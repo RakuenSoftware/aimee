@@ -11,10 +11,13 @@
 
 struct cJSON;
 
+/* Parse native exec outcome at its tool-owner entry boundary. Borrowed static
+ * verdict/reason are returned only for a classified failure. */
+int agent_tools_effect_exec_failure(const char *result, const char **verdict, const char **reason);
 void agent_tools_effect_reset(void);
 int agent_tools_effect_admit(const char *name, struct cJSON **args, const char *cwd,
                              const char *sid, int classification);
-char *agent_tools_effect_receipt(const char *verdict, char *result);
+char *agent_tools_effect_receipt(const char *verdict, char *result, int *is_error);
 int agent_tools_effect_classification(const char *name, int (*classifier)(const char *, int *));
 int agent_tools_effect_mcp_failure_is_timeout(const char *error);
 void agent_tools_effect_propose(const char *name, struct cJSON *args, int classification);

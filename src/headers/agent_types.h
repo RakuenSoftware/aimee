@@ -45,7 +45,7 @@ struct cJSON;
 #define AGENT_DEFAULT_MAX_TOKENS   0
 #define MAX_EXEC_ROLES             8
 #define MAX_EXEC_PROMPT_LEN        4096
-#define AGENT_BACKEND_TMUX_CLI     "tmux-cli"
+#define AGENT_BACKEND_TMUX_CLI     "tmux-cli" /* Legacy input alias; executes headless. */
 #define AGENT_BACKEND_PROVIDER_CLI "provider-cli"
 #define AGENT_BACKEND_CLI_STDIO    "cli-stdio" /* legacy config alias */
 #define CLI_CMD_MAX                256
@@ -423,7 +423,7 @@ typedef struct
    int credential_count;
    agent_middleware_cfg_t middleware; /* per-agent middleware pipeline config */
    /* CLI backend config (optional) */
-   char backend[32];          /* "tmux-cli", "provider-cli", or "" for HTTP */
+   char backend[32];          /* "provider-cli" or "" for HTTP; old tmux input normalizes. */
    char cli_cmd[CLI_CMD_MAX]; /* CLI command, e.g. "claude" or "gemini" */
    int cli_idle_timeout_ms;   /* explicit response timeout ms; 0/-1 = no timeout */
    int session_reuse;         /* 1 = reuse CLI session across tasks */
@@ -527,6 +527,9 @@ typedef struct
     * "stop", "length"), when the parser captured it. Empty otherwise. */
    char stop_reason[32];
    char clean_retry_attempt[65];
+   /* Owner-checked canonical history source for this actual execution. Empty
+    * for non-session internal work; never a borrowed connection or parent log. */
+   char canonical_session_id[128];
    char *response;
    int prompt_tokens;
    int completion_tokens;

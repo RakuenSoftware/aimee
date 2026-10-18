@@ -293,3 +293,18 @@ c23958b53565bb2011e23a2eabf201e301f10c55:tests/baselines/modules/memory-ownershi
 dcf9612144887cc2a8e2368f51ba1e34ebeb8cd7:docs/validation/native-memory-fixes-2026-10-08/extended-evidence/api-0002.json:generic-api-key:11
 
 c1d01de0c8bdbff766340182686314fd51969f97:docs/validation/native-memory-fixes-2026-10-08/extended-evidence/api-0002.json:generic-api-key:11
+
+# Reviewed SHA-256 of the public browser IR OpenAPI schema, not a credential.
+d9f9605298a6adc74c951aa552dd9ced7d15e0b3:tests/baselines/modules/memory-ownership.json:generic-api-key:2737
+
+# SHA-256 of the reviewed OpenAPI protocol catalog input, not an API credential.
+# tests/baselines/modules/memory-ownership.json: api/openapi-server-v1.yaml
+a08f764739750bcd4094b4c409aa0c4ea99ab75e:tests/baselines/modules/memory-ownership.json:generic-api-key:2737
+
+# Reviewed public OpenAPI SHA-256 input for canonical trajectory export.
+# The digest matches api/openapi-server-v1.yaml; this exact historical finding is not a credential.
+042361d5df49723961a9165c2edaaf4a03299b2b:tests/baselines/modules/memory-ownership.json:generic-api-key:2741
+
+# Reviewed public OpenAPI SHA-256 for canonical owned /v1/runs; the exact
+# api/openapi-server-v1.yaml input digest is not a credential.
+764c97560a257b37c9e52c2c6cd34c5528257330:tests/baselines/modules/memory-ownership.json:generic-api-key:2746

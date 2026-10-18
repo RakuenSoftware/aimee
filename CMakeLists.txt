@@ -257,7 +257,6 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/agent_max_turns.c
         ${AIMEE_SRC_DIR}/posix/agent_runtime_messages.c
         ${AIMEE_SRC_DIR}/posix/agent_runtime_support.c
-        ${AIMEE_SRC_DIR}/posix/agent_runtime_tmux.c
         ${AIMEE_SRC_DIR}/posix/agent_bridge.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools.c
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
@@ -317,7 +316,6 @@ else()
         ${AIMEE_SRC_DIR}/posix/agent_max_turns.c
         ${AIMEE_SRC_DIR}/posix/agent_runtime_messages.c
         ${AIMEE_SRC_DIR}/posix/agent_runtime_support.c
-        ${AIMEE_SRC_DIR}/posix/agent_runtime_tmux.c
         ${AIMEE_SRC_DIR}/posix/agent_bridge.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools.c
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
@@ -524,7 +522,15 @@ set(KB_STORE_HOST_ADAPTER_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_store_adapters/kb_service_backend_runtime.c
 )
 
+set(IR_BASE_SRCS
+    ${AIMEE_SRC_DIR}/modules/ir/aimee_ir.c
+)
+set(HOOK_IR_SRCS
+    ${AIMEE_SRC_DIR}/modules/translation/hook_ir.c
+)
 set(CORE_SRCS
+    ${HOOK_IR_SRCS}
+    ${IR_BASE_SRCS}
     ${AIMEE_SRC_DIR}/config_client.c
     ${AIMEE_SRC_DIR}/config_client_contract.c
     ${AIMEE_SRC_DIR}/config_client_accessors.c
@@ -620,7 +626,6 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_action_audit.c
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_tdd.c
-   _learn.c
     ${AIMEE_SRC_DIR}/session_state.c
     ${AIMEE_SRC_DIR}/session_briefing.c
     ${AIMEE_SRC_DIR}/file_safety.c
@@ -708,6 +713,10 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/cli_session_pty.c
     ${AIMEE_SRC_DIR}/server/cli_codex.c
     ${AIMEE_SRC_DIR}/server/cli_claude.c
+    ${AIMEE_SRC_DIR}/server/claude_headless.c
+    ${AIMEE_SRC_DIR}/server/server_session_control.c
+    ${AIMEE_SRC_DIR}/server/server_session_log.c
+    ${AIMEE_SRC_DIR}/server/agent_response_projection.c
 
     ${AIMEE_SRC_DIR}/server/cli_mistral.c
     ${AIMEE_SRC_DIR}/server/cli_acp.c
@@ -751,6 +760,8 @@ set(GIT_SRCS
 )
 
 set(CLI_SRCS
+    ${HOOK_IR_SRCS}
+    ${IR_BASE_SRCS}
     ${AIMEE_SRC_DIR}/cli_main.c
     ${AIMEE_SRC_DIR}/cli_agent_setup.c
     ${AIMEE_SRC_DIR}/cli_session_start.c
@@ -794,6 +805,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_index_bootstrap.c
     ${AIMEE_SRC_DIR}/cli_launch.c
     ${AIMEE_SRC_DIR}/cli_proxy.c
+    ${AIMEE_SRC_DIR}/cli_proxy_cmd.c
     ${AIMEE_SRC_DIR}/cli_mcp_serve.c
     # handle_tools_list calls mcp_tool_prose_lean/mcp_compact_tool_prose to build
     # the lean catalog. The client does not
@@ -825,8 +837,11 @@ set(CLI_SRCS
 # it is compiled on every platform — no per-OS exclusion.
 
 set(SERVER_SRCS
+    ${AIMEE_SRC_DIR}/cli_proxy.c
     ${AIMEE_SRC_DIR}/server/server_native_primitive.c
     ${AIMEE_SRC_DIR}/server/server_main.c
+    ${AIMEE_SRC_DIR}/modules/translation/harness_ir.c
+    ${AIMEE_SRC_DIR}/modules/translation/history_ir.c
     ${AIMEE_SRC_DIR}/modules/ir/session_event.c
     ${AIMEE_SRC_DIR}/modules/ir/aimee_ir_module_plan.c
     ${AIMEE_SRC_DIR}/server/ir_host_bindings.c
@@ -891,6 +906,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_coord_dispatcher.c
     ${AIMEE_SRC_DIR}/server/server_agent.c
     ${AIMEE_SRC_DIR}/server/server_compute.c
+    ${AIMEE_SRC_DIR}/server/server_chat_ir.c
     ${AIMEE_SRC_DIR}/server/server_compute_roundtable.c
     ${AIMEE_SRC_DIR}/server/server_compute_mailbox.c
     ${AIMEE_SRC_DIR}/server_compute_episodes.c
@@ -976,6 +992,12 @@ set(SERVER_SRCS
 set(SERVER_DATA_SRCS ${DATA_SRCS})
 list(REMOVE_ITEM SERVER_DATA_SRCS ${SERVER_SRCS} ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c)
 list(APPEND SERVER_DATA_SRCS ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c)
+list(APPEND SERVER_SRCS
+    ${AIMEE_SRC_DIR}/server/server_http_op_runs.c
+    ${AIMEE_SRC_DIR}/server/server_compute_owner.c
+    ${AIMEE_SRC_DIR}/server/server_learning_outcome.c
+)
+
 set(SERVER_CORE_SRCS ${CORE_SRCS})
 list(REMOVE_ITEM SERVER_CORE_SRCS ${AIMEE_SRC_DIR}/modules/kb/c/db_postgres.c)
 

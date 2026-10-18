@@ -2080,7 +2080,8 @@
       "symbols": [
         "kb_client_memory_scope_context_apply"
       ],
-      "sha256": "b5b2ffe86ff04fc6aea5cc2e30813d723fde00a946c719236d2d09c506099633"
+      "sha256": "0dc32c36caea15f25402beea92874d1f5338f8197f0455c272f59c0c0c785938",
+      "boundary_change": "The dispatcher now returns its existing execution/receipt owner failure classification alongside the owned text result. Canonical consumers use this flag for is_error, evidence and liveness instead of guessing from text. Receipt completion can mark an unconfirmed outcome as failed before effect completion/audit. The kb_client_memory_scope_context_apply host-context seam and its arguments are unchanged; no memory eligibility, recall or scope policy moves into tools. This records the source change, not independent reviewer approval. Native exec-envelope outcome classification is relocated into the existing tools effect-contract source to keep the dispatcher below the file limit; its signals and policy ownership are unchanged."
     },
     "src/rel_types.c": {
       "disposition": "storage-protocol",
@@ -2099,7 +2100,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "23ea2433dd21dac4f6afc2a4de0243d079fad361ac5212df54b6f89a3d212bb7"
+      "sha256": "5078e2d794b86766c42daa0a2fcea87bca7d2150cdac8ffeded4e1ae2cc84b84",
+      "boundary_review": "2026-10-18 PR #3038: selected canonical runs enter the same role-policy, admission, context assembly and Go memory-owner calls. The new branch retains complete ordered input and disables flat KB hint substitution for that input. Existing native memory symbols and Go admission authority are unchanged; no native memory engine or independent production approval is introduced. Long-owner follow-up: the local identity-copy buffer now uses the Vault principal bound, preserving the attested owner suffix in canonical source references. Memory symbols and policy calls are unchanged."
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
@@ -2129,12 +2131,13 @@
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "0162a15bdffb591090610099de82717438dccffc2dc57f0781d366a064ef1574",
+      "sha256": "062e11349e17e9b16804a6adc00ec6221fcd82086acf47e61bde48011a678467",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go. Oct 18: removed only the response-composition input copy after sharing its API type; memory adapters are unchanged."
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go. Oct 18: removed only the response-composition input copy after sharing its API type; memory adapters are unchanged.",
+      "boundary_review": "IR #3036: governance transports strict v2 canonical identity views with complete names/namespaces to its existing Go policy owner. The existing five memory transport symbols, authenticated owner calls, erasure and backend authority are unchanged. This records the governance-only source-boundary review and does not assert independent production approval."
     },
     "src/server/server.c": {
       "disposition": "host-transport",
@@ -2142,7 +2145,8 @@
         "kb_client_memory_scope_context_clear",
         "server_module_memory_data"
       ],
-      "sha256": "fd5207c828fba0b29affa0bc7162ef36a11831049d0c2641394d4626a1fa8e8e"
+      "sha256": "1e68d0b9c77aeb305c6c9cfcda5534224a5878a380b42d59595acd6f8f8a7fd7",
+      "boundary_review": "IR #3036: native pre/post hook payloads stop at the translation-owned canonical intent adapter. Existing authenticated harness identity, session policy, registered workspace binding and Go memory interception authority remain unchanged; no raw hook payload is published as model history. This records source-boundary reasoning, not independent production approval."
     },
     "src/server/server_api.c": {
       "disposition": "host-transport",
@@ -2179,15 +2183,17 @@
       "symbols": [
         "server_module_memory_data"
       ],
-      "sha256": "1d5099366b3f9928c4ca9e880819b0c21f590d736fb94393482f93204d1825d5"
+      "sha256": "60f3408d474bd0eb22637a7f964b79aae9238229f13f223e14d19c1d320c041c",
+      "boundary_review": "IR #3036: the existing memory interception host reads borrowed canonical tool arguments instead of reparsing a native hook argument string. The registered Go memory stage still owns classification and storage policy; its request fields, scope hints and spill behavior are unchanged. This records source-boundary reasoning, not independent production approval."
     },
     "src/server/server_http_routes.c": {
       "disposition": "protocol-catalog",
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "0948f3d7a333751b0b1bd04be60911d8fce953c5f81704173cde7c2206b486b5",
-      "review": "2026-10-14: restores queues only for exact configured detached roots before polling; memory owner, actor authorization, and transport envelope are unchanged. Workspace registration tests cover shared/unknown-root refusal."
+      "sha256": "a7b852c7344c9defd7f2f53e93a528ad83a1cca26eed4690b328ac225272fbd9",
+      "review": "2026-10-18: async op-run lifecycle moved to server_http_op_runs.c; the memory_stats catalog entry and Go memory-owner calls remain here unchanged. Browser control replies now require an actual interactive attested request, excluding inherited compute owners.",
+      "boundary_review": "IR #3036: queued operations carry an owned verified caller context and intersect its original capability ceiling, so Go policy receives the originating actor instead of an empty or pooled previous actor. This changes caller propagation, not Go memory admission authority. Worker ownership ends only after durable terminal capture. No independent production approval is asserted."
     },
     "src/server/server_mcp.c": {
       "disposition": "host-transport",
@@ -2364,7 +2370,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "9b4de3cdde039ab362ecb6efb9fc1df0868066d487f7f51c21889ad64b62f48d"
+      "sha256": "673df4dee914a7cd72f21bbbbb0d6877bac1b4955870e73f92932ce9b7b925ae",
+      "boundary_change": "Canonical gateway_policy view and descending catalog paths; the fixture calls the real Go memory owner for namespace policy. C retains host schema data and validates/applies the returned patch; no C memory or shell-selection policy is introduced."
     },
     "src/tests/test_kb.c": {
       "disposition": "host-fixture",
@@ -2500,7 +2507,8 @@
         "memory_stats",
         "server_module_memory_data"
       ],
-      "sha256": "c352450213186fee7424ee65b200723d42e9cf1ff7025cd4b703d7d6dae964f9"
+      "sha256": "25a20fd6f2dd06e78ceef0338fa75fe24ce81f790f33c853598b2261a57e8ab2",
+      "boundary_review": "IR #3036 fixture: canonical native hooks retain authenticated harness/session policy and opaque attempt identity; foreign namespaces refuse before state mutation. Existing memory stage stubs and memory authority are unchanged."
     },
     "src/tests/test_server_facts_transport.c": {
       "disposition": "host-fixture",
@@ -2606,8 +2614,8 @@
       "symbols": [
         "AIMEE_MEMORY_BACKEND_TOKEN"
       ],
-      "sha256": "79bb15f142b1db23c19eab4e034936beaa1e3747d86b72e70da914a76f6666fc",
-      "reason": "Reviewed 2026-10-17: add a canonical Codex credential getter through the existing attested Vault pipe. AIMEE_MEMORY_BACKEND_TOKEN custody and Go memory ownership are unchanged; no memory policy or fallback is added.",
+      "sha256": "834e9bceb88a851dbf172292c078843f70658f07129bba96bd5e472eff92078e",
+      "reason": "Reviewed 2026-10-18: the existing attested private Vault helper returns the selected Codex token, account and source lineage together using serving's refresh-aware resolver. The computed response remains pipe-only. AIMEE_MEMORY_BACKEND_TOKEN import/custody, grants and the Go memory owner are unchanged. This records source-boundary reasoning, not independent reviewer approval.",
       "evidence": [
         "src/tests/test_agent.c",
         "server-go/modules/providers/inspect_test.go",
@@ -2685,6 +2693,7 @@
   "generated_files": {
     "src/schema_data.h": {
       "disposition": "protocol-catalog",
+      "boundary_review": "IR #3036: regenerate the public catalog after trajectory v2 export and owned batch-session contract changes. The two existing memory health/stats symbols and their API contracts remain unchanged. This records input/output source reasoning, not independent production-promotion approval.",
       "symbols": [
         "aimee_memory_hygiene",
         "kb_store_memory_find_facts_like"
@@ -2702,11 +2711,12 @@
         "AIMEE_MEMORY_HEALTH_ENABLED",
         "memory_stats"
       ],
-      "sha256": "3a349db886e702c63101c1e2fc399092074b5ceeb927ed397df6a0345a38e3c5",
+      "sha256": "ac2e743098327dbdc45c3266e85ad5157187aba60ed72a487e92e2c7ee63c938",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "1a0e64c669a408e287d82d7da4d791d176fd07e5c18e7341d1abb0bb3148ad5f"
-      }
+        "api/openapi-server-v1.yaml": "8080f9fbea2e7a7845dc6d05cf03a3aebd9c52c650907634dce95c55f678879b"
+      },
+      "boundary_review": "2026-10-18 PR #3038: only the /runs documentation changes: asynchronous canonical input, owner privacy, preserved controls and incomplete status. Memory routes and their Go ownership are unchanged."
     }
   },
   "namespace_review": "Current KB domain names and paths replace the retired database ordinal; original files and symbols remain immutable, and the checker covers both spellings. Native memory ownership does not change."

@@ -46,11 +46,8 @@ int main(void)
    printf("aimee-backend: ");
    char err[128];
 
-   /* --- (1) the canonical Anthropic egress is DETERMINISTIC and round-trip STABLE.
-    *         The raw sidecar was retired: egress is now a pure function of the typed IR
-    *         plus the uniform cache policy, so parse->build is NOT the identity (it adds
-    *         the policy's cache markers), but it IS idempotent -- building twice is
-    *         byte-identical, and re-parsing the egress then rebuilding reproduces it. --- */
+   /* Native Anthropic replay preserves client forms and cache markers. Repeated
+    * rendering and parse/render remain deterministic. */
    aimee_request_t air;
    parse_anthropic(ANTHROPIC, &air);
    cJSON *built = anthropic_backend_build(&air);
@@ -116,6 +113,8 @@ int main(void)
    free(air.model);
    air.model = strdup("claude-3-5-sonnet");
    air.mutated = 1;
+   air.cache_policy = AIMEE_CACHE_STABLE_PREFIX;
+   oir.cache_policy = AIMEE_CACHE_STABLE_PREFIX;
    cJSON *xbuilt = anthropic_backend_build(&oir); /* openai -> IR -> anthropic egress */
    cJSON *abuilt = anthropic_backend_build(&air); /* anthropic -> IR -> anthropic egress */
    assert(xbuilt && abuilt);
@@ -179,14 +178,18 @@ int main(void)
           strcmp(cJSON_GetObjectItem(tblk, "signature")->valuestring, "ErUBCkYIAxgCIkA") == 0);
    cJSON_Delete(trendered);
 
-   /* an unsigned thinking block omits the key rather than emitting an empty one --
-    * an empty signature would be rejected, where an absent one is merely unsigned. */
+   /* An unsigned/foreign thought stays canonical but cannot be replayed as
+    * fabricated Anthropic reasoning with a missing signature. */
    free(tresp.content[0].thinking_signature);
    tresp.content[0].thinking_signature = NULL;
    cJSON *tunsigned = anthropic_frontend_render(&tresp);
    assert(tunsigned);
-   assert(!cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(tunsigned, "content"), 0),
-                               "signature"));
+   const cJSON *unsigned_content = cJSON_GetObjectItem(tunsigned, "content");
+   assert(cJSON_GetArraySize(unsigned_content) == 1);
+   assert(!strcmp(
+       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(unsigned_content, 0), "text")),
+       "done"));
+   assert(tresp.n_content == 2 && !strcmp(tresp.content[0].text, "let me check"));
    cJSON_Delete(tunsigned);
 
    aimee_response_free(&tresp);

@@ -54,7 +54,7 @@ and declared header dependencies as the exporter. Modules with `external_source`
 (currently config) still have to match their existing repository pins and Go
 dependency version; freezing the application snapshot cannot bypass that check.
 
-The `c-repository-pins` workflow enforces this application snapshot on `main`
+The `Module exports and runtime validation` workflow enforces this application snapshot on `main`
 and PRs into `main`, and continues to build standalone exports locally on both
 integration and release changes. Those fixture exports are never published.
 At application promotion, review the source and public-surface diffs, then run:

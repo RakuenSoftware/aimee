@@ -11,6 +11,7 @@
 #include "aimee/core/connection/auth.h"
 #include "kb_identity_token.h"
 #include "request_context.h"
+#include "server_http_identity.h"
 #include "config.h"
 #include "runtime_secret.h"
 #include <netinet/in.h> /* INADDR_ANY / INADDR_LOOPBACK */
@@ -157,6 +158,9 @@ void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
    ctx.transport = is_tcp ? REQ_TRANSPORT_TCP : REQ_TRANSPORT_UDS;
    ctx.peer_uid = reqctx_peer_uid(fd, is_tcp);
    ctx.capabilities = caps;
+   ctx.vault_transport = server_http_identity_transport();
+   snprintf(ctx.vault_principal, sizeof ctx.vault_principal, "%s",
+            server_http_identity_principal());
    ctx.trusted = 0;
 
    http_header(buf, "Idempotency-Key", ctx.idempotency_key, sizeof(ctx.idempotency_key));

@@ -216,7 +216,8 @@ int main(void)
    assert(totals.recognized == 1 && totals.recovered_bytes == 8);
    assert(totals.saved_bytes == -1 && totals.net_saved_bytes == -9);
 
-   cJSON *messages = cJSON_Parse("[{\"role\":\"assistant\",\"content\":\"[done] yes\"}]");
+   cJSON *messages = cJSON_Parse(
+       "[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"text\",\"text\":\"[done] yes\"}]}]");
    char *closet = NULL;
    int evicted = 0;
    cJSON *record = econ_module_record_build(messages, 0, 1, &closet, &evicted);

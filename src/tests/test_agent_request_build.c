@@ -284,6 +284,7 @@ int main(void)
     * item shape. */
    golden("chatgpt", "gpt-5.5-codex",
           "{\"model\":\"gpt-5.5-codex\",\"store\":false,\"stream\":true,"
+          "\"include\":[\"reasoning.encrypted_content\"],"
           "\"instructions\":\"You are helpful.\","
           "\"input\":[{\"type\":\"message\",\"role\":\"user\","
           "\"content\":[{\"type\":\"input_text\",\"text\":\"deploy the release\"}]}]}");

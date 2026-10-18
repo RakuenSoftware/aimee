@@ -1,0 +1,168 @@
+#include "server_session_control.h"
+#include "vault_principal.h"
+#include <aimee/ir/session_event.h>
+#include <assert.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+static int results[4];
+static void *answer(void *arg)
+{
+   size_t n = (size_t)arg;
+   cJSON *reply = cJSON_Parse("{\"decision\":\"allow\"}");
+   results[n] = server_control_reply("session", "turn:permission", "alice", reply);
+   cJSON_Delete(reply);
+   return NULL;
+}
+static void long_owner_reply(void)
+{
+   char owner[VAULT_PRINCIPAL_MAX] = "webuser:";
+   memset(owner + 8, 'a', VAULT_CERT_CN_MAX);
+   owner[8 + VAULT_CERT_CN_MAX] = 0;
+   server_control_scope_t *scope = server_control_scope_open("long-session", "turn", owner);
+   assert(scope);
+   cJSON *request = cJSON_Parse("{\"tool_name\":\"Read\",\"input\":{\"path\":\"source.c\"}}");
+   cJSON *reply = cJSON_Parse("{\"decision\":\"deny\"}");
+   assert(!server_control_register(scope, "permission", "permission", request));
+   owner[8 + VAULT_CERT_CN_MAX - 1] = 'b';
+   assert(server_control_reply("long-session", "turn:permission", owner, reply) < 0);
+   owner[8 + VAULT_CERT_CN_MAX - 1] = 'a';
+   assert(!server_control_reply("long-session", "turn:permission", owner, reply));
+   char *id = NULL, *kind = NULL;
+   cJSON *original = NULL, *decision = NULL;
+   assert(server_control_take(scope, "permission", &id, &kind, &original, &decision) == 1);
+   assert(!strcmp(id, "permission") && cJSON_Compare(decision, reply, 1));
+   free(id);
+   free(kind);
+   cJSON_Delete(original);
+   cJSON_Delete(decision);
+   cJSON_Delete(request);
+   cJSON_Delete(reply);
+   server_control_scope_close(scope);
+}
+
+int main(void)
+{
+   long_owner_reply();
+   server_control_scope_t *scope = server_control_scope_open("session", "turn", "alice");
+   assert(scope);
+   assert(server_control_scope_bind(scope) == NULL && server_control_scope_current() == scope);
+   cJSON *request = cJSON_Parse("{\"tool_name\":\"Read\",\"input\":{\"path\":\"source.c\"}}");
+   assert(server_control_register(scope, "permission", "permission", request) == 0);
+   assert(server_control_register(scope, "permission", "permission", request) < 0);
+   cJSON *reply = cJSON_Parse("{\"decision\":\"allow\"}");
+   assert(server_control_reply("session", "turn:permission", "mallory", reply) < 0);
+   assert(server_control_reply("session", "old-turn:permission", "alice", reply) == 1);
+   assert(server_control_reply("other-session", "turn:permission", "alice", reply) == 1);
+   pthread_t threads[4];
+   for (size_t i = 0; i < 4; i++)
+      assert(!pthread_create(&threads[i], NULL, answer, (void *)i));
+   int accepted = 0;
+   for (int i = 0; i < 4; i++)
+   {
+      pthread_join(threads[i], NULL);
+      assert(results[i] == 0 || results[i] == 1);
+      accepted += results[i] == 0;
+   }
+   assert(accepted == 1);
+   char *id = NULL, *kind = NULL;
+   cJSON *original = NULL, *decision = NULL;
+   assert(server_control_take(scope, "wrong-id", &id, &kind, &original, &decision) == 0);
+   assert(server_control_take(scope, "permission", &id, &kind, &original, &decision) == 1);
+   assert(!strcmp(id, "permission") && !strcmp(kind, "permission") &&
+          cJSON_Compare(request, original, 1));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(decision, "decision")), "allow"));
+   free(id);
+   free(kind);
+   cJSON_Delete(original);
+   cJSON_Delete(decision);
+   assert(server_control_reply("session", "turn:permission", "alice", reply) == 1);
+   assert(server_control_take(scope, NULL, &id, &kind, &original, &decision) == 0);
+   cJSON_Delete(reply);
+   reply = cJSON_Parse("{\"decision\":\"allow\",\"native_response\":{}}");
+   assert(server_control_reply("session", "turn:permission", "alice", reply) < 0);
+   /* Invalid form submissions do not consume the pending native request. */
+   cJSON *form =
+       cJSON_Parse("{\"form\":{\"message\":\"Pick options\",\"schema\":{\"type\":\"object\","
+                   "\"properties\":{\"count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":4},"
+                   "\"name\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":1},"
+                   "\"enabled\":{\"type\":\"boolean\"},\"tags\":{\"type\":\"array\",\"minItems\":1,"
+                   "\"maxItems\":2,\"items\":{\"anyOf\":[{\"const\":\"a\",\"title\":\"A\"},"
+                   "{\"const\":\"b\",\"title\":\"B\"}]}}},\"required\":[\"count\",\"name\","
+                   "\"enabled\",\"tags\"]}}}");
+   assert(form && server_control_register(scope, "form", "elicitation", form) == 0);
+   const char *invalid[] = {
+       "{}",
+       "{\"count\":1.5,\"name\":\"x\",\"enabled\":true,\"tags\":[\"a\"]}",
+       "{\"count\":5,\"name\":\"x\",\"enabled\":true,\"tags\":[\"a\"]}",
+       "{\"count\":2,\"name\":\"xx\",\"enabled\":true,\"tags\":[\"a\"]}",
+       "{\"count\":2,\"name\":\"x\",\"enabled\":1,\"tags\":[\"a\"]}",
+       "{\"count\":2,\"name\":\"x\",\"enabled\":true,\"tags\":[\"unknown\"]}",
+       "{\"count\":2,\"name\":\"x\",\"enabled\":true,\"tags\":[\"a\",\"a\"]}",
+       "{\"count\":2,\"name\":\"x\",\"enabled\":true,\"tags\":[\"a\"],\"extra\":true}",
+   };
+   for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+   {
+      cJSON *bad = cJSON_CreateObject();
+      cJSON_AddStringToObject(bad, "decision", "allow");
+      cJSON_AddItemToObject(bad, "content", cJSON_Parse(invalid[i]));
+      assert(server_control_reply("session", "turn:form", "alice", bad) < 0);
+      assert(server_control_take(scope, "form", &id, &kind, &original, &decision) == 0);
+      cJSON_Delete(bad);
+   }
+   cJSON *accepted_form = cJSON_Parse("{\"decision\":\"allow\",\"content\":{\"count\":2,"
+                                      "\"name\":\"é\",\"enabled\":false,\"tags\":[\"a\",\"b\"]}}");
+   assert(server_control_reply("session", "turn:form", "mallory", accepted_form) < 0);
+   assert(server_control_reply("session", "turn:form", "alice", accepted_form) == 0);
+   assert(server_control_take(scope, "form", &id, &kind, &original, &decision) == 1);
+   assert(cJSON_Compare(accepted_form, decision, 1));
+   free(id);
+   free(kind);
+   cJSON_Delete(original);
+   cJSON_Delete(decision);
+   cJSON_Delete(form);
+   cJSON_Delete(accepted_form);
+   cJSON *url = cJSON_Parse("{\"url\":{\"href\":\"https://accounts.example.test/"
+                            "authorize\",\"message\":\"Authorize\",\"server\":\"inventory\","
+                            "\"elicitation_id\":\"el-1\"}}");
+   assert(url && server_control_register(scope, "url", "elicitation", url) == 0);
+   cJSON *url_reply = cJSON_Parse("{\"decision\":\"allow\",\"content\":{}}");
+   assert(server_control_reply("session", "turn:url", "alice", url_reply) < 0);
+   cJSON_DeleteItemFromObjectCaseSensitive(url_reply, "content");
+   assert(server_control_reply("session", "turn:url", "mallory", url_reply) < 0);
+   assert(server_control_reply("session", "turn:url", "alice", url_reply) == 0);
+   assert(server_control_take(scope, "url", &id, &kind, &original, &decision) == 1);
+   assert(cJSON_Compare(original, url, 1) && cJSON_Compare(decision, url_reply, 1));
+   free(id);
+   free(kind);
+   cJSON_Delete(original);
+   cJSON_Delete(decision);
+   cJSON *href = cJSON_GetObjectItem(cJSON_GetObjectItem(url, "url"), "href");
+   cJSON_SetValuestring(href, "HTTPS://accounts.example.test/authorize");
+   assert(aimee_ir_elicitation_url_valid(cJSON_GetObjectItem(url, "url")));
+   const char *bad_urls[] = {"javascript:alert(1)",
+                             "data:text/html,secret",
+                             "file:///etc/passwd",
+                             "https://user:password@example.test/",
+                             "https://",
+                             "https://x\\@attacker/",
+                             "https://example.test/\nheader"};
+   for (size_t i = 0; i < sizeof bad_urls / sizeof bad_urls[0]; i++)
+   {
+      cJSON_SetValuestring(href, bad_urls[i]);
+      assert(!aimee_ir_elicitation_url_valid(cJSON_GetObjectItem(url, "url")));
+   }
+   cJSON_Delete(url);
+   cJSON_Delete(url_reply);
+   server_control_scope_close(scope);
+   assert(!server_control_scope_current());
+   cJSON_Delete(reply);
+   reply = cJSON_Parse("{\"decision\":\"deny\"}");
+   assert(server_control_reply("session", "turn:permission", "alice", reply) == 1);
+   cJSON_Delete(reply);
+   cJSON_Delete(request);
+   puts("server controls: owner/turn/session binding, concurrent reply, consume-once and teardown "
+        "passed");
+   return 0;
+}

@@ -37,7 +37,7 @@ typedef struct
    dl_failure_mode_t failure_mode;
    double confidence;
    char lesson[512];    /* human-readable lesson */
-   char evidence[1024]; /* compact evidence JSON string */
+   char evidence[4096]; /* compact JSON, including worst-case escaping of a 512-byte error */
 } dl_classification_t;
 
 /*
@@ -50,9 +50,8 @@ void classify_delegate_exit(const dl_exit_metrics_t *metrics, dl_classification_
  * delegate_learning_record — insert a learning record into DB1.
  * Returns 0 on success, -1 on failure.
  */
-int db1_delegate_learning_record(const char *session_id, const char *role,
-                                 const char *failure_mode, const char *lesson,
-                                 const char *evidence_json, double confidence);
+int db1_delegate_learning_record(const char *session_id, const char *role, const char *failure_mode,
+                                 const char *lesson, const char *evidence_json, double confidence);
 
 /*
  * delegate_learning_inject_prompt — retrieve top-N highest-confidence learnings

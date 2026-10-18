@@ -72,7 +72,10 @@ static void build_id_map(const cJSON *messages, int end_idx, tool_id_map_t *m)
       }
 
       /* Anthropic: {role:"assistant", content:[{type:"tool_use", id, name}]} */
-      cJSON *content = cJSON_GetObjectItem(msg, "content");
+      cJSON *content = cJSON_GetObjectItem(msg, "blocks");
+      int canonical = content != NULL;
+      if (!content)
+         content = cJSON_GetObjectItem(msg, "content");
       if (content && cJSON_IsArray(content))
       {
          cJSON *block;
@@ -81,7 +84,8 @@ static void build_id_map(const cJSON *messages, int end_idx, tool_id_map_t *m)
             const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
             if (!type || strcmp(type, "tool_use") != 0)
                continue;
-            const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(block, "id"));
+            const char *id =
+                cJSON_GetStringValue(cJSON_GetObjectItem(block, canonical ? "tool_id" : "id"));
             const char *nm = cJSON_GetStringValue(cJSON_GetObjectItem(block, "name"));
             map_insert(m, id, nm);
          }
@@ -146,9 +150,11 @@ int compact_prune_tool_results(cJSON *messages, int start_idx, int end_idx, int 
       const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
 
       /* OpenAI: role=tool */
-      if (role && strcmp(role, "tool") == 0)
+      if (role && strcmp(role, "tool") == 0 && !cJSON_GetObjectItem(msg, "blocks"))
       {
-         cJSON *content = cJSON_GetObjectItem(msg, "content");
+         cJSON *content = cJSON_GetObjectItem(msg, "blocks");
+         if (!content)
+            content = cJSON_GetObjectItem(msg, "content");
          if (!content || !cJSON_IsString(content))
             continue;
          size_t orig = strlen(content->valuestring);
@@ -164,9 +170,12 @@ int compact_prune_tool_results(cJSON *messages, int start_idx, int end_idx, int 
       }
 
       /* Anthropic: role=user with tool_result blocks */
-      if (role && strcmp(role, "user") == 0)
+      if (cJSON_GetObjectItem(msg, "blocks") || (role && strcmp(role, "user") == 0))
       {
-         cJSON *content = cJSON_GetObjectItem(msg, "content");
+         cJSON *content = cJSON_GetObjectItem(msg, "blocks");
+         int canonical = content != NULL;
+         if (!content)
+            content = cJSON_GetObjectItem(msg, "content");
          if (!content || !cJSON_IsArray(content))
             continue;
          cJSON *block;
@@ -183,7 +192,8 @@ int compact_prune_tool_results(cJSON *messages, int start_idx, int end_idx, int 
             if ((int)orig <= eff_thresh)
                continue;
 
-            const char *tid = cJSON_GetStringValue(cJSON_GetObjectItem(block, "tool_use_id"));
+            const char *tid = cJSON_GetStringValue(
+                cJSON_GetObjectItem(block, canonical ? "tool_id" : "tool_use_id"));
             const char *name = map_lookup(&id_map, tid);
             char stub[192];
             make_stub(stub, sizeof(stub), name, orig);

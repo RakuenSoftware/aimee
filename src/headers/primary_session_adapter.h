@@ -18,6 +18,7 @@ extern "C"
       const agent_network_t *network;
       const char *provider_session_id;
       const char *aimee_session_id;
+      const char *active_turn_id; /* Server-owned capture turn; never client input. */
       const char *cwd;
       const char *system_prompt;
       const char *user_prompt;

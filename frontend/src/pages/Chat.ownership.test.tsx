@@ -19,10 +19,24 @@ function session(id: string, text = ''): Session {
 }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 let stream: ReadableStreamDefaultController<Uint8Array>;
-const emit = (event: string, data = {}) => stream.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+let sequence = 0;
+let prompt = '';
+function emit(type: string, data: { content?: string } = {}) {
+  const event = (event: unknown) => stream.enqueue(new TextEncoder().encode(`event: ir\ndata: ${JSON.stringify({
+    version: 1, session_id: 'one', sequence: String(++sequence), event_id: `event-${sequence}`,
+    turn_id: 'turn', actor: 'owner', event,
+  })}\n\n`));
+  const delta = (payload: unknown) => event({ kind: 'delta', message_id: 'answer', role: 'assistant', payload });
+  if (type === 'turn_start') {
+    event({ kind: 'message', message_id: 'prompt', payload: { role: 'user', blocks: [{ type: 'text', text: prompt }] } });
+    delta({ type: 'TURN_START' }); delta({ type: 'BLOCK_START', block_id: 0, kind: 'text' });
+  } else if (type === 'text') delta({ type: 'BLOCK_DELTA', block_id: 0, kind: 'text', text_delta: data.content });
+  else { delta({ type: 'BLOCK_STOP', block_id: 0, kind: 'text' }); delta({ type: 'TURN_STOP' }); }
+}
 const tick = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 
 beforeEach(() => {
+  sequence = 0; prompt = '';
   vi.useFakeTimers();
   localStorage.clear();
   context.sessions = [session('one')];
@@ -43,6 +57,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 function send(text: string) {
+  prompt = text;
   const input = screen.getByPlaceholderText(/Type a message/);
   fireEvent.change(input, { target: { value: text } });
   fireEvent.keyDown(input, { key: 'Enter' });
@@ -124,15 +139,16 @@ describe('chat transcript ownership', () => {
     expect(screen.getByTestId('user').textContent).toBe('First conversation');
   });
 
-  it('flushes a new message to the account cache when navigating before the debounce fires', async () => {
+  it('keeps canonical admission out of the separate text-only account cache', async () => {
     const view = render(<Chat />);
     await tick();
     send('Do not lose this message');
     await tick();
+    await act(async () => { emit('turn_start'); });
+    await tick(100);
+    expect(screen.getByTestId('user').textContent).toBe('Do not lose this message');
     view.unmount();
-    expect(context.patchSession).toHaveBeenCalledWith('one', {
-      messages: [{ role: 'user', text: 'Do not lose this message' }],
-    });
+    expect(context.patchSession.mock.calls.some(([, patch]) => patch.messages?.some((m: { text: string }) => m.text === 'Do not lose this message'))).toBe(false);
     await act(async () => { stream.close(); });
     await tick(500);
   });

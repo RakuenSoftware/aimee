@@ -23,7 +23,7 @@ static void warn_unreachable(db1_family_t *family, int reason)
    refuse exactly those calls and return the same -1 as a broken store -- fine
    in a test with short strings, wrong the first time a real prompt arrives. The
    bus bounds the message instead. */
-static int frame_size(const char *const *fields, uint32_t count, size_t *need_out)
+int db1_request_frame_size(const char *const *fields, uint32_t count, size_t *need_out)
 {
    /* Zero fields is a legal request: an operation that takes no arguments
       sends the header alone. The upper bound still applies. */
@@ -47,7 +47,7 @@ static int frame_size(const char *const *fields, uint32_t count, size_t *need_ou
 }
 
 /* op(u32) | field_count(u32) | (len(u32) | bytes) * count, per db1_module_api.h. */
-static void encode(uint8_t *out, uint32_t op, const char *const *fields, uint32_t count)
+void db1_request_encode(uint8_t *out, uint32_t op, const char *const *fields, uint32_t count)
 {
    uint32_t at = 0;
    aimee_db1_put_u32(out + at, op);
@@ -90,7 +90,7 @@ int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint3
    }
 
    size_t request_len = 0;
-   if (frame_size(fields, count, &request_len) != 0)
+   if (db1_request_frame_size(fields, count, &request_len) != 0)
       return -1;
    /* The reply is bounded by the caller's own buffer: it asked for at most
       value_len bytes, so there is no reason to hold more than that. */
@@ -105,7 +105,7 @@ int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint3
       free(response);
       return -1;
    }
-   encode(request, op, fields, count);
+   db1_request_encode(request, op, fields, count);
 
    uint32_t response_len = 0;
    uint64_t deadline = aimee_module_call_deadline_ns(family->timeout_ms);

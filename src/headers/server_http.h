@@ -312,6 +312,9 @@ extern "C"
                          char *resp, int resp_cap);
 
 #if AIMEE_WITH_ROUNDTABLE
+   struct server_conn;
+   int server_http_submit_op_run_owned(const char *op_method, const char *body_json,
+                                       const struct server_conn *conn, char *resp, int resp_cap);
    /* Submit an existing dispatch method through the HTTP async op-run machinery
     * without going through a /v1 route. `body_json` is the method body before
     * method/__run_id injection. `conn_caps` are the caller capabilities to use

@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "aimee.h"
+#include "util.h"
 
 /* text_trim_partial_utf8: undo a byte-wise truncation that split a character.
  *
@@ -576,8 +577,35 @@ static void test_parse_utc_ts_is_timezone_independent(void)
    printf("  parse_utc_ts reads UTC regardless of host timezone\n");
 }
 
+static void test_read_complete_bounded_frame(void)
+{
+   FILE *stream = tmpfile();
+   assert(stream);
+   for (size_t i = 0; i < 131072; i++)
+      assert(fputc((int)(i % 251), stream) != EOF);
+   rewind(stream);
+   size_t length = 999;
+   char *frame = read_stream_limited(stream, 131072, &length);
+   assert(frame && length == 131072 && !frame[length]);
+   for (size_t i = 0; i < length; i++)
+      assert((unsigned char)frame[i] == i % 251);
+   free(frame);
+   rewind(stream);
+   frame = read_stream_limited(stream, 131071, &length);
+   assert(!frame && !length);
+   fclose(stream);
+   stream = tmpfile();
+   assert(stream);
+   frame = read_stream_limited(stream, 32, &length);
+   assert(frame && !length && !frame[0]);
+   free(frame);
+   fclose(stream);
+   puts("  PASS: complete bounded binary frames never return a truncated prefix");
+}
+
 int main(void)
 {
+   test_read_complete_bounded_frame();
    test_parse_utc_ts_accepts_both_spellings();
    test_parse_utc_ts_is_timezone_independent();
    test_normalize_key();

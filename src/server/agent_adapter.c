@@ -10,6 +10,33 @@
 
 static const agent_adapter_t g_adapters[] = {
     {
+        .name = "openai",
+        .provider = "openai",
+        .display_name = "OpenAI compatible",
+        .default_endpoint = "https://api.openai.com/v1",
+        .auth_type = "bearer",
+        .capabilities = AGENT_ADAPTER_CAP_DELEGATE_TURN | AGENT_ADAPTER_CAP_PRIMARY_CONVERSATION |
+                        AGENT_ADAPTER_CAP_DIRECT_HTTP | AGENT_ADAPTER_CAP_PRIMARY_SESSION,
+    },
+    {
+        .name = "anthropic",
+        .provider = "anthropic",
+        .display_name = "Anthropic",
+        .default_endpoint = "https://api.anthropic.com/v1",
+        .auth_type = "api-key",
+        .capabilities = AGENT_ADAPTER_CAP_DELEGATE_TURN | AGENT_ADAPTER_CAP_PRIMARY_CONVERSATION |
+                        AGENT_ADAPTER_CAP_DIRECT_HTTP | AGENT_ADAPTER_CAP_PRIMARY_SESSION,
+    },
+    {
+        .name = "openrouter",
+        .provider = "openrouter",
+        .display_name = "OpenRouter",
+        .default_endpoint = "https://openrouter.ai/api/v1",
+        .auth_type = "bearer",
+        .capabilities = AGENT_ADAPTER_CAP_DELEGATE_TURN | AGENT_ADAPTER_CAP_PRIMARY_CONVERSATION |
+                        AGENT_ADAPTER_CAP_DIRECT_HTTP | AGENT_ADAPTER_CAP_PRIMARY_SESSION,
+    },
+    {
         .name = "codex",
         .provider = "chatgpt",
         .display_name = "Codex",
@@ -71,6 +98,9 @@ const agent_adapter_t *agent_adapter_for_provider(const char *provider)
 {
    if (!provider || !provider[0])
       return NULL;
+   if (streq(provider, "ollama") || streq(provider, "llama-eval") ||
+       streq(provider, "llama_native"))
+      provider = "openai";
    for (int i = 0; g_adapters[i].name; i++)
       if (streq(g_adapters[i].provider, provider) || streq(g_adapters[i].name, provider))
          return &g_adapters[i];

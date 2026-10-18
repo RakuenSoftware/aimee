@@ -2,6 +2,9 @@ package delegates
 
 import (
 	"encoding/binary"
+	"encoding/json"
+	"github.com/JBailes/aimee/server-go/ir"
+	"strings"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -10,7 +13,7 @@ import (
 func rescueRequestBytes(text string, known []string, allowJSON bool, mode byte) []byte {
 	request := make([]byte, rescueReqHeaderLen)
 	binary.LittleEndian.PutUint32(request[0:4], rescueRequestMagic)
-	request[4] = wireVersion
+	request[4] = rescueWireVersion
 	if allowJSON {
 		request[5] = 1
 	}
@@ -29,31 +32,24 @@ func rescueRequestBytes(text string, known []string, allowJSON bool, mode byte) 
 
 func decodeRescueResponse(t *testing.T, response []byte) RescueResult {
 	t.Helper()
-	if len(response) < rescueRespHeaderLen ||
-		binary.LittleEndian.Uint32(response[0:4]) != rescueResponseMagic {
-		t.Fatalf("bad response envelope (%d bytes)", len(response))
+	var responseIR rescueResponse
+	if !ir.Decode(response, &responseIR) || responseIR.Version != 1 {
+		t.Fatalf("bad canonical rescue envelope: %s", response)
 	}
-	out := RescueResult{IsToolCall: binary.LittleEndian.Uint32(response[4:8]) == 1}
-	count := int(binary.LittleEndian.Uint32(response[8:12]))
-	contentLen := int(binary.LittleEndian.Uint32(response[12:16]))
-	at := rescueRespHeaderLen
-	out.Content = string(response[at : at+contentLen])
-	at += contentLen
-	for i := 0; i < count; i++ {
-		idLen := int(binary.LittleEndian.Uint16(response[at : at+2]))
-		nameLen := int(binary.LittleEndian.Uint16(response[at+2 : at+4]))
-		argsLen := int(binary.LittleEndian.Uint32(response[at+4 : at+8]))
-		at += 8
-		call := RescueToolCall{
-			ID:        string(response[at : at+idLen]),
-			Name:      string(response[at+idLen : at+idLen+nameLen]),
-			Arguments: string(response[at+idLen+nameLen : at+idLen+nameLen+argsLen]),
+	out := RescueResult{IsToolCall: responseIR.Matched}
+	if responseIR.Message != nil {
+		encoded, _ := json.Marshal([]ir.Message{*responseIR.Message})
+		if _, err := ir.DecodeMessages(encoded); err != nil {
+			t.Fatal(err)
 		}
-		at += idLen + nameLen + argsLen
-		out.Calls = append(out.Calls, call)
-	}
-	if at != len(response) {
-		t.Fatalf("response had %d trailing bytes", len(response)-at)
+		for _, block := range responseIR.Message.Blocks {
+			if block.Type == "text" {
+				out.Content = *block.Text
+			}
+			if block.Type == "tool_use" {
+				out.Calls = append(out.Calls, RescueToolCall{ID: block.ToolID, Name: block.Name, Arguments: string(block.Input)})
+			}
+		}
 	}
 	return out
 }
@@ -105,11 +101,9 @@ func TestRescueStageDetectModeDoesNotParse(t *testing.T) {
 	if status != bus.ModuleStatusOK {
 		t.Fatalf("status = %d", status)
 	}
-	if len(response) != rescueRespHeaderLen {
-		t.Fatalf("detect carried a body of %d bytes", len(response)-rescueRespHeaderLen)
-	}
-	if binary.LittleEndian.Uint32(response[4:8]) != 1 {
-		t.Error("detect missed a tool call")
+	var envelope rescueResponse
+	if !ir.Decode(response, &envelope) || envelope.Version != 1 || !envelope.Matched || envelope.Message != nil {
+		t.Fatalf("detection invented model content: %s", response)
 	}
 }
 
@@ -142,5 +136,50 @@ func TestRescueStageRejectsInvalidEnvelope(t *testing.T) {
 	if _, status := Handle(bus.ModuleInvocation{StageID: StageRescue, DeadlineNS: 1},
 		good); status != bus.ModuleStatusCancelled {
 		t.Errorf("expired status = %d", status)
+	}
+}
+
+func TestRescueStageCanonicalLongCallsAndOpaqueArguments(t *testing.T) {
+	name := strings.Repeat("long_name_", 30)
+	arguments := `{"id":9007199254740993,"ratio":0.12345678901234567890123456789,"huge":1e9000,"unicode":"\ud83d\ude80"}`
+	text := strings.Repeat("<tool_call><name>"+name+"</name><arguments>"+arguments+"</arguments></tool_call>", 40)
+	response, status := Handle(bus.ModuleInvocation{StageID: StageRescue}, rescueRequestBytes(text, []string{name}, false, rescueModeParse))
+	if status != bus.ModuleStatusOK {
+		t.Fatal(status)
+	}
+	got := decodeRescueResponse(t, response)
+	if len(got.Calls) != 40 {
+		t.Fatalf("truncated call group: %d", len(got.Calls))
+	}
+	for _, call := range got.Calls {
+		if call.Name != name || !strings.Contains(call.Arguments, "9007199254740993") || !strings.Contains(call.Arguments, "0.12345678901234567890123456789") || !strings.Contains(call.Arguments, "1e9000") {
+			t.Fatal("name or opaque arguments changed", call)
+		}
+	}
+}
+func TestRescueStageRefusesMalformedArgumentsAndRetiredWire(t *testing.T) {
+	for _, arguments := range []string{`[]`, `{"x":1} trailing`, `{"x":1,"x":2}`, `{"x":"\ud800"}`, `{"x":"\u0000"}`} {
+		text := "<tool_call><name>bash</name><arguments>" + arguments + "</arguments></tool_call>"
+		if _, status := Handle(bus.ModuleInvocation{StageID: StageRescue}, rescueRequestBytes(text, []string{"bash"}, false, rescueModeParse)); status != bus.ModuleStatusInvalidRequest {
+			t.Fatalf("accepted malformed arguments %s status=%d", arguments, status)
+		}
+	}
+	retired := rescueRequestBytes("plain", nil, false, rescueModeParse)
+	retired[4] = 1
+	if _, status := Handle(bus.ModuleInvocation{StageID: StageRescue}, retired); status != bus.ModuleStatusInvalidRequest {
+		t.Fatal("retired wire accepted")
+	}
+}
+func TestRescueCallOverflowIsNotPartialDispatch(t *testing.T) {
+	text := strings.Repeat("<tool_call><name>bash</name><arguments>{}</arguments></tool_call>", 4097)
+	if _, status := Handle(bus.ModuleInvocation{StageID: StageRescue}, rescueRequestBytes(text, []string{"bash"}, false, rescueModeParse)); status != bus.ModuleStatusInvalidRequest {
+		t.Fatal("overflow became partial tool dispatch", status)
+	}
+}
+func TestNativeArgumentValuesDoNotLoseTrailingText(t *testing.T) {
+	var object orderedObject
+	object.addParameterValue("value", "123suffix")
+	if object.print() != `{"value":"123suffix"}` {
+		t.Fatal(object.print())
 	}
 }

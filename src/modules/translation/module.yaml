@@ -17,12 +17,18 @@
     "src/modules/translation/aimee_frontend_anthropic.c",
     "src/modules/translation/aimee_frontend_openai.c",
     "src/modules/translation/aimee_frontend_responses.c",
-    "src/modules/translation/aimee_ir_stream.c"
+    "src/modules/translation/aimee_ir_stream.c",
+    "src/modules/translation/harness_ir.c",
+    "src/modules/translation/history_ir.c",
+    "src/modules/translation/hook_ir.c",
+    "src/modules/translation/wire_codec.c"
   ],
   "public_headers": [
     "src/modules/translation/include/aimee/translation/aimee_backend.h",
     "src/modules/translation/include/aimee/translation/aimee_frontend.h",
-    "src/modules/translation/include/aimee/translation/aimee_ir_stream.h"
+    "src/modules/translation/include/aimee/translation/aimee_ir_stream.h",
+    "src/modules/translation/include/aimee/translation/harness_ir.h",
+    "src/modules/translation/include/aimee/translation/hook_ir.h"
   ],
   "tests": [
     "src/tests/test_aimee_backend.c",
@@ -30,6 +36,8 @@
     "src/tests/test_aimee_converse_stream.c",
     "src/tests/test_aimee_frontend.c",
     "src/tests/test_aimee_ir_stream.c",
+    "src/tests/test_harness_ir.c",
+    "src/tests/test_cmd_hooks_scope.c",
     "src/tests/test_aimee_tool_choice.c"
   ],
   "docs": [

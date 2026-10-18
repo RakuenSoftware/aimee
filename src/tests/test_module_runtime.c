@@ -293,7 +293,14 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       return 0;
    }
    else if (strcmp(name, "delegates") == 0)
-      *kind = AIMEE_DELEGATES_EVENT_INVOKE, *principal_ref = 10;
+   {
+      *kind = AIMEE_DELEGATES_EVENT_INVOKE;
+      *principal_ref = 10;
+      served[0] = *kind;
+      served[1] = AIMEE_DELEGATES_EVENT_RESCUE;
+      *serve_count = 2;
+      return 0;
+   }
    else if (strcmp(name, "tools") == 0)
       *kind = AIMEE_TOOLS_EVENT_DISPATCH, *principal_ref = 11;
    else if (strcmp(name, "workspace") == 0)
@@ -492,6 +499,44 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_delegates_message_decode(response, response_len, AIMEE_DELEGATES_RESPONSE_MAGIC,
                                             role, sizeof(role)) == 0);
       assert(strcmp(role, "code") == 0);
+      /* Real C v2 framing -> Go dialect parser -> canonical owned message. */
+      char name_long[201];
+      memset(name_long, 'n', sizeof name_long - 1);
+      name_long[sizeof name_long - 1] = 0;
+      char prose[1024];
+      int prose_length = snprintf(
+          prose, sizeof prose,
+          "<tool_call><name>%s</name><arguments>{\"id\":9007199254740993}</arguments></tool_call>",
+          name_long);
+      assert(prose_length > 0 && (size_t)prose_length < sizeof prose);
+      const char *known[] = {name_long};
+      uint8_t rescue_request[2048];
+      size_t rescue_length = aimee_delegates_rescue_request_encode(
+          prose, (size_t)prose_length, known, 1, 0, AIMEE_DELEGATES_RESCUE_MODE_PARSE,
+          rescue_request, sizeof rescue_request);
+      assert(rescue_length && rescue_request[4] == 2);
+      assert(aimee_module_client_call(client, AIMEE_DELEGATES_EVENT_RESCUE,
+                                      AIMEE_DELEGATES_STAGE_RESCUE, 3119, 0, rescue_request,
+                                      (uint32_t)rescue_length, response, sizeof response,
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len && response_len < sizeof response);
+      response[response_len] = 0;
+      cJSON *rescued = cJSON_Parse((const char *)response);
+      assert(rescued);
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(rescued, "matched")));
+      cJSON *message = cJSON_GetObjectItemCaseSensitive(rescued, "message");
+      cJSON *blocks = cJSON_GetObjectItemCaseSensitive(message, "blocks");
+      assert(cJSON_GetArraySize(blocks) == 1);
+      const char *name_value = cJSON_GetStringValue(
+          cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(blocks, 0), "name"));
+      assert(name_value && !strcmp(name_value, name_long));
+      assert(strstr((const char *)response, "9007199254740993"));
+      cJSON_Delete(rescued);
+      rescue_request[4] = 1;
+      assert(aimee_module_client_call(client, AIMEE_DELEGATES_EVENT_RESCUE,
+                                      AIMEE_DELEGATES_STAGE_RESCUE, 3120, 0, rescue_request,
+                                      (uint32_t)rescue_length, response, sizeof response,
+                                      &response_len, NULL, NULL) != AIMEE_MODULE_CALL_OK);
    }
    else if (strcmp(name, "tools") == 0)
    {
@@ -591,17 +636,26 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    }
    else if (strcmp(name, "governance") == 0)
    {
-      static const char *tools[] = {"read_file", "spawn_agent", "Task"};
+      const char *policy =
+          "{\"version\":2,\"policy_active\":true,\"stop_reason\":\"max_tokens\",\"tools\":["
+          "{\"name\":\"mcp__aimee__preview_blast_radius_with_complete_identity\","
+          "\"namespace\":\"tenant/project/namespace/longer-than-thirty-one-bytes\"},"
+          "{\"name\":\"spawn_agent\"},{\"name\":\"Task\"}]}";
       aimee_governance_decision_t decision;
-      assert(aimee_governance_request_encode(1, tools, 3, "max_tokens", request, sizeof(request)) ==
-             0);
-      request_len = AIMEE_GOVERNANCE_REQUEST_LEN;
+      request_len = (uint32_t)strlen(policy);
+      memcpy(request, policy, request_len);
       assert(aimee_module_client_call(client, kind, AIMEE_GOVERNANCE_STAGE_EVALUATE, 2009, 0,
                                       request, request_len, response, sizeof(response),
                                       &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_governance_response_decode(response, response_len, 3, &decision) == 0);
       assert(decision.keep_mask == 1 && decision.drop_count == 2);
       assert(strcmp(decision.stop_reason, "max_tokens") == 0);
+      uint8_t retired[632] = {0};
+      aimee_governance_put_u32(retired, 0x51564f47u);
+      aimee_governance_put_u32(retired + 4, 1);
+      assert(aimee_module_client_call(client, kind, AIMEE_GOVERNANCE_STAGE_EVALUATE, 2010, 0,
+                                      retired, sizeof(retired), response, sizeof(response),
+                                      &response_len, NULL, NULL) != AIMEE_MODULE_CALL_OK);
    }
    else if (strcmp(name, "roundtable") == 0)
    {
@@ -749,9 +803,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(response_len == 72 && memcmp(response, "TSTA\1\0\0\0", 8) == 0);
 
-      const char record_request[] =
-          "{\"messages\":[{\"role\":\"assistant\",\"content\":\"[done] changed "
-          "src/server/session_compact.c\"}],\"start\":0,\"end\":1}";
+      const char record_request[] = "{\"messages\":[{\"role\":\"assistant\",\"blocks\":[{\"type\":"
+                                    "\"text\",\"text\":\"[done] changed "
+                                    "src/server/session_compact.c\"}]}],\"start\":0,\"end\":1}";
       assert(aimee_module_client_call(client, AIMEE_ECONOMIZER_EVENT_RECORD_BUILD,
                                       AIMEE_ECONOMIZER_STAGE_RECORD_BUILD, 2021, 0, record_request,
                                       sizeof(record_request) - 1, response, sizeof(response),
@@ -998,8 +1052,10 @@ static void smoke_host_gateway_plan(bus_client_t *host)
    assert(aimee_module_client_init(&client, host) == 0);
    cJSON *plan = host_plan(
        &client,
-       "{\"operation\":\"gateway-plan\",\"phase\":\"context\",\"roles\":[\"user\"],\"tools\":[],"
-       "\"provided_query\":\"deploy matrix\",\"last_user_text\":\"persona text\"}");
+       "{\"operation\":\"gateway-plan\",\"phase\":\"context\","
+       "\"request\":{\"version\":1,\"view\":\"gateway_policy\","
+       "\"messages\":[{\"role\":\"user\"}],\"tools\":[],\"last_user_text\":\"persona text\"},"
+       "\"provided_query\":\"deploy matrix\"}");
    cJSON *steps = cJSON_GetObjectItemCaseSensitive(plan, "steps");
    assert(cJSON_GetArraySize(steps) == 4);
    cJSON *retrieve = cJSON_GetArrayItem(steps, 0);
@@ -1013,13 +1069,19 @@ static void smoke_host_gateway_plan(bus_client_t *host)
    assert(strcmp(json_string(evidence, "origin"), "retrieval") == 0 &&
           strcmp(json_string(evidence, "authority"), "evidence") == 0);
    cJSON_Delete(plan);
-   plan = host_plan(&client, "{\"operation\":\"gateway-plan\",\"phase\":\"tools\",\"roles\":["
-                             "\"user\"],\"tools\":[\"exec_command\",\"apply_patch\",\"shell\"]}");
+   plan =
+       host_plan(&client, "{\"operation\":\"gateway-plan\",\"phase\":\"tools\","
+                          "\"request\":{\"version\":1,\"view\":\"gateway_policy\","
+                          "\"messages\":[{\"role\":\"user\"}],\"tools\":["
+                          "{\"kind\":\"function\",\"name\":\"exec_command\"},"
+                          "{\"kind\":\"function\",\"name\":\"apply_patch\"},"
+                          "{\"kind\":\"function\",\"name\":\"shell\"}],\"last_user_text\":\"\"}}");
    steps = cJSON_GetObjectItemCaseSensitive(plan, "steps");
    assert(cJSON_GetArraySize(steps) == 1);
-   cJSON *indices = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(steps, 0), "indices");
-   assert(cJSON_GetArraySize(indices) == 2 && cJSON_GetArrayItem(indices, 0)->valueint == 2 &&
-          cJSON_GetArrayItem(indices, 1)->valueint == 0);
+   cJSON *paths = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(steps, 0), "paths");
+   assert(cJSON_GetArraySize(paths) == 2 &&
+          cJSON_GetArrayItem(cJSON_GetArrayItem(paths, 0), 0)->valueint == 2 &&
+          cJSON_GetArrayItem(cJSON_GetArrayItem(paths, 1), 0)->valueint == 0);
    cJSON_Delete(plan);
    const char *claim = "{\"operation\":\"ingress-task-claim\",\"session\":\"live\",\"project\":"
                        "\"p\",\"query\":\"fix resolver\"}";

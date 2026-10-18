@@ -10,26 +10,23 @@
  * prompt-cache / correctness). The typed core is the source of truth for the core
  * stages; the sidecar is for lossless same-protocol replay + observability.
  *
- * TRUST-BOUNDARY RULE: tool names + ids are OPAQUE and carried verbatim in their own
- * typed fields (never derived from the args). Tool arguments follow ruling-Q1
- * OPTION C (dual-form): the block's `raw` sidecar holds the ORIGINAL wire bytes
- * (Anthropic input object, or the OpenAI `arguments` STRING) and is AUTHORITATIVE
- * for SAME-protocol replay; `tool_input` holds the PARSED canonical cJSON object
- * (derived ONCE from raw, never independently built) used for cross-protocol
- * EQUALITY + cross-protocol backend build. The OPAQUE-byte guarantee is scoped to
- * SAME-protocol round-trips (replay raw verbatim); cross-protocol conversion
- * preserves SEMANTICS via `tool_input`, not bytes. CAVEAT: cJSON numbers are
- * doubles, so a cross-protocol re-serialize can lose precision on tool-arg integers
- * >2^53 -- prefer raw re-emit where the same-protocol fast-path applies; a
- * precision-preserving path is future work. STREAMING: accumulate raw fragments
- * only; materialize `tool_input` lazily when the block finalizes; an in-flight
- * (accumulating) tool_use is NOT IR-equal until finalized. */
+ * TRUST-BOUNDARY RULE: tool names and ids are opaque typed fields, never derived
+ * from arguments. Completed tool input is admitted once as canonical JSON. Its
+ * exact decimal tokens survive cloning, equality and every provider rebuild;
+ * known numeric fields independently validate their numeric bounds. Immutable
+ * native sidecars serve only verified same-protocol output replay and never
+ * override the owned canonical request. Complete native argument strings require
+ * full JSON framing. Streaming accumulates raw fragments until block completion;
+ * an in-flight tool use is not IR-equal to its finalized form. */
+
 #ifndef DEC_AIMEE_IR_H
 #define DEC_AIMEE_IR_H 1
 
 #include <stddef.h>
 
 struct cJSON;
+
+#define AIMEE_IR_MAX_BLOCKS 4096
 
 /* Which wire protocol an adapter speaks (frontend: the client; backend: provider). */
 typedef enum
@@ -117,6 +114,12 @@ typedef struct
     * REQUIRES it echoed back verbatim on a resubmitted assistant thinking turn, so it
     * must be modeled (not lost to the raw sidecar) for the canonical egress. Owned. */
    char *thinking_signature;
+   /* Host replay fence over the admitted native prefix and thinking chain.
+    * This is provenance metadata, never a replacement vendor signature. */
+   char *thinking_binding;
+   char *thinking_id;
+   char *thinking_encrypted_content;
+   char *thinking_redacted;
    /* TOOL_USE: id = the call id (stable, links to the matching TOOL_RESULT);
     * name = opaque tool name; input = opaque argument JSON (borrowed sidecar view,
     * preserved verbatim). TOOL_RESULT: id = the tool_use id it answers;
@@ -140,6 +143,10 @@ typedef struct
    /* Per-block prompt-cache marker (opaque, e.g. "ephemeral"); NULL if none. The
     * cache decision is per-section, so this must survive block-preserving stages. */
    char *cache_control;
+   char *cache_ttl; /* optional cache lifetime, e.g. 5m or 1h; owned */
+   /* Positive groups retain content belonging to one authored message. Zero
+    * leaves grouping unspecified; paragraph presentation never changes text bytes. */
+   int message_group;
    /* Sidecar: the block's original wire JSON (unknown fields, exact bytes for
     * same-protocol replay). Owned. */
    struct cJSON *raw;
@@ -150,17 +157,46 @@ typedef struct
    char *role; /* opaque: "user" / "assistant" / "system" / "tool" / ... */
    aimee_block_t *blocks;
    int n_blocks;
-   struct cJSON *raw; /* sidecar */
+   int content_scalar; /* observed scalar-text form; retained as transport provenance */
+   struct cJSON *raw;  /* sidecar */
 } aimee_message_t;
 
-typedef struct
+typedef enum
 {
-   char *name; /* opaque */
+   AIMEE_STRICT_UNSET = 0,
+   AIMEE_STRICT_NULL,
+   AIMEE_STRICT_FALSE,
+   AIMEE_STRICT_TRUE
+} aimee_strict_mode_t;
+
+typedef enum
+{
+   AIMEE_TOOL_FUNCTION = 0,
+   AIMEE_TOOL_NAMESPACE,
+   AIMEE_TOOL_HOSTED
+} aimee_tool_kind_t;
+
+typedef struct aimee_tool
+{
+   char *name;
    char *description;
-   struct cJSON *schema; /* input JSON schema, opaque; owned */
+   struct cJSON *schema; /* owned opaque function argument schema */
    char *cache_control;
-   struct cJSON *raw; /* sidecar */
+   char *cache_ttl;
+   aimee_tool_kind_t kind;
+   struct aimee_tool *children; /* namespace functions; owned */
+   int n_children;
+   /* Provider-owned execution/configuration is explicit, never a nameless function. */
+   aimee_wire_t provider_wire;
+   char *native_type;
+   struct cJSON *native_options;
+   aimee_strict_mode_t strict;
+   int has_defer_loading, defer_loading;
+   struct cJSON *raw; /* entry sidecar, never the source of the typed catalog */
 } aimee_tool_t;
+
+void aimee_tool_free(aimee_tool_t *tool);
+int aimee_ir_tool_valid(const aimee_tool_t *tool);
 
 /* Which tools the model may or must call. TYPED, not wire-shaped: every wire spells
  * this differently (Anthropic {type:auto|any|tool|none}; OpenAI chat
@@ -178,15 +214,56 @@ typedef enum
    AIMEE_TOOL_CHOICE_TOOL, /* must call tool_choice_name */
 } aimee_tool_choice_t;
 
+typedef enum
+{
+   AIMEE_OUTPUT_UNSET = 0,
+   AIMEE_OUTPUT_TEXT,
+   AIMEE_OUTPUT_JSON_OBJECT,
+   AIMEE_OUTPUT_JSON_SCHEMA
+} aimee_output_kind_t;
+
+typedef struct
+{
+   aimee_output_kind_t kind;
+   char *name, *description;
+   struct cJSON *schema; /* owned, opaque JSON Schema */
+   aimee_strict_mode_t strict;
+} aimee_output_format_t;
+
+typedef enum
+{
+   AIMEE_CACHE_DEFAULT =
+       0, /* retain native client policy; translate other sources deterministically */
+   AIMEE_CACHE_STABLE_PREFIX, /* explicit host normalization policy */
+} aimee_cache_policy_t;
+
+typedef enum
+{
+   AIMEE_EFFORT_UNSET = 0,
+   AIMEE_EFFORT_NONE,
+   AIMEE_EFFORT_MINIMAL,
+   AIMEE_EFFORT_LOW,
+   AIMEE_EFFORT_MEDIUM,
+   AIMEE_EFFORT_HIGH,
+   AIMEE_EFFORT_XHIGH,
+   AIMEE_EFFORT_MAX
+} aimee_reasoning_effort_t;
+const char *aimee_ir_effort_name(aimee_reasoning_effort_t effort);
+int aimee_ir_effort_parse(const char *name, aimee_reasoning_effort_t *effort);
+
 typedef struct
 {
    char *model;
+   aimee_cache_policy_t cache_policy;
    aimee_block_t *system; /* system as ORDERED BLOCKS, not a flat string */
    int n_system;
    aimee_message_t *messages;
    int n_messages;
    aimee_tool_t *tools;
    int n_tools;
+   aimee_output_format_t output_format;
+   aimee_reasoning_effort_t reasoning_effort;
+   char *reasoning_summary; /* owned: auto, concise or detailed */
    aimee_tool_choice_t tool_choice;
    char *tool_choice_name; /* AIMEE_TOOL_CHOICE_TOOL only; opaque tool name; owned */
    /* Whether the model may emit several tool calls in one turn. OpenAI and Responses
@@ -220,16 +297,17 @@ typedef struct
     * Opaque, preserved verbatim. Owned. NULL when the client sent none. */
    struct cJSON *thinking;
    aimee_wire_t frontend; /* the client wire this was parsed from */
-   /* Set to 1 by any IR transform that changes the typed fields (a module editing
-    * messages/system/tools). While 0, the request is byte-identical to `raw`, so a
-    * same-protocol backend may emit `raw` verbatim (byte-faithful egress -> prompt
-    * cache preserved). A transform that dirties the IR MUST set this so the backend
-    * re-serializes from the typed fields instead of shipping stale original bytes. */
+   /* A transform reports typed payload changes here. Native replay additionally
+    * compares the complete modeled wire content against its entry snapshot;
+    * provenance-only edits do not change native bytes, and a missed flag cannot
+    * replay stale payloads. */
    int mutated;
    /* Whole-request sidecar: the ORIGINAL request JSON. Enables the same-protocol
     * raw-passthrough fast-path (frontend==backend, unmutated) and lossless replay.
     * Owned. */
    struct cJSON *raw;
+   char *raw_bytes; /* original native request bytes; owned, excluded from model/log JSON */
+   size_t raw_length;
 } aimee_request_t;
 
 /* Canonical stop reasons; the provider-specific string is kept alongside so nothing
@@ -245,7 +323,7 @@ typedef enum
    AIMEE_STOP_ERROR
 } aimee_stop_reason_t;
 
-typedef struct
+typedef struct aimee_response
 {
    char *id;
    char *model;
@@ -253,6 +331,7 @@ typedef struct
    aimee_block_t *content;
    int n_content;
    aimee_stop_reason_t stop_reason;
+   char *error_message;   /* typed provider failure; NULL on ordinary responses */
    char *raw_stop_reason; /* provider-specific string (e.g. "stop_sequence") */
    long usage_in;
    long usage_out;
@@ -275,6 +354,13 @@ typedef enum
    AIMEE_DELTA_ERROR
 } aimee_delta_type_t;
 
+/* Borrowed canonical tool identity for policy views; no native projection. */
+typedef struct
+{
+   const char *name;
+   const char *namespace_name;
+} aimee_tool_identity_view_t;
+
 typedef struct
 {
    aimee_delta_type_t type;
@@ -283,16 +369,52 @@ typedef struct
    /* BLOCK_START of a tool_use carries the id + name (opaque, verbatim). */
    const char *tool_id;
    const char *tool_name;
-   const char *text_delta;          /* BLOCK_DELTA for text/thinking */
+   const char *text_delta;
+   const char *signature_delta;
+   const char *redacted_content;
+   const char *tool_namespace;
+   const struct cJSON *tool_input;  /* BLOCK_START initial arguments; borrowed */
    const char *tool_args_delta;     /* BLOCK_DELTA for tool_use argument JSON fragment */
    aimee_stop_reason_t stop_reason; /* TURN_STOP */
+   const char *raw_stop_reason;     /* native terminal spelling, borrowed */
    long usage_in, usage_out;        /* TURN_STOP */
-   const char *error_message;       /* ERROR */
+   long usage_cache_read, usage_cache_write, usage_reasoning;
+   const char *error_message; /* ERROR */
 } aimee_delta_t;
 
+/* Bounded owned model-delta assembly for canonical persistence/replay. This
+ * consumer knows no native provider protocol. Free after success or any refusal. */
+typedef struct
+{
+   aimee_response_t response;
+   struct aimee_ir_builder_storage *storage;
+   size_t capacity, bytes;
+   int started, complete;
+} aimee_ir_response_builder_t;
+int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
+                                    const aimee_delta_t *delta);
+void aimee_ir_response_builder_free(aimee_ir_response_builder_t *builder);
+
 /* ---- lifecycle ---- */
+void aimee_message_free(aimee_message_t *message);
 void aimee_request_free(aimee_request_t *r);
 void aimee_response_free(aimee_response_t *r);
+/* Stable comparison-only JSON view; opaque source values remain unchanged.
+ * Duplicate member names refuse rather than acquire conflicting meanings. */
+int aimee_ir_json_unique(const struct cJSON *json);
+/* Exact JSON frame admission: valid UTF-8, no embedded/escaped NUL, one value,
+ * and unambiguous object keys. Opaque numeric spelling is retained. Owned. */
+struct cJSON *aimee_ir_json_parse_frame(const char *frame, size_t length);
+struct cJSON *aimee_ir_json_canonical_copy(const struct cJSON *json);
+int aimee_ir_thinking_binding_valid(const char *binding);
+int aimee_ir_block_valid(const aimee_block_t *block);
+/* Validate completed request content before host policy or native rendering. */
+int aimee_ir_request_admit(const aimee_request_t *request);
+/* Exact advertised function lookup. Names and namespaces are opaque, separate
+ * identities; missing/hosted/ambiguous identities return NULL. Borrowed result. */
+const aimee_tool_t *aimee_ir_find_function(const aimee_request_t *request,
+                                           const char *namespace_name, const char *name);
+
 void aimee_block_free_contents(aimee_block_t *b);
 
 /* Set metadata on one block. Content ownership is unchanged. */
@@ -314,13 +436,12 @@ int aimee_ir_context_promotion_allowed(aimee_context_origin_t origin,
                                        aimee_context_authority_t from,
                                        aimee_context_authority_t to);
 
-/* Build a canonical assistant response carrying a single TEXT block. This is the
- * bridge for producers that yield only flat text (the tmux/CLI TUI handler, whose
- * screen-scrape recovers one text answer) into the unified message IR: the result
- * is an ordinary aimee_response_t that every IR consumer treats identically to a
- * provider-parsed one. `model` may be NULL/empty. stop_reason is END_TURN. Fills
- * caller-provided `out` (stack-ok); free with aimee_response_free. Returns 0 on
- * success, -1 on allocation failure (out is left freed/zeroed). */
+/* Build a canonical assistant response carrying a single TEXT block for a
+ * genuinely text-only source. Native model/harness adapters retain their typed
+ * blocks instead; terminal screens cannot supply structured model history. `model` may be
+ * NULL/empty. stop_reason is END_TURN. Fills caller-provided `out` (stack-ok); free with
+ * aimee_response_free. Returns 0 on success, -1 on allocation failure (out is left freed/zeroed).
+ */
 int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const char *model);
 
 /* ---- accessors used by the core stages / KB ----
@@ -330,9 +451,16 @@ int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const c
  * blocks). Returns the number of chars written (excluding NUL), or 0 if none. */
 size_t aimee_ir_last_user_text(const aimee_request_t *r, char *buf, size_t n);
 
-/* Remove strictly descending tool indices after validating the entire patch.
- * Returns the number removed, or -1 without mutation for an invalid patch. */
-int aimee_ir_remove_tools(aimee_request_t *request, const struct cJSON *indices);
+/* Descending catalog index paths; validate the entire patch before mutation. */
+int aimee_ir_tool_paths_valid(const aimee_request_t *request, const struct cJSON *paths);
+int aimee_ir_remove_tool_paths(aimee_request_t *request, const struct cJSON *paths);
+
+/* Admit a completed API model response, rejecting forged results/roles, duplicate
+ * tool IDs, malformed blocks and invalid function arguments. Classifies provenance. */
+int aimee_ir_response_admit(aimee_response_t *response);
+/* Optional usage counter: absent is unchanged; malformed/negative/fractional or
+ * inexact/unrepresentable values return -1 before any integer conversion. */
+int aimee_ir_read_usage(const struct cJSON *usage, const char *name, long *out);
 
 /* ---- response-side accessors (delegate/core stages read these) ----
  *
@@ -353,6 +481,16 @@ size_t aimee_ir_response_text(const aimee_response_t *r, char *buf, size_t n);
 /* Non-zero if the response carries at least one TOOL_USE block — the IR spelling
  * of parsed_response_t.is_tool_call. */
 int aimee_ir_response_has_tool_use(const aimee_response_t *r);
+/* Tool ordinals count TOOL_USE blocks only; other blocks retain their order.
+ * Returned tool blocks are borrowed from the response, never projected copies. */
+int aimee_ir_response_tool_count(const aimee_response_t *response);
+aimee_block_t *aimee_ir_response_tool(aimee_response_t *response, int ordinal);
+int aimee_ir_response_drop_tool(aimee_response_t *response, int ordinal);
+/* Allocate a text projection only at a consumer that requires flat text.
+ * The owned IR retains thinking, tools, media and all other block types. */
+/* Owned URI for media: inline base64 plus MIME becomes a data URI. */
+char *aimee_ir_media_url(const aimee_block_t *block);
+char *aimee_ir_response_text_alloc(const aimee_response_t *response);
 
 /* Concatenate the response's THINKING blocks into `buf`. The reasoning is handed
  * back rather than discarded, so callers that want to log or audit it can. */
@@ -369,6 +507,8 @@ aimee_stop_reason_t aimee_stop_reason_parse(const char *canonical_name);
  * (the client's model string). This is the golden-test assertion that an
  * Anthropic-shaped turn and an OpenAI-shaped turn with identical semantics produce
  * identical IR -> identical KB input + identical backend build. */
+/* Native byte equality excludes host provenance/replay metadata only. */
+int aimee_ir_request_wire_equal(const aimee_request_t *a, const aimee_request_t *b);
 int aimee_ir_request_equal(const aimee_request_t *a, const aimee_request_t *b);
 
 /* ----- Request transform stage (the protocol-neutral module seam) -------------

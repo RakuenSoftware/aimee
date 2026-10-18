@@ -1,6 +1,9 @@
 package delegates
 
-import "strings"
+import (
+	"github.com/JBailes/aimee/server-go/ir"
+	"strings"
+)
 
 // parseXMLBlocks reads <tool_call> blocks, including namespaced ones, and falls
 // back to Qwen's <function=> spelling inside a block.
@@ -51,7 +54,7 @@ func parseXMLBlocks(scan string, known knownTools, out *RescueResult) int {
 		if nameOK {
 			rawNameLen = nameEnd - nameStart
 		}
-		nameUsable := nameOK && rawNameLen <= rescueNameMax
+		nameUsable := nameOK && rawNameLen <= 65535
 
 		if nameUsable {
 			name := normalizeToolName(trimC(scan[nameStart:nameEnd]))
@@ -82,6 +85,9 @@ func xmlArguments(scan string, start, end int, ok bool) string {
 		return "{}"
 	}
 	args := trimC(scan[start:end])
+	if strings.HasPrefix(args, "{") || strings.HasPrefix(args, "[") {
+		return args
+	}
 	if _, valid := parseJSONPrefix(args); valid {
 		return args
 	}
@@ -119,7 +125,7 @@ func parseQwenFunctionCall(block string, out *RescueResult) bool {
 		return false
 	}
 	nameEnd := nameStart + gt
-	name := normalizeToolName(trimC(truncName(block[nameStart:nameEnd])))
+	name := normalizeToolName(trimC(block[nameStart:nameEnd]))
 
 	bodyStart := nameEnd + 1
 	bodyEnd := len(block)
@@ -204,7 +210,7 @@ func parseInvokeCall(block string, known knownTools, out *RescueResult) bool {
 		p = valueEnd + len("</parameter>")
 	}
 
-	out.appendCall(truncName(name), args.print())
+	out.appendCall(name, args.print())
 	return true
 }
 
@@ -322,7 +328,7 @@ func parseChannelCalls(scan string, out *RescueResult) int {
 		if argsClose < 0 {
 			break
 		}
-		name := normalizeToolName(trimC(truncName(scan[nameStart:nameEnd])))
+		name := normalizeToolName(trimC(scan[nameStart:nameEnd]))
 		out.appendCall(name, channelArgsToJSON(scan[argsOpen+1:argsClose]))
 		found++
 		p = argsClose + 1
@@ -373,12 +379,12 @@ func parseMistralBracketCalls(scan string, known knownTools, out *RescueResult) 
 		if argsClose < 0 {
 			break
 		}
-		name := trimC(truncName(scan[nameStart:nameEnd]))
+		name := trimC(scan[nameStart:nameEnd])
 		if !known.known(name) {
 			p = argsClose + 1
 			continue
 		}
-		out.appendCall(normalizeToolName(trimC(truncName(name))),
+		out.appendCall(normalizeToolName(trimC(name)),
 			fillArguments(scan[argsOpen:argsClose+1]))
 		found++
 		p = argsClose + 1
@@ -412,11 +418,14 @@ func jsonArgumentsFromItem(item *jsonValue) string {
 		return printJSON(item)
 	}
 	if item.isString() {
-		if parsed, ok := parseJSONPrefix(item.str); ok && parsed.isObject() {
+		if parsed, ok := parseJSONPrefix(item.str); ok && parsed.isObject() && ir.ValidJSON([]byte(trimC(item.str))) {
 			return printJSON(parsed)
 		}
 	}
-	return "{}"
+	if item.isString() {
+		return item.str
+	}
+	return printJSON(item)
 }
 
 // parseJSONToolObject reads {"name":...,"arguments":...} and its spellings.
@@ -449,7 +458,7 @@ func parseJSONToolObject(text string, known knownTools, out *RescueResult) bool 
 		jargs = root.get("parameters")
 	}
 
-	out.appendCall(truncName(jname.str), jsonArgumentsFromItem(jargs))
+	out.appendCall(jname.str, jsonArgumentsFromItem(jargs))
 	return true
 }
 
@@ -541,6 +550,9 @@ func RescueParseToolCalls(text string, knownNames []string, allowJSON bool) (Res
 	}
 	if found == 0 && allowJSON {
 		found = parseBareJSONCalls(scan, known, &out)
+	}
+	if len(out.Calls) > 4096 {
+		return RescueResult{}, -1
 	}
 	return out, found
 }

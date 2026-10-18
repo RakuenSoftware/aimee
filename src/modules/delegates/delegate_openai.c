@@ -1,26 +1,8 @@
 /* delegate_openai.c: OpenAI-compatible provider driver (covers openai, ollama, chatgpt) */
 #include "aimee.h"
 #include <aimee/delegates/delegate_driver.h>
-#include "agent_protocol.h"
 #include <aimee/tools/agent_tools.h>
 #include <string.h>
-
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((weak, noinline)) int payload_rewrite_track_request(const char *system_prompt,
-                                                                  const char *static_context,
-                                                                  int current_tokens,
-                                                                  int model_context_limit)
-#else
-static int payload_rewrite_track_request(const char *system_prompt, const char *static_context,
-                                         int current_tokens, int model_context_limit)
-#endif
-{
-   (void)system_prompt;
-   (void)static_context;
-   (void)current_tokens;
-   (void)model_context_limit;
-   return 0;
-}
 
 /* --- OpenAI chat/completions driver --- */
 
@@ -83,23 +65,6 @@ static int openai_build_url(const agent_t *agent, char *url, size_t url_len)
    return openai_join_endpoint(agent->endpoint, "/chat/completions", url, url_len);
 }
 
-static cJSON *openai_build_request(const agent_t *agent, cJSON *messages, cJSON *tools,
-                                   const char *system_prompt, int max_tokens, double temperature)
-{
-   /* System prompt goes in the messages array for OpenAI (already handled by caller) */
-   (void)system_prompt;
-   return agent_build_request_openai(agent, messages, tools, max_tokens, temperature);
-}
-
-static void openai_parse_response(cJSON *root, const char *body, parsed_response_t *out)
-{
-   (void)body;
-   /* IR is the sole parser for the openai wire; on parse failure it leaves *out
-    * zeroed (an empty response), the same as an unparseable reply. No XML rescue on
-    * the driver path (rescue_mode < 0), matching the legacy hook. */
-   agent_ir_parse_json_response(root, 0 /*openai*/, -1, NULL, out);
-}
-
 static cJSON *openai_build_tools(void)
 {
    return build_tools_array();
@@ -125,8 +90,7 @@ static void openai_get_caps(const agent_t *agent, driver_caps_t *caps)
 const delegate_driver_t delegate_driver_openai = {
     .name = "openai",
     .build_url = openai_build_url,
-    .build_request = openai_build_request,
-    .parse_response = openai_parse_response,
+
     .build_tools = openai_build_tools,
     .get_caps = openai_get_caps,
 };
@@ -136,22 +100,6 @@ const delegate_driver_t delegate_driver_openai = {
 static int chatgpt_build_url(const agent_t *agent, char *url, size_t url_len)
 {
    return openai_join_endpoint(agent->endpoint, "/responses", url, url_len);
-}
-
-static cJSON *chatgpt_build_request(const agent_t *agent, cJSON *messages, cJSON *tools,
-                                    const char *system_prompt, int max_tokens, double temperature)
-{
-   (void)max_tokens;
-   (void)temperature;
-   return agent_build_request_responses(agent, messages, tools, system_prompt);
-}
-
-static void chatgpt_parse_response(cJSON *root, const char *body, parsed_response_t *out)
-{
-   (void)root;
-   /* IR is the sole parser for the responses/SSE (codex) wire. Extracts the response
-    * object from the stream and parses it via the IR; zeroed *out on failure. */
-   agent_ir_parse_responses(body, -1, NULL, out);
 }
 
 static cJSON *chatgpt_build_tools(void)
@@ -171,8 +119,7 @@ static void chatgpt_get_caps(const agent_t *agent, driver_caps_t *caps)
 const delegate_driver_t delegate_driver_chatgpt = {
     .name = "chatgpt",
     .build_url = chatgpt_build_url,
-    .build_request = chatgpt_build_request,
-    .parse_response = chatgpt_parse_response,
+
     .build_tools = chatgpt_build_tools,
     .get_caps = chatgpt_get_caps,
 };
@@ -180,29 +127,6 @@ const delegate_driver_t delegate_driver_chatgpt = {
 /* --- Anthropic Messages API driver --- */
 
 static void anthropic_get_caps(const agent_t *agent, driver_caps_t *caps);
-
-static int delegate_prompt_token_estimate(cJSON *messages, const char *system_prompt)
-{
-   int tokens = 0;
-   char *serialised = messages ? cJSON_PrintUnformatted(messages) : NULL;
-
-   if (serialised)
-   {
-      tokens += (int)(strlen(serialised) / 4) + 1;
-      free(serialised);
-   }
-   if (system_prompt && system_prompt[0])
-      tokens += (int)(strlen(system_prompt) / 4) + 1;
-   return tokens;
-}
-
-static void delegate_payload_rewrite_track(cJSON *messages, const char *system_prompt,
-                                           int model_context_limit)
-{
-   payload_rewrite_track_request(system_prompt, NULL,
-                                 delegate_prompt_token_estimate(messages, system_prompt),
-                                 model_context_limit);
-}
 
 static int anthropic_build_url(const agent_t *agent, char *url, size_t url_len)
 {
@@ -228,23 +152,6 @@ static int anthropic_build_url(const agent_t *agent, char *url, size_t url_len)
    return 0;
 }
 
-static cJSON *anthropic_build_request(const agent_t *agent, cJSON *messages, cJSON *tools,
-                                      const char *system_prompt, int max_tokens, double temperature)
-{
-   driver_caps_t caps;
-   anthropic_get_caps(agent, &caps);
-   delegate_payload_rewrite_track(messages, system_prompt, caps.context_limit);
-   return agent_build_request_anthropic(agent, messages, tools, system_prompt, max_tokens,
-                                        temperature);
-}
-
-static void anthropic_parse_response(cJSON *root, const char *body, parsed_response_t *out)
-{
-   (void)body;
-   /* IR is the sole parser for the anthropic wire; zeroed *out on failure. */
-   agent_ir_parse_json_response(root, 1 /*anthropic*/, -1, NULL, out);
-}
-
 static cJSON *anthropic_build_tools(void)
 {
    return build_tools_array_anthropic();
@@ -268,8 +175,7 @@ static void anthropic_get_caps(const agent_t *agent, driver_caps_t *caps)
 const delegate_driver_t delegate_driver_anthropic = {
     .name = "anthropic",
     .build_url = anthropic_build_url,
-    .build_request = anthropic_build_request,
-    .parse_response = anthropic_parse_response,
+
     .build_tools = anthropic_build_tools,
     .get_caps = anthropic_get_caps,
 };
@@ -293,8 +199,7 @@ static void openrouter_get_caps(const agent_t *agent, driver_caps_t *caps)
 const delegate_driver_t delegate_driver_openrouter = {
     .name = "openrouter",
     .build_url = openai_build_url,
-    .build_request = openai_build_request,
-    .parse_response = openai_parse_response,
+
     .build_tools = openai_build_tools,
     .get_caps = openrouter_get_caps,
 };
@@ -312,8 +217,7 @@ static void mistral_get_caps(const agent_t *agent, driver_caps_t *caps)
 const delegate_driver_t delegate_driver_mistral = {
     .name = "mistral",
     .build_url = openai_build_url,
-    .build_request = openai_build_request,
-    .parse_response = openai_parse_response,
+
     .build_tools = openai_build_tools,
     .get_caps = mistral_get_caps,
 };
@@ -334,8 +238,7 @@ static void minimax_get_caps(const agent_t *agent, driver_caps_t *caps)
 const delegate_driver_t delegate_driver_minimax = {
     .name = "minimax",
     .build_url = openai_build_url,
-    .build_request = openai_build_request,
-    .parse_response = openai_parse_response,
+
     .build_tools = openai_build_tools,
     .get_caps = minimax_get_caps,
 };

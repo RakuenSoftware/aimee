@@ -4,6 +4,7 @@
 #include "aimee.h"
 #include "agent_config.h"
 #include "agent_exec.h"
+#include "request_context.h"
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdarg.h>
@@ -76,6 +77,17 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    (void)max_tokens;
    (void)temperature;
    memset(out, 0, sizeof(*out));
+   if (name && !strcmp(name, "context-owner"))
+   {
+      const request_context_t *owner = request_context_get();
+      assert(owner && user_prompt && !strcmp(owner->principal, user_prompt));
+      assert(owner->capabilities == 7 && owner->transport == REQ_TRANSPORT_TCP);
+      assert(!strcmp(owner->caller_authorization, "test-only-owner-proof"));
+      assert(owner->request_budget_present == 1 &&
+             !strcmp(owner->request_budget_limits, "{\"max_tokens\":1234}"));
+      assert(!owner->context_refused);
+      assert(!request_context_refuse_assembly("worker-only-refusal"));
+   }
    if (name && strcmp(name, "slow") == 0)
    {
       for (int elapsed = 0; elapsed < 3000 && !agent_request_cancelled(); elapsed += 10)
@@ -380,9 +392,41 @@ static void test_use_tools_routes_to_tools_runner(void)
    printf("  test_use_tools_routes_to_tools_runner: ok\n");
 }
 
+static void test_parallel_preserves_owner_and_limits(void)
+{
+   agent_config_t cfg = {0};
+   for (int deadline = 0; deadline < 2; deadline++)
+   {
+      request_context_t owner = {0};
+      snprintf(owner.principal, sizeof owner.principal, "owner-%d", deadline);
+      snprintf(owner.caller_authorization, sizeof owner.caller_authorization,
+               "test-only-owner-proof");
+      owner.capabilities = 7;
+      owner.transport = REQ_TRANSPORT_TCP;
+      owner.request_budget_present = 1;
+      snprintf(owner.request_budget_limits, sizeof owner.request_budget_limits,
+               "{\"max_tokens\":1234}");
+      request_context_set(&owner);
+      agent_task_t tasks[2] = {0};
+      agent_result_t results[2] = {0};
+      for (int i = 0; i < 2; i++)
+      {
+         tasks[i].agent = "context-owner";
+         tasks[i].user_prompt = owner.principal;
+      }
+      assert(agent_run_parallel(&cfg, tasks, 2, results, deadline ? 1000 : 0) == 2);
+      assert(request_context_get() && !memcmp(request_context_get(), &owner, sizeof owner));
+      for (int i = 0; i < 2; i++)
+         free(results[i].response);
+      request_context_clear();
+   }
+   puts("  parallel owner proof, capability scope, limits and local refusal isolation: ok");
+}
+
 int main(void)
 {
    printf("agent_parallel tests\n");
+   test_parallel_preserves_owner_and_limits();
    test_deadline_cancels_and_joins_slow_worker();
    test_no_deadline_runs_all();
    test_parallel_worker_inherits_cwd();

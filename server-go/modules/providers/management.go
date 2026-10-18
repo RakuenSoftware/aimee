@@ -569,8 +569,8 @@ func (m *Manager) modelCommand(ctx context.Context, req Request, root object) (o
 		}
 	}
 	if p := str(model, "provider"); p == "claude" || p == "claude-code" {
-		model["backend"] = "tmux-cli"
-		model["cli_kind"] = p
+		model["backend"] = "provider-cli"
+		model["cli_kind"] = "claude"
 		model["cli_cmd"] = "claude --model " + str(model, "model")
 		model["session_reuse"] = true
 		model["endpoint"] = ""

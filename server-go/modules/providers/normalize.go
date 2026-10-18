@@ -89,8 +89,14 @@ func normalizeModel(model object) error {
 	if str(model, "backend") == "cli-stdio" {
 		model["backend"] = "provider-cli"
 	}
-	if str(model, "backend") == "provider-cli" && str(model, "cli_kind") == "claude" {
-		model["backend"] = "tmux-cli"
+	if str(model, "backend") == "tmux-cli" {
+		model["backend"] = "provider-cli"
+		if str(model, "cli_kind") == "" {
+			model["cli_kind"] = str(model, "provider")
+		}
+	}
+	if str(model, "backend") == "provider-cli" && (str(model, "cli_kind") == "claude" || str(model, "cli_kind") == "claude-code" || str(model, "cli_kind") == "claude-oauth") {
+		model["cli_kind"] = "claude"
 		if str(model, "provider") == "openai" {
 			model["provider"] = "claude"
 		}
@@ -100,10 +106,9 @@ func normalizeModel(model object) error {
 		if cmd := str(model, "cli_cmd"); cmd == "" || cmd == "claude-p" {
 			model["cli_cmd"] = "claude"
 		}
-		delete(model, "cli_kind")
 	}
 	if _, ok := model["primary_only"]; !ok {
-		model["primary_only"] = str(model, "backend") == "tmux-cli" && (str(model, "provider") == "claude" || str(model, "cli_kind") == "claude")
+		model["primary_only"] = str(model, "backend") == "provider-cli" && str(model, "cli_kind") == "claude"
 	}
 	if str(model, "backend") == "provider-cli" && str(model, "cli_kind") == "mistral-plan" {
 		model["cost_tier"] = 0

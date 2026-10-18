@@ -11,7 +11,9 @@ typedef enum
    AIMEE_SESSION_MESSAGE,
    AIMEE_SESSION_CONTROL_REQUEST,
    AIMEE_SESSION_CONTROL_RESPONSE,
-   AIMEE_SESSION_EXECUTION
+   AIMEE_SESSION_EXECUTION,
+   AIMEE_SESSION_PROJECTION,
+   AIMEE_SESSION_CHILD_EXECUTION
 } aimee_session_event_kind_t;
 
 typedef struct
@@ -29,6 +31,11 @@ typedef struct
    /* Host-task lifecycle is separate from each model response TURN_STOP. */
    const char *execution_status; /* running, completed, failed, cancelled */
    const char *execution_error;
+   /* Private execution reference; its conversation remains in its own log. */
+   const char *child_session, *child_turn, *child_role;
+   /* Output-boundary fidelity report; never model content. */
+   const char *projection_model, *projection_boundary;
+   int projection_reasoning, projection_opaque;
 } aimee_session_event_t;
 
 /* Canonical JSON, independent of native protocols. Returned objects are owned
@@ -36,16 +43,48 @@ typedef struct
  * Raw provider sidecars are deliberately not serialized into session events. */
 struct cJSON *aimee_ir_block_json(const aimee_block_t *block);
 struct cJSON *aimee_ir_message_json(const aimee_message_t *message);
+/* Canonical request/catalog snapshot: no native replay bytes or raw sidecars. */
+struct cJSON *aimee_ir_request_json(const aimee_request_t *request);
+/* Bounded identity/query projection for request policy, never a model prompt. */
+struct cJSON *aimee_ir_policy_view_json(const aimee_request_t *request);
+/* Decode canonical persisted content, never a provider protocol. On failure out
+ * is empty; on success it owns its fields (aimee_message_free). */
+int aimee_ir_message_parse(const struct cJSON *json, aimee_message_t *out);
+/* Repair canonical tool cycles in order; -1 leaves the original untouched. */
+int aimee_ir_history_repair(struct cJSON *messages);
 struct cJSON *aimee_ir_delta_json(const aimee_delta_t *delta);
 struct cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event);
+
+/* Flat MCP form data and normalized operator replies. No transport or I/O. */
+int aimee_ir_form_validate(const struct cJSON *schema, const struct cJSON *content);
+int aimee_ir_elicitation_url_valid(const struct cJSON *url);
+int aimee_ir_control_reply_valid(const char *kind, const struct cJSON *request,
+                                 const struct cJSON *reply);
 
 /* Thread-bound emission sink. Adapter boundaries publish typed IR here, not a
  * browser-specific event. A missing sink is legal for non-session consumers;
  * a failing installed sink is returned to the producer, never swallowed. */
 typedef int (*aimee_ir_session_sink_fn)(const aimee_session_event_t *event, void *context);
 void aimee_ir_session_set_sink(aimee_ir_session_sink_fn sink, void *context);
+/* Independent worker task boundary: discard an earlier task's failure only
+ * when there is no active parent capture owner to preserve. */
+void aimee_ir_session_begin_task(void);
+/* Restore a nested execution owner without clearing its capture failure. */
+void aimee_ir_session_restore_sink(aimee_ir_session_sink_fn sink, void *context, int failed);
 aimee_ir_session_sink_fn aimee_ir_session_get_sink(void **context);
 int aimee_ir_session_emit(const aimee_session_event_t *event);
+int aimee_ir_session_emit_projection(const char *model, int reasoning, int opaque,
+                                     const char *boundary);
+/* Capture failure is sticky for the installed task sink, including adapter
+ * admission failures. Clearing the sink ends the scope and resets the latch. */
+void aimee_ir_session_fail_capture(void);
+int aimee_ir_session_capture_failed(void);
+/* Snapshot for a response whose native stream already supplies lifecycle. */
 int aimee_ir_session_emit_response(const aimee_response_t *response, const char *message_id);
+/* Buffered response: TURN_START, complete typed message, TURN_STOP with usage. */
+int aimee_ir_session_emit_buffered_response(const aimee_response_t *response,
+                                            const char *message_id);
+
+int aimee_ir_session_emit_tool_result(const char *tool_id, const char *result, int is_error);
 
 #endif

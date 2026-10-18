@@ -6,6 +6,10 @@
 #include "util.h"
 #include "agent_request_shaping.h"
 #include "agent_protocol.h"
+#include <aimee/gateway/gateway_delegate.h>
+#include <aimee/ir/session_event.h>
+#include <aimee/translation/aimee_frontend.h>
+#include <aimee/translation/aimee_backend.h>
 #include "config.h"
 #include "log.h"
 #include "model_sampling.h"
@@ -221,6 +225,8 @@ cJSON *agent_build_request_responses(const agent_t *agent, cJSON *input, cJSON *
 
    cJSON_AddBoolToObject(req, "store", 0);
    cJSON_AddBoolToObject(req, "stream", 1);
+   cJSON *include = cJSON_AddArrayToObject(req, "include");
+   cJSON_AddItemToArray(include, cJSON_CreateString("reasoning.encrypted_content"));
    if (safe_input)
       cJSON_AddItemToObject(req, "input", safe_input);
    else
@@ -320,427 +326,129 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
    return req;
 }
 
-/* --- Response parsers --- */
-
-/* Split a <think>...</think> reasoning preamble off a model response.
- * Qwen3 and similar reasoning models embed thinking in the content field when
- * the llama.cpp server is not configured to separate it into reasoning_content.
- *
- * Prefix-anchored via the shared text_split_reasoning_prefix(): this previously
- * removed <think> pairs (and bare close tags) from ANYWHERE in the text, which
- * silently corrupted any answer that legitimately discussed the tag — the same
- * defect that killed curator jobs summarising this very function. One rule, one
- * implementation, shared with provider_client.c and llm-chat.py.
- * Returns a new malloc'd string; caller must free. NULL on alloc failure. */
-static int append_text(char **out, const char *text)
+/* Provider profiles still own their outbound knobs. Conversation content is
+ * decoded only as canonical IR, and rendered by the translation backend once. */
+cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
+                              const char *system_prompt, int max_tokens, double temperature,
+                              aimee_wire_t wire, int is_delegate, aimee_request_t *dispatch_catalog)
 {
-   if (!text || !text[0])
-      return 0;
-   if (!*out)
+   if (!agent || !cJSON_IsArray(messages))
+      return NULL;
+   cJSON *empty = cJSON_CreateArray();
+   if (!empty)
+      return NULL;
+   cJSON *profile = wire == AIMEE_WIRE_ANTHROPIC
+                        ? agent_build_request_anthropic(agent, empty, tools, system_prompt,
+                                                        max_tokens, temperature)
+                    : wire == AIMEE_WIRE_RESPONSES
+                        ? agent_build_request_responses(agent, empty, tools, system_prompt)
+                        : agent_build_request_openai(agent, empty, tools, max_tokens, temperature);
+   if (wire == AIMEE_WIRE_OPENAI_CHAT && system_prompt && system_prompt[0])
    {
-      *out = strdup(text);
-      return *out ? 0 : -1;
-   }
-   size_t old_len = strlen(*out);
-   size_t add_len = strlen(text);
-   char *grown = realloc(*out, old_len + add_len + 1);
-   if (!grown)
-      return -1;
-   memcpy(grown + old_len, text, add_len + 1);
-   *out = grown;
-   return 0;
-}
-
-/* Capture the provider-reported model id (the response's "model" field) into the
- * parsed result, so billing can prefer it over the requested/served alias. */
-
-/* Extract content and tool calls from a single Responses API output item cJSON. */
-static void parse_responses_output_item(cJSON *item, parsed_response_t *out)
-{
-   cJSON *type = cJSON_GetObjectItem(item, "type");
-   if (!type || !cJSON_IsString(type))
-      return;
-   if (strcmp(type->valuestring, "function_call") == 0)
-   {
-      out->is_tool_call = 1;
-      if (out->call_count < AGENT_MAX_TOOL_CALLS)
+      cJSON *system = cJSON_CreateObject();
+      if (!system || !cJSON_AddStringToObject(system, "role", "system") ||
+          !cJSON_AddStringToObject(system, "content", system_prompt) ||
+          !cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(profile, "messages"), system))
       {
-         parsed_tool_call_t *call = &out->calls[out->call_count];
-         cJSON *cid = cJSON_GetObjectItem(item, "call_id");
-         cJSON *nm = cJSON_GetObjectItem(item, "name");
-         cJSON *args = cJSON_GetObjectItem(item, "arguments");
-         /* A tool the client offered inside a `namespace` group comes back with a
-          * BARE nested name and its namespace beside it. Keep the pair together --
-          * the client routes on both. */
-         cJSON *ns = cJSON_GetObjectItem(item, "namespace");
-         if (cid && cJSON_IsString(cid))
-            snprintf(call->id, sizeof(call->id), "%s", cid->valuestring);
-         if (nm && cJSON_IsString(nm))
-            snprintf(call->name, sizeof(call->name), "%s", nm->valuestring);
-         if (ns && cJSON_IsString(ns))
-            snprintf(call->tool_namespace, sizeof(call->tool_namespace), "%s", ns->valuestring);
-         if (args && cJSON_IsString(args))
-            call->arguments = strdup(args->valuestring);
-         else
-            call->arguments = strdup("{}");
-         out->call_count++;
+         cJSON_Delete(system);
+         cJSON_Delete(profile);
+         cJSON_Delete(empty);
+         return NULL;
       }
    }
-   else if (strcmp(type->valuestring, "message") == 0)
+   aimee_request_t ir = {0};
+   cJSON *rendered = NULL;
+   char error[128];
+   int rc =
+       wire == AIMEE_WIRE_ANTHROPIC   ? anthropic_frontend_parse(profile, &ir, error, sizeof error)
+       : wire == AIMEE_WIRE_RESPONSES ? responses_frontend_parse(profile, &ir, error, sizeof error)
+                                      : openai_frontend_parse(profile, &ir, error, sizeof error);
+   if (rc != 0)
+      goto fail;
+   /* The empty profile may carry provider-added system context only. */
+   for (int i = 0; i < ir.n_messages; i++)
+      aimee_message_free(&ir.messages[i]);
+   free(ir.messages);
+   ir.n_messages = 0;
+   int count = cJSON_GetArraySize(messages);
+   ir.messages = count ? calloc((size_t)count, sizeof *ir.messages) : NULL;
+   if (count && !ir.messages)
+      goto fail;
+   for (int i = 0; i < count; i++)
    {
-      cJSON *content = cJSON_GetObjectItem(item, "content");
-      if (content && cJSON_IsArray(content))
+      ir.n_messages++;
+      if (aimee_ir_message_parse(cJSON_GetArrayItem(messages, i), &ir.messages[i]) != 0)
+         goto fail;
+   }
+   aimee_ir_classify_context(&ir);
+   int policy_changes = gateway_delegate_run_request_pipeline(&ir, is_delegate);
+   if (policy_changes < 0)
+      goto fail;
+   ir.mutated = 1;
+   aimee_wire_projection_report_t projection;
+   aimee_backend_projection_report(&ir, wire, &projection);
+   if (aimee_ir_session_emit_projection(ir.model, projection.omitted_reasoning_blocks,
+                                        projection.omitted_opaque_state_blocks, "request"))
+      goto fail;
+   if (projection.omitted_reasoning_blocks)
+      LOG_INFO("translation.projection",
+               "wire=%d omitted_reasoning=%d omitted_opaque_state=%d canonical_history=retained",
+               (int)wire, projection.omitted_reasoning_blocks,
+               projection.omitted_opaque_state_blocks);
+   rendered = wire == AIMEE_WIRE_ANTHROPIC   ? anthropic_backend_build(&ir)
+              : wire == AIMEE_WIRE_RESPONSES ? responses_backend_build(&ir)
+                                             : openai_backend_build(&ir);
+   if (!rendered)
+      goto fail;
+   const char *key = wire == AIMEE_WIRE_RESPONSES ? "input" : "messages";
+   cJSON *content = cJSON_DetachItemFromObjectCaseSensitive(rendered, key);
+   if (!content || !cJSON_ReplaceItemInObjectCaseSensitive(profile, key, content))
+   {
+      cJSON_Delete(content);
+      goto fail;
+   }
+   if (policy_changes)
+   {
+      /* The typed catalog/choice is authoritative when policy changes it. Other
+       * provider profile knobs retain their established output contract. */
+      const char *policy_keys[] = {"tools", "tool_choice", "parallel_tool_calls"};
+      for (size_t i = 0; i < sizeof policy_keys / sizeof *policy_keys; i++)
       {
-         int appended_text = 0;
-         int cn = cJSON_GetArraySize(content);
-         for (int j = 0; j < cn; j++)
+         cJSON *value = cJSON_DetachItemFromObjectCaseSensitive(rendered, policy_keys[i]);
+         cJSON_DeleteItemFromObjectCaseSensitive(profile, policy_keys[i]);
+         if (value && !cJSON_AddItemToObject(profile, policy_keys[i], value))
          {
-            cJSON *part = cJSON_GetArrayItem(content, j);
-            cJSON *pt = cJSON_GetObjectItem(part, "type");
-            if (pt && cJSON_IsString(pt) && strcmp(pt->valuestring, "output_text") == 0)
-            {
-               cJSON *text = cJSON_GetObjectItem(part, "text");
-               if (text && cJSON_IsString(text) && text->valuestring && text->valuestring[0])
-               {
-                  if (!appended_text && out->content && out->content[0])
-                  {
-                     size_t n = strlen(out->content);
-                     const char *sep =
-                         (n >= 2 && out->content[n - 1] == '\n' && out->content[n - 2] == '\n') ? ""
-                         : out->content[n - 1] == '\n' ? "\n"
-                                                       : "\n\n";
-                     (void)append_text(&out->content, sep);
-                  }
-                  (void)append_text(&out->content, text->valuestring);
-                  appended_text = 1;
-               }
-            }
+            cJSON_Delete(value);
+            goto fail;
          }
       }
    }
-}
-static void responses_take_longer_content(parsed_response_t *out, char **candidate)
-{
-   if (!out || !candidate || !*candidate)
-      return;
-   if (!(*candidate)[0])
+   if (wire == AIMEE_WIRE_OPENAI_CHAT)
+      agent_request_shape_openai_messages(agent, cJSON_GetObjectItemCaseSensitive(profile, key));
+   cJSON_Delete(rendered);
+   if (dispatch_catalog)
    {
-      free(*candidate);
-      *candidate = NULL;
-      return;
+      aimee_request_free(dispatch_catalog);
+      *dispatch_catalog = (aimee_request_t){.tools = ir.tools, .n_tools = ir.n_tools};
+      ir.tools = NULL;
+      ir.n_tools = 0;
    }
-   if (!out->content || strlen(*candidate) > strlen(out->content))
-   {
-      free(out->content);
-      out->content = *candidate;
-      *candidate = NULL;
-      return;
-   }
-   free(*candidate);
-   *candidate = NULL;
-}
-static void responses_append_output_text_part(cJSON *part, char **out_text)
-{
-   if (!part || !out_text)
-      return;
-   cJSON *type = cJSON_GetObjectItem(part, "type");
-   if (!cJSON_IsString(type) || strcmp(type->valuestring, "output_text") != 0)
-      return;
-   cJSON *text = cJSON_GetObjectItem(part, "text");
-   if (cJSON_IsString(text))
-      (void)append_text(out_text, text->valuestring);
-}
-static int responses_append_sse_data(char **data, size_t *len, size_t *cap, const char *value,
-                                     size_t value_len)
-{
-   if (!data || !len || !cap || !value)
-      return -1;
-   size_t extra = value_len + (*len > 0 ? 1 : 0) + 1;
-   if (*len > SIZE_MAX - extra)
-      return -1;
-   size_t need = *len + extra;
-   if (need > *cap)
-   {
-      size_t next = *cap ? *cap : 256;
-      while (next < need)
-      {
-         if (next > SIZE_MAX / 2)
-            return -1;
-         next *= 2;
-      }
-      char *grown = realloc(*data, next);
-      if (!grown)
-         return -1;
-      *data = grown;
-      *cap = next;
-   }
-   if (*len > 0)
-      (*data)[(*len)++] = '\n';
-   memcpy(*data + *len, value, value_len);
-   *len += value_len;
-   (*data)[*len] = '\0';
-   return 0;
-}
-static const char *responses_sse_field_value(const char *line, size_t line_len, const char *field,
-                                             size_t field_len, size_t *value_len)
-{
-   if (!line || !field || !value_len || line_len <= field_len || line[field_len] != ':' ||
-       strncmp(line, field, field_len) != 0)
-      return NULL;
-   size_t off = field_len + 1;
-   if (off < line_len && line[off] == ' ')
-      off++;
-   *value_len = line_len - off;
-   return line + off;
-}
-static const char *responses_text_value(cJSON *value)
-{
-   if (cJSON_IsString(value))
-      return value->valuestring;
-   if (!cJSON_IsObject(value))
-      return NULL;
-   cJSON *nested = cJSON_GetObjectItem(value, "text");
-   if (!cJSON_IsString(nested))
-      nested = cJSON_GetObjectItem(value, "value");
-   return cJSON_IsString(nested) ? nested->valuestring : NULL;
-}
-static void responses_handle_sse_event(const char *event, const char *data, parsed_response_t *out,
-                                       cJSON *collected_output, char **delta_text, char **done_text,
-                                       char **part_text, cJSON **completed_response)
-{
-   if (!event || !event[0] || !data || !data[0])
-      return;
-   cJSON *ev = cJSON_Parse(data);
-   if (!ev)
-      return;
-   if (strcmp(event, "response.output_item.done") == 0)
-   {
-      cJSON *item = cJSON_GetObjectItem(ev, "item");
-      if (item)
-      {
-         parse_responses_output_item(item, out);
-         cJSON *dup = cJSON_Duplicate(item, 1);
-         if (dup)
-            cJSON_AddItemToArray(collected_output, dup);
-      }
-   }
-   else if (strcmp(event, "response.output_text.delta") == 0)
-   {
-      const char *text = responses_text_value(cJSON_GetObjectItem(ev, "delta"));
-      if (text)
-         (void)append_text(delta_text, text);
-   }
-   else if (strcmp(event, "response.output_text.done") == 0)
-   {
-      const char *text = responses_text_value(cJSON_GetObjectItem(ev, "text"));
-      if (text)
-         (void)append_text(done_text, text);
-   }
-   else if (strcmp(event, "response.content_part.done") == 0)
-   {
-      cJSON *part = cJSON_GetObjectItem(ev, "part");
-      responses_append_output_text_part(part, part_text);
-   }
-   else if (strcmp(event, "response.completed") == 0)
-   {
-      cJSON *resp = cJSON_GetObjectItem(ev, "response");
-      if (resp && completed_response)
-      {
-         cJSON_Delete(*completed_response);
-         *completed_response = cJSON_Duplicate(resp, 1);
-      }
-   }
-
-   cJSON_Delete(ev);
-}
-static void responses_parse_sse_events(const char *body, parsed_response_t *out,
-                                       cJSON *collected_output, char **delta_text, char **done_text,
-                                       char **part_text, cJSON **completed_response)
-{
-   char event[128] = {0};
-   char *data = NULL;
-   size_t data_len = 0;
-   size_t data_cap = 0;
-
-   const char *p = body;
-   while (p && *p)
-   {
-      const char *line = p;
-      const char *eol = strpbrk(p, "\r\n");
-      size_t line_len = eol ? (size_t)(eol - line) : strlen(line);
-      if (eol)
-      {
-         if (*eol == '\r' && eol[1] == '\n')
-            p = eol + 2;
-         else
-            p = eol + 1;
-      }
-      else
-      {
-         p = line + line_len;
-      }
-      if (line_len == 0)
-      {
-         responses_handle_sse_event(event, data, out, collected_output, delta_text, done_text,
-                                    part_text, completed_response);
-         event[0] = '\0';
-         data_len = 0;
-         if (data)
-            data[0] = '\0';
-         continue;
-      }
-      size_t value_len = 0;
-      const char *value = responses_sse_field_value(line, line_len, "event", 5, &value_len);
-      if (value)
-      {
-         size_t n = value_len < sizeof(event) - 1 ? value_len : sizeof(event) - 1;
-         memcpy(event, value, n);
-         event[n] = '\0';
-         continue;
-      }
-      value = responses_sse_field_value(line, line_len, "data", 4, &value_len);
-      if (value)
-         (void)responses_append_sse_data(&data, &data_len, &data_cap, value, value_len);
-   }
-
-   responses_handle_sse_event(event, data, out, collected_output, delta_text, done_text, part_text,
-                              completed_response);
-   free(data);
+   aimee_request_free(&ir);
+   cJSON_Delete(empty);
+   return profile;
+fail:
+   cJSON_Delete(rendered);
+   aimee_request_free(&ir);
+   cJSON_Delete(profile);
+   cJSON_Delete(empty);
+   return NULL;
 }
 
-/* 1 if `resp`'s output array already carries a function_call item. */
-static int responses_object_has_function_call(cJSON *resp)
-{
-   cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
-   if (!cJSON_IsArray(output))
-      return 0;
-   cJSON *item = NULL;
-   cJSON_ArrayForEach(item, output)
-   {
-      cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
-      if (type && cJSON_IsString(type) && strcmp(type->valuestring, "function_call") == 0)
-         return 1;
-   }
-   return 0;
-}
-
-/* 1 if `resp`'s output array already carries a non-empty output_text part. */
-static int responses_object_has_output_text(cJSON *resp)
-{
-   cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
-   if (!cJSON_IsArray(output))
-      return 0;
-   cJSON *item = NULL;
-   cJSON_ArrayForEach(item, output)
-   {
-      cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
-      if (!type || !cJSON_IsString(type) || strcmp(type->valuestring, "message") != 0)
-         continue;
-      cJSON *content = cJSON_GetObjectItemCaseSensitive(item, "content");
-      cJSON *part = NULL;
-      if (cJSON_IsArray(content))
-         cJSON_ArrayForEach(part, content)
-         {
-            cJSON *pt = cJSON_GetObjectItemCaseSensitive(part, "type");
-            cJSON *tx = cJSON_GetObjectItemCaseSensitive(part, "text");
-            if (pt && cJSON_IsString(pt) && strcmp(pt->valuestring, "output_text") == 0 && tx &&
-                cJSON_IsString(tx) && tx->valuestring[0])
-               return 1;
-         }
-   }
-   return 0;
-}
-
-/* Extract the Responses (codex) "response object" -- the one carrying the `output`
- * item array -- from an SSE body, so the IR responses_backend_parse (and the response
- * shadow) can consume the same shape the JSON wires do. Prefers the response.completed
- * event's payload; falls back to parsing the whole body as a single JSON object
- * (non-streaming).
- *
- * Codex streams the answer text as output_text deltas and its completed event's
- * message body is often EMPTY, so responses_backend_parse would see no text (while the
- * legacy parser recovered it from the deltas). Fold the SSE-aggregated text -- the
- * same text legacy uses, captured in the scratch parse below -- back into the object's
- * output when the completed message lacks it, so the object is self-contained. Returns
- * a new cJSON the caller owns, or NULL. */
+/* Compatibility entry for existing diagnostics. Native framing is owned by
+ * translation; execution calls its typed decoder directly. */
 cJSON *agent_responses_sse_response_object(const char *body)
 {
-   if (!body)
-      return NULL;
-   parsed_response_t scratch;
-   memset(&scratch, 0, sizeof(scratch));
-   cJSON *collected = cJSON_CreateArray();
-   char *delta_text = NULL, *done_text = NULL, *part_text = NULL;
-   cJSON *completed = NULL;
-   responses_parse_sse_events(body, &scratch, collected, &delta_text, &done_text, &part_text,
-                              &completed);
-   /* Fold the streamed text into scratch.content the same way the legacy parser does
-    * (output_item.done text, else content_part.done, else the output_text deltas --
-    * longest wins). These helpers consume the passed-in strings. */
-   responses_take_longer_content(&scratch, &part_text);
-   responses_take_longer_content(&scratch, &done_text);
-   responses_take_longer_content(&scratch, &delta_text);
-
-   cJSON *resp = completed ? completed : cJSON_Parse(body);
-   /* Codex's response.completed payload can arrive with an output array that
-    * omits the items it already streamed -- the same emptiness handled for text
-    * just below. A function_call delivered via response.output_item.done was
-    * therefore collected here and then thrown away with `collected`, so the
-    * whole turn produced no tool call and no text: the delegate reported
-    * "no content in final response" with tool_calls=0 on every attempt.
-    * Measured on a live codex turn: item_types=[reasoning,function_call] on the
-    * wire, zero tool calls extracted.
-    *
-    * Fold the streamed function_call items back in when the response object
-    * carries none of its own. Never when it does -- the completed payload is
-    * authoritative whenever it is populated. */
-   if (resp && !responses_object_has_function_call(resp))
-   {
-      const cJSON *item = NULL;
-      cJSON_ArrayForEach(item, collected)
-      {
-         const cJSON *type = cJSON_GetObjectItemCaseSensitive((cJSON *)item, "type");
-         if (!cJSON_IsString(type) || strcmp(type->valuestring, "function_call") != 0)
-            continue;
-         cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
-         if (!cJSON_IsArray(output))
-            output = cJSON_AddArrayToObject(resp, "output");
-         cJSON *dup = cJSON_Duplicate(item, 1);
-         if (output && dup)
-            cJSON_AddItemToArray(output, dup);
-         else
-            cJSON_Delete(dup);
-      }
-   }
-   cJSON_Delete(collected);
-   if (resp && scratch.content && scratch.content[0] && !responses_object_has_output_text(resp))
-   {
-      cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
-      if (!cJSON_IsArray(output))
-         output = cJSON_AddArrayToObject(resp, "output");
-      if (cJSON_IsArray(output))
-      {
-         cJSON *msg = cJSON_CreateObject();
-         cJSON_AddStringToObject(msg, "type", "message");
-         cJSON *content = cJSON_AddArrayToObject(msg, "content");
-         cJSON *part = cJSON_CreateObject();
-         cJSON_AddStringToObject(part, "type", "output_text");
-         cJSON_AddStringToObject(part, "text", scratch.content);
-         cJSON_AddItemToArray(content, part);
-         cJSON_AddItemToArray(output, msg);
-      }
-   }
-   agent_free_parsed_response(&scratch);
-   return resp;
-}
-
-void agent_free_parsed_response(parsed_response_t *p)
-{
-   for (int i = 0; i < p->call_count; i++)
-      free(p->calls[i].arguments);
-   free(p->content);
-   if (p->assistant_message)
-      cJSON_Delete(p->assistant_message);
+   return responses_backend_sse_object(body);
 }
 
 /* --- Message utilities --- */
@@ -1243,6 +951,8 @@ static int repair_orphans_responses(cJSON *messages, cJSON *call_ids, cJSON *res
 }
 int message_history_repair(cJSON *messages)
 {
+   if (cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(messages, 0), "blocks"))
+      return aimee_ir_history_repair(messages);
    if (!messages || !cJSON_IsArray(messages))
       return 0;
 

@@ -71,14 +71,41 @@ same interaction have one declared capture owner: model ingress or the harness, 
 PR #3030 contains a narrow repair of the old browser stream. Its event-name additions are not the
 canonical design and are to be replaced, not copied into another adapter.
 
-## Implemented foundation
+## Implemented browser path
 
-- Canonical C serialization/sink for messages, deltas, controls, and host execution lifecycle.
-- Append-only migration 44, typed DB1 operations, idempotent transactional append, bounded replay
-  pages, and exact decimal sequences. No browser-accessible replay/append route is added yet.
-- A standalone frontend reducer with tool-ID correlation and identical live/replay projection.
-- Native contract tests, storage validation/retry/page tests, a PostgreSQL concurrency/cascade
-  fixture, and reducer tests. The PostgreSQL fixture requires `AIMEE_TEST_PG_URL`.
+- Canonical C serialization/sink for messages, deltas, controls and host execution lifecycle.
+- Migration 44 and DB1 append/page operations persist events before delivery, with transactional
+  actor checks, bounded replay pages, exact decimal sequences and cascading session erasure.
+- Migration 45 stores owner-checked, per-harness resume handles. Claude projects and Codex rollout
+  files survive credential-home cleanup; credentials are materialized from the Vault per run.
+- `/v1/chat/stream` with `ir_version: 1` emits canonical envelopes. The authenticated session events
+  route with `format=ir` replays the same log, then follows new commits. The web backend passes both
+  through unchanged; Chat uses one reducer with ordered deduplication across POST and SSE.
+- Browser Claude primaries run `claude -p --output-format stream-json --include-partial-messages`.
+  Claude, Codex app-server and ACP entry adapters emit typed events before legacy consumers.
+  API model responses publish typed lifecycle, messages, usage and errors at entry. Native
+  execution and tool dispatch retain owned IR and full tool identities. Tool results are canonical
+  blocks; persisted execution histories contain canonical messages rather than provider arrays.
+- Responses SSE parsing is translation-owned and retains ordered completed items and encrypted
+  reasoning when the terminal snapshot omits them. Anthropic signed/redacted thinking and URL or
+  inline media survive canonical persistence and egress.
+- Canonical compaction retains user/policy messages exactly and keeps whole tool cycles at cuts.
+  The Go economizer accepts the same canonical messages and emits canonical summary messages.
+- Native adapter, process lifecycle, capture ordering/failure/cancellation and frontend replay
+  fixtures cover the integrated path. The PostgreSQL concurrency, ownership and cascade fixture
+  runs in the required PostgreSQL replay CI job with `AIMEE_TEST_PG_URL`.
 
-The runtime does not publish to this log yet, and Chat does not consume the reducer yet. Steps 3–7
-and the authorization/lifecycle portions of step 2 are outstanding. This is not an end-to-end fix.
+## Remaining migration boundaries
+
+The native execution loop and simple completion runtime no longer consume `parsed_response_t`.
+Compatibility wrappers, legacy ingress/driver/rescue consumers and flat `agent_result_t` callers
+remain to be removed for the global invariant. Primary history now writes canonical messages,
+but publication from every delegate worker and reconstruction from the session log still need
+one session-owned path. The Go economizer handles canonical messages; the shared typed IR bus
+contract and remaining native ingress transforms still require cutover.
+The browser displays typed harness controls but does not yet offer interactive permission replies.
+Existing primary approval policy still applies. Model ingress capture is not simultaneously enabled
+for these harness-owned browser turns: each native harness adapter is the capture owner.
+Historical text is retained in a labelled legacy section, without inferred tools or reasoning.
+Live subscription authentication and native resume also require deployment verification with
+Vault-held credentials; deterministic process fixtures do not establish provider acceptance.

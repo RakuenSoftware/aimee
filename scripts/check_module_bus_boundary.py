@@ -30,12 +30,25 @@ BUS_TRANSPORT_HEADERS = {"aimee/audit/obs_bus.h", "aimee/postgres/client.h"}
 # the pipeline's shared data contract rather than a peer service call; retiring
 # them depends on docs/proposals/pending/ir-sole-path-and-pluggable-stages.md,
 # not on moving a call onto the bus.
+# Harness translation also consumes the canonical session envelope: this is the
+# same shared IR data contract, not a call into another module's domain service.
 IR_SHARED_TYPE = {
+    # Hook admission owns canonical tool intents, not a peer domain service.
+    ("src/modules/translation/include/aimee/translation/hook_ir.h", "aimee/ir/aimee_ir.h"),
+    # Response stages mutate shared owned IR; governance decisions still cross the bus.
+    ("src/modules/governance/gw_stage_governance.h", "aimee/ir/aimee_ir.h"),
+    # Gateway policing consumes the canonical catalog data contract; policy remains its own owner.
+    ("src/modules/gateway/include/aimee/gateway/gateway_policy.h", "aimee/ir/aimee_ir.h"),
+    # Legacy-history entry migration uses the canonical message codec, not a peer service.
+    ("src/modules/translation/history_ir.c", "aimee/ir/session_event.h"),
     ("src/modules/delegates/aimee_ir_rescue.c", "aimee/ir/aimee_ir_metrics.h"),
     ("src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h", "aimee/ir/aimee_ir.h"),
+    # Rescue transport returns the public owned message type, replacing a flat host response.
+    ("src/modules/delegates/include/aimee/delegates/delegate_xml_fallback.h", "aimee/ir/aimee_ir.h"),
     ("src/modules/translation/include/aimee/translation/aimee_backend.h", "aimee/ir/aimee_ir.h"),
     ("src/modules/translation/include/aimee/translation/aimee_frontend.h", "aimee/ir/aimee_ir.h"),
     ("src/modules/translation/include/aimee/translation/aimee_ir_stream.h", "aimee/ir/aimee_ir.h"),
+    ("src/modules/translation/include/aimee/translation/harness_ir.h", "aimee/ir/session_event.h"),
 }
 # A peer service called directly in process. Each one must become bus traffic.
 PENDING_BUS_MIGRATION = {

@@ -170,7 +170,7 @@ func subscription(root object, vendor string) (object, error) {
 	if vendor == "codex" {
 		model["provider"], model["auth_type"], model["endpoint"], model["model"], model["context_window"], model["cost_tier"] = "chatgpt", "codex-oauth", "https://chatgpt.com/backend-api/codex", "gpt-5.5", 272000, 0
 	} else {
-		model["provider"], model["auth_type"], model["backend"], model["cli_cmd"], model["session_reuse"], model["primary_only"], model["context_window"], model["cost_tier"] = "claude", "none", "tmux-cli", "claude", true, true, 200000, 1
+		model["provider"], model["auth_type"], model["backend"], model["cli_kind"], model["cli_cmd"], model["session_reuse"], model["primary_only"], model["context_window"], model["cost_tier"] = "claude", "none", "provider-cli", "claude", "claude", true, true, 200000, 1
 	}
 	p := object{"name": name}
 	for _, field := range connectionFields {

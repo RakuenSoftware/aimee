@@ -1,7 +1,6 @@
-#include "aimee.h"
-#include "agent_protocol.h"
-#include "cJSON.h"
 #include "gw_stage_completion.h"
+#include "cJSON.h"
+#include <aimee/ir/session_event.h>
 
 #include <assert.h>
 #include <stdio.h>
@@ -15,166 +14,155 @@ static cJSON *json(const char *text)
    return out;
 }
 
-static void test_intervenes_on_confirmed_deferred_siblings(void)
+static aimee_request_t request(const char *messages, const char *tool, const char *schema)
 {
-   cJSON *messages = json("[{\"role\":\"user\",\"content\":\"repair the unsafe path\"},"
-                          "{\"role\":\"assistant\",\"tool_calls\":[{\"type\":\"function\","
-                          "\"function\":{\"name\":\"apply_patch\",\"arguments\":\"{}\"}}]}]");
-   cJSON *tools = json(
-       "[{\"type\":\"function\",\"function\":{\"name\":\"exec_command\","
-       "\"parameters\":{\"type\":\"object\",\"properties\":{\"cmd\":{\"type\":\"string\"}}}}}]");
-   parsed_response_t parsed = {0};
-   parsed.content = strdup(
-       "Heads-up: the same unsafe path pattern exists in two report handlers. Want me to apply "
-       "the same containment check there?");
-
-   assert(gw_response_completion_armed(messages, tools) == 1);
-   assert(gw_response_run_completion(&parsed, messages, tools, "tool_calls") == 1);
-   assert(parsed.is_tool_call == 1 && parsed.call_count == 1);
-   assert(strcmp(parsed.calls[0].name, "exec_command") == 0);
-   assert(strstr(parsed.calls[0].arguments, "\"cmd\"") != NULL);
-   assert(strstr(parsed.calls[0].arguments, "\"true\"") != NULL);
-   assert(strncmp(parsed.calls[0].id, AIMEE_COMPLETION_CALL_PREFIX,
-                  strlen(AIMEE_COMPLETION_CALL_PREFIX)) == 0);
-   assert(strcmp(parsed.stop_reason, "tool_calls") == 0);
-
-   free(parsed.content);
-   free(parsed.calls[0].arguments);
-   cJSON_Delete(messages);
-   cJSON_Delete(tools);
+   aimee_request_t out = {0};
+   cJSON *history = json(messages);
+   out.n_messages = cJSON_GetArraySize(history);
+   out.messages = calloc((size_t)out.n_messages, sizeof *out.messages);
+   assert(out.messages);
+   for (int i = 0; i < out.n_messages; i++)
+      assert(!aimee_ir_message_parse(cJSON_GetArrayItem(history, i), &out.messages[i]));
+   cJSON_Delete(history);
+   if (tool)
+   {
+      out.n_tools = 1;
+      out.tools = calloc(1, sizeof *out.tools);
+      assert(out.tools);
+      out.tools[0].name = strdup(tool);
+      out.tools[0].schema = json(schema);
+      assert(out.tools[0].name);
+   }
+   return out;
 }
 
-static void test_does_not_intervene_without_confirmed_defect_or_edit(void)
+static aimee_response_t response(const char *text)
 {
-   cJSON *no_edit = json("[{\"role\":\"user\",\"content\":\"review this code\"}]");
-   cJSON *edited = json("[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\","
-                        "\"name\":\"apply_patch\",\"input\":{}}]}]");
-   cJSON *tools = json("[{\"name\":\"Bash\",\"input_schema\":{\"type\":\"object\","
-                       "\"properties\":{\"command\":{\"type\":\"string\"}}}}]");
-   parsed_response_t parsed = {0};
-   parsed.content = strdup("I fixed the requested file. Want me to update the docs too?");
-   assert(gw_response_run_completion(&parsed, edited, tools, "tool_use") == 0);
-   free(parsed.content);
-
-   memset(&parsed, 0, sizeof(parsed));
-   parsed.content = strdup("Related findings were not changed.");
-   assert(gw_response_run_completion(&parsed, no_edit, tools, "tool_use") == 0);
-   free(parsed.content);
-   cJSON_Delete(no_edit);
-   cJSON_Delete(edited);
-   cJSON_Delete(tools);
+   aimee_response_t out = {0};
+   out.n_content = 2;
+   out.content = calloc(2, sizeof *out.content);
+   assert(out.content);
+   out.content[0] = (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                                    .text = strdup("private"),
+                                    .thinking_signature = strdup("signed")};
+   out.content[1] = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup(text)};
+   out.stop_reason = AIMEE_STOP_END_TURN;
+   return out;
 }
 
-static void test_one_marker_caps_intervention(void)
+static const char edit_history[] =
+    "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"repair the unsafe path\"}]},"
+    "{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"edit\","
+    "\"name\":\"apply_patch\",\"input\":{}}]}]";
+static const char cmd_schema[] =
+    "{\"type\":\"object\",\"properties\":{\"cmd\":{\"type\":\"string\"}}}";
+static const char empty_schema[] = "{\"type\":\"object\"}";
+
+static void test_intervention_retains_reasoning_and_bounds_retry(void)
 {
-   cJSON *messages =
-       json("[{\"role\":\"assistant\",\"tool_calls\":[{\"function\":{\"name\":"
-            "\"apply_patch\",\"arguments\":\"{}\"}}]},"
-            "{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"call_aimee_completion_7\","
-            "\"function\":{\"name\":\"exec_command\",\"arguments\":\"{}\"}}]}]");
-   cJSON *tools = json("[{\"type\":\"function\",\"name\":\"exec_command\","
-                       "\"parameters\":{\"type\":\"object\",\"properties\":{\"cmd\":{}}}}]");
-   parsed_response_t parsed = {0};
-   parsed.content = strdup("Related finding: same defect. Not touched.");
-   assert(gw_response_completion_armed(messages, tools) == 0);
-   assert(gw_response_run_completion(&parsed, messages, tools, "tool_calls") == 0);
-   free(parsed.content);
-   cJSON_Delete(messages);
-   cJSON_Delete(tools);
-}
-
-static void test_no_marker_allows_bounded_retry(void)
-{
-   cJSON *messages = json("[{\"role\":\"assistant\",\"tool_calls\":[{\"function\":{\"name\":"
-                          "\"apply_patch\",\"arguments\":\"{}\"}}]}]");
-   cJSON *tools = json("[{\"type\":\"function\",\"name\":\"exec_command\","
-                       "\"parameters\":{\"type\":\"object\",\"properties\":{\"cmd\":{}}}}]");
-   assert(gw_response_completion_armed(messages, tools) == 1);
-   cJSON_Delete(messages);
-   cJSON_Delete(tools);
-}
-
-static void test_structured_call_adds_authoritative_next_turn_policy(void)
-{
-   cJSON *messages =
-       json("[{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"call_aimee_completion_9\","
-            "\"function\":{\"name\":\"Bash\",\"arguments\":\"{\\\"command\\\":\\\"true\\\"}\"}}]},"
-            "{\"role\":\"tool\",\"tool_call_id\":\"call_aimee_completion_9\","
-            "\"content\":\"\"}]");
-   char *prompt = gw_request_completion_system_prompt(messages, "existing policy");
-   assert(prompt != NULL);
-   assert(strstr(prompt, "existing policy") != NULL);
-   assert(strstr(prompt, "<aimee-completion-policy>") != NULL);
-   assert(strstr(prompt, "unless the user explicitly excluded it") != NULL);
-   free(prompt);
-
-   cJSON *ordinary = json("[{\"role\":\"user\",\"content\":\"hello\"}]");
-   assert(gw_request_completion_system_prompt(ordinary, "base") == NULL);
-   cJSON_Delete(ordinary);
-   cJSON_Delete(messages);
-}
-
-static void test_shell_surface_adds_cli_first_policy(void)
-{
-   cJSON *tools = json("[{\"type\":\"function\",\"name\":\"exec_command\","
-                       "\"parameters\":{\"type\":\"object\",\"properties\":{\"cmd\":{}}}}]");
-   char *prompt = gw_request_tool_system_prompt(tools, "existing policy");
-   assert(prompt != NULL);
-   assert(strstr(prompt, "existing policy") != NULL);
-   assert(strstr(prompt, "<aimee-tool-policy>") != NULL);
-   assert(strstr(prompt, "CLI is the preferred registered") != NULL);
-   assert(strstr(prompt, "MCP is the alternative") != NULL);
-   assert(strstr(prompt, "root cause, not merely the named") != NULL);
-   assert(strstr(prompt, "aimee index ast-grep") != NULL);
-   assert(strstr(prompt, "preserving the existing success-path contract") != NULL);
-   free(prompt);
-   cJSON_Delete(tools);
-
-   cJSON *no_shell = json("[{\"type\":\"function\",\"name\":\"read_file\"}]");
-   assert(gw_request_tool_system_prompt(no_shell, "base") == NULL);
-   cJSON_Delete(no_shell);
-}
-
-static void test_shell_redirect_counts_as_an_edit(void)
-{
-   cJSON *messages = json(
-       "[{\"role\":\"assistant\",\"tool_calls\":[{\"function\":{\"name\":"
-       "\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"cat > app/files.py <<EOF\\\"}\"}}]}]");
-   cJSON *tools = json("[{\"type\":\"function\",\"name\":\"exec_command\","
-                       "\"parameters\":{\"type\":\"object\",\"properties\":{\"cmd\":{}}}}]");
-   assert(gw_response_completion_armed(messages, tools) == 1);
-   cJSON_Delete(messages);
-   cJSON_Delete(tools);
-}
-
-static void test_observed_scope_deferral_wording_intervenes(void)
-{
-   cJSON *messages = json(
-       "[{\"role\":\"assistant\",\"tool_calls\":[{\"function\":{\"name\":"
-       "\"exec_command\",\"arguments\":\"{\\\"cmd\\\":\\\"cat > app/files.py <<EOF\\\"}\"}}]}]");
-   cJSON *tools = json("[{\"type\":\"function\",\"name\":\"exec_command\","
-                       "\"parameters\":{\"type\":\"object\",\"properties\":{\"cmd\":{}}}}]");
-   parsed_response_t parsed = {0};
-   parsed.content = strdup(
+   const char *texts[] = {
+       "Heads-up: the same unsafe path pattern exists in two report handlers. Want me to apply the "
+       "same containment check there?",
+       "Related findings were not changed.",
        "One heads-up: app/reports.py has the same flagged traversal pattern but was outside the "
-       "scope of this request - want me to apply the same fix there?");
-   assert(gw_response_run_completion(&parsed, messages, tools, "tool_calls") == 1);
-   free(parsed.content);
-   free(parsed.calls[0].arguments);
-   cJSON_Delete(messages);
-   cJSON_Delete(tools);
+       "scope of this request - want me to apply the same fix there?"};
+   for (int i = 0; i < 3; i++)
+      for (int bash = 0; bash <= 1; bash++)
+      {
+         aimee_request_t policy = request(edit_history, bash ? "Bash" : "exec_command",
+                                          bash ? empty_schema : cmd_schema);
+         aimee_response_t out = response(texts[i]);
+         assert(gw_ir_response_completion_armed(&policy));
+         assert(gw_ir_response_run_completion(&out, &policy) == 1);
+         assert(out.n_content == 3 && !strcmp(out.content[0].thinking_signature, "signed"));
+         assert(!strcmp(out.content[1].text, texts[i]));
+         const aimee_block_t *call = &out.content[2];
+         assert(call->type == AIMEE_BLK_TOOL_USE && !strcmp(call->tool_name, policy.tools[0].name));
+         assert(!strncmp(call->tool_id, AIMEE_COMPLETION_CALL_PREFIX,
+                         strlen(AIMEE_COMPLETION_CALL_PREFIX)));
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                            call->tool_input, bash ? "command" : "cmd")),
+                        "true"));
+         assert(call->context.origin == AIMEE_CTX_ORIGIN_PLATFORM &&
+                call->context.authority == AIMEE_CTX_AUTH_POLICY);
+         assert(out.stop_reason == AIMEE_STOP_TOOL_USE);
+         assert(!gw_ir_response_run_completion(&out, &policy) && out.n_content == 3);
+         /* Feed the actual canonical intervention into the next request. Its
+          * marker prevents another retry and supplies the continuation policy. */
+         aimee_message_t next = {
+             .role = strdup("assistant"), .blocks = out.content, .n_blocks = out.n_content};
+         policy.messages =
+             realloc(policy.messages, (size_t)(policy.n_messages + 1) * sizeof *policy.messages);
+         assert(policy.messages);
+         policy.messages[policy.n_messages++] = next;
+         out.content = NULL;
+         out.n_content = 0;
+         assert(!gw_ir_response_completion_armed(&policy));
+         char *prompt = gw_ir_request_completion_system_prompt(&policy, "existing policy");
+         assert(prompt && strstr(prompt, "existing policy") &&
+                strstr(prompt, "<aimee-completion-policy>"));
+         assert(strstr(prompt, "unless the user explicitly excluded it"));
+         free(prompt);
+         aimee_response_free(&out);
+         aimee_request_free(&policy);
+      }
+}
+
+static void test_no_unrelated_or_evidence_intervention(void)
+{
+   const char *histories[] = {
+       "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"apply_patch cat > file\"}]}]",
+       "[{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"is_error\":false,\"tool_id\":"
+       "\"edit\",\"content\":"
+       "\"apply_patch cat > file\"}]}]",
+       "[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"text\",\"text\":\"apply_patch cat > "
+       "file\"}]}]"};
+   for (int i = 0; i < 3; i++)
+   {
+      aimee_request_t policy = request(histories[i], "Bash", empty_schema);
+      aimee_response_t out = response("Related findings were not changed.");
+      assert(!gw_ir_response_completion_armed(&policy));
+      assert(!gw_ir_response_run_completion(&out, &policy) && out.n_content == 2);
+      assert(!gw_ir_request_completion_system_prompt(&policy, "base"));
+      aimee_response_free(&out);
+      aimee_request_free(&policy);
+   }
+   aimee_request_t policy = request(edit_history, "Bash", empty_schema);
+   aimee_response_t out = response("I fixed the requested file. Want me to update the docs too?");
+   assert(!gw_ir_response_run_completion(&out, &policy));
+   aimee_response_free(&out);
+   policy.tools[0].name[0] = 'x';
+   out = response("Related findings were not changed.");
+   assert(!gw_ir_response_completion_armed(&policy));
+   assert(!gw_ir_response_run_completion(&out, &policy));
+   assert(!gw_ir_request_tool_system_prompt(&policy, "base"));
+   aimee_response_free(&out);
+   aimee_request_free(&policy);
+}
+
+static void test_shell_edit_and_instruction_surface(void)
+{
+   aimee_request_t policy =
+       request("[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"edit\","
+               "\"name\":\"exec_command\",\"input\":{\"cmd\":\"cat > app/files.py <<EOF\"}}]}]",
+               "exec_command", cmd_schema);
+   assert(gw_ir_response_completion_armed(&policy));
+   char *prompt = gw_ir_request_tool_system_prompt(&policy, "existing policy");
+   assert(prompt && strstr(prompt, "existing policy") && strstr(prompt, "<aimee-tool-policy>"));
+   assert(strstr(prompt, "CLI is the preferred registered") &&
+          strstr(prompt, "MCP is the alternative"));
+   assert(strstr(prompt, "root cause, not merely the named") &&
+          strstr(prompt, "aimee index ast-grep"));
+   assert(strstr(prompt, "preserving the existing success-path contract"));
+   free(prompt);
+   aimee_request_free(&policy);
 }
 
 int main(void)
 {
-   test_intervenes_on_confirmed_deferred_siblings();
-   test_does_not_intervene_without_confirmed_defect_or_edit();
-   test_one_marker_caps_intervention();
-   test_no_marker_allows_bounded_retry();
-   test_structured_call_adds_authoritative_next_turn_policy();
-   test_shell_surface_adds_cli_first_policy();
-   test_shell_redirect_counts_as_an_edit();
-   test_observed_scope_deferral_wording_intervenes();
+   test_intervention_retains_reasoning_and_bounds_retry();
+   test_no_unrelated_or_evidence_intervention();
+   test_shell_edit_and_instruction_surface();
    puts("response completion stage: ok");
    return 0;
 }

@@ -116,6 +116,7 @@ var schemaHistory = []struct {
 	{42, "schema_governed_actions.sql"},
 	{43, "schema_clean_retry.sql"},
 	{44, "schema_session_ir_events.sql"},
+	{45, "schema_session_harness.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

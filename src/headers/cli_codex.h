@@ -36,6 +36,8 @@ extern "C"
    typedef struct
    {
       const char *thread_id;     /* optional: resume this Codex thread */
+      const char *home;          /* host-materialized Vault credential HOME */
+      const char *session_id;    /* host-owned Aimee session for MCP */
       const char *cwd;           /* optional: child process working directory */
       const char *system_prompt; /* optional: developerInstructions on new threads */
       const char *user_prompt;

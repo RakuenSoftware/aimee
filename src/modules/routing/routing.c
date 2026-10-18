@@ -271,12 +271,6 @@ agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detai
    {
       const char *cmd =
           agent->cli_cmd[0] ? agent->cli_cmd : (agent->cli_kind[0] ? agent->cli_kind : "claude");
-      if (!agent_command_on_path("tmux"))
-      {
-         if (detail && detail_sz)
-            snprintf(detail, detail_sz, "tmux");
-         return AGENT_ROUTE_MISSING_COMMAND;
-      }
       if (!agent_command_on_path(cmd))
       {
          if (detail && detail_sz)
@@ -637,37 +631,6 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
    if (!ag || !ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
       return NULL;
 
-   /* Session affinity outranks the default. A tmux agent holds a STATEFUL
-    * session; switching a user mid-conversation to an HTTP peer abandons it.
-    * The tier-filtered pass below has always preferred tmux, so returning the
-    * default before that check would silently break session continuity for a
-    * user whose default happens to be an HTTP agent. Only bypass cost_tier
-    * here — that is the ordering this fix is about — not the tmux preference. */
-   if (strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
-   {
-      /* Decline ONLY for a tmux peer the normal pass would actually select.
-       * That pass is tier-filtered and prefers tmux WITHIN min_tier, so a tmux
-       * agent at a higher tier never wins there. Declining for any tmux peer at
-       * all would abandon the default and then hand the turn to some unrelated
-       * cheap agent — losing the default without preserving the session. */
-      int min_tier = -1;
-      for (int i = 0; i < cfg->agent_count; i++)
-      {
-         agent_t *peer = &cfg->agents[i];
-         if (!agent_route_candidate_eligible(peer, role, 0, 0, AGENT_SCOPE_UNSET))
-            continue;
-         if (min_tier < 0 || peer->cost_tier < min_tier)
-            min_tier = peer->cost_tier;
-      }
-      for (int i = 0; i < cfg->agent_count; i++)
-      {
-         agent_t *peer = &cfg->agents[i];
-         if (peer == ag || !agent_route_candidate_eligible(peer, role, 0, 0, AGENT_SCOPE_UNSET))
-            continue;
-         if (peer->cost_tier == min_tier && strcmp(peer->backend, AGENT_BACKEND_TMUX_CLI) == 0)
-            return NULL; /* the normal pass will pick this stateful session */
-      }
-   }
    return ag;
 }
 
@@ -713,10 +676,8 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
       return qualified[selected];
    }
 
-   /* First pass: find the minimum tier; note if any tmux agent is there
-    * (tmux sessions are stateful and always preferred over HTTP peers). */
+   /* Canonical history ownership is independent of the selected backend. */
    int min_tier = -1;
-   int has_tmux = 0;
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
@@ -725,15 +686,12 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
       if (min_tier < 0 || ag->cost_tier < min_tier)
       {
          min_tier = ag->cost_tier;
-         has_tmux = 0;
       }
-      if (ag->cost_tier == min_tier && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) == 0)
-         has_tmux = 1;
    }
    if (min_tier < 0)
       return NULL;
 
-   /* Second pass: collect candidates at min_tier (tmux-only if any exist). */
+   /* Collect all eligible candidates at the cheapest tier. */
    agent_t *candidates[MAX_AGENTS];
    int count = 0;
    for (int i = 0; i < cfg->agent_count; i++)
@@ -742,8 +700,6 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
       if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
          continue;
       if (ag->cost_tier != min_tier)
-         continue;
-      if (has_tmux && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
          continue;
       if (count < MAX_AGENTS)
          candidates[count++] = ag;
@@ -1020,7 +976,6 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
    }
 
    int min_tier = -1;
-   int has_tmux = 0;
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
@@ -1045,10 +1000,7 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
       if (min_tier < 0 || ag->cost_tier < min_tier)
       {
          min_tier = ag->cost_tier;
-         has_tmux = 0;
       }
-      if (ag->cost_tier == min_tier && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) == 0)
-         has_tmux = 1;
    next_agent:;
    }
 
@@ -1063,8 +1015,6 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
       if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
          continue;
       if (ag->cost_tier != min_tier)
-         continue;
-      if (has_tmux && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
          continue;
 
       if (locals_only && !agent_is_local(ag))

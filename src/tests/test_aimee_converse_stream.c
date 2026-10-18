@@ -98,6 +98,14 @@ int main(void)
       assert(d[1].text_delta && strcmp(d[1].text_delta, "think") == 0);
       cJSON_Delete(pl);
 
+      n = run(
+          "contentBlockDelta",
+          "{\"contentBlockIndex\":2,\"delta\":{\"reasoningContent\":{\"signature\":\"opaque\"}}}",
+          &st, d, 8, &pl);
+      assert(n == 1 && d[0].kind == AIMEE_BLK_THINKING && !d[0].text_delta &&
+             !strcmp(d[0].signature_delta, "opaque"));
+      cJSON_Delete(pl);
+
       converse_stream_state_t fresh;
       converse_stream_state_init(&fresh);
       n = run("contentBlockDelta", "{\"contentBlockIndex\":3,\"delta\":{\"text\":\"x\"}}", &fresh,
@@ -135,10 +143,14 @@ int main(void)
       int n = run("messageStop", "{\"stopReason\":\"tool_use\"}", &st, d, 8, &pl);
       assert(n == 0 && st.message_stop_seen);
       cJSON_Delete(pl);
-      n = run("metadata", "{\"usage\":{\"inputTokens\":12,\"outputTokens\":34}}", &st, d, 8, &pl);
+      n = run("metadata",
+              "{\"usage\":{\"inputTokens\":12,\"outputTokens\":34,\"cacheReadInputTokens\":8,"
+              "\"cacheWriteInputTokens\":3}}",
+              &st, d, 8, &pl);
       assert(n == 1 && d[0].type == AIMEE_DELTA_TURN_STOP);
       assert(d[0].stop_reason == AIMEE_STOP_TOOL_USE);
-      assert(d[0].usage_in == 12 && d[0].usage_out == 34);
+      assert(d[0].usage_in == 12 && d[0].usage_out == 34 && d[0].usage_cache_read == 8 &&
+             d[0].usage_cache_write == 3);
       cJSON_Delete(pl);
       n = run("metadata", "{\"usage\":{\"inputTokens\":1,\"outputTokens\":1}}", &st, d, 8, &pl);
       assert(n == -1);

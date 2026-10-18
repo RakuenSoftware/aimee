@@ -2,9 +2,11 @@ package memory
 
 import (
 	"encoding/json"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 )
 
 type gatewayStep struct {
@@ -16,7 +18,7 @@ type gatewayStep struct {
 	WhenOutput  string         `json:"when_output,omitempty"`
 	EpochOutput string         `json:"epoch_output,omitempty"`
 	Context     map[string]any `json:"context,omitempty"`
-	Indices     []int          `json:"indices,omitempty"`
+	Paths       [][]int        `json:"paths,omitempty"`
 }
 
 func gatewayOptionalString(args commandArgs, key string) (string, bool) {
@@ -29,6 +31,25 @@ func gatewayOptionalString(args commandArgs, key string) (string, bool) {
 		return "", false
 	}
 	return *value, true
+}
+
+// MCP groups retain their callable surface. Native shell aliases, including namespaced
+// Codex functions and Anthropic's Bash, share one opening-turn policy.
+func gatewayNativeShell(tool canonical.PolicyTool, namespace string) bool {
+	if strings.HasPrefix(namespace, "mcp__") {
+		return false
+	}
+	if tool.Kind == "hosted" && tool.NativeType == "local_shell" {
+		return true
+	}
+	if namespace == "container" && tool.Name == "exec" {
+		return true
+	}
+	switch tool.Name {
+	case "exec_command", "local_shell", "shell", "bash", "run_command", "container.exec", "shell_command", "run_shell_command", "Bash", "Shell":
+		return true
+	}
+	return false
 }
 
 func handleGatewayPlan(options handlerOptions, args commandArgs) ([]byte, bus.ModuleStatus) {
@@ -58,34 +79,47 @@ func handleGatewayPlan(options handlerOptions, args commandArgs) ([]byte, bus.Mo
 		}
 		guidanceProvided = guidanceProvided || name == "guidance"
 	}
-	roles, tools := []string{}, []string{}
+	var request *canonical.PolicyView
 	if phase != "text" {
-		if json.Unmarshal(args["roles"], &roles) != nil || roles == nil || json.Unmarshal(args["tools"], &tools) != nil || tools == nil {
+		if args["roles"] != nil || args["tools"] != nil || args["last_user_text"] != nil {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		var err error
+		request, err = canonical.DecodePolicyView(args["request"])
+		if err != nil {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 	}
 	start := true
-	for _, role := range roles {
-		if role == "assistant" {
-			start = false
-			break
+	if request != nil {
+		for _, message := range request.Messages {
+			if message.Role == "assistant" {
+				start = false
+				break
+			}
 		}
 	}
-	remove := []int{}
-	if start {
-		for i := len(tools) - 1; i >= 0; i-- {
-			switch tools[i] {
-			case "exec_command", "local_shell", "shell", "bash", "run_command", "container.exec":
-				remove = append(remove, i)
+	remove := [][]int{}
+	if start && request != nil {
+		for i := len(request.Tools) - 1; i >= 0; i-- {
+			tool := request.Tools[i]
+			if tool.Kind == "namespace" {
+				for j := len(tool.Children) - 1; j >= 0; j-- {
+					if gatewayNativeShell(tool.Children[j], tool.Name) {
+						remove = append(remove, []int{i, j})
+					}
+				}
+			} else if gatewayNativeShell(tool, "") {
+				remove = append(remove, []int{i})
 			}
 		}
 	}
 	steps := []gatewayStep{}
 	appendGuidance := start && !guidanceProvided
-	result := map[string]any{"status": "ok", "append_guidance": appendGuidance, "remove_tools": remove}
+	result := map[string]any{"status": "ok", "append_guidance": appendGuidance, "remove_tool_paths": remove}
 	if phase == "tools" {
 		if len(remove) > 0 {
-			steps = append(steps, gatewayStep{Kind: "remove_tools", Indices: remove})
+			steps = append(steps, gatewayStep{Kind: "remove_tools", Paths: remove})
 		}
 	} else if phase == "context" || phase == "text" {
 		provided, ok := gatewayOptionalString(args, "provided_query")
@@ -93,6 +127,9 @@ func handleGatewayPlan(options handlerOptions, args commandArgs) ([]byte, bus.Mo
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		fallback, ok := gatewayOptionalString(args, "last_user_text")
+		if request != nil {
+			fallback = request.LastUserText
+		}
 		if !ok {
 			return nil, bus.ModuleStatusInvalidRequest
 		}

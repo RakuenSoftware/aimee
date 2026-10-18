@@ -47,7 +47,7 @@ policy; they let C callers marshal bytes onto the event bus instead of keeping d
 The kind is fixed by the process contract at `4096 + ordinal*256 + stage`; economizer is
 ordinal 27, so it is not a free choice.
 
-`messages` travels as raw JSON in both directions and is emitted with the module's
+`messages` is admitted by the shared typed Go IR contract at reduction and record-building entry, then retains its original JSON member/decimal order for the cache-sensitive tree. Native and mixed history shapes are refused. Changed output is admitted again before emission with the module's
 cJSON-compatible printer, so the bytes the caller forwards are the bytes the fold
 measured. A `messages` field absent from the response means nothing was mutated and the
 caller must forward its **original** array untouched.
@@ -226,3 +226,5 @@ treats its absence as "no reduction available" and dispatches the original promp
 is the same path exercised whenever the bus is momentarily unavailable. The C files that
 would then be dead are `economizer_module_client.c`, `gateway_mutate.c` and
 `gateway_mutate_wire.c`.
+
+Canonical JSON fidelity: the order-preserving reducer tree retains original decimal tokens through cloning, spill/fold rendering and structural summaries. Adjacent integers beyond binary64 precision and extreme exponents remain distinct opaque values. Explicit numeric replacement invalidates a retained token. Complete framing, unique object members, bounded nesting and embedded-NUL refusal apply before reduction. Historical `%g` number summaries are intentionally retired because they changed tool evidence values; the remaining string/depth summary limits are unchanged.

@@ -3,70 +3,48 @@ package governance
 
 import (
 	"encoding/binary"
-	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/ir"
 )
 
 const (
 	EventEvaluate uint32 = 8961
 	StageEvaluate uint32 = 1
 
-	requestMagic          uint32 = 0x51564f47
 	responseMagic         uint32 = 0x52564f47
-	wireVersion           uint32 = 1
+	wireVersion           uint32 = 2
 	toolCountMax                 = 16
-	toolNameMax                  = 31
-	toolNameSlot                 = 32
-	stopReasonMax                = 31
-	requestToolLengthsOff        = 24
-	requestToolNamesOff          = 88
-	requestStopReasonOff         = 600
-	requestLen                   = 632
 	responseStopReasonOff        = 24
 	responseLen                  = 56
 )
 
 type policyRequest struct {
-	active     bool
-	toolNames  []string
-	stopReason string
+	Version    uint32            `json:"version"`
+	Active     *bool             `json:"policy_active"`
+	Tools      []ir.ToolIdentity `json:"tools"`
+	StopReason string            `json:"stop_reason"`
+}
+
+func canonicalStop(reason string) bool {
+	switch reason {
+	case "unknown", "end_turn", "max_tokens", "tool_use", "stop_sequence", "content_filter", "error":
+		return true
+	}
+	return false
 }
 
 func decodeRequest(request []byte) (policyRequest, bool) {
-	if len(request) != requestLen || binary.LittleEndian.Uint32(request[0:4]) != requestMagic ||
-		binary.LittleEndian.Uint32(request[4:8]) != wireVersion ||
-		binary.LittleEndian.Uint32(request[8:12]) > 1 ||
-		binary.LittleEndian.Uint32(request[12:16]) > toolCountMax ||
-		binary.LittleEndian.Uint32(request[16:20]) > stopReasonMax ||
-		binary.LittleEndian.Uint32(request[20:24]) != 0 {
+	var decoded policyRequest
+	if !ir.Decode(request, &decoded) || decoded.Version != wireVersion || decoded.Active == nil || decoded.Tools == nil || len(decoded.Tools) > toolCountMax || !canonicalStop(decoded.StopReason) {
 		return policyRequest{}, false
 	}
-	count := int(binary.LittleEndian.Uint32(request[12:16]))
-	names := make([]string, count)
-	for index := range toolCountMax {
-		lengthOffset := requestToolLengthsOff + index*4
-		nameLen := int(binary.LittleEndian.Uint32(request[lengthOffset : lengthOffset+4]))
-		slotOffset := requestToolNamesOff + index*toolNameSlot
-		slot := request[slotOffset : slotOffset+toolNameSlot]
-		if nameLen > toolNameMax || (index >= count && nameLen != 0) ||
-			!modulewire.NonzeroText(slot[:nameLen]) || !modulewire.ZeroPadding(slot[nameLen:]) {
+	for _, tool := range decoded.Tools {
+		if tool.Name == "" {
 			return policyRequest{}, false
 		}
-		if index < count {
-			names[index] = string(slot[:nameLen])
-		}
 	}
-	reasonLen := int(binary.LittleEndian.Uint32(request[16:20]))
-	reasonSlot := request[requestStopReasonOff:]
-	if !modulewire.NonzeroText(reasonSlot[:reasonLen]) || !modulewire.ZeroPadding(reasonSlot[reasonLen:]) {
-		return policyRequest{}, false
-	}
-	return policyRequest{
-		active:     binary.LittleEndian.Uint32(request[8:12]) == 1,
-		toolNames:  names,
-		stopReason: string(reasonSlot[:reasonLen]),
-	}, true
+	return decoded, true
 }
 
 func deniedTool(name string) bool {
@@ -79,32 +57,28 @@ func deniedTool(name string) bool {
 }
 
 func evaluate(request policyRequest) (uint32, uint32, string) {
-	count := len(request.toolNames)
+	count := len(request.Tools)
 	keepMask := uint32(0)
 	if count > 0 {
 		keepMask = (1 << count) - 1
 	}
-	if !request.active || count == 0 {
-		return keepMask, 0, request.stopReason
+	if !*request.Active || count == 0 {
+		return keepMask, 0, request.StopReason
 	}
 
 	drops := uint32(0)
 	keepMask = 0
-	for index, name := range request.toolNames {
-		if deniedTool(name) {
+	for index, tool := range request.Tools {
+		if deniedTool(tool.Name) {
 			drops++
 		} else {
 			keepMask |= 1 << index
 		}
 	}
 	kept := count - int(drops)
-	finalReason := request.stopReason
-	if finalReason == "" || kept == 0 {
-		if kept > 0 {
-			finalReason = "tool_use"
-		} else {
-			finalReason = "end_turn"
-		}
+	finalReason := request.StopReason
+	if finalReason == "tool_use" && kept == 0 {
+		finalReason = "end_turn"
 	}
 	return keepMask, drops, finalReason
 }

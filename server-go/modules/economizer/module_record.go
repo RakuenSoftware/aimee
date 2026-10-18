@@ -2,8 +2,10 @@ package economizer
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/ir"
 )
 
 // RecordBuildRequest is the session-compaction record seam. The caller already
@@ -27,42 +29,31 @@ type recordBuildResponse struct {
 	ClosetEvicted bool         `json:"closet_evicted,omitempty"`
 }
 
-func recordMessageText(msg *JSONValue) string {
-	content := msg.Get("content")
-	if content == nil {
-		return ""
-	}
-	if content.IsString() {
-		return content.Str
-	}
-	if content.IsArray() {
-		for _, block := range content.Items {
-			if block.GetString("type") == "text" {
-				return block.GetString("text")
-			}
+func recordBlockText(block ir.Block) string {
+	switch block.Type {
+	case "text":
+		if block.Text != nil {
+			return *block.Text
+		}
+	case "tool_result":
+		var text string
+		if json.Unmarshal(block.Content, &text) == nil {
+			return text
+		}
+		if len(block.Content) > 0 {
+			return string(block.Content)
 		}
 	}
 	return ""
 }
-
-func recordMessageIsToolResult(msg *JSONValue) bool {
-	role := msg.GetString("role")
-	if role == "" || role == "tool" {
-		return true
-	}
-	if role != "user" {
-		return false
-	}
-	content := msg.Get("content")
-	if !content.IsArray() {
-		return false
-	}
-	for _, block := range content.Items {
-		if block.GetString("type") == "tool_result" {
-			return true
+func recordMessageText(message ir.Message) string {
+	var parts []string
+	for _, block := range message.Blocks {
+		if text := recordBlockText(block); text != "" {
+			parts = append(parts, text)
 		}
 	}
-	return false
+	return strings.Join(parts, "\n")
 }
 
 // recordAddUnique deliberately checks the untrimmed value against prior stored
@@ -82,28 +73,30 @@ func recordAddUnique(items *[]string, value string, maxBytes int) {
 	*items = append(*items, value)
 }
 
-func buildRecord(messages *JSONValue, start, end int) recordBuildResponse {
+func buildRecord(messages []ir.Message, start, end int) recordBuildResponse {
 	resp := recordBuildResponse{Record: recordFields{
 		Files: []string{}, Errors: []string{}, Decisions: []string{},
 	}}
 	var set CoordSet
 	rawTotal := 0
 	for i := start; i < end; i++ {
-		msg := messages.At(i)
-		text := recordMessageText(msg)
-		if text == "" {
-			continue
+		message := messages[i]
+		for _, block := range message.Blocks {
+			text := recordBlockText(block)
+			if text == "" {
+				continue
+			}
+			lane := LaneAgent
+			// A tool result in the same message cannot promote user text.
+			if message.Role == "user" && block.Type != "tool_result" {
+				lane = LaneUser
+			}
+			prov := Provenance{Lane: lane, TurnID: int64(i), ToolCallID: -1, ResultIndex: -1}
+			NominateInto(text, &prov, &set)
+			rawTotal += len(text)
 		}
-		role := msg.GetString("role")
-		lane := LaneAgent
-		if role == "user" && !recordMessageIsToolResult(msg) {
-			lane = LaneUser
-		}
-		prov := Provenance{Lane: lane, TurnID: int64(i), ToolCallID: -1, ResultIndex: -1}
-		NominateInto(text, &prov, &set)
-		rawTotal += len(text)
-
-		if role == "assistant" {
+		if message.Role == "assistant" {
+			text := recordMessageText(message)
 			switch ParseRegister(text) {
 			case RegVerdict:
 				recordAddUnique(&resp.Record.Decisions, text, 180)
@@ -125,12 +118,11 @@ func buildRecord(messages *JSONValue, start, end int) recordBuildResponse {
 
 func handleRecordBuild(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	var req RecordBuildRequest
-	if err := json.Unmarshal(request, &req); err != nil {
+	if !ir.Decode(request, &req) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	messages := ParseJSON(string(req.Messages))
-	if messages == nil || !messages.IsArray() || req.Start < 0 || req.End < req.Start ||
-		req.End > messages.Len() {
+	messages, err := ir.DecodeMessages(req.Messages)
+	if err != nil || req.Start < 0 || req.End < req.Start || req.End > len(messages) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	resp := buildRecord(messages, req.Start, req.End)

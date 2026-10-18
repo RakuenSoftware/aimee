@@ -411,7 +411,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(
             {field: len(report["ownership"][field]) for field in validator.OWNERSHIP_FIELDS},
             {"sources": 1, "private_headers": 0, "public_headers": 1, "tests": 1,
-             "contracts": 0, "docs": 1, "go_sources": 4, "go_tests": 2, "go_assets": 0},
+             "contracts": 0, "docs": 1, "go_sources": 5, "go_tests": 2, "go_assets": 0},
         )
 
     def test_contract_ownership_is_scoped_and_complete(self) -> None:
@@ -562,7 +562,7 @@ class DescriptorTests(unittest.TestCase):
             ("benchmarks", "sources", "src/modules/benchmarks/module_adapter.c"),
             ("benchmarks", "go_sources", "server-go/modules/benchmarks/benchmarks.go"),
             ("benchmarks", "go_tests", "server-go/modules/benchmarks/benchmarks_test.go"),
-            ("governance", "sources", "src/modules/governance/module_adapter.c"),
+            ("governance", "sources", "src/modules/governance/gw_stage_governance.c"),
             ("governance", "go_sources", "server-go/modules/governance/governance.go"),
             ("governance", "go_tests", "server-go/modules/governance/governance_test.go"),
             ("workflows", "sources", "src/modules/workflows/module_adapter.c"),

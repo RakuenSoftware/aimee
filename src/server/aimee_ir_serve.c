@@ -15,8 +15,7 @@
 #include "server_http_identity.h" /* inbound session identity */
 #include "request_context.h"
 #include <aimee/ir/aimee_ir_metrics.h>
-#include "aimee.h"          /* size macros for agent_types.h */
-#include "agent_protocol.h" /* parsed_response_t (Slice 3 transitional adapter) */
+#include "aimee.h" /* size macros for agent_types.h */
 #include <aimee/ir/aimee_ir.h>
 #include <aimee/core/turn_integrity.h>
 #include "cJSON.h"
@@ -27,28 +26,14 @@
 
 int aimee_ir_path_enabled(void)
 {
-   /* DEFAULT-ON: the IR path is now the primary request-build path (proven live on
-    * .254 for Claude Code->codex incl. tools/streaming). An explicit setting wins;
-    * legacy translators remain as the automatic fallback on any IR-build failure.
-    * Set AIMEE_IR_PATH=0 to force the legacy path. */
-   const char *v = getenv("AIMEE_IR_PATH");
-   if (v && v[0])
-      return v[0] != '0';
+   /* Retained ABI for callers; canonical admission has no legacy escape hatch. */
    return 1;
 }
 
 int aimee_ir_stream_relay_enabled(void)
 {
-   /* DEFAULT-OFF, gated SEPARATELY from AIMEE_IR_PATH (roundtable Q6: gate
-    * buffered-IR / streaming-IR / passthrough independently). When on, the
-    * incremental OpenAI-chat -> Anthropic SSE relay is driven by the neutral
-    * IR-delta model (openai_chunk_to_deltas -> anthropic_delta_emit) instead of
-    * the legacy anthropic_stream_feed_openai translator -- eliminating the last
-    * live direct-translation site. Ships dark; enablement is a rollout decision
-    * gated on live cross-protocol parity, exactly like the legacy-deletion step.
-    * (The user's codex config uses the buffered-replay path, not this relay.) */
-   const char *v = getenv("AIMEE_IR_STREAM_RELAY");
-   return v && (strcmp(v, "1") == 0 || strcmp(v, "on") == 0 || strcmp(v, "true") == 0);
+   /* Kept for existing callers; ingress has no legacy stream execution path. */
+   return 1;
 }
 
 /* Resolve the memory module toggle: config-store modules.memory (canonical) -> env
@@ -114,30 +99,6 @@ static char *ir_resolve_persona_instructions(void)
    if (strcmp(name, "engineer") == 0 && config_default_persona()[0])
       snprintf(name, sizeof name, "%s", config_default_persona());
    return persona_compose_primary_instructions(name, NULL);
-}
-
-/* The neutral IR keeps provider-native tool sidecars so a Responses request can
- * survive its intermediate chat-shaped hop and be rebuilt for a Responses
- * backend. That preservation must end at an actual OpenAI chat backend: its
- * `tools` array accepts function entries only (llama.cpp rejects a Codex
- * `custom` tool before inference). Filter only the final provider request, after
- * the driver is known, so chatgpt/Responses still receives native tool types. */
-static void filter_openai_chat_tools(cJSON *provider_request, int is_responses)
-{
-   if (is_responses || !provider_request)
-      return;
-   cJSON *tools = cJSON_GetObjectItemCaseSensitive(provider_request, "tools");
-   if (!cJSON_IsArray(tools))
-      return;
-   for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
-   {
-      cJSON *tool = cJSON_GetArrayItem(tools, i);
-      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(tool, "type"));
-      if (type && strcmp(type, "function") != 0)
-         cJSON_DeleteItemFromArray(tools, i);
-   }
-   if (cJSON_GetArraySize(tools) == 0)
-      cJSON_DeleteItemFromObjectCaseSensitive(provider_request, "tools");
 }
 
 char *aimee_ir_prepend_active_persona_text(const char *text, int conversation_established)
@@ -286,6 +247,17 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
                                                    : "none");
 }
 
+void aimee_ir_apply_gateway_request_stages(aimee_request_t *request)
+{
+   aimee_ir_apply_request_stages(request, ir_memory_enabled());
+}
+
+void aimee_ir_apply_native_request_stages(aimee_request_t *request)
+{
+   if (config_present() && config_ingress_preinject_anthropic_enabled())
+      aimee_ir_apply_request_stages(request, ir_memory_enabled());
+}
+
 char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
                                    const char *agent_model, int max_tokens_override,
                                    int want_stream)
@@ -325,334 +297,18 @@ char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
     * buffered-replay path ask for SSE and then parse it as JSON. */
    ir.stream = want_stream ? 1 : 0;
 
-   aimee_ir_apply_request_stages(
-       &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
+   aimee_ir_apply_request_stages(&ir, ir_memory_enabled());
 
    int is_responses = driver_name && strcmp(driver_name, "chatgpt") == 0;
-   cJSON *prov = is_responses ? responses_backend_build(&ir) : openai_backend_build(&ir);
+   char *s =
+       aimee_backend_render_wire(&ir, is_responses ? AIMEE_WIRE_RESPONSES : AIMEE_WIRE_OPENAI_CHAT);
    aimee_request_free(&ir);
-   if (!prov)
+   if (!s)
    {
       aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, AIMEE_WIRE_ANTHROPIC);
       return NULL;
    }
-   filter_openai_chat_tools(prov, is_responses);
-   char *s = cJSON_PrintUnformatted(prov);
-   cJSON_Delete(prov);
    if (s)
       aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, AIMEE_WIRE_ANTHROPIC);
    return s;
-}
-
-static const char *jo_str(const cJSON *o, const char *k)
-{
-   const cJSON *it = cJSON_GetObjectItemCaseSensitive((cJSON *)o, k);
-   return (it && cJSON_IsString(it)) ? it->valuestring : NULL;
-}
-
-int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
-                               char **instructions_out, cJSON **messages_out, cJSON **tools_out,
-                               int *stream_out)
-{
-   if (model && model_n)
-      model[0] = '\0';
-   if (instructions_out)
-      *instructions_out = NULL;
-   if (messages_out)
-      *messages_out = NULL;
-   if (tools_out)
-      *tools_out = NULL;
-   if (stream_out)
-      *stream_out = 0;
-
-   cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
-   if (!req)
-      return -1;
-   aimee_request_t ir;
-   char err[128];
-   if (responses_frontend_parse(req, &ir, err, sizeof err) != 0)
-   {
-      cJSON_Delete(req);
-      aimee_ir_metric_inc(AIMEE_IR_M_PARSE_FAIL, AIMEE_WIRE_RESPONSES);
-      return -1;
-   }
-   cJSON_Delete(req);
-   if (model && model_n && ir.model)
-      snprintf(model, model_n, "%s", ir.model);
-   if (stream_out)
-      *stream_out = ir.stream;
-
-   /* This is an intermediate decode, not provider assembly. Both buffered and
-    * streaming Responses subsequently enter aimee_ir_build_from_chat, which
-    * applies request stages after routing. Applying them here too duplicates Go
-    * recall/guidance and makes the second recall query include the persona. */
-   /* build the chat shape, then split leading system messages -> instructions */
-   cJSON *chat = openai_backend_build(&ir);
-   aimee_request_free(&ir);
-   if (!chat)
-   {
-      aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, AIMEE_WIRE_RESPONSES);
-      return -1;
-   }
-   cJSON *msgs = cJSON_DetachItemFromObjectCaseSensitive(chat, "messages");
-   cJSON *tools = cJSON_DetachItemFromObjectCaseSensitive(chat, "tools");
-   cJSON_Delete(chat);
-
-   char *instr = NULL;
-   size_t ilen = 0;
-   cJSON *first;
-   while (msgs && (first = cJSON_GetArrayItem(msgs, 0)) != NULL)
-   {
-      const char *role = jo_str(first, "role");
-      if (!role || strcmp(role, "system") != 0)
-         break;
-      const char *c = jo_str(first, "content");
-      if (c && c[0])
-      {
-         size_t cl = strlen(c);
-         char *p = realloc(instr, ilen + cl + 3);
-         if (p)
-         {
-            instr = p;
-            if (ilen)
-            {
-               memcpy(instr + ilen, "\n\n", 2);
-               ilen += 2;
-            }
-            memcpy(instr + ilen, c, cl);
-            ilen += cl;
-            instr[ilen] = '\0';
-         }
-      }
-      cJSON_DeleteItemFromArray(msgs, 0);
-   }
-
-   if (instructions_out)
-      *instructions_out = instr;
-   else
-      free(instr);
-   if (messages_out)
-      *messages_out = msgs;
-   else
-      cJSON_Delete(msgs);
-   if (tools_out)
-      *tools_out = tools;
-   else
-      cJSON_Delete(tools);
-   aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, AIMEE_WIRE_RESPONSES);
-   return 0;
-}
-
-cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, const cJSON *tools,
-                                const char *system, const char *driver_name, int max_tokens,
-                                double temperature)
-{
-   /* assemble a chat request {model, messages: [system?] + messages, tools} */
-   cJSON *chat = cJSON_CreateObject();
-   if (agent_model)
-      cJSON_AddStringToObject(chat, "model", agent_model);
-   cJSON *msgs = cJSON_AddArrayToObject(chat, "messages");
-   if (system && system[0])
-   {
-      cJSON *sm = cJSON_CreateObject();
-      cJSON_AddStringToObject(sm, "role", "system");
-      cJSON_AddStringToObject(sm, "content", system);
-      cJSON_AddItemToArray(msgs, sm);
-   }
-   if (cJSON_IsArray(messages))
-   {
-      const cJSON *m = NULL;
-      cJSON_ArrayForEach(m, messages) cJSON_AddItemToArray(msgs, cJSON_Duplicate(m, 1));
-   }
-   if (cJSON_IsArray(tools))
-      cJSON_AddItemToObject(chat, "tools", cJSON_Duplicate((cJSON *)tools, 1));
-
-   /* Keep generation controls on the IR path. AIMEE_IR_PATH silently discarded
-    * the output cap, leaving local llama.cpp delegates at n_predict=-1 -- an
-    * unbounded generation where the caller had asked for a bounded one.
-    * Responses-backed provider CLIs keep their established no-cap request
-    * shape, because that wire rejects the chat-completions field. */
-   int is_responses_wire = driver_name && strcmp(driver_name, "chatgpt") == 0;
-   if (!is_responses_wire && max_tokens > 0)
-      cJSON_AddNumberToObject(chat, "max_tokens", max_tokens);
-   if (!is_responses_wire && temperature >= 0.0)
-      cJSON_AddNumberToObject(chat, "temperature", temperature);
-
-   aimee_request_t ir;
-   char err[128];
-   int rc = openai_frontend_parse(chat, &ir, err, sizeof err);
-   cJSON_Delete(chat);
-   if (rc != 0)
-   {
-      aimee_ir_metric_inc(AIMEE_IR_M_PARSE_FAIL, AIMEE_WIRE_OPENAI_CHAT);
-      return NULL;
-   }
-   if (agent_model && agent_model[0])
-   {
-      free(ir.model);
-      ir.model = strdup(agent_model);
-   }
-   aimee_ir_apply_request_stages(
-       &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
-
-   int is_anthropic_wire = driver_name && strcmp(driver_name, "anthropic") == 0;
-   cJSON *prov = is_responses_wire   ? responses_backend_build(&ir)
-                 : is_anthropic_wire ? anthropic_backend_build(&ir)
-                                     : openai_backend_build(&ir);
-   aimee_request_free(&ir);
-   if (!is_anthropic_wire)
-      filter_openai_chat_tools(prov, is_responses_wire);
-   if (!prov)
-      aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, AIMEE_WIRE_OPENAI_CHAT);
-   else
-      aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, AIMEE_WIRE_OPENAI_CHAT);
-   return prov;
-}
-
-static aimee_wire_t history_wire(const char *provider)
-{
-   if (provider && strcmp(provider, "anthropic") == 0)
-      return AIMEE_WIRE_ANTHROPIC;
-   if (provider && strcmp(provider, "chatgpt") == 0)
-      return AIMEE_WIRE_RESPONSES;
-   return AIMEE_WIRE_OPENAI_CHAT;
-}
-
-cJSON *aimee_ir_convert_history(const char *messages_json, const char *from_provider,
-                                const char *to_provider)
-{
-   cJSON *history = messages_json ? cJSON_Parse(messages_json) : NULL;
-   if (!cJSON_IsArray(history))
-   {
-      cJSON_Delete(history);
-      return NULL;
-   }
-   aimee_wire_t from = history_wire(from_provider);
-   aimee_wire_t to = history_wire(to_provider);
-   if (from == to)
-      return history;
-
-   /* Wrap the stored array as the request body its frontend parses. */
-   const char *in_key = from == AIMEE_WIRE_RESPONSES ? "input" : "messages";
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
-   {
-      cJSON_Delete(history);
-      return NULL;
-   }
-   cJSON_AddItemToObject(req, in_key, history);
-   aimee_request_t ir;
-   char err[128] = "";
-   int rc = from == AIMEE_WIRE_ANTHROPIC   ? anthropic_frontend_parse(req, &ir, err, sizeof err)
-            : from == AIMEE_WIRE_RESPONSES ? responses_frontend_parse(req, &ir, err, sizeof err)
-                                           : openai_frontend_parse(req, &ir, err, sizeof err);
-   cJSON_Delete(req);
-   if (rc != 0)
-   {
-      aimee_ir_metric_inc(AIMEE_IR_M_PARSE_FAIL, from);
-      return NULL;
-   }
-
-   cJSON *built = to == AIMEE_WIRE_ANTHROPIC   ? anthropic_backend_build(&ir)
-                  : to == AIMEE_WIRE_RESPONSES ? responses_backend_build(&ir)
-                                               : openai_backend_build(&ir);
-   aimee_request_free(&ir);
-   cJSON *out = built ? cJSON_DetachItemFromObjectCaseSensitive(
-                            built, to == AIMEE_WIRE_RESPONSES ? "input" : "messages")
-                      : NULL;
-   cJSON_Delete(built);
-   if (!cJSON_IsArray(out))
-   {
-      cJSON_Delete(out);
-      aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, to);
-      return NULL;
-   }
-   /* Chat Completions renders IR system blocks as leading system messages; the
-    * per-turn system prompt replaces them, so a converted history carries none. */
-   while (to == AIMEE_WIRE_OPENAI_CHAT && cJSON_GetArraySize(out) > 0)
-   {
-      const char *role = jo_str(cJSON_GetArrayItem(out, 0), "role");
-      if (!role || strcmp(role, "system") != 0)
-         break;
-      cJSON_DeleteItemFromArray(out, 0);
-   }
-   return out;
-}
-
-/* aimee_ir_resp_path_enabled -- Slice 3 gate (config-only: AIMEE_IR_RESP_PATH env,
- * DEFAULT-OFF). When on, the OPENAI-WIRE buffered response parse on the /v1/messages
- * ingress runs provider-JSON -> openai_backend_parse -> IR -> aimee_ir_response_to_parsed,
- * replacing driver->parse_response. Per-wire by ruling: anthropic + responses stay on
- * legacy until their response-shadow parity is proven live. Ships dark; flip after the
- * on-box emit diff confirms byte-identity. */
-int aimee_ir_resp_path_enabled(void)
-{
-   const char *v = getenv("AIMEE_IR_RESP_PATH");
-   return v && (strcmp(v, "1") == 0 || strcmp(v, "on") == 0 || strcmp(v, "true") == 0);
-}
-
-/* TRANSITIONAL (Slice 3, canonical-IR) -- bridge the IR response back to the legacy
- * parsed_response_t so the existing Anthropic emit + gateway policing keep working
- * while the response PARSE moves onto the IR. REMOVE once the emit + police paths are
- * IR-native (proposal: full IR render + IR-coupled police). DO NOT add new callers.
- * Fills every parsed_response_t field the ingress emit/police consume (audited): content,
- * calls[]/call_count, is_tool_call, prompt/completion/cache tokens, stop_reason, model.
- * `out` is zeroed here; caller frees via the usual agent_free_parsed_response. */
-void aimee_ir_response_to_parsed(const aimee_response_t *r, parsed_response_t *out)
-{
-   if (!out)
-      return;
-   memset(out, 0, sizeof(*out));
-   if (!r)
-      return;
-
-   out->prompt_tokens = (int)r->usage_in;
-   out->completion_tokens = (int)r->usage_out;
-   out->cache_read_tokens = (int)r->usage_cache_read;
-   out->cache_write_tokens = (int)r->usage_cache_write;
-   if (r->model)
-      snprintf(out->model, sizeof(out->model), "%s", r->model);
-   if (r->raw_stop_reason)
-      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", r->raw_stop_reason);
-   out->stop = r->stop_reason;
-
-   /* content = concatenation of all TEXT blocks (parsed_response_t convention: a
-    * single flat string; NULL when there is no text, e.g. a pure tool call). */
-   size_t cap = 1;
-   for (int i = 0; i < r->n_content; i++)
-      if (r->content[i].type == AIMEE_BLK_TEXT && r->content[i].text)
-         cap += strlen(r->content[i].text);
-   if (cap > 1)
-   {
-      out->content = malloc(cap);
-      if (out->content)
-      {
-         out->content[0] = '\0';
-         for (int i = 0; i < r->n_content; i++)
-            if (r->content[i].type == AIMEE_BLK_TEXT && r->content[i].text)
-               strncat(out->content, r->content[i].text, cap - strlen(out->content) - 1);
-      }
-   }
-
-   /* tool calls: id (opaque) / name / arguments (serialized tool_input JSON). */
-   int nc = 0;
-   for (int i = 0; i < r->n_content && nc < AGENT_MAX_TOOL_CALLS; i++)
-   {
-      const aimee_block_t *b = &r->content[i];
-      if (b->type != AIMEE_BLK_TOOL_USE)
-         continue;
-      parsed_tool_call_t *c = &out->calls[nc++];
-      if (b->tool_id)
-         snprintf(c->id, sizeof(c->id), "%s", b->tool_id);
-      if (b->tool_name)
-         snprintf(c->name, sizeof(c->name), "%s", b->tool_name);
-      /* Carried with the name: a namespaced call is only routable as the pair. */
-      if (b->tool_namespace)
-         snprintf(c->tool_namespace, sizeof(c->tool_namespace), "%s", b->tool_namespace);
-      c->arguments = b->tool_input ? cJSON_PrintUnformatted(b->tool_input) : NULL;
-      if (!c->arguments)
-         c->arguments = strdup("{}");
-   }
-   out->call_count = nc;
-   out->is_tool_call = (nc > 0);
 }

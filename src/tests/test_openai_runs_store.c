@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include "openai_runs_store.h"
+#include "vault_principal.h"
 
 /* ---- 1. create / status / get / duplicate ---- */
 static void test_create_status_get(void)
@@ -43,6 +44,28 @@ static void test_create_status_get(void)
    assert(openai_runs_store_get("nope", buf, sizeof(buf)) == 0);
    assert(buf[0] == '\0');
    printf("  create_status_get: ok\n");
+}
+
+static void test_owned_records(void)
+{
+   openai_runs_store_reset();
+   assert(!openai_runs_store_create_owned("owned", "{}", NULL));
+   assert(!openai_runs_store_create_owned("owned", "{}", ""));
+   assert(openai_runs_store_create_owned("owned", "{}", "webuser:owner"));
+   assert(openai_runs_store_access("owned", "webuser:owner") == 1);
+   assert(openai_runs_store_access("owned", "webuser:other") == 0);
+   assert(openai_runs_store_access("owned", NULL) == 0);
+   assert(openai_runs_store_access("missing", "webuser:owner") == -1);
+   char long_owner[VAULT_PRINCIPAL_MAX + 1];
+   memset(long_owner, 'a', sizeof long_owner);
+   long_owner[VAULT_PRINCIPAL_MAX - 1] = '\0';
+   assert(openai_runs_store_create_owned("long-owner", "{}", long_owner));
+   assert(openai_runs_store_access("long-owner", long_owner) == 1);
+   long_owner[VAULT_PRINCIPAL_MAX - 1] = 'a';
+   long_owner[VAULT_PRINCIPAL_MAX] = '\0';
+   assert(!openai_runs_store_create_owned("oversize-owner", "{}", long_owner));
+   openai_runs_store_finalize("owned", OPENAI_RUN_INCOMPLETE, "{\"status\":\"incomplete\"}");
+   assert(!openai_runs_store_request_cancel("owned"));
 }
 
 /* ---- 2. status transitions + snapshot update + terminal lockout ---- */
@@ -91,6 +114,8 @@ static void test_status_helpers(void)
    assert(openai_run_status_terminal(OPENAI_RUN_COMPLETED));
    assert(openai_run_status_terminal(OPENAI_RUN_CANCELLED));
    assert(openai_run_status_terminal(OPENAI_RUN_FAILED));
+   assert(openai_run_status_terminal(OPENAI_RUN_INCOMPLETE));
+   assert(!strcmp(openai_run_status_str(OPENAI_RUN_INCOMPLETE), "incomplete"));
    printf("  status_helpers: ok\n");
 }
 
@@ -108,6 +133,12 @@ static void test_missing_classification(void)
           OPENAI_RUNS_MISSING_INTERRUPTED);
    assert(openai_runs_store_classify_missing("run_unknown") == OPENAI_RUNS_MISSING_UNKNOWN);
    assert(openai_runs_store_classify_missing("oprun_malformed") == OPENAI_RUNS_MISSING_UNKNOWN);
+   snprintf(current, sizeof(current), "run_%s_1700000000_1", generation);
+   assert(openai_runs_store_classify_missing(current) == OPENAI_RUNS_MISSING_EVICTED);
+   assert(openai_runs_store_classify_missing("run_gprior_1700000000_1") ==
+          OPENAI_RUNS_MISSING_INTERRUPTED);
+   assert(openai_runs_store_classify_missing("run_1700000000_1") ==
+          OPENAI_RUNS_MISSING_INTERRUPTED);
    printf("  missing_classification: ok\n");
 }
 
@@ -210,6 +241,7 @@ int main(void)
 {
    printf("openai_runs_store:\n");
    test_create_status_get();
+   test_owned_records();
    test_transitions();
    test_status_helpers();
    test_missing_classification();

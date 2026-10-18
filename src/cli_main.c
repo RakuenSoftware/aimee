@@ -14,6 +14,7 @@
 #include "cli_css.h"
 #include "cli_mcp_serve.h"
 #include "cli_proxy.h"
+#include <aimee/translation/hook_ir.h>
 #include "aimee/protocols/acp/acp_server.h"
 #include "cli_profile.h"
 #include "client_constants.h"
@@ -50,7 +51,7 @@ static int client_hook_session_id_safe(const char *sid)
    return 1;
 }
 
-int client_hook_payload_session_id(const cJSON *hook_json, char *out, size_t out_len)
+static int client_hook_session_id(const char *payload_sid, char *out, size_t out_len)
 {
    if (!out || out_len == 0)
       return 0;
@@ -60,19 +61,27 @@ int client_hook_payload_session_id(const cJSON *hook_json, char *out, size_t out
     * its inherited id outranks a client-local thread id from the hook payload.
     * Without a launcher, the payload remains the authoritative fallback. */
    const char *sid = getenv("AIMEE_SESSION_ID");
-   const cJSON *jsid = hook_json ? cJSON_GetObjectItemCaseSensitive(hook_json, "session_id") : NULL;
-   if ((!sid || !sid[0]) && cJSON_IsString(jsid) && jsid->valuestring[0])
-      sid = jsid->valuestring;
+   if ((!sid || !sid[0]) && payload_sid && payload_sid[0])
+      sid = payload_sid;
 
    static const char *env_keys[] = {"CLAUDE_SESSION_ID", "CODEX_THREAD_ID", NULL};
    for (int i = 0; (!sid || !sid[0]) && env_keys[i]; i++)
       sid = getenv(env_keys[i]);
 
-   if (!client_hook_session_id_safe(sid))
+   if (!sid || !sid[0])
       return 0;
+   if (!client_hook_session_id_safe(sid) || strlen(sid) >= out_len)
+      return -1;
 
    snprintf(out, out_len, "%s", sid);
    return 1;
+}
+
+int client_hook_payload_session_id(const cJSON *hook_json, char *out, size_t out_len)
+{
+   return client_hook_session_id(
+              cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hook_json, "session_id")), out,
+              out_len) > 0;
 }
 
 /* Emit a structured "server unavailable" error with log path and remediation. */
@@ -705,20 +714,14 @@ static int arg_list_contains(int argc, char **argv, const char *flag)
 /* Read all of stdin into a buffer. Returns malloc'd string, caller frees. */
 char *read_stdin(void)
 {
-   size_t cap = 65536;
-   char *buf = malloc(cap);
-   if (!buf)
-      return NULL;
-   size_t len = 0;
-   while (len < cap - 1)
+   size_t length = 0;
+   char *frame = read_stream_limited(stdin, AIMEE_HOOK_FRAME_MAX, &length);
+   if (frame && memchr(frame, 0, length))
    {
-      int n = (int)read(fileno(stdin), buf + len, (unsigned int)(cap - 1 - len));
-      if (n <= 0)
-         break;
-      len += (size_t)n;
+      free(frame);
+      return NULL;
    }
-   buf[len] = '\0';
-   return buf;
+   return frame;
 }
 
 /* Unified help for the `ensemble` umbrella verb (a panel of agents). aggregate
@@ -1025,43 +1028,43 @@ static int handle_hooks(int argc, char **argv, int json_output)
    char method[32];
    snprintf(method, sizeof(method), "hooks.%s", phase);
 
-   char *stdin_data = read_stdin();
-
-   /* Parse tool_name and tool_input from stdin */
-   cJSON *json = stdin_data ? cJSON_Parse(stdin_data) : NULL;
-   const char *tool_name = "";
-   const char *tool_input = "{}";
-   char *tool_input_heap = NULL;
-   if (json)
+   if (strcmp(phase, "pre") && strcmp(phase, "post"))
    {
-      cJSON *tn = cJSON_GetObjectItemCaseSensitive(json, "tool_name");
-      if (cJSON_IsString(tn))
-         tool_name = tn->valuestring;
-      cJSON *ti = cJSON_GetObjectItemCaseSensitive(json, "tool_input");
-      if (cJSON_IsString(ti))
-         tool_input = ti->valuestring;
-      else if (cJSON_IsObject(ti) || cJSON_IsArray(ti))
-      {
-         tool_input_heap = cJSON_PrintUnformatted(ti);
-         if (tool_input_heap)
-            tool_input = tool_input_heap;
-      }
+      fprintf(stderr, "hooks requires 'pre' or 'post'\n");
+      return 2;
    }
+   size_t frame_length = 0;
+   char *stdin_data = read_stream_limited(stdin, AIMEE_HOOK_FRAME_MAX, &frame_length);
+   aimee_hook_ir_t hook = {0};
+   if (!stdin_data || aimee_hook_ir_parse(stdin_data, frame_length, &hook))
+   {
+      free(stdin_data);
+      fprintf(stderr, "aimee: malformed or oversized native hook payload; tool call blocked\n");
+      return 2;
+   }
+   if (hook.call.tool_namespace && hook.call.tool_namespace[0])
+   {
+      fprintf(stderr, "aimee: namespaced hook has no registered policy owner; tool call blocked\n");
+      aimee_hook_ir_free(&hook);
+      free(stdin_data);
+      return 2;
+   }
+   const char *tool_name = hook.call.tool_name;
 
    char hook_sid[64] = "";
-   const char *sid =
-       client_hook_payload_session_id(json, hook_sid, sizeof(hook_sid)) ? hook_sid : NULL;
+   int sid_status = client_hook_session_id(hook.session_id, hook_sid, sizeof hook_sid);
+   const char *sid = sid_status > 0 ? hook_sid : NULL;
+   if (sid_status < 0)
+   {
+      fprintf(stderr, "aimee: invalid native hook scope; tool call blocked\n");
+      aimee_hook_ir_free(&hook);
+      free(stdin_data);
+      return 2;
+   }
    /* Worktree routing must happen on the client: a remote Aimee server cannot
     * see or create a worktree in this machine's repository. */
-   const char *hook_cwd = NULL;
-   cJSON *hook_input = NULL;
-   if (json)
-   {
-      cJSON *cj = cJSON_GetObjectItemCaseSensitive(json, "cwd");
-      if (cJSON_IsString(cj))
-         hook_cwd = cj->valuestring;
-      hook_input = cJSON_GetObjectItemCaseSensitive(json, "tool_input");
-   }
+   const char *hook_cwd = hook.cwd;
+   cJSON *hook_input = hook.call.tool_input;
    char route_cwd[MAX_PATH_LEN];
    if (!hook_cwd || !hook_cwd[0])
    {
@@ -1074,12 +1077,11 @@ static int handle_hooks(int argc, char **argv, int json_output)
    if (client_config_workspace_contains(hook_cwd) == 0)
    {
       free(stdin_data);
-      cJSON_Delete(json);
-      free(tool_input_heap);
+      aimee_hook_ir_free(&hook);
       return 0;
    }
    const char *discovery_command = NULL;
-   cJSON *discovery_input = cJSON_Parse(tool_input);
+   const cJSON *discovery_input = hook.call.tool_input;
    if (cJSON_IsObject(discovery_input))
       discovery_command =
           cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(discovery_input, "command"));
@@ -1091,7 +1093,6 @@ static int handle_hooks(int argc, char **argv, int json_output)
                             ? attn_discovery_gate(tool_name, discovery_command, sid,
                                                   discovery_reason, sizeof(discovery_reason))
                             : 0;
-   cJSON_Delete(discovery_input);
    if (discovery_deny)
    {
       if (cli_hook_client_uses_pretool_json())
@@ -1102,8 +1103,7 @@ static int handle_hooks(int argc, char **argv, int json_output)
       else
          fprintf(stderr, "aimee: %s\n", discovery_reason);
       free(stdin_data);
-      cJSON_Delete(json);
-      free(tool_input_heap);
+      aimee_hook_ir_free(&hook);
       return discovery_deny;
    }
 
@@ -1119,21 +1119,8 @@ static int handle_hooks(int argc, char **argv, int json_output)
          else
             fprintf(stderr, "aimee: %s\n", reason);
          free(stdin_data);
-         cJSON_Delete(json);
-         free(tool_input_heap);
+         aimee_hook_ir_free(&hook);
          return cli_hook_client_uses_pretool_json() ? 0 : 2;
-      }
-      if (local_updated)
-      {
-         free(tool_input_heap);
-         tool_input_heap = cJSON_PrintUnformatted(local_updated);
-         if (tool_input_heap)
-            tool_input = tool_input_heap;
-         else
-         {
-            cJSON_Delete(local_updated);
-            local_updated = NULL;
-         }
       }
    }
 
@@ -1154,33 +1141,33 @@ static int handle_hooks(int argc, char **argv, int json_output)
       if (deny < 0 && local_updated && cli_hook_client_supports_updated_input())
          emit_pretool_updated_json(local_updated);
       free(stdin_data);
-      cJSON_Delete(json);
+      aimee_hook_ir_free(&hook);
       cJSON_Delete(local_updated);
-      free(tool_input_heap);
       return deny < 0 ? 0 : deny;
    }
 
    char cwd[4096];
-   if (!getcwd(cwd, sizeof(cwd)))
-      cwd[0] = '\0';
-   if (json)
-   {
-      static const char *cwd_keys[] = {"cwd", "workdir", "working_dir", "working_directory", NULL};
-      for (int i = 0; cwd_keys[i]; i++)
-      {
-         cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(json, cwd_keys[i]);
-         if (cJSON_IsString(jcwd) && jcwd->valuestring[0])
-         {
-            snprintf(cwd, sizeof(cwd), "%s", jcwd->valuestring);
-            break;
-         }
-      }
-   }
+   if (!getcwd(cwd, sizeof cwd))
+      cwd[0] = 0;
+   if (hook.cwd && hook.cwd[0])
+      snprintf(cwd, sizeof cwd, "%s", hook.cwd);
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddStringToObject(req, "tool_name", tool_name);
-   cJSON_AddStringToObject(req, "tool_input", tool_input);
+   aimee_hook_ir_t intent = hook;
+   if (local_updated)
+      intent.call.tool_input = local_updated;
+   cJSON *canonical_hook = aimee_hook_ir_json(&intent);
+   if (!canonical_hook || !cJSON_AddNumberToObject(req, "ir_version", 1) ||
+       !cJSON_AddItemToObject(req, "hook", canonical_hook))
+   {
+      cJSON_Delete(canonical_hook);
+      cJSON_Delete(req);
+      aimee_hook_ir_free(&hook);
+      cJSON_Delete(local_updated);
+      free(stdin_data);
+      return 2;
+   }
    cJSON_AddStringToObject(req, "cwd", cwd);
    if (strcmp(phase, "pre") == 0 &&
        attn_tool_in_non_git_workspace(hook_cwd, tool_name,
@@ -1261,9 +1248,8 @@ static int handle_hooks(int argc, char **argv, int json_output)
       int deny = client_failopen_subagent_deny(phase, tool_name);
       if (deny >= 0)
       {
-         cJSON_Delete(json);
+         aimee_hook_ir_free(&hook);
          cJSON_Delete(local_updated);
-         free(tool_input_heap);
          return deny;
       }
       fprintf(stderr, "aimee: hooks %s: no response from server — tool call allowed\n", phase);
@@ -1287,13 +1273,12 @@ static int handle_hooks(int argc, char **argv, int json_output)
          {
             emit_pretool_rewrite_unsupported_json(exit_code, msg_str);
             cJSON_Delete(resp);
-            cJSON_Delete(json);
+            aimee_hook_ir_free(&hook);
             cJSON_Delete(local_updated);
-            free(tool_input_heap);
             return 0;
          }
 
-         cJSON *orig = cJSON_Parse(tool_input);
+         cJSON *orig = cJSON_Duplicate(local_updated ? local_updated : hook_input, 1);
          if (orig)
          {
             if (exit_code == 1)
@@ -1324,9 +1309,8 @@ static int handle_hooks(int argc, char **argv, int json_output)
             }
             cJSON_Delete(out);
             cJSON_Delete(resp);
-            cJSON_Delete(json);
+            aimee_hook_ir_free(&hook);
             cJSON_Delete(local_updated);
-            free(tool_input_heap);
             return 0;
          }
       }
@@ -1336,9 +1320,8 @@ static int handle_hooks(int argc, char **argv, int json_output)
       {
          emit_pretool_deny_json(msg_str);
          cJSON_Delete(resp);
-         cJSON_Delete(json);
+         aimee_hook_ir_free(&hook);
          cJSON_Delete(local_updated);
-         free(tool_input_heap);
          return 0;
       }
 
@@ -1366,9 +1349,8 @@ static int handle_hooks(int argc, char **argv, int json_output)
    if (exit_code == 0 && local_updated && cli_hook_client_supports_updated_input())
       emit_pretool_updated_json(local_updated);
 
-   cJSON_Delete(json);
+   aimee_hook_ir_free(&hook);
    cJSON_Delete(local_updated);
-   free(tool_input_heap);
    return exit_code;
 }
 

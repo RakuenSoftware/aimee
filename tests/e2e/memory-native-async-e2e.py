@@ -45,6 +45,7 @@ def inside(output):
     prefix = 'native-memory-' + uuid.uuid4().hex[:10]
     content = 'Complete native Go memory fixture 界🦊; preserve LIMIT_7 and identifier ' + prefix
     owner_pid, memory_id = None, None
+    refresh_stop_ordinal = None
     refresh_id = None
     shared_change_id = None
     has_shared = False
@@ -110,7 +111,7 @@ def inside(output):
             pass
 
         def do_POST(self):
-            nonlocal refresh_id, shared_change_id
+            nonlocal refresh_id, shared_change_id, refresh_stop_ordinal
             raw = self.rfile.read(int(self.headers.get('Content-Length', '0')))
             body = json.loads(raw)
             # Independent read-only connection sees committed intent before the
@@ -163,6 +164,7 @@ def inside(output):
                             if admission is not None:
                                 expected_unresolved.add(admission['attempt_id'])
                             os.kill(owner_pid, signal.SIGSTOP)
+                            refresh_stop_ordinal = ordinal
                     except Exception as exc:
                         provider_errors.append(type(exc).__name__ + ': ' + str(exc))
             if scenario == 'correction-before-retry' and ordinal == 1:
@@ -243,7 +245,9 @@ def inside(output):
         check('shared projection settled before '+name, False)
 
     def run(name, limits=None, mode='single', input_text=None):
-        nonlocal scenario, scenario_start
+        nonlocal scenario, scenario_start, refresh_stop_ordinal
+        if mode == 'refresh-outage':
+            refresh_stop_ordinal = None
         if name != 'paused Go memory owner':
             settle_shared_projection(name)
         started, before = time.monotonic(), len(captures)
@@ -480,7 +484,8 @@ def inside(output):
         try:
             before = len(captures)
             result, events = run('native refresh owner outage', mode='refresh-outage')
-            check('native refresh intervention succeeds', not provider_errors)
+            check('native refresh intervention succeeds after five provider requests',
+                  not provider_errors and refresh_stop_ordinal == 5)
             check('native refresh reports memory owner refusal', result.get('status') == 'failed' and
                   any('unavailable' in text for text in strings(events)))
             check('native refresh refusal prevents a sixth provider request', len(captures) == before + 5)
@@ -605,7 +610,8 @@ def inside(output):
                 exploration_session=exploration_session,
                 source_contracts=[entry['binding'].get('sources', []) for entry, _ in receipt_captures if entry is not None],
                 receipt_attempts=[entry['attempt_id'] for entry, _ in receipt_captures if entry is not None],
-                unresolved_attempts=sorted(expected_unresolved)), indent=2) + '\n')
+                unresolved_attempts=sorted(expected_unresolved),
+                refresh_stop_ordinal=refresh_stop_ordinal), indent=2) + '\n')
     return 0
 
 

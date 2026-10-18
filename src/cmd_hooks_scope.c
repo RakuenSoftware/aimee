@@ -19,27 +19,33 @@ static int hook_session_id_safe(const char *sid)
    return 1;
 }
 
-int hook_payload_session_id(const cJSON *hook_json, char *out, size_t out_len)
+int hook_session_id(const char *payload_sid, char *out, size_t out_len)
 {
    if (!out || out_len == 0)
       return 0;
    out[0] = '\0';
 
-   const char *sid = NULL;
-   const cJSON *jsid = hook_json ? cJSON_GetObjectItemCaseSensitive(hook_json, "session_id") : NULL;
-   if (cJSON_IsString(jsid) && jsid->valuestring[0])
-      sid = jsid->valuestring;
+   const char *sid = payload_sid;
 
    static const char *env_keys[] = {"AIMEE_SESSION_ID", "CLAUDE_SESSION_ID", "CODEX_THREAD_ID",
                                     NULL};
    for (int i = 0; (!sid || !sid[0]) && env_keys[i]; i++)
       sid = getenv(env_keys[i]);
 
-   if (!hook_session_id_safe(sid))
+   if (!sid || !sid[0])
       return 0;
+   if (!hook_session_id_safe(sid) || strlen(sid) >= out_len)
+      return -1;
 
    snprintf(out, out_len, "%s", sid);
    return 1;
+}
+
+int hook_payload_session_id(const cJSON *hook_json, char *out, size_t out_len)
+{
+   return hook_session_id(
+              cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hook_json, "session_id")), out,
+              out_len) > 0;
 }
 
 static int hook_payload_copy_cwd_from_object(const cJSON *obj, char *out, size_t out_len)
@@ -53,6 +59,8 @@ static int hook_payload_copy_cwd_from_object(const cJSON *obj, char *out, size_t
       cJSON *jcwd = cJSON_GetObjectItemCaseSensitive((cJSON *)obj, cwd_keys[i]);
       if (cJSON_IsString(jcwd) && jcwd->valuestring[0])
       {
+         if (strlen(jcwd->valuestring) >= out_len)
+            return 0;
          snprintf(out, out_len, "%s", jcwd->valuestring);
          return 1;
       }

@@ -248,8 +248,7 @@
     "server-go/modules/memory/discord_alias_facts.go",
     "server-go/modules/memory/height_facts.go",
     "server-go/modules/memory/lifting_facts.go",
-    "server-go/modules/memory/spatial_facts.go",
-    "server-go/modules/memory/tools/transfer/main.go"
+    "server-go/modules/memory/spatial_facts.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",

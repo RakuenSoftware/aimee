@@ -51,30 +51,16 @@ func wireContainer() *JSONValue {
 	msgs.Append(mkUser("do the task"))
 	for k := 0; k < 6; k++ {
 		id := fmt.Sprintf("call_%02d", k)
-		a := NewObject()
-		a.Set("role", NewString("assistant"))
-		tcs := NewArray()
-		tc := NewObject()
-		tc.Set("id", NewString(id))
-		tc.Set("type", NewString("function"))
-		fn := NewObject()
-		fn.Set("name", NewString("read_file"))
-		fn.Set("arguments", NewString("{}"))
-		tc.Set("function", fn)
-		tcs.Append(tc)
-		a.Set("tool_calls", tcs)
-		msgs.Append(a)
+		msgs.Append(mkCall(id, "read_file", NewObject()))
 
 		var body strings.Builder
 		for body.Len() < 800 {
 			body.WriteString("filler output bytes here and on; ")
 		}
 		fmt.Fprintf(&body, "tail at /work/src/stage_%d.c done", k)
-		tr := NewObject()
-		tr.Set("role", NewString("tool"))
-		tr.Set("tool_call_id", NewString(id))
-		tr.Set("content", NewString(body.String()))
-		msgs.Append(tr)
+		result := mkToolResult(id, body.String())
+		result.Set("role", NewString("tool"))
+		msgs.Append(result)
 	}
 	c.Set("messages", msgs)
 	return c

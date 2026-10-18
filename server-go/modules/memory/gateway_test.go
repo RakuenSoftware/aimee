@@ -12,8 +12,8 @@ import (
 
 func TestGatewayPlanSessionAndTools(t *testing.T) {
 	h := NewHandler(nil)
-	for _, roles := range [][]string{{}, {"system", "user", "user"}, {"user", "assistant", "user"}, {"assistant"}, {"Assistant", ""}} {
-		args, _ := json.Marshal(map[string]any{"operation": "gateway-plan", "roles": roles, "tools": []string{"exec_command", "apply_patch", "local_shell", "shell", "bash", "run_command", "container.exec", "mcp__aimee__find_symbol", "Exec_command", "exec_command"}})
+	for _, roles := range [][]string{{}, {"system", "user", "user"}, {"user", "assistant", "user"}, {"assistant"}} {
+		args, _ := json.Marshal(map[string]any{"operation": "gateway-plan", "request": gatewayPolicyFixture(roles, []string{"exec_command", "apply_patch", "local_shell", "shell", "bash", "run_command", "container.exec", "mcp__aimee__find_symbol", "Exec_command", "exec_command"}, "")})
 		r := runHostRuntime(t, h, string(args))
 		wantStart := true
 		for _, role := range roles {
@@ -23,9 +23,9 @@ func TestGatewayPlanSessionAndTools(t *testing.T) {
 		}
 		wantRemove := []any{}
 		if wantStart {
-			wantRemove = []any{float64(9), float64(6), float64(5), float64(4), float64(3), float64(2), float64(0)}
+			wantRemove = []any{[]any{float64(9)}, []any{float64(6)}, []any{float64(5)}, []any{float64(4)}, []any{float64(3)}, []any{float64(2)}, []any{float64(0)}}
 		}
-		if r["append_guidance"] != wantStart || !reflect.DeepEqual(r["remove_tools"], wantRemove) {
+		if r["append_guidance"] != wantStart || !reflect.DeepEqual(r["remove_tool_paths"], wantRemove) {
 			t.Fatal(roles, r)
 		}
 	}

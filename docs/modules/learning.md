@@ -24,6 +24,14 @@ aborts before signal persistence when the process is absent or its response is
 invalid. Proposal persistence, evidence assembly, and the broader learning
 engine are still C migration work.
 
+The host-only canonical execution stage uses event `6147`, stage `3`. Browser and private execution
+capture owners invoke it after persisting a typed terminal event. Go Learning validates the host
+context, terminal status and exact source reference, and returns an explicitly `ungraded` observation.
+The host writes that projection to the existing server-local interaction ledger as `task_outcome`.
+This path requires no KB connection. Its source is the canonical session log; a missing observer or
+failed projection write leaves that source intact and logs incomplete capture. It does not create an
+independently verified grade or replace receipt-bound procedure application policy.
+
 The descriptor declares the module-owned C implementation and parity adapter, the Go process handler
 and tests, its headers, direct C tests, and this document; it sets `ownership_complete: true`.
 `learning.h` and `module_api.h` are canonical public headers under
