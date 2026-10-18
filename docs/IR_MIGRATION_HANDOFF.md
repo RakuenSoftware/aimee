@@ -4,6 +4,12 @@ Prepared 17 October 2026, approximately 23:30 Europe/Amsterdam. The user request
 
 ## Current continuation status: 18 October 2026
 
+The user subsequently authorized a personally authenticated replacement PR if needed to resolve the
+opening-app attribution, and requires the attribution gate permanently. This supersedes the earlier
+one-PR-only restriction below. Carry forward only #3036's work, verify the replacement's strict
+attribution check before closing #3036, and preserve links and review history. The replacement has
+not yet been opened at this local checkpoint.
+
 - All publication remains on #3036 and fix/browser-ir-runtime. Latest published checkpoint is a3d470b98; later entries below distinguish local work from published qualification. The original 17 October checkpoint and backlog below are historical and are superseded where dated continuation entries report completed work.
 - Canonical primary loading/model switching, durable-log history, standard browser controls, native hook admission, compaction and several credential/consumer cutovers are implemented. The whole migration remains unfinished, especially credential-free native execution, scoped native tools and account-bound replay/cache proof.
 - The user explicitly confirmed that production .100 should NOT use a KB instance right now. Unset KB mode/endpoint are intentional. Do not configure/connect a KB or enable a dependency on one to fix learning. Repair and qualify server-local learning, failed approaches and authenticated task-outcome capture through their existing owners.
@@ -766,3 +772,25 @@ Repository-wide native CMake configuration succeeds, and both canonical browser/
 
 
 Fresh CI on a3d470b98 passes the standalone Learning live assertion against four canonical source rows, plus lint, Go/frontend and ordinary native unit jobs. Full integration still fails: after the corrected registered cwd, its repository-backed format delegate requires a dedicated worktree, and the disposable bare remote cannot satisfy the production remote-default fetch policy without the Git owner. The fixture server now explicitly selects the supported current worktree base for this deliberately offline disposable checkout; production policy is unchanged. Workspace/owner/worktree setup now runs even without Docker and must reach the mandatory sandbox refusal before the completion/readback journey may be reported skipped. Fresh local integration ir_integration_learning_worktree_3036 passes 155/155 with 26 explicit service-dependent skips. Its actual delegate job creates a dedicated worktree and reaches the mandatory Docker refusal without a provider call. This qualifies local setup, not real Docker completion/readback, which is still not established. All 76 lint checks passed before the final fixture update; Python compilation, shell syntax, docs checks and the complete integration run pass for that update.
+
+
+### 2026-10-18: CI workflow identity and supervisor fixture correction
+
+The user requested a meaningful name for c-repository-pins. Its new displayed workflow name is
+Module exports and runtime validation, with the job Export builds and runtime checks. Its main-only
+application snapshot/pin gate remains main-only; testing still exercises the exported builds and
+module runtime. The failing pins step in 78222d62e was test_module_supervisor.sh after the memory
+module restarted, not the published-pin gate.
+
+The fixture's visible count file could be truncated while its set-e reader polled, causing an immediate
+EOF exit with no diagnostic. The helper now atomically publishes complete PID/count files, preserving
+PID-before-count ordering. Polling treats an incomplete read as not ready within the same bounded
+restart timeout. Cleanup waits for the supervisor and socket process before removing their files.
+A forced short-read experiment reproduces exit 1 with the previous polling expression and passes
+with the corrected expression; five actual restart/shutdown runs and Go supervisor race tests pass.
+The seven application-lock regressions, export lock-preservation regression and workflow-pin check
+also pass. This does not weaken restart or child-shutdown assertions.
+
+An Aimee-authenticated edit of #3036 succeeded, but its newly triggered attribution job still failed on
+the recorded connector app. The user's authorized replacement procedure above is being prepared.
+The overall migration and production learning repair remain unfinished.
