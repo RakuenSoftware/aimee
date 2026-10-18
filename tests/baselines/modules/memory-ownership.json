@@ -2594,12 +2594,12 @@
         "kb_module_memory_erase_subject",
         "kb_module_memory_reset_derived"
       ],
-      "sha256": "e433e68f0bc3e9e34c4708e41a1d3caf4495219eed7b0d6cf980189556b3dbdb",
+      "sha256": "2b2d9f18cd6579ac80ca71fcdee280b8d657f2952d70c65d6bd9cecf4c7a87ff",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Oct 18: extracted only shared HTTP query/response helpers; owner erasure/reset forwarding functions are byte-identical."
     },
     "src/modules/vault/vault_env_bootstrap.c": {
       "disposition": "credential-custody",

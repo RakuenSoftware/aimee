@@ -498,4 +498,14 @@ add_test(NAME test_conversation_context COMMAND test_conversation_context)
 set_tests_properties(test_conversation_context PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Tenant entry is stubbed to exercise every HTTP failure mapping without a DB.
+add_executable(test_kb_http_common test_kb_http_common.c
+  ../kb/http/kb_http_common.c ../vendor/cJSON.c)
+target_include_directories(test_kb_http_common PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..
+  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+aimee_enable_test_asserts(test_kb_http_common)
+add_test(NAME test_kb_http_common COMMAND test_kb_http_common)
+
 aimee_add_test(test_core_base64 test_core_base64.c)

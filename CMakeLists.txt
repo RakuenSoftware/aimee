@@ -1036,6 +1036,7 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/http/kb_http_entry.c
     # kb_http.c reads request bodies through these scanners; both build systems
     # must compile them or the kb target links an undefined symbol.
+    ${AIMEE_SRC_DIR}/kb/http/kb_http_common.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_json.c
     ${AIMEE_SRC_DIR}/kb/http/kb_ingress.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_team.c
