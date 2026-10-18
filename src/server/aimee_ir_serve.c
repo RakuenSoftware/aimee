@@ -316,8 +316,7 @@ char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
     * buffered-replay path ask for SSE and then parse it as JSON. */
    ir.stream = want_stream ? 1 : 0;
 
-   aimee_ir_apply_request_stages(
-       &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
+   aimee_ir_apply_request_stages(&ir, ir_memory_enabled());
 
    int is_responses = driver_name && strcmp(driver_name, "chatgpt") == 0;
    char *s =
@@ -354,18 +353,14 @@ int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
    if (stream_out)
       *stream_out = 0;
 
-   cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
-   if (!req)
-      return -1;
-   aimee_request_t ir;
+   aimee_request_t ir = {0};
    char err[128];
-   if (responses_frontend_parse(req, &ir, err, sizeof err) != 0)
+   if (aimee_frontend_parse_wire(body, body ? strlen(body) : 0, AIMEE_WIRE_RESPONSES, &ir, err,
+                                 sizeof err) != 0)
    {
-      cJSON_Delete(req);
       aimee_ir_metric_inc(AIMEE_IR_M_PARSE_FAIL, AIMEE_WIRE_RESPONSES);
       return -1;
    }
-   cJSON_Delete(req);
    if (model && model_n && ir.model)
       snprintf(model, model_n, "%s", ir.model);
    if (stream_out)
@@ -432,9 +427,10 @@ int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
    return 0;
 }
 
-cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, const cJSON *tools,
-                                const char *system, const char *driver_name, int max_tokens,
-                                double temperature)
+cJSON *aimee_ir_build_from_chat_mode(const char *agent_model, const cJSON *messages,
+                                     const cJSON *tools, const char *system,
+                                     const char *driver_name, int max_tokens, double temperature,
+                                     int apply_stages)
 {
    /* assemble a chat request {model, messages: [system?] + messages, tools} */
    cJSON *chat = cJSON_CreateObject();
@@ -471,8 +467,9 @@ cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, 
    char err[128];
    int rc = openai_frontend_parse(chat, &ir, err, sizeof err);
    cJSON_Delete(chat);
-   if (rc != 0)
+   if (rc != 0 || aimee_ir_request_admit(&ir))
    {
+      aimee_request_free(&ir);
       aimee_ir_metric_inc(AIMEE_IR_M_PARSE_FAIL, AIMEE_WIRE_OPENAI_CHAT);
       return NULL;
    }
@@ -481,8 +478,13 @@ cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, 
       free(ir.model);
       ir.model = strdup(agent_model);
    }
-   aimee_ir_apply_request_stages(
-       &ir, ir_memory_enabled()); /* the single protocol-neutral module stage (memory ported) */
+   if (apply_stages)
+      aimee_ir_apply_request_stages(&ir, ir_memory_enabled());
+   if (aimee_ir_request_admit(&ir))
+   {
+      aimee_request_free(&ir);
+      return NULL;
+   }
 
    int is_anthropic_wire = driver_name && strcmp(driver_name, "anthropic") == 0;
    cJSON *prov = is_responses_wire   ? responses_backend_build(&ir)
@@ -496,4 +498,12 @@ cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, 
    else
       aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, AIMEE_WIRE_OPENAI_CHAT);
    return prov;
+}
+
+cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, const cJSON *tools,
+                                const char *system, const char *driver_name, int max_tokens,
+                                double temperature)
+{
+   return aimee_ir_build_from_chat_mode(agent_model, messages, tools, system, driver_name,
+                                        max_tokens, temperature, 1);
 }

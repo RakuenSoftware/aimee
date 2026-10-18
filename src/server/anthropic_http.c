@@ -822,9 +822,10 @@ typedef struct
    char *message_id;
 } native_ir_stream_ctx_t;
 
-static int messages_publish_delta(const aimee_delta_t *delta)
+static int messages_publish_delta(const char *message_id, const aimee_delta_t *delta)
 {
    aimee_session_event_t event = {.kind = AIMEE_SESSION_DELTA, .role = "assistant", .delta = delta};
+   event.message_id = message_id && message_id[0] ? message_id : "native";
    return aimee_ir_session_emit(&event);
 }
 
@@ -848,7 +849,7 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
             }
             if (n)
             {
-               if (messages_publish_delta(&terminal))
+               if (messages_publish_delta(c->msg_id, &terminal))
                {
                   c->ir_failed = 1;
                   return -1;
@@ -880,7 +881,7 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
             }
             for (int i = 0; i < n; i++)
             {
-               if (messages_publish_delta(&deltas[i]))
+               if (messages_publish_delta(c->msg_id, &deltas[i]))
                {
                   c->ir_failed = 1;
                   cJSON_Delete(chunk);
@@ -961,11 +962,11 @@ static int native_ir_flush(native_ir_stream_ctx_t *c)
    {
       const cJSON *message = cJSON_GetObjectItemCaseSensitive(payload, "message");
       const char *id = jo_cstr(message, "id");
-      c->message_id = strdup(id);
+      c->message_id = strdup(id[0] ? id : "native");
       if (!c->message_id)
          n = -1;
    }
-   if (n > 0 && messages_publish_delta(&delta))
+   if (n > 0 && messages_publish_delta(c->message_id, &delta))
       n = -1;
    if (n > 0)
    {
@@ -1101,7 +1102,7 @@ static int messages_stream_native_ir(const char *url, const char *auth, const vo
              .error_message =
                  "Provider stream failed canonical admission or ended before completion"};
          if (!aimee_ir_session_capture_failed())
-            messages_publish_delta(&error);
+            messages_publish_delta(stream.message_id, &error);
          anthropic_delta_emit(&error, &stream.frontend, stream.message_id, model, emit, ctx);
       }
       status = -1;
@@ -1160,7 +1161,7 @@ static int messages_stream_ir_relay(const char *url, const char *auth, const voi
           pc.ir_failed || ir_status != 200 ? -1 : openai_stream_finish(&pc.ir_ost, &terminal, 1);
       if (n > 0)
       {
-         if (messages_publish_delta(&terminal))
+         if (messages_publish_delta(msg_id, &terminal))
          {
             terminal = (aimee_delta_t){.type = AIMEE_DELTA_ERROR,
                                        .error_message = "Canonical stream persistence failed"};

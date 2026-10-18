@@ -863,13 +863,8 @@ static int responses_handler(const char *body, char *resp, int cap)
    cJSON *messages = NULL, *tools = NULL;
    int parsed_stream = 0;
    int parsed_ok =
-       aimee_ir_path_enabled() &&
        aimee_ir_responses_to_chat(body, parsed_model, sizeof(parsed_model), &instructions,
                                   &messages, &tools, &parsed_stream) == 0;
-   if (!parsed_ok)
-      parsed_ok =
-          openai_parse_responses_to_chat(body, parsed_model, sizeof(parsed_model), &instructions,
-                                         &messages, &tools, &parsed_stream) == 0;
    if (!parsed_ok)
    {
       free(prompt);
@@ -1253,20 +1248,13 @@ static int gw_stage_openai_tool_policing(gw_request_t *r, void *ud)
  * execute tool calls — out->calls[] surfaces them so the handler can relay them
  * to Codex. Returns 0 on success, -1 on transport/parse failure. *out is zeroed
  * here; the caller frees it with agent_free_parsed_response(). */
-/* Build the provider request body from the effective messages/tools/system (IR path
- * when enabled, else the legacy driver builder). Re-callable so the gateway-mutation
- * 4xx restore path can rebuild the body from the restored (pristine) messages.
- * Returns a malloc'd JSON string (caller frees) or NULL. */
+/* Admission is mandatory even when the caller disables host message edits. */
 static char *openai_build_body(const agent_t *agent, const delegate_driver_t *driver,
                                cJSON *eff_messages, cJSON *eff_tools, const char *eff_system,
                                int tok, double temperature, int preserve_messages)
 {
-   cJSON *req = NULL;
-   if (!preserve_messages && aimee_ir_path_enabled())
-      req = aimee_ir_build_from_chat(agent->model, eff_messages, eff_tools, eff_system,
-                                     driver->name, tok, temperature);
-   if (!req)
-      req = driver->build_request(agent, eff_messages, eff_tools, eff_system, tok, temperature);
+   cJSON *req = aimee_ir_build_from_chat_mode(agent->model, eff_messages, eff_tools, eff_system,
+                                              driver->name, tok, temperature, !preserve_messages);
    if (!req)
       return NULL;
    char *body = cJSON_PrintUnformatted(req);
@@ -1331,7 +1319,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
     * because on three of these paths nothing upstream was ever contacted. */
    delegate_drivers_init();
    const delegate_driver_t *driver = delegate_driver_get(agent->provider);
-   if (!driver || !driver->build_request || !driver->parse_response)
+   if (!driver || !driver->parse_response)
    {
       LOG_WARN("openai.responses", "no usable driver for provider=%s (agent=%s)",
                agent->provider ? agent->provider : "?", agent->name ? agent->name : "?");
@@ -1571,23 +1559,15 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    responses_mint_id(created, id, sizeof(id));
    char frame[2048];
 
-   /* Route the Responses CLIENT parse through the IR (no direct Responses->chat
-    * translation) when the flag is on; fall back to the legacy translator on any
-    * failure or when off. Both feed the same downstream agent path. */
-   int rp_ok = 0;
-   if (aimee_ir_path_enabled())
-      rp_ok = (aimee_ir_responses_to_chat(body, model, sizeof(model), &instructions, &messages,
-                                          &tools, &stream) == 0);
-   if (!rp_ok)
-      rp_ok = (openai_parse_responses_to_chat(body, model, sizeof(model), &instructions, &messages,
-                                              &tools, &stream) == 0);
+   int rp_ok = aimee_ir_responses_to_chat(body, model, sizeof(model), &instructions, &messages,
+                                          &tools, &stream) == 0;
    if (!rp_ok)
    {
       if (openai_format_responses_created(id, model, created, frame, sizeof(frame)) > 0)
          emit(ctx, "response.created", frame);
-      if (openai_format_responses_completed(id, model, "invalid responses request", created, 0, 0,
-                                            0, frame, sizeof(frame)) > 0)
-         emit(ctx, "response.completed", frame);
+      if (openai_format_responses_failed(id, model, created, "invalid_request_error",
+                                         "invalid responses request", frame, sizeof(frame)) > 0)
+         emit(ctx, "response.failed", frame);
       free(instructions);
       cJSON_Delete(messages);
       cJSON_Delete(tools);

@@ -35,12 +35,13 @@ describe('canonical session projection', () => {
       envelope(1, { kind: 'delta', message_id: 'buffered', role: 'assistant', payload: { type: 'TURN_START' } }),
       envelope(2, message('buffered', 'assistant', [{ type: 'text', text: 'partial answer' }])),
       envelope(3, { kind: 'delta', message_id: 'buffered', role: 'assistant', payload: {
-        type: 'TURN_STOP', stop_reason: 'max_tokens', usage_in: 12, usage_out: 7,
+        type: 'TURN_STOP', stop_reason: 'max_tokens', raw_stop_reason: 'length', usage_in: 12, usage_out: 7,
         usage_cache_read: 9, usage_cache_write: 3, usage_reasoning: 2,
       } }),
     ];
     const state = events.reduce(reduceSession, emptySession('s'));
     expect(state.messages[0].stopReason).toBe('max_tokens');
+    expect(state.messages[0].nativeStopReason).toBe('length');
     expect(state.messages[0].usage).toEqual({ input: 12, output: 7, cacheRead: 9, cacheWrite: 3, reasoning: 2 });
     expect(JSON.parse(JSON.stringify(events)).reduce(reduceSession, emptySession('s'))).toEqual(state);
   });

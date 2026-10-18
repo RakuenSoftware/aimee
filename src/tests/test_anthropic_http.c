@@ -487,6 +487,10 @@ static int stream_sink(const aimee_session_event_t *event, void *context)
 {
    (void)context;
    assert(event->kind == AIMEE_SESSION_DELTA && event->delta);
+   assert(event->message_id && event->message_id[0]);
+   cJSON *wire = aimee_ir_session_event_json(event);
+   assert(wire);
+   cJSON_Delete(wire);
    stream_sink_calls++;
    return stream_sink_fail_at && stream_sink_calls >= stream_sink_fail_at ? -1 : 0;
 }

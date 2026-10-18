@@ -682,3 +682,41 @@ int aimee_ir_read_usage(const cJSON *usage, const char *name, long *out)
    *out = (long)value->valuedouble;
    return 0;
 }
+
+int aimee_ir_request_admit(const aimee_request_t *request)
+{
+   if (!request || request->n_system < 0 || request->n_messages < 0 || request->n_tools < 0 ||
+       request->n_system > AIMEE_IR_MAX_BLOCKS || request->n_messages > AIMEE_IR_MAX_BLOCKS ||
+       request->n_tools > AIMEE_IR_MAX_BLOCKS || (request->n_system && !request->system) ||
+       (request->n_messages && !request->messages) || (request->n_tools && !request->tools))
+      return -1;
+   for (int i = 0; i < request->n_system; i++)
+      if (!aimee_ir_block_valid(&request->system[i]) ||
+          request->system[i].type == AIMEE_BLK_TOOL_USE ||
+          request->system[i].type == AIMEE_BLK_TOOL_RESULT)
+         return -1;
+   for (int i = 0; i < request->n_messages; i++)
+   {
+      const aimee_message_t *message = &request->messages[i];
+      const char *role = message->role;
+      if (!role ||
+          (strcmp(role, "system") && strcmp(role, "developer") && strcmp(role, "user") &&
+           strcmp(role, "assistant") && strcmp(role, "tool")) ||
+          message->n_blocks < 0 || message->n_blocks > AIMEE_IR_MAX_BLOCKS ||
+          (message->n_blocks && !message->blocks))
+         return -1;
+      for (int j = 0; j < message->n_blocks; j++)
+      {
+         const aimee_block_t *block = &message->blocks[j];
+         if (!aimee_ir_block_valid(block) ||
+             (block->type == AIMEE_BLK_TOOL_USE && strcmp(role, "assistant")) ||
+             (block->type == AIMEE_BLK_TOOL_RESULT && strcmp(role, "user") && strcmp(role, "tool")))
+            return -1;
+      }
+   }
+   for (int i = 0; i < request->n_tools; i++)
+      if (!request->tools[i].name || !request->tools[i].name[0] ||
+          (request->tools[i].schema && !cJSON_IsObject(request->tools[i].schema)))
+         return -1;
+   return 0;
+}

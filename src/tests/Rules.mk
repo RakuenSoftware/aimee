@@ -414,6 +414,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-cli-launch $(TESTPREFIX)/unit-test-compu
                $(TESTPREFIX)/unit-test-vault-kms \
                $(TESTPREFIX)/unit-test-aimee-ir-shadow \
                $(TESTPREFIX)/unit-test-aimee-ir-serve \
+               $(TESTPREFIX)/unit-test-openai-ingress-ir \
                $(TESTPREFIX)/unit-test-aimee-ir-session \
                $(TESTPREFIX)/unit-test-aimee-ir-stream \
                $(TESTPREFIX)/unit-test-aimee-converse-stream \
@@ -2674,6 +2675,22 @@ $(TESTPREFIX)/unit-test-aimee-ir-session: $(OBJDIR)/tests/test_aimee_ir_session.
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-aimee-ir-serve: $(OBJDIR)/tests/test_aimee_ir_serve.o \
+                                       $(OBJDIR)/modules/ir/aimee_ir_session.o \
+                                       $(OBJDIR)/server/aimee_ir_serve.o $(OBJDIR)/modules/translation/wire_codec.o \
+                                       $(OBJDIR)/modules/translation/aimee_backend_openai.o \
+                                       $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
+                                       $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+                                       $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
+                                       $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
+                                       $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
+                                       $(OBJDIR)/modules/ir/aimee_ir.o \
+                                       $(OBJDIR)/core/turn_integrity/turn_integrity.o \
+                                       $(OBJDIR)/aimee_sha256.o \
+                                       $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
+                                       $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/translation/history_ir.o $(OBJDIR)/modules/ir/session_event.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-openai-ingress-ir: $(OBJDIR)/tests/test_openai_ingress_ir.o \
                                        $(OBJDIR)/modules/ir/aimee_ir_session.o \
                                        $(OBJDIR)/server/aimee_ir_serve.o $(OBJDIR)/modules/translation/wire_codec.o \
                                        $(OBJDIR)/modules/translation/aimee_backend_openai.o \

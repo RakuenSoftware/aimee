@@ -34,6 +34,7 @@ export type Delta = {
   input?: Record<string, unknown>;
   tool_args_delta?: string;
   stop_reason?: string;
+  raw_stop_reason?: string;
   usage_in?: number;
   usage_out?: number;
   usage_cache_read?: number;
@@ -59,6 +60,7 @@ export type ProjectedMessage = Message & {
   error?: string;
   cancelled?: boolean;
   stopReason?: string;
+  nativeStopReason?: string;
   usage?: { input: number; output: number; cacheRead?: number; cacheWrite?: number; reasoning?: number };
 };
 export type Control = {
@@ -147,6 +149,7 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         message.complete = previous.complete;
         message.usage = previous.usage;
         message.stopReason = previous.stopReason;
+        message.nativeStopReason = previous.nativeStopReason;
         message.error = previous.error;
         message.cancelled = previous.cancelled;
         next.messages = state.messages.map((m, i) => i === index ? message : m);
@@ -195,6 +198,7 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
           ...(d.usage_cache_write !== undefined ? { cacheWrite: d.usage_cache_write } : {}),
           ...(d.usage_reasoning !== undefined ? { reasoning: d.usage_reasoning } : {}) };
         message.stopReason = d.stop_reason;
+        message.nativeStopReason = d.raw_stop_reason;
         message.complete = true;
         return next;
       }

@@ -264,6 +264,16 @@ int main(void)
       cJSON_Delete(t2);
    }
 
+   {
+      char rejected_model[64], *rejected_instructions = NULL;
+      cJSON *rejected_messages = NULL, *rejected_tools = NULL;
+      int rejected_stream;
+      assert(aimee_ir_responses_to_chat("{\"input\":\"hi\"} trailing", rejected_model,
+                                        sizeof rejected_model, &rejected_instructions,
+                                        &rejected_messages, &rejected_tools, &rejected_stream) < 0);
+      assert(!rejected_instructions && !rejected_messages && !rejected_tools);
+   }
+
    /* aimee_ir_build_from_chat: agent-path chat components -> provider request via IR */
    cJSON *cm = cJSON_Parse("[{\"role\":\"user\",\"content\":\"hi\"}]");
    cJSON *ct = cJSON_Parse("[{\"type\":\"function\",\"function\":{\"name\":\"Read\",\"parameters\":"

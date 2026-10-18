@@ -322,6 +322,8 @@ void aimee_message_free(aimee_message_t *message);
 void aimee_request_free(aimee_request_t *r);
 void aimee_response_free(aimee_response_t *r);
 int aimee_ir_block_valid(const aimee_block_t *block);
+/* Validate completed request content before host policy or native rendering. */
+int aimee_ir_request_admit(const aimee_request_t *request);
 void aimee_block_free_contents(aimee_block_t *b);
 
 /* Set metadata on one block. Content ownership is unchanged. */

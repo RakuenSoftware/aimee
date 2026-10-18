@@ -56,6 +56,7 @@ func validSessionIREvent(encoded []byte) bool {
 			Namespace       string          `json:"namespace"`
 			Input           json.RawMessage `json:"input"`
 			StopReason      string          `json:"stop_reason"`
+			RawStopReason   string          `json:"raw_stop_reason"`
 			UsageIn         *int64          `json:"usage_in"`
 			UsageOut        *int64          `json:"usage_out"`
 			UsageCacheRead  *int64          `json:"usage_cache_read"`
@@ -63,7 +64,7 @@ func validSessionIREvent(encoded []byte) bool {
 			UsageReasoning  *int64          `json:"usage_reasoning"`
 			Error           string          `json:"error_message"`
 		}
-		if e.MessageID == "" || e.Role == "" || !decodeIR(e.Payload, &d) {
+		if e.MessageID == "" || e.Role == "" || !decodeIR(e.Payload, &d) || (d.RawStopReason != "" && d.Type != "TURN_STOP") {
 			return false
 		}
 		switch d.Type {

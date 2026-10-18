@@ -12,7 +12,7 @@ func TestSessionIRCanonicalValidation(t *testing.T) {
 		`{"kind":"message","message_id":"a","payload":{"role":"assistant","blocks":[{"type":"thinking","text":"reason","signature":"opaque","thinking_id":"rs_1","encrypted_content":"cipher","redacted_content":"redacted","cache_control":"ephemeral"},{"type":"tool_use","tool_id":"a","name":"bash","input":{"command":"pwd"}}]}}`,
 		`{"kind":"message","message_id":"t","payload":{"role":"tool","blocks":[{"type":"tool_result","tool_id":"a","content":{"stdout":"/workspace"},"is_error":false}]}}`,
 		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_DELTA","kind":"tool_use","block_id":0,"tool_args_delta":"{"}}`,
-		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"TURN_STOP","usage_in":12,"usage_out":5,"usage_cache_read":3,"usage_cache_write":2,"usage_reasoning":1,"stop_reason":"tool_use"}}`,
+		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"TURN_STOP","usage_in":12,"usage_out":5,"usage_cache_read":3,"usage_cache_write":2,"usage_reasoning":1,"stop_reason":"tool_use","raw_stop_reason":"pause_turn"}}`,
 		`{"kind":"control_request","request_id":"p","control_kind":"permission","payload":{"options":["allow","deny"]}}`,
 		`{"kind":"control_response","request_id":"p","control_kind":"permission","payload":{"decision":"deny"}}`,
 		`{"kind":"execution","payload":{"status":"running"}}`,
@@ -23,6 +23,8 @@ func TestSessionIRCanonicalValidation(t *testing.T) {
 		}
 	}
 	for _, event := range []string{
+		`{"kind":"delta","message_id":"m","role":"assistant","payload":{"type":"TURN_STOP","raw_stop_reason":123}}`,
+		`{"kind":"delta","message_id":"m","role":"assistant","payload":{"type":"TURN_START","raw_stop_reason":"stop"}}`,
 		`{"kind":"delta","message_id":"m","role":"assistant","payload":{"type":"BLOCK_DELTA","kind":"text","block_id":0,"signature_delta":"bad"}}`,
 		`{"kind":"delta","message_id":"m","role":"assistant","payload":{"type":"BLOCK_START","kind":"text","block_id":0,"input":{}}}`,
 		`{"kind":"delta","message_id":"m","role":"assistant","payload":{"type":"BLOCK_START","kind":"tool_use","block_id":0,"tool_id":"call","name":"read","input":[]}}`,
