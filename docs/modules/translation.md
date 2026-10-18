@@ -75,6 +75,19 @@ wire cannot replay foreign opaque reasoning state. Native Responses requests req
 reasoning so stateless continuation can retain it. Tool results retain structured content through
 the canonical history; protocol-specific representation limits apply at egress.
 
+### Host-observed native replay state
+
+The native request codec exposes a borrowed, thread-bound state guard. A server scope may
+restore opaque replay bindings from independently observed canonical responses; the translation
+module itself performs no I/O or authorization. Hosts recheck the owned request immediately
+before provider rendering, after restored history and policy edits. A guard refusal releases and
+zeros that request. Scoped callbacks must be restored before their context is released.
+
+Raw-sidecar equality checks parse the immutable reference without invoking this guard. Guarding
+both the transformed request and its comparison reference could make removed opaque state look
+unchanged and accidentally replay the original bytes. The canonical equality and actual native
+prefix fences still decide whether a byte-preserving fast path is admissible.
+
 ## Dependencies and consumers
 
 - `ir`: supplies the canonical request, response, block, tool, usage, and streaming representation.

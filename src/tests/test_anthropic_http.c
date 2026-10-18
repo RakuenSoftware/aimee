@@ -1484,8 +1484,52 @@ static void test_native_count_admits_before_dispatch(void)
    reset_capture();
 }
 
+static int opaque_guard_calls;
+static int discard_unproved_signature(aimee_request_t *request, void *deny)
+{
+   opaque_guard_calls++;
+   if (deny)
+      return -1;
+   for (int i = 0; i < request->n_messages; i++)
+      for (int j = 0; j < request->messages[i].n_blocks; j++)
+      {
+         aimee_block_t *b = &request->messages[i].blocks[j];
+         free(b->thinking_signature);
+         free(b->thinking_binding);
+         b->thinking_signature = b->thinking_binding = NULL;
+      }
+   return 0;
+}
+static void test_native_provenance_is_rechecked_at_actual_egress(void)
+{
+   const char *body =
+       "{\"model\":\"m\",\"max_tokens\":8,\"messages\":[{\"role\":\"assistant\",\"content\":[{"
+       "\"type\":\"thinking\",\"thinking\":\"source thought\",\"signature\":\"source "
+       "signature\"}]},{\"role\":\"user\",\"content\":\"next\"}]}";
+   aimee_request_t request = {0};
+   char error[128];
+   assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_ANTHROPIC, &request, error,
+                                     sizeof error));
+   aimee_frontend_state_scope_t previous =
+       aimee_frontend_bind_state_guard(discard_unproved_signature, NULL);
+   char *wire = anthropic_build_prov_body(&request, AIMEE_WIRE_ANTHROPIC, 0);
+   assert(wire && !strstr(wire, "source signature") && !strstr(wire, "source thought"));
+   assert(opaque_guard_calls == 1);
+   free(wire);
+   aimee_request_free(&request);
+   aimee_frontend_bind_state_guard(previous.guard, previous.context);
+   assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_ANTHROPIC, &request, error,
+                                     sizeof error));
+   previous = aimee_frontend_bind_state_guard(discard_unproved_signature, &request);
+   assert(!anthropic_build_prov_body(&request, AIMEE_WIRE_ANTHROPIC, 0) && !request.messages &&
+          !request.model);
+   aimee_request_free(&request);
+   aimee_frontend_bind_state_guard(previous.guard, previous.context);
+}
+
 int main(void)
 {
+   test_native_provenance_is_rechecked_at_actual_egress();
    test_canonical_economizer_restore_resends_once();
    test_native_count_admits_before_dispatch();
    test_native_alias_uses_provider_model();

@@ -920,6 +920,13 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-cli-proxy-bound
 $(TESTPREFIX)/unit-test-cli-proxy-bound: $(OBJDIR)/tests/test_cli_proxy_bound.o $(OBJDIR)/cli_proxy.o $(CORE_CONNECTION_LIB)
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-replay
+$(TESTPREFIX)/unit-test-server-native-replay: $(OBJDIR)/tests/test_server_native_replay.o \
+    $(OBJDIR)/server/server_native_replay.o $(OBJDIR)/modules/ir/session_event.o \
+    $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o \
+    $(OBJDIR)/platform_random.o $(filter %/platform_random.o,$(PLATFORM_BASIC_OBJS))
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto
+
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-runtime
 $(TESTPREFIX)/unit-test-server-native-runtime: $(OBJDIR)/tests/test_server_native_runtime.o \
     $(OBJDIR)/server/server_native_runtime.o $(OBJDIR)/cli_proxy.o \

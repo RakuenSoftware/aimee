@@ -2,7 +2,20 @@
 
 Prepared 17 October 2026, approximately 23:30 Europe/Amsterdam. The user requested implementation to stop here, the work to be pushed, and a complete handoff for a local session. Do not infer that the overall migration is complete.
 
-## Current continuation status: 18 October 2026
+## Current continuation status after #3038 merged
+
+The user confirmed #3038 is merged and requested the remaining migration and standalone
+learning work. The follow-up is [#3047](https://github.com/RakuenSoftware/aimee/pull/3047),
+branch `fix/browser-ir-continuation`, based on merged #3038 (`344139139`). Its scoped native
+runtime prerequisites and exact validation limits are recorded at the end of this handoff.
+The scoped runtime now captures and restores replay evidence, with SDK activation still pending.
+The SDK cutover, account-bound cache/history adoption and standalone learning repair remain unfinished. Do not treat the new foundation as overall completion.
+
+Automatic reviews and strict attribution remain enabled. Production `.100` must remain KB-free.
+Do not reopen #3036 or add WOL work. Earlier instructions to continue the now-merged #3038
+are superseded by the user's latest continuation request.
+
+## Merged #3038 validation and replacement history: 18 October 2026
 
 The user authorized replacement of #3036 to satisfy the permanent attribution gate, then
 explicitly requested its retirement. Active work is now on
@@ -18,8 +31,9 @@ all 60 pass on `07548c7fe`.
 #3036 is closed, its body is empty, and `fix/browser-ir-runtime` was deleted locally and
 remotely. GitHub retains the closed PR record. All older instructions below naming #3036
 as the active PR/branch are historical and superseded. Do not reopen it, restore its branch,
-or create another replacement. Continue on #3038 with automatic reviews and strict attribution
-checks enabled.
+or create another replacement for that closed PR. The historical #3038 continuation instruction
+was superseded when the user confirmed its merge; automatic reviews and strict attribution
+checks remain enabled.
 
 - Canonical primary loading/model switching, durable-log history, standard browser controls, native hook admission, compaction and several credential/consumer cutovers are implemented. The whole migration remains unfinished, especially credential-free native execution, scoped native tools and account-bound replay/cache proof.
 - The user explicitly confirmed that production .100 should NOT use a KB instance right now. Unset KB mode/endpoint are intentional. Do not configure/connect a KB or enable a dependency on one to fix learning. Repair and qualify server-local learning, failed approaches and authenticated task-outcome capture through their existing owners.
@@ -984,3 +998,56 @@ remaining typed consumers/capabilities and standalone procedure feedback. Produc
 remains intentionally KB-free. Independently graded learning, synthesis and live acceptance
 cannot be inferred from process-success observations. Production promotion still requires the
 independent reviewer specified in `OWNERS.md`.
+
+
+### Scoped native replay provenance (local, after the transport checkpoint)
+
+The scoped runtime now records proof-only metadata from actual canonical upstream responses in
+its existing principal-owned session log. This is a derived, mutex-protected cache rebuilt from
+that log, not another transcript store. Block commitments exclude host-only cache/context markers.
+Anthropic signatures recover their actual observed `ap1` binding; echoed prefixes cannot mint one.
+Conflicting bindings never become last-write-wins. Unknown/account-model-mismatched opaque state
+is omitted from the egress request with a durable fidelity report, preserving the source history.
+The report uses the captured selected model and is emitted once across entry/egress rechecks.
+Source read/write failures refuse, and paging checks actor, session and exact sequence continuity.
+Cancellation interrupts proof paging. The listener also gives each admitted native HTTP request
+its own request identity while preserving the host session and restrictive limits.
+
+The translation owner exposes a borrowed thread-scoped guard. Both HTTP owners recheck actual
+provider egress after history restoration and policy edits. Raw-sidecar comparisons remain pure:
+applying the guard to both sides would let removed opaque bytes look unchanged and reappear.
+The guard/sink apply only to model requests; MCP execution retains its own capture owner. Model
+traffic currently requires the stable Codex Vault lineage; Claude custody/refresh support remains
+open. Production SDK spawn sites are still unchanged and must not be switched before history,
+actor-scoped tools and actual streaming are qualified together.
+
+Local normal fixtures pass for the durable proof owner, scoped runtime, cross-protocol egress,
+OpenAI shapes/ingress and all three Anthropic HTTP variants. They cover eight concurrent proof
+writers, multi-page replay, source corruption/unavailability, failed writes, cancellation,
+connection/model scope, ambiguous proof, explicit omission, late restored-history admission and
+request cleanup on guard failure. The final five focused fixtures pass ASan/UBSan with leak
+detection; the proof/runtime fixtures also pass ThreadSanitizer. The full agent suite passes
+with its three explicit store-dependent skips. Both actual CMake fixtures, server/KB builds and all 76 lint checks pass for this source tree. Fresh CI is still required
+for this replay-provenance slice. Transport checkpoint `8565183b0` finished with 55 passing
+checks and the two existing platform skips, including integration, sanitizers/scripts and
+deployment tiers T1, T2, T2-luks and T3 (CI run `39157560588`).
+
+A real installed Codex `0.160.1` app-server qualification found and exercised the stable
+`thread/inject_items` method, without `experimentalApi`. Using a temporary credential-free home
+and a loopback provider fixture, the actual provider request retained adopted user/assistant
+roles, full call/result identity, prior content and the current user. After process restart,
+`thread/resume` retained the adopted history and completed native turn. This is a supported
+adoption candidate, not yet wired into Aimee or evidence of real upstream cache billing.
+Artifacts: `/var/tmp/aimee-native-inject-http-probe.py` and its captured request JSON. The stable
+and experimental schemas were generated from the installed binary. The separate experimental
+`thread/resume.history` field explicitly says `FOR CODEX CLOUD - DO NOT USE`; it stays unused.
+The official source also declares stable `thread/inject_items` in
+https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/common.rs.
+
+Next: implement and qualify canonical history adoption/cache continuation at the actual SDK
+spawn sites, including changed-model/account scopes and complete tools/workspace/control owner
+handoffs. Preserve same-scope native caches where their canonical prefix is still valid; do not
+silently start blank or flatten roles. SDK internal compaction and true Responses streaming need
+qualification before activation. Claude OAuth custody/refresh, remaining IR consumers/capabilities,
+standalone procedure feedback, independently graded learning and production acceptance remain
+required. `.100` remains intentionally KB-free; no production promotion has occurred.

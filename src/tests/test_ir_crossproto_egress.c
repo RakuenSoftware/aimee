@@ -977,8 +977,58 @@ static void test_mandatory_egress_admission(void)
    puts("  invalid owned requests refuse before native replay or backend construction OK");
 }
 
+static int state_guard_calls;
+static int strip_unproved_state(aimee_request_t *request, void *context)
+{
+   state_guard_calls++;
+   if (context)
+      return -1;
+   for (int i = 0; i < request->n_messages; i++)
+      for (int j = 0; j < request->messages[i].n_blocks; j++)
+      {
+         aimee_block_t *b = &request->messages[i].blocks[j];
+         free(b->thinking_id);
+         free(b->thinking_encrypted_content);
+         b->thinking_id = b->thinking_encrypted_content = NULL;
+      }
+   return 0;
+}
+static void test_host_state_guard_does_not_mutate_replay_reference(void)
+{
+   const char *body = "{\"model\":\"m\",\"stream\":true,\"store\":false,\"input\":["
+                      "{\"type\":\"reasoning\",\"id\":\"rs_observed\",\"encrypted_content\":"
+                      "\"opaque-state\",\"summary\":[]},"
+                      "{\"role\":\"user\",\"content\":\"next\"}]}";
+   aimee_frontend_state_scope_t previous =
+       aimee_frontend_bind_state_guard(strip_unproved_state, NULL);
+   aimee_request_t request = {0};
+   char error[128];
+   assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_RESPONSES, &request, error,
+                                     sizeof error));
+   assert(state_guard_calls == 1);
+   char *wire = aimee_backend_render_wire(&request, AIMEE_WIRE_RESPONSES);
+   assert(wire && !strstr(wire, "opaque-state") && !strstr(wire, "rs_observed"));
+   assert(state_guard_calls == 1); /* A raw comparison is pure, never guarded again. */
+   free(wire);
+   aimee_request_free(&request);
+   aimee_frontend_state_scope_t outer =
+       aimee_frontend_bind_state_guard(strip_unproved_state, (void *)1);
+   assert(aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_RESPONSES, &request, error,
+                                    sizeof error));
+   assert(!request.raw_bytes && !request.messages);
+   aimee_frontend_bind_state_guard(outer.guard, outer.context);
+   aimee_frontend_bind_state_guard(previous.guard, previous.context);
+   assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_RESPONSES, &request, error,
+                                     sizeof error));
+   wire = aimee_backend_render_wire(&request, AIMEE_WIRE_RESPONSES);
+   assert(wire && !strcmp(wire, body));
+   free(wire);
+   aimee_request_free(&request);
+}
+
 int main(void)
 {
+   test_host_state_guard_does_not_mutate_replay_reference();
    test_json_comparison_view();
    test_native_thinking_replay_binding();
    test_completed_argument_framing();

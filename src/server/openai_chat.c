@@ -929,8 +929,10 @@ static int openai_ir_append_policy(aimee_request_t *request, char *policy)
    request->mutated = 1;
    return 0;
 }
-static char *openai_build_ir_body(const aimee_request_t *request, aimee_wire_t wire)
+static char *openai_build_ir_body(aimee_request_t *request, aimee_wire_t wire)
 {
+   if (aimee_frontend_guard_state(request, NULL, 0))
+      return NULL;
    if (aimee_ir_request_admit(request))
       return NULL;
    char *body = aimee_backend_render_wire(request, wire);
@@ -994,7 +996,7 @@ static int openai_prepare_ir_request(aimee_request_t *request, const agent_t *ag
    }
    return aimee_ir_request_admit(request);
 }
-static int openai_post_ir(const agent_t *agent, const aimee_request_t *request, aimee_wire_t wire,
+static int openai_post_ir(const agent_t *agent, aimee_request_t *request, aimee_wire_t wire,
                           const char *url, const char *auth, const char *headers, char **reply,
                           aimee_anthropic_replay_t *replay, char *error, size_t capacity)
 {

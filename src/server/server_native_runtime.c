@@ -1,6 +1,8 @@
 /* Native children hold only a lifetime-scoped local capability. Existing HTTP
  * owners admit model/tool requests under the captured actor and registration. */
 #include "server_native_runtime.h"
+#include "server_native_replay.h"
+#include <aimee/translation/aimee_frontend.h>
 #include "cli_proxy.h"
 #include "server_http.h"
 #include "server_http_identity.h"
@@ -19,6 +21,7 @@
 struct server_native_runtime
 {
    cli_proxy_t *listener;
+   server_native_replay_t *replay;
    agent_t selected;
    request_context_t owner;
    agent_request_creds_t credentials;
@@ -90,6 +93,11 @@ static int native_forward(const char *method, const char *path, const char *head
    if (db1_server_session_get(runtime->session, &source) ||
        strcmp(source.principal, runtime->owner.vault_principal))
       return -1;
+   int model_request = !strcmp(method, "POST") && (strncmp(path, "/v1/mcp/", 8) != 0);
+   /* Model state is account-bound only once the Vault owner supplies stable
+    * lineage. Other native credential sources still need that custody cutover. */
+   if (model_request && !runtime->replay)
+      return -1;
    char *input = malloc((size_t)length + 1);
    if (!input)
       return -1;
@@ -102,7 +110,14 @@ static int native_forward(const char *method, const char *path, const char *head
    agent_request_creds_snapshot(&previous_credentials);
    const agent_t *previous_model = agent_registry_bind_ingress_model(&runtime->selected);
    aimee_ir_session_begin_task();
+   int rc = -1;
+   agent_codex_credentials_t current = {0};
    request_context_t admitted = runtime->owner;
+   unsigned char request_nonce[16];
+   if (platform_random_bytes(request_nonce, sizeof request_nonce))
+      goto restore;
+   for (unsigned i = 0; i < sizeof request_nonce; i++)
+      snprintf(admitted.request_id + 2 * i, 3, "%02x", request_nonce[i]);
    snprintf(admitted.method, sizeof admitted.method, "%s", method);
    snprintf(admitted.path, sizeof admitted.path, "%s", path);
    /* The browser turn's dedup key cannot collapse distinct SDK requests. */
@@ -111,8 +126,6 @@ static int native_forward(const char *method, const char *path, const char *head
    server_http_identity_bind_request_owner(&admitted);
    agent_request_creds_restore(&runtime->credentials);
    agent_set_request_session(runtime->session);
-   int rc = -1;
-   agent_codex_credentials_t current = {0};
    if (runtime->lineage[0])
    {
       const char *registration = runtime->selected.registration[0] ? runtime->selected.registration
@@ -128,8 +141,24 @@ static int native_forward(const char *method, const char *path, const char *head
       goto restore;
    agent_set_request_cancel(&watch.cancelled);
    anthropic_http_capture_request_headers(headers);
+   void *previous_sink_context = NULL;
+   aimee_ir_session_sink_fn previous_sink = aimee_ir_session_get_sink(&previous_sink_context);
+   int previous_failed = aimee_ir_session_capture_failed();
+   aimee_frontend_state_scope_t previous_guard = {0};
+   if (model_request)
+   {
+      previous_guard =
+          aimee_frontend_bind_state_guard(server_native_replay_restore, runtime->replay);
+      aimee_ir_session_set_sink(server_native_replay_capture, runtime->replay);
+   }
    io->response_started(io->context);
    rc = server_http_native_forward(io->downstream_fd, method, path, input, (int)length);
+   if (model_request)
+   {
+      aimee_frontend_bind_state_guard(previous_guard.guard, previous_guard.context);
+      aimee_ir_session_restore_sink(previous_sink, previous_sink_context,
+                                    previous_failed || aimee_ir_session_capture_failed());
+   }
    atomic_store(&watch.finished, 1);
    pthread_join(monitor, NULL);
    agent_set_request_cancel(NULL);
@@ -210,6 +239,13 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
    }
    if (aimee_sha256_hex(binding, used, runtime->binding))
       goto failed;
+   if (runtime->lineage[0])
+   {
+      runtime->replay = server_native_replay_open(runtime->session, runtime->owner.vault_principal,
+                                                  runtime->binding, runtime->selected.model);
+      if (!runtime->replay)
+         goto failed;
+   }
    unsigned char random[32];
    if (platform_random_bytes(random, sizeof random))
       goto failed;
@@ -247,6 +283,7 @@ void server_native_runtime_close(server_native_runtime_t *runtime)
    if (!runtime)
       return;
    cli_proxy_stop(runtime->listener);
+   server_native_replay_close(runtime->replay);
    OPENSSL_cleanse(runtime, sizeof *runtime);
    free(runtime);
 }

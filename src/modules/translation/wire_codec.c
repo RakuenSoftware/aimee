@@ -8,6 +8,26 @@
 #include <stdlib.h>
 #include <string.h>
 
+static _Thread_local aimee_frontend_state_scope_t state_scope;
+aimee_frontend_state_scope_t aimee_frontend_bind_state_guard(aimee_frontend_state_guard_fn guard,
+                                                             void *context)
+{
+   aimee_frontend_state_scope_t previous = state_scope;
+   state_scope = (aimee_frontend_state_scope_t){guard, context};
+   return previous;
+}
+int aimee_frontend_guard_state(aimee_request_t *request, char *error, size_t capacity)
+{
+   if (!request)
+      return -1;
+   if (!state_scope.guard || !state_scope.guard(request, state_scope.context))
+      return 0;
+   aimee_request_free(request);
+   if (error && capacity)
+      snprintf(error, capacity, "native replay evidence unavailable");
+   return -1;
+}
+
 static int parse_native_object(const cJSON *native, aimee_wire_t wire, aimee_request_t *out,
                                char *error, size_t capacity)
 {
@@ -19,8 +39,8 @@ static int parse_native_object(const cJSON *native, aimee_wire_t wire, aimee_req
                                            : -1;
 }
 
-int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire,
-                              aimee_request_t *out, char *error, size_t error_capacity)
+static int parse_wire(const char *body, size_t length, aimee_wire_t wire, aimee_request_t *out,
+                      char *error, size_t error_capacity)
 {
    if (!out)
       return -1;
@@ -50,6 +70,14 @@ int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire
    out->raw_length = length;
    return 0;
 }
+int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire,
+                              aimee_request_t *out, char *error, size_t error_capacity)
+{
+   int rc = parse_wire(body, length, wire, out, error, error_capacity);
+   if (rc)
+      return rc;
+   return aimee_frontend_guard_state(out, error, error_capacity);
+}
 char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wire)
 {
    if (aimee_ir_request_admit(request))
@@ -62,8 +90,8 @@ char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wir
    {
       aimee_request_t original = {0};
       char error[128];
-      if (!aimee_frontend_parse_wire(request->raw_bytes, request->raw_length, wire, &original,
-                                     error, sizeof error))
+      if (!parse_wire(request->raw_bytes, request->raw_length, wire, &original, error,
+                      sizeof error))
       {
          int same_model =
              (!request->model && !original.model) ||
@@ -104,7 +132,7 @@ int aimee_frontend_parse_native_frame(const cJSON *native, const char *frame, si
    if (frame)
    {
       aimee_request_t original = {0};
-      if (aimee_frontend_parse_wire(frame, length, wire, &original, error, capacity))
+      if (parse_wire(frame, length, wire, &original, error, capacity))
       {
          aimee_request_free(out);
          return -1;
@@ -162,7 +190,7 @@ int aimee_frontend_parse_native_frame(const cJSON *native, const char *frame, si
       original.raw_length = 0;
       aimee_request_free(&original);
    }
-   return 0;
+   return aimee_frontend_guard_state(out, error, capacity);
 }
 
 int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire,

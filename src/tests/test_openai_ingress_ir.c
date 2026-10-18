@@ -273,8 +273,57 @@ static void test_responses_run_input_controls(void)
    }
 }
 
+static int replay_guard_calls;
+static int discard_unproved_replay(aimee_request_t *request, void *deny)
+{
+   replay_guard_calls++;
+   if (deny)
+      return -1;
+   for (int i = 0; i < request->n_messages; i++)
+      for (int j = 0; j < request->messages[i].n_blocks; j++)
+      {
+         aimee_block_t *b = &request->messages[i].blocks[j];
+         free(b->thinking_id);
+         free(b->thinking_encrypted_content);
+         b->thinking_id = b->thinking_encrypted_content = NULL;
+      }
+   return 0;
+}
+static void test_restored_history_rechecks_native_provenance(void)
+{
+   const char *body = "{\"model\":\"m\",\"input\":\"next\"}";
+   aimee_frontend_state_scope_t previous =
+       aimee_frontend_bind_state_guard(discard_unproved_replay, NULL);
+   aimee_request_t request = {0};
+   char error[128];
+   assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_RESPONSES, &request, error,
+                                     sizeof error));
+   assert(replay_guard_calls == 1);
+   /* The same owned history replacement used by previous_response_id/economizer
+    * restoration happens after native entry and must not bypass the guard. */
+   cJSON *history = cJSON_Parse(
+       "[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"thinking\",\"text\":\"summary\","
+       "\"thinking_id\":\"rs_previous_account\",\"encrypted_content\":\"previous-opaque\"}]},{"
+       "\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"next\"}]}]");
+   assert(history && !openai_ir_history_replace(&request, history));
+   cJSON_Delete(history);
+   char *wire = openai_build_ir_body(&request, AIMEE_WIRE_RESPONSES);
+   assert(wire && !strstr(wire, "rs_previous_account") && !strstr(wire, "previous-opaque"));
+   assert(replay_guard_calls == 2);
+   free(wire);
+   aimee_request_free(&request);
+   assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_RESPONSES, &request, error,
+                                     sizeof error));
+   aimee_frontend_bind_state_guard(discard_unproved_replay, &request);
+   assert(!openai_build_ir_body(&request, AIMEE_WIRE_RESPONSES) && !request.messages &&
+          !request.model);
+   aimee_request_free(&request);
+   aimee_frontend_bind_state_guard(previous.guard, previous.context);
+}
+
 int main(void)
 {
+   test_restored_history_rechecks_native_provenance();
    test_responses_run_input_controls();
    test_tool_free_admission_and_text_entry();
    test_canonical_response_cache_round_trip();

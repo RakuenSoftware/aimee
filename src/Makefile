@@ -638,7 +638,7 @@ SERVER_SRCS += server/provider_settable.c
 SERVER_SRCS += server/module_routing_adapter.c
 SERVER_SRCS += server/module_stage_adapters.c
 SERVER_SRCS += modules/benchmarks/agent_eval_memory_transport.c
-SERVER_SRCS += cli_proxy.c server/server_native_runtime.c
+SERVER_SRCS += cli_proxy.c server/server_native_runtime.c server/server_native_replay.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orchestrator.c,$(DATA_SRCS))
 SERVER_DATA_OBJS = $(SERVER_DATA_SRCS:%.c=$(OBJDIR)/server/%.o) \

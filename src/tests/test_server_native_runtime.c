@@ -1,10 +1,13 @@
 #include "server_native_runtime.h"
+#include "server_native_replay.h"
+#include <aimee/translation/aimee_frontend.h>
 #include "server_http.h"
 #include "server_http_identity.h"
 #include "db1_client/server_sessions.h"
 #include <aimee/core/connection/socket.h>
 #include <assert.h>
 #include <stdatomic.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +18,10 @@ static _Thread_local const agent_t *current_model;
 static _Thread_local atomic_int *current_cancel;
 static _Thread_local char identity[VAULT_PRINCIPAL_MAX];
 static _Thread_local int protocol_captured;
+static pthread_mutex_t ids_mutex = PTHREAD_MUTEX_INITIALIZER;
+static char seen_ids[64][64];
+static int seen_count;
+static void probe_replay_scope(const char *path);
 static atomic_int calls, cancelled, wait_for_cancel, source_changed, session_removed,
     malformed_source;
 
@@ -112,6 +119,7 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
                                int length)
 {
    (void)method;
+   probe_replay_scope(path);
    assert(protocol_captured);
    assert(length == 2 && !strcmp(body, "{}"));
    const request_context_t *owner = request_context_get();
@@ -119,6 +127,13 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    assert(!strcmp(identity, owner->vault_principal));
    assert(!strcmp(owner->method, method) && !strcmp(owner->path, path));
    assert(!owner->idempotency_key[0]);
+   assert(strlen(owner->request_id) == 32);
+   pthread_mutex_lock(&ids_mutex);
+   assert(seen_count < 64);
+   for (int i = 0; i < seen_count; i++)
+      assert(strcmp(seen_ids[i], owner->request_id));
+   strcpy(seen_ids[seen_count++], owner->request_id);
+   pthread_mutex_unlock(&ids_mutex);
    assert(!strcmp(current_credentials.vault_principal, identity));
    assert(!strcmp(current_credentials.session_id, owner->session_key));
    assert(current_model && !strcmp(current_model->registration, "selected-account"));
@@ -145,6 +160,79 @@ void aimee_ir_session_begin_task(void)
 {
 }
 
+/* The standalone replay fixture exercises the real durable proof owner. This
+ * listener fixture verifies its guard/sink are confined to model requests. */
+struct server_native_replay
+{
+   char actor[VAULT_PRINCIPAL_MAX];
+};
+static _Thread_local aimee_frontend_state_scope_t state_guard;
+static _Thread_local aimee_ir_session_sink_fn installed_sink;
+static _Thread_local void *sink_context;
+server_native_replay_t *server_native_replay_open(const char *session, const char *actor,
+                                                  const char *scope, const char *model)
+{
+   assert(session[0] && strlen(scope) == 64 && !strcmp(model, "selected-model"));
+   server_native_replay_t *r = calloc(1, sizeof *r);
+   assert(r);
+   strcpy(r->actor, actor);
+   return r;
+}
+void server_native_replay_close(server_native_replay_t *r)
+{
+   free(r);
+}
+int server_native_replay_restore(aimee_request_t *request, void *context)
+{
+   (void)request;
+   server_native_replay_t *r = context;
+   assert(!strcmp(r->actor, identity));
+   return 0;
+}
+int server_native_replay_capture(const aimee_session_event_t *event, void *context)
+{
+   (void)event;
+   return server_native_replay_restore(NULL, context);
+}
+aimee_frontend_state_scope_t aimee_frontend_bind_state_guard(aimee_frontend_state_guard_fn guard,
+                                                             void *context)
+{
+   aimee_frontend_state_scope_t previous = state_guard;
+   state_guard = (aimee_frontend_state_scope_t){guard, context};
+   return previous;
+}
+aimee_ir_session_sink_fn aimee_ir_session_get_sink(void **context)
+{
+   *context = sink_context;
+   return installed_sink;
+}
+void aimee_ir_session_set_sink(aimee_ir_session_sink_fn sink, void *context)
+{
+   installed_sink = sink;
+   sink_context = context;
+}
+void aimee_ir_session_restore_sink(aimee_ir_session_sink_fn sink, void *context, int failed)
+{
+   assert(!failed);
+   aimee_ir_session_set_sink(sink, context);
+}
+int aimee_ir_session_capture_failed(void)
+{
+   return 0;
+}
+static void probe_replay_scope(const char *path)
+{
+   if (!strcmp(path, "/v1/responses"))
+   {
+      assert(state_guard.guard && installed_sink);
+      aimee_request_t request = {0};
+      assert(!state_guard.guard(&request, state_guard.context));
+      aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION};
+      assert(!installed_sink(&event, sink_context));
+   }
+   else
+      assert(!state_guard.guard && !installed_sink);
+}
 static int send_request(const server_native_runtime_t *runtime, const char *path, const char *token)
 {
    const char *port = strrchr(server_native_runtime_url(runtime), ':') + 1;
@@ -188,6 +276,7 @@ int main(void)
                           .capabilities = CAP_CHAT | CAP_TOOL_EXECUTE};
    strcpy(a.vault_principal, "webuser:alice");
    strcpy(a.idempotency_key, "browser-turn-only");
+   strcpy(a.request_id, "browser-request-only");
    a.capabilities |= CAP_WORKFLOW_ADMIN | CAP_GRANT_ADMIN | CAP_SHADOW_ADMIN;
    request_context_t b = a;
    strcpy(b.vault_principal, "webuser:bob");
