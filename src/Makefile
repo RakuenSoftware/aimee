@@ -1055,13 +1055,29 @@ CONFIG_TEST_DEFAULTS ?= $(shell cd ../server-go && $(GO) list -mod=mod -f '{{.Di
 # than naming three directories.
 SCRIPT_TESTS = $(sort $(wildcard ../scripts/tests/test_*.py))
 
+# Tests another CI job already runs, named by file name. Not a list of what
+# runs: discovery above still decides that, and each skipped name must match a
+# discovered test or the target fails, so a renamed or deleted test cannot leave
+# a stale skip that reads as coverage. CI skips the thin-client proxy suite here
+# because the `build` job runs it with the real pinned Codex required, which is
+# strictly stronger than this lane's run.
+SCRIPT_TESTS_SKIP ?=
+SCRIPT_TESTS_RUN = $(filter-out $(addprefix ../scripts/tests/,$(SCRIPT_TESTS_SKIP)),$(SCRIPT_TESTS))
+# Test files are independent processes; run them in parallel. Output is kept
+# per test and printed only for a failure, so a parallel run stays readable.
+SCRIPT_TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+
 script-tests:
 	@test -n "$(strip $(SCRIPT_TESTS))" || { echo "script-tests: ERROR no tests found"; exit 1; }
-	@set -e; for t in $(SCRIPT_TESTS); do \
-		echo "script-tests: $$t"; \
-		(cd .. && python3 -I "$${t#../}") >/dev/null; \
+	@for skip in $(SCRIPT_TESTS_SKIP); do \
+		test -f "../scripts/tests/$$skip" || { echo "script-tests: ERROR skip '$$skip' matches no test"; exit 1; }; \
 	done
-	@echo "script-tests: ok ($(words $(SCRIPT_TESTS)) tests)"
+	@logs=$$(mktemp -d); trap 'rm -rf "$$logs"' EXIT; \
+	printf '%s\n' $(SCRIPT_TESTS_RUN) | sed 's|^\.\./||' | \
+	  (cd .. && xargs -P "$(SCRIPT_TEST_JOBS)" -I{} sh -c \
+	    'log="$$1/$$(basename "$$2").log"; if python3 -I "$$2" >"$$log" 2>&1; then echo "script-tests: ok   $$2"; else echo "script-tests: FAIL $$2"; cat "$$log"; exit 1; fi' \
+	    _ "$$logs" {}) || { echo "script-tests: FAILED"; exit 1; }
+	@echo "script-tests: ok ($(words $(SCRIPT_TESTS_RUN)) tests, $(words $(SCRIPT_TESTS_SKIP)) run by another job)"
 
 go-unit-tests:
 	@test -n "$(GO)" || { echo "go-unit-tests: ERROR go is required"; exit 1; }
@@ -1448,10 +1464,25 @@ memory-owner-replay-check:
 	@test -n "$$AIMEE_KB_STORE_REPLAY_URL" || (echo "memory-owner-replay-check requires AIMEE_KB_STORE_REPLAY_URL for a disposable PostgreSQL database" >&2; exit 2)
 	@test -n "$$AIMEE_MEMORY_EVAL_URL" || (echo "memory-owner-replay-check requires AIMEE_MEMORY_EVAL_URL for a separate disposable scratch database" >&2; exit 2)
 	@test -n "$$AIMEE_DB_TEST_URL" || (echo "memory-owner-replay-check requires AIMEE_DB_TEST_URL for isolated evaluator provisioning" >&2; exit 2)
+ifeq ($(strip $(MEMORY_OWNER_REPLAY_JSON)),)
 	cd ../server-go && \
 	  AIMEE_MEMORY_REPLAY_REQUIRED=1 AIMEE_MEMORY_EVAL_REQUIRED=1 \
 	  AIMEE_DB_TEST_REQUIRED=1 go test -race -count=1 -timeout=30m -v \
 	  ./modules/memory ./modules/memory/cmd/aimee-memory-eval ./cmd/aimee-module
+else
+	@# Same run, also recorded as `go test -json` so the frozen reliability
+	@# check (scripts/check_memory_reliability_release.py --go-events) can verify
+	@# its required cases from THIS execution instead of running them again. The
+	@# log shows the same text -v prints.
+	@mkdir -p "$(dir $(abspath $(MEMORY_OWNER_REPLAY_JSON)))"
+	cd ../server-go || exit 1; status=0; \
+	  AIMEE_MEMORY_REPLAY_REQUIRED=1 AIMEE_MEMORY_EVAL_REQUIRED=1 \
+	  AIMEE_DB_TEST_REQUIRED=1 go test -race -count=1 -timeout=30m -json \
+	  ./modules/memory ./modules/memory/cmd/aimee-memory-eval ./cmd/aimee-module \
+	  > "$(abspath $(MEMORY_OWNER_REPLAY_JSON))" || status=$$?; \
+	  python3 -I -S ../scripts/go-test-json-output.py "$(abspath $(MEMORY_OWNER_REPLAY_JSON))"; \
+	  exit $$status
+endif
 
 memory-retrieval-eval-check:
 	cd ../server-go && AIMEE_MEMORY_EVAL_REQUIRED=1 go test -race -count=1 -v ./modules/memory -run '^(TestRetrievalCorpus|TestPersonalMemoryPrivacyRegression|TestContentGateEmitsCleanVerdict|TestPrivateCode.*|TestKBGraphFusionUsesInstancePolicyAndVisibility|TestCodeVectorsRejectStaleContentAndModel)$$'

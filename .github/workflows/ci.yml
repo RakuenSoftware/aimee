@@ -158,31 +158,11 @@ jobs:
         uses: ./.github/actions/install-audit-sqlite
       - name: Install script test dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential pkg-config libssl-dev zlib1g-dev python3-yaml openssh-client
-      - name: Build the thin client required by proxy regression tests
-        run: make -C src -j2 ../aimee
+      # The thin-client proxy suite is the only script test that needs a built
+      # client, and `build` runs it with real Codex required, so it is skipped
+      # here and this job builds nothing.
       - name: Run every discovered script regression test
-        run: make -C src script-tests
-
-  sanitizer-gate:
-    name: Address and undefined-behavior sanitizers
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Install fixed audit runtime
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/install-audit-sqlite
-      - name: Install native build dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q gcc make libsqlite3-dev libcurl4-openssl-dev \
-            libpam0g-dev libssl-dev libp11-kit-dev libpq-dev
-      - name: Run the complete native test registry under ASan and UBSan
-        working-directory: src
-        env:
-          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
-          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-        run: make sanitizers
+        run: make -C src script-tests SCRIPT_TESTS_SKIP=test_thin_client_proxy.py
 
   # Keep the workflow itself unfiltered: GitHub leaves required checks pending
   # when an entire workflow is skipped by a path filter. Job-level skips report
@@ -491,7 +471,10 @@ jobs:
           cache-dependency-path: server-go/go.sum
       - name: Contract, native bridge, external adapters and egress race tests
         working-directory: server-go
-        run: go test -race ./memory ./modules/memory ./modules/memory/backendstore ./modules/memory/cognee ./modules/memory/hillock ./modules/egress
+        # ./modules/memory is not listed: postgres-knowledge-replay runs that whole
+        # package with -race AND a real database, which this lane does not have,
+        # so running it here again only repeated the database-free subset.
+        run: go test -race ./memory ./modules/memory/backendstore ./modules/memory/cognee ./modules/memory/hillock ./modules/egress
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.13"
@@ -747,8 +730,14 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    name: unit-tests (${{ matrix.label }}/2)
+    timeout-minutes: 45
+    name: unit-tests (${{ matrix.label }}/4)
+    # The sqlite-shim registry runs ONCE, under ASan and UBSan. It used to run
+    # twice: plain here, then again unsharded in a separate sanitizer job that
+    # took ~20 minutes on its own. The real-Postgres shards below still run the
+    # same binaries at production optimization, so a defect that only shows
+    # without instrumentation is not left uncovered, and every shim-path test
+    # now also runs with leak, address and undefined-behavior detection.
     strategy:
       fail-fast: false
       matrix:
@@ -757,6 +746,10 @@ jobs:
             label: 1
           - shard_index: 1
             label: 2
+          - shard_index: 2
+            label: 3
+          - shard_index: 3
+            label: 4
     # Live Postgres sidecar so unit-test-aimee-db and unit-test-memory-postgres
     # exercise the real libpq path (placeholder rewriter, FTS5→tsvector
     # translation, ON CONFLICT targets, schema apply) instead of skipping
@@ -764,6 +757,8 @@ jobs:
     # memories_code_fts trigram index (see src/schema/postgres.sql).
     env:
       AIMEE_TEST_PG_URL: postgres://aimee:aimee@localhost:5432/aimee_test
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: "true"
     steps:
@@ -775,10 +770,10 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ~/.cache/ccache
-          key: unit-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-${{ github.run_id }}
+          key: unit-asan-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-${{ github.run_id }}
           restore-keys: |
-            unit-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-
-            unit-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-
+            unit-asan-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-
+            unit-asan-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -851,12 +846,15 @@ jobs:
           ccache --max-size=750M
           ccache --zero-stats
           cd src
+          # `sanitizers` is `unit-tests` in its own object tree with
+          # -fsanitize=address,undefined; the shard variables pass through.
           make -j"$(nproc)" CC="ccache gcc" \
             GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
-            UNIT_TEST_SHARD_COUNT=2 \
+            UNIT_TEST_SHARD_COUNT=4 \
             UNIT_TEST_SHARD_INDEX=${{ matrix.shard_index }} \
             UNIT_TEST_SKIP_P1=1 \
-            unit-tests
+            UNIT_TEST_SKIP_PROXY=1 \
+            sanitizers
           ccache --show-stats
 
   # The same unit-test binaries, linked against real libpq instead of the sqlite
@@ -980,6 +978,7 @@ jobs:
             UNIT_TEST_SHARD_COUNT=3 \
             UNIT_TEST_SHARD_INDEX=${{ matrix.shard_index }} \
             UNIT_TEST_SKIP_P1=1 \
+            UNIT_TEST_SKIP_PROXY=1 \
             unit-tests-pg
           ccache --show-stats
       - name: Live workflow database and API tests
@@ -1068,7 +1067,29 @@ jobs:
         # Report memory independently when an earlier PostgreSQL assertion fails.
         # Failed setup still fails this required job; no checks are waived.
         if: ${{ !cancelled() }}
-        run: make -C src GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 memory-owner-replay-check
+        run: |
+          make -C src GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+            MEMORY_OWNER_REPLAY_JSON="$RUNNER_TEMP/memory-owner-replay.json" \
+            memory-owner-replay-check
+      # The frozen MR-18 reliability invariants. They used to run in a separate
+      # memory-retrieval-eval job that re-ran 144 of the cases the step above
+      # just executed (./modules/memory, aimee-memory-eval and aimee-module,
+      # all with -race and REQUIRED=1), plus a hand-picked subset of
+      # ./modules/memory a third time. The checker now verifies those packages
+      # from the recorded run and executes only the packages that run nowhere
+      # else with a database: execution-policy and aimee/families.
+      - name: Frozen memory reliability invariants (no skipped cases)
+        env:
+          PGPASSWORD: aimee
+          AIMEE_TEST_PG_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_db1
+          AIMEE_DB_TEST_REQUIRED: '1'
+          AIMEE_MEMORY_REPLAY_REQUIRED: '1'
+        run: |
+          createdb -h 127.0.0.1 -U aimee memory_db1
+          python3 -m unittest benchmarks.tests.test_answerability benchmarks.tests.test_reliability_experiment
+          python3 scripts/check_memory_reliability_release.py \
+            --go-events "$RUNNER_TEMP/memory-owner-replay.json" \
+            --output "$RUNNER_TEMP/memory-reliability-release.json"
   # This is part of the protected unit-test aggregate below. The fake LSP peer
   # proves framing; these pinned providers prove what the shipping client can
   # and cannot do with real protocol implementations before a PR reaches main.
@@ -1850,113 +1871,9 @@ jobs:
       - name: Workflow name resolution
         run: cd src && make workflow-name-resolution-test
 
-  windows-cmake:
-    needs: change-scope
-    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-
-      - name: Set up MinGW-w64
-        shell: pwsh
-        run: |
-          # Reliable MinGW setup. Two failure modes this avoids:
-          #  (1) bare `choco install mingw` flakes ~50% on the Chocolatey CDN;
-          #  (2) the choco package's gcc path changes between versions (v15.2.0
-          #      moved it), so a hardcoded `...\mingw64\bin` breaks.
-          # Prefer a complete pre-installed MSYS2 toolchain (no network). Runner
-          # images have moved between mingw64 and ucrt64, so probe both. If neither
-          # is complete, use MSYS2's own package manager before falling back to
-          # Chocolatey; a Chocolatey outage must not be the only installation path.
-          function Find-MingwBin {
-            foreach ($candidate in @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin")) {
-              if ((Test-Path "$candidate\gcc.exe") -and
-                  (Test-Path "$candidate\mingw32-make.exe")) { return $candidate }
-            }
-            $g = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\mingw","C:\ProgramData\mingw64" `
-                   -Recurse -Filter gcc.exe -ErrorAction SilentlyContinue |
-                 Where-Object { $_.FullName -match 'mingw64' } | Select-Object -First 1
-            if ($g) {
-              $candidate = Split-Path $g.FullName
-              if (Test-Path "$candidate\mingw32-make.exe") { return $candidate }
-            }
-            return $null
-          }
-          $bin = Find-MingwBin
-          $pacman = "C:\msys64\usr\bin\pacman.exe"
-          if (-not $bin -and (Test-Path $pacman)) {
-            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
-              & $pacman -Sy --noconfirm --needed `
-                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make `
-                mingw-w64-ucrt-x86_64-openssl
-              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
-              $bin = Find-MingwBin
-            }
-          }
-          if (-not $bin) {
-            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
-              choco install mingw -y --no-progress
-              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
-              $bin = Find-MingwBin
-            }
-          }
-          if (-not $bin) { Write-Error "MinGW gcc.exe not found after install"; exit 1 }
-          $prefix = Split-Path $bin
-          if (-not (Test-Path "$prefix\include\openssl\evp.h") -and (Test-Path $pacman)) {
-            $opensslPackage = if ($bin -like "*\ucrt64\*") {
-              "mingw-w64-ucrt-x86_64-openssl"
-            } else {
-              "mingw-w64-x86_64-openssl"
-            }
-            & $pacman -Sy --noconfirm --needed $opensslPackage
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-          if (-not (Test-Path "$prefix\include\openssl\evp.h")) {
-            Write-Error "MinGW OpenSSL headers not found after install"; exit 1
-          }
-          Write-Host "Using MinGW at $bin"
-          & "$bin\gcc.exe" --version
-          echo "$bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "OPENSSL_ROOT_DIR=$($prefix -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Download SQLite amalgamation
-        shell: powershell
-        run: |
-          $url = "https://www.sqlite.org/2024/sqlite-amalgamation-3470200.zip"
-          Invoke-WebRequest -Uri $url -OutFile sqlite.zip
-          Expand-Archive sqlite.zip -DestinationPath sqlite-tmp
-          New-Item -ItemType Directory -Force -Path src\vendor\sqlite3
-          Copy-Item sqlite-tmp\sqlite-amalgamation-3470200\sqlite3.c src\vendor\sqlite3\
-          Copy-Item sqlite-tmp\sqlite-amalgamation-3470200\sqlite3.h src\vendor\sqlite3\
-
-      - name: Configure with CMake
-        run: cmake -B build -G "MinGW Makefiles" -DAIMEE_THIN_CLIENT=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF
-
-      # Windows ships only the thin client (aimee.exe). aimee-server, aimee-kb,
-      # aimee-gateway, and aimee-runtime-web are Linux/Docker components and are not
-      # built here, so the MinGW runner needs no libpq/zstd. The thin client
-      # still links OpenSSL crypto for executable-artifact trust verification.
-      - name: Build the thin client
-        run: cmake --build build --parallel 2 --target aimee
-
-      - name: Smoke test the client
-        shell: powershell
-        run: |
-          .\build\aimee.exe version
-          # The new remote transport must parse on Windows (Winsock path).
-          .\build\aimee.exe --server http://127.0.0.1:9 version
-
-      - name: Thin-client smoke (selfcheck, Winsock transport)
-        shell: bash
-        run: |
-          # Beyond `version`: drive a real subcommand with the HTTP transport env
-          # set, so the Windows client exercises its Winsock connect path (a
-          # connection error is the expected selfcheck outcome; a usage/parse
-          # error is not). Mirrors the macOS/Linux thin-client smoke.
-          AIMEE_BIN='./build/aimee.exe' FORCE_MODE=selfcheck \
-            bash scripts/aimee-thin-client-smoke.sh
-
+  # The only Windows thin-client build. A second job, windows-cmake, built the
+  # same target with the same flags (its one difference, -DWITH_UI=OFF, is
+  # forced by -DAIMEE_THIN_CLIENT=ON in CMakeLists.txt), so it was removed.
   windows-build:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
@@ -2156,81 +2073,6 @@ jobs:
             echo "FAIL: transient keychain leaked"; exit 1; fi
           echo "PASS: Secure Transport presented client cert; server verified CN=ci-macos-client; no keychain leak"
 
-  memory-retrieval-eval:
-    needs: change-scope
-    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    services:
-      postgres:
-        # Match the PostgreSQL 18 schema and Unicode rejection identity contract.
-        image: pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
-        env:
-          POSTGRES_USER: aimee
-          POSTGRES_PASSWORD: aimee
-          POSTGRES_DB: memory_eval
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U aimee -d memory_eval"
-          --health-interval 5s --health-timeout 5s --health-retries 12
-    env:
-      AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Install fixed audit runtime
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/install-audit-sqlite
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
-        with:
-          go-version-file: server-go/go.mod
-      - name: Runner diagnostics
-        run: |
-          echo "::group::Runner environment"
-          echo "ref: $GITHUB_REF  sha: $GITHUB_SHA  runner: $RUNNER_OS $RUNNER_ARCH"
-          uname -a
-          gcc --version 2>/dev/null || true
-          make --version 2>/dev/null | head -1 || true
-          df -h / | tail -1
-          echo "::endgroup::"
-      - name: Install dependencies
-        run: |
-          # GitHub runners preinstall third-party apt repos (e.g. packages.microsoft.com)
-          # that intermittently serve invalid/unsigned metadata and fail `apt-get update`
-          # hard — though none of our packages come from them. Drop them, then retry
-          # update with backoff so a transient mirror hiccup doesn't fail the job.
-          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          for attempt in 1 2 3; do
-            if timeout 240 sudo apt-get install -y -q gcc make \
-              libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-              libpq-dev postgresql-client; then
-              break
-            fi
-            test "$attempt" -lt 3 || exit 1
-            echo "apt-get install retry $attempt (transient mirror timeout)"
-            sleep $((attempt * 5))
-          done
-      - name: Memory retrieval eval (corpus + regression check)
-        run: cd src && make -j$(nproc) memory-retrieval-eval-check
-      - name: Frozen memory reliability invariants (no skipped cases)
-        env:
-          PGPASSWORD: aimee
-          AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
-          AIMEE_KB_STORE_REPLAY_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_replay
-          AIMEE_TEST_PG_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_db1
-          AIMEE_DB_TEST_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
-          AIMEE_DB_TEST_REQUIRED: '1'
-          AIMEE_MEMORY_REPLAY_REQUIRED: '1'
-          PGOPTIONS: '-c jit=off'
-        run: |
-          createdb -h 127.0.0.1 -U aimee memory_replay
-          createdb -h 127.0.0.1 -U aimee memory_db1
-          psql -h 127.0.0.1 -U aimee -d memory_replay -v ON_ERROR_STOP=1 -f scripts/postgres-hygiene-role.sql > /tmp/memory-replay-bootstrap.log
-          sed 's/__EMBED_DIM__/3/g' src/modules/kb/c/schema.sql | psql -h 127.0.0.1 -U aimee -d memory_replay --single-transaction -v ON_ERROR_STOP=1 >> /tmp/memory-replay-bootstrap.log
-          python3 -m unittest benchmarks.tests.test_answerability benchmarks.tests.test_reliability_experiment scripts.tests.test_memory_reliability_release
-          python3 scripts/check_memory_reliability_release.py --output /tmp/memory-reliability-release.json
-
   # Every role uses the candidate application and standardized encrypted store.
   e2e-docker:
     needs: change-scope
@@ -2243,10 +2085,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {topology: T1, storage: plain, suffix: ''}
-          - {topology: T2, storage: plain, suffix: ''}
-          - {topology: T3, storage: plain, suffix: ''}
-          - {topology: T2, storage: luks, suffix: '-luks'}
+          # No T1 leg: deployment-matrix.py's T1 path is exactly the KB block
+          # that T2 runs first, unchanged. Its one T1-only step, the plain KB
+          # upgrade, runs in the T3 leg.
+          #
+          # Every storage-agnostic gate runs once. T3 owns the KB-free personal
+          # memory gate, so T2 skips its identical copy; the LUKS leg proves
+          # both roles boot on encrypted storage and then runs the LUKS-only
+          # recovery, migration and upgrade checks instead of every
+          # application gate a second time.
+          - {topology: T2, storage: plain, suffix: '', matrix_args: '--skip-kb-free-gate'}
+          - {topology: T3, storage: plain, suffix: '', matrix_args: ''}
+          - {topology: T2, storage: luks, suffix: '-luks', matrix_args: '--boot-only'}
     name: e2e-docker (${{ matrix.topology }}${{ matrix.suffix }})
     env:
       AIMEE_APPLICATION_IMAGE: aimee:e2e
@@ -2295,7 +2145,7 @@ jobs:
         if: matrix.storage == 'luks'
         run: echo "AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)" >> "$GITHUB_ENV"
       - name: Run the shipped deployment and regression gates
-        run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} --output /tmp/aimee-e2e-evidence
+        run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} ${{ matrix.matrix_args }} --output /tmp/aimee-e2e-evidence
       - name: Installed Vault helper under hardened egress (both roles)
         if: matrix.topology == 'T3'
         run: python3 tests/e2e/egress-vault-e2e.py --output /tmp/aimee-e2e-evidence
@@ -2315,7 +2165,7 @@ jobs:
               --evidence "/tmp/aimee-e2e-evidence/luks-${mode}.json" "${extra[@]}"
           done
       - name: Recreate the current-layout KB and preserve scoped memory
-        if: matrix.topology == 'T1' || matrix.storage == 'luks'
+        if: matrix.topology == 'T3' || matrix.storage == 'luks'
         run: |
           sudo --preserve-env=AIMEE_APPLICATION_IMAGE,AIMEE_POSTGRES_IMAGE,AIMEE_EMBEDDER_IMAGE \
             python3 tests/e2e/kb-upgrade-e2e.py --storage ${{ matrix.storage }} --output /tmp/aimee-e2e-evidence
