@@ -37,6 +37,7 @@ RULES = {
     "retired-api": re.compile(r"\b(?:" + "|".join(RETIRED) + r")\b"),
     "driver-bypass": re.compile(r"->\s*(?:parse_response|build_request)\s*\("),
     "unclassified-tool-dispatch": re.compile(r"\bdispatch_tool_call(?:_ctx)?\s*\("),
+    "native-hook-field": re.compile(r'"(?:tool_name|tool_input|tool_response|tool_use_id|tool_call_id|tool_namespace)"'),
     "native-history-field": re.compile(
         r'"(?:tool_calls|function_call|function_call_output|tool_call_id|tool_use_id|'
         r'call_id|choices|reasoning_content|input_text|output_text|input_schema)"'),
@@ -48,6 +49,7 @@ CANONICAL_FILES = {
     "src/server/server_session_log.c", "src/server/server_chat_ir.c",
     "src/server/primary_session_adapter.c",
 }
+CANONICAL_HOOK_FILES = {"src/cmd_hooks.c", "src/server/server_hooks.c"}
 CANONICAL_TREES = ("server-go/modules/economizer/", "server-go/modules/memory/")
 # These call sites consume the tool/receipt owner's semantic outcome. The other
 # native output/compatibility boundaries are not declared globally migrated.
@@ -84,6 +86,8 @@ def findings(root: Path) -> list[dict]:
         source = without_comments(original)
         canonical = relative in CANONICAL_FILES or relative.startswith(CANONICAL_TREES)
         for rule, pattern in RULES.items():
+            if rule == "native-hook-field" and relative not in CANONICAL_HOOK_FILES:
+                continue
             if rule == "native-history-field" and not canonical:
                 continue
             if rule == "unclassified-tool-dispatch" and relative not in CLASSIFIED_DISPATCH_FILES:

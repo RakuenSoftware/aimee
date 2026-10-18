@@ -6,6 +6,7 @@
 #endif
 #include "server_http_internal.h"
 #include <aimee/ir/session_event.h>
+#include <aimee/translation/hook_ir.h>
 #include "server_http_routes_workspace.h"
 #include "server_http.h"
 #include "shadow_mirror.h"
@@ -1240,7 +1241,12 @@ int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
 {
    if (!rq->op || !rq->op[0])
       return err_json(resp, cap, 500, "route has no dispatch method");
-   cJSON *req = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : cJSON_CreateObject();
+   int tool_hook = !strcmp(rq->op, "hooks.pre") || !strcmp(rq->op, "hooks.post");
+   cJSON *req = tool_hook
+                    ? (rq->body_len > 0 && (size_t)rq->body_len <= AIMEE_HOOK_FRAME_MAX
+                           ? aimee_ir_json_parse_frame(rq->body, (size_t)rq->body_len)
+                           : NULL)
+                    : ((rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : cJSON_CreateObject());
    if (!req || !cJSON_IsObject(req))
    {
       cJSON_Delete(req);

@@ -27,12 +27,8 @@ int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire
    memset(out, 0, sizeof *out);
    if (!body || !length || length == SIZE_MAX)
       return -1;
-   const char *end = NULL;
-   cJSON *request = cJSON_ParseWithLengthOpts(body, length, &end, 0);
-   if (request && end)
-      while (end < body + length && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n'))
-         end++;
-   if (!request || !end || end != body + length || !aimee_ir_json_unique(request))
+   cJSON *request = aimee_ir_json_parse_frame(body, length);
+   if (!request)
    {
       cJSON_Delete(request);
       if (error && error_capacity)

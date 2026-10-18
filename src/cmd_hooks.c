@@ -1,4 +1,5 @@
 #include "workspace_hook_scope.h"
+#include <aimee/translation/hook_ir.h>
 /* cmd_hooks.c: the `aimee hooks` pre/post tool hook command.
  *
  * Session-start / launch / wrapup live in cmd_session_lifecycle.c; scope-aware
@@ -278,65 +279,49 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
    argc--;
    argv++;
 
-   /* Read JSON from stdin -- hook input is small (tool name + args) */
-   char input[65536];
-   size_t total = 0;
-   while (total < sizeof(input) - 1)
+   if (strcmp(phase, "pre") && strcmp(phase, "post"))
+      fatal("hooks requires 'pre' or 'post'");
+   size_t frame_length = 0;
+   char *input = read_stream_limited(stdin, AIMEE_HOOK_FRAME_MAX, &frame_length);
+   aimee_hook_ir_t hook = {0};
+   if (!input || aimee_hook_ir_parse(input, frame_length, &hook))
    {
-      ssize_t n = read(STDIN_FILENO, input + total, sizeof(input) - 1 - total);
-      if (n <= 0)
-         break;
-      total += (size_t)n;
+      free(input);
+      fatal("malformed or oversized native hook payload; tool call blocked");
    }
-   input[total] = '\0';
-
-   cJSON *json = cJSON_Parse(input);
-
+   free(input);
+   if (hook.call.tool_namespace && hook.call.tool_namespace[0])
+   {
+      aimee_hook_ir_free(&hook);
+      fatal("namespaced hook has no registered policy owner; tool call blocked");
+   }
    char hook_sid[64] = "";
-   if (hook_payload_session_id(json, hook_sid, sizeof(hook_sid)))
+   int sid_status = hook_session_id(hook.session_id, hook_sid, sizeof hook_sid);
+   if (sid_status < 0)
+   {
+      aimee_hook_ir_free(&hook);
+      fatal("invalid native hook session scope; tool call blocked");
+   }
+   if (sid_status > 0)
       session_id_set_override(hook_sid);
-
-   const char *tool_name = "";
-   char *tool_input_heap = NULL;
-   const char *tool_input = "{}";
-
-   if (json)
+   const char *tool_name = hook.call.tool_name;
+   char *tool_input_heap = aimee_hook_ir_arguments(&hook);
+   if (!tool_input_heap)
    {
-      cJSON *tn = cJSON_GetObjectItemCaseSensitive(json, "tool_name");
-      if (cJSON_IsString(tn))
-         tool_name = tn->valuestring;
-
-      cJSON *ti = cJSON_GetObjectItemCaseSensitive(json, "tool_input");
-      if (cJSON_IsString(ti))
-         tool_input = ti->valuestring;
-      else if (cJSON_IsObject(ti) || cJSON_IsArray(ti))
-      {
-         tool_input_heap = cJSON_PrintUnformatted(ti);
-         tool_input = tool_input_heap;
-      }
+      aimee_hook_ir_free(&hook);
+      fatal("cannot retain canonical hook arguments");
    }
-
+   const char *tool_input = tool_input_heap;
    char cwd[MAX_PATH_LEN] = "";
-   if (!hook_payload_cwd(json, cwd, sizeof(cwd)))
-      (void)getcwd(cwd, sizeof(cwd));
-   cJSON *scope_input = cJSON_Parse(tool_input);
-   static const char *const scope_keys[] = {"workdir", "cwd", "working_dir", "working_directory",
-                                            NULL};
-   for (int i = 0; scope_keys[i]; i++)
-   {
-      const char *value =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(scope_input, scope_keys[i]));
-      if (value && value[0])
-      {
-         snprintf(cwd, sizeof(cwd), "%s", value);
-         break;
-      }
-   }
-   cJSON_Delete(scope_input);
+   const char *effective_cwd = hook.tool_cwd && hook.tool_cwd[0] ? hook.tool_cwd : hook.cwd;
+   if (effective_cwd && effective_cwd[0])
+      snprintf(cwd, sizeof cwd, "%s", effective_cwd);
+   else
+      (void)getcwd(cwd, sizeof cwd);
    if (!workspace_hook_registered(cwd))
    {
       free(tool_input_heap);
-      cJSON_Delete(json);
+      aimee_hook_ir_free(&hook);
       return;
    }
 
@@ -473,11 +458,11 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
             emit_pretool_rewrite_unsupported_json(rc, msg);
             db1_shutdown();
             free(tool_input_heap);
-            cJSON_Delete(json);
+            aimee_hook_ir_free(&hook);
             exit(0);
          }
 
-         cJSON *orig = cJSON_Parse(tool_input);
+         cJSON *orig = cJSON_Duplicate(hook.call.tool_input, 1);
          if (orig)
          {
             if (rc == 1)
@@ -519,7 +504,7 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
          }
          db1_shutdown();
          free(tool_input_heap);
-         cJSON_Delete(json);
+         aimee_hook_ir_free(&hook);
          exit(0);
       }
 
@@ -530,20 +515,17 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
          const char *scan_content = NULL;
          const char *scan_file = NULL;
 
-         if (is_write_tool(tool_name) && json)
+         if (is_write_tool(tool_name))
          {
-            cJSON *ti_obj = cJSON_GetObjectItemCaseSensitive(json, "tool_input");
-            cJSON *parsed = cJSON_IsObject(ti_obj) ? ti_obj : cJSON_Parse(tool_input);
-            cJSON *content_item = cJSON_GetObjectItem(parsed, "content");
+            const cJSON *parsed = hook.call.tool_input;
+            const cJSON *content_item = cJSON_GetObjectItemCaseSensitive(parsed, "content");
             if (!content_item)
-               content_item = cJSON_GetObjectItem(parsed, "new_string");
-            if (content_item && cJSON_IsString(content_item))
+               content_item = cJSON_GetObjectItemCaseSensitive(parsed, "new_string");
+            if (cJSON_IsString(content_item))
                scan_content = content_item->valuestring;
-            cJSON *fp_item = cJSON_GetObjectItem(parsed, "file_path");
-            if (fp_item && cJSON_IsString(fp_item))
+            const cJSON *fp_item = cJSON_GetObjectItemCaseSensitive(parsed, "file_path");
+            if (cJSON_IsString(fp_item))
                scan_file = fp_item->valuestring;
-            if (!cJSON_IsObject(ti_obj) && parsed)
-               cJSON_Delete(parsed);
          }
 
          if (scan_content)
@@ -564,7 +546,7 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
                emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
                db1_shutdown();
                free(tool_input_heap);
-               cJSON_Delete(json);
+               aimee_hook_ir_free(&hook);
                exit(rc);
             }
          }
@@ -589,7 +571,7 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
 
       db1_shutdown();
       free(tool_input_heap);
-      cJSON_Delete(json);
+      aimee_hook_ir_free(&hook);
       exit((rc == 2 && msg[0] && hook_client_uses_pretool_json()) ? 0 : rc);
    }
    else if (strcmp(phase, "post") == 0)
@@ -599,9 +581,9 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
          char cwd[MAX_PATH_LEN];
          if (getcwd(cwd, sizeof(cwd)) && cwd[0])
          {
-            char payload_cwd[MAX_PATH_LEN];
-            if (hook_payload_cwd(json, payload_cwd, sizeof(payload_cwd)))
-               snprintf(cwd, sizeof(cwd), "%s", payload_cwd);
+            const char *payload_cwd = hook.cwd && hook.cwd[0] ? hook.cwd : hook.tool_cwd;
+            if (payload_cwd)
+               snprintf(cwd, sizeof cwd, "%s", payload_cwd);
             if (!is_aimee_worktree_path(cwd))
             {
                const char *pwd = getenv("PWD");
@@ -631,12 +613,16 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
 
       /* Record tool event for virtual context assembly (no-op when disabled). */
       {
-         cJSON *tr = json ? cJSON_GetObjectItemCaseSensitive(json, "tool_response") : NULL;
+         const cJSON *tr = hook.result.tool_result;
          cJSON *tr_content = tr ? cJSON_GetObjectItemCaseSensitive(tr, "content") : NULL;
-         const char *result_str =
-             (tr_content && cJSON_IsString(tr_content)) ? tr_content->valuestring : "";
+         char *structured_result =
+             tr && !cJSON_IsString(tr_content) ? cJSON_PrintUnformatted(tr) : NULL;
+         const char *result_str = cJSON_IsString(tr_content) ? tr_content->valuestring
+                                  : structured_result        ? structured_result
+                                                             : "";
          int result_bytes = (int)strlen(result_str);
          conv_ctx_record_event(session_id(), tool_name, tool_input, result_str, result_bytes);
+         free(structured_result);
       }
 
       if (ctx->json_output)
@@ -644,7 +630,7 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
          /* Attach structured diff fields from tool_response if present.
           * Hook consumers can read unified_diff / additions / deletions
           * without re-reading the file. */
-         cJSON *tr = json ? cJSON_GetObjectItemCaseSensitive(json, "tool_response") : NULL;
+         const cJSON *tr = hook.result.tool_result;
          cJSON *tr_content = tr ? cJSON_GetObjectItemCaseSensitive(tr, "content") : NULL;
          const char *tr_str =
              (tr_content && cJSON_IsString(tr_content)) ? tr_content->valuestring : NULL;
@@ -684,7 +670,7 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
    }
 
    db1_shutdown();
-   cJSON_Delete(json);
+   aimee_hook_ir_free(&hook);
    if (tool_input_heap)
       free(tool_input_heap);
 }

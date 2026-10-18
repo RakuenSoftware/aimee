@@ -22,6 +22,7 @@ void hook_scope_labels_for_cwd(const char *cwd, char *workspace_out, size_t work
 /* Resolve the host/agent session id from a hook payload. SessionStart already
  * receives a host-provided session_id; PreToolUse/PostToolUse must use the same
  * id or worktree state drifts to a PPID-derived Aimee session. */
+int hook_session_id(const char *payload_sid, char *out, size_t out_len);
 int hook_payload_session_id(const struct cJSON *hook_json, char *out, size_t out_len);
 
 /* Resolve the effective tool cwd from a hook payload. Prefer explicit hook

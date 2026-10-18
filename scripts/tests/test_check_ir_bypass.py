@@ -71,6 +71,15 @@ class IRBypassTests(unittest.TestCase):
             self.source(relative, 'dispatch_tool_call_ctx_status(tool, args, timeout, &failed);')
         checker.check(self.root)
 
+    def test_native_hook_envelopes_stop_at_entry_adapter(self):
+        for relative in checker.CANONICAL_HOOK_FILES:
+            path = self.source(relative, 'lookup(payload, "tool_input");')
+            with self.assertRaisesRegex(ValueError, "native-hook-field"):
+                checker.check(self.root)
+            path.unlink()
+        self.source("src/modules/translation/hook_ir.c", 'lookup(native, "tool_input");')
+        checker.check(self.root)
+
     def test_explicit_native_adapters_and_fixture_data_remain_valid(self):
         self.source("src/modules/translation/aimee_backend_openai.c", 'lookup(native, "tool_calls");')
         self.source("src/tests/test_native.c", 'anthropic_stream_feed_openai(s, p);')

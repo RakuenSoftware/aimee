@@ -2,6 +2,7 @@
 #define DEC_SERVER_H 1
 
 #include "aimee_features.h"
+#include <aimee/ir/aimee_ir.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <sys/types.h>
@@ -24,7 +25,7 @@ typedef struct cJSON cJSON;
 
 /* Authenticated hook memory interception, implemented with the other hook
  * helpers so the main method table does not own storage-policy details. */
-int server_memory_intercept(const char *tool, const char *tool_input, const char *cwd, cJSON *req,
+int server_memory_intercept(const aimee_block_t *call, const char *cwd, cJSON *req,
                             const char *client, char *msg, size_t msg_len);
 
 #define SERVER_PROTOCOL_VERSION 1

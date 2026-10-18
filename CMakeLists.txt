@@ -519,7 +519,15 @@ set(KB_STORE_HOST_ADAPTER_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_store_adapters/kb_service_backend_runtime.c
 )
 
+set(IR_BASE_SRCS
+    ${AIMEE_SRC_DIR}/modules/ir/aimee_ir.c
+)
+set(HOOK_IR_SRCS
+    ${AIMEE_SRC_DIR}/modules/translation/hook_ir.c
+)
 set(CORE_SRCS
+    ${HOOK_IR_SRCS}
+    ${IR_BASE_SRCS}
     ${AIMEE_SRC_DIR}/config_client.c
     ${AIMEE_SRC_DIR}/config_client_contract.c
     ${AIMEE_SRC_DIR}/config_client_accessors_0.c
@@ -819,6 +827,8 @@ if(NOT WITH_UI)
 endif()
 
 set(CLI_SRCS
+    ${HOOK_IR_SRCS}
+    ${IR_BASE_SRCS}
     ${AIMEE_SRC_DIR}/cli_main.c
     ${AIMEE_SRC_DIR}/cli_agent_setup.c
     ${AIMEE_SRC_DIR}/cli_session_start.c

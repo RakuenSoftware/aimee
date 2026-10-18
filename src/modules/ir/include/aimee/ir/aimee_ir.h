@@ -402,6 +402,9 @@ void aimee_response_free(aimee_response_t *r);
 /* Stable comparison-only JSON view; opaque source values remain unchanged.
  * Duplicate member names refuse rather than acquire conflicting meanings. */
 int aimee_ir_json_unique(const struct cJSON *json);
+/* Exact JSON frame admission: valid UTF-8, no embedded/escaped NUL, one value,
+ * and unambiguous object keys. Opaque numeric spelling is retained. Owned. */
+struct cJSON *aimee_ir_json_parse_frame(const char *frame, size_t length);
 struct cJSON *aimee_ir_json_canonical_copy(const struct cJSON *json);
 int aimee_ir_thinking_binding_valid(const char *binding);
 int aimee_ir_block_valid(const aimee_block_t *block);

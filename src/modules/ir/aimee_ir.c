@@ -259,6 +259,79 @@ int aimee_ir_json_unique(const cJSON *json)
 {
    return json_compare_view((cJSON *)json, 0, 0) == 0;
 }
+static int json_frame_text_valid(const unsigned char *text, size_t length)
+{
+   int in_string = 0;
+   for (size_t i = 0; i < length; i++)
+   {
+      unsigned int cp = text[i];
+      if (!cp || (cp < 0x20 && (in_string || (cp != '\t' && cp != '\r' && cp != '\n'))))
+         return 0;
+      if (cp == '"')
+         in_string = !in_string;
+      if (cp == 0x5c) /* JSON escape introducer. */
+      {
+         if (i + 5 < length && !memcmp(text + i + 1, "u0000", 5))
+            return 0;
+         if (i + 1 < length)
+            i++;
+         continue;
+      }
+      if (cp < 0x80)
+         continue;
+      unsigned int minimum;
+      size_t extra;
+      if (cp >= 0xc2 && cp <= 0xdf)
+      {
+         minimum = 0x80;
+         extra = 1;
+         cp &= 0x1f;
+      }
+      else if (cp >= 0xe0 && cp <= 0xef)
+      {
+         minimum = 0x800;
+         extra = 2;
+         cp &= 0x0f;
+      }
+      else if (cp >= 0xf0 && cp <= 0xf4)
+      {
+         minimum = 0x10000;
+         extra = 3;
+         cp &= 7;
+      }
+      else
+         return 0;
+      if (extra >= length - i)
+         return 0;
+      for (size_t j = 0; j < extra; j++)
+      {
+         unsigned int next = text[++i];
+         if ((next & 0xc0) != 0x80)
+            return 0;
+         cp = (cp << 6) | (next & 0x3f);
+      }
+      if (cp < minimum || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff))
+         return 0;
+   }
+   return 1;
+}
+cJSON *aimee_ir_json_parse_frame(const char *frame, size_t length)
+{
+   if (!frame || !length || length == SIZE_MAX ||
+       !json_frame_text_valid((const unsigned char *)frame, length))
+      return NULL;
+   const char *end = NULL;
+   cJSON *json = cJSON_ParseWithLengthOpts(frame, length, &end, 0);
+   while (end && end < frame + length && strchr(" \t\r\n", *end))
+      end++;
+   if (!json || !end || end != frame + length || !aimee_ir_json_unique(json))
+   {
+      cJSON_Delete(json);
+      return NULL;
+   }
+   return json;
+}
+
 cJSON *aimee_ir_json_canonical_copy(const cJSON *json)
 {
    cJSON *copy = cJSON_Duplicate(json, 1);

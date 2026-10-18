@@ -335,7 +335,9 @@ CONFIG_CLIENT_SRCS = config_client.c config_client_contract.c \
 CONFIG_CLIENT_OBJS = $(CONFIG_CLIENT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/module_json_call.o \
 	$(OBJDIR)/session_id.o
 
-IR_CONTRACT_SRCS = modules/ir/aimee_ir.c modules/ir/session_event.c modules/translation/aimee_frontend_openai.c modules/translation/aimee_backend_openai.c
+IR_BASE_SRCS = modules/ir/aimee_ir.c
+HOOK_IR_SRCS = modules/translation/hook_ir.c
+IR_CONTRACT_SRCS = $(HOOK_IR_SRCS) $(IR_BASE_SRCS) modules/ir/session_event.c modules/translation/aimee_frontend_openai.c modules/translation/aimee_backend_openai.c
 
 CORE_SRCS = interaction_event_names.c diagnose_render.c clarify_render.c ensemble_render.c ensemble_view.c execution_plan_list.c remote_client_claim.c jti_replay_consume.c wfe_store_lists.c db1_store_ready.c command_registry.c module_commands.c $(CONFIG_CLIENT_SRCS) client_config.c session_id.c toolset.c util.c util_url.c aimee_sha256.c module_json_call.c providers_client.c kb/kb_identity.c modules/git/forge_credentials.c forge_app_token.c modules/vault/runtime_secret.c modules/workspace/workspace_mirror.c report_enrichment.c modules/audit/audit_action.c modules/audit/audit_worm.c modules/audit/audit_worm_chain.c modules/audit/audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c rrf.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
             aimee_home.c shared/kb_paths.c provider_client.c kb_curator_provider.c \
@@ -571,7 +573,7 @@ CORE_SRCS += $(IR_CONTRACT_SRCS)
 
 # --- Pure client (aimee) ---
 CLI_SRCS = cli_kb_smoke.c cli_argspec.c cli_v1_routes.c cli_v1_routes_d.c cli_v1_routes_e.c cli_v1_routes_f.c cli_v1_routes_c.c cli_v1_routes_b.c cli_index_bootstrap.c cli_main.c cli_agent_setup.c cli_session_start.c hook_session_token.c session_degraded_notice.c cmd_self_update.c self_update_util.c harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c cli_attention_guard.c client_session_worktree.c session_worktree_key.c cli_code_audit.c cli_css.c cli_chat_stream.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c client_config.c modules/delegates/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c modules/protocols/acp/acp_server.c modules/workspace/cli_workspace_serve.c modules/workspace/workspace_client_diff.c cli_agent_keys.c cmd_workflow.c
-CLI_SRCS += http_content_encoding.c
+CLI_SRCS += http_content_encoding.c $(HOOK_IR_SRCS) $(IR_BASE_SRCS)
 CLI_SRCS += cli_proxy.c cli_proxy_cmd.c
 CLI_OBJS = $(CLI_SRCS:%.c=$(OBJDIR)/%.o)
 CLIENT_PLATFORM_OBJS = $(filter %/platform_ipc.o %/platform_net.o %/platform_path.o %/platform_process.o %/platform_random.o %/history.o %/cli_client.o %/cli_main.o,$(PLATFORM_OBJS))

@@ -2160,7 +2160,8 @@
         "kb_client_memory_scope_context_clear",
         "server_module_memory_data"
       ],
-      "sha256": "fd5207c828fba0b29affa0bc7162ef36a11831049d0c2641394d4626a1fa8e8e"
+      "sha256": "1e68d0b9c77aeb305c6c9cfcda5534224a5878a380b42d59595acd6f8f8a7fd7",
+      "boundary_review": "IR #3036: native pre/post hook payloads stop at the translation-owned canonical intent adapter. Existing authenticated harness identity, session policy, registered workspace binding and Go memory interception authority remain unchanged; no raw hook payload is published as model history. This records source-boundary reasoning, not independent production approval."
     },
     "src/server/server_api.c": {
       "disposition": "host-transport",
@@ -2197,15 +2198,17 @@
       "symbols": [
         "server_module_memory_data"
       ],
-      "sha256": "1d5099366b3f9928c4ca9e880819b0c21f590d736fb94393482f93204d1825d5"
+      "sha256": "60f3408d474bd0eb22637a7f964b79aae9238229f13f223e14d19c1d320c041c",
+      "boundary_review": "IR #3036: the existing memory interception host reads borrowed canonical tool arguments instead of reparsing a native hook argument string. The registered Go memory stage still owns classification and storage policy; its request fields, scope hints and spill behavior are unchanged. This records source-boundary reasoning, not independent production approval."
     },
     "src/server/server_http_routes.c": {
       "disposition": "protocol-catalog",
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "27a9e3146d8e52cd6b88acfab55e45bb52b8d719199c2f93e03dd1f1ef3bae3c",
-      "review": "2026-10-18: clears ownerless IR capture failure at independent op-run task boundaries. Existing memory_stats route, request fields and Go memory-owner calls are unchanged; no memory execution moves into C."
+      "sha256": "9c5796d904576b2093c3caf499522c652057d7cb9eb5e70afeaf90388b140a89",
+      "review": "2026-10-18: clears ownerless IR capture failure at independent op-run task boundaries. Existing memory_stats route, request fields and Go memory-owner calls are unchanged; no memory execution moves into C.",
+      "boundary_review": "IR #3036: pre/post hook HTTP routes validate exact original frame bytes before native JSON parsing can erase identity suffixes or invalid UTF-8. Other dispatch routes and memory handlers keep their existing behavior, capability checks, request fields and Go authority. This records source-boundary reasoning, not independent production approval."
     },
     "src/server/server_mcp.c": {
       "disposition": "host-transport",
@@ -2533,7 +2536,8 @@
         "memory_stats",
         "server_module_memory_data"
       ],
-      "sha256": "c352450213186fee7424ee65b200723d42e9cf1ff7025cd4b703d7d6dae964f9"
+      "sha256": "25a20fd6f2dd06e78ceef0338fa75fe24ce81f790f33c853598b2261a57e8ab2",
+      "boundary_review": "IR #3036 fixture: canonical native hooks retain authenticated harness/session policy and opaque attempt identity; foreign namespaces refuse before state mutation. Existing memory stage stubs and memory authority are unchanged."
     },
     "src/tests/test_server_facts_transport.c": {
       "disposition": "host-fixture",

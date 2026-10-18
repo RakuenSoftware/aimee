@@ -1602,6 +1602,7 @@ $(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/tests/test_guardrails.o $(OBJDIR)/
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cmd-hooks-scope: $(OBJDIR)/tests/test_cmd_hooks_scope.o \
+                             $(OBJDIR)/modules/translation/hook_ir.o $(OBJDIR)/modules/ir/aimee_ir.o \
                              $(OBJDIR)/cmd_hooks_scope.o $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1984,6 +1985,9 @@ $(TESTPREFIX)/unit-test-vault-provider-credential: $(OBJDIR)/tests/test_vault_pr
                       $(OBJDIR)/modules/vault/agent_credentials.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+
+$(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/modules/translation/hook_ir.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o
+$(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o
 
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/tests/support/module_bus_stub.o $(filter-out $(OBJDIR)/db1_client/sessions.o $(OBJDIR)/db1_client/conversation.o,$(DB1_CLIENT_OBJS)) $(OBJDIR)/server/server.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server/provider_settable.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
 	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o \

@@ -1715,7 +1715,7 @@ fi
 
 HOOK_PAYLOAD='{"tool_name":"Read","tool_input":"{\"file_path\":\"main.c\"}"}'
 set +e
-RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1) || true
+RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1)
 HOOK_RC=$?
 set -e
 if [ "$HOOK_RC" -ne 0 ] && echo "$RESP" | grep -q "server build mismatch"; then
@@ -1726,7 +1726,7 @@ if [ "$HOOK_RC" -ne 0 ] && echo "$RESP" | grep -q "server build mismatch"; then
     )
     start_server || true
     set +e
-    RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1) || true
+    RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1)
     HOOK_RC=$?
     set -e
 fi
@@ -1734,6 +1734,85 @@ if [ "$HOOK_RC" -eq 0 ]; then
     PASS=$((PASS + 1))
 else
     echo "FAIL: hooks pre safe file (expected exit 0, got $HOOK_RC)"
+    FAIL=$((FAIL + 1))
+fi
+
+# The actual server route admits both installed legacy clients and canonical
+# hook intents, while marked/mixed/foreign identities cannot fall back to a leaf.
+if python3 - "$HTTP_SOCK" "$AIMEE" <<'PYHOOK'
+import copy
+import http.client
+import json
+import os
+import socket
+import subprocess
+import sys
+
+class UnixHTTP(http.client.HTTPConnection):
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(20)
+        self.sock.connect(sys.argv[1])
+
+def invoke(phase, payload, expected_status=200):
+    conn = UnixHTTP('localhost')
+    try:
+        encoded = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        conn.request('POST', '/v1/hooks/' + phase, encoded,
+                     {'Content-Type': 'application/json'})
+        response = conn.getresponse()
+        body = json.loads(response.read())
+        assert response.status == expected_status, (response.status, body)
+        return body.get('result', body)
+    finally:
+        conn.close()
+
+legacy = {'tool_name': 'Read', 'session_id': 'integ-hook-ir',
+          'tool_input': {'file_path': 'main.c'}}
+canonical = {'ir_version': 1, 'session_id': 'integ-hook-ir', 'hook': {
+    'call': {'type': 'tool_use', 'name': 'Read', 'tool_id': 'opaque-hook-id',
+             'input': {'file_path': 'main.c', 'number': 9007199254740993}},
+    'result': {'type': 'tool_result', 'tool_id': 'opaque-hook-id',
+               'content': {'content': [{'type': 'text', 'text': 'read result'}]},
+               'is_error': False}}}
+for phase in ('pre', 'post'):
+    for payload in (legacy, canonical):
+        reply = invoke(phase, payload)
+        assert reply.get('exit_code') == 0, (phase, reply)
+    for mutation in ('mixed', 'version', 'namespace', 'pair'):
+        payload = copy.deepcopy(canonical)
+        if mutation == 'mixed':
+            payload['tool_name'] = 'Read'
+        elif mutation == 'version':
+            payload['ir_version'] = 2
+        elif mutation == 'namespace':
+            payload['hook']['call']['namespace'] = 'foreign'
+        else:
+            payload['hook']['result']['tool_id'] = 'different-call'
+        reply = invoke(phase, payload)
+        assert reply.get('exit_code') == 2, (phase, mutation, reply)
+# Validate original HTTP bytes before native JSON can discard identity suffixes.
+for phase in ('pre', 'post'):
+    for frame in (b'{"tool_name":"Read","tool_name":"Write"}',
+                  br'{"tool_name":"Read\u0000Write"}',
+                  b'{"tool_name":"\xc0\xaf"}',
+                  b'{"tool_name":"Read"} trailing',
+                  b'{"tool_name":"Read"}\0hidden'):
+        invoke(phase, frame, 400)
+# Validate the installed thin-client entry as well as server admission. Oversize
+# or malformed stdin must refuse rather than send a truncated valid prefix.
+for frame in (b'{"tool_name":"Read"} trailing',
+              b'{"tool_name":"Read"}\0hidden',
+              b'{"tool_name":"Read"} ' + b' ' * (4 * 1024 * 1024)):
+    proc = subprocess.run([sys.argv[2], 'hooks', 'pre'], input=frame,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
+    assert proc.returncode == 2, (proc.returncode, proc.stderr[:256])
+print('canonical/legacy hook RPC, identity refusal and complete thin-client frames pass')
+PYHOOK
+then
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: canonical hook transport and thin-client framing"
     FAIL=$((FAIL + 1))
 fi
 
