@@ -117,23 +117,16 @@ int session_compact_estimate_tokens(struct cJSON *messages);
 int session_compact_pressure(int prompt_tokens, int completion_tokens, int context_window,
                              const session_compact_config_t *cfg);
 
-/* Compact a cJSON messages array in-place.
- *
- * Steps performed:
- *   1. Repair orphaned tool call / result pairs (message_history_repair).
- *   2. Build a structured text summary of the messages to be discarded.
- *   3. Insert a "compaction boundary" user message with the summary.
- *   4. Remove the summarised messages, retaining the tail verbatim.
- *   5. Merge consecutive same-role messages (messages_compact_consecutive).
- *
- * The first message is always kept (typically the system prompt or original
- * task). Messages in the middle are summarised.  The last `retain_tail`
- * messages are kept verbatim.
- *
- * Returns 0 on success (result->compacted indicates whether anything changed).
- * Returns -1 on error (messages NULL or not an array).
- * cfg may be NULL to use built-in defaults.
- * out may be NULL if the caller only needs the side effect. */
+/* Compact a canonical {role,blocks} history in-place. Native/mixed/malformed
+ * history refuses; import legacy data at its explicit translation boundary.
+ * Owned IR supplies tool cycles, evidence, signatures and protected user/policy
+ * messages. The first message and aligned retained tail survive verbatim.
+ * Summaries are assistant evidence blocks with explicit compaction metadata.
+ * Repairs and the candidate history are staged before committing any change.
+ * Same-count compaction is accepted only when it reduces serialized context.
+ * Returns 0 on success, -1 on admission/allocation failure without mutation.
+ * cfg and out are optional. messages_removed counts folded messages; repairs
+ * may add explicitly cancelled tool results separately. */
 int session_compact(struct cJSON *messages, const session_compact_config_t *cfg,
                     session_compact_result_t *out);
 

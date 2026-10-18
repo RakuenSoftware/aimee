@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""Keep retired native paths out and migrated IR consumers free of wire readers.
+
+Native entry/egress adapters remain explicit boundaries. This guard expands with
+consumer cutovers; its scope is not a claim that every consumer has migrated.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+from pathlib import Path
+import re
+
+ROOT = Path(__file__).resolve().parents[1]
+LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
+RETIRED = (
+    "raw_responses", "build_provider_body", "translate_request",
+    "agent_ir_parse_json_response", "agent_ir_parse_responses",
+    "agent_build_openai_assistant_message_from_calls",
+    "delegate_respond_message", "agent_tools_strip_delegate_respond",
+    "anthropic_system_to_text", "anthropic_messages_to_openai",
+    "anthropic_tools_to_openai", "anthropic_tools_to_responses",
+    "anthropic_response_from_parsed", "anthropic_stream_begin",
+    "anthropic_stream_feed_openai", "anthropic_stream_finish",
+    "anthropic_stream_get_usage", "anthropic_stream_free", "emit_message_as_sse",
+)
+RULES = {
+    "retired-api": re.compile(r"\b(?:" + "|".join(RETIRED) + r")\b"),
+    "driver-bypass": re.compile(r"->\s*(?:parse_response|build_request)\s*\("),
+    "native-history-field": re.compile(
+        r'"(?:tool_calls|function_call|function_call_output|tool_call_id|tool_use_id|'
+        r'call_id|choices|reasoning_content|input_text|output_text|input_schema)"'),
+}
+# These consumers have completed their history/algorithm cutover. Provider
+# adapters are intentionally outside this set; newly migrated consumers join it.
+CANONICAL_FILES = {
+    "src/posix/agent_runtime.c", "src/server/session_compact.c",
+    "src/server/server_session_log.c", "src/server/server_chat_ir.c",
+    "src/server/primary_session_adapter.c",
+}
+CANONICAL_TREES = ("server-go/modules/economizer/", "server-go/modules/memory/")
+# Match strings first so comment markers inside literal data remain literal data.
+LEXEMES = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`[^`]*`|/\*[\s\S]*?\*/|//[^\n]*')
+
+
+def without_comments(source: str) -> str:
+    return LEXEMES.sub(
+        lambda match: re.sub(r"[^\n]", " ", match[0])
+        if match[0].startswith(("/*", "//")) else match[0], source)
+
+
+def sources(root: Path):
+    for tree in ("src", "server-go"):
+        for path in sorted((root / tree).rglob("*")):
+            relative = path.relative_to(root).as_posix()
+            if path.suffix not in {".c", ".h", ".go"} or not path.is_file():
+                continue
+            parts = path.relative_to(root).parts
+            if any(part in {"tests", "testdata", "vendor", "build", "tmp"} for part in parts) or path.name.endswith("_test.go"):
+                continue
+            yield relative, path
+
+
+def findings(root: Path) -> list[dict]:
+    result = []
+    for relative, path in sources(root):
+        original = path.read_text(encoding="utf-8")
+        source = without_comments(original)
+        canonical = relative in CANONICAL_FILES or relative.startswith(CANONICAL_TREES)
+        for rule, pattern in RULES.items():
+            if rule == "native-history-field" and not canonical:
+                continue
+            for match in pattern.finditer(source):
+                line = source.count("\n", 0, match.start()) + 1
+                literal = original.splitlines()[line - 1].strip()
+                result.append({"file": relative, "rule": rule, "line": line,
+                               "sha256": hashlib.sha256(literal.encode()).hexdigest()})
+    return result
+
+
+def check(root: Path, today: dt.date | None = None) -> None:
+    today = today or dt.date.today()
+    ledger = json.loads((root / LEDGER).read_text(encoding="utf-8"))
+    if set(ledger) != {"version", "exceptions"} or ledger["version"] != 1 or not isinstance(ledger["exceptions"], list):
+        raise ValueError("invalid IR bypass ledger")
+    actual = findings(root)
+    for exception in ledger["exceptions"]:
+        required = {"file", "rule", "line", "sha256", "owner", "reason", "expires", "retirement"}
+        if set(exception) != required or exception["rule"] not in RULES:
+            raise ValueError("incomplete IR bypass exception")
+        if any(not isinstance(exception[key], str) or not exception[key].strip()
+               for key in required - {"line"}) or type(exception["line"]) is not int:
+            raise ValueError("invalid IR bypass exception fields")
+        if dt.date.fromisoformat(exception["expires"]) <= today:
+            raise ValueError(f"expired IR bypass exception: {exception['file']}")
+        identity = {key: exception[key] for key in ("file", "rule", "line", "sha256")}
+        if identity not in actual:
+            raise ValueError(f"unused or changed IR bypass exception: {exception['file']}")
+        actual.remove(identity)
+    if actual:
+        raise ValueError("IR bypasses:\n" + "\n".join(
+            f"{row['file']}:{row['line']} {row['rule']}" for row in actual))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=ROOT)
+    args = parser.parse_args()
+    try:
+        check(args.root)
+    except (ValueError, KeyError, OSError) as error:
+        raise SystemExit(f"ir-bypass: {error}") from error
+    print("ir-bypass: retired APIs and migrated C/Go consumers clean; no native fallback")
+
+
+if __name__ == "__main__":
+    main()

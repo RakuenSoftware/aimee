@@ -227,6 +227,12 @@
       "ctest": false,
       "make": true,
       "module": "governance",
+      "test": "src/tests/test_governance_bus_bridge.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "governance",
       "test": "src/tests/test_response_governance_stage.c"
     },
     {

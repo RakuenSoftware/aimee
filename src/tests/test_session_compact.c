@@ -1,97 +1,55 @@
-/* test_session_compact.c: unit tests for session compaction */
+/* Owned canonical session compaction: protected instructions, complete cycles,
+ * literal evidence, atomic admission and unbounded retained tails. */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include "aimee.h"
 #include "session_compact.h"
+#include "util.h"
 #include <aimee/ir/session_event.h>
 #include "cJSON.h"
-
 #define PASS(name) printf("  PASS: %s\n", name)
 
-/* ------------------------------------------------------------------ helpers */
-
-static cJSON *make_msg(const char *role, const char *content)
+static cJSON *make_msg(const char *role, const char *text)
 {
-   cJSON *msg = cJSON_CreateObject();
-   cJSON_AddStringToObject(msg, "role", role);
-   cJSON_AddStringToObject(msg, "content", content);
-   return msg;
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)text};
+   aimee_message_t message = {.role = (char *)role, .blocks = &block, .n_blocks = 1};
+   cJSON *json = aimee_ir_message_json(&message);
+   assert(json);
+   return json;
+}
+static cJSON *make_canonical_text(const char *role, const char *text)
+{
+   return make_msg(role, text);
+}
+static cJSON *make_long_conversation(int count)
+{
+   cJSON *messages = cJSON_CreateArray();
+   cJSON_AddItemToArray(messages, make_msg("user", "task"));
+   for (int i = 0; i < count; i++)
+      cJSON_AddItemToArray(messages, make_msg("assistant", "evidence"));
+   return messages;
 }
 
-/* An OpenAI-shape assistant tool call: {role, tool_calls:[{function:{name,arguments}}]} */
-static cJSON *make_tool_call_msg(const char *name, const char *arguments)
-{
-   cJSON *msg = cJSON_CreateObject();
-   cJSON_AddStringToObject(msg, "role", "assistant");
-   cJSON *calls = cJSON_AddArrayToObject(msg, "tool_calls");
-   cJSON *call = cJSON_CreateObject();
-   cJSON_AddStringToObject(call, "id", "call_1");
-   cJSON *fn = cJSON_AddObjectToObject(call, "function");
-   cJSON_AddStringToObject(fn, "name", name);
-   cJSON_AddStringToObject(fn, "arguments", arguments);
-   cJSON_AddItemToArray(calls, call);
-   return msg;
-}
-
-/* An Anthropic-shape assistant tool call: content:[{type:"tool_use",name,input}] */
-static cJSON *make_tool_use_msg(const char *name, const char *input_key, const char *input_val)
-{
-   cJSON *msg = cJSON_CreateObject();
-   cJSON_AddStringToObject(msg, "role", "assistant");
-   cJSON *content = cJSON_AddArrayToObject(msg, "content");
-   cJSON *block = cJSON_CreateObject();
-   cJSON_AddStringToObject(block, "type", "tool_use");
-   cJSON_AddStringToObject(block, "name", name);
-   cJSON *input = cJSON_AddObjectToObject(block, "input");
-   cJSON_AddStringToObject(input, input_key, input_val);
-   cJSON_AddItemToArray(content, block);
-   return msg;
-}
-
-/* Returns 1 if `sig_prefix` ("<name>:") matches any captured signature. */
-static int sigs_have_tool(const session_compact_result_t *r, const char *name)
-{
-   size_t nlen = strlen(name);
-   for (int i = 0; i < r->readonly_sig_count; i++)
-      if (strncmp(r->readonly_sigs[i], name, nlen) == 0 && r->readonly_sigs[i][nlen] == ':')
-         return 1;
-   return 0;
-}
-
-/* Pad an array with filler pairs so the compactor has something to summarise
- * beyond the anchor and the retained tail. */
-static void pad_conversation(cJSON *arr, int n_pairs)
-{
-   for (int i = 0; i < n_pairs; i++)
-   {
-      char ubuf[64], abuf[64];
-      snprintf(ubuf, sizeof(ubuf), "Filler user message %d with enough text to matter.", i);
-      snprintf(abuf, sizeof(abuf), "Filler assistant reply %d with enough text to matter.", i);
-      cJSON_AddItemToArray(arr, make_msg("user", ubuf));
-      cJSON_AddItemToArray(arr, make_msg("assistant", abuf));
-   }
-}
-
-/* Build a messages array with n_user user/assistant pairs plus a leading system msg */
-static cJSON *make_long_conversation(int n_pairs)
+static cJSON *make_record_conversation(void)
 {
    cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "You are a helpful assistant."));
-   for (int i = 0; i < n_pairs; i++)
+   cJSON_AddItemToArray(arr, make_msg("system", "You are a coder."));
+   cJSON_AddItemToArray(arr, make_msg("user", "Investigate the retry path."));
+   cJSON_AddItemToArray(
+       arr, make_msg("assistant", "[verdict] The retry budget is capped upstream at 4a7f19c2b8e30d1"
+                                  "5f6a2c9b40e7d3814aa9c5162; nothing downstream can raise it."));
+   cJSON_AddItemToArray(
+       arr,
+       make_msg("assistant", "[hazard] Touching #778 without the migration will strand rows."));
+   for (int i = 0; i < 8; i++)
    {
-      char ubuf[64], abuf[64];
-      snprintf(ubuf, sizeof(ubuf), "User question %d: please explain topic %d in detail.", i, i);
-      snprintf(abuf, sizeof(abuf), "Assistant answer %d: here is a thorough explanation...", i);
-      cJSON_AddItemToArray(arr, make_msg("user", ubuf));
-      cJSON_AddItemToArray(arr, make_msg("assistant", abuf));
+      cJSON_AddItemToArray(arr, make_msg("user", "continue"));
+      cJSON_AddItemToArray(arr, make_msg("assistant", "[wip] Reading src/modules/git/retry.c."));
    }
    return arr;
 }
-
-/* ------------------------------------------------------------------ pressure tests */
 
 static void test_pressure_unknown_window(void)
 {
@@ -141,8 +99,6 @@ static void test_pressure_custom_thresholds(void)
    PASS("pressure_custom_thresholds");
 }
 
-/* ------------------------------------------------------------------ token estimation */
-
 static void test_estimate_tokens_null(void)
 {
    assert(session_compact_estimate_tokens(NULL) == 0);
@@ -181,247 +137,6 @@ static void test_estimate_tokens_grows_with_content(void)
    PASS("estimate_tokens_grows_with_content");
 }
 
-/* ------------------------------------------------------------------ compaction tests */
-
-static void test_compact_null_messages(void)
-{
-   int rc = session_compact(NULL, NULL, NULL);
-   assert(rc == -1);
-   PASS("compact_null_messages");
-}
-
-static void test_compact_too_few_messages(void)
-{
-   /* 3 messages: not enough to compact (need at least 1+1+retain_tail = 8 with defaults) */
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "You are helpful."));
-   cJSON_AddItemToArray(arr, make_msg("user", "hello"));
-   cJSON_AddItemToArray(arr, make_msg("assistant", "hi there"));
-
-   session_compact_result_t result;
-   int rc = session_compact(arr, NULL, &result);
-   assert(rc == 0);
-   assert(result.compacted == 0);
-   assert(cJSON_GetArraySize(arr) == 3);
-   cJSON_Delete(arr);
-   PASS("compact_too_few_messages");
-}
-
-static void test_compact_long_conversation(void)
-{
-   /* 20 pairs = 41 messages total (with system) — well above the minimum */
-   cJSON *arr = make_long_conversation(20);
-   int before = cJSON_GetArraySize(arr);
-   assert(before == 41);
-
-   session_compact_result_t result;
-   int rc = session_compact(arr, NULL, &result);
-   assert(rc == 0);
-   assert(result.compacted == 1);
-   assert(result.messages_before == 41);
-   assert(result.messages_after < before);
-   assert(result.messages_removed > 0);
-
-   /* Summary should mention compaction */
-   assert(strstr(result.summary, "compacted") != NULL);
-
-   cJSON_Delete(arr);
-   PASS("compact_long_conversation");
-}
-
-static void test_compact_preserves_first_message(void)
-{
-   cJSON *arr = make_long_conversation(15);
-
-   int rc = session_compact(arr, NULL, NULL);
-   assert(rc == 0);
-
-   /* First message must still be the system message */
-   cJSON *first = cJSON_GetArrayItem(arr, 0);
-   assert(first);
-   const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(first, "role"));
-   assert(role && strcmp(role, "system") == 0);
-
-   cJSON_Delete(arr);
-   PASS("compact_preserves_first_message");
-}
-
-static void test_compact_boundary_marker_present(void)
-{
-   cJSON *arr = make_long_conversation(15);
-
-   int rc = session_compact(arr, NULL, NULL);
-   assert(rc == 0);
-
-   /* Second message should be the boundary marker */
-   int n = cJSON_GetArraySize(arr);
-   assert(n >= 2);
-   cJSON *second = cJSON_GetArrayItem(arr, 1);
-   assert(second);
-   /* The boundary marker has _compaction_boundary=true */
-   cJSON *marker = cJSON_GetObjectItem(second, "_compaction_boundary");
-   assert(marker && cJSON_IsTrue(marker));
-
-   cJSON_Delete(arr);
-   PASS("compact_boundary_marker_present");
-}
-
-static void test_compact_retains_tail(void)
-{
-   /* Use a small custom retain_tail of 4 and a long conversation */
-   session_compact_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.retain_tail = 4;
-
-   cJSON *arr = make_long_conversation(20);
-   /* Record the last 4 messages' content before compaction */
-   int n_before = cJSON_GetArraySize(arr);
-   char last_contents[4][128];
-   for (int i = 0; i < 4; i++)
-   {
-      cJSON *msg = cJSON_GetArrayItem(arr, n_before - 4 + i);
-      const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "content"));
-      snprintf(last_contents[i], sizeof(last_contents[i]), "%s", text ? text : "");
-   }
-
-   session_compact_result_t result;
-   int rc = session_compact(arr, &cfg, &result);
-   assert(rc == 0);
-   assert(result.compacted == 1);
-
-   /* The last 4 messages should still appear in the array */
-   int n_after = cJSON_GetArraySize(arr);
-   /* system + boundary (may merge with first tail user msg) + remaining tail.
-    * With retain_tail=4: worst case is 5 (boundary merges with first user tail). */
-   assert(n_after >= 3);
-
-   /* Verify all last 4 content strings appear somewhere in the compacted array */
-   char *serialised = cJSON_PrintUnformatted(arr);
-   assert(serialised);
-   for (int i = 0; i < 4; i++)
-   {
-      if (last_contents[i][0])
-         assert(strstr(serialised, last_contents[i]) != NULL);
-   }
-   free(serialised);
-
-   cJSON_Delete(arr);
-   PASS("compact_retains_tail");
-}
-
-static void test_compact_summary_has_original_task(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "You are a coder."));
-   cJSON_AddItemToArray(arr, make_msg("user", "fix the login bug"));
-   /* Add enough messages to trigger compaction */
-   for (int i = 0; i < 10; i++)
-   {
-      cJSON_AddItemToArray(arr, make_msg("assistant", "working on it..."));
-      cJSON_AddItemToArray(arr, make_msg("user", "ok"));
-   }
-
-   session_compact_result_t result;
-   int rc = session_compact(arr, NULL, &result);
-   assert(rc == 0);
-   assert(result.compacted == 1);
-
-   /* Summary should mention the original task */
-   assert(strstr(result.summary, "fix the login bug") != NULL);
-
-   cJSON_Delete(arr);
-   PASS("compact_summary_has_original_task");
-}
-
-static void test_compact_summary_has_flashback_json(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "You are a coder."));
-   cJSON_AddItemToArray(arr, make_msg("user", "Update src/memory_core.c to use SSE."));
-   cJSON_AddItemToArray(
-       arr, make_msg("assistant", "Decision: use SSE for the frontend transport path."));
-   cJSON_AddItemToArray(arr,
-                        make_msg("user", "The build failed with permission denied in src/db.c."));
-   for (int i = 0; i < 8; i++)
-   {
-      cJSON_AddItemToArray(arr, make_msg("assistant", "Working through the fix."));
-      cJSON_AddItemToArray(arr, make_msg("user", "continue"));
-   }
-
-   session_compact_result_t result;
-   int rc = session_compact(arr, NULL, &result);
-   assert(rc == 0);
-   assert(result.compacted == 1);
-   assert(strstr(result.summary, "Flashback JSON:") != NULL);
-   assert(strstr(result.summary, "\"files_modified\"") != NULL);
-   assert(strstr(result.summary, "src/memory_core.c") != NULL);
-   assert(strstr(result.summary, "\"errors_encountered\"") != NULL);
-   assert(strstr(result.summary, "\"decisions_made\"") != NULL);
-
-   cJSON_Delete(arr);
-   PASS("compact_summary_has_flashback_json");
-}
-
-static void test_compact_summary_has_structured_sections(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "You are a coder."));
-   cJSON_AddItemToArray(arr, make_msg("user", "Fix the delegate routing fallback."));
-   cJSON_AddItemToArray(arr,
-                        make_msg("assistant", "Decision: update the OpenRouter fallback list."));
-   for (int i = 0; i < 8; i++)
-   {
-      cJSON_AddItemToArray(arr, make_msg("user", "continue"));
-      cJSON_AddItemToArray(arr, make_msg("assistant", "Working through src/agent_bridge.c."));
-   }
-
-   session_compact_result_t result;
-   int rc = session_compact(arr, NULL, &result);
-   assert(rc == 0);
-   assert(result.compacted == 1);
-   assert(strstr(result.summary, "[CONTEXT COMPACTION"));
-
-   const char *sections[] = {"## Active Task",       "## Goal",           "## Constraints",
-                             "## Completed Actions", "## Active State",   "## In Progress",
-                             "## Blocked",           "## Key Decisions",  "## Resolved Questions",
-                             "## Pending User Asks", "## Relevant Files", NULL};
-   for (int i = 0; sections[i]; i++)
-      assert(strstr(result.summary, sections[i]) != NULL);
-
-   cJSON_Delete(arr);
-   PASS("compact_summary_has_structured_sections");
-}
-
-/* ------------------------------------------------- record-derived derivation */
-
-/* Build a conversation whose salient facts are INVISIBLE to the legacy prose scan:
- *   - the settled conclusion contains no "decided"/"chosen"/"will use" keyword
- *   - the hazard contains no "error"/"failed"/"denied" keyword
- *   - the identifiers are a commit sha and an issue ref, which token_looks_like_path()
- *     does not recognise at all (it only matches slashes and known extensions)
- * Both are tagged with the register grammar the agent itself emits. */
-static cJSON *make_record_conversation(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "You are a coder."));
-   cJSON_AddItemToArray(arr, make_msg("user", "Investigate the retry path."));
-   cJSON_AddItemToArray(
-       arr, make_msg("assistant", "[verdict] The retry budget is capped upstream at 4a7f19c2b8e30d1"
-                                  "5f6a2c9b40e7d3814aa9c5162; nothing downstream can raise it."));
-   cJSON_AddItemToArray(
-       arr,
-       make_msg("assistant", "[hazard] Touching #778 without the migration will strand rows."));
-   for (int i = 0; i < 8; i++)
-   {
-      cJSON_AddItemToArray(arr, make_msg("user", "continue"));
-      cJSON_AddItemToArray(arr, make_msg("assistant", "[wip] Reading src/modules/git/retry.c."));
-   }
-   return arr;
-}
-
-/* A missing optional module fails open to the legacy derivation. Register
- * classification itself is pinned in the Go module and cross-language runtime
- * suite; this C-only test deliberately has no bus host. */
 static void test_record_uses_register_classification(void)
 {
    cJSON *arr = make_record_conversation();
@@ -446,8 +161,6 @@ static void test_record_uses_register_classification(void)
    PASS("record_uses_register_classification");
 }
 
-/* With no module attached, the heuristic fallback does not invent a
- * coordinate it cannot recognize. */
 static void test_record_conserves_coordinates_verbatim(void)
 {
    cJSON *arr = make_record_conversation();
@@ -465,8 +178,6 @@ static void test_record_conserves_coordinates_verbatim(void)
    PASS("record_conserves_coordinates_verbatim");
 }
 
-/* The enabled record path is byte-identical to the legacy fallback when the Go
- * module is unavailable. */
 static void test_record_flag_selects_derivation(void)
 {
    cJSON *legacy_arr = make_record_conversation();
@@ -491,8 +202,6 @@ static void test_record_flag_selects_derivation(void)
    PASS("record_flag_selects_derivation");
 }
 
-/* The legacy path stays intact and selectable — it is the fallback until the
- * quality baseline can say which derivation is better. */
 static void test_record_off_keeps_legacy_sections(void)
 {
    cJSON *arr = make_record_conversation();
@@ -516,8 +225,6 @@ static void test_record_off_keeps_legacy_sections(void)
    PASS("record_off_keeps_legacy_sections");
 }
 
-/* Every section the boundary contract promises is still present on the record
- * path — a different derivation must not change the summary's shape. */
 static void test_record_keeps_section_contract(void)
 {
    cJSON *arr = make_record_conversation();
@@ -538,353 +245,6 @@ static void test_record_keeps_section_contract(void)
 
    cJSON_Delete(arr);
    PASS("record_keeps_section_contract");
-}
-
-static void test_compact_idempotent_on_small(void)
-{
-   /* Compacting an already-small array should be a no-op */
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "hello"));
-   cJSON_AddItemToArray(arr, make_msg("assistant", "hi"));
-
-   session_compact_result_t r1, r2;
-   session_compact(arr, NULL, &r1);
-   session_compact(arr, NULL, &r2);
-
-   assert(r1.compacted == 0);
-   assert(r2.compacted == 0);
-
-   cJSON_Delete(arr);
-   PASS("compact_idempotent_on_small");
-}
-
-static void test_compact_result_counts(void)
-{
-   cJSON *arr = make_long_conversation(20); /* 41 messages */
-   session_compact_result_t result;
-   int rc = session_compact(arr, NULL, &result);
-   assert(rc == 0);
-   assert(result.messages_before == 41);
-   assert(result.messages_after > 0);
-   assert(result.messages_removed > 0);
-   assert(result.messages_before > result.messages_after);
-   /* Removed + after = before + 1 (boundary marker added) */
-   /* Note: messages_compact_consecutive may further reduce count */
-   cJSON_Delete(arr);
-   PASS("compact_result_counts");
-}
-
-/* ------------------------------------------------------------------ main */
-
-/* ------------------------------------------- pre-boundary signature capture */
-
-static void test_sigs_capture_readonly_calls(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "You are an execution agent."));
-   cJSON_AddItemToArray(arr, make_tool_call_msg("read_file", "{\"path\":\"src/a.c\"}"));
-   cJSON_AddItemToArray(arr, make_tool_call_msg("grep", "{\"pattern\":\"foo\"}"));
-   pad_conversation(arr, 8);
-
-   session_compact_result_t r;
-   assert(session_compact(arr, NULL, &r) == 0);
-   assert(r.compacted == 1);
-   assert(sigs_have_tool(&r, "read_file"));
-   assert(sigs_have_tool(&r, "grep"));
-   assert(r.readonly_sig_count == 2);
-
-   cJSON_Delete(arr);
-   PASS("sigs capture read-only calls from the discarded range");
-}
-
-/* THE falsification: a repeated `test` after an edit is progress, not
- * re-derivation. If this list ever counts it, rounds-to-resume is a lie. */
-static void test_sigs_exclude_mutating_and_verifying_tools(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "You are an execution agent."));
-   cJSON_AddItemToArray(arr, make_tool_call_msg("test", "{\"suite\":\"unit\"}"));
-   cJSON_AddItemToArray(arr, make_tool_call_msg("edit_file", "{\"path\":\"src/a.c\"}"));
-   cJSON_AddItemToArray(arr, make_tool_call_msg("write_file", "{\"path\":\"src/b.c\"}"));
-   cJSON_AddItemToArray(arr, make_tool_call_msg("bash", "{\"cmd\":\"make\"}"));
-   cJSON_AddItemToArray(arr, make_tool_call_msg("verify", "{}"));
-   cJSON_AddItemToArray(arr, make_tool_call_msg("env_get", "{\"key\":\"PATH\"}"));
-   pad_conversation(arr, 8);
-
-   session_compact_result_t r;
-   assert(session_compact(arr, NULL, &r) == 0);
-   assert(r.compacted == 1);
-   assert(!sigs_have_tool(&r, "test"));
-   assert(!sigs_have_tool(&r, "edit_file"));
-   assert(!sigs_have_tool(&r, "write_file"));
-   assert(!sigs_have_tool(&r, "bash"));
-   assert(!sigs_have_tool(&r, "verify"));
-   assert(!sigs_have_tool(&r, "env_get"));
-   assert(r.readonly_sig_count == 0);
-
-   cJSON_Delete(arr);
-   PASS("sigs exclude mutating/verifying tools (repeated test is progress)");
-}
-
-static void test_sigs_distinguish_args(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "You are an execution agent."));
-   /* Same tool, same args, twice -> one fact. */
-   cJSON_AddItemToArray(arr, make_tool_call_msg("read_file", "{\"path\":\"src/a.c\"}"));
-   cJSON_AddItemToArray(arr, make_tool_call_msg("read_file", "{\"path\":\"src/a.c\"}"));
-   /* Same tool, different args -> a distinct fact. */
-   cJSON_AddItemToArray(arr, make_tool_call_msg("read_file", "{\"path\":\"src/b.c\"}"));
-   pad_conversation(arr, 8);
-
-   session_compact_result_t r;
-   assert(session_compact(arr, NULL, &r) == 0);
-   assert(r.readonly_sig_count == 2); /* deduped, but args-sensitive */
-
-   cJSON_Delete(arr);
-   PASS("sigs dedupe identical calls and separate differing args");
-}
-
-static void test_sigs_capture_anthropic_shape(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "You are an execution agent."));
-   cJSON_AddItemToArray(arr, make_tool_use_msg("find_symbol", "name", "session_compact"));
-   cJSON_AddItemToArray(arr, make_tool_use_msg("edit_file", "path", "src/a.c"));
-   pad_conversation(arr, 8);
-
-   session_compact_result_t r;
-   assert(session_compact(arr, NULL, &r) == 0);
-   assert(sigs_have_tool(&r, "find_symbol"));
-   assert(!sigs_have_tool(&r, "edit_file"));
-   assert(r.readonly_sig_count == 1);
-
-   cJSON_Delete(arr);
-   PASS("sigs capture the Anthropic tool_use shape");
-}
-
-static void test_sigs_only_from_discarded_range(void)
-{
-   /* A read-only call inside the retained tail is NOT lost context — the agent
-    * can still see it after the boundary, so it must not be counted. */
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "You are an execution agent."));
-   cJSON_AddItemToArray(arr, make_tool_call_msg("read_file", "{\"path\":\"discarded.c\"}"));
-   pad_conversation(arr, 8);
-   /* Land this call inside the final SESSION_COMPACT_RETAIN_TAIL messages. */
-   cJSON_AddItemToArray(arr, make_tool_call_msg("grep", "{\"pattern\":\"retained\"}"));
-   pad_conversation(arr, 2);
-
-   session_compact_result_t r;
-   assert(session_compact(arr, NULL, &r) == 0);
-   assert(r.compacted == 1);
-   assert(sigs_have_tool(&r, "read_file")); /* discarded -> counted */
-   assert(!sigs_have_tool(&r, "grep"));     /* retained  -> not counted */
-
-   cJSON_Delete(arr);
-   PASS("sigs come only from the discarded range, not the retained tail");
-}
-
-static void test_sigs_cap_is_reported_not_silent(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "You are an execution agent."));
-   for (int i = 0; i < SESSION_COMPACT_MAX_SIGS + 10; i++)
-   {
-      char args[64];
-      snprintf(args, sizeof(args), "{\"path\":\"src/file_%d.c\"}", i);
-      cJSON_AddItemToArray(arr, make_tool_call_msg("read_file", args));
-   }
-   pad_conversation(arr, 8);
-
-   session_compact_result_t r;
-   assert(session_compact(arr, NULL, &r) == 0);
-   assert(r.readonly_sig_count == SESSION_COMPACT_MAX_SIGS);
-   assert(r.readonly_sigs_dropped == 10); /* never silently truncate */
-
-   cJSON_Delete(arr);
-   PASS("sig cap reports what it dropped");
-}
-
-static void test_sigs_zero_when_nothing_compacted(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "You are an execution agent."));
-   cJSON_AddItemToArray(arr, make_tool_call_msg("read_file", "{\"path\":\"src/a.c\"}"));
-
-   session_compact_result_t r;
-   assert(session_compact(arr, NULL, &r) == 0);
-   assert(r.compacted == 0);
-   assert(r.readonly_sig_count == 0); /* no boundary -> no lost context */
-
-   cJSON_Delete(arr);
-   PASS("no compaction -> no signatures");
-}
-
-/* ------------------------------------------------------------------ tool pairing */
-
-/* Every tool result left in the compacted array must follow a call it answers. */
-static int every_result_has_its_call(const cJSON *arr)
-{
-   char seen[32][32];
-   int n_seen = 0;
-   const cJSON *msg = NULL;
-   cJSON_ArrayForEach(msg, arr)
-   {
-      const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "type"));
-      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-      const char *call = NULL, *result = NULL;
-      if (type && strcmp(type, "function_call") == 0)
-         call = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "call_id"));
-      else if (type && strcmp(type, "function_call_output") == 0)
-         result = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "call_id"));
-      else if (role && strcmp(role, "tool") == 0)
-         result = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "tool_call_id"));
-      else if (role && strcmp(role, "assistant") == 0)
-      {
-         const cJSON *tc = cJSON_GetArrayItem(cJSON_GetObjectItem(msg, "tool_calls"), 0);
-         call = tc ? cJSON_GetStringValue(cJSON_GetObjectItem(tc, "id")) : NULL;
-      }
-      if (call && n_seen < 32)
-         snprintf(seen[n_seen++], sizeof(seen[0]), "%s", call);
-      if (result)
-      {
-         int found = 0;
-         for (int i = 0; i < n_seen; i++)
-            found |= strcmp(seen[i], result) == 0;
-         if (!found)
-            return 0;
-      }
-   }
-   return 1;
-}
-
-static cJSON *make_openai_call(const char *id)
-{
-   cJSON *msg = make_tool_call_msg("read_file", "{\"path\":\"a.c\"}");
-   cJSON *call = cJSON_GetArrayItem(cJSON_GetObjectItem(msg, "tool_calls"), 0);
-   cJSON_ReplaceItemInObject(call, "id", cJSON_CreateString(id));
-   return msg;
-}
-
-static cJSON *make_openai_result(const char *id)
-{
-   cJSON *msg = make_msg("tool", "file contents");
-   cJSON_AddStringToObject(msg, "tool_call_id", id);
-   return msg;
-}
-
-/* The cut is a message count; with retain_tail=1 it lands on the tool result, so the
- * call it answers was summarised away and the result went to the provider alone. */
-static void test_cut_keeps_openai_call_with_its_result(void)
-{
-   session_compact_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.retain_tail = 1;
-   cJSON *arr = make_long_conversation(6);
-   cJSON_AddItemToArray(arr, make_openai_call("call_tail"));
-   cJSON_AddItemToArray(arr, make_openai_result("call_tail"));
-
-   session_compact_result_t result;
-   assert(session_compact(arr, &cfg, &result) == 0);
-   assert(result.compacted == 1);
-   assert(every_result_has_its_call(arr));
-   char *s = cJSON_PrintUnformatted(arr);
-   assert(strstr(s, "\"tool_call_id\":\"call_tail\"") && strstr(s, "\"id\":\"call_tail\""));
-   free(s);
-   cJSON_Delete(arr);
-   PASS("cut_keeps_openai_call_with_its_result");
-}
-
-static cJSON *make_responses_item(const char *type, const char *call_id)
-{
-   cJSON *it = cJSON_CreateObject();
-   cJSON_AddStringToObject(it, "type", type);
-   cJSON_AddStringToObject(it, "call_id", call_id);
-   if (strcmp(type, "function_call") == 0)
-   {
-      cJSON_AddStringToObject(it, "name", "read_file");
-      cJSON_AddStringToObject(it, "arguments", "{}");
-   }
-   else
-      cJSON_AddStringToObject(it, "output", "file contents");
-   return it;
-}
-
-static cJSON *make_responses_message(const char *role, const char *part_type, const char *text)
-{
-   cJSON *it = cJSON_CreateObject();
-   cJSON_AddStringToObject(it, "type", "message");
-   cJSON_AddStringToObject(it, "role", role);
-   cJSON *content = cJSON_AddArrayToObject(it, "content");
-   cJSON *part = cJSON_CreateObject();
-   cJSON_AddStringToObject(part, "type", part_type);
-   cJSON_AddStringToObject(part, "text", text);
-   cJSON_AddItemToArray(content, part);
-   return it;
-}
-
-/* Responses history keeps calls and outputs as role-less items, and a parallel turn
- * puts both calls before both outputs: the cut must move past the whole group. */
-static void test_cut_keeps_responses_parallel_calls(void)
-{
-   session_compact_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.retain_tail = 2;
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_responses_message("user", "input_text", "anchor"));
-   for (int i = 0; i < 6; i++)
-   {
-      cJSON_AddItemToArray(arr, make_responses_message("user", "input_text", "filler question"));
-      cJSON_AddItemToArray(arr,
-                           make_responses_message("assistant", "output_text", "filler answer"));
-   }
-   cJSON_AddItemToArray(arr, make_responses_item("function_call", "fc_1"));
-   cJSON_AddItemToArray(arr, make_responses_item("function_call", "fc_2"));
-   cJSON_AddItemToArray(arr, make_responses_item("function_call_output", "fc_1"));
-   cJSON_AddItemToArray(arr, make_responses_item("function_call_output", "fc_2"));
-
-   session_compact_result_t result;
-   assert(session_compact(arr, &cfg, &result) == 0);
-   assert(result.compacted == 1);
-   assert(every_result_has_its_call(arr));
-   cJSON_Delete(arr);
-   PASS("cut_keeps_responses_parallel_calls");
-}
-
-/* Responses text parts and role-less calls reach the summary: the task came from an
- * input_text part, and the summarised function_call is counted rather than skipped. */
-static void test_summary_reads_responses_items(void)
-{
-   session_compact_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.retain_tail = 2;
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_responses_message("user", "input_text", "anchor"));
-   cJSON_AddItemToArray(arr, make_responses_message("user", "input_text", "Port the parser to IR"));
-   cJSON_AddItemToArray(arr, make_responses_item("function_call", "fc_9"));
-   cJSON_AddItemToArray(arr, make_responses_item("function_call_output", "fc_9"));
-   cJSON_AddItemToArray(arr, make_responses_message("assistant", "output_text", "Done reading"));
-   for (int i = 0; i < 3; i++)
-   {
-      cJSON_AddItemToArray(arr, make_responses_message("user", "input_text", "next"));
-      cJSON_AddItemToArray(arr, make_responses_message("assistant", "output_text", "ok"));
-   }
-
-   session_compact_result_t result;
-   assert(session_compact(arr, &cfg, &result) == 0);
-   assert(result.compacted == 1);
-   assert(strstr(result.summary, "Port the parser to IR"));
-   assert(strstr(result.summary, "1 tool call"));
-   cJSON_Delete(arr);
-   PASS("summary_reads_responses_items");
-}
-
-static cJSON *make_canonical_text(const char *role, const char *text)
-{
-   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)text};
-   aimee_message_t message = {.role = (char *)role, .blocks = &block, .n_blocks = 1};
-   return aimee_ir_message_json(&message);
 }
 
 static void test_canonical_compaction_preserves_instructions_and_pairs(void)
@@ -946,10 +306,11 @@ static void test_canonical_tool_evidence_in_fallback(void)
                    "{\"type\":\"tool_use\",\"tool_id\":\"b\",\"name\":\"read\",\"input\":{}}]}"));
    cJSON_AddItemToArray(
        messages,
-       cJSON_Parse(
-           "{\"role\":\"tool\",\"blocks\":[{\"type\":\"text\",\"text\":\"first\"},"
-           "{\"type\":\"tool_result\",\"tool_id\":\"a\",\"content\":\"error in src/second.c\"},"
-           "{\"type\":\"tool_result\",\"tool_id\":\"b\",\"content\":\"changed src/third.c\"}]}"));
+       cJSON_Parse("{\"role\":\"tool\",\"blocks\":[{\"type\":\"text\",\"text\":\"first\"},"
+                   "{\"type\":\"tool_result\",\"tool_id\":\"a\",\"is_error\":true,\"content\":"
+                   "\"error in src/second.c\"},"
+                   "{\"type\":\"tool_result\",\"tool_id\":\"b\",\"is_error\":false,\"content\":"
+                   "\"changed src/third.c\"}]}"));
    for (int i = 0; i < 12; i++)
       cJSON_AddItemToArray(messages, make_canonical_text("assistant", "progress"));
    session_compact_config_t cfg = {.retain_tail = 3};
@@ -962,50 +323,251 @@ static void test_canonical_tool_evidence_in_fallback(void)
    PASS("canonical fallback keeps all tool evidence");
 }
 
+static void test_native_and_mixed_refuse_atomically(void)
+{
+   const char *inputs[] = {
+       "null",
+       "{}",
+       "[{\"role\":\"user\",\"content\":\"native\"}]",
+       "[{\"type\":\"function_call\",\"call_id\":\"a\",\"name\":\"read\",\"arguments\":\"{}\"}]",
+       "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"a\",\"name\":"
+       "\"read\",\"input\":{}}]}]",
+       "[{\"role\":\"user\",\"blocks\":[]},{\"role\":\"user\",\"content\":\"native\"}]",
+       "[{\"role\":\"user\",\"blocks\":[],\"content\":\"native\"}]",
+       "[{\"role\":\"user\",\"role\":\"assistant\",\"blocks\":[]}]",
+       "[{\"role\":\"user\",\"blocks\":[{\"type\":\"tool_use\",\"name\":\"read\",\"tool_id\":\"a\","
+       "\"input\":{}}]}]",
+       "[{\"role\":\"invented\",\"blocks\":[]}]"};
+   for (size_t i = 0; i < sizeof inputs / sizeof inputs[0]; i++)
+   {
+      cJSON *messages = cJSON_Parse(inputs[i]);
+      assert(messages);
+      char *before = cJSON_PrintUnformatted(messages);
+      session_compact_result_t result;
+      assert(session_compact(messages, NULL, &result) == -1);
+      char *after = cJSON_PrintUnformatted(messages);
+      assert(before && after && !strcmp(before, after));
+      assert(!result.compacted);
+      free(before);
+      free(after);
+      cJSON_Delete(messages);
+   }
+   assert(session_compact(NULL, NULL, NULL) == -1);
+   cJSON *empty = cJSON_CreateArray();
+   assert(session_compact(empty, NULL, NULL) == 0);
+   cJSON_Delete(empty);
+   PASS("native, mixed and malformed history refuses without mutation");
+}
+
+static void test_tail_over_256_retains_opaque_values(void)
+{
+   cJSON *messages = make_long_conversation(20);
+   cJSON *expected = cJSON_CreateArray();
+   for (int i = 0; i < 300; i++)
+   {
+      char text[64];
+      snprintf(text, sizeof text, "retained evidence %d", i);
+      cJSON *message = make_msg("assistant", text);
+      if (i == 150)
+      {
+         cJSON_Delete(message);
+         message = cJSON_Parse(
+             "{\"role\":\"assistant\",\"blocks\":["
+             "{\"type\":\"thinking\",\"text\":\"private\",\"signature\":\"native-signature\"},"
+             "{\"type\":\"text\",\"text\":\"answer\",\"cache_control\":\"ephemeral\",\"cache_ttl\":"
+             "\"1h\"}]} ");
+      }
+      cJSON_AddItemToArray(expected, cJSON_Duplicate(message, 1));
+      cJSON_AddItemToArray(messages, message);
+   }
+   session_compact_config_t config = {.retain_tail = 300};
+   session_compact_result_t result;
+   assert(session_compact(messages, &config, &result) == 0 && result.compacted);
+   assert(result.messages_before == 321 && result.messages_after == 302 &&
+          result.messages_removed == 19);
+   for (int i = 0; i < 300; i++)
+      assert(
+          cJSON_Compare(cJSON_GetArrayItem(expected, i), cJSON_GetArrayItem(messages, i + 2), 1));
+   assert(cJSON_IsTrue(
+       cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(messages, 1), "_compaction_boundary")));
+   cJSON_Delete(expected);
+   cJSON_Delete(messages);
+   PASS("300-message tail keeps opaque reasoning, cache metadata and order");
+}
+
+static void test_same_message_count_can_reduce_context(void)
+{
+   cJSON *messages = cJSON_CreateArray();
+   cJSON *expected = cJSON_CreateArray();
+   cJSON_AddItemToArray(messages, make_msg("user", "original task"));
+   char *long_text = malloc(30001);
+   assert(long_text);
+   memset(long_text, 'x', 30000);
+   long_text[30000] = 0;
+   for (int i = 0; i < 2; i++)
+   {
+      cJSON *instruction = make_msg("user", i ? "later constraint" : "first constraint");
+      cJSON_AddItemToArray(expected, cJSON_Duplicate(instruction, 1));
+      cJSON_AddItemToArray(messages, instruction);
+      cJSON_AddItemToArray(messages, make_msg("assistant", long_text));
+   }
+   free(long_text);
+   for (int i = 0; i < 3; i++)
+      cJSON_AddItemToArray(messages, make_msg("assistant", "retained tail"));
+   int before = session_compact_estimate_tokens(messages);
+   session_compact_config_t config = {.retain_tail = 3};
+   session_compact_result_t result;
+   assert(session_compact(messages, &config, &result) == 0 && result.compacted);
+   assert(result.messages_before == 8 && result.messages_after == 8 &&
+          result.messages_removed == 0);
+   assert(session_compact_estimate_tokens(messages) < before / 2);
+   assert(cJSON_Compare(cJSON_GetArrayItem(expected, 0), cJSON_GetArrayItem(messages, 1), 1));
+   assert(cJSON_Compare(cJSON_GetArrayItem(expected, 1), cJSON_GetArrayItem(messages, 3), 1));
+   cJSON_Delete(expected);
+   cJSON_Delete(messages);
+   PASS("protected instructions survive while same-count compaction reduces context");
+}
+
+static void test_readonly_signatures_and_repair(void)
+{
+   cJSON *messages = cJSON_CreateArray();
+   cJSON_AddItemToArray(messages, make_msg("user", "task"));
+   cJSON *call = cJSON_Parse("{\"role\":\"assistant\",\"blocks\":[]}");
+   cJSON *result = cJSON_Parse("{\"role\":\"tool\",\"blocks\":[]}");
+   cJSON *calls = cJSON_GetObjectItemCaseSensitive(call, "blocks");
+   cJSON *results = cJSON_GetObjectItemCaseSensitive(result, "blocks");
+   for (int i = 0; i < 70; i++)
+   {
+      char id[64];
+      snprintf(id, sizeof id, "native-call-%d", i);
+      cJSON *input = cJSON_CreateObject();
+      cJSON_AddNumberToObject(input, "index", i);
+      aimee_block_t tool = {
+          .type = AIMEE_BLK_TOOL_USE, .tool_id = id, .tool_name = "read_file", .tool_input = input};
+      cJSON_AddItemToArray(calls, aimee_ir_block_json(&tool));
+      cJSON_Delete(input);
+      cJSON *output = cJSON_CreateString("read evidence");
+      tool = (aimee_block_t){.type = AIMEE_BLK_TOOL_RESULT, .tool_id = id, .tool_result = output};
+      cJSON_AddItemToArray(results, aimee_ir_block_json(&tool));
+      cJSON_Delete(output);
+   }
+   cJSON_AddItemToArray(messages, call);
+   cJSON_AddItemToArray(messages, result);
+   for (int i = 0; i < 12; i++)
+      cJSON_AddItemToArray(messages, make_msg("assistant", "progress"));
+   session_compact_config_t config = {.retain_tail = 3};
+   session_compact_result_t report;
+   assert(session_compact(messages, &config, &report) == 0 && report.compacted);
+   assert(report.readonly_sig_count == 64 && report.readonly_sigs_dropped == 6);
+   assert(strstr(report.summary, "70 tool calls"));
+   cJSON_Delete(messages);
+   char sig[64], other[64];
+   assert(session_compact_tool_sig("read_file", "{\"n\":9007199254740993}", sig, sizeof sig));
+   assert(session_compact_tool_sig("read_file", "{\"n\":9007199254740992}", other, sizeof other));
+   assert(strcmp(sig, other));
+   assert(!session_compact_tool_sig("write_file", "{}", sig, sizeof sig));
+   assert(!session_compact_tool_sig("test", "{}", sig, sizeof sig));
+   char focused[8192];
+   assert(!session_compact_focused("Investigate the retry path", focused, sizeof focused));
+   assert(strstr(focused, "Investigate the retry path"));
+   PASS("all canonical calls counted, signature capacity reported, exact arguments distinguished");
+}
+
+static size_t fault_at, allocation_count;
+static int allocation_faulted;
+static void *fail_one_allocation(size_t size)
+{
+   allocation_count++;
+   if (allocation_count == fault_at)
+   {
+      allocation_faulted = 1;
+      return NULL;
+   }
+   return malloc(size);
+}
+
+static void test_allocation_refusal_is_atomic(void)
+{
+   int reached_success = 0;
+   for (fault_at = 1; fault_at < 2000; fault_at++)
+   {
+      cJSON *messages = make_long_conversation(20);
+      cJSON_AddItemToArray(
+          messages, make_msg("assistant", "error reading src/failure.c; using guarded retry"));
+      char *before = cJSON_PrintUnformatted(messages);
+      assert(before);
+      allocation_count = 0;
+      allocation_faulted = 0;
+      cJSON_Hooks hooks = {.malloc_fn = fail_one_allocation, .free_fn = free};
+      cJSON_InitHooks(&hooks);
+      session_compact_result_t report;
+      int rc = session_compact(messages, NULL, &report);
+      cJSON_InitHooks(NULL);
+      char *after = cJSON_PrintUnformatted(messages);
+      assert(after);
+      if (allocation_faulted)
+      {
+         if (rc != -1 || strcmp(before, after))
+            fprintf(stderr, "allocation fault %zu: rc=%d changed=%d\n", fault_at, rc,
+                    strcmp(before, after) != 0);
+         assert(rc == -1 && !strcmp(before, after));
+      }
+      else
+      {
+         assert(rc == 0 && report.compacted);
+         reached_success = 1;
+      }
+      free(before);
+      free(after);
+      cJSON_Delete(messages);
+      if (reached_success)
+         break;
+   }
+   assert(reached_success);
+   PASS("every JSON allocation failure refuses without changing durable source history");
+}
+
+static void test_summary_utf8_boundaries(void)
+{
+   char topic[4001];
+   topic[0] = 0;
+   for (int i = 0; i < 300; i++)
+      strcat(topic, "工具😀");
+   char summary[8192];
+   assert(!session_compact_focused(topic, summary, sizeof summary));
+   assert(text_is_valid_utf8(summary));
+   for (size_t size = 60; size < 400; size++)
+   {
+      memset(summary, 'x', sizeof summary);
+      assert(!session_compact_focused(topic, summary, size));
+      assert(strlen(summary) < size && text_is_valid_utf8(summary));
+   }
+   PASS("bounded summaries and caller buffers retain complete Unicode code points");
+}
+
 int main(void)
 {
-   printf("session_compact:\n");
-   test_canonical_tool_evidence_in_fallback();
-   test_canonical_compaction_preserves_instructions_and_pairs();
-
    test_pressure_unknown_window();
    test_pressure_ok();
    test_pressure_warn();
    test_pressure_compact();
    test_pressure_custom_thresholds();
-
    test_estimate_tokens_null();
    test_estimate_tokens_basic();
    test_estimate_tokens_grows_with_content();
-
-   test_compact_null_messages();
-   test_compact_too_few_messages();
-   test_compact_long_conversation();
-   test_compact_preserves_first_message();
-   test_compact_boundary_marker_present();
-   test_compact_retains_tail();
-   test_compact_summary_has_original_task();
-   test_compact_summary_has_flashback_json();
-   test_compact_summary_has_structured_sections();
    test_record_uses_register_classification();
    test_record_conserves_coordinates_verbatim();
    test_record_flag_selects_derivation();
    test_record_off_keeps_legacy_sections();
    test_record_keeps_section_contract();
-   test_compact_idempotent_on_small();
-   test_compact_result_counts();
-   test_cut_keeps_openai_call_with_its_result();
-   test_cut_keeps_responses_parallel_calls();
-   test_summary_reads_responses_items();
-
-   test_sigs_capture_readonly_calls();
-   test_sigs_exclude_mutating_and_verifying_tools();
-   test_sigs_distinguish_args();
-   test_sigs_capture_anthropic_shape();
-   test_sigs_only_from_discarded_range();
-   test_sigs_cap_is_reported_not_silent();
-   test_sigs_zero_when_nothing_compacted();
-
-   printf("all session_compact tests passed\n");
+   test_canonical_compaction_preserves_instructions_and_pairs();
+   test_canonical_tool_evidence_in_fallback();
+   test_native_and_mixed_refuse_atomically();
+   test_allocation_refusal_is_atomic();
+   test_summary_utf8_boundaries();
+   test_tail_over_256_retains_opaque_values();
+   test_same_message_count_can_reduce_context();
+   test_readonly_signatures_and_repair();
+   puts("owned session compaction: passed");
    return 0;
 }
