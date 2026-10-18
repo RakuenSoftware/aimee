@@ -9,7 +9,10 @@ import json
 import os
 from pathlib import Path
 import socket
+import shutil
+import subprocess
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -298,6 +301,35 @@ def main():
             assert tool_reply["is_error"] is missing, tool_reply
             assert ("IDENTITY_READ_CONTROL" in tool_reply["result"]) is not missing, tool_reply
         print("canonical dispatch: exact advertised read executes; foreign namespace and unknown identity return durable errors")
+
+        # Server delegates require the real sandbox backend; never substitute
+        # a fake executor to make storage qualification appear to pass.
+        docker = shutil.which("docker")
+        sandbox_ready = docker and subprocess.run([docker, "version"], stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, timeout=15, check=False).returncode == 0
+        if not sandbox_ready:
+            print("SKIP: delegate learning completion/readback (real Docker sandbox unavailable)")
+        else:
+            # Exercise the real async delegate -> DB1 learning writer -> next-run
+            # prompt reader. Completion must follow capture, not race its readback.
+            lesson = "Delegate succeeded in role 'format'"
+            for run in range(2):
+                before = len(observed)
+                launched = api("/v1/delegate/run", dict(role="format", persona="engineer", via="ir-live-a", tools=False,
+                    prompt=f"IR_LEARNING_RECEIPT_{run} return PRIMARY_OK", session_id=sid,
+                    cwd=str(home), max_turns=2))
+                assert launched.get("job_id", 0) > 0, launched
+                deadline = time.monotonic() + 30
+                while True:
+                    status = api("/v1/delegate/status", dict(job_id=launched["job_id"], full_result=True))
+                    if status.get("job_status") in ("done", "failed", "partial", "cancelled"):
+                        break
+                    assert time.monotonic() < deadline, status
+                    time.sleep(0.05)
+                assert status["job_status"] == "done" and "PRIMARY_OK" in status["result"], status
+                assert len(observed) > before, status
+                assert (lesson in json.dumps(observed[before])) == (run == 1), observed[before]
+            print("delegate learning: terminal completion precedes durable learning readback into the next actual execution")
 
 
     finally:

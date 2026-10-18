@@ -4922,7 +4922,9 @@ $(TESTPREFIX)/unit-test-delegate-liveness: $(OBJDIR)/tests/test_delegate_livenes
 
 $(TESTPREFIX)/unit-test-delegate-exit-classify: \
                                     $(OBJDIR)/tests/test_delegate_exit_classify.o \
-                                    $(OBJDIR)/delegate_exit_classify.o
+                                    $(OBJDIR)/delegate_exit_classify.o \
+                                    $(OBJDIR)/modules/delegates/delegate_run_phases.o \
+                                    $(OBJDIR)/interaction_event_names.o $(OBJDIR)/cJSON.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-agent-parallel: $(OBJDIR)/tests/test_agent_parallel.o \

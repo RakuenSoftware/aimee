@@ -1876,6 +1876,13 @@ static void delegate_worker_run(void *arg)
    delegate_checkout_add_result_ex(resp, launch_worktree_path, launch_head, parent_worktree_path,
                                    parent_worktree_head, parent_worktree_fingerprint);
 
+   /* Persist observed learning before clients can observe terminal completion.
+    * Capture failure is explicit and does not rewrite the task's execution result. */
+   if (delegate_record_exit_learning(sid, role, &result, rc, max_turns, &acfg, target_agent,
+                                     learning_goal, deleg_id) != 0)
+      LOG_WARN("delegate", "delegate %s: terminal execution has incomplete learning capture",
+               deleg_id);
+
    free(result.response);
    free(handoff_prompt);
    free(resolved_prompt);
@@ -1895,10 +1902,6 @@ static void delegate_worker_run(void *arg)
                role && role[0] ? role : "task", result.turns, result.tool_calls);
       (void)presence_route_event(effective_sid, PRESENCE_EV_DELEGATE, "delegate_done", summary);
    }
-
-   /* Classify and record a learning from this delegate exit. */
-   delegate_record_exit_learning(sid, role, &result, rc, max_turns, &acfg, target_agent,
-                                 learning_goal, deleg_id);
 
    /* Close the delegate_routing bandit decision (if one was sampled) with the run
     * outcome. By default success (rc == 0) -> 1.0, otherwise 0.0. When the

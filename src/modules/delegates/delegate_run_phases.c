@@ -69,9 +69,9 @@ static int delegate_file_snapshot_changed(delegate_file_snapshot_t before,
  * event agent's provider+model) and a structured IE_DELEGATE_EXIT interaction
  * event. Pure post-run side effect — does not alter rc/result. Extracted
  * verbatim from delegate_worker. */
-void delegate_record_exit_learning(const char *sid, const char *role, const agent_result_t *result,
-                                   int rc, int max_turns, agent_config_t *acfg,
-                                   agent_t *target_agent, const char *goal, const char *source_ref)
+int delegate_record_exit_learning(const char *sid, const char *role, const agent_result_t *result,
+                                  int rc, int max_turns, agent_config_t *acfg,
+                                  agent_t *target_agent, const char *goal, const char *source_ref)
 {
    dl_exit_metrics_t dlm;
    memset(&dlm, 0, sizeof(dlm));
@@ -93,12 +93,17 @@ void delegate_record_exit_learning(const char *sid, const char *role, const agen
    char *evidence_json = NULL;
    if (cJSON_IsObject(evidence))
    {
-      cJSON_AddStringToObject(evidence, "provider", event_agent ? event_agent->provider : "");
-      cJSON_AddStringToObject(evidence, "model", event_agent ? event_agent->model : "");
-      evidence_json = cJSON_PrintUnformatted(evidence);
+      if (cJSON_AddStringToObject(evidence, "provider", event_agent ? event_agent->provider : "") &&
+          cJSON_AddStringToObject(evidence, "model", event_agent ? event_agent->model : ""))
+         evidence_json = cJSON_PrintUnformatted(evidence);
    }
-   db1_delegate_learning_record(sid, role, dl_failure_mode_to_string(dlc.failure_mode), dlc.lesson,
-                                evidence_json ? evidence_json : dlc.evidence, dlc.confidence);
+   int learning_recorded =
+       evidence_json &&
+       db1_delegate_learning_record(sid, role, dl_failure_mode_to_string(dlc.failure_mode),
+                                    dlc.lesson, evidence_json, dlc.confidence) == 0;
+   if (!learning_recorded)
+      LOG_WARN("delegate", "delegate %s: learning record could not be persisted",
+               source_ref ? source_ref : "");
    int approach_failure_recorded = -1;
    if (dlc.failure_mode == DL_MODE_NO_PROGRESS && goal && goal[0])
    {
@@ -112,26 +117,36 @@ void delegate_record_exit_learning(const char *sid, const char *role, const agen
    free(evidence_json);
    cJSON_Delete(evidence);
 
+   int exit_recorded = 0;
    cJSON *payload = cJSON_CreateObject();
    if (payload)
    {
-      cJSON_AddStringToObject(payload, "role", role ? role : "");
-      cJSON_AddStringToObject(payload, "failure_mode", dl_failure_mode_to_string(dlc.failure_mode));
-      cJSON_AddNumberToObject(payload, "turns", result->turns);
-      cJSON_AddNumberToObject(payload, "tool_calls", result->tool_calls);
-      cJSON_AddNumberToObject(payload, "confidence", dlc.confidence);
-      cJSON_AddStringToObject(payload, "agent", result->agent_name);
-      cJSON_AddStringToObject(payload, "provider", event_agent ? event_agent->provider : "");
-      cJSON_AddStringToObject(payload, "model", event_agent ? event_agent->model : "");
-      if (approach_failure_recorded >= 0)
-         cJSON_AddBoolToObject(payload, "approach_failure_recorded", approach_failure_recorded);
-      char *payload_json = cJSON_PrintUnformatted(payload);
-      (void)db1_interaction_event_record(sid, ie_event_type_name(IE_DELEGATE_EXIT), "system",
-                                         payload_json ? payload_json : "{}",
-                                         rc == 0 ? "ok" : "error");
+      int complete =
+          cJSON_AddStringToObject(payload, "role", role ? role : "") &&
+          cJSON_AddBoolToObject(payload, "learning_recorded", learning_recorded) &&
+          cJSON_AddStringToObject(payload, "failure_mode",
+                                  dl_failure_mode_to_string(dlc.failure_mode)) &&
+          cJSON_AddNumberToObject(payload, "turns", result->turns) &&
+          cJSON_AddNumberToObject(payload, "tool_calls", result->tool_calls) &&
+          cJSON_AddNumberToObject(payload, "confidence", dlc.confidence) &&
+          cJSON_AddStringToObject(payload, "agent", result->agent_name) &&
+          cJSON_AddStringToObject(payload, "provider", event_agent ? event_agent->provider : "") &&
+          cJSON_AddStringToObject(payload, "model", event_agent ? event_agent->model : "");
+      if (complete && approach_failure_recorded >= 0)
+         complete = cJSON_AddBoolToObject(payload, "approach_failure_recorded",
+                                          approach_failure_recorded) != NULL;
+      char *payload_json = complete ? cJSON_PrintUnformatted(payload) : NULL;
+      if (payload_json)
+         exit_recorded =
+             db1_interaction_event_record(sid, ie_event_type_name(IE_DELEGATE_EXIT), "system",
+                                          payload_json, rc == 0 ? "ok" : "error") >= 0;
       free(payload_json);
       cJSON_Delete(payload);
    }
+   if (!exit_recorded)
+      LOG_WARN("delegate", "delegate %s: exit event could not be persisted",
+               source_ref ? source_ref : "");
+   return learning_recorded && exit_recorded && approach_failure_recorded != 0 ? 0 : -1;
 }
 
 /* Detect a no-op write delegate: a write role that reported success (rc==0) but

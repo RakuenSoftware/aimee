@@ -164,6 +164,11 @@ evidence are recorded; liveness drives a terminal result; and the result returns
 workflow, gateway, or roundtable. Retries remain within the same identity, policy, vault scope, workspace,
 and audit boundaries while reacquiring credentials through the authorized vault path when required.
 
+Post-run delegate learning and the structured exit event are written before terminal completion is
+published. The capture API reports incomplete writes and logs them separately from the execution
+result. No-progress exits also report failed-approach persistence when a goal is available. These
+observations do not constitute an independently graded task outcome.
+
 ## Tests and failure behavior
 
 The descriptor's nineteen direct tests each drive a delegates source as their subject: the driver,

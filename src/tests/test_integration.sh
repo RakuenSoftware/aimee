@@ -2133,6 +2133,9 @@ fi  # WORKFLOW_MODULE_READY
 PRIMARY_IR_LOG="$HOME/primary-ir-live.log"
 if python3 "$REPO_ROOT/src/tests/test_primary_ir_live.py" >"$PRIMARY_IR_LOG" 2>&1; then
     PASS=$((PASS + 1))
+    PRIMARY_SKIPS=$(grep -c '^SKIP:' "$PRIMARY_IR_LOG" || true)
+    SKIP=$((SKIP + PRIMARY_SKIPS))
+    grep '^SKIP:' "$PRIMARY_IR_LOG" || true
 else
     echo "FAIL: canonical primary switching and durable replay"
     # This fixture contains synthetic provider data. Preserve bounded client-side
