@@ -6,17 +6,20 @@
 #include <stdint.h>
 #include <string.h>
 
-#define AIMEE_LEARNING_EVENT_OBSERVE    6145u
-#define AIMEE_LEARNING_STAGE_OBSERVE    1u
+#define AIMEE_LEARNING_EVENT_OBSERVE 6145u
+#define AIMEE_LEARNING_STAGE_OBSERVE 1u
 /* Host-only CMPQ/CMPS JSON admission and projection contract. */
 #define AIMEE_LEARNING_EVENT_EXPERIENCE 6146u
 #define AIMEE_LEARNING_STAGE_EXPERIENCE 2u
-#define AIMEE_LEARNING_REQUEST_MAGIC    0x53424f4cu /* "LOBS" */
-#define AIMEE_LEARNING_RESPONSE_MAGIC   0x4b53414cu /* "LASK" */
-#define AIMEE_LEARNING_WIRE_VERSION     1u
-#define AIMEE_LEARNING_SIGNAL_MAX       31u
-#define AIMEE_LEARNING_REQUEST_LEN      40u
-#define AIMEE_LEARNING_RESPONSE_LEN     8u
+/* Host-only observation of a persisted canonical execution terminal. */
+#define AIMEE_LEARNING_EVENT_EXECUTION 6147u
+#define AIMEE_LEARNING_STAGE_EXECUTION 3u
+#define AIMEE_LEARNING_REQUEST_MAGIC   0x53424f4cu /* "LOBS" */
+#define AIMEE_LEARNING_RESPONSE_MAGIC  0x4b53414cu /* "LASK" */
+#define AIMEE_LEARNING_WIRE_VERSION    1u
+#define AIMEE_LEARNING_SIGNAL_MAX      31u
+#define AIMEE_LEARNING_REQUEST_LEN     40u
+#define AIMEE_LEARNING_RESPONSE_LEN    8u
 
 #define AIMEE_LEARNING_SINK_RERANKER  0x01u
 #define AIMEE_LEARNING_SINK_SUPERSEDE 0x02u
@@ -51,7 +54,7 @@ static inline int aimee_learning_request_encode(const char *signal, uint8_t *out
 }
 
 static inline int aimee_learning_request_decode(const uint8_t *in, size_t len, char *signal,
-                                                 size_t signal_cap)
+                                                size_t signal_cap)
 {
    if (!in || len != AIMEE_LEARNING_REQUEST_LEN || !signal || signal_cap == 0 ||
        aimee_learning_get_u32(in) != AIMEE_LEARNING_REQUEST_MAGIC ||
@@ -63,8 +66,7 @@ static inline int aimee_learning_request_decode(const uint8_t *in, size_t len, c
    return 0;
 }
 
-static inline int aimee_learning_response_decode(const uint8_t *in, size_t len,
-                                                  uint32_t *sink_mask)
+static inline int aimee_learning_response_decode(const uint8_t *in, size_t len, uint32_t *sink_mask)
 {
    if (!in || len != AIMEE_LEARNING_RESPONSE_LEN || !sink_mask ||
        aimee_learning_get_u32(in) != AIMEE_LEARNING_RESPONSE_MAGIC)

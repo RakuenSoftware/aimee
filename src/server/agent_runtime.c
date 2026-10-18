@@ -16,7 +16,6 @@
 #include "role_templates.h"
 #include "provider_catalog.h"
 #include "modules/kb/c/agent_hints.h"
-#include "modules/kb/c/agent_outcomes.h"
 #include "modules/kb/c/memory_query.h"
 #include "modules/kb/c/rules.h"
 #include "modules/kb/c/tasks.h"
@@ -121,59 +120,6 @@ static void agent_apply_runtime_config(agent_t *agent)
    if (!agent)
       return;
    agent->autonomous = config_autonomous();
-}
-
-static void classify_outcome(const agent_result_t *result, int max_turns, agent_outcome_t *outcome)
-{
-   memset(outcome, 0, sizeof(*outcome));
-   outcome->turns_used = result->turns;
-   outcome->tools_called = result->tool_calls;
-   outcome->tokens_used = result->prompt_tokens + result->completion_tokens;
-
-   if (result->abstained)
-   {
-      outcome->outcome = OUTCOME_PARTIAL;
-      snprintf(outcome->reason, sizeof(outcome->reason), "abstained: %s", result->abstain_reason);
-      return;
-   }
-
-   if (!result->success)
-   {
-      if (result->error[0])
-      {
-         outcome->outcome = OUTCOME_ERROR;
-         snprintf(outcome->reason, sizeof(outcome->reason), "%.250s", result->error);
-
-         const char *tool_err = strstr(result->error, "tool ");
-         if (tool_err)
-            snprintf(outcome->tool_error_pattern, sizeof(outcome->tool_error_pattern), "%.120s",
-                     tool_err);
-      }
-      else
-      {
-         outcome->outcome = OUTCOME_FAILURE;
-         snprintf(outcome->reason, sizeof(outcome->reason), "execution failed");
-      }
-      return;
-   }
-
-   if (max_turns > 0 && result->turns >= max_turns)
-   {
-      outcome->outcome = OUTCOME_PARTIAL;
-      snprintf(outcome->reason, sizeof(outcome->reason), "max turns reached (%d)", max_turns);
-      return;
-   }
-
-   outcome->outcome = OUTCOME_SUCCESS;
-   snprintf(outcome->reason, sizeof(outcome->reason), "completed in %d turns", result->turns);
-}
-
-static void record_outcome(const char *agent_name, const char *role, const agent_outcome_t *outcome)
-{
-   static const char *outcome_str[] = {"success", "partial", "failure", "error"};
-   (void)kb_client_agent_outcome_record(agent_name, role, outcome_str[outcome->outcome],
-                                        outcome->reason, outcome->turns_used, outcome->tools_called,
-                                        outcome->tokens_used, outcome->tool_error_pattern);
 }
 
 extern const char *delegation_active_id(void);
@@ -477,10 +423,6 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
          agent_log_call(out, role);
          agent_store_feedback(out, role, user_prompt);
 
-         agent_outcome_t oc;
-         classify_outcome(out, ag->max_turns, &oc);
-         record_outcome(out->agent_name, role, &oc);
-
          if (cache_enabled && !session_bound && out->response)
             db1_agent_cache_put(role, user_prompt, out->response);
          return 0;
@@ -502,12 +444,6 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
    }
 
    agent_store_feedback(out, role, user_prompt);
-
-   {
-      agent_outcome_t oc;
-      classify_outcome(out, 0, &oc);
-      record_outcome(out->agent_name, role, &oc);
-   }
 
    if (!out->error[0])
       agent_route_failure_message(role, out->error, sizeof(out->error));
@@ -625,9 +561,6 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    int rc = agent_dispatch_one(&local, &cfg->network, role, system_prompt, user_prompt, max_tokens,
                                temperature, 0 /* use_tools */, out);
    {
-      agent_outcome_t oc;
-      classify_outcome(out, local.max_turns, &oc);
-      record_outcome(out->agent_name, role ? role : "ensemble", &oc);
    }
    return rc;
 }
@@ -662,9 +595,6 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
    int rc = agent_dispatch_one(&local, &cfg->network, role, system_prompt, user_prompt, max_tokens,
                                temperature, 1 /* use_tools */, out);
    {
-      agent_outcome_t oc;
-      classify_outcome(out, local.max_turns, &oc);
-      record_outcome(out->agent_name, role ? role : "ensemble", &oc);
    }
    return rc;
 }
@@ -820,9 +750,6 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
    agent_store_feedback(out, role, user_prompt);
 
    {
-      agent_outcome_t oc;
-      classify_outcome(out, ag->max_turns, &oc);
-      record_outcome(out->agent_name, role, &oc);
    }
    if (rc == 0 && !agent_get_request_session()[0] && delegate_role_result_cache_enabled(role) &&
        out->response)

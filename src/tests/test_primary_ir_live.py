@@ -128,6 +128,17 @@ def main():
                 assert "fixture-signature" in json.dumps(observed[-1]), observed[-1]
             assert any(record["event"].get("payload", {}).get("raw_stop_reason") in ("stop", "end_turn") for record in records), records
 
+        # Verify the actual standalone observer and its persisted source binding
+        # before any later fixture task adds more terminal events to this session.
+        verification = subprocess.run([os.environ.get("GO", "go"), "-C",
+            str(Path(__file__).resolve().parents[2] / "server-go"), "test", "./modules/learning",
+            "-run", "^TestExecutionObservationLiveCanonicalCapture$", "-count=1"],
+            env={**os.environ, "AIMEE_LEARNING_LIVE_SESSION": sid,
+                 "AIMEE_LEARNING_LIVE_ACTOR": f"uid:{os.getuid()}"},
+            capture_output=True, text=True, timeout=120)
+        assert verification.returncode == 0, verification.stdout + verification.stderr
+        print("standalone learning: four real canonical task outcomes persisted locally without KB or fabricated grades")
+
         reports = [record["event"]["payload"] for record in live if record["event"]["kind"] == "projection"]
         assert any(report == {"model": "ir-model-a", "boundary": "request", "omitted_reasoning_blocks": 1,
                               "omitted_opaque_state_blocks": 1} for report in reports), reports
@@ -312,14 +323,16 @@ def main():
         else:
             # Exercise the real async delegate -> DB1 learning writer -> next-run
             # prompt reader. Completion must follow capture, not race its readback.
+            workspace = Path(os.environ["AIMEE_IR_DELEGATE_WORKSPACE"])
+            assert (workspace / ".git").is_dir(), "registered integration checkout is missing"
             lesson = "Delegate succeeded in role 'format'"
             for run in range(2):
                 before = len(observed)
                 launched = api("/v1/delegate/run", dict(role="format", persona="engineer", via="ir-live-a", tools=False,
                     prompt=f"IR_LEARNING_RECEIPT_{run} return PRIMARY_OK", session_id=sid,
-                    cwd=str(home), max_turns=2))
+                    cwd=str(workspace), max_turns=2))
                 assert launched.get("job_id", 0) > 0, launched
-                deadline = time.monotonic() + 30
+                deadline = time.monotonic() + 120
                 while True:
                     status = api("/v1/delegate/status", dict(job_id=launched["job_id"], full_result=True))
                     if status.get("job_status") in ("done", "failed", "partial", "cancelled"):

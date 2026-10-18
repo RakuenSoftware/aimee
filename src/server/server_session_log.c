@@ -1,4 +1,5 @@
 #include "server_session_log.h"
+#include "server_learning_outcome.h"
 #include "server_session_control.h"
 #include "agent_config.h"
 #include "agent_tasks.h"
@@ -64,11 +65,14 @@ static int log_event(const aimee_session_event_t *event, void *context)
    char id[96], sequence[32];
    snprintf(id, sizeof id, "%s:%llu", scope->turn, ++scope->counter);
    char *wire = cJSON_PrintUnformatted(payload);
-   cJSON_Delete(payload);
    int rc = wire ? db1_session_ir_append(scope->session, id, scope->turn, scope->principal, wire,
                                          sequence)
                  : -1;
    free(wire);
+   if (!rc && event->kind == AIMEE_SESSION_EXECUTION && strcmp(event->execution_status, "running"))
+      server_learning_observe_terminal(scope->session, scope->turn, sequence, id, scope->principal,
+                                       payload);
+   cJSON_Delete(payload);
    const char *role =
        event->kind == AIMEE_SESSION_MESSAGE && event->message ? event->message->role : event->role;
    if (!rc && role && !strcmp(role, "assistant") &&

@@ -1,5 +1,6 @@
 /* Durable session capture owned by the server compute task. */
 #include "server_compute_impl.h"
+#include "server_learning_outcome.h"
 #include "agent_config.h"
 #include "presence.h"
 #include "db1_client/server_sessions.h"
@@ -176,6 +177,9 @@ static int chat_ir_sink(const aimee_session_event_t *event, void *context)
       return -1;
    }
    free(json);
+   if (event->kind == AIMEE_SESSION_EXECUTION && strcmp(event->execution_status, "running"))
+      server_learning_observe_terminal(c->ir_session, c->ir_turn, sequence, event_id,
+                                       c->vault_principal, payload);
    cJSON *envelope = cJSON_CreateObject();
    cJSON_AddNumberToObject(envelope, "version", 1);
    cJSON_AddStringToObject(envelope, "session_id", c->ir_session);

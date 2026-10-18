@@ -19,6 +19,7 @@ static struct row
    char *history;
 } rows[16];
 static int count, reject_append, reject_checkpoint, reject_reference, parent_events;
+int test_learning_observations(void);
 void agent_request_creds_snapshot(agent_request_creds_t *out)
 {
    *out = credentials;
@@ -37,6 +38,20 @@ static struct row *find(const char *id)
       if (!strcmp(rows[i].id, id))
          return &rows[i];
    return NULL;
+}
+void test_learning_assert_source(const cJSON *record)
+{
+   const char *session =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(record, "session_id"));
+   const char *actor = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(record, "actor"));
+   int sequence = atoi(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(record, "sequence")));
+   pthread_mutex_lock(&lock);
+   struct row *row = find(session);
+   assert(row && !strcmp(row->actor, actor));
+   assert(sequence > 0 && sequence <= cJSON_GetArraySize(row->events));
+   assert(cJSON_Compare(cJSON_GetArrayItem(row->events, sequence - 1),
+                        cJSON_GetObjectItemCaseSensitive(record, "event"), 1));
+   pthread_mutex_unlock(&lock);
 }
 int db1_server_session_get(const char *id, db1_server_session_t *out)
 {
@@ -258,11 +273,13 @@ int main(void)
    assert(server_session_log_begin("review", "wrong parent owner", &scope) < 0 && !scope);
    assert(count == 2);
    attest("parent", "alice");
+   int observations_before_rejection = test_learning_observations();
    reject_append = 1;
    assert(server_session_log_begin("review", "stop before execution", &scope) < 0 && scope);
    assert(server_session_log_finish(scope, 0, "failed") < 0);
    assert(aimee_ir_session_capture_failed());
    aimee_ir_session_set_sink(NULL, NULL);
+   assert(test_learning_observations() == observations_before_rejection);
    reject_append = 0;
    reject_checkpoint = 1;
    assert(server_session_log_begin("review", "private", &scope) == 0);
@@ -291,11 +308,13 @@ int main(void)
    reject_reference = 0;
    aimee_ir_session_set_sink(NULL, NULL);
    int before_workers = count;
+   int observations_before_workers = test_learning_observations();
    pthread_t threads[2];
    for (long i = 0; i < 2; i++)
       assert(pthread_create(&threads[i], NULL, worker, (void *)(i + 10)) == 0);
    for (int i = 0; i < 2; i++)
       assert(pthread_join(threads[i], NULL) == 0);
+   assert(test_learning_observations() == observations_before_workers + 4);
    assert(count == before_workers + 2); /* Each durable job reuses its private child. */
    const cJSON *reference;
    int references = 0;

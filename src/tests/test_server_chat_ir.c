@@ -9,6 +9,19 @@
 static cJSON *log_entries;
 static int writes, fail_store, disconnected, cancelled;
 static char owner[64] = "alice";
+void test_learning_observations_reset(void);
+int test_learning_observations(void);
+void test_learning_assert_source(const cJSON *record)
+{
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(record, "session_id")),
+                  "session-one"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(record, "actor")), owner));
+   int sequence = atoi(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(record, "sequence")));
+   assert(sequence > 0 && sequence <= cJSON_GetArraySize(log_entries));
+   assert(cJSON_Compare(cJSON_GetArrayItem(log_entries, sequence - 1),
+                        cJSON_GetObjectItemCaseSensitive(record, "event"), 1));
+}
+
 int presence_turn_host_own(const char *sid, const char *turn)
 {
    (void)sid;
@@ -110,6 +123,7 @@ static void cleanup(compute_ctx_t *c)
    cJSON_Delete(log_entries);
    log_entries = cJSON_CreateArray();
    writes = fail_store = disconnected = cancelled = 0;
+   test_learning_observations_reset();
 }
 static void response(void)
 {
@@ -156,6 +170,7 @@ int main(void)
    disconnected = 1;
    response();
    assert(!server_chat_ir_finish(&c, NULL));
+   assert(test_learning_observations() == 1);
    assert(!c.conn_alive && writes == 2 && cJSON_GetArraySize(log_entries) == 5);
    const cJSON *last = cJSON_GetObjectItem(cJSON_GetArrayItem(log_entries, 4), "payload");
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(last, "status")), "completed"));
