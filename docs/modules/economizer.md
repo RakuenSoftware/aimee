@@ -226,3 +226,5 @@ treats its absence as "no reduction available" and dispatches the original promp
 is the same path exercised whenever the bus is momentarily unavailable. The C files that
 would then be dead are `economizer_module_client.c`, `gateway_mutate.c` and
 `gateway_mutate_wire.c`.
+
+Canonical JSON fidelity: the order-preserving reducer tree retains original decimal tokens through cloning, spill/fold rendering and structural summaries. Adjacent integers beyond binary64 precision and extreme exponents remain distinct opaque values. Explicit numeric replacement invalidates a retained token. Complete framing, unique object members, bounded nesting and embedded-NUL refusal apply before reduction. Historical `%g` number summaries are intentionally retired because they changed tool evidence values; the remaining string/depth summary limits are unchanged.

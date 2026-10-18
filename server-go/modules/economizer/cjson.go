@@ -3,6 +3,7 @@ package economizer
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"strconv"
 	"strings"
@@ -26,17 +27,20 @@ import (
 //  2. Go HTML-escapes <, > and & by default.
 //
 // So this file reproduces cJSON's printer: insertion order preserved, cJSON's
-// escape set, and cJSON's number spelling.
+// escape set, and the vendored codec's exact parsed decimal tokens. Newly
+// constructed numbers retain the legacy numeric formatting below.
 
 // JSONValue is an order-preserving parsed JSON value.
 type JSONValue struct {
-	Kind  JSONKind
-	Str   string
-	Num   float64
-	Bool  bool
-	Keys  []string     // object key order, as parsed
-	Vals  []*JSONValue // object values, parallel to Keys
-	Items []*JSONValue // array elements
+	Kind         JSONKind
+	Str          string
+	Num          float64
+	numberLexeme string
+	numberValue  float64
+	Bool         bool
+	Keys         []string     // object key order, as parsed
+	Vals         []*JSONValue // object values, parallel to Keys
+	Items        []*JSONValue // array elements
 }
 
 // JSONKind enumerates the value kinds cJSON distinguishes.
@@ -61,40 +65,27 @@ func ParseJSON(raw string) *JSONValue {
 	if err != nil {
 		return nil
 	}
-	v, err := parseJSONValue(dec, tok)
+	v, err := parseJSONValue(dec, tok, 0)
 	if err != nil {
 		return nil
 	}
-	// Trailing bytes after the first complete value are IGNORED, because
-	// cJSON_ParseWithLength ignores them too (it is called without
-	// require_null_terminated). Verified: cJSON parses `{"a":1}trailing` as
-	// `{"a":1}`. Rejecting it here would make the fold take a different path than
-	// C for the same input.
+	if _, err := dec.Token(); err != io.EOF {
+		return nil
+	}
 	return v
 }
 
-// KNOWN DIVERGENCE from cJSON, documented rather than hidden.
-//
-// cJSON accepts a RAW control byte (< 0x20) inside a string and re-emits it
-// escaped: {"c":"x<0x01>y"} parses and prints as {"c":"xy"}. Go's
-// encoding/json rejects that input outright, so ParseJSON returns nil where
-// cJSON would have succeeded.
-//
-// Consequence: for a malformed-but-cJSON-acceptable body, the compress lever
-// falls back to head+tail where C would have produced a JSON structural summary
-// — different output bytes for the same input. Well-formed producers escape
-// control characters, so this only reaches bodies that were already invalid
-// JSON, but it IS a behaviour difference and is pinned by a test.
-//
-// Closing it needs a hand-written lenient parser; that is a deliberate
-// follow-up, not an oversight.
-
-func parseJSONValue(dec *json.Decoder, tok json.Token) (*JSONValue, error) {
+// Native and canonical ingress use the same strict, bounded framing.
+func parseJSONValue(dec *json.Decoder, tok json.Token, depth int) (*JSONValue, error) {
+	if depth > 512 {
+		return nil, fmt.Errorf("JSON nesting exceeds canonical limit")
+	}
 	switch t := tok.(type) {
 	case json.Delim:
 		switch t {
 		case '{':
 			v := &JSONValue{Kind: JSONObject}
+			names := make(map[string]bool)
 			for {
 				kt, err := dec.Token()
 				if err != nil {
@@ -103,12 +94,16 @@ func parseJSONValue(dec *json.Decoder, tok json.Token) (*JSONValue, error) {
 				if d, ok := kt.(json.Delim); ok && d == '}' {
 					return v, nil
 				}
-				key, _ := kt.(string)
+				key, ok := kt.(string)
+				if !ok || names[key] || strings.ContainsRune(key, 0) {
+					return nil, fmt.Errorf("invalid or duplicate object key")
+				}
+				names[key] = true
 				vt, err := dec.Token()
 				if err != nil {
 					return nil, err
 				}
-				child, err := parseJSONValue(dec, vt)
+				child, err := parseJSONValue(dec, vt, depth+1)
 				if err != nil {
 					return nil, err
 				}
@@ -125,7 +120,7 @@ func parseJSONValue(dec *json.Decoder, tok json.Token) (*JSONValue, error) {
 				if d, ok := vt.(json.Delim); ok && d == ']' {
 					return v, nil
 				}
-				child, err := parseJSONValue(dec, vt)
+				child, err := parseJSONValue(dec, vt, depth+1)
 				if err != nil {
 					return nil, err
 				}
@@ -134,13 +129,13 @@ func parseJSONValue(dec *json.Decoder, tok json.Token) (*JSONValue, error) {
 		}
 		return nil, fmt.Errorf("unexpected delimiter %v", t)
 	case string:
+		if strings.ContainsRune(t, 0) {
+			return nil, fmt.Errorf("embedded NUL string")
+		}
 		return &JSONValue{Kind: JSONString, Str: t}, nil
 	case json.Number:
-		f, err := t.Float64()
-		if err != nil {
-			return nil, err
-		}
-		return &JSONValue{Kind: JSONNumber, Num: f}, nil
+		f, _ := t.Float64() // Range overflow/underflow remains exact in the retained token.
+		return &JSONValue{Kind: JSONNumber, Num: f, numberLexeme: string(t), numberValue: f}, nil
 	case bool:
 		if t {
 			return &JSONValue{Kind: JSONTrue, Bool: true}, nil
@@ -258,7 +253,7 @@ func printJSON(b *strings.Builder, v *JSONValue) {
 	case JSONTrue:
 		b.WriteString("true")
 	case JSONNumber:
-		b.WriteString(CJSONNumber(v.Num))
+		b.WriteString(v.numberText())
 	case JSONString:
 		cjsonEscape(b, v.Str)
 	case JSONArray:
@@ -282,4 +277,13 @@ func printJSON(b *strings.Builder, v *JSONValue) {
 		}
 		b.WriteByte('}')
 	}
+}
+
+// Preserve parsed decimal tokens through folding/cloning. Constructed numbers
+// retain the existing cJSON spelling; direct numeric mutation invalidates proof.
+func (v *JSONValue) numberText() string {
+	if v.numberLexeme != "" && math.Float64bits(v.Num) == math.Float64bits(v.numberValue) {
+		return v.numberLexeme
+	}
+	return CJSONNumber(v.Num)
 }
