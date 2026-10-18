@@ -160,6 +160,11 @@ def main():
         api("/v1/responses", {**followup, "stream": False}, {"aimee-session-id": "another-scope"}, expected=400)
         assert len(observed) == count, "Cross-scope continuation reached the provider"
         print("canonical Responses: 17 long-ID/large-argument tools, native signed replay, durable continuation and cross-scope refusal passed")
+        api("/v1/messages", dict(model="ir-live-b", max_tokens=64,
+            messages=[dict(role="user", content="IR_NATIVE_ALIAS")]))
+        assert observed[-1]["model"] == "ir-model-b", observed[-1]
+        print("native Anthropic registered alias resolves to its provider model ID")
+
 
     finally:
         cleanup_error = None

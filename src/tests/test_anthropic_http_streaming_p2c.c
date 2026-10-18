@@ -350,10 +350,6 @@ int agent_http_last_retry_after(void)
 /* Driver parse stub (mirrors test_anthropic_http_p2c.c): populates
  * parsed.calls[] from g_tool_uses_json, leaves content empty, and copies
  * g_upstream_stop_reason into parsed.stop_reason. */
-static void parsed_with_tool_uses(cJSON *root, const char *body, parsed_response_t *out)
-{
-   assert(!"legacy response parser invoked instead of canonical IR");
-}
 
 /* Accessor stubs mirror this fixture's policy — prevent_subagents
  * tracks g_prevent, pin_model was left zeroed — so assertions are unchanged. */
@@ -429,7 +425,9 @@ static void replay_capture(void *ctx, const char *event, const char *data)
  * on the wire; stop_reason "end_turn" (all-dropped rewrite). */
 static void test_streaming_anthropic_police_drops_subagent_tool_use(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    replay_cap_t cap;
    const char *names[] = {"Task"};
    const char *ids[] = {"t1"};
@@ -476,7 +474,9 @@ static void test_streaming_anthropic_police_drops_subagent_tool_use(void)
  * emits the text block + an end_turn message_delta. */
 static void test_streaming_anthropic_police_on_no_tool_use_passthrough(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    replay_cap_t cap;
 
    reset_capture();
@@ -518,7 +518,9 @@ static void test_streaming_anthropic_police_on_no_tool_use_passthrough(void)
  * partial SSE events). */
 static void test_streaming_anthropic_policy_on_upstream_error_returns_error(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    replay_cap_t cap;
 
    reset_capture();
@@ -547,7 +549,9 @@ static void test_streaming_anthropic_policy_on_upstream_error_returns_error(void
 /* Policy OFF still admits native frames through canonical IR. */
 static void test_streaming_anthropic_policy_off_uses_ir(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    replay_cap_t cap;
 
    reset_capture();
@@ -591,7 +595,9 @@ static void test_streaming_anthropic_policy_off_uses_ir(void)
  * `tool_use` block named `web_search`. Pins the B2 fix end-to-end. */
 static void test_streaming_anthropic_partial_drop_preserves_max_tokens(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    replay_cap_t cap;
 
    reset_capture();
@@ -641,7 +647,9 @@ static void test_streaming_anthropic_partial_drop_preserves_max_tokens(void)
  * no tool_use on the wire, end_turn. */
 static void test_streaming_openai_police_drops_subagent_tool_use(void)
 {
-   const delegate_driver_t driver = {.name = "openai", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "openai",
+   };
    replay_cap_t cap;
    const char *names[] = {"Task"};
    const char *ids[] = {"t1"};
@@ -681,7 +689,9 @@ static void test_streaming_openai_police_drops_subagent_tool_use(void)
 /* Policy ON, OpenAI-via-translator primary, text-only upstream reply. */
 static void test_streaming_openai_police_on_no_tool_use_passthrough(void)
 {
-   const delegate_driver_t driver = {.name = "openai", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "openai",
+   };
    replay_cap_t cap;
 
    reset_capture();
@@ -718,7 +728,9 @@ static void test_streaming_openai_police_on_no_tool_use_passthrough(void)
  * event must precede [DONE], so EOF cannot invent a successful turn. */
 static void test_streaming_openai_policy_off_is_byte_neutral(void)
 {
-   const delegate_driver_t driver = {.name = "openai", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "openai",
+   };
    replay_cap_t cap;
 
    reset_capture();
@@ -754,7 +766,9 @@ static void test_streaming_openai_policy_off_is_byte_neutral(void)
  * an armed turn is buffered even when subagent policing is off. */
 static void assert_streaming_armed_completion_is_buffered(const char *driver_name)
 {
-   const delegate_driver_t driver = {.name = driver_name, .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = driver_name,
+   };
    replay_cap_t cap;
 
    reset_capture();
@@ -801,7 +815,9 @@ static void test_streaming_armed_completion_is_provider_neutral(void)
 
 static void test_native_completion_followup_reaches_provider_system(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    replay_cap_t cap;
 
    reset_capture();

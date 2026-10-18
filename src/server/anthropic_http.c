@@ -410,8 +410,8 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
  * Anthropic Messages, so preserve request fields such as system cache_control,
  * tool_choice, thinking, stop_sequences, top_p, and top_k. By default the
  * configured primary model wins over the inbound model name; under parity the
- * inbound model is honored verbatim (falling back to the primary only when the
- * client omitted it) so Claude Code's per-task model selection survives. */
+ * concrete provider model is honored verbatim; registered agent aliases resolve
+ * to the selected agent's provider model ID, just as on the OpenAI surface. */
 static char *build_anthropic_provider_body(const cJSON *in, const agent_t *ag, int stream,
                                            int parity, const char *original_frame)
 {
@@ -421,18 +421,23 @@ static char *build_anthropic_provider_body(const cJSON *in, const agent_t *ag, i
    req = cJSON_Duplicate((cJSON *)in, 1);
    if (!req)
       return NULL;
-   if (!parity)
+   const char *requested_model =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "model"));
+   int selected_alias =
+       requested_model && ag &&
+       (!strcmp(requested_model, "aimee") || (ag->name[0] && !strcmp(requested_model, ag->name)));
+   if (!parity || !requested_model || !requested_model[0] || selected_alias)
    {
-      cJSON *model;
-      cJSON_DeleteItemFromObjectCaseSensitive(req, "model");
-      model = cJSON_CreateString(ag && ag->model[0] ? ag->model : "claude");
-      if (model)
-         cJSON_AddItemToObject(req, "model", model);
-   }
-   else if (!cJSON_GetObjectItemCaseSensitive(req, "model") && ag && ag->model[0])
-   {
-      /* Parity, but the client sent no model: give the upstream call one. */
-      cJSON_AddStringToObject(req, "model", ag->model);
+      const char *served = ag && ag->model[0] ? ag->model : "claude";
+      if (!requested_model || strcmp(requested_model, served))
+      {
+         cJSON_DeleteItemFromObjectCaseSensitive(req, "model");
+         if (!cJSON_AddStringToObject(req, "model", served))
+         {
+            cJSON_Delete(req);
+            return NULL;
+         }
+      }
    }
    const cJSON *native_stream = cJSON_GetObjectItemCaseSensitive(req, "stream");
    if (stream && !cJSON_IsTrue(native_stream))

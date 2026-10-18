@@ -428,10 +428,6 @@ static const cJSON *obj(const cJSON *parent, const char *key)
  * decision as the real Go module; the production C seam applies it before
  * anthropic_response_from_parsed reads
  * call_count to render the wire. */
-static void parsed_with_tool_uses(cJSON *root, const char *body, parsed_response_t *out)
-{
-   assert(!"legacy response parser invoked instead of canonical IR");
-}
 
 /* P2c (response-side tool policing, buffered) integration tests. The real
  * `gateway_policy.o` is linked into this test target so the production police
@@ -444,7 +440,9 @@ static void parsed_with_tool_uses(cJSON *root, const char *body, parsed_response
  * block. */
 static void test_messages_buffered_anthropic_police_drops_subagent_tool_use(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    char resp[8192];
    cJSON *sent;
    cJSON *content;
@@ -485,7 +483,9 @@ static void test_messages_buffered_anthropic_police_drops_subagent_tool_use(void
  * the wire stop_reason == "tool_use" matches the surviving call. */
 static void test_messages_buffered_anthropic_police_keeps_non_subagent_tool_use(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    char resp[8192];
    cJSON *sent;
    cJSON *content;
@@ -530,17 +530,15 @@ static void test_messages_buffered_anthropic_police_keeps_non_subagent_tool_use(
 /* parse_response stub for the codex/Responses buffered path: invoked with
  * (NULL, raw_sse_body) — the same contract the chatgpt driver honors — and
  * renders a text reply. Asserts it received the RAW body, not a cJSON tree. */
-static void parsed_text_pong(cJSON *root, const char *body, parsed_response_t *out)
-{
-   assert(!"legacy response parser invoked instead of canonical IR");
-}
 
 /* Codex/Responses (chatgpt wire) replies with raw SSE even to a buffered fetch, so
  * the ingress must parse it via the driver. Regression guard: before the fix,
  * messages_buffered cJSON_Parse'd the SSE (failed) and returned an EMPTY reply. */
 static void test_messages_buffered_responses_wire_parses_sse(void)
 {
-   const delegate_driver_t driver = {.name = "chatgpt", .parse_response = parsed_text_pong};
+   const delegate_driver_t driver = {
+       .name = "chatgpt",
+   };
    char resp[8192];
    cJSON *sent;
    const cJSON *content;

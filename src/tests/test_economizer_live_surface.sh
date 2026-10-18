@@ -31,8 +31,8 @@ grep -q 'mreq.history_fold = preset.history_fold || config_fold_enabled();' posi
     fail "the delegate history fold is gated again (chatgpt exclusion reintroduced?)"
 grep -q 'gw_mutate_upstream_ok(parity)' server/anthropic_http.c ||
     fail "Anthropic ingress mutation does not preserve native Anthropic prefixes"
-grep -q 'gw_mutate_upstream_ok(upstream_is_anthropic)' server/openai_chat.c ||
-    fail "OpenAI ingress mutation does not exclude Anthropic upstreams"
+grep -q 'gw_mutate_upstream_ok(wire == AIMEE_WIRE_ANTHROPIC)' server/openai_chat.c ||
+    fail "OpenAI ingress mutation must classify the canonical selected provider wire"
 
 # The economizer never adds, removes, or moves provider cache controls and does
 # not perform a remote token-counting preflight.

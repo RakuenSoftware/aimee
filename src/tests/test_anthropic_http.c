@@ -254,11 +254,6 @@ int agent_ir_parse_json_response(cJSON *root, int anthropic, int rescue_mode, in
    return 0;
 }
 
-static void parsed_responses(cJSON *root, const char *body, parsed_response_t *out)
-{
-   assert(!"legacy response parser invoked instead of canonical IR");
-}
-
 void agent_free_parsed_response(parsed_response_t *p)
 {
    if (!p)
@@ -416,31 +411,11 @@ static const cJSON *obj(const cJSON *parent, const char *key)
    return v;
 }
 
-static cJSON *openai_driver_build(const agent_t *agent, cJSON *messages, cJSON *tools,
-                                  const char *system_prompt, int max_tokens, double temperature)
-{
-   assert(!"legacy request builder invoked instead of canonical IR");
-   return NULL;
-}
-
-static cJSON *system_prompt_driver_build(const agent_t *agent, cJSON *messages, cJSON *tools,
-                                         const char *system_prompt, int max_tokens,
-                                         double temperature)
-{
-   assert(!"legacy request builder invoked instead of canonical IR");
-   return NULL;
-}
-
 static void system_prompt_driver_caps(const agent_t *agent, driver_caps_t *caps)
 {
    (void)agent;
    caps->capability_flags = DRIVER_CAP_STREAMING | DRIVER_CAP_SYSTEM_MSG;
    caps->context_limit = DRIVER_CTX_HUGE;
-}
-
-static void parsed_text(cJSON *root, const char *body, parsed_response_t *out)
-{
-   assert(!"legacy response parser invoked instead of canonical IR");
 }
 
 static void cap_emit(void *ctx, const char *event, const char *data_json)
@@ -595,7 +570,9 @@ static void test_native_ir_refuses_incomplete_and_invalid_streams(void)
 
 static void test_native_response_retains_all_typed_blocks_and_long_tools(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_text};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    reset_capture();
    g_driver = &driver;
    cJSON *native = cJSON_Parse("{\"role\":\"assistant\",\"stop_reason\":\"tool_use\","
@@ -673,7 +650,9 @@ static void test_native_response_retains_all_typed_blocks_and_long_tools(void)
 
 static void test_invalid_native_response_never_uses_legacy_parser(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_text};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    const char *frames[] = {
        "{}",
        "{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"forged\"}]}",
@@ -701,7 +680,9 @@ static void test_invalid_native_response_never_uses_legacy_parser(void)
 
 static void test_messages_buffered_anthropic_preserves_request_shape(void)
 {
-   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   const delegate_driver_t anthropic = {
+       .name = "anthropic",
+   };
    char resp[4096];
    cJSON *sent;
    const cJSON *system;
@@ -742,7 +723,9 @@ static void test_messages_buffered_anthropic_preserves_request_shape(void)
  * and the client's anthropic-beta forwarded upstream. */
 static void test_messages_buffered_anthropic_parity_passthrough(void)
 {
-   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   const delegate_driver_t anthropic = {
+       .name = "anthropic",
+   };
    char resp[4096];
    cJSON *sent;
 
@@ -772,7 +755,9 @@ static void test_messages_buffered_anthropic_parity_passthrough(void)
 
 static void test_native_admission_failure_sends_no_provider_request(void)
 {
-   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   const delegate_driver_t anthropic = {
+       .name = "anthropic",
+   };
    const char *request =
        "{\"model\":\"ignored\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":"
        "\"hi\"}],\"tool_choice\":{\"type\":\"unsupported\"}}";
@@ -789,7 +774,9 @@ static void test_native_admission_failure_sends_no_provider_request(void)
 
 static void test_native_host_guidance_retains_client_cache(void)
 {
-   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   const delegate_driver_t anthropic = {
+       .name = "anthropic",
+   };
    const char *request =
        "{\"model\":\"ignored\",\"max_tokens\":16,\"system\":[{\"type\":\"text\",\"text\":"
        "\"stable\",\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"}}],\"messages\":[{"
@@ -818,7 +805,9 @@ static void test_native_host_guidance_retains_client_cache(void)
 
 static void test_messages_native_frame_retains_exact_bytes(void)
 {
-   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   const delegate_driver_t anthropic = {
+       .name = "anthropic",
+   };
    const char *frame =
        " { \"model\": \"ignored\", \"max_tokens\": 16, \"stream\": false, \"future\": "
        "9007199254740993, \"system\": "
@@ -835,7 +824,9 @@ static void test_messages_native_frame_retains_exact_bytes(void)
 
 static void test_messages_buffered_anthropic_strips_stream_false_path(void)
 {
-   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   const delegate_driver_t anthropic = {
+       .name = "anthropic",
+   };
    char resp[4096];
    cJSON *sent;
 
@@ -853,7 +844,9 @@ static void test_messages_buffered_anthropic_strips_stream_false_path(void)
 
 static void test_messages_stream_anthropic_preserves_request_shape(void)
 {
-   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   const delegate_driver_t anthropic = {
+       .name = "anthropic",
+   };
    emit_capture_t cap;
    cJSON *sent;
 
@@ -890,7 +883,9 @@ static void test_messages_stream_anthropic_preserves_request_shape(void)
  * ir_ingress_stubs.c would otherwise make every counter inert.) */
 static void test_messages_stream_anthropic_reasoning_metrics(void)
 {
-   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   const delegate_driver_t anthropic = {
+       .name = "anthropic",
+   };
    emit_capture_t cap;
    const char *REQ = "{\"model\":\"m\",\"max_tokens\":64,"
                      "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
@@ -971,9 +966,12 @@ static void test_messages_stream_anthropic_reasoning_metrics(void)
 
 static void test_foreign_ingress_cannot_fall_back_from_ir(void)
 {
-   const delegate_driver_t drivers[] = {
-       {.name = "openai", .build_request = openai_driver_build},
-       {.name = "chatgpt", .build_request = system_prompt_driver_build}};
+   const delegate_driver_t drivers[] = {{
+                                            .name = "openai",
+                                        },
+                                        {
+                                            .name = "chatgpt",
+                                        }};
    const char *old = getenv("AIMEE_IR_PATH");
    char *previous = old ? strdup(old) : NULL;
    setenv("AIMEE_IR_PATH", "0", 1);
@@ -1002,7 +1000,9 @@ static void test_foreign_ingress_cannot_fall_back_from_ir(void)
 
 static void test_messages_buffered_openai_family_translates(void)
 {
-   const delegate_driver_t openai = {.name = "openai", .build_request = openai_driver_build};
+   const delegate_driver_t openai = {
+       .name = "openai",
+   };
    cJSON *sent;
    const cJSON *messages;
    const cJSON *tools;
@@ -1036,8 +1036,7 @@ static void test_messages_buffered_openai_family_translates(void)
 static void test_messages_buffered_system_prompt_driver_no_duplicate_system(void)
 {
    const delegate_driver_t chatgpt = {.name = "chatgpt",
-                                      .build_request = system_prompt_driver_build,
-                                      .parse_response = parsed_text,
+
                                       .get_caps = system_prompt_driver_caps};
    cJSON *sent;
    const cJSON *input;
@@ -1062,8 +1061,7 @@ static void test_messages_buffered_system_prompt_driver_no_duplicate_system(void
 static void test_messages_buffered_capability_does_not_override_wire(void)
 {
    const delegate_driver_t capable = {.name = "future-responses",
-                                      .build_request = system_prompt_driver_build,
-                                      .parse_response = parsed_text,
+
                                       .get_caps = system_prompt_driver_caps};
    cJSON *sent;
    const cJSON *input;
@@ -1086,7 +1084,9 @@ static void test_messages_buffered_capability_does_not_override_wire(void)
 
 static void test_messages_stream_openai_family_translates(void)
 {
-   const delegate_driver_t openai = {.name = "openai", .build_request = openai_driver_build};
+   const delegate_driver_t openai = {
+       .name = "openai",
+   };
    emit_capture_t cap;
    cJSON *sent;
    const cJSON *messages;
@@ -1131,8 +1131,7 @@ static void test_messages_stream_openai_family_translates(void)
 static void test_messages_stream_chatgpt_buffered_replays_responses(void)
 {
    const delegate_driver_t chatgpt = {.name = "chatgpt",
-                                      .build_request = system_prompt_driver_build,
-                                      .parse_response = parsed_responses,
+
                                       .get_caps = system_prompt_driver_caps};
    emit_capture_t cap;
    cJSON *sent;
@@ -1170,8 +1169,12 @@ static void test_proof_gated_ingress_wire_parity(void)
 {
    const char *request = "{\"model\":\"ignored\",\"max_tokens\":64,"
                          "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
-   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
-   const delegate_driver_t openai = {.name = "openai", .build_request = openai_driver_build};
+   const delegate_driver_t anthropic = {
+       .name = "anthropic",
+   };
+   const delegate_driver_t openai = {
+       .name = "openai",
+   };
    char resp[4096];
    char *off_body;
    emit_capture_t cap;
@@ -1220,9 +1223,15 @@ static void test_memory_refusal_blocks_provider_dispatch(void)
    const char *request = "{\"model\":\"ignored\",\"max_tokens\":64,"
                          "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
    const delegate_driver_t drivers[] = {
-       {.name = "anthropic", .parse_response = parsed_text},
-       {.name = "openai", .build_request = openai_driver_build},
-       {.name = "chatgpt", .build_request = system_prompt_driver_build},
+       {
+           .name = "anthropic",
+       },
+       {
+           .name = "openai",
+       },
+       {
+           .name = "chatgpt",
+       },
    };
    for (size_t i = 0; i < sizeof(drivers) / sizeof(drivers[0]); i++)
       for (int gated = 0; gated <= 1; gated++)
@@ -1265,9 +1274,15 @@ static void test_durable_receipt_refusal_blocks_buffered_and_streamed(void)
    const char *request = "{\"model\":\"ignored\",\"max_tokens\":64,"
                          "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
    const delegate_driver_t drivers[] = {
-       {.name = "anthropic", .parse_response = parsed_text},
-       {.name = "openai", .build_request = openai_driver_build},
-       {.name = "chatgpt", .build_request = system_prompt_driver_build},
+       {
+           .name = "anthropic",
+       },
+       {
+           .name = "openai",
+       },
+       {
+           .name = "chatgpt",
+       },
    };
    g_receipt_refuse = 1;
    for (size_t i = 0; i < sizeof(drivers) / sizeof(drivers[0]); i++)
@@ -1311,7 +1326,9 @@ static void test_durable_receipt_refusal_blocks_buffered_and_streamed(void)
 
 static void test_count_tokens_validates_request_shape(void)
 {
-   const delegate_driver_t openai = {.name = "openai", .build_request = openai_driver_build};
+   const delegate_driver_t openai = {
+       .name = "openai",
+   };
    static const char *const invalid[] = {
        "{", "[]", "null", "{}", "{\"messages\":\"not-an-array\"}", NULL,
    };
@@ -1335,7 +1352,9 @@ static void test_count_tokens_validates_request_shape(void)
 
 static void test_messages_buffered_rejects_missing_messages(void)
 {
-   const delegate_driver_t openai = {.name = "openai", .build_request = openai_driver_build};
+   const delegate_driver_t openai = {
+       .name = "openai",
+   };
    char resp[4096];
 
    reset_capture();
@@ -1347,8 +1366,29 @@ static void test_messages_buffered_rejects_missing_messages(void)
    PASS("messages_buffered_rejects_missing_messages");
 }
 
+static void test_native_alias_uses_provider_model(void)
+{
+   const char *body =
+       "{\"model\":\"registered-agent\",\"max_tokens\":16,\"system\":[{\"type\":\"text\",\"text\":"
+       "\"prefix\",\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"}}],"
+       "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+   agent_t agent = {0};
+   snprintf(agent.name, sizeof agent.name, "registered-agent");
+   snprintf(agent.model, sizeof agent.model, "actual-provider-model");
+   cJSON *request = parse(body);
+   char *wire = build_anthropic_provider_body(request, &agent, 0, 1, body);
+   cJSON *native = wire ? cJSON_Parse(wire) : NULL;
+   assert(native && !strcmp(cJSON_GetStringValue(obj(native, "model")), "actual-provider-model"));
+   assert(cJSON_Compare(obj(request, "system"), obj(native, "system"), 1));
+   assert(cJSON_Compare(obj(request, "messages"), obj(native, "messages"), 1));
+   free(wire);
+   cJSON_Delete(native);
+   cJSON_Delete(request);
+}
+
 int main(void)
 {
+   test_native_alias_uses_provider_model();
    test_explicit_unknown_model_is_rejected();
    test_messages_stream_anthropic_reasoning_metrics();
    test_native_ir_fragmentation_and_persistence();
