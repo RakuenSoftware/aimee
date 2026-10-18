@@ -2156,8 +2156,26 @@ fi  # WORKFLOW_MODULE_READY
 
 # Native provider output must cross the same durable IR contract used by
 # browser live delivery and replay, including after model switches.
+# This journey owns a server-local checkout. The earlier mirror journey's
+# client path is deliberately foreign to server execution; registering that path
+# as a mirror does not make it a shared server workspace for a delegate.
+PRIMARY_IR_WORKSPACE="$HOME/primary-ir-workspace"
+git init -b main "$PRIMARY_IR_WORKSPACE" >/dev/null
+git -C "$PRIMARY_IR_WORKSPACE" config user.name "Aimee Integration"
+git -C "$PRIMARY_IR_WORKSPACE" config user.email "aimee-integration@example.invalid"
+printf 'canonical delegate fixture\n' >"$PRIMARY_IR_WORKSPACE/README.md"
+git -C "$PRIMARY_IR_WORKSPACE" add README.md
+git -C "$PRIMARY_IR_WORKSPACE" commit -m fixture >/dev/null
+PRIMARY_WORKSPACE_REQ=$(python3 - "$PRIMARY_IR_WORKSPACE" <<'PYREQ'
+import json, sys
+print(json.dumps({"method": "workspace.add", "root": sys.argv[1],
+                  "provider": "shared", "scan": False}))
+PYREQ
+)
+RESP=$(http_rpc "$PRIMARY_WORKSPACE_REQ") || true
+check_output "canonical delegate server workspace registered" '"status":"ok"' echo "$RESP"
 PRIMARY_IR_LOG="$HOME/primary-ir-live.log"
-if AIMEE_IR_DELEGATE_WORKSPACE="$MIRROR_CLIENT" python3 "$REPO_ROOT/src/tests/test_primary_ir_live.py" >"$PRIMARY_IR_LOG" 2>&1; then
+if AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$REPO_ROOT/src/tests/test_primary_ir_live.py" >"$PRIMARY_IR_LOG" 2>&1; then
     PASS=$((PASS + 1))
     PRIMARY_SKIPS=$(grep -c '^SKIP:' "$PRIMARY_IR_LOG" || true)
     SKIP=$((SKIP + PRIMARY_SKIPS))

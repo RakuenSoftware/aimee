@@ -87,7 +87,7 @@ validation; disabling the update requirement without enabling the queue would pe
 Set the queue build concurrency to 1 and maximum merge group size to 1 initially, so unrelated
 changes do not repeatedly invalidate several candidates. Increase these after measuring queue time.
 
-The `CI`, `Release policy`, `core-c-package`, `c-repository-pins`, and `Audit storage regressions` workflows accept
+The `CI`, `Release policy`, `core-c-package`, `Module exports and runtime validation`, and `Audit storage regressions` workflows accept
 `merge_group: checks_requested` for `testing`. They check out GitHub's event SHA, which is the
 queued integration commit. Queue runs always take the full test path, including documentation-only
 changes. PR attribution checks remain admission checks on the original PR; the queue has no PR

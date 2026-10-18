@@ -4,19 +4,38 @@ Prepared 17 October 2026, approximately 23:30 Europe/Amsterdam. The user request
 
 ## Current continuation status: 18 October 2026
 
-The user subsequently authorized a personally authenticated replacement PR if needed to resolve the
-opening-app attribution, and requires the attribution gate permanently. This supersedes the earlier
-one-PR-only restriction below. Carry forward only #3036's work, verify the replacement's strict
-attribution check before closing #3036, and preserve links and review history. The replacement has
-not yet been opened at this local checkpoint.
+The user authorized replacement of #3036 to satisfy the permanent attribution gate, then
+explicitly requested its retirement. Active work is now on
+[#3038](https://github.com/RakuenSoftware/aimee/pull/3038), branch
+`fix/browser-ir-runtime-personal`, targeting `testing`. It contains all of #3036's migration
+work. Its published checkpoint `2aac64506` passes `no-coauthor-trailers` and the renamed
+`Export builds and runtime checks`; integration still fails in delegate fixture setup.
 
-- All publication remains on #3036 and fix/browser-ir-runtime. Latest published checkpoint is a3d470b98; later entries below distinguish local work from published qualification. The original 17 October checkpoint and backlog below are historical and are superseded where dated continuation entries report completed work.
+#3036 is closed, its body is empty, and `fix/browser-ir-runtime` was deleted locally and
+remotely. GitHub retains the closed PR record. All older instructions below naming #3036
+as the active PR/branch are historical and superseded. Do not reopen it, restore its branch,
+or create another replacement. Continue on #3038 with automatic reviews and strict attribution
+checks enabled.
+
 - Canonical primary loading/model switching, durable-log history, standard browser controls, native hook admission, compaction and several credential/consumer cutovers are implemented. The whole migration remains unfinished, especially credential-free native execution, scoped native tools and account-bound replay/cache proof.
 - The user explicitly confirmed that production .100 should NOT use a KB instance right now. Unset KB mode/endpoint are intentional. Do not configure/connect a KB or enable a dependency on one to fix learning. Repair and qualify server-local learning, failed approaches and authenticated task-outcome capture through their existing owners.
 - The active-project CLI repair is installed and was exercised from wol-lore. Keep the completed WOL PR separate; no WOL content belongs in #3036.
-- Strict opening-app attribution remains enforced. Do not exempt #3036 or create a replacement PR. Production promotion still needs the recorded independent review required by OWNERS.md.
+- Strict opening-app attribution remains enforced; #3038 passes without an exemption. Production promotion still needs the recorded independent review required by OWNERS.md.
 
-## Start here
+## Replacement CI repairs: 18 October 2026
+
+- The delegate learning journey now owns a registered `shared` server checkout,
+  separate from the earlier mirror journey's client-side path. The integration
+  Make target builds the actual `aimee-delegate-egress` sandbox owner as a prerequisite.
+  Real Docker completion/readback remains required where Docker is available.
+- MR-18's frozen `main_test.go` input was reviewed: removing only event 6147
+  from the expected Learning registry reproduces the previous frozen SHA-256 exactly
+  (`09438b193d19bc2551759b538037f4da20604a707f04d2ff4f30e1f34a59a725`).
+  The refreshed input hash admits the new canonical execution-outcome stage;
+  no invariant cases, groups, assertions, thresholds or denominators changed.
+
+## Historical 17 October startup instructions (superseded)
+
 
 - Repository: https://github.com/RakuenSoftware/aimee
 - **Keep all further work in the existing PR #3036**: https://github.com/RakuenSoftware/aimee/pull/3036
