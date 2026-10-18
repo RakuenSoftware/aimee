@@ -1795,7 +1795,14 @@ int cli_codex_compact_thread(const cli_codex_compact_request_t *req,
 int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const char *system_prompt,
                                    const char *user_prompt, agent_result_t *out)
 {
+   if (!out)
+      return -1;
    memset(out, 0, sizeof(*out));
+   if (!agent)
+   {
+      snprintf(out->error, sizeof(out->error), "missing agent");
+      return -1;
+   }
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
 
    if (!user_prompt || !user_prompt[0])
