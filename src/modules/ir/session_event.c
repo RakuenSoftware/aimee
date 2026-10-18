@@ -532,6 +532,24 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
                                    event->projection_opaque))
          goto fail;
       break;
+   case AIMEE_SESSION_CHILD_EXECUTION:
+      if (!event->child_session || !event->child_session[0] || strlen(event->child_session) > 127 ||
+          !event->child_turn || !event->child_turn[0] || strlen(event->child_turn) > 127 ||
+          !event->child_role || !event->child_role[0] || strlen(event->child_role) > 127 ||
+          !event->execution_status ||
+          (strcmp(event->execution_status, "running") &&
+           strcmp(event->execution_status, "completed") &&
+           strcmp(event->execution_status, "failed") &&
+           strcmp(event->execution_status, "cancelled")))
+         goto fail;
+      kind = "child_execution";
+      payload = cJSON_CreateObject();
+      if (!payload || !add_string(payload, "session_id", event->child_session) ||
+          !add_string(payload, "turn_id", event->child_turn) ||
+          !add_string(payload, "role", event->child_role) ||
+          !add_string(payload, "status", event->execution_status))
+         goto fail;
+      break;
    case AIMEE_SESSION_EXECUTION:
       if (!event->execution_status || (strcmp(event->execution_status, "running") &&
                                        strcmp(event->execution_status, "completed") &&

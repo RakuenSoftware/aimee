@@ -4,6 +4,7 @@ import "testing"
 
 func TestSessionIRCanonicalValidation(t *testing.T) {
 	for _, event := range []string{
+		`{"kind":"child_execution","payload":{"session_id":"child","turn_id":"run","role":"review","status":"running"}}`,
 		`{"kind":"projection","payload":{"model":"model-b","boundary":"request","omitted_reasoning_blocks":2,"omitted_opaque_state_blocks":1}}`,
 		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_START","kind":"thinking","block_id":0,"text_delta":"initial","signature_delta":"sig","redacted_content":"opaque"}}`,
 		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_DELTA","kind":"thinking","block_id":0,"signature_delta":"nature"}}`,
@@ -24,6 +25,10 @@ func TestSessionIRCanonicalValidation(t *testing.T) {
 		}
 	}
 	for _, event := range []string{
+		`{"kind":"child_execution","payload":{"session_id":"child","turn_id":"run","role":"review","status":"invented"}}`,
+		`{"kind":"child_execution","payload":{"session_id":"","turn_id":"run","role":"review","status":"running"}}`,
+		`{"kind":"child_execution","payload":{"session_id":"child","turn_id":"run","status":"running"}}`,
+		`{"kind":"child_execution","payload":{"session_id":"child","turn_id":"run","role":"review","status":"running","prompt":"must remain private"}}`,
 		`{"kind":"projection","payload":{"model":"model-b","boundary":"request","omitted_reasoning_blocks":2,"omitted_opaque_state_blocks":3}}`,
 		`{"kind":"projection","payload":{"model":"model-b","boundary":"request","omitted_reasoning_blocks":2}}`,
 		`{"kind":"projection","payload":{"model":"model-b","boundary":"request","omitted_reasoning_blocks":2,"omitted_opaque_state_blocks":-1}}`,

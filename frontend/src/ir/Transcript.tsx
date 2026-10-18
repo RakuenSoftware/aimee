@@ -1,13 +1,53 @@
+import { useEffect, useRef, useState } from 'react';
 import { Message, ThinkingBlock, ToolBlock } from '../pages/chat/ChatPrimitives';
-import { toolResults } from './session';
-import type { SessionState } from './session';
+import { emptySession, reduceSession, toolResults } from './session';
+import type { ChildExecution, Envelope, SessionState } from './session';
 import ControlCard, { type ReplyControl } from './ControlCard';
 const pretty = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? '';
 function mediaURL(ref: string | undefined): string | undefined {
   if (ref && (/^https?:\/\//i.test(ref) || /^data:image\/(png|jpeg|webp|gif);base64,/i.test(ref) || ref.startsWith('/api/artifacts/'))) return ref;
   return undefined;
 }
-export default function IRTranscript({ state, onReply }: { state: SessionState; onReply?: ReplyControl }) {
+function ChildExecutionView({ reference, ancestors }: { reference: ChildExecution; ancestors: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const current = useRef(emptySession(reference.session_id));
+  const [state, setState] = useState(current.current);
+  const [error, setError] = useState('');
+  const cyclic = ancestors.includes(reference.session_id);
+  useEffect(() => {
+    if (!expanded || cyclic) return;
+    setError('');
+    const stream = new EventSource(`/api/chat/session-events?format=ir&sid=${encodeURIComponent(reference.session_id)}&cursor=${current.current.sequence}`);
+    stream.addEventListener('ir', (message) => {
+      try {
+        const envelope = JSON.parse((message as MessageEvent).data) as Envelope;
+        const next = reduceSession(current.current, envelope);
+        current.current = next;
+        setState(next);
+        const status = next.executions[reference.turn_id];
+        if (status && status !== 'running') stream.close();
+      } catch {
+        setError('Delegate history could not be read. Close and reopen to retry.');
+        stream.close();
+      }
+    });
+    stream.onerror = () => {
+      setError('Delegate history is unavailable. Close and reopen to retry.');
+      stream.close();
+    };
+    return () => stream.close();
+  }, [expanded, cyclic, reference.session_id, reference.turn_id]);
+  return <details onToggle={event => setExpanded(event.currentTarget.open)}>
+    <summary>Delegate: {reference.role} — {reference.status}</summary>
+    {expanded && (cyclic ? <p role="alert">This execution reference forms a cycle.</p> : <>
+      {!state.messages.length && !error && <p role="status">Loading delegate history…</p>}
+      <IRTranscript state={state} ancestors={ancestors} />
+      {error && <p role="alert">{error}</p>}
+    </>)}
+  </details>;
+}
+
+export default function IRTranscript({ state, onReply, ancestors = [] }: { state: SessionState; onReply?: ReplyControl; ancestors?: string[] }) {
   const results = toolResults(state);
   const uses = new Set(state.messages.flatMap(m => m.blocks.filter(b => b.type === 'tool_use').map(b => b.tool_id)));
   return <>
@@ -41,6 +81,8 @@ export default function IRTranscript({ state, onReply }: { state: SessionState; 
       }
     }))}
     {Object.entries(state.controls).map(([id, control]) => <ControlCard key={id} id={id} control={control} onReply={onReply} />)}
+    {Object.values(state.children ?? {}).map(child => <ChildExecutionView
+      key={`${child.session_id}:${child.turn_id}`} reference={child} ancestors={[...ancestors, state.session]} />)}
     {(state.projections ?? []).map(report => <p role="status" key={report.id}>
       {report.omitted_reasoning_blocks} reasoning {report.omitted_reasoning_blocks === 1 ? 'block remains' : 'blocks remain'} in history and
       {report.omitted_reasoning_blocks === 1 ? ' was' : ' were'} omitted from {report.boundary === 'request' ? `${report.model}'s input` : `the client response from ${report.model}`}.

@@ -12,7 +12,8 @@ typedef enum
    AIMEE_SESSION_CONTROL_REQUEST,
    AIMEE_SESSION_CONTROL_RESPONSE,
    AIMEE_SESSION_EXECUTION,
-   AIMEE_SESSION_PROJECTION
+   AIMEE_SESSION_PROJECTION,
+   AIMEE_SESSION_CHILD_EXECUTION
 } aimee_session_event_kind_t;
 
 typedef struct
@@ -30,6 +31,8 @@ typedef struct
    /* Host-task lifecycle is separate from each model response TURN_STOP. */
    const char *execution_status; /* running, completed, failed, cancelled */
    const char *execution_error;
+   /* Private execution reference; its conversation remains in its own log. */
+   const char *child_session, *child_turn, *child_role;
    /* Output-boundary fidelity report; never model content. */
    const char *projection_model, *projection_boundary;
    int projection_reasoning, projection_opaque;

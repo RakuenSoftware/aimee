@@ -193,6 +193,24 @@ int main(void)
    event.projection_opaque = -1;
    assert(!aimee_ir_session_event_json(&event));
 
+   event = (aimee_session_event_t){.kind = AIMEE_SESSION_CHILD_EXECUTION,
+                                   .child_session = "private-child",
+                                   .child_turn = "child-run",
+                                   .child_role = "review",
+                                   .execution_status = "running"};
+   json = aimee_ir_session_event_json(&event);
+   assert(json &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(json, "kind")), "child_execution"));
+   const cJSON *child = cJSON_GetObjectItem(json, "payload");
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(child, "session_id")), "private-child"));
+   assert(!cJSON_GetObjectItem(json, "message_id") && !cJSON_GetObjectItem(child, "prompt"));
+   cJSON_Delete(json);
+   event.child_role = NULL;
+   assert(!aimee_ir_session_event_json(&event));
+   event.child_role = "review";
+   event.execution_status = "invented";
+   assert(!aimee_ir_session_event_json(&event));
+
    int failure = -7;
    aimee_response_t response = {.role = "assistant", .content = blocks, .n_content = 2};
    aimee_ir_session_set_sink(capture, &failure);

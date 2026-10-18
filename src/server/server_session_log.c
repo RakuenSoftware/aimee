@@ -14,6 +14,8 @@
 struct server_session_log
 {
    char session[128], turn[33], principal[128];
+   char parent[128], role[128];
+   int announced;
    unsigned long long counter;
    unsigned long long model_completions;
    cJSON *tool_ids;
@@ -116,6 +118,31 @@ qualification_failed:
    cJSON_Delete(payload);
    return -1;
 }
+/* Worker attestation identifies the parent even when no HTTP sink crosses the
+ * thread boundary. Only a reference is appended there; all content stays private. */
+static int publish_child(server_session_log_t *scope, const char *status)
+{
+   if (!scope->parent[0])
+      return 0;
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_CHILD_EXECUTION,
+                                  .child_session = scope->session,
+                                  .child_turn = scope->turn,
+                                  .child_role = scope->role,
+                                  .execution_status = status};
+   cJSON *payload = aimee_ir_session_event_json(&event);
+   char *wire = payload ? cJSON_PrintUnformatted(payload) : NULL;
+   cJSON_Delete(payload);
+   char id[96], sequence[32];
+   snprintf(id, sizeof id, "%s:child:%s", scope->turn, status);
+   int rc = wire ? db1_session_ir_append(scope->parent, id, scope->turn, scope->principal, wire,
+                                         sequence)
+                 : -1;
+   free(wire);
+   if (rc)
+      aimee_ir_session_fail_capture();
+   return rc;
+}
+
 static int ensure_owner(const char *session, const char *type, const char *principal)
 {
    db1_server_session_t row;
@@ -151,10 +178,16 @@ int server_session_log_begin(const char *role, const char *prompt, server_sessio
       goto fail;
    if (role)
    {
+      if (!role[0] || strlen(role) >= sizeof scope->role)
+         goto fail;
+      snprintf(scope->role, sizeof scope->role, "%s", role);
+      if (current && strcmp(current->principal, scope->principal))
+         goto fail;
+      snprintf(scope->parent, sizeof scope->parent, "%s",
+               current ? current->session : attestation.session_id);
       int job = agent_get_durable_job_id();
       char key[192], digest[65];
-      snprintf(key, sizeof key, "%s:%d:%s", attestation.session_id, job,
-               job > 0 ? "durable" : scope->turn);
+      snprintf(key, sizeof key, "%s:%d:%s", scope->parent, job, job > 0 ? "durable" : scope->turn);
       if (aimee_sha256_hex(key, strlen(key), digest))
          goto fail;
       snprintf(scope->session, sizeof scope->session, "delegate-%s", digest);
@@ -162,7 +195,8 @@ int server_session_log_begin(const char *role, const char *prompt, server_sessio
    else
       snprintf(scope->session, sizeof scope->session, "%s", attestation.session_id);
    if (ensure_owner(attestation.session_id, "native", scope->principal) ||
-       (role && ensure_owner(scope->session, "delegate", scope->principal)))
+       (role && (ensure_owner(scope->parent, "native", scope->principal) ||
+                 ensure_owner(scope->session, "delegate", scope->principal))))
       goto fail;
    scope->previous_sink = previous_sink;
    scope->previous_context = previous_context;
@@ -177,7 +211,10 @@ int server_session_log_begin(const char *role, const char *prompt, server_sessio
    aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
    aimee_session_event_t user = {
        .kind = AIMEE_SESSION_MESSAGE, .message_id = "user", .message = &message};
-   if (aimee_ir_session_emit(&started) || aimee_ir_session_emit(&user))
+   if (aimee_ir_session_emit(&started) || publish_child(scope, "running"))
+      return -1;
+   scope->announced = scope->parent[0] != 0;
+   if (aimee_ir_session_emit(&user))
       return -1; /* Caller must finish *out, including failed admission. */
    return 0;
 fail:
@@ -236,6 +273,8 @@ int server_session_log_finish(server_session_log_t *scope, int success, const ch
       success = 0;
       error = "execution completed without canonical model output";
    }
+   if (aimee_ir_session_capture_failed())
+      success = 0;
    aimee_session_event_t finished = {.kind = AIMEE_SESSION_EXECUTION,
                                      .execution_status = agent_request_cancelled() ? "cancelled"
                                                          : success                 ? "completed"
@@ -243,6 +282,8 @@ int server_session_log_finish(server_session_log_t *scope, int success, const ch
                                      .execution_error = error && error[0] ? error : NULL};
    int failed = aimee_ir_session_emit(&finished) != 0 || aimee_ir_session_capture_failed();
    failed = failed || missing;
+   if (scope->announced && publish_child(scope, failed ? "failed" : finished.execution_status))
+      failed = 1;
    current = scope->previous;
    aimee_ir_session_restore_sink(scope->previous_sink, scope->previous_context, failed);
    server_control_scope_bind(scope->previous_controls);

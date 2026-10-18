@@ -2754,7 +2754,7 @@ export default function Chat() {
             Show earlier messages ({hiddenCount})
           </Button>
         )}
-        {canonicalState?.messages.length ? <>
+        {canonicalState && (canonicalState.messages.length > 0 || Object.keys(canonicalState.children ?? {}).length > 0) ? <>
           {windowedMsgs.length > 0 && <details><summary>Earlier text-only history</summary>
             <Transcript messages={windowedMsgs} working={false} activeSid={activeAimeeSid} />
           </details>}

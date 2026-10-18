@@ -114,6 +114,16 @@ func validSessionIREvent(encoded []byte) bool {
 			projection.Reasoning != nil && projection.Opaque != nil &&
 			*projection.Reasoning > 0 && *projection.Reasoning <= 9007199254740991 &&
 			*projection.Opaque >= 0 && *projection.Opaque <= *projection.Reasoning
+	case "child_execution":
+		var child struct {
+			Session string `json:"session_id"`
+			Turn    string `json:"turn_id"`
+			Role    string `json:"role"`
+			Status  string `json:"status"`
+		}
+		return decodeIR(e.Payload, &child) && child.Session != "" && len(child.Session) <= 127 &&
+			child.Turn != "" && len(child.Turn) <= 127 && child.Role != "" && len(child.Role) <= 127 &&
+			(child.Status == "running" || child.Status == "completed" || child.Status == "failed" || child.Status == "cancelled")
 	case "execution":
 		var x struct {
 			Status string `json:"status"`

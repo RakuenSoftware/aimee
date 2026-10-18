@@ -43,7 +43,10 @@ export type Delta = {
   error_message?: string;
 };
 export type ProjectionReport = { model: string; boundary: 'request' | 'response'; omitted_reasoning_blocks: number; omitted_opaque_state_blocks: number };
+export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+export type ChildExecution = { session_id: string; turn_id: string; role: string; status: ExecutionStatus };
 export type SessionEvent =
+  | { kind: 'child_execution'; payload: ChildExecution }
   | { kind: 'projection'; payload: ProjectionReport }
   | { kind: 'history'; payload: { scope: string; phase: 'message' | 'commit'; index?: number; count?: number; message?: Message } }
   | { kind: 'message'; message_id: string; payload: Message }
@@ -73,10 +76,11 @@ export type SessionState = {
   session: string; sequence: string; messages: ProjectedMessage[];
   controls: Record<string, Control>; activeTurns: string[]; errors: string[];
   projections: (ProjectionReport & { id: string; turn: string })[];
+  children: Record<string, ChildExecution>;
   executions: Record<string, 'running' | 'completed' | 'failed' | 'cancelled'>;
 };
 export function emptySession(session: string): SessionState {
-  return { session, sequence: '0', messages: [], controls: {}, activeTurns: [], errors: [], projections: [], executions: {} };
+  return { session, sequence: '0', messages: [], controls: {}, activeTurns: [], errors: [], projections: [], executions: {}, children: {} };
 }
 function sequence(value: string): bigint {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) throw new Error('Invalid session sequence');
@@ -120,6 +124,18 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       (event.kind === 'message' || event.kind === 'delta' || event.kind === 'control_request'))
     throw new Error('Content follows execution completion');
   switch (event.kind) {
+    case 'child_execution': {
+      const child = event.payload;
+      if (![child.session_id, child.turn_id, child.role].every(value => nonempty(value) && new TextEncoder().encode(value).length <= 127) ||
+          child.session_id === state.session || !['running', 'completed', 'failed', 'cancelled'].includes(child.status))
+        throw new Error('Invalid child execution reference');
+      const key = `${child.session_id}:${child.turn_id}`;
+      const previous = state.children?.[key];
+      if (previous && (previous.role !== child.role || previous.status !== 'running' && previous.status !== child.status))
+        throw new Error('Child execution identity or terminal status changed');
+      next.children = { ...(state.children ?? {}), [key]: { ...child } };
+      return next;
+    }
     case 'projection': {
       const report = event.payload;
       if (!nonempty(report.model) || (report.boundary !== 'request' && report.boundary !== 'response') || !Number.isSafeInteger(report.omitted_reasoning_blocks) || report.omitted_reasoning_blocks <= 0 ||

@@ -18,7 +18,7 @@ static struct row
    cJSON *events;
    char *history;
 } rows[16];
-static int count, reject_append, reject_checkpoint, parent_events;
+static int count, reject_append, reject_checkpoint, reject_reference, parent_events;
 void agent_request_creds_snapshot(agent_request_creds_t *out)
 {
    *out = credentials;
@@ -73,6 +73,13 @@ int db1_session_ir_append(const char *session, const char *id, const char *turn,
    assert(r && !strcmp(r->actor, actor));
    cJSON *event = cJSON_Parse(wire);
    assert(event);
+   const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "kind"));
+   if (reject_reference && kind && !strcmp(kind, "child_execution"))
+   {
+      cJSON_Delete(event);
+      pthread_mutex_unlock(&lock);
+      return -1;
+   }
    cJSON_AddItemToArray(r->events, event);
    snprintf(sequence, 32, "%d", cJSON_GetArraySize(r->events));
    pthread_mutex_unlock(&lock);
@@ -192,6 +199,19 @@ int main(void)
    assert(server_session_log_finish(scope, 1, NULL) < 0);
    assert(aimee_ir_session_capture_failed());
    aimee_ir_session_set_sink(NULL, NULL);
+   reject_reference = 1;
+   assert(server_session_log_begin("review", "reference admission must persist", &scope) < 0 &&
+          scope);
+   reject_reference = 0;
+   assert(server_session_log_finish(scope, 0, "reference unavailable") < 0);
+   aimee_ir_session_set_sink(NULL, NULL);
+   assert(server_session_log_begin("review", "terminal reference", &scope) == 0);
+   model_reply();
+   reject_reference = 1;
+   assert(server_session_log_finish(scope, 1, NULL) < 0);
+   assert(aimee_ir_session_capture_failed());
+   reject_reference = 0;
+   aimee_ir_session_set_sink(NULL, NULL);
    int before_workers = count;
    pthread_t threads[2];
    for (long i = 0; i < 2; i++)
@@ -199,6 +219,23 @@ int main(void)
    for (int i = 0; i < 2; i++)
       assert(pthread_join(threads[i], NULL) == 0);
    assert(count == before_workers + 2); /* Each durable job reuses its private child. */
+   const cJSON *reference;
+   int references = 0;
+   cJSON_ArrayForEach(reference, rows[0].events)
+   {
+      const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reference, "kind"));
+      assert(kind && !strcmp(kind, "child_execution"));
+      const cJSON *payload = cJSON_GetObjectItemCaseSensitive(reference, "payload");
+      const char *child =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "session_id"));
+      assert(child && strcmp(child, "parent") && find(child));
+      assert(!cJSON_GetObjectItemCaseSensitive(payload, "prompt"));
+      char *wire = cJSON_PrintUnformatted(reference);
+      assert(wire && !strstr(wire, "private child prompt") && !strstr(wire, "canonical reply"));
+      free(wire);
+      references++;
+   }
+   assert(references >= 10); /* Synchronous and independent concurrent workers. */
    for (int i = 0; i < count; i++)
    {
       cJSON_Delete(rows[i].events);

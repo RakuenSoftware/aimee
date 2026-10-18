@@ -176,3 +176,16 @@ it('preserves initial content, opaque thinking state and complete tool inputs du
   const partial = events.slice(0, 5).reduce(reduceSession, emptySession('s'));
   expect(() => reduceSession(partial, d(6, { type: 'BLOCK_DELTA', block_id: 1, tool_args_delta: '{}' }))).toThrow('complete initial input');
 });
+
+it('keeps child references separate from parent model history and replays terminal state', () => {
+  const reference = { session_id: 'private-child', turn_id: 'child-run', role: 'review', status: 'running' as const };
+  const events = [envelope(1, { kind: 'child_execution', payload: reference }),
+    envelope(2, { kind: 'child_execution', payload: { ...reference, status: 'completed' } })];
+  const state = events.reduce(reduceSession, emptySession('s'));
+  expect(state.messages).toEqual([]);
+  expect(state.executions).toEqual({});
+  expect(state.children['private-child:child-run'].status).toBe('completed');
+  expect(JSON.parse(JSON.stringify(events)).reduce(reduceSession, emptySession('s'))).toEqual(state);
+  expect(() => reduceSession(state, envelope(3, { kind: 'child_execution', payload: reference }))).toThrow(/terminal/);
+  expect(() => reduceSession(emptySession('s'), envelope(1, { kind: 'child_execution', payload: { ...reference, session_id: 's' } }))).toThrow(/reference/);
+});

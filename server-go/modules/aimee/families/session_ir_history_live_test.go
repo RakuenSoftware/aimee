@@ -84,6 +84,51 @@ func TestSessionIRLiveHistoryCheckpointOwnershipIsolationAndAtomicReload(t *test
 	if status, got := load("primary", "alice"); status != store.StatusOK || got != base {
 		t.Fatalf("reload: %d %s", status, got)
 	}
+	// A parent owns only the execution reference. The expandable conversation
+	// is paged from the child's separately authorized log and never joins the prompt.
+	if _, err = pool.Exec(ctx, `INSERT INTO server_sessions(id,principal) VALUES ('private-child','alice')`); err != nil {
+		t.Fatal(err)
+	}
+	referenceTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer referenceTx.Rollback(ctx)
+	for i, event := range []struct{ session, payload string }{
+		{"s", `{"kind":"child_execution","payload":{"session_id":"private-child","turn_id":"child-run","role":"review","status":"running"}}`},
+		{"private-child", `{"kind":"execution","payload":{"status":"running"}}`},
+		{"private-child", `{"kind":"message","message_id":"child-answer","payload":{"role":"assistant","blocks":[{"type":"text","text":"PRIVATE_CHILD_LOG"}]}}`},
+		{"private-child", `{"kind":"execution","payload":{"status":"completed"}}`},
+		{"s", `{"kind":"child_execution","payload":{"session_id":"private-child","turn_id":"child-run","role":"review","status":"completed"}}`},
+	} {
+		status, _, appendErr := sessionIRAppend(ctx, sessionIRLiveTx{referenceTx}, []string{event.session, fmt.Sprintf("ref-%d", i), "child-run", "alice", event.payload})
+		if appendErr != nil || status != store.StatusOK {
+			t.Fatalf("child/reference append: %d %v", status, appendErr)
+		}
+	}
+	if err = referenceTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, got := load("primary", "alice"); got != base {
+		t.Fatalf("child reference changed parent prompt: %s", got)
+	}
+	pageTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pageTx.Rollback(ctx)
+	for _, check := range []struct {
+		session, actor string
+		private        bool
+	}{
+		{"s", "alice", false}, {"private-child", "alice", true}, {"private-child", "mallory", false},
+	} {
+		status, cells, pageErr := sessionIRPage(ctx, sessionIRLiveTx{pageTx}, []string{check.session, "0", "128", check.actor})
+		if pageErr != nil || status != store.StatusOK || len(cells) != 1 || strings.Contains(cells[0], "PRIVATE_CHILD_LOG") != check.private {
+			t.Fatalf("child log isolation: %s %s %v %v", check.session, check.actor, cells, pageErr)
+		}
+	}
+
 	save("child", "delegate:child", "alice", `[{"role":"user","blocks":[{"type":"text","text":"PRIVATE_CHILD"}]}]`, true)
 	if _, got := load("primary", "alice"); strings.Contains(got, "PRIVATE_CHILD") || got != base {
 		t.Fatalf("child leaked: %s", got)
