@@ -79,6 +79,12 @@ int openai_backend_parse(const struct cJSON *resp, aimee_response_t *out, char *
  * `instructions`; messages -> `input` items (message / function_call); tools ->
  * flat function tools; max_tokens -> max_output_tokens. Returns a new cJSON. */
 struct cJSON *responses_backend_build(const aimee_request_t *ir);
+/* Canonical history -> stable Codex thread/inject_items output boundary.
+ * Returns owned Responses input items, preserving roles/order/full tool IDs.
+ * System/tools/sampling stay with their separate host configuration owners.
+ * Caller proves resume prefix and account scope; upstream replay guard still
+ * validates opaque reasoning when these items reach the selected model. */
+struct cJSON *aimee_codex_history_items(const aimee_request_t *history);
 /* Owned native snapshot assembled at the Responses SSE entry boundary. */
 struct cJSON *responses_backend_sse_object(const char *body);
 /* Reasoning text out of a Responses `reasoning` output item, from its `summary`.

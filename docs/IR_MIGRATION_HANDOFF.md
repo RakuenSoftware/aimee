@@ -1065,3 +1065,20 @@ inside the execution. No client header can set this host-only field.
 Request-context, MCP memory-authority, native-runtime and full agent fixtures pass.
 The first three also pass ASan/UBSan with leak checking. This closes an attribution
 prerequisite; standalone feedback admission and native SDK activation remain open.
+
+## Stable native history boundary and real SDK qualification
+
+Both Codex adapter entry points now accept canonical history and use stable
+`thread/inject_items` before starting a model turn. This is an output-boundary
+implementation; browser/session callers still need account-scoped prefix proof
+and the complete native tool/workspace/control handoff before activation. A typed
+request carries preceding history (only unseen tail on a proven resume), never a
+flattened transcript. Rejection or invalid IR refuses before model execution.
+
+The new opt-in `src/tests/test_codex_native_adoption.py` drives the compiled Aimee
+adapter against the actual installed Codex 0.160.1 and a credential-free loopback
+provider. It passes initial canonical adoption, actual provider-input assertions,
+process restart and native resume retaining prior roles/tool pairs/completed turn.
+This caught and fixed real SDK startup rejection of the obsolete `untrusted`
+approval policy; startup now uses `on-request` and retains host control handling.
+Synthetic provider usage does not establish production cache savings.

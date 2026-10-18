@@ -96,6 +96,19 @@ static char *blocks_text(const aimee_block_t *blocks, int n)
    return s;
 }
 
+cJSON *aimee_codex_history_items(const aimee_request_t *history)
+{
+   cJSON *request = responses_backend_build(history);
+   cJSON *items = cJSON_DetachItemFromObjectCaseSensitive(request, "input");
+   cJSON_Delete(request);
+   if (!cJSON_IsArray(items))
+   {
+      cJSON_Delete(items);
+      return NULL;
+   }
+   return items;
+}
+
 cJSON *responses_backend_build(const aimee_request_t *ir)
 {
    if (aimee_ir_request_admit(ir))

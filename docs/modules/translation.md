@@ -205,3 +205,30 @@ Browser-owned Claude and Codex controls persist the admitted canonical operator 
 ### Native tool hook entry
 
 `hook_ir.c` admits complete bounded native hook frames into owned canonical tool-use/result values. CLI forwarding carries a versioned hook intent; marked intents cannot fall back to native fields. Legacy installed clients convert once at the server entry. Scope and authenticated harness metadata remain separate transport fields, and policy/storage authority stays with its existing owner. Missing legacy tool IDs are retained as missing: hook intents are control inputs and cannot be published as model history without real identity. Unknown namespaces are preserved by admission and refused by the current flat hook policy catalog before routing or policy side effects.
+
+### Native Codex history adoption
+
+`aimee_codex_history_items` renders admitted canonical messages through the existing
+Responses output owner. Both native Codex entry points accept an optional typed
+history request and adopt its items with the stable `thread/inject_items` method
+after thread start/resume and before `turn/start`. Roles, block order, opaque
+reasoning and full tool call/result IDs remain typed until this output boundary.
+Unsupported SDKs and invalid history refuse before model execution. The host must
+prove account/connection scope and supply only an unseen canonical tail on resume;
+the migration has not yet activated this option at the browser/session callers.
+The selected-model gateway still owns opaque replay verification.
+
+The opt-in real SDK qualification uses the compiled adapter, an empty native HOME
+and a loopback Responses provider:
+
+```sh
+python3 src/tests/test_codex_native_adoption.py \
+  --adapter-binary /path/to/unit-test-cli-codex --codex-binary /path/to/codex
+```
+
+It checks the actual provider input, then starts a second adapter/SDK process and
+resumes the native thread. This proves history adoption and native persistence,
+not upstream cache billing. Mock subprocess fixtures also cover both native entry
+points, resumed/fresh threads, malformed history and method refusal without a
+subsequent model turn. Codex startup uses the supported `on-request` approval
+policy; the installed 0.160.1 SDK refuses the old `untrusted` policy.
