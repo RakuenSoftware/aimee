@@ -78,3 +78,16 @@ func TestDuplicateJSONMembersRefuse(t *testing.T) {
 		t.Fatal("refused independent object keys")
 	}
 }
+
+func TestCanonicalMessagesContract(t *testing.T) {
+	raw := `[{"role":"assistant","blocks":[{"type":"thinking","text":"private","signature":"sig"},{"type":"tool_use","tool_id":"opaque","name":"Read","input":{"id":9007199254740993}}]},{"role":"user","blocks":[{"type":"tool_result","tool_id":"opaque","content":{"value":0.12345678901234567890123456789}}]},{"role":"user","content_scalar":true,"_compaction_boundary":true,"blocks":[{"type":"text","text":"continue"}]}]`
+	messages, err := DecodeMessages([]byte(raw))
+	if err != nil || !messages[2].ContentScalar || !messages[2].Boundary || string(messages[0].Blocks[1].Input) != `{"id":9007199254740993}` {
+		t.Fatal(messages, err)
+	}
+	for _, bad := range []string{`null`, `{}`, `[{"role":"user","content":"native"}]`, strings.Replace(raw, `"role":"assistant"`, `"role":"user"`, 1), strings.Replace(raw, `"id":9007199254740993`, `"id":1,"id":2`, 1)} {
+		if _, err := DecodeMessages([]byte(bad)); err == nil {
+			t.Fatal("accepted invalid canonical history", bad)
+		}
+	}
+}

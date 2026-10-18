@@ -37,7 +37,7 @@ class CProcessBuildTests(unittest.TestCase):
                 sources = exporter.go_process_shared_sources(module)
                 self.assertIn("server-go/aimee/client.go", sources)
                 self.assertFalse(any(path.startswith("server-go/db1/") for path in sources))
-        for module in ("aimee", "memory"):
+        for module in ("aimee", "memory", "economizer"):
             with self.subTest(ir_consumer=module):
                 sources = exporter.go_process_shared_sources(module)
                 self.assertIn("server-go/ir/session.go", sources)

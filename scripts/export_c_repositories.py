@@ -760,7 +760,7 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
 # the serving module. Add entries here in lockstep with the caller's process
 # contract and runtime-bundle coverage.
 GO_SHARED_CONTRACTS = {
-    "server-go/ir": {"aimee", "memory"},
+    "server-go/ir": {"aimee", "memory", "economizer"},
     "server-go/memory": {"memory"},
     "server-go/internal/retrievalmetrics": {"memory", "benchmarks"},
     "server-go/modules/module-runtime/identity": {"server", "kb", "memory"},

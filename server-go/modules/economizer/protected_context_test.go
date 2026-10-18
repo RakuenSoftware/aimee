@@ -101,17 +101,10 @@ func TestDelegateReductionAdmission(t *testing.T) {
 	for _, orphan := range []bool{false, true} {
 		messages := NewArray()
 		if orphan {
-			for i := 0; i < 12; i++ {
-				appendTurn(messages, i)
-			}
-			result := NewObject()
-			result.Set("role", NewString("tool"))
-			result.Set("tool_call_id", NewString("missing"))
-			result.Set("content", NewString("unpaired result"))
-			messages.Append(result)
+			messages = canonicalModuleTurns(12, true)
 		} else {
 			for i := 0; i < 20; i++ {
-				messages.Append(mkUser("Do not remove requirement CASE_7."))
+				messages.Append(ParseJSON(`{"role":"user","blocks":[{"type":"text","text":"Do not remove requirement CASE_7."}]}`))
 			}
 		}
 		response, status := invoke(t, ReduceRequest{Messages: json.RawMessage(PrintJSONUnformatted(messages)), Seam: "delegate", HistoryFold: true})

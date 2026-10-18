@@ -67,7 +67,7 @@ func validStrict(value string) bool {
 	return value == "" || value == "unset" || value == "null" || value == "true" || value == "false"
 }
 func object(value json.RawMessage) bool {
-	return len(value) > 0 && json.Valid(value) && strings.HasPrefix(strings.TrimSpace(string(value)), "{")
+	return len(value) > 0 && json.Valid(value) && uniqueJSON(value) && strings.HasPrefix(strings.TrimSpace(string(value)), "{")
 }
 func (t Tool) Valid() bool {
 	if !validStrict(t.Strict) || (t.Schema != nil && !object(t.Schema)) || (t.NativeOptions != nil && !object(t.NativeOptions)) {
@@ -252,4 +252,25 @@ func DecodePolicyView(encoded []byte) (*PolicyView, error) {
 		}
 	}
 	return &request, nil
+}
+
+// DecodeMessages admits canonical history independently of a provider request.
+// Consumers may retain original JSON byte/order views after typed admission.
+func DecodeMessages(encoded []byte) ([]Message, error) {
+	var messages []Message
+	if !utf8.Valid(encoded) || !Decode(encoded, &messages) || messages == nil || len(messages) > 4096 {
+		return nil, fmt.Errorf("invalid canonical messages")
+	}
+	for _, message := range messages {
+		if !validRole(message.Role) || message.Blocks == nil || len(message.Blocks) > 4096 {
+			return nil, fmt.Errorf("invalid canonical message")
+		}
+		for _, block := range message.Blocks {
+			if !validTypedBlock(block) || block.Type == "tool_use" && message.Role != "assistant" ||
+				block.Type == "tool_result" && message.Role != "user" && message.Role != "tool" {
+				return nil, fmt.Errorf("invalid canonical block")
+			}
+		}
+	}
+	return messages, nil
 }

@@ -749,9 +749,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(response_len == 72 && memcmp(response, "TSTA\1\0\0\0", 8) == 0);
 
-      const char record_request[] =
-          "{\"messages\":[{\"role\":\"assistant\",\"content\":\"[done] changed "
-          "src/server/session_compact.c\"}],\"start\":0,\"end\":1}";
+      const char record_request[] = "{\"messages\":[{\"role\":\"assistant\",\"blocks\":[{\"type\":"
+                                    "\"text\",\"text\":\"[done] changed "
+                                    "src/server/session_compact.c\"}]}],\"start\":0,\"end\":1}";
       assert(aimee_module_client_call(client, AIMEE_ECONOMIZER_EVENT_RECORD_BUILD,
                                       AIMEE_ECONOMIZER_STAGE_RECORD_BUILD, 2021, 0, record_request,
                                       sizeof(record_request) - 1, response, sizeof(response),

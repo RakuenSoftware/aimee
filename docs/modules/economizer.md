@@ -47,7 +47,7 @@ policy; they let C callers marshal bytes onto the event bus instead of keeping d
 The kind is fixed by the process contract at `4096 + ordinal*256 + stage`; economizer is
 ordinal 27, so it is not a free choice.
 
-`messages` travels as raw JSON in both directions and is emitted with the module's
+`messages` is admitted by the shared typed Go IR contract at reduction and record-building entry, then retains its original JSON member/decimal order for the cache-sensitive tree. Native and mixed history shapes are refused. Changed output is admitted again before emission with the module's
 cJSON-compatible printer, so the bytes the caller forwards are the bytes the fold
 measured. A `messages` field absent from the response means nothing was mutated and the
 caller must forward its **original** array untouched.
