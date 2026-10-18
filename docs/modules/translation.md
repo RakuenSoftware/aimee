@@ -182,3 +182,5 @@ The Anthropic HTTP native builder attaches its original body with
 `aimee_frontend_parse_native_frame` before rendering. Its existing context-injection option selects
 the shared canonical stage runner; disabling injection does not bypass canonical admission. Exact
 body replay is selected only after comparing the host-adjusted typed request with the original.
+
+Opaque JSON numeric values survive native entry, canonical ownership and explicit egress without a double roundtrip. The shared C JSON codec retains decimal tokens, including tool arguments and schemas; numeric mutation invalidates that token. Completed argument strings require full JSON framing. Browser canonical parsing/rendering likewise preserves decimals outside JavaScript's roundtrip range rather than displaying a rounded tool argument. Embedded NUL strings are refused because the C string contract cannot represent them faithfully.

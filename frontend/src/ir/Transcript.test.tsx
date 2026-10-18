@@ -1,3 +1,4 @@
+import { parseJSON } from './json';
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -78,4 +79,14 @@ it('refuses a child stream that returns another session', () => {
   act(() => receive?.(new MessageEvent('ir', { data: JSON.stringify({ version: 1, session_id: 'wrong-owner', sequence: '1', event_id: 'e', turn_id: 't', actor: 'alice', event: { kind: 'execution', payload: { status: 'completed' } } }) })));
   expect(screen.getByRole('alert').textContent).toContain('could not be read');
   expect(close).toHaveBeenCalled();
+});
+
+it('displays exact opaque numbers without quoting them or rounding tool arguments', () => {
+  const state = reduceSession(emptySession('s'), { version: 1, session_id: 's', sequence: '1', event_id: 'a', turn_id: 't', actor: 'alice',
+    event: { kind: 'message', message_id: 'a', payload: { role: 'assistant', blocks: [
+      { type: 'tool_use', tool_id: 'call', name: 'read', input: parseJSON('{"id":9007199254740993}') },
+    ] } } });
+  const { container } = render(<IRTranscript state={state} />);
+  expect(container.textContent).toContain('9007199254740993');
+  expect(container.textContent).not.toContain('9007199254740992');
 });

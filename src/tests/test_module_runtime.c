@@ -998,8 +998,10 @@ static void smoke_host_gateway_plan(bus_client_t *host)
    assert(aimee_module_client_init(&client, host) == 0);
    cJSON *plan = host_plan(
        &client,
-       "{\"operation\":\"gateway-plan\",\"phase\":\"context\",\"roles\":[\"user\"],\"tools\":[],"
-       "\"provided_query\":\"deploy matrix\",\"last_user_text\":\"persona text\"}");
+       "{\"operation\":\"gateway-plan\",\"phase\":\"context\","
+       "\"request\":{\"version\":1,\"view\":\"gateway_policy\","
+       "\"messages\":[{\"role\":\"user\"}],\"tools\":[],\"last_user_text\":\"persona text\"},"
+       "\"provided_query\":\"deploy matrix\"}");
    cJSON *steps = cJSON_GetObjectItemCaseSensitive(plan, "steps");
    assert(cJSON_GetArraySize(steps) == 4);
    cJSON *retrieve = cJSON_GetArrayItem(steps, 0);
@@ -1013,13 +1015,19 @@ static void smoke_host_gateway_plan(bus_client_t *host)
    assert(strcmp(json_string(evidence, "origin"), "retrieval") == 0 &&
           strcmp(json_string(evidence, "authority"), "evidence") == 0);
    cJSON_Delete(plan);
-   plan = host_plan(&client, "{\"operation\":\"gateway-plan\",\"phase\":\"tools\",\"roles\":["
-                             "\"user\"],\"tools\":[\"exec_command\",\"apply_patch\",\"shell\"]}");
+   plan =
+       host_plan(&client, "{\"operation\":\"gateway-plan\",\"phase\":\"tools\","
+                          "\"request\":{\"version\":1,\"view\":\"gateway_policy\","
+                          "\"messages\":[{\"role\":\"user\"}],\"tools\":["
+                          "{\"kind\":\"function\",\"name\":\"exec_command\"},"
+                          "{\"kind\":\"function\",\"name\":\"apply_patch\"},"
+                          "{\"kind\":\"function\",\"name\":\"shell\"}],\"last_user_text\":\"\"}}");
    steps = cJSON_GetObjectItemCaseSensitive(plan, "steps");
    assert(cJSON_GetArraySize(steps) == 1);
-   cJSON *indices = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(steps, 0), "indices");
-   assert(cJSON_GetArraySize(indices) == 2 && cJSON_GetArrayItem(indices, 0)->valueint == 2 &&
-          cJSON_GetArrayItem(indices, 1)->valueint == 0);
+   cJSON *paths = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(steps, 0), "paths");
+   assert(cJSON_GetArraySize(paths) == 2 &&
+          cJSON_GetArrayItem(cJSON_GetArrayItem(paths, 0), 0)->valueint == 2 &&
+          cJSON_GetArrayItem(cJSON_GetArrayItem(paths, 1), 0)->valueint == 0);
    cJSON_Delete(plan);
    const char *claim = "{\"operation\":\"ingress-task-claim\",\"session\":\"live\",\"project\":"
                        "\"p\",\"query\":\"fix resolver\"}";

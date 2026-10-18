@@ -75,6 +75,8 @@ static void test_exact_native_request_bytes(void)
       cJSON *changed = output ? cJSON_Parse(output) : NULL;
       assert(changed &&
              !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(changed, "model")), "other-model"));
+      if (i == 0)
+         assert(strstr(output, "9007199254740993"));
       cJSON_Delete(changed);
       free(output);
       aimee_request_free(&ir);
@@ -638,6 +640,167 @@ static void test_owned_tool_catalog(void)
         "sidecars OK");
 }
 
+static void test_opaque_json_precision(void)
+{
+   const char *opaque = "{\"id\":9007199254740993,\"fraction\":0.12345678901234567890123456789,"
+                        "\"huge\":1e999,\"tiny\":-1.234e-999,\"zero\":-0.00}";
+   cJSON *original = cJSON_ParseWithOpts(opaque, NULL, 1);
+   assert(original);
+   cJSON *clone = cJSON_Duplicate(original, 1);
+   assert(clone);
+   cJSON_Delete(original);
+   char *printed = cJSON_PrintUnformatted(clone);
+   assert(printed && !strcmp(printed, opaque));
+   free(printed);
+   cJSON *id = cJSON_GetObjectItem(clone, "id");
+   cJSON *neighbor = cJSON_ParseWithOpts("9007199254740992", NULL, 1);
+   assert(neighbor && !id->valuestring && !neighbor->valuestring &&
+          id->valuedouble == neighbor->valuedouble);
+   assert(!cJSON_Compare(id, neighbor, 1));
+   cJSON *references = cJSON_CreateArray();
+   assert(references && cJSON_AddItemReferenceToArray(references, id));
+   printed = cJSON_PrintUnformatted(references);
+   assert(printed && !strcmp(printed, "[9007199254740993]"));
+   free(printed);
+   cJSON_SetNumberValue(cJSON_GetArrayItem(references, 0), 7);
+   assert(id->number_lexeme && !strcmp(id->number_lexeme, "9007199254740993"));
+   cJSON_Delete(references);
+   cJSON_SetIntValue(id, 5);
+   printed = cJSON_PrintUnformatted(id);
+   assert(printed && !strcmp(printed, "5"));
+   free(printed);
+   id->valuedouble = 6; /* Detect deprecated direct mutation as well. */
+   printed = cJSON_PrintUnformatted(id);
+   assert(printed && !strcmp(printed, "6"));
+   free(printed);
+   cJSON_Delete(clone);
+   cJSON_Delete(neighbor);
+   const char *equal[][2] = {{"1", "1.00"},
+                             {"-1200.0", "-12e2"},
+                             {"0e9999999999999999999999", "-0"},
+                             {"1e999", "10e998"},
+                             {"0.0100", "1e-2"}};
+   for (size_t i = 0; i < sizeof equal / sizeof equal[0]; i++)
+   {
+      cJSON *a = cJSON_ParseWithOpts(equal[i][0], NULL, 1);
+      cJSON *b = cJSON_ParseWithOpts(equal[i][1], NULL, 1);
+      assert(a && b && cJSON_Compare(a, b, 1));
+      cJSON_Delete(a);
+      cJSON_Delete(b);
+   }
+   const char *invalid[] = {
+       "01", "-01", "1.", "1e", "1e+", "1+2", ".5", "-.5", "{\"id\":\"prefix\\u0000suffix\"}"};
+   for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+      assert(!cJSON_ParseWithOpts(invalid[i], NULL, 1));
+   puts("  exact opaque decimals, clone/reference lifetime, mutation and equality OK");
+}
+
+static void test_opaque_tool_rebuild(void)
+{
+   const char *body =
+       "{\"model\":\"m\",\"max_tokens\":64,\"messages\":[{\"role\":\"assistant\","
+       "\"content\":[{\"type\":\"tool_use\",\"id\":\"call\",\"name\":\"f\",\"input\":"
+       "{\"id\":9007199254740993,\"fraction\":0.12345678901234567890123456789}}]}],"
+       "\"tools\":[{\"name\":\"f\",\"input_schema\":{\"type\":\"object\","
+       "\"properties\":{\"id\":{\"const\":9007199254740993}}}}]}";
+   aimee_request_t request = {0};
+   char error[128];
+   assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_ANTHROPIC, &request, error,
+                                     sizeof error));
+   request.mutated = 1;
+   cJSON_Delete(request.raw);
+   request.raw = NULL;
+   free(request.raw_bytes);
+   request.raw_bytes = NULL;
+   request.raw_length = 0;
+   const aimee_wire_t wires[] = {AIMEE_WIRE_ANTHROPIC, AIMEE_WIRE_OPENAI_CHAT,
+                                 AIMEE_WIRE_RESPONSES};
+   for (size_t i = 0; i < sizeof wires / sizeof wires[0]; i++)
+   {
+      char *wire = aimee_backend_render_wire(&request, wires[i]);
+      assert(wire && strstr(wire, "9007199254740993") &&
+             strstr(wire, "0.12345678901234567890123456789"));
+      aimee_request_t restored = {0};
+      assert(
+          !aimee_frontend_parse_wire(wire, strlen(wire), wires[i], &restored, error, sizeof error));
+      char *input = cJSON_PrintUnformatted(restored.messages[0].blocks[0].tool_input);
+      assert(input && strstr(input, "9007199254740993") &&
+             strstr(input, "0.12345678901234567890123456789"));
+      free(input);
+      free(wire);
+      aimee_request_free(&restored);
+   }
+   aimee_request_free(&request);
+   puts("  opaque tool arguments and schemas survive all three rebuilt native wires OK");
+}
+
+static cJSON *argument_field(cJSON *node)
+{
+   if (cJSON_IsObject(node))
+   {
+      cJSON *arguments = cJSON_GetObjectItemCaseSensitive(node, "arguments");
+      if (arguments)
+         return arguments;
+   }
+   cJSON *child;
+   cJSON_ArrayForEach(child, node)
+   {
+      cJSON *arguments = argument_field(child);
+      if (arguments)
+         return arguments;
+   }
+   return NULL;
+}
+static void test_completed_argument_framing(void)
+{
+   const char *requests[] = {
+       "{\"model\":\"m\",\"messages\":[{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"call\","
+       "\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]}]}",
+       "{\"model\":\"m\",\"input\":[{\"type\":\"function_call\",\"call_id\":\"call\",\"name\":"
+       "\"f\",\"arguments\":\"{}\"}]}"};
+   const char *responses[] = {
+       "{\"id\":\"r\",\"model\":\"m\",\"choices\":[{\"message\":{\"role\":\"assistant\","
+       "\"content\":null,\"tool_calls\":[{\"id\":\"call\",\"type\":\"function\",\"function\":{"
+       "\"name\":\"f\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}",
+       "{\"id\":\"r\",\"model\":\"m\",\"status\":\"completed\",\"output\":[{\"type\":\"function_"
+       "call\",\"id\":\"fc\",\"call_id\":\"call\",\"name\":\"f\",\"arguments\":\"{}\"}]}"};
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_RESPONSES};
+   for (int i = 0; i < 2; i++)
+      for (int output = 0; output < 2; output++)
+      {
+         cJSON *frame = cJSON_Parse(output ? responses[i] : requests[i]);
+         assert(frame && argument_field(frame));
+         for (int invalid = 0; invalid < 2; invalid++)
+         {
+            assert(cJSON_SetValuestring(argument_field(frame), invalid ? "{} trailing" : "{}"));
+            char *wire = cJSON_PrintUnformatted(frame), error[128] = "";
+            assert(wire);
+            int rc;
+            if (output)
+            {
+               aimee_response_t response = {0};
+               rc = aimee_backend_parse_wire(wire, strlen(wire), wires[i], &response, error,
+                                             sizeof error);
+               aimee_response_free(&response);
+            }
+            else
+            {
+               aimee_request_t request = {0};
+               rc = aimee_frontend_parse_wire(wire, strlen(wire), wires[i], &request, error,
+                                              sizeof error);
+               aimee_request_free(&request);
+            }
+            if (!(invalid ? rc < 0 : rc == 0))
+               fprintf(stderr, "argument frame wire=%d output=%d invalid=%d rc=%d error=%s\n", i,
+                       output, invalid, rc, error);
+            assert(invalid ? rc < 0 : rc == 0);
+            free(wire);
+         }
+         cJSON_Delete(frame);
+      }
+   puts("  completed request and response arguments reject trailing JSON junk OK");
+}
+
 static void test_mandatory_egress_admission(void)
 {
    const char *native = "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
@@ -659,6 +822,9 @@ static void test_mandatory_egress_admission(void)
 
 int main(void)
 {
+   test_completed_argument_framing();
+   test_opaque_tool_rebuild();
+   test_opaque_json_precision();
    test_mandatory_egress_admission();
    test_owned_tool_catalog();
    test_owned_output_formats();

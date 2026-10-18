@@ -531,7 +531,16 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
                const cJSON *fn = cJSON_GetObjectItemCaseSensitive((cJSON *)call, "function");
                b->tool_name = dupstr(fn ? ostr(fn, "name") : NULL);
                const char *args = fn ? ostr(fn, "arguments") : NULL;
-               b->tool_input = args ? cJSON_Parse(args) : NULL; /* derived-once parse */
+               b->tool_input =
+                   args ? cJSON_ParseWithOpts(args, NULL, 1) : NULL; /* derived-once parse */
+               if (!cJSON_IsObject(b->tool_input))
+               {
+                  if (err && errn)
+                     snprintf(err, errn,
+                              "completed function arguments require a complete JSON object");
+                  aimee_request_free(out);
+                  return -1;
+               }
             }
          }
       }

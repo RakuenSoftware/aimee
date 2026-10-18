@@ -192,7 +192,15 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
              * name is bare in that case and only the pair identifies the tool. */
             b->tool_namespace = dupstr(ostr(item, "namespace"));
             const char *args = ostr(item, "arguments");
-            b->tool_input = args ? cJSON_Parse(args) : NULL;
+            b->tool_input = args ? cJSON_ParseWithOpts(args, NULL, 1) : NULL;
+            if (!cJSON_IsObject(b->tool_input))
+            {
+               if (err && errn)
+                  snprintf(err, errn,
+                           "completed function arguments require a complete JSON object");
+               aimee_request_free(out);
+               return -1;
+            }
          }
          else if (type && strcmp(type, "reasoning") == 0)
          {

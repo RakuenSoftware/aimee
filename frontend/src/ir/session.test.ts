@@ -1,3 +1,4 @@
+import { parseJSON, stringifyJSON } from './json';
 import { describe, expect, it } from 'vitest';
 import { emptySession, reduceSession, toolResults } from './session';
 import type { Block, Envelope, SessionEvent } from './session';
@@ -188,4 +189,23 @@ it('keeps child references separate from parent model history and replays termin
   expect(JSON.parse(JSON.stringify(events)).reduce(reduceSession, emptySession('s'))).toEqual(state);
   expect(() => reduceSession(state, envelope(3, { kind: 'child_execution', payload: reference }))).toThrow(/terminal/);
   expect(() => reduceSession(emptySession('s'), envelope(1, { kind: 'child_execution', payload: { ...reference, session_id: 's' } }))).toThrow(/reference/);
+});
+
+ it('retains opaque decimals identically in message snapshots and completed tool fragments', () => {
+  const argumentsJSON = '{"id":9007199254740993,"ratio":0.12345678901234567890123456789}';
+  const events = [
+    envelope(1, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'TURN_START' } }),
+    envelope(2, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'BLOCK_START', block_id: 0, kind: 'tool_use', tool_id: 'call', name: 'read' } }),
+    envelope(3, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'BLOCK_DELTA', block_id: 0, kind: 'tool_use', tool_args_delta: argumentsJSON } }),
+    envelope(4, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'BLOCK_STOP', block_id: 0 } }),
+    envelope(5, { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'TURN_STOP' } }),
+  ];
+  const live = events.reduce(reduceSession, emptySession('s'));
+  const replay = events.map(event => parseJSON(stringifyJSON(event)!) as Envelope).reduce(reduceSession, emptySession('s'));
+  expect(replay).toEqual(live);
+  expect(stringifyJSON(live.messages[0].blocks[0].input)).toBe(argumentsJSON);
+  const snapshot = reduceSession(emptySession('s'), envelope(1, message('m', 'assistant', [
+    { type: 'tool_use', tool_id: 'call', name: 'read', input: parseJSON(argumentsJSON) },
+  ])));
+  expect(snapshot.messages[0].blocks[0].input).toEqual(live.messages[0].blocks[0].input);
 });

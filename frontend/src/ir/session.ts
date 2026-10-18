@@ -1,3 +1,4 @@
+import { parseJSON } from './json';
 /** Canonical session projection. No native provider/harness protocol is accepted
  * here. Live delivery and durable replay use exactly the same reducer. */
 export type Block = {
@@ -272,7 +273,7 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       }
       if (d.type === 'BLOCK_STOP') {
         if (block.type === 'tool_use') message.blocks[blockID] = { ...block,
-          input: message.argumentFragments[blockID] ? JSON.parse(message.argumentFragments[blockID]) as unknown : block.input ?? {} };
+          input: message.argumentFragments[blockID] ? parseJSON(message.argumentFragments[blockID]) as unknown : block.input ?? {} };
         message.stoppedBlocks.push(blockID);
         return next;
       }

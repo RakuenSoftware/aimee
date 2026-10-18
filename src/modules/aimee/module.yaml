@@ -5,6 +5,7 @@
     "audit",
     "config",
     "execution-policy",
+    "ir",
     "module-runtime"
   ],
   "runtime_toggle": {

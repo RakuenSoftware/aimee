@@ -1,9 +1,10 @@
+import { parseJSON, stringifyJSON } from './json';
 import { useEffect, useRef, useState } from 'react';
 import { Message, ThinkingBlock, ToolBlock } from '../pages/chat/ChatPrimitives';
 import { emptySession, reduceSession, toolResults } from './session';
 import type { ChildExecution, Envelope, SessionState } from './session';
 import ControlCard, { type ReplyControl } from './ControlCard';
-const pretty = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? '';
+const pretty = (value: unknown) => typeof value === 'string' ? value : stringifyJSON(value, 2) ?? '';
 function mediaURL(ref: string | undefined): string | undefined {
   if (ref && (/^https?:\/\//i.test(ref) || /^data:image\/(png|jpeg|webp|gif);base64,/i.test(ref) || ref.startsWith('/api/artifacts/'))) return ref;
   return undefined;
@@ -20,7 +21,7 @@ function ChildExecutionView({ reference, ancestors }: { reference: ChildExecutio
     const stream = new EventSource(`/api/chat/session-events?format=ir&sid=${encodeURIComponent(reference.session_id)}&cursor=${current.current.sequence}`);
     stream.addEventListener('ir', (message) => {
       try {
-        const envelope = JSON.parse((message as MessageEvent).data) as Envelope;
+        const envelope = parseJSON((message as MessageEvent).data) as Envelope;
         const next = reduceSession(current.current, envelope);
         current.current = next;
         setState(next);

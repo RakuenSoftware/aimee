@@ -1,3 +1,4 @@
+import { parseJSON, stringifyJSON } from '../ir/json';
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import { AutoGrowTextarea, Button, Drawer, Spinner, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
@@ -1606,7 +1607,7 @@ export default function Chat() {
     presenceSseRef.current = es;
     es.addEventListener('ir', (event: MessageEvent<string>) => {
       try {
-        ingestIR(activeAimeeSid, JSON.parse(event.data) as Record<string, unknown>);
+        ingestIR(activeAimeeSid, parseJSON(event.data) as Record<string, unknown>);
         setIRTransportErrors(prev => prev[activeAimeeSid] ? { ...prev, [activeAimeeSid]: '' } : prev);
       } catch (error) {
         setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: error instanceof Error ? error.message : 'Session replay failed' }));
@@ -1619,7 +1620,7 @@ export default function Chat() {
   const replyControl = useCallback(async (requestId: string, reply: ControlReply) => {
     const response = await fetch('/api/chat/control-reply', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: activeAimeeSid, request_id: requestId, reply }),
+      body: stringifyJSON({ session_id: activeAimeeSid, request_id: requestId, reply }),
     });
     const body = await response.json().catch(() => ({})) as { error?: string };
     if (!response.ok) throw new Error(body.error || 'Could not send the reply');
@@ -2541,7 +2542,7 @@ export default function Chat() {
             evtType = line.slice(7).trim();
           } else if (line.startsWith('data: ') && evtType) {
             try {
-              const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
+              const data = parseJSON(line.slice(6)) as Record<string, unknown>;
               if (evtType === 'ir') {
                 ingestIR(streamRefs.originSid, data);
                 evtType = null;
