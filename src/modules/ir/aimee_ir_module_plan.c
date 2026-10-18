@@ -2,14 +2,14 @@
  * selects effects, resources and context metadata; the host owns IR allocation
  * and explicitly supplied connections. No domain decisions belong here. */
 #include <aimee/ir/module_plan.h>
+#include <aimee/ir/session_event.h>
 #include "module_commands.h"
 #include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define PLAN_TEXT_CAPACITY 65536
-#define PLAN_STEP_LIMIT    64
+#define PLAN_STEP_LIMIT 64
 
 static const char *string_field(const cJSON *object, const char *key)
 {
@@ -112,17 +112,8 @@ static int validate_plan(const aimee_request_t *ir, const cJSON *steps,
       {
          if (!ir || tool_patch++)
             return -1;
-         const cJSON *indices = cJSON_GetObjectItemCaseSensitive(step, "indices"), *index;
-         if (!cJSON_IsArray(indices))
+         if (!aimee_ir_tool_paths_valid(ir, cJSON_GetObjectItemCaseSensitive(step, "paths")))
             return -1;
-         int upper = ir->n_tools;
-         cJSON_ArrayForEach(index, indices)
-         {
-            if (!cJSON_IsNumber(index) || index->valuedouble < 0 || index->valuedouble >= upper ||
-                index->valuedouble != (double)index->valueint)
-               return -1;
-            upper = index->valueint;
-         }
       }
       else
          return -1;
@@ -151,26 +142,12 @@ static cJSON *request_plan(const aimee_request_t *ir, const aimee_ir_module_plan
    }
    if (ir)
    {
-      cJSON *roles = cJSON_AddArrayToObject(args, "roles"),
-            *tools = cJSON_AddArrayToObject(args, "tools");
-      if (!roles || !tools)
+      cJSON *view = aimee_ir_policy_view_json(ir);
+      if (!view || !cJSON_AddItemToObject(args, "request", view))
+      {
+         cJSON_Delete(view);
          goto done;
-      for (int i = 0; i < ir->n_messages; i++)
-         if (!cJSON_AddItemToArray(
-                 roles, cJSON_CreateString(ir->messages[i].role ? ir->messages[i].role : "")))
-            goto done;
-      for (int i = 0; i < ir->n_tools; i++)
-         if (!cJSON_AddItemToArray(tools,
-                                   cJSON_CreateString(ir->tools[i].name ? ir->tools[i].name : "")))
-            goto done;
-      char *text = malloc(PLAN_TEXT_CAPACITY);
-      if (!text)
-         goto done;
-      aimee_ir_last_user_text(ir, text, PLAN_TEXT_CAPACITY);
-      cJSON *added = cJSON_AddStringToObject(args, "last_user_text", text);
-      free(text);
-      if (!added)
-         goto done;
+      }
    }
    if (aimee_module_commands_dispatch_internal_timeout(config->method, args, 500, &reply) <= 0)
    {
@@ -270,7 +247,7 @@ static int execute(aimee_request_t *ir, const aimee_ir_module_plan_t *config, ch
       }
       else if (strcmp(kind, "append_context") == 0)
          changed |= append_context(ir, step, outputs, config);
-      else if (aimee_ir_remove_tools(ir, cJSON_GetObjectItemCaseSensitive(step, "indices")) > 0)
+      else if (aimee_ir_remove_tool_paths(ir, cJSON_GetObjectItemCaseSensitive(step, "paths")) > 0)
          changed = 1;
    }
    if (text_result)

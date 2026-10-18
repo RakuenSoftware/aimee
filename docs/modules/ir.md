@@ -181,7 +181,21 @@ discovery. It snapshots roles, tool names and last-user text, then validates eve
 step before invoking any supplied connection or editing the IR. Bindings and
 text resources are explicitly supplied by the host; plans cannot invoke arbitrary
 commands. Supported steps call a binding, append typed context or remove a
-validated descending list of tool indices. Context metadata follows the existing
+validated descending list of catalog paths. Context metadata follows the existing
 IR authority-promotion rule, revision epochs retain their full 64-bit value,
 and appended blocks preserve the existing cached prefix. Domain selection,
 rendering and policy belong to the Go module producing the plan.
+
+
+The Go public wire contract lives in `server-go/ir`, alongside the existing
+implementation-independent caller contracts. It contains typed canonical blocks,
+messages, requests and catalogs plus strict codecs; it owns no storage, I/O,
+module dispatch or policy. DB1 session admission consumes that shared contract.
+No peer-module implementation import or bus-boundary exemption is added.
+
+Request planning receives an explicitly marked `gateway_policy` projection of
+canonical roles, catalog kinds/namespaces/provider identity and bounded last-user
+text. Prompt bodies, tool schemas and opaque configuration stay with the host;
+the Go policy returns descending catalog paths, and the host validates the whole
+patch before changing owned IR. This keeps long transcripts out of the bounded
+bus frame without flattening a native request or losing nested tool identity.

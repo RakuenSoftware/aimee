@@ -2393,7 +2393,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "9b4de3cdde039ab362ecb6efb9fc1df0868066d487f7f51c21889ad64b62f48d"
+      "sha256": "673df4dee914a7cd72f21bbbbb0d6877bac1b4955870e73f92932ce9b7b925ae",
+      "boundary_change": "Canonical gateway_policy view and descending catalog paths; the fixture calls the real Go memory owner for namespace policy. C retains host schema data and validates/applies the returned patch; no C memory or shell-selection policy is introduced."
     },
     "src/tests/test_kb.c": {
       "disposition": "host-fixture",

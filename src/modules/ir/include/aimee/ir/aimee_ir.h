@@ -420,9 +420,9 @@ int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const c
  * blocks). Returns the number of chars written (excluding NUL), or 0 if none. */
 size_t aimee_ir_last_user_text(const aimee_request_t *r, char *buf, size_t n);
 
-/* Remove strictly descending tool indices after validating the entire patch.
- * Returns the number removed, or -1 without mutation for an invalid patch. */
-int aimee_ir_remove_tools(aimee_request_t *request, const struct cJSON *indices);
+/* Descending catalog index paths; validate the entire patch before mutation. */
+int aimee_ir_tool_paths_valid(const aimee_request_t *request, const struct cJSON *paths);
+int aimee_ir_remove_tool_paths(aimee_request_t *request, const struct cJSON *paths);
 
 /* Admit a completed API model response, rejecting forged results/roles, duplicate
  * tool IDs, malformed blocks and invalid function arguments. Classifies provenance. */

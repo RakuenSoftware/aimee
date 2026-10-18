@@ -597,6 +597,19 @@ static void test_request_policy_uses_admitted_catalog(void)
    assert(!strcmp(cJSON_GetStringValue(obj(cache, "ttl")), "1h"));
    cJSON_Delete(sent);
    reset_capture();
+   g_driver = &driver;
+   g_prevent = 1;
+   assert(
+       messages_buffered("{\"model\":\"ignored\",\"max_tokens\":16,"
+                         "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],"
+                         "\"tools\":[{\"name\":\"Task\",\"input_schema\":{\"type\":\"object\"}}],"
+                         "\"tool_choice\":{\"type\":\"any\",\"disable_parallel_tool_use\":true}}",
+                         response, sizeof response) == 200);
+   sent = parse(g_last_body);
+   assert(!cJSON_GetObjectItemCaseSensitive(sent, "tools") &&
+          !cJSON_GetObjectItemCaseSensitive(sent, "tool_choice"));
+   cJSON_Delete(sent);
+   reset_capture();
    PASS("typed request policing removes denied catalog/choice while retaining native cache "
         "metadata");
 }

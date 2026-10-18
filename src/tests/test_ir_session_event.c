@@ -211,6 +211,51 @@ int main(void)
    event.execution_status = "invented";
    assert(!aimee_ir_session_event_json(&event));
 
+   aimee_tool_t child_tool = {
+       .name = "Read", .strict = AIMEE_STRICT_NULL, .schema = cJSON_Parse("{\"type\":\"object\"}")};
+   aimee_tool_t request_tools[2] = {{.kind = AIMEE_TOOL_NAMESPACE,
+                                     .name = "functions",
+                                     .children = &child_tool,
+                                     .n_children = 1},
+                                    {.kind = AIMEE_TOOL_HOSTED,
+                                     .provider_wire = AIMEE_WIRE_RESPONSES,
+                                     .native_type = "web_search",
+                                     .native_options = cJSON_Parse("{\"hosted_setting\":true}")}};
+   aimee_block_t request_text = {.type = AIMEE_BLK_TEXT, .text = "question"};
+   aimee_message_t request_message = {.role = "user", .blocks = &request_text, .n_blocks = 1};
+   aimee_request_t request = {
+       .model = "model",
+       .frontend = AIMEE_WIRE_RESPONSES,
+       .messages = &request_message,
+       .n_messages = 1,
+       .tools = request_tools,
+       .n_tools = 2,
+       .has_max_tokens = 1,
+       .max_tokens = 77,
+       .reasoning_effort = AIMEE_EFFORT_HIGH,
+       .tool_choice = AIMEE_TOOL_CHOICE_TOOL,
+       .tool_choice_name = "Read",
+       .raw = cJSON_Parse("{\"model_auth_secret_must_not_enter_canonical_snapshot\":true}")};
+   json = aimee_ir_request_json(&request);
+   char *snapshot = json ? cJSON_PrintUnformatted(json) : NULL;
+   assert(snapshot && strstr(snapshot, "hosted_setting") && !strstr(snapshot, "model_auth_secret"));
+   const cJSON *catalog = cJSON_GetObjectItemCaseSensitive(json, "tools");
+   const cJSON *child_json = cJSON_GetArrayItem(
+       cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(catalog, 0), "children"), 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(child_json, "strict")),
+                  "null"));
+   free(snapshot);
+   cJSON_Delete(json);
+   json = aimee_ir_policy_view_json(&request);
+   snapshot = json ? cJSON_PrintUnformatted(json) : NULL;
+   assert(snapshot && strstr(snapshot, "web_search") && !strstr(snapshot, "hosted_setting") &&
+          !strstr(snapshot, "schema"));
+   free(snapshot);
+   cJSON_Delete(json);
+   cJSON_Delete(request.raw);
+   cJSON_Delete(child_tool.schema);
+   cJSON_Delete(request_tools[1].native_options);
+
    int failure = -7;
    aimee_response_t response = {.role = "assistant", .content = blocks, .n_content = 2};
    aimee_ir_session_set_sink(capture, &failure);

@@ -43,6 +43,10 @@ typedef struct
  * Raw provider sidecars are deliberately not serialized into session events. */
 struct cJSON *aimee_ir_block_json(const aimee_block_t *block);
 struct cJSON *aimee_ir_message_json(const aimee_message_t *message);
+/* Canonical request/catalog snapshot: no native replay bytes or raw sidecars. */
+struct cJSON *aimee_ir_request_json(const aimee_request_t *request);
+/* Bounded identity/query projection for request policy, never a model prompt. */
+struct cJSON *aimee_ir_policy_view_json(const aimee_request_t *request);
 /* Decode canonical persisted content, never a provider protocol. On failure out
  * is empty; on success it owns its fields (aimee_message_free). */
 int aimee_ir_message_parse(const struct cJSON *json, aimee_message_t *out);

@@ -106,6 +106,12 @@ UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
         "Implementation-independent memory caller framing, wire types and pure "
         "embedding identity commitments. No storage, ranking, policy or admission.",
     ),
+    "server-go/ir": (
+        "contract",
+        "Pure canonical IR data types and strict wire codecs shared by native "
+        "producers, storage and module consumers. This is a public data contract, "
+        "not a peer module implementation: no state, I/O, dispatch or policy.",
+    ),
     "server-go/delegate": (
         "contract",
         "Shared caller-side contract for delegate execution, so a peer can call "

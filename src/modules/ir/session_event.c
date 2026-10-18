@@ -407,6 +407,232 @@ fail:
    return -1;
 }
 
+static const char *request_wire_name(aimee_wire_t wire)
+{
+   return wire == AIMEE_WIRE_ANTHROPIC     ? "anthropic"
+          : wire == AIMEE_WIRE_OPENAI_CHAT ? "openai_chat"
+          : wire == AIMEE_WIRE_RESPONSES   ? "responses"
+                                           : "unspecified";
+}
+static const char *strict_name(aimee_strict_mode_t strict)
+{
+   static const char *const names[] = {"unset", "null", "false", "true"};
+   return strict >= AIMEE_STRICT_UNSET && strict <= AIMEE_STRICT_TRUE ? names[strict] : NULL;
+}
+static cJSON *request_tool_json(const aimee_tool_t *tool, int details)
+{
+   if (!aimee_ir_tool_valid(tool))
+      return NULL;
+   cJSON *json = cJSON_CreateObject();
+   const char *kind = tool->kind == AIMEE_TOOL_FUNCTION    ? "function"
+                      : tool->kind == AIMEE_TOOL_NAMESPACE ? "namespace"
+                                                           : "hosted";
+   if (!json || !add_string(json, "kind", kind) || !add_string(json, "name", tool->name))
+      goto fail;
+   if (details && (!add_string(json, "description", tool->description) ||
+                   !add_copy(json, "schema", tool->schema) ||
+                   !add_string(json, "strict", strict_name(tool->strict)) ||
+                   !add_string(json, "cache_control", tool->cache_control) ||
+                   !add_string(json, "cache_ttl", tool->cache_ttl) ||
+                   (tool->has_defer_loading &&
+                    !cJSON_AddBoolToObject(json, "defer_loading", tool->defer_loading))))
+      goto fail;
+   if (tool->kind == AIMEE_TOOL_HOSTED)
+   {
+      if (!add_string(json, "provider", request_wire_name(tool->provider_wire)) ||
+          !add_string(json, "native_type", tool->native_type) ||
+          (details && !add_copy(json, "native_options", tool->native_options)))
+         goto fail;
+   }
+   if (tool->kind == AIMEE_TOOL_NAMESPACE)
+   {
+      cJSON *children = cJSON_AddArrayToObject(json, "children");
+      if (!children)
+         goto fail;
+      for (int i = 0; i < tool->n_children; i++)
+      {
+         cJSON *child = request_tool_json(&tool->children[i], details);
+         if (!child || !cJSON_AddItemToArray(children, child))
+         {
+            cJSON_Delete(child);
+            goto fail;
+         }
+      }
+   }
+   return json;
+fail:
+   cJSON_Delete(json);
+   return NULL;
+}
+
+cJSON *aimee_ir_request_json(const aimee_request_t *request)
+{
+   if (aimee_ir_request_admit(request))
+      return NULL;
+   cJSON *out = cJSON_CreateObject();
+   if (!out || !cJSON_AddNumberToObject(out, "version", 1) ||
+       !add_string(out, "model", request->model) ||
+       !add_string(out, "source_wire", request_wire_name(request->frontend)) ||
+       !add_string(out, "cache_policy",
+                   request->cache_policy == AIMEE_CACHE_STABLE_PREFIX ? "stable_prefix" : "native"))
+      goto fail;
+   cJSON *system = cJSON_AddArrayToObject(out, "system"),
+         *messages = cJSON_AddArrayToObject(out, "messages"),
+         *tools = cJSON_AddArrayToObject(out, "tools");
+   if (!system || !messages || !tools)
+      goto fail;
+   for (int i = 0; i < request->n_system; i++)
+   {
+      cJSON *block = aimee_ir_block_json(&request->system[i]);
+      if (!block || !cJSON_AddItemToArray(system, block))
+      {
+         cJSON_Delete(block);
+         goto fail;
+      }
+   }
+   for (int i = 0; i < request->n_messages; i++)
+   {
+      cJSON *message = aimee_ir_message_json(&request->messages[i]);
+      if (!message || !cJSON_AddItemToArray(messages, message))
+      {
+         cJSON_Delete(message);
+         goto fail;
+      }
+   }
+   for (int i = 0; i < request->n_tools; i++)
+   {
+      cJSON *tool = request_tool_json(&request->tools[i], 1);
+      if (!tool || !cJSON_AddItemToArray(tools, tool))
+      {
+         cJSON_Delete(tool);
+         goto fail;
+      }
+   }
+   static const char *const choices[] = {"unset", "auto", "none", "any", "tool"};
+   if (request->tool_choice < AIMEE_TOOL_CHOICE_UNSET ||
+       request->tool_choice > AIMEE_TOOL_CHOICE_TOOL)
+      goto fail;
+   cJSON *choice = cJSON_AddObjectToObject(out, "tool_choice");
+   if (!choice || !add_string(choice, "mode", choices[request->tool_choice]) ||
+       !add_string(choice, "name", request->tool_choice_name))
+      goto fail;
+   if ((request->has_parallel_tool_calls &&
+        !cJSON_AddBoolToObject(out, "parallel_tool_calls", request->parallel_tool_calls)) ||
+       (request->has_max_tokens &&
+        !cJSON_AddNumberToObject(out, "max_tokens", request->max_tokens)) ||
+       (request->has_temperature &&
+        !cJSON_AddNumberToObject(out, "temperature", request->temperature)) ||
+       (request->has_top_p && !cJSON_AddNumberToObject(out, "top_p", request->top_p)) ||
+       (request->has_top_k && !cJSON_AddNumberToObject(out, "top_k", request->top_k)) ||
+       !cJSON_AddBoolToObject(out, "stream", request->stream) ||
+       !add_copy(out, "metadata", request->metadata) ||
+       !add_string(out, "service_tier", request->service_tier))
+      goto fail;
+   cJSON *stops = cJSON_AddArrayToObject(out, "stop_sequences");
+   if (!stops || request->n_stop < 0 || request->n_stop > AIMEE_IR_MAX_BLOCKS ||
+       (request->n_stop && !request->stop_sequences))
+      goto fail;
+   for (int i = 0; i < request->n_stop; i++)
+   {
+      cJSON *stop =
+          request->stop_sequences[i] ? cJSON_CreateString(request->stop_sequences[i]) : NULL;
+      if (!stop || !cJSON_AddItemToArray(stops, stop))
+      {
+         cJSON_Delete(stop);
+         goto fail;
+      }
+   }
+   if (request->reasoning_effort != AIMEE_EFFORT_UNSET &&
+       !add_string(out, "reasoning_effort", aimee_ir_effort_name(request->reasoning_effort)))
+      goto fail;
+   if (!add_string(out, "reasoning_summary", request->reasoning_summary))
+      goto fail;
+   if (request->thinking)
+   {
+      cJSON *config = cJSON_AddObjectToObject(out, "provider_config");
+      if (!config || !add_string(config, "wire", "anthropic") ||
+          !add_copy(config, "thinking", request->thinking))
+         goto fail;
+   }
+   const aimee_output_format_t *format = &request->output_format;
+   if (format->kind != AIMEE_OUTPUT_UNSET)
+   {
+      const char *kind = format->kind == AIMEE_OUTPUT_TEXT          ? "text"
+                         : format->kind == AIMEE_OUTPUT_JSON_OBJECT ? "json_object"
+                         : format->kind == AIMEE_OUTPUT_JSON_SCHEMA ? "json_schema"
+                                                                    : NULL;
+      cJSON *output = cJSON_AddObjectToObject(out, "output_format");
+      if (!kind || !output || !add_string(output, "kind", kind) ||
+          !add_string(output, "name", format->name) ||
+          !add_string(output, "description", format->description) ||
+          !add_copy(output, "schema", format->schema) ||
+          !add_string(output, "strict", strict_name(format->strict)))
+         goto fail;
+   }
+   return out;
+fail:
+   cJSON_Delete(out);
+   return NULL;
+}
+
+/* This declared policy projection excludes prompt bodies and opaque schemas.
+ * Only the last user text and catalog identities are consumed by these stages. */
+cJSON *aimee_ir_policy_view_json(const aimee_request_t *request)
+{
+   if (aimee_ir_request_admit(request))
+      return NULL;
+   cJSON *out = cJSON_CreateObject();
+   if (!out || !cJSON_AddNumberToObject(out, "version", 1) ||
+       !add_string(out, "view", "gateway_policy"))
+      goto fail;
+   cJSON *messages = cJSON_AddArrayToObject(out, "messages"),
+         *tools = cJSON_AddArrayToObject(out, "tools");
+   if (!messages || !tools)
+      goto fail;
+   for (int i = 0; i < request->n_messages; i++)
+   {
+      cJSON *message = cJSON_CreateObject();
+      if (!message || !add_string(message, "role", request->messages[i].role) ||
+          !cJSON_AddItemToArray(messages, message))
+      {
+         cJSON_Delete(message);
+         goto fail;
+      }
+   }
+   for (int i = 0; i < request->n_tools; i++)
+   {
+      cJSON *tool = request_tool_json(&request->tools[i], 0);
+      if (!tool || !cJSON_AddItemToArray(tools, tool))
+      {
+         cJSON_Delete(tool);
+         goto fail;
+      }
+   }
+   char *text = malloc(65536);
+   if (!text)
+      goto fail;
+   size_t length = aimee_ir_last_user_text(request, text, 65536);
+   /* Never send a partial final UTF-8 code point over the strict JSON bus. */
+   if (length)
+   {
+      size_t start = length - 1;
+      while (start && ((unsigned char)text[start] & 0xc0) == 0x80)
+         start--;
+      unsigned char first = (unsigned char)text[start];
+      size_t needed = first >= 0xf0 ? 4 : first >= 0xe0 ? 3 : first >= 0xc0 ? 2 : 1;
+      if (length - start < needed)
+         text[start] = 0;
+   }
+   int added = add_string(out, "last_user_text", text);
+   free(text);
+   if (!added)
+      goto fail;
+   return out;
+fail:
+   cJSON_Delete(out);
+   return NULL;
+}
+
 cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
 {
    static const char *const types[] = {"TURN_START", "BLOCK_START", "BLOCK_DELTA",

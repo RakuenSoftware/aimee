@@ -356,8 +356,8 @@ static void test_native_cache_replay_and_unreported_mutation(void)
    grown[0] = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup("host instructions")};
    ir.n_system++;
    ir.mutated = 1;
-   cJSON *patch = cJSON_Parse("[1]");
-   assert(aimee_ir_remove_tools(&ir, patch) == 1 && ir.mutated);
+   cJSON *patch = cJSON_Parse("[[1]]");
+   assert(aimee_ir_remove_tool_paths(&ir, patch) == 1 && ir.mutated);
    cJSON_Delete(patch);
    output = anthropic_backend_build(&ir);
    assert(output && cJSON_GetArraySize(cJSON_GetObjectItem(output, "system")) == 2);
@@ -638,8 +638,28 @@ static void test_owned_tool_catalog(void)
         "sidecars OK");
 }
 
+static void test_mandatory_egress_admission(void)
+{
+   const char *native = "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+   aimee_request_t request = {0};
+   char error[128];
+   assert(!aimee_frontend_parse_wire(native, strlen(native), AIMEE_WIRE_OPENAI_CHAT, &request,
+                                     error, sizeof error));
+   /* A pristine native sidecar cannot bypass a malformed owned request. */
+   free(request.messages[0].role);
+   request.messages[0].role = strdup("forged");
+   assert(aimee_ir_request_admit(&request) < 0);
+   assert(!anthropic_backend_build(&request));
+   assert(!openai_backend_build(&request));
+   assert(!responses_backend_build(&request));
+   assert(!aimee_backend_render_wire(&request, AIMEE_WIRE_OPENAI_CHAT));
+   aimee_request_free(&request);
+   puts("  invalid owned requests refuse before native replay or backend construction OK");
+}
+
 int main(void)
 {
+   test_mandatory_egress_admission();
    test_owned_tool_catalog();
    test_owned_output_formats();
    test_completed_response_usage_admission();

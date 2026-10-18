@@ -128,7 +128,7 @@ void openai_family_add_tool_choice(cJSON *out, const aimee_request_t *ir, int re
 
 cJSON *openai_backend_build(const aimee_request_t *ir)
 {
-   if (!ir)
+   if (aimee_ir_request_admit(ir))
       return NULL;
    cJSON *out = cJSON_CreateObject();
    if (ir->output_format.kind != AIMEE_OUTPUT_UNSET)

@@ -54,7 +54,7 @@ int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire
 }
 char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wire)
 {
-   if (!request)
+   if (aimee_ir_request_admit(request))
       return NULL;
    int native_transport =
        wire != AIMEE_WIRE_RESPONSES ||

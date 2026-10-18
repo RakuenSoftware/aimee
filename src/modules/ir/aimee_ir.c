@@ -277,32 +277,116 @@ void aimee_response_free(aimee_response_t *r)
 
 /* Execute a module's tool-index patch. Validate the whole patch first so a
  * malformed or stale plan cannot partially mutate the request. */
-int aimee_ir_remove_tools(aimee_request_t *request, const cJSON *indices)
+int aimee_ir_tool_paths_valid(const aimee_request_t *request, const cJSON *paths)
 {
-   if (!request || !cJSON_IsArray(indices) || request->n_tools < 0)
-      return -1;
-   int upper = request->n_tools;
-   const cJSON *index = NULL;
-   cJSON_ArrayForEach(index, indices)
+   if (!request || !cJSON_IsArray(paths) || cJSON_GetArraySize(paths) > AIMEE_IR_MAX_BLOCKS)
+      return 0;
+   const cJSON *path, *previous = NULL;
+   cJSON_ArrayForEach(path, paths)
    {
-      if (!cJSON_IsNumber(index) || index->valuedouble < 0 || index->valuedouble >= upper ||
-          index->valuedouble != (double)index->valueint)
-         return -1;
-      upper = index->valueint;
+      int depth = cJSON_GetArraySize(path);
+      if (!cJSON_IsArray(path) || depth < 1 || depth > 16)
+         return 0;
+      const aimee_tool_t *tools = request->tools;
+      int count = request->n_tools;
+      for (int i = 0; i < depth; i++)
+      {
+         const cJSON *index = cJSON_GetArrayItem(path, i);
+         if (!tools || !cJSON_IsNumber(index) || index->valuedouble < 0 ||
+             index->valuedouble >= count || index->valuedouble != index->valueint)
+            return 0;
+         const aimee_tool_t *tool = &tools[index->valueint];
+         if (i + 1 < depth && tool->kind != AIMEE_TOOL_NAMESPACE)
+            return 0;
+         tools = tool->children;
+         count = tool->n_children;
+      }
+      if (previous)
+      {
+         int n = cJSON_GetArraySize(previous), different = 0;
+         for (int i = 0; i < n && i < depth; i++)
+         {
+            int left = cJSON_GetArrayItem(previous, i)->valueint;
+            int right = cJSON_GetArrayItem(path, i)->valueint;
+            if (left < right)
+               return 0;
+            if (left > right)
+            {
+               different = 1;
+               break;
+            }
+         }
+         if (!different)
+            return 0; /* Duplicate or overlapping parent/child paths. */
+      }
+      previous = path;
    }
-   int removed = 0;
-   cJSON_ArrayForEach(index, indices)
+   return 1;
+}
+static void relax_removed_tool_choice(aimee_request_t *request, const aimee_tool_t *tool)
+{
+   if (request->tool_choice == AIMEE_TOOL_CHOICE_TOOL && request->tool_choice_name && tool->name &&
+       !strcmp(tool->name, request->tool_choice_name))
    {
-      int i = index->valueint;
-      aimee_tool_free(&request->tools[i]);
-      memmove(&request->tools[i], &request->tools[i + 1],
-              (size_t)(request->n_tools - i - 1) * sizeof(request->tools[0]));
-      request->n_tools--;
-      memset(&request->tools[request->n_tools], 0, sizeof request->tools[0]);
+      request->tool_choice = AIMEE_TOOL_CHOICE_AUTO;
+      free(request->tool_choice_name);
+      request->tool_choice_name = NULL;
+   }
+   for (int i = 0; i < tool->n_children; i++)
+      relax_removed_tool_choice(request, &tool->children[i]);
+}
+static void prune_empty_tool_namespaces(aimee_tool_t *tools, int *count)
+{
+   for (int i = *count - 1; i >= 0; i--)
+      if (tools[i].kind == AIMEE_TOOL_NAMESPACE)
+      {
+         prune_empty_tool_namespaces(tools[i].children, &tools[i].n_children);
+         if (!tools[i].n_children)
+         {
+            aimee_tool_free(&tools[i]);
+            memmove(&tools[i], &tools[i + 1], (size_t)(*count - i - 1) * sizeof *tools);
+            (*count)--;
+            memset(&tools[*count], 0, sizeof *tools);
+         }
+      }
+}
+int aimee_ir_remove_tool_paths(aimee_request_t *request, const cJSON *paths)
+{
+   if (!aimee_ir_tool_paths_valid(request, paths))
+      return -1;
+   int removed = 0;
+   const cJSON *path;
+   cJSON_ArrayForEach(path, paths)
+   {
+      aimee_tool_t *tools = request->tools;
+      int *count = &request->n_tools;
+      int depth = cJSON_GetArraySize(path);
+      for (int i = 0; i < depth - 1; i++)
+      {
+         aimee_tool_t *parent = &tools[cJSON_GetArrayItem(path, i)->valueint];
+         tools = parent->children;
+         count = &parent->n_children;
+      }
+      int index = cJSON_GetArrayItem(path, depth - 1)->valueint;
+      relax_removed_tool_choice(request, &tools[index]);
+      aimee_tool_free(&tools[index]);
+      memmove(&tools[index], &tools[index + 1], (size_t)(*count - index - 1) * sizeof *tools);
+      (*count)--;
+      memset(&tools[*count], 0, sizeof *tools);
       removed++;
    }
    if (removed)
+   {
+      prune_empty_tool_namespaces(request->tools, &request->n_tools);
+      if (!request->n_tools)
+      {
+         request->tool_choice = AIMEE_TOOL_CHOICE_UNSET;
+         request->has_parallel_tool_calls = 0;
+         free(request->tool_choice_name);
+         request->tool_choice_name = NULL;
+      }
       request->mutated = 1;
+   }
    return removed;
 }
 
@@ -764,6 +848,28 @@ int aimee_ir_request_admit(const aimee_request_t *request)
        request->n_tools > AIMEE_IR_MAX_BLOCKS || (request->n_system && !request->system) ||
        (request->n_messages && !request->messages) || (request->n_tools && !request->tools))
       return -1;
+   if (request->frontend < AIMEE_WIRE_UNKNOWN || request->frontend > AIMEE_WIRE_RESPONSES ||
+       request->cache_policy < AIMEE_CACHE_DEFAULT ||
+       request->cache_policy > AIMEE_CACHE_STABLE_PREFIX ||
+       request->tool_choice < AIMEE_TOOL_CHOICE_UNSET ||
+       request->tool_choice > AIMEE_TOOL_CHOICE_TOOL ||
+       (request->tool_choice == AIMEE_TOOL_CHOICE_TOOL &&
+        (!request->tool_choice_name || !request->tool_choice_name[0])) ||
+       (request->has_max_tokens && request->max_tokens < 1) ||
+       (request->has_temperature && !isfinite(request->temperature)) ||
+       (request->has_top_p && !isfinite(request->top_p)) || request->n_stop < 0 ||
+       request->n_stop > AIMEE_IR_MAX_BLOCKS || (request->n_stop && !request->stop_sequences) ||
+       (request->thinking && !cJSON_IsObject(request->thinking)) ||
+       request->output_format.kind < AIMEE_OUTPUT_UNSET ||
+       request->output_format.kind > AIMEE_OUTPUT_JSON_SCHEMA ||
+       request->output_format.strict < AIMEE_STRICT_UNSET ||
+       request->output_format.strict > AIMEE_STRICT_TRUE ||
+       (request->output_format.kind == AIMEE_OUTPUT_JSON_SCHEMA &&
+        !cJSON_IsObject(request->output_format.schema)))
+      return -1;
+   for (int i = 0; i < request->n_stop; i++)
+      if (!request->stop_sequences[i])
+         return -1;
    if (request->reasoning_effort < AIMEE_EFFORT_UNSET ||
        request->reasoning_effort > AIMEE_EFFORT_MAX ||
        (request->reasoning_summary && strcmp(request->reasoning_summary, "auto") &&

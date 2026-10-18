@@ -118,7 +118,9 @@ int gateway_policy_apply_ir(aimee_request_t *request)
        (request->tool_choice == AIMEE_TOOL_CHOICE_TOOL && request->tool_choice_name &&
         is_subagent_tool_name(request->tool_choice_name)))
    {
-      request->tool_choice = AIMEE_TOOL_CHOICE_AUTO;
+      request->tool_choice = request->n_tools ? AIMEE_TOOL_CHOICE_AUTO : AIMEE_TOOL_CHOICE_UNSET;
+      if (!request->n_tools)
+         request->has_parallel_tool_calls = 0;
       free(request->tool_choice_name);
       request->tool_choice_name = NULL;
    }

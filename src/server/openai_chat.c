@@ -128,10 +128,17 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
    const request_context_t *rc = request_context_get();
    /* Behaviour-affecting config flags that can change generation for this path. */
    char flags[96];
-   snprintf(flags, sizeof(flags), "cs%d rc%d pi%d dw%d gv%d sp%d", config_cache_shaping_enabled(),
-            config_reasoning_cap_enabled(), config_ingress_preinject_enabled(),
-            config_dedup_window_seconds(), openai_governance_enabled(),
-            gateway_prevent_subagents_enabled());
+   snprintf(flags, sizeof(flags), "ir1-sha256 cs%d rc%d pi%d dw%d gv%d sp%d",
+            config_cache_shaping_enabled(), config_reasoning_cap_enabled(),
+            config_ingress_preinject_enabled(), config_dedup_window_seconds(),
+            openai_governance_enabled(), gateway_prevent_subagents_enabled());
+   /* Key composition needs commitments, not a second copy of a potentially
+    * megabyte-scale prompt in the bounded bus frame. Domain separation keeps
+    * this canonical-input key format distinct from legacy raw-body callers. */
+   char body_digest[65], context_digest[65];
+   if (aimee_sha256_hex(body ? body : "", body ? strlen(body) : 0, body_digest) ||
+       aimee_sha256_hex(context ? context : "", context ? strlen(context) : 0, context_digest))
+      return -1;
    response_dedup_key_inputs_t in = {
        .principal = request_context_principal(),
        .source = rc ? rc->source : "",
@@ -140,8 +147,8 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
        .endpoint = endpoint,
        .stream = 0,
        .idempotency_key = idem,
-       .body = body,
-       .context = context,
+       .body = body_digest,
+       .context = context_digest,
        .behavior_flags = flags,
    };
    if (response_dedup_key(&in, key, key_cap) != 0)
@@ -1374,7 +1381,9 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
    if (cache && !request->n_tools && config_present() && config_dedup_enabled() &&
        request_context_idempotency_key()[0])
    {
-      char *prepared = openai_build_ir_body(request, wire);
+      cJSON *canonical = aimee_ir_request_json(request);
+      char *prepared = canonical ? cJSON_PrintUnformatted(canonical) : NULL;
+      cJSON_Delete(canonical);
       cache->enabled = prepared
                            ? dedup_eligible(cache->key, sizeof cache->key, agent, cache->endpoint,
                                             cache->body, prepared, &cache->ttl)

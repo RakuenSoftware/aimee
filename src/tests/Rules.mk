@@ -1722,7 +1722,7 @@ $(TESTPREFIX)/unit-test-ir-module-plan: $(OBJDIR)/tests/test_ir_module_plan.o \
                      $(OBJDIR)/modules/ir/aimee_ir_module_plan.o $(OBJDIR)/server/ir_host_bindings.o $(OBJDIR)/pipeline/gw_stage_registry.o $(OBJDIR)/server/ingress_preinject.o \
                      $(OBJDIR)/server/request_context.o $(OBJDIR)/log.o \
                      $(OBJDIR)/integrity_gate.o $(OBJDIR)/integrity_ingress.o \
-                     $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/aimee_ir_session.o \
+                     $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/aimee_ir_session.o $(OBJDIR)/modules/ir/session_event.o \
                      $(OBJDIR)/core/turn_integrity/turn_integrity.o \
                      $(OBJDIR)/aimee_sha256.o \
                      $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o \

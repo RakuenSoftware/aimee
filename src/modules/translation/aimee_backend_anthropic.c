@@ -349,7 +349,7 @@ static cJSON *native_request_overlay(const aimee_request_t *ir, cJSON *out)
 
 cJSON *anthropic_backend_build(const aimee_request_t *ir)
 {
-   if (!ir)
+   if (aimee_ir_request_admit(ir))
       return NULL;
    /* Native replay retains client cache breakpoints, TTLs, field ordering and
     * unknown native settings. Verify the typed payload against its entry

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strconv"
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
@@ -12,45 +13,11 @@ import (
 // Checkpoints are host projections of admitted/executed IR, not model output.
 // Observation events remain immutable, including calls removed by governance.
 // The checkpoint and every message are appended in one owner-checked transaction.
-type irHistoryEvent struct {
-	Scope   string          `json:"scope"`
-	Phase   string          `json:"phase"`
-	Index   int             `json:"index,omitempty"`
-	Count   int             `json:"count,omitempty"`
-	Message json.RawMessage `json:"message,omitempty"`
-}
+func validIRHistoryMessage(raw json.RawMessage) bool { return canonical.ValidMessage(raw) }
 
-func validIRHistoryMessage(raw json.RawMessage) bool {
-	var message struct {
-		Role     string            `json:"role"`
-		Blocks   []json.RawMessage `json:"blocks"`
-		Boundary bool              `json:"_compaction_boundary,omitempty"`
-	}
-	if !decodeIR(raw, &message) || message.Role == "" || message.Blocks == nil || len(message.Blocks) > 4096 {
-		return false
-	}
-	for _, block := range message.Blocks {
-		if !validIRBlock(block) {
-			return false
-		}
-	}
-	return true
-}
+type irHistoryEvent = canonical.HistoryEvent
 
-func validIRHistoryEvent(raw json.RawMessage) bool {
-	var event irHistoryEvent
-	if !decodeIR(raw, &event) || event.Scope == "" || len(event.Scope) > 128 {
-		return false
-	}
-	switch event.Phase {
-	case "message":
-		return event.Index >= 0 && event.Count == 0 && validIRHistoryMessage(event.Message)
-	case "commit":
-		return event.Count >= 0 && event.Index == 0 && event.Message == nil
-	default:
-		return false
-	}
-}
+func validIRHistoryEvent(raw json.RawMessage) bool { return canonical.ValidHistoryEvent(raw) }
 
 func sessionIRHistorySave(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	// session, checkpoint, scope, authenticated actor, canonical history
