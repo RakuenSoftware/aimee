@@ -2,7 +2,7 @@
 
 #include <aimee/delegates/delegate_credential_retry.h>
 
-#include "agent_config.h" /* agent_set_request_codex_creds, *_token_present */
+#include "agent_config.h" /* selected-registration request credentials */
 #include "agent_exec.h"
 #include "config.h" /* config_output_dir */
 #include <aimee/delegates/delegate_credentials.h>
@@ -26,23 +26,24 @@ static void codex_oauth_apply_vault_override(const char *principal, const agent_
       return;
    if (strcmp(target_agent->auth_type, "codex-oauth") != 0)
       return;
-   if (agent_request_codex_token_present())
-      return; /* a live client push is authoritative */
+   if (agent_request_codex_token_matches(target_agent))
+      return; /* The same selected registration is already bound. */
 
    char tok[MAX_API_KEY_LEN] = "";
    char acct[128] = "";
    vault_status_t st = VAULT_NO_ENTRY;
 
    (void)principal;
-   st = vault_service_get_server_principal(target_agent->name, VAULT_CODEX_TOKEN_CRED, tok,
-                                           sizeof(tok));
-   if (st == VAULT_OK)
-      (void)vault_service_get_server_principal(target_agent->name, VAULT_CODEX_ACCOUNT_CRED, acct,
+   const char *registration = target_agent->registration[0] ? target_agent->registration
+                              : target_agent->name[0]       ? target_agent->name
+                                                            : "codex";
+   st = vault_service_get_server_principal(registration, VAULT_CODEX_TOKEN_CRED, tok, sizeof(tok));
+   if (st == VAULT_OK && tok[0])
+   {
+      (void)vault_service_get_server_principal(registration, VAULT_CODEX_ACCOUNT_CRED, acct,
                                                sizeof(acct));
-
-   if (st != VAULT_OK || !tok[0])
-      return;
-   agent_set_request_codex_creds(tok, acct[0] ? acct : NULL);
+      agent_set_request_codex_creds_for(target_agent, tok, acct[0] ? acct : NULL);
+   }
    OPENSSL_cleanse(tok, sizeof(tok));
    OPENSSL_cleanse(acct, sizeof(acct));
 }

@@ -13,6 +13,9 @@
 #include <string.h>
 
 char test_vault_server_codex_oauth[4096];
+char test_vault_codex_connection[128];
+char test_vault_codex_token[4096];
+char test_vault_codex_account[128];
 char test_vault_api_key_agent[64];
 char test_vault_api_key[4096];
 
@@ -50,8 +53,8 @@ vault_status_t vault_service_get(const char *principal, const char *agent, const
  * credential sees it as both present and gettable. */
 int vault_service_has_server_principal(const char *agent, const char *cred)
 {
-   if (agent && cred && test_vault_api_key_agent[0] && strcmp(agent, test_vault_api_key_agent) == 0 &&
-       strcmp(cred, VAULT_API_KEY_CRED) == 0)
+   if (agent && cred && test_vault_api_key_agent[0] &&
+       strcmp(agent, test_vault_api_key_agent) == 0 && strcmp(cred, VAULT_API_KEY_CRED) == 0)
       return test_vault_api_key[0] != '\0';
    return agent && cred && strcmp(agent, "codex") == 0 && strcmp(cred, "oauth") == 0 &&
           test_vault_server_codex_oauth[0];
@@ -60,6 +63,18 @@ int vault_service_has_server_principal(const char *agent, const char *cred)
 vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
                                                   size_t out_len)
 {
+   if (agent && cred && test_vault_codex_connection[0] &&
+       !strcmp(agent, test_vault_codex_connection))
+   {
+      const char *value = !strcmp(cred, VAULT_CODEX_TOKEN_CRED)     ? test_vault_codex_token
+                          : !strcmp(cred, VAULT_CODEX_ACCOUNT_CRED) ? test_vault_codex_account
+                                                                    : "";
+      if (value[0])
+      {
+         snprintf(out, out_len, "%s", value);
+         return VAULT_OK;
+      }
+   }
    if (agent && cred && strcmp(agent, "codex") == 0 && strcmp(cred, "oauth") == 0 &&
        test_vault_server_codex_oauth[0])
    {

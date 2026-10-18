@@ -216,6 +216,7 @@ int agent_has_resolvable_credentials(const agent_t *agent)
  * Thread-local: each chat/delegate turn runs on its own worker thread. */
 static _Thread_local char g_request_codex_token[MAX_API_KEY_LEN];
 static _Thread_local char g_request_codex_account_id[128];
+static _Thread_local char g_request_codex_registration[128];
 
 /* Explicit, actionable reason the current turn's auth resolution failed — set by
  * agent_resolve_auth on a known failure (e.g. codex REAUTH_REQUIRED) so the
@@ -288,21 +289,46 @@ static int agent_vault_get(const char *agent_name, const char *cred, char *out, 
    return 0;
 }
 
-void agent_set_request_codex_creds(const char *token, const char *account_id)
+/* The server preset is the legacy unnamed context. Named registrations never
+ * inherit that account merely because their own credential is missing. */
+static const char *codex_registration(const agent_t *agent)
 {
-   if (token && token[0])
-      snprintf(g_request_codex_token, sizeof(g_request_codex_token), "%s", token);
-   else
-      g_request_codex_token[0] = '\0';
-   if (account_id && account_id[0])
-      snprintf(g_request_codex_account_id, sizeof(g_request_codex_account_id), "%s", account_id);
-   else
-      g_request_codex_account_id[0] = '\0';
+   if (agent && agent->registration[0])
+      return agent->registration;
+   if (agent && agent->name[0])
+      return agent->name;
+   return "codex";
 }
 
-int agent_request_codex_token_present(void)
+static void set_codex_creds(const char *registration, const char *token, const char *account_id)
 {
-   return g_request_codex_token[0] != '\0';
+   OPENSSL_cleanse(g_request_codex_token, sizeof(g_request_codex_token));
+   OPENSSL_cleanse(g_request_codex_account_id, sizeof(g_request_codex_account_id));
+   g_request_codex_registration[0] = 0;
+   if (!token || !token[0])
+      return;
+   snprintf(g_request_codex_token, sizeof(g_request_codex_token), "%s", token);
+   snprintf(g_request_codex_account_id, sizeof(g_request_codex_account_id), "%s",
+            account_id ? account_id : "");
+   snprintf(g_request_codex_registration, sizeof(g_request_codex_registration), "%s",
+            registration && registration[0] ? registration : "codex");
+}
+
+void agent_set_request_codex_creds_for(const agent_t *agent, const char *token,
+                                       const char *account_id)
+{
+   set_codex_creds(codex_registration(agent), token, account_id);
+}
+
+void agent_set_request_codex_creds(const char *token, const char *account_id)
+{
+   set_codex_creds("codex", token, account_id);
+}
+
+int agent_request_codex_token_matches(const agent_t *agent)
+{
+   return g_request_codex_token[0] &&
+          !strcmp(g_request_codex_registration, codex_registration(agent));
 }
 
 void agent_request_creds_snapshot(agent_request_creds_t *out)
@@ -312,6 +338,8 @@ void agent_request_creds_snapshot(agent_request_creds_t *out)
    snprintf(out->session_id, sizeof(out->session_id), "%s", g_request_session_id);
    snprintf(out->codex_token, sizeof(out->codex_token), "%s", g_request_codex_token);
    snprintf(out->codex_account_id, sizeof(out->codex_account_id), "%s", g_request_codex_account_id);
+   snprintf(out->codex_registration, sizeof(out->codex_registration), "%s",
+            g_request_codex_registration);
    snprintf(out->vault_principal, sizeof(out->vault_principal), "%s", g_request_vault_principal);
 }
 
@@ -320,7 +348,7 @@ void agent_request_creds_restore(const agent_request_creds_t *creds)
    if (!creds)
       return;
    agent_set_request_session(creds->session_id);
-   agent_set_request_codex_creds(creds->codex_token, creds->codex_account_id);
+   set_codex_creds(creds->codex_registration, creds->codex_token, creds->codex_account_id);
    agent_set_request_vault_principal(creds->vault_principal);
 }
 
@@ -371,15 +399,11 @@ void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len)
    {
       char acct[128];
       acct[0] = '\0';
-      if (g_request_codex_account_id[0])
+      if (agent_request_codex_token_matches(agent))
          snprintf(acct, sizeof(acct), "%s", g_request_codex_account_id);
       else
-      /* miss leaves acct empty (helper guarantees) -> header is skipped below. */
-      {
-         if (!agent->registration[0] ||
-             !agent_vault_get(agent->registration, VAULT_CODEX_ACCOUNT_CRED, acct, sizeof(acct)))
-            (void)agent_vault_get(agent->name, VAULT_CODEX_ACCOUNT_CRED, acct, sizeof(acct));
-      }
+         (void)agent_vault_get(codex_registration(agent), VAULT_CODEX_ACCOUNT_CRED, acct,
+                               sizeof(acct));
       if (acct[0])
       {
          if (!strstr(buf, "originator:"))
@@ -581,28 +605,37 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
 
    if (strcmp(auth_type, "codex-oauth") == 0)
    {
-      /* Codex OAuth token, in precedence: per-turn token (set by the vault delegate
-       * path) > the permanent Vault (turn principal, then server principal). */
-      if (g_request_codex_token[0])
+      /* The host-bound token and the Vault lookup both belong to the selected
+       * registration. The actor principal never selects a provider account. */
+      if (agent_request_codex_token_matches(agent))
       {
          snprintf(buf, buf_len, "Authorization: Bearer %s", g_request_codex_token);
          return 0;
       }
       char token[MAX_API_KEY_LEN];
-      if ((agent->registration[0] &&
-           agent_vault_get(agent->registration, VAULT_CODEX_TOKEN_CRED, token, sizeof(token))) ||
-          agent_vault_get(agent->name, VAULT_CODEX_TOKEN_CRED, token, sizeof(token)))
+      if (agent_vault_get(codex_registration(agent), VAULT_CODEX_TOKEN_CRED, token, sizeof(token)))
       {
          snprintf(buf, buf_len, "Authorization: Bearer %s", token);
+         OPENSSL_cleanse(token, sizeof(token));
          return 0;
+      }
+      if (strcmp(codex_registration(agent), "codex"))
+      {
+         OPENSSL_cleanse(token, sizeof(token));
+         snprintf(g_request_auth_error, sizeof(g_request_auth_error),
+                  "Codex credential is unavailable for selected connection '%s'",
+                  codex_registration(agent));
+         return -1;
       }
       /* Vault-backed, auto-refreshing token bootstrapped from the opaque codex
        * OAuth document already ingested by login or boot migration. */
       if (agent_codex_oauth_current_token(token, sizeof(token)) == 0)
       {
          snprintf(buf, buf_len, "Authorization: Bearer %s", token);
+         OPENSSL_cleanse(token, sizeof(token));
          return 0;
       }
+      OPENSSL_cleanse(token, sizeof(token));
       /* No usable codex token. If a prior refresh was rejected by the IdP, the
        * refresh token is dead and the server cannot recover on its own — give
        * the operator the exact remedy instead of a generic provider 401 (D6). */
@@ -763,6 +796,7 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
       if (agent_provider_env_value(agent->provider, token, sizeof(token)))
       {
          snprintf(buf, buf_len, "Authorization: Bearer %s", token);
+         OPENSSL_cleanse(token, sizeof(token));
          return 0;
       }
    }

@@ -317,18 +317,13 @@ int agent_codex_oauth_current_token(char *buf, size_t len);
 
 void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len);
 
-/* Per-turn Codex OAuth creds supplied by the thin client (its ~/.codex/auth.json
- * is the live, refreshed source; the server has no such file). Set at the start
- * of a chat/delegate turn and cleared at the end. When set, agent_resolve_auth
- * uses `token` for a codex-oauth agent in preference to the server's file, and
- * agent_build_extra_headers injects ChatGPT-Account-ID from `account_id`. Pass
- * NULL/empty to clear. Thread-local (each turn runs on its own worker thread). */
+/* Host-owned per-turn Codex credentials. The legacy setter binds the server
+ * codex connection. The explicit setter binds the selected registration; token
+ * and account may only serve that connection. NULL/empty clears both. */
 void agent_set_request_codex_creds(const char *token, const char *account_id);
-
-/* 1 when a per-turn Codex OAuth token is currently bound. Set by the vault
- * delegate path (delegate_credential_retry, from the vault); the legacy client
- * push was retired in P4b. */
-int agent_request_codex_token_present(void);
+void agent_set_request_codex_creds_for(const agent_t *agent, const char *token,
+                                       const char *account_id);
+int agent_request_codex_token_matches(const agent_t *agent);
 
 /* Per-turn session id, set at the start of a chat/delegate turn from the request
  * and carried in the creds snapshot so a fan-out worker inherits the originating
@@ -369,6 +364,7 @@ typedef struct
    char session_id[128];
    char codex_token[MAX_API_KEY_LEN];
    char codex_account_id[128];
+   char codex_registration[128];
    char vault_principal[VAULT_PRINCIPAL_MAX];
 } agent_request_creds_t;
 
