@@ -27,13 +27,7 @@
 
 int aimee_ir_path_enabled(void)
 {
-   /* DEFAULT-ON: the IR path is now the primary request-build path (proven live on
-    * .254 for Claude Code->codex incl. tools/streaming). An explicit setting wins;
-    * legacy translators remain as the automatic fallback on any IR-build failure.
-    * Set AIMEE_IR_PATH=0 to force the legacy path. */
-   const char *v = getenv("AIMEE_IR_PATH");
-   if (v && v[0])
-      return v[0] != '0';
+   /* Retained ABI for callers; canonical admission has no legacy escape hatch. */
    return 1;
 }
 

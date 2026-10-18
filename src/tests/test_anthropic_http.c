@@ -463,31 +463,16 @@ static const cJSON *obj(const cJSON *parent, const char *key)
 static cJSON *openai_driver_build(const agent_t *agent, cJSON *messages, cJSON *tools,
                                   const char *system_prompt, int max_tokens, double temperature)
 {
-   cJSON *out = cJSON_CreateObject();
-   cJSON_AddStringToObject(out, "driver", "openai");
-   cJSON_AddStringToObject(out, "model", agent->model);
-   cJSON_AddItemToObject(out, "messages", cJSON_Duplicate(messages, 1));
-   if (tools)
-      cJSON_AddItemToObject(out, "tools", cJSON_Duplicate(tools, 1));
-   cJSON_AddNumberToObject(out, "max_tokens", max_tokens);
-   cJSON_AddNumberToObject(out, "temperature", temperature);
-   cJSON_AddStringToObject(out, "system_prompt", system_prompt ? system_prompt : "");
-   return out;
+   assert(!"legacy request builder invoked instead of canonical IR");
+   return NULL;
 }
 
 static cJSON *system_prompt_driver_build(const agent_t *agent, cJSON *messages, cJSON *tools,
                                          const char *system_prompt, int max_tokens,
                                          double temperature)
 {
-   cJSON *out = cJSON_CreateObject();
-   (void)tools;
-   (void)max_tokens;
-   (void)temperature;
-   cJSON_AddStringToObject(out, "driver", "chatgpt");
-   cJSON_AddStringToObject(out, "model", agent->model);
-   cJSON_AddStringToObject(out, "instructions", system_prompt ? system_prompt : "");
-   cJSON_AddItemToObject(out, "input", cJSON_Duplicate(messages, 1));
-   return out;
+   assert(!"legacy request builder invoked instead of canonical IR");
+   return NULL;
 }
 
 static void system_prompt_driver_caps(const agent_t *agent, driver_caps_t *caps)
@@ -1068,6 +1053,37 @@ static void test_messages_stream_anthropic_reasoning_metrics(void)
    PASS("messages_stream_anthropic_reasoning_metrics");
 }
 
+static void test_foreign_ingress_cannot_fall_back_from_ir(void)
+{
+   const delegate_driver_t drivers[] = {
+       {.name = "openai", .build_request = openai_driver_build},
+       {.name = "chatgpt", .build_request = system_prompt_driver_build}};
+   const char *old = getenv("AIMEE_IR_PATH");
+   char *previous = old ? strdup(old) : NULL;
+   setenv("AIMEE_IR_PATH", "0", 1);
+   for (size_t i = 0; i < sizeof drivers / sizeof drivers[0]; i++)
+   {
+      reset_capture();
+      g_driver = &drivers[i];
+      const char *invalid = "{\"model\":\"ignored\",\"max_tokens\":16,\"messages\":["
+                            "{\"role\":\"user\",\"content\":\"hi\"}],"
+                            "\"tool_choice\":{\"type\":\"unsupported\"}}";
+      char reply[1024];
+      assert(messages_buffered(invalid, reply, sizeof reply) == 500);
+      assert(!g_last_body && strstr(reply, "canonical"));
+      emit_capture_t cap = {0};
+      assert(!messages_stream(invalid, cap_emit, &cap));
+      assert(!g_last_body && cap.count == 1 && !strcmp(cap.events[0], "error"));
+   }
+   if (previous)
+      setenv("AIMEE_IR_PATH", previous, 1);
+   else
+      unsetenv("AIMEE_IR_PATH");
+   free(previous);
+   reset_capture();
+   PASS("foreign ingress refuses invalid IR even with the retired flag disabled");
+}
+
 static void test_messages_buffered_openai_family_translates(void)
 {
    const delegate_driver_t openai = {.name = "openai", .build_request = openai_driver_build};
@@ -1086,7 +1102,7 @@ static void test_messages_buffered_openai_family_translates(void)
                          "\"tools\":[{\"name\":\"Read\",\"input_schema\":{\"type\":\"object\"}}]}",
                          resp, sizeof(resp)) == 200);
    sent = parse(g_last_body);
-   assert(strcmp(obj(sent, "driver")->valuestring, "openai") == 0);
+   assert(cJSON_IsString(obj(sent, "model")));
    messages = obj(sent, "messages");
    assert(cJSON_IsArray(messages));
    assert(strcmp(obj(cJSON_GetArrayItem((cJSON *)messages, 0), "role")->valuestring, "system") ==
@@ -1127,7 +1143,7 @@ static void test_messages_buffered_system_prompt_driver_no_duplicate_system(void
    PASS("messages_buffered_system_prompt_driver_no_duplicate_system");
 }
 
-static void test_messages_buffered_system_prompt_capability_no_duplicate_system(void)
+static void test_messages_buffered_capability_does_not_override_wire(void)
 {
    const delegate_driver_t capable = {.name = "future-responses",
                                       .build_request = system_prompt_driver_build,
@@ -1143,14 +1159,13 @@ static void test_messages_buffered_system_prompt_capability_no_duplicate_system(
                             "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
                             resp, sizeof(resp)) == 200);
    sent = parse(g_last_body);
-   assert(strcmp(obj(sent, "instructions")->valuestring, "SYS") == 0);
-   input = obj(sent, "input");
+   input = obj(sent, "messages");
    assert(cJSON_IsArray(input));
-   assert(cJSON_GetArraySize((cJSON *)input) == 1);
-   assert(strcmp(obj(cJSON_GetArrayItem((cJSON *)input, 0), "role")->valuestring, "user") == 0);
+   assert(cJSON_GetArraySize((cJSON *)input) == 2);
+   assert(strcmp(obj(cJSON_GetArrayItem((cJSON *)input, 0), "role")->valuestring, "system") == 0);
    cJSON_Delete(sent);
    reset_capture();
-   PASS("messages_buffered_system_prompt_capability_no_duplicate_system");
+   PASS("messages_buffered_capability_does_not_override_wire");
 }
 
 static void test_messages_stream_openai_family_translates(void)
@@ -1221,7 +1236,7 @@ static void test_messages_stream_chatgpt_buffered_replays_responses(void)
                           "\"stream\":true}",
                           cap_emit, &cap) == 0);
    sent = parse(g_last_body);
-   assert(strcmp(obj(sent, "driver")->valuestring, "chatgpt") == 0);
+   assert(cJSON_IsArray(obj(sent, "input")));
    assert(strcmp(obj(sent, "instructions")->valuestring, "SYS") == 0);
    assert(cJSON_IsTrue(obj(sent, "stream")));
    assert(cap.count >= 4);
@@ -1435,9 +1450,10 @@ int main(void)
    test_messages_native_frame_retains_exact_bytes();
    test_messages_buffered_anthropic_strips_stream_false_path();
    test_messages_stream_anthropic_preserves_request_shape();
+   test_foreign_ingress_cannot_fall_back_from_ir();
    test_messages_buffered_openai_family_translates();
    test_messages_buffered_system_prompt_driver_no_duplicate_system();
-   test_messages_buffered_system_prompt_capability_no_duplicate_system();
+   test_messages_buffered_capability_does_not_override_wire();
    test_messages_stream_openai_family_translates();
    test_messages_stream_chatgpt_buffered_replays_responses();
    test_proof_gated_ingress_wire_parity();

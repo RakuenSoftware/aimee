@@ -25,28 +25,28 @@ static int g_test_tools_calls;
 static char g_test_query[1024];
 static int g_test_guidance_provided;
 
-void ir_seam_test_native_preinject(int enabled)
+__attribute__((weak)) void ir_seam_test_native_preinject(int enabled)
 {
    g_test_native_preinject = enabled;
 }
-int config_ingress_preinject_anthropic_enabled(void)
+__attribute__((weak)) int config_ingress_preinject_anthropic_enabled(void)
 {
    return g_test_native_preinject;
 }
 
-int ir_seam_test_guidance_provided(void)
+__attribute__((weak)) int ir_seam_test_guidance_provided(void)
 {
    return g_test_guidance_provided;
 }
 
-void ir_seam_test_memory(int enabled)
+__attribute__((weak)) void ir_seam_test_memory(int enabled)
 {
    g_test_memory_enabled = enabled;
    g_test_context_calls = g_test_tools_calls = 0;
    g_test_query[0] = '\0';
 }
 
-int ir_seam_test_plan_calls(const char *phase)
+__attribute__((weak)) int ir_seam_test_plan_calls(const char *phase)
 {
    return strcmp(phase, "context") == 0 ? g_test_context_calls : g_test_tools_calls;
 }
@@ -56,24 +56,24 @@ const char *ir_seam_test_query(void)
    return g_test_query;
 }
 
-void ir_seam_test_session(const char *session_id)
+__attribute__((weak)) void ir_seam_test_session(const char *session_id)
 {
    snprintf(g_test_session, sizeof g_test_session, "%s", session_id ? session_id : "");
    g_test_delivery_state = 0;
    g_test_claim_error_once = 0;
 }
 
-void ir_seam_test_persona(const char *instructions)
+__attribute__((weak)) void ir_seam_test_persona(const char *instructions)
 {
    snprintf(g_test_persona, sizeof g_test_persona, "%s", instructions ? instructions : "");
 }
 
-void ir_seam_test_claim_error_once(void)
+__attribute__((weak)) void ir_seam_test_claim_error_once(void)
 {
    g_test_claim_error_once = 1;
 }
 
-int aimee_ir_stage_module_plan(aimee_request_t *ir, void *ud)
+__attribute__((weak)) int aimee_ir_stage_module_plan(aimee_request_t *ir, void *ud)
 {
    (void)ir;
    const aimee_ir_module_plan_t *plan = ud;
@@ -94,12 +94,12 @@ int aimee_ir_stage_module_plan(aimee_request_t *ir, void *ud)
  * not select a session/persona remain byte-identical; the ingress coverage below
  * can exercise real placement without linking the rest of the server. */
 
-const char *server_http_identity_session_hdr(void)
+__attribute__((weak)) const char *server_http_identity_session_hdr(void)
 {
    return g_test_session;
 }
 
-int session_persona_delivery_claim(const char *session_id)
+__attribute__((weak)) int session_persona_delivery_claim(const char *session_id)
 {
    (void)session_id;
    if (g_test_claim_error_once)
@@ -113,13 +113,13 @@ int session_persona_delivery_claim(const char *session_id)
    return 1;
 }
 
-void session_persona_delivery_finish(const char *session_id, int delivered)
+__attribute__((weak)) void session_persona_delivery_finish(const char *session_id, int delivered)
 {
    (void)session_id;
    g_test_delivery_state = delivered ? 1 : 0;
 }
 
-int session_persona_get(const char *session_id, char *out, size_t n)
+__attribute__((weak)) int session_persona_get(const char *session_id, char *out, size_t n)
 {
    (void)session_id;
    if (out && n)
@@ -127,25 +127,26 @@ int session_persona_get(const char *session_id, char *out, size_t n)
    return 0;
 }
 
-void config_current_persona(char *out, size_t n)
+__attribute__((weak)) void config_current_persona(char *out, size_t n)
 {
    if (out && n)
       snprintf(out, n, "%s", "engineer");
 }
 
-const char *config_default_persona(void)
+__attribute__((weak)) const char *config_default_persona(void)
 {
    return "";
 }
 
-char *persona_compose_primary_instructions(const char *name, const char *cwd)
+__attribute__((weak)) char *persona_compose_primary_instructions(const char *name, const char *cwd)
 {
    (void)name;
    (void)cwd;
    return g_test_persona[0] ? strdup(g_test_persona) : NULL;
 }
 
-int server_ir_plan_enabled(const char *method, const char *operation, const char *value)
+__attribute__((weak)) int server_ir_plan_enabled(const char *method, const char *operation,
+                                                 const char *value)
 {
    return g_test_memory_enabled;
 }
@@ -154,24 +155,24 @@ int server_ir_plan_enabled(const char *method, const char *operation, const char
  * loading a legacy_config_record and reading the field. Reporting "not present" reproduces
  * what the old legacy_config_read -> -1 stub produced: an unresolved tristate, so
  * enablement falls to the env default above. */
-int config_present(void)
+__attribute__((weak)) int config_present(void)
 {
    return g_test_native_preinject;
 }
 
-int config_module_memory(void)
+__attribute__((weak)) int config_module_memory(void)
 {
    return -1;
 }
 
-int config_module_enabled(int config_tristate, int env_default)
+__attribute__((weak)) int config_module_enabled(int config_tristate, int env_default)
 {
    return config_tristate >= 0 ? config_tristate : env_default;
 }
 
 /* The IR stage runner now records per-turn session observations; this test
  * links the runner without the request-context object, so absorb the call. */
-void request_context_note_aimee_session(int tool_calls, int redundant_tool_calls,
+__attribute__((weak)) void request_context_note_aimee_session(int tool_calls, int redundant_tool_calls,
                                         const char *intervention, const char *tool_transport)
 {
    (void)tool_calls;
@@ -185,7 +186,7 @@ const aimee_ir_plan_resource_t server_ir_plan_resources[] = {{NULL, NULL}};
 
 /* These shape-only fixtures use inert plans and no HTTP request context.
  * Production refusal propagation is covered by test_ir_module_plan. */
-void server_ir_plan_refuse(const char *kind, void *context)
+__attribute__((weak)) void server_ir_plan_refuse(const char *kind, void *context)
 {
    (void)kind;
    (void)context;

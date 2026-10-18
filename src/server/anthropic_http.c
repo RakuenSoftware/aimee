@@ -324,42 +324,6 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
    return gw_pipeline_run_request(&r, stages, (size_t)nstages);
 }
 
-/* Build the provider request body via the selected delegate driver. `stream`
- * toggles the provider stream flag. Returns a malloc'd JSON string (caller
- * frees), or NULL. */
-static char *build_provider_body(const delegate_driver_t *driver, const agent_t *ag,
-                                 cJSON *messages, cJSON *tools, const char *system_text,
-                                 int max_tokens, double temperature, int stream)
-{
-   cJSON *req = NULL;
-   char *body;
-
-   if (driver && driver->build_request)
-      req = driver->build_request(ag, messages, tools, system_text, max_tokens, temperature);
-   else
-      req = agent_build_request_openai((agent_t *)ag, messages, tools, max_tokens, temperature);
-   if (!req)
-      return NULL;
-   if (stream)
-   {
-      cJSON_AddBoolToObject(req, "stream", 1);
-      /* Ask OpenAI-compatible providers to emit a final usage chunk so the
-       * translator can record realized (not estimated) cost. Only OpenAI-family
-       * providers honour stream_options.include_usage; the Anthropic provider has
-       * its own usage in message_start/message_delta and takes a separate body
-       * builder, so this is never sent to it. */
-      if (!driver_is_anthropic(driver))
-      {
-         cJSON *so = cJSON_AddObjectToObject(req, "stream_options");
-         if (so)
-            cJSON_AddBoolToObject(so, "include_usage", 1);
-      }
-   }
-   body = cJSON_PrintUnformatted(req);
-   cJSON_Delete(req);
-   return body;
-}
-
 /* Anthropic-native ingress is a near-passthrough: Claude Code already speaks
  * Anthropic Messages, so preserve request fields such as system cache_control,
  * tool_choice, thinking, stop_sequences, top_p, and top_k. By default the
@@ -454,14 +418,13 @@ static int messages_add_host_guidance(cJSON *request, const cJSON *messages, con
 
 /* --- Buffered: POST /v1/messages (stream:false) ------------------------- */
 
-/* Build the upstream provider body from the current `req`. Native Anthropic
- * enters canonical replay; translated requests still retain their legacy fallback.
+/* Build the upstream provider body from the current `req`. Every provider request
+ * enters canonical admission and renders at its selected output boundary.
  * Re-callable so the gateway-mutation 4xx
  * restore path can rebuild the body from the restored (pristine) req. Returns a
  * malloc'd JSON string (caller frees) or NULL. */
 static char *anthropic_build_prov_body(cJSON *req, const delegate_driver_t *driver,
-                                       const agent_t *ag, int parity, cJSON *messages, cJSON *tools,
-                                       const char *system_text, int stream,
+                                       const agent_t *ag, int parity, int stream,
                                        const char *original_frame)
 {
    char *prov_body = NULL;
@@ -469,17 +432,9 @@ static char *anthropic_build_prov_body(cJSON *req, const delegate_driver_t *driv
       prov_body = build_anthropic_provider_body(req, ag, stream, parity, original_frame);
    else
    {
-      if (aimee_ir_path_enabled())
-         prov_body = aimee_ir_build_provider_body(
-             req, driver->name, ag->model,
-             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)), stream);
-      if (!prov_body)
-      {
-         aimee_ir_metric_inc(AIMEE_IR_M_LEGACY_FALLBACK, AIMEE_WIRE_ANTHROPIC);
-         prov_body = build_provider_body(driver, ag, messages, tools, system_text,
-                                         agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
-                                         jo_num(req, "temperature", 1.0), stream);
-      }
+      prov_body = aimee_ir_build_provider_body(
+          req, driver ? driver->name : NULL, ag->model,
+          agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)), stream);
    }
    return prov_body;
 }
@@ -617,8 +572,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    else
       agent_build_extra_headers(ag, extra, sizeof(extra));
 
-   prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text,
-                                         responses_wire, body);
+   prov_body = anthropic_build_prov_body(req, driver, ag, parity, responses_wire, body);
    if (!prov_body)
    {
       status = write_error(resp, cap, 500, "api_error",
@@ -1441,44 +1395,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
        gateway_prevent_subagents_enabled() || responses_wire || completion_buffered;
    int upstream_stream = responses_wire ? 1 : (buffered_replay ? 0 : 1);
 
-   if (driver_is_anthropic(driver))
-      prov_body = build_anthropic_provider_body(req, ag, upstream_stream, parity, body);
-   else
-   {
-      /* Slice 5 (streaming): build the provider request VIA THE IR when the flag is
-       * on (Claude Code streams, so this is the path that matters for the codex
-       * case); legacy fallback on failure / flag off. For codex the reply is
-       * fetched buffered + replayed as Anthropic SSE below, so no IR-delta stream
-       * translation is needed here. */
-      if (aimee_ir_path_enabled())
-         prov_body = aimee_ir_build_provider_body(
-             req, driver->name, ag->model,
-             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)), upstream_stream);
-      /* Shadow: build what LEGACY would have sent for this same request and compare
-       * byte-for-byte. This is the evidence that retires the translators — proving
-       * the IR sends the provider the same bytes, not merely that it "worked". Off
-       * unless AIMEE_IR_SHADOW is set: the extra build is real work. */
-      if (prov_body && aimee_ir_shadow_enabled())
-      {
-         char *legacy_body =
-             build_provider_body(driver, ag, messages, tools, system_text,
-                                 agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
-                                 jo_num(req, "temperature", 1.0), upstream_stream);
-         aimee_ir_shadow_compare_bodies(prov_body, legacy_body, AIMEE_WIRE_ANTHROPIC);
-         free(legacy_body);
-      }
-      if (!prov_body)
-      {
-         /* Served by the LEGACY translator. Counted at the call site, not inside the
-          * IR builder: the *_FAIL counters record that a stage failed, this records
-          * that a real request was answered by legacy. Deleting the translators is
-          * gated on this reading 0 over a live window. */
-         aimee_ir_metric_inc(AIMEE_IR_M_LEGACY_FALLBACK, AIMEE_WIRE_ANTHROPIC);
-         prov_body = build_provider_body(driver, ag, messages, tools, system_text,
-                                         agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
-                                         jo_num(req, "temperature", 1.0), upstream_stream);
-      }
-   }
+   prov_body = anthropic_build_prov_body(req, driver, ag, parity, upstream_stream, body);
 
    if (!prov_body)
    {
