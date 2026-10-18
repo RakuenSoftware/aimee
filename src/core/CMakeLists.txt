@@ -12,6 +12,15 @@ if(UNIX AND NOT APPLE AND AIMEE_CORE_WITH_NATIVE_TLS AND NOT AIMEE_CORE_WITH_OPE
     message(FATAL_ERROR "Native TLS on this platform requires AIMEE_CORE_WITH_OPENSSL")
 endif()
 
+add_library(aimee-core-codec STATIC codec/base64.c)
+target_compile_features(aimee-core-codec PUBLIC c_std_11)
+target_include_directories(aimee-core-codec PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/codec/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+install(TARGETS aimee-core-codec EXPORT aimee-core-targets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(DIRECTORY codec/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
 add_library(aimee-core-connection STATIC
     connection/auth.c
     connection/control.c

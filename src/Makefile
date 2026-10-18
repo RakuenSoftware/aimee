@@ -1,4 +1,5 @@
 CC      = gcc
+.DEFAULT_GOAL := all
 AR      ?= ar
 OBJDIR  = build/obj
 
@@ -109,7 +110,7 @@ endif
 # would fail trying to write .d dependency files into non-existent subdirectories.
 _DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/modules/kb/c)
 
-C_FLAGS = -Os -g -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -Wall -Wextra -Werror -Wformat=2 -Wformat-security -Wno-unused-parameter -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1_client -Ipeer_client -Imodules/config -Imodules/kb/c -Imodules/economizer -Imodules/egress/include -Imodules/learning/include -Imodules/roadmap -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/connection/include -Icore/event_bus/include -Icore/turn_integrity/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
+C_FLAGS = -Os -g -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -Wall -Wextra -Werror -Wformat=2 -Wformat-security -Wno-unused-parameter -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1_client -Ipeer_client -Imodules/config -Imodules/kb/c -Imodules/economizer -Imodules/egress/include -Imodules/learning/include -Imodules/roadmap -iquote modules/sandbox -Imodules/sandbox/include -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -iquote modules/governance -Imodules/governance/include -iquote modules/workflows -Imodules/workflows/include -Imodules/vault -Imodules/git/include -Imodules/workspace/include -Imodules/guardrails -iquote modules/roundtable -Imodules/roundtable/include -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Icore/codec/include -Icore/connection/include -Icore/event_bus/include -Icore/turn_integrity/include -iquote modules/benchmarks -Imodules/benchmarks/include -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -iquote modules/kb-synthesis -Imodules/kb-synthesis/include -Imodules/runtime-web/include -Imodules/control-web/include -Imodules/postgres/include -Imodules/module-runtime/include -Imodules/providers/include -Imodules/protocols/include -Imodules/response-composition/include -Imodules/routing/include -Imodules/skills/include -Imodules/tools/include -Imodules/translation/include -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
 
 # KB_STORE client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
@@ -239,9 +240,16 @@ LEAN_SERVER = ../aimee-server-lean$(EXEEXT)
 LEAN_KB = ../aimee-kb-lean$(EXEEXT)
 LEAN_OBJDIR = build/obj-lean
 
+CORE_CODEC_SRCS = core/codec/base64.c
+CORE_CODEC_OBJS = $(CORE_CODEC_SRCS:%.c=$(OBJDIR)/%.o)
+CORE_CODEC_LIB = $(OBJDIR)/libaimee-core-codec.a
+
+$(CORE_CODEC_LIB): $(CORE_CODEC_OBJS)
+	$(AR) rcs $@ $^
+
 # Linker flag sets (layered -- each level adds to the previous)
-L_MINIMAL = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lpthread $(EXTRA_L_FLAGS)
-L_CORE    = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lzstd -lz $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB)
+L_MINIMAL = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lpthread $(EXTRA_L_FLAGS) $(CORE_CODEC_LIB)
+L_CORE    = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lzstd -lz $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) $(CORE_CODEC_LIB)
 L_AGENT   = $(L_CORE) -lssl -lcrypto $(HTTP_LIB)
 L_FULL    = $(L_AGENT) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 L_CLIENT  = $(L_MINIMAL) $(CORE_CONNECTION_LIB) $(TLS_LIBS) -lm -lz
@@ -250,8 +258,8 @@ L_GATEWAY = $(L_MINIMAL) -lssl -lcrypto $(HTTP_LIB)
 # same postgres + memory modules as aimee-kb, so it no longer routes every
 # store-bound call through the kb client socket. Keep the audit hardening flags
 # on this newer direct-store topology.
-L_SERVER  = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
-L_KB      = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
+L_SERVER  = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS) $(CORE_CODEC_LIB)
+L_KB      = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS) $(CORE_CODEC_LIB)
 ifeq ($(OS),Windows_NT)
     L_FULL += -ladvapi32
     L_KB += -ladvapi32
@@ -934,12 +942,12 @@ GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o \
                $(OBJDIR)/modules/vault/runtime_secret.o $(GATEWAY_PLATFORM_OBJS)
 
 # All source files for linting (excluding vendored cJSON)
-ALL_SRCS = $(sort $(POSTGRES_CLIENT_SRCS) $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB1_CLIENT_SRCS) $(KB_STORE_PG_SRCS) $(KB_STORE_SRCS) $(KB_STORE_HOST_ADAPTER_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c modules/kb/c/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c modules/kb/c/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c modules/kb/c/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) \
+ALL_SRCS = $(sort $(CORE_CODEC_SRCS) $(POSTGRES_CLIENT_SRCS) $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB1_CLIENT_SRCS) $(KB_STORE_PG_SRCS) $(KB_STORE_SRCS) $(KB_STORE_HOST_ADAPTER_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c modules/kb/c/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_offline_hardening.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c modules/kb/c/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c modules/kb/c/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) \
            $(CORE_CONNECTION_SRCS) $(CORE_EVENT_BUS_SRCS) $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(KB_SYNTHESIS_SRCS) $(GATEWAY_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
 LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(wildcard tests/fuzz_*.c) $(wildcard tests/bench_*.c)
 
 # All object files for dependency tracking
-ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(KB_STORE_PG_OBJS) $(KB_STORE_OBJS) $(STATUS_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) \
+ALL_OBJS = $(CORE_CODEC_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(KB_STORE_PG_OBJS) $(KB_STORE_OBJS) $(STATUS_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) \
            $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(GATEWAY_OBJS) $(KB_KB_STORE_PG_OBJS) $(KB_KB_STORE_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
 # Header dependency tracking must cover EVERY object we compile, not just the ones
 # a hand-maintained *_OBJS variable happens to name. Objects reachable only as a
@@ -1383,7 +1391,7 @@ BENCH_OBJS = $(OBJDIR)/tests/bench_perf.o $(OBJDIR)/modules/guardrails/guardrail
              $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/tests/support/vault_service_stub.o \
              $(OBJDIR)/tests/support/git_ownership_stub.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o
 
-tests/bench-perf: $(BENCH_OBJS) $(TEST_DATA_OBJS) | $(CORE_CONNECTION_LIB)
+tests/bench-perf: $(BENCH_OBJS) $(TEST_DATA_OBJS) $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
 	$(CC) -o $@ $^ $(TEST_L_FLAGS)
 
 bench: tests/bench-perf
@@ -1561,7 +1569,7 @@ token-roots-provisioner-core: token-roots-provisioner-isolation-check $(KB_TOKEN
 # THESE LINK THE CORE ARCHIVE THROUGH L_KB BUT ARE NOT IN THE PRODUCT LIST.
 #
 # $(BINARY)/$(SERVER)/$(GATEWAY) name $(CORE_CONNECTION_LIB) as a real
-# prerequisite, and tests get it from `$(TEST_TARGETS): | $(CORE_CONNECTION_LIB)`
+# prerequisite, and tests get it from `$(TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)`
 # in tests/Rules.mk. These auxiliary drivers got neither, so on a clean tree they
 # reached the link step before the archive existed and died with
 # "cannot find build/obj/libaimee-core-connection.a" -- which is what kept
@@ -1576,7 +1584,7 @@ token-roots-provisioner-core: token-roots-provisioner-isolation-check $(KB_TOKEN
 # prove a minted token reaches a live server could not itself be built without
 # first building something else that happened to create the archive.
 $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) ../oidc-login-live \
-../identity-mint-live ../write-tier-enforce-live: | $(CORE_CONNECTION_LIB)
+../identity-mint-live ../write-tier-enforce-live: $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
 
 $(KB_TOKEN_ROOTS_PROVISIONER): $(TOKEN_ROOTS_PROVISIONER_OBJS) \
                                $(TOKEN_ROOTS_PROVISIONER_VAULT_OBJS) \
@@ -2649,7 +2657,7 @@ FUZZ_TARGETS = tests/fuzz_extractors tests/fuzz_json_parse \
 print-fuzz-targets:
 	@for target in $(FUZZ_TARGETS); do printf '%s\n' "$$target"; done
 
-$(FUZZ_TARGETS): | $(CORE_CONNECTION_LIB)
+$(FUZZ_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
 
 $(OBJDIR)/tests/fuzz_extractors.o: tests/fuzz_extractors.c
 	@mkdir -p $(OBJDIR)/tests
@@ -2872,3 +2880,6 @@ build-variants:
 	./tests/test_build_integrity.sh --build-variants
 
 -include $(DEPS)
+
+# Every native link may use the shared utility wrappers, including authorities.
+$(BINARY) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(KB_STATUS_PROVISIONER) $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) $(KB_STATUS_AUTHORITY) $(KB_TOKEN_AUTHORITY) $(GATEWAY): $(CORE_CODEC_LIB)

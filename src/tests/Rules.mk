@@ -941,8 +941,10 @@ $(TESTPREFIX)/unit-test-process-module-handlers: \
 # The shared connection archive is the only implementation of endpoint,
 # credential, and OpenSSL mTLS primitives. Tests may link it through L_CORE,
 # L_CLIENT, L_SERVER, or L_KB; the order-only edge guarantees the archive exists
-# before any selected test link starts.
-$(TEST_TARGETS): | $(CORE_CONNECTION_LIB)
+# before any selected test link starts. The codec is a normal prerequisite so
+# changing its implementation also relinks tests using utility wrappers.
+TEST_TARGETS += $(TESTPREFIX)/unit-test-core-base64
+$(TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
 
 .PHONY: unit-test-communication
 unit-test-communication: $(TESTPREFIX)/unit-test-communication
@@ -3642,7 +3644,7 @@ unit-test-module-protocol: $(TESTPREFIX)/unit-test-module-protocol
 # The bus tests are deliberately NOT in TEST_TARGETS -- each needs a special bus
 # link set the standard unit-tests build does not assemble, so the bench gate
 # (check_bus_perf_gate.sh) force-builds them via their .PHONY targets. That also
-# means none of them inherited the blanket `$(TEST_TARGETS): | $(CORE_CONNECTION_LIB)`
+# means none of them inherited the blanket `$(TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)`
 # earlier in this file, so the ones that pull the archive through L_CORE died on a
 # clean tree with "cannot find build/obj/libaimee-core-connection.a" -- exactly the
 # gap already fixed for unit-test-code-treesitter below and for the auxiliary
@@ -3664,7 +3666,7 @@ BUS_TEST_TARGETS := $(addprefix $(TESTPREFIX)/, \
    unit-test-execution-policy-bus \
    unit-test-bus-arena unit-test-bus-region unit-test-bus-ring unit-test-bus-wire)
 
-$(BUS_TEST_TARGETS): | $(CORE_CONNECTION_LIB)
+$(BUS_TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
 
 
 # Render-boundary prompt sanitizer (graph-feedback §4 / P0). Pure: no DB.
@@ -3699,12 +3701,12 @@ $(OBJDIR)/code_treesitter.o: C_FLAGS += -DAIMEE_TREESITTER -Ivendor/tree-sitter/
 # Order-only dep on a fetch target so a cold checkout fetches tree_sitter/api.h before
 # this object (which includes it) is compiled (see the same note in src/Makefile).
 $(OBJDIR)/code_treesitter.o: | vendor/tree-sitter/lib/src/lib.c
-# The blanket `$(TEST_TARGETS): | $(CORE_CONNECTION_LIB)` earlier in this file
+# The blanket `$(TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)` earlier in this file
 # expands TEST_TARGETS where it is written, and this target appends itself
 # BELOW that line -- so it never inherited the dependency. It still links the
 # archive through L_CORE, so a clean tree failed with "cannot find
 # build/obj/libaimee-core-connection.a" at link time.
-$(TESTPREFIX)/unit-test-code-treesitter: | $(CORE_CONNECTION_LIB)
+$(TESTPREFIX)/unit-test-code-treesitter: $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
 $(TESTPREFIX)/unit-test-code-treesitter: $(OBJDIR)/tests/test_code_treesitter.o \
                                          $(OBJDIR)/code_treesitter.o \
                                          $(OBJDIR)/extractors.o \
@@ -5409,7 +5411,7 @@ $(OBJDIR)/tests/vault_custody_pkcs11_hsm.o: modules/vault/vault_custody_pkcs11.c
 	$(CC) -c $(C_FLAGS) $(P11KIT_HARNESS_CFLAGS) -o $@ $<
 # Appended to TEST_TARGETS below the blanket order-only rule (or not at all), so
 # it never inherited the core-archive dependency it links through TEST_L_FLAGS.
-$(TESTPREFIX)/p7-pkcs11-harness: | $(CORE_CONNECTION_LIB)
+$(TESTPREFIX)/p7-pkcs11-harness: $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
 $(TESTPREFIX)/p7-pkcs11-harness: $(OBJDIR)/tests/test_vault_custody_pkcs11.o \
                               $(OBJDIR)/tests/vault_custody_pkcs11_hsm.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o \
@@ -6908,3 +6910,9 @@ $(TESTPREFIX)/unit-test-server-memory-setup: $(OBJDIR)/tests/test_server_memory_
 $(TESTPREFIX)/unit-test-ir-session-event: $(OBJDIR)/tests/test_ir_session_event.o \
     $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-core-base64: $(OBJDIR)/tests/test_core_base64.o $(CORE_CODEC_LIB)
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+# Include tests appended after the initial unit-test list.
+$(TEST_TARGETS): $(CORE_CODEC_LIB)

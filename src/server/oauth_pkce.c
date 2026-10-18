@@ -1,3 +1,4 @@
+#include <aimee/core/codec/base64.h>
 /*
  * oauth_pkce.c: PKCE (RFC 7636) primitives.
  *
@@ -14,55 +15,16 @@
 #include <openssl/sha.h>
 #endif
 
-static const char BASE64URL_ALPHABET[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-
 /* RFC 7636 §4.1: unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~" */
 static const char PKCE_UNRESERVED[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
 
 int oauth_pkce_base64url_encode(const unsigned char *in, size_t inlen, char *out, size_t outlen)
 {
-   if (!out || outlen == 0)
+   size_t written = 0, need = aimee_codec_base64_capacity(inlen, AIMEE_BASE64_URL);
+   if (!out || !outlen || (!in && inlen) || !need || outlen < need)
       return -1;
-   if (!in && inlen > 0)
-      return -1;
-
-   /* base64url no-pad output length = ceil(inlen * 4 / 3). */
-   size_t needed = (inlen / 3) * 4;
-   size_t rem = inlen % 3;
-   if (rem == 1)
-      needed += 2;
-   else if (rem == 2)
-      needed += 3;
-   if (needed + 1 > outlen)
-      return -1;
-
-   size_t i = 0, j = 0;
-   while (i + 3 <= inlen)
-   {
-      unsigned v = ((unsigned)in[i] << 16) | ((unsigned)in[i + 1] << 8) | (unsigned)in[i + 2];
-      out[j++] = BASE64URL_ALPHABET[(v >> 18) & 0x3F];
-      out[j++] = BASE64URL_ALPHABET[(v >> 12) & 0x3F];
-      out[j++] = BASE64URL_ALPHABET[(v >> 6) & 0x3F];
-      out[j++] = BASE64URL_ALPHABET[v & 0x3F];
-      i += 3;
-   }
-   if (rem == 1)
-   {
-      unsigned v = (unsigned)in[i] << 16;
-      out[j++] = BASE64URL_ALPHABET[(v >> 18) & 0x3F];
-      out[j++] = BASE64URL_ALPHABET[(v >> 12) & 0x3F];
-   }
-   else if (rem == 2)
-   {
-      unsigned v = ((unsigned)in[i] << 16) | ((unsigned)in[i + 1] << 8);
-      out[j++] = BASE64URL_ALPHABET[(v >> 18) & 0x3F];
-      out[j++] = BASE64URL_ALPHABET[(v >> 12) & 0x3F];
-      out[j++] = BASE64URL_ALPHABET[(v >> 6) & 0x3F];
-   }
-   out[j] = '\0';
-   return 0;
+   return aimee_codec_base64_encode(in, inlen, out, outlen, AIMEE_BASE64_URL, &written) ? 0 : -1;
 }
 
 int oauth_pkce_generate_verifier(char *out, size_t len)

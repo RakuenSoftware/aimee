@@ -19,6 +19,7 @@ function(aimee_add_test test_name)
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${CMAKE_CURRENT_SOURCE_DIR}/../headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+  target_link_libraries(${test_name} PRIVATE aimee-core-codec)
   aimee_enable_test_asserts(${test_name})
   if(WIN32)
     target_compile_definitions(${test_name} PRIVATE AIMEE_WINDOWS _WIN32_WINNT=0x0A00)
@@ -496,3 +497,5 @@ endif()
 add_test(NAME test_conversation_context COMMAND test_conversation_context)
 set_tests_properties(test_conversation_context PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+aimee_add_test(test_core_base64 test_core_base64.c)

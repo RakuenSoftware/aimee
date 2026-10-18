@@ -1,3 +1,5 @@
+#include <aimee/core/codec/base64.h>
+#include <limits.h>
 /* vault_store.c: the 0600 per-principal file substrate for the credential vault
  * (WP-C.1). Stores only ciphertext (envelope per vault_crypto). The filename is
  * the URL-safe base64 of the principal so an attacker-influenced webuser name
@@ -52,78 +54,32 @@ static void remove_cred(cJSON *creds, cJSON *entry)
    }
 }
 
-/* ── URL-safe base64 (no padding), binary-safe ───────────────────────────── */
-static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-
-/* Encode len bytes into a malloc'd NUL-terminated string (caller frees), or NULL
- * on OOM. */
+/* Vault records keep their historical unpadded URL decoding profile. */
 static char *b64url_encode(const uint8_t *in, size_t len)
 {
-   size_t olen = (len + 2) / 3 * 4;
-   char *out = malloc(olen + 1);
+   size_t capacity = aimee_codec_base64_capacity(len, AIMEE_BASE64_URL), written = 0;
+   if (!capacity)
+      return NULL;
+   char *out = malloc(capacity);
    if (!out)
       return NULL;
-   size_t o = 0;
-   for (size_t i = 0; i < len;)
+   if (!aimee_codec_base64_encode(in, len, out, capacity, AIMEE_BASE64_URL, &written))
    {
-      uint32_t a = in[i++];
-      uint32_t b = i < len ? in[i++] : 0;
-      uint32_t c = i < len ? in[i++] : 0;
-      uint32_t triple = (a << 16) | (b << 8) | c;
-      out[o++] = B64[(triple >> 18) & 0x3f];
-      out[o++] = B64[(triple >> 12) & 0x3f];
-      out[o++] = B64[(triple >> 6) & 0x3f];
-      out[o++] = B64[triple & 0x3f];
+      free(out);
+      return NULL;
    }
-   /* Trim the padding chars implied by the input length (no '=' in url-safe). */
-   size_t rem = len % 3;
-   if (rem == 1)
-      o -= 2;
-   else if (rem == 2)
-      o -= 1;
-   out[o] = '\0';
    return out;
 }
 
-static int b64_val(char c)
-{
-   if (c >= 'A' && c <= 'Z')
-      return c - 'A';
-   if (c >= 'a' && c <= 'z')
-      return c - 'a' + 26;
-   if (c >= '0' && c <= '9')
-      return c - '0' + 52;
-   if (c == '-')
-      return 62;
-   if (c == '_')
-      return 63;
-   return -1;
-}
-
-/* Decode into out (size out_cap). Returns the decoded byte count, or -1 on
- * malformed input / overflow. */
 static int b64url_decode(const char *in, uint8_t *out, size_t out_cap)
 {
-   size_t ilen = strlen(in);
-   size_t o = 0;
-   uint32_t acc = 0;
-   int bits = 0;
-   for (size_t i = 0; i < ilen; i++)
-   {
-      int v = b64_val(in[i]);
-      if (v < 0)
-         return -1;
-      acc = (acc << 6) | (uint32_t)v;
-      bits += 6;
-      if (bits >= 8)
-      {
-         bits -= 8;
-         if (o >= out_cap)
-            return -1;
-         out[o++] = (uint8_t)((acc >> bits) & 0xff);
-      }
-   }
-   return (int)o;
+   size_t written = 0;
+   if (!in ||
+       !aimee_codec_base64_decode(in, strlen(in), out, out_cap, AIMEE_BASE64_URL_COMPAT,
+                                  &written) ||
+       written > INT_MAX)
+      return -1;
+   return (int)written;
 }
 
 /* ── Vault file path ──────────────────────────────────────────────────────── */

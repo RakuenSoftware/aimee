@@ -71,6 +71,7 @@ set(AIMEE_DELEGATES_INCLUDE_DIR
 set(AIMEE_PROTOCOLS_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/modules/protocols/include")
 set(AIMEE_CORE_CONNECTION_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/core/codec/include"
     "${AIMEE_SRC_DIR}/core/connection/include")
 set(AIMEE_CORE_EVENT_BUS_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/core/event_bus/include")
@@ -1136,6 +1137,10 @@ set_property(SOURCE
     "${AIMEE_SRC_DIR}/modules/kb/c/fact_mutation.c"
     APPEND PROPERTY INCLUDE_DIRECTORIES "${AIMEE_SRC_DIR}/modules/kb/include")
 
+add_library(aimee-core-codec STATIC ${AIMEE_SRC_DIR}/core/codec/base64.c)
+target_compile_features(aimee-core-codec PUBLIC c_std_11)
+target_include_directories(aimee-core-codec PUBLIC ${AIMEE_SRC_DIR}/core/codec/include)
+
 add_library(aimee-core STATIC
     ${CORE_SRCS}
     ${DB1_SRCS}
@@ -1148,6 +1153,7 @@ target_include_directories(aimee-core PUBLIC
     ${AIMEE_SRC_DIR}/modules/kb/c
 )
 target_compile_options(aimee-core PRIVATE ${AIMEE_COMMON_WARNINGS})
+target_link_libraries(aimee-core PUBLIC aimee-core-codec)
 target_link_libraries(aimee-core PUBLIC Threads::Threads)
 
 add_library(aimee-data STATIC ${DATA_SRCS})

@@ -1,3 +1,4 @@
+#include <aimee/core/codec/base64.h>
 #include "server/server_mgmt_token.h"
 
 #include "server_identity_token.h"
@@ -21,74 +22,20 @@
 #define JWKS_MAX          65536u
 #define JSON_INT_MAX      INT64_C(9007199254740991)
 
-static int b64_value(unsigned char c)
-{
-   if (c >= 'A' && c <= 'Z')
-      return c - 'A';
-   if (c >= 'a' && c <= 'z')
-      return c - 'a' + 26;
-   if (c >= '0' && c <= '9')
-      return c - '0' + 52;
-   return c == '-' ? 62 : (c == '_' ? 63 : -1);
-}
-
+/* JWTs and JWK integers require the exact unpadded URL spelling. */
 static int b64_decode(const char *in, size_t n, unsigned char *out, size_t cap, size_t *out_n)
 {
-   if (!in || !n || !out || !out_n || n % 4 == 1)
+   size_t written = 0;
+   if (!n || !out_n ||
+       !aimee_codec_base64_decode(in, n, out, cap, AIMEE_BASE64_URL_CANONICAL, &written))
       return 0;
-   uint32_t acc = 0;
-   unsigned bits = 0;
-   size_t used = 0;
-   for (size_t i = 0; i < n; ++i)
-   {
-      int v = b64_value((unsigned char)in[i]);
-      if (v < 0)
-         return 0;
-      acc = (acc << 6) | (uint32_t)v;
-      bits += 6;
-      if (bits >= 8)
-      {
-         bits -= 8;
-         if (used == cap)
-            return 0;
-         out[used++] = (unsigned char)(acc >> bits);
-         acc &= bits ? ((UINT32_C(1) << bits) - 1) : 0;
-      }
-   }
-   if (acc != 0)
-      return 0; /* non-zero unused bits are a non-canonical spelling */
-   *out_n = used;
-   return 1;
-}
-
-static int b64_canonical(const char *encoded, size_t encoded_n, const unsigned char *raw,
-                         size_t raw_n)
-{
-   static const char alphabet[] =
-       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-   size_t expected = (raw_n * 8 + 5) / 6;
-   if (expected != encoded_n)
-      return 0;
-   for (size_t i = 0, o = 0; i < raw_n; i += 3)
-   {
-      uint32_t v = (uint32_t)raw[i] << 16;
-      size_t left = raw_n - i;
-      if (left > 1)
-         v |= (uint32_t)raw[i + 1] << 8;
-      if (left > 2)
-         v |= raw[i + 2];
-      unsigned chars = left == 1 ? 2 : (left == 2 ? 3 : 4);
-      for (unsigned j = 0; j < chars; ++j)
-         if (encoded[o++] != alphabet[(v >> (18 - j * 6)) & 63])
-            return 0;
-   }
+   *out_n = written;
    return 1;
 }
 
 static int decode_segment(const char *s, size_t n, unsigned char *out, size_t cap, size_t *out_n)
 {
-   return b64_decode(s, n, out, cap, out_n) && b64_canonical(s, n, out, *out_n) &&
-          !memchr(out, '\0', *out_n);
+   return b64_decode(s, n, out, cap, out_n) && !memchr(out, '\0', *out_n);
 }
 
 static int decoded_nul_escape(const unsigned char *raw, size_t n)
@@ -424,10 +371,8 @@ static EVP_PKEY *rsa_from_jwk(const cJSON *key)
    size_t ns = strlen(nj->valuestring), es = strlen(ej->valuestring), nn = 0, en = 0;
    unsigned char nb[1024], eb[8];
    if (!b64_decode(nj->valuestring, ns, nb, sizeof(nb), &nn) ||
-       !b64_canonical(nj->valuestring, ns, nb, nn) ||
-       !b64_decode(ej->valuestring, es, eb, sizeof(eb), &en) ||
-       !b64_canonical(ej->valuestring, es, eb, en) || nn < 256 || nn > 1024 || !en || nb[0] == 0 ||
-       (en > 1 && eb[0] == 0))
+       !b64_decode(ej->valuestring, es, eb, sizeof(eb), &en) || nn < 256 || nn > 1024 || !en ||
+       nb[0] == 0 || (en > 1 && eb[0] == 0))
       return NULL;
    BIGNUM *n = BN_bin2bn(nb, (int)nn, NULL);
    BIGNUM *e = BN_bin2bn(eb, (int)en, NULL);
@@ -641,8 +586,7 @@ verify_core(const char *jwt, size_t jwt_len, const char *jwks_json, const char *
    server_mgmt_token_result_t result = SERVER_MGMT_TOKEN_INVALID;
    int ok = decode_segment(jwt, henc_n, header_raw, TOKEN_HEADER_MAX, &header_n) &&
             decode_segment(dot1 + 1, penc_n, payload_raw, TOKEN_PAYLOAD_MAX, &payload_n) &&
-            b64_decode(dot2 + 1, senc_n, signature, TOKEN_SIG_MAX, &signature_n) &&
-            b64_canonical(dot2 + 1, senc_n, signature, signature_n) && signature_n > 0;
+            b64_decode(dot2 + 1, senc_n, signature, TOKEN_SIG_MAX, &signature_n) && signature_n > 0;
    if (!ok)
       goto done;
    ok = 0;
@@ -723,7 +667,7 @@ int server_mgmt_token_verify(const char *jwt, size_t jwt_len, const char *jwks_j
  * separate token type from the management JWT above: it requires the
  * `aimee-id+jwt` header `typ`, carries a three-level `tier` instead of a
  * capability, and has NO peer-cert binding or request digest. It reuses this
- * file's vetted JWS/JWKS primitives (decode_segment, b64_decode, b64_canonical,
+ * file's vetted JWS/JWKS primitives (decode_segment, b64_decode,
  * parse_json, select_key, verify_signature). See server_identity_token.h.
  * ------------------------------------------------------------------------- */
 
@@ -822,8 +766,7 @@ server_identity_token_verify(const char *jwt, size_t jwt_len, const char *jwks_j
    server_identity_token_result_t result = SERVER_IDENTITY_TOKEN_INVALID;
    int ok = decode_segment(jwt, henc_n, header_raw, TOKEN_HEADER_MAX, &header_n) &&
             decode_segment(dot1 + 1, penc_n, payload_raw, TOKEN_PAYLOAD_MAX, &payload_n) &&
-            b64_decode(dot2 + 1, senc_n, signature, TOKEN_SIG_MAX, &signature_n) &&
-            b64_canonical(dot2 + 1, senc_n, signature, signature_n) && signature_n > 0;
+            b64_decode(dot2 + 1, senc_n, signature, TOKEN_SIG_MAX, &signature_n) && signature_n > 0;
    if (!ok)
       goto done;
    ok = 0;
