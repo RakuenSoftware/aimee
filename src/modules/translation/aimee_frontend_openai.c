@@ -10,6 +10,9 @@
 #include "cJSON.h"
 
 #include <stdio.h>
+#include <stdint.h>
+#include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -603,6 +606,119 @@ oom:
    if (err && errn)
       snprintf(err, errn, "openai_frontend_parse: out of memory");
    aimee_request_free(out);
+   return -1;
+}
+
+/* The legacy /v1/completions surface owns only a text prompt. Build its IR
+ * directly at entry, without fabricating an intermediate provider protocol. */
+int aimee_frontend_parse_text_completion(const char *body, size_t length, aimee_request_t *out,
+                                         char *error, size_t capacity)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof *out);
+   const char *end = NULL;
+   cJSON *root = body && length && length != SIZE_MAX
+                     ? cJSON_ParseWithLengthOpts(body, length, &end, 0)
+                     : NULL;
+   if (root && end)
+      while (end < body + length && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n'))
+         end++;
+   const char *prompt = ostr(root, "prompt");
+   const cJSON *model = cJSON_GetObjectItemCaseSensitive(root, "model");
+   const cJSON *stream = cJSON_GetObjectItemCaseSensitive(root, "stream");
+   const cJSON *maximum = cJSON_GetObjectItemCaseSensitive(root, "max_tokens");
+   const cJSON *temperature = cJSON_GetObjectItemCaseSensitive(root, "temperature");
+   const cJSON *top_p = cJSON_GetObjectItemCaseSensitive(root, "top_p");
+   const cJSON *top_k = cJSON_GetObjectItemCaseSensitive(root, "top_k");
+   const cJSON *stop = cJSON_GetObjectItemCaseSensitive(root, "stop");
+   if (cJSON_IsNull(model))
+      model = NULL;
+   if (cJSON_IsNull(stream))
+      stream = NULL;
+   if (cJSON_IsNull(maximum))
+      maximum = NULL;
+   if (cJSON_IsNull(temperature))
+      temperature = NULL;
+   if (cJSON_IsNull(top_p))
+      top_p = NULL;
+   if (cJSON_IsNull(top_k))
+      top_k = NULL;
+   if (!cJSON_IsObject(root) || end != body + length || !prompt || !prompt[0] ||
+       (model && !cJSON_IsString(model)) || (stream && !cJSON_IsBool(stream)) ||
+       (maximum &&
+        (!cJSON_IsNumber(maximum) || !isfinite(maximum->valuedouble) || maximum->valuedouble < 1 ||
+         maximum->valuedouble > INT_MAX || maximum->valuedouble != floor(maximum->valuedouble))) ||
+       (temperature && (!cJSON_IsNumber(temperature) || !isfinite(temperature->valuedouble) ||
+                        temperature->valuedouble < 0 || temperature->valuedouble > 2)) ||
+       (top_p && (!cJSON_IsNumber(top_p) || !isfinite(top_p->valuedouble) ||
+                  top_p->valuedouble < 0 || top_p->valuedouble > 1)) ||
+       (top_k &&
+        (!cJSON_IsNumber(top_k) || !isfinite(top_k->valuedouble) || top_k->valuedouble < 1 ||
+         top_k->valuedouble > INT_MAX || top_k->valuedouble != floor(top_k->valuedouble))) ||
+       (stop && !cJSON_IsNull(stop) && !cJSON_IsString(stop) && !cJSON_IsArray(stop)) ||
+       cJSON_GetObjectItemCaseSensitive(root, "tools"))
+      goto invalid;
+   const char *single[] = {"n", "best_of", NULL};
+   for (int i = 0; single[i]; i++)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(root, single[i]);
+      if (value && !cJSON_IsNull(value) && (!cJSON_IsNumber(value) || value->valuedouble != 1))
+         goto invalid;
+   }
+   const cJSON *echo = cJSON_GetObjectItemCaseSensitive(root, "echo");
+   if (echo && !cJSON_IsNull(echo) && !cJSON_IsFalse(echo))
+      goto invalid;
+   out->model = model ? strdup(model->valuestring) : NULL;
+   out->stream = cJSON_IsTrue(stream);
+   out->has_max_tokens = maximum != NULL;
+   out->max_tokens = maximum ? maximum->valueint : 0;
+   out->has_temperature = temperature != NULL;
+   out->temperature = temperature ? temperature->valuedouble : 0;
+   out->has_top_p = top_p != NULL;
+   out->top_p = top_p ? top_p->valuedouble : 0;
+   out->has_top_k = top_k != NULL;
+   out->top_k = top_k ? top_k->valueint : 0;
+   const cJSON *metadata = cJSON_GetObjectItemCaseSensitive(root, "metadata");
+   if (metadata && !cJSON_IsNull(metadata))
+   {
+      if (!cJSON_IsObject(metadata) || !(out->metadata = cJSON_Duplicate(metadata, 1)))
+         goto invalid;
+   }
+   out->messages = calloc(1, sizeof *out->messages);
+   if ((model && !out->model) || !out->messages)
+      goto invalid;
+   out->n_messages = 1;
+   out->messages[0].role = strdup("user");
+   out->messages[0].blocks = calloc(1, sizeof *out->messages[0].blocks);
+   if (!out->messages[0].role || !out->messages[0].blocks)
+      goto invalid;
+   out->messages[0].n_blocks = 1;
+   out->messages[0].blocks[0] = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup(prompt)};
+   if (!out->messages[0].blocks[0].text)
+      goto invalid;
+   out->n_stop = cJSON_IsString(stop) ? 1 : cJSON_IsArray(stop) ? cJSON_GetArraySize(stop) : 0;
+   if (out->n_stop > AIMEE_IR_MAX_BLOCKS)
+      goto invalid;
+   if (out->n_stop)
+   {
+      out->stop_sequences = calloc((size_t)out->n_stop, sizeof *out->stop_sequences);
+      if (!out->stop_sequences)
+         goto invalid;
+      for (int i = 0; i < out->n_stop; i++)
+      {
+         const cJSON *value = cJSON_IsString(stop) ? stop : cJSON_GetArrayItem(stop, i);
+         if (!cJSON_IsString(value) || !(out->stop_sequences[i] = strdup(value->valuestring)))
+            goto invalid;
+      }
+   }
+   cJSON_Delete(root);
+   return 0;
+invalid:
+   cJSON_Delete(root);
+   aimee_request_free(out);
+   if (error && capacity)
+      snprintf(error, capacity, "invalid or unsupported text completion request");
    return -1;
 }
 

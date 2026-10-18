@@ -165,6 +165,28 @@ def main():
         assert observed[-1]["model"] == "ir-model-b", observed[-1]
         print("native Anthropic registered alias resolves to its provider model ID")
 
+        for streaming in (False, True):
+            request = dict(model="ir-live-a", stream=streaming, preserve_messages=True,
+                messages=[dict(role="system", content="IR_SYSTEM_BOUNDARY"),
+                          dict(role="user", content="IR_FIRST_USER"),
+                          dict(role="assistant", content="IR_PREVIOUS_ASSISTANT"),
+                          dict(role="user", content=[dict(type="text", text="IR_LAST_USER"),
+                              dict(type="image_url", image_url=dict(url="https://example.invalid/image.png"))])])
+            reply = api("/v1/chat/completions", request)
+            sent = observed[-1]
+            assert [message["role"] for message in sent["messages"]] == ["system", "user", "assistant", "user"], sent
+            assert sent["model"] == "ir-model-a" and "IR_FIRST_USER" in json.dumps(sent["messages"][1]), sent
+            assert "IR_PREVIOUS_ASSISTANT" in json.dumps(sent["messages"][2]), sent
+            assert "image.png" in json.dumps(sent["messages"][3]), sent
+            assert "PRIMARY_OK" in (reply if isinstance(reply, str) else json.dumps(reply)), reply
+            reply = api("/v1/completions", dict(model="ir-live-a", prompt="IR_TEXT_PROMPT", max_tokens=77,
+                temperature=0.2, top_p=0.9, stop=["IR_STOP"], stream=streaming))
+            sent = observed[-1]
+            assert sent["model"] == "ir-model-a" and "IR_TEXT_PROMPT" in json.dumps(sent["messages"]), sent
+            assert sent["max_tokens"] == 77 and sent["temperature"] == 0.2 and sent["top_p"] == 0.9 and sent["stop"] in (["IR_STOP"], "IR_STOP"), sent
+            assert "PRIMARY_OK" in (reply if isinstance(reply, str) else json.dumps(reply)), reply
+        print("tool-free Chat retains roles/media; text completion enters directly as IR, buffered and streaming")
+
 
     finally:
         cleanup_error = None

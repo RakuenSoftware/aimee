@@ -144,8 +144,112 @@ static void test_owned_http_response_boundaries(void)
    puts("OpenAI HTTP owned response rendering preserves ordered blocks and 17 full tool calls");
 }
 
+static void test_tool_free_admission_and_text_entry(void)
+{
+   char error[160];
+   aimee_request_t request = {0};
+   const char *chat =
+       "{\"model\":\"named-agent\",\"messages\":["
+       "{\"role\":\"system\",\"content\":\"policy\"},"
+       "{\"role\":\"user\",\"content\":\"first\"},"
+       "{\"role\":\"assistant\",\"content\":\"answer\"},"
+       "{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"last\"},"
+       "{\"type\":\"image_url\",\"image_url\":{\"url\":\"https://example.invalid/image.png\"}}]}]}";
+   assert(!openai_admit_completion(chat, 1, &request, error, sizeof error));
+   assert(request.n_tools == 0 && request.n_system == 1 && request.n_messages == 3);
+   assert(!strcmp(request.messages[0].role, "user") &&
+          !strcmp(request.messages[1].role, "assistant"));
+   assert(request.messages[2].n_blocks == 2 &&
+          request.messages[2].blocks[1].type == AIMEE_BLK_IMAGE);
+   aimee_request_free(&request);
+   const char *text =
+       "{\"model\":\"named-agent\",\"prompt\":\"raw prompt\",\"max_tokens\":77,"
+       "\"temperature\":0.2,\"top_p\":0.9,\"top_k\":7,\"stream\":true,\"stop\":[\"STOP\",\"END\"]}";
+   assert(!openai_admit_completion(text, 0, &request, error, sizeof error));
+   assert(!request.raw && !request.raw_bytes && request.n_messages == 1 && request.n_system == 0);
+   assert(!strcmp(request.messages[0].blocks[0].text, "raw prompt"));
+   assert(request.stream && request.max_tokens == 77 && request.temperature == 0.2 &&
+          request.top_p == 0.9 && request.top_k == 7);
+   assert(request.n_stop == 2 && !strcmp(request.stop_sequences[1], "END"));
+   char *native = openai_build_ir_body(&request, AIMEE_WIRE_ANTHROPIC);
+   assert(native && strstr(native, "raw prompt") && strstr(native, "stop_sequences"));
+   free(native);
+   aimee_request_free(&request);
+   const char *invalid[] = {"{\"prompt\":\"x\"} trailing",
+                            "{\"prompt\":[]}",
+                            "{\"prompt\":\"x\",\"max_tokens\":1.5}",
+                            "{\"prompt\":\"x\",\"temperature\":3}",
+                            "{\"prompt\":\"x\",\"stop\":[42]}",
+                            "{\"prompt\":\"x\",\"tools\":[]}",
+                            "{\"prompt\":\"x\",\"n\":2}",
+                            "{\"prompt\":\"x\",\"echo\":true}"};
+   for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+   {
+      assert(openai_admit_completion(invalid[i], 0, &request, error, sizeof error));
+      aimee_request_free(&request);
+   }
+   assert(openai_admit_completion("{\"messages\":[]}", 1, &request, error, sizeof error));
+   aimee_request_free(&request);
+}
+static void test_canonical_response_cache_round_trip(void)
+{
+   aimee_response_t response = {.role = strdup("assistant"),
+                                .id = strdup("native-id"),
+                                .model = strdup("native-model"),
+                                .stop_reason = AIMEE_STOP_MAX_TOKENS,
+                                .raw_stop_reason = strdup("length"),
+                                .usage_in = 32,
+                                .usage_out = 8,
+                                .usage_cache_read = 16,
+                                .usage_cache_write = 4,
+                                .usage_reasoning = 3,
+                                .n_content = 3};
+   response.content = calloc(3, sizeof *response.content);
+   assert(response.content);
+   response.content[0] = (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                                         .text = strdup("thought"),
+                                         .thinking_signature = strdup("opaque-signature"),
+                                         .thinking_encrypted_content = strdup("cipher"),
+                                         .thinking_id = strdup("reasoning-id")};
+   response.content[1] =
+       (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup("answer"), .message_group = 1};
+   response.content[2] = (aimee_block_t){.type = AIMEE_BLK_IMAGE,
+                                         .media_ref = strdup("https://example.invalid/image.png")};
+   response.raw = cJSON_Parse("{\"native_sidecar_must_not_enter_cache\":true}");
+   openai_ir_cache_t first = {.created = 123};
+   snprintf(first.client_id, sizeof first.client_id, "chatcmpl-stable");
+   char *encoded = openai_ir_cache_encode(&response, &first);
+   assert(encoded && !strstr(encoded, "native_sidecar_must_not_enter_cache"));
+   aimee_response_t restored = {0};
+   openai_ir_cache_t replay = {0};
+   assert(!openai_ir_cache_decode(encoded, &restored, &replay));
+   assert(!strcmp(replay.client_id, first.client_id) && replay.created == first.created);
+   assert(restored.n_content == 3 &&
+          !strcmp(restored.content[0].thinking_signature, "opaque-signature"));
+   assert(!strcmp(restored.content[0].thinking_encrypted_content, "cipher"));
+   assert(restored.content[1].message_group == 1 && restored.content[2].type == AIMEE_BLK_IMAGE);
+   assert(restored.stop_reason == AIMEE_STOP_MAX_TOKENS &&
+          !strcmp(restored.raw_stop_reason, "length"));
+   assert(restored.usage_in == 32 && restored.usage_cache_read == 16 &&
+          restored.usage_reasoning == 3);
+   assert(!strcmp(restored.id, "native-id") && !strcmp(restored.model, "native-model") &&
+          !restored.raw);
+   aimee_response_free(&restored);
+   cJSON *invalid = cJSON_Parse(encoded);
+   assert(invalid);
+   cJSON_ReplaceItemInObjectCaseSensitive(invalid, "usage_in", cJSON_CreateNumber(-1));
+   char *bad = cJSON_PrintUnformatted(invalid);
+   assert(openai_ir_cache_decode(bad, &restored, &replay) && !restored.content);
+   free(bad);
+   cJSON_Delete(invalid);
+   free(encoded);
+   aimee_response_free(&response);
+}
+
 int main(void)
 {
+   test_tool_free_admission_and_text_entry();
+   test_canonical_response_cache_round_trip();
    test_owned_http_response_boundaries();
    const char *body =
        "{\"model\":\"fixture-model\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}],"

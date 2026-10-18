@@ -2,10 +2,7 @@
  * IR. parse = client request JSON -> aimee_request_t; render = aimee_response_t ->
  * client response JSON. Paired with the backend adapters (IR <-> provider wire), so
  * no client-shape -> provider-shape path ever exists. See aimee_ir.h + the proposal.
- *
- * These are built ALONGSIDE the legacy anthropic_ingress.c / openai_shape.c and are
- * wired into the live path behind a config flag in a later slice; the legacy
- * translators are deleted only once cross-protocol parity is proven live. */
+ * Canonical admission is mandatory on the live ingress paths. */
 #ifndef DEC_AIMEE_FRONTEND_H
 #define DEC_AIMEE_FRONTEND_H 1
 
@@ -18,6 +15,11 @@ struct cJSON;
 /* Parse an exact native JSON frame and retain its owned byte representation. */
 int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire,
                               aimee_request_t *out, char *error, size_t error_capacity);
+
+/* Legacy text completion input enters directly as a canonical user block.
+ * It has no provider-native raw replay form and never becomes a Chat request. */
+int aimee_frontend_parse_text_completion(const char *body, size_t length, aimee_request_t *out,
+                                         char *error, size_t capacity);
 
 /* Admit host-adjusted native fields with an immutable original frame sidecar.
  * Typed transforms run after this boundary; semantic comparison gates exact replay. */

@@ -109,6 +109,8 @@ static void record_avoided_turn(const char *model, double avoided_cost)
    (void)db1_token_audit_insert(&row);
 }
 
+static int openai_governance_enabled(void);
+
 /* Dedup eligibility for the buffered completion path (§4): only when the flag is
  * on and the client supplied an explicit Idempotency-Key. The caller has already
  * rejected streaming, and this path runs no tools — both v1 requirements. The key
@@ -126,9 +128,10 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
    const request_context_t *rc = request_context_get();
    /* Behaviour-affecting config flags that can change generation for this path. */
    char flags[96];
-   snprintf(flags, sizeof(flags), "cs%d rc%d pi%d dw%d", config_cache_shaping_enabled(),
+   snprintf(flags, sizeof(flags), "cs%d rc%d pi%d dw%d gv%d sp%d", config_cache_shaping_enabled(),
             config_reasoning_cap_enabled(), config_ingress_preinject_enabled(),
-            config_dedup_window_seconds());
+            config_dedup_window_seconds(), openai_governance_enabled(),
+            gateway_prevent_subagents_enabled());
    response_dedup_key_inputs_t in = {
        .principal = request_context_principal(),
        .source = rc ? rc->source : "",
@@ -149,17 +152,28 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
    return 1;
 }
 
-/* Defined below, after the gateway pipeline they depend on; the chat tool-relay
- * branch in run_completion is their first caller. */
-static int agent_execute_messages(const agent_t *agent, const char *body, aimee_wire_t wire,
-                                  int max_tokens, double temperature, aimee_response_t *out,
-                                  char *error, size_t capacity, int preserve_messages);
+/* The short-window cache stores canonical responses, never flattened client JSON. */
+typedef struct
+{
+   const char *body, *endpoint;
+   char key[288], client_id[64];
+   long created;
+   int enabled, avoided, ttl;
+} openai_ir_cache_t;
+static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request_t *request,
+                                             aimee_response_t *out, char *error, size_t capacity,
+                                             int preserve, openai_ir_cache_t *cache);
+static int openai_prepare_ir_request(aimee_request_t *request, const agent_t *agent, int max_tokens,
+                                     double temperature, int preserve);
+static int openai_admit_completion(const char *body, int chat, aimee_request_t *request,
+                                   char *error, size_t capacity);
+
+/* Owned execution helpers are defined below the client render boundary. */
 static int agent_execute_ir_request(const agent_t *agent, aimee_request_t *request, int max_tokens,
                                     double temperature, aimee_response_t *out, char *error,
                                     size_t capacity, int preserve_messages);
 static cJSON *openai_ir_history_json(const aimee_request_t *request);
 static int openai_ir_history_replace(aimee_request_t *request, const cJSON *history);
-static int openai_governance_enabled(void);
 
 /* The provider result remains owned IR through policy and the client boundary. */
 static cJSON *openai_render_ir(const aimee_response_t *response, const char *id, const char *model,
@@ -390,263 +404,104 @@ static int openai_request_preserves_messages(const char *body)
    return preserve;
 }
 
-static int openai_request_has_assistant(const char *body)
+static int openai_admit_completion(const char *body, int chat, aimee_request_t *request,
+                                   char *error, size_t capacity)
 {
-   cJSON *root = body ? cJSON_Parse(body) : NULL;
-   cJSON *items = root ? cJSON_GetObjectItemCaseSensitive(root, "messages") : NULL;
-   if (!cJSON_IsArray(items))
-      items = root ? cJSON_GetObjectItemCaseSensitive(root, "input") : NULL;
-   int found = 0;
-   cJSON *item = NULL;
-   cJSON_ArrayForEach(item, items)
+   int status = chat ? aimee_frontend_parse_wire(body, body ? strlen(body) : 0,
+                                                 AIMEE_WIRE_OPENAI_CHAT, request, error, capacity)
+                     : aimee_frontend_parse_text_completion(body, body ? strlen(body) : 0, request,
+                                                            error, capacity);
+   if (status || aimee_ir_request_admit(request))
+      return -1;
+   if (chat && (!cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(request->raw, "messages")) ||
+                !cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(request->raw, "messages"))))
    {
-      const char *role = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "role"));
-      if (role && strcmp(role, "assistant") == 0)
-      {
-         found = 1;
-         break;
-      }
+      snprintf(error, capacity, "messages must be a non-empty array");
+      return -1;
    }
-   cJSON_Delete(root);
-   return found;
-}
-
-/* Persona for the LEGACY chat path only.
- *
- * When the IR path is live it owns persona placement (ir_stage_persona_instructions
- * puts it on the first user message), and both share one per-session delivery
- * claim -- so calling this unguarded would let the flat path win the claim and
- * silently move placement off the IR on the DEFAULT path. Guarding keeps each
- * mode delivering through its own seam, still exactly once. */
-static char *legacy_persona_text(const char *text, int conversation_established)
-{
-   if (aimee_ir_path_enabled())
-      return NULL;
-   return aimee_ir_prepend_active_persona_text(text, conversation_established);
+   return 0;
 }
 
 static int run_completion(int chat, const char *body, char *resp, int cap)
 {
-   char model[64] = "";
-   char *prompt = NULL;
-   int stream = 0;
-   int prc = chat ? openai_parse_chat_request(body, model, sizeof(model), &prompt, &stream)
-                  : openai_parse_completion_request(body, model, sizeof(model), &prompt, &stream);
-   if (prc != 0)
+   aimee_request_t request = {0};
+   aimee_response_t response = {0};
+   char error[512] = "invalid canonical completion request";
+   char *model = NULL;
+   int status = 400;
+   openai_ir_cache_t cache = {.body = body,
+                              .endpoint = chat ? "/v1/chat/completions" : "/v1/completions",
+                              .created = (long)time(NULL)};
+   snprintf(cache.client_id, sizeof cache.client_id, "%s-%ld", chat ? "chatcmpl" : "cmpl",
+            cache.created);
+   if (openai_admit_completion(body, chat, &request, error, sizeof error))
+      goto failure;
+   if (request.stream)
    {
-      openai_format_error(resp, cap, "invalid_request_error",
-                          chat ? "invalid chat completion request: expected messages[] with content"
-                               : "invalid completion request: expected a non-empty prompt");
-      return 400;
+      snprintf(error, sizeof error, "streaming request requires the streaming transport");
+      goto failure;
    }
-   if (stream)
+   model = strdup(request.model && request.model[0] ? request.model : "aimee");
+   if (!model)
+      goto failure;
+   agent_t agent;
+   if (agent_registry_resolve_ingress_model(model, &agent))
    {
-      free(prompt);
-      openai_format_error(resp, cap, "invalid_request_error",
-                          "streaming responses are not yet supported on this endpoint");
-      return 400;
+      status = strcmp(model, "aimee") ? 404 : 503;
+      snprintf(error, sizeof error, "the requested model is not available");
+      goto failure;
    }
-
-   /* Resolve the backend BEFORE dedup so the key carries the resolved
-    * provider/model — two requests resolving to a different backend must not
-    * collide even with an identical body. Honour the requested model: "aimee"
-    * (or empty) means the default agent; any other value selects a configured
-    * agent by name, and is rejected with model_not_found when it matches none
-    * (never silently falls back to a different model). */
-   agent_t agbuf;
-   agent_t *ag = agent_registry_resolve_ingress_model(model, &agbuf) == 0 ? &agbuf : NULL;
-   if (!ag)
+   int preserve = chat && openai_request_preserves_messages(body);
+   if (openai_prepare_ir_request(
+           &request, &agent, request.has_max_tokens ? request.max_tokens : OPENAI_CHAT_MAX_TOKENS,
+           OPENAI_CHAT_TEMPERATURE, preserve))
    {
-      free(prompt);
-      if (model[0] && strcmp(model, "aimee") != 0)
-      {
-         openai_format_error(resp, cap, "model_not_found", "the requested model is not available");
-         return 404;
-      }
-      openai_format_error_code(resp, cap, "server_error", "no agent configured",
-                               AIMEE_ERR_NO_PRIMARY);
-      return 503;
+      status = 500;
+      snprintf(error, sizeof error, "cannot prepare canonical completion request");
+      goto failure;
    }
-
-   /* Tool relay: when the caller supplies `tools`, this endpoint must return the
-    * model's tool_calls for the CALLER to execute — the stateless half of the
-    * OpenAI contract that every agentic client depends on. Without it a client
-    * sees a provider that cannot call tools and refuses to run at all.
-    *
-    * This does NOT make the endpoint agentic: aimee still executes nothing and
-    * holds no loop state (that remains /v1/runs). agent_execute_messages is the
-    * same passthrough the /v1/responses ingress uses, so inbound tools go
-    * through the shared tool-policing stage rather than around it.
-    *
-    * Dedup is skipped here: its key does not cover `tools`, so a cached
-    * tool-free reply must never be replayed for a tool-bearing request. */
-   if (chat)
+   if (agent_execute_prepared_ir_request(&agent, &request, &response, error, sizeof error, preserve,
+                                         &cache))
    {
-      char *instructions = NULL;
-      cJSON *messages = NULL, *tools = NULL;
-      if (openai_split_chat_request(body, &instructions, &messages, &tools) == 0 &&
-          (tools || openai_request_preserves_messages(body)))
-      {
-         aimee_response_t parsed;
-         char upstream_error[512];
-         int preserve = openai_request_preserves_messages(body) && !tools;
-         int trc = agent_execute_messages(
-             ag, body, AIMEE_WIRE_OPENAI_CHAT,
-             openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768),
-             openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0), &parsed,
-             upstream_error, sizeof upstream_error, preserve);
-         free(instructions);
-         free(prompt);
-
-         if (trc != 0)
-         {
-            aimee_response_free(&parsed);
-            cJSON_Delete(messages);
-            cJSON_Delete(tools);
-            openai_format_error(resp, cap, wire_fence_error_type(upstream_error), upstream_error);
-            return wire_fence_error_http_status(upstream_error);
-         }
-
-         if (agent_ingress_accounting_enabled())
-            agent_ingress_record_cost(
-                ag->name, ag->model, model,
-                parsed.raw_stop_reason ? parsed.raw_stop_reason
-                                       : aimee_stop_reason_name(parsed.stop_reason),
-                (int)parsed.usage_in, (int)parsed.usage_out, (int)parsed.usage_cache_write,
-                (int)parsed.usage_cache_read, "openai-ingress", NULL);
-
-         long tcreated = (long)time(NULL);
-         char tid[64];
-         snprintf(tid, sizeof tid, "chatcmpl-%ld", tcreated);
-         int tlen = openai_ir_buffered(&parsed, tid, model, tcreated, 0, resp, cap);
-         aimee_response_free(&parsed);
-         cJSON_Delete(messages);
-         cJSON_Delete(tools);
-         if (tlen < 0)
-         {
-            openai_format_error(resp, cap, "server_error", "response did not fit the buffer");
-            return 500;
-         }
-         return 200;
-      }
-      free(instructions);
-      cJSON_Delete(messages);
-      cJSON_Delete(tools);
+      status = wire_fence_error_http_status(error);
+      goto failure;
    }
-
-   /* Plain-text serving owns this envelope; the structured tool path above
-    * runs memory/persona stages during final provider assembly instead.
-    * Build it before dedup: it is part of the model input,
-    * so the §4 dedup key must hash it (a stale reply must not be replayed after
-    * the injected memory/context changes). On a cache miss it is reused for the
-    * provider call below; on a hit it is freed unused. */
-   int first_turn = !chat || !openai_request_has_assistant(body);
-   char *pi_env = server_ir_plan_text("memory.runtime", "gateway-plan", "text", prompt);
-   char *persona_txt = legacy_persona_text(prompt, !first_turn);
-   if (persona_txt)
+   if (!chat && aimee_ir_response_tool_count(&response))
    {
-      free(prompt);
-      prompt = persona_txt;
+      status = 502;
+      snprintf(error, sizeof error, "text completion cannot represent a tool call");
+      goto failure;
    }
-
-   /* §4 short-window dedup: serve a re-sent identical request (same account/source
-    * boundary, RESOLVED provider+model, endpoint, stream mode, idempotency key,
-    * body, pre-injected context, AND behaviour-config flags) from the TTL cache
-    * without paying for the provider call again. Buffered + non-stream + tool-free
-    * here. The key is built from the resolved agent above. */
-   char dedup_key[288] = "";
-   int dedup_ttl = RESPONSE_DEDUP_TTL_SECONDS;
-   const char *endpoint = chat ? "/v1/chat/completions" : "/v1/completions";
-   int dedup_on =
-       dedup_eligible(dedup_key, sizeof(dedup_key), ag, endpoint, body, pi_env, &dedup_ttl);
-   if (dedup_on < 0)
-   {
-      free(pi_env);
-      free(prompt);
-      openai_format_error(resp, cap, "server_error", "response composition unavailable");
-      return 503;
-   }
-   if (dedup_on)
-   {
-      char *cached = NULL;
-      double avoided = 0.0;
-      if (response_dedup_get(dedup_key, (long)time(NULL), &cached, &avoided))
-      {
-         int n = snprintf(resp, cap, "%s", cached);
-         free(cached);
-         free(pi_env);
-         free(prompt);
-         if (n < 0 || n >= cap)
-         {
-            openai_format_error(resp, cap, "server_error",
-                                "cached response did not fit the buffer");
-            return 500;
-         }
-         if (agent_ingress_accounting_enabled())
-            record_avoided_turn(model, avoided);
-         return 200;
-      }
-   }
-
-   /* Honour the OpenAI sampling params when present, else fall back to the
-    * endpoint defaults. temperature clamps to [0, 2]; max_tokens to [1, hi]. */
-   double temperature = openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0);
-   int max_tokens = openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768);
-
-   agent_result_t result;
-   memset(&result, 0, sizeof(result));
-   /* pi_env (the <aimee-context> envelope) was built up front for the dedup key;
-    * reuse it as the system prompt here. */
-   int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, prompt, max_tokens, temperature,
-                                0 /* use_tools: plain chat completion */, &result);
-   free(pi_env);
-   free(prompt);
-
-   if (erc != 0 || !result.response)
-   {
-      openai_format_error(resp, cap, wire_fence_error_type(result.error),
-                          result.error[0] ? result.error : "completion failed");
-      free(result.response);
-      return wire_fence_error_http_status(result.error);
-   }
-
-   /* Cost accounting for the OpenAI-compatible ingress: this handler runs the
-    * provider call directly (no agent_log_call), so record the turn's spend. */
-   snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
-   if (agent_ingress_accounting_enabled())
-      agent_record_token_audit(&result, "", "openai-ingress");
-
-   long created = (long)time(NULL);
-   char id[48];
-   snprintf(id, sizeof(id), "%s-%ld", chat ? "chatcmpl" : "cmpl", created);
-
-   int len = chat ? openai_format_chat_completion(id, model, result.response, created,
-                                                  result.prompt_tokens, result.completion_tokens,
-                                                  resp, cap)
-                  : openai_format_text_completion(id, model, result.response, created,
-                                                  result.prompt_tokens, result.completion_tokens,
-                                                  resp, cap);
-   free(result.response);
-   if (len < 0)
-   {
+   if (!cache.avoided && agent_ingress_accounting_enabled())
+      agent_ingress_record_cost(
+          agent.name, agent.model, model,
+          response.raw_stop_reason ? response.raw_stop_reason
+                                   : aimee_stop_reason_name(response.stop_reason),
+          (int)response.usage_in, (int)response.usage_out, (int)response.usage_cache_write,
+          (int)response.usage_cache_read, "openai-ingress", NULL);
+   char *text = chat ? NULL : aimee_ir_response_text_alloc(&response);
+   int length =
+       chat   ? openai_ir_buffered(&response, cache.client_id, model, cache.created, 0, resp, cap)
+       : text ? openai_format_text_completion(cache.client_id, model, text, cache.created,
+                                              (int)response.usage_in, (int)response.usage_out, resp,
+                                              cap)
+              : -1;
+   free(text);
+   status = length >= 0 ? 200 : 500;
+   if (status != 200)
       openai_format_error(resp, cap, "server_error", "response did not fit the buffer");
-      return 500;
-   }
-
-   /* Cache this successful, tool-free 200 so an immediate identical retry under
-    * the same idempotency key is served without a second provider call. The
-    * stored cost is the realized spend, replayed as the avoided cost on a hit. */
-   if (dedup_on)
-   {
-      token_usage_t usage = {.input_tokens = result.prompt_tokens,
-                             .output_tokens = result.completion_tokens,
-                             .cache_write_tokens = result.cache_write_tokens,
-                             .cache_read_tokens = result.cache_read_tokens};
-      const char *bill_model = result.model[0] ? result.model : model;
-      double cost = token_estimate_cost(bill_model, &usage);
-      response_dedup_put(dedup_key, resp, cost, (long)time(NULL), dedup_ttl);
-   }
-   return 200;
+   goto cleanup;
+failure:
+   openai_format_error(resp, cap,
+                       status == 400   ? "invalid_request_error"
+                       : status == 404 ? "model_not_found"
+                                       : wire_fence_error_type(error),
+                       error);
+cleanup:
+   free(model);
+   aimee_request_free(&request);
+   aimee_response_free(&response);
+   return status;
 }
 
 static int chat_completions_handler(const char *body, char *resp, int cap)
@@ -1138,227 +993,93 @@ static int stream_pick_agent(agent_t *out, const char *model)
    return agent_registry_resolve_ingress_model(model, out);
 }
 
+static int completion_stream_ir(int chat, const char *body, server_http_sse_emit emit, void *ctx)
+{
+   aimee_request_t request = {0};
+   aimee_response_t response = {0};
+   char error[512] = "invalid canonical completion request";
+   char *model = NULL;
+   long created = (long)time(NULL);
+   char id[64];
+   snprintf(id, sizeof id, "%s-%ld", chat ? "chatcmpl" : "cmpl", created);
+   if (openai_admit_completion(body, chat, &request, error, sizeof error))
+      goto failure;
+   model = strdup(request.model && request.model[0] ? request.model : "aimee");
+   if (!model)
+      goto failure;
+   agent_t agent;
+   if (agent_registry_resolve_ingress_model(model, &agent))
+   {
+      snprintf(error, sizeof error, "the requested model is not available");
+      goto failure;
+   }
+   int preserve = chat && openai_request_preserves_messages(body);
+   if (agent_execute_ir_request(
+           &agent, &request, request.has_max_tokens ? request.max_tokens : OPENAI_CHAT_MAX_TOKENS,
+           OPENAI_CHAT_TEMPERATURE, &response, error, sizeof error, preserve))
+      goto failure;
+   if (!chat && aimee_ir_response_tool_count(&response))
+   {
+      snprintf(error, sizeof error, "text completion cannot represent a tool call");
+      goto failure;
+   }
+   if (agent_ingress_accounting_enabled())
+      agent_ingress_record_cost(
+          agent.name, agent.model, model,
+          response.raw_stop_reason ? response.raw_stop_reason
+                                   : aimee_stop_reason_name(response.stop_reason),
+          (int)response.usage_in, (int)response.usage_out, (int)response.usage_cache_write,
+          (int)response.usage_cache_read, "openai-ingress", NULL);
+   if (chat)
+   {
+      emit_chunk(emit, ctx, id, model, created, 1, NULL, 0);
+      if (openai_ir_chat_emit(&response, id, model, created, emit, ctx))
+         goto failure;
+   }
+   else
+   {
+      char *text = aimee_ir_response_text_alloc(&response);
+      if (!text)
+         goto failure;
+      text_sanitize_utf8(text);
+      size_t length = strlen(text);
+      for (size_t offset = 0; offset < length;)
+      {
+         char segment[OPENAI_STREAM_CHUNK + 1];
+         size_t take = text_utf8_chunk_len(text + offset, length - offset, OPENAI_STREAM_CHUNK);
+         memcpy(segment, text + offset, take);
+         segment[take] = 0;
+         emit_text_chunk(emit, ctx, id, model, created, segment, 0);
+         offset += take;
+      }
+      free(text);
+      emit_text_chunk(emit, ctx, id, model, created, "", 1);
+   }
+   goto cleanup;
+failure:
+{
+   char failure[1024];
+   openai_format_error(failure, sizeof failure, wire_fence_error_type(error), error);
+   emit(ctx, failure);
+}
+cleanup:
+   if (chat)
+      emit(ctx, "[DONE]");
+   free(model);
+   aimee_request_free(&request);
+   aimee_response_free(&response);
+   return 0;
+}
 static int chat_stream_handler(const char *body, server_http_sse_emit emit, void *ctx)
 {
-   char model[64] = "";
-   char *prompt = NULL;
-   int stream = 0;
-   long created = (long)time(NULL);
-   char id[48];
-   snprintf(id, sizeof(id), "chatcmpl-%ld", created);
-
-   if (openai_parse_chat_request(body, model, sizeof(model), &prompt, &stream) != 0)
-   {
-      emit_chunk(emit, ctx, id, model, created, 1, "invalid chat completion request", 0);
-      emit_chunk(emit, ctx, id, model, created, 0, NULL, 1);
-      free(prompt);
-      return 0;
-   }
-
-   agent_t agbuf;
-   agent_t *ag = stream_pick_agent(&agbuf, model) == 0 ? &agbuf : NULL;
-   if (!ag)
-   {
-      emit_chunk(emit, ctx, id, model, created, 1, "no agent configured", 0);
-      emit_chunk(emit, ctx, id, model, created, 0, NULL, 1);
-      free(prompt);
-      return 0;
-   }
-
-   double temperature = openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0);
-   int max_tokens = openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768);
-
-   /* Tool relay, streaming half. Agentic clients stream by default, so without
-    * this the buffered relay in run_completion would never be reached by them.
-    * Same statelessness contract as that branch. This handler already computes
-    * the whole reply before chunking it, so the calls ship in a single delta
-    * followed by a tool_calls finish frame. */
-   {
-      char *instructions = NULL;
-      cJSON *messages = NULL, *tools = NULL;
-      if (openai_split_chat_request(body, &instructions, &messages, &tools) == 0 && tools)
-      {
-         aimee_response_t parsed;
-         char upstream_error[512];
-         int trc = agent_execute_messages(ag, body, AIMEE_WIRE_OPENAI_CHAT, max_tokens, temperature,
-                                          &parsed, upstream_error, sizeof(upstream_error), 0);
-         free(instructions);
-         free(prompt);
-
-         emit_chunk(emit, ctx, id, model, created, 1, NULL, 0); /* role frame */
-         if (trc != 0)
-         {
-            char error_frame[1024];
-            openai_format_error(error_frame, sizeof(error_frame),
-                                wire_fence_error_type(upstream_error), upstream_error);
-            emit(ctx, error_frame);
-            emit(ctx, "[DONE]");
-            aimee_response_free(&parsed);
-            cJSON_Delete(messages);
-            cJSON_Delete(tools);
-            return 0;
-         }
-
-         if (agent_ingress_accounting_enabled())
-            agent_ingress_record_cost(
-                ag->name, ag->model, model,
-                parsed.raw_stop_reason ? parsed.raw_stop_reason
-                                       : aimee_stop_reason_name(parsed.stop_reason),
-                (int)parsed.usage_in, (int)parsed.usage_out, (int)parsed.usage_cache_write,
-                (int)parsed.usage_cache_read, "openai-ingress", NULL);
-
-         if (openai_ir_chat_emit(&parsed, id, model, created, emit, ctx))
-         {
-            char failure[256];
-            openai_format_error(failure, sizeof failure, "server_error",
-                                "canonical response rendering failed");
-            emit(ctx, failure);
-         }
-         emit(ctx, "[DONE]");
-         aimee_response_free(&parsed);
-         cJSON_Delete(messages);
-         cJSON_Delete(tools);
-         return 0;
-      }
-      free(instructions);
-      cJSON_Delete(messages);
-      cJSON_Delete(tools);
-   }
-
-   agent_result_t result;
-   memset(&result, 0, sizeof(result));
-   /* P1 pre-injection: prepend the <aimee-context> envelope as the system
-    * prompt (config ingress_preinject_enabled; no-op when off/empty). */
-   int first_turn = !openai_request_has_assistant(body);
-   char *pi_env = server_ir_plan_text("memory.runtime", "gateway-plan", "text", prompt);
-   char *persona_txt = legacy_persona_text(prompt, !first_turn);
-   if (persona_txt)
-   {
-      free(prompt);
-      prompt = persona_txt;
-   }
-   int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, prompt, max_tokens, temperature,
-                                0 /* use_tools: plain chat completion */, &result);
-   free(pi_env);
-   free(prompt);
-
-   emit_chunk(emit, ctx, id, model, created, 1, NULL, 0); /* role frame */
-   if (erc != 0 || !result.response)
-   {
-      emit_chunk(emit, ctx, id, model, created, 0,
-                 result.error[0] ? result.error : "completion failed", 0);
-   }
-   else
-   {
-      /* Cost accounting: streaming chat/completions runs the provider call
-       * directly (no agent_log_call). */
-      snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
-      if (agent_ingress_accounting_enabled())
-         agent_record_token_audit(&result, "", "openai-ingress");
-      text_sanitize_utf8(result.response);
-      const char *txt = result.response;
-      size_t n = strlen(txt);
-      for (size_t off = 0; off < n;)
-      {
-         char seg[OPENAI_STREAM_CHUNK + 1];
-         size_t take = text_utf8_chunk_len(txt + off, n - off, OPENAI_STREAM_CHUNK);
-         memcpy(seg, txt + off, take);
-         seg[take] = '\0';
-         emit_chunk(emit, ctx, id, model, created, 0, seg, 0);
-         off += take;
-      }
-   }
-   emit_chunk(emit, ctx, id, model, created, 0, NULL, 1); /* finish frame */
-   free(result.response);
-   return 0;
+   return completion_stream_ir(1, body, emit, ctx);
 }
-
-/* SSE streaming for POST /v1/completions (legacy text_completion). Same
- * compute-then-chunk shape as chat, emitting text_completion chunk frames. */
 static int completion_stream_handler(const char *body, server_http_sse_emit emit, void *ctx)
 {
-   char model[64] = "";
-   char *prompt = NULL;
-   int stream = 0;
-   long created = (long)time(NULL);
-   char id[48];
-   snprintf(id, sizeof(id), "cmpl-%ld", created);
-
-   if (openai_parse_completion_request(body, model, sizeof(model), &prompt, &stream) != 0)
-   {
-      emit_text_chunk(emit, ctx, id, model, created, "invalid completion request", 0);
-      emit_text_chunk(emit, ctx, id, model, created, "", 1);
-      free(prompt);
-      return 0;
-   }
-
-   agent_t agbuf;
-   agent_t *ag = stream_pick_agent(&agbuf, model) == 0 ? &agbuf : NULL;
-   if (!ag)
-   {
-      emit_text_chunk(emit, ctx, id, model, created, "no agent configured", 0);
-      emit_text_chunk(emit, ctx, id, model, created, "", 1);
-      free(prompt);
-      return 0;
-   }
-
-   double temperature = openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0);
-   int max_tokens = openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768);
-
-   agent_result_t result;
-   memset(&result, 0, sizeof(result));
-   /* P1 pre-injection: prepend the <aimee-context> envelope as the system
-    * prompt (config ingress_preinject_enabled; no-op when off/empty). */
-   char *pi_env = server_ir_plan_text("memory.runtime", "gateway-plan", "text", prompt);
-   char *persona_txt = legacy_persona_text(prompt, 0);
-   if (persona_txt)
-   {
-      free(prompt);
-      prompt = persona_txt;
-   }
-   int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, prompt, max_tokens, temperature,
-                                0 /* use_tools: plain chat completion */, &result);
-   free(pi_env);
-   free(prompt);
-
-   if (erc != 0 || !result.response)
-   {
-      emit_text_chunk(emit, ctx, id, model, created,
-                      result.error[0] ? result.error : "completion failed", 0);
-   }
-   else
-   {
-      /* Cost accounting: streaming completions runs the provider call directly. */
-      snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
-      if (agent_ingress_accounting_enabled())
-         agent_record_token_audit(&result, "", "openai-ingress");
-      text_sanitize_utf8(result.response);
-      const char *txt = result.response;
-      size_t n = strlen(txt);
-      for (size_t off = 0; off < n;)
-      {
-         char seg[OPENAI_STREAM_CHUNK + 1];
-         size_t take = text_utf8_chunk_len(txt + off, n - off, OPENAI_STREAM_CHUNK);
-         memcpy(seg, txt + off, take);
-         seg[take] = '\0';
-         emit_text_chunk(emit, ctx, id, model, created, seg, 0);
-         off += take;
-      }
-   }
-   emit_text_chunk(emit, ctx, id, model, created, "", 1); /* finish frame */
-   free(result.response);
-   return 0;
+   return completion_stream_ir(0, body, emit, ctx);
 }
 
-/* ---- OpenAI-ingress gateway request pipeline (universal-gateway) -------------
- * The /v1/responses ingress runs the same ordered [memory, tool_policing] stages
- * over a gw_request_t as the Anthropic ingress (anthropic_http.c), so both APIs
- * aimee presents share the one audited pipeline seam. The OpenAI request reaches
- * the provider step DECOMPOSED (an instructions string + a tools array) rather
- * than as a single inbound cJSON, so `raw` is a small IR object assembled from
- * those two mutable fields; the stages mutate it and the caller reads the results
- * back. Behavior is identical to the prior inline memory block + the P2b tool
- * strip it replaces. */
+/* Shared canonical request preparation and provider execution. */
 
 static cJSON *openai_ir_history_json(const aimee_request_t *request)
 {
@@ -1525,14 +1246,93 @@ static int openai_post_ir(const agent_t *agent, const aimee_request_t *request, 
       snprintf(error, capacity, "%s", wire_fence_last_error());
    return status;
 }
-static int agent_execute_ir_request(const agent_t *agent, aimee_request_t *request, int max_tokens,
-                                    double temperature, aimee_response_t *out, char *error,
-                                    size_t capacity, int preserve_messages)
+/* Cache payloads are canonical message blocks plus typed response metadata.
+ * Reuse therefore needs no native decoder or text reconstruction. */
+static char *openai_ir_cache_encode(const aimee_response_t *response,
+                                    const openai_ir_cache_t *cache)
+{
+   aimee_message_t message = {.role = response->role ? response->role : "assistant",
+                              .blocks = response->content,
+                              .n_blocks = response->n_content};
+   cJSON *root = cJSON_CreateObject(), *content = aimee_ir_message_json(&message);
+   if (!root || !content || !cJSON_AddItemToObject(root, "message", content))
+   {
+      cJSON_Delete(content);
+      cJSON_Delete(root);
+      return NULL;
+   }
+   int ok = cJSON_AddStringToObject(root, "schema", "aimee.response-cache.ir.v1") &&
+            cJSON_AddStringToObject(root, "client_id", cache->client_id) &&
+            cJSON_AddNumberToObject(root, "created", cache->created) &&
+            cJSON_AddStringToObject(root, "stop_reason",
+                                    aimee_stop_reason_name(response->stop_reason)) &&
+            cJSON_AddNumberToObject(root, "usage_in", response->usage_in) &&
+            cJSON_AddNumberToObject(root, "usage_out", response->usage_out) &&
+            cJSON_AddNumberToObject(root, "usage_cache_read", response->usage_cache_read) &&
+            cJSON_AddNumberToObject(root, "usage_cache_write", response->usage_cache_write) &&
+            cJSON_AddNumberToObject(root, "usage_reasoning", response->usage_reasoning);
+   if (response->id)
+      ok = ok && cJSON_AddStringToObject(root, "id", response->id);
+   if (response->model)
+      ok = ok && cJSON_AddStringToObject(root, "model", response->model);
+   if (response->raw_stop_reason)
+      ok = ok && cJSON_AddStringToObject(root, "raw_stop_reason", response->raw_stop_reason);
+   char *encoded = ok ? cJSON_PrintUnformatted(root) : NULL;
+   cJSON_Delete(root);
+   return encoded;
+}
+static int openai_ir_cache_decode(const char *encoded, aimee_response_t *response,
+                                  openai_ir_cache_t *cache)
+{
+   cJSON *root = encoded ? cJSON_ParseWithOpts(encoded, NULL, 1) : NULL;
+   const char *schema = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "schema"));
+   const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "client_id"));
+   const char *stop = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "stop_reason"));
+   aimee_message_t message = {0};
+   long created;
+   if (!schema || strcmp(schema, "aimee.response-cache.ir.v1") || !id || !id[0] ||
+       strlen(id) >= sizeof cache->client_id || !stop ||
+       aimee_ir_read_usage(root, "created", &created) ||
+       aimee_ir_message_parse(cJSON_GetObjectItemCaseSensitive(root, "message"), &message))
+      goto invalid;
+   response->role = message.role;
+   response->content = message.blocks;
+   response->n_content = message.n_blocks;
+   response->stop_reason = aimee_stop_reason_parse(stop);
+   if (response->stop_reason == AIMEE_STOP_UNKNOWN && strcmp(stop, "unknown"))
+      goto invalid;
+   const char *fields[] = {"id", "model", "raw_stop_reason"};
+   char **destinations[] = {&response->id, &response->model, &response->raw_stop_reason};
+   for (int i = 0; i < 3; i++)
+   {
+      const cJSON *field = cJSON_GetObjectItemCaseSensitive(root, fields[i]);
+      if (field && (!cJSON_IsString(field) || !(*destinations[i] = strdup(field->valuestring))))
+         goto invalid;
+   }
+   if (aimee_ir_read_usage(root, "usage_in", &response->usage_in) ||
+       aimee_ir_read_usage(root, "usage_out", &response->usage_out) ||
+       aimee_ir_read_usage(root, "usage_cache_read", &response->usage_cache_read) ||
+       aimee_ir_read_usage(root, "usage_cache_write", &response->usage_cache_write) ||
+       aimee_ir_read_usage(root, "usage_reasoning", &response->usage_reasoning) ||
+       aimee_ir_response_admit(response))
+      goto invalid;
+   snprintf(cache->client_id, sizeof cache->client_id, "%s", id);
+   cache->created = created;
+   cJSON_Delete(root);
+   return 0;
+invalid:
+   cJSON_Delete(root);
+   aimee_response_free(response);
+   return -1;
+}
+
+static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request_t *request,
+                                             aimee_response_t *out, char *error, size_t capacity,
+                                             int preserve_messages, openai_ir_cache_t *cache)
 {
    memset(out, 0, sizeof *out);
    snprintf(error, capacity, "canonical provider request failed");
-   if (!agent || !request ||
-       openai_prepare_ir_request(request, agent, max_tokens, temperature, preserve_messages))
+   if (!agent || aimee_ir_request_admit(request))
       return -1;
    delegate_drivers_init();
    const delegate_driver_t *driver = delegate_driver_get(agent->provider);
@@ -1571,11 +1371,51 @@ static int agent_execute_ir_request(const agent_t *agent, aimee_request_t *reque
           openai_ir_history_replace(request, cJSON_GetObjectItemCaseSensitive(container, "input")))
          goto refused;
    }
+   if (cache && !request->n_tools && config_present() && config_dedup_enabled() &&
+       request_context_idempotency_key()[0])
+   {
+      char *prepared = openai_build_ir_body(request, wire);
+      cache->enabled = prepared
+                           ? dedup_eligible(cache->key, sizeof cache->key, agent, cache->endpoint,
+                                            cache->body, prepared, &cache->ttl)
+                           : -1;
+      free(prepared);
+      if (cache->enabled < 0)
+      {
+         snprintf(error, capacity, "response composition unavailable");
+         cJSON_Delete(container);
+         gw_mutate_ctx_free(&mutation);
+         return -1;
+      }
+      char *encoded = NULL;
+      double avoided = 0;
+      if (cache->enabled && response_dedup_get(cache->key, (long)time(NULL), &encoded, &avoided))
+      {
+         int decoded = openai_ir_cache_decode(encoded, out, cache);
+         free(encoded);
+         if (!decoded)
+         {
+            cJSON_Delete(container);
+            gw_mutate_ctx_free(&mutation);
+            if (aimee_ir_session_emit_buffered_response(out, NULL))
+            {
+               snprintf(error, capacity, "canonical cached response persistence failed");
+               return -1;
+            }
+            cache->avoided = 1;
+            if (agent_ingress_accounting_enabled())
+               record_avoided_turn(agent->model, avoided);
+            return 0;
+         }
+      }
+   }
    char *reply = NULL;
    int status = openai_post_ir(agent, request, wire, url, auth, headers, &reply, error, capacity);
    if (status != HTTP_RETRY_ADMISSION_REFUSED && container &&
        gw_buffered_after_status(container, "input", status, &mutation) == GW_POST_RESEND)
    {
+      if (cache)
+         cache->enabled = 0; /* The restored request has a different cache identity. */
       free(reply);
       reply = NULL;
       if (openai_ir_history_replace(request, cJSON_GetObjectItemCaseSensitive(container, "input")))
@@ -1610,6 +1450,21 @@ static int agent_execute_ir_request(const agent_t *agent, aimee_request_t *reque
       snprintf(error, capacity, "canonical response policy or persistence failed");
       return -1;
    }
+   if (cache && cache->enabled && !aimee_ir_response_tool_count(out))
+   {
+      char *encoded = openai_ir_cache_encode(out, cache);
+      if (encoded)
+      {
+         token_usage_t usage = {.input_tokens = out->usage_in,
+                                .output_tokens = out->usage_out,
+                                .cache_write_tokens = out->usage_cache_write,
+                                .cache_read_tokens = out->usage_cache_read};
+         response_dedup_put(cache->key, encoded,
+                            token_estimate_cost(out->model ? out->model : agent->model, &usage),
+                            (long)time(NULL), cache->ttl);
+         free(encoded);
+      }
+   }
    return 0;
 refused:
    cJSON_Delete(container);
@@ -1617,20 +1472,20 @@ refused:
    snprintf(error, capacity, "canonical economizer history is invalid");
    return -1;
 }
-static int agent_execute_messages(const agent_t *agent, const char *body, aimee_wire_t wire,
-                                  int max_tokens, double temperature, aimee_response_t *out,
-                                  char *error, size_t capacity, int preserve_messages)
+static int agent_execute_ir_request(const agent_t *agent, aimee_request_t *request, int max_tokens,
+                                    double temperature, aimee_response_t *out, char *error,
+                                    size_t capacity, int preserve_messages)
 {
    memset(out, 0, sizeof *out);
-   aimee_request_t request = {0};
-   if (aimee_frontend_parse_wire(body, body ? strlen(body) : 0, wire, &request, error, capacity))
+   if (!agent || !request ||
+       openai_prepare_ir_request(request, agent, max_tokens, temperature, preserve_messages))
+   {
+      snprintf(error, capacity, "canonical provider request failed");
       return -1;
-   int rc = agent_execute_ir_request(agent, &request, max_tokens, temperature, out, error, capacity,
-                                     preserve_messages);
-   aimee_request_free(&request);
-   return rc;
+   }
+   return agent_execute_prepared_ir_request(agent, request, out, error, capacity, preserve_messages,
+                                            NULL);
 }
-
 /* SSE streaming for POST /v1/responses — full Codex parity. Converts the Codex
  * Responses request into the OpenAI chat shape (instructions -> system, the
  * message / function_call / function_call_output history -> chat messages,
