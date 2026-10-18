@@ -99,4 +99,8 @@ int bedrock_converse_parse(const struct cJSON *resp, aimee_response_t *out, char
  * is one source of truth. NULL / unrecognized -> AIMEE_STOP_UNKNOWN. */
 aimee_stop_reason_t converse_stop_reason(const char *sr);
 
+/* Explicit output boundary for the typed format; NULL when unset or invalid. */
+struct cJSON *openai_family_output_format_build(const aimee_output_format_t *format,
+                                                int responses_shape);
+
 #endif /* DEC_AIMEE_BACKEND_H */

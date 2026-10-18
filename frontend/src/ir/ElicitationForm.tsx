@@ -47,9 +47,9 @@ export default function ElicitationForm({ form, disabled, onSubmit }: { form: Js
     return [];
   })));
   const isSupported = schema.type === 'object' && object(schema.properties) && fields.every(([, field]) => object(field) && supported(field)) &&
-    required.every(key => Object.hasOwn(schema.properties as object, key));
+    required.every(key => Object.prototype.hasOwnProperty.call(schema.properties as object, key));
   const ready = isSupported && fields.every(([key, field]) => object(field) &&
-    (Object.hasOwn(values, key) ? valid(field, values[key]) : !required.includes(key)));
+    (Object.prototype.hasOwnProperty.call(values, key) ? valid(field, values[key]) : !required.includes(key)));
   function set(key: string, value: Value | undefined) {
     setValues(old => { const next = { ...old }; if (value === undefined) delete next[key]; else Object.defineProperty(next, key, { value, writable: true, enumerable: true, configurable: true }); return next; });
   }
@@ -61,7 +61,7 @@ export default function ElicitationForm({ form, disabled, onSubmit }: { form: Js
       const field = raw as JsonObject;
       const label = typeof field.title === 'string' ? field.title : key;
       const choices = options(field.type === 'array' ? field.items as JsonObject : field);
-      const value = Object.hasOwn(values, key) ? values[key] : undefined;
+      const value = Object.prototype.hasOwnProperty.call(values, key) ? values[key] : undefined;
       return <fieldset key={key} disabled={disabled}>
         <legend>{label}{required.includes(key) ? ' (required)' : ''}</legend>
         {typeof field.description === 'string' && <p>{field.description}</p>}

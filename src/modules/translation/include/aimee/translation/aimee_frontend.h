@@ -67,4 +67,11 @@ struct cJSON *openai_frontend_render(const aimee_response_t *resp);
 /* Render an IR response as an OpenAI Responses API response (output items). */
 struct cJSON *responses_frontend_render(const aimee_response_t *resp);
 
+/* Shared owned text/media content adapter for Chat request/response boundaries. */
+int openai_ir_parse_content(const struct cJSON *content, aimee_block_t **blocks, int *count);
+
+/* Shared typed output-format entry: Chat nests json_schema, Responses does not. */
+int openai_family_output_format_parse(const struct cJSON *format, int responses_shape,
+                                      aimee_request_t *out, char *error, size_t capacity);
+
 #endif /* DEC_AIMEE_FRONTEND_H */

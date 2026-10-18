@@ -186,6 +186,9 @@ void aimee_request_free(aimee_request_t *r)
       }
       free(r->tools);
    }
+   free_str(r->output_format.name);
+   free_str(r->output_format.description);
+   cJSON_Delete(r->output_format.schema);
    free_str(r->tool_choice_name);
    cJSON_Delete(r->metadata);
    free_str(r->service_tier);
@@ -402,6 +405,12 @@ int aimee_ir_request_equal(const aimee_request_t *a, const aimee_request_t *b)
           !json_eq(a->tools[i].schema, b->tools[i].schema))
          return 0;
    }
+   if (a->output_format.kind != b->output_format.kind ||
+       a->output_format.strict != b->output_format.strict ||
+       !str_eq(a->output_format.name, b->output_format.name) ||
+       !str_eq(a->output_format.description, b->output_format.description) ||
+       !json_eq(a->output_format.schema, b->output_format.schema))
+      return 0;
    if (a->tool_choice != b->tool_choice || (a->tool_choice == AIMEE_TOOL_CHOICE_TOOL &&
                                             !str_eq(a->tool_choice_name, b->tool_choice_name)))
       return 0;

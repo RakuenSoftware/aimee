@@ -371,8 +371,9 @@ static cJSON *converse_tool_choice(const aimee_request_t *ir, int *failed)
 
 cJSON *bedrock_converse_build(const aimee_request_t *ir)
 {
-   if (!ir)
-      return NULL;
+   if (!ir || (ir->output_format.kind != AIMEE_OUTPUT_UNSET &&
+               ir->output_format.kind != AIMEE_OUTPUT_TEXT))
+      return NULL; /* Refuse unsupported constraints instead of dropping them. */
    int failed = 0;
    cJSON *out = json_new_object(&failed);
    cJSON *choice = NULL;

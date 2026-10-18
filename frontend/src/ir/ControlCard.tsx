@@ -29,7 +29,7 @@ export default function ControlCard({ id, control, onReply }: { id: string; cont
     <summary>{control.kind}: {control.response ? 'Resolved' : control.closed ? 'Closed' : pending ? 'Reply sent' : 'Awaiting your reply'}</summary>
     {typeof control.request.title === 'string' && <p>{control.request.title}</p>}
     {control.kind !== 'question' && control.kind !== 'elicitation' && <pre>{JSON.stringify(control.request.input ?? control.request, null, 2)}</pre>}
-    {!closed && control.kind === 'elicitation' && control.request.form && typeof control.request.form === 'object' &&
+    {!closed && control.kind === 'elicitation' && !!control.request.form && typeof control.request.form === 'object' &&
       <ElicitationForm form={control.request.form as Record<string, unknown>} disabled={pending || !onReply} onSubmit={content => void submit('allow', content)} />}
     {!closed && items.map(q => <fieldset key={q.id} disabled={pending || !onReply}>
       <legend>{q.question}</legend>

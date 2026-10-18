@@ -100,6 +100,17 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
    if (!ir)
       return NULL;
    cJSON *out = cJSON_CreateObject();
+   if (ir->output_format.kind != AIMEE_OUTPUT_UNSET)
+   {
+      cJSON *format = openai_family_output_format_build(&ir->output_format, 1);
+      cJSON *text = cJSON_AddObjectToObject(out, "text");
+      if (!format || !text || !cJSON_AddItemToObject(text, "format", format))
+      {
+         cJSON_Delete(format);
+         cJSON_Delete(out);
+         return NULL;
+      }
+   }
    if (ir->model)
       cJSON_AddStringToObject(out, "model", ir->model);
    /* NOTE: no max_output_tokens -- the legacy build omits it and codex/gpt-5.5

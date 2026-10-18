@@ -495,8 +495,86 @@ static void test_completed_response_usage_admission(void)
    puts("  completed usage counters reject invalid values before integer conversion OK");
 }
 
+static void test_owned_output_formats(void)
+{
+   const char *strict[] = {"", ",\"strict\":null", ",\"strict\":false", ",\"strict\":true"};
+   const aimee_strict_mode_t modes[] = {AIMEE_STRICT_UNSET, AIMEE_STRICT_NULL, AIMEE_STRICT_FALSE,
+                                        AIMEE_STRICT_TRUE};
+   for (size_t i = 0; i < sizeof modes / sizeof modes[0]; i++)
+   {
+      char body[1024], error[128];
+      snprintf(
+          body, sizeof body,
+          "{\"model\":\"a\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],"
+          "\"response_format\":{\"type\":\"json_schema\",\"json_schema\":{\"name\":\"result_1\","
+          "\"description\":\"exact description\",\"schema\":{\"type\":\"object\"}%s}}}",
+          strict[i]);
+      cJSON *root = cJSON_Parse(body);
+      aimee_request_t ir = {0}, again = {0};
+      assert(root && !openai_frontend_parse(root, &ir, error, sizeof error));
+      assert(ir.output_format.kind == AIMEE_OUTPUT_JSON_SCHEMA &&
+             ir.output_format.strict == modes[i]);
+      cJSON_Delete(ir.raw);
+      ir.raw = NULL; /* The canonical fields alone must support every boundary. */
+      cJSON *responses = responses_backend_build(&ir);
+      assert(responses && !responses_frontend_parse(responses, &again, error, sizeof error));
+      assert(again.output_format.strict == modes[i]);
+      assert(!strcmp(again.output_format.name, "result_1"));
+      assert(!strcmp(again.output_format.description, "exact description"));
+      assert(cJSON_Compare(ir.output_format.schema, again.output_format.schema, 1));
+      cJSON *chat = openai_backend_build(&again);
+      assert(chat && cJSON_Compare(cJSON_GetObjectItem(root, "response_format"),
+                                   cJSON_GetObjectItem(chat, "response_format"), 1));
+      cJSON *native = anthropic_backend_build(&ir);
+      assert(native &&
+             cJSON_Compare(
+                 ir.output_format.schema,
+                 cJSON_GetObjectItem(
+                     cJSON_GetObjectItem(cJSON_GetObjectItem(native, "output_config"), "format"),
+                     "schema"),
+                 1));
+      cJSON_Delete(native);
+      cJSON_Delete(chat);
+      cJSON_Delete(responses);
+      aimee_request_free(&again);
+      aimee_request_free(&ir);
+      cJSON_Delete(root);
+   }
+   cJSON *native =
+       cJSON_Parse("{\"model\":\"a\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],"
+                   "\"output_config\":{\"effort\":\"high\",\"format\":{\"type\":\"json_schema\","
+                   "\"schema\":{\"type\":\"object\"}}}}");
+   aimee_request_t ir = {0};
+   char error[128];
+   assert(!anthropic_frontend_parse(native, &ir, error, sizeof error));
+   ir.mutated = 1;
+   ir.max_tokens = 128;
+   cJSON *out = anthropic_backend_build(&ir);
+   assert(out && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(
+                             cJSON_GetObjectItem(out, "output_config"), "effort")),
+                         "high"));
+   assert(cJSON_GetObjectItem(cJSON_GetObjectItem(out, "output_config"), "format"));
+   cJSON_Delete(out);
+   ir.output_format.kind = AIMEE_OUTPUT_UNSET;
+   out = anthropic_backend_build(&ir);
+   assert(out && !cJSON_GetObjectItem(cJSON_GetObjectItem(out, "output_config"), "format"));
+   cJSON_Delete(out);
+   ir.output_format.kind = AIMEE_OUTPUT_JSON_OBJECT;
+   assert(!anthropic_backend_build(&ir));
+   out = responses_backend_build(&ir);
+   assert(out);
+   cJSON_Delete(out);
+   ir.output_format.kind = AIMEE_OUTPUT_JSON_SCHEMA;
+   ir.output_format.strict = (aimee_strict_mode_t)99;
+   assert(!openai_family_output_format_build(&ir.output_format, 0));
+   aimee_request_free(&ir);
+   cJSON_Delete(native);
+   puts("  owned structured output preserves schemas and all strict states across model wires OK");
+}
+
 int main(void)
 {
+   test_owned_output_formats();
    test_completed_response_usage_admission();
    test_foreign_reasoning_switch_preserves_canonical_state();
    test_history_entry_migration();

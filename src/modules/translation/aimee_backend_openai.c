@@ -5,6 +5,7 @@
  * applied per the tool_result-grouping ruling in the follow-up; this covers
  * system-lowering, text/tool_use, tool definitions, params, and response parse. */
 #include <aimee/translation/aimee_backend.h>
+#include <aimee/translation/aimee_frontend.h>
 
 #include "cJSON.h"
 #include "util.h" /* text_split_reasoning_prefix, strip_llm_private_scaffold */
@@ -38,6 +39,58 @@ static char *blocks_text(const aimee_block_t *blocks, int n)
       if (blocks[i].type == AIMEE_BLK_TEXT && blocks[i].text)
          strcat(s, blocks[i].text);
    return s;
+}
+
+cJSON *openai_family_output_format_build(const aimee_output_format_t *format, int responses_shape)
+{
+   if (!format || format->kind == AIMEE_OUTPUT_UNSET)
+      return NULL;
+   const char *type = format->kind == AIMEE_OUTPUT_TEXT          ? "text"
+                      : format->kind == AIMEE_OUTPUT_JSON_OBJECT ? "json_object"
+                      : format->kind == AIMEE_OUTPUT_JSON_SCHEMA ? "json_schema"
+                                                                 : NULL;
+   if (!type || format->strict < AIMEE_STRICT_UNSET || format->strict > AIMEE_STRICT_TRUE)
+      return NULL;
+   if (format->kind == AIMEE_OUTPUT_JSON_SCHEMA && format->name)
+   {
+      size_t length = strlen(format->name);
+      if (!length || length > 64)
+         return NULL;
+      for (size_t i = 0; i < length; i++)
+      {
+         unsigned char c = (unsigned char)format->name[i];
+         if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+               c == '_' || c == '-'))
+            return NULL;
+      }
+   }
+   cJSON *out = cJSON_CreateObject();
+   if (!out || !cJSON_AddStringToObject(out, "type", type))
+      goto fail;
+   if (format->kind == AIMEE_OUTPUT_JSON_SCHEMA)
+   {
+      if (!cJSON_IsObject(format->schema))
+         goto fail;
+      cJSON *definition = responses_shape ? out : cJSON_AddObjectToObject(out, "json_schema");
+      if (!definition ||
+          !cJSON_AddStringToObject(definition, "name", format->name ? format->name : "response") ||
+          !cJSON_AddItemToObject(definition, "schema", cJSON_Duplicate(format->schema, 1)) ||
+          (format->description &&
+           !cJSON_AddStringToObject(definition, "description", format->description)))
+         goto fail;
+      if (format->strict == AIMEE_STRICT_NULL)
+      {
+         if (!cJSON_AddNullToObject(definition, "strict"))
+            goto fail;
+      }
+      else if (format->strict != AIMEE_STRICT_UNSET &&
+               !cJSON_AddBoolToObject(definition, "strict", format->strict == AIMEE_STRICT_TRUE))
+         goto fail;
+   }
+   return out;
+fail:
+   cJSON_Delete(out);
+   return NULL;
 }
 
 void openai_family_add_tool_choice(cJSON *out, const aimee_request_t *ir, int responses_shape)
@@ -135,6 +188,16 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
    if (!ir)
       return NULL;
    cJSON *out = cJSON_CreateObject();
+   if (ir->output_format.kind != AIMEE_OUTPUT_UNSET)
+   {
+      cJSON *format = openai_family_output_format_build(&ir->output_format, 0);
+      if (!format || !cJSON_AddItemToObject(out, "response_format", format))
+      {
+         cJSON_Delete(format);
+         cJSON_Delete(out);
+         return NULL;
+      }
+   }
    if (ir->model)
       cJSON_AddStringToObject(out, "model", ir->model);
    if (ir->has_max_tokens)
@@ -351,6 +414,8 @@ static int sappend(char **dst, const char *src, size_t len)
 /* Grow out->content by one block; return the new zeroed block or NULL on OOM. */
 static aimee_block_t *ob_grow(aimee_response_t *out)
 {
+   if (out->n_content >= AIMEE_IR_MAX_BLOCKS)
+      return NULL;
    void *p = realloc(out->content, (size_t)(out->n_content + 1) * sizeof(aimee_block_t));
    if (!p)
       return NULL;
@@ -403,6 +468,110 @@ static void openai_content_split(const cJSON *content, char **answer, char **rea
    }
 }
 
+static int openai_response_text(aimee_response_t *out, const char *text, int group)
+{
+   if (!text)
+      return -1;
+   const char *reasoning = NULL;
+   size_t length = 0;
+   const char *answer = text_split_reasoning_prefix(text, &reasoning, &length);
+   if (length)
+   {
+      aimee_block_t *block = ob_grow(out);
+      if (!block)
+         return -1;
+      block->type = AIMEE_BLK_THINKING;
+      block->text = strndup(reasoning, length);
+      if (!block->text)
+         return -1;
+   }
+   char *cleaned = strip_llm_private_scaffold(answer);
+   if (!cleaned)
+      return -1;
+   if (strcmp(cleaned, answer))
+   {
+      /* Keep the original private-scaffold spelling in the canonical record.
+       * Only the visible text projection uses the cleaned completion. */
+      aimee_block_t *block = ob_grow(out);
+      if (!block)
+      {
+         free(cleaned);
+         return -1;
+      }
+      block->type = AIMEE_BLK_THINKING;
+      block->text = strdup(answer);
+      if (!block->text)
+      {
+         free(cleaned);
+         return -1;
+      }
+   }
+   if (!cleaned[0])
+   {
+      free(cleaned);
+      return 0;
+   }
+   aimee_block_t *block = ob_grow(out);
+   if (!block)
+   {
+      free(cleaned);
+      return -1;
+   }
+   block->type = AIMEE_BLK_TEXT;
+   block->text = cleaned;
+   block->message_group = group;
+   return 0;
+}
+static int openai_response_content(aimee_response_t *out, const cJSON *content)
+{
+   if (!content || cJSON_IsNull(content))
+      return 0;
+   if (cJSON_IsString(content))
+      return openai_response_text(out, content->valuestring, 0);
+   if (!cJSON_IsArray(content))
+      return -1;
+   const cJSON *part;
+   cJSON_ArrayForEach(part, content)
+   {
+      const char *type = ostr(part, "type");
+      if (cJSON_IsString(part) || (type && (!strcmp(type, "text") || !strcmp(type, "output_text"))))
+      {
+         if (openai_response_text(out,
+                                  cJSON_IsString(part) ? part->valuestring : ostr(part, "text"), 1))
+            return -1;
+      }
+      else if (type && (!strcmp(type, "thinking") || !strcmp(type, "reasoning")))
+      {
+         const cJSON *thought = cJSON_GetObjectItemCaseSensitive(
+             part, !strcmp(type, "thinking") ? "thinking" : "reasoning");
+         char *text = NULL;
+         openai_content_split(thought, &text, &text);
+         aimee_block_t *block = ob_grow(out);
+         if (!block)
+         {
+            free(text);
+            return -1;
+         }
+         block->type = AIMEE_BLK_THINKING;
+         block->text = text;
+         block->thinking_signature = dupstr(ostr(part, "signature"));
+         if (!text)
+            return -1;
+      }
+      else
+      {
+         /* Borrow one native part without borrowing the following siblings. */
+         cJSON item = *part;
+         item.next = item.prev = NULL;
+         cJSON array = {.type = cJSON_Array, .child = &item};
+         if (out->n_content >= AIMEE_IR_MAX_BLOCKS ||
+             openai_ir_parse_content(&array, &out->content, &out->n_content))
+            return -1;
+      }
+   }
+   return 0;
+}
+
 int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, size_t errn)
 {
    if (out)
@@ -443,75 +612,40 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
    {
       out->role = dupstr(ostr(msg, "role"));
 
-      /* Text response: split answer vs reasoning. Reasoning models on this wire embed
-       * their chain-of-thought in the content (content-parts thinking items, an inline
-       * <think>...</think> prefix, or a separate reasoning_content field). We STORE it
-       * as a THINKING block (excluded from the content accessor) rather than discard
-       * it, and keep the answer as a TEXT block. */
-      char *answer = NULL, *reasoning = NULL;
-      openai_content_split(cJSON_GetObjectItemCaseSensitive((cJSON *)msg, "content"), &answer,
-                           &reasoning);
-
-      const cJSON *rc = cJSON_GetObjectItemCaseSensitive((cJSON *)msg, "reasoning_content");
-      if (rc)
+      const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(msg, "reasoning_content");
+      if (!reasoning)
+         reasoning = cJSON_GetObjectItemCaseSensitive(msg, "reasoning");
+      if (reasoning && !cJSON_IsNull(reasoning))
       {
-         /* qwen3 etc.: when content is empty the actual output is in reasoning_content;
-          * otherwise it is separate reasoning. */
-         if (!answer || !answer[0])
+         char *text = NULL;
+         openai_content_split(reasoning, &text, &text);
+         aimee_block_t *block = ob_grow(out);
+         if (!block)
          {
-            free(answer);
-            answer = NULL;
-            openai_content_split(rc, &answer, &answer);
-         }
-         else
-            openai_content_split(rc, &reasoning, &reasoning);
-      }
-
-      if (answer)
-      {
-         const char *rp = NULL;
-         size_t rlen = 0;
-         const char *ans = text_split_reasoning_prefix(answer, &rp, &rlen);
-         if (rlen > 0)
-            sappend(&reasoning, rp, rlen); /* store the <think> prefix */
-         /* Drop leaked private scaffold from the answer (malformed prose, not a clean
-          * reasoning block; the helper returns only the cleaned text). */
-         char *cleaned = strip_llm_private_scaffold(ans);
-         free(answer);
-         answer = cleaned;
-      }
-
-      if (reasoning && reasoning[0])
-      {
-         aimee_block_t *b = ob_grow(out);
-         if (!b)
-         {
-            free(answer);
-            free(reasoning);
+            free(text);
             aimee_response_free(out);
             return -1;
          }
-         b->type = AIMEE_BLK_THINKING;
-         b->text = reasoning;
-         reasoning = NULL;
-      }
-      free(reasoning);
-
-      if (answer && answer[0])
-      {
-         aimee_block_t *b = ob_grow(out);
-         if (!b)
+         block->type = AIMEE_BLK_THINKING;
+         block->text = text;
+         if (!text)
          {
-            free(answer);
             aimee_response_free(out);
             return -1;
          }
-         b->type = AIMEE_BLK_TEXT;
-         b->text = answer;
-         answer = NULL;
       }
-      free(answer);
-
+      if (openai_response_content(out, cJSON_GetObjectItemCaseSensitive(msg, "content")))
+      {
+         aimee_response_free(out);
+         return -1;
+      }
+      const cJSON *refusal = cJSON_GetObjectItemCaseSensitive(msg, "refusal");
+      if (refusal && !cJSON_IsNull(refusal) &&
+          (!cJSON_IsString(refusal) || openai_response_text(out, refusal->valuestring, 0)))
+      {
+         aimee_response_free(out);
+         return -1;
+      }
       const cJSON *calls = cJSON_GetObjectItemCaseSensitive((cJSON *)msg, "tool_calls");
       const cJSON *c = NULL;
       if (calls && cJSON_IsArray(calls))
@@ -530,7 +664,13 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
             const cJSON *fn = cJSON_GetObjectItemCaseSensitive((cJSON *)c, "function");
             b->tool_name = dupstr(fn ? ostr(fn, "name") : NULL);
             const char *args = fn ? ostr(fn, "arguments") : NULL;
-            b->tool_input = args ? cJSON_Parse(args) : NULL;
+            const char *end = NULL;
+            b->tool_input = args ? cJSON_ParseWithOpts(args, &end, 1) : NULL;
+            if (!cJSON_IsObject(b->tool_input))
+            {
+               aimee_response_free(out);
+               return -1;
+            }
          }
    }
 

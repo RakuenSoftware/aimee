@@ -39,7 +39,7 @@ static void *grow1(void **arr, int *n, size_t esz)
 
 /* Parse an OpenAI content value (string OR array of parts) and APPEND blocks to
  * (*blocks,*n). type:"text" -> TEXT; type:"image_url" -> IMAGE (media_ref=url). */
-static int append_openai_content(const cJSON *content, aimee_block_t **blocks, int *n)
+int openai_ir_parse_content(const cJSON *content, aimee_block_t **blocks, int *n)
 {
    if (!content)
       return 0;
@@ -106,7 +106,7 @@ static int append_openai_content(const cJSON *content, aimee_block_t **blocks, i
          const char *ref = ostr(file, "file_id");
          b->media_ref = dupstr(ref ? ref : ostr(file, "file_data"));
       }
-      else if (type && !strcmp(type, "text"))
+      else if (type && (!strcmp(type, "text") || !strcmp(type, "output_text")))
       {
          b->type = AIMEE_BLK_TEXT;
          b->text = dupstr(ostr(el, "text"));
@@ -115,6 +115,53 @@ static int append_openai_content(const cJSON *content, aimee_block_t **blocks, i
          b->type = AIMEE_BLK_UNKNOWN;
    }
    return 0;
+}
+
+int openai_family_output_format_parse(const cJSON *format, int responses_shape,
+                                      aimee_request_t *out, char *error, size_t capacity)
+{
+   if (!format || cJSON_IsNull(format))
+      return 0;
+   const char *type = ostr(format, "type");
+   if (!type)
+      goto invalid;
+   aimee_output_format_t *output = &out->output_format;
+   if (!strcmp(type, "text"))
+      output->kind = AIMEE_OUTPUT_TEXT;
+   else if (!strcmp(type, "json_object"))
+      output->kind = AIMEE_OUTPUT_JSON_OBJECT;
+   else if (!strcmp(type, "json_schema"))
+   {
+      output->kind = AIMEE_OUTPUT_JSON_SCHEMA;
+      const cJSON *definition =
+          responses_shape ? format : cJSON_GetObjectItemCaseSensitive(format, "json_schema");
+      const char *name = ostr(definition, "name");
+      const cJSON *schema = cJSON_GetObjectItemCaseSensitive(definition, "schema");
+      const cJSON *description = cJSON_GetObjectItemCaseSensitive(definition, "description");
+      const cJSON *strict = cJSON_GetObjectItemCaseSensitive(definition, "strict");
+      if (!name || !name[0] || strlen(name) > 64 ||
+          strspn(name, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") !=
+              strlen(name) ||
+          !cJSON_IsObject(schema) || (description && !cJSON_IsString(description)) ||
+          (strict && !cJSON_IsNull(strict) && !cJSON_IsBool(strict)))
+         goto invalid;
+      output->name = dupstr(name);
+      output->schema = cJSON_Duplicate(schema, 1);
+      output->description = description ? dupstr(description->valuestring) : NULL;
+      output->strict = !strict                ? AIMEE_STRICT_UNSET
+                       : cJSON_IsNull(strict) ? AIMEE_STRICT_NULL
+                       : cJSON_IsTrue(strict) ? AIMEE_STRICT_TRUE
+                                              : AIMEE_STRICT_FALSE;
+      if (!output->name || !output->schema || (description && !output->description))
+         goto invalid;
+   }
+   else
+      goto invalid;
+   return 0;
+invalid:
+   if (error && capacity)
+      snprintf(error, capacity, "invalid or unsupported structured output format");
+   return -1;
 }
 
 int openai_family_tool_choice_parse(const cJSON *tc, const cJSON *parallel, int responses_shape,
@@ -211,6 +258,13 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
    const cJSON *stream = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "stream");
    out->stream = (stream && cJSON_IsTrue(stream)) ? 1 : 0;
 
+   if (openai_family_output_format_parse(cJSON_GetObjectItemCaseSensitive(req, "response_format"),
+                                         0, out, err, errn))
+   {
+      aimee_request_free(out);
+      return -1;
+   }
+
    /* messages. LIFT only the LEADING CONSECUTIVE run of role:"system" into
     * out->system (to converge with Anthropic's separate system). A system message
     * AFTER the first non-system turn is NOT lifted -- lifting mid-conversation
@@ -231,7 +285,7 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
          {
             const char *s = cJSON_IsString(content) ? content->valuestring : NULL;
             int empty = s && s[strspn(s, " \t\r\n")] == '\0'; /* whitespace-only */
-            if (!empty && append_openai_content(content, &out->system, &out->n_system) != 0)
+            if (!empty && openai_ir_parse_content(content, &out->system, &out->n_system) != 0)
                goto oom;
             continue;
          }
@@ -285,7 +339,7 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
             if (!block->text)
                goto oom;
          }
-         if (append_openai_content(content, &msg->blocks, &msg->n_blocks) != 0)
+         if (openai_ir_parse_content(content, &msg->blocks, &msg->n_blocks) != 0)
             goto oom;
          /* assistant tool_calls -> TOOL_USE blocks. tool_input is the PARSED object
           * (canonical, cross-protocol comparable); the OpenAI `arguments` STRING is

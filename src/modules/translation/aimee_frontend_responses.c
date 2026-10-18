@@ -287,6 +287,14 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
          tool->schema = params ? cJSON_Duplicate(params, 1) : NULL;
       }
    }
+   if (openai_family_output_format_parse(
+           cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(req, "text"),
+                                            "format"),
+           1, out, err, errn))
+   {
+      aimee_request_free(out);
+      return -1;
+   }
    return 0;
 
 oom:

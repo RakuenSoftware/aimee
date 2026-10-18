@@ -273,6 +273,26 @@ int anthropic_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       }
    }
 
+   const cJSON *format = cJSON_GetObjectItemCaseSensitive(
+       cJSON_GetObjectItemCaseSensitive(req, "output_config"), "format");
+   if (format && !cJSON_IsNull(format))
+   {
+      const char *type = ostr(format, "type");
+      const cJSON *schema = cJSON_GetObjectItemCaseSensitive(format, "schema");
+      if (!type || strcmp(type, "json_schema") || !cJSON_IsObject(schema))
+      {
+         if (err && errn)
+            snprintf(err, errn, "invalid or unsupported Anthropic output format");
+         aimee_request_free(out);
+         return -1;
+      }
+      out->output_format.kind = AIMEE_OUTPUT_JSON_SCHEMA;
+      out->output_format.strict = AIMEE_STRICT_TRUE;
+      out->output_format.schema = cJSON_Duplicate(schema, 1);
+      if (!out->output_format.schema)
+         goto oom;
+   }
+
    /* stop_sequences */
    const cJSON *stop = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "stop_sequences");
    if (stop && cJSON_IsArray(stop))

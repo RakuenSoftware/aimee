@@ -190,6 +190,28 @@ typedef enum
 
 typedef enum
 {
+   AIMEE_OUTPUT_UNSET = 0,
+   AIMEE_OUTPUT_TEXT,
+   AIMEE_OUTPUT_JSON_OBJECT,
+   AIMEE_OUTPUT_JSON_SCHEMA
+} aimee_output_kind_t;
+typedef enum
+{
+   AIMEE_STRICT_UNSET = 0,
+   AIMEE_STRICT_NULL,
+   AIMEE_STRICT_FALSE,
+   AIMEE_STRICT_TRUE
+} aimee_strict_mode_t;
+typedef struct
+{
+   aimee_output_kind_t kind;
+   char *name, *description;
+   struct cJSON *schema; /* owned, opaque JSON Schema */
+   aimee_strict_mode_t strict;
+} aimee_output_format_t;
+
+typedef enum
+{
    AIMEE_CACHE_DEFAULT =
        0, /* retain native client policy; translate other sources deterministically */
    AIMEE_CACHE_STABLE_PREFIX, /* explicit host normalization policy */
@@ -205,6 +227,7 @@ typedef struct
    int n_messages;
    aimee_tool_t *tools;
    int n_tools;
+   aimee_output_format_t output_format;
    aimee_tool_choice_t tool_choice;
    char *tool_choice_name; /* AIMEE_TOOL_CHOICE_TOOL only; opaque tool name; owned */
    /* Whether the model may emit several tool calls in one turn. OpenAI and Responses

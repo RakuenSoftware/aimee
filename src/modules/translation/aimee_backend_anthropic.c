@@ -340,10 +340,10 @@ static cJSON *native_request_overlay(const aimee_request_t *ir, cJSON *out)
    }
    else
       aimee_request_free(&original);
-   static const char *const fields[] = {"model",       "system",        "messages",     "tools",
-                                        "tool_choice", "max_tokens",    "temperature",  "top_p",
-                                        "top_k",       "metadata",      "service_tier", "thinking",
-                                        "stream",      "stop_sequences"};
+   static const char *const fields[] = {"model",       "system",         "messages",     "tools",
+                                        "tool_choice", "max_tokens",     "temperature",  "top_p",
+                                        "top_k",       "metadata",       "service_tier", "thinking",
+                                        "stream",      "stop_sequences", "output_config"};
    return native_overlay(ir->raw, out, fields, sizeof fields / sizeof fields[0]);
 }
 
@@ -389,6 +389,38 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
       cJSON_AddItemToObject(out, "metadata", cJSON_Duplicate(ir->metadata, 1));
    if (ir->service_tier)
       cJSON_AddStringToObject(out, "service_tier", ir->service_tier);
+   if (ir->output_format.kind == AIMEE_OUTPUT_JSON_OBJECT)
+   {
+      cJSON_Delete(out);
+      return NULL; /* This wire has schema-constrained output, not JSON-object mode. */
+   }
+   const cJSON *original_output = ir->frontend == AIMEE_WIRE_ANTHROPIC
+                                      ? cJSON_GetObjectItemCaseSensitive(ir->raw, "output_config")
+                                      : NULL;
+   cJSON *output_config =
+       cJSON_IsObject(original_output) ? cJSON_Duplicate(original_output, 1) : cJSON_CreateObject();
+   if (!output_config)
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(output_config, "format");
+   if (ir->output_format.kind == AIMEE_OUTPUT_JSON_SCHEMA)
+   {
+      cJSON *format = cJSON_AddObjectToObject(output_config, "format");
+      if (!cJSON_IsObject(ir->output_format.schema) || !format ||
+          !cJSON_AddStringToObject(format, "type", "json_schema") ||
+          !cJSON_AddItemToObject(format, "schema", cJSON_Duplicate(ir->output_format.schema, 1)))
+      {
+         cJSON_Delete(output_config);
+         cJSON_Delete(out);
+         return NULL;
+      }
+   }
+   if (cJSON_GetArraySize(output_config))
+      cJSON_AddItemToObject(out, "output_config", output_config);
+   else
+      cJSON_Delete(output_config);
    if (ir->thinking)
       cJSON_AddItemToObject(out, "thinking", cJSON_Duplicate(ir->thinking, 1));
    if (ir->stream)
