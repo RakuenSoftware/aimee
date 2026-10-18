@@ -1183,3 +1183,23 @@ exact CI Cppcheck pass for this change.
 Old durable records are not heuristically rewritten; earlier wrapped records do
 not establish byte-equivalent native replay. Full account-bound prefix admission,
 compaction qualification and command-item adoption still need completion.
+
+
+## Continuation integration qualification
+
+Checkpoint `16c218fa9` passes the full HTTP integration run: 156/156, with
+26 explicit unavailable-service skips. This includes A/B/A/B primary switching,
+canonical history, ordered durable replay/resumed cursors, source-bound execution
+observations and lost-projection recovery. The local fixture uses PostgreSQL 17.6
+on 127.0.0.1:55449, schema `ir_continuation_16c218fa9`, with a separate
+`aimee_store_runtime` login and `virant` migration role. The first attempt correctly
+refused identical runtime/migration roles; qualification uses separated roles.
+The run does not establish independent grades, Docker completion/readback or
+production acceptance. Log: `/var/tmp/aimee-ir-continuation-final-integration.log`.
+
+The installed registered CLI still points at the older `ir3036-19d839003` release.
+During PR metadata updates its implicit checkout resolution failed; explicit
+`path=<continuation worktree>` succeeded. Current `marshal_git_cli` already stamps
+the invoking directory as `path`, so do not reintroduce a duplicate source fix or
+weaken checkout confinement. Use explicit paths with that installed CLI until an
+independently reviewed production promotion updates it. Production stays KB-free.
