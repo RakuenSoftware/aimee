@@ -511,7 +511,8 @@ endif()
 
 if(NOT WIN32)
   aimee_add_test(test_server_chat_ir test_server_chat_ir.c ../server/server_chat_ir.c ../server/server_session_control.c
-    ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
+    ../server/server_learning_outcome.c support/learning_outcome_stub.c support/log_stub.c
+    ../interaction_event_names.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
   target_link_libraries(test_server_chat_ir PRIVATE OpenSSL::Crypto)
 endif()
 
@@ -551,6 +552,8 @@ if(NOT WIN32)
     ../server/server_session_control.c ../vendor/cJSON.c)
   target_link_libraries(test_server_session_control PRIVATE Threads::Threads)
   aimee_add_test(test_server_session_log test_server_session_log.c
-    ../server/server_session_log.c ../server/server_session_control.c)
+    ../server/server_session_log.c ../server/server_session_control.c
+    ../server/server_learning_outcome.c support/learning_outcome_stub.c support/log_stub.c
+    ../interaction_event_names.c)
   target_link_libraries(test_server_session_log PRIVATE Threads::Threads OpenSSL::Crypto)
 endif()
