@@ -55,12 +55,12 @@ static int g_response_status = 200;
 static int g_prevent = 0;
 /* Tool-use fixtures for parsed_with_tool_uses. The JSON is a cJSON array of
  * {id, name, arguments} objects; the parser translates it into a populated
- * parsed_response_t.calls[] so messages_buffered's parse step has real
+ * owned IR tool blocks so messages_buffered's parse step has real
  * tool_use blocks to feed the police function. */
 static const char *g_tool_uses_json;
 static const char *g_upstream_stop_reason;
 
-static int governance_event_bus_provider(int policy_active, const char *const *tool_names,
+static int governance_event_bus_provider(int policy_active, const aimee_tool_identity_view_t *tools,
                                          uint32_t tool_count, const char *stop_reason,
                                          aimee_governance_decision_t *decision)
 {
@@ -74,8 +74,8 @@ static int governance_event_bus_provider(int policy_active, const char *const *t
    for (uint32_t i = 0; i < tool_count; ++i)
    {
       int denied =
-          strcmp(tool_names[i], "Agent") == 0 || strcmp(tool_names[i], "spawn_agent") == 0 ||
-          strcmp(tool_names[i], "RemoteTrigger") == 0 || strcmp(tool_names[i], "Task") == 0;
+          strcmp(tools[i].name, "Agent") == 0 || strcmp(tools[i].name, "spawn_agent") == 0 ||
+          strcmp(tools[i].name, "RemoteTrigger") == 0 || strcmp(tools[i].name, "Task") == 0;
       if (denied)
          decision->drop_count++;
       else
@@ -400,11 +400,11 @@ static const cJSON *obj(const cJSON *parent, const char *key)
    return v;
 }
 
-/* P2c parser: populates parsed_response_t.calls[] from the JSON list in
+/* P2c parser: populates owned IR tool blocks from the JSON list in
  * g_tool_uses_json, leaves content empty, and copies g_upstream_stop_reason
  * into parsed.stop_reason. The fake event-bus provider returns the same
  * decision as the real Go module; the production C seam applies it before
- * anthropic_response_from_parsed reads
+ * anthropic_frontend_render reads
  * call_count to render the wire. */
 
 /* P2c (response-side tool policing, buffered) integration tests. The real

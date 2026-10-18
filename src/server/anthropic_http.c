@@ -1319,16 +1319,8 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    wire_prov_body = (const char *)wire_body.data;
    wire_prov_body_len = wire_body.len;
 
-   /* P2c streaming: when gateway_prevent_subagents is ON, or the primary
-    * speaks the OpenAI Responses API (`chatgpt` / Codex), the streaming
-    * path becomes buffered — we fetch the upstream reply to completion,
-    * run the police function on the parsed struct (same logic as the
-    * buffered /v1/messages path), and replay the policed reply as a
-    * well-formed Anthropic SSE sequence via emit_message_as_sse. The
-    * chatgpt special-case is necessary because its stream format is
-    * response.output_* / response.completed, not the OpenAI chat chunk
-    * shape that today's incremental translator understands. Off (the
-    * default) falls through to today's incremental relay/translator. */
+   /* Policy and Responses providers require a complete owned response before
+    * rendering native client SSE. Other providers enter the IR delta relay. */
    if (buffered_replay)
    {
       messages_stream_buffered_replay(url, auth, wire_prov_body, wire_prov_body_len, extra, ag,

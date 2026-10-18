@@ -1,7 +1,7 @@
 /* aimee_ir_stream.h -- Slice 4: the neutral IR-DELTA streaming model. A BACKEND SSE
  * parser turns a provider stream into IR delta events; a FRONTEND SSE renderer
  * turns IR deltas into the client's stream. Together they replace the direct
- * provider-SSE -> client-SSE translators (anthropic_stream_feed_openai / xlate_*).
+ * provider-SSE -> client-SSE translators.
  * Pure state machines (no I/O); deltas borrow into the parsed chunk (transient). */
 #ifndef DEC_AIMEE_IR_STREAM_H
 #define DEC_AIMEE_IR_STREAM_H 1

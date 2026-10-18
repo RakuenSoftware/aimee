@@ -4,7 +4,7 @@
  * so the production police function runs end-to-end. The two streaming
  * paths (Anthropic-native raw-byte relay, OpenAI-via-translator per-block)
  * both bypass their incremental paths when the policy is ON, fall through
- * to a buffered upstream fetch + police + emit_message_as_sse replay.
+ * to a buffered upstream fetch + police + canonical response SSE renderer replay.
  *
  * Scope: covers the policy-ON path (drops + replays) AND the policy-OFF
  * regression canary (today's incremental paths are unchanged). */
@@ -64,7 +64,7 @@ static const char *g_tool_uses_json;
 static const char *g_upstream_stop_reason;
 static const char *g_response_content;
 
-static int governance_event_bus_provider(int policy_active, const char *const *tool_names,
+static int governance_event_bus_provider(int policy_active, const aimee_tool_identity_view_t *tools,
                                          uint32_t tool_count, const char *stop_reason,
                                          aimee_governance_decision_t *decision)
 {
@@ -78,8 +78,8 @@ static int governance_event_bus_provider(int policy_active, const char *const *t
    for (uint32_t i = 0; i < tool_count; ++i)
    {
       int denied =
-          strcmp(tool_names[i], "Agent") == 0 || strcmp(tool_names[i], "spawn_agent") == 0 ||
-          strcmp(tool_names[i], "RemoteTrigger") == 0 || strcmp(tool_names[i], "Task") == 0;
+          strcmp(tools[i].name, "Agent") == 0 || strcmp(tools[i].name, "spawn_agent") == 0 ||
+          strcmp(tools[i].name, "RemoteTrigger") == 0 || strcmp(tools[i].name, "Task") == 0;
       if (denied)
          decision->drop_count++;
       else
@@ -401,7 +401,7 @@ static void replay_capture(void *ctx, const char *event, const char *data)
  * tool_use. The streaming path takes the buffered-and-replay branch: the
  * raw byte relay is bypassed, the upstream reply is fetched as a single
  * agent_http_post, the police function drops the subagent call, and
- * emit_message_as_sse replays the surviving sequence. No tool_use block
+ * canonical response SSE renderer replays the surviving sequence. No tool_use block
  * on the wire; stop_reason "end_turn" (all-dropped rewrite). */
 static void test_streaming_anthropic_police_drops_subagent_tool_use(void)
 {
