@@ -1094,7 +1094,7 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	return request, nil
 }
 
-func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []byte) (result []byte, status bus.ModuleStatus) {
+func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, request DataRequest, failure *error) (result []byte, status bus.ModuleStatus) {
 	if backend, ok := options.data.(*postgresDataStore); ok {
 		bound := *backend
 		bound.recallExecutor = options.executor
@@ -1108,10 +1108,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		}()
 		options.data = &bound
 	}
-	request, err := decodeDataRequest(body)
-	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
-	}
+	var err error
 	// This is an internal lifecycle contract for the trusted connection host,
 	// not a model/user command. Existing owner routes admit subject erasure.
 	if request.Operation == "erase-backend" {
@@ -1405,6 +1402,9 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		cause := err
 		if cause == nil {
 			cause = ctx.Err()
+		}
+		if failure != nil {
+			*failure = cause
 		}
 		// Never log the request, SQL, driver message or connection string.
 		log.Printf("memory data failure operation=%q trace=%d status=%d class=%s",
