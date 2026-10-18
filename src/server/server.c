@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 #endif
 #include "workspace_hook_scope.h"
+#include <aimee/translation/hook_ir.h>
 #include "server_internal.h"
 #include "aimee.h"
 #include "harness_memory_scope.h" /* hmem_scope_for_client */
@@ -859,54 +860,41 @@ static int server_hook_identity(server_conn_t *conn, cJSON *req, const char *sid
  * interception deny. Honest scope + fail policy: see wfe_native_gate.h / cmd_hooks.c. */
 static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   cJSON *jtn = cJSON_GetObjectItemCaseSensitive(req, "tool_name");
-   cJSON *jti = cJSON_GetObjectItemCaseSensitive(req, "tool_input");
-   cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(req, "cwd");
-   cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
-   cJSON *jrid = cJSON_GetObjectItemCaseSensitive(req, "request_id");
-
-   const char *request_id = cJSON_IsString(jrid) ? jrid->valuestring : NULL;
-
-   if (!cJSON_IsString(jtn))
-      return server_send_error(conn, "missing tool_name", request_id);
-
-   const char *tool_name = jtn->valuestring;
-   char *ti_heap = NULL;
-   const char *tool_input = "{}";
-
-   if (cJSON_IsString(jti))
-      tool_input = jti->valuestring;
-   else if (cJSON_IsObject(jti) || cJSON_IsArray(jti))
+   const char *request_id =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "request_id"));
+   aimee_hook_ir_t hook = {0};
+   if (aimee_hook_ir_admit(req, &hook))
+      return hook_send_blocked(conn, "Malformed native or canonical hook intent.", request_id);
+   /* The native guardrail catalog is flat. Never reinterpret a foreign
+    * namespaced identity as a privileged/known leaf name. */
+   if (hook.call.tool_namespace && hook.call.tool_namespace[0])
    {
-      ti_heap = cJSON_PrintUnformatted(jti);
-      tool_input = ti_heap;
+      aimee_hook_ir_free(&hook);
+      return hook_send_blocked(conn, "Namespaced hook has no registered policy owner.", request_id);
    }
-
-   const char *cwd = cJSON_IsString(jcwd) ? jcwd->valuestring : "";
-   const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : "unknown";
+   const char *tool_name = hook.call.tool_name;
+   char *ti_heap = aimee_hook_ir_arguments(&hook);
+   if (!ti_heap)
+   {
+      aimee_hook_ir_free(&hook);
+      return hook_send_blocked(conn, "Cannot retain canonical hook arguments.", request_id);
+   }
+   const char *tool_input = ti_heap;
+   const char *cwd = hook.cwd ? hook.cwd : "";
+   const char *sid = hook.session_id ? hook.session_id : "unknown";
    if (!is_safe_id(sid))
+   {
+      free(ti_heap);
+      aimee_hook_ir_free(&hook);
       return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
                                request_id);
-
-   cJSON *scope_input = cJSON_Parse(tool_input);
-   const char *scope_cwd = cwd;
-   static const char *const scope_keys[] = {"workdir", "cwd", "working_dir", "working_directory",
-                                            NULL};
-   for (int i = 0; scope_keys[i]; i++)
-   {
-      const char *value =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(scope_input, scope_keys[i]));
-      if (value && value[0])
-      {
-         scope_cwd = value;
-         break;
-      }
    }
-   int registered = workspace_hook_registered(scope_cwd);
-   cJSON_Delete(scope_input);
+   const char *target_cwd = hook.tool_cwd && hook.tool_cwd[0] ? hook.tool_cwd : cwd;
+   int registered = workspace_hook_registered(target_cwd);
    if (!registered)
    {
       free(ti_heap);
+      aimee_hook_ir_free(&hook);
       cJSON *allowed = cJSON_CreateObject();
       cJSON_AddStringToObject(allowed, "status", "ok");
       cJSON_AddNumberToObject(allowed, "exit_code", 0);
@@ -920,8 +908,12 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *trusted_client = NULL;
    int hook_identity = server_hook_identity(conn, req, sid, &trusted_client);
    if (hook_identity < 0)
+   {
+      free(ti_heap);
+      aimee_hook_ir_free(&hook);
       return hook_send_blocked(conn, "Unauthenticated or mismatched session hook identity.",
                                request_id);
+   }
 
    session_state_t state;
    session_state_load(&state, sid);
@@ -930,10 +922,11 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * central store BEFORE the generic guardrails see it (rc==2 -> client deny). */
    {
       char mr_msg[1024] = "";
-      if (trusted_client && server_memory_intercept(tool_name, tool_input, cwd, req, trusted_client,
-                                                    mr_msg, sizeof(mr_msg)) == 2)
+      if (trusted_client && server_memory_intercept(&hook.call, cwd, req, trusted_client, mr_msg,
+                                                    sizeof(mr_msg)) == 2)
       {
          free(ti_heap);
+         aimee_hook_ir_free(&hook);
          return hook_send_blocked(conn, mr_msg, request_id);
       }
    }
@@ -943,6 +936,7 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (s2rc >= 0)
    {
       free(ti_heap);
+      aimee_hook_ir_free(&hook);
       return s2rc;
    }
 
@@ -953,19 +947,6 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * branch and verify guards. Binding only the file-tool provider leaves those
     * probes on the server and makes every remote push unresolvable.
     * Worktree creation/routing belongs to the thin client for detached roots. */
-   cJSON *input = cJSON_Parse(tool_input);
-   const char *target_cwd = cwd;
-   static const char *cwd_keys[] = {"workdir", "cwd", "working_dir", "working_directory", NULL};
-   for (int i = 0; cwd_keys[i]; i++)
-   {
-      const char *value =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(input, cwd_keys[i]));
-      if (value && value[0])
-      {
-         target_cwd = value;
-         break;
-      }
-   }
    char saved_cwd[MAX_PATH_LEN];
    snprintf(saved_cwd, sizeof(saved_cwd), "%s", run_cmd_get_cwd() ? run_cmd_get_cwd() : "");
    /* Only an authenticated lifecycle hook may attest to client-local scope.
@@ -986,8 +967,7 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    if (rc != 2 && hook_identity == 1)
    {
-      const char *attempt =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "tool_use_id"));
+      const char *attempt = hook.call.tool_id;
       if (!attempt || !attempt[0])
          attempt = request_id;
       if (policy_check_session_tool(sid, tool_name, tool_input, attempt, msg, sizeof(msg)) != 0)
@@ -995,7 +975,6 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
    run_cmd_set_cwd(saved_cwd[0] ? saved_cwd : NULL);
    workspace_turn_unbind_active();
-   cJSON_Delete(input);
 
    /* Sub-agent interception (enforce-delegate-only): the primary agent must not
     * spawn its OWN sub-agents. pre_tool_check already blocks Task/Agent/spawn_agent
@@ -1006,7 +985,7 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
        agent_any_delegate_available())
    {
       char prompt[8192] = "";
-      cJSON *ti = cJSON_Parse(tool_input);
+      const cJSON *ti = hook.call.tool_input;
       if (ti)
       {
          cJSON *jp = cJSON_GetObjectItemCaseSensitive(ti, "prompt");
@@ -1019,7 +998,6 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
             snprintf(prompt, sizeof(prompt), "%s", p);
          else if (d)
             snprintf(prompt, sizeof(prompt), "%s", d);
-         cJSON_Delete(ti);
       }
       if (strlen(prompt) >= 20)
       {
@@ -1064,44 +1042,48 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    int src = server_send_response(conn, resp);
    cJSON_Delete(resp);
-   if (ti_heap)
-      free(ti_heap);
+   free(ti_heap);
+   aimee_hook_ir_free(&hook);
    return src;
 }
 
 static int handle_hooks_post(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-
-   cJSON *jtn = cJSON_GetObjectItemCaseSensitive(req, "tool_name");
-   cJSON *jti = cJSON_GetObjectItemCaseSensitive(req, "tool_input");
-   cJSON *jrid = cJSON_GetObjectItemCaseSensitive(req, "request_id");
-   const char *request_id = cJSON_IsString(jrid) ? jrid->valuestring : NULL;
-
-   const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "session_id"));
+   const char *request_id =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "request_id"));
+   aimee_hook_ir_t hook = {0};
+   if (aimee_hook_ir_admit(req, &hook))
+      return hook_send_blocked(conn, "Malformed native or canonical hook intent.", request_id);
+   if (hook.call.tool_namespace && hook.call.tool_namespace[0])
+   {
+      aimee_hook_ir_free(&hook);
+      return hook_send_blocked(conn, "Namespaced hook has no registered policy owner.", request_id);
+   }
+   const char *sid = hook.session_id;
    if (!sid || !is_safe_id(sid))
+   {
+      aimee_hook_ir_free(&hook);
       return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
                                request_id);
+   }
    const char *trusted_client = NULL;
    int hook_identity = server_hook_identity(conn, req, sid, &trusted_client);
    if (hook_identity < 0)
+   {
+      aimee_hook_ir_free(&hook);
       return hook_send_blocked(conn, "Unauthenticated or mismatched session hook identity.",
                                request_id);
-
-   const char *tool_name = cJSON_IsString(jtn) ? jtn->valuestring : "";
-   char *ti_heap = NULL;
-   const char *tool_input = "{}";
-
-   if (cJSON_IsString(jti))
-      tool_input = jti->valuestring;
-   else if (cJSON_IsObject(jti) || cJSON_IsArray(jti))
-   {
-      ti_heap = cJSON_PrintUnformatted(jti);
-      tool_input = ti_heap;
    }
-
-   post_tool_update(tool_name, tool_input, NULL);
-
+   char *arguments = aimee_hook_ir_arguments(&hook);
+   if (!arguments)
+   {
+      aimee_hook_ir_free(&hook);
+      return hook_send_blocked(conn, "Cannot retain canonical hook arguments.", request_id);
+   }
+   post_tool_update(hook.call.tool_name, arguments, NULL);
+   free(arguments);
+   aimee_hook_ir_free(&hook);
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "exit_code", 0);
    cJSON_AddStringToObject(resp, "hook_identity", trusted_client ? "trusted" : "untrusted");
@@ -1109,8 +1091,6 @@ static int handle_hooks_post(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON_AddStringToObject(resp, "request_id", request_id);
    int rc = server_send_response(conn, resp);
    cJSON_Delete(resp);
-   if (ti_heap)
-      free(ti_heap);
    return rc;
 }
 

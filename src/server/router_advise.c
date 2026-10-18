@@ -182,6 +182,41 @@ int gw_stage_router(gw_request_t *r, void *ud)
    return 0;
 }
 
+void router_advise_ir(const aimee_request_t *request)
+{
+   if (!request)
+      return;
+   for (int i = request->n_messages - 1; i >= 0; i--)
+   {
+      const aimee_message_t *message = &request->messages[i];
+      if (!message->role || strcmp(message->role, "user"))
+         continue;
+      size_t length = 0;
+      for (int j = 0; j < message->n_blocks; j++)
+         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text)
+            length += strlen(message->blocks[j].text) + 1;
+      if (!length)
+         return; /* Tool-result continuation is not a fresh routing request. */
+      char *query = calloc(length, 1);
+      if (!query)
+         return;
+      for (int j = 0; j < message->n_blocks; j++)
+         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text)
+         {
+            if (query[0])
+               strcat(query, "\n");
+            strcat(query, message->blocks[j].text);
+         }
+      const char *turn = ingress_preinject_turn_id();
+      router_advise_log(turn && turn[0] ? turn : "ingress", query);
+      const char *session = ingress_preinject_session_id();
+      if (session && session[0])
+         wfe_bind_interactive(session, query, NULL);
+      free(query);
+      return;
+   }
+}
+
 void router_advise_turn(const char *session_id, const char *message)
 {
    wfe_prefilter_outcome_t pf = router_advise_log(session_id, message);

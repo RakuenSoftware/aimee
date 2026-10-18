@@ -1,0 +1,939 @@
+# Aimee overnight continuation handoff
+
+Prepared 17 October 2026, approximately 23:30 Europe/Amsterdam. The user requested implementation to stop here, the work to be pushed, and a complete handoff for a local session. Do not infer that the overall migration is complete.
+
+## Current continuation status: 18 October 2026
+
+The user authorized replacement of #3036 to satisfy the permanent attribution gate, then
+explicitly requested its retirement. Active work is now on
+[#3038](https://github.com/RakuenSoftware/aimee/pull/3038), branch
+`fix/browser-ir-runtime-personal`, targeting `testing`. It contains all of #3036's migration
+work. Its published checkpoint `07548c7fe` passes all 60 checks, including strict attribution,
+full integration, sanitizers and deployment tiers T1, T2, T2-luks and T3. Integration passes
+156/156 in CI, including real Docker delegate completion/readback (25 other service-dependent
+checks skipped). The earlier note calling all four deployment tiers green on `6b8d720c0`
+was incorrect: the job tool returned only its first page. Full check enumeration confirms
+all 60 pass on `07548c7fe`.
+
+#3036 is closed, its body is empty, and `fix/browser-ir-runtime` was deleted locally and
+remotely. GitHub retains the closed PR record. All older instructions below naming #3036
+as the active PR/branch are historical and superseded. Do not reopen it, restore its branch,
+or create another replacement. Continue on #3038 with automatic reviews and strict attribution
+checks enabled.
+
+- Canonical primary loading/model switching, durable-log history, standard browser controls, native hook admission, compaction and several credential/consumer cutovers are implemented. The whole migration remains unfinished, especially credential-free native execution, scoped native tools and account-bound replay/cache proof.
+- The user explicitly confirmed that production .100 should NOT use a KB instance right now. Unset KB mode/endpoint are intentional. Do not configure/connect a KB or enable a dependency on one to fix learning. Repair and qualify server-local learning, failed approaches and authenticated task-outcome capture through their existing owners.
+- The active-project CLI repair is installed and was exercised from wol-lore. Keep the completed WOL PR separate; no WOL content belongs in #3038.
+- Strict opening-app attribution remains enforced; #3038 passes without an exemption. Production promotion still needs the recorded independent review required by OWNERS.md.
+
+## Replacement CI repairs: 18 October 2026
+
+- The delegate learning journey now owns a registered `shared` server checkout,
+  separate from the earlier mirror journey's client-side path. The integration
+  Make target builds the actual `aimee-delegate-egress` sandbox owner as a prerequisite.
+  Real Docker completion/readback remains required where Docker is available.
+- MR-18's frozen `main_test.go` input was reviewed: removing only event 6147
+  from the expected Learning registry reproduces the previous frozen SHA-256 exactly
+  (`09438b193d19bc2551759b538037f4da20604a707f04d2ff4f30e1f34a59a725`).
+  The refreshed input hash admits the new canonical execution-outcome stage;
+  no invariant cases, groups, assertions, thresholds or denominators changed.
+
+## Historical 17 October startup instructions (superseded)
+
+
+- Repository: https://github.com/RakuenSoftware/aimee
+- **Keep all further work in the existing PR #3036**: https://github.com/RakuenSoftware/aimee/pull/3036
+- Branch: `fix/browser-ir-runtime`; target: `testing`.
+- **Historical 17 October pushed and verified commit: `3f44879630c02206bd908870e4b192b86ea54d2c`.** Its Git tree is `2f63314f5ad5d95da0a7d8cbb2adddffbe4672b2`, exactly equal to the tested staged tree.
+- Commit parents: previous published head `9bc8d682cb626e8afefdb57df50319d4a1279d15`, plus `testing` at `096aaf6a5d7eeeb4632d5127d8df72078bab281a`. The latter contains merged #3033, #3034, #3035 and #3037.
+- Raw Git author and committer were checked through GitHub: `JBailes <jbailes@gmail.com>`. No AI attribution trailer was added.
+- **The full IR migration remains unfinished.** The pushed change cuts over the delegate execution loop and history; it does not finish every ingress, session owner, control channel, or internal consumer.
+- Do not spend the overnight session merely watching CI. Fix actual failures, but continue the substantive migration described below. Do not create additional PRs or claim completion after another foundation slice.
+
+Suggested local startup, using an isolated worktree if the existing checkout has work:
+
+```bash
+git fetch origin fix/browser-ir-runtime testing
+git worktree add -b local/aimee-ir-overnight ../aimee-ir-overnight origin/fix/browser-ir-runtime
+cd ../aimee-ir-overnight
+git log -1 --oneline
+git status --short
+```
+
+If that local branch or directory already exists, choose another local name; **do not make another remote PR branch**. Push completed commits to `origin fix/browser-ir-runtime`, checking for concurrent changes first. Read the checkout's current `OWNERS.md`, `CONTRIBUTING.md`, and applicable `AGENTS.md` before edits.
+
+## What the user actually wants
+
+The existing Aimee web GUI should let the user work from any machine in the house, using the server's same terminal/environment, tools, delegates and models as their desktop CLI. They authorize full environment/terminal access. They do not want a new IDE, another GUI, or a separate web proxy proposal. Refer to the Go service as the **web backend**.
+
+Their architectural rule is explicit: **convert native model or harness output into typed IR at its entry into Aimee; downstream execution, history, persistence, replay and webchat should consume IR. Render native wire formats only at explicit output boundaries.** Scraped terminal screens are not a valid structured entry adapter.
+
+Claude should use headless `claude -p --output-format stream-json --include-partial-messages` instead of tmux capture. The user accepted headless tradeoffs and asked about caching; preserve native session continuation and prompt-cache semantics. Keys/OAuth belong to Vault. Credentials must not be exposed as model/browser content; reuse Vault custody and existing typed credential/egress paths.
+
+One PR only. Previous assistants repeatedly opened PRs and claimed partial work was complete; the user explicitly rejected that behavior.
+
+## Existing published browser foundation in #3036
+
+These pieces were already on the branch before the new delegate cutover:
+
+- Server-owned canonical capture in `src/server/server_chat_ir.c`; persist before delivery. Browser disconnect loses a subscriber, not the admitted execution. Storage failure aborts capture/execution.
+- Migration 44 introduces the ordered durable canonical session log and append/page operations. Migration 45 stores owner-checked per-harness native resume IDs.
+- Claude stream-json, Codex app-server and ACP entry adapters live in `src/modules/translation/harness_ir.c`. Typed content/control requests are emitted at the reader boundary.
+- Claude browser primaries use a real child headless runner. Vault-backed ephemeral credential homes retain native resume directories through symlinks to `.claude/projects` and `.codex/sessions`. Codex app-server has OAuth and Aimee MCP configuration.
+- Browser requests use `ir_version:1`; replay uses `format=ir&cursor`. The web backend forwards canonical event bytes unchanged. The frontend uses one canonical reducer for live delivery and replay.
+- Admitted host turns retain presence/arbitration/workspace leases after the browser disconnects.
+- Permission requests are displayed as typed controls. **Interactive browser permission replies are not implemented.**
+- Harness capture owns observation for those browser turns; ingress is not also captured for them, avoiding duplicate model turns.
+- Legacy unversioned events, native-history storage and other runtime paths still exist. The foundation is not a global cutover.
+
+## What the newly pushed commit changes
+
+### Delegate execution actually retains IR
+
+`src/posix/agent_runtime.c` now receives owned `aimee_response_t` from the native decoders and retains typed blocks through governance, respond normalization, dispatch, history and final-turn capture. There is no `parsed_response_t` projection in the active tool loop and no three-way provider-format history append branch there.
+
+- Full opaque tool IDs are retained; no fixed 16-call execution cap. Admission caps responses at `AIMEE_IR_MAX_BLOCKS` (4096).
+- Tool arguments are dynamically allocated views of each typed `tool_input`; original typed JSON remains the source.
+- Governance batches the dynamic list through the existing 16-wide registered Go policy provider, applies deletions backwards, and preserves non-tool blocks and typed truncation.
+- `delegate_respond` normalization operates on typed blocks. Mixed respond/real-call output drops only respond. Pure respond becomes final text while retaining thinking/media/context.
+- History is canonical `{role, blocks}`. One assistant append path and one tool-result append path replace the native-format branches. Host/user text is canonical at construction.
+- Tool attempt counts are recorded before dispatch/capture, so a result-publication failure does not falsely imply the tool never ran.
+- Local capture/continuity failure is terminal and does not rotate credentials or replay the turn with another provider after a tool may have executed.
+- `agent_result_t` still exposes a legacy flat text projection to external/internal callers; replacing all those consumers is unfinished.
+
+### Entry adapters and history import
+
+`src/posix/agent_ir_parse.c` provides owned IR decoding for buffered native responses. It rescues tool calls once at entry, validates admitted assistant content, and publishes buffered lifecycle events. API responses reject forged tool results, invalid roles, duplicate tool IDs, invalid function arguments and unsupported content. Legacy `agent_ir_parse_*` wrappers remain for callers not yet migrated.
+
+**Legacy-history conversion was moved out of POSIX into** `src/modules/translation/history_ir.c`, exported as `aimee_frontend_history_import` in `aimee_frontend.h`:
+
+- Canonical histories are codec-validated and copied.
+- Native Anthropic, Chat and Responses histories enter through their frontend adapter and become canonical.
+- Mixed canonical/native histories fail.
+- Leading legacy system content is lifted out; current host system instructions are supplied separately.
+- Chat assistant `reasoning_content` / string `reasoning` is retained as THINKING before visible content.
+- Existing cross-protocol fixtures now test all three history imports, tool pairing, canonical reload, reasoning and mixed-shape rejection.
+
+### Canonical IR codec/lifecycle
+
+IR now preserves thinking ID, encrypted reasoning content, redacted state, cache metadata, context metadata, typed error text and full cache/read/write/reasoning usage. New helpers free messages, validate blocks, enumerate/drop tools, allocate response text and render media references.
+
+`aimee_ir_message_parse` is the owned canonical decoder. Tool input is opaque JSON or absent globally, because ACP may provide arbitrary/partial input; the completed API function-call decoder separately requires object arguments.
+
+`aimee_ir_history_repair` tracks ordered tool cycles, supports reused IDs in later cycles, inserts cancelled results for unanswered current calls and removes orphan results without dropping unrelated blocks. It builds a replacement before mutating history.
+
+Buffered response publication is TURN_START -> MESSAGE -> TURN_STOP. Provider failures produce a typed ERROR lifecycle. A thread-local capture-failure latch distinguishes continuity failure from retryable provider errors.
+
+### Translation/egress
+
+- Anthropic request/response parsing shares a block adapter, including signed and redacted thinking.
+- Responses SSE extraction belongs to `aimee_backend_responses.c`; the former several-hundred-line parser in `server/agent_bridge.c` is now a compatibility wrapper. It preserves output-index order, completed items omitted by the terminal snapshot, encrypted reasoning, full IDs, CRLF/multiline framing, refusal and incomplete/error outcomes. Missing terminal events and unknown content fail rather than flattening to empty text.
+- Responses egress preserves ordered text/media/tool uses/results and structured tool results, requests encrypted reasoning, and retains native reasoning IDs. Foreign opaque thinking is retained internally without fabricating a native Responses reasoning ID.
+- OpenAI Chat parses image/file parts and preserves media at egress. Chat egress does not yet replay THINKING as provider-specific `reasoning_content`; check compatible-provider needs rather than inventing universal OpenAI fields.
+- Anthropic egress retains URL/media distinctions and opaque data-URI handling. **Its general cache-normalization policy still strips/replaces client breakpoints; the requested same-protocol raw fast path is not implemented yet.**
+- All three response parsers/renderers handle typed errors; truncation/stop reason from merged #3033 remains intact.
+
+### Canonical request/history and compaction
+
+`agent_build_request_ir` in `server/agent_bridge.c` imports the native provider profile/catalog into IR, replaces its messages from canonical history and renders at egress. Existing profile-specific knobs remain in the output profile. This is an active delegate cutover, not deletion of every legacy builder elsewhere.
+
+C compaction recognizes canonical blocks, protects complete user/system/developer messages, keeps signed reasoning/tool cycles in the retained tail, and folds evidence segments around protected messages. It builds the replacement before mutation and keeps mixed protected result messages intact. The merge preserves #3034's separate native-history cut alignment fix.
+
+Go economizer folding/compression/repair recognizes canonical blocks and produces canonical summaries. **The Go record builder was also fixed** (`module_record.go`) to extract canonical text and tool-result evidence, avoid roleless-reasoning-as-result classification, and preserve paths found in results. Shared typed Go IR across all modules remains unfinished.
+
+### Browser reducer correction
+
+`frontend/src/ir/session.ts`: a full message snapshot received inside an already-started model turn stops its blocks but preserves the previous completion state. TURN_STOP owns completion/usage. Standalone messages complete immediately; a snapshot after TURN_STOP stays complete. This fixes the observed replay error, “Delta follows message completion”. Metadata and usage tests cover live/replay parity.
+
+### Capture failures do not replay tools
+
+`AGENT_RC_CAPTURE_FAILED` is a local refusal alongside context refusal. Dispatch, provider fallback, credential retry and browser execution stop on it and do not penalize provider health or cool down credentials. The simple completion parser in `server/agent_runtime.c` also uses the owned IR decoders instead of three handwritten native parsers.
+
+## Validation actually completed
+
+All **13 focused native binaries passed**. After incorporating testing's #3034/#3035, all were rebuilt/rerun successfully (the final nine were rerun immediately before handoff):
+
+```
+agent-context-refusal
+delegate-credentials
+agent-error-retryable
+responses-parity
+ir-session-event
+ir-crossproto-egress
+session-compact
+harness-ir
+server-chat-ir
+response-governance-stage
+agent-runtime-messages
+agent-ir-parse
+delegate-driver
+```
+
+Important coverage includes a real 17-tool turn with long opaque IDs, capture failure before/after dispatch, no credential/provider replay, ordered Responses SSE with incomplete/empty terminal snapshots, native history conversion and tool-cycle-preserving compaction.
+
+- Frontend: **259 tests across 32 files**, plus `tsc --noEmit`, passed after the reducer fix.
+- Go: `-race ./modules/aimee/families ./modules/economizer -count=1` passed; economizer race tests passed again after the canonical record-builder fix.
+- Python attribution/identity: **11 tests passed**, including the literal single-asterisk footer reported by the user.
+- `git diff --check` and clang-format 19 dry-run over changed C/header files passed.
+- Ownership/module gates passed: source ownership, header layout, docs, inventory, test registration, descriptor sources, placement, emitter linkage, Go package ownership and module bus boundary. The new history codec include is explicitly recorded as a shared IR contract, not an undocumented peer service call.
+- ASan/UBSan **four binaries passed**: IR session codec/events, cross-protocol egress, governance and Responses parity. These sanitizer runs preceded the final helper relocation/history-import fixture and latest testing merge; rerun locally with the final tree.
+- Do **not** claim the larger end-to-end ASan targets passed: this environment's non-LTO sanitizer build exposed unresolved existing test linkage (DB1/tool effect-contract symbols) for agent-context/delegate-driver. Standard builds of those targets pass.
+- Fresh CI for `3f448796...` has **not** been inspected. Prior published-head CI mostly passed, but that is not evidence for the newly pushed tree.
+- No live Vault-backed deployment/subscription/native-resume acceptance test has been completed. PostgreSQL integration ran in CI for the earlier foundation; rerun current CI locally where possible.
+
+## Highest-priority next work / concrete unresolved seams
+
+1. **Primary history switching now needs canonical ownership.** Newly merged #3035's `primary_session_adapter.c` adopts another provider's history through `aimee_ir_convert_history` in `aimee_ir_serve.c`, which expects native arrays and renders them back to native wire. The new delegate loop now returns canonical histories. Inspect/fix this immediately: primary state, load, adoption and compaction should import once through `aimee_frontend_history_import` and keep canonical history regardless of current provider. Do not serialize canonical blocks as though they were native `content`/Responses items. Add a real primary-switch/reload fixture; there was no existing `test_primary_session_adapter.c` found.
+2. **Durable session log must become the source of history**, not just a browser observation stream beside `primary_sessions`. All native/CLI primaries and delegates need the same server-owned ordered capture/replay path. Current thread-local sink does not automatically propagate into worker threads; do not borrow an HTTP socket context. Bind a log-only server owner to attested session/principal/execution scope using existing typed APIs.
+3. Preserve scope for child delegates. Their private model conversation should not be dumped into the parent's prompt. Parent receives the delegate TOOL_RESULT; the UI may expand child execution scope. Session identity belongs in the transport envelope, not model deltas.
+4. **Governance/log consistency remains unresolved:** entry capture sees the original model response, while governance/respond normalization mutates execution history. A denied tool use may appear in the session log without a paired denial result. The canonical log/projection design must represent the decision without losing the original event or silently creating a second history source.
+5. **Interactive browser controls are unfinished.** Implement Claude/Codex permission/question replies through their documented native control channel, with owner-checked server pending IDs and correlated canonical CONTROL_RESPONSE events. Do not let a model's own ingress/MCP token approve its request. Claude currently writes a plain prompt and closes stdin; supported bidirectional stream-json input/control is needed. Verify exact schemas against official primary documentation before implementing.
+6. **Audit CLI ingress/Vault integration.** Desktop `cli_proxy_launch` in `src/cli_proxy.c:528` sets Aimee base URLs and Codex's Responses provider. Browser Codex currently selects `model_provider="openai"`; headless CLI credential homes currently contain Vault-materialized subscription credentials and go directly upstream, with IR supplied by harness adapters. Determine whether the existing ingress can serve Vault-held subscription OAuth and reuse the desktop route/session binding. Do not invent a web proxy. Verify credential/tool custody rather than assuming an ephemeral HOME alone prevents a CLI tool reading credentials.
+7. Remove remaining tmux execution paths globally; browser headless is done, but nonbrowser `AGENT_BACKEND_TMUX_CLI`, `agent_runtime_tmux.c` and related paths remain.
+8. **C compaction fallback evidence reader** `msg_text` in `src/server/session_compact.c` currently reads first TEXT, not TOOL_RESULT.content. Go's record path was fixed, but inspect the fallback flashback/summary path for canonical tool-evidence loss and add a meaningful fixture. Avoid speculative changes; verify actual readers.
+
+## Full remaining migration backlog from the user's audit
+
+Do not narrow the task to just the above immediate bugs:
+
+- Activate `ingress_preinject_anthropic_enabled` through IR **after** implementing a cache-preserving raw fast path; do not delete the setting or silently lose client cache breakpoints.
+- Make IR response parse and stream relay the actual default, delete `anthropic_stream_feed_openai`, `driver->parse_response` and silent legacy response fallbacks once the IR path is complete.
+- Remove `build_provider_body`, `driver->build_request` and direct `translate_request` paths; routing/policy must read IR rather than the translated raw request.
+- Remove Responses -> Chat -> IR and Chat-format round trips that lose tool choice, reasoning and structured output.
+- Implement real mutation tracking and same-protocol raw passthrough preserving exact bytes/cache metadata, then remove the separate Anthropic passthrough/native relay.
+- Move tool policing/router/model pin and economizer/memory/governance onto typed IR; supply shared typed Go IR over the bus rather than extending per-format branches indefinitely.
+- Add typed reasoning effort, structured output and hosted-tool choice fields. Opaque `thinking`, metadata and service-tier sidecars are still transitional.
+- Remove residual `parsed_response_t`/legacy delegate registry/native tool-shape handling from unmigrated consumers. The delegate loop is cut over; the whole repository is not.
+- Replace flat `agent_result_t` for its many internal callers; hand parser removal in simple completion is only part of this.
+- Rebuild Responses `previous_response_id` history from canonical session history, replacing the flattened in-process text store.
+- Trajectory export should preserve typed blocks and tool IDs. KB curator `provider_client.c` and Claude/Codex hook payloads must also enter IR.
+- Migrate old native-array and tmux-text transcripts with explicit fidelity reporting; lost screen structure cannot be recreated honestly.
+- Fix the 1 MiB history-load ceiling (`src/db1_client/sessions.c`, `db1_primary_session_load`) which returns empty on oversize. Check related list/load buffers and protocol limits rather than merely raising one malloc.
+- Add the IR bypass checker requested in `ir-sole-path-residual.md`, with exact justified exceptions/retirement, covering the identified native-shape strings in C/Go. Do not rubber-stamp all current bypasses.
+- Update README, STATUS, WHAT'S NEW and the pending canonical session proposal truthfully as cutovers complete.
+- Preserve reload/live parity, tool ID pairing, controls, ownership, session switching and cache behavior across all models.
+
+## Attribution CI policy: required and intentionally strict
+
+The existing `no-coauthor-trailers` check was strengthened in #3036. It must reject all of:
+
+- Raw Git author **or committer** identities such as `Claude <noreply@anthropic.com>` (the user's example was PR #3033 commit `2c18a5309bd1506622149658e9d3390d0c0fecc5`).
+- Generated-by footers, including the exact single-asterisk Claude Code footer reported on #3034. A regression fixture was added this turn; it passes.
+- The opening PR issue's structured `performed_via_github_app` attribution to Claude or ChatGPT Codex Connector, which produces GitHub's “with …” label. **Read the issues endpoint**, not just `/pulls`; missing/malformed metadata fails closed.
+
+Files: `scripts/check-pr-attribution.py`, `scripts/check-commit-identities.py`, the existing workflow job, related Python tests, `CONTRIBUTING.md` guidance.
+
+**#3036 itself has the disallowed Codex Connector opening attribution and is expected to fail this stronger gate.** Body edits do not remove the structured attribution. Do not exempt this PR, weaken the rule, falsify metadata or open another PR. This is a remaining human/policy-resolution blocker; surface it accurately after completing reviewable implementation.
+
+Why #3034 previously passed despite its footer: the stronger gate was only in unmerged #3036; #3034 still ran the old generated-with-only check. #3034 is now merged into testing. Do not rewrite other PRs just to apply an unmerged policy.
+
+## Cloud session details, only if needed
+
+- Cloud checkout: `/workspace/scratch/7f86ecc3b843/aimee`.
+- After publication, local HEAD was synchronized to `3f44879630c02206bd908870e4b192b86ea54d2c` by a soft reset after verifying exact tree equality. The tracked worktree/index is clean; the unrelated benchmark file remains untracked. The PR title/body was updated to distinguish completed work from the remaining migration.
+- Before publication local HEAD was merge `f2b659909f722e7fa42abfc0a37569eaf913499a`, with **62 staged files, 3609 insertions / 1688 deletions**. The GitHub commit was recreated from the identical tree with the two published parents above. Local refs/index may need synchronization; verify tree equality before any soft reset. Do not hard-reset away edits.
+- Unrelated untracked file must not be staged/deleted: `benchmarks/results/gemma4-unified/ab-v1/gemma4_e2b/.raw_gemma4_e2b.jsonl.ngLKJV`.
+- Two retained stash backups: `ir-delegate-before-testing-3034-3035` and `IR delegate and canonical history migration in progress`. Do not pop them over the pushed code; they duplicate older WIP and can reintroduce conflicts.
+- Do **not** regenerate `tests/baselines/refactor/index.json`. Module-test registration already passes with its current baseline.
+- Initial 2.5 MB GitHub tree upload hung and was interrupted. Publication succeeded by sequential smaller tree batches; the final tree SHA exactly matched local Git. A single commit and lease-checked ref update then succeeded. No new PR was created.
+- If local Git auth works, use ordinary commits/pushes under the verified human identity. Cloud shell Git had no write credential, so GitHub Git-data API was used. Never print credentials or add assistant author/trailer metadata.
+- No subagents were used; the session's developer rules prohibit spawning them unless the user or an applicable repo instruction explicitly requests delegation.
+
+### Cloud-only test tooling (local machine should use its own normal dependencies)
+
+```
+Go: /tmp/go/bin/go and gofmt (1.26.9)
+clang-format 19: /tmp/aimee-clang19/clang_format/data/bin/clang-format
+dependency headers: /tmp/aimee-test-deps/root/usr/include
+dependency libs: /tmp/aimee-test-deps/root/usr/lib/x86_64-linux-gnu
+standard object/test dirs: /tmp/aimee-ir-build, /tmp/aimee-ir-tests
+sanitizer dirs: /tmp/aimee-delegate-ir-asan, /tmp/aimee-delegate-ir-asan-tests
+```
+
+Cloud native narrow build pattern:
+
+```bash
+make -s -j2 -C src \
+  OBJDIR=/tmp/aimee-ir-build TESTPREFIX=/tmp/aimee-ir-tests \
+  EXTRA_C_FLAGS='-I/tmp/aimee-test-deps/root/usr/include -DAIMEE_DISABLE_ZSTD' \
+  TEST_L_FLAGS='-L/tmp/aimee-test-deps/root/usr/lib/x86_64-linux-gnu -lsqlite3 -lm -lpthread /tmp/aimee-ir-build/libaimee-core-connection.a -lssl -lcrypto -lz' \
+  /tmp/aimee-ir-tests/unit-test-agent-context-refusal
+```
+
+`AIMEE_DISABLE_ZSTD` was only needed because this environment lacks zstd development headers. PostgreSQL could not start here due to chown/setgroups restrictions, and Unix-socket tests have environment limits; run them on the local system. Do not bypass those restrictions. Do not edit C sources while a Make using the same object directory is running.
+
+Sanitizer experiments needed `--gc-sections`, `-fsanitize=address,undefined`, `-fno-omit-frame-pointer`, and nonfatal existing GCC `format-truncation`/`restrict` warnings at -O1. Runs used `ASAN_OPTIONS=detect_leaks=0` due to environment constraints. Fix actual new defects, not unrelated existing warnings simply to get this cloud build through.
+
+## Overnight success criteria
+
+Continue implementing the user's canonical-IR design in #3036. Start with canonical primary load/switch and the log/history source-of-truth seam, then native controls and ingress/cache-preserving cutover. Keep a precise checklist of what is removed versus still transitional. Run meaningful tests and the repository's required gates, fix CI defects, and push to the same branch. Do not report the entire task complete while interactive controls, ingress bypasses, native history ownership or other agreed consumers remain unfinished.
+
+## Local continuation progress (18 October 2026)
+
+Implementation continues in #3036 on `fix/browser-ir-runtime`. The migration remains unfinished.
+
+- Primary model switching/reload now consumes canonical history. Completed primary histories are
+  owner-checked atomic checkpoints in the ordered durable session log. Legacy provider rows are
+  import-only. Related transcript reads use bounded dynamic transport frames instead of the old
+  1 MiB empty-on-oversize behavior.
+- Compaction fallback reads typed tool results as evidence. Same-protocol untouched Anthropic
+  replay retains client cache markers and TTLs; unreported typed mutations prevent stale replay.
+- Browser permission/question replies use a server pending registry bound to principal/session/turn.
+  Only authenticated browser transport can enqueue decisions. Claude uses bidirectional stream-json
+  stdin; Codex consumes correlated operator replies. Both persist control responses before delivery.
+- Main-checkout CLI index discovery now bootstraps missing registry scope using the existing bounded
+  ingest path and resolves the canonical registered project; linked-worktree scope is retained.
+- Local frontend: 264 tests and TypeScript passed. Native server builds. Focused address/undefined
+  sanitizer fixtures, including replay and the real Codex child control exchange, passed with
+  leak detection enabled. Full native agent tests pass under `/var/tmp`; this host has `/tmp/.git`,
+  so the isolation test correctly treats `/tmp` scratch directories as repository descendants.
+- Local PostgreSQL live race fixtures cover checkpoint atomicity, ownership, replay and child-scope
+  privacy. Web backend race tests cover authenticated reply forwarding and cross-origin refusal.
+- CMake configuration still fails on existing deleted source references (starting with `_learn.c`).
+  Make is the working native build. Do not describe CMake or deployment qualification as passed.
+
+Still required: log-only capture owners for every nonbrowser primary/delegate worker, governance
+and observation pairing, remaining ingress/cache and native replay cutovers, tmux retirement,
+remaining typed IR consumers, bypass enforcement, and full integration/deployment qualification.
+The opening attribution on #3036 remains rejected by the strengthened gate; no exemption was added.
+
+### Additional local execution/history validation
+
+- `agent_dispatch_one` now installs a log-only owner for attested native primaries without an
+  existing capture and gives delegates private durable child sessions. Workers use copied typed
+  attestation; no HTTP context is shared. Durable job IDs select stable child history across attempts.
+- The tool loop loads/checkpoints that same durable canonical history. A prior unfinished host
+  execution requires reconciliation; only the caller's server-owned active turn may be excluded
+  from its own history load. This prevents restart from silently replaying an uncertain execution.
+- Governance emits an explicit error TOOL_RESULT for each removed opaque call ID, including calls
+  beyond the old mask width. Host-consumed synthetic final-answer calls also receive paired results.
+- Configured integration passed 153/153 checks with 25 full-stack-service skips. Deployment compose
+  environment tests passed, including the real emitter. HTTP reply tests reject model bearer/TCP
+  spoofing; native pending ownership, consume-once and child subprocess fixtures cover correlation.
+- New log owner and governance fixtures passed address/undefined sanitizers with leak detection.
+  The all-family Go race suite passes against a fresh isolated PostgreSQL database; sharing it with
+  the integration schema invalidates older tests' global table-count assumptions.
+- Fresh CI on `a08f76473` passed lint and exposed link dependency omissions for native HTTP/control
+  and a newly activated cold CLI fixture, plus a Windows unused-variable warning. Those are fixed
+  locally and need fresh CI. Secret scanning reported the OpenAPI input SHA-256 as an API key;
+  `.gitleaksignore` records that single commit/file/rule/line finding and its digest-only rationale.
+
+Remaining scope includes child execution references/UI expansion, all ingress/cache and native
+replay cutovers, tmux retirement, remaining typed consumers and bypass enforcement. Live Vault-backed
+browser qualification and full-stack deployment checks remain required. The attribution gate is unchanged.
+
+### Continuation: native replay and stream fidelity (18 October)
+
+The next worktree phase preserves authored Responses message groups without inserting separator
+blocks into model history. Native Anthropic edits preserve client cache breakpoints, TTLs and unchanged
+native extensions. A strict wire codec retains the exact original frame when same-protocol semantic
+comparison succeeds, including whitespace and numeric spellings; actual ingress attachment of this
+byte sidecar remains unfinished.
+
+Canonical stream deltas now carry thinking signatures, redacted state and initial tool inputs.
+OpenAI final usage arriving after finish_reason is retained. The incremental Chat-to-Anthropic ingress
+no longer executes its legacy stream translator, and premature EOF produces an error.
+
+Fresh b6dec512c CI passed native/PG suites, Go, frontend, sanitizers and Windows. The complete script
+suite found a missing ownership entry for session_ir_history_live_test.go (corrected). Three Docker
+matrix jobs stopped in native asynchronous primary recovery. Investigation reproduced lost attested
+identity: HTTP captured it only after early streaming routes returned. Capture now precedes those
+handoffs. Generic OpenAI/Anthropic/OpenRouter and local compatible HTTP models also need native primary
+adapter registration; they previously fell into the role-confined delegate route. A disposable local
+server plus PostgreSQL and synthetic provider now completes PRIMARY_OK after these fixes. Fresh Docker
+CI must still qualify the repaired path. The attribution gate remains intentionally strict and failing.
+
+The full migration is still incomplete. Global headless execution/tmux retirement, credential custody,
+remaining raw request/governance and response consumers, MCP elicitation forms and full Vault-backed
+browser/resume acceptance remain open. Do not interpret the passing focused checks as completion.
+
+### Continuation: non-browser Claude entry capture
+
+The registered Claude provider adapter now runs the same incremental headless reader as browser
+Claude, rather than collecting the entire subprocess output and decoding it afterward. Its timeout
+honors the configured workflow cap. A real subprocess fixture verifies that rejected live capture
+terminates the child before its later completion marker is written. Standalone native assistant
+snapshots also supply the legacy text projection from the owned decoded response.
+
+External harnesses do not produce a native-loop checkpoint array: their persisted canonical events
+are the history source. The native wrapper no longer tries to checkpoint a NULL array after a
+successful harness run. Conversely, a log owner cannot report success without a completed canonical
+model response. Capture failures remain sticky when a nested owner restores a NULL parent sink.
+Global tmux retirement, scoped runtime/resume unification and credential custody still remain.
+
+The complete local script suite passed all 69 tests. All 75 lint checks passed for 6edd36846.
+Fresh CI found two old fixtures whose contracts changed: default native cache preservation requires
+explicit stable-prefix policy in the cross-protocol normalization test; a stream ending with [DONE]
+requires a preceding native finish_reason. Both fixtures now test those explicit contracts.
+
+### Continuation: native HTTP entry now uses canonical replay
+
+The Anthropic HTTP provider builder now admits native requests through typed IR before egress.
+The immutable original body is attached at the real ingress, rather than only in codec fixtures.
+Independent typed/raw comparison selects exact replay: a handler-level fixture preserves whitespace,
+an unknown large integer spelling, explicit stream:false and a one-hour cache TTL byte for byte.
+Host stream-mode edits rebuild the native request while retaining untouched cache markers and forms.
+
+The existing ingress_preinject_anthropic_enabled option now invokes the same canonical stage catalog
+as translated requests. With the option off, canonical admission and exact replay remain active.
+A native stage fixture verifies that opt-in assembly runs context/tools once, recalls the original
+query and preserves its client cache TTL after persona insertion. Raw foreign-ingress policy stages,
+legacy translated-request fallbacks and response projections still remain to be cut over.
+
+### Cache guidance and worker reuse follow-up
+
+Host tool/completion guidance is appended as a separate native system block before canonical admission; original client system blocks, cache breakpoints and TTLs survive. A new independent task clears a previous ownerless capture-failure latch, while nested work retains the active owner's failure. IR session, HTTP owner and native Anthropic handler fixtures passed with ASan/UBSan and leak detection. Global migration work remains open.
+
+### Native harness retirement follow-up
+
+The tmux model-execution engine (`agent_runtime_tmux.c`) and detached Claude delegate shortcut are removed. Historical backend spellings normalize to structured provider adapters, including old Claude aliases. Provider registration now creates headless records. Routing no longer gives the retired backend spelling affinity over canonical-history peers. Interactive PTY session support is separate terminal functionality; it does not produce model history.
+
+Server-hosted native CLI executions prepare Vault-backed ephemeral homes using the same helper as browser execution. Conversation directories and owner-checked native handles use the current private canonical execution identity; sibling delegate sessions do not share native history. Claude binds its stream initialization handle; Codex resumes/starts and binds the native thread before sending a turn. Credential teardown preserves conversation files. Codex line storage now belongs to its process instance; the compaction reader no longer frees a borrowed line.
+
+Admitted, attested legacy chat subscribers now capture canonical events too, independently of transport version. Their existing event projection remains available. Unattached/unattested ingress and remaining internal consumers still require the broader audit; this does not declare a global cutover complete.
+
+Validation: full native agent suite (including a real child launched from a legacy tmux record), native CLI/session owner fixtures, provider Go race tests, all 75 lint gates, and disposable server/PostgreSQL primary execution passed. Focused ASan/UBSan checks cover native CLI adapters, private runtime homes and canonical owners. CI at published 34f5be6f3 passed Docker T1 and T3; T2 variants were still running at this checkpoint. The memory replay job failed a PageRank fixture deadline, while its canonical IR session replay step passed. The opening-app attribution failure remains unexempted.
+
+### Foreign request admission and installed scope repair
+
+Anthropic ingress now builds foreign provider bodies exclusively through canonical IR; the legacy driver body builder and shadow build are removed. Invalid typed admission fails before network send even with `AIMEE_IR_PATH=0`; the compatibility predicate is permanently enabled. Three native HTTP fixtures and ASan/UBSan pass against the real request seam. Raw routing/model-pin/tool-policing stages, response projections and other ingress paths still require cutover.
+
+The fixed CLI from published 19d839003 is installed at the registered `/home/virant/.local/bin/aimee` via a separate `releases/ir3036-19d839003/aimee` binary. The original `releases/1.0.2/aimee` is preserved. The reported investigate query was rerun through that registered path after explicitly entering wol-lore: status ok, project wol-lore, four hits. Local install evidence/previous target is `/tmp/aimee-ir-cli-install.json`. The fresh CI native failure was an old environment-dependent tmux-affinity assertion in test_agent_caps; it now checks the canonical primary choice unconditionally.
+
+### Typed buffered response and completion cutover
+
+Anthropic ingress now admits completed native responses through the shared owned IR wire decoder, applies typed response governance/completion, and renders only at the client boundary. The legacy parsed-response bridge and response flag are removed. Completed-response admission rejects unfinished frames, trailing junk, forged results and duplicate calls; numeric usage is checked before conversion. Native signed/redacted thinking, media, cache usage and more than sixteen opaque tool calls survive buffered and synthesized streaming output. Unsigned foreign reasoning remains canonical and is explicitly reported when the Anthropic projection omits it.
+
+Ten focused ASan/UBSan binaries passed with leak detection; the final stricter terminal-frame and dead-bridge changes passed five rebuilt standard binaries. All 75 lint gates ran, with only the expected generated-document comparison failing before committing the regenerated configuration table. Native Anthropic raw streaming, other ingress/policy consumers, native signature prefix binding after host compaction, MCP elicitation and credential custody remain unfinished. CI at 68ec8a34e passed both native shards, all PostgreSQL native shards, integration, frontend and Go tests; deployment/sanitizer jobs were still pending when inspected. The attribution gate remains strict and fails on the PR opening app.
+
+### Native streaming relay cutover
+
+The separate Anthropic raw-byte relay and observation-only reasoning parser are removed. Native Anthropic SSE now enters canonical deltas before persistence and client rendering. The same durable-before-delivery rule also applies to the OpenAI incremental relay. Native signatures, redacted blocks, initial and incremental tool input, message identity, cache usage and terminal spelling survive rendering. Admission checks block/message ordering, closed blocks, terminal reasons, safe counters and complete SSE framing; unsupported content variants and incomplete streams fail explicitly. A failed durable append stops downstream delivery.
+
+Seven standard HTTP/stream/harness binaries passed; five ASan/UBSan binaries passed with leak detection, followed by four rebuilt sanitizer binaries after terminal-spelling preservation. All 75 lint gates passed before that final metadata-only extension. Native harness fixtures now include real final message_delta events before message_stop. Other ingress/policy consumers, thinking-prefix binding after host edits, MCP forms, credential custody and full browser/Vault acceptance remain open.
+
+### MCP form replies and pending-control validation
+
+Codex MCP form elicitations now publish a normalized form and accept typed browser submissions through the native correlated response. The browser renders flat strings, numbers/integers, booleans, single/multiple enums and their defaults/constraints. Unsupported nested forms retain decline/cancel controls. The shared IR contract validates required fields, primitive types, finite/safe numeric bounds, Unicode lengths, enums and array cardinality. The server checks the pending request before storing a reply; invalid answers remain correctable instead of consuming the request. Native rendering validates form data independently. Permission/question replies also reject unrelated payload fields before consumption.
+
+All 270 frontend tests across 34 files and TypeScript checks passed. Five standard native control/harness binaries and three ASan/UBSan binaries passed; normalization was additionally exercised through a real Codex entry frame. All 75 lint gates passed. A freshly built disposable server/PostgreSQL primary turn returned PRIMARY_OK. The full integration suite is running. Thinking-prefix binding after host edits, remaining ingress/policy consumers, credential custody and live browser/Vault acceptance remain open.
+
+### Mandatory OpenAI request admission and stream contract alignment
+
+OpenAI ingress no longer invokes driver request builders when IR admission fails or preserve_messages is set. Preserving messages disables host context edits independently of admission. Both Responses handlers reject failed IR parsing instead of using the legacy direct translator; native framing rejects trailing junk. A new actual-ingress builder fixture asserts that legacy callbacks never run across all three provider wires and both host-edit modes, including malformed roles/content/tools. The remaining Responses-to-Chat projection and flat response consumers still require replacement.
+
+The streaming cutover review caught missing canonical message identities and a Go validator missing the new raw_stop_reason field. Both are corrected: captured deltas now carry stable message identity, the test sink serializes every event through the actual codec, Go admits terminal native spelling, and the browser retains it separately from the canonical stop reason. These were defects in the newly added cutover, not evidence of successful live capture at the earlier checkpoint.
+
+Validation: two rebuilt request fixtures and their ASan/UBSan runs passed; the stream-identity fixture passed with sanitizers. All 270 frontend tests, TypeScript, 75 lint gates and PostgreSQL-backed session IR race tests passed (7.061s). A real attached-session disposable server test switched OpenAI -> Anthropic -> OpenAI -> Anthropic across four calls, captured 48 ordered durable events, retained every prior prompt, and restored the native Anthropic signature on the final switch. This uses local provider fixtures, not live subscription credentials. The earlier full integration rerun passed 153/153 with 25 service-dependent skips after allocating a fresh schema; the first reuse had five admission-cap failures from existing workflow rows. CI at 68ec8a34e finished every technical check including all four Docker tiers; only the unchanged opening-app attribution gate failed.
+
+### Durable browser fidelity reports and regular integration replay coverage
+
+Projection loss now has a typed, durable session event. The browser reports reasoning/opaque-state omissions at the explicit request or response boundary while retaining canonical blocks; these reports never enter model messages. C producers, strict Go validation, the browser reducer and rendering consume the same contract. Request and response boundaries are distinguished so output conversion is not misreported as a model-input edit.
+
+The new src/tests/test_primary_ir_live.py is called by the regular integration suite. It follows the GUI session-primary selection contract (without overriding the provider model ID), verifies A/B/A/B across native OpenAI/Anthropic HTTP fixtures, checks retained prompts/signatures and fidelity metadata, then compares every live envelope with authenticated durable replay and a resumed cursor. Standalone execution passed with four calls and 49 ordered events. Full integration passed 154/154 with 25 service-dependent skips before adding the projection assertion; a fresh full rerun is still needed for that final metadata extension. Three standard/native sanitizer targets, all 271 frontend tests, TypeScript, PostgreSQL session-IR race fixtures and all 75 lint gates passed. Live subscription credentials, thinking-prefix binding after host edits, remaining typed consumers/ingress/policy and child UI still remain open.
+
+
+## Continuation: 18 October, 04:15 Europe/Amsterdam
+
+The migration remains unfinished. Continue only on PR #3036 / fix/browser-ir-runtime.
+
+- Durable primary replay now has a regular integration fixture, `test_primary_ir_live.py`: attached, authenticated GUI-style model selection A/B/A/B (agent names differ from provider model IDs), every prior prompt retained, native signed reasoning restored, exact live/durable replay parity and cursor replay. Projection decisions are durable typed events displayed in the browser; private delegate conversations stay separate.
+- Curator requests now use canonical request fields and provider responses retain owned IR; text/JSON is an explicit application projection. Shared Chat response admission preserves ordered text/media, reasoning and full dynamic tool arrays/IDs. Structured output is typed, including schema/name/description and absent/null/false/true strict states, with explicit Chat, Responses and Anthropic boundaries. Unsupported Anthropic JSON-object and Bedrock structured-output modes refuse rather than silently drop the setting.
+- Fresh d0527820f CI passed native/PG shards, Go, integration, replay, sanitizers and static checks, but the frontend production build failed (unknown JSX value and ES2022 Object.hasOwn). All four Docker tiers stopped on that same build failure. Both issues are corrected; local `npm run build` and 271 tests pass. `tsc --noEmit` on the solution root was insufficient evidence: run the actual production build.
+- Current server AND KB production builds pass. Four focused ASan/UBSan binaries pass: cross-protocol egress, provider-client, kb-curator-llm and agent-ir-parse. The 75-check lint run is being completed. Rerun fresh full integration and CI after publication.
+- Registered CLI active-project detection was rebuilt, installed and tested from wol-lore with a successful indexed investigation. The original release is preserved; installation/rollback metadata is in `/tmp/aimee-ir-cli-install.json`. The server has not been deployed.
+
+Unfinished high-priority work: OpenAI HTTP response/Responses ingress still uses parsed_response_t and Responses-to-Chat-to-IR projections; durable owner-scoped previous_response_id replacement; typed Go bus consumers/economizer/memory, routing/tool policing/model pin; owned agent_result_t consumers; native hook payload/trajectory export; child references and expandable child UI; historical fidelity reporting; IR bypass gate; native signed-thinking prefix binding after compaction or other prefix edits; rebuilt opaque JSON numeric precision; credential custody via existing Vault/CLI ingress; remaining elicitation methods; final documentation, current-tree integration/sanitizers/Docker and live Vault/subscription/native-resume qualification. Do not count structural mock signatures as cryptographic native replay acceptance.
+
+The attribution gate intentionally still rejects the immutable PR-opening app attribution. Do not exempt it or create another PR. An accidentally created unrelated remote docs/current-state-audit ref was reported to the user and exact-lease cleanup remains pending automatic approval; no PR was created for it and its local checkout is preserved.
+
+
+### OpenAI HTTP response cutover, 18 October 04:30
+
+The structured Chat/Responses HTTP response paths now hold owned `aimee_response_t` through mandatory wire admission, immutable capture, canonical governance/completion and explicit client rendering. `openai_chat.c` no longer invokes `driver->parse_response` or uses `parsed_response_t`. Dynamic Chat and Responses SSE rendering preserves every call rather than the old fixed call array/frame; the fixture checks 17 calls with 511-character IDs and 8 KiB arguments, reasoning/encrypted state, authored message grouping, cache/reasoning usage and incomplete termination. Chat text/media output uses the shared ordered content boundary. Unsupported Responses output media refuses explicitly. Curator and this cutover pass focused native and ASan/UBSan fixtures. Current server and KB builds pass; fresh PostgreSQL integration passes 154/154 (25 service-dependent checks skipped). Curator lint passed all 75 checks; the response-cutover lint rerun is in progress.
+
+Remaining plain text completion/run callers still use `agent_result_t`. Full native request ownership and hosted tools, Responses continuation persistence, typed module consumers and the other unfinished items above remain open. The OpenAI HTTP response cutover does not complete them.
+
+
+### Native request ownership and durable Responses continuation, 18 October 04:45
+
+Structured Chat and Responses HTTP execution now consumes the complete native request as owned IR. The Responses-to-Chat-to-IR helper and the unused Chat-component provider builders are retired. Request-side OpenAI policing includes typed namespace children; router input is canonical text. Economizer gateway mutation receives canonical messages, and a rejected reduced request can rebuild/resend its restored canonical original once. Structured output and typed reasoning effort survive native request assembly. Tool definitions now have typed function/namespace/hosted kinds, nested function catalogs, strict/deferred-loading settings and explicitly provider-owned configuration. A backend which cannot represent the hosted catalog refuses rather than dropping it or forging an empty function. Forced hosted/allowed-tool choice and hosted execution output events are still unfinished.
+
+The flattened in-process Responses store is deleted. previous_response_id now loads an authenticated, parent-session-scoped canonical checkpoint from the existing durable session log; response ids are random. Unknown, unauthorized or cross-scope ids refuse before provider dispatch. The real HTTP integration fixture exercises 17 native calls with >500-character IDs and 8 KiB arguments, streaming tool-result continuation, retained native signatures, schema/effort settings and cross-scope refusal. Structural signature retention is not cryptographic binding acceptance.
+
+Validation: six focused fixtures pass standard and ASan/UBSan; the twelve other handoff fixtures pass after rebuilding. Current server and KB builds pass; lint passes all 75 checks. Fresh full integration passes 154/154, with 25 service-dependent skips. The standalone primary fixture must start the real memory module (the full integration suite does); absence correctly refuses context assembly. No production server deployment has occurred.
+
+CI at 5dbebcf62: frontend build repaired; technical jobs mostly pass, but memory-owner PostgreSQL replay failed in TestMemoryRuntimeRoleReplay -> exercisePageRankRecallReplay: the full lexical pool/graph query hit the operation deadline. Investigate actual SQL/planning; do not raise a timeout or waive the test. T2-luks was still running at the last check. Attribution still fails on PR-opening app metadata as intended.
+
+For local replay diagnosis pgvector 0.8.7 was checksum-verified from the official PGDG package metadata and unpacked ONLY under /tmp/aimee-ir-pg-deps. The existing PostgreSQL 18 runtime uses unversioned extension directories, so its vector extension files were copied within that temporary prefix. Metadata: /tmp/aimee-ir-pgvector-install.json. UTF8 disposable replay database: aimee_ir_memory_replay_utf8 (the initially created SQL_ASCII database cannot apply the Unicode schema). Schema provisioned from the actual roles/schema/grants files with embed dimension 384. A focused race-enabled runtime-role replay is running, with slow-query logging enabled for that disposable database only.
+
+
+### Driver interface retirement and native alias routing, 18 October 05:00
+
+The provider vtable no longer exposes build_request or parse_response; every registered callback and its unused legacy implementations/fixture hooks are deleted. Native Anthropic model selection now resolves registered agent aliases (including aimee) to the configured provider model ID while retaining concrete native-model passthrough and untouched client cache sections. Four affected native fixtures pass, three Anthropic fixtures pass ASan/UBSan, and the real HTTP primary/Responses fixture also verifies this Anthropic alias case.
+
+Fresh a79d81986 CI exposed two concrete omissions: unit-test-agent-request-build lacked the newly shared OpenAI frontend render object, and test_economizer_live_surface.sh still searched for the old upstream_is_anthropic local variable. Linkage is repaired in every explicit backend-only target, and the gate checks the actual canonical selected wire. Affected request-build/HTTP/parity fixtures and the ASan request-build target pass locally. Lint rerun passes all 75 checks.
+
+The focused race-enabled PostgreSQL memory runtime-role replay now passes locally in 280 seconds. Its first local failure was a fixture timezone bug: a date-only timestamptz boundary uses Europe/Amsterdam, while stored validity dates normalize to UTC. The boundary is now explicit UTC. An earlier attempted scope reset did NOT solve that failure and was removed; no scope relaxation is included. CI's separate PageRank full-lexical-pool deadline is still unresolved and must not be described as fixed by the timezone change. Investigate the recall query/candidate work rather than increasing the timeout.
+
+
+### Native request policy cutover, 18 October 05:20
+
+Anthropic Messages ingress now admits the complete native frame into owned IR before tool policing, routing, model pinning, host guidance and economizer mutation. Native wire is an immutable replay sidecar, not the policy/history source. Buffered and streaming execution render the admitted, transformed request once at the selected provider boundary; the request is no longer reparsed after editing native JSON. Count-token passthrough also requires canonical admission and resolves registered aliases to provider model IDs.
+
+Buffered economizer rejection now restores the canonical original and resends once; the former log-only missing-resend path is deleted. Fixtures assert canonical reducer input, exact restored messages, one retry without rerunning policy, refusal of native-shaped reducer output before dispatch, admission before routing/policing, and real policy removal of a denied tool/choice while preserving client cache metadata. Four native fixtures and their ASan/UBSan runs pass; current server/KB build, real A/B/A/B primary plus durable Responses continuation/alias fixture and all 75 lint gates pass.
+
+Fresh fc0164a59 CI exposed a stale frontend fixture that expected an invalid nameless custom tool to survive in a raw sidecar. It now asserts typed function/hosted/namespace ownership and separately asserts refusal of malformed/unknown tools. This fixes that fixture contract; custom free-form execution remains unimplemented and must not be claimed supported. Native thinking-prefix binding, credential custody, remaining owned consumers, child references/UI and the other outstanding migration work remain open.
+
+
+### Private child references and browser expansion, 18 October 05:25
+
+Delegate owners now durably append typed child_execution references (private session, execution turn, role and lifecycle status) to their attested parent log. Independent workers use copied attestation; nested workers reference their immediate private parent. No child prompts, reasoning or tool transcript enter the parent event or model history. Failure to publish either admission or terminal references propagates as capture failure, including after a child has executed.
+
+The browser reducer retains references separately from messages. Expanding a delegate lazily opens its authenticated canonical session stream and uses the same transcript reducer/rendering; close/unmount cancels the subscriber, terminal completion closes it, and wrong-session delivery/cycles refuse. Parent and child cursors remain independent.
+
+Validation: 274 frontend tests and the production build pass; native codec and concurrent child-log fixtures pass with ASan/UBSan and leak detection, including failed reference publication. PostgreSQL-backed session IR race tests pass (7.035s), covering parent prompt isolation, private child paging and cross-principal refusal. Current server/KB builds and all 75 lint gates pass. A fresh full integration run is in progress with schema ir_integration_child_3036. The other open migration items remain unfinished.
+
+
+### All completion ingress uses owned IR, 18 October 05:45
+
+Tool-free Chat no longer flattens role-separated messages through agent_dispatch_one. Buffered and streaming Chat share the owned request/response execution path regardless of tool catalog presence. Legacy /v1/completions has a direct typed entry adapter for its text prompt, sampling, stop settings and metadata; it does not construct a Chat-shaped intermediate. Unsupported batches, echo and tools refuse explicitly. Text extraction occurs only at its client output boundary. preserve_messages disables host context edits independently of mandatory admission, including streaming.
+
+Short-window idempotent reuse is retained: its key includes the fully prepared provider payload after canonical economizer mutation, resolved identity/backend and behavior flags. Cache values contain canonical blocks and typed response/usage metadata, with stable client response identity; native sidecars and flattened output JSON are not stored. A cache hit publishes admitted canonical content before delivery; failed persistence refuses reuse. Tool-bearing responses are not cached, and restoration after a rejected reduction disables reuse for that changed request.
+
+Validation: native entry/response/cache fixtures and the existing dedup suite pass, two rebuilt ASan/UBSan fixtures pass with leak detection, server/KB builds pass and all 75 lint gates pass. Real HTTP coverage now checks separate Chat system/user/assistant roles and media plus text-completion sampling/stop settings, both buffered and streaming, alongside A/B/A/B and durable Responses continuation. The full current-tree integration rerun passes 154/154 with 25 service-dependent skips (schema ir_integration_completion_3036). The child-reference tree's separate full integration rerun also passed 154/154.
+
+CI at 523af6d0a passes PostgreSQL knowledge replay (7m30s), Docker T1 and T3; T2/T2-luks were pending at the last check. The unchanged attribution check still rejects the PR-opening app. This is not a waiver or completion of the overall migration: native thinking-prefix binding, Vault custody, typed module consumers, hook/trajectory ingress, remaining hosted/custom tool forms and final live browser/subscription/native-resume qualification remain open.
+
+
+### Shared Go IR contract and namespace policy, 18 October 06:25
+
+The public data-only server-go/ir package now owns canonical session/history validators and typed request/catalog codecs. Store ownership, authorization and dispatch remain in their registered module owners. The Go package ownership ledger explicitly records this contract; no peer implementation or bus exemption was added. Memory gateway planning now consumes a strict, bounded typed policy view with roles, callable identities and last-user text. Complete schemas, opaque provider options and prompt bodies stay in the owned host request. Legacy flat policy ingress is rejected.
+
+Go policy returns descending namespace paths for shell removal. C validates the complete patch before mutation, prunes emptied namespaces, preserves remaining schemas and MCP tools, and relaxes removed forced choices. An empty catalog clears both choice and parallel-call settings. A real registered-Go fixture covers nested shell functions, hosted local shell and retained MCP/web-search tools. Its memory boundary fingerprint was refreshed with the precise boundary review; this does not assert a separate reviewer's production-promotion approval.
+
+All backend constructors and native replay require canonical admission. Canonical request snapshots now provide the idempotency key source; request/body commitments are SHA-256 digests before bounded key-composition transport. Native frames and duplicate multi-megabyte prompts are no longer transported merely to derive a cache key.
+
+Validation: shared-contract and PostgreSQL-backed session/gateway race tests pass; six focused native fixtures and five ASan/UBSan fixtures pass with leak detection. Mandatory egress admission additionally passes standard and sanitizer tests. All 75 lint checks pass. Current server and KB production builds pass. The integration rerun aborted at its thin-client rebuild because the compiler exhausted a /tmp disk quota; it has not passed for this tree yet. Compiler temporaries are being moved to /var/tmp for the rerun. Never run production builds alongside lint: the provider-registration detector test temporarily removes a real registration call while testing its diagnostic.
+
+The overall migration remains unfinished. Native signed-thinking prefix binding, readable native credential homes, remaining typed consumers and flat results, native hooks/trajectory, opaque JSON numeric precision, remaining hosted/custom/elicitation forms and live browser/Vault/subscription/native-resume qualification remain open. CI at 1ae034d3f has passed the checked technical jobs, with integration and T2-luks still pending at the last inspection; attribution continues to reject the immutable opening-app metadata.
+
+
+### Opaque JSON numeric fidelity, 18 October 06:30
+
+The typed policy tree at fd48bd88b passes fresh full integration: 154/154, with 25 service-dependent skips. Task-owned compiler/test artifacts were relocated to /var/tmp after /tmp reached its user quota; unrelated files were preserved.
+
+The shared C JSON codec now retains parsed decimal tokens through duplication, references and serialization. Explicit numeric setters invalidate the token, and direct numeric mutation is detected before serialization. Exact decimal comparison distinguishes adjacent large integers rather than merging their rounded double views; equivalent spellings still compare equal. Extreme exponents remain opaque JSON data. Completed tool-argument adapters require full JSON framing. Invalid numeric grammar and embedded NUL strings are rejected rather than re-emitted or truncated. This is a local vendor patch, with no dependency/version substitution. A dedicated number_lexeme field extends the vendored struct; every native consumer must rebuild against the matching header. Numeric nodes retain NULL valuestring, preserving legacy string checks.
+
+The browser canonical entry parser, tool-fragment completion and transcript/control rendering preserve decimals outside JavaScript's roundtrip range. Known numeric contract fields continue to require ordinary valid numbers; opaque values use an immutable exact-decimal value and the canonical serializer, whose native JSON.stringify path refuses accidental conversion. Live and durable replay use the same parser and reducer.
+
+Validation: all 19 rebuilt focused native fixtures pass, including the original handoff fixtures and current primary/log/ingress/policy/cache tests. Five rebuilt ASan/UBSan fixtures pass with leak detection. Tests cover long decimals and adjacent >2^53 values, clone/reference lifetime, mutation, semantic decimal equality, canonical tool/schema rebuild across all three native wires, streamed versus snapshot browser parity and exact visible tool arguments. All 279 frontend tests and the actual production build pass. Current server and KB builds pass. Lint and another full integration run for this numeric-fidelity tree are still required. The other outstanding migration/deployment items remain open.
+
+
+Numeric-fidelity follow-up: 23 rebuilt native fixtures and five sanitizer fixtures now pass, including the standalone frontend/backend/tool-choice/stream suites. The completed-argument regression exposed a real admission defect: failed Chat/Responses history-argument parsing became an absent input and was accepted. Those API entry adapters now require a complete JSON object, with valid controls and trailing-junk refusal exercised for both requests and responses. The canonical codec still permits arbitrary harness input separately. The current server/KB builds pass; 279 frontend tests and the production build pass. Fresh integration of the dedicated decimal-token storage tree passed 154/154 (25 skips, ir_integration_decimal_3036); the final complete-argument admission extension requires its final integration rerun.
+
+Fresh fd48bd88b CI found missing standalone export inclusion of server-go/ir and a stale bus-conformance caller sending flat gateway roles/tools. The export map now follows the two actual consumers, and aimee explicitly declares its IR contract dependency. The real interop fixture uses typed views and namespace paths. All 20 export regression tests pass (one service-dependent skip); the complete Go/module/C bus-conformance suite passes. The final 75-check lint and conformance rerun is in progress. These are real corrections, not CI waivers.
+
+
+### URL elicitation and canonical operator replies, 18 October 07:00
+
+63e707bf8 is published on PR #3036. Its final full integration passes 154/154 (25 service-dependent skips, ir_integration_numeric_final_3036), all 75 lint checks pass, and the complete bus-conformance rerun passes. No technical CI failure was reported at the last check of that commit; most jobs were still pending, and immutable opening-app attribution still fails.
+
+Codex URL-mode MCP elicitation now normalizes at native entry into a canonical external-interaction request. The browser shows the requesting server and destination host and sends its owner-correlated consent when the user chooses to open the destination. It never sends secrets/form content through that URL consent response and does not mistake acceptance for completion. Explicit HTTP(S), authority, userinfo/control and byte limits apply; invalid targets retain decline/cancel. Already recorded consent permits reopening the external page. Device-verification/custom form extensions remain unsupported and must not be claimed implemented.
+
+Browser-owned Claude and Codex control replies now publish the actual admitted canonical operator decision before native serialization/delivery, then resolve the adapter's pending identity. Native reply rendering emits no duplicate canonical event and cannot flatten cancellation into denial or replace a question's complete answer arrays with a joined native string in history. The native elicitation observer also normalizes accept/decline/cancel at entry. Nonbrowser native control projections still require the remaining consumer audit.
+
+The real child-process fixtures exercise permission cancellation, questions and URL elicitation with exact native replies, and assert canonical decisions independently. A rejected Claude decision capture prevents native approval delivery. Owner/session/turn binding, invalid-content refusal and consume-once behavior are covered. Five focused standard fixtures pass; 281 frontend tests and the actual production build pass. Five corresponding sanitizer fixtures passed with leak detection before the final URI-case normalization/fixture extension; the final rebuild and rerun, current server/KB rebuild and lint are in progress. The migration and production qualification remain unfinished.
+
+URL-control final local qualification: all five rebuilt native fixtures and all five ASan/UBSan fixtures pass with leak detection, including both actual child runners. The Codex fixture deliberately sends canonical cancel while asserting native decline, proving intent is retained independently. Current server and KB builds pass. The final 75-check lint run is in progress; full integration of this URL-control tree still needs its fresh schema/run.
+
+### Signed native replay fences and durable stream snapshots, 18 October 07:45
+
+The URL-control tree ffeb8da65 passes fresh full integration (154/154, 25 service-dependent skips). Its fresh CI technical jobs pass; the strict attribution gate continues to reject PR #3036's immutable opening-app attribution. No exemption or replacement PR was introduced.
+
+Anthropic native entry now records a SHA-256 prefix and predecessor/current thinking-chain commitment on each canonical thinking block. The fence uses the actual sent system/tools/messages, excludes transport cache markers only at their defined locations, and canonicalizes object ordering and exact decimal spellings for comparison without changing opaque stored values. Ordinary schema/input members named cache_control remain significant. Model/sampling/output metadata remains outside the documented prefix. Vendor signature/account/model verification remains authoritative; this local fence is not a claim of cryptographic vendor acceptance.
+
+At egress, incompatible or historically unbound thinking is omitted from the candidate native projection with a fidelity report. The immutable canonical checkpoint keeps its signatures and opaque state for later compatible replay. Oldest-block removal can retain an unbroken surviving chain; middle gaps cannot acquire new proof. Compatibility edits copy proof from the original admitted native frame rather than binding edited prefixes as original. Wire equality excludes context/fence metadata while retaining actual cache and native scalar-content form, so metadata-only changes can reuse exact original bytes.
+
+Native HTTP execution prepares the response fence before dispatch from the actual rendered request, including restored/fallback attempts. Buffered responses bind before canonical capture. Native Anthropic streaming assembles owned canonical deltas, retains complete signatures/redacted blocks/tool inputs, and appends a bound full-message snapshot before the terminal event. A rejected snapshot prevents client completion. The bounded builder grows fragment buffers geometrically. Scalar native text and structured tool-result transport form survive durable history to avoid changing previously sent prefix values on append.
+
+Canonical JSON ingress now rejects duplicate member names, including opaque nested values, instead of letting C/Go/browser consumers select different values. Shared Go decoding and browser lossless parsing enforce the same ambiguity refusal. The C comparison view never replaces original decimal tokens or source member ordering.
+
+Validation so far: 282 frontend tests and production web build pass; PostgreSQL-backed shared-contract/session/gateway race tests pass. Five focused ASan/UBSan fixtures pass with leak detection, including real native-stream capture refusal and durable signed snapshot replay. Current server/KB build and full integration pass (154/154, 25 skips, ir_integration_binding_3036), including primary A/B/A reload, changed-header omission and subsequent unchanged-checkpoint replay. The broad native suite exposed a direct-parser fixture lacking the now-required actual sent prefix; its setup/capture assertions were corrected and its final rerun is pending. Final lint and sanitizer rebuilds for the small fixture/linkage/compatibility-cache adjustments are pending. Live Vault/subscription/native-resume qualification, readable native credential custody, remaining typed consumers/results/hooks/trajectory, custom/hosted capabilities and production promotion remain unfinished.
+
+Signed-replay final checks: all 23 rebuilt native fixtures, all six rebuilt ASan/UBSan fixtures with leak detection, current server/KB production builds, 282 frontend tests, web production build, PostgreSQL-backed focused Go race tests and all 75 lint checks pass. The memory ownership ledger records the exact host-only replay change and retains its original memory symbols/owner. The integration result above precedes the final duplicate-schema/depth admission extension; a final published-tree integration rerun remains required. Current tests use real sent-request prefixes for native stream and buffered-replay fixtures, not fabricated empty requests that fail before exercising the parser.
+
+
+### Economizer JSON fidelity follow-up, 18 October 07:50
+
+Signed replay a330bcfc8 is published only on #3036. Its final fresh-schema integration now passes 154/154 (25 skips, ir_integration_binding_final_3036), including the final duplicate-schema/depth admission extension. Eight strict attribution regression tests pass. Fresh CI has started; its complete verdict is pending.
+
+The Go economizer's order-preserving tree was still converting parsed opaque numbers to float64 before serialization/clone, despite native/browser exact-decimal preservation. It now retains original numeric tokens, detects direct numeric replacement, permits opaque extreme exponents, and applies complete framing/duplicate-member/depth/NUL checks. Structural summaries keep actual decimal values instead of rounding identifiers and constraints with historical %g formatting. The parsed-number differential fixture now follows the changed vendored C codec; the constructed-double formatting contract remains separate. Full economizer race tests pass, including clone isolation, adjacent large integer/long decimal/extreme exponent preservation, strict framing and explicit summary values. Legacy native-shape fold/repair branches and typed shared-IR admission remain to be cut over; this change does not claim that broader cutover complete.
+
+
+### Typed economizer history and compaction records, 18 October 08:00
+
+The economizer's reduce bus stage now requires strict shared canonical message admission before any state load or transform, and validates generated candidates before returning them. Complete envelopes reject unknown/duplicate fields. Provider/mixed arrays and wrong role/block combinations are refused. Original member order and decimal tokens remain in the cache-sensitive internal tree. The public shared contract's standalone export inclusion now follows the actual economizer importer as well as Aimee and Memory; its existing descriptor already declares IR.
+
+Compaction record extraction now consumes typed ir.Message/ir.Block values instead of branching over native content/tool_calls/Responses items. Thinking is excluded. Structured tool evidence retains its actual opaque JSON. User text in a mixed tool-result message retains its quarantined lane instead of inheriting the tool result's lane. Original range, actor/storage and record policy ownership remain unchanged.
+
+Full shared IR/economizer race tests, all 20 standalone-export regressions (one service-dependent skip), native economizer client, ownership checks and complete Go/module/C bus conformance pass. C interop now sends canonical record history. Structural-admission fixtures use canonical tool cycles and make their preconditions hard assertions instead of skips. Remaining native-format branches inside fold/repair algorithms are still present and are the next deletion; public ingress cannot select those branches. This checkpoint does not claim all remaining consumers or deployment qualification complete.
+
+### Canonical economizer fold and repair cutover, 18 October 08:05
+
+Native message-shape detection, Responses/Chat/Anthropic history branches and silent argument sanitization have been removed from the economizer's fold/compress/repair consumers. Core transforms explicitly refuse native or mixed history, emit canonical evidence messages, preserve unchanged opaque blocks and repair only current canonical tool cycles. Concurrent duplicate call IDs refuse without mutation; IDs reused in later cycles remain legal. Dynamic repair retains complete long IDs/names and groups larger than the retired 16-call API.
+
+Recall injection was a remaining live native writer: its assistant notice used content instead of blocks and would fail the new typed candidate admission. It now uses the canonical evidence-message constructor. Tests mutate actual canonical text instead of adding ignored native content fields. Legacy wire-repair fixtures were replaced by canonical cycle, malformed/native refusal, grouped results, opaque/signature preservation, 40-call long-identity and idempotence cases. Provider-specific proof planners remain native egress evidence consumers, separate from history transforms.
+
+Shared IR, economizer and Aimee-family race suites pass. Complete Go/module/C bus conformance and all 75 lint checks pass. The latest Go multicall artifact is rebuilt. Fresh integration of the complete economizer consumer tree remains required. Credential custody and live native-resume qualification, dynamic rescue/flat results, hooks/trajectory and the other remaining migration items are still open; no production promotion or separate reviewer approval is asserted.
+
+### Canonical dynamic rescue and strict string fidelity, 18 October 08:30
+
+The complete economizer tree aa075a66d is published only on #3036 and passes fresh integration (154/154, 25 service-dependent skips, ir_integration_economizer_3036). Its technical CI jobs were still finishing at the last inspection; attribution remains unchanged and failing on immutable opening-app metadata. Local Docker deployment tests cannot run because the Docker executable is absent; CI Docker qualification remains necessary.
+
+Delegate rescue now returns an owned canonical assistant message over its existing stage. Request framing is explicitly v2 and v1 is refused; core and the delegates multicall artifact must be upgraded together. The fixed binary reply, parsed_response_t bridge, 16-call cap and short-name truncation are removed from this path. The Go dialect owner retains the inventory decision. Complete JSON object arguments are required; malformed/trailing/duplicate arguments refuse recovery rather than becoming {}. Missing arguments may still represent an explicitly empty argument object. XML/Qwen parameter-text conversion retains its existing dialect meaning without truncating a JSON-looking prefix away from trailing text. Dynamic overflow refuses the entire candidate. C prepares and validates every recovered block before mutating any source content, preserves source context/cache-breakpoint metadata, and leaves thinking/non-text blocks untouched.
+
+The delegate entry JSON reader now retains exact decimal tokens and Unicode scalar values, instead of a float64/manual-surrogate roundtrip. Shared Go canonical decoding and the browser parser/serializer also refuse embedded NUL and unpaired surrogate spellings that native strings cannot represent. Valid astral Unicode and exact numeric arguments survive. The new public header imports only the shared owned IR data type; that exact crossing is recorded in the existing IR_SHARED_TYPE ledger, with no peer-service or attribution exemption. Memory transport symbols and policy ownership are unchanged; the source fingerprint records the rescue-only boundary review, not independent production approval.
+
+Validation: complete delegates/economizer/shared-IR race suites pass; focused PostgreSQL-backed IR/session/gateway/rescue contracts pass across five packages. All 283 frontend tests and the production web build pass. Three native fixtures and all three corresponding ASan/UBSan fixtures pass with leak detection. Cases cover a 40-call group, long names/IDs, exact large/decimal/extreme values, atomic refusal and malformed argument framing. The real C-to-Go stage fixture retains a 200-byte name and >2^53 input and refuses retired framing. Complete Go/module/C bus conformance, all 20 standalone export regressions (one service-dependent skip), current server/KB builds, 25 boundary-regression tests and all 75 lint checks pass. Final paired-artifact integration and fresh CI for this rescue checkpoint are still required.
+
+Remaining audit concern: server_session_log qualifies tool_id inside serialized MESSAGE/DELTA payloads for UI correlation. Message/session/turn identity belongs in the transport envelope; inspect durable native replay and move UI correlation out of canonical model IDs. Primary checkpoints may preserve original IDs, but observations must not silently rewrite native tool identity. Do not claim the full migration complete until that seam and the earlier remaining backlog are resolved.
+
+### Native tool identity survives durable observation, 18 October 08:40
+
+Rescue ea1bde20d is published only on #3036. Its paired-artifact full integration passes 154/154 (25 service-dependent skips, ir_integration_rescue_3036). Fresh CI is running; the attribution failure remains unchanged.
+
+The log-only owner no longer qualifies tool_id inside canonical MESSAGE or DELTA payloads. Tool IDs, inputs, signatures and opaque values remain what the native adapter admitted. Event and message identities still belong to the transport envelope. Native IDs may recur in later model cycles, so UI correlation now derives a separate occurrence key from projected message identity/block position and execution scope. Repeated cycles and interleaved turns retain separate output cards. A unique outstanding call can receive an external result in a following request; unrelated/ambiguous results remain visible rather than being hidden or attached to an arbitrary call. These view keys never enter model history.
+
+The C logger fixture exercises original tool IDs through buffered messages, streamed deltas, a full snapshot and repeated result cycles, while retaining signatures and exact input values. It passes normally and under ASan/UBSan with leak detection. All 287 frontend tests and the production web build pass, including live/replay equality, interleaved same-ID turns, cross-turn results, repeated cycle cards and visible ambiguous evidence. Current server/KB builds pass. Final lint/integration and publication of this identity checkpoint remain pending. Historical native fidelity still needs explicit migration/qualification; existing opaque log IDs must not be guessed or stripped heuristically.
+
+Tool-identity final local checks: all 75 lint checks pass. The UI correlation result depends only on ordered canonical messages and occurrence/scope identities; later execution status cannot retrospectively move a recorded result. No schema or history rewrite is introduced. Local test builds use a fixed validation build-id override for object-cache reuse and are not production release artifacts; final deployment must use the exact reviewed CI/source identity.
+
+### Canonical response stages, 18 October morning
+
+Native tool identity checkpoint 99f9111f6 is published on #3036. Its final integration passes 154/154 (25 service-dependent skips, ir_integration_tool_identity_3036). At the latest CI inspection the native unit shards, web/backend checks and Windows builds pass; sanitizer, Docker and some PostgreSQL jobs remain pending. The immutable opening-app attribution failure remains; it is not exempted.
+
+The response registry now carries the owned canonical response type. Governance uses that registry and its existing separately supervised policy provider, applying bounded masks across the complete dynamic IR response. The unused flat governance wrapper, its fixed-call cleanup and weak test stubs are removed. Completion policy/intervention now has only the typed request/response API; its alternate native-history readers and parsed_response_t writer are removed. Existing default/disabled-policy, owner failure, malformed-decision and completion-retry cases now exercise canonical values. Additional cases keep user/tool evidence from becoming edit instructions, preserve thinking and original text, and feed the actual inserted canonical marker into next-turn bounded-policy checks. This does not retire the remaining flat response parser/egress compatibility APIs elsewhere.
+
+All three focused stage/registry fixtures pass; both changed response-stage sanitizer fixtures pass with leak detection. Current server/KB builds, 25 module-boundary regressions and all 75 lint checks pass. The new direct governance include is an exact shared IR data-type crossing; policy authority remains across the bus. No production promotion is asserted.
+
+Credential research: installed codex-cli 0.160.1 can generate an experimental chatgptAuthTokens schema, but that schema explicitly labels this mode FOR OPENAI INTERNAL USE ONLY / DO NOT USE. It has not been adopted as Aimee's credential solution. Native readable credential homes, supported Vault custody and live subscription/native-resume qualification remain unresolved; ephemeral homes alone do not meet that custody requirement. The full migration remains unfinished.
+
+### Canonical trajectory export and private result references, 18 October morning
+
+Response-stage checkpoint d8c608cdf is published only on #3036. Its completed CI passes sanitizers, Docker T1/T2/T2-luks/T3, PostgreSQL knowledge replay and all three PostgreSQL unit shards. The only failing check is the unchanged strict opening-app attribution gate. No exemption, automatic-review disabling or replacement PR was introduced.
+
+Trajectory export now loads the authenticated owner's primary history projection from the durable canonical session log and admits owned aimee_message_t values. It emits aimee.trajectory.v2 with canonical messages, the actual source session and explicit export fidelity. Native tool IDs, namespaces, signatures, replay fences, structured results and exact numeric arguments survive. Unknown/unmodeled input refuses instead of silently disappearing. Ordinary text/arguments/results may be screened by the existing Go memory owner; unsafe identities/signatures or contextual credential assignments refuse export. Field context is retained for scalar and nested structured values without implementing a second C screening policy. Compression records explicit per-message/block omissions and a digest of the screened export value. The immutable log is never rewritten. There is no fabricated success/reward or time-window overlay of other sessions' audit rows.
+
+Agent results now carry an owned canonical_session_id copied from the actual private execution before log-owner teardown. This is a source reference, not a new transcript or borrowed connection. Session-bound work neither reads nor writes the legacy flat role-result cache; non-session internal compatibility remains. Batch export follows that real child reference instead of writing/reconstructing synthetic interaction events. The HTTP export receives its principal explicitly from the authenticated connection. Batch validates the owned parent, binds copied request attestation before loading agents/execution and restores it afterwards. The CLI supplies its active/explicit --session. Batch toolsets use the existing thread-local owner, preserving the calling thread's toolset and the process environment.
+
+Validation: focused native export/batch tests pass against fresh PostgreSQL databases and the actual Go screening process; corresponding ASan/UBSan fixtures pass with leak detection. Cases include exact >2^53 input, Unicode, signed reasoning, structured results, explicit omissions, foreign/missing owners, unavailable/invalid screening, unsafe opaque keys, scalar credential values and nested credential containers. Full agent tests pass (three unchanged store-dependent cases skip without their store fixture), including attestation snapshot/getter/restore. Current server/KB builds pass. Full integration passes 154/154 with 25 service-dependent skips, including real HTTP trajectory export and two repeated cache-eligible summarize tasks with the actual delegates policy owner; each returns a distinct private canonical execution and retains no parent conversation in its export. Final nested-context strengthening is additionally exercised by the rebuilt native/Go-owner and sanitizer fixtures. All 75 lint checks ran; the sole generated OpenAPI ownership fingerprint failure was corrected with an explicit trajectory-only source explanation and its ownership target rerun. Memory API contracts/symbols and memory policy authority are unchanged. Eight attribution regressions pass.
+
+This remains an unfinished migration. Other flat result consumers and legacy response entry/egress compatibility, native hook consumers, the broad bypass gate, remaining hosted/custom capabilities, supported native credential custody and live browser/Vault/subscription/native-resume qualification remain open. No production promotion or independent approving-reviewer identity is asserted.
+
+### Owned native response entry only, 18 October morning
+
+Trajectory checkpoint 042361d5d is published on #3036. Fresh CI caught the same unit-test-cli-argspec failure in native and PostgreSQL shards: the compiled batch marshaller carried the new session_id, while its served argument specification omitted it. The actual served spec now uses the existing limited session fact (including explicit-empty semantics), and differential cases cover overrides, environment/default resolution and empty values. No test expectation or gate is exempted. All 134 shipped specs / 1266 differential samples pass, also under ASan/UBSan; numeric argument parity reports zero mismatches.
+
+The unused agent_ir_parse_json_response, agent_ir_parse_responses and assistant-message rebuild wrappers are removed from the production entry API. Buffered JSON and Responses/SSE entry now expose only the complete owned aimee_response_t decoder surface. There is no fixed-count/name/ID projection or native assistant-history reconstruction at this boundary. Compatibility parser/free stubs are removed from the ingress fixtures. Their golden cases now assert typed blocks, canonical checkpoint identities, complete usage and the actual decoder. Rescue tests explicitly retain prose beside a recovered call; reasoning counters observe the owned response without changing its blocks. The remaining flat parsed_response_t definition still serves legacy output-only helpers elsewhere and must not be mistaken for a completed consumer retirement.
+
+All seven focused standard fixtures and all seven corresponding ASan/UBSan fixtures pass with leak detection: agent-ir-parse, responses-parity, agent-http, agent, anthropic-http, anthropic-http-p2c and anthropic-http-streaming-p2c. The full agent fixture retains its three explicit store-dependent skips. The additional argument-spec sanitizer fixture passes. Current server/KB builds and all 75 lint checks pass. This slice changes no Go wire framing, storage schema or frontend code. Fresh CI for the new published checkpoint still needs inspection. The credential/native-resume/replay and other remaining migration backlog above is unchanged; no production promotion or independent approval is claimed.
+
+### Stop metadata and final-answer normalization, 18 October morning
+
+Owned response-entry checkpoint 426c9da6e is published on #3036. Governance now sends the canonical stop vocabulary to its policy owner, while preserving the original native stop spelling when policy does not change the canonical reason. Final-answer normalization follows the same rule. An actual tool-use to end-turn transition clears the now-invalid native spelling. The obsolete parsed_response_t final-answer helper and its declaration are removed; existing normalization fixtures now exercise owned IR and preserve opaque exact arguments and native IDs.
+
+Both focused native fixtures and both ASan/UBSan fixtures pass with leak detection. Production server/KB builds and memory/module boundary checks pass. This checkpoint does not change Go framing. The governance request still has a 31-byte name cap; replacing that remaining bounded identity projection is required next. All remaining migration, credential, live replay and deployment qualifications above remain open.
+
+### Complete governance identities and single policy owner, 18 October morning
+
+Stop-metadata checkpoint ce5af9b9a is published only on #3036. Fresh CI exposed test_agent_caps relying on the removed transitive agent_protocol include; it now explicitly includes its actual token-budget API. Secret scanning flagged the public OpenAPI input SHA-256 in historical commit 042361d5d (line 2741), verified against api/openapi-server-v1.yaml. Only that exact historical digest finding is recorded in the existing gitleaks fingerprint ledger. The strict opening-app attribution gate is untouched.
+
+Governance v2 transports canonical identity views with complete names and namespaces through strict shared Go IR admission. The previous 31-byte tool-name projection and v1 request codec are removed. Decisions still use bounded masks across every chunk of the dynamic IR response. Native raw stop metadata stays owned by the host. The duplicate C policy handler/parity implementation is retired; the supervised Go module is the sole policy owner. Core and governance artifacts must be upgraded together. Standalone exports include the actual shared IR dependency; an independent exported governance build and policy tests pass.
+
+Go governance/shared-IR race tests, three focused standard native fixtures (stage, production bridge, remaining process handlers), both stage/bridge sanitizer fixtures, and real C-to-Go governance interoperability normally and under ASan/UBSan with leak detection pass. Coverage includes 40 calls, long names/namespaces, malformed/duplicate/unknown/NUL/surrogate/retired framing, cancellation, owner failures and retired replies. All shipped Go/module/C bus conformance passes. All 68 descriptor/export regressions pass with one service-dependent skip. Current production server/KB builds and all 75 lint checks pass. The final explicit-include correction still requires full agent normal/sanitizer checks; paired-artifact integration and fresh CI remain pending. Earlier unresolved custody/native-resume and remaining consumer migration items are not declared complete.
+
+Final correction checks: the complete agent fixture passes normally and under ASan/UBSan with leak detection (three explicit store-dependent skips). The CI-pinned gitleaks 8.30.1 binary was digest-verified and scans the complete current HEAD ancestry with no leaks found after the exact public-digest fingerprint classification. Attribution policy remains unchanged. Fresh paired-artifact integration is running in disposable schema ir_integration_governance_3036.
+
+### Retired direct Anthropic translator, 18 October morning
+
+Governance checkpoint 365387f38 is published only on #3036. Its paired-artifact integration passes 154/154 with 25 service-dependent skips in ir_integration_governance_3036. The first broader native rebuild found two remaining Anthropic test doubles using the retired string-only governance callback; both now consume canonical identity views.
+
+The old Anthropic-to-Chat messages/tools/system translator, direct OpenAI-chunk-to-Anthropic streaming translator and parsed_response_t Anthropic response/replay renderers had no production callers. They and their declarations are removed rather than left as alternate APIs. anthropic_ingress now owns only existing per-request HTTP protocol metadata; content translation uses canonical entry and explicit native output adapters. The replacement ingress fixture tests actual canonical request/response admission and egress: exact native bytes with cache metadata, separate system blocks, image input, mixed user/tool evidence, exact extreme/large numeric arguments, signed thinking, truncation, full usage and 40 long-ID/name calls. Thread-local header isolation/reset is exercised with a second thread. Existing HTTP/streaming fixtures retain their native SSE and policy assertions.
+
+All four focused native fixtures and all four corresponding ASan/UBSan fixtures pass with leak detection: anthropic-ingress, anthropic-http, anthropic-http-p2c and anthropic-http-streaming-p2c. Current production server/KB builds pass. This retirement changes no Go framing or durable schema; the full 75-check lint pass belongs to the preceding governance tree, with focused ownership/include/test-registration gates run for this removal. Remaining flat output compatibility APIs, C compaction native fallbacks, custody and live native-resume qualification are still open.
+
+### Owned C compaction and mechanical bypass gate, 18 October morning
+
+Direct-Anthropic retirement f9c6dab1e is published only on #3036. Its sanitizer/native shards and other technical CI pass at the latest inspection, except the script suite found the newly declared governance bridge missing from the test-registration baseline; that exact Make-registered, non-CTest row is now recorded. All 18 registration regressions pass. Two Docker variants were still pending, and immutable opening-app attribution remains failing. Read-only inspection found no recorded review submissions or inline review threads; independent production approval is not asserted.
+
+C session compaction now admits complete canonical histories into owned messages once, and all text/evidence/signature/protection/pairing consumers read typed blocks. The native format readers, native summary writer, fixed 256-message tail splice and legacy repair/merge path are removed from this consumer. Focused summaries construct canonical values too. Literal structured tool results are evidence; their JSON is not interpreted as native message wire. Repairs and candidate summaries are staged before source mutation. All injected JSON allocation failures refuse without changing the original serialized history. Bounded text copies preserve complete UTF-8 code points. User/system/developer messages and aligned tool cycles survive unchanged. Same-count compaction is accepted only when it shrinks serialized context, fixing rejection of useful compression between protected user instructions. The summary counts every actual tool call, and read-only metrics preserve exact argument tokens.
+
+The new lint-wired IR bypass checker scans production C/Go for retired entry/direct-translation APIs and driver build/parse calls. It also blocks provider-native history fields in the explicitly migrated execution/history owners and Go Memory/Economizer consumers. Native entry/egress adapters remain explicit boundaries. Scope grows with remaining consumer cutovers; this is not a claim that every repository consumer has migrated. Its exception ledger is empty. Any future exception needs an exact file/rule/line/content hash, owner, reason, retirement and expiration; expired, moved or unused entries fail. Six checker regressions cover C/Go mutations, adapter/test boundaries, comments and exception retirement.
+
+Four focused standard and ASan/UBSan fixtures pass with leak detection: session-compact, session-compact-focused, context-engine and full agent (three explicit store-dependent skips). Tests retain the record/prose section contracts and signed-reasoning/tool-cycle cases, and add native/mixed/malformed atomic refusal, the allocation-failure sweep, Unicode boundary checks, a 300-message retained tail with cache metadata, same-count context reduction and 70-call metrics/cap reporting. Current production server/KB builds, 24 checker/registration regressions, eight attribution regressions and all 76 lint checks pass. Fresh paired-artifact integration is running in ir_integration_compaction_3036.
+
+Next confirmed identity seam: the C delegate loop passes tool_name to validation/dispatch and does not consume tool_namespace. Resolve against its advertised catalog; never silently alias a namespaced call to a registered leaf. Native client-owned execution is a separate boundary. Credential homes, supported scoped Vault/native transport and native full-history signed replay qualification remain open, along with the other unfinished consumers above. No production promotion or full-migration completion is claimed.
+
+Compaction final paired-artifact integration passes 154/154 with 25 service-dependent skips in ir_integration_compaction_3036. The native and Go artifacts use governance v2 together. No production release/deployment identity is implied by the local validation build-id override.
+
+### Existing model listener accepts an explicit host transport, 18 October morning
+
+Owned compaction/bypass checkpoint 88e7144d1 is published only on #3036. Its source tree passes integration 154/154 (25 skips), all 76 lint checks, the focused normal/sanitizer fixtures and complete-history secret scan. Fresh CI still has pending sanitizer/script/Docker jobs at the latest inspection. T3 failed the native asynchronous memory outage gate: evidence records only three provider requests before an unavailable refusal, rather than the planned injection after five. The downloaded artifact digest matches the published digest. This is not evidence of a sixth request, and it is not classified as a fixed or waived failure. The fixture now records the actual SIGSTOP ordinal and requires injection after five before crediting the induced-outage check. The existing requirement forbidding a sixth request remains unchanged. Local Docker is absent; fresh deployment CI is required.
+
+The existing CLI model-only listener is separated from client-global authentication. Its bounded parser/workers/token/headers/stream lifecycle remain in cli_proxy.c; CLI configuration and launcher remain in client-only cli_proxy_cmd.c. cli_proxy_start_bound requires an explicit transport callback and immutable owner scope; it reads no global remote configuration or upstream credentials. Nonempty host session binding overrides client correlation headers. The existing CLI entry still requires its existing remote configuration and forwards with its existing authentication. Server can link the shared listener without the client-only wrapper. No new web backend, service or parallel native content serializer is introduced.
+
+The new host-bound native fixture passes normally and under ASan/UBSan with leak detection. It checks independent owners/sessions, cross-token rejection, spoofed-header removal, exact numeric request bytes, an existing FD response handoff and cancellation. All 28 existing thin-client proxy regressions pass, including installed real Codex SDK/mTLS cases. Current server/KB builds and focused ownership/include/registration/bypass checks pass. The server scoped callback, native SDK child configuration, credential-free homes, selected Vault resolution and replay-proof reconciliation are not wired yet; readable runtime credential documents remain unresolved.
+
+Additional confirmed C credential seam to fix with custody: agent_resolve_auth accepts any per-turn Codex token before selecting a registration, then can fall back to the server Codex account for a missing named connection. Extra account headers similarly accept an unbound per-turn account ID. Go providers already refuse named-to-server fallback. Bind token/account/registration snapshots together and preserve actual default-server success paths; do not borrow another connection. OAuth login currently stores the complete vendor document, so account ID must come from the same selected credential source. Research notes with concrete source locations are in /var/tmp/aimee-ir-native-custody-research.md (local, not a deployed artifact).
+
+### Selected Codex connection credentials, 18 October late morning
+
+Shared listener checkpoint 52fead66f is published only on #3036. Fresh CI passes integration, frontend, Go, lint, builds and most platform checks; sanitizers and deployment qualification were still running at inspection. The strict opening-app attribution gate remains enforced and failing. The strengthened T3 fixture records the actual outage injection ordinal; the previous early refusal is not classified as a successful outage test.
+
+C per-turn Codex credentials now bind the selected registration, including across worker snapshots. A different named connection cannot borrow that token/account or the default server refresh credential. The selected registration, rather than a coincident model label, owns explicit Vault lookups. Delegate credential binding follows the same identity and cleans transient buffers on misses as well as success. A bound token without an account cannot borrow an unrelated Vault account header. The unused unscoped token-presence API is removed.
+
+The full native agent fixture passes normally and under ASan/UBSan with leak detection, retaining its three explicit store-dependent skips. New cases cover default-server success, work/personal switching, missing named credentials, account-header isolation, worker snapshot restoration, selected Vault slots and misleading model labels. Current server/KB builds and IR/module/include boundary gates pass. This is a connection-isolation fix, not completion of credential-free native homes or the atomic refresh/document/account cutover. Those and the remaining migration work above remain open; no production promotion or independent reviewer approval is claimed.
+
+### Canonical delegate request policy and fallback, 18 October late morning
+
+Connection-isolation checkpoint 20ee67f47 is published only on #3036. Delegate request policing now consumes owned IR inside request construction, before native rendering. The provider-shape enum/selector and raw request-stage wrapper are retired. Both the initial request and first-turn fallback run the same canonical policy; fallback previously skipped request policing. Changed tools, tool choice and parallel-call settings render from the canonical result, while other established provider-profile knobs remain intact. Primary turns retain their delegation tools. The bypass checker rejects reintroducing the retired shape API, with a mutation regression.
+
+The typed delegate fixture, real three-protocol HTTP/request-shape fixture and full agent fixture pass normally and under ASan/UBSan with leak detection. Actual request builders exercise primary/delegate behavior, selected/fallback models, surviving required choice and removal of the last tool/forced choice without mutating the shared catalog. Full agent retains three explicit store-dependent skips. Production server/KB and IR/module/memory/include gates pass; all six bypass-checker regressions pass. Fresh integration in ir_integration_delegate_policy_retry_3036 passes 154/154 with 25 service-dependent skips.
+
+The first integration run in ir_integration_delegate_policy_3036 recorded 153/154: one MCP memory mutation timed out, and the memory module hung during its intended shutdown. SIGQUIT was used on that task-owned module to obtain a diagnostic; the visible stack was waiting in runModuleClient's admitted-job drain. Its transient directory was then cleaned by the harness. The successful fresh-schema rerun does not explain this intermittent service failure; retain /var/tmp/aimee-ir-delegate-canonical-policy-integration.log for follow-up rather than claiming it fixed.
+
+52fead66f's T3 job was canceled when the next checkpoint was pushed. Its digest-verified deploy-T3-verdicts artifact contains four completed groups (605 checks, all passing), but no native-async verdict. It does not qualify the strengthened native outage test. Allow 20ee67f47's CI to finish before the next push. Native credential custody/replay, exact catalog-bound dispatch and remaining consumers above are still open. No production promotion or independent approval is claimed.
+
+### Exact advertised tool identities and owner-classified outcomes, 18 October afternoon
+
+All technical CI for published 20ee67f47 passes, including ASan/UBSan, full script regressions, integration, frontend/Go/platform checks and Docker T1/T2/T2-luks/T3. The strengthened native outage fixture is included in that passing T3 run. The sole failure is the unchanged strict opening-app attribution gate. Canonical delegate-policy checkpoint b47834846 is committed locally; publish it and this checkpoint together only to fix/browser-ir-runtime / #3036.
+
+The runtime now retains the owned post-policy catalog from actual request construction, including replacement on model fallback. Exact function lookup treats names and namespaces as separate opaque identities, excludes hosted tools and refuses ambiguity. Argument coercion uses the advertised canonical schema. A call absent from that request cannot reach validators, policy or local dispatch by matching a leaf name. No synthetic namespace alias is introduced. The current local catalog is flat; namespaced external-client capabilities are not fabricated as local bindings. Namespaced respond calls also cannot become the host's final answer or receive a synthetic host-final result. Mixed local/foreign respond output preserves the foreign call.
+
+Live qualification exposed another existing consumer bug: a structured governed-action refusal was marked successful because it did not start with error:. The dispatcher now carries its tool/receipt owner's semantic failure flag separately from text. Canonical tool-result is_error, history, evidence counting and liveness use that flag, including bootstrap evidence calls. Unconfirmed action receipts remain failures; confirmed prior receipts retain their owned state. Effect completion/audit follows the receipt outcome. Matching script-RPC and tool.execute consumers use the same classification; the explicit HTTP output includes is_error. Native exec-envelope classification remains at the tools owner and moved into its existing effect-contract source to satisfy the file-length gate. The memory host-context API and authority are unchanged; only the exact changed dispatcher fingerprint and source rationale are updated in the ownership ledger.
+
+The integration harness now runs the real tools resource owner alongside the real Go execution-policy owner. Its new browser-primary fixture proves a real advertised read succeeds, a foreign namespace and unknown function produce durable errors without reading the fixture, live scoped call/result IDs pair, and native replay retains the original call ID. The explicit tools HTTP bridge exposes both successful and failed outcomes. The fixture failure log is retained in bounded output before temporary-directory cleanup. An initial fixture assertion incorrectly expected the raw native ID in live events; inspection of the real durable log confirmed the existing host-scoped ID contract, which the corrected assertions now check alongside native replay.
+
+Seven focused fixtures pass normally and under ASan/UBSan with leak detection: IR, agent HTTP, delegate driver, agent context/refusal, full agent, governed-action owner and script runner. The affected four fixtures were rebuilt/rerun after outcome-helper relocation and the additional matching RPC fixes. Full agent retains three explicit store-dependent skips. Current server/KB builds pass. Fresh integration ir_integration_catalog_final_3036 passes 154/154 with 25 service-dependent skips; earlier successful owner-backed integration ir_integration_catalog_owner_3036 also passes. All 76 lint checks ran; the sole file-limit failure was fixed through owner-local code relocation, and affected line/include/module/memory/API gates pass. Seven mutation regressions pass for the IR bypass checker, which now rejects unclassified dispatch at the three migrated consumers. No broad exception or attribution exemption is added.
+
+This is still unfinished. Supported native credential-free homes/transport, paired selected-connection OAuth account/refresh lineage, account-bound native resume/cache proof, native MCP actor/workspace qualification and the remaining consumers/capabilities listed above remain required. /var/tmp/aimee-ir-native-custody-research.md records the next seams and explicitly distinguishes design candidates from implementation. The earlier intermittent memory MCP timeout/shutdown-drain hang remains unexplained despite subsequent passing runs. No production promotion or independent approving-reviewer identity is claimed.
+
+### Paired Codex credentials and login lineage, 18 October afternoon
+
+- Serving now obtains bearer and extra headers through one `agent_resolve_auth_headers` call. The separate public resolvers are retired and covered by the bypass gate. Buffered/streaming HTTP, completion and delegate callers use the combined boundary; delegate credential setup no longer pins separately read Vault fields on reusable workers.
+- The Vault file owner reads token/account/native-document/source marker from one immutable encrypted-file snapshot. All output buffers clear on any read/decrypt failure. Instance credentials remain on their existing local owner even when tenant credentials use another backend; unsupported snapshot backends fail explicitly rather than pretending separate reads are atomic.
+- Under the existing cross-process refresh lock (separate named-connection locks), a changed native login resets normalized credentials and commits its semantic source digest before refreshing. An unchanged source preserves rotated refresh/access credentials, including metadata/formatting-only changes. Removed native sources cannot resurrect a normalized cache. Named connections cannot borrow the server account. Malformed, duplicate, mixed-shape, oversized and header-injection credential fields fail closed.
+- The existing attested private Vault helper returns the selected token/account/source lineage together; Go provider diagnostics use that single refresh-aware response and never fall back to loose slots or stale native documents. Credentials stay off the module bus/model/browser content. Generic OAuth storage now records an unknown expiry as zero, preventing a new login from inheriting the previous token's expiry. Refresh already uses stdin; investigation disproved the suspected argv transport leak.
+- Validation: nine focused native binaries passed normally (agent, three Anthropic HTTP fixtures, delegate credentials, Vault store/service, OAuth PKCE/reauth); six passed with ASAN/UBSAN and leak detection (agent, delegate credentials, Vault store/service, OAuth PKCE/reauth). The agent fixture reports three explicit store-dependent skips. Real encrypted-file concurrent replacement and service audit/clearing cases pass; selected-account, re-authentication, refresh rotation, source removal, cross-process locking and configured-header regressions pass. Providers Go race tests and server/KB/module builds pass. Fresh-schema integration `ir_integration_codex_pair_3036` passed 154/154, with 25 explicit service skips. All 76 lint checks ran; the only failure was stale exact memory-boundary hashes, subsequently reviewed and corrected with unchanged memory authority and a passing ownership check. Final originator-header correction passed both agent variants.
+- The prior published `d88016646` technical CI passed, including T1/T2/T2-luks/T3 deployment regressions. The strict opening-app attribution gate still fails and is not exempted. No GitHub reviews or review threads were recorded at the latest check; production promotion is still unqualified. Native credential-free custody, account-scoped resume/cache proof, remaining IR consumers and live qualification remain unfinished; this checkpoint does not complete the migration.
+
+### Flat response compatibility retired, 18 October afternoon
+
+- Removed the unused `parsed_response_t` / fixed-array tool-call type, flat response policy helper, response shadow comparator, flat Chat tool emitters, and flat Responses SSE tail. No serving caller remained. The mechanical bypass gate now rejects their reintroduction. The live Go-backed canonical governance owner and its typed refusal/result publication remain authoritative.
+- Moved the existing canonical buffered Chat/Responses and SSE output implementation from `openai_chat.c` into the translation owner. Serving and direct fixtures now call those same typed output boundaries. Orchestration snapshots carry borrowed `aimee_request_t` / `aimee_response_t` views rather than native JSON/flat response types; existing spawn/dispatch wrappers still have no model snapshot to supply.
+- Replaced obsolete flat/shadow fixtures with real native-codec and production-output fixtures: all three wires retain 20 KB of exact text, 400-byte tool IDs, 40 ordered tools, exact numeric/string arguments, usage and truncation. Chat/Responses output tests cover namespaced identities, buffered/stream terminal parity, one envelope owner, cached usage and explicit capacity/argument failures. Existing live IR governance, buffered/streaming HTTP and ingress regressions remain passing. Request-shadow mismatch logs now report lengths without prompt prefixes; the shared diagnostic counter is atomic.
+- Validation: 14 focused native fixtures passed normally; seven passed under ASAN/UBSAN with leak detection (canonical client output, all-wire response codecs, OpenAI shapes, gateway request policy, orchestration, canonical governance, and OpenAI ingress). The full agent fixture retains its three explicit store-dependent skips. Server and KB builds passed. All 76 lint checks passed, including unchanged 188 module crossings and memory authority. Seven bypass mutation tests passed with new retired-symbol cases. Fresh schema `ir_integration_flat_retire_3036` passed integration 154/154, with 25 explicit service skips.
+- This removes dead compatibility consumers; it does not establish native credential-free execution, native account-scoped resume/cache proof, complete remaining result/hook consumers, or live/production qualification. The generic simple request builder already constructs IR internally; remaining review there concerns post-render profile edits and fallback prompt continuity, not a native handwritten request builder.
+
+### Prepared prompt survives simple fallback, 18 October afternoon
+
+- The non-tool `agent_execute` path applied pre-LLM hooks once for its primary request, freed that prepared prompt, then built fallback from the original user text. It now retains the same prepared user content through fallback and uses it for Anthropic payload accounting too; all early exits release the owned buffer.
+- A transport-level regression with a real registered pre-LLM hook reproduced the missing context before the fix (assertion on the fallback body). It now passes normally and under ASAN/UBSAN with leak detection, verifies the hook runs exactly once, and retains both primary/fallback local-refusal terminal assertions. Server/KB rebuilds and affected IR, memory ownership and line checks pass. The exact runtime boundary hash/rationale records the change without altering memory authority.
+
+### Canonical native hook admission, 18 October afternoon
+
+- Native pre/post tool hooks now stop at `translation/hook_ir.c`. It owns complete tool identities, typed arguments and structured results, including the native semantic error flag. The thin CLI forwards a versioned canonical hook intent; the server and legacy direct command consume the same owned representation. Installed old clients retain one explicit unmarked native entry, while marked/mixed or unsupported versions cannot fall back. Scope and authenticated harness metadata remain transport-owned. Missing legacy tool IDs are never invented or published as model history.
+- The old 64 KiB/truncated stdin behavior is replaced with a complete bounded reader (4 MiB for hooks). Exact original hook HTTP frames and frontend request frames reject trailing bytes, embedded/escaped NUL, invalid UTF-8, unescaped controls and duplicate keys before a native JSON parser can erase identity. Serialized native argument objects decode once; canonical string arguments remain strings. Opaque result numbers and full call IDs survive. Conflicting identity/scope aliases refuse rather than silently selecting a different owner.
+- Worktree routing and discovery read canonical arguments directly. Host memory interception borrows the canonical call and retains its existing Go classification/storage owner. The policy call receives the actual full call ID; authentication, session policy, registered workspace and detached runner binding remain in place. Foreign namespaces have no binding in the current flat native-hook policy catalog and explicitly refuse before routing/state changes rather than borrowing a leaf's privileges. General advertised namespaced-native hook support remains open.
+- Structured legacy hook results are retained as context evidence instead of being lost when content is an array/object. Existing native output/rewrite boundaries remain explicit. Hook intents are control/policy inputs, not a second model transcript. The bypass gate now rejects native hook envelope readers in the migrated direct-hook and memory-interception consumers; its exception ledger remains empty.
+- Validation: six focused binaries passed normally and under ASAN/UBSAN with leak detection (hook scope/admission, util, frontend, cross-protocol replay, server dispatch and server HTTP). The dispatch fixture checks trusted canonical policy admission with a 400-byte ID, exact numeric arguments and namespace refusal before state mutation. Real CLI/server/KB builds pass. Fresh-schema integration `ir_integration_hook_final_3036` passes 155/155, with 25 explicit service-dependent skips; its real HTTP/CLI checks cover legacy/canonical admission, mixed versions, mismatched call/result IDs, namespaces, malformed bytes and oversized stdin. An earlier fresh-schema run also passed 155/155. The first attempt aborted on PostgreSQL disk quota before hook checks; the disposable test cluster was stopped cleanly, moved from `/tmp` to `/var/tmp/aimee-ir-pg-data-3036`, and restarted on its same 55463 port before fresh-schema reruns.
+- All 76 lint checks ran; only the new source/IR-type registrations initially failed. Those registrations were corrected and affected ownership, module, line, memory, bypass and test-registration gates pass. Eighteen ownership/bypass mutation regressions and eight attribution regressions pass. Exact changed memory adapter/fixture fingerprints include source-boundary rationale; no memory policy authority or independent production approval is inferred. CMake and Make share the new pure IR/hook source declarations rather than duplicating canonical source ownership.
+- Published head `a63c95c9b` now passes all technical CI, including complete sanitizer/scripts and T1/T2/T2-luks/T3 deployment jobs. The strict opening-app attribution gate is still failing and is not exempted. This hook slice does not finish the migration: credential-free native execution, actor-bound MCP, account-scoped resume/cache proof, remaining consumers/capabilities and live/production qualification above remain open. All further publication stays on #3036.
+
+### 2026-10-18: verified caller ownership across async execution
+
+- Compute contexts now own the originating request context, including verified caller proof, restrictive header budgets and the private attested Vault actor. Chat, steer continuations, tool execution, delegate execution, generic async operation runs, SSE offload and both parallel fan-out paths restore the captured context and clear it after execution. Copies containing caller proof are wiped when released. Conn-free continuations inherit the originating capability ceiling; a different authenticated connection discards the former caller proof and limits.
+- Private connection attestation stays distinct from display/proxy principal strings. An inherited browser actor can execute its authorized task but cannot submit interactive permission/question approvals: those require the actual attested browser request. Async operation ownership remains installed through durable terminal capture. The existing operation lifecycle was extracted to server_http_op_runs.c to preserve the HTTP route owner's line bound.
+- The first threaded regression failed before the fan-out fix. Six focused native fixtures now pass (agent-parallel, request-context, server-dispatch, server-http, full agent and server-chat-ir), including all six under ASan/UBSan with leak detection. The full agent retains three explicit store-dependent skips. Current server/KB builds pass. All 76 lint checks pass again with the final HTTP capture-order correction.
+- Fresh integration initially exposed an actual regression: HTTP populated request context before capturing the authenticated connection, so the compute handoff discarded its incomplete owner and a real authorized file read failed. Capture now precedes context population after certificate/capability resolution; every connection-worker exit still clears identity/context. A fresh PostgreSQL schema, ir_integration_owner_capture_3036, passes 155/155 integration checks with 25 explicit service-dependent skips, including real canonical primary switching, replay and tool execution.
+- Published a6f9acdc7 CI finished: sanitizer, integration, frontend, Go and T1/T2/T2-luks/T3 deployment tests pass. Two technical failures are fixed in this tree: the thin-client canonical usage bound explicitly converts LONG_MAX for Clang, and the exact Make-only translation registration for test_cmd_hooks_scope.c is recorded. Strict Clang validation and all 18 registration regressions pass. The immutable opening-app attribution gate remains failing, with no exemption or replacement PR.
+- The user's additional production KB/learning requirement is open. The authenticated registered CLI reaches .100 and its background-process capability gives a verified command path into the aimee container. Production reports v1.0.2-history-index-repair-20261017; KB status is unavailable, kb_mode/kb_client_url and synthesis endpoint/model are unset, and dashboard vector status is unavailable. The learning module process is present; the durable delegate jobs listing is empty. DB1 delegate learning, no-progress approach failures and KB agent outcomes have distinct writers; zero rows must not be replaced by manufactured evidence or inferred to have one cause. Shared Vault-name inspection is explicitly refused without vault:write:server for webuser:admin; no self-grant or alternative credential extraction was attempted. Direct SSH has a changed host key and was not used. Production configuration has not been mutated, a real completed-task learning receipt has not yet been demonstrated, and production promotion remains unqualified.
+
+Native credential-free transport and full authorized MCP tools, account-bound native replay/cache proof, remaining IR consumers/capabilities and the additional production learning repair remain required. This checkpoint does not complete #3036.
+
+### 2026-10-18: delegate learning capture before terminal publication
+
+- Confirmed a separate learning lifecycle defect: delegate_worker published its terminal response/job state before invoking delegate_record_exit_learning, and both DB1 writes ignored their results. Capture now runs before terminal publication. Its typed API returns incomplete capture on a failed learning row, exit event, applicable no-progress approach row or event serialization. Warnings identify the failed capture separately from the task's execution result; the durable exit payload records whether its learning row was accepted. A positive interaction-event ID is success, matching the existing DB1 client contract.
+- The extended delegate-exit-classify fixture passes normally and under ASan/UBSan with leak detection. It exercises successful capture, each failed store write, positive event IDs, provider metadata and successful/failed no-progress approach writes. The server/KB build passes. Fresh Go race tests pass for modules/aimee/families and modules/learning. All 76 lint checks pass.
+- Added a real async delegate completion/readback journey to the primary integration fixture: after a completed sandboxed format task, the next task must receive the first task's persisted lesson through the existing DB1 prompt reader. The request includes the required engineer persona. This requires the actual Docker sandbox, with no fake or unsandboxed substitute. The integration runner counts and prints its explicit skip when that service is unavailable. Local final integration passes 155/155 with 26 service-dependent skips in ir_integration_learning_final_3036. The new sandboxed readback journey is NOT locally qualified and requires fresh full-stack CI.
+- b8354e0d6 is published on the same #3036. Its macOS build and complete script suite pass, confirming both prior technical CI fixes. A later handoff heading was appended after the local lint run and contained an em dash forbidden by the documentation gate; that exact heading is corrected here and docs-check passes. At the latest check its sanitizer and T2/T2-luks/T3 jobs were still running. The strict opening-app attribution failure is unchanged and remains enforced.
+- Production KB destination is not configured in the connected instance or its managed Compose services. The user subsequently confirmed that this is intentional: no KB instance should be used. Configuration and grants remain untouched. These code changes do not establish production synthesis, approach accumulation or independently graded task outcomes, and do not complete the migration work above.
+
+The production destination question is now answered: the user requires .100 to run without a KB instance. KB activation is not part of this repair. Confirmed remaining server-local dependency: agent_runtime.c record_outcome calls kb_client_agent_outcome_record, which sends agent.outcome_record to the optional KB; the server learning.application route likewise forwards to KB. DB1 delegate learning and approach failures are separate local writers. These remaining KB dependencies must be removed through the existing runtime owners, with actual verification provenance preserved; process completion alone must never become an independently graded outcome.
+
+Escaping follow-up: a new regression reproduced malformed failure evidence when errors contain quotes, backslashes, newlines or Unicode. DB1 stores evidence_json as TEXT, so this corrupts provenance rather than proving the cause of zero rows. Classification now serializes error data with cJSON, and its evidence buffer holds the worst-case JSON escaping of the production 512-byte error buffer. Metadata/exit serialization failures refuse incomplete capture instead of writing partial provenance. Normal and ASan/UBSan fixtures pass, including a 511-byte control-character error. Final server/KB builds and all 76 lint checks pass. Fresh integration passes 155/155 with 26 explicit service-dependent skips in ir_integration_learning_escape_3036. The new sandboxed delegate readback remains a local skip, not a qualified live-learning result.
+
+### 2026-10-18: standalone canonical execution observations (in progress)
+
+Production .100 must remain disconnected from KB, as explicitly confirmed by the user. The five legacy agent_runtime outcome calls sent heuristic observations to optional KB. Those calls are removed. Browser and private execution capture owners now invoke the registered Go Learning stage only after a successful canonical terminal append. Learning requires a host-owned authenticated context, validates the typed terminal event and exact positive source sequence, and returns an explicitly ungraded observation. The host persists that projection through the existing local DB1 interaction_events ledger as task_outcome, with the immutable canonical session/turn/event/sequence and actual actor in the payload. No new transcript or database is introduced. A capture failure leaves the source event intact and warns; execution completion is never promoted into an independently verified grade.
+
+Go race tests pass, including authority refusals and exact sequences above the JavaScript integer limit. Browser/private native fixtures check that the source append precedes observation; rejected appends do not emit observations. Browser capture, private capture and full-agent fixtures pass under ASan/UBSan with leak detection. A new read-only live assertion verifies four actual browser terminal observations against their canonical PostgreSQL source records. Fresh integration ir_integration_local_learning_grant_3036 passes 155/155 with 26 explicit service-dependent skips. Its live Go assertion verifies all four local observations against the exact canonical source rows. The harness starts the real Learning owner with its generated grant installed before the bus starts. Earlier red runs caught absent owner/grant installation; neither was accepted as a skip. All 76 lint checks pass. Eight attribution checker regressions pass without changing the gate. Automatic reconciliation of a failed observation write is not implemented.
+
+Fresh CI on 615261841 passes lint and Go/frontend/native unit jobs. Its integration failure identifies a new fixture setup error: the delegate learning journey used the test configuration directory, which is outside the registered workspace. The fixture now supplies the actual registered mirror checkout as its cwd; sandbox checks remain unchanged. Local Docker qualification remains unavailable. The opening-app attribution gate continues to fail without exemptions.
+
+The server learning.application route still forwards receipt-bound feedback to KB and requires a standalone owner path. Independently graded outcomes, synthesis, remaining learning intake and production qualification remain open alongside the native credential custody, replay and remaining IR consumer work. This checkpoint does not complete #3036.
+
+CMake follow-up: mirrored the new helper, scoped Learning stub, log stub and interaction-event names into the two affected fixture declarations. A focused CMake project extracted those declarations from src/tests/CMakeLists.txt, linked the actual required IR/core sources and ran both fixtures successfully. The repository-wide native CMake configure still fails on existing retired source/test references (including DB1); this is not a full native CMake qualification. Make's current server/KB and affected fixtures remain qualified as described above. All four deployment tiers finished successfully on 615261841; that head's only failed checks are integration (the fixture cwd corrected here) and immutable opening-app attribution.
+
+
+### 2026-10-18: reconcile native CMake capture qualification (local)
+
+The native CMake configure failure recorded above is now resolved locally. Removed one malformed orphan source token and seven registrations for test sources already retired from this checkout; no runtime fallback or active fixture was removed. Existing Go store/private-memory suites and canonical native fixtures retain the migrated behavior. The private PostgreSQL bootstrap client now guards its GNU feature macro so CMake's command-line definition does not cause a redefinition error. Actual repository builds then exposed the private-session fixture's missing canonical event codec and SHA-256 dependencies, which now match Make.
+
+Repository-wide native CMake configuration succeeds, and both canonical browser/private capture targets build and pass through that graph, including RelWithDebInfo with assertions retained. The existing build-integrity CI job now installs CMake explicitly and configures/builds/runs those same targets so stale removed-source references and missing link dependencies are exercised automatically. Full native CMake all-target compilation is not claimed. Make server/KB parity and all 76 lint checks pass. These changes are local and do not complete the remaining migration or standalone learning work.
+
+
+Fresh CI on a3d470b98 passes the standalone Learning live assertion against four canonical source rows, plus lint, Go/frontend and ordinary native unit jobs. Full integration still fails: after the corrected registered cwd, its repository-backed format delegate requires a dedicated worktree, and the disposable bare remote cannot satisfy the production remote-default fetch policy without the Git owner. The fixture server now explicitly selects the supported current worktree base for this deliberately offline disposable checkout; production policy is unchanged. Workspace/owner/worktree setup now runs even without Docker and must reach the mandatory sandbox refusal before the completion/readback journey may be reported skipped. Fresh local integration ir_integration_learning_worktree_3036 passes 155/155 with 26 explicit service-dependent skips. Its actual delegate job creates a dedicated worktree and reaches the mandatory Docker refusal without a provider call. This qualifies local setup, not real Docker completion/readback, which is still not established. All 76 lint checks passed before the final fixture update; Python compilation, shell syntax, docs checks and the complete integration run pass for that update.
+
+
+### 2026-10-18: CI workflow identity and supervisor fixture correction
+
+The user requested a meaningful name for c-repository-pins. Its new displayed workflow name is
+Module exports and runtime validation, with the job Export builds and runtime checks. Its main-only
+application snapshot/pin gate remains main-only; testing still exercises the exported builds and
+module runtime. The failing pins step in 78222d62e was test_module_supervisor.sh after the memory
+module restarted, not the published-pin gate.
+
+The fixture's visible count file could be truncated while its set-e reader polled, causing an immediate
+EOF exit with no diagnostic. The helper now atomically publishes complete PID/count files, preserving
+PID-before-count ordering. Polling treats an incomplete read as not ready within the same bounded
+restart timeout. Cleanup waits for the supervisor and socket process before removing their files.
+A forced short-read experiment reproduces exit 1 with the previous polling expression and passes
+with the corrected expression; five actual restart/shutdown runs and Go supervisor race tests pass.
+The seven application-lock regressions, export lock-preservation regression and workflow-pin check
+also pass. This does not weaken restart or child-shutdown assertions.
+
+An Aimee-authenticated edit of #3036 succeeded, but its newly triggered attribution job still failed on
+the recorded connector app. The user's authorized replacement procedure above is being prepared.
+The overall migration and production learning repair remain unfinished.
+
+
+### 2026-10-18: recover local execution observations from canonical replay
+
+DB1 now binds task_outcome projections to the exact immutable source session, sequence,
+event ID, turn and actor, with status/error checked against that event. The session row lock
+serializes concurrent retries; identical projections are idempotent and inconsistent replacements
+refuse. Unknown sources, another actor and a fabricated grade cannot enter this path. The
+existing observation wire, Learning validation owner, local interaction ledger and canonical source
+remain in place; no transcript or schema is added.
+
+Owner-checked browser event replay retries terminal observations before delivery. A lost or pruned
+derived row can therefore be recovered from the retained canonical source without changing the
+execution result or duplicating another subscriber's observation. This is replay-driven recovery,
+not a claim of a background sweep over every unvisited private session.
+
+Real PostgreSQL race tests pass with 16 concurrent retries producing exactly one row, source and
+grade forgery refusals, loss/reconstruction and deleted-source refusal. The real HTTP integration
+journey verifies four captured observations, removes one disposable projection as a fault injection,
+then recovers it through actual authenticated replay and verifies exactly four after repeated/resumed
+replay. Fresh schema ir_integration_recovery_3038 passes 156/156 with 26 explicit service skips
+(including local Docker completion/readback). Native HTTP/dispatch and Go owner/Learning race tests
+pass. Server/KB build and affected ownership, bus, bypass, docs and test-registration gates pass.
+Both affected native fixtures also pass with ASan/UBSan and leak detection. All 76 lint
+checks pass.
+
+Procedure feedback still needs a standalone path: learning.application continues forwarding
+receipt-bound feedback to KB. Independently graded learning, synthesis, credential-free native
+execution, actor-bound native tools, cache-preserving account-bound replay and remaining IR
+consumers remain unfinished. Production .100 remains intentionally disconnected from KB and
+has not been promoted to this migration head.
+
+### 2026-10-18: canonical asynchronous inference runs
+
+`/v1/runs` now admits complete canonical Responses input and pins the selected registration.
+Its governed server tool loop retains ordered roles, media, instructions, sampling and explicit
+output limits, full tool identities/results and exact aggregate typed usage. There is no
+role-transcript flattening or fallback to another model. Unsupported execution controls, client
+catalogs and explicit limit/temperature controls on the Responses/Codex backend refuse before
+execution rather than silently disappearing. The existing bounded live projection exposes the
+private canonical session reference; durable history remains with the session log. Token-limited
+output stays incomplete, and cancellation interrupts an actual in-flight provider request.
+
+Inference and operation run records require their authenticated owner. Read, event and stop routes
+hide foreign records. Generic queued operations use the same captured owner for the record and
+worker; pipeline callers pass their real connection through the existing compute context capture
+owner. A different connection discards inherited caller proof and budget. Pooled worker tests
+verify no previous checkout, credentials, caller proof or budget leaks. CLI polling recognizes
+incomplete as terminal. Five unused input flattening/conversion APIs are removed and guarded
+against reintroduction. The API documentation and its exact memory-boundary disposition are
+reviewed; memory admission remains Go-owned.
+
+Eight affected native fixtures pass (HTTP, dispatch, full agent, session log, OpenAI shape,
+canonical ingress, live run store and CLI polling), including ASan/UBSan with leak detection.
+Full-agent fixtures retain three explicit PostgreSQL-dependent skips. Eight bypass mutation tests
+pass. Server/KB builds pass. Fresh schema ir_integration_runs_final_3038 passes integration
+156/156 with 26 explicit service-dependent skips, including unavailable local Docker. The actual
+run journey exercises full roles/media and a 20KB message, selected-model routing, a governed
+read_file call with a 409-byte identity, complete durable history, exact two-turn usage, native
+SSE output, truncation, malformed-control refusal and cancellation before provider release.
+All 76 lint checks pass. This does not qualify production promotion or finish credential-free
+native execution, actor-scoped native tools, account-bound native replay/cache proof, remaining
+IR capabilities/consumers or the broader standalone learning repair.
+
+### 2026-10-18: retain exact browser tool identities
+
+Browser canonical capture no longer qualifies native tool IDs with host turn/message IDs.
+Event/message identities remain host-qualified; model tool IDs, including streamed block starts,
+remain unchanged. The existing frontend already correlates calls by projection message/block
+identity and execution scope, including repeated native IDs. Removed the obsolete per-compute
+mapping and cleanup. This aligns the durable browser event stream with provider replay rather
+than storing a different model identity for presentation.
+
+The native capture regression exercises 1024-byte identities, repeated IDs in separate model
+responses, exact result pairing and streamed tool starts without mutating producer blocks.
+Normal and ASan/UBSan/leak runs pass. Both focused frontend suites pass (26 tests). The actual
+HTTP journey now requires the exact original call ID on live calls/results and provider replay.
+Fresh schema ir_integration_browser_ids_retry_3038 passes integration 156/156 with 26 explicit
+service skips. The first attempt hit the local /tmp user quota before the new assertions;
+the integration runner now honors TMPDIR for its isolated home, and the rerun passes. All
+76 lint checks passed; the final temp-home adjustment also passes shell syntax and tempdir gates.
+Server/KB builds pass. All 680 declared fixture/helper targets compile locally; local GCC's
+existing unterminated-string-initialization and unused-but-set-variable warnings required
+nonfatal treatment for that broad compile. No CI compiler flags were weakened, and this is not
+a claim that all 680 fixtures were executed.
+
+Fresh CI on the canonical-run publication caught the old minimal-ingress weak free stub's
+void-pointer declaration after agent_exec.h began including the canonical types. Published
+c60e7f20b corrects it to aimee_response_t*. All three consumers compile and pass locally;
+the replacement CI's ordinary unit shards and two PostgreSQL shards have passed so far.
+Continue checking every named job through Aimee git pr checks, not only the first job-list page.
+The overall migration and standalone learning/production work remain unfinished as listed above.
+
+### 2026-10-18: preserve complete attested session owners
+
+The C server-session DTO allowed only 64 bytes, while private capture/native bindings and the
+control broker allowed 128. The Vault contract permits a 128-byte name plus its namespace.
+Legal authenticated identities could therefore fail history-owner checks, be truncated in
+capture, or fail to open a permission/question scope. These boundaries now use the existing
+VAULT_PRINCIPAL_MAX contract. The C store client already sizes decoded cells from the DTO;
+the SQL schema, wire, authenticated identity factory and Go admission authority are unchanged.
+The external memory boundary disposition records the narrow identity-buffer change.
+
+Native regressions exercise a full-length legal webuser identity through an existing parent,
+private execution, source capture and identity copy. Another identity with the same long prefix
+and a different final byte cannot adopt that parent. Control replies similarly accept only the
+complete original owner and remain consume-once. Five affected fixtures (private log, controls,
+browser capture, HTTP and full agent) pass normally and under ASan/UBSan with leak detection.
+The full agent retains three explicit store-dependent skips. Server/KB builds and all 76 lint
+checks pass. Fresh schema ir_integration_owner_width_3038 passes integration 156/156 with 26
+explicit service-dependent skips.
+
+The earlier c60e7f20b CI reached 56 passing checks but T3 failed at the native asynchronous
+memory gate. Its artifact proves memory arrival/receipts, recovery, refresh and protected folding
+passed; the first failed assertion was the tmux accounting refusal diagnostic. The new canonical
+history-adoption refusal had preceded the existing external-backend accounting fence. Published
+482ce4580 restores that fence's priority without weakening either refusal. Its new full-agent
+regression fails before the repair and passes afterward for both tmux/Claude and provider/ACP;
+the final full-agent sanitizer run also passes. Fresh deployment CI is required to qualify the
+complete T3 journey and all later assertions. Keep the attribution gate and automatic reviews.

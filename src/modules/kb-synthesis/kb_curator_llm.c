@@ -39,36 +39,6 @@
  * is, while the model is genuinely working. */
 #define KB_CURATOR_PROVIDER_TIMEOUT_MS 600000
 
-/* Build [{role:system, content:system_prompt}?, {role:user, content:request_json}]. */
-static cJSON *build_messages(const char *system_prompt, const char *request_json)
-{
-   cJSON *msgs = cJSON_CreateArray();
-   if (!msgs)
-      return NULL;
-   if (system_prompt && system_prompt[0])
-   {
-      cJSON *sys = cJSON_CreateObject();
-      if (!sys)
-      {
-         cJSON_Delete(msgs);
-         return NULL;
-      }
-      cJSON_AddStringToObject(sys, "role", "system");
-      cJSON_AddStringToObject(sys, "content", system_prompt);
-      cJSON_AddItemToArray(msgs, sys);
-   }
-   cJSON *user = cJSON_CreateObject();
-   if (!user)
-   {
-      cJSON_Delete(msgs);
-      return NULL;
-   }
-   cJSON_AddStringToObject(user, "role", "user");
-   cJSON_AddStringToObject(user, "content", request_json ? request_json : "");
-   cJSON_AddItemToArray(msgs, user);
-   return msgs;
-}
-
 char *kb_curator_llm_run(kb_curator_stage_t stage, const char *system_prompt,
                          const char *request_json, cJSON *json_schema, const char *fallback_command,
                          int out_cap, char *errbuf, size_t errlen)
@@ -100,18 +70,27 @@ char *kb_curator_llm_run(kb_curator_stage_t stage, const char *system_prompt,
          def->timeout_ms = KB_CURATOR_PROVIDER_TIMEOUT_MS;
       if (def->max_attempts <= 0)
          def->max_attempts = 1;
-      cJSON *msgs = build_messages(system_prompt, request_json);
-      if (!msgs)
-      {
-         if (errbuf && errlen)
-            snprintf(errbuf, errlen, "out of memory building request");
-         return NULL;
-      }
-      /* provider_client_complete zeroes out on entry, but zero-init here too so
-       * provider_completion_free is unconditionally safe regardless of the callee. */
+      aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = (char *)system_prompt};
+      aimee_block_t input = {.type = AIMEE_BLK_TEXT,
+                             .text = (char *)(request_json ? request_json : "")};
+      aimee_ir_block_set_context(&system, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                                 AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                                 0);
+      aimee_ir_block_set_context(&input, AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_AUTH_EVIDENCE,
+                                 AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                                 0);
+      aimee_message_t message = {.role = "user", .blocks = &input, .n_blocks = 1};
+      aimee_request_t request = {.system = &system,
+                                 .n_system = system_prompt && system_prompt[0] ? 1 : 0,
+                                 .messages = &message,
+                                 .n_messages = 1};
+      if (json_schema)
+         request.output_format = (aimee_output_format_t){.kind = AIMEE_OUTPUT_JSON_SCHEMA,
+                                                         .name = "curator_output",
+                                                         .schema = json_schema,
+                                                         .strict = AIMEE_STRICT_TRUE};
       provider_completion_t out = {0};
-      int rc = provider_client_complete(def, msgs, json_schema, &out, errbuf, errlen);
-      cJSON_Delete(msgs);
+      int rc = provider_client_complete_ir(def, &request, &out, errbuf, errlen);
       if (rc != 0)
       {
          provider_completion_free(&out);

@@ -28,7 +28,8 @@ INTEG_REAL_HOME="$HOME"
 export GOCACHE="${GOCACHE:-$INTEG_REAL_HOME/.cache/go-build}"
 export GOMODCACHE="${GOMODCACHE:-$INTEG_REAL_HOME/go/pkg/mod}"
 export GOFLAGS="${GOFLAGS:--mod=mod}"
-export HOME=$(mktemp -d /tmp/aimee-integ-XXXXXX)
+INTEG_TEST_HOME=$(mktemp -d "${TMPDIR:-/tmp}/aimee-integ-XXXXXX")
+export HOME="$INTEG_TEST_HOME"
 export AIMEE_HOME="$HOME/.config/aimee"
 unset AIMEE_PROFILE
 # One session id for the whole run. Every `aimee mcp-serve` this harness spawns
@@ -155,6 +156,29 @@ stop_providers_module() {
     fi
 }
 
+# Batch/private execution tests use the real role policy, including the
+# cache-eligible summarize role. An absent policy owner would make the cache
+# regression vacuous because the safe fallback disables all role caching.
+DELEGATES_MODULE="$AIMEE_HOME/aimee-module-delegates"
+DELEGATES_MODULE_PID=""
+install_delegates_module() {
+    cp "$DB1_MODULE_BUILT" "$DELEGATES_MODULE"
+    chmod 0755 "$DELEGATES_MODULE"
+    install_generated_grant delegates "$DELEGATES_MODULE"
+}
+start_delegates_module() {
+    stop_delegates_module
+    "$DELEGATES_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-delegates.log" 2>&1 &
+    DELEGATES_MODULE_PID=$!
+}
+stop_delegates_module() {
+    if [ -n "$DELEGATES_MODULE_PID" ]; then
+        kill "$DELEGATES_MODULE_PID" 2>/dev/null || true
+        wait "$DELEGATES_MODULE_PID" 2>/dev/null || true
+        DELEGATES_MODULE_PID=""
+    fi
+}
+
 # Native tool admission requires the real execution-policy owner, just as in
 # the shipped Server placement. Absence must remain a refusal in production.
 POLICY_MODULE="$AIMEE_HOME/aimee-module-execution-policy"
@@ -174,6 +198,48 @@ stop_policy_module() {
         kill "$POLICY_MODULE_PID" 2>/dev/null || true
         wait "$POLICY_MODULE_PID" 2>/dev/null || true
         POLICY_MODULE_PID=""
+    fi
+}
+
+# Governed local file tools need their exact resource owner as well as policy.
+TOOLS_MODULE="$AIMEE_HOME/aimee-module-tools"
+TOOLS_MODULE_PID=""
+install_tools_module() {
+    cp "$DB1_MODULE_BUILT" "$TOOLS_MODULE"
+    chmod 0755 "$TOOLS_MODULE"
+    install_generated_grant tools "$TOOLS_MODULE"
+}
+start_tools_module() {
+    stop_tools_module
+    "$TOOLS_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-tools.log" 2>&1 &
+    TOOLS_MODULE_PID=$!
+}
+stop_tools_module() {
+    if [ -n "$TOOLS_MODULE_PID" ]; then
+        kill "$TOOLS_MODULE_PID" 2>/dev/null || true
+        wait "$TOOLS_MODULE_PID" 2>/dev/null || true
+        TOOLS_MODULE_PID=""
+    fi
+}
+
+# Standalone observations must use the actual Learning owner, without a KB.
+LEARNING_MODULE="$AIMEE_HOME/aimee-module-learning"
+LEARNING_MODULE_PID=""
+install_learning_module() {
+    cp "$DB1_MODULE_BUILT" "$LEARNING_MODULE"
+    chmod 0755 "$LEARNING_MODULE"
+    install_generated_grant learning "$LEARNING_MODULE"
+}
+start_learning_module() {
+    stop_learning_module
+    "$LEARNING_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-learning.log" 2>&1 &
+    LEARNING_MODULE_PID=$!
+}
+stop_learning_module() {
+    if [ -n "$LEARNING_MODULE_PID" ]; then
+        kill "$LEARNING_MODULE_PID" 2>/dev/null || true
+        wait "$LEARNING_MODULE_PID" 2>/dev/null || true
+        LEARNING_MODULE_PID=""
     fi
 }
 
@@ -453,8 +519,11 @@ stop_workflow_module() {
 install_db1_module
 install_config_module
 install_providers_module
+install_delegates_module
 install_memory_module
 install_policy_module
+install_tools_module
+install_learning_module
 # Grants are read by the daemon at startup, so this has to happen BEFORE the
 # server is started even though the module itself is not launched until the
 # workflow section. Installing it later produced a module that ran, attached to
@@ -772,7 +841,9 @@ start_server() {
     # else, and every check that reads only the client's side has to guess.
     SERVER_LOG="$HOME/aimee-server.$$.log"
     local log="$SERVER_LOG"
-    "$AIMEE_SERVER" --foreground >"$log" 2>&1 &
+    # The disposable local mirror has no network-backed forge owner. Use its
+    # known current commit explicitly; production keeps remote-default policy.
+    AIMEE_SESSION_WORKTREE_BASE=current "$AIMEE_SERVER" --foreground >"$log" 2>&1 &
     SERVER_PID=$!
     local config_started=0
     local i
@@ -780,8 +851,11 @@ start_server() {
         if [ "$config_started" -eq 0 ] && [ -S "$MODULE_BUS_SOCK" ]; then
             start_config_module
             start_providers_module
+            start_delegates_module
             if [ "$MEMORY_MODULE_ENABLED" -eq 1 ]; then start_memory_module; fi
             start_policy_module
+            start_tools_module
+            start_learning_module
             config_started=1
         fi
         [ -S "$HTTP_SOCK" ] && { start_db1_module; return 0; }
@@ -821,8 +895,11 @@ cleanup() {
     stop_pg_module
     stop_config_module
     stop_providers_module
+    stop_delegates_module
     stop_memory_module
     stop_policy_module
+    stop_tools_module
+    stop_learning_module
     local rc=$?
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
         echo ""
@@ -1665,7 +1742,7 @@ fi
 
 HOOK_PAYLOAD='{"tool_name":"Read","tool_input":"{\"file_path\":\"main.c\"}"}'
 set +e
-RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1) || true
+RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1)
 HOOK_RC=$?
 set -e
 if [ "$HOOK_RC" -ne 0 ] && echo "$RESP" | grep -q "server build mismatch"; then
@@ -1676,7 +1753,7 @@ if [ "$HOOK_RC" -ne 0 ] && echo "$RESP" | grep -q "server build mismatch"; then
     )
     start_server || true
     set +e
-    RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1) || true
+    RESP=$(echo "$HOOK_PAYLOAD" | CLAUDE_SESSION_ID=integ-test $AIMEE hooks pre 2>&1)
     HOOK_RC=$?
     set -e
 fi
@@ -1684,6 +1761,85 @@ if [ "$HOOK_RC" -eq 0 ]; then
     PASS=$((PASS + 1))
 else
     echo "FAIL: hooks pre safe file (expected exit 0, got $HOOK_RC)"
+    FAIL=$((FAIL + 1))
+fi
+
+# The actual server route admits both installed legacy clients and canonical
+# hook intents, while marked/mixed/foreign identities cannot fall back to a leaf.
+if python3 - "$HTTP_SOCK" "$AIMEE" <<'PYHOOK'
+import copy
+import http.client
+import json
+import os
+import socket
+import subprocess
+import sys
+
+class UnixHTTP(http.client.HTTPConnection):
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(20)
+        self.sock.connect(sys.argv[1])
+
+def invoke(phase, payload, expected_status=200):
+    conn = UnixHTTP('localhost')
+    try:
+        encoded = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        conn.request('POST', '/v1/hooks/' + phase, encoded,
+                     {'Content-Type': 'application/json'})
+        response = conn.getresponse()
+        body = json.loads(response.read())
+        assert response.status == expected_status, (response.status, body)
+        return body.get('result', body)
+    finally:
+        conn.close()
+
+legacy = {'tool_name': 'Read', 'session_id': 'integ-hook-ir',
+          'tool_input': {'file_path': 'main.c'}}
+canonical = {'ir_version': 1, 'session_id': 'integ-hook-ir', 'hook': {
+    'call': {'type': 'tool_use', 'name': 'Read', 'tool_id': 'opaque-hook-id',
+             'input': {'file_path': 'main.c', 'number': 9007199254740993}},
+    'result': {'type': 'tool_result', 'tool_id': 'opaque-hook-id',
+               'content': {'content': [{'type': 'text', 'text': 'read result'}]},
+               'is_error': False}}}
+for phase in ('pre', 'post'):
+    for payload in (legacy, canonical):
+        reply = invoke(phase, payload)
+        assert reply.get('exit_code') == 0, (phase, reply)
+    for mutation in ('mixed', 'version', 'namespace', 'pair'):
+        payload = copy.deepcopy(canonical)
+        if mutation == 'mixed':
+            payload['tool_name'] = 'Read'
+        elif mutation == 'version':
+            payload['ir_version'] = 2
+        elif mutation == 'namespace':
+            payload['hook']['call']['namespace'] = 'foreign'
+        else:
+            payload['hook']['result']['tool_id'] = 'different-call'
+        reply = invoke(phase, payload)
+        assert reply.get('exit_code') == 2, (phase, mutation, reply)
+# Validate original HTTP bytes before native JSON can discard identity suffixes.
+for phase in ('pre', 'post'):
+    for frame in (b'{"tool_name":"Read","tool_name":"Write"}',
+                  br'{"tool_name":"Read\u0000Write"}',
+                  b'{"tool_name":"\xc0\xaf"}',
+                  b'{"tool_name":"Read"} trailing',
+                  b'{"tool_name":"Read"}\0hidden'):
+        invoke(phase, frame, 400)
+# Validate the installed thin-client entry as well as server admission. Oversize
+# or malformed stdin must refuse rather than send a truncated valid prefix.
+for frame in (b'{"tool_name":"Read"} trailing',
+              b'{"tool_name":"Read"}\0hidden',
+              b'{"tool_name":"Read"} ' + b' ' * (4 * 1024 * 1024)):
+    proc = subprocess.run([sys.argv[2], 'hooks', 'pre'], input=frame,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
+    assert proc.returncode == 2, (proc.returncode, proc.stderr[:256])
+print('canonical/legacy hook RPC, identity refusal and complete thin-client frames pass')
+PYHOOK
+then
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: canonical hook transport and thin-client framing"
     FAIL=$((FAIL + 1))
 fi
 
@@ -1998,6 +2154,44 @@ check_output "and it is gone from the read side" '404' \
 stop_workflow_module
 
 fi  # WORKFLOW_MODULE_READY
+
+# Native provider output must cross the same durable IR contract used by
+# browser live delivery and replay, including after model switches.
+# This journey owns a server-local checkout. The earlier mirror journey's
+# client path is deliberately foreign to server execution; registering that path
+# as a mirror does not make it a shared server workspace for a delegate.
+PRIMARY_IR_WORKSPACE="$HOME/primary-ir-workspace"
+git init -b main "$PRIMARY_IR_WORKSPACE" >/dev/null
+git -C "$PRIMARY_IR_WORKSPACE" config user.name "Aimee Integration"
+git -C "$PRIMARY_IR_WORKSPACE" config user.email "aimee-integration@example.invalid"
+printf 'canonical delegate fixture\n' >"$PRIMARY_IR_WORKSPACE/README.md"
+git -C "$PRIMARY_IR_WORKSPACE" add README.md
+git -C "$PRIMARY_IR_WORKSPACE" commit -m fixture >/dev/null
+PRIMARY_WORKSPACE_REQ=$(python3 - "$PRIMARY_IR_WORKSPACE" <<'PYREQ'
+import json, sys
+print(json.dumps({"method": "workspace.add", "root": sys.argv[1],
+                  "provider": "shared", "scan": False}))
+PYREQ
+)
+RESP=$(http_rpc "$PRIMARY_WORKSPACE_REQ") || true
+check_output "canonical delegate server workspace registered" '"status":"ok"' echo "$RESP"
+PRIMARY_IR_LOG="$HOME/primary-ir-live.log"
+if AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$REPO_ROOT/src/tests/test_primary_ir_live.py" >"$PRIMARY_IR_LOG" 2>&1; then
+    PASS=$((PASS + 1))
+    PRIMARY_SKIPS=$(grep -c '^SKIP:' "$PRIMARY_IR_LOG" || true)
+    SKIP=$((SKIP + PRIMARY_SKIPS))
+    grep '^SKIP:' "$PRIMARY_IR_LOG" || true
+    grep '^standalone learning:' "$PRIMARY_IR_LOG" || true
+    grep '^delegate setup:' "$PRIMARY_IR_LOG" || true
+    grep '^delegate learning:' "$PRIMARY_IR_LOG" || true
+else
+    echo "FAIL: canonical primary switching and durable replay"
+    # This fixture contains synthetic provider data. Preserve bounded client-side
+    # assertion evidence as well as the server tail before cleanup removes HOME.
+    tail -c 12000 "$PRIMARY_IR_LOG"
+    dump_server_log
+    FAIL=$((FAIL + 1))
+fi
 
 # ============================================================
 # 11. Server shutdown

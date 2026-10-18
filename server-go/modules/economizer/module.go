@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/ir"
 )
 
 // Bus surface for the economizer module. Reduction remains the primary stage.
@@ -211,7 +212,7 @@ func NewHandlerWithStore(store StateStore) bus.ModuleHandler {
 			return handlePostStatus(breaker, stats, &req)
 		case StageReduce:
 			var req ReduceRequest
-			if err := json.Unmarshal(request, &req); err != nil {
+			if !ir.Decode(request, &req) {
 				return nil, bus.ModuleStatusInvalidRequest
 			}
 			return handleReduce(breaker, stats, store, &req)
@@ -231,6 +232,11 @@ func NewHandlerWithStore(store StateStore) bus.ModuleHandler {
 
 func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, store StateStore,
 	req *ReduceRequest) ([]byte, bus.ModuleStatus) {
+	if _, err := ir.DecodeMessages(req.Messages); err != nil {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	// Preserve original member ordering/decimal tokens for frozen-prefix bytes;
+	// provider shapes have already been refused by the shared typed contract.
 	messages := ParseJSON(string(req.Messages))
 	if messages == nil || !messages.IsArray() {
 		return nil, bus.ModuleStatusInvalidRequest
@@ -350,6 +356,9 @@ func handleReduce(breaker *SessionBreaker, stats *GatewayStatsStore, store State
 		// forwards are the bytes the fold measured — anything else would move the
 		// prefix and cost the cache.
 		resp.Messages = json.RawMessage(PrintJSONUnformatted(out.Messages))
+		if _, err := ir.DecodeMessages(resp.Messages); err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
 	}
 	// Persist BEFORE any bypass decision and regardless of it. The freeze
 	// boundary has to advance on every turn the reducer saw, not only the ones

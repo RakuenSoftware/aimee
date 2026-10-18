@@ -1,4 +1,4 @@
-name: c-repository-pins
+name: Module exports and runtime validation
 
 on:
   # Test GitHub's queued integration commit without updating the PR branch.
@@ -64,7 +64,8 @@ permissions:
   contents: read
 
 jobs:
-  pins:
+  validate:
+    name: Export builds and runtime checks
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -124,4 +125,5 @@ jobs:
         run: python3 -I scripts/check_application_source_lock.py
       - name: Test application source-lock failure modes
         run: python3 -I scripts/tests/test_check_application_source_lock.py -v
-      - run: sh src/tests/test_module_supervisor.sh
+      - name: Module crash restart and shutdown
+        run: sh src/tests/test_module_supervisor.sh

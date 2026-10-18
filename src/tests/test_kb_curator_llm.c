@@ -28,7 +28,7 @@ static int ok_handler(const char *url, const char *auth_header, const char *body
    snprintf(g_seen_url, sizeof(g_seen_url), "%s", url ? url : "");
    snprintf(g_seen_body, sizeof(g_seen_body), "%s", body ? body : "");
    if (response_buf)
-      *response_buf = strdup("{\"choices\":[{\"message\":{\"content\":"
+      *response_buf = strdup("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":"
                              "\"{\\\"synthesis\\\":\\\"ok\\\"}\"}}]}");
    return 200;
 }

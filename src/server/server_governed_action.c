@@ -258,21 +258,29 @@ done:
    return rc;
 }
 
-char *policy_action_finish(const char *verdict, char *result)
+char *policy_action_finish(const char *verdict, char *result, int *is_error)
 {
    if (action_existing_receipt)
    {
       action_refusal[0] = 0;
+      const char *state = action_text(
+          cJSON_GetObjectItemCaseSensitive(action_existing_receipt, "receipt"), "state");
+      if (is_error)
+         *is_error = strcmp(state, "acknowledged") && strcmp(state, "effect_confirmed");
       char *prior = cJSON_PrintUnformatted(action_existing_receipt);
       cJSON_Delete(action_existing_receipt);
       action_existing_receipt = NULL;
       free(result);
+      if (!prior && is_error)
+         *is_error = 1;
       return prior ? prior : safe_strdup("error: prior action receipt unavailable; do not replay");
    }
    if (!action_intent)
    {
       if (!action_refusal[0])
          return result;
+      if (is_error)
+         *is_error = 1;
       cJSON *refusal = cJSON_CreateObject();
       cJSON_AddStringToObject(refusal, "status", "refused");
       cJSON_AddStringToObject(refusal, "reason", action_refusal);
@@ -338,6 +346,8 @@ char *policy_action_finish(const char *verdict, char *result)
    cJSON_Delete(decision);
    cJSON_Delete(action_intent);
    action_intent = NULL;
+   if (is_error)
+      *is_error = !wrapped || (strcmp(state, "acknowledged") && strcmp(state, "effect_confirmed"));
    return wrapped ? wrapped : safe_strdup("error: action outcome unknown; reconcile before retry");
 }
 

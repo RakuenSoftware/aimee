@@ -124,6 +124,11 @@ vault_status_t vault_service_set_server(const char *agent, const char *cred, con
  * you actually intend to USE the credential -- that one audits, correctly. */
 int vault_service_has_server_principal(const char *agent, const char *cred);
 
+/* Resolve all requested fields from one immutable server-credential snapshot.
+ * Missing fields have present=0; any failure clears every output. A backend
+ * without snapshot support returns VAULT_ERR_UNSUPPORTED_OP, never torn pairs. */
+vault_status_t vault_service_read_server_snapshot(const char *agent, vault_store_read_t *reads,
+                                                  size_t count);
 vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
                                                   size_t out_len);
 

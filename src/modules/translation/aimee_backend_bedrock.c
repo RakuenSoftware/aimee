@@ -371,8 +371,16 @@ static cJSON *converse_tool_choice(const aimee_request_t *ir, int *failed)
 
 cJSON *bedrock_converse_build(const aimee_request_t *ir)
 {
-   if (!ir)
+   if (ir && ir->reasoning_effort != AIMEE_EFFORT_UNSET)
       return NULL;
+   for (int i = 0; ir && i < ir->n_tools; i++)
+      if (ir->tools[i].kind != AIMEE_TOOL_FUNCTION || ir->tools[i].strict == AIMEE_STRICT_TRUE ||
+          (ir->tools[i].has_defer_loading && ir->tools[i].defer_loading) ||
+          ir->tools[i].native_options)
+         return NULL;
+   if (!ir || (ir->output_format.kind != AIMEE_OUTPUT_UNSET &&
+               ir->output_format.kind != AIMEE_OUTPUT_TEXT))
+      return NULL; /* Refuse unsupported constraints instead of dropping them. */
    int failed = 0;
    cJSON *out = json_new_object(&failed);
    cJSON *choice = NULL;
@@ -619,21 +627,16 @@ int bedrock_converse_parse(const cJSON *resp, aimee_response_t *out, char *err, 
       }
    }
 
-   const cJSON *usage = cJSON_GetObjectItemCaseSensitive((cJSON *)resp, "usage");
-   if (usage && cJSON_IsObject(usage))
+   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
+   if (aimee_ir_read_usage(usage, "inputTokens", &out->usage_in) ||
+       aimee_ir_read_usage(usage, "outputTokens", &out->usage_out) ||
+       aimee_ir_read_usage(usage, "cacheReadInputTokens", &out->usage_cache_read) ||
+       aimee_ir_read_usage(usage, "cacheWriteInputTokens", &out->usage_cache_write))
    {
-      const cJSON *in = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "inputTokens");
-      const cJSON *ou = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "outputTokens");
-      const cJSON *cr = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "cacheReadInputTokens");
-      const cJSON *cw = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "cacheWriteInputTokens");
-      if (in && cJSON_IsNumber(in))
-         out->usage_in = (long)in->valuedouble;
-      if (ou && cJSON_IsNumber(ou))
-         out->usage_out = (long)ou->valuedouble;
-      if (cr && cJSON_IsNumber(cr))
-         out->usage_cache_read = (long)cr->valuedouble;
-      if (cw && cJSON_IsNumber(cw))
-         out->usage_cache_write = (long)cw->valuedouble;
+      if (err && errn)
+         snprintf(err, errn, "invalid provider usage counter");
+      aimee_response_free(out);
+      return -1;
    }
    if (!out->raw || !out->role || !out->raw_stop_reason)
       goto allocation_failure;

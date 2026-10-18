@@ -214,7 +214,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "learning":
 		config.ModuleName = name
 		config.PrincipalRef = 8
-		config.Stages = []bus.ModuleStage{{EventKind: learning.EventKind, StageID: learning.StageObserve}, {EventKind: learning.EventExperience, StageID: learning.StageExperience}}
+		config.Stages = []bus.ModuleStage{{EventKind: learning.EventKind, StageID: learning.StageObserve}, {EventKind: learning.EventExperience, StageID: learning.StageExperience}, {EventKind: learning.EventExecution, StageID: learning.StageExecution}}
 		config.Handler = learning.Handle
 	case "providers":
 		config.ModuleName = name

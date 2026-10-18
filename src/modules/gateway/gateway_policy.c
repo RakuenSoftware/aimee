@@ -87,6 +87,47 @@ int gateway_policy_strip_tools(cJSON *tools, int tools_openai_shape)
    return stripped;
 }
 
+static int police_ir_catalog(aimee_tool_t *tools, int *count)
+{
+   int removed = 0;
+   for (int i = *count - 1; i >= 0; i--)
+   {
+      aimee_tool_t *tool = &tools[i];
+      if (tool->kind == AIMEE_TOOL_NAMESPACE)
+         removed += police_ir_catalog(tool->children, &tool->n_children);
+      if ((tool->name && is_subagent_tool_name(tool->name)) ||
+          (tool->kind == AIMEE_TOOL_NAMESPACE && !tool->n_children))
+      {
+         aimee_tool_free(tool);
+         memmove(tool, tool + 1, (size_t)(*count - i - 1) * sizeof *tool);
+         (*count)--;
+         memset(&tools[*count], 0, sizeof *tool);
+         removed++;
+      }
+   }
+   return removed;
+}
+int gateway_policy_apply_ir(aimee_request_t *request)
+{
+   if (!request || !gateway_prevent_subagents_enabled())
+      return 0;
+   int removed = police_ir_catalog(request->tools, &request->n_tools);
+   if (!removed)
+      return 0;
+   if (!request->n_tools ||
+       (request->tool_choice == AIMEE_TOOL_CHOICE_TOOL && request->tool_choice_name &&
+        is_subagent_tool_name(request->tool_choice_name)))
+   {
+      request->tool_choice = request->n_tools ? AIMEE_TOOL_CHOICE_AUTO : AIMEE_TOOL_CHOICE_UNSET;
+      if (!request->n_tools)
+         request->has_parallel_tool_calls = 0;
+      free(request->tool_choice_name);
+      request->tool_choice_name = NULL;
+   }
+   request->mutated = 1;
+   return removed;
+}
+
 int gateway_policy_apply_request(cJSON *req, int tools_openai_shape)
 {
    cJSON *tools;
@@ -147,62 +188,4 @@ int gateway_policy_is_denied_tool(const char *name)
    if (!gateway_prevent_subagents_enabled())
       return 0;
    return is_subagent_tool_name(name);
-}
-
-/* Response-side tool policing: memmove-compact denied entries out of `p->calls[]`
- * and finalize `p->stop_reason` so it agrees with the wire emitted by
- * `anthropic_response_from_parsed`. See gateway_policy.h for the stop-reason
- * rules and the full set of fields the function does NOT touch. */
-int gateway_policy_police_parsed_response(parsed_response_t *p)
-{
-   int drops = 0;
-   int n, i, w;
-
-   if (!p)
-      return 0;
-   if (!gateway_prevent_subagents_enabled())
-      return 0;
-
-   n = p->call_count;
-   if (n <= 0)
-      return 0;
-
-   /* Single pass: read index `i`, write index `w`. Surviving entries are
-    * shifted down to the front of the array in their original order. Dropped
-    * entries' `arguments` strings are freed eagerly — the slot is then
-    * overwritten by the next survivor, so `agent_free_parsed_response`'s
-    * 0..call_count-1 sweep would otherwise leak the dropped strings. */
-   w = 0;
-   for (i = 0; i < n; i++)
-   {
-      const parsed_tool_call_t *src = &p->calls[i];
-      if (is_subagent_tool_name(src->name))
-      {
-         free(src->arguments);
-         p->calls[i].arguments = NULL;
-         drops++;
-         continue;
-      }
-      if (w != i)
-         p->calls[w] = *src;
-      w++;
-   }
-   p->call_count = w;
-   /* Stop-reason finalization: if the upstream did not set a reason
-    * (stop_reason[0] == '\0'), derive from the surviving call_count so the
-    * audit row and the renderer's fallback (line 435 of anthropic_ingress.c,
-    * `parsed->stop_reason[0] ? parsed->stop_reason : n_calls > 0 ? "tool_use"
-    * : "end_turn"`) agree on a non-empty value. If the upstream DID set a
-    * reason (e.g. "max_tokens" for a truncated reply, or "stop_sequence" /
-    * "refusal"), preserve it verbatim — see the doc comment above for the
-    * partial-drop preservation rationale. The all-dropped case always
-    * rewrites to "end_turn" because the wire's "tool_use" reply became an
-    * "end_turn" reply (the model emitted a tool_use reply; the police
-    * removed every block; the client now sees end_turn). */
-   if (p->stop_reason[0] == '\0' || w == 0)
-   {
-      snprintf(p->stop_reason, sizeof(p->stop_reason), "%s", w > 0 ? "tool_use" : "end_turn");
-      p->stop = w > 0 ? AIMEE_STOP_TOOL_USE : AIMEE_STOP_END_TURN;
-   }
-   return drops;
 }

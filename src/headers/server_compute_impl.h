@@ -7,6 +7,9 @@
 #include "coord_jobs.h"
 #include "server.h"
 #include "cJSON.h"
+#include <aimee/ir/session_event.h>
+#include "server_session_control.h"
+#include "request_context.h"
 #include <pthread.h>
 
 #define CLAUDE_LINE_MAX (256 * 1024)
@@ -27,6 +30,7 @@ typedef struct
    pthread_mutex_t *write_mutex;
    /* The originating connection's capability set, captured at ctx creation.
     * CAPS_ALL ⟺ a fully-trusted local UDS peer (co-located, same filesystem);
+    * Conn-free continuations retain their captured owner's scope. Otherwise,
     * anything less is a remote/TCP peer whose client-supplied cwd is a FOREIGN
     * path the server must not open on its own filesystem (workspace-resource-
     * plane AC #6 — the worktree_cwd-trust hole). */
@@ -38,7 +42,17 @@ typedef struct
     * the ONLY identity key the worker trusts (never the body session_id). */
    attested_transport_t attested_transport;
    char vault_principal[VAULT_PRINCIPAL_MAX];
+   request_context_snapshot_t request_context;
    cJSON *req; /* owned by this context */
+   int ir_enabled, ir_delivery, ir_failed, ir_completed;
+   unsigned long long ir_counter;
+   unsigned long long ir_model_events;
+   char ir_session[128], ir_turn[128];
+   char ir_sequence[32];
+   server_control_scope_t *ir_controls, *ir_previous_controls;
+   char ir_harness[32];
+   aimee_ir_session_sink_fn ir_previous_sink;
+   void *ir_previous_context;
    /* Unified-presence turn arbitration. When a chat request carries an
     * attach_id and a presence exists for the session, handle_chat_send_stream
     * acquires the per-session turn lock before dispatch; the pooled worker
@@ -91,10 +105,17 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
  * (enforce-delegate-only). Call once at server startup. */
 void server_install_gateway_delegate_policy(void);
 void compute_respond(compute_ctx_t *cctx, cJSON *resp);
+int server_chat_ir_begin(compute_ctx_t *cctx, const char *session, const char *message);
+int server_chat_ir_finish(compute_ctx_t *cctx, const char *error);
 void compute_error(compute_ctx_t *cctx, const char *message);
 void compute_ok(compute_ctx_t *cctx);
 void compute_ctx_release_budget(compute_ctx_t *cctx);
 void compute_ctx_free(compute_ctx_t *cctx);
+/* Worker-only owner binding. Copies are owned by cctx; clear after the worker
+ * returns, even when it already freed cctx. */
+void compute_ctx_capture_request_context(compute_ctx_t *cctx, const server_conn_t *conn);
+void compute_ctx_bind_request_context(const compute_ctx_t *cctx);
+void compute_ctx_clear_request_context(void);
 int tool_execute_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx);
 /* Dispatch a coord task as a background delegate worker. Returns 0 on success, -1 on failure. */
 int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const char *role,

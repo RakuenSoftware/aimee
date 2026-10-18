@@ -5,12 +5,14 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/ir"
 )
 
 func invoke(t *testing.T, req ReduceRequest) (ReduceResponse, bus.ModuleStatus) {
@@ -79,6 +81,7 @@ func invokeWithStore(t *testing.T, store StateStore, req ReduceRequest) (ReduceR
 func rawMessages(t *testing.T, n int) json.RawMessage {
 	t.Helper()
 	arr := makeMessages(n)
+
 	return json.RawMessage(PrintJSONUnformatted(arr))
 }
 
@@ -104,7 +107,7 @@ func TestModuleReduceStage(t *testing.T) {
 	if got == nil || !got.IsArray() {
 		t.Fatal("emitted messages are not a JSON array")
 	}
-	if !strings.Contains(got.At(1).GetString("content"), "folded") {
+	if !strings.Contains(got.At(1).Get("blocks").At(0).GetString("text"), "folded") {
 		t.Error("the original user message should precede optional folded history")
 	}
 }
@@ -445,11 +448,15 @@ func TestModuleToolRecallRejectsMalformedFramesAndDirectories(t *testing.T) {
 
 func TestModuleRecordBuildStage(t *testing.T) {
 	h := NewHandler()
-	messages, _ := json.Marshal([]map[string]string{
-		{"role": "user", "content": "please inspect /untrusted/input.txt " + strings.Repeat("context ", 100)},
-		{"role": "assistant", "content": "[done] changed src/server/session_compact.c at port=3002"},
-		{"role": "assistant", "content": "[blocked] denied by policy"},
+	textMessage := func(role, text string) ir.Message {
+		return ir.Message{Role: role, Blocks: []ir.Block{{Type: "text", Text: &text}}}
+	}
+	messages, _ := json.Marshal([]ir.Message{
+		textMessage("user", "please inspect /untrusted/input.txt "+strings.Repeat("context ", 100)),
+		textMessage("assistant", "[done] changed src/server/session_compact.c at port=3002"),
+		textMessage("assistant", "[blocked] denied by policy"),
 	})
+
 	req := RecordBuildRequest{
 		Messages: messages,
 		Start:    0,
@@ -490,3 +497,66 @@ func TestModuleEventKindMatchesContract(t *testing.T) {
 }
 
 var errStoreDown = errors.New("store is unreachable")
+
+func TestCanonicalRecordRetainsToolEvidence(t *testing.T) {
+	messages, err := ir.DecodeMessages([]byte(`[{"role":"user","blocks":[{"type":"text","text":"Change src/request.c"}]},{"role":"assistant","blocks":[{"type":"thinking","text":"hidden/secret.c"},{"type":"text","text":"DECISION: preserve caching"},{"type":"text","text":"and tool pairs"}]},{"role":"user","blocks":[{"type":"tool_result","tool_id":"opaque","content":"Updated src/adapter.c"}]}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := recordMessageText(messages[1]); got != "DECISION: preserve caching\nand tool pairs" {
+		t.Fatalf("assistant evidence = %q", got)
+	}
+	if got := recordMessageText(messages[2]); got != "Updated src/adapter.c" {
+		t.Fatalf("tool evidence = %q", got)
+	}
+	record := buildRecord(messages, 0, len(messages))
+	found := false
+	for _, path := range record.Record.Files {
+		if path == "src/adapter.c" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("tool result path lost: %#v", record.Record.Files)
+	}
+}
+
+func canonicalModuleTurns(count int, orphan bool) *JSONValue {
+	messages := NewArray()
+	for i := 0; i < count; i++ {
+		raw := fmt.Sprintf(`[{"role":"user","blocks":[{"type":"text","text":"keep working on the migration"}]},{"role":"assistant","blocks":[{"type":"tool_use","tool_id":"call_%d","name":"read_file","input":{}}]},{"role":"tool","blocks":[{"type":"tool_result","tool_id":"call_%d","content":%q}]},{"role":"assistant","blocks":[{"type":"text","text":"done reading the file"}]}]`, i, i, strings.Repeat("tool output /work/src/a.c ", 100))
+		for _, message := range ParseJSON(raw).Items {
+			messages.Append(message)
+		}
+	}
+	if orphan {
+		messages.Append(ParseJSON(`{"role":"tool","blocks":[{"type":"tool_result","tool_id":"missing","content":"unpaired output"}]}`))
+	}
+	return messages
+}
+func TestModuleHistoryRejectsNativeAndAmbiguousIngress(t *testing.T) {
+	for _, raw := range []string{
+		`[{"role":"user","content":"native"}]`,
+		`[{"role":"user","blocks":[{"type":"text","text":"canonical"}]},{"role":"assistant","content":"native"}]`,
+		`[{"role":"invented","blocks":[]}]`,
+		`[{"role":"user","blocks":[{"type":"tool_use","tool_id":"x","name":"Read","input":{}}]}]`,
+		`[{"role":"assistant","blocks":[{"type":"tool_use","tool_id":"x","name":"Read","input":{"x":1,"x":2}}]}]`,
+	} {
+		for _, stage := range []uint32{StageReduce, StageRecordBuild} {
+			body := []byte(`{"messages":` + raw + `}`)
+			if _, status := NewHandler()(bus.ModuleInvocation{StageID: stage}, body); status != bus.ModuleStatusInvalidRequest {
+				t.Fatalf("stage=%d accepted noncanonical history: %s", stage, raw)
+			}
+		}
+	}
+}
+func TestTypedRecordKeepsMixedUserEvidenceQuarantined(t *testing.T) {
+	messages, err := ir.DecodeMessages([]byte(`[{"role":"user","blocks":[{"type":"text","text":"Inspect /untrusted/user-only.c ` + strings.Repeat("untrusted context ", 100) + `"},{"type":"tool_result","tool_id":"opaque","content":{"path":"/work/tool-only.c","id":9007199254740993}}]}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := buildRecord(messages, 0, 1)
+	if !strings.Contains(got.Closet, "(untrusted)") || !strings.Contains(got.Closet, "/untrusted/user-only.c") || !strings.Contains(got.Closet, "/work/tool-only.c") {
+		t.Fatalf("mixed lanes or structured evidence lost: %+v", got)
+	}
+}

@@ -133,6 +133,9 @@ int cli_session_isolated_claude_home(const char *work_dir, char *home_out, size_
  * vaulted OAuth document under the runtime tier. The caller attaches the home
  * to cli_session_t so destroy removes it. */
 int cli_session_isolated_codex_home(char *home_out, size_t home_out_sz);
+/* Isolated Vault credentials plus scope-private persistent native conversation files. */
+int cli_session_harness_home(const char *vendor, const char *cwd, const char *sid, char *home,
+                             size_t capacity, cli_session_t *cleanup);
 
 /* Materialize seam: read the vaulted (agent, "oauth") token into `out`. The strong
  * implementation (server_cli_oauth.c) reads the vault; a weak default in

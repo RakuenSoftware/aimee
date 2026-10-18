@@ -533,10 +533,37 @@ static void test_cross_surface_concurrent(void)
    presence_detach(sid, aB);
 }
 
+static void test_host_turn_survives_detach(void)
+{
+   const char *sid = "host-owned";
+   char a[64], b[64], turn[64], next[64];
+   CHECK_EQ_INT(presence_attach(sid, "u", "webchat", NULL, PRESENCE_EV_ALL, 0, a, sizeof(a)), 1);
+   CHECK_EQ_INT(presence_turn_acquire(sid, a, 0, turn, sizeof(turn), NULL, 0, NULL),
+                PRESENCE_TURN_ACQUIRED);
+   CHECK_EQ_INT(presence_turn_host_own(sid, "wrong-turn"), 0);
+   CHECK_EQ_INT(presence_turn_host_own(sid, turn), 1);
+   CHECK_EQ_INT(presence_workspace_lease_acquire(sid, "workspace", a), 1);
+   CHECK_EQ_INT(presence_detach(sid, a), 1);
+   CHECK_EQ_INT(presence_attachment_count(sid), 0);
+   CHECK_EQ_INT(presence_turn_is_live(sid, turn), 1);
+   CHECK_EQ_INT(presence_attach(sid, "u", "webchat", NULL, PRESENCE_EV_ALL, 0, b, sizeof(b)), 1);
+   CHECK_EQ_INT(presence_turn_acquire(sid, b, 0, next, sizeof(next), NULL, 0, NULL),
+                PRESENCE_TURN_BUSY);
+   CHECK_EQ_INT(presence_workspace_lease_acquire(sid, "workspace", b), 0);
+   CHECK_EQ_INT(presence_turn_release(sid, turn), 1);
+   CHECK_EQ_INT(presence_turn_acquire(sid, b, 0, next, sizeof(next), NULL, 0, NULL),
+                PRESENCE_TURN_ACQUIRED);
+   CHECK_EQ_INT(presence_turn_host_own(sid, next), 1);
+   CHECK_EQ_INT(presence_detach(sid, b), 1);
+   CHECK_EQ_INT(presence_turn_release(sid, next), 1);
+   CHECK_EQ_INT(presence_turn_is_live(sid, next), 0);
+}
+
 int main(void)
 {
    presence_init();
 
+   test_host_turn_survives_detach();
    test_cross_surface_concurrent();
    test_attach_owner_and_count();
    test_persistent_keeps_alive();

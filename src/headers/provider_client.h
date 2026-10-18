@@ -17,6 +17,7 @@
 #define DEC_PROVIDER_CLIENT_H 1
 
 #include <stddef.h>
+#include <aimee/ir/aimee_ir.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -85,6 +86,8 @@ extern "C"
 
    typedef struct
    {
+      /* Owned canonical response. Text fields below are application projections. */
+      aimee_response_t ir;
       char *content;                  /* malloc'd completion text; NULL if none. Caller frees. */
       char *reasoning;                /* malloc'd reasoning/chain-of-thought, when the provider
                                        * returned any: either as `reasoning_content` (llama.cpp
@@ -114,10 +117,16 @@ extern "C"
                                               struct cJSON *json_schema);
 
    /* Parse an OpenAI chat-completions response `body` into `out` (zeroed first).
-    * Returns 0 when choices[0].message.content is present, -1 otherwise. Usage,
+    * Returns 0 for an admitted textual completion, -1 otherwise. The owned IR
+    * retains reasoning/media/tool blocks; free the result after success or failure. Usage,
     * model and finish_reason are filled when present. `http_status` is left 0
     * here — provider_client_complete sets it after the transport call. */
    int provider_client_parse_openai(const char *body, provider_completion_t *out);
+
+   /* Canonical entry for internal callers. The request is borrowed; provider
+    * configuration controls model/sampling and serialization stays at egress. */
+   int provider_client_complete_ir(const provider_def_t *def, const aimee_request_t *request,
+                                   provider_completion_t *out, char *errbuf, size_t errlen);
 
    /* Build + POST (with retry) + parse. Returns 0 on success; on failure returns
     * -1 and writes a message into errbuf (when errlen > 0). `out` is zeroed on

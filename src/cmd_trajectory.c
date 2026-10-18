@@ -43,7 +43,7 @@ static void trajectory_export_cmd(app_ctx_t *ctx, int argc, char **argv)
       fatal("trajectory: could not initialize DB1");
 
    char *json = NULL;
-   if (trajectory_export(selector, &opts, &json) != 0 || !json)
+   if (trajectory_export(selector, agent_get_request_vault_principal(), &opts, &json) != 0 || !json)
       fatal("trajectory export failed; no matching redacted exportable session");
 
    printf("%s\n", json);

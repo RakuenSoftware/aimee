@@ -19,6 +19,8 @@
  * records the advisory routing/enforce decision. Returns 0 (never mutates the
  * request); safe on every turn (no LLM, no recursion). */
 int gw_stage_router(gw_request_t *r, void *ud);
+#include <aimee/ir/aimee_ir.h>
+void router_advise_ir(const aimee_request_t *request);
 
 /* Legacy per-message entry: classify `message` for `session_id`, record the
  * advisory decision, and (on a sampled DEFER) run the LLM classifier telemetry.

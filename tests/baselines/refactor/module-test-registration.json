@@ -227,6 +227,12 @@
       "ctest": false,
       "make": true,
       "module": "governance",
+      "test": "src/tests/test_governance_bus_bridge.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "governance",
       "test": "src/tests/test_response_governance_stage.c"
     },
     {
@@ -666,6 +672,18 @@
       "make": true,
       "module": "translation",
       "test": "src/tests/test_aimee_tool_choice.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_cmd_hooks_scope.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_harness_ir.c"
     },
     {
       "ctest": false,

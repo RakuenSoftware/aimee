@@ -8,36 +8,61 @@
 #include <stdio.h>
 #include <string.h>
 
-static char g_test_oauth_token[4096];
-
+static struct
+{
+   char client[128], token[4096];
+} tokens[16];
+int test_oauth_stores, test_oauth_removes, test_oauth_get_fail;
 void test_oauth_tokens_reset(void)
 {
-   memset(g_test_oauth_token, 0, sizeof(g_test_oauth_token));
+   memset(tokens, 0, sizeof tokens);
+   test_oauth_stores = test_oauth_removes = test_oauth_get_fail = 0;
 }
-
 int oauth_token_get(const char *client_name, const char *client_id, const char *token_endpoint,
-                    int skew_secs, char *buf, size_t len)
+                    int skew_secs, char *buf, size_t capacity)
 {
-   (void)client_name;
    (void)client_id;
    (void)token_endpoint;
    (void)skew_secs;
-   if (!buf || len == 0 || !g_test_oauth_token[0])
-   {
-      if (buf && len)
-         buf[0] = '\0';
+   if (!buf || !capacity)
       return -1;
-   }
-   snprintf(buf, len, "%s", g_test_oauth_token);
+   buf[0] = 0;
+   for (size_t i = 0; !test_oauth_get_fail && i < 16; i++)
+      if (!strcmp(tokens[i].client, client_name) && tokens[i].token[0])
+      {
+         if (strlen(tokens[i].token) >= capacity)
+            return -1;
+         snprintf(buf, capacity, "%s", tokens[i].token);
+         return 0;
+      }
+   return -1;
+}
+int oauth_token_store(const char *client_name, const oauth_token_response_t *response)
+{
+   if (!response || !response->access_token[0])
+      return -1;
+   size_t selected = 16;
+   for (size_t i = 0; i < 16; i++)
+      if (!strcmp(tokens[i].client, client_name))
+      {
+         selected = i;
+         break;
+      }
+      else if (selected == 16 && !tokens[i].client[0])
+         selected = i;
+   if (selected == 16)
+      return -1;
+   snprintf(tokens[selected].client, sizeof tokens[selected].client, "%s", client_name);
+   snprintf(tokens[selected].token, sizeof tokens[selected].token, "%s", response->access_token);
+   test_oauth_stores++;
    return 0;
 }
-
-int oauth_token_store(const char *client_name, const oauth_token_response_t *resp)
+int oauth_token_remove(const char *client_name)
 {
-   (void)client_name;
-   if (!resp || !resp->access_token[0])
-      return -1;
-   snprintf(g_test_oauth_token, sizeof(g_test_oauth_token), "%s", resp->access_token);
+   for (size_t i = 0; i < 16; i++)
+      if (!strcmp(tokens[i].client, client_name))
+         memset(&tokens[i], 0, sizeof tokens[i]);
+   test_oauth_removes++;
    return 0;
 }
 

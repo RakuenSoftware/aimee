@@ -257,15 +257,25 @@ jobs:
 
   no-coauthor-trailers:
     # Standing directive: commits/PRs must never carry AI co-authorship trailers.
+    # Also rejects AI app attribution on the opening PR entry.
     # Scans only the PR's NEW commits (base..head), so existing history is
     # grandfathered while any newly introduced trailer fails the PR.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+      - name: Reject AI author and committer identities in new commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/check-commit-identities.py "$BASE_SHA" "$HEAD_SHA"
       - name: Reject AI co-authorship trailers in new commits
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -294,7 +304,7 @@ jobs:
           # trailer alternative is line-anchored so prose naming the trailer (a
           # commit that FIXES this check, for instance) does not trip it.
           ATTRIBUTION_RE='^[[:space:]]*co-authored-by:'
-          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*generated with \[(claude|codex)'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*[_*]*generated (with|by) \[(claude|codex|chatgpt|copilot|github copilot)'
           ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*(claude|codex|chatgpt|copilot)-session:'
           ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*https?://[^[:space:]]*/(code/)?session[_/-]'
           export ATTRIBUTION_RE
@@ -336,25 +346,16 @@ jobs:
             exit 1
           fi
           echo "no co-authorship trailers in $range — ok"
-      - name: Reject AI attribution in the PR title/body
+      - name: Reject AI attribution in live PR metadata and text
         env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          # Same set as the commit scan above; kept in step with it deliberately,
-          # because a body-only session link is the easy way for one to land.
-          ATTRIBUTION_RE='^[[:space:]]*co-authored-by:'
-          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*generated with \[(claude|codex)'
-          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*(claude|codex|chatgpt|copilot)-session:'
-          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*https?://[^[:space:]]*/(code/)?session[_/-]'
-          hits=$(printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" \
-                 | grep -inE "$ATTRIBUTION_RE" || true)
-          if [ -n "$hits" ]; then
-            echo "::error::The PR title/body carries AI attribution; remove it (standing directive)."
-            echo "$hits"
-            exit 1
-          fi
-          echo "no AI attribution in PR title/body — ok"
+          # The opening entry's "with <app>" badge is structured issue metadata,
+          # not body text. Fetch live state so editing a footer cannot hide it.
+          # An API or schema failure fails this step; there is no empty fallback.
+          gh api --method GET "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}" > "$RUNNER_TEMP/pr-attribution.json"
+          python3 scripts/check-pr-attribution.py "$RUNNER_TEMP/pr-attribution.json"
 
   lint:
     needs: change-scope
@@ -448,24 +449,9 @@ jobs:
       - name: Confirm browser failures block the required gate
         run: python3 -I scripts/tests/test_frontend_release_gate.py
 
-  # Go unit tests, which until now ran in NO job that a pull request into testing
-  # could reach.
-  #
-  # The only CI invocation of `go test` over server-go is in c-repository-pins,
-  # and that workflow says so plainly: "main ONLY, on both triggers... Nothing
-  # here runs for a branch or a PR targeting testing." The `go-unit-tests` make
-  # target exists and covers all three Go modules, but its only caller is
-  # `verify-local`, a developer target that no workflow runs. So every Go package
-  # in server-go, runtime-web and control-web -- the bus, every Go module, the
-  # storage wire -- was gated by nothing on the ordinary PR path, and passed only
-  # because people ran it by hand.
-  #
-  # It uses the make target rather than a list of packages here. A list is the
-  # failure this job exists to fix, one level up: c-repository-pins enumerates
-  # `./bus ./modules/... ./cmd/aimee-module`, so a new top-level Go package in
-  # server-go falls outside it silently. `go-unit-tests` discovers module dirs by
-  # wildcard and runs `./...` in each, so a new package is covered by
-  # construction rather than by somebody remembering.
+  # The Go unit job runs ./... in every discovered module. The separate
+  # Module exports and runtime validation workflow also tests the CGO-free
+  # runtime bundle, whose narrower package list cannot replace this coverage.
   memory-backends:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
@@ -720,7 +706,7 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make \
+          timeout 240 sudo apt-get install -y -q gcc make cmake \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Build integrity
@@ -731,6 +717,14 @@ jobs:
       # because they were only ever run by hand — see scripts/validate-aimee-artifacts.sh.
       - name: Build the shipping set
         run: cd src && make -j"$(nproc)" all
+      - name: Native CMake canonical capture fixtures
+        run: |
+          cmake -S . -B build/native-ir-cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF
+          cmake --build build/native-ir-cmake --parallel "$(nproc)" \
+            --target test_server_chat_ir test_server_session_log
+          ctest --test-dir build/native-ir-cmake \
+            -R '^test_server_(chat_ir|session_log)$' --output-on-failure
       - name: Artifact integrity (removed capabilities stay removed)
         run: bash scripts/validate-aimee-artifacts.sh
 
@@ -1088,6 +1082,11 @@ jobs:
       - name: Verify persisted erasure state upgrade and idempotence
         if: matrix.part == 'native'
         run: python3 tests/e2e/knowledge-schema-upgrade.py
+      - name: Replay canonical session log and harness resume ownership
+        working-directory: server-go
+        env:
+          AIMEE_TEST_PG_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_postgres_ci
+        run: go test -race -count=1 ./modules/aimee/families -run '^TestSessionIRLiveConcurrentReplayAndDeletion$'
       - name: Replay memory ownership and PostgreSQL sessions
         if: matrix.part == 'native'
         run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 postgres-knowledge-replay

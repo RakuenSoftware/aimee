@@ -11,13 +11,13 @@
 
 #include <stddef.h>
 
-struct parsed_response;
+struct aimee_response;
 
 /* Shared context handed to every response stage. Typed (not void*) so the durable ABI is
  * not coupled to undocumented casting; grows by adding fields, never a bare pointer. */
 typedef struct
 {
-   struct parsed_response *resp; /* the parsed reply; stages mutate in place */
+   struct aimee_response *resp; /* owned canonical reply; stages mutate in place */
 } gw_response_ctx_t;
 
 /* A stage's outcome. `ok` proceeds; `reject`/`error` stop the pipeline and MUST prevent the

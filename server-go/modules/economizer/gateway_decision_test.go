@@ -79,21 +79,13 @@ func TestReduceStageBypassesWhenNothingWasApplied(t *testing.T) {
 func TestReduceStageRunsTheStructuralCheck(t *testing.T) {
 	// A tool result whose matching call is not in the array is an orphan: the
 	// exact shape the guard exists to keep away from a provider.
-	arr := NewArray()
-	for i := 0; i < 12; i++ {
-		appendTurn(arr, i)
-	}
-	orphan := NewObject()
-	orphan.Set("role", NewString("tool"))
-	orphan.Set("tool_call_id", NewString("call_missing"))
-	orphan.Set("content", NewString("a result for a call that is not here"))
-	arr.Append(orphan)
+	arr := canonicalModuleTurns(12, true)
 
 	// Pin the premise: this transcript IS structurally broken by the same
 	// function the stage is expected to use. If this stops holding, the test
 	// below is proving nothing.
 	if MessageHistoryRepair(arr.Clone()) == 0 {
-		t.Skip("fixture is no longer structurally broken; rewrite it")
+		t.Fatal("fixture is no longer structurally broken")
 	}
 
 	body, err := json.Marshal(ReduceRequest{
@@ -115,7 +107,7 @@ func TestReduceStageRunsTheStructuralCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !resp.Mutated {
-		t.Skip("no reduction was applied, so there is no view to check")
+		t.Fatal("fixture produced no reduction for structural admission")
 	}
 	if resp.Bypass == "none" {
 		t.Errorf("a structurally broken reduced view was cleared for dispatch "+

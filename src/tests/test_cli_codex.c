@@ -11,7 +11,16 @@
 #include <unistd.h>
 
 #include "cli_codex.h"
+#include "provider_cli_adapter.h"
+#include "server_session_control.h"
+#include <aimee/ir/session_event.h>
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
+
+/* Minimal harnesses have no bound server turn to cancel. */
+int agent_request_cancelled(void)
+{
+   return 0;
+}
 
 static void test_parse_agent_message_extracts_text(void)
 {
@@ -314,6 +323,13 @@ static void test_parse_tool_action_skips_other_methods(void)
    assert(cli_codex_parse_tool_action(NULL) == 0);
 }
 
+static int bind_native_fixture(const char *id, void *context)
+{
+   assert(!strcmp(id, "t1"));
+   (*(int *)context)++;
+   return 0;
+}
+
 static void test_agent_execute_cli_codex_uses_requested_cwd(void)
 {
    char root[256];
@@ -334,12 +350,18 @@ static void test_agent_execute_cli_codex_uses_requested_cwd(void)
    assert(fp != NULL);
    fputs("#!/bin/sh\n"
          "pwd > \"$AIMEE_TEST_CODEX_CWD_OUT\"\n"
+         "if [ -n \"$AIMEE_TEST_CODEX_RESUME_OUT\" ]; then\n"
+         "  printf '%s\\n' \"$HOME\" \"$AIMEE_SESSION_ID\" > \"$AIMEE_TEST_CODEX_RESUME_OUT\"\n"
+         "fi\n"
          "i=0\n"
          "while IFS= read -r line; do\n"
          "  i=$((i + 1))\n"
          "  case \"$i\" in\n"
          "    1) printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}' ;;\n"
-         "    2) printf '%s\\n' "
+         "    2) printf '%s\\n' \"$line\" > \"$AIMEE_TEST_CODEX_REQUEST_OUT\"\n"
+         "       if [ -n \"$AIMEE_TEST_CODEX_RESUME_OUT\" ]; then printf '%s\\n' \"$line\" >> "
+         "\"$AIMEE_TEST_CODEX_RESUME_OUT\"; fi\n"
+         "       printf '%s\\n' "
          "'{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"thread\":{\"id\":\"t1\"}}}' ;;\n"
          "    3) printf '%s\\n' \"$line\" > \"$AIMEE_TEST_CODEX_REQUEST_OUT\"\n"
          "       printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{}}'\n"
@@ -386,6 +408,33 @@ static void test_agent_execute_cli_codex_uses_requested_cwd(void)
    assert(strstr(req_line, "\"type\":\"text\"") != NULL);
    assert(strstr(req_line, "\"text\":\"user prompt\"") != NULL);
    assert(strstr(req_line, "\"text_elements\":[]") != NULL);
+
+   char resume_marker[512];
+   snprintf(resume_marker, sizeof resume_marker, "%s/resume.txt", root);
+   setenv("AIMEE_TEST_CODEX_RESUME_OUT", resume_marker, 1);
+   int bound = 0;
+   provider_cli_cfg_t cfg = {.agent = &agent,
+                             .cwd = workdir,
+                             .system_prompt = "system",
+                             .user_prompt = "resumed prompt",
+                             .home = workdir,
+                             .session_id = "private-delegate",
+                             .resume_id = "t1",
+                             .bind_session = bind_native_fixture,
+                             .bind_context = &bound};
+   assert(!codex_provider_cli_adapter.execute(&cfg, &out));
+   assert(out.success && bound == 1);
+   free(out.response);
+   fp = fopen(resume_marker, "r");
+   assert(fp && fgets(seen, sizeof seen, fp));
+   seen[strcspn(seen, "\r\n")] = 0;
+   assert(!strcmp(seen, workdir));
+   assert(fgets(seen, sizeof seen, fp) && !strcmp(seen, "private-delegate\n"));
+   assert(fgets(req_line, sizeof req_line, fp));
+   assert(strstr(req_line, "thread/resume") && strstr(req_line, "t1"));
+   fclose(fp);
+   unsetenv("AIMEE_TEST_CODEX_RESUME_OUT");
+   unlink(resume_marker);
 
    unsetenv("AIMEE_TEST_CODEX_CWD_OUT");
    unsetenv("AIMEE_TEST_CODEX_REQUEST_OUT");
@@ -639,6 +688,97 @@ static void test_chat_stream_replaces_invalid_utf8_prompt_bytes(void)
    rmdir(root);
 }
 
+static int operator_requests, operator_responses;
+static int codex_operator_capture(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   if (event->kind == AIMEE_SESSION_CONTROL_REQUEST)
+   {
+      server_control_scope_t *scope = server_control_scope_current();
+      assert(server_control_register(scope, event->request_id, event->control_kind,
+                                     event->control) == 0);
+      cJSON *reply =
+          cJSON_Parse(!strcmp(event->control_kind, "question")
+                          ? "{\"decision\":\"allow\",\"answers\":{\"direction\":[\"North\"]}}"
+                      : !strcmp(event->control_kind, "elicitation") ? "{\"decision\":\"allow\"}"
+                                                                    : "{\"decision\":\"cancel\"}");
+      char id[256];
+      snprintf(id, sizeof id, "operator-turn:%s", event->request_id);
+      assert(server_control_reply("operator-session", id, "alice", reply) == 0);
+      cJSON_Delete(reply);
+      operator_requests++;
+   }
+   else if (event->kind == AIMEE_SESSION_CONTROL_RESPONSE)
+   {
+      const char *decision =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event->control, "decision"));
+      assert(decision &&
+             !strcmp(decision, !strcmp(event->control_kind, "permission") ? "cancel" : "allow"));
+      if (!strcmp(event->control_kind, "question"))
+         assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(
+             cJSON_GetObjectItemCaseSensitive(event->control, "answers"), "direction")));
+      assert(!cJSON_GetObjectItemCaseSensitive(event->control, "action"));
+      operator_responses++;
+   }
+   return 0;
+}
+static void test_operator_replies_reach_native_child(void)
+{
+   char root[256], script[512];
+   snprintf(root, sizeof root, "%s/aimee-codex-operator-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(root));
+   snprintf(script, sizeof script, "%s/codex", root);
+   FILE *fp = fopen(script, "w");
+   assert(fp);
+   fputs("#!/usr/bin/env python3\nimport json, sys\ndef send(value):\n print(json.dumps(value), "
+         "flush=True)\nfor i in range(3):\n frame=json.loads(sys.stdin.readline())\n if "
+         "frame.get('method') == 'initialized':\n  frame=json.loads(sys.stdin.readline())\n "
+         "result={'thread': {'id':'t1'}} if frame['method'].startswith('thread/') else {}\n "
+         "send({'jsonrpc':'2.0','id':frame['id'],'result':result})\nfor method, ident, params, "
+         "expected in [\n ('item/commandExecution/requestApproval', 71, {'command':'printf "
+         "hello'}, {'decision':'decline'}),\n ('item/tool/requestUserInput', 72, "
+         "{'questions':[{'id':'direction','question':'Which "
+         "direction?','options':[{'label':'North'}]}]}, "
+         "{'answers':{'direction':{'answers':['North']}}}),\n"
+         " ('mcpServer/elicitation/request', 73, {'mode':'url','serverName':'inventory',"
+         "'message':'Authorize access','url':'https://accounts.example.test/authorize',"
+         "'elicitationId':'el-1'}, {'action':'accept','content':None,'_meta':None})\n]:\n "
+         "send({'jsonrpc':'2.0','id':ident,'method':method,'params':params})\n "
+         "frame=json.loads(sys.stdin.readline())\n assert frame['id']==ident and "
+         "frame['result']==expected, "
+         "frame\nsend({'method':'item/"
+         "completed','params':{'item':{'type':'agentMessage','id':'m1','text':'Operator replies "
+         "received'}}})\nsend({'method':'turn/"
+         "completed','params':{'turn':{'status':'completed'}}})\n",
+         fp);
+   assert(fclose(fp) == 0 && chmod(script, 0700) == 0);
+   char *old_path = getenv("PATH") ? strdup(getenv("PATH")) : NULL;
+   char path[16384];
+   snprintf(path, sizeof path, "%s:%s", root, old_path ? old_path : "");
+   assert(setenv("PATH", path, 1) == 0);
+   server_control_scope_t *scope =
+       server_control_scope_open("operator-session", "operator-turn", "alice");
+   assert(scope);
+   server_control_scope_t *previous = server_control_scope_bind(scope);
+   aimee_ir_session_set_sink(codex_operator_capture, NULL);
+   cli_codex_chat_request_t req = {.cwd = root, .user_prompt = "hello", .timeout_ms = 5000};
+   cli_codex_chat_result_t out;
+   codex_stream_capture_t cap = {0};
+   assert(cli_codex_chat_stream(&req, codex_capture_cb, &cap, &out) == 0);
+   assert(strstr(cap.buf, "Operator replies received"));
+   assert(operator_requests == 3 && operator_responses == 3);
+   aimee_ir_session_set_sink(NULL, NULL);
+   server_control_scope_bind(previous);
+   server_control_scope_close(scope);
+   if (old_path)
+      assert(setenv("PATH", old_path, 1) == 0);
+   else
+      unsetenv("PATH");
+   free(old_path);
+   unlink(script);
+   rmdir(root);
+}
+
 int main(void)
 {
    signal(SIGPIPE, SIG_IGN);
@@ -775,6 +915,7 @@ int main(void)
    test_chat_stream_replaces_invalid_utf8_prompt_bytes();
    printf("OK\n");
 
+   test_operator_replies_reach_native_child();
    printf("All cli_codex parse tests passed.\n");
    return 0;
 }

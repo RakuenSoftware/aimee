@@ -17,6 +17,15 @@ MR-07 remains observe-only, selection and utility-horizon policies remain disabl
 retry remains opt-in. Existing detached source spans still require a published snapshot, and
 workspace registration alone does not start a client runner.
 
+## Browser chat integration (2026-10-17)
+
+The browser submits canonical IR turns and replays the Server-owned event log through one reducer.
+Claude uses structured print mode; Codex app-server and ACP convert native frames at entry.
+Per-harness resume handles and runtime credentials stay server-side. Permission and question
+replies use authenticated browser transport and correlated native control channels. Global legacy-loop
+removal and live subscription qualification remain separate gates.
+See the [migration boundaries](proposals/pending/canonical-ir-session-stream.md).
+
 ## Runtime
 
 | Feature | State | Boundary |
@@ -92,6 +101,7 @@ workspace registration alone does not start a client runner.
 | External witness and anchor | Gated | Needed for evidence against a compromised host. |
 | Org budgets and rate limits | Done | Catalog, admission, spend, and quota surfaces. |
 | Browser workspace | Done | Top session tabs open chat with a session-owned project and history. Chat forwards the authenticated actor and displays tool lifecycle activity, including direct primary models. The left panel opens projects, agents, workflows, graph, logs, settings, and VS Code. |
+| Canonical IR migration | In progress | Direct primary load, switching and compaction use canonical log checkpoints; native observations remain immutable. Claude/Codex browser permission and question replies work. Native Anthropic ingress uses cache-preserving IR replay. Native CLI execution now uses structured headless adapters with scoped Vault homes; the tmux execution engine and detached delegate bypass are removed. MCP forms, credential/tool custody qualification and remaining legacy consumers are unfinished. |
 | Managed container deploy | Done | Browser manages Server model containers through the mounted Docker socket. A KB is deployed and enrolled separately. |
 | Split deploy | Done | Server and KB can run without Docker-socket delegation. |
 | Native thin clients | Done | Linux, macOS, and Windows; no database linkage. |

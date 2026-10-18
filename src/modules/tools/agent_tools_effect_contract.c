@@ -224,6 +224,34 @@ void agent_tools_effect_record_postcondition(int passed, const char *detail)
       (void)ti_effect_contract_record_postcondition(&g_effect, passed, detail);
 }
 
+/* Exec envelopes report failures through exit_code/status rather than the text
+ * output. This native entry classification belongs to the tool/effect owner. */
+int agent_tools_effect_exec_failure(const char *result, const char **verdict, const char **reason)
+{
+   cJSON *root = cJSON_Parse(result);
+   if (!root)
+      return 0;
+   cJSON *stderr_value = cJSON_GetObjectItem(root, "stderr");
+   cJSON *exit_value = cJSON_GetObjectItem(root, "exit_code");
+   cJSON *status_value = cJSON_GetObjectItem(root, "status");
+   int failed = 1;
+   if (cJSON_IsString(stderr_value) && !strncmp(stderr_value->valuestring, "refused:", 8))
+   {
+      *verdict = "refused";
+      *reason = "policy";
+   }
+   else if ((cJSON_IsNumber(exit_value) && exit_value->valuedouble != 0) ||
+            (cJSON_IsString(status_value) && !strcmp(status_value->valuestring, "failed")))
+   {
+      *verdict = "error";
+      *reason = "tool_error";
+   }
+   else
+      failed = 0;
+   cJSON_Delete(root);
+   return failed;
+}
+
 void agent_tools_effect_finish(const char *verdict, const char *reason)
 {
    if (g_effect_active)
@@ -261,7 +289,7 @@ int agent_tools_effect_admit(const char *name, cJSON **args, const char *cwd, co
    agent_tools_effect_propose(name, *args, classification);
    return agent_tools_effect_validate_and_execute(name, *args, classification);
 }
-char *agent_tools_effect_receipt(const char *verdict, char *result)
+char *agent_tools_effect_receipt(const char *verdict, char *result, int *is_error)
 {
-   return g_action_finish ? g_action_finish(verdict, result) : result;
+   return g_action_finish ? g_action_finish(verdict, result, is_error) : result;
 }

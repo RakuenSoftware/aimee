@@ -2,6 +2,7 @@
 #include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int captured;
@@ -16,10 +17,115 @@ static int capture(const aimee_session_event_t *event, void *context)
    return *(int *)context;
 }
 
+static int buffered_steps;
+static int buffered_capture(const aimee_session_event_t *event, void *context)
+{
+   int fail_at = *(int *)context;
+   buffered_steps++;
+   if (buffered_steps == 2)
+      assert(event->kind == AIMEE_SESSION_MESSAGE);
+   else
+   {
+      assert(event->kind == AIMEE_SESSION_DELTA);
+      assert(event->delta->type ==
+             (buffered_steps == 1 ? AIMEE_DELTA_TURN_START : AIMEE_DELTA_TURN_STOP));
+      if (buffered_steps == 3)
+      {
+         assert(event->delta->stop_reason == AIMEE_STOP_MAX_TOKENS);
+         assert(event->delta->usage_cache_read == 9 && event->delta->usage_cache_write == 3);
+      }
+   }
+   assert(!strcmp(event->message_id, "buffered"));
+   return buffered_steps == fail_at ? -7 : 0;
+}
+
+static void test_owned_delta_assembly(void)
+{
+   aimee_ir_response_builder_t builder = {0};
+   aimee_delta_t deltas[] = {{.type = AIMEE_DELTA_TURN_START},
+                             {.type = AIMEE_DELTA_BLOCK_START,
+                              .block_id = 0,
+                              .kind = AIMEE_BLK_THINKING,
+                              .text_delta = "reason",
+                              .signature_delta = "sig-"},
+                             {.type = AIMEE_DELTA_BLOCK_DELTA,
+                              .block_id = 0,
+                              .kind = AIMEE_BLK_THINKING,
+                              .text_delta = " more",
+                              .signature_delta = "complete"},
+                             {.type = AIMEE_DELTA_BLOCK_STOP, .block_id = 0},
+                             {.type = AIMEE_DELTA_BLOCK_START,
+                              .block_id = 1,
+                              .kind = AIMEE_BLK_TOOL_USE,
+                              .tool_id = "opaque-id",
+                              .tool_name = "Read"},
+                             {.type = AIMEE_DELTA_BLOCK_DELTA,
+                              .block_id = 1,
+                              .kind = AIMEE_BLK_TOOL_USE,
+                              .tool_args_delta = "{\"id\":9007199254740"},
+                             {.type = AIMEE_DELTA_BLOCK_DELTA,
+                              .block_id = 1,
+                              .kind = AIMEE_BLK_TOOL_USE,
+                              .tool_args_delta = "993}"},
+                             {.type = AIMEE_DELTA_BLOCK_STOP, .block_id = 1},
+                             {.type = AIMEE_DELTA_TURN_STOP,
+                              .stop_reason = AIMEE_STOP_TOOL_USE,
+                              .raw_stop_reason = "tool_use",
+                              .usage_in = 12,
+                              .usage_out = 4,
+                              .usage_cache_read = 9}};
+   for (size_t i = 0; i < sizeof deltas / sizeof deltas[0]; i++)
+      assert(!aimee_ir_response_builder_apply(&builder, &deltas[i]));
+   assert(builder.complete && builder.response.n_content == 2 &&
+          builder.response.usage_cache_read == 9);
+   assert(!strcmp(builder.response.content[0].text, "reason more") &&
+          !strcmp(builder.response.content[0].thinking_signature, "sig-complete"));
+   char *input = cJSON_PrintUnformatted(builder.response.content[1].tool_input);
+   assert(input && !strcmp(input, "{\"id\":9007199254740993}"));
+   free(input);
+   assert(aimee_ir_response_builder_apply(&builder, &deltas[2]) < 0);
+   aimee_ir_response_builder_free(&builder);
+   assert(!aimee_ir_response_builder_apply(&builder, &deltas[0]));
+   assert(aimee_ir_response_builder_apply(&builder, &deltas[0]) < 0);
+   aimee_ir_response_builder_free(&builder);
+   for (int invalid = 0; invalid < 3; invalid++)
+   {
+      assert(!aimee_ir_response_builder_apply(&builder, &deltas[0]));
+      aimee_delta_t start = {.type = AIMEE_DELTA_BLOCK_START,
+                             .block_id = 0,
+                             .kind = AIMEE_BLK_TOOL_USE,
+                             .tool_id = "call",
+                             .tool_name = "Read"};
+      assert(!aimee_ir_response_builder_apply(&builder, &start));
+      if (invalid == 0)
+         assert(aimee_ir_response_builder_apply(&builder, &deltas[8]) < 0);
+      else if (invalid == 1)
+         assert(aimee_ir_response_builder_apply(&builder, &start) < 0);
+      else
+      {
+         aimee_delta_t bad = {.type = AIMEE_DELTA_BLOCK_DELTA,
+                              .block_id = 0,
+                              .kind = AIMEE_BLK_TOOL_USE,
+                              .tool_args_delta = "{} trailing"};
+         assert(!aimee_ir_response_builder_apply(&builder, &bad));
+         bad.type = AIMEE_DELTA_BLOCK_STOP;
+         assert(aimee_ir_response_builder_apply(&builder, &bad) < 0);
+      }
+      aimee_ir_response_builder_free(&builder);
+   }
+   puts("owned canonical delta assembly retains signatures/opaque arguments and refuses incomplete "
+        "lifecycles");
+}
+
 int main(void)
 {
+   test_owned_delta_assembly();
    aimee_block_t blocks[] = {
-       {.type = AIMEE_BLK_THINKING, .text = "reason", .thinking_signature = "signature"},
+       {.type = AIMEE_BLK_THINKING,
+        .text = "reason",
+        .thinking_signature = "signature",
+        .thinking_id = "rs_opaque",
+        .thinking_encrypted_content = "ciphertext"},
        {.type = AIMEE_BLK_TOOL_USE,
         .tool_id = "opaque:42",
         .tool_name = "bash",
@@ -47,6 +153,34 @@ int main(void)
    assert(cJSON_IsTrue(cJSON_GetObjectItem(result, "is_error")));
    assert(!cJSON_GetObjectItem(use, "raw"));
    assert(!cJSON_GetObjectItem(use, "native_secret"));
+   blocks[0].cache_control = "ephemeral";
+   blocks[0].context = (aimee_context_meta_t){.origin = AIMEE_CTX_ORIGIN_MODEL,
+                                              .authority = AIMEE_CTX_AUTH_EVIDENCE,
+                                              .trust = AIMEE_CTX_TRUST_UNVERIFIED,
+                                              .sensitivity = AIMEE_CTX_SENS_CONFIDENTIAL,
+                                              .model_visible = 1,
+                                              .revision_domain = "session",
+                                              .revision_scope = "scope",
+                                              .revision_epoch = 18446744073709551615ULL};
+   cJSON *encoded = aimee_ir_message_json(&message);
+   assert(encoded);
+   aimee_message_t decoded = {0};
+   assert(aimee_ir_message_parse(encoded, &decoded) == 0);
+   cJSON *again = aimee_ir_message_json(&decoded);
+   assert(again && cJSON_Compare(encoded, again, 1));
+   assert(decoded.blocks[0].context.revision_epoch == 18446744073709551615ULL);
+   assert(decoded.blocks[0].cache_control && !strcmp(decoded.blocks[0].cache_control, "ephemeral"));
+   assert(decoded.blocks[1].raw == NULL);
+   aimee_message_free(&decoded);
+   cJSON_Delete(again);
+   cJSON *bad = cJSON_GetArrayItem(cJSON_GetObjectItem(encoded, "blocks"), 1);
+   cJSON_ReplaceItemInObject(bad, "tool_id", cJSON_CreateNumber(42));
+   assert(aimee_ir_message_parse(encoded, &decoded) == -1);
+   assert(decoded.role == NULL && decoded.blocks == NULL && decoded.n_blocks == 0);
+   cJSON_Delete(encoded);
+   encoded = cJSON_Parse("{\"role\":\"assistant\",\"blocks\":[{\"type\":\"native_future_item\"}]}");
+   assert(aimee_ir_message_parse(encoded, &decoded) == -1);
+   cJSON_Delete(encoded);
    cJSON_Delete(json);
 
    aimee_delta_t delta = {.type = AIMEE_DELTA_BLOCK_DELTA,
@@ -65,6 +199,19 @@ int main(void)
    event.role = NULL;
    assert(!aimee_ir_session_event_json(&event));
    delta.type = (aimee_delta_type_t)99;
+   assert(!aimee_ir_delta_json(&delta));
+   delta = (aimee_delta_t){.type = AIMEE_DELTA_BLOCK_START,
+                           .kind = AIMEE_BLK_THINKING,
+                           .block_id = 0,
+                           .text_delta = "initial",
+                           .signature_delta = "sig",
+                           .redacted_content = "opaque"};
+   json = aimee_ir_delta_json(&delta);
+   assert(json &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(json, "signature_delta")), "sig") &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(json, "redacted_content")), "opaque"));
+   cJSON_Delete(json);
+   delta.kind = AIMEE_BLK_TEXT;
    assert(!aimee_ir_delta_json(&delta));
    blocks[1].tool_id = NULL;
    assert(!aimee_ir_block_json(&blocks[1]));
@@ -108,19 +255,149 @@ int main(void)
                            .tool_args_delta = "{"};
    assert(!aimee_ir_delta_json(&delta));
 
+   event = (aimee_session_event_t){.kind = AIMEE_SESSION_PROJECTION,
+                                   .projection_model = "model-b",
+                                   .projection_boundary = "request",
+                                   .projection_reasoning = 2,
+                                   .projection_opaque = 1};
+   json = aimee_ir_session_event_json(&event);
+   assert(json && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(json, "kind")), "projection"));
+   assert(!cJSON_GetObjectItem(json, "message_id") && !cJSON_GetObjectItem(json, "role"));
+   cJSON *report = cJSON_GetObjectItem(json, "payload");
+   assert(cJSON_GetObjectItem(report, "omitted_reasoning_blocks")->valueint == 2);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(report, "boundary")), "request"));
+   cJSON_Delete(json);
+   event.projection_opaque = 3;
+   assert(!aimee_ir_session_event_json(&event));
+   event.projection_opaque = -1;
+   assert(!aimee_ir_session_event_json(&event));
+
+   event = (aimee_session_event_t){.kind = AIMEE_SESSION_CHILD_EXECUTION,
+                                   .child_session = "private-child",
+                                   .child_turn = "child-run",
+                                   .child_role = "review",
+                                   .execution_status = "running"};
+   json = aimee_ir_session_event_json(&event);
+   assert(json &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(json, "kind")), "child_execution"));
+   const cJSON *child = cJSON_GetObjectItem(json, "payload");
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(child, "session_id")), "private-child"));
+   assert(!cJSON_GetObjectItem(json, "message_id") && !cJSON_GetObjectItem(child, "prompt"));
+   cJSON_Delete(json);
+   event.child_role = NULL;
+   assert(!aimee_ir_session_event_json(&event));
+   event.child_role = "review";
+   event.execution_status = "invented";
+   assert(!aimee_ir_session_event_json(&event));
+
+   aimee_tool_t child_tool = {
+       .name = "Read", .strict = AIMEE_STRICT_NULL, .schema = cJSON_Parse("{\"type\":\"object\"}")};
+   aimee_tool_t request_tools[2] = {{.kind = AIMEE_TOOL_NAMESPACE,
+                                     .name = "functions",
+                                     .children = &child_tool,
+                                     .n_children = 1},
+                                    {.kind = AIMEE_TOOL_HOSTED,
+                                     .provider_wire = AIMEE_WIRE_RESPONSES,
+                                     .native_type = "web_search",
+                                     .native_options = cJSON_Parse("{\"hosted_setting\":true}")}};
+   aimee_block_t request_text = {.type = AIMEE_BLK_TEXT, .text = "question"};
+   aimee_message_t request_message = {.role = "user", .blocks = &request_text, .n_blocks = 1};
+   aimee_request_t request = {
+       .model = "model",
+       .frontend = AIMEE_WIRE_RESPONSES,
+       .messages = &request_message,
+       .n_messages = 1,
+       .tools = request_tools,
+       .n_tools = 2,
+       .has_max_tokens = 1,
+       .max_tokens = 77,
+       .reasoning_effort = AIMEE_EFFORT_HIGH,
+       .tool_choice = AIMEE_TOOL_CHOICE_TOOL,
+       .tool_choice_name = "Read",
+       .raw = cJSON_Parse("{\"model_auth_secret_must_not_enter_canonical_snapshot\":true}")};
+   json = aimee_ir_request_json(&request);
+   char *snapshot = json ? cJSON_PrintUnformatted(json) : NULL;
+   assert(snapshot && strstr(snapshot, "hosted_setting") && !strstr(snapshot, "model_auth_secret"));
+   const cJSON *catalog = cJSON_GetObjectItemCaseSensitive(json, "tools");
+   const cJSON *child_json = cJSON_GetArrayItem(
+       cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(catalog, 0), "children"), 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(child_json, "strict")),
+                  "null"));
+   free(snapshot);
+   cJSON_Delete(json);
+   json = aimee_ir_policy_view_json(&request);
+   snapshot = json ? cJSON_PrintUnformatted(json) : NULL;
+   assert(snapshot && strstr(snapshot, "web_search") && !strstr(snapshot, "hosted_setting") &&
+          !strstr(snapshot, "schema"));
+   free(snapshot);
+   cJSON_Delete(json);
+   cJSON_Delete(request.raw);
+   cJSON_Delete(child_tool.schema);
+   cJSON_Delete(request_tools[1].native_options);
+
    int failure = -7;
    aimee_response_t response = {.role = "assistant", .content = blocks, .n_content = 2};
    aimee_ir_session_set_sink(capture, &failure);
    assert(aimee_ir_session_emit_response(&response, "msg-3") == -7);
    assert(captured == 1);
+   assert(aimee_ir_session_capture_failed());
+   aimee_ir_session_begin_task();
+   assert(aimee_ir_session_capture_failed()); /* Nested work cannot clear a live owner. */
+   aimee_ir_session_restore_sink(NULL, NULL, 1);
+   assert(aimee_ir_session_capture_failed());
+   aimee_ir_session_begin_task();
+   assert(!aimee_ir_session_capture_failed());
+   aimee_ir_session_set_sink(capture, &failure);
    void *context = NULL;
    assert(aimee_ir_session_get_sink(&context) == capture && context == &failure);
    aimee_ir_session_set_sink(NULL, NULL);
    assert(aimee_ir_session_get_sink(&context) == NULL && context == NULL);
+   assert(!aimee_ir_session_capture_failed());
    assert(aimee_ir_session_emit_response(&response, "msg-3") == 0);
    cJSON_Delete(blocks[1].tool_input);
    cJSON_Delete(blocks[1].raw);
    cJSON_Delete(blocks[2].tool_result);
+   /* Reused IDs belong to their current ordered tool cycle. A prior result
+    * must not hide a missing result in a later turn. Repair is idempotent. */
+   cJSON *history = cJSON_Parse(
+       "[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"thinking\",\"text\":\"reason\","
+       "\"signature\":\"sig\"},"
+       "{\"type\":\"tool_use\",\"tool_id\":\"same\",\"name\":\"read_file\",\"input\":{}}]},"
+       "{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":\"same\",\"content\":"
+       "\"ok\",\"is_error\":false}]},"
+       "{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"same\",\"name\":"
+       "\"read_file\",\"input\":{}}]},"
+       "{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"next\"}]},"
+       "{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":\"orphan\","
+       "\"content\":\"bad\",\"is_error\":false}]}]");
+   assert(history);
+   assert(aimee_ir_history_repair(history) == 2);
+   assert(cJSON_GetArraySize(history) == 5);
+   cJSON *repaired =
+       cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(history, 3), "blocks"), 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(repaired, "tool_id")), "same"));
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(repaired, "is_error")));
+   assert(aimee_ir_history_repair(history) == 0);
+   assert(!strcmp(
+       cJSON_GetStringValue(cJSON_GetObjectItem(
+           cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(history, 0), "blocks"), 0),
+           "signature")),
+       "sig"));
+   cJSON_Delete(history);
+   for (int fail_at = 0; fail_at <= 3; fail_at++)
+   {
+      aimee_response_t buffered = {.role = "assistant",
+                                   .content = blocks,
+                                   .n_content = 1,
+                                   .stop_reason = AIMEE_STOP_MAX_TOKENS,
+                                   .usage_cache_read = 9,
+                                   .usage_cache_write = 3};
+      buffered_steps = 0;
+      aimee_ir_session_set_sink(buffered_capture, &fail_at);
+      assert(aimee_ir_session_emit_buffered_response(&buffered, "buffered") == (fail_at ? -7 : 0));
+      assert(buffered_steps == (fail_at ? fail_at : 3));
+   }
+   aimee_ir_session_set_sink(NULL, NULL);
    puts("IR session event tests passed");
    return 0;
 }

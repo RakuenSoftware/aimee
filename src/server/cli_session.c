@@ -3,6 +3,8 @@
 #define _GNU_SOURCE
 #endif
 #include "aimee.h"
+#include "aimee_home.h"
+#include <ctype.h>
 #include "cJSON.h"
 #include "cli_session.h"
 #include "platform_path.h"
@@ -1672,4 +1674,35 @@ char *cli_session_delta(const char *previous, const char *current)
       return strdup(current + prev_len);
 
    return strdup(current);
+}
+
+/* Credential homes are ephemeral; only native conversation files persist.
+ * These are harness runtime state, never the browser's transcript. */
+int cli_session_harness_home(const char *vendor, const char *cwd, const char *sid, char *home,
+                             size_t capacity, cli_session_t *cleanup)
+{
+   if (!vendor || (strcmp(vendor, "claude") && strcmp(vendor, "codex")) || !sid || !sid[0] ||
+       !home || !capacity || !cleanup)
+      return -1;
+   for (const char *p = sid; *p; p++)
+      if (!isalnum((unsigned char)*p) && *p != '-' && *p != '_')
+         return -1;
+   int claude = !strcmp(vendor, "claude");
+   if ((claude ? cli_session_isolated_claude_home(cwd, home, capacity)
+               : cli_session_isolated_codex_home(home, capacity)) != 0)
+      return -1;
+   cli_session_set_isolated_home(cleanup, home);
+   char history[4096], link[4096];
+   const char *directory = claude ? "projects" : "sessions";
+   if (snprintf(history, sizeof(history), "%s/browser-%s/%s/%s", aimee_home(), vendor, sid,
+                directory) >= (int)sizeof(history) ||
+       platform_mkdir_p(history, 0700) != 0 ||
+       snprintf(link, sizeof(link), "%s/.%s/%s", home, vendor, directory) >= (int)sizeof(link) ||
+       symlink(history, link) != 0)
+   {
+      cli_session_destroy(cleanup);
+      home[0] = '\0';
+      return -1;
+   }
+   return 0;
 }

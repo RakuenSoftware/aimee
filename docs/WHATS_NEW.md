@@ -1,10 +1,30 @@
 # What's new
 
-## Canonical IR session migration (in progress)
+## Browser chat uses the canonical IR session log
 
-Adds typed session-event serialization, an ordered Server-owned event log, and a shared frontend
-projection for live/replayed messages, tools, thinking, attachments, and harness controls. These are
-migration foundations; the live browser/runtime paths have not yet switched to the new contract.
+The existing web GUI now renders canonical model messages, thinking, tool arguments and results
+from an ordered Server-owned log. Live delivery and replay use the same reducer; reconnecting
+from another machine replays committed events, and closing a tab does not cancel the running turn.
+The web backend forwards canonical bytes without rebuilding model events.
+Direct primary sessions now retain canonical history across model changes and reload it from
+owner-checked checkpoints in that same log. Provider transcripts are imported only for legacy
+sessions. Compaction checkpoints preserve the executed history without replacing the original
+observation events. Transcript reads no longer have a separate 1 MiB buffer ceiling.
+Untouched native Anthropic requests preserve client cache breakpoints and TTLs; typed edits
+force rebuilding instead of replaying stale content.
+
+Claude primary and delegate turns use `claude -p` with structured streaming instead of tmux capture. Historical `tmux-cli` agent records are migrated to native provider adapters; the router no longer lets that spelling mask HTTP peers. Claude,
+Codex app-server and ACP frames are converted at their native entry adapters. Claude and Codex
+resume handles are stored separately for each Aimee session; their runtime homes receive
+credentials from the Vault. Existing text-only history remains explicitly marked as legacy.
+Browser operators can answer permission and question requests. Replies are bound to the
+authenticated user, session and pending turn, and are recorded before native delivery. Admitted
+legacy subscribers also capture canonical events while retaining their transport projection.
+Remaining consumer cutovers and live subscription qualification remain migration work.
+
+CLI index discovery now registers a missing canonical repository through the existing bounded
+client ingest path before querying it. Main checkouts and linked worktrees retain the caller's
+project scope; an unavailable registry does not trigger an upload.
 
 ## Browser chat repairs
 

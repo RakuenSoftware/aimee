@@ -19,6 +19,7 @@ extern "C"
       IE_USER_CORRECTION,
       IE_FAILOVER_EVENT,
       IE_MCP_PACKAGE_CHECK,
+      IE_TASK_OUTCOME,
    } ie_event_type_t;
 
    typedef struct

@@ -34,8 +34,35 @@ static int t_change(aimee_request_t *ir, void *ud)
    return 1;
 }
 
+static void test_exact_function_identity(void)
+{
+   aimee_tool_t children[] = {{.name = "read"}, {.name = "other"}};
+   aimee_tool_t tools[] = {
+       {.name = "read"},
+       {.name = "remote", .kind = AIMEE_TOOL_NAMESPACE, .children = children, .n_children = 2},
+       {.name = "read", .kind = AIMEE_TOOL_HOSTED},
+       {.name = "remote.read"}};
+   aimee_request_t request = {.tools = tools, .n_tools = 4};
+   assert(aimee_ir_find_function(&request, NULL, "read") == &tools[0]);
+   assert(aimee_ir_find_function(&request, "", "read") == &tools[0]);
+   assert(aimee_ir_find_function(&request, "remote", "read") == &children[0]);
+   assert(aimee_ir_find_function(&request, NULL, "remote.read") == &tools[3]);
+   assert(!aimee_ir_find_function(&request, "other", "read"));
+   assert(!aimee_ir_find_function(&request, "remote", "remote.read"));
+   assert(!aimee_ir_find_function(&request, NULL, "other"));
+   assert(!aimee_ir_find_function(&request, NULL, "remote"));
+   assert(!aimee_ir_find_function(NULL, NULL, "read"));
+   assert(!aimee_ir_find_function(&request, NULL, NULL));
+   tools[2] = (aimee_tool_t){.name = "read"};
+   assert(!aimee_ir_find_function(&request, NULL, "read"));
+   assert(aimee_ir_find_function(&request, "remote", "read") == &children[0]);
+   children[1].name = "read";
+   assert(!aimee_ir_find_function(&request, "remote", "read"));
+}
+
 int main(void)
 {
+   test_exact_function_identity();
    printf("aimee-ir: ");
 
    /* --- last_user_text: last user message, concat TEXT blocks, drop non-text --- */

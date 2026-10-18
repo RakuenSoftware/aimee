@@ -6,9 +6,11 @@
  * the tool_result-grouping ruling in the follow-up; this covers instructions,
  * message text, function_call (tool_use), tools, and response parse. */
 #include <aimee/translation/aimee_backend.h>
+#include <aimee/translation/aimee_frontend.h>
 
 #include "cJSON.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -96,9 +98,31 @@ static char *blocks_text(const aimee_block_t *blocks, int n)
 
 cJSON *responses_backend_build(const aimee_request_t *ir)
 {
-   if (!ir)
+   if (aimee_ir_request_admit(ir))
       return NULL;
    cJSON *out = cJSON_CreateObject();
+   if (ir->output_format.kind != AIMEE_OUTPUT_UNSET)
+   {
+      cJSON *format = openai_family_output_format_build(&ir->output_format, 1);
+      cJSON *text = cJSON_AddObjectToObject(out, "text");
+      if (!format || !text || !cJSON_AddItemToObject(text, "format", format))
+      {
+         cJSON_Delete(format);
+         cJSON_Delete(out);
+         return NULL;
+      }
+   }
+   if (ir->reasoning_effort != AIMEE_EFFORT_UNSET || ir->reasoning_summary)
+   {
+      cJSON *reasoning = cJSON_AddObjectToObject(out, "reasoning");
+      const char *effort = aimee_ir_effort_name(ir->reasoning_effort);
+      if (!reasoning ||
+          (ir->reasoning_effort != AIMEE_EFFORT_UNSET &&
+           (!effort || !cJSON_AddStringToObject(reasoning, "effort", effort))) ||
+          (ir->reasoning_summary &&
+           !cJSON_AddStringToObject(reasoning, "summary", ir->reasoning_summary)))
+         goto fail;
+   }
    if (ir->model)
       cJSON_AddStringToObject(out, "model", ir->model);
    /* NOTE: no max_output_tokens -- the legacy build omits it and codex/gpt-5.5
@@ -108,6 +132,8 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
     * always on (the caller accumulates + parses the SSE). */
    cJSON_AddBoolToObject(out, "store", 0);
    cJSON_AddBoolToObject(out, "stream", 1);
+   cJSON *include = cJSON_AddArrayToObject(out, "include");
+   cJSON_AddItemToArray(include, cJSON_CreateString("reasoning.encrypted_content"));
    /* system blocks -> `instructions` (Responses' system field); a default keeps
     * codex happy when the client sent no system. */
    char *instr = ir->n_system > 0 ? blocks_text(ir->system, ir->n_system) : NULL;
@@ -120,55 +146,144 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
    {
       const aimee_message_t *im = &ir->messages[i];
       int is_assistant = im->role && strcmp(im->role, "assistant") == 0;
-      /* text blocks -> a `message` item; each tool_use -> a `function_call` item */
-      char *text = blocks_text(im->blocks, im->n_blocks);
-      if (text && text[0])
-      {
-         cJSON *item = cJSON_CreateObject();
-         cJSON_AddStringToObject(item, "type", "message");
-         cJSON_AddStringToObject(item, "role", im->role ? im->role : "user");
-         cJSON *content = cJSON_AddArrayToObject(item, "content");
-         cJSON *part = cJSON_CreateObject();
-         cJSON_AddStringToObject(part, "type", is_assistant ? "output_text" : "input_text");
-         cJSON_AddStringToObject(part, "text", text);
-         cJSON_AddItemToArray(content, part);
-         cJSON_AddItemToArray(input, item);
-      }
-      free(text);
+      /* Preserve block ordering: reasoning may precede a call, and text can
+       * appear on either side. Each native item is rendered at this boundary. */
+      cJSON *last_message = NULL;
+      int last_group = 0;
       for (int j = 0; j < im->n_blocks; j++)
       {
          const aimee_block_t *b = &im->blocks[j];
+         cJSON *item = cJSON_CreateObject();
+         if (!item)
+            goto fail;
          if (b->type == AIMEE_BLK_TOOL_USE)
          {
-            cJSON *fc = cJSON_CreateObject();
-            cJSON_AddStringToObject(fc, "type", "function_call");
-            cJSON_AddStringToObject(fc, "call_id", b->tool_id ? b->tool_id : "");
-            cJSON_AddStringToObject(fc, "name", b->tool_name ? b->tool_name : "");
-            /* Only when set: a plain tool has no group, and an empty `namespace`
-             * would claim one that does not exist. */
+            cJSON_AddStringToObject(item, "type", "function_call");
+            cJSON_AddStringToObject(item, "call_id", b->tool_id ? b->tool_id : "");
+            cJSON_AddStringToObject(item, "name", b->tool_name ? b->tool_name : "");
             if (b->tool_namespace && b->tool_namespace[0])
-               cJSON_AddStringToObject(fc, "namespace", b->tool_namespace);
+               cJSON_AddStringToObject(item, "namespace", b->tool_namespace);
             char *args = b->tool_input ? cJSON_PrintUnformatted(b->tool_input) : NULL;
-            cJSON_AddStringToObject(fc, "arguments", args ? args : "{}");
+            cJSON_AddStringToObject(item, "arguments", args ? args : "{}");
             free(args);
-            cJSON_AddItemToArray(input, fc);
          }
          else if (b->type == AIMEE_BLK_TOOL_RESULT)
          {
-            /* SPLIT (grouping ruling, Option A): tool_result block -> a
-             * function_call_output item, call_id = tool_id verbatim; rich content
-             * coerced to a string (documented lossy). */
-            cJSON *fo = cJSON_CreateObject();
-            cJSON_AddStringToObject(fo, "type", "function_call_output");
-            cJSON_AddStringToObject(fo, "call_id", b->tool_id ? b->tool_id : "");
-            char *o = NULL;
-            if (b->tool_result && cJSON_IsString(b->tool_result))
-               o = strdup(b->tool_result->valuestring);
-            else if (b->tool_result)
-               o = cJSON_PrintUnformatted(b->tool_result);
-            cJSON_AddStringToObject(fo, "output", o ? o : "");
-            free(o);
-            cJSON_AddItemToArray(input, fo);
+            cJSON_AddStringToObject(item, "type", "function_call_output");
+            cJSON_AddStringToObject(item, "call_id", b->tool_id ? b->tool_id : "");
+            cJSON *result = NULL;
+            if (!b->tool_result)
+               result = cJSON_CreateString("");
+            else if (cJSON_IsString(b->tool_result) || cJSON_IsArray(b->tool_result))
+               result = cJSON_Duplicate(b->tool_result, 1);
+            else
+            {
+               char *text = cJSON_PrintUnformatted(b->tool_result);
+               result = text ? cJSON_CreateString(text) : NULL;
+               free(text);
+            }
+            if (!result || !cJSON_AddItemToObject(item, "output", result))
+            {
+               cJSON_Delete(result);
+               cJSON_Delete(item);
+               goto fail;
+            }
+         }
+         else if (b->type == AIMEE_BLK_THINKING)
+         {
+            /* A foreign provider's reasoning has no Responses item identity.
+             * Keep it in canonical history; only native reasoning is replayable
+             * as this provider's opaque state at egress. */
+            if (!b->thinking_id)
+            {
+               cJSON_Delete(item);
+               continue;
+            }
+            cJSON_AddStringToObject(item, "type", "reasoning");
+            if (b->thinking_id)
+               cJSON_AddStringToObject(item, "id", b->thinking_id);
+            if (b->thinking_encrypted_content)
+               cJSON_AddStringToObject(item, "encrypted_content", b->thinking_encrypted_content);
+            cJSON *summary = cJSON_AddArrayToObject(item, "summary");
+            if (b->text && b->text[0])
+            {
+               cJSON *part = cJSON_CreateObject();
+               cJSON_AddStringToObject(part, "type", "summary_text");
+               cJSON_AddStringToObject(part, "text", b->text);
+               cJSON_AddItemToArray(summary, part);
+            }
+         }
+         else if (b->type == AIMEE_BLK_TEXT || b->type == AIMEE_BLK_IMAGE ||
+                  b->type == AIMEE_BLK_DOCUMENT)
+         {
+            cJSON_AddStringToObject(item, "type", "message");
+            cJSON_AddStringToObject(item, "role", im->role ? im->role : "user");
+            cJSON *content = cJSON_AddArrayToObject(item, "content");
+            cJSON *part = cJSON_CreateObject();
+            if (b->type == AIMEE_BLK_TEXT)
+            {
+               cJSON_AddStringToObject(part, "type", is_assistant ? "output_text" : "input_text");
+               cJSON_AddStringToObject(part, "text", b->text ? b->text : "");
+            }
+            else if (b->type == AIMEE_BLK_IMAGE)
+            {
+               cJSON_AddStringToObject(part, "type", "input_image");
+               char *url = aimee_ir_media_url(b);
+               if (!url)
+               {
+                  cJSON_Delete(part);
+                  cJSON_Delete(item);
+                  goto fail;
+               }
+               cJSON_AddStringToObject(part, "image_url", url);
+               free(url);
+            }
+            else
+            {
+               cJSON_AddStringToObject(part, "type", "input_file");
+               char *ref = aimee_ir_media_url(b);
+               if (!ref)
+               {
+                  cJSON_Delete(part);
+                  cJSON_Delete(item);
+                  goto fail;
+               }
+               const char *key = !strncmp(ref, "http://", 7) || !strncmp(ref, "https://", 8)
+                                     ? "file_url"
+                                 : !strncmp(ref, "file-", 5) ? "file_id"
+                                                             : "file_data";
+               cJSON_AddStringToObject(part, key, ref);
+               free(ref);
+            }
+            cJSON_AddItemToArray(content, part);
+         }
+         else
+         {
+            cJSON_Delete(item);
+            goto fail;
+         }
+         int content_item = b->type == AIMEE_BLK_TEXT || b->type == AIMEE_BLK_IMAGE ||
+                            b->type == AIMEE_BLK_DOCUMENT;
+         if (content_item && last_message && b->message_group > 0 && last_group == b->message_group)
+         {
+            cJSON *parts = cJSON_GetObjectItemCaseSensitive(item, "content");
+            cJSON *part = cJSON_DetachItemFromArray(parts, 0);
+            if (!part || !cJSON_AddItemToArray(
+                             cJSON_GetObjectItemCaseSensitive(last_message, "content"), part))
+            {
+               cJSON_Delete(part);
+               cJSON_Delete(item);
+               goto fail;
+            }
+            cJSON_Delete(item);
+            continue;
+         }
+         last_message = content_item ? item : NULL;
+         last_group = content_item ? b->message_group : 0;
+         if (!cJSON_AddItemToArray(input, item))
+         {
+            cJSON_Delete(item);
+            goto fail;
          }
       }
    }
@@ -178,41 +293,20 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
       cJSON *tools = cJSON_AddArrayToObject(out, "tools");
       for (int i = 0; i < ir->n_tools; i++)
       {
-         /* Re-emit anything the IR does not model as a plain named function exactly
-          * as it arrived. A Codex client's `namespace` groups carry their nested tool
-          * list under `tools`, and flattening one into a single function named
-          * mcp__aimee lost all nineteen aimee tools and made the model call a name
-          * Codex then rejected ("unsupported call: mcp__aimee"). `web_search` and
-          * friends carry no name at all, and synthesising `"name": ""` for them made
-          * the provider reject the entire request.
-          *
-          * Only a sidecar whose own type is `function` is safe to re-render from the
-          * modelled fields; everything else goes back verbatim. */
-         const cJSON *raw = ir->tools[i].raw;
-         const cJSON *rtype = raw ? cJSON_GetObjectItemCaseSensitive((cJSON *)raw, "type") : NULL;
-         int raw_is_function = cJSON_IsString(rtype) && strcmp(rtype->valuestring, "function") == 0;
-         if (raw && (!raw_is_function || !ir->tools[i].name || !ir->tools[i].name[0]))
+         cJSON *tool = openai_ir_render_tool(&ir->tools[i], 1);
+         if (!tool || !cJSON_AddItemToArray(tools, tool))
          {
-            cJSON *verbatim = cJSON_Duplicate((cJSON *)raw, 1);
-            if (verbatim)
-               cJSON_AddItemToArray(tools, verbatim);
-            continue;
+            cJSON_Delete(tool);
+            cJSON_Delete(out);
+            return NULL;
          }
-         if (!ir->tools[i].name || !ir->tools[i].name[0])
-            continue; /* unnamed and unmodelled: never emit name:"" */
-         cJSON *t = cJSON_CreateObject();
-         cJSON_AddStringToObject(t, "type", "function");
-         cJSON_AddStringToObject(t, "name", ir->tools[i].name);
-         if (ir->tools[i].description)
-            cJSON_AddStringToObject(t, "description", ir->tools[i].description);
-         cJSON_AddItemToObject(t, "parameters",
-                               ir->tools[i].schema ? cJSON_Duplicate(ir->tools[i].schema, 1)
-                                                   : cJSON_CreateObject());
-         cJSON_AddItemToArray(tools, t);
       }
    }
    openai_family_add_tool_choice(out, ir, 1);
    return out;
+fail:
+   cJSON_Delete(out);
+   return NULL;
 }
 
 int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, size_t errn)
@@ -226,15 +320,37 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
       return -1;
    }
    out->raw = cJSON_Duplicate(resp, 1);
+   const cJSON *failure = cJSON_GetObjectItemCaseSensitive(resp, "error");
+   if (failure && !cJSON_IsNull(failure))
+   {
+      const char *message =
+          cJSON_IsString(failure) ? failure->valuestring : ostr(failure, "message");
+      out->error_message = dupstr(message ? message : "upstream API error");
+      out->stop_reason = AIMEE_STOP_ERROR;
+      if (!out->error_message)
+      {
+         aimee_response_free(out);
+         return -1;
+      }
+      return 0;
+   }
    out->id = dupstr(ostr(resp, "id"));
    out->model = dupstr(ostr(resp, "model"));
    out->role = dupstr("assistant");
    const char *status = ostr(resp, "status");
    out->raw_stop_reason = dupstr(status);
+   if (status && (!strcmp(status, "failed") || !strcmp(status, "cancelled")))
+   {
+      out->stop_reason = AIMEE_STOP_ERROR;
+      out->error_message = dupstr("upstream response failed");
+      if (!out->error_message)
+         goto oom;
+      return 0;
+   }
 
    /* output items: message (output_text parts) / function_call / reasoning */
    const cJSON *output = cJSON_GetObjectItemCaseSensitive((cJSON *)resp, "output");
-   int saw_tool = 0;
+   int saw_tool = 0, saw_refusal = 0, saw_message = 0;
    if (output && cJSON_IsArray(output))
    {
       const cJSON *item = NULL;
@@ -252,7 +368,15 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
             b->tool_name = dupstr(ostr(item, "name"));
             b->tool_namespace = dupstr(ostr(item, "namespace"));
             const char *args = ostr(item, "arguments");
-            b->tool_input = args ? cJSON_Parse(args) : NULL;
+            b->tool_input = args ? cJSON_ParseWithOpts(args, NULL, 1) : NULL;
+            if (!cJSON_IsObject(b->tool_input))
+            {
+               if (err && errn)
+                  snprintf(err, errn,
+                           "completed function arguments require a complete JSON object");
+               aimee_response_free(out);
+               return -1;
+            }
             saw_tool = 1;
          }
          else if (type && strcmp(type, "reasoning") == 0)
@@ -263,9 +387,13 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
             b->type = AIMEE_BLK_THINKING;
             b->raw = cJSON_Duplicate(item, 1);
             b->text = responses_reasoning_summary_text(item);
+            b->thinking_id = dupstr(ostr(item, "id"));
+            b->thinking_encrypted_content = dupstr(ostr(item, "encrypted_content"));
          }
          else if (type && strcmp(type, "message") == 0)
          {
+            /* Keep authored-message grouping as metadata, never invented text. */
+            saw_message++;
             const cJSON *content = cJSON_GetObjectItemCaseSensitive((cJSON *)item, "content");
             const cJSON *part = NULL;
             if (content && cJSON_IsArray(content))
@@ -277,10 +405,38 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
                      aimee_block_t *b = grow_content(out);
                      if (!b)
                         goto oom;
+                     b->message_group = saw_message;
                      b->type = AIMEE_BLK_TEXT;
                      b->text = dupstr(ostr(part, "text"));
                   }
+                  else if (pt && !strcmp(pt, "refusal"))
+                  {
+                     aimee_block_t *b = grow_content(out);
+                     if (!b)
+                        goto oom;
+                     b->message_group = saw_message;
+                     b->type = AIMEE_BLK_TEXT;
+                     b->text = dupstr(ostr(part, "refusal"));
+                     saw_refusal = 1;
+                  }
+                  else
+                  {
+                     aimee_block_t *b = grow_content(out);
+                     if (!b)
+                        goto oom;
+                     b->message_group = saw_message;
+                     b->type = AIMEE_BLK_UNKNOWN;
+                     b->raw = cJSON_Duplicate(part, 1);
+                  }
                }
+         }
+         else
+         {
+            aimee_block_t *b = grow_content(out);
+            if (!b)
+               goto oom;
+            b->type = AIMEE_BLK_UNKNOWN;
+            b->raw = cJSON_Duplicate(item, 1);
          }
       }
    }
@@ -289,30 +445,24 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
    if (status && strcmp(status, "incomplete") == 0)
       out->stop_reason = AIMEE_STOP_MAX_TOKENS;
    else
-      out->stop_reason = saw_tool ? AIMEE_STOP_TOOL_USE : AIMEE_STOP_END_TURN;
+      out->stop_reason = saw_refusal ? AIMEE_STOP_CONTENT_FILTER
+                         : saw_tool  ? AIMEE_STOP_TOOL_USE
+                                     : AIMEE_STOP_END_TURN;
 
-   const cJSON *usage = cJSON_GetObjectItemCaseSensitive((cJSON *)resp, "usage");
-   if (usage && cJSON_IsObject(usage))
+   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
+   const cJSON *cached = cJSON_GetObjectItemCaseSensitive(usage, "input_tokens_details");
+   const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(usage, "output_tokens_details");
+   if (aimee_ir_read_usage(usage, "input_tokens", &out->usage_in) ||
+       aimee_ir_read_usage(usage, "output_tokens", &out->usage_out) ||
+       aimee_ir_read_usage(cached, "cached_tokens", &out->usage_cache_read) ||
+       aimee_ir_read_usage(reasoning, "reasoning_tokens", &out->usage_reasoning))
    {
-      const cJSON *in = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "input_tokens");
-      const cJSON *ou = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "output_tokens");
-      if (in && cJSON_IsNumber(in))
-         out->usage_in = (long)in->valuedouble;
-      if (ou && cJSON_IsNumber(ou))
-         out->usage_out = (long)ou->valuedouble;
-      /* CACHED PROMPT TOKENS. Responses reports them in a sibling object,
-       * usage.input_tokens_details.cached_tokens -- the same shape as Chat's
-       * prompt_tokens_details, under a different name. Reading only the two flat
-       * counters loses them, which is why the Anthropic arm was the only one ever
-       * reporting cache numbers. See the note in aimee_backend_openai.c. */
-      const cJSON *itd = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "input_tokens_details");
-      if (itd && cJSON_IsObject(itd))
-      {
-         const cJSON *cr = cJSON_GetObjectItemCaseSensitive((cJSON *)itd, "cached_tokens");
-         if (cr && cJSON_IsNumber(cr))
-            out->usage_cache_read = (long)cr->valuedouble;
-      }
+      if (err && errn)
+         snprintf(err, errn, "invalid provider usage counter");
+      aimee_response_free(out);
+      return -1;
    }
+
    return 0;
 
 oom:
@@ -320,4 +470,391 @@ oom:
       snprintf(err, errn, "responses_backend_parse: out of memory");
    aimee_response_free(out);
    return -1;
+}
+
+/* Buffered SSE framing belongs to this native entry adapter. No execution or
+ * provider-neutral history type knows these event names or JSON keys. */
+typedef struct
+{
+   cJSON *items;
+   cJSON *terminal;
+   char *delta_text;
+   char *done_text;
+   char *part_text;
+} responses_body_t;
+
+static int response_append(char **text, const char *part, size_t size, int newline)
+{
+   size_t length = *text ? strlen(*text) : 0;
+   size_t separator = newline && length ? 1 : 0;
+   if (length > SIZE_MAX - separator - 1 || size > SIZE_MAX - length - separator - 1)
+      return -1;
+   char *grown = realloc(*text, length + separator + size + 1);
+   if (!grown)
+      return -1;
+   if (separator)
+      grown[length++] = '\n';
+   memcpy(grown + length, part, size);
+   grown[length + size] = 0;
+   *text = grown;
+   return 0;
+}
+
+static const char *response_text_value(const cJSON *value)
+{
+   if (cJSON_IsString(value))
+      return value->valuestring;
+   const char *text = ostr(value, "text");
+   return text ? text : ostr(value, "value");
+}
+
+static int response_body_event(responses_body_t *state, const char *event, const char *data)
+{
+   if (!data || !data[0] || !strcmp(data, "[DONE]"))
+      return 0;
+   cJSON *frame = cJSON_ParseWithOpts(data, NULL, 1);
+   if (!cJSON_IsObject(frame))
+   {
+      cJSON_Delete(frame);
+      return -1;
+   }
+   const char *kind = event && event[0] ? event : ostr(frame, "type");
+   int rc = 0;
+   if (!kind)
+      goto done;
+   if (!strcmp(kind, "response.output_item.done"))
+   {
+      const cJSON *item = cJSON_GetObjectItemCaseSensitive(frame, "item");
+      const cJSON *index = cJSON_GetObjectItemCaseSensitive(frame, "output_index");
+      cJSON *copy = cJSON_IsObject(item) ? cJSON_Duplicate(item, 1) : NULL;
+      if (!copy)
+      {
+         rc = -1;
+         goto done;
+      }
+      if (index)
+      {
+         if (!cJSON_IsNumber(index) || index->valuedouble != index->valueint ||
+             index->valueint < 0 || index->valueint > 4095)
+         {
+            cJSON_Delete(copy);
+            rc = -1;
+            goto done;
+         }
+         while (cJSON_GetArraySize(state->items) <= index->valueint)
+         {
+            cJSON *empty = cJSON_CreateNull();
+            if (!empty || !cJSON_AddItemToArray(state->items, empty))
+            {
+               cJSON_Delete(empty);
+               cJSON_Delete(copy);
+               rc = -1;
+               goto done;
+            }
+         }
+         cJSON *previous = cJSON_GetArrayItem(state->items, index->valueint);
+         if (!cJSON_IsNull(previous) && !cJSON_Compare(previous, copy, 1))
+         {
+            cJSON_Delete(copy);
+            rc = -1;
+            goto done;
+         }
+         if (!cJSON_ReplaceItemInArray(state->items, index->valueint, copy))
+         {
+            cJSON_Delete(copy);
+            rc = -1;
+         }
+      }
+      else if (cJSON_GetArraySize(state->items) >= 4096 ||
+               !cJSON_AddItemToArray(state->items, copy))
+      {
+         cJSON_Delete(copy);
+         rc = -1;
+      }
+   }
+   else if (!strcmp(kind, "response.output_text.delta") ||
+            !strcmp(kind, "response.output_text.done"))
+   {
+      int delta = !strcmp(kind, "response.output_text.delta");
+      const char *text =
+          response_text_value(cJSON_GetObjectItemCaseSensitive(frame, delta ? "delta" : "text"));
+      if (text)
+         rc =
+             response_append(delta ? &state->delta_text : &state->done_text, text, strlen(text), 0);
+   }
+   else if (!strcmp(kind, "response.content_part.done"))
+   {
+      const cJSON *part = cJSON_GetObjectItemCaseSensitive(frame, "part");
+      const char *type = ostr(part, "type"), *text = ostr(part, "text");
+      if (type && !strcmp(type, "output_text") && text)
+         rc = response_append(&state->part_text, text, strlen(text), 0);
+   }
+   else if (!strcmp(kind, "response.completed") || !strcmp(kind, "response.incomplete") ||
+            !strcmp(kind, "response.failed"))
+   {
+      const cJSON *response = cJSON_GetObjectItemCaseSensitive(frame, "response");
+      cJSON *copy = cJSON_IsObject(response) ? cJSON_Duplicate(response, 1) : NULL;
+      if (!copy)
+         rc = -1;
+      else
+      {
+         cJSON_Delete(state->terminal);
+         state->terminal = copy;
+         if (!cJSON_GetObjectItemCaseSensitive(copy, "status"))
+            cJSON_AddStringToObject(copy, "status",
+                                    !strcmp(kind, "response.incomplete") ? "incomplete"
+                                    : !strcmp(kind, "response.failed")   ? "failed"
+                                                                         : "completed");
+      }
+   }
+   else if (!strcmp(kind, "error"))
+   {
+      cJSON *failure = cJSON_CreateObject(), *copy = cJSON_Duplicate(frame, 1);
+      if (!failure || !copy || !cJSON_AddItemToObject(failure, "error", copy))
+      {
+         cJSON_Delete(failure);
+         cJSON_Delete(copy);
+         rc = -1;
+      }
+      else
+      {
+         cJSON_Delete(state->terminal);
+         state->terminal = failure;
+      }
+   }
+done:
+   cJSON_Delete(frame);
+   return rc;
+}
+
+static int response_item_same(const cJSON *a, const cJSON *b, int same_index)
+{
+   if (!cJSON_IsObject(a) || !cJSON_IsObject(b))
+      return 0;
+   const char *at = ostr(a, "type"), *bt = ostr(b, "type");
+   if (!at || !bt || strcmp(at, bt))
+      return 0;
+   const char *aid = ostr(a, "id"), *bid = ostr(b, "id");
+   if (aid && bid)
+      return !strcmp(aid, bid);
+   if (!strcmp(at, "function_call"))
+   {
+      aid = ostr(a, "call_id");
+      bid = ostr(b, "call_id");
+      return aid && bid && !strcmp(aid, bid);
+   }
+   return same_index;
+}
+
+static int response_missing(const cJSON *value)
+{
+   return !value || cJSON_IsNull(value) || (cJSON_IsArray(value) && !value->child) ||
+          (cJSON_IsString(value) && !value->valuestring[0]);
+}
+
+static int response_merge_fields(cJSON *out, const cJSON *other)
+{
+   const cJSON *field;
+   cJSON_ArrayForEach(field, other)
+   {
+      const cJSON *previous = cJSON_GetObjectItemCaseSensitive(out, field->string);
+      if (!response_missing(previous) || response_missing(field))
+         continue;
+      cJSON *copy = cJSON_Duplicate(field, 1);
+      if (!copy)
+         return -1;
+      int ok = previous ? cJSON_ReplaceItemInObjectCaseSensitive(out, field->string, copy)
+                        : cJSON_AddItemToObject(out, field->string, copy);
+      if (!ok)
+      {
+         cJSON_Delete(copy);
+         return -1;
+      }
+   }
+   return 0;
+}
+
+static cJSON *response_merge_output(const cJSON *streamed, const cJSON *terminal)
+{
+   int streamed_count = 0;
+   const cJSON *item;
+   cJSON_ArrayForEach(item, streamed) streamed_count += cJSON_IsObject(item);
+   int terminal_count = cJSON_GetArraySize(terminal);
+   if (terminal_count > 4096)
+      return NULL;
+   const cJSON *primary = streamed_count >= terminal_count ? streamed : terminal;
+   const cJSON *secondary = primary == streamed ? terminal : streamed;
+   int n = cJSON_GetArraySize(primary), m = cJSON_GetArraySize(secondary);
+   int *matches = malloc((size_t)(m ? m : 1) * sizeof *matches);
+   cJSON *out = cJSON_CreateArray();
+   if (!matches || !out)
+      goto fail;
+   for (int j = 0; j < m; j++)
+   {
+      matches[j] = -1;
+      const cJSON *candidate = cJSON_GetArrayItem(secondary, j);
+      for (int i = 0; i < n; i++)
+         if (response_item_same(cJSON_GetArrayItem(primary, i), candidate, i == j))
+         {
+            matches[j] = i;
+            break;
+         }
+   }
+   for (int i = 0; i < n; i++)
+   {
+      const cJSON *source = cJSON_GetArrayItem(primary, i);
+      if (!cJSON_IsObject(source))
+      {
+         if (i < m && matches[i] < 0 && cJSON_IsObject(cJSON_GetArrayItem(secondary, i)))
+         {
+            source = cJSON_GetArrayItem(secondary, i);
+            matches[i] = i;
+         }
+         else
+            continue;
+      }
+      cJSON *copy = cJSON_Duplicate(source, 1);
+      if (!copy)
+         goto fail;
+      for (int j = 0; j < m; j++)
+         if (matches[j] == i && response_merge_fields(copy, cJSON_GetArrayItem(secondary, j)))
+         {
+            cJSON_Delete(copy);
+            goto fail;
+         }
+      if (!cJSON_AddItemToArray(out, copy))
+      {
+         cJSON_Delete(copy);
+         goto fail;
+      }
+   }
+   for (int j = 0; j < m; j++)
+   {
+      const cJSON *source = cJSON_GetArrayItem(secondary, j);
+      if (matches[j] >= 0 || !cJSON_IsObject(source))
+         continue;
+      cJSON *copy = cJSON_Duplicate(source, 1);
+      if (!copy || !cJSON_AddItemToArray(out, copy))
+      {
+         cJSON_Delete(copy);
+         goto fail;
+      }
+   }
+   free(matches);
+   return out;
+fail:
+   free(matches);
+   cJSON_Delete(out);
+   return NULL;
+}
+
+cJSON *responses_backend_sse_object(const char *body)
+{
+   if (!body)
+      return NULL;
+   /* A buffered non-streamed response has no SSE framing to decode. */
+   const char *first = body;
+   while (*first == ' ' || *first == '\t' || *first == '\r' || *first == '\n')
+      first++;
+   if (*first == '{')
+      return cJSON_ParseWithOpts(body, NULL, 1);
+   responses_body_t state = {.items = cJSON_CreateArray()};
+   char event[128] = "", *data = NULL;
+   if (!state.items)
+      return NULL;
+   const char *cursor = body;
+   while (*cursor)
+   {
+      const char *line = cursor, *end = strpbrk(cursor, "\r\n");
+      size_t size = end ? (size_t)(end - line) : strlen(line);
+      cursor = end ? end + ((*end == '\r' && end[1] == '\n') ? 2 : 1) : line + size;
+      if (!size)
+      {
+         if (response_body_event(&state, event, data))
+            goto fail;
+         event[0] = 0;
+         free(data);
+         data = NULL;
+      }
+      else if (size >= 6 && !strncmp(line, "event:", 6))
+      {
+         size_t offset = size > 6 && line[6] == ' ' ? 7 : 6;
+         if (size - offset >= sizeof event)
+            goto fail;
+         memcpy(event, line + offset, size - offset);
+         event[size - offset] = 0;
+      }
+      else if (size >= 5 && !strncmp(line, "data:", 5))
+      {
+         size_t offset = size > 5 && line[5] == ' ' ? 6 : 5;
+         if (response_append(&data, line + offset, size - offset, 1))
+            goto fail;
+      }
+   }
+   if (response_body_event(&state, event, data) || !state.terminal)
+      goto fail;
+   if (!cJSON_GetObjectItemCaseSensitive(state.terminal, "error"))
+   {
+      const cJSON *native_output = cJSON_GetObjectItemCaseSensitive(state.terminal, "output");
+      if (native_output && !cJSON_IsArray(native_output))
+         goto fail;
+      cJSON *output = response_merge_output(state.items, native_output);
+      if (!output)
+         goto fail;
+      /* The completed item snapshots carry all native content. Text-only
+       * providers may supply only text deltas and an empty terminal snapshot. */
+      int text_found = 0;
+      const cJSON *item;
+      cJSON_ArrayForEach(item, output)
+      {
+         const cJSON *part;
+         cJSON_ArrayForEach(part, cJSON_GetObjectItemCaseSensitive(item, "content"))
+         {
+            const char *text = ostr(part, "text");
+            text_found |= text && text[0];
+         }
+      }
+      const char *text = state.part_text;
+      if (state.done_text && (!text || strlen(state.done_text) > strlen(text)))
+         text = state.done_text;
+      if (state.delta_text && (!text || strlen(state.delta_text) > strlen(text)))
+         text = state.delta_text;
+      if (!text_found && text && text[0])
+      {
+         cJSON *message = cJSON_CreateObject(), *part = cJSON_CreateObject();
+         cJSON *content = message ? cJSON_AddArrayToObject(message, "content") : NULL;
+         if (!message || !part || !content ||
+             !cJSON_AddStringToObject(message, "type", "message") ||
+             !cJSON_AddStringToObject(part, "type", "output_text") ||
+             !cJSON_AddStringToObject(part, "text", text))
+         {
+            cJSON_Delete(message);
+            cJSON_Delete(part);
+            cJSON_Delete(output);
+            goto fail;
+         }
+         cJSON_AddItemToArray(content, part);
+         cJSON_AddItemToArray(output, message);
+      }
+      cJSON_DeleteItemFromObjectCaseSensitive(state.terminal, "output");
+      if (!cJSON_AddItemToObject(state.terminal, "output", output))
+      {
+         cJSON_Delete(output);
+         goto fail;
+      }
+   }
+   free(data);
+   free(state.delta_text);
+   free(state.done_text);
+   free(state.part_text);
+   cJSON_Delete(state.items);
+   return state.terminal;
+fail:
+   free(data);
+   free(state.delta_text);
+   free(state.done_text);
+   free(state.part_text);
+   cJSON_Delete(state.items);
+   cJSON_Delete(state.terminal);
+   return NULL;
 }

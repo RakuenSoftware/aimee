@@ -51,7 +51,8 @@ static gw_orch_result_t delegate_hook(const gw_turn_snapshot_t *turn,
 static gw_orch_result_t after_hook(const gw_turn_snapshot_t *turn,
                                    const gw_turn_capabilities_t *caps, void *ud)
 {
-   (void)turn;
+   assert(turn->request && !strcmp(turn->request->model, "owned-model"));
+   assert(turn->response && turn->response->stop_reason == AIMEE_STOP_MAX_TOKENS);
    (void)caps;
    (void)ud;
    g_ran_after++;
@@ -113,6 +114,10 @@ int main(void)
    gw_turn_snapshot_t turn;
    memset(&turn, 0, sizeof(turn));
    turn.turn_id = "t1";
+   const aimee_request_t request = {.model = "owned-model"};
+   const aimee_response_t response = {.stop_reason = AIMEE_STOP_MAX_TOKENS};
+   turn.request = &request;
+   turn.response = &response;
    gw_turn_capabilities_t caps = {NULL, fake_spawn_delegate, fake_dispatch_workflow};
 
    /* enabled hooks run through the runner, in order; the delegate hook spawns via the

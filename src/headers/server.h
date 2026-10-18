@@ -2,6 +2,7 @@
 #define DEC_SERVER_H 1
 
 #include "aimee_features.h"
+#include <aimee/ir/aimee_ir.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <sys/types.h>
@@ -24,7 +25,7 @@ typedef struct cJSON cJSON;
 
 /* Authenticated hook memory interception, implemented with the other hook
  * helpers so the main method table does not own storage-policy details. */
-int server_memory_intercept(const char *tool, const char *tool_input, const char *cwd, cJSON *req,
+int server_memory_intercept(const aimee_block_t *call, const char *cwd, cJSON *req,
                             const char *client, char *msg, size_t msg_len);
 
 #define SERVER_PROTOCOL_VERSION 1
@@ -220,7 +221,7 @@ extern const int method_registry_count;
  * event loop without waiting; the event loop later reclaims the slot
  * once refcount reaches 0. Connection slots are fixed in place while
  * in use, so worker-held pointers stay valid for their job lifetime. */
-typedef struct
+typedef struct server_conn
 {
    int in_use; /* slot is reserved by an open or closing connection */
    int fd;

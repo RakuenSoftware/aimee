@@ -17,6 +17,50 @@ extern char **environ;
 
 /* --- Shared utilities (used by all modules including tests) --- */
 
+char *read_stream_limited(FILE *stream, size_t maximum, size_t *length)
+{
+   if (length)
+      *length = 0;
+   if (!stream || !maximum || maximum == (size_t)-1)
+      return NULL;
+   size_t capacity = maximum < 16384 ? maximum + 1 : 16384;
+   size_t used = 0;
+   char *buffer = malloc(capacity);
+   if (!buffer)
+      return NULL;
+   for (;;)
+   {
+      if (used == maximum)
+      {
+         if (fgetc(stream) != EOF || ferror(stream))
+            goto fail;
+         break;
+      }
+      if (used == capacity - 1)
+      {
+         size_t next = capacity > (maximum + 1) / 2 ? maximum + 1 : capacity * 2;
+         char *grown = realloc(buffer, next);
+         if (!grown)
+            goto fail;
+         buffer = grown;
+         capacity = next;
+      }
+      size_t n = fread(buffer + used, 1, capacity - used - 1, stream);
+      used += n;
+      if (ferror(stream))
+         goto fail;
+      if (feof(stream))
+         break;
+   }
+   buffer[used] = 0;
+   if (length)
+      *length = used;
+   return buffer;
+fail:
+   free(buffer);
+   return NULL;
+}
+
 char *safe_strdup(const char *s)
 {
    if (!s)

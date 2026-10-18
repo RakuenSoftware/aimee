@@ -9,7 +9,8 @@ static const char *last_content(cJSON *messages)
 {
    int n = cJSON_GetArraySize(messages);
    cJSON *msg = cJSON_GetArrayItem(messages, n - 1);
-   cJSON *content = msg ? cJSON_GetObjectItem(msg, "content") : NULL;
+   cJSON *content =
+       cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(msg, "blocks"), 0), "text");
    return cJSON_IsString(content) ? content->valuestring : "";
 }
 
@@ -102,7 +103,8 @@ static void test_degenerate_retry_budget(void)
    /* The appended instruction must keep pointing the model AT the tool interface;
     * it must never tell it the budget is closed or to stop calling tools. */
    cJSON *retry_msg = cJSON_GetArrayItem(messages, 0);
-   const char *retry_text = cJSON_GetStringValue(cJSON_GetObjectItem(retry_msg, "content"));
+   const char *retry_text = cJSON_GetStringValue(cJSON_GetObjectItem(
+       cJSON_GetArrayItem(cJSON_GetObjectItem(retry_msg, "blocks"), 0), "text"));
    assert(retry_text != NULL);
    assert(strstr(retry_text, "use the available tool interface") != NULL);
    assert(strstr(retry_text, "tool budget was closed") == NULL);

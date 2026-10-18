@@ -98,8 +98,8 @@ func TestGWSnapshotIsIndependent(t *testing.T) {
 	msgs := NewArray()
 	msgs.Append(mkUser("original"))
 	snap := GWSnapshotMessages(msgs)
-	msgs.At(0).Set("content", NewString("mutated"))
-	if snap.At(0).GetString("content") != "original" {
+	msgs.At(0).Get("blocks").At(0).Set("text", NewString("mutated"))
+	if fixtureText(snap.At(0)) != "original" {
 		t.Error("the snapshot shares state with the original — restore would not work")
 	}
 	if GWSnapshotMessages(nil) != nil {
@@ -118,7 +118,7 @@ func TestGWReplaceMessages(t *testing.T) {
 	if !GWReplaceMessages(container, "messages", reduced) {
 		t.Fatal("replace failed")
 	}
-	if container.Get("messages").At(0).GetString("content") != "new" {
+	if fixtureText(container.Get("messages").At(0)) != "new" {
 		t.Error("the reduced array was not installed")
 	}
 	// An absent key is added rather than refused.

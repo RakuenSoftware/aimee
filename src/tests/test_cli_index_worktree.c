@@ -165,6 +165,106 @@ static void check_forwarding(const char *main_root, const char *cwd)
    assert(chdir(original) == 0);
 }
 
+/* A normal checkout has no remote registration yet. Drive the real bounded
+ * ingest and verify that the subsequent query uses its registered project. */
+static void check_missing_registration_bootstrap(const char *main_root)
+{
+   char original[4096];
+   assert(getcwd(original, sizeof original) && chdir(main_root) == 0);
+   int listener = socket(AF_INET, SOCK_STREAM, 0);
+   assert(listener >= 0);
+   struct sockaddr_in addr = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+   assert(bind(listener, (struct sockaddr *)&addr, sizeof addr) == 0 && listen(listener, 4) == 0);
+   socklen_t size = sizeof addr;
+   assert(getsockname(listener, (struct sockaddr *)&addr, &size) == 0);
+   char endpoint[64];
+   snprintf(endpoint, sizeof endpoint, "http://127.0.0.1:%d", ntohs(addr.sin_port));
+   setenv("AIMEE_API_ENDPOINT", endpoint, 1);
+   cli_v1_manifest_set_for_test(
+       cJSON_Parse("{\"manifest_version\":1,\"routes\":["
+                   "{\"op\":\"index.list\",\"verb\":\"GET\",\"path\":\"/v1/index/projects\"},"
+                   "{\"op\":\"index.hybrid\",\"verb\":\"POST\",\"path\":\"/v1/index/query\"}]}"));
+   pid_t child = fork();
+   assert(child >= 0);
+   if (!child)
+   {
+      alarm(15);
+      for (int step = 0; step < 6; step++)
+      {
+         int fd = accept(listener, NULL, NULL);
+         assert(fd >= 0);
+         char bytes[16384] = "";
+         size_t used = 0;
+         char *body;
+         for (;;)
+         {
+            ssize_t n = recv(fd, bytes + used, sizeof bytes - used - 1, 0);
+            assert(n > 0);
+            used += (size_t)n;
+            bytes[used] = 0;
+            char *end = strstr(bytes, "\r\n\r\n"), *len = strstr(bytes, "Content-Length:");
+            if (end && len && used >= (size_t)(end + 4 - bytes) + strtoul(len + 15, NULL, 10))
+            {
+               body = end + 4;
+               break;
+            }
+            assert(used < sizeof bytes - 1);
+         }
+         cJSON *reply = cJSON_Parse("{\"status\":\"ok\"}");
+         if (step == 0 || step == 1 || step == 4)
+         {
+            assert(strstr(bytes, " /v1/index/projects "));
+            cJSON_AddArrayToObject(reply, "projects");
+            if (step == 4)
+               add_project(reply, "registered-after-ingest", main_root);
+         }
+         else
+         {
+            cJSON *req = cJSON_Parse(body);
+            assert(req);
+            if (step < 4)
+            {
+               assert(strstr(bytes, " /v1/index/ingest "));
+               assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "phase")),
+                              step == 2 ? "begin" : "seal"));
+               assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "root")), main_root));
+            }
+            else
+            {
+               assert(strstr(bytes, " /v1/index/query "));
+               assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "project")),
+                              "registered-after-ingest"));
+               assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(req, "cwd")), main_root));
+               cJSON_AddItemToObject(reply, "results", cJSON_Parse("[{\"result\":{\"hits\":[]}}]"));
+            }
+            cJSON_Delete(req);
+         }
+         char *json = cJSON_PrintUnformatted(reply);
+         cJSON_Delete(reply);
+         char header[256];
+         int n = snprintf(header, sizeof header,
+                          "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                          "%zu\r\nConnection: close\r\n\r\n",
+                          strlen(json));
+         assert(send(fd, header, (size_t)n, 0) == n);
+         assert(send(fd, json, strlen(json), 0) == (ssize_t)strlen(json));
+         free(json);
+         close(fd);
+      }
+      close(listener);
+      _exit(0);
+   }
+   close(listener);
+   cli_v1_route_t route = {.method = "index.hybrid", .timeout_ms = 2000};
+   char *args[] = {"needle"};
+   assert(cli_v1_forward(NULL, &route, 1, NULL, NULL, 1, args) == 0);
+   int status;
+   assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+   cli_v1_manifest_set_for_test(NULL);
+   unsetenv("AIMEE_API_ENDPOINT");
+   assert(chdir(original) == 0);
+}
+
 int main(void)
 {
    char tmp[4096], main_root[4096], linked[4096], subdir[4096];
@@ -215,7 +315,9 @@ int main(void)
                  "explicit") == 0);
    cJSON_Delete(req);
    req = request(main_root);
-   assert(cli_index_worktree_root("index.hybrid", req) == NULL);
+   char *canonical = cli_index_worktree_root("index.hybrid", req);
+   assert(canonical && !strcmp(canonical, main_root));
+   free(canonical);
    cJSON_Delete(req);
    req = request(tmp); /* Outside any repository: preserve the server fallback. */
    assert(cli_index_worktree_root("index.hybrid", req) == NULL);
@@ -249,6 +351,8 @@ int main(void)
    cJSON_Delete(response);
 
    check_forwarding(main_root, subdir);
+   check_forwarding(main_root, main_root);
+   check_missing_registration_bootstrap(main_root);
    run((const char *const[]){"git", "-C", main_root, "worktree", "remove", "--force", linked,
                              NULL});
    run((const char *const[]){"rm", "-rf", "--", tmp, NULL});

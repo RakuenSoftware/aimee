@@ -509,6 +509,43 @@ static void test_audit_hook_server_and_password(void)
    printf("  PASS: test_audit_hook_server_and_password\n");
 }
 
+static void test_server_credential_snapshot(void)
+{
+   assert(vault_service_set_server("paired", "token", "snapshot-token") == VAULT_OK);
+   assert(vault_service_set_server("paired", "account", "snapshot-account") == VAULT_OK);
+   char token[64], account[64], missing[64];
+   vault_store_read_t reads[] = {{"token", token, sizeof token, 0},
+                                 {"account", account, sizeof account, 0},
+                                 {"absent", missing, sizeof missing, 0}};
+   g_nrecs = 0;
+   vault_service_set_audit_hook(capture_hook);
+   assert(vault_service_read_server_snapshot("paired", reads, 3) == VAULT_OK);
+   assert(reads[0].present && reads[1].present && !reads[2].present);
+   assert(!strcmp(token, "snapshot-token") && !strcmp(account, "snapshot-account"));
+   assert(!missing[0]);
+   expect_rec(0, "vault.get_server", VAULT_SERVER_PRINCIPAL, "paired", "token", ATTEST_NONE,
+              VAULT_OK);
+   expect_rec(1, "vault.get_server", VAULT_SERVER_PRINCIPAL, "paired", "account", ATTEST_NONE,
+              VAULT_OK);
+   expect_rec(2, "vault.get_server", VAULT_SERVER_PRINCIPAL, "paired", "absent", ATTEST_NONE,
+              VAULT_NO_ENTRY);
+   assert(g_nrecs == 3);
+   assert_no_secret_leak("snapshot-token");
+   assert_no_secret_leak("snapshot-account");
+   reads[1].capacity = 2;
+   assert(vault_service_read_server_snapshot("paired", reads, 3) == VAULT_ERR_CRYPTO);
+   assert(!token[0] && !account[0] && !missing[0]);
+   assert(!reads[0].present && !reads[1].present && !reads[2].present);
+   reads[1].capacity = sizeof account;
+   strcpy(token, "stale");
+   strcpy(account, "stale");
+   reads[0].credential = NULL;
+   assert(vault_service_read_server_snapshot("paired", reads, 3) == VAULT_ERR_BADARG);
+   assert(!token[0] && !account[0]);
+   vault_service_set_audit_hook(NULL);
+   printf("  PASS: test_server_credential_snapshot\n");
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-vaultsvc-test-%d", (int)getpid());
@@ -531,6 +568,7 @@ int main(void)
    test_server_principal_vault();
    test_audit_hook();
    test_audit_hook_server_and_password();
+   test_server_credential_snapshot();
 
    vault_kek_cache_clear();
    char rm[320];

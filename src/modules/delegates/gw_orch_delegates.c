@@ -1,5 +1,5 @@
 /* gw_orch_delegates.c -- see gw_orch_delegates.h. The module is thin (mirrors
- * gw_response_run_governance): a toggle, one hook, and a wrapper that runs the single-hook
+ * gw_ir_response_run_governance): a toggle, one hook, and a wrapper that runs the single-hook
  * catalog through the seam. The coord-specific capability adapter that actually spawns lives
  * at the producer (server_coord_dispatcher.c); this module only decides whether the module is
  * enabled and drives the runner, so it stays I/O-free and unit-testable with a fake caps. */

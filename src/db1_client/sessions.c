@@ -499,6 +499,147 @@ char *db1_server_session_erasure_receipt(const char *request_id, const char *pri
  return receipt;
 }
 
+/* Read-only variable-width replies. Retry only these reads when the transport
+ * reports the complete frame size; writes must never be replayed here. Decode
+ * into owned strings so a large transcript is bounded by the bus contract,
+ * rather than a per-cell malloc ceiling. */
+static int primary_read(uint32_t op, const char *const *fields, uint32_t count,
+                        char ***out, uint32_t *filled)
+{
+   *out = NULL;
+   *filled = 0;
+   if (!obs_bus_module_available(AIMEE_DB1_EVENT_SESSIONS))
+      return -1;
+   size_t request_len;
+   if (frame_size(fields, count, &request_len) != 0)
+      return -1;
+   uint8_t *request = malloc(request_len);
+   uint32_t capacity = 4096, length = 0;
+   uint8_t *response = malloc(capacity);
+   if (!request || !response)
+   {
+      free(request);
+      free(response);
+      return -1;
+   }
+   encode(request, op, fields, count);
+   uint64_t deadline = aimee_module_call_deadline_ns(DB1_SESSIONS_CALL_TIMEOUT_MS);
+   aimee_module_call_result_t rc;
+   for (;;)
+   {
+      rc = obs_bus_module_call(AIMEE_DB1_EVENT_SESSIONS, AIMEE_DB1_STAGE_SESSIONS, 0, deadline,
+                              request, (uint32_t)request_len, response, capacity, &length,
+                              NULL, NULL);
+      if (rc != AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE || length <= capacity ||
+          length > AIMEE_MODULE_MESSAGE_MAX_BODY)
+         break;
+      uint8_t *grown = realloc(response, length);
+      if (!grown)
+         break;
+      response = grown;
+      capacity = length;
+   }
+   free(request);
+   int status = -1;
+   char **cells = NULL;
+   uint32_t n = 0;
+   if (rc != AIMEE_MODULE_CALL_OK || length < 8 || length > capacity)
+      goto done;
+   status = (int)aimee_db1_get_u32(response);
+   n = aimee_db1_get_u32(response + 4);
+   if (n > (length - 8) / 4 || (status != AIMEE_DB1_STATUS_OK && n))
+      goto invalid;
+   cells = calloc(n ? n : 1, sizeof(*cells));
+   if (!cells)
+      goto invalid;
+   uint32_t at = 8;
+   for (uint32_t i = 0; i < n; i++)
+   {
+      if (length - at < 4)
+         goto invalid;
+      uint32_t size = aimee_db1_get_u32(response + at);
+      at += 4;
+      if (size > length - at || memchr(response + at, 0, size))
+         goto invalid;
+      cells[i] = malloc((size_t)size + 1);
+      if (!cells[i])
+         goto invalid;
+      memcpy(cells[i], response + at, size);
+      cells[i][size] = 0;
+      at += size;
+   }
+   if (at != length)
+      goto invalid;
+   *out = cells;
+   *filled = n;
+   goto done;
+invalid:
+   for (uint32_t i = 0; cells && i < n; i++)
+      free(cells[i]);
+   free(cells);
+   status = -1;
+done:
+   free(response);
+   return status;
+}
+
+static void primary_cells_free(char **cells, uint32_t count)
+{
+   for (uint32_t i = 0; i < count; i++)
+      free(cells[i]);
+   free(cells);
+}
+
+int db1_session_ir_history_load(const char *session_id, const char *scope, const char *actor,
+                                const char *active_turn, char **out)
+{
+   if (!out)
+      return -1;
+   *out = NULL;
+   if (!session_id || !scope || !actor)
+      return -1;
+   const char *fields[] = {session_id, scope, actor, active_turn ? active_turn : ""};
+   char **cells = NULL;
+   uint32_t count = 0;
+   int status = primary_read(AIMEE_DB1_OP_SESSION_IR_HISTORY_LOAD, fields, 4, &cells, &count);
+   int rc = status == AIMEE_DB1_STATUS_MISSING ? 1 : -1;
+   if (status == AIMEE_DB1_STATUS_OK && count == 1)
+   {
+      *out = cells[0];
+      cells[0] = NULL;
+      rc = 0;
+   }
+   primary_cells_free(cells, count);
+   return rc;
+}
+
+int db1_session_ir_history_save(const char *session_id, const char *checkpoint, const char *scope,
+                                const char *actor, const char *messages_json)
+{
+   if (!session_id || !checkpoint || !scope || !actor || !messages_json)
+      return -1;
+   const char *fields[] = {session_id, checkpoint, scope, actor, messages_json};
+   return write_result(call_stage(AIMEE_DB1_OP_SESSION_IR_HISTORY_SAVE, fields, 5,
+                                  NULL, NULL, 0, NULL));
+}
+
+static int primary_row_take(db1_primary_session_row_t *row, char **cells)
+{
+   const size_t capacities[] = {sizeof row->session_id, sizeof row->agent_name,
+                               sizeof row->provider, sizeof row->created_at, sizeof row->updated_at};
+   char *destinations[] = {row->session_id, row->agent_name, row->provider,
+                          row->created_at, row->updated_at};
+   for (int i = 0; i < 5; i++)
+   {
+      if (strlen(cells[i]) >= capacities[i])
+         return -1;
+      memcpy(destinations[i], cells[i], strlen(cells[i]) + 1);
+   }
+   row->messages_json = cells[5];
+   cells[5] = NULL;
+   return 0;
+}
+
 int db1_primary_session_save(const char *session_id, const char *agent_name, const char *provider, const char *messages_json)
 {
    if (!session_id || !session_id[0])
@@ -512,19 +653,17 @@ char *db1_primary_session_load(const char *session_id, const char *agent_name, c
    if (!session_id || !session_id[0])
       return NULL;
    const char *fields[] = {session_id, agent_name ? agent_name : "", provider ? provider : ""};
-   char *value = malloc(1048576u);
-   if (!value)
-      return NULL;
-   char *const values[] = {value};
-   const size_t caps[] = {1048576u};
-   int wire_status = call_stage(AIMEE_DB1_OP_PRIMARY_SESSION_LOAD, fields, 3, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || !value[0])
+   char **cells = NULL;
+   uint32_t count = 0;
+   int status = primary_read(AIMEE_DB1_OP_PRIMARY_SESSION_LOAD, fields, 3, &cells, &count);
+   char *value = NULL;
+   if (status == AIMEE_DB1_STATUS_OK && count == 1 && cells[0][0])
    {
-      free(value);
-      return NULL;
+      value = cells[0];
+      cells[0] = NULL;
    }
-   char *shrunk = realloc(value, strlen(value) + 1u);
-   return shrunk ? shrunk : value;
+   primary_cells_free(cells, count);
+   return value;
 }
 
 int db1_primary_session_delete(const char *session_id, const char *agent_name, const char *provider)
@@ -535,86 +674,47 @@ int db1_primary_session_delete(const char *session_id, const char *agent_name, c
    return write_result(call_stage(AIMEE_DB1_OP_PRIMARY_SESSION_DELETE, fields, 3, NULL, NULL, 0, NULL));
 }
 
+static int primary_rows_read(uint32_t op, const char *const *fields, uint32_t argc,
+                              db1_primary_session_row_t **out, int max)
+{
+   *out = NULL;
+   char **cells = NULL;
+   uint32_t count = 0;
+   int status = primary_read(op, fields, argc, &cells, &count);
+   if (status != AIMEE_DB1_STATUS_OK || count % 6 || count / 6 > (uint32_t)max)
+   {
+      primary_cells_free(cells, count);
+      return -1;
+   }
+   uint32_t n = count / 6;
+   db1_primary_session_row_t *rows = calloc(n ? n : 1, sizeof(*rows));
+   if (!rows)
+   {
+      primary_cells_free(cells, count);
+      return -1;
+   }
+   for (uint32_t i = 0; i < n; i++)
+      if (primary_row_take(&rows[i], cells + i * 6) != 0)
+      {
+         db1_primary_session_rows_free(rows, (int)n);
+         primary_cells_free(cells, count);
+         return -1;
+      }
+   primary_cells_free(cells, count);
+   *out = rows;
+   return (int)n;
+}
+
 int db1_primary_session_alloc_recent(db1_primary_session_row_t **out, int max)
 {
    if (!out || max <= 0)
       return -1;
    if (max > 256)
       max = 256;
-   char arg0[32];
-   snprintf(arg0, sizeof arg0, "%d", max);
-   const char *fields[] = {arg0};
-   db1_primary_session_row_t *wire_held = calloc((size_t)max, sizeof *wire_held);
-   if (!wire_held)
-      return -1;
-   char **wire_values = malloc((size_t)max * 6u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 6u * sizeof *wire_caps);
-   if (!wire_values || !wire_caps)
-   {
-      free(wire_values);
-      free(wire_caps);
-      free(wire_held);
-      return -1;
-   }
-   memset(wire_held, 0, (size_t)max * sizeof *wire_held);
-   for (int wire_row = 0; wire_row < max; ++wire_row)
-   {
-      wire_values[wire_row * 6u + 0u] = wire_held[wire_row].session_id;
-      wire_caps[wire_row * 6u + 0u] = sizeof wire_held[wire_row].session_id;
-      wire_values[wire_row * 6u + 1u] = wire_held[wire_row].agent_name;
-      wire_caps[wire_row * 6u + 1u] = sizeof wire_held[wire_row].agent_name;
-      wire_values[wire_row * 6u + 2u] = wire_held[wire_row].provider;
-      wire_caps[wire_row * 6u + 2u] = sizeof wire_held[wire_row].provider;
-      wire_values[wire_row * 6u + 3u] = wire_held[wire_row].created_at;
-      wire_caps[wire_row * 6u + 3u] = sizeof wire_held[wire_row].created_at;
-      wire_values[wire_row * 6u + 4u] = wire_held[wire_row].updated_at;
-      wire_caps[wire_row * 6u + 4u] = sizeof wire_held[wire_row].updated_at;
-      wire_held[wire_row].messages_json = malloc(1048576u);
-      if (!wire_held[wire_row].messages_json)
-      {
-         for (int wire_done = 0; wire_done < wire_row; ++wire_done)
-         {
-            free(wire_held[wire_done].messages_json);
-            wire_held[wire_done].messages_json = NULL;
-         }
-         free(wire_values);
-         free(wire_caps);
-         free(wire_held);
-         return -1;
-      }
-      wire_held[wire_row].messages_json[0] = '\0';
-      wire_values[wire_row * 6u + 5u] = wire_held[wire_row].messages_json;
-      wire_caps[wire_row * 6u + 5u] = 1048576u;
-   }
-   uint32_t wire_filled = 0;
-   int wire_status = call_stage(AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_RECENT, fields, 1, wire_values, wire_caps,
-                           (uint32_t)(max * 6), &wire_filled);
-   free(wire_values);
-   free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 6u != 0u)
-   {
-      for (int wire_done = 0; wire_done < max; ++wire_done)
-      {
-         free(wire_held[wire_done].messages_json);
-         wire_held[wire_done].messages_json = NULL;
-      }
-      free(wire_held);
-      return -1;
-   }
-   int wire_rows = (int)(wire_filled / 6u);
-   for (int wire_row = wire_rows; wire_row < max; ++wire_row)
-   {
-      free(wire_held[wire_row].messages_json);
-      wire_held[wire_row].messages_json = NULL;
-   }
-   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
-   {
-      char *wire_shrunk = realloc(wire_held[wire_row].messages_json, strlen(wire_held[wire_row].messages_json) + 1u);
-      if (wire_shrunk)
-         wire_held[wire_row].messages_json = wire_shrunk;
-   }
-   *out = wire_held;
-   return wire_rows;
+   char bound[32];
+   snprintf(bound, sizeof bound, "%d", max);
+   const char *fields[] = {bound};
+   return primary_rows_read(AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_RECENT, fields, 1, out, max);
 }
 
 int db1_primary_session_alloc_search(const char *query, db1_primary_session_row_t **out, int max)
@@ -623,109 +723,26 @@ int db1_primary_session_alloc_search(const char *query, db1_primary_session_row_
       return -1;
    if (max > 256)
       max = 256;
-   char arg1[32];
-   snprintf(arg1, sizeof arg1, "%d", max);
-   const char *fields[] = {query ? query : "", arg1};
-   db1_primary_session_row_t *wire_held = calloc((size_t)max, sizeof *wire_held);
-   if (!wire_held)
-      return -1;
-   char **wire_values = malloc((size_t)max * 6u * sizeof *wire_values);
-   size_t *wire_caps = malloc((size_t)max * 6u * sizeof *wire_caps);
-   if (!wire_values || !wire_caps)
-   {
-      free(wire_values);
-      free(wire_caps);
-      free(wire_held);
-      return -1;
-   }
-   memset(wire_held, 0, (size_t)max * sizeof *wire_held);
-   for (int wire_row = 0; wire_row < max; ++wire_row)
-   {
-      wire_values[wire_row * 6u + 0u] = wire_held[wire_row].session_id;
-      wire_caps[wire_row * 6u + 0u] = sizeof wire_held[wire_row].session_id;
-      wire_values[wire_row * 6u + 1u] = wire_held[wire_row].agent_name;
-      wire_caps[wire_row * 6u + 1u] = sizeof wire_held[wire_row].agent_name;
-      wire_values[wire_row * 6u + 2u] = wire_held[wire_row].provider;
-      wire_caps[wire_row * 6u + 2u] = sizeof wire_held[wire_row].provider;
-      wire_values[wire_row * 6u + 3u] = wire_held[wire_row].created_at;
-      wire_caps[wire_row * 6u + 3u] = sizeof wire_held[wire_row].created_at;
-      wire_values[wire_row * 6u + 4u] = wire_held[wire_row].updated_at;
-      wire_caps[wire_row * 6u + 4u] = sizeof wire_held[wire_row].updated_at;
-      wire_held[wire_row].messages_json = malloc(1048576u);
-      if (!wire_held[wire_row].messages_json)
-      {
-         for (int wire_done = 0; wire_done < wire_row; ++wire_done)
-         {
-            free(wire_held[wire_done].messages_json);
-            wire_held[wire_done].messages_json = NULL;
-         }
-         free(wire_values);
-         free(wire_caps);
-         free(wire_held);
-         return -1;
-      }
-      wire_held[wire_row].messages_json[0] = '\0';
-      wire_values[wire_row * 6u + 5u] = wire_held[wire_row].messages_json;
-      wire_caps[wire_row * 6u + 5u] = 1048576u;
-   }
-   uint32_t wire_filled = 0;
-   int wire_status = call_stage(AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_SEARCH, fields, 2, wire_values, wire_caps,
-                           (uint32_t)(max * 6), &wire_filled);
-   free(wire_values);
-   free(wire_caps);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK || wire_filled % 6u != 0u)
-   {
-      for (int wire_done = 0; wire_done < max; ++wire_done)
-      {
-         free(wire_held[wire_done].messages_json);
-         wire_held[wire_done].messages_json = NULL;
-      }
-      free(wire_held);
-      return -1;
-   }
-   int wire_rows = (int)(wire_filled / 6u);
-   for (int wire_row = wire_rows; wire_row < max; ++wire_row)
-   {
-      free(wire_held[wire_row].messages_json);
-      wire_held[wire_row].messages_json = NULL;
-   }
-   for (int wire_row = 0; wire_row < wire_rows; ++wire_row)
-   {
-      char *wire_shrunk = realloc(wire_held[wire_row].messages_json, strlen(wire_held[wire_row].messages_json) + 1u);
-      if (wire_shrunk)
-         wire_held[wire_row].messages_json = wire_shrunk;
-   }
-   *out = wire_held;
-   return wire_rows;
+   char bound[32];
+   snprintf(bound, sizeof bound, "%d", max);
+   const char *fields[] = {query ? query : "", bound};
+   return primary_rows_read(AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_SEARCH, fields, 2, out, max);
 }
 
 int db1_primary_session_get_latest(const char *session_id, db1_primary_session_row_t *out)
 {
    if (!session_id || !session_id[0] || !out)
       return -1;
-   const char *fields[] = {session_id};
    memset(out, 0, sizeof *out);
-   out->messages_json = malloc(1048576u);
-   if (!out->messages_json)
-   {
-      free(out->messages_json);
-      memset(out, 0, sizeof *out);
-      return -1;
-   }
-   out->messages_json[0] = '\0';
-   char *const values[] = {out->session_id, out->agent_name, out->provider, out->created_at, out->updated_at, out->messages_json};
-   const size_t caps[] = {sizeof out->session_id, sizeof out->agent_name, sizeof out->provider, sizeof out->created_at, sizeof out->updated_at, 1048576u};
-   int wire_status = call_stage(AIMEE_DB1_OP_PRIMARY_SESSION_GET_LATEST, fields, 1, values, caps, 6, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-   {
-      free(out->messages_json);
-      memset(out, 0, sizeof *out);
-      return -1;
-   }
-   char *shrunk_messages_json = realloc(out->messages_json, strlen(out->messages_json) + 1u);
-   if (shrunk_messages_json)
-      out->messages_json = shrunk_messages_json;
-   return 0;
+   const char *fields[] = {session_id};
+   char **cells = NULL;
+   uint32_t count = 0;
+   int status = primary_read(AIMEE_DB1_OP_PRIMARY_SESSION_GET_LATEST, fields, 1, &cells, &count);
+   int rc = status == AIMEE_DB1_STATUS_MISSING ? 1 : -1;
+   if (status == AIMEE_DB1_STATUS_OK && count == 6)
+      rc = primary_row_take(out, cells);
+   primary_cells_free(cells, count);
+   return rc;
 }
 
 int db1_session_write_path_record(const char *session_id, const char *path)
@@ -905,23 +922,45 @@ int db1_session_ir_append(const char *session_id, const char *event_id, const ch
        call_stage(AIMEE_DB1_OP_SESSION_IR_APPEND, fields, 5, values, caps, 1, NULL));
 }
 
-char *db1_session_ir_page(const char *session_id, const char *after, int limit)
+char *db1_session_ir_page(const char *session_id, const char *after, int limit,
+                          const char *principal)
 {
    if (!session_id || !after || limit < 1 || limit > 128)
       return NULL;
    char bound[32];
    snprintf(bound, sizeof(bound), "%d", limit);
-   const char *fields[] = {session_id, after, bound};
+   const char *fields[] = {session_id, after, bound, principal};
    char *json = malloc(4u * 1024u * 1024u);
    if (!json)
       return NULL;
    char *const values[] = {json};
    const size_t caps[] = {4u * 1024u * 1024u};
-   if (call_stage(AIMEE_DB1_OP_SESSION_IR_PAGE, fields, 3, values, caps, 1, NULL) !=
+   if (call_stage(AIMEE_DB1_OP_SESSION_IR_PAGE, fields, 4, values, caps, 1, NULL) !=
        AIMEE_DB1_STATUS_OK)
    {
       free(json);
       return NULL;
    }
    return json;
+}
+
+int db1_session_harness_get(const char *session_id, const char *harness, char *out_native_id,
+                            size_t capacity, const char *principal)
+{
+   if (!session_id || !harness || !out_native_id || !capacity)
+      return -1;
+   const char *fields[] = {session_id, harness, principal};
+   char *values[] = {out_native_id};
+   const size_t caps[] = {capacity};
+   int status = call_stage(AIMEE_DB1_OP_SESSION_HARNESS_GET, fields, 3, values, caps, 1, NULL);
+   return status == AIMEE_DB1_STATUS_OK ? 0 : status == AIMEE_DB1_STATUS_MISSING ? 1 : -1;
+}
+int db1_session_harness_bind(const char *session_id, const char *harness, const char *native_id,
+                             const char *principal)
+{
+   if (!session_id || !harness || !native_id)
+      return -1;
+   const char *fields[] = {session_id, harness, native_id, principal};
+   return write_result(
+       call_stage(AIMEE_DB1_OP_SESSION_HARNESS_BIND, fields, 4, NULL, NULL, 0, NULL));
 }

@@ -4,10 +4,10 @@
  */
 #include "aimee.h"
 #include "session_compact.h"
-#include "headers/compact_prune.h"
-#include "agent_protocol.h"
+#include "util.h"
 #include "economizer.h" /* event-bus client for the Go-owned record path */
 #include "cJSON.h"
+#include <aimee/ir/session_event.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -38,97 +38,77 @@ static int chars_to_tokens(size_t chars)
    return (int)((chars + 3) / 4);
 }
 
-/* Extract the text content from a single message item.
- * Handles plain string content and array content: Anthropic/OpenAI "text" parts and
- * Responses "input_text"/"output_text" parts. Returns a borrowed pointer or NULL. */
-static const char *msg_text(const cJSON *msg)
+/* The JSON wrapper is a persistence boundary. Every consumer below reads the
+ * owned canonical messages, never native message/content/tool-call shapes. */
+typedef struct
 {
-   if (!msg)
-      return NULL;
-   cJSON *content = cJSON_GetObjectItem(msg, "content");
-   if (!content)
-      return NULL;
-   if (cJSON_IsString(content))
-      return content->valuestring;
-   /* For array content, try to extract first text block */
-   if (cJSON_IsArray(content))
-   {
-      cJSON *block;
-      cJSON_ArrayForEach(block, content)
-      {
-         const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
-         if (type && (strcmp(type, "text") == 0 || strcmp(type, "input_text") == 0 ||
-                      strcmp(type, "output_text") == 0))
-         {
-            const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(block, "text"));
-            if (text)
-               return text;
-         }
-      }
-   }
-   return NULL;
+   aimee_message_t *messages;
+   int count;
+} compact_history_t;
+
+static void history_free(compact_history_t *history)
+{
+   for (int i = 0; i < history->count; i++)
+      aimee_message_free(&history->messages[i]);
+   free(history->messages);
+   memset(history, 0, sizeof *history);
 }
 
-/* Return 1 if a message contains a tool call (assistant tool-use step). */
-static int msg_is_tool_call(const cJSON *msg)
+static int history_load(const cJSON *messages, compact_history_t *history)
 {
-   if (!msg)
-      return 0;
-   /* Responses: a top-level function_call item (no role) */
-   const char *item_type = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "type"));
-   if (item_type && strcmp(item_type, "function_call") == 0)
-      return 1;
-   /* OpenAI: tool_calls array present */
-   cJSON *tc = cJSON_GetObjectItem(msg, "tool_calls");
-   if (tc && cJSON_IsArray(tc) && cJSON_GetArraySize(tc) > 0)
-      return 1;
-   /* Anthropic: content array with a tool_use block */
-   cJSON *content = cJSON_GetObjectItem(msg, "content");
-   if (content && cJSON_IsArray(content))
+   memset(history, 0, sizeof *history);
+   if (!cJSON_IsArray(messages))
+      return -1;
+   int count = cJSON_GetArraySize(messages);
+   if (count > AIMEE_IR_MAX_BLOCKS)
+      return -1;
+   history->messages = count ? calloc((size_t)count, sizeof *history->messages) : NULL;
+   if (count && !history->messages)
+      return -1;
+   for (int i = 0; i < count; i++)
    {
-      cJSON *block;
-      cJSON_ArrayForEach(block, content)
+      const cJSON *source = cJSON_GetArrayItem(messages, i);
+      const cJSON *field;
+      cJSON_ArrayForEach(field, source)
       {
-         const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
-         if (type && strcmp(type, "tool_use") == 0)
-            return 1;
+         if (!field->string || (strcmp(field->string, "role") && strcmp(field->string, "blocks") &&
+                                strcmp(field->string, "content_scalar") &&
+                                strcmp(field->string, "_compaction_boundary")))
+            goto fail;
       }
+      if (aimee_ir_message_parse(source, &history->messages[i]))
+         goto fail;
+      history->count++;
    }
+   aimee_request_t request = {.messages = history->messages, .n_messages = count};
+   if (aimee_ir_request_admit(&request))
+      goto fail;
+   return 0;
+fail:
+   history_free(history);
+   return -1;
+}
+
+static int msg_tool_count(const aimee_message_t *message)
+{
+   int count = 0;
+   for (int i = 0; i < message->n_blocks; i++)
+      count += message->blocks[i].type == AIMEE_BLK_TOOL_USE;
+   return count;
+}
+
+static int msg_is_tool_result(const aimee_message_t *message)
+{
+   for (int i = 0; i < message->n_blocks; i++)
+      if (message->blocks[i].type == AIMEE_BLK_TOOL_RESULT)
+         return 1;
    return 0;
 }
 
-/* Return 1 if a message is a tool result (user-role tool result step). */
-static int msg_is_tool_result(const cJSON *msg)
+static char *msg_text(const aimee_message_t *message)
 {
-   if (!msg)
-      return 0;
-   /* Responses: a top-level function_call_output item. Other role-less Responses
-    * items (function_call, reasoning) are not results; treating every role-less item
-    * as one counted the assistant's own calls as tool output. */
-   const char *item_type = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "type"));
-   if (item_type && strcmp(item_type, "function_call_output") == 0)
-      return 1;
-   const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-   if (!role)
-      return 0;
-   if (strcmp(role, "tool") == 0)
-      return 1; /* OpenAI role=tool */
-   /* Anthropic: role=user with content array containing tool_result blocks */
-   if (strcmp(role, "user") == 0)
-   {
-      cJSON *content = cJSON_GetObjectItem(msg, "content");
-      if (content && cJSON_IsArray(content))
-      {
-         cJSON *block;
-         cJSON_ArrayForEach(block, content)
-         {
-            const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
-            if (type && strcmp(type, "tool_result") == 0)
-               return 1;
-         }
-      }
-   }
-   return 0;
+   aimee_response_t view = {.content = message->blocks, .n_content = message->n_blocks};
+   return aimee_ir_response_text_alloc(&view);
 }
 
 /* ------------------------------------------------------------------ token estimation */
@@ -185,6 +165,9 @@ static void append_truncated(char *buf, size_t *pos, size_t cap, const char *tex
       emit = remaining;
    memcpy(buf + *pos, text, emit);
    *pos += emit;
+   buf[*pos] = '\0';
+   text_trim_partial_utf8(buf);
+   *pos = strlen(buf);
    if (tlen > max_chars && *pos + 4 < cap)
    {
       memcpy(buf + *pos, "...", 3);
@@ -204,7 +187,11 @@ static void append_format(char *buf, size_t *pos, size_t cap, const char *fmt, .
    va_end(ap);
 
    if (n > 0)
+   {
       *pos += (size_t)n < cap - *pos ? (size_t)n : cap - *pos - 1;
+      text_trim_partial_utf8(buf);
+      *pos = strlen(buf);
+   }
 }
 
 static int token_looks_like_path(const char *tok)
@@ -240,47 +227,89 @@ static int array_contains_string(cJSON *arr, const char *value)
    return 0;
 }
 
-static void flashback_add_unique(cJSON *arr, const char *value, size_t max_len)
+static int flashback_add_unique(cJSON *arr, const char *value, size_t max_len)
 {
    if (!arr || !value || !value[0] || array_contains_string(arr, value))
-      return;
+      return 0;
    char trimmed[256];
    snprintf(trimmed, sizeof(trimmed), "%.*s", (int)max_len, value);
-   cJSON_AddItemToArray(arr, cJSON_CreateString(trimmed));
+   text_trim_partial_utf8(trimmed);
+   cJSON *item = cJSON_CreateString(trimmed);
+   if (!item || !cJSON_AddItemToArray(arr, item))
+   {
+      cJSON_Delete(item);
+      return -1;
+   }
+   return 0;
 }
 
-static void flashback_extract_from_text(cJSON *files, cJSON *errors, cJSON *decisions,
-                                        const char *text)
+static int flashback_extract_from_text(cJSON *files, cJSON *errors, cJSON *decisions,
+                                       const char *text)
 {
    if (!text || !text[0])
-      return;
+      return 0;
 
    char lower[1024];
    snprintf(lower, sizeof(lower), "%s", text);
+   text_trim_partial_utf8(lower);
    for (size_t i = 0; lower[i]; i++)
-      lower[i] = (char)tolower((unsigned char)lower[i]);
+      if (lower[i] >= 'A' && lower[i] <= 'Z')
+         lower[i] = (char)(lower[i] + ('a' - 'A'));
 
    if (strstr(lower, "error") || strstr(lower, "failed") || strstr(lower, "failure") ||
        strstr(lower, "exception") || strstr(lower, "traceback") || strstr(lower, "denied"))
-      flashback_add_unique(errors, text, 180);
+      if (flashback_add_unique(errors, text, 180))
+         return -1;
 
    if (strstr(lower, "decided") || strstr(lower, "decision") || strstr(lower, "choose") ||
        strstr(lower, "chosen") || strstr(lower, "agreed") || strstr(lower, "will use") ||
        strstr(lower, "use ") || strstr(lower, "using "))
-      flashback_add_unique(decisions, text, 180);
+      if (flashback_add_unique(decisions, text, 180))
+         return -1;
 
    char copy[1024];
    snprintf(copy, sizeof(copy), "%s", text);
+   text_trim_partial_utf8(copy);
    const char *delims = " \t\r\n,;:()[]{}<>\"'";
    char *save = NULL;
    for (char *tok = strtok_r(copy, delims, &save); tok; tok = strtok_r(NULL, delims, &save))
    {
       if (token_looks_like_path(tok))
-         flashback_add_unique(files, tok, 160);
+         if (flashback_add_unique(files, tok, 160))
+            return -1;
    }
+   return 0;
 }
 
-static cJSON *flashback_build(const cJSON *messages, int start_idx, int end_idx)
+/* Tool results remain opaque evidence. Scan their literal JSON value rather
+ * than interpreting a provider-native content schema inside tool output. */
+static int flashback_extract_message(cJSON *files, cJSON *errors, cJSON *decisions,
+                                     const aimee_message_t *message)
+{
+   for (int i = 0; i < message->n_blocks; i++)
+   {
+      const aimee_block_t *block = &message->blocks[i];
+      if (block->type == AIMEE_BLK_TEXT)
+      {
+         if (flashback_extract_from_text(files, errors, decisions, block->text))
+            return -1;
+      }
+      else if (block->type == AIMEE_BLK_TOOL_RESULT && block->tool_result)
+      {
+         const char *text = cJSON_GetStringValue(block->tool_result);
+         char *json = text ? NULL : cJSON_PrintUnformatted(block->tool_result);
+         if (!text && !json)
+            return -1;
+         int rc = flashback_extract_from_text(files, errors, decisions, text ? text : json);
+         free(json);
+         if (rc)
+            return -1;
+      }
+   }
+   return 0;
+}
+
+static cJSON *flashback_build(const compact_history_t *history, int start_idx, int end_idx)
 {
    cJSON *root = NULL;
    cJSON *files = NULL;
@@ -294,18 +323,22 @@ static cJSON *flashback_build(const cJSON *messages, int start_idx, int end_idx)
    if (!root || !files || !errors || !decisions)
       goto done;
 
-   cJSON_AddItemToObject(root, "files_modified", files);
-   cJSON_AddItemToObject(root, "errors_encountered", errors);
-   cJSON_AddItemToObject(root, "decisions_made", decisions);
-   files = errors = decisions = NULL;
+   if (!cJSON_AddItemToObject(root, "files_modified", files))
+      goto done;
+   files = NULL;
+   if (!cJSON_AddItemToObject(root, "errors_encountered", errors))
+      goto done;
+   errors = NULL;
+   if (!cJSON_AddItemToObject(root, "decisions_made", decisions))
+      goto done;
+   decisions = NULL;
 
    for (int i = start_idx; i < end_idx; i++)
-   {
-      cJSON *msg = cJSON_GetArrayItem((cJSON *)messages, i);
-      flashback_extract_from_text(cJSON_GetObjectItem(root, "files_modified"),
-                                  cJSON_GetObjectItem(root, "errors_encountered"),
-                                  cJSON_GetObjectItem(root, "decisions_made"), msg_text(msg));
-   }
+      if (flashback_extract_message(cJSON_GetObjectItem(root, "files_modified"),
+                                    cJSON_GetObjectItem(root, "errors_encountered"),
+                                    cJSON_GetObjectItem(root, "decisions_made"),
+                                    &history->messages[i]))
+         goto done;
 
    return root;
 
@@ -339,23 +372,26 @@ static void append_array_items(char *buf, size_t *pos, size_t cap, cJSON *arr,
    append_format(buf, pos, cap, "\n");
 }
 
-static void append_flashback_json(char *buf, size_t *pos, size_t cap, cJSON *root)
+static int append_flashback_json(char *buf, size_t *pos, size_t cap, cJSON *root)
 {
    char *json = root ? cJSON_PrintUnformatted(root) : NULL;
-   if (json && json[0])
+   if (!json)
+      return -1;
+   if (json[0])
       append_format(buf, pos, cap, "Flashback JSON: %s\n\n", json);
    free(json);
+   return 0;
 }
 
 /* Build a structured text summary of messages[start_idx .. end_idx-1].
  * Writes the result into buf (length SESSION_COMPACT_SUMMARY_MAX). */
-static void build_summary(const cJSON *messages, int start_idx, int end_idx, char *buf,
-                          size_t buf_len, int from_record)
+static int build_summary(const cJSON *messages, const compact_history_t *history, int start_idx,
+                         int end_idx, char *buf, size_t buf_len, int from_record)
 {
    if (!buf || buf_len == 0)
-      return;
+      return -1;
 
-   int n = cJSON_GetArraySize(messages);
+   int n = history->count;
    if (start_idx < 0)
       start_idx = 0;
    if (end_idx > n)
@@ -366,52 +402,67 @@ static void build_summary(const cJSON *messages, int start_idx, int end_idx, cha
    size_t pos = 0;
 
    int n_summarised = end_idx - start_idx;
-   const char *first_user_text = NULL;
-   const char *last_user_text = NULL;
-   const char *last_assistant_text = NULL;
+   char *first_user_text = NULL;
+   char *last_user_text = NULL;
+   char *last_assistant_text = NULL;
    int tool_call_count = 0;
    int assistant_count = 0;
+   char *closet_block = NULL;
+   int closet_evict = ECON_MODULE_CLOSET_EVICT_NONE;
+   cJSON *flashback = NULL;
 
    for (int i = start_idx; i < end_idx; i++)
    {
-      cJSON *msg = cJSON_GetArrayItem(messages, i);
-      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-      if (role && strcmp(role, "user") == 0 && !msg_is_tool_result(msg))
+      const aimee_message_t *msg = &history->messages[i];
+      const char *role = msg->role;
+      if (!strcmp(role, "user") && !msg_is_tool_result(msg))
       {
-         const char *text = msg_text(msg);
-         if (text && text[0])
+         char *text = msg_text(msg);
+         if (!text)
+            goto fail;
+         if (text[0])
          {
             if (!first_user_text)
-               first_user_text = text;
+            {
+               first_user_text = strdup(text);
+               if (!first_user_text)
+               {
+                  free(text);
+                  goto fail;
+               }
+            }
+            free(last_user_text);
             last_user_text = text;
          }
+         else
+            free(text);
       }
-      if (msg_is_tool_call(msg))
+      tool_call_count += msg_tool_count(msg);
+      if (!strcmp(role, "assistant"))
       {
-         tool_call_count++;
-         continue;
-      }
-      if (role && strcmp(role, "assistant") == 0)
-      {
-         const char *text = msg_text(msg);
-         if (text && text[0])
+         char *text = msg_text(msg);
+         if (!text)
+            goto fail;
+         if (text[0])
          {
             assistant_count++;
+            free(last_assistant_text);
             last_assistant_text = text;
          }
+         else
+            free(text);
       }
    }
 
    /* The record path falls back to the prose scan if it cannot allocate, so a
     * summary is never emptied by an allocation failure. */
-   char *closet_block = NULL;
-   int closet_evict = ECON_MODULE_CLOSET_EVICT_NONE;
-   cJSON *flashback = NULL;
    if (from_record)
       flashback =
           econ_module_record_build(messages, start_idx, end_idx, &closet_block, &closet_evict);
    if (!flashback)
-      flashback = flashback_build(messages, start_idx, end_idx);
+      flashback = flashback_build(history, start_idx, end_idx);
+   if (!flashback)
+      goto fail;
    cJSON *files = flashback ? cJSON_GetObjectItem(flashback, "files_modified") : NULL;
    cJSON *errors = flashback ? cJSON_GetObjectItem(flashback, "errors_encountered") : NULL;
    cJSON *decisions = flashback ? cJSON_GetObjectItem(flashback, "decisions_made") : NULL;
@@ -497,15 +548,27 @@ static void build_summary(const cJSON *messages, int start_idx, int end_idx, cha
       append_format(tmp, &pos, sizeof(tmp),
                     "- NOTE: some identifiers could not be conserved within the budget; "
                     "re-read the source before relying on any identifier not listed above.\n\n");
+   if (append_flashback_json(tmp, &pos, sizeof(tmp), flashback))
+      goto fail;
    free(closet_block);
-
-   append_flashback_json(tmp, &pos, sizeof(tmp), flashback);
    cJSON_Delete(flashback);
+   free(first_user_text);
+   free(last_user_text);
+   free(last_assistant_text);
 
    /* Copy to caller's buffer */
    size_t copy_len = pos < buf_len - 1 ? pos : buf_len - 1;
    memcpy(buf, tmp, copy_len);
    buf[copy_len] = '\0';
+   text_trim_partial_utf8(buf);
+   return 0;
+fail:
+   free(closet_block);
+   cJSON_Delete(flashback);
+   free(first_user_text);
+   free(last_user_text);
+   free(last_assistant_text);
+   return -1;
 }
 
 /* --------------------------------------------- pre-boundary signature capture */
@@ -578,291 +641,219 @@ static void add_readonly_sig(session_compact_result_t *out, const char *name, co
    out->readonly_sig_count++;
 }
 
-/* Walk messages[start, end) — the range about to be discarded — and record the
- * read-only tool calls found there. Handles both wire shapes:
- *   OpenAI:    {role:"assistant", tool_calls:[{function:{name, arguments}}]}
- *   Anthropic: {role:"assistant", content:[{type:"tool_use", name, input}]} */
-static void capture_readonly_sigs(cJSON *messages, int start, int end,
-                                  session_compact_result_t *out)
+/* Capture every owned call before discarding evidence; exact JSON numbers and
+ * full identities remain in the canonical source, independent of the metric. */
+static int capture_readonly_sigs(const compact_history_t *history, int start, int end,
+                                 session_compact_result_t *out)
 {
    for (int i = start; i < end; i++)
-   {
-      cJSON *msg = cJSON_GetArrayItem(messages, i);
-      if (!msg || !cJSON_IsObject(msg))
-         continue;
-
-      /* OpenAI chat shape */
-      cJSON *tool_calls = cJSON_GetObjectItem(msg, "tool_calls");
-      if (cJSON_IsArray(tool_calls))
+      for (int j = 0; j < history->messages[i].n_blocks; j++)
       {
-         cJSON *call = NULL;
-         cJSON_ArrayForEach(call, tool_calls)
-         {
-            cJSON *fn = cJSON_GetObjectItem(call, "function");
-            if (!fn)
-               continue;
-            const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(fn, "name"));
-            const char *args = cJSON_GetStringValue(cJSON_GetObjectItem(fn, "arguments"));
-            add_readonly_sig(out, name, args ? args : "");
-         }
+         const aimee_block_t *block = &history->messages[i].blocks[j];
+         if (block->type != AIMEE_BLK_TOOL_USE)
+            continue;
+         char *args = block->tool_input ? cJSON_PrintUnformatted(block->tool_input) : NULL;
+         if (block->tool_input && !args)
+            return -1;
+         add_readonly_sig(out, block->tool_name, args ? args : "");
+         free(args);
       }
-
-      /* Anthropic content-block shape */
-      cJSON *content = cJSON_GetObjectItem(msg, "content");
-      if (cJSON_IsArray(content))
-      {
-         cJSON *block = NULL;
-         cJSON_ArrayForEach(block, content)
-         {
-            const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
-            if (!type || strcmp(type, "tool_use") != 0)
-               continue;
-            const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(block, "name"));
-            cJSON *input = cJSON_GetObjectItem(block, "input");
-            char *args = input ? cJSON_PrintUnformatted(input) : NULL;
-            add_readonly_sig(out, name, args ? args : "");
-            if (args)
-               free(args);
-         }
-      }
-   }
-}
-
-/* ------------------------------------------------------------------ tool pairing */
-
-/* Record the tool-call ids a message issues into `calls` and the ids it answers into
- * `results`, for the three wire shapes history is kept in: OpenAI (tool_calls[].id /
- * role=tool tool_call_id), Anthropic (tool_use.id / tool_result.tool_use_id) and
- * Responses (function_call.call_id / function_call_output.call_id). */
-static void msg_tool_ids(const cJSON *msg, cJSON *calls, cJSON *results)
-{
-   const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "type"));
-   const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-   if (type && strcmp(type, "function_call") == 0)
-   {
-      const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "call_id"));
-      if (id && !cJSON_HasObjectItem(calls, id))
-         cJSON_AddBoolToObject(calls, id, 1);
-      return;
-   }
-   if (type && strcmp(type, "function_call_output") == 0)
-   {
-      const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "call_id"));
-      if (id && !cJSON_HasObjectItem(results, id))
-         cJSON_AddBoolToObject(results, id, 1);
-      return;
-   }
-   if (!role)
-      return;
-   if (strcmp(role, "tool") == 0)
-   {
-      const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "tool_call_id"));
-      if (id && !cJSON_HasObjectItem(results, id))
-         cJSON_AddBoolToObject(results, id, 1);
-      return;
-   }
-   const cJSON *tcs = cJSON_GetObjectItem(msg, "tool_calls");
-   const cJSON *tc = NULL;
-   if (cJSON_IsArray(tcs))
-      cJSON_ArrayForEach(tc, tcs)
-      {
-         const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(tc, "id"));
-         if (id && !cJSON_HasObjectItem(calls, id))
-            cJSON_AddBoolToObject(calls, id, 1);
-      }
-   const cJSON *content = cJSON_GetObjectItem(msg, "content");
-   const cJSON *block = NULL;
-   if (cJSON_IsArray(content))
-      cJSON_ArrayForEach(block, content)
-      {
-         const char *bt = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
-         const char *id = NULL;
-         cJSON *into = NULL;
-         if (bt && strcmp(bt, "tool_use") == 0)
-         {
-            id = cJSON_GetStringValue(cJSON_GetObjectItem(block, "id"));
-            into = calls;
-         }
-         else if (bt && strcmp(bt, "tool_result") == 0)
-         {
-            id = cJSON_GetStringValue(cJSON_GetObjectItem(block, "tool_use_id"));
-            into = results;
-         }
-         if (id && into && !cJSON_HasObjectItem(into, id))
-            cJSON_AddBoolToObject(into, id, 1);
-      }
-}
-
-/* Whether messages[from..] answers a tool call it does not itself contain. */
-static int tail_has_orphan_result(const cJSON *messages, int from)
-{
-   cJSON *calls = cJSON_CreateObject();
-   cJSON *results = cJSON_CreateObject();
-   if (!calls || !results)
-   {
-      cJSON_Delete(calls);
-      cJSON_Delete(results);
-      return 1; /* cannot prove the cut safe: treat it as unsafe */
-   }
-   int n = cJSON_GetArraySize(messages);
-   for (int i = from; i < n; i++)
-      msg_tool_ids(cJSON_GetArrayItem(messages, i), calls, results);
-   int orphan = 0;
-   const cJSON *r = NULL;
-   cJSON_ArrayForEach(r, results)
-   {
-      if (!cJSON_HasObjectItem(calls, r->string))
-      {
-         orphan = 1;
-         break;
-      }
-   }
-   cJSON_Delete(calls);
-   cJSON_Delete(results);
-   return orphan;
-}
-
-/* Move the compaction cut earlier until the kept tail holds every call its tool
- * results answer. The cut is a message count, so it used to land between a call and
- * its result; the call was summarised away and the result sent alone, which every
- * provider rejects (a tool result must follow its call). Returns the aligned cut,
- * never below `lo`. */
-static int align_cut_to_tool_pairs(const cJSON *messages, int lo, int cut)
-{
-   while (cut > lo && tail_has_orphan_result(messages, cut))
-      cut--;
-   return cut;
+   return 0;
 }
 
 /* ------------------------------------------------------------------ public API */
 
+/* Move a canonical compaction cut back to the oldest call answered in the
+ * retained suffix. Opaque IDs are compared in full; no fixed-size registry. */
+static int canonical_pair_cut(const compact_history_t *history, int cut)
+{
+   int adjusted;
+   do
+   {
+      adjusted = cut;
+      for (int i = cut; i < history->count; i++)
+         for (int k = 0; k < history->messages[i].n_blocks; k++)
+         {
+            const aimee_block_t *result = &history->messages[i].blocks[k];
+            if (result->type != AIMEE_BLK_TOOL_RESULT || !result->tool_id)
+               continue;
+            int found = -1;
+            for (int j = i; j >= 0 && found < 0; j--)
+               for (int l = 0; l < history->messages[j].n_blocks; l++)
+               {
+                  const aimee_block_t *call = &history->messages[j].blocks[l];
+                  if (call->type == AIMEE_BLK_TOOL_USE && call->tool_id &&
+                      !strcmp(call->tool_id, result->tool_id))
+                  {
+                     found = j;
+                     break;
+                  }
+               }
+            if (found >= 0 && found < adjusted)
+               adjusted = found;
+         }
+      if (adjusted == cut)
+         return cut;
+      cut = adjusted;
+   } while (cut > 0);
+   return cut;
+}
+
+static int canonical_protected(const aimee_message_t *message)
+{
+   if (!strcmp(message->role, "system") || !strcmp(message->role, "developer"))
+      return 1;
+   if (strcmp(message->role, "user"))
+      return 0;
+   for (int i = 0; i < message->n_blocks; i++)
+      if (message->blocks[i].type != AIMEE_BLK_TOOL_RESULT)
+         return 1;
+   return 0;
+}
+
+static int append_canonical_summary(cJSON *rebuilt, const cJSON *messages,
+                                    const compact_history_t *history, int start, int end,
+                                    const session_compact_config_t *cfg)
+{
+   if (start == end)
+      return 0;
+   char text[SESSION_COMPACT_SUMMARY_MAX];
+   if (build_summary(messages, history, start, end, text, sizeof text, cfg ? cfg->from_record : 0))
+      return -1;
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = text};
+   aimee_ir_block_set_context(&block, AIMEE_CTX_ORIGIN_RETRIEVAL, AIMEE_CTX_AUTH_EVIDENCE,
+                              AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                              0);
+   aimee_message_t message = {.role = "assistant", .blocks = &block, .n_blocks = 1};
+   cJSON *item = aimee_ir_message_json(&message);
+   if (!item || !cJSON_AddBoolToObject(item, "_compaction_boundary", 1) ||
+       !cJSON_AddItemToArray(rebuilt, item))
+   {
+      cJSON_Delete(item);
+      return -1;
+   }
+   return 0;
+}
+
+/* Canonical compaction retains user/policy messages exactly and folds the
+ * evidence between them. Build the complete replacement before changing history. */
+static int compact_canonical(cJSON *messages, const compact_history_t *history, int start, int end,
+                             const session_compact_config_t *cfg, session_compact_result_t *out)
+{
+   int n = cJSON_GetArraySize(messages);
+   out->messages_after = n;
+   for (int i = start; i < end; i++)
+   {
+      const aimee_message_t *message = &history->messages[i];
+      if (canonical_protected(message) && msg_is_tool_result(message))
+         return 0; /* A mixed protected result keeps its preceding cycle intact. */
+   }
+   cJSON *rebuilt = cJSON_CreateArray();
+   if (!rebuilt)
+      return -1;
+   int segment = start;
+   for (int i = 0; i < n; i++)
+   {
+      const cJSON *message = cJSON_GetArrayItem(messages, i);
+      int keep = i < start || i >= end || canonical_protected(&history->messages[i]);
+      if (i >= start && (keep || i == end))
+      {
+         if (append_canonical_summary(rebuilt, messages, history, segment, i < end ? i : end, cfg))
+            goto fail;
+         segment = i + 1;
+      }
+      if (keep)
+      {
+         cJSON *copy = cJSON_Duplicate(message, 1);
+         if (!copy || !cJSON_AddItemToArray(rebuilt, copy))
+         {
+            cJSON_Delete(copy);
+            goto fail;
+         }
+      }
+      if (i >= end)
+         segment = end;
+   }
+   int after = cJSON_GetArraySize(rebuilt);
+   if (after >= n)
+   {
+      char *before_json = cJSON_PrintUnformatted(messages);
+      char *after_json = cJSON_PrintUnformatted(rebuilt);
+      int smaller =
+          after == n && before_json && after_json && strlen(after_json) < strlen(before_json);
+      free(before_json);
+      free(after_json);
+      if (!smaller)
+      {
+         cJSON_Delete(rebuilt);
+         return 0;
+      }
+   }
+   if (capture_readonly_sigs(history, start, end, out) ||
+       build_summary(messages, history, start, end, out->summary, sizeof out->summary,
+                     cfg ? cfg->from_record : 0))
+      goto fail;
+   while (messages->child)
+      cJSON_Delete(cJSON_DetachItemViaPointer(messages, messages->child));
+   while (rebuilt->child)
+      cJSON_AddItemToArray(messages, cJSON_DetachItemViaPointer(rebuilt, rebuilt->child));
+   cJSON_Delete(rebuilt);
+   out->messages_after = after;
+   out->messages_removed = n - after;
+   out->compacted = 1;
+   return 0;
+fail:
+   cJSON_Delete(rebuilt);
+   return -1;
+}
+
 int session_compact(cJSON *messages, const session_compact_config_t *cfg,
                     session_compact_result_t *out)
 {
-   session_compact_result_t local_out;
-   memset(&local_out, 0, sizeof(local_out));
-
-   if (!messages || !cJSON_IsArray(messages))
-   {
-      if (out)
-         *out = local_out;
-      return -1;
-   }
-
-   int n = cJSON_GetArraySize(messages);
-   local_out.messages_before = n;
-
+   session_compact_result_t result = {0};
+   compact_history_t history = {0};
+   cJSON *working = NULL;
+   int rc = -1;
+   if (history_load(messages, &history))
+      goto done;
+   int n = history.count;
+   result.messages_before = result.messages_after = n;
    int retain = resolve_retain_tail(cfg);
-
-   /* Need at least: 1 kept-first + enough to summarise + retain_tail.
-    * If there's nothing meaningful to summarise, skip. */
-   int min_to_compact = 1 + 1 + retain; /* first + at least 1 summarised + tail */
-   if (n < min_to_compact)
+   if (n < 2 || retain >= n - 1)
    {
-      local_out.messages_after = n;
-      if (out)
-         *out = local_out;
-      return 0; /* nothing to do */
+      rc = 0;
+      goto done;
    }
-
-   /* Step 1: repair orphaned tool pairs */
-   local_out.repairs = message_history_repair(messages);
-
-   /* Refresh count after repair (repair may add synthetic results) */
-   n = cJSON_GetArraySize(messages);
-
-   /* Step 2: determine the range to summarise.
-    * Always keep: messages[0] (system/first-user) and the last `retain` messages.
-    * Summarise: messages[1 .. n-retain-1]. */
-   int summary_start = 1;        /* first message after the anchor */
-   int summary_end = n - retain; /* exclusive: last `retain` messages are kept */
-   if (summary_end > summary_start)
-      summary_end = align_cut_to_tool_pairs(messages, summary_start, summary_end);
-
-   if (summary_end <= summary_start)
-   {
-      /* Not enough messages to summarise anything */
-      local_out.messages_after = n;
-      if (out)
-         *out = local_out;
-      return 0;
-   }
-
-   /* Step 2a: capture the read-only tool signatures about to be destroyed.
-    * Must run before Step 2b/Step 5 touch the range: this is the only moment
-    * the pre-boundary tool history exists. Pure — it only fills `local_out`. */
-   capture_readonly_sigs(messages, summary_start, summary_end, &local_out);
-
-   /* Step 2b: prune large tool-result blobs before summarisation.
-    * The pruned messages are about to be deleted (Step 5), so in-place
-    * replacement is safe and only affects what build_summary() sees. */
-   compact_prune_tool_results(messages, summary_start, summary_end, 0);
-
-   /* Step 3: build summary of messages[summary_start..summary_end) */
-   build_summary(messages, summary_start, summary_end, local_out.summary, sizeof(local_out.summary),
-                 cfg ? cfg->from_record : 0);
-
-   /* Step 4: insert a boundary marker message right after messages[0].
-    * We build the JSON object first, then splice it in. */
-   cJSON *boundary = cJSON_CreateObject();
-   if (!boundary)
-   {
-      local_out.messages_after = n;
-      if (out)
-         *out = local_out;
-      return -1;
-   }
-   cJSON_AddStringToObject(boundary, "role", "user");
-   cJSON_AddStringToObject(boundary, "content", local_out.summary);
-   /* Mark it so callers can identify it */
-   cJSON_AddBoolToObject(boundary, "_compaction_boundary", cJSON_True);
-
-   /* Step 5: remove messages[summary_start .. summary_end) from the array.
-    * We do this by detaching items by index.  After each detach the array
-    * shrinks by 1, so we always detach at the same index `summary_start`. */
-   int removed = 0;
-   for (int i = summary_start; i < summary_end; i++)
-   {
-      cJSON *item = cJSON_DetachItemFromArray(messages, summary_start);
-      if (item)
-      {
-         cJSON_Delete(item);
-         removed++;
-      }
-   }
-   local_out.messages_removed = removed;
-
-   /* Step 6: insert boundary after index 0 (now the array is shorter) */
-   /* cJSON has no insert-at; we rebuild by detaching from 1 onward,
-    * inserting boundary, then re-adding the tail items. */
-   int after_remove = cJSON_GetArraySize(messages);
-   /* Detach tail (everything after index 0) */
-   cJSON *tail_items[256];
-   int tail_count = 0;
-   while (cJSON_GetArraySize(messages) > 1 && tail_count < 256)
-   {
-      tail_items[tail_count++] = cJSON_DetachItemFromArray(messages, 1);
-   }
-   /* Add boundary */
-   cJSON_AddItemToArray(messages, boundary);
-   /* Re-add tail */
-   for (int i = 0; i < tail_count; i++)
-   {
-      if (tail_items[i])
-         cJSON_AddItemToArray(messages, tail_items[i]);
-   }
-
-   /* Step 7: merge consecutive same-role messages */
-   messages_compact_consecutive(messages);
-
-   local_out.compacted = 1;
-   local_out.messages_after = cJSON_GetArraySize(messages);
-
-   (void)after_remove; /* used in debug builds via assert; suppress warning */
-
+   /* Repairs and summaries are staged together. Any refusal leaves the source
+    * byte-for-byte unchanged, including opaque values and cache metadata. */
+   working = cJSON_Duplicate(messages, 1);
+   if (!working)
+      goto done;
+   result.repairs = aimee_ir_history_repair(working);
+   if (result.repairs < 0)
+      goto done;
+   history_free(&history);
+   if (history_load(working, &history))
+      goto done;
+   n = history.count;
+   int start = 1, end = canonical_pair_cut(&history, n - retain);
+   if (msg_tool_count(&history.messages[0]))
+      while (start < end && msg_is_tool_result(&history.messages[start]))
+         start++;
+   if (end > start && compact_canonical(working, &history, start, end, cfg, &result))
+      goto done;
+   result.messages_after = cJSON_GetArraySize(working);
+   while (messages->child)
+      cJSON_Delete(cJSON_DetachItemViaPointer(messages, messages->child));
+   while (working->child)
+      cJSON_AddItemToArray(messages, cJSON_DetachItemViaPointer(working, working->child));
+   rc = 0;
+done:
+   history_free(&history);
+   cJSON_Delete(working);
    if (out)
-      *out = local_out;
-   return 0;
+      *out = result;
+   return rc;
 }
 
 int session_compact_focused(const char *topic, char *out, size_t out_len)
@@ -870,27 +861,18 @@ int session_compact_focused(const char *topic, char *out, size_t out_len)
    if (!topic || !out || out_len == 0)
       return -1;
 
-   /* Build a minimal 2-message synthetic conversation so build_summary()
-    * populates ## Active Task from the user message (the focus topic).
-    * A short assistant acknowledgement follows so the summary range is valid. */
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)topic};
+   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+   compact_history_t history = {.messages = &message, .count = 1};
    cJSON *messages = cJSON_CreateArray();
-   if (!messages)
+   cJSON *item = aimee_ir_message_json(&message);
+   if (!messages || !item || !cJSON_AddItemToArray(messages, item))
+   {
+      cJSON_Delete(messages);
+      cJSON_Delete(item);
       return -1;
-
-   cJSON *user_msg = cJSON_CreateObject();
-   cJSON_AddStringToObject(user_msg, "role", "user");
-   cJSON_AddStringToObject(user_msg, "content", topic);
-   cJSON_AddItemToArray(messages, user_msg);
-
-   cJSON *asst_msg = cJSON_CreateObject();
-   cJSON_AddStringToObject(asst_msg, "role", "assistant");
-   cJSON_AddStringToObject(asst_msg, "content", "Acknowledged.");
-   cJSON_AddItemToArray(messages, asst_msg);
-
-   /* Legacy derivation: this builds a synthetic 2-message conversation purely to
-    * render an "Active Task" heading from a topic string. There is no recorded
-    * history behind it, so there is nothing for the record path to read. */
-   build_summary(messages, 0, 1, out, out_len, 0);
+   }
+   int rc = build_summary(messages, &history, 0, 1, out, out_len, 0);
    cJSON_Delete(messages);
-   return 0;
+   return rc;
 }

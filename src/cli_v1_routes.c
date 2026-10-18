@@ -978,12 +978,13 @@ cJSON *marshal_trajectory_batch(int argc, char **argv)
    if (!tasks || !tasks[0])
    {
       fprintf(stderr, "aimee: usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir "
-                      "[--toolset-dist research] [--out dir]\n");
+                      "[--session ID] [--toolset-dist research] [--out dir]\n");
       return NULL;
    }
 
    cJSON *req = marshal_no_args("trajectory.batch");
    cJSON_AddStringToObject(req, "tasks_path", tasks);
+   cJSON_AddStringToObject(req, "session_id", resolve_session_env(&opts));
    const char *dist = cli_args_get(&opts, "toolset-dist");
    if (dist && dist[0])
       cJSON_AddStringToObject(req, "toolset_dist", dist);

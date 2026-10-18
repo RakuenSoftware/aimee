@@ -10,6 +10,8 @@
 #include "agent.h"
 #include "agent_protocol.h"
 #include "cJSON.h"
+#include "support/ir_response_fixture.h"
+#include <aimee/ir/session_event.h>
 
 void test_responses_parser_keeps_all_output_text_parts(void)
 {
@@ -21,13 +23,12 @@ void test_responses_parser_keeps_all_output_text_parts(void)
        "event: response.completed\n"
        "data: {\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":22}}}\n\n";
 
-   parsed_response_t parsed;
-   agent_ir_parse_responses(body, -1, NULL, &parsed);
-   assert(parsed.content != NULL);
-   assert(strcmp(parsed.content, "I did not deploy this to `192.168.0.83`.") == 0);
-   assert(parsed.prompt_tokens == 11);
-   assert(parsed.completion_tokens == 22);
-   agent_free_parsed_response(&parsed);
+   aimee_response_t parsed;
+   agent_ir_decode_responses(body, -1, NULL, &parsed);
+   assert_ir_text(&parsed, "I did not deploy this to `192.168.0.83`.");
+   assert(parsed.usage_in == 11);
+   assert(parsed.usage_out == 22);
+   aimee_response_free(&parsed);
 }
 
 void test_responses_parser_accumulates_output_text_deltas(void)
@@ -41,15 +42,14 @@ void test_responses_parser_accumulates_output_text_deltas(void)
        "data: {\"response\":{\"output\":[],\"usage\":{\"input_tokens\":5,\"output_tokens\":6}}}"
        "\r\n\r\n";
 
-   parsed_response_t parsed;
-   agent_ir_parse_responses(body, -1, NULL, &parsed);
-   assert(parsed.content != NULL);
-   assert(strcmp(parsed.content,
-                 "The useful model fact here is that Qwen3.6 keeps scaling KV cache with context "
-                 "length.") == 0);
-   assert(parsed.prompt_tokens == 5);
-   assert(parsed.completion_tokens == 6);
-   agent_free_parsed_response(&parsed);
+   aimee_response_t parsed;
+   agent_ir_decode_responses(body, -1, NULL, &parsed);
+   assert_ir_text(&parsed,
+                  "The useful model fact here is that Qwen3.6 keeps scaling KV cache with context "
+                  "length.");
+   assert(parsed.usage_in == 5);
+   assert(parsed.usage_out == 6);
+   aimee_response_free(&parsed);
 }
 
 /* Walk a Responses object's output[] for the first non-empty message output_text.
@@ -199,10 +199,7 @@ void test_responses_object_keeps_existing_text(void)
    cJSON_Delete(resp);
 }
 
-/* agent_ir_parse_responses: the IR-backed parser for the responses/SSE (codex) wire.
- * A native function_call becomes a tool call, and assistant_message is the output-item
- * array (function_call items carry call_id) that the turn loop replays into the next
- * request's `input`. */
+/* Native function calls become owned canonical tool blocks for durable replay. */
 void test_ir_parse_responses_tool_call(void)
 {
    const char *body =
@@ -214,22 +211,24 @@ void test_ir_parse_responses_tool_call(void)
        "\"name\":\"bash\",\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\"}],"
        "\"usage\":{\"input_tokens\":3,\"output_tokens\":4}}}\r\n\r\n";
 
-   parsed_response_t p;
-   int rc = agent_ir_parse_responses(body, -1, NULL, &p);
+   aimee_response_t p;
+   int rc = agent_ir_decode_responses(body, -1, NULL, &p);
    assert(rc == 0);
-   assert(p.is_tool_call == 1);
-   assert(p.call_count == 1);
-   assert(strcmp(p.calls[0].name, "bash") == 0);
-   assert(strcmp(p.calls[0].id, "call_1") == 0);
-   /* assistant_message is the output array; the turn loop matches function_call items
-    * by call_id, so the id must be present and equal. */
-   assert(p.assistant_message != NULL && cJSON_IsArray(p.assistant_message));
-   cJSON *item = cJSON_GetArrayItem(p.assistant_message, 0);
-   cJSON *cid = cJSON_GetObjectItemCaseSensitive(item, "call_id");
-   assert(cid && cJSON_IsString(cid) && strcmp(cid->valuestring, "call_1") == 0);
-   /* a plain tool has no group */
-   assert(p.calls[0].tool_namespace[0] == '\0');
-   agent_free_parsed_response(&p);
+   assert(aimee_ir_response_has_tool_use(&p) == 1);
+   assert(aimee_ir_response_tool_count(&p) == 1);
+   assert(strcmp(aimee_ir_response_tool(&p, 0)->tool_name, "bash") == 0);
+   assert(strcmp(aimee_ir_response_tool(&p, 0)->tool_id, "call_1") == 0);
+   /* The durable checkpoint uses the canonical ID, without a native output array. */
+   aimee_message_t message = {.role = "assistant", .blocks = p.content, .n_blocks = p.n_content};
+   cJSON *checkpoint = aimee_ir_message_json(&message);
+   assert(checkpoint && !cJSON_GetObjectItemCaseSensitive(checkpoint, "output"));
+   const cJSON *block =
+       cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(checkpoint, "blocks"), 0);
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(block, "tool_id")), "call_1"));
+   cJSON_Delete(checkpoint);
+   assert(!aimee_ir_response_tool(&p, 0)->tool_namespace);
+   aimee_response_free(&p);
 }
 
 /* A tool the client offered inside a `namespace` group comes back with a BARE
@@ -248,16 +247,16 @@ void test_ir_parse_responses_namespaced_tool_call(void)
        "\"arguments\":\"{\\\"command\\\":\\\"status\\\"}\"}],"
        "\"usage\":{\"input_tokens\":3,\"output_tokens\":4}}}\r\n\r\n";
 
-   parsed_response_t p;
-   assert(agent_ir_parse_responses(body, -1, NULL, &p) == 0);
-   assert(p.call_count == 1);
+   aimee_response_t p;
+   assert(agent_ir_decode_responses(body, -1, NULL, &p) == 0);
+   assert(aimee_ir_response_tool_count(&p) == 1);
    /* the name stays bare -- it is the group that qualifies it */
-   assert(strcmp(p.calls[0].name, "git") == 0);
-   assert(strcmp(p.calls[0].tool_namespace, "mcp__aimee") == 0);
-   agent_free_parsed_response(&p);
+   assert(strcmp(aimee_ir_response_tool(&p, 0)->tool_name, "git") == 0);
+   assert(strcmp(aimee_ir_response_tool(&p, 0)->tool_namespace, "mcp__aimee") == 0);
+   aimee_response_free(&p);
 }
 
-/* Text-only codex reply: no tool call, no assistant_message, usage bridged. */
+/* Text-only Codex reply retains canonical text and full usage. */
 void test_ir_parse_responses_text_only(void)
 {
    const char *body =
@@ -267,14 +266,14 @@ void test_ir_parse_responses_text_only(void)
        "data: {\"response\":{\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}}"
        "\r\n\r\n";
 
-   parsed_response_t p;
-   int rc = agent_ir_parse_responses(body, -1, NULL, &p);
+   aimee_response_t p;
+   int rc = agent_ir_decode_responses(body, -1, NULL, &p);
    assert(rc == 0);
-   assert(p.is_tool_call == 0);
-   assert(p.content && strcmp(p.content, "hello world") == 0);
-   assert(p.assistant_message == NULL);
-   assert(p.prompt_tokens == 1 && p.completion_tokens == 2);
-   agent_free_parsed_response(&p);
+   assert(aimee_ir_response_has_tool_use(&p) == 0);
+   assert_ir_text(&p, "hello world");
+   assert(p.n_content == 1 && p.content[0].type == AIMEE_BLK_TEXT);
+   assert(p.usage_in == 1 && p.usage_out == 2);
+   aimee_response_free(&p);
 }
 
 void test_responses_parser_uses_output_text_done(void)
@@ -289,14 +288,12 @@ void test_responses_parser_uses_output_text_done(void)
        "data: "
        "{\"response\":{\"output\":[],\"usage\":{\"input_tokens\":7,\"output_tokens\":8}}}\n\n";
 
-   parsed_response_t parsed;
-   agent_ir_parse_responses(body, -1, NULL, &parsed);
-   assert(parsed.content != NULL);
-   assert(strcmp(parsed.content,
-                 "One caveat: the endpoint I could reach at `192.168.1.103:8080`.") == 0);
-   assert(parsed.prompt_tokens == 7);
-   assert(parsed.completion_tokens == 8);
-   agent_free_parsed_response(&parsed);
+   aimee_response_t parsed;
+   agent_ir_decode_responses(body, -1, NULL, &parsed);
+   assert_ir_text(&parsed, "One caveat: the endpoint I could reach at `192.168.1.103:8080`.");
+   assert(parsed.usage_in == 7);
+   assert(parsed.usage_out == 8);
+   aimee_response_free(&parsed);
 }
 
 void test_responses_parser_separates_message_items(void)
@@ -316,11 +313,10 @@ void test_responses_parser_separates_message_items(void)
        "data: {\"response\":{\"output\":[],\"usage\":{\"input_tokens\":9,\"output_tokens\":10}}}"
        "\n\n";
 
-   parsed_response_t parsed;
-   agent_ir_parse_responses(body, -1, NULL, &parsed);
-   assert(parsed.content != NULL);
-   assert(strcmp(parsed.content, "PR.\n\nGitHub") == 0);
-   assert(parsed.prompt_tokens == 9);
-   assert(parsed.completion_tokens == 10);
-   agent_free_parsed_response(&parsed);
+   aimee_response_t parsed;
+   agent_ir_decode_responses(body, -1, NULL, &parsed);
+   assert_ir_text(&parsed, "PR.\n\nGitHub");
+   assert(parsed.usage_in == 9);
+   assert(parsed.usage_out == 10);
+   aimee_response_free(&parsed);
 }

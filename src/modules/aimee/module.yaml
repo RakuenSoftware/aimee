@@ -5,6 +5,7 @@
     "audit",
     "config",
     "execution-policy",
+    "ir",
     "module-runtime"
   ],
   "runtime_toggle": {
@@ -51,6 +52,7 @@
     "server-go/modules/aimee/families/runtime_state.go",
     "server-go/modules/aimee/families/schema.go",
     "server-go/modules/aimee/families/session_ir.go",
+    "server-go/modules/aimee/families/session_ir_history.go",
     "server-go/modules/aimee/families/sessions.go",
     "server-go/modules/aimee/families/telemetry.go",
     "server-go/modules/aimee/families/telemetry_diagnose.go",
@@ -115,6 +117,7 @@
     "server-go/modules/aimee/families/runtime_caches_test.go",
     "server-go/modules/aimee/families/runtime_caches_utf8_test.go",
     "server-go/modules/aimee/families/session_exploration_live_test.go",
+    "server-go/modules/aimee/families/session_ir_history_live_test.go",
     "server-go/modules/aimee/families/session_ir_live_test.go",
     "server-go/modules/aimee/families/session_ir_test.go",
     "server-go/modules/aimee/families/sessions_test.go",
@@ -181,6 +184,7 @@
     "server-go/modules/aimee/families/schema_subject_erasure_receipts.sql",
     "server-go/modules/aimee/families/schema_task_projection.sql",
     "server-go/modules/aimee/families/schema_telemetry.sql",
-    "server-go/modules/aimee/families/schema_workflow.sql"
+    "server-go/modules/aimee/families/schema_workflow.sql",
+    "server-go/modules/aimee/families/schema_session_harness.sql"
   ]
 }
