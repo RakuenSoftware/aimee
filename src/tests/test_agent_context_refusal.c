@@ -3,6 +3,7 @@
  * as Go-owner protocol replies; this test does not reimplement memory policy. */
 #include "aimee.h"
 #include "agent_exec.h"
+#include <aimee/module-runtime/pre_llm_hook.h>
 #include <aimee/ir/session_event.h>
 #include "config.h"
 #include "cJSON.h"
@@ -89,6 +90,15 @@ static int provider_calls;
 static int final_response;
 static int malformed_projection;
 static int transport_refuse;
+static int expect_hook_prompt, hook_calls;
+static int fallback_hook_context(const char *user, char *out, size_t capacity, void *context)
+{
+   (void)context;
+   assert(!strcmp(user, "original prompt"));
+   hook_calls++;
+   snprintf(out, capacity, "single-hook-context");
+   return 0;
+}
 
 int http_retry_post_context_bytes(const char *url, const char *auth_header, const void *body,
                                   size_t body_len, char **response_buf, int timeout_ms,
@@ -227,6 +237,8 @@ int http_retry_post_observed_bytes(const char *url, const char *auth_header, con
                                    const http_retry_observer_t *observer)
 {
    assert(!admit_retry && observer && observer->before && observer->after);
+   if (expect_hook_prompt)
+      assert(body && body_len == strlen(body) && strstr(body, "single-hook-context"));
    assert(observer->before(observer->context, body, body_len) == 0);
    if (transport_refuse)
    {
@@ -506,8 +518,14 @@ int main(void)
       free(result.response);
       /* The non-tool execution path must preserve the same refusal contract. */
       request_context_set(&retry_context);
-      provider_calls = 0;
+      provider_calls = hook_calls = 0;
+      expect_hook_prompt = 1;
+      plugin_chook_reset();
+      assert(!plugin_chook_register_pre_llm(fallback_hook_context, NULL));
       rc = agent_execute(&agent, NULL, "original prompt", 128, 0, &result);
+      assert(hook_calls == 1);
+      plugin_chook_reset();
+      expect_hook_prompt = 0;
       assert(rc == AGENT_RC_CONTEXT_REFUSED && !result.success);
       assert(provider_calls == (fallback ? 2 : 1));
       assert(strcmp(result.stop_reason, "context_refused") == 0);

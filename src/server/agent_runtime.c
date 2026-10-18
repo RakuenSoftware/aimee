@@ -1085,9 +1085,9 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    cJSON *req = agent_build_request(agent, system_prompt, effective_user, tok, temperature);
    char *body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
-   free(augmented_prompt);
    if (!body)
    {
+      free(augmented_prompt);
       snprintf(out->error, sizeof(out->error), "failed to build request");
       return -1;
    }
@@ -1097,6 +1097,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
        aimee_anthropic_replay_prepare(body, strlen(body), &sent_replay))
    {
       free(body);
+      free(augmented_prompt);
       snprintf(out->error, sizeof out->error, "cannot bind native replay prefix");
       aimee_ir_session_fail_capture();
       return AGENT_RC_CAPTURE_FAILED;
@@ -1124,6 +1125,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    {
       snprintf(out->error, sizeof(out->error), "%s after request", stop_reason);
       free(response_body);
+      free(augmented_prompt);
       return -1;
    }
 
@@ -1143,8 +1145,9 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       snprintf(out->served_model, MAX_MODEL_LEN, "%s", fb_agent.model);
 
       if (is_anthropic_provider(&fb_agent))
-         track_simple_anthropic_payload_rewrite(driver, &fb_agent, system_prompt, user_prompt);
-      cJSON *fb_req = agent_build_request(&fb_agent, system_prompt, user_prompt, tok, temperature);
+         track_simple_anthropic_payload_rewrite(driver, &fb_agent, system_prompt, effective_user);
+      cJSON *fb_req =
+          agent_build_request(&fb_agent, system_prompt, effective_user, tok, temperature);
       char *fb_body = cJSON_PrintUnformatted(fb_req);
       cJSON_Delete(fb_req);
       if (fb_body)
@@ -1153,6 +1156,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
              aimee_anthropic_replay_prepare(fb_body, strlen(fb_body), &sent_replay))
          {
             free(fb_body);
+            free(augmented_prompt);
             snprintf(out->error, sizeof out->error, "cannot bind fallback native replay prefix");
             aimee_ir_session_fail_capture();
             return AGENT_RC_CAPTURE_FAILED;
@@ -1166,6 +1170,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
          free(fb_body);
       }
    }
+   free(augmented_prompt);
    if (active_delegation_stopped(stop_reason, sizeof(stop_reason)))
    {
       snprintf(out->error, sizeof(out->error), "%s after request", stop_reason);
