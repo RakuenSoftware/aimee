@@ -134,8 +134,7 @@ int kb_evidence_embed_one(const char *embed_cmd)
    const int embed_dim = config_embedder_dims_current();
    if (embed_dim <= 0 || embed_dim > EMBED_MAX_DIM)
    {
-      kb_store_evidence_mark_failed(pend.artifact_id,
-                                    "invalid configured embedding dimension");
+      kb_store_evidence_mark_failed(pend.artifact_id, "invalid configured embedding dimension");
       return 1;
    }
    float *vec = malloc((size_t)embed_dim * sizeof(*vec));
