@@ -45,7 +45,7 @@ static void test_plan_from_changes_table(void)
        "\n"
        "| File | Change |\n"
        "|------|--------|\n"
-       "| `src/cmd_agent_delegate.c` | Add plan subcommand. |\n"
+       "| `src/cli_v1_routes.c` | Add plan route. |\n"
        "| `src/modules/delegates/delegate_plan.c` | Add planner helpers. |\n"
        "\n"
        "## Acceptance Criteria\n"
@@ -70,7 +70,7 @@ static void test_plan_from_changes_table(void)
    assert(strcmp(cJSON_GetObjectItem(first, "role")->valuestring, "code") == 0);
    assert(cJSON_GetArraySize(arr(first, "owned_files")) == 1);
    assert(cJSON_GetArraySize(arr(first, "acceptance_criteria")) == 2);
-   /* The first packet owns src/cmd_agent_delegate.c, which has no matching unit
+   /* The first packet owns src/cli_v1_routes.c, which has no matching unit
     * test, so it verifies with lint only — and must NOT carry an unrelated
     * test target. */
    assert(str_arr_contains(arr(first, "verify_commands"), "make -C src lint"));
@@ -98,7 +98,7 @@ static void test_plan_from_changes_table(void)
    cJSON *review = cJSON_GetArrayItem(packets, 2);
    assert(strcmp(cJSON_GetObjectItem(review, "role")->valuestring, "review") == 0);
    assert(cJSON_GetArraySize(arr(review, "owned_files")) == 0);
-   assert(str_arr_contains(arr(review, "expected_files"), "src/cmd_agent_delegate.c"));
+   assert(str_arr_contains(arr(review, "expected_files"), "src/cli_v1_routes.c"));
    assert(str_arr_contains(arr(review, "expected_files"), "src/modules/delegates/delegate_plan.c"));
    assert(strcmp(cJSON_GetObjectItem(review, "handoff_schema")->valuestring,
                  "delegate_review_v1") == 0);
