@@ -30,15 +30,6 @@ __attribute__((weak)) int gw_response_governance_enabled(void)
    return 0;
 }
 
-__attribute__((weak)) int gw_response_run_governance(struct parsed_response *parsed, int enabled,
-                                                     int policy_active)
-{
-   (void)parsed;
-   (void)enabled;
-   (void)policy_active;
-   return 0;
-}
-
 /* --- IR response-path symbols wired into agent_runtime.c ------------------
  * Weak so the minimal-link agent tests that don't exercise the IR response path
  * resolve without the whole backend/IR chain. The backend parse stubs return -1
