@@ -4263,7 +4263,7 @@ $(TESTPREFIX)/unit-test-gw-orch-delegates: $(OBJDIR)/tests/test_gw_orch_delegate
 $(TESTPREFIX)/unit-test-gw-orch-workflows: $(OBJDIR)/tests/test_gw_orch_workflows.o $(OBJDIR)/modules/workflows/gw_orch_workflows.o $(OBJDIR)/pipeline/gw_orchestration_seam.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-gateway-p4-delegate: $(OBJDIR)/tests/test_gateway_p4_delegate.o $(OBJDIR)/modules/gateway/gateway_delegate.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/modules/gateway/gateway_pipeline.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
+$(TESTPREFIX)/unit-test-gateway-p4-delegate: $(OBJDIR)/tests/test_gateway_p4_delegate.o $(OBJDIR)/modules/gateway/gateway_delegate.o $(OBJDIR)/modules/gateway/gateway_policy.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(OBJDIR)/tests/%.o: tests/%.c

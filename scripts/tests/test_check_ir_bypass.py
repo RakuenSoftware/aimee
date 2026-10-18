@@ -35,6 +35,7 @@ class IRBypassTests(unittest.TestCase):
         for relative, source in [
             ("src/server/rogue.c", "anthropic_stream_feed_openai(s, p);"),
             ("server-go/modules/rogue/rogue.go", "raw_responses := x"),
+            ("src/server/rogue.c", "gateway_delegate_tool_shape(1, 0);"),
             ("src/server/rogue.c", "driver->parse_response(body);"),
             ("src/server/rogue.c", "driver->build_request(input);"),
         ]:

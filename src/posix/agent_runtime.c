@@ -27,7 +27,6 @@
 #include <aimee/delegates/delegate_driver.h>
 #include <aimee/delegates/delegate_role.h>
 #include <aimee/delegates/delegate_xml_fallback.h>
-#include <aimee/gateway/gateway_delegate.h>
 #include <aimee/gateway/gateway_policy.h>
 #include "gw_stage_governance.h"
 #include "http_retry.h"
@@ -1174,32 +1173,16 @@ native_provider_http:
       cJSON *req;
       if (chatgpt)
          req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
-                                      AIMEE_WIRE_RESPONSES);
+                                      AIMEE_WIRE_RESPONSES, role != NULL);
       else if (anthropic)
       {
          track_anthropic_payload_rewrite(driver, &fb_agent, eff_messages, sys);
          req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
-                                      AIMEE_WIRE_ANTHROPIC);
+                                      AIMEE_WIRE_ANTHROPIC, role != NULL);
       }
       else
          req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
-                                      AIMEE_WIRE_OPENAI_CHAT);
-
-      /* Universal-gateway P4: run aimee's own outbound call through the same request
-       * pipeline the proxy ingresses use, so a config-enabled tool-policing policy
-       * (gateway_prevent_subagents) applies to delegate calls. Mutates req in place;
-       * a <0 return is a hard stage failure — abort rather than forward a half-altered
-       * request (mirrors anthropic_http.c). Gated to delegates (role != NULL); the
-       * primary shares the pipeline but is not policed here. */
-      if (gateway_delegate_run_request_pipeline(
-              req, gateway_delegate_tool_shape(anthropic, chatgpt), role != NULL) < 0)
-      {
-         snprintf(out->error, sizeof(out->error), "gateway request pipeline failed");
-         cJSON_Delete(req);
-         cJSON_Delete(reduced_messages);
-         econ_module_result_free(&econ_res);
-         break;
-      }
+                                      AIMEE_WIRE_OPENAI_CHAT, role != NULL);
 
       char *body = cJSON_PrintUnformatted(req);
       cJSON_Delete(req);
@@ -1313,16 +1296,16 @@ native_provider_http:
          cJSON *fb_req;
          if (chatgpt)
             fb_req = agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok,
-                                            temperature, AIMEE_WIRE_RESPONSES);
+                                            temperature, AIMEE_WIRE_RESPONSES, role != NULL);
          else if (anthropic)
          {
             track_anthropic_payload_rewrite(driver, &fb_agent, messages, sys);
             fb_req = agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok,
-                                            temperature, AIMEE_WIRE_ANTHROPIC);
+                                            temperature, AIMEE_WIRE_ANTHROPIC, role != NULL);
          }
          else
             fb_req = agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok,
-                                            temperature, AIMEE_WIRE_OPENAI_CHAT);
+                                            temperature, AIMEE_WIRE_OPENAI_CHAT, role != NULL);
          char *fb_body = cJSON_PrintUnformatted(fb_req);
          cJSON_Delete(fb_req);
          if (fb_body)

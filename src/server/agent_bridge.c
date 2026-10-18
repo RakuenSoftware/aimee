@@ -6,6 +6,7 @@
 #include "util.h"
 #include "agent_request_shaping.h"
 #include "agent_protocol.h"
+#include <aimee/gateway/gateway_delegate.h>
 #include <aimee/ir/session_event.h>
 #include <aimee/translation/aimee_frontend.h>
 #include <aimee/translation/aimee_backend.h>
@@ -329,7 +330,7 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
  * decoded only as canonical IR, and rendered by the translation backend once. */
 cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
                               const char *system_prompt, int max_tokens, double temperature,
-                              aimee_wire_t wire)
+                              aimee_wire_t wire, int is_delegate)
 {
    if (!agent || !cJSON_IsArray(messages))
       return NULL;
@@ -380,6 +381,9 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
          goto fail;
    }
    aimee_ir_classify_context(&ir);
+   int policy_changes = gateway_delegate_run_request_pipeline(&ir, is_delegate);
+   if (policy_changes < 0)
+      goto fail;
    ir.mutated = 1;
    aimee_wire_projection_report_t projection;
    aimee_backend_projection_report(&ir, wire, &projection);
@@ -402,6 +406,22 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
    {
       cJSON_Delete(content);
       goto fail;
+   }
+   if (policy_changes)
+   {
+      /* The typed catalog/choice is authoritative when policy changes it. Other
+       * provider profile knobs retain their established output contract. */
+      const char *policy_keys[] = {"tools", "tool_choice", "parallel_tool_calls"};
+      for (size_t i = 0; i < sizeof policy_keys / sizeof *policy_keys; i++)
+      {
+         cJSON *value = cJSON_DetachItemFromObjectCaseSensitive(rendered, policy_keys[i]);
+         cJSON_DeleteItemFromObjectCaseSensitive(profile, policy_keys[i]);
+         if (value && !cJSON_AddItemToObject(profile, policy_keys[i], value))
+         {
+            cJSON_Delete(value);
+            goto fail;
+         }
+      }
    }
    if (wire == AIMEE_WIRE_OPENAI_CHAT)
       agent_request_shape_openai_messages(agent, cJSON_GetObjectItemCaseSensitive(profile, key));

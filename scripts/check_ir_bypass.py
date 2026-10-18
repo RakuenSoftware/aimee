@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
     "raw_responses", "build_provider_body", "translate_request",
+    "gateway_delegate_tool_shape", "GW_TOOL_SHAPE_NAMED",
+    "GW_TOOL_SHAPE_FUNCTION_NESTED", "GW_TOOL_SHAPE_UNSUPPORTED",
     "agent_ir_parse_json_response", "agent_ir_parse_responses",
     "agent_build_openai_assistant_message_from_calls",
     "delegate_respond_message", "agent_tools_strip_delegate_respond",

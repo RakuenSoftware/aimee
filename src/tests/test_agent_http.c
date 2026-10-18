@@ -12,6 +12,7 @@
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "agent_protocol.h"
+#include <aimee/gateway/gateway_policy.h>
 #include <aimee/delegates/delegate_driver.h>
 #include <aimee/delegates/delegate_xml_fallback.h>
 #include "model_provider.h"
@@ -917,10 +918,73 @@ static void test_connect_timeout_caps_below_request_budget(void)
    printf("connect_timeout_caps_below_request_budget OK\n");
 }
 
+static int delegates_available_for_policy(void)
+{
+   return 1;
+}
+
+static void test_canonical_delegate_policy_before_native_egress(void)
+{
+   const char *tool_wires[] = {
+       "[{\"type\":\"function\",\"function\":{\"name\":\"Read\",\"parameters\":{\"type\":"
+       "\"object\"}}},"
+       "{\"type\":\"function\",\"function\":{\"name\":\"Task\",\"parameters\":{\"type\":\"object\"}"
+       "}}]",
+       "[{\"name\":\"Read\",\"input_schema\":{\"type\":\"object\"}},"
+       "{\"name\":\"Task\",\"input_schema\":{\"type\":\"object\"}}]",
+       "[{\"type\":\"function\",\"name\":\"Read\",\"parameters\":{\"type\":\"object\"}},"
+       "{\"type\":\"function\",\"name\":\"Task\",\"parameters\":{\"type\":\"object\"}}]"};
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_ANTHROPIC,
+                                 AIMEE_WIRE_RESPONSES};
+   cJSON *messages = cJSON_Parse(
+       "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"inspect the project\"}]}]");
+   assert(messages);
+   gateway_policy_set_delegates_available_provider(delegates_available_for_policy);
+   for (size_t w = 0; w < sizeof wires / sizeof *wires; w++)
+   {
+      cJSON *tools = cJSON_Parse(tool_wires[w]);
+      assert(tools);
+      for (int delegate = 0; delegate < 2; delegate++)
+      {
+         for (int fallback = 0; fallback < 2; fallback++)
+         {
+            agent_t agent = {0};
+            snprintf(agent.model, sizeof agent.model, "%s", fallback ? "fallback" : "selected");
+            agent.require_initial_tool_call = 1;
+            cJSON *native =
+                agent_build_request_ir(&agent, messages, tools, "host", 128, 0, wires[w], delegate);
+            assert(native);
+            assert(!strcmp(cJSON_GetObjectItemCaseSensitive(native, "model")->valuestring,
+                           agent.model));
+            cJSON *catalog = cJSON_GetObjectItemCaseSensitive(native, "tools");
+            assert(cJSON_GetArraySize(catalog) == (delegate ? 1 : 2));
+            assert(cJSON_GetObjectItemCaseSensitive(native, "tool_choice"));
+            cJSON_Delete(native);
+         }
+      }
+      assert(cJSON_GetArraySize(tools) == 2); /* Shared source is never modified. */
+      /* Removing the last tool also clears the forced choice at real egress. */
+      cJSON_DeleteItemFromArray(tools, 0);
+      agent_t agent = {0};
+      snprintf(agent.model, sizeof agent.model, "%s", "selected");
+      agent.require_initial_tool_call = 1;
+      cJSON *native = agent_build_request_ir(&agent, messages, tools, "host", 128, 0, wires[w], 1);
+      assert(native && !cJSON_GetObjectItemCaseSensitive(native, "tools"));
+      assert(!cJSON_GetObjectItemCaseSensitive(native, "tool_choice"));
+      assert(!cJSON_GetObjectItemCaseSensitive(native, "parallel_tool_calls"));
+      cJSON_Delete(native);
+      cJSON_Delete(tools);
+   }
+   gateway_policy_set_delegates_available_provider(NULL);
+   cJSON_Delete(messages);
+   puts("canonical delegate policy before all native outputs/fallback models OK");
+}
+
 int main(void)
 {
    printf("test_agent_http: ");
 
+   test_canonical_delegate_policy_before_native_egress();
    test_connect_timeout_caps_below_request_budget();
    test_build_request_openai_omits_empty_tools();
    test_openai_request_strips_private_message_fields();

@@ -75,7 +75,7 @@ struct cJSON *agent_build_request_anthropic(const agent_t *agent, struct cJSON *
  * only by this migration adapter, and native requests are built only at egress. */
 struct cJSON *agent_build_request_ir(const agent_t *agent, const struct cJSON *messages,
                                      struct cJSON *tools, const char *system_prompt, int max_tokens,
-                                     double temperature, aimee_wire_t wire);
+                                     double temperature, aimee_wire_t wire, int is_delegate);
 
 /* Set the Anthropic `system` field on an outbound request (§3 cache-aware
  * shaping). When cache_marking is non-zero, the STABLE prefix (the text before
