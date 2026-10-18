@@ -1,6 +1,6 @@
 import { parseJSON, stringifyJSON } from './json';
 import { describe, expect, it } from 'vitest';
-import { emptySession, reduceSession, toolResults } from './session';
+import { emptySession, reduceSession, toolResults, toolBlockKey } from './session';
 import type { Block, Envelope, SessionEvent } from './session';
 const envelope = (n: number, event: SessionEvent): Envelope => ({ version: 1, session_id: 's', sequence: String(n), event_id: `e${n}`, turn_id: 't', actor: 'operator', event });
 const message = (id: string, role: string, blocks: Block[]): SessionEvent => ({ kind: 'message', message_id: id, payload: { role, blocks } });
@@ -23,8 +23,8 @@ describe('canonical session projection', () => {
     ];
     const live = events.reduce(reduceSession, emptySession('s'));
     expect((JSON.parse(JSON.stringify(events)) as Envelope[]).reduce(reduceSession, emptySession('s'))).toEqual(live);
-    expect(toolResults(live).get('a')?.[0].content).toBe('A');
-    expect(toolResults(live).get('b')?.[0].content).toBe('B');
+    expect(toolResults(live).byCall.get(toolBlockKey(live.messages[1], 2))?.[0].content).toBe('A');
+    expect(toolResults(live).byCall.get(toolBlockKey(live.messages[1], 1))?.[0].content).toBe('B');
     expect(live.messages[1].blocks[0].signature).toBe('opaque');
     expect(live.messages[1].blocks[0].encrypted_content).toBe('cipher');
     expect(live.messages[1].blocks[0].redacted_content).toBe('redacted');
@@ -217,4 +217,47 @@ it('retains and validates thinking replay provenance without placing it in visib
  expect(state.messages[0].blocks[0].thinking_binding).toBe(binding);
  for (const bad of [binding+'a', binding.replace('ap1:', 'ap2:')])
   expect(() => reduceSession(emptySession('s'), envelope(1,message('m','assistant',[{type:'thinking',text:'reason',thinking_binding:bad}])))).toThrow('replay binding');
+});
+
+it('preserves native IDs while deriving distinct results for reused tool cycles', () => {
+  const events = [
+    envelope(1, message('first', 'assistant', [{ type: 'tool_use', tool_id: 'same', name: 'read', input: {} }])),
+    envelope(2, message('result1', 'tool', [{ type: 'tool_result', tool_id: 'same', content: 'FIRST' }])),
+    envelope(3, message('second', 'assistant', [{ type: 'tool_use', tool_id: 'same', name: 'read', input: {} }])),
+    envelope(4, message('result2', 'tool', [{ type: 'tool_result', tool_id: 'same', content: 'SECOND' }])),
+  ];
+  const state = events.reduce(reduceSession, emptySession('s'));
+  const original = stringifyJSON(state);
+  const results = toolResults(state);
+  expect(results.byCall.get(toolBlockKey(state.messages[0], 0))?.map(block => block.content)).toEqual(['FIRST']);
+  expect(results.byCall.get(toolBlockKey(state.messages[2], 0))?.map(block => block.content)).toEqual(['SECOND']);
+  expect(results.matched.size).toBe(2);
+  expect(stringifyJSON(state)).toBe(original);
+  expect(state.messages.map(message => message.blocks[0].tool_id)).toEqual(['same', 'same', 'same', 'same']);
+  expect(toolResults(events.map(event => parseJSON(stringifyJSON(event)!) as Envelope).reduce(reduceSession, emptySession('s')))).toEqual(results);
+});
+it('uses execution scope for interleaved native IDs and leaves ambiguous results visible', () => {
+  const events = [
+    { ...envelope(1, message('a', 'assistant', [{ type: 'tool_use', tool_id: 'same', name: 'read' }])), turn_id: 'a' },
+    { ...envelope(2, message('b', 'assistant', [{ type: 'tool_use', tool_id: 'same', name: 'read' }])), turn_id: 'b' },
+    { ...envelope(3, message('unknown', 'tool', [{ type: 'tool_result', tool_id: 'same', content: 'AMBIGUOUS' }])), turn_id: 'unknown' },
+    { ...envelope(4, message('rb', 'tool', [{ type: 'tool_result', tool_id: 'same', content: 'B' }])), turn_id: 'b' },
+    { ...envelope(5, message('ra', 'tool', [{ type: 'tool_result', tool_id: 'same', content: 'A' }])), turn_id: 'a' },
+  ];
+  const state = events.reduce(reduceSession, emptySession('s'));
+  const result = toolResults(state);
+  expect(result.byCall.get(toolBlockKey(state.messages[0], 0))?.[0].content).toBe('A');
+  expect(result.byCall.get(toolBlockKey(state.messages[1], 0))?.[0].content).toBe('B');
+  expect(result.matched.has(toolBlockKey(state.messages[2], 0))).toBe(false);
+});
+it('correlates an external result from the following request without reusing a completed result', () => {
+  const events = [
+    envelope(1, message('a', 'assistant', [{ type: 'tool_use', tool_id: 'native', name: 'read' }])),
+    { ...envelope(2, message('result', 'tool', [{ type: 'tool_result', tool_id: 'native', content: 'CROSS_TURN' }])), turn_id: 'next' },
+    { ...envelope(3, message('orphan', 'tool', [{ type: 'tool_result', tool_id: 'native', content: 'UNMATCHED' }])), turn_id: 'later' },
+  ];
+  const state = events.reduce(reduceSession, emptySession('s'));
+  const result = toolResults(state);
+  expect(result.byCall.get(toolBlockKey(state.messages[0], 0))?.map(block => block.content)).toEqual(['CROSS_TURN']);
+  expect(result.matched.has(toolBlockKey(state.messages[2], 0))).toBe(false);
 });

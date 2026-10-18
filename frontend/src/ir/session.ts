@@ -325,12 +325,42 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
     default: throw new Error('Unsupported canonical event');
   }
 }
-/** Tools correlate across role/message boundaries and completion order. */
-export function toolResults(state: SessionState): Map<string, Block[]> {
-  const results = new Map<string, Block[]>();
-  for (const message of state.messages) for (const block of message.blocks) {
-    if (block.type !== 'tool_result' || !block.tool_id) continue;
-    results.set(block.tool_id, [...(results.get(block.tool_id) || []), block]);
+/** UI identity belongs to the projection, never to a canonical tool_id. */
+export const toolBlockKey = (message: Pick<ProjectedMessage, 'id'>, index: number): string =>
+  JSON.stringify([message.id, index]);
+export function toolResults(state: SessionState): { byCall: Map<string, Block[]>; matched: Set<string> } {
+  type Call = { key: string; turn: string; message: string; resolved: boolean };
+  const byCall = new Map<string, Block[]>();
+  const matched = new Set<string>();
+  const pending = new Map<string, Call[]>();
+  const bindings = new Map<string, Call>();
+  for (const message of state.messages) for (const [index, block] of message.blocks.entries()) {
+    if (!block.tool_id) continue;
+    const scope = JSON.stringify([message.turn, block.tool_id]);
+    if (block.type === 'tool_use') {
+      // A later model response starts a new cycle. Duplicate IDs inside one
+      // response stay ambiguous; interleaved execution turns remain separate.
+      const previous = (pending.get(block.tool_id) ?? []).filter(call =>
+        call.message === message.id || (!call.resolved && call.turn !== message.turn));
+      previous.push({ key: toolBlockKey(message, index), turn: message.turn, message: message.id, resolved: false });
+      pending.set(block.tool_id, previous);
+      bindings.delete(scope);
+      continue;
+    }
+    if (block.type !== 'tool_result') continue;
+    let call = bindings.get(scope);
+    if (!call) {
+      const candidates = pending.get(block.tool_id) ?? [];
+      const sameTurn = candidates.filter(candidate => candidate.turn === message.turn);
+      const eligible = sameTurn.length ? sameTurn : candidates.filter(candidate =>
+        !candidate.resolved);
+      if (eligible.length !== 1) continue; // Preserve uncorrelated evidence visibly.
+      call = eligible[0];
+      bindings.set(scope, call);
+    }
+    call.resolved = true;
+    byCall.set(call.key, [...(byCall.get(call.key) ?? []), block]);
+    matched.add(toolBlockKey(message, index));
   }
-  return results;
+  return { byCall, matched };
 }

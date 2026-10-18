@@ -18,7 +18,6 @@ struct server_session_log
    int announced;
    unsigned long long counter;
    unsigned long long model_completions;
-   cJSON *tool_ids;
    aimee_ir_session_sink_fn previous_sink;
    void *previous_context;
    server_control_scope_t *previous_controls;
@@ -60,44 +59,8 @@ static int log_event(const aimee_session_event_t *event, void *context)
          return -1;
       }
    }
-   cJSON *body = cJSON_GetObjectItemCaseSensitive(payload, "payload");
-   cJSON *blocks = event->kind == AIMEE_SESSION_MESSAGE
-                       ? cJSON_GetObjectItemCaseSensitive(body, "blocks")
-                       : NULL;
-   int count = blocks ? cJSON_GetArraySize(blocks) : event->kind == AIMEE_SESSION_DELTA ? 1 : 0;
-   for (int i = 0; i < count; i++)
-   {
-      cJSON *block = blocks ? cJSON_GetArrayItem(blocks, i) : body;
-      const char *native = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(block, "tool_id"));
-      if (!native || !native[0])
-         continue;
-      const char *kind =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(block, blocks ? "type" : "kind"));
-      if (!scope->tool_ids)
-         scope->tool_ids = cJSON_CreateObject();
-      if (!scope->tool_ids)
-         goto qualification_failed;
-      cJSON *mapped = cJSON_GetObjectItemCaseSensitive(scope->tool_ids, native);
-      if (kind && !strcmp(kind, "tool_use") &&
-          (blocks || (event->delta && event->delta->type == AIMEE_DELTA_BLOCK_START)))
-      {
-         if (!event->message_id)
-            goto qualification_failed;
-         size_t n = strlen(scope->turn) + strlen(event->message_id) + strlen(native) + 3;
-         char *qualified = malloc(n);
-         if (!qualified)
-            goto qualification_failed;
-         snprintf(qualified, n, "%s:%s:%s", scope->turn, event->message_id, native);
-         cJSON_DeleteItemFromObjectCaseSensitive(scope->tool_ids, native);
-         mapped = cJSON_AddStringToObject(scope->tool_ids, native, qualified);
-         free(qualified);
-         if (!mapped)
-            goto qualification_failed;
-      }
-      if (mapped && !cJSON_ReplaceItemInObjectCaseSensitive(
-                        block, "tool_id", cJSON_CreateString(mapped->valuestring)))
-         goto qualification_failed;
-   }
+   /* Model tool identities are canonical content. Qualify only transport
+    * message/event identities; replay must retain the actual native tool IDs. */
    char id[96], sequence[32];
    snprintf(id, sizeof id, "%s:%llu", scope->turn, ++scope->counter);
    char *wire = cJSON_PrintUnformatted(payload);
@@ -114,9 +77,6 @@ static int log_event(const aimee_session_event_t *event, void *context)
          event->delta->type == AIMEE_DELTA_TURN_STOP)))
       scope->model_completions++;
    return rc;
-qualification_failed:
-   cJSON_Delete(payload);
-   return -1;
 }
 /* Worker attestation identifies the parent even when no HTTP sink crosses the
  * thread boundary. Only a reference is appended there; all content stays private. */
@@ -287,7 +247,6 @@ int server_session_log_finish(server_session_log_t *scope, int success, const ch
    current = scope->previous;
    aimee_ir_session_restore_sink(scope->previous_sink, scope->previous_context, failed);
    server_control_scope_bind(scope->previous_controls);
-   cJSON_Delete(scope->tool_ids);
    free(scope);
    return failed ? -1 : 0;
 }

@@ -90,3 +90,21 @@ it('displays exact opaque numbers without quoting them or rounding tool argument
   expect(container.textContent).toContain('9007199254740993');
   expect(container.textContent).not.toContain('9007199254740992');
 });
+
+it('keeps reused native tool results on their own cards and shows ambiguous evidence', () => {
+  const events: Envelope['event'][] = [
+    { kind:'message',message_id:'a',payload:{role:'assistant',blocks:[{type:'tool_use',tool_id:'same',name:'firstTool',input:{}}]} },
+    { kind:'message',message_id:'ra',payload:{role:'tool',blocks:[{type:'tool_result',tool_id:'same',content:'FIRST_ONLY'}]} },
+    { kind:'message',message_id:'b',payload:{role:'assistant',blocks:[{type:'tool_use',tool_id:'same',name:'secondTool',input:{}}]} },
+    { kind:'message',message_id:'rb',payload:{role:'tool',blocks:[{type:'tool_result',tool_id:'same',content:'SECOND_ONLY'}]} },
+    { kind:'message',message_id:'orphan',payload:{role:'tool',blocks:[{type:'tool_result',tool_id:'unknown',content:'VISIBLE_ORPHAN'}]} },
+    { kind:'message',message_id:'duplicates',payload:{role:'assistant',blocks:[{type:'tool_use',tool_id:'dup',name:'left'},{type:'tool_use',tool_id:'dup',name:'right'}]} },
+    { kind:'message',message_id:'ambiguous',payload:{role:'tool',blocks:[{type:'tool_result',tool_id:'dup',content:'VISIBLE_AMBIGUOUS'}]} },
+  ];
+  const state = events.reduce((state,event,index) => reduceSession(state,{version:1,session_id:'s',sequence:String(index+1),event_id:String(index+1),turn_id:'t',actor:'alice',event}),emptySession('s'));
+  render(<IRTranscript state={state} />);
+  expect(screen.getAllByText(/FIRST_ONLY/)).toHaveLength(1);
+  expect(screen.getAllByText(/SECOND_ONLY/)).toHaveLength(1);
+  expect(screen.getByText('VISIBLE_ORPHAN')).toBeTruthy();
+  expect(screen.getAllByText(/VISIBLE_AMBIGUOUS/)).toHaveLength(1);
+});

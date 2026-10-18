@@ -130,6 +130,83 @@ static void model_reply(void)
        .kind = AIMEE_SESSION_MESSAGE, .message_id = "model", .message = &message};
    assert(aimee_ir_session_emit(&event) == 0);
 }
+
+static void native_tool_identity(void)
+{
+   const char *native = "opaque:native/call";
+   cJSON *input = cJSON_Parse("{\"id\":9007199254740993}");
+   assert(input);
+   aimee_block_t blocks[] = {
+       {.type = AIMEE_BLK_THINKING, .text = "retained", .thinking_signature = "original-signature"},
+       {.type = AIMEE_BLK_TOOL_USE,
+        .tool_id = (char *)native,
+        .tool_name = "Read",
+        .tool_input = input}};
+   aimee_response_t response = {
+       .role = "assistant", .content = blocks, .n_content = 2, .stop_reason = AIMEE_STOP_TOOL_USE};
+   int start = cJSON_GetArraySize(rows[1].events);
+   assert(!aimee_ir_session_emit_buffered_response(&response, "native-message"));
+   assert(!aimee_ir_session_emit_tool_result(native, "first result", 0));
+   aimee_delta_t delta = {.type = AIMEE_DELTA_TURN_START};
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_DELTA,
+                                  .role = "assistant",
+                                  .message_id = "native-stream",
+                                  .delta = &delta};
+   assert(!aimee_ir_session_emit(&event));
+   delta = (aimee_delta_t){.type = AIMEE_DELTA_BLOCK_START,
+                           .kind = AIMEE_BLK_TOOL_USE,
+                           .block_id = 0,
+                           .tool_id = native,
+                           .tool_name = "Read",
+                           .tool_input = input};
+   assert(!aimee_ir_session_emit(&event));
+   delta = (aimee_delta_t){.type = AIMEE_DELTA_BLOCK_STOP, .block_id = 0};
+   assert(!aimee_ir_session_emit(&event));
+   aimee_response_t streamed = response;
+   streamed.content = &blocks[1];
+   streamed.n_content = 1;
+   assert(!aimee_ir_session_emit_response(&streamed, "native-stream"));
+   delta = (aimee_delta_t){.type = AIMEE_DELTA_TURN_STOP, .stop_reason = AIMEE_STOP_TOOL_USE};
+   assert(!aimee_ir_session_emit(&event));
+   assert(!aimee_ir_session_emit_tool_result(native, "second result", 0));
+   int observed = 0;
+   for (int i = start; i < cJSON_GetArraySize(rows[1].events); i++)
+   {
+      const cJSON *row = cJSON_GetArrayItem(rows[1].events, i),
+                  *payload = cJSON_GetObjectItemCaseSensitive(row, "payload");
+      const cJSON *list = cJSON_GetObjectItemCaseSensitive(payload, "blocks");
+      if (!list)
+      {
+         const char *id =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "tool_id"));
+         if (id)
+         {
+            assert(!strcmp(id, native));
+            observed++;
+         }
+      }
+      else
+      {
+         const cJSON *block;
+         cJSON_ArrayForEach(block, list)
+         {
+            const char *id =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(block, "tool_id"));
+            if (id)
+            {
+               assert(!strcmp(id, native));
+               observed++;
+            }
+            const char *signature =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(block, "signature"));
+            if (signature)
+               assert(!strcmp(signature, "original-signature"));
+         }
+      }
+   }
+   assert(observed == 5 && !strcmp(blocks[1].tool_id, native));
+   cJSON_Delete(input);
+}
 static void *worker(void *arg)
 {
    job = (int)(long)arg;
@@ -172,6 +249,7 @@ int main(void)
    assert(server_session_log_identity(native_scope, 2, native_principal, sizeof native_principal) <
           0);
    model_reply();
+   native_tool_identity();
    assert(server_session_log_finish(scope, 1, NULL) == 0);
    aimee_session_event_t finished = {.kind = AIMEE_SESSION_EXECUTION,
                                      .execution_status = "completed"};

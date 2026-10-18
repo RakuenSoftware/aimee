@@ -1,7 +1,7 @@
 import { parseJSON, stringifyJSON } from './json';
 import { useEffect, useRef, useState } from 'react';
 import { Message, ThinkingBlock, ToolBlock } from '../pages/chat/ChatPrimitives';
-import { emptySession, reduceSession, toolResults } from './session';
+import { emptySession, reduceSession, toolResults, toolBlockKey } from './session';
 import type { ChildExecution, Envelope, SessionState } from './session';
 import ControlCard, { type ReplyControl } from './ControlCard';
 const pretty = (value: unknown) => typeof value === 'string' ? value : stringifyJSON(value, 2) ?? '';
@@ -49,11 +49,10 @@ function ChildExecutionView({ reference, ancestors }: { reference: ChildExecutio
 }
 
 export default function IRTranscript({ state, onReply, ancestors = [] }: { state: SessionState; onReply?: ReplyControl; ancestors?: string[] }) {
-  const results = toolResults(state);
-  const uses = new Set(state.messages.flatMap(m => m.blocks.filter(b => b.type === 'tool_use').map(b => b.tool_id)));
+  const { byCall, matched } = toolResults(state);
   return <>
     {state.messages.flatMap(m => m.blocks.map((b, index) => {
-      const key = `${m.id}:${index}`;
+      const key = toolBlockKey(m, index);
       switch (b.type) {
         case 'text': {
           if (b.message_group && index > 0 && m.blocks[index - 1].type === 'text' && m.blocks[index - 1].message_group === b.message_group) return null;
@@ -63,14 +62,14 @@ export default function IRTranscript({ state, onReply, ancestors = [] }: { state
         }
         case 'thinking': return <ThinkingBlock key={key} text={b.text || ''} />;
         case 'tool_use': {
-          const output = results.get(b.tool_id || '');
+          const output = byCall.get(key);
           return <ToolBlock key={key} name={b.namespace ? `${b.namespace}/${b.name}` : b.name || 'Tool'} args={pretty(b.input ?? m.argumentFragments[index] ?? '')}
             result={output ? output.map(r => `${r.is_error ? 'Error: ' : ''}${pretty(r.content)}`).join('\n') :
               state.executions[m.turn] === 'cancelled' ? 'Turn cancelled' :
               state.executions[m.turn] === 'failed' ? 'Turn failed before a result was recorded' :
               state.executions[m.turn] === 'completed' ? 'No result reported by the harness' : m.error} />;
         }
-        case 'tool_result': return uses.has(b.tool_id) ? null : <ToolBlock key={key} name={b.tool_id || 'Tool result'} args="" result={pretty(b.content)} />;
+        case 'tool_result': return matched.has(key) ? null : <ToolBlock key={key} name={b.tool_id || 'Tool result'} args="" result={pretty(b.content)} />;
         case 'image': {
           const url = mediaURL(b.media_ref);
           return url ? <img key={key} src={url} alt="Conversation attachment" style={{ maxWidth: '80%' }} /> : <pre key={key}>{b.media_ref}</pre>;
