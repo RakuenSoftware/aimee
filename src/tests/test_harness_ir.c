@@ -51,6 +51,9 @@ static void claude(void)
    assert(
        frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0}}",
              &s, 0) == 0);
+   assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"message_delta\",\"delta\":{"
+                "\"stop_reason\":\"end_turn\"}}}",
+                &s, 0) == 0);
    assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"message_stop\"}}", &s, 0) == 0);
    assert(cJSON_GetArraySize(events) == 5);
    assert(!strcmp(string(cJSON_GetArrayItem(events, 0), "message_id"), "a1"));
@@ -110,6 +113,9 @@ static void claude_block_snapshots(void)
    assert(
        frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":1}}",
              &s, 0) == 0);
+   assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"message_delta\",\"delta\":{"
+                "\"stop_reason\":\"end_turn\"}}}",
+                &s, 0) == 0);
    assert(frame("{\"type\":\"stream_event\",\"event\":{\"type\":\"message_stop\"}}", &s, 0) == 0);
    assert(cJSON_GetArraySize(events) == before + 9);
    cJSON *last = cJSON_GetArrayItem(events, before + 8);

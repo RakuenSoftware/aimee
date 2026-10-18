@@ -100,6 +100,8 @@ static const char *success_frames =
     "{\"type\":\"assistant\",\"session_id\":\"native-one\",\"message\":{\"id\":\"m1\",\"role\":"
     "\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"reply\"}]}}\n"
     "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_stop\",\"index\":0}}\n"
+    "{\"type\":\"stream_event\",\"event\":{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":"
+    "\"end_turn\"}}}\n"
     "{\"type\":\"stream_event\",\"event\":{\"type\":\"message_stop\"}}\n"
     "{\"type\":\"result\",\"session_id\":\"native-one\",\"is_error\":false}\n"
     "FRAMES\n";

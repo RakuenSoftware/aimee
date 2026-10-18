@@ -814,28 +814,19 @@ typedef struct
    void *emit_ctx;
    char event[64];
    char *data;
-   size_t data_len;
-   size_t data_cap;
-   int emitted;
-   /* An upstream error FRAME saying our request was invalid. The HTTP status is
-      200 on a stream that opens and then fails, so the frame is the only place
-      this shows up. */
-   int saw_invalid_request;
-   /* Usage observed by tapping the relayed Anthropic SSE (message_start carries
-    * input + cache tokens, message_delta the final output_tokens), for the
-    * ingress cost row written after the stream. The relayed bytes are unchanged. */
-   int input_tokens;
-   int output_tokens;
-   int cache_write_tokens;
-   int cache_read_tokens;
-   /* Observation-only reasoning tap (see relay_observe_reasoning). Parsing the
-    * relayed SSE does not mutate it, so exact-parity passthrough is unaffected. */
-   anthropic_backend_stream_state_t ir_bst;
-   char *reasoning;         /* accumulated thinking text, NULL until any arrives */
-   size_t reasoning_len;    /* bytes used (excluding the NUL) */
-   int reasoning_truncated; /* hit RELAY_REASONING_MAX: present but incomplete */
-   int reasoning_giveup;    /* parser rejected the stream: nothing trustworthy */
-} anthropic_relay_ctx_t;
+   size_t data_len, data_cap;
+   int emitted, saw_invalid_request, failed, saw_reasoning;
+   anthropic_backend_stream_state_t backend;
+   anthropic_stream_state_t frontend;
+   const char *model;
+   char *message_id;
+} native_ir_stream_ctx_t;
+
+static int messages_publish_delta(const aimee_delta_t *delta)
+{
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_DELTA, .role = "assistant", .delta = delta};
+   return aimee_ir_session_emit(&event);
+}
 
 static int prov_line_cb(const char *line, size_t len, void *ud)
 {
@@ -857,6 +848,11 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
             }
             if (n)
             {
+               if (messages_publish_delta(&terminal))
+               {
+                  c->ir_failed = 1;
+                  return -1;
+               }
                c->ir_usage_out = terminal.usage_out;
                anthropic_delta_emit(&terminal, &c->ir_ast, c->msg_id, c->model, c->emit,
                                     c->emit_ctx);
@@ -884,6 +880,12 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
             }
             for (int i = 0; i < n; i++)
             {
+               if (messages_publish_delta(&deltas[i]))
+               {
+                  c->ir_failed = 1;
+                  cJSON_Delete(chunk);
+                  return -1;
+               }
                if (deltas[i].type == AIMEE_DELTA_TURN_STOP)
                   c->ir_usage_out = deltas[i].usage_out;
                anthropic_delta_emit(&deltas[i], &c->ir_ast, c->msg_id, c->model, c->emit,
@@ -907,19 +909,19 @@ static int prov_chunk_cb(const char *data, size_t len, void *ud)
    return sse_parser_feed(&c->parser, data, len, prov_line_cb, c);
 }
 
-static int relay_append_data(anthropic_relay_ctx_t *c, const char *data)
+static int native_ir_append_data(native_ir_stream_ctx_t *c, const char *data)
 {
-   size_t add = data ? strlen(data) : 0;
-   size_t sep = c->data_len ? 1 : 0;
+   size_t add = strlen(data), sep = c->data_len ? 1 : 0;
+   /* Bound an individual native frame before decoding it. */
+   if (add + sep > 16 * 1024 * 1024 || c->data_len > 16 * 1024 * 1024 - add - sep)
+      return -1;
    size_t need = c->data_len + sep + add + 1;
-   char *tmp;
-
    if (need > c->data_cap)
    {
       size_t cap = c->data_cap ? c->data_cap : 4096;
       while (cap < need)
          cap *= 2;
-      tmp = realloc(c->data, cap);
+      char *tmp = realloc(c->data, cap);
       if (!tmp)
          return -1;
       c->data = tmp;
@@ -927,180 +929,93 @@ static int relay_append_data(anthropic_relay_ctx_t *c, const char *data)
    }
    if (sep)
       c->data[c->data_len++] = '\n';
-   if (add)
-   {
-      memcpy(c->data + c->data_len, data, add);
-      c->data_len += add;
-   }
-   c->data[c->data_len] = '\0';
+   memcpy(c->data + c->data_len, data, add + 1);
+   c->data_len += add;
    return 0;
 }
 
-/* The model's reasoning is accumulated only to be MATCHED against, never replayed,
- * so it is bounded: the cap costs recall of late thought, where an unbounded buffer
- * would let a long chain grow the proxy's per-stream memory without limit. A capped
- * buffer is FLAGGED, never silently short. */
-#define RELAY_REASONING_MAX 16384
-
-static void relay_append_reasoning(anthropic_relay_ctx_t *c, const char *s)
+static int native_ir_flush(native_ir_stream_ctx_t *c)
 {
-   size_t add = strlen(s);
-   if (!add)
-      return;
-   if (c->reasoning_len >= RELAY_REASONING_MAX)
+   if (c->failed)
+      return -1;
+   if (!c->data_len)
    {
-      c->reasoning_truncated = 1;
-      return;
-   }
-   if (add > RELAY_REASONING_MAX - c->reasoning_len)
-   {
-      add = RELAY_REASONING_MAX - c->reasoning_len;
-      c->reasoning_truncated = 1;
-   }
-   if (!c->reasoning)
-   {
-      /* allocated lazily: a turn with no thinking pays nothing */
-      c->reasoning = malloc(RELAY_REASONING_MAX + 1);
-      if (!c->reasoning)
-         return;
-      c->reasoning[0] = '\0';
-   }
-   memcpy(c->reasoning + c->reasoning_len, s, add);
-   c->reasoning_len += add;
-   c->reasoning[c->reasoning_len] = '\0';
-}
-
-/* Observation-only tap: feed the reassembled Anthropic SSE through the IR backend
- * parser and accumulate the model's reasoning. PARSING IS NOT MUTATING -- the caller
- * still emits the provider's bytes verbatim, so the exact-parity passthrough this
- * relay exists to provide is untouched.
- *
- * On ANY parser rejection the accumulated text is discarded and the tap gives up for
- * the rest of the stream. Half-parsed reasoning is worse than none: a consumer that
- * acts on a fragment it cannot trust is exactly the failure this feature must avoid,
- * so the tap abstains rather than hand on something questionable. */
-static void relay_observe_reasoning(anthropic_relay_ctx_t *c, const char *event, const char *data)
-{
-   if (c->reasoning_giveup || !data || !data[0])
-      return;
-   /* Hot path: a text content_block_delta arrives once per token chunk, and parsing
-    * every one would put a JSON parse in front of every streamed token. A real
-    * thinking event always contains the substring, so this pre-filter is
-    * conservative -- it can cost a needless parse, never a missed delta. */
-   if (strcmp(event, "content_block_delta") == 0 && !strstr(data, "thinking"))
-      return;
-   cJSON *payload = cJSON_Parse(data);
-   if (!payload)
-      return; /* unparseable: still relayed verbatim, just nothing to observe */
-   aimee_delta_t d[2];
-   int n = anthropic_stream_to_deltas(event, payload, &c->ir_bst, d, 2);
-   if (n < 0)
-   {
-      c->reasoning_giveup = 1;
-      free(c->reasoning);
-      c->reasoning = NULL;
-      c->reasoning_len = 0;
-   }
-   for (int i = 0; i < n; i++)
-      if (d[i].type == AIMEE_DELTA_BLOCK_DELTA && d[i].kind == AIMEE_BLK_THINKING &&
-          d[i].text_delta)
-         relay_append_reasoning(c, d[i].text_delta);
-   cJSON_Delete(payload);
-}
-
-/* Observe usage on the relayed Anthropic SSE without altering it. message_start
- * carries input + cache tokens under message.usage; message_delta carries the
- * final cumulative output_tokens under usage. */
-static void relay_capture_usage(anthropic_relay_ctx_t *c, const char *event, const char *data)
-{
-   if (!data || !data[0])
-      return;
-   if (strcmp(event, "message_start") != 0 && strcmp(event, "message_delta") != 0)
-      return;
-   cJSON *root = cJSON_Parse(data);
-   if (!root)
-      return;
-   cJSON *msg = cJSON_GetObjectItem(root, "message");
-   cJSON *usage = cJSON_GetObjectItem(msg ? msg : root, "usage");
-   if (cJSON_IsObject(usage))
-   {
-      cJSON *it;
-      if ((it = cJSON_GetObjectItem(usage, "input_tokens")) && cJSON_IsNumber(it))
-         c->input_tokens = it->valueint;
-      if ((it = cJSON_GetObjectItem(usage, "output_tokens")) && cJSON_IsNumber(it))
-         c->output_tokens = it->valueint;
-      if ((it = cJSON_GetObjectItem(usage, "cache_creation_input_tokens")) && cJSON_IsNumber(it))
-         c->cache_write_tokens = it->valueint;
-      if ((it = cJSON_GetObjectItem(usage, "cache_read_input_tokens")) && cJSON_IsNumber(it))
-         c->cache_read_tokens = it->valueint;
-   }
-   cJSON_Delete(root);
-}
-
-static void relay_flush(anthropic_relay_ctx_t *c)
-{
-   const char *event = c->event[0] ? c->event : "message";
-
-   if (c->data_len > 0 && strcmp(c->data, "[DONE]") != 0)
-   {
-      /* Classify BEFORE emitting: the bytes go to the client either way, but a
-         frame blaming the request is what tells the breaker this session's
-         reduced payload is the suspect. */
-      if (gw_stream_anthropic_error_is_invalid_request(c->data))
-         c->saw_invalid_request = 1;
-      relay_capture_usage(c, event, c->data);
-      relay_observe_reasoning(c, event, c->data);
-      c->emit(c->emit_ctx, event, c->data); /* provider bytes, unchanged */
-      c->emitted++;
-   }
-   c->event[0] = '\0';
-   c->data_len = 0;
-   if (c->data)
-      c->data[0] = '\0';
-}
-
-static void relay_emit_transport_error(anthropic_relay_ctx_t *c, int status)
-{
-   char data[192];
-
-   snprintf(data, sizeof(data),
-            "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
-            "\"message\":\"primary provider stream failed with status %d\"}}",
-            status);
-   c->emit(c->emit_ctx, "error", data);
-   c->emitted++;
-}
-
-static int anthropic_relay_line_cb(const char *line, size_t len, void *ud)
-{
-   anthropic_relay_ctx_t *c = (anthropic_relay_ctx_t *)ud;
-   if (len == 0)
-   {
-      relay_flush(c);
+      c->event[0] = 0;
       return 0;
    }
-   if (strncmp(line, "event:", 6) == 0)
+   const char *end = NULL;
+   cJSON *payload = cJSON_ParseWithLengthOpts(c->data, c->data_len, &end, 0);
+   if (end)
+      while (end < c->data + c->data_len &&
+             (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n'))
+         end++;
+   const char *type = jo_cstr(payload, "type");
+   const char *event = c->event[0] ? c->event : type;
+   aimee_delta_t delta;
+   int n = payload && end == c->data + c->data_len && (!type[0] || !strcmp(type, event))
+               ? anthropic_stream_to_deltas(event, payload, &c->backend, &delta, 1)
+               : -1;
+   if (gw_stream_anthropic_error_is_invalid_request(c->data))
+      c->saw_invalid_request = 1;
+   if (n > 0 && delta.type == AIMEE_DELTA_TURN_START)
+   {
+      const cJSON *message = cJSON_GetObjectItemCaseSensitive(payload, "message");
+      const char *id = jo_cstr(message, "id");
+      c->message_id = strdup(id);
+      if (!c->message_id)
+         n = -1;
+   }
+   if (n > 0 && messages_publish_delta(&delta))
+      n = -1;
+   if (n > 0)
+   {
+      if (delta.kind == AIMEE_BLK_THINKING && (delta.text_delta || delta.redacted_content))
+         c->saw_reasoning = 1;
+      c->emitted +=
+          anthropic_delta_emit(&delta, &c->frontend, c->message_id, c->model, c->emit, c->emit_ctx);
+      if (delta.type == AIMEE_DELTA_ERROR)
+         c->failed = 1;
+   }
+   if (n < 0)
+      c->failed = 1;
+   cJSON_Delete(payload);
+   c->event[0] = 0;
+   c->data_len = 0;
+   c->data[0] = 0;
+   return c->failed ? -1 : 0;
+}
+
+static int native_ir_line_cb(const char *line, size_t len, void *ud)
+{
+   native_ir_stream_ctx_t *c = ud;
+   if (!len)
+      return native_ir_flush(c);
+   if (len >= 6 && !strncmp(line, "event:", 6))
    {
       const char *p = line + 6;
-      while (*p == ' ')
+      if (*p == ' ')
          p++;
-      snprintf(c->event, sizeof(c->event), "%s", p);
-      return 0;
+      if (strlen(p) >= sizeof c->event)
+         return -1;
+      snprintf(c->event, sizeof c->event, "%s", p);
    }
-   if (strncmp(line, "data:", 5) == 0)
+   else if (len >= 5 && !strncmp(line, "data:", 5))
    {
       const char *p = line + 5;
-      while (*p == ' ')
+      if (*p == ' ')
          p++;
-      return relay_append_data(c, p);
+      return native_ir_append_data(c, p);
    }
    return 0;
 }
 
-static int anthropic_relay_chunk_cb(const char *data, size_t len, void *ud)
+static int native_ir_chunk_cb(const char *data, size_t len, void *ud)
 {
-   anthropic_relay_ctx_t *c = (anthropic_relay_ctx_t *)ud;
-   return sse_parser_feed(&c->parser, data, len, anthropic_relay_line_cb, c);
+   native_ir_stream_ctx_t *c = ud;
+   int rc = sse_parser_feed(&c->parser, data, len, native_ir_line_cb, c);
+   if (rc)
+      c->failed = 1;
+   return rc;
 }
 
 static void messages_stream_pipeline_error(server_http_sse_event_emit emit, void *ctx)
@@ -1162,65 +1077,52 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
    free(frame);
 }
 
-/* Native Anthropic streaming relay: forward the upstream Anthropic SSE
- * verbatim through the mutation breaker, then record realized/partial cost.
- * Extracted from messages_stream(); goto cleanup became return. */
-/* Returns the upstream HTTP status. `invalid_frame_out` reports an upstream
- * error frame that blamed the request, which a 200-then-fail stream cannot show
- * any other way. */
-static int messages_stream_native_relay(const char *url, const char *auth, const void *prov_body,
-                                        size_t prov_body_len, const char *extra, agent_t *ag,
-                                        const char *model, server_http_sse_event_emit emit,
-                                        void *ctx, int *invalid_frame_out)
+/* Native frames are admitted and persisted before the client renderer sees them. */
+static int messages_stream_native_ir(const char *url, const char *auth, const void *prov_body,
+                                     size_t prov_body_len, const char *extra, agent_t *ag,
+                                     const char *model, server_http_sse_event_emit emit, void *ctx,
+                                     int *invalid_frame_out)
 {
-   anthropic_relay_ctx_t relay;
-   int stream_status;
-   memset(&relay, 0, sizeof(relay));
-   sse_parser_init(&relay.parser);
-   anthropic_backend_stream_state_init(&relay.ir_bst);
-   relay.emit = emit;
-   relay.emit_ctx = ctx;
-   stream_status = wire_fence_post_stream(
-       url, auth, prov_body, prov_body_len, anthropic_relay_chunk_cb, &relay, ag->timeout_ms,
-       extra[0] ? extra : NULL, ag->provider, ag->model, WIRE_FENCE_ANTHROPIC_MESSAGES);
-   if (stream_status == HTTP_RETRY_ADMISSION_REFUSED)
-   {
+   native_ir_stream_ctx_t stream = {.emit = emit, .emit_ctx = ctx, .model = model};
+   sse_parser_init(&stream.parser);
+   anthropic_backend_stream_state_init(&stream.backend);
+   int status = wire_fence_post_stream(url, auth, prov_body, prov_body_len, native_ir_chunk_cb,
+                                       &stream, ag->timeout_ms, extra[0] ? extra : NULL,
+                                       ag->provider, ag->model, WIRE_FENCE_ANTHROPIC_MESSAGES);
+   if (status == HTTP_RETRY_ADMISSION_REFUSED)
       messages_stream_pipeline_error(emit, ctx);
-      sse_parser_free(&relay.parser);
-      free(relay.data);
-      free(relay.reasoning);
-      if (invalid_frame_out)
-         *invalid_frame_out = 0;
-      return stream_status;
-   }
-   relay_flush(&relay);
-   if (stream_status != 200)
+   else if (status != 200 || stream.failed || stream.parser.buf_len || stream.data_len ||
+            !stream.backend.terminal_emitted)
    {
-      relay_emit_transport_error(&relay, stream_status);
+      if (!stream.backend.failed)
+      {
+         aimee_delta_t error = {
+             .type = AIMEE_DELTA_ERROR,
+             .error_message =
+                 "Provider stream failed canonical admission or ended before completion"};
+         if (!aimee_ir_session_capture_failed())
+            messages_publish_delta(&error);
+         anthropic_delta_emit(&error, &stream.frontend, stream.message_id, model, emit, ctx);
+      }
+      status = -1;
    }
-   /* Cost accounting for the native Anthropic streaming ingress, from the
-    * usage tapped off the relayed SSE. A clean 200 is realized spend; an
-    * aborted stream that still observed usage is recorded as partial so the
-    * observed tokens are not silently lost. */
-   if ((relay.input_tokens > 0 || relay.output_tokens > 0) && agent_ingress_accounting_enabled())
-      agent_ingress_record_cost(ag->name, ag->model, model, NULL, relay.input_tokens,
-                                relay.output_tokens, relay.cache_write_tokens,
-                                relay.cache_read_tokens, "anthropic-ingress",
-                                stream_status == 200 ? "realized" : "partial");
-   /* Record what the reasoning tap saw. Nothing consumes the text yet -- these two
-    * counters ARE the deliverable of this step: they measure how often a relayed
-    * turn carries readable reasoning at all, which is what decides whether
-    * thought-triggered recall is worth building on this path. */
-   if (relay.reasoning_len > 0)
-      aimee_ir_metric_inc(AIMEE_IR_M_REASONING_OBSERVED, AIMEE_WIRE_ANTHROPIC);
-   if (relay.reasoning_truncated || relay.reasoning_giveup)
-      aimee_ir_metric_inc(AIMEE_IR_M_REASONING_INCOMPLETE, AIMEE_WIRE_ANTHROPIC);
-   sse_parser_free(&relay.parser);
-   free(relay.data);
-   free(relay.reasoning);
+   if ((stream.backend.pending_usage_in || stream.backend.pending_usage_out) &&
+       agent_ingress_accounting_enabled())
+      agent_ingress_record_cost(
+          ag->name, ag->model, model, NULL, (int)stream.backend.pending_usage_in,
+          (int)stream.backend.pending_usage_out, (int)stream.backend.pending_cache_write,
+          (int)stream.backend.pending_cache_read, "anthropic-ingress",
+          status == 200 ? "realized" : "partial");
+   if (stream.saw_reasoning)
+      aimee_ir_metric_inc(status == 200 ? AIMEE_IR_M_REASONING_OBSERVED
+                                        : AIMEE_IR_M_REASONING_INCOMPLETE,
+                          AIMEE_WIRE_ANTHROPIC);
    if (invalid_frame_out)
-      *invalid_frame_out = relay.saw_invalid_request;
-   return stream_status;
+      *invalid_frame_out = stream.saw_invalid_request;
+   sse_parser_free(&stream.parser);
+   free(stream.data);
+   free(stream.message_id);
+   return status;
 }
 
 /* Slice-5 IR-delta streaming relay: drive the OpenAI-chat -> Anthropic SSE relay
@@ -1258,6 +1160,12 @@ static int messages_stream_ir_relay(const char *url, const char *auth, const voi
           pc.ir_failed || ir_status != 200 ? -1 : openai_stream_finish(&pc.ir_ost, &terminal, 1);
       if (n > 0)
       {
+         if (messages_publish_delta(&terminal))
+         {
+            terminal = (aimee_delta_t){.type = AIMEE_DELTA_ERROR,
+                                       .error_message = "Canonical stream persistence failed"};
+            ir_status = -1;
+         }
          pc.ir_usage_out = terminal.usage_out;
          anthropic_delta_emit(&terminal, &pc.ir_ast, msg_id, model, emit, ctx);
       }
@@ -1452,8 +1360,8 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    if (driver_is_anthropic(driver))
    {
-      stream_status = messages_stream_native_relay(url, auth, wire_prov_body, wire_prov_body_len,
-                                                   extra, ag, model, emit, ctx, &stream_bad_frame);
+      stream_status = messages_stream_native_ir(url, auth, wire_prov_body, wire_prov_body_len,
+                                                extra, ag, model, emit, ctx, &stream_bad_frame);
       goto cleanup;
    }
 

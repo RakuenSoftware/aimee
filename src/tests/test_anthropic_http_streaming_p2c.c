@@ -544,12 +544,8 @@ static void test_streaming_anthropic_policy_on_upstream_error_returns_error(void
    PASS("streaming_anthropic_policy_on_upstream_error_returns_error");
 }
 
-/* Policy OFF regression canary: today's incremental raw byte relay runs
- * unchanged. We send a fake Anthropic SSE upstream payload and assert
- * the events pass through verbatim (the relay emits the parsed data
- * payload as a "message" event — its event name is the SSE `event:` line
- * or "message" by default). */
-static void test_streaming_anthropic_policy_off_is_byte_neutral(void)
+/* Policy OFF still admits native frames through canonical IR. */
+static void test_streaming_anthropic_policy_off_uses_ir(void)
 {
    const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
    replay_cap_t cap;
@@ -557,9 +553,11 @@ static void test_streaming_anthropic_policy_off_is_byte_neutral(void)
    reset_capture();
    g_driver = &driver;
    g_prevent = 0;
-   g_stream_payload = "event: message_start\ndata: "
-                      "{\"type\":\"message_start\",\"message\":{\"id\":\"m1\"}}\n\n"
-                      "event: message_stop\ndata: {}\n\n";
+   g_stream_payload =
+       "event: message_start\ndata: "
+       "{\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"role\":\"assistant\"}}\n\n"
+       "event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+       "event: message_stop\ndata: {}\n\n";
 
    memset(&cap, 0, sizeof(cap));
    messages_stream("{\"model\":\"ignored\",\"max_tokens\":16,"
@@ -567,7 +565,7 @@ static void test_streaming_anthropic_policy_off_is_byte_neutral(void)
                    "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
                    replay_capture, &cap);
 
-   /* Today the relay emits at least message_start + message_stop verbatim. */
+   /* Native identity and the admitted completion survive client rendering. */
    int saw_start = 0, saw_stop = 0;
    for (int i = 0; i < cap.count; i++)
    {
@@ -808,7 +806,10 @@ static void test_native_completion_followup_reaches_provider_system(void)
 
    reset_capture();
    g_driver = &driver;
-   g_stream_payload = "event: message_stop\ndata: {}\n\n";
+   g_stream_payload =
+       "event: message_start\ndata: {\"message\":{\"id\":\"m1\",\"role\":\"assistant\"}}\n\n"
+       "event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+       "event: message_stop\ndata: {}\n\n";
    memset(&cap, 0, sizeof(cap));
    messages_stream("{\"model\":\"ignored\",\"max_tokens\":16,\"stream\":true,"
                    "\"system\":\"existing system\","
@@ -832,7 +833,7 @@ int main(void)
    test_streaming_anthropic_police_drops_subagent_tool_use();
    test_streaming_anthropic_police_on_no_tool_use_passthrough();
    test_streaming_anthropic_policy_on_upstream_error_returns_error();
-   test_streaming_anthropic_policy_off_is_byte_neutral();
+   test_streaming_anthropic_policy_off_uses_ir();
    test_streaming_anthropic_partial_drop_preserves_max_tokens();
    test_streaming_openai_police_drops_subagent_tool_use();
    test_streaming_openai_police_on_no_tool_use_passthrough();

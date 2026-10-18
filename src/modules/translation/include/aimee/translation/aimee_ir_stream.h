@@ -93,11 +93,15 @@ typedef struct
 {
    aimee_block_type_t kind[AIMEE_STREAM_MAX_TOOLS]; /* per content-block index, block kind */
    int kind_set[AIMEE_STREAM_MAX_TOOLS];            /* 1 once kind[i] recorded */
-   int started;                                     /* message_start seen */
-   int terminal_emitted;                            /* TURN_STOP emitted */
-   aimee_stop_reason_t pending_stop_reason;         /* from message_delta */
-   long pending_usage_in;                           /* from message_start */
-   long pending_usage_out;                          /* from message_delta */
+   int closed[AIMEE_STREAM_MAX_TOOLS];
+   int stop_seen;
+   char raw_stop_reason[128]; /* native enum; oversized values fail admission */
+   int failed;
+   int started;                             /* message_start seen */
+   int terminal_emitted;                    /* TURN_STOP emitted */
+   aimee_stop_reason_t pending_stop_reason; /* from message_delta */
+   long pending_usage_in;                   /* from message_start */
+   long pending_usage_out;                  /* from message_delta */
    long pending_cache_read, pending_cache_write, pending_reasoning;
 } anthropic_backend_stream_state_t;
 
@@ -106,7 +110,7 @@ void anthropic_backend_stream_state_init(anthropic_backend_stream_state_t *st);
 /* Convert one Anthropic SSE event into up to `max` IR deltas (updates st). Returns
  * the number written (>=0, <=max), or -1 on a structurally-malformed KNOWN event
  * (caller drops the stream). An unknown event_type -> 0 (forward-compat ignore), as
- * do `ping` and a not-yet-modelled content_block_delta variant. LIFETIME: like the
+ * does `ping`. Unsupported content variants fail explicitly. LIFETIME: like the
  * other backend parsers, the emitted deltas' const char* fields BORROW into `payload`
  * (or, for an error event with no message, into a string literal); `payload` must
  * outlive the deltas' use. An out-of-range content-block index returns -1, so no

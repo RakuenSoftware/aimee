@@ -311,6 +311,7 @@ typedef struct
    const struct cJSON *tool_input;  /* BLOCK_START initial arguments; borrowed */
    const char *tool_args_delta;     /* BLOCK_DELTA for tool_use argument JSON fragment */
    aimee_stop_reason_t stop_reason; /* TURN_STOP */
+   const char *raw_stop_reason;     /* native terminal spelling, borrowed */
    long usage_in, usage_out;        /* TURN_STOP */
    long usage_cache_read, usage_cache_write, usage_reasoning;
    const char *error_message; /* ERROR */

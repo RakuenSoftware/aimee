@@ -508,9 +508,7 @@ void anthropic_backend_stream_state_init(anthropic_backend_stream_state_t *st)
    if (!st)
       return;
    memset(st, 0, sizeof *st);
-   /* Absent a stop_reason (message_stop with no preceding final message_delta), fall
-    * back to end_turn -- the same default openai's finish_to_stop applies to NULL. */
-   st->pending_stop_reason = AIMEE_STOP_END_TURN;
+   st->pending_stop_reason = AIMEE_STOP_UNKNOWN;
 }
 
 int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
@@ -519,6 +517,8 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
    if (!event_type || !st || !out || max <= 0)
       return 0;
 
+   if (st->failed)
+      return -1;
    if (strcmp(event_type, "ping") == 0)
       return 0;
 
@@ -540,6 +540,9 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
          return -1;
       if (aimee_ir_read_usage(usage, "cache_creation_input_tokens", &st->pending_cache_write) < 0)
          return -1;
+      if (aimee_ir_read_usage(usage, "output_tokens", &st->pending_usage_out) < 0)
+         return -1;
+      out[0].usage_out = st->pending_usage_out;
       out[0].usage_in = st->pending_usage_in;
       out[0].usage_cache_read = st->pending_cache_read;
       out[0].usage_cache_write = st->pending_cache_write;
@@ -550,7 +553,8 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
    if (strcmp(event_type, "content_block_start") == 0)
    {
       int idx;
-      if (!payload || anthropic_index(payload, &idx) != 0)
+      if (!payload || !st->started || st->terminal_emitted || st->stop_seen ||
+          anthropic_index(payload, &idx) != 0)
          return -1;
       const cJSON *cb = cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "content_block");
       if (!cJSON_IsObject(cb) || st->kind_set[idx])
@@ -558,7 +562,9 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
       aimee_block_type_t kind = anthropic_block_kind(ostr(cb, "type"));
       const char *tool_id = (kind == AIMEE_BLK_TOOL_USE) ? ostr(cb, "id") : NULL;
       const char *tool_name = (kind == AIMEE_BLK_TOOL_USE) ? ostr(cb, "name") : NULL;
-      if (kind == AIMEE_BLK_TOOL_USE && (!tool_id || !tool_name))
+      if (kind == AIMEE_BLK_TOOL_USE &&
+          (!tool_id || !tool_id[0] || !tool_name || !tool_name[0] ||
+           !cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(cb, "input"))))
          return -1; /* a tool_use block with no id/name cannot be answered */
       memset(&out[0], 0, sizeof out[0]);
       out[0].type = AIMEE_DELTA_BLOCK_START;
@@ -586,10 +592,11 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
    if (strcmp(event_type, "content_block_delta") == 0)
    {
       int idx;
-      if (!payload || anthropic_index(payload, &idx) != 0)
+      if (!payload || !st->started || st->terminal_emitted || st->stop_seen ||
+          anthropic_index(payload, &idx) != 0)
          return -1;
       const cJSON *delta = cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "delta");
-      if (!cJSON_IsObject(delta) || !st->kind_set[idx])
+      if (!cJSON_IsObject(delta) || !st->kind_set[idx] || st->closed[idx])
          return -1; /* Anthropic always brackets deltas with a content_block_start */
       const char *dtype = ostr(delta, "type");
       if (!dtype)
@@ -620,7 +627,7 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
          args = ostr(delta, "partial_json");
       }
       else
-         return 0; /* a future delta variant -> ignore it, keep the stream */
+         return -1; /* Unmodelled content must never silently disappear. */
 
       if (!text && !args && !signature)
          return -1; /* a KNOWN variant missing its own payload field */
@@ -642,12 +649,14 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
    if (strcmp(event_type, "content_block_stop") == 0)
    {
       int idx;
-      if (!payload || anthropic_index(payload, &idx) != 0 || !st->kind_set[idx])
+      if (!payload || !st->started || st->terminal_emitted || st->stop_seen ||
+          anthropic_index(payload, &idx) != 0 || !st->kind_set[idx] || st->closed[idx])
          return -1;
       memset(&out[0], 0, sizeof out[0]);
       out[0].type = AIMEE_DELTA_BLOCK_STOP;
       out[0].block_id = idx;
       out[0].kind = st->kind[idx];
+      st->closed[idx] = 1;
       return 1;
    }
 
@@ -660,8 +669,17 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
          return -1;
       /* stop_reason is null on a non-final message_delta; only the last one sets it. */
       const char *sr = ostr(delta, "stop_reason");
-      if (sr)
+      if (sr && sr[0])
+      {
+         if (st->stop_seen || strlen(sr) >= sizeof st->raw_stop_reason)
+            return -1;
+         for (int i = 0; i < AIMEE_STREAM_MAX_TOOLS; i++)
+            if (st->kind_set[i] && !st->closed[i])
+               return -1;
+         strcpy(st->raw_stop_reason, sr);
+         st->stop_seen = 1;
          st->pending_stop_reason = aimee_stop_reason_parse(sr);
+      }
       if (aimee_ir_read_usage(cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "usage"),
                               "output_tokens", &st->pending_usage_out) < 0)
          return -1;
@@ -680,11 +698,12 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
 
    if (strcmp(event_type, "message_stop") == 0)
    {
-      if (!st->started || st->terminal_emitted)
+      if (!st->started || !st->stop_seen || st->terminal_emitted)
          return -1;
       memset(&out[0], 0, sizeof out[0]);
       out[0].type = AIMEE_DELTA_TURN_STOP;
       out[0].stop_reason = st->pending_stop_reason;
+      out[0].raw_stop_reason = st->raw_stop_reason;
       out[0].usage_in = st->pending_usage_in;
       out[0].usage_out = st->pending_usage_out;
       out[0].usage_cache_read = st->pending_cache_read;
@@ -701,6 +720,7 @@ int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
       memset(&out[0], 0, sizeof out[0]);
       out[0].type = AIMEE_DELTA_ERROR;
       out[0].error_message = msg ? msg : "anthropic stream error";
+      st->failed = 1;
       return 1;
    }
 
@@ -853,7 +873,9 @@ static int delta_build_events(const aimee_delta_t *d, anthropic_stream_state_t *
       cJSON *o = cJSON_CreateObject();
       cJSON_AddStringToObject(o, "type", "message_delta");
       cJSON *dl = cJSON_AddObjectToObject(o, "delta");
-      cJSON_AddStringToObject(dl, "stop_reason", aimee_stop_reason_name(d->stop_reason));
+      cJSON_AddStringToObject(dl, "stop_reason",
+                              d->raw_stop_reason ? d->raw_stop_reason
+                                                 : aimee_stop_reason_name(d->stop_reason));
       cJSON_AddNullToObject(dl, "stop_sequence");
       cJSON *u = cJSON_AddObjectToObject(o, "usage");
       cJSON_AddNumberToObject(u, "output_tokens", (double)d->usage_out);

@@ -466,6 +466,7 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
            cJSON_AddNumberToObject(out, "usage_out", delta->usage_out) != NULL;
    if (delta->type == AIMEE_DELTA_TURN_STOP)
    {
+      ok = ok && add_string(out, "raw_stop_reason", delta->raw_stop_reason);
       if (delta->usage_cache_read)
          ok = ok &&
               cJSON_AddNumberToObject(out, "usage_cache_read", delta->usage_cache_read) != NULL;
@@ -639,6 +640,7 @@ int aimee_ir_session_emit_buffered_response(const aimee_response_t *response,
       return rc;
    delta = (aimee_delta_t){.type = AIMEE_DELTA_TURN_STOP,
                            .stop_reason = response->stop_reason,
+                           .raw_stop_reason = response->raw_stop_reason,
                            .usage_in = response->usage_in,
                            .usage_out = response->usage_out,
                            .usage_cache_read = response->usage_cache_read,

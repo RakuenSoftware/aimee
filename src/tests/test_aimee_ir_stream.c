@@ -239,9 +239,13 @@ int main(void)
       assert(n == 1 && strcmp(d[0].tool_args_delta, "{\"a\":") == 0);
       A_DONE();
 
-      /* a future delta variant is ignored rather than dropping the stream */
+      /* Unsupported content variants fail instead of losing model output. */
       A_FEED("content_block_delta", "{\"index\":1,\"delta\":{\"type\":\"future_delta\"}}");
-      assert(n == 0);
+      assert(n == -1);
+      A_DONE();
+
+      A_FEED("content_block_stop", "{\"index\":1}");
+      assert(n == 1);
       A_DONE();
 
       A_FEED("message_delta",
@@ -252,6 +256,7 @@ int main(void)
       A_FEED("message_stop", "{}");
       assert(n == 1 && d[0].type == AIMEE_DELTA_TURN_STOP);
       assert(d[0].stop_reason == AIMEE_STOP_TOOL_USE);
+      assert(!strcmp(d[0].raw_stop_reason, "tool_use"));
       assert(d[0].usage_in == 7 && d[0].usage_out == 42);
       A_DONE();
 
@@ -291,6 +296,8 @@ int main(void)
 
       /* a delta whose variant contradicts the block's declared kind */
       anthropic_backend_stream_state_init(&st);
+      A_FEED("message_start", "{\"message\":{\"role\":\"assistant\"}}");
+      A_DONE();
       A_FEED("content_block_start", "{\"index\":0,\"content_block\":{\"type\":\"text\"}}");
       assert(n == 1);
       A_DONE();
@@ -301,6 +308,8 @@ int main(void)
 
       /* a KNOWN variant missing its own payload field */
       anthropic_backend_stream_state_init(&st);
+      A_FEED("message_start", "{\"message\":{\"role\":\"assistant\"}}");
+      A_DONE();
       A_FEED("content_block_start", "{\"index\":0,\"content_block\":{\"type\":\"text\"}}");
       assert(n == 1);
       A_DONE();
@@ -333,6 +342,7 @@ int main(void)
       assert(n == 1 && d[0].type == AIMEE_DELTA_ERROR &&
              strcmp(d[0].error_message, "overloaded") == 0);
       A_DONE();
+      anthropic_backend_stream_state_init(&st);
       A_FEED("error", "{}");
       assert(n == 1 && d[0].type == AIMEE_DELTA_ERROR && d[0].error_message);
       A_DONE();

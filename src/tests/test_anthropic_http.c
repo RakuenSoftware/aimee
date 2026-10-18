@@ -475,229 +475,118 @@ static void test_explicit_unknown_model_is_rejected(void)
    PASS("explicit_unknown_model_is_rejected");
 }
 
-static void test_anthropic_relay_round_trip(void)
+static const char *native_empty_stream =
+    "event: message_start\ndata: "
+    "{\"type\":\"message_start\",\"message\":{\"id\":\"native-id\",\"role\":\"assistant\"}}\n\n"
+    "event: message_delta\ndata: "
+    "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+    "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+
+static int stream_sink_calls, stream_sink_fail_at;
+static int stream_sink(const aimee_session_event_t *event, void *context)
 {
-   anthropic_relay_ctx_t relay;
-   emit_capture_t cap;
-   const char *chunk1 = "event: content_block_delta\n"
-                        "data: {\"type\":\"content_block_delta\"";
-   const char *chunk2 = "}\n"
-                        "data: {\"delta\":{\"text\":\"x\"}}\n\n"
-                        "data: {\"type\":\"message_delta\"}\n\n"
-                        "event: ping\n"
-                        "data: [DONE]\n\n";
-
-   memset(&relay, 0, sizeof(relay));
-   memset(&cap, 0, sizeof(cap));
-   sse_parser_init(&relay.parser);
-   relay.emit = cap_emit;
-   relay.emit_ctx = &cap;
-
-   assert(anthropic_relay_chunk_cb(chunk1, strlen(chunk1), &relay) == 0);
-   assert(anthropic_relay_chunk_cb(chunk2, strlen(chunk2), &relay) == 0);
-   relay_flush(&relay);
-
-   assert(cap.count == 2);
-   assert(strcmp(cap.events[0], "content_block_delta") == 0);
-   assert(strcmp(cap.data[0], "{\"type\":\"content_block_delta\"}\n{\"delta\":{\"text\":\"x\"}}") ==
-          0);
-   assert(strcmp(cap.events[1], "message") == 0);
-   assert(strcmp(cap.data[1], "{\"type\":\"message_delta\"}") == 0);
-   assert(relay.emitted == 2);
-
-   sse_parser_free(&relay.parser);
-   free(relay.data);
-   PASS("anthropic_relay_round_trip");
+   (void)context;
+   assert(event->kind == AIMEE_SESSION_DELTA && event->delta);
+   stream_sink_calls++;
+   return stream_sink_fail_at && stream_sink_calls >= stream_sink_fail_at ? -1 : 0;
 }
 
-static void test_anthropic_relay_usage_capture(void)
+static void test_native_ir_fragmentation_and_persistence(void)
 {
-   anthropic_relay_ctx_t relay;
-   emit_capture_t cap;
-   const char *chunk =
-       "event: message_start\n"
-       "data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-3-5-sonnet\","
-       "\"usage\":{\"input_tokens\":120,\"cache_creation_input_tokens\":30,"
-       "\"cache_read_input_tokens\":10,\"output_tokens\":1}}}\n\n"
-       "event: message_delta\n"
-       "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":55}}\n\n";
-
-   memset(&relay, 0, sizeof(relay));
-   memset(&cap, 0, sizeof(cap));
-   sse_parser_init(&relay.parser);
-   relay.emit = cap_emit;
-   relay.emit_ctx = &cap;
-
-   assert(anthropic_relay_chunk_cb(chunk, strlen(chunk), &relay) == 0);
-   relay_flush(&relay);
-
-   /* Usage tapped off the relayed SSE (the relayed bytes are unchanged): input +
-    * cache from message_start, final output from message_delta. */
-   assert(relay.input_tokens == 120);
-   assert(relay.output_tokens == 55);
-   assert(relay.cache_write_tokens == 30);
-   assert(relay.cache_read_tokens == 10);
-
-   sse_parser_free(&relay.parser);
-   free(relay.data);
-   PASS("anthropic_relay_usage_capture");
-}
-
-/* The reasoning tap must read the model's thought WITHOUT perturbing a single byte
- * of the relayed stream -- that byte-neutrality is the whole reason the native
- * passthrough exists, and is what makes observing it safe. */
-static void test_anthropic_relay_reasoning_tap(void)
-{
-   anthropic_relay_ctx_t relay, control;
-   emit_capture_t cap, cap_control;
-   const char *chunk = "event: message_start\n"
-                       "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\","
-                       "\"usage\":{\"input_tokens\":5}}}\n\n"
-                       "event: content_block_start\n"
-                       "data: {\"type\":\"content_block_start\",\"index\":0,"
-                       "\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n"
-                       "event: content_block_delta\n"
-                       "data: {\"type\":\"content_block_delta\",\"index\":0,"
-                       "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"I need a test\"}}\n\n"
-                       "event: content_block_delta\n"
-                       "data: {\"type\":\"content_block_delta\",\"index\":0,"
-                       "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\" environment\"}}\n\n"
-                       "event: content_block_delta\n"
-                       "data: {\"type\":\"content_block_delta\",\"index\":0,"
-                       "\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig\"}}\n\n"
-                       "event: content_block_stop\n"
-                       "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
-                       "event: content_block_start\n"
-                       "data: {\"type\":\"content_block_start\",\"index\":1,"
-                       "\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"
-                       "event: content_block_delta\n"
-                       "data: {\"type\":\"content_block_delta\",\"index\":1,"
-                       "\"delta\":{\"type\":\"text_delta\",\"text\":\"Answer\"}}\n\n"
-                       "event: message_delta\n"
-                       "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},"
-                       "\"usage\":{\"output_tokens\":9}}\n\n"
-                       "event: message_stop\n"
-                       "data: {\"type\":\"message_stop\"}\n\n";
-
-   memset(&relay, 0, sizeof(relay));
-   memset(&cap, 0, sizeof(cap));
-   sse_parser_init(&relay.parser);
-   anthropic_backend_stream_state_init(&relay.ir_bst);
-   relay.emit = cap_emit;
-   relay.emit_ctx = &cap;
-   assert(anthropic_relay_chunk_cb(chunk, strlen(chunk), &relay) == 0);
-   relay_flush(&relay);
-
-   /* the reasoning is recovered, and ONLY the reasoning -- not the answer text */
-   assert(relay.reasoning);
-   assert(strcmp(relay.reasoning, "I need a test environment") == 0);
-   assert(!relay.reasoning_truncated && !relay.reasoning_giveup);
-   /* usage tapping still works alongside it */
-   assert(relay.input_tokens == 5 && relay.output_tokens == 9);
-
-   /* Byte-neutrality: a relay with the tap disabled (giveup preset) must emit the
-    * exact same events and payloads, event for event. */
-   memset(&control, 0, sizeof(control));
-   memset(&cap_control, 0, sizeof(cap_control));
-   sse_parser_init(&control.parser);
-   control.reasoning_giveup = 1; /* tap off */
-   control.emit = cap_emit;
-   control.emit_ctx = &cap_control;
-   assert(anthropic_relay_chunk_cb(chunk, strlen(chunk), &control) == 0);
-   relay_flush(&control);
-
-   assert(cap.count == cap_control.count);
-   for (int i = 0; i < cap.count; i++)
+   const char *frames =
+       "event: message_start\r\ndata: "
+       "{\"message\":{\"id\":\"opaque-id\",\"role\":\"assistant\",\"usage\":{\"input_tokens\":120,"
+       "\"cache_creation_input_tokens\":30,\"cache_read_input_tokens\":10}}}\r\n\r\n"
+       "event: content_block_start\ndata: "
+       "{\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"initial\"}}\n\n"
+       "event: content_block_delta\ndata: "
+       "{\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"opaque-signature\"}}"
+       "\n\n"
+       "event: content_block_stop\ndata: {\"index\":0}\n\n"
+       "event: content_block_start\ndata: "
+       "{\"index\":1,\"content_block\":{\"type\":\"redacted_thinking\",\"data\":\"opaque-"
+       "redaction\"}}\n\n"
+       "event: content_block_stop\ndata: {\"index\":1}\n\n"
+       "event: content_block_start\ndata: "
+       "{\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"full-tool-id\",\"name\":"
+       "\"Read\",\"input\":{}}}\n\n"
+       "event: content_block_delta\ndata: "
+       "{\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":"
+       "\\\"a\\\"}\"}}\n\n"
+       "event: content_block_stop\ndata: {\"index\":2}\n\n"
+       "event: message_delta\ndata: "
+       "{\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":55}}\n\n"
+       "event: message_stop\ndata: {}\n\n";
+   for (size_t step = 1; step <= 61; step += 15)
    {
-      assert(strcmp(cap.events[i], cap_control.events[i]) == 0);
-      assert(strcmp(cap.data[i], cap_control.data[i]) == 0);
+      emit_capture_t cap = {0};
+      native_ir_stream_ctx_t stream = {.emit = cap_emit, .emit_ctx = &cap, .model = "model"};
+      stream_sink_calls = stream_sink_fail_at = 0;
+      aimee_ir_session_set_sink(stream_sink, NULL);
+      size_t length = strlen(frames);
+      for (size_t at = 0; at < length; at += step)
+         assert(native_ir_chunk_cb(frames + at, length - at < step ? length - at : step, &stream) ==
+                0);
+      assert(stream.backend.terminal_emitted && !stream.failed);
+      assert(stream.backend.pending_usage_in == 120 && stream.backend.pending_usage_out == 55);
+      assert(stream.backend.pending_cache_write == 30 && stream.backend.pending_cache_read == 10);
+      assert(stream_sink_calls == 10 && cap.count == 11);
+      assert(strstr(cap.data[0], "opaque-id"));
+      assert(strstr(cap.data[1], "initial"));
+      assert(strstr(cap.data[2], "opaque-signature"));
+      assert(strstr(cap.data[4], "opaque-redaction"));
+      assert(!strcmp(cap.events[cap.count - 1], "message_stop"));
+      aimee_ir_session_set_sink(NULL, NULL);
+      free(stream.data);
+      free(stream.message_id);
+      sse_parser_free(&stream.parser);
    }
-   assert(!control.reasoning);
-
-   sse_parser_free(&relay.parser);
-   free(relay.data);
-   free(relay.reasoning);
-   sse_parser_free(&control.parser);
-   free(control.data);
-   PASS("anthropic_relay_reasoning_tap");
+   /* A rejected durable append prevents that delta and all later client output. */
+   emit_capture_t cap = {0};
+   native_ir_stream_ctx_t stream = {.emit = cap_emit, .emit_ctx = &cap};
+   stream_sink_calls = 0;
+   stream_sink_fail_at = 2;
+   aimee_ir_session_set_sink(stream_sink, NULL);
+   assert(native_ir_chunk_cb(frames, strlen(frames), &stream) < 0);
+   assert(cap.count == 1 && stream.failed && aimee_ir_session_capture_failed());
+   aimee_ir_session_set_sink(NULL, NULL);
+   stream_sink_fail_at = 0;
+   free(stream.data);
+   free(stream.message_id);
+   sse_parser_free(&stream.parser);
+   PASS("native IR fragmentation preserves signed state and persists before rendering");
 }
 
-/* A stream the parser rejects must yield NOTHING rather than a partial thought:
- * acting on a fragment is the failure mode this tap has to avoid. */
-static void test_anthropic_relay_reasoning_abstains_on_bad_stream(void)
+static void test_native_ir_refuses_incomplete_and_invalid_streams(void)
 {
-   anthropic_relay_ctx_t relay;
-   emit_capture_t cap;
-   /* real reasoning first, then a malformed KNOWN event (index out of range) */
-   const char *chunk =
-       "event: message_start\n"
-       "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}\n\n"
-       "event: content_block_start\n"
-       "data: {\"type\":\"content_block_start\",\"index\":0,"
-       "\"content_block\":{\"type\":\"thinking\"}}\n\n"
-       "event: content_block_delta\n"
-       "data: {\"type\":\"content_block_delta\",\"index\":0,"
-       "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"half a thought\"}}\n\n"
-       "event: content_block_start\n"
-       "data: {\"type\":\"content_block_start\",\"index\":999999,"
-       "\"content_block\":{\"type\":\"thinking\"}}\n\n"
-       "event: content_block_delta\n"
-       "data: {\"type\":\"content_block_delta\",\"index\":0,"
-       "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\" and more\"}}\n\n";
-
-   memset(&relay, 0, sizeof(relay));
-   memset(&cap, 0, sizeof(cap));
-   sse_parser_init(&relay.parser);
-   anthropic_backend_stream_state_init(&relay.ir_bst);
-   relay.emit = cap_emit;
-   relay.emit_ctx = &cap;
-   assert(anthropic_relay_chunk_cb(chunk, strlen(chunk), &relay) == 0);
-   relay_flush(&relay);
-
-   assert(relay.reasoning_giveup);
-   assert(!relay.reasoning && relay.reasoning_len == 0); /* the fragment is discarded */
-   assert(cap.count == 5); /* every event still relayed to the client */
-
-   sse_parser_free(&relay.parser);
-   free(relay.data);
-   PASS("anthropic_relay_reasoning_abstains_on_bad_stream");
-}
-
-static void test_relay_append_data_growth(void)
-{
-   anthropic_relay_ctx_t relay;
-   char big[7000];
-
-   memset(&relay, 0, sizeof(relay));
-   memset(big, 'a', sizeof(big) - 1);
-   big[sizeof(big) - 1] = '\0';
-
-   assert(relay_append_data(&relay, big) == 0);
-   assert(relay.data_cap >= sizeof(big));
-   assert(relay.data_len == strlen(big));
-   assert(strcmp(relay.data, big) == 0);
-
-   free(relay.data);
-   PASS("relay_append_data_growth");
-}
-
-static void test_relay_transport_error(void)
-{
-   anthropic_relay_ctx_t relay;
-   emit_capture_t cap;
-
-   memset(&relay, 0, sizeof(relay));
-   memset(&cap, 0, sizeof(cap));
-   relay.emit = cap_emit;
-   relay.emit_ctx = &cap;
-
-   relay_emit_transport_error(&relay, 599);
-   assert(cap.count == 1);
-   assert(strcmp(cap.events[0], "error") == 0);
-   assert(strstr(cap.data[0], "\"type\":\"error\"") != NULL);
-   assert(strstr(cap.data[0], "status 599") != NULL);
-   assert(relay.emitted == 1);
-   PASS("relay_transport_error");
+   const char *bad[] = {
+       "event: message_stop\ndata: {}\n\n",
+       "event: content_block_start\ndata: {\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n",
+       "event: message_start\ndata: {\"message\":{\"role\":\"assistant\"}}\n\n",
+       "event: message_start\ndata: "
+       "{\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":1e300}}}\n\n",
+       "event: message_start\ndata: {\"message\":{\"role\":\"assistant\"}}\n\nevent: "
+       "content_block_start\ndata: "
+       "{\"index\":0,\"content_block\":{\"type\":\"future-content\"}}\n\n",
+       "event: message_start\ndata: {\"message\":{\"role\":\"assistant\"}}\n\nevent: "
+       "content_block_start\ndata: {\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\nevent: "
+       "message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+       "event: message_start\ndata: {\"message\":{\"role\":\"assistant\"}} trailing\n\n",
+   };
+   agent_t agent = {0};
+   for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++)
+   {
+      emit_capture_t cap = {0};
+      reset_capture();
+      g_stream_payload = bad[i];
+      assert(messages_stream_native_ir("fixture", "", "{}", 2, "", &agent, "model", cap_emit, &cap,
+                                       NULL) < 0);
+      assert(!strcmp(cap.events[cap.count - 1], "error"));
+      for (int j = 0; j < cap.count; j++)
+         assert(strcmp(cap.events[j], "message_stop"));
+   }
+   reset_capture();
+   PASS("native IR refuses malformed, unsupported and unfinished streams");
 }
 
 static void test_native_response_retains_all_typed_blocks_and_long_tools(void)
@@ -967,8 +856,7 @@ static void test_messages_stream_anthropic_preserves_request_shape(void)
    reset_capture();
    memset(&cap, 0, sizeof(cap));
    g_driver = &anthropic;
-   g_stream_payload = "event: message_stop\n"
-                      "data: {\"type\":\"message_stop\"}\n\n";
+   g_stream_payload = native_empty_stream;
    assert(messages_stream("{\"model\":\"ignored\",\"max_tokens\":64,"
                           "\"system\":[{\"type\":\"text\",\"text\":\"SYS\","
                           "\"cache_control\":{\"type\":\"ephemeral\"}}],"
@@ -984,8 +872,8 @@ static void test_messages_stream_anthropic_preserves_request_shape(void)
    assert(cJSON_IsObject(obj(sent, "tool_choice")));
    assert(cJSON_IsObject(obj(sent, "thinking")));
    assert(cJSON_IsTrue(obj(sent, "stream")));
-   assert(cap.count == 1);
-   assert(strcmp(cap.events[0], "message_stop") == 0);
+   assert(cap.count == 3);
+   assert(strcmp(cap.events[2], "message_stop") == 0);
    cJSON_Delete(sent);
    reset_capture();
    PASS("messages_stream_anthropic_preserves_request_shape");
@@ -1017,6 +905,10 @@ static void test_messages_stream_anthropic_reasoning_metrics(void)
                       "event: content_block_delta\n"
                       "data: {\"type\":\"content_block_delta\",\"index\":0,"
                       "\"delta\":{\"type\":\"text_delta\",\"text\":\"plain answer\"}}\n\n"
+                      "event: content_block_stop\n"
+                      "data: {\"index\":0}\n\n"
+                      "event: message_delta\n"
+                      "data: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
                       "event: message_stop\n"
                       "data: {\"type\":\"message_stop\"}\n\n";
    assert(messages_stream(REQ, cap_emit, &cap) == 0);
@@ -1037,6 +929,8 @@ static void test_messages_stream_anthropic_reasoning_metrics(void)
                       "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"weighing it up\"}}\n\n"
                       "event: content_block_stop\n"
                       "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+                      "event: message_delta\n"
+                      "data: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
                       "event: message_stop\n"
                       "data: {\"type\":\"message_stop\"}\n\n";
    assert(messages_stream(REQ, cap_emit, &cap) == 0);
@@ -1291,8 +1185,7 @@ static void test_proof_gated_ingress_wire_parity(void)
    reset_capture();
    memset(&cap, 0, sizeof(cap));
    g_driver = &anthropic;
-   g_stream_payload = "event: message_stop\n"
-                      "data: {\"type\":\"message_stop\"}\n\n";
+   g_stream_payload = native_empty_stream;
    assert(messages_stream(request, cap_emit, &cap) == 0);
    off_body = strdup(g_last_body);
    assert(off_body != NULL);
@@ -1453,13 +1346,9 @@ static void test_messages_buffered_rejects_missing_messages(void)
 int main(void)
 {
    test_explicit_unknown_model_is_rejected();
-   test_anthropic_relay_round_trip();
-   test_anthropic_relay_usage_capture();
-   test_anthropic_relay_reasoning_tap();
-   test_anthropic_relay_reasoning_abstains_on_bad_stream();
    test_messages_stream_anthropic_reasoning_metrics();
-   test_relay_append_data_growth();
-   test_relay_transport_error();
+   test_native_ir_fragmentation_and_persistence();
+   test_native_ir_refuses_incomplete_and_invalid_streams();
    test_native_response_retains_all_typed_blocks_and_long_tools();
    test_invalid_native_response_never_uses_legacy_parser();
    test_messages_buffered_anthropic_preserves_request_shape();
