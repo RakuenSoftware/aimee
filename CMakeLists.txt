@@ -862,6 +862,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_index_bootstrap.c
     ${AIMEE_SRC_DIR}/cli_launch.c
     ${AIMEE_SRC_DIR}/cli_proxy.c
+    ${AIMEE_SRC_DIR}/cli_proxy_cmd.c
     ${AIMEE_SRC_DIR}/cli_mcp_serve.c
     # handle_tools_list calls mcp_tool_prose_lean/mcp_compact_tool_prose to build
     # the lean catalog. The client does not
@@ -893,6 +894,7 @@ set(CLI_SRCS
 # it is compiled on every platform — no per-OS exclusion.
 
 set(SERVER_SRCS
+    ${AIMEE_SRC_DIR}/cli_proxy.c
     ${AIMEE_SRC_DIR}/server/server_native_primitive.c
     ${AIMEE_SRC_DIR}/server/server_main.c
     ${AIMEE_SRC_DIR}/modules/translation/harness_ir.c

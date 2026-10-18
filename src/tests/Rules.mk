@@ -916,6 +916,10 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-authority-ipc
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening
 TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
+TEST_TARGETS += $(TESTPREFIX)/unit-test-cli-proxy-bound
+$(TESTPREFIX)/unit-test-cli-proxy-bound: $(OBJDIR)/tests/test_cli_proxy_bound.o $(OBJDIR)/cli_proxy.o $(CORE_CONNECTION_LIB)
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
 TEST_TARGETS += $(TESTPREFIX)/unit-test-governance-bus-bridge
 $(OBJDIR)/tests/test_governance_bus_bridge.o: server/module_stage_adapters.c
 $(TESTPREFIX)/unit-test-governance-bus-bridge: $(OBJDIR)/tests/test_governance_bus_bridge.o $(OBJDIR)/cJSON.o
