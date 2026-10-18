@@ -278,6 +278,12 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
                                                    : "none");
 }
 
+void aimee_ir_apply_native_request_stages(aimee_request_t *request)
+{
+   if (config_present() && config_ingress_preinject_anthropic_enabled())
+      aimee_ir_apply_request_stages(request, ir_memory_enabled());
+}
+
 char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
                                    const char *agent_model, int max_tokens_override,
                                    int want_stream)

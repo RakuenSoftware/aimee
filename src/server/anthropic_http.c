@@ -35,7 +35,8 @@
 #include "router_advise.h"   /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_shadow.h" /* Slice 3: IR shadow-mode observer */
 #include <aimee/ir/aimee_ir_metrics.h>
-#include "aimee_ir_serve.h"                  /* Slice 5: IR live request-build */
+#include "aimee_ir_serve.h" /* Slice 5: IR live request-build */
+#include <aimee/translation/aimee_frontend.h>
 #include <aimee/translation/aimee_backend.h> /* Slice 3: openai_backend_parse (IR response path) */
 #include <aimee/translation/aimee_ir_stream.h> /* Slice 5-wire: IR-delta incremental relay */
 #include "ingress_preinject.h"
@@ -366,7 +367,7 @@ static char *build_provider_body(const delegate_driver_t *driver, const agent_t 
  * inbound model is honored verbatim (falling back to the primary only when the
  * client omitted it) so Claude Code's per-task model selection survives. */
 static char *build_anthropic_provider_body(const cJSON *in, const agent_t *ag, int stream,
-                                           int parity)
+                                           int parity, const char *original_frame)
 {
    cJSON *req;
    char *body;
@@ -387,28 +388,45 @@ static char *build_anthropic_provider_body(const cJSON *in, const agent_t *ag, i
       /* Parity, but the client sent no model: give the upstream call one. */
       cJSON_AddStringToObject(req, "model", ag->model);
    }
-   cJSON_DeleteItemFromObjectCaseSensitive(req, "stream");
-   if (stream)
+   const cJSON *native_stream = cJSON_GetObjectItemCaseSensitive(req, "stream");
+   if (stream && !cJSON_IsTrue(native_stream))
+   {
+      cJSON_DeleteItemFromObjectCaseSensitive(req, "stream");
       cJSON_AddBoolToObject(req, "stream", 1);
-   body = cJSON_PrintUnformatted(req);
+   }
+   else if (!stream && cJSON_IsTrue(native_stream))
+      cJSON_DeleteItemFromObjectCaseSensitive(req, "stream");
+   aimee_request_t ir = {0};
+   char error[128];
+   if (aimee_frontend_parse_native_frame(req, original_frame,
+                                         original_frame ? strlen(original_frame) : 0,
+                                         AIMEE_WIRE_ANTHROPIC, &ir, error, sizeof error))
+   {
+      cJSON_Delete(req);
+      return NULL;
+   }
+   aimee_ir_apply_native_request_stages(&ir);
+   body = aimee_backend_render_wire(&ir, AIMEE_WIRE_ANTHROPIC);
+   aimee_request_free(&ir);
    cJSON_Delete(req);
    return body;
 }
 
 /* --- Buffered: POST /v1/messages (stream:false) ------------------------- */
 
-/* Build the upstream provider body from the current `req` (Anthropic parity path
- * duplicates req directly; otherwise via the IR path or the legacy translator over
- * the extracted messages/tools/system). Re-callable so the gateway-mutation 4xx
+/* Build the upstream provider body from the current `req`. Native Anthropic
+ * enters canonical replay; translated requests still retain their legacy fallback.
+ * Re-callable so the gateway-mutation 4xx
  * restore path can rebuild the body from the restored (pristine) req. Returns a
  * malloc'd JSON string (caller frees) or NULL. */
 static char *anthropic_build_prov_body(cJSON *req, const delegate_driver_t *driver,
                                        const agent_t *ag, int parity, cJSON *messages, cJSON *tools,
-                                       const char *system_text, int stream)
+                                       const char *system_text, int stream,
+                                       const char *original_frame)
 {
    char *prov_body = NULL;
    if (driver_is_anthropic(driver))
-      prov_body = build_anthropic_provider_body(req, ag, stream, parity);
+      prov_body = build_anthropic_provider_body(req, ag, stream, parity, original_frame);
    else
    {
       if (aimee_ir_path_enabled())
@@ -595,7 +613,13 @@ static int messages_buffered(const char *body, char *resp, int cap)
       agent_build_extra_headers(ag, extra, sizeof(extra));
 
    prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text,
-                                         responses_wire);
+                                         responses_wire, body);
+   if (!prov_body)
+   {
+      status = write_error(resp, cap, 500, "api_error",
+                           "could not assemble canonical provider request", 0);
+      goto cleanup;
+   }
    const char *pristine_body = prov_body ? prov_body : "{}";
    int economizer_active = econ_mode_current() != ECON_MODE_OFF;
    wire_fence_route_t wire_route = parity           ? WIRE_FENCE_ANTHROPIC_MESSAGES
@@ -1445,7 +1469,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    int upstream_stream = responses_wire ? 1 : (buffered_replay ? 0 : 1);
 
    if (driver_is_anthropic(driver))
-      prov_body = build_anthropic_provider_body(req, ag, upstream_stream, parity);
+      prov_body = build_anthropic_provider_body(req, ag, upstream_stream, parity, body);
    else
    {
       /* Slice 5 (streaming): build the provider request VIA THE IR when the flag is
@@ -1483,6 +1507,15 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       }
    }
 
+   if (!prov_body)
+   {
+      anthropic_stream_state_t state = {0};
+      aimee_delta_t error = {.type = AIMEE_DELTA_ERROR,
+                             .error_message = "could not assemble canonical provider request"};
+      anthropic_delta_emit(&error, &state, msg_id, model, emit, ctx);
+      stream_status = 500;
+      goto cleanup;
+   }
    const char *pristine_body = prov_body ? prov_body : "{}";
    int economizer_active = econ_mode_current() != ECON_MODE_OFF;
    wire_fence_route_t wire_route = parity           ? WIRE_FENCE_ANTHROPIC_MESSAGES

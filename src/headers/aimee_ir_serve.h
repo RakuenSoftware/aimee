@@ -29,6 +29,10 @@ char *aimee_ir_build_provider_body(const struct cJSON *req, const char *driver_n
                                    const char *agent_model, int max_tokens_override,
                                    int want_stream);
 
+/* Native Anthropic retains its configured context-injection opt-in while using
+ * the same canonical stage catalog as translated requests. */
+void aimee_ir_apply_native_request_stages(aimee_request_t *request);
+
 /* 1 if the IR live-path flag is enabled (config-only: AIMEE_IR_PATH env). */
 int aimee_ir_path_enabled(void);
 

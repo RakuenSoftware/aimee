@@ -10,6 +10,7 @@
 #include "agent_protocol.h"
 #include <aimee/ir/aimee_ir.h>
 #include <aimee/translation/aimee_frontend.h>
+#include <aimee/translation/aimee_backend.h>
 #include "aimee_ir_serve.h"
 #include "cJSON.h"
 
@@ -27,6 +28,7 @@ static const char *REQ =
 void ir_seam_test_session(const char *session_id);
 void ir_seam_test_persona(const char *instructions);
 void ir_seam_test_memory(int enabled);
+void ir_seam_test_native_preinject(int enabled);
 int ir_seam_test_plan_calls(const char *phase);
 const char *ir_seam_test_query(void);
 int ir_seam_test_guidance_provided(void);
@@ -59,8 +61,49 @@ static void test_import_history(void)
    cJSON_Delete(native);
 }
 
+static void test_native_stage_replay(void)
+{
+   cJSON *native = cJSON_Parse(REQ);
+   assert(native);
+   cJSON *system = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(native, "system"), 0);
+   cJSON *cache = cJSON_AddObjectToObject(system, "cache_control");
+   cJSON_AddStringToObject(cache, "type", "ephemeral");
+   cJSON_AddStringToObject(cache, "ttl", "1h");
+   char *frame = cJSON_PrintUnformatted(native);
+   assert(frame);
+   ir_seam_test_session("native-cache-stage");
+   ir_seam_test_memory(1);
+   ir_seam_test_persona("NATIVE_STAGE_PERSONA");
+   for (int enabled = 0; enabled < 2; enabled++)
+   {
+      aimee_request_t request = {0};
+      char error[128];
+      ir_seam_test_native_preinject(enabled);
+      assert(!aimee_frontend_parse_native_frame(native, frame, strlen(frame), AIMEE_WIRE_ANTHROPIC,
+                                                &request, error, sizeof error));
+      aimee_ir_apply_native_request_stages(&request);
+      assert(ir_seam_test_plan_calls("context") == enabled);
+      assert(ir_seam_test_plan_calls("tools") == enabled);
+      char *wire = aimee_backend_render_wire(&request, AIMEE_WIRE_ANTHROPIC);
+      assert(wire && strstr(wire, "\"ttl\":\"1h\""));
+      if (enabled)
+         assert(strstr(wire, "NATIVE_STAGE_PERSONA") && !strcmp(ir_seam_test_query(), "hi"));
+      else
+         assert(!strcmp(wire, frame));
+      free(wire);
+      aimee_request_free(&request);
+   }
+   ir_seam_test_native_preinject(0);
+   ir_seam_test_memory(0);
+   ir_seam_test_persona(NULL);
+   ir_seam_test_session(NULL);
+   cJSON_Delete(native);
+   free(frame);
+}
+
 int main(void)
 {
+   test_native_stage_replay();
    printf("ir-serve: ");
    test_import_history();
    cJSON *req = cJSON_Parse(REQ);

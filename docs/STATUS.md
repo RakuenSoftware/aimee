@@ -101,7 +101,7 @@ See the [migration boundaries](proposals/pending/canonical-ir-session-stream.md)
 | External witness and anchor | Gated | Needed for evidence against a compromised host. |
 | Org budgets and rate limits | Done | Catalog, admission, spend, and quota surfaces. |
 | Browser workspace | Done | Top session tabs open chat with a session-owned project and history. Chat forwards the authenticated actor and displays tool lifecycle activity, including direct primary models. The left panel opens projects, agents, workflows, graph, logs, settings, and VS Code. |
-| Canonical IR migration | In progress | Direct primary load, switching and compaction use canonical log checkpoints; native observations remain immutable. Browser control replies and remaining legacy ingress/execution consumers are unfinished. |
+| Canonical IR migration | In progress | Direct primary load, switching and compaction use canonical log checkpoints; native observations remain immutable. Claude/Codex browser permission and question replies work. Native Anthropic ingress uses cache-preserving IR replay. MCP forms, global tmux retirement, credential custody and remaining legacy consumers are unfinished. |
 | Managed container deploy | Done | Browser manages Server model containers through the mounted Docker socket. A KB is deployed and enrolled separately. |
 | Split deploy | Done | Server and KB can run without Docker-socket delegation. |
 | Native thin clients | Done | Linux, macOS, and Windows; no database linkage. |

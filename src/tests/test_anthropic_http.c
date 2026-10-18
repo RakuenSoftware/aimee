@@ -874,6 +874,40 @@ static void test_messages_buffered_anthropic_parity_passthrough(void)
    PASS("messages_buffered_anthropic_parity_passthrough");
 }
 
+static void test_native_admission_failure_sends_no_provider_request(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   const char *request =
+       "{\"model\":\"ignored\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":"
+       "\"hi\"}],\"tool_choice\":{\"type\":\"unsupported\"}}";
+   char response[4096];
+   reset_capture();
+   g_driver = &anthropic;
+   assert(messages_buffered(request, response, sizeof response) == 500 && !g_last_body);
+   emit_capture_t cap = {0};
+   assert(messages_stream(request, cap_emit, &cap) == 0 && !g_last_body);
+   assert(cap.count == 1 && !strcmp(cap.events[0], "error"));
+   reset_capture();
+   PASS("native_admission_failure_sends_no_provider_request");
+}
+
+static void test_messages_native_frame_retains_exact_bytes(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   const char *frame =
+       " { \"model\": \"ignored\", \"max_tokens\": 16, \"stream\": false, \"future\": "
+       "9007199254740993, \"system\": "
+       "[{\"type\":\"text\",\"text\":\"stable\",\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":"
+       "\"1h\"}}], \"messages\": [{\"role\":\"user\",\"content\":\"hi\"}] } \n";
+   char response[4096];
+   reset_capture();
+   g_driver = &anthropic;
+   assert(messages_buffered(frame, response, sizeof response) == 200);
+   assert(g_last_body && !strcmp(g_last_body, frame));
+   reset_capture();
+   PASS("messages_native_frame_retains_exact_bytes");
+}
+
 static void test_messages_buffered_anthropic_strips_stream_false_path(void)
 {
    const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
@@ -1367,6 +1401,8 @@ int main(void)
    test_relay_transport_error();
    test_messages_buffered_anthropic_preserves_request_shape();
    test_messages_buffered_anthropic_parity_passthrough();
+   test_native_admission_failure_sends_no_provider_request();
+   test_messages_native_frame_retains_exact_bytes();
    test_messages_buffered_anthropic_strips_stream_false_path();
    test_messages_stream_anthropic_preserves_request_shape();
    test_messages_buffered_openai_family_translates();

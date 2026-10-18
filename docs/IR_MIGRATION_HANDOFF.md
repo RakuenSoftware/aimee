@@ -328,3 +328,17 @@ The complete local script suite passed all 69 tests. All 75 lint checks passed f
 Fresh CI found two old fixtures whose contracts changed: default native cache preservation requires
 explicit stable-prefix policy in the cross-protocol normalization test; a stream ending with [DONE]
 requires a preceding native finish_reason. Both fixtures now test those explicit contracts.
+
+### Continuation: native HTTP entry now uses canonical replay
+
+The Anthropic HTTP provider builder now admits native requests through typed IR before egress.
+The immutable original body is attached at the real ingress, rather than only in codec fixtures.
+Independent typed/raw comparison selects exact replay: a handler-level fixture preserves whitespace,
+an unknown large integer spelling, explicit stream:false and a one-hour cache TTL byte for byte.
+Host stream-mode edits rebuild the native request while retaining untouched cache markers and forms.
+
+The existing ingress_preinject_anthropic_enabled option now invokes the same canonical stage catalog
+as translated requests. With the option off, canonical admission and exact replay remain active.
+A native stage fixture verifies that opt-in assembly runs context/tools once, recalls the original
+query and preserves its client cache TTL after persona insertion. Raw foreign-ingress policy stages,
+legacy translated-request fallbacks and response projections still remain to be cut over.

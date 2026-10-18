@@ -19,10 +19,20 @@ static char g_test_persona[1024];
 static int g_test_delivery_state;
 static int g_test_claim_error_once;
 static int g_test_memory_enabled;
+static int g_test_native_preinject;
 static int g_test_context_calls;
 static int g_test_tools_calls;
 static char g_test_query[1024];
 static int g_test_guidance_provided;
+
+void ir_seam_test_native_preinject(int enabled)
+{
+   g_test_native_preinject = enabled;
+}
+int config_ingress_preinject_anthropic_enabled(void)
+{
+   return g_test_native_preinject;
+}
 
 int ir_seam_test_guidance_provided(void)
 {
@@ -146,7 +156,7 @@ int server_ir_plan_enabled(const char *method, const char *operation, const char
  * enablement falls to the env default above. */
 int config_present(void)
 {
-   return 0;
+   return g_test_native_preinject;
 }
 
 int config_module_memory(void)

@@ -8,6 +8,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int parse_native_object(const cJSON *native, aimee_wire_t wire, aimee_request_t *out,
+                               char *error, size_t capacity)
+{
+   return wire == AIMEE_WIRE_ANTHROPIC     ? anthropic_frontend_parse(native, out, error, capacity)
+          : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_frontend_parse(native, out, error, capacity)
+          : wire == AIMEE_WIRE_RESPONSES   ? responses_frontend_parse(native, out, error, capacity)
+                                           : -1;
+}
+
 int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire,
                               aimee_request_t *out, char *error, size_t error_capacity)
 {
@@ -28,12 +37,7 @@ int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire
          snprintf(error, error_capacity, "invalid native request framing");
       return -1;
    }
-   int rc =
-       wire == AIMEE_WIRE_ANTHROPIC ? anthropic_frontend_parse(request, out, error, error_capacity)
-       : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_frontend_parse(request, out, error, error_capacity)
-       : wire == AIMEE_WIRE_RESPONSES
-           ? responses_frontend_parse(request, out, error, error_capacity)
-           : -1;
+   int rc = parse_native_object(request, wire, out, error, error_capacity);
    cJSON_Delete(request);
    if (rc)
       return rc;
@@ -87,4 +91,30 @@ char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wir
    char *bytes = native ? cJSON_PrintUnformatted(native) : NULL;
    cJSON_Delete(native);
    return bytes;
+}
+
+int aimee_frontend_parse_native_frame(const cJSON *native, const char *frame, size_t length,
+                                      aimee_wire_t wire, aimee_request_t *out, char *error,
+                                      size_t capacity)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof *out);
+   if (parse_native_object(native, wire, out, error, capacity))
+      return -1;
+   if (frame)
+   {
+      aimee_request_t original = {0};
+      if (aimee_frontend_parse_wire(frame, length, wire, &original, error, capacity))
+      {
+         aimee_request_free(out);
+         return -1;
+      }
+      out->raw_bytes = original.raw_bytes;
+      out->raw_length = original.raw_length;
+      original.raw_bytes = NULL;
+      original.raw_length = 0;
+      aimee_request_free(&original);
+   }
+   return 0;
 }

@@ -334,3 +334,10 @@ __attribute__((weak)) int openai_stream_finish(void *state, void *out, int max)
    (void)max;
    return 0;
 }
+
+/* Minimal ingress fixtures do not start module-owned request stages. The real
+ * host implementation overrides this when linked into the server. */
+__attribute__((weak)) void aimee_ir_apply_native_request_stages(void *request)
+{
+   (void)request;
+}
