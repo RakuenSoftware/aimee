@@ -6,6 +6,7 @@
 #endif
 #include "server_http_internal.h"
 #include "agent_config.h"
+#include "server_learning_outcome.h"
 #include "db1_client/server_sessions.h"
 #include "db1_client/primary_sessions.h"
 #include "server_http.h"
@@ -267,6 +268,27 @@ static void handle_session_ir_events(int fd, const char *input, const char *requ
                failed = 1;
                break;
             }
+            /* Replay is also recovery for a lost derived observation. The
+             * owner-checked durable event is the source; DB1 serializes and
+             * deduplicates projection retries against that exact source. */
+            const cJSON *source = cJSON_GetObjectItemCaseSensitive(event, "event");
+            const cJSON *payload = cJSON_GetObjectItemCaseSensitive(source, "payload");
+            const char *kind =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(source, "kind"));
+            const char *status =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "status"));
+            const char *event_actor =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "actor"));
+            if (kind && !strcmp(kind, "execution") && status &&
+                (!strcmp(status, "completed") || !strcmp(status, "failed") ||
+                 !strcmp(status, "cancelled")) &&
+                event_actor && !strcmp(event_actor, actor))
+               server_learning_observe_terminal(
+                   session,
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "turn_id")),
+                   seq->valuestring,
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "event_id")), actor,
+                   source);
             if (write_all_fd(fd, "id: ", 4) < 0 ||
                 write_all_fd(fd, seq->valuestring, strlen(seq->valuestring)) < 0 ||
                 write_all_fd(fd, "\nevent: ir\ndata: ", 17) < 0 ||

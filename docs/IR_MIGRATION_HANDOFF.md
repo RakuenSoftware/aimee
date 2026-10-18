@@ -8,8 +8,11 @@ The user authorized replacement of #3036 to satisfy the permanent attribution ga
 explicitly requested its retirement. Active work is now on
 [#3038](https://github.com/RakuenSoftware/aimee/pull/3038), branch
 `fix/browser-ir-runtime-personal`, targeting `testing`. It contains all of #3036's migration
-work. Its published checkpoint `2aac64506` passes `no-coauthor-trailers` and the renamed
-`Export builds and runtime checks`; integration still fails in delegate fixture setup.
+work. Its published checkpoint `6b8d720c0` passes `no-coauthor-trailers` and the renamed
+`Export builds and runtime checks`. Its integration now passes 156/156 in CI, including
+real Docker delegate completion/readback (25 other service-dependent checks skipped).
+The memory release and all four deployment tiers pass; the full sanitizer and script suites
+were still running at this local checkpoint.
 
 #3036 is closed, its body is empty, and `fix/browser-ir-runtime` was deleted locally and
 remotely. GitHub retains the closed PR record. All older instructions below naming #3036
@@ -19,7 +22,7 @@ checks enabled.
 
 - Canonical primary loading/model switching, durable-log history, standard browser controls, native hook admission, compaction and several credential/consumer cutovers are implemented. The whole migration remains unfinished, especially credential-free native execution, scoped native tools and account-bound replay/cache proof.
 - The user explicitly confirmed that production .100 should NOT use a KB instance right now. Unset KB mode/endpoint are intentional. Do not configure/connect a KB or enable a dependency on one to fix learning. Repair and qualify server-local learning, failed approaches and authenticated task-outcome capture through their existing owners.
-- The active-project CLI repair is installed and was exercised from wol-lore. Keep the completed WOL PR separate; no WOL content belongs in #3036.
+- The active-project CLI repair is installed and was exercised from wol-lore. Keep the completed WOL PR separate; no WOL content belongs in #3038.
 - Strict opening-app attribution remains enforced; #3038 passes without an exemption. Production promotion still needs the recorded independent review required by OWNERS.md.
 
 ## Replacement CI repairs: 18 October 2026
@@ -813,3 +816,34 @@ also pass. This does not weaken restart or child-shutdown assertions.
 An Aimee-authenticated edit of #3036 succeeded, but its newly triggered attribution job still failed on
 the recorded connector app. The user's authorized replacement procedure above is being prepared.
 The overall migration and production learning repair remain unfinished.
+
+
+### 2026-10-18: recover local execution observations from canonical replay
+
+DB1 now binds task_outcome projections to the exact immutable source session, sequence,
+event ID, turn and actor, with status/error checked against that event. The session row lock
+serializes concurrent retries; identical projections are idempotent and inconsistent replacements
+refuse. Unknown sources, another actor and a fabricated grade cannot enter this path. The
+existing observation wire, Learning validation owner, local interaction ledger and canonical source
+remain in place; no transcript or schema is added.
+
+Owner-checked browser event replay retries terminal observations before delivery. A lost or pruned
+derived row can therefore be recovered from the retained canonical source without changing the
+execution result or duplicating another subscriber's observation. This is replay-driven recovery,
+not a claim of a background sweep over every unvisited private session.
+
+Real PostgreSQL race tests pass with 16 concurrent retries producing exactly one row, source and
+grade forgery refusals, loss/reconstruction and deleted-source refusal. The real HTTP integration
+journey verifies four captured observations, removes one disposable projection as a fault injection,
+then recovers it through actual authenticated replay and verifies exactly four after repeated/resumed
+replay. Fresh schema ir_integration_recovery_3038 passes 156/156 with 26 explicit service skips
+(including local Docker completion/readback). Native HTTP/dispatch and Go owner/Learning race tests
+pass. Server/KB build and affected ownership, bus, bypass, docs and test-registration gates pass.
+Both affected native fixtures also pass with ASan/UBSan and leak detection. All 76 lint
+checks pass.
+
+Procedure feedback still needs a standalone path: learning.application continues forwarding
+receipt-bound feedback to KB. Independently graded learning, synthesis, credential-free native
+execution, actor-bound native tools, cache-preserving account-bound replay and remaining IR
+consumers remain unfinished. Production .100 remains intentionally disconnected from KB and
+has not been promoted to this migration head.

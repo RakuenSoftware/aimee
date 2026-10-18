@@ -1987,6 +1987,7 @@ $(TESTPREFIX)/unit-test-vault-provider-credential: $(OBJDIR)/tests/test_vault_pr
 
 
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/modules/translation/hook_ir.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o
+$(TESTPREFIX)/unit-test-server-http $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/server/server_learning_outcome.o $(OBJDIR)/module_commands.o
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/server/server_compute_owner.o
 
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/tests/support/module_bus_stub.o $(filter-out $(OBJDIR)/db1_client/sessions.o $(OBJDIR)/db1_client/conversation.o,$(DB1_CLIENT_OBJS)) $(OBJDIR)/server/server.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server/provider_settable.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \

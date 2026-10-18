@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -226,5 +227,109 @@ func TestSessionIRLiveConcurrentReplayAndDeletion(t *testing.T) {
 	}
 	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The source session lock serializes concurrent projection retries, while a
+// missing projection can be reconstructed from the retained canonical event.
+func TestSessionIRLiveExecutionObservationRecovery(t *testing.T) {
+	root := livePool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	schema := fmt.Sprintf("execution_observation_%d", time.Now().UnixNano())
+	if _, err := root.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer root.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	config, err := pgxpool.ParseConfig(os.Getenv("AIMEE_TEST_PG_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql", "schema_telemetry.sql"} {
+		body, err := schemaFS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = pool.Exec(ctx, string(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO server_sessions(id,principal) VALUES ('s','operator')`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, _, err := sessionIRAppend(ctx, sessionIRLiveTx{tx}, []string{"s", "event", "turn", "operator", `{"kind":"execution","payload":{"status":"failed","error":"real source error"}}`})
+	if err != nil || status != store.StatusOK {
+		tx.Rollback(ctx)
+		t.Fatalf("append: %d %v", status, err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	observation := `{"schema_version":1,"source":{"kind":"canonical_session_log","session_id":"s","sequence":"1","event_id":"event","turn_id":"turn","actor":"operator"},"observed_status":"failed","error":"real source error","verification":"ungraded"}`
+	record := func(raw string) (uint32, error) {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			return 0, err
+		}
+		defer tx.Rollback(ctx)
+		status, _, err := interactionEventRecord(ctx, sessionIRLiveTx{tx}, []string{"s", "task_outcome", "system", raw, "observed"})
+		if err != nil || status != store.StatusOK {
+			return status, err
+		}
+		return status, tx.Commit(ctx)
+	}
+	// A producer cannot change source identity, status, diagnostic or grading.
+	for _, change := range [][2]string{{`"sequence":"1"`, `"sequence":"2"`}, {`"event_id":"event"`, `"event_id":"foreign"`}, {`"actor":"operator"`, `"actor":"other"`}, {`"observed_status":"failed"`, `"observed_status":"completed"`}, {`"error":"real source error"`, `"error":"invented"`}, {`"verification":"ungraded"`, `"verification":"verified"`}} {
+		status, err := record(strings.Replace(observation, change[0], change[1], 1))
+		if err != nil || (status != store.StatusInvalid && status != store.StatusMissing) {
+			t.Fatalf("forgery: %d %v", status, err)
+		}
+	}
+	var wg sync.WaitGroup
+	failures := make(chan error, 16)
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			status, err := record(observation)
+			if err != nil || status != store.StatusOK {
+				failures <- fmt.Errorf("record: %d %v", status, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(failures)
+	for err := range failures {
+		t.Fatal(err)
+	}
+	var count int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM interaction_events WHERE event_type='task_outcome'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("concurrent retry count %d: %v", count, err)
+	}
+	// Pruned/lost derived rows do not erase or mutate the source.
+	if _, err = pool.Exec(ctx, `DELETE FROM interaction_events WHERE event_type='task_outcome'`); err != nil {
+		t.Fatal(err)
+	}
+	if status, err = record(observation); err != nil || status != store.StatusOK {
+		t.Fatalf("recovery: %d %v", status, err)
+	}
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM interaction_events WHERE event_type='task_outcome'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("recovered count %d: %v", count, err)
+	}
+	if _, err = pool.Exec(ctx, `DELETE FROM server_sessions WHERE id='s'`); err != nil {
+		t.Fatal(err)
+	}
+	if status, err = record(observation); err != nil || status != store.StatusMissing {
+		t.Fatalf("deleted source accepted: %d %v", status, err)
 	}
 }

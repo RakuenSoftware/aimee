@@ -134,7 +134,8 @@ def main():
             str(Path(__file__).resolve().parents[2] / "server-go"), "test", "./modules/learning",
             "-run", "^TestExecutionObservationLiveCanonicalCapture$", "-count=1"],
             env={**os.environ, "AIMEE_LEARNING_LIVE_SESSION": sid,
-                 "AIMEE_LEARNING_LIVE_ACTOR": f"uid:{os.getuid()}"},
+                 "AIMEE_LEARNING_LIVE_ACTOR": f"uid:{os.getuid()}",
+                 "AIMEE_LEARNING_LIVE_DROP_PROJECTION": "1"},
             capture_output=True, text=True, timeout=120)
         assert verification.returncode == 0, verification.stdout + verification.stderr
         print("standalone learning: four real canonical task outcomes persisted locally without KB or fabricated grades")
@@ -178,6 +179,14 @@ def main():
                 if response:
                     response.close()
                 connection.close()
+        # The first verification removed one derived row. Actual owner-checked
+        # replay must restore it, and repeated/resumed replay must not duplicate.
+        recovery = subprocess.run(verification.args,
+            env={**os.environ, "AIMEE_LEARNING_LIVE_SESSION": sid,
+                 "AIMEE_LEARNING_LIVE_ACTOR": f"uid:{os.getuid()}"},
+            capture_output=True, text=True, timeout=120)
+        assert recovery.returncode == 0, recovery.stdout + recovery.stderr
+        print("standalone learning: canonical replay recovered a lost projection without duplicate outcomes")
         print(f"canonical primary: A/B/A/B, {len(observed)} native calls, {sequence} durable events, live/replay and resumed-cursor parity passed")
 
         # Repeated cache-eligible prompts still produce private canonical

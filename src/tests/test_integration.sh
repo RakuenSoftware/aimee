@@ -2182,6 +2182,7 @@ if AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$REPO_ROOT/src/t
     grep '^SKIP:' "$PRIMARY_IR_LOG" || true
     grep '^standalone learning:' "$PRIMARY_IR_LOG" || true
     grep '^delegate setup:' "$PRIMARY_IR_LOG" || true
+    grep '^delegate learning:' "$PRIMARY_IR_LOG" || true
 else
     echo "FAIL: canonical primary switching and durable replay"
     # This fixture contains synthetic provider data. Preserve bounded client-side

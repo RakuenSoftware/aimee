@@ -12,8 +12,9 @@ import (
 )
 
 // The native integration runner supplies a disposable source session after four
-// completed browser tasks. This test performs read-only verification against
-// the actual C -> Go Learning -> DB1 path, with no KB process or fabricated rows.
+// completed browser tasks. Verification reads the actual C -> Go Learning ->
+// DB1 path, with no KB process or fabricated rows. The optional fault injection
+// removes one disposable derived row before real HTTP replay reconstructs it.
 func TestExecutionObservationLiveCanonicalCapture(t *testing.T) {
 	session := os.Getenv("AIMEE_LEARNING_LIVE_SESSION")
 	if session == "" {
@@ -81,4 +82,11 @@ func TestExecutionObservationLiveCanonicalCapture(t *testing.T) {
 			t.Fatal("observation differs from canonical terminal")
 		}
 	}
+	if os.Getenv("AIMEE_LEARNING_LIVE_DROP_PROJECTION") == "1" {
+		tag, err := conn.Exec(ctx, `DELETE FROM interaction_events WHERE id=(SELECT min(id) FROM interaction_events WHERE session_id=$1 AND event_type='task_outcome')`, session)
+		if err != nil || tag.RowsAffected() != 1 {
+			t.Fatal("disposable projection fault injection failed")
+		}
+	}
+
 }
