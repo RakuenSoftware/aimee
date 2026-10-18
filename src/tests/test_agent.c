@@ -21,6 +21,7 @@ extern int test_oauth_stores, test_oauth_removes, test_oauth_get_fail;
 #include "support/store_module_fixture.h"
 #include "db1_client/execution_trace.h"
 #include "agent.h"
+#include "request_context.h"
 #include "agent_config.h"
 #include "oauth_flow.h"
 #include "vault_service.h"
@@ -4106,6 +4107,40 @@ static void test_agent_save_config_does_not_cache_underived_agents(void)
 void test_competence_contract_roundtrip_and_routing(void);
 void test_cost_selection_filters_before_learning(void);
 
+static void test_canonical_external_run_preserves_budget_refusal(void)
+{
+   request_context_snapshot_t previous;
+   request_context_snapshot(&previous);
+   request_context_t owner = {.request_budget_present = 1};
+   snprintf(owner.request_budget_limits, sizeof owner.request_budget_limits,
+            "{\"schema_version\":1,\"max_request_bytes\":0}");
+   request_context_set(&owner);
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "canonical run"};
+   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+   aimee_request_t request = {.messages = &message, .n_messages = 1};
+   const char *backends[] = {AGENT_BACKEND_TMUX_CLI, AGENT_BACKEND_PROVIDER_CLI};
+   const char *kinds[] = {"claude", "acp"};
+   for (int i = 0; i < 2; i++)
+   {
+      agent_t agent = {0};
+      snprintf(agent.name, sizeof agent.name, "external");
+      snprintf(agent.provider, sizeof agent.provider, "anthropic");
+      snprintf(agent.backend, sizeof agent.backend, "%s", backends[i]);
+      snprintf(agent.cli_kind, sizeof agent.cli_kind, "%s", kinds[i]);
+      snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "/bin/false");
+      aimee_response_t response = {0};
+      agent_result_t result = {0};
+      assert(agent_execute_request_with_tools(&agent, NULL, "execute", &request, &response,
+                                              &result) != 0);
+      assert(!strcmp(result.error, "request_budget_unavailable"));
+      assert(!response.n_content && !result.response);
+      aimee_response_free(&response);
+   }
+   request_context_restore(&previous);
+   request_context_snapshot_clear(&previous);
+   puts("canonical external runs retain the existing accounting refusal");
+}
+
 int main(void)
 {
    /* BEFORE ANYTHING ELSE, because the fixture configures the module runtime and
@@ -4141,6 +4176,7 @@ int main(void)
     * here rather than silently deleting it. */
    assert(strncmp(agent_config_path(), tmp_home, strlen(tmp_home)) == 0);
    session_id_set_override("unit-test-agent");
+   test_canonical_external_run_preserves_budget_refusal();
    test_tool_surface_single_source();
    test_agent_endpoint_valid();
    test_agent_name_valid();

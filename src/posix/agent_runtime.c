@@ -695,16 +695,16 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
       }
       if (adapter)
       {
+         if (wire_fence_external_backend() != 0)
+         {
+            snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
+            return -1;
+         }
          if (seed)
          {
             snprintf(out->error, sizeof out->error,
                      "native harness cannot adopt the complete run history");
             return AGENT_RC_CONTEXT_REFUSED;
-         }
-         if (wire_fence_external_backend() != 0)
-         {
-            snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
-            return -1;
          }
          return agent_execute_provider_session(adapter, agent, system_prompt, user_prompt, out);
       }
