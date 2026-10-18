@@ -6,6 +6,20 @@ const envelope = (n: number, event: SessionEvent): Envelope => ({ version: 1, se
 const message = (id: string, role: string, blocks: Block[]): SessionEvent => ({ kind: 'message', message_id: id, payload: { role, blocks } });
 
 describe('canonical session projection', () => {
+  it('advances replay-proof cursors without creating model history', () => {
+    const digest = 'a'.repeat(64);
+    const proof = { scope: digest, block_digest: digest, wire: 'anthropic' as const,
+      thinking_binding: `ap1:${digest}:${digest}:${digest}` };
+    const first = reduceSession(emptySession('s'), envelope(1, { kind: 'replay_proof', payload: proof }));
+    expect(first).toEqual({ ...emptySession('s'), sequence: '1' });
+    const replay = JSON.parse(JSON.stringify(envelope(1, { kind: 'replay_proof', payload: proof }))) as Envelope;
+    expect(reduceSession(emptySession('s'), replay)).toEqual(first);
+    for (const invalid of [
+      { ...proof, scope: '' }, { ...proof, block_digest: 'unknown' },
+      { ...proof, thinking_binding: null }, { ...proof, wire: 'other' },
+      { ...proof, prompt: 'unmodeled content' },
+    ]) expect(() => reduceSession(emptySession('s'), envelope(1, { kind: 'replay_proof', payload: invalid } as SessionEvent))).toThrow();
+  });
   it('renders live and replay identically, pairing interleaved tools by opaque ID', () => {
     const events = [
       envelope(1, message('u', 'user', [{ type: 'text', text: 'Investigate' }])),

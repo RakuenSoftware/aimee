@@ -310,6 +310,11 @@ extern "C"
     * body may be NULL. */
    int server_http_route(const char *method, const char *path, const char *body, int body_len,
                          char *resp, int resp_cap);
+   /* Synchronous host-native handoff through the existing HTTP handlers. Caller
+    * must bind its copied authenticated request owner; child headers establish
+    * no identity. Output uses the listener's existing response FD. */
+   int server_http_native_forward(int fd, const char *method, const char *path, const char *body,
+                                  int body_len);
 
 #if AIMEE_WITH_ROUNDTABLE
    struct server_conn;

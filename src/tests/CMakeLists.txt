@@ -445,6 +445,20 @@ set_tests_properties(test_session_compact_focused PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # Native harness conversion and the POSIX print-mode lifecycle.
+if(NOT WIN32)
+  add_executable(test_server_native_runtime test_server_native_runtime.c
+    ../server/server_native_runtime.c ../cli_proxy.c ../server/request_context.c
+    ../aimee_sha256.c ../platform_random.c ../posix/platform_random.c ../vendor/cJSON.c)
+  target_include_directories(test_server_native_runtime PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR}/modules/kb/c
+    ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../db1_client ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+  target_link_libraries(test_server_native_runtime PRIVATE
+    aimee-core-connection Threads::Threads OpenSSL::Crypto)
+  aimee_enable_test_asserts(test_server_native_runtime)
+  add_test(NAME test_server_native_runtime COMMAND test_server_native_runtime)
+endif()
+
 aimee_add_test(test_harness_ir test_harness_ir.c
   ../modules/translation/harness_ir.c ../modules/translation/aimee_ir_stream.c
   ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c

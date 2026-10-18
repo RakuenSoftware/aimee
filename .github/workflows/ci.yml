@@ -722,9 +722,9 @@ jobs:
           cmake -S . -B build/native-ir-cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF
           cmake --build build/native-ir-cmake --parallel "$(nproc)" \
-            --target test_server_chat_ir test_server_session_log
+            --target test_server_chat_ir test_server_session_log test_server_native_runtime
           ctest --test-dir build/native-ir-cmake \
-            -R '^test_server_(chat_ir|session_log)$' --output-on-failure
+            -R '^test_server_(chat_ir|session_log|native_runtime)$' --output-on-failure
       - name: Artifact integrity (removed capabilities stay removed)
         run: bash scripts/validate-aimee-artifacts.sh
 

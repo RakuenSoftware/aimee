@@ -44,6 +44,7 @@ extern int test_oauth_stores, test_oauth_removes, test_oauth_get_fail;
 #include <aimee/audit/audit_worm.h>
 
 void test_agent_route_with_caps_honors_tools_enabled(void);
+void test_agent_ingress_selected_connection_scope(void);
 void test_agent_route_with_caps_honors_context_override(void);
 void test_tools_enabled_capability_default(void);
 void test_agent_default_primary_skips_disabled(void);
@@ -4192,6 +4193,7 @@ int main(void)
    test_agent_route_primary_turn_marker();
    test_agent_route_client_only_claude_excluded();
    test_agent_routing_block_reason();
+   test_agent_ingress_selected_connection_scope();
    test_agent_route_with_caps_honors_tools_enabled();
    test_agent_route_with_caps_honors_context_override();
    test_knowledge_write_gates_the_tool_policy();

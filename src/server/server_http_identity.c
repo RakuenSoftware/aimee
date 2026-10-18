@@ -79,7 +79,7 @@ static _Thread_local const char *tl_query = "";
  * them alongside the vault principal). Copied out of the request buffer at capture
  * and cleared (bearer zeroed) with the rest — valid only during the route handler
  * on the serving thread. Empty when absent. */
-static _Thread_local char tl_session_hdr[80] = "";
+static _Thread_local char tl_session_hdr[SERVER_SESSION_ID_MAX] = "";
 /* Bearer buffer sized for long tokens (JWT/OIDC bearers can exceed 512B). Truncation
  * beyond this is deterministic (same input -> same truncated string -> same session
  * key), so it only risks two >2KB bearers that share a 2KB prefix sharing a disable
@@ -226,6 +226,7 @@ void server_http_identity_bind_request_owner(const request_context_t *owner)
    tl_transport = owner->vault_transport;
    tl_peer_uid = owner->peer_uid;
    snprintf(tl_principal, sizeof tl_principal, "%s", owner->vault_principal);
+   snprintf(tl_session_hdr, sizeof tl_session_hdr, "%s", owner->session_key);
 }
 
 int server_http_identity_browser_operator(void)

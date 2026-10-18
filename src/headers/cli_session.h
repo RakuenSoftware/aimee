@@ -136,6 +136,12 @@ int cli_session_isolated_codex_home(char *home_out, size_t home_out_sz);
 /* Isolated Vault credentials plus scope-private persistent native conversation files. */
 int cli_session_harness_home(const char *vendor, const char *cwd, const char *sid, char *home,
                              size_t capacity, cli_session_t *cleanup);
+/* Credential-free native runtime. `binding` is a host-owned connection lineage
+ * digest, not a client account name. Only conversation state in that exact
+ * session/binding is linked; auth files and shared auth configuration are absent. */
+int cli_session_native_home(const char *vendor, const char *cwd, const char *sid,
+                            const char *binding, char *home, size_t capacity,
+                            cli_session_t *cleanup);
 
 /* Materialize seam: read the vaulted (agent, "oauth") token into `out`. The strong
  * implementation (server_cli_oauth.c) reads the vault; a weak default in

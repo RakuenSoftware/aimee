@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -143,6 +144,29 @@ func ValidSessionEvent(encoded []byte) bool {
 	case "control_request", "control_response":
 		var c map[string]json.RawMessage
 		return e.RequestID != "" && e.ControlKind != "" && Decode(e.Payload, &c) && c != nil
+	case "replay_proof":
+		var proof struct {
+			Scope   string          `json:"scope"`
+			Digest  string          `json:"block_digest"`
+			Wire    string          `json:"wire"`
+			Binding json.RawMessage `json:"thinking_binding,omitempty"`
+		}
+		if !Decode(e.Payload, &proof) || len(proof.Scope) != 64 || strings.Trim(proof.Scope, "0123456789abcdef") != "" ||
+			len(proof.Digest) != 64 || strings.Trim(proof.Digest, "0123456789abcdef") != "" {
+			return false
+		}
+		if proof.Wire == "responses" {
+			return proof.Binding == nil
+		}
+		if proof.Wire != "anthropic" || proof.Binding == nil {
+			return false
+		}
+		var value string
+		if !Decode(proof.Binding, &value) {
+			return false
+		}
+		return len(value) == 198 && strings.HasPrefix(value, "ap1:") && value[68] == ':' && value[133] == ':' &&
+			strings.Trim(value[4:68]+value[69:133]+value[134:], "0123456789abcdef") == ""
 	case "projection":
 		var projection struct {
 			Model     string `json:"model"`

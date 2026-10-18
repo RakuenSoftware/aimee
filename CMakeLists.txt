@@ -1061,6 +1061,7 @@ list(APPEND SERVER_DATA_SRCS ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orch
 list(APPEND SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_http_op_runs.c
     ${AIMEE_SRC_DIR}/server/server_compute_owner.c
+    ${AIMEE_SRC_DIR}/server/server_native_runtime.c
     ${AIMEE_SRC_DIR}/server/server_learning_outcome.c
 )
 

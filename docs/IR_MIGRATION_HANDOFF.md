@@ -937,3 +937,50 @@ history-adoption refusal had preceded the existing external-backend accounting f
 regression fails before the repair and passes afterward for both tmux/Claude and provider/ACP;
 the final full-agent sanitizer run also passes. Fresh deployment CI is required to qualify the
 complete T3 journey and all later assertions. Keep the attribution gate and automatic reviews.
+
+
+### After merged #3038: scoped native runtime prerequisites (local)
+
+Continuation branch `fix/browser-ir-continuation` starts from merged #3038 (`344139139`).
+This slice prepares the native child boundary; it does **not** activate credential-free SDK
+execution or claim the migration complete.
+
+- The existing local listener now accepts a host-owned route/forward callback. The CLI's
+  ordinary proxy remains model-only. A new server runtime captures an attested session owner,
+  selected registration and restrictive capability set. It admits only model/MCP entry routes,
+  strips operator authority, ignores child-supplied identity/credentials, pins model resolution
+  and cancels an in-flight handler on disconnect. The original browser dedup key cannot collapse
+  separate native requests. Codex Vault reads use the captured actor, retain the paired source
+  lineage and refuse a changed login before forwarding. Server credentials never enter a child
+  response. This is a same-host scoped capability, not a process sandbox.
+- Existing HTTP handlers accept the captured owner through an explicit internal entry. Native
+  children cannot acquire interactive browser-operator authority. The selected-model binding is
+  thread-local, nested and restored; identical vendor model names cannot change the connection.
+- Credential-free homes are available with durable native state partitioned by session and a
+  scope digest. They read no Vault credentials and link no shared native configuration. The
+  production SDK spawn sites still use the old credential-bearing homes until replay and
+  supported model/tool transport are wired and qualified together.
+- The canonical event contract reserves strict `replay_proof` metadata, consistently validated
+  by C, Go and the browser. It is excluded from transcript history. Actual source-proof capture,
+  restored signed-thinking egress, ambiguity handling and account-bound resume adoption are
+  still outstanding; the new event is not yet produced by a live SDK runtime.
+
+Local validation so far: the full agent fixture passes with its three explicit store-dependent
+skips; native listener/runtime, HTTP, native homes and canonical event fixtures pass. The five
+boundary fixtures also pass ASan/UBSan with leak detection. All 288 frontend tests, TypeScript
+checking and Go IR/session-owner race suites pass. All 76 lint checks and server/KB builds pass.
+The new runtime fixture passes through the actual repository CMake graph with assertions enabled.
+Session-erasure, malformed-lineage, full 127-byte session identity and protocol-header cases also
+pass normally and under ASan/UBSan. CI now builds/runs the runtime fixture through CMake. The
+first CI head passed strict attribution but its secret scan flagged the hexadecimal validation
+alphabet. The predicate now uses character comparisons; the scanner and its full-history scope
+remain unchanged. The branch commit is rewritten to remove the flagged line from reachable
+history. The configured local test PostgreSQL endpoint is unavailable, so integration and
+deployment qualification remain with fresh CI; no production qualification is claimed.
+
+The next required work remains actual credential-free native SDK wiring, actor-bound full tools,
+account-bound cache/history adoption, upstream-response replay evidence, Claude refresh custody,
+remaining typed consumers/capabilities and standalone procedure feedback. Production `.100`
+remains intentionally KB-free. Independently graded learning, synthesis and live acceptance
+cannot be inferred from process-success observations. Production promotion still requires the
+independent reviewer specified in `OWNERS.md`.

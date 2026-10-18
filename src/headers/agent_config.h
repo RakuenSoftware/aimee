@@ -96,6 +96,10 @@ int agent_registry_default_primary(agent_t *out);
  * registered agent name and never silently falls back. The selected agent must
  * be enabled. This is the shared ingress contract for all client wire formats. */
 int agent_registry_resolve_ingress_model(const char *model, agent_t *out);
+/* Host-owned native execution scope. The selected registration snapshot must
+ * outlive the synchronous request; restore the returned scope before reuse.
+ * This is never populated from an HTTP/model field. */
+const agent_t *agent_registry_bind_ingress_model(const agent_t *selected);
 /* Select the default "primary" agent for ingress paths that don't name a model:
  * an explicitly configured default when it is enabled, else the first enabled
  * agent, else NULL. Never returns a disabled agent. */

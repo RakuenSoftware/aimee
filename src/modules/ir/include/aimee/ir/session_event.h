@@ -13,7 +13,8 @@ typedef enum
    AIMEE_SESSION_CONTROL_RESPONSE,
    AIMEE_SESSION_EXECUTION,
    AIMEE_SESSION_PROJECTION,
-   AIMEE_SESSION_CHILD_EXECUTION
+   AIMEE_SESSION_CHILD_EXECUTION,
+   AIMEE_SESSION_REPLAY_PROOF
 } aimee_session_event_kind_t;
 
 typedef struct
@@ -36,6 +37,9 @@ typedef struct
    /* Output-boundary fidelity report; never model content. */
    const char *projection_model, *projection_boundary;
    int projection_reasoning, projection_opaque;
+   /* Host-observed native state. Digests and the actual sent-prefix binding
+    * contain no credential or duplicate transcript. Never model content. */
+   const char *replay_scope, *replay_digest, *replay_wire, *replay_binding;
 } aimee_session_event_t;
 
 /* Canonical JSON, independent of native protocols. Returned objects are owned

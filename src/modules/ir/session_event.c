@@ -754,6 +754,24 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
       kind = event->kind == AIMEE_SESSION_CONTROL_REQUEST ? "control_request" : "control_response";
       payload = cJSON_Duplicate(event->control, 1);
       break;
+   case AIMEE_SESSION_REPLAY_PROOF:
+      if (!event->replay_scope || strlen(event->replay_scope) != 64 ||
+          strspn(event->replay_scope, "0123456789abcdef") != 64 || !event->replay_digest ||
+          strlen(event->replay_digest) != 64 ||
+          strspn(event->replay_digest, "0123456789abcdef") != 64 || !event->replay_wire ||
+          (strcmp(event->replay_wire, "anthropic") && strcmp(event->replay_wire, "responses")) ||
+          (!strcmp(event->replay_wire, "anthropic") &&
+           (!event->replay_binding || !aimee_ir_thinking_binding_valid(event->replay_binding))) ||
+          (!strcmp(event->replay_wire, "responses") && event->replay_binding))
+         goto fail;
+      kind = "replay_proof";
+      payload = cJSON_CreateObject();
+      if (!payload || !add_string(payload, "scope", event->replay_scope) ||
+          !add_string(payload, "block_digest", event->replay_digest) ||
+          !add_string(payload, "wire", event->replay_wire) ||
+          !add_string(payload, "thinking_binding", event->replay_binding))
+         goto fail;
+      break;
    case AIMEE_SESSION_PROJECTION:
       if (!event->projection_model || !event->projection_model[0] ||
           event->projection_reasoning <= 0 || event->projection_opaque < 0 ||
