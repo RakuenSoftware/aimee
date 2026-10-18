@@ -1082,3 +1082,50 @@ process restart and native resume retaining prior roles/tool pairs/completed tur
 This caught and fixed real SDK startup rejection of the obsolete `untrusted`
 approval policy; startup now uses `on-request` and retains host control handling.
 Synthetic provider usage does not establish production cache savings.
+
+## Standalone feedback persistence in the continuation
+
+The KB-free `learning.application` path now uses the existing Learning admission
+and projection owner and DB1 telemetry's local immutable event ledger. The host
+constructs exposure/scope from its principal-owned WORM receipt and replaces JSON
+actor claims with the attested local principal. Host model intent refuses human
+feedback, including on the configured-KB route. Daemon bearer identity alone does
+not establish a user. Existing configured KB behavior is preserved; no KB service
+or endpoint is enabled. Explicitly misconfigured remote mode does not fall back.
+
+Migration 46 adds local observation rows and payload-free erasure intent. Typed
+DB1 snapshot/append operations preserve full JSON, use optimistic cohort digests
+and prevent mutable event-ID replacement. C projects before append and retries
+projection on a concurrent update. No additional active session/project is needed
+for feedback on an existing receipt. Subject erasure and startup replay cover the
+new rows; triggers and the existing epoch fence erased IDs and old RR snapshots.
+
+Local qualification uses a newly built isolated PostgreSQL 17.6 under
+`/var/tmp/aimee-ir-postgres`, loopback port 55449, UTF-8 database `aimee_ir_test`.
+The source archive's published SHA-256 was checked. No production DB is used.
+The complete Go DB1-family and Learning race suites pass with both PostgreSQL
+fixture variables configured. Local feedback ownership/CAS fixtures pass normally
+and under ASan/UBSan. A real Codex adoption/restart regression also passes against
+CI's pinned 0.153.4, and is now included in the build workflow.
+
+This closes local explicit-feedback persistence, not autonomous learning. Native
+SDK activation, account-bound canonical-prefix/cache admission, complete native
+tool/workspace/control snapshots, Claude custody, remaining consumers and actual
+independent learning/grading/synthesis acceptance remain open. Production `.100`
+remains KB-free and is not promoted without the required independent review.
+
+CI follow-up: the native SDK test's registration inventory entry was missing and
+is now recorded without changing the checker. The parallel script run also
+reproduced a shared-checkout fault-injection race: principal-ref and provider
+registration tests wrote their negative cases into actual production files. They
+now use a private fixture/virtual read, with 12 concurrent gate runs passing and
+production inventory/contracts unchanged. These are separate pushed CI repairs;
+the standalone learning slice's fresh CI still follows its own publication.
+
+The standalone feedback slice also passes the repository CMake fixture with
+assertions enabled, the server production build, all 76 lint checks and full
+DB1-family/Learning race suites against a fresh UTF-8 fixture database. Focused
+PostgreSQL retries cover maximum admitted action/gap arrays exceeding 64 KiB,
+without the old 4096-byte DTO. The script suite's observed shared-checkout race
+was repaired and independently stress-run; its complete rerun/fresh CI remain
+the final validation for this checkpoint.

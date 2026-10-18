@@ -678,6 +678,12 @@ jobs:
         env:
           AIMEE_TEST_REQUIRE_CODEX: '1'
         run: python3 scripts/tests/test_thin_client_proxy.py -v
+      - name: Native Codex canonical adoption and process restart
+        run: |
+          make -C src -j2 build/obj/tests/unit-test-cli-codex
+          python3 src/tests/test_codex_native_adoption.py \
+            --adapter-binary src/build/obj/tests/unit-test-cli-codex \
+            --codex-binary "$(command -v codex)"
 
   build-integrity:
     needs: change-scope
@@ -722,9 +728,9 @@ jobs:
           cmake -S . -B build/native-ir-cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF
           cmake --build build/native-ir-cmake --parallel "$(nproc)" \
-            --target test_server_chat_ir test_server_session_log test_server_native_runtime test_server_native_replay
+            --target test_server_chat_ir test_server_session_log test_server_native_runtime test_server_native_replay test_server_learning_application
           ctest --test-dir build/native-ir-cmake \
-            -R '^test_server_(chat_ir|session_log|native_runtime|native_replay)$' --output-on-failure
+            -R '^test_server_(chat_ir|session_log|native_runtime|native_replay|learning_application)$' --output-on-failure
       - name: Artifact integrity (removed capabilities stay removed)
         run: bash scripts/validate-aimee-artifacts.sh
 

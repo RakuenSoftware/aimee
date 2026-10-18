@@ -920,6 +920,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-cli-proxy-bound
 $(TESTPREFIX)/unit-test-cli-proxy-bound: $(OBJDIR)/tests/test_cli_proxy_bound.o $(OBJDIR)/cli_proxy.o $(CORE_CONNECTION_LIB)
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-learning-application
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-replay
 $(TESTPREFIX)/unit-test-server-native-replay: $(OBJDIR)/tests/test_server_native_replay.o \
     $(OBJDIR)/server/server_native_replay.o $(OBJDIR)/modules/ir/session_event.o \
@@ -8035,3 +8036,7 @@ $(TESTPREFIX)/unit-test-server-session-log: $(OBJDIR)/tests/test_server_session_
     $(OBJDIR)/interaction_event_names.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
     $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-server-learning-application: $(OBJDIR)/tests/test_server_learning_application.o \
+    $(OBJDIR)/server/server_learning_application.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

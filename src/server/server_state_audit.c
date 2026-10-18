@@ -9,6 +9,7 @@
 #include "module_json_call.h"
 #include "modules/economizer/economizer_module_client.h"
 #include "request_context.h"
+#include "server_learning_application.h"
 #include <aimee/audit/audit_worm.h>
 #include "dashboard.h"
 #include "lsp.h"
@@ -244,6 +245,9 @@ int handle_memory_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_learning_application(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
+   const request_context_t *execution = request_context_get();
+   if (execution && execution->model_execution)
+      return server_send_error(conn, "user feedback authority required", NULL);
    cJSON *event = cJSON_GetObjectItemCaseSensitive(req, "event");
    const char *event_json = jo_str(req, "event_json", "");
    if (!event && event_json[0] && strlen(event_json) <= 65536)
@@ -284,6 +288,22 @@ int handle_learning_application(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    {
       cJSON_Delete(ledger);
       return server_send_error(conn, "procedure version absent from receipt", NULL);
+   }
+   char kb_mode[64] = "";
+   config_kb_mode_copy(kb_mode, sizeof kb_mode);
+   if (!strcmp(kb_mode, "none") || (!kb_mode[0] && !kb_client_connection_configured()))
+   {
+      const request_context_t *owner = request_context_get();
+      const char *workspace = jo_str(binding, "workspace", "");
+      const char *project = jo_str(binding, "project", "");
+      cJSON *reply = server_learning_application_local(owner, event, matched,
+                                                       workspace[0] ? "workspace"
+                                                       : project[0] ? "project"
+                                                                    : "global",
+                                                       workspace[0] ? workspace : project);
+      cJSON_Delete(ledger);
+      return reply ? send_and_free(conn, reply)
+                   : server_send_error(conn, "local learning application unavailable", NULL);
    }
    cJSON *payload = cJSON_CreateObject();
    cJSON_AddItemToObject(payload, "governed_event", cJSON_Duplicate(event, 1));

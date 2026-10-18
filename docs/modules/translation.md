@@ -218,8 +218,8 @@ prove account/connection scope and supply only an unseen canonical tail on resum
 the migration has not yet activated this option at the browser/session callers.
 The selected-model gateway still owns opaque replay verification.
 
-The opt-in real SDK qualification uses the compiled adapter, an empty native HOME
-and a loopback Responses provider:
+The real SDK qualification runs in CI against the pinned SDK, using the compiled
+adapter, an empty native HOME and a loopback Responses provider. Run it locally:
 
 ```sh
 python3 src/tests/test_codex_native_adoption.py \

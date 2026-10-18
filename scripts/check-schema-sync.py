@@ -54,6 +54,9 @@ KB_STORE_SHIM_ONLY_LEXICAL_INDEX_TABLES = {
 # DB1-local user/session/runtime tables. These belong only in the DB1 schema;
 # the KB_STORE schemas (sqlite shim and postgres) must not create them.
 DB1_ONLY_TABLES = {
+    # Server-local immutable procedure experience and payload-free erasure intent.
+    "local_procedure_events",
+    "local_procedure_erasure_intents",
     "user_memory_erasure_epoch",
     "user_memory_erasure_intents",
     "user_memory_erasure_sessions",

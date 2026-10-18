@@ -628,6 +628,10 @@ func serverSessionEraseSubject(ctx context.Context, q store.Queryer, f []string)
 	if sessionCount > 4096 {
 		return store.StatusInvalid, nil, nil
 	}
+	var removedProcedures int64
+	if err := q.QueryRow(ctx, `SELECT local_procedure_prepare_subject_erasure($1)`, principal).Scan(&removedProcedures); err != nil {
+		return 0, nil, err
+	}
 	tag, err := q.Exec(ctx, serverSessionEraseSubjectSQL, principal)
 	if err != nil {
 		return 0, nil, err

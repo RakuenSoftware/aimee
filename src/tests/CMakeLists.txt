@@ -446,6 +446,12 @@ set_tests_properties(test_session_compact_focused PROPERTIES
 
 # Native harness conversion and the POSIX print-mode lifecycle.
 if(NOT WIN32)
+  add_executable(test_server_learning_application test_server_learning_application.c
+    ../server/server_learning_application.c ../vendor/cJSON.c)
+  target_include_directories(test_server_learning_application PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR}/modules/kb/c)
+  aimee_enable_test_asserts(test_server_learning_application)
+  add_test(NAME test_server_learning_application COMMAND test_server_learning_application)
   add_executable(test_server_native_replay test_server_native_replay.c
     ../server/server_native_replay.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
     ../aimee_sha256.c ../platform_random.c ../posix/platform_random.c ../vendor/cJSON.c)

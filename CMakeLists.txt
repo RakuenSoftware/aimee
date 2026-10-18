@@ -1064,6 +1064,7 @@ list(APPEND SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_native_runtime.c
     ${AIMEE_SRC_DIR}/server/server_native_replay.c
     ${AIMEE_SRC_DIR}/server/server_learning_outcome.c
+    ${AIMEE_SRC_DIR}/server/server_learning_application.c
 )
 
 set(SERVER_CORE_SRCS ${CORE_SRCS})
