@@ -515,6 +515,23 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
       kind = event->kind == AIMEE_SESSION_CONTROL_REQUEST ? "control_request" : "control_response";
       payload = cJSON_Duplicate(event->control, 1);
       break;
+   case AIMEE_SESSION_PROJECTION:
+      if (!event->projection_model || !event->projection_model[0] ||
+          event->projection_reasoning <= 0 || event->projection_opaque < 0 ||
+          event->projection_opaque > event->projection_reasoning || !event->projection_boundary ||
+          (strcmp(event->projection_boundary, "request") &&
+           strcmp(event->projection_boundary, "response")))
+         goto fail;
+      kind = "projection";
+      payload = cJSON_CreateObject();
+      if (!payload || !add_string(payload, "model", event->projection_model) ||
+          !add_string(payload, "boundary", event->projection_boundary) ||
+          !cJSON_AddNumberToObject(payload, "omitted_reasoning_blocks",
+                                   event->projection_reasoning) ||
+          !cJSON_AddNumberToObject(payload, "omitted_opaque_state_blocks",
+                                   event->projection_opaque))
+         goto fail;
+      break;
    case AIMEE_SESSION_EXECUTION:
       if (!event->execution_status || (strcmp(event->execution_status, "running") &&
                                        strcmp(event->execution_status, "completed") &&
@@ -810,4 +827,17 @@ int aimee_ir_control_reply_valid(const char *kind, const cJSON *request, const c
       return 1;
    }
    return !strcmp(kind, "permission") && !answers && !content;
+}
+
+int aimee_ir_session_emit_projection(const char *model, int reasoning, int opaque,
+                                     const char *boundary)
+{
+   if (!reasoning && !opaque)
+      return 0;
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
+                                  .projection_model = model && model[0] ? model : "selected model",
+                                  .projection_boundary = boundary,
+                                  .projection_reasoning = reasoning,
+                                  .projection_opaque = opaque};
+   return aimee_ir_session_emit(&event);
 }

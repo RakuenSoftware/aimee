@@ -383,6 +383,9 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
    ir.mutated = 1;
    aimee_wire_projection_report_t projection;
    aimee_backend_projection_report(&ir, wire, &projection);
+   if (aimee_ir_session_emit_projection(ir.model, projection.omitted_reasoning_blocks,
+                                        projection.omitted_opaque_state_blocks, "request"))
+      goto fail;
    if (projection.omitted_reasoning_blocks)
       LOG_INFO("translation.projection",
                "wire=%d omitted_reasoning=%d omitted_opaque_state=%d canonical_history=retained",

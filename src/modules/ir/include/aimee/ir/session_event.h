@@ -11,7 +11,8 @@ typedef enum
    AIMEE_SESSION_MESSAGE,
    AIMEE_SESSION_CONTROL_REQUEST,
    AIMEE_SESSION_CONTROL_RESPONSE,
-   AIMEE_SESSION_EXECUTION
+   AIMEE_SESSION_EXECUTION,
+   AIMEE_SESSION_PROJECTION
 } aimee_session_event_kind_t;
 
 typedef struct
@@ -29,6 +30,9 @@ typedef struct
    /* Host-task lifecycle is separate from each model response TURN_STOP. */
    const char *execution_status; /* running, completed, failed, cancelled */
    const char *execution_error;
+   /* Output-boundary fidelity report; never model content. */
+   const char *projection_model, *projection_boundary;
+   int projection_reasoning, projection_opaque;
 } aimee_session_event_t;
 
 /* Canonical JSON, independent of native protocols. Returned objects are owned
@@ -61,6 +65,8 @@ void aimee_ir_session_begin_task(void);
 void aimee_ir_session_restore_sink(aimee_ir_session_sink_fn sink, void *context, int failed);
 aimee_ir_session_sink_fn aimee_ir_session_get_sink(void **context);
 int aimee_ir_session_emit(const aimee_session_event_t *event);
+int aimee_ir_session_emit_projection(const char *model, int reasoning, int opaque,
+                                     const char *boundary);
 /* Capture failure is sticky for the installed task sink, including adapter
  * admission failures. Clearing the sink ends the scope and resets the latch. */
 void aimee_ir_session_fail_capture(void);

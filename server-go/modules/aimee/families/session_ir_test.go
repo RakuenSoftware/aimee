@@ -4,6 +4,7 @@ import "testing"
 
 func TestSessionIRCanonicalValidation(t *testing.T) {
 	for _, event := range []string{
+		`{"kind":"projection","payload":{"model":"model-b","boundary":"request","omitted_reasoning_blocks":2,"omitted_opaque_state_blocks":1}}`,
 		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_START","kind":"thinking","block_id":0,"text_delta":"initial","signature_delta":"sig","redacted_content":"opaque"}}`,
 		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_DELTA","kind":"thinking","block_id":0,"signature_delta":"nature"}}`,
 		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_START","kind":"tool_use","block_id":1,"tool_id":"call","name":"read","namespace":"files","input":{"path":"a"}}}`,
@@ -23,6 +24,9 @@ func TestSessionIRCanonicalValidation(t *testing.T) {
 		}
 	}
 	for _, event := range []string{
+		`{"kind":"projection","payload":{"model":"model-b","boundary":"request","omitted_reasoning_blocks":2,"omitted_opaque_state_blocks":3}}`,
+		`{"kind":"projection","payload":{"model":"model-b","boundary":"request","omitted_reasoning_blocks":2}}`,
+		`{"kind":"projection","payload":{"model":"model-b","boundary":"request","omitted_reasoning_blocks":2,"omitted_opaque_state_blocks":-1}}`,
 		`{"kind":"delta","message_id":"m","role":"assistant","payload":{"type":"TURN_STOP","raw_stop_reason":123}}`,
 		`{"kind":"delta","message_id":"m","role":"assistant","payload":{"type":"TURN_START","raw_stop_reason":"stop"}}`,
 		`{"kind":"delta","message_id":"m","role":"assistant","payload":{"type":"BLOCK_DELTA","kind":"text","block_id":0,"signature_delta":"bad"}}`,

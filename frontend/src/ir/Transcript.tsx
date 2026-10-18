@@ -41,6 +41,11 @@ export default function IRTranscript({ state, onReply }: { state: SessionState; 
       }
     }))}
     {Object.entries(state.controls).map(([id, control]) => <ControlCard key={id} id={id} control={control} onReply={onReply} />)}
+    {(state.projections ?? []).map(report => <p role="status" key={report.id}>
+      {report.omitted_reasoning_blocks} reasoning {report.omitted_reasoning_blocks === 1 ? 'block remains' : 'blocks remain'} in history and
+      {report.omitted_reasoning_blocks === 1 ? ' was' : ' were'} omitted from {report.boundary === 'request' ? `${report.model}'s input` : `the client response from ${report.model}`}.
+      {report.omitted_opaque_state_blocks > 0 && <> {report.omitted_opaque_state_blocks} {report.omitted_opaque_state_blocks === 1 ? 'contains' : 'contain'} native opaque state.</>}
+    </p>)}
     {state.errors.map((error, i) => <div role="alert" key={`error:${i}`}>{error}</div>)}
   </>;
 }

@@ -102,6 +102,18 @@ func validSessionIREvent(encoded []byte) bool {
 	case "control_request", "control_response":
 		var c map[string]json.RawMessage
 		return e.RequestID != "" && e.ControlKind != "" && decodeIR(e.Payload, &c) && c != nil
+	case "projection":
+		var projection struct {
+			Model     string `json:"model"`
+			Boundary  string `json:"boundary"`
+			Reasoning *int64 `json:"omitted_reasoning_blocks"`
+			Opaque    *int64 `json:"omitted_opaque_state_blocks"`
+		}
+		return decodeIR(e.Payload, &projection) && projection.Model != "" &&
+			(projection.Boundary == "request" || projection.Boundary == "response") &&
+			projection.Reasoning != nil && projection.Opaque != nil &&
+			*projection.Reasoning > 0 && *projection.Reasoning <= 9007199254740991 &&
+			*projection.Opaque >= 0 && *projection.Opaque <= *projection.Reasoning
 	case "execution":
 		var x struct {
 			Status string `json:"status"`

@@ -201,6 +201,9 @@ static int messages_decode_response(const char *frame, const delegate_driver_t *
    aimee_request_t view = {.messages = &message, .n_messages = 1};
    aimee_wire_projection_report_t projection;
    aimee_backend_projection_report(&view, AIMEE_WIRE_ANTHROPIC, &projection);
+   if (aimee_ir_session_emit_projection(out->model, projection.omitted_reasoning_blocks,
+                                        projection.omitted_opaque_state_blocks, "response"))
+      return -1;
    if (projection.omitted_reasoning_blocks)
       LOG_INFO(
           "translation.projection",

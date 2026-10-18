@@ -1999,6 +1999,11 @@ stop_workflow_module
 
 fi  # WORKFLOW_MODULE_READY
 
+# Native provider output must cross the same durable IR contract used by
+# browser live delivery and replay, including after model switches.
+check "canonical primary switching and durable replay" \
+    python3 "$REPO_ROOT/src/tests/test_primary_ir_live.py"
+
 # ============================================================
 # 11. Server shutdown
 # ============================================================

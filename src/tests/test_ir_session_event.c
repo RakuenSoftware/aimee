@@ -176,6 +176,23 @@ int main(void)
                            .tool_args_delta = "{"};
    assert(!aimee_ir_delta_json(&delta));
 
+   event = (aimee_session_event_t){.kind = AIMEE_SESSION_PROJECTION,
+                                   .projection_model = "model-b",
+                                   .projection_boundary = "request",
+                                   .projection_reasoning = 2,
+                                   .projection_opaque = 1};
+   json = aimee_ir_session_event_json(&event);
+   assert(json && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(json, "kind")), "projection"));
+   assert(!cJSON_GetObjectItem(json, "message_id") && !cJSON_GetObjectItem(json, "role"));
+   cJSON *report = cJSON_GetObjectItem(json, "payload");
+   assert(cJSON_GetObjectItem(report, "omitted_reasoning_blocks")->valueint == 2);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(report, "boundary")), "request"));
+   cJSON_Delete(json);
+   event.projection_opaque = 3;
+   assert(!aimee_ir_session_event_json(&event));
+   event.projection_opaque = -1;
+   assert(!aimee_ir_session_event_json(&event));
+
    int failure = -7;
    aimee_response_t response = {.role = "assistant", .content = blocks, .n_content = 2};
    aimee_ir_session_set_sink(capture, &failure);

@@ -42,7 +42,9 @@ export type Delta = {
   usage_reasoning?: number;
   error_message?: string;
 };
+export type ProjectionReport = { model: string; boundary: 'request' | 'response'; omitted_reasoning_blocks: number; omitted_opaque_state_blocks: number };
 export type SessionEvent =
+  | { kind: 'projection'; payload: ProjectionReport }
   | { kind: 'history'; payload: { scope: string; phase: 'message' | 'commit'; index?: number; count?: number; message?: Message } }
   | { kind: 'message'; message_id: string; payload: Message }
   | { kind: 'delta'; message_id: string; role: string; payload: Delta }
@@ -70,10 +72,11 @@ export type Control = {
 export type SessionState = {
   session: string; sequence: string; messages: ProjectedMessage[];
   controls: Record<string, Control>; activeTurns: string[]; errors: string[];
+  projections: (ProjectionReport & { id: string; turn: string })[];
   executions: Record<string, 'running' | 'completed' | 'failed' | 'cancelled'>;
 };
 export function emptySession(session: string): SessionState {
-  return { session, sequence: '0', messages: [], controls: {}, activeTurns: [], errors: [], executions: {} };
+  return { session, sequence: '0', messages: [], controls: {}, activeTurns: [], errors: [], projections: [], executions: {} };
 }
 function sequence(value: string): bigint {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) throw new Error('Invalid session sequence');
@@ -117,6 +120,14 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       (event.kind === 'message' || event.kind === 'delta' || event.kind === 'control_request'))
     throw new Error('Content follows execution completion');
   switch (event.kind) {
+    case 'projection': {
+      const report = event.payload;
+      if (!nonempty(report.model) || (report.boundary !== 'request' && report.boundary !== 'response') || !Number.isSafeInteger(report.omitted_reasoning_blocks) || report.omitted_reasoning_blocks <= 0 ||
+          !Number.isSafeInteger(report.omitted_opaque_state_blocks) || report.omitted_opaque_state_blocks < 0 ||
+          report.omitted_opaque_state_blocks > report.omitted_reasoning_blocks) throw new Error('Invalid projection report');
+      next.projections = [...(state.projections ?? []), { ...report, id: envelope.event_id, turn: envelope.turn_id }];
+      return next;
+    }
     case 'history': {
       const history = event.payload;
       if (!nonempty(history.scope) || (history.phase !== 'message' && history.phase !== 'commit'))
