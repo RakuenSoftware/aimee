@@ -18,6 +18,10 @@ LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
     "raw_responses", "build_provider_body", "translate_request",
     "agent_resolve_auth", "agent_build_extra_headers",
+    "parsed_response_t", "parsed_tool_call_t", "agent_free_parsed_response",
+    "gateway_policy_police_parsed_response", "aimee_ir_shadow_compare_response",
+    "openai_format_chat_completion_tool_calls", "openai_format_chat_chunk_tool_calls",
+    "openai_responses_emit_policed",
     "gateway_delegate_tool_shape", "agent_tool_result_usable", "GW_TOOL_SHAPE_NAMED",
     "GW_TOOL_SHAPE_FUNCTION_NESTED", "GW_TOOL_SHAPE_UNSUPPORTED",
     "agent_ir_parse_json_response", "agent_ir_parse_responses",

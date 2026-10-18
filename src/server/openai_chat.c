@@ -182,223 +182,6 @@ static int agent_execute_ir_request(const agent_t *agent, aimee_request_t *reque
 static cJSON *openai_ir_history_json(const aimee_request_t *request);
 static int openai_ir_history_replace(aimee_request_t *request, const cJSON *history);
 
-/* The provider result remains owned IR through policy and the client boundary. */
-static cJSON *openai_render_ir(const aimee_response_t *response, const char *id, const char *model,
-                               long created, int responses)
-{
-   aimee_response_t view = *response;
-   view.id = (char *)id;
-   view.model = (char *)model;
-   cJSON *root = responses ? responses_frontend_render(&view) : openai_frontend_render(&view);
-   if (!root)
-      return NULL;
-   cJSON_AddNumberToObject(root, responses ? "created_at" : "created", (double)created);
-   if (responses)
-   {
-      cJSON *item;
-      int index = 0;
-      cJSON_ArrayForEach(item, cJSON_GetObjectItemCaseSensitive(root, "output"))
-      {
-         if (!cJSON_GetObjectItemCaseSensitive(item, "id"))
-         {
-            size_t capacity = strlen(id) + 40;
-            char *item_id = malloc(capacity);
-            if (!item_id)
-            {
-               cJSON_Delete(root);
-               return NULL;
-            }
-            snprintf(item_id, capacity, "%s-item-%d", id, index);
-            cJSON_AddStringToObject(item, "id", item_id);
-            free(item_id);
-         }
-         cJSON_AddStringToObject(item, "status", "completed");
-         index++;
-      }
-   }
-   return root;
-}
-static int openai_ir_buffered(const aimee_response_t *response, const char *id, const char *model,
-                              long created, int responses, char *buffer, int capacity)
-{
-   cJSON *root = openai_render_ir(response, id, model, created, responses);
-   int length =
-       root && cJSON_PrintPreallocated(root, buffer, capacity, 0) ? (int)strlen(buffer) : -1;
-   cJSON_Delete(root);
-   return length;
-}
-static int openai_ir_emit_event(server_http_sse_event_emit emit, void *context, const char *event,
-                                cJSON *payload)
-{
-   if (!payload || !cJSON_AddStringToObject(payload, "type", event))
-   {
-      cJSON_Delete(payload);
-      return -1;
-   }
-   char *json = cJSON_PrintUnformatted(payload);
-   cJSON_Delete(payload);
-   if (!json)
-      return -1;
-   emit(context, event, json);
-   free(json);
-   return 0;
-}
-static int openai_ir_chat_emit(const aimee_response_t *response, const char *id, const char *model,
-                               long created, server_http_sse_emit emit, void *context)
-{
-   cJSON *root = openai_render_ir(response, id, model, created, 0);
-   if (!root)
-      return -1;
-   cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(root, "choices"), 0);
-   cJSON *message = cJSON_DetachItemFromObjectCaseSensitive(choice, "message");
-   cJSON *calls = cJSON_GetObjectItemCaseSensitive(message, "tool_calls"), *call;
-   int index = 0;
-   cJSON_ArrayForEach(call, calls) cJSON_AddNumberToObject(call, "index", index++);
-   cJSON_AddItemToObject(choice, "delta", message);
-   cJSON *finish = cJSON_DetachItemFromObjectCaseSensitive(choice, "finish_reason");
-   cJSON_AddNullToObject(choice, "finish_reason");
-   cJSON_ReplaceItemInObjectCaseSensitive(root, "object",
-                                          cJSON_CreateString("chat.completion.chunk"));
-   cJSON *usage = cJSON_DetachItemFromObjectCaseSensitive(root, "usage");
-   char *json = cJSON_PrintUnformatted(root);
-   if (!json)
-   {
-      cJSON_Delete(finish);
-      cJSON_Delete(usage);
-      cJSON_Delete(root);
-      return -1;
-   }
-   emit(context, json);
-   free(json);
-   cJSON_ReplaceItemInObjectCaseSensitive(choice, "delta", cJSON_CreateObject());
-   cJSON_ReplaceItemInObjectCaseSensitive(choice, "finish_reason", finish);
-   cJSON_AddItemToObject(root, "usage", usage);
-   json = cJSON_PrintUnformatted(root);
-   cJSON_Delete(root);
-   if (!json)
-      return -1;
-   emit(context, json);
-   free(json);
-   return 0;
-}
-static cJSON *openai_ir_item_event(const cJSON *item, int index)
-{
-   cJSON *event = cJSON_CreateObject();
-   if (!event || !cJSON_AddNumberToObject(event, "output_index", index) ||
-       !cJSON_AddStringToObject(event, "item_id",
-                                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "id"))))
-   {
-      cJSON_Delete(event);
-      return NULL;
-   }
-   return event;
-}
-static int openai_ir_responses_emit(const aimee_response_t *response, const char *id,
-                                    const char *model, long created,
-                                    server_http_sse_event_emit emit, void *context)
-{
-   cJSON *root = openai_render_ir(response, id, model, created, 1);
-   if (!root)
-      return -1;
-   cJSON *item;
-   int index = 0, rc = -1;
-   cJSON_ArrayForEach(item, cJSON_GetObjectItemCaseSensitive(root, "output"))
-   {
-      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "type"));
-      cJSON *start = cJSON_Duplicate(item, 1);
-      cJSON *event = openai_ir_item_event(item, index);
-      if (!start || !event)
-      {
-         cJSON_Delete(start);
-         cJSON_Delete(event);
-         goto done;
-      }
-      cJSON_ReplaceItemInObjectCaseSensitive(start, "status", cJSON_CreateString("in_progress"));
-      if (!strcmp(type, "message"))
-         cJSON_ReplaceItemInObjectCaseSensitive(start, "content", cJSON_CreateArray());
-      else if (!strcmp(type, "function_call"))
-         cJSON_ReplaceItemInObjectCaseSensitive(start, "arguments", cJSON_CreateString(""));
-      else if (!strcmp(type, "reasoning"))
-      {
-         cJSON_ReplaceItemInObjectCaseSensitive(start, "summary", cJSON_CreateArray());
-         cJSON_DeleteItemFromObjectCaseSensitive(start, "encrypted_content");
-      }
-      cJSON_AddItemToObject(event, "item", start);
-      if (openai_ir_emit_event(emit, context, "response.output_item.added", event))
-         goto done;
-      if (!strcmp(type, "function_call"))
-      {
-         const char *args =
-             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "arguments"));
-         event = openai_ir_item_event(item, index);
-         cJSON_AddStringToObject(event, "delta", args);
-         if (openai_ir_emit_event(emit, context, "response.function_call_arguments.delta", event))
-            goto done;
-         event = openai_ir_item_event(item, index);
-         cJSON_AddStringToObject(event, "arguments", args);
-         if (openai_ir_emit_event(emit, context, "response.function_call_arguments.done", event))
-            goto done;
-      }
-      else
-      {
-         int reasoning = !strcmp(type, "reasoning");
-         const char *parts_name = reasoning ? "summary" : "content";
-         cJSON *part;
-         int part_index = 0;
-         cJSON_ArrayForEach(part, cJSON_GetObjectItemCaseSensitive(item, parts_name))
-         {
-            const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(part, "text"));
-            const char *position = reasoning ? "summary_index" : "content_index";
-            const char *added =
-                reasoning ? "response.reasoning_summary_part.added" : "response.content_part.added";
-            const char *delta =
-                reasoning ? "response.reasoning_summary_text.delta" : "response.output_text.delta";
-            const char *text_done =
-                reasoning ? "response.reasoning_summary_text.done" : "response.output_text.done";
-            const char *part_done =
-                reasoning ? "response.reasoning_summary_part.done" : "response.content_part.done";
-            cJSON *empty = cJSON_Duplicate(part, 1);
-            cJSON_ReplaceItemInObjectCaseSensitive(empty, "text", cJSON_CreateString(""));
-            event = openai_ir_item_event(item, index);
-            cJSON_AddNumberToObject(event, position, part_index);
-            cJSON_AddItemToObject(event, "part", empty);
-            if (openai_ir_emit_event(emit, context, added, event))
-               goto done;
-            event = openai_ir_item_event(item, index);
-            cJSON_AddNumberToObject(event, position, part_index);
-            cJSON_AddStringToObject(event, "delta", text ? text : "");
-            if (openai_ir_emit_event(emit, context, delta, event))
-               goto done;
-            event = openai_ir_item_event(item, index);
-            cJSON_AddNumberToObject(event, position, part_index);
-            cJSON_AddStringToObject(event, "text", text ? text : "");
-            if (openai_ir_emit_event(emit, context, text_done, event))
-               goto done;
-            event = openai_ir_item_event(item, index);
-            cJSON_AddNumberToObject(event, position, part_index);
-            cJSON_AddItemToObject(event, "part", cJSON_Duplicate(part, 1));
-            if (openai_ir_emit_event(emit, context, part_done, event))
-               goto done;
-            part_index++;
-         }
-      }
-      event = openai_ir_item_event(item, index);
-      cJSON_AddItemToObject(event, "item", cJSON_Duplicate(item, 1));
-      if (openai_ir_emit_event(emit, context, "response.output_item.done", event))
-         goto done;
-      index++;
-   }
-   cJSON *terminal = cJSON_CreateObject();
-   cJSON_AddItemToObject(terminal, "response", cJSON_Duplicate(root, 1));
-   rc = openai_ir_emit_event(emit, context,
-                             response->stop_reason == AIMEE_STOP_MAX_TOKENS ? "response.incomplete"
-                                                                            : "response.completed",
-                             terminal);
-done:
-   cJSON_Delete(root);
-   return rc;
-}
-
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
  * (and chat-request parse); otherwise the legacy text_completion shape. */
 /* A connector that packs/counts chat messages must keep that exact role shape.
@@ -487,12 +270,12 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
           (int)response.usage_in, (int)response.usage_out, (int)response.usage_cache_write,
           (int)response.usage_cache_read, "openai-ingress", NULL);
    char *text = chat ? NULL : aimee_ir_response_text_alloc(&response);
-   int length =
-       chat   ? openai_ir_buffered(&response, cache.client_id, model, cache.created, 0, resp, cap)
-       : text ? openai_format_text_completion(cache.client_id, model, text, cache.created,
-                                              (int)response.usage_in, (int)response.usage_out, resp,
-                                              cap)
-              : -1;
+   int length = chat   ? aimee_openai_buffered_response(&response, cache.client_id, model,
+                                                        cache.created, 0, resp, cap)
+                : text ? openai_format_text_completion(cache.client_id, model, text, cache.created,
+                                                       (int)response.usage_in,
+                                                       (int)response.usage_out, resp, cap)
+                       : -1;
    free(text);
    status = length >= 0 ? 200 : 500;
    if (status != 200)
@@ -948,7 +731,8 @@ static int responses_handler(const char *body, char *buffer, int capacity)
       free(model);
       goto failed;
    }
-   int length = openai_ir_buffered(&response, id, model, (long)time(NULL), 1, buffer, capacity);
+   int length =
+       aimee_openai_buffered_response(&response, id, model, (long)time(NULL), 1, buffer, capacity);
    free(model);
    aimee_request_free(&request);
    aimee_response_free(&response);
@@ -1040,7 +824,7 @@ static int completion_stream_ir(int chat, const char *body, server_http_sse_emit
    if (chat)
    {
       emit_chunk(emit, ctx, id, model, created, 1, NULL, 0);
-      if (openai_ir_chat_emit(&response, id, model, created, emit, ctx))
+      if (aimee_openai_emit_chat_response(&response, id, model, created, emit, ctx))
          goto failure;
    }
    else
@@ -1568,7 +1352,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
       snprintf(error, sizeof error, "durable Responses history could not be committed");
       goto failed;
    }
-   if (openai_ir_responses_emit(&response, id, model, created, emit, context))
+   if (aimee_openai_emit_responses_tail(&response, id, model, created, emit, context))
    {
       snprintf(error, sizeof error, "canonical response rendering failed");
       goto failed;

@@ -451,15 +451,6 @@ cJSON *agent_responses_sse_response_object(const char *body)
    return responses_backend_sse_object(body);
 }
 
-void agent_free_parsed_response(parsed_response_t *p)
-{
-   for (int i = 0; i < p->call_count; i++)
-      free(p->calls[i].arguments);
-   free(p->content);
-   if (p->assistant_message)
-      cJSON_Delete(p->assistant_message);
-}
-
 /* --- Message utilities --- */
 
 /* Merge consecutive same-role messages in a cJSON messages array.

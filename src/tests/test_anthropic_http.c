@@ -359,16 +359,6 @@ int gateway_prevent_subagents_enabled(void)
 {
    return 0;
 }
-/* P2c (response-side tool policing) is exercised by its own dedicated
- * integration test (unit-test-anthropic-http-p2c) which links the real
- * gateway_policy.o. In these whitebox shape tests we stub it to a no-op
- * so the response shape is unaltered. */
-int gateway_policy_police_parsed_response(parsed_response_t *p)
-{
-   (void)p;
-   return 0;
-}
-
 void router_advise_ir(const aimee_request_t *request)
 {
    assert(!aimee_ir_request_admit(request));

@@ -1,9 +1,5 @@
-/* aimee_ir_shadow.h -- SHADOW-MODE observation of the canonical-IR path on live
- * traffic. The legacy translator still serves every response; the shadow just
- * parses the same request into the IR, rebuilds it same-protocol, and records
- * whether the round-trip is faithful (ir_rebuild_mismatch = a BUG). This proves
- * IR fidelity on real Claude Code traffic BEFORE any flag flips traffic onto the
- * IR path. Config-only gate (never request-controlled). Never affects the turn. */
+/* Request field-coverage and explicit comparison diagnostics. Production
+ * responses always enter canonical IR; there is no legacy response shadow. */
 #ifndef DEC_AIMEE_IR_SHADOW_H
 #define DEC_AIMEE_IR_SHADOW_H 1
 
@@ -18,7 +14,8 @@ void aimee_ir_shadow_observe_request(const struct cJSON *req, aimee_wire_t front
 
 /* Shadow-compare the two provider bodies for the SAME request: what the IR built
  * (`ir_body`) vs what the legacy translator would have sent (`legacy_body`).
- * Counts ir_body_match / ir_body_mismatch and logs a capped, TRUNCATED diff.
+ * Counts ir_body_match / ir_body_mismatch and logs capped length/shape metadata without request
+ * content.
  *
  * This is the evidence that retires the legacy translators. The existing
  * observe_request only proves the IR round-trips the CLIENT shape; it says nothing
@@ -31,24 +28,6 @@ void aimee_ir_shadow_observe_request(const struct cJSON *req, aimee_wire_t front
  * build failure), which counts as a mismatch. */
 void aimee_ir_shadow_compare_bodies(const char *ir_body, const char *legacy_body,
                                     aimee_wire_t frontend);
-
-/* Shadow-compare how the two paths PARSED the same provider response: the legacy
- * translator's parsed_response_t (`legacy`, the production result) vs what the IR
- * backend parser makes of the same response JSON (`resp_json`). Parses via the IR
- * for the given wire, then checks they agree on the answer text and on the set of
- * tool calls (count + names + argument JSON). Counts ir_resp_match /
- * ir_resp_mismatch and logs a capped, truncated note.
- *
- * This is the response-side twin of compare_bodies: the request shadow proves the
- * IR sends the provider the same bytes; this proves it reads the reply the same
- * way. Both are required before the response translators can be retired.
- *
- * No-op unless AIMEE_IR_SHADOW is set (the extra parse is real work) or if either
- * argument is NULL. Never affects the turn -- the legacy result is what runs.
- * `legacy` is a `parsed_response_t`; forward-declared to keep this header light. */
-struct parsed_response;
-void aimee_ir_shadow_compare_response(const struct parsed_response *legacy,
-                                      const struct cJSON *resp_json, aimee_wire_t wire);
 
 /* 1 when shadow mode is on, so callers can skip building the comparison body. */
 int aimee_ir_shadow_enabled(void);

@@ -107,11 +107,11 @@ static void test_owned_http_response_boundaries(void)
       cJSON_AddStringToObject(block->tool_input, "payload", payload);
    }
    assert(!aimee_ir_response_admit(&response));
-   assert(!openai_ir_chat_emit(&response, "chat-fixture", "model-alias", 123, collect_chat_frame,
-                               NULL));
+   assert(!aimee_openai_emit_chat_response(&response, "chat-fixture", "model-alias", 123,
+                                           collect_chat_frame, NULL));
    assert(chat_frames == 2);
-   assert(!openai_ir_responses_emit(&response, "resp-fixture", "model-alias", 123, collect_ir_event,
-                                    NULL));
+   assert(!aimee_openai_emit_responses_tail(&response, "resp-fixture", "model-alias", 123,
+                                            collect_ir_event, NULL));
    assert(added_items == 20 && done_items == 20 && tool_deltas == 17 && terminal_events == 1);
    aimee_response_t replay = {0};
    char error[128];
@@ -134,8 +134,8 @@ static void test_owned_http_response_boundaries(void)
    captured_length = 0;
    response.stop_reason = AIMEE_STOP_MAX_TOKENS;
    added_items = done_items = tool_deltas = terminal_events = 0;
-   assert(!openai_ir_responses_emit(&response, "resp-incomplete", "model-alias", 123,
-                                    collect_ir_event, NULL));
+   assert(!aimee_openai_emit_responses_tail(&response, "resp-incomplete", "model-alias", 123,
+                                            collect_ir_event, NULL));
    assert(strstr(captured_stream, "event: response.incomplete\n"));
    free(captured_stream);
    captured_stream = NULL;

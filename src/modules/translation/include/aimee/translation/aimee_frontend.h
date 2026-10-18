@@ -9,6 +9,7 @@
 #include <stddef.h>
 
 #include <aimee/ir/aimee_ir.h>
+#include <aimee/translation/aimee_ir_stream.h>
 
 struct cJSON;
 
@@ -73,6 +74,22 @@ struct cJSON *responses_frontend_render(const aimee_response_t *resp);
  * children and explicitly provider-owned hosted-tool options. */
 int openai_ir_parse_tool(const struct cJSON *native, aimee_tool_t *tool, int nested);
 struct cJSON *openai_ir_render_tool(const aimee_tool_t *tool, int responses_shape);
+
+/* Native client output boundaries. The response is borrowed canonical IR;
+ * rendering never mutates or consumes it. Responses tail excludes the caller's
+ * single response.created envelope. Emitters return 0 on success, -1 on failure. */
+typedef void (*aimee_chat_emit_fn)(void *context, const char *data_json);
+struct cJSON *aimee_openai_render_response(const aimee_response_t *response, const char *id,
+                                           const char *model, long created, int responses);
+int aimee_openai_buffered_response(const aimee_response_t *response, const char *id,
+                                   const char *model, long created, int responses, char *buffer,
+                                   int capacity);
+int aimee_openai_emit_chat_response(const aimee_response_t *response, const char *id,
+                                    const char *model, long created, aimee_chat_emit_fn emit,
+                                    void *context);
+int aimee_openai_emit_responses_tail(const aimee_response_t *response, const char *id,
+                                     const char *model, long created, aimee_sse_emit_fn emit,
+                                     void *context);
 
 /* Shared owned text/media content adapter for Chat request/response boundaries. */
 int openai_ir_parse_content(const struct cJSON *content, aimee_block_t **blocks, int *count);

@@ -11,22 +11,6 @@ extern "C"
 {
 #endif
 
-   /* Forward declarations keep this low-level shaping header decoupled from the
-    * agent pipeline and the server HTTP layer — it must not pull those headers
-    * in (the original transitive include also had a fragile load-bearing order:
-    * aimee.h before agent_protocol.h for the MAX_PATH_LEN macro). The .c units
-    * that define or call the P2c helper below (openai_shape.c, openai_chat.c,
-    * server_http.c) include the full definitions themselves.
-    *   - parsed_response_t: forward-declared by tag only (the full
-    *     `struct parsed_response` definition lives in agent_protocol.h and must
-    *     be visible in any TU that *dereferences* it — callers passing the
-    *     pointer through need only this forward decl).
-    *   - openai_sse_emit_fn: signature-compatible with server_http_sse_event_emit;
-    *     a distinct name avoids depending on server_http.h here.
-    * DO NOT re-add #include "aimee.h" / "server_http.h" / "agent_protocol.h"
-    * here — that re-introduces the inverted dependency and load-bearing order
-    * this forward-decl block was created to remove. */
-   typedef struct parsed_response parsed_response_t;
    typedef void (*openai_sse_emit_fn)(void *ctx, const char *event, const char *data_json);
 
    /* Bounded provider diagnostic. Only recognized JSON error text is exposed;
@@ -83,25 +67,6 @@ extern "C"
     * messages array. On success the caller cJSON_Delete()s both arrays. */
    int openai_split_chat_request(const char *body, char **instructions_out,
                                  struct cJSON **messages_out, struct cJSON **tools_out);
-
-   /* Build a chat.completion whose assistant turn carries tool_calls[] rather
-    * than content, with finish_reason "tool_calls" — the shape an agentic client
-    * (OpenCode, Codex, the OpenAI SDK) requires before it will execute a tool.
-    * `arguments` is emitted as a JSON string, per the wire contract. Returns
-    * bytes written (excluding NUL), or -1 if it does not fit or there are no
-    * calls to report. */
-   int openai_format_chat_completion_tool_calls(const char *id, const char *model,
-                                                const parsed_response_t *parsed, long created,
-                                                char *resp, int cap);
-
-   /* Build a chat.completion.chunk carrying `delta.tool_calls[]` (each entry
-    * indexed, `arguments` a JSON string). The upstream reply is buffered before
-    * chunking, so each call's arguments are complete and ship in one delta;
-    * clients accumulate by `index` either way. finish_reason is null — pair this
-    * with openai_format_chat_chunk_finish(…, "tool_calls", …). Returns bytes
-    * written (excluding NUL), or -1 if it does not fit or there are no calls. */
-   int openai_format_chat_chunk_tool_calls(const char *id, const char *model, long created,
-                                           const parsed_response_t *parsed, char *resp, int cap);
 
    /* Build the terminal chat.completion.chunk with an empty delta and an
     * explicit finish_reason ("stop", "tool_calls", …). openai_format_chat_chunk's
@@ -296,43 +261,6 @@ extern "C"
     * identical to openai_format_error. */
    int openai_format_error_code(char *resp, int cap, const char *type, const char *message,
                                 int aimee_code);
-
-   /* P2c (response-side tool policing, OpenAI streaming): emit the tool-call
-    * tail of the `response.*` SSE sequence for a parsed_response_t that carries
-    * `calls[]` (the post-police shape — calls[] may be empty if every entry was
-    * a denied subagent). The wire shape mirrors the existing tool-call emit loop
-    * in responses_stream_handler; this helper exists for unit-testability
-    * (test_openai_chat_policed.c).
-    *
-    * Caller contract: the caller MUST emit the leading `response.created`
-    * envelope event exactly once before invoking this helper (every path —
-    * text, tool-call, error — shares that single emit). This helper does NOT
-    * emit `response.created`, so the tool-call path never doubles it on the wire.
-    * - If parsed->call_count > 0: emits per-call frames for each surviving
-    *   call (output_item.added, function_call_arguments.delta/.done,
-    *   output_item.done), then response.completed with all calls in output[].
-    * - If parsed->call_count == 0 (the P2c all-dropped case), OR parsed is
-    *   NULL: emits a single response.completed with empty output[] (a NULL
-    *   parsed is treated as zero calls / zero usage, never dereferenced).
-    *
-    * Ownership / lifetime:
-    * - The function borrows everything; it takes ownership of nothing and frees
-    *   nothing of the caller's. `parsed`, `id`, `model`, and the `ctx` behind
-    *   `emit` need only outlive the call (synchronous — `emit` is invoked only
-    *   before this function returns; neither `emit` nor `ctx` is retained).
-    * - A NULL `emit` is tolerated (the helper returns without emitting) — a guard
-    *   for the public/test surface; the production caller (responses_stream_handler)
-    *   always passes a real emit and has already emitted `response.created`
-    *   through it before calling, so a NULL there is a non-starter. Per-call and
-    *   `response.completed` frames use scratch the function mallocs (sized to the
-    *   id/model/args) and frees internally — no caller scratch is needed.
-    * - Emit failures are not the helper's concern: `emit` returns void and the
-    *   helper does not roll back or resume a partially-emitted sequence. A
-    *   transport that can fail mid-stream must detect it inside `emit`/`ctx`;
-    *   the helper always walks the full sequence. */
-   void openai_responses_emit_policed(const parsed_response_t *parsed, const char *id,
-                                      const char *model, long created, openai_sse_emit_fn emit,
-                                      void *ctx);
 
 #ifdef __cplusplus
 }

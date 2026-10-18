@@ -7,58 +7,6 @@
 
 struct cJSON;
 
-/* --- Parsed response types --- */
-
-typedef struct
-{
-   char id[64];
-   /* Was [32], which silently TRUNCATED. A namespaced MCP tool name routinely
-    * exceeds it: "mcp__aimee__preview_blast_radius" is exactly 32 characters, so
-    * it could not fit even with its terminator. */
-   char name[128];
-   /* The tool's owning namespace, empty when it has none.
-    *
-    * A Codex client sends its MCP tools inside a `namespace` group, and the
-    * provider answers with the nested name BARE plus this field beside it:
-    *
-    *   {"type":"function_call","name":"git","namespace":"mcp__aimee",...}
-    *
-    * The client routes on the pair, so dropping this half makes the call
-    * unroutable -- it answers "unsupported call: git". Modeled rather than left
-    * to the raw sidecar for the same reason as aimee_block_t.thinking_signature:
-    * the sidecar is same-protocol replay, and this has to survive the chat hop in
-    * the middle of responses -> IR -> chat -> IR -> responses. */
-   char tool_namespace[64];
-   char *arguments; /* malloc'd */
-} parsed_tool_call_t;
-
-/* Named tag so low-level headers (e.g. openai_shape.h) can forward-declare
- * `parsed_response_t` by pointer without including this agent-pipeline header. */
-typedef struct parsed_response
-{
-   int is_tool_call;
-   char *content; /* malloc'd, NULL if tool call */
-   parsed_tool_call_t calls[AGENT_MAX_TOOL_CALLS];
-   int call_count;
-   struct cJSON *assistant_message; /* cloned, caller frees */
-   int prompt_tokens;
-   int completion_tokens;
-   int cache_write_tokens; /* Anthropic: cache_creation_input_tokens */
-   int cache_read_tokens;  /* Anthropic: cache_read_input_tokens */
-   /* Provider-reported model id echoed in the response (often more specific than
-    * the requested/served alias, e.g. a dated version). Empty when absent. */
-   char model[MAX_MODEL_LEN];
-   /* Provider stop/finish reason (Anthropic stop_reason / OpenAI finish_reason),
-    * captured for the audit. Empty when absent. Its vocabulary is whatever the
-    * provider (or a policy stage) wrote, so never compare it against one wire's
-    * words to decide behaviour -- use `stop`. */
-   char stop_reason[32];
-   /* The canonical stop reason, carried from the IR parse. AIMEE_STOP_UNKNOWN (the
-    * zero value) when no IR parse produced this response. Emitters render it in
-    * their own client's vocabulary. */
-   aimee_stop_reason_t stop;
-} parsed_response_t;
-
 /* --- Request builders --- */
 
 struct cJSON *agent_build_request_openai(const agent_t *agent, struct cJSON *messages,
@@ -123,7 +71,6 @@ int agent_ir_decode_responses(const char *body, int rescue_mode, int *n_rescued,
 
 /* Legacy output-only compatibility values are released here while their
  * remaining native emitters are retired. Execution never constructs them. */
-void agent_free_parsed_response(parsed_response_t *p);
 
 /* --- Message utilities --- */
 
