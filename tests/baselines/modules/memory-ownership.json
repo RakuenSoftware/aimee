@@ -2095,7 +2095,8 @@
       "symbols": [
         "kb_client_memory_scope_context_apply"
       ],
-      "sha256": "b5b2ffe86ff04fc6aea5cc2e30813d723fde00a946c719236d2d09c506099633"
+      "sha256": "0dc32c36caea15f25402beea92874d1f5338f8197f0455c272f59c0c0c785938",
+      "boundary_change": "The dispatcher now returns its existing execution/receipt owner failure classification alongside the owned text result. Canonical consumers use this flag for is_error, evidence and liveness instead of guessing from text. Receipt completion can mark an unconfirmed outcome as failed before effect completion/audit. The kb_client_memory_scope_context_apply host-context seam and its arguments are unchanged; no memory eligibility, recall or scope policy moves into tools. This records the source change, not independent reviewer approval. Native exec-envelope outcome classification is relocated into the existing tools effect-contract source to keep the dispatcher below the file limit; its signals and policy ownership are unchanged."
     },
     "src/rel_types.c": {
       "disposition": "storage-protocol",

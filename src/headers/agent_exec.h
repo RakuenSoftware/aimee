@@ -273,7 +273,7 @@ int policy_recheck_action_tool(const char *tool, const char *effect, const char 
                                char *reason, size_t reason_len);
 int policy_action_begin(const char *name, struct cJSON **args, const char *cwd, const char *sid,
                         int authorized);
-char *policy_action_finish(const char *verdict, char *result);
+char *policy_action_finish(const char *verdict, char *result, int *is_error);
 struct cJSON;
 int policy_prepare_exploration(const struct cJSON *offer, const char *session,
                                const char *workspace, const char *project);

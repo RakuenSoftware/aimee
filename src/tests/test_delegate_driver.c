@@ -348,9 +348,53 @@ static void test_typed_delegate_respond(void)
    }
 }
 
+static int capture_local_final_only(const aimee_session_event_t *event, void *context)
+{
+   assert(event->kind == AIMEE_SESSION_MESSAGE && event->message->n_blocks == 1);
+   const aimee_block_t *block = &event->message->blocks[0];
+   assert(block->type == AIMEE_BLK_TOOL_RESULT && block->tool_is_error);
+   assert(!strcmp(block->tool_id, "respond-id"));
+   (*(int *)context)++;
+   return 0;
+}
+static void test_namespaced_respond_is_not_host_final(void)
+{
+   aimee_response_t response = {.n_content = 1, .stop_reason = AIMEE_STOP_TOOL_USE};
+   response.content = calloc(1, sizeof *response.content);
+   assert(response.content);
+   response.content[0] =
+       (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                       .tool_name = strdup("respond"),
+                       .tool_namespace = strdup("foreign"),
+                       .tool_id = strdup("foreign-id"),
+                       .tool_input = cJSON_Parse("{\"message\":\"not a final answer\"}")};
+   int emitted = 0;
+   aimee_ir_session_set_sink(capture_local_final_only, &emitted);
+   assert(agent_response_consume_final(&response) == 0 && !emitted);
+   aimee_ir_session_set_sink(NULL, NULL);
+   assert(response.n_content == 1 && response.stop_reason == AIMEE_STOP_TOOL_USE);
+   assert(!strcmp(response.content[0].tool_namespace, "foreign"));
+   assert(!strcmp(response.content[0].tool_id, "foreign-id"));
+   response.content = realloc(response.content, 2 * sizeof *response.content);
+   assert(response.content);
+   response.n_content = 2;
+   response.content[1] =
+       (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                       .tool_name = strdup("respond"),
+                       .tool_id = strdup("respond-id"),
+                       .tool_input = cJSON_Parse("{\"message\":\"local answer\"}")};
+   aimee_ir_session_set_sink(capture_local_final_only, &emitted);
+   assert(agent_response_consume_final(&response) == 2 && emitted == 1);
+   aimee_ir_session_set_sink(NULL, NULL);
+   assert(response.n_content == 1 && !strcmp(response.content[0].tool_namespace, "foreign"));
+   assert(!strcmp(response.content[0].tool_id, "foreign-id"));
+   aimee_response_free(&response);
+}
+
 int main(void)
 {
    printf("delegate_driver: ");
+   test_namespaced_respond_is_not_host_final();
    test_typed_delegate_respond();
    test_respond_retains_native_stop_metadata();
    test_registry_init();

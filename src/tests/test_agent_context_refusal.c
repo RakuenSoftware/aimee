@@ -18,6 +18,35 @@
 #include <string.h>
 
 static int wide_parallel, wide_uses, wide_results;
+static int identity_case, identity_results;
+static char identity_path[4096];
+static int capture_identity_result(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   if (event->kind != AIMEE_SESSION_MESSAGE)
+      return 0;
+   for (int i = 0; i < event->message->n_blocks; i++)
+   {
+      const aimee_block_t *block = &event->message->blocks[i];
+      if (block->type != AIMEE_BLK_TOOL_RESULT)
+         continue;
+      assert(!strcmp(block->tool_id, "identity-call"));
+      char *result = cJSON_PrintUnformatted(block->tool_result);
+      assert(result);
+      /* This fixture intentionally has no execution-policy owner. The exact
+       * advertised control reaches that independent gate; foreign/unknown calls
+       * must be refused earlier, before policy or tool execution. */
+      if (identity_case == 2)
+         assert(block->tool_is_error && strstr(result, "blocked by policy") &&
+                strstr(result, "CAPABILITY_ABSENT"));
+      else
+         assert(block->tool_is_error && strstr(result, "not advertised") &&
+                !strstr(result, "IDENTITY_READ_CONTROL"));
+      free(result);
+      identity_results++;
+   }
+   return 0;
+}
 static int wide_capture(const aimee_session_event_t *event, void *context)
 {
    if (event->kind != AIMEE_SESSION_MESSAGE)
@@ -80,6 +109,43 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
    (void)model;
    (void)session_id;
    provider_calls++;
+   if (identity_case)
+   {
+      cJSON *reply = cJSON_Parse("{\"id\":\"identity-response\",\"object\":\"response\","
+                                 "\"status\":\"completed\",\"output\":[]}");
+      assert(reply);
+      cJSON *output = cJSON_GetObjectItemCaseSensitive(reply, "output");
+      if (provider_calls == 1)
+      {
+         cJSON *call = cJSON_CreateObject(), *args = cJSON_CreateObject();
+         assert(call && args);
+         assert(cJSON_AddStringToObject(args, "path", identity_path));
+         char *arguments = cJSON_PrintUnformatted(args);
+         assert(arguments);
+         assert(cJSON_AddStringToObject(call, "type", "function_call"));
+         assert(cJSON_AddStringToObject(call, "call_id", "identity-call"));
+         assert(cJSON_AddStringToObject(call, "name",
+                                        identity_case == 3 ? "unadvertised" : "read_file"));
+         if (identity_case == 1)
+            assert(cJSON_AddStringToObject(call, "namespace", "foreign"));
+         assert(cJSON_AddStringToObject(call, "arguments", arguments));
+         assert(cJSON_AddItemToArray(output, call));
+         free(arguments);
+         cJSON_Delete(args);
+      }
+      else
+      {
+         assert(provider_calls == 2);
+         cJSON *message =
+             cJSON_Parse("{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{"
+                         "\"type\":\"output_text\",\"text\":\"Identity fixture completed.\"}]}");
+         assert(message && cJSON_AddItemToArray(output, message));
+      }
+      *response_buf = cJSON_PrintUnformatted(reply);
+      cJSON_Delete(reply);
+      assert(*response_buf);
+      return 200;
+   }
    if (wide_parallel && provider_calls == 1)
    {
       cJSON *reply = cJSON_Parse("{\"choices\":[{\"finish_reason\":\"tool_calls\",\"message\":{"
@@ -485,6 +551,24 @@ int main(void)
    aimee_ir_session_set_sink(NULL, NULL);
    cJSON_Delete(pending);
    wide_parallel = 0;
+   snprintf(identity_path, sizeof identity_path, "%s/identity-read.txt", home);
+   FILE *identity_file = fopen(identity_path, "w");
+   assert(identity_file);
+   assert(fputs("IDENTITY_READ_CONTROL", identity_file) >= 0);
+   assert(fclose(identity_file) == 0);
+   snprintf(agent.provider, sizeof agent.provider, "%s", "chatgpt");
+   for (identity_case = 1; identity_case <= 3; identity_case++)
+   {
+      recalls = provider_calls = identity_results = 0;
+      aimee_ir_session_set_sink(capture_identity_result, NULL);
+      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
+                                             0, &result);
+      assert(rc == 0 && result.success && provider_calls == 2 && identity_results == 1);
+      assert(result.tool_calls == 1 && result.successful_tool_calls == 0);
+      free(result.response);
+      aimee_ir_session_set_sink(NULL, NULL);
+   }
+   identity_case = 0;
    puts("agent context refusal: passed");
    return 0;
 }

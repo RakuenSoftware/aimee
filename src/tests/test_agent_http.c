@@ -944,6 +944,7 @@ static void test_canonical_delegate_policy_before_native_egress(void)
    {
       cJSON *tools = cJSON_Parse(tool_wires[w]);
       assert(tools);
+      aimee_request_t dispatch = {0};
       for (int delegate = 0; delegate < 2; delegate++)
       {
          for (int fallback = 0; fallback < 2; fallback++)
@@ -951,13 +952,19 @@ static void test_canonical_delegate_policy_before_native_egress(void)
             agent_t agent = {0};
             snprintf(agent.model, sizeof agent.model, "%s", fallback ? "fallback" : "selected");
             agent.require_initial_tool_call = 1;
-            cJSON *native =
-                agent_build_request_ir(&agent, messages, tools, "host", 128, 0, wires[w], delegate);
+            cJSON *native = agent_build_request_ir(&agent, messages, tools, "host", 128, 0,
+                                                   wires[w], delegate, &dispatch);
             assert(native);
             assert(!strcmp(cJSON_GetObjectItemCaseSensitive(native, "model")->valuestring,
                            agent.model));
             cJSON *catalog = cJSON_GetObjectItemCaseSensitive(native, "tools");
             assert(cJSON_GetArraySize(catalog) == (delegate ? 1 : 2));
+            assert(dispatch.n_tools == (delegate ? 1 : 2) && !dispatch.n_messages &&
+                   !dispatch.messages && !dispatch.system);
+            const aimee_tool_t *read = aimee_ir_find_function(&dispatch, NULL, "Read");
+            assert(read && cJSON_IsObject(read->schema));
+            assert(!aimee_ir_find_function(&dispatch, "foreign", "Read"));
+            assert(!!aimee_ir_find_function(&dispatch, NULL, "Task") == !delegate);
             assert(cJSON_GetObjectItemCaseSensitive(native, "tool_choice"));
             cJSON_Delete(native);
          }
@@ -968,10 +975,13 @@ static void test_canonical_delegate_policy_before_native_egress(void)
       agent_t agent = {0};
       snprintf(agent.model, sizeof agent.model, "%s", "selected");
       agent.require_initial_tool_call = 1;
-      cJSON *native = agent_build_request_ir(&agent, messages, tools, "host", 128, 0, wires[w], 1);
+      cJSON *native =
+          agent_build_request_ir(&agent, messages, tools, "host", 128, 0, wires[w], 1, &dispatch);
       assert(native && !cJSON_GetObjectItemCaseSensitive(native, "tools"));
       assert(!cJSON_GetObjectItemCaseSensitive(native, "tool_choice"));
       assert(!cJSON_GetObjectItemCaseSensitive(native, "parallel_tool_calls"));
+      assert(!dispatch.n_tools && !aimee_ir_find_function(&dispatch, NULL, "Task"));
+      aimee_request_free(&dispatch);
       cJSON_Delete(native);
       cJSON_Delete(tools);
    }

@@ -36,6 +36,7 @@ class IRBypassTests(unittest.TestCase):
             ("src/server/rogue.c", "anthropic_stream_feed_openai(s, p);"),
             ("server-go/modules/rogue/rogue.go", "raw_responses := x"),
             ("src/server/rogue.c", "gateway_delegate_tool_shape(1, 0);"),
+            ("src/server/rogue.c", "agent_tool_result_usable(text);"),
             ("src/server/rogue.c", "driver->parse_response(body);"),
             ("src/server/rogue.c", "driver->build_request(input);"),
         ]:
@@ -53,6 +54,16 @@ class IRBypassTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "native-history-field"):
                     checker.check(self.root)
                 path.unlink()
+
+    def test_migrated_dispatch_consumers_require_owner_status(self):
+        for relative in checker.CLASSIFIED_DISPATCH_FILES:
+            for name in ("dispatch_tool_call", "dispatch_tool_call_ctx"):
+                path = self.source(relative, name + '(tool, args, timeout);')
+                with self.assertRaisesRegex(ValueError, "unclassified-tool-dispatch"):
+                    checker.check(self.root)
+                path.unlink()
+            self.source(relative, 'dispatch_tool_call_ctx_status(tool, args, timeout, &failed);')
+        checker.check(self.root)
 
     def test_explicit_native_adapters_and_fixture_data_remain_valid(self):
         self.source("src/modules/translation/aimee_backend_openai.c", 'lookup(native, "tool_calls");')

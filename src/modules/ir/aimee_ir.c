@@ -1049,6 +1049,41 @@ int aimee_ir_read_usage(const cJSON *usage, const char *name, long *out)
    return 0;
 }
 
+const aimee_tool_t *aimee_ir_find_function(const aimee_request_t *request,
+                                           const char *namespace_name, const char *name)
+{
+   if (!request || !name || !name[0] || request->n_tools < 0 ||
+       request->n_tools > AIMEE_IR_MAX_BLOCKS || (request->n_tools && !request->tools))
+      return NULL;
+   const aimee_tool_t *found = NULL;
+   for (int i = 0; i < request->n_tools; i++)
+   {
+      const aimee_tool_t *entry = &request->tools[i];
+      const aimee_tool_t *functions = entry;
+      int count = 1;
+      if (namespace_name && namespace_name[0])
+      {
+         if (entry->kind != AIMEE_TOOL_NAMESPACE || !entry->name ||
+             strcmp(entry->name, namespace_name) || entry->n_children < 0 ||
+             entry->n_children > AIMEE_IR_MAX_BLOCKS || (entry->n_children && !entry->children))
+            continue;
+         functions = entry->children;
+         count = entry->n_children;
+      }
+      for (int j = 0; j < count; j++)
+      {
+         const aimee_tool_t *function = &functions[j];
+         if (function->kind != AIMEE_TOOL_FUNCTION || !function->name ||
+             strcmp(function->name, name))
+            continue;
+         if (found)
+            return NULL; /* An ambiguous catalog cannot select an executor. */
+         found = function;
+      }
+   }
+   return found;
+}
+
 int aimee_ir_request_admit(const aimee_request_t *request)
 {
    if (!request || request->n_system < 0 || request->n_messages < 0 || request->n_tools < 0 ||

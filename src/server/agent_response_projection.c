@@ -69,13 +69,15 @@ int agent_response_consume_final(aimee_response_t *response)
    for (int i = 0; i < count; i++)
    {
       const aimee_block_t *tool = aimee_ir_response_tool(response, i);
-      if (tool->tool_name && !strcmp(tool->tool_name, "respond"))
+      if (tool->tool_name && !strcmp(tool->tool_name, "respond") &&
+          (!tool->tool_namespace || !tool->tool_namespace[0]))
          responds++;
    }
    for (int i = 0; responds && i < count; i++)
    {
       const aimee_block_t *tool = aimee_ir_response_tool(response, i);
-      if (!tool->tool_name || strcmp(tool->tool_name, "respond"))
+      if (!tool->tool_name || strcmp(tool->tool_name, "respond") ||
+          (tool->tool_namespace && tool->tool_namespace[0]))
          continue;
       const cJSON *answer = cJSON_GetObjectItemCaseSensitive(tool->tool_input, "message");
       const char *result =

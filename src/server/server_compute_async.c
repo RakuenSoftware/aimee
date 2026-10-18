@@ -246,7 +246,8 @@ static void tool_execute_worker(void *arg)
     * arrives with CAPS_ALL and is the trusted execution-policy boundary for this
     * first-class API; capability-limited remote callers do not inherit it. */
    agent_tools_set_effect_authorized(trusted_local);
-   char *result = dispatch_tool_call(tool, args, timeout_ms);
+   int is_error = 1;
+   char *result = dispatch_tool_call_ctx_status(tool, args, timeout_ms, &is_error);
    agent_tools_set_effect_authorized(0);
    result = policy_annotate_indexed(tool, args, "external-tool", result);
 
@@ -255,6 +256,7 @@ static void tool_execute_worker(void *arg)
    workspace_turn_unbind_active();
 
    cJSON *resp = jo_ok();
+   cJSON_AddBoolToObject(resp, "is_error", is_error);
    cJSON_AddStringToObject(resp, "result", result ? result : "");
    free(result);
    compute_respond(cctx, resp);

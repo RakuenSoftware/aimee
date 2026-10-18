@@ -16,9 +16,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 def main():
     home = Path(os.environ["AIMEE_HOME"])
     observed = []
+    execution_case = execution_requests = 0
+    extra_attachments = []
+    identity_path = home / "identity-read.txt"
+    identity_path.write_text("IDENTITY_READ_CONTROL")
 
     class Provider(BaseHTTPRequestHandler):
         def do_POST(self):
+            nonlocal execution_requests
             request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             observed.append(request)
             payload = {
@@ -38,6 +43,21 @@ def main():
                 payload["content"].extend(dict(type="tool_use", id=f"call-{index}-" + "i" * 500,
                                                name="Read", input={"path": "p" * 8192, "index": index}) for index in range(17))
                 payload["stop_reason"] = "tool_use"
+            if self.path.endswith("/responses"):
+                assert execution_case in (1, 2, 3)
+                execution_requests += 1
+                assert execution_requests <= 2
+                output = [dict(type="message", role="assistant", content=[
+                    dict(type="output_text", text="IDENTITY_EXECUTION_OK")])]
+                if execution_requests == 1:
+                    call = dict(type="function_call", call_id="identity-call",
+                                name="unadvertised" if execution_case == 3 else "read_file",
+                                arguments=json.dumps(dict(path=str(identity_path))))
+                    if execution_case == 1:
+                        call["namespace"] = "foreign"
+                    output = [call]
+                payload = dict(id="identity-response", object="response", status="completed",
+                               model="ir-model-c", output=output)
             data = json.dumps(payload).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -78,7 +98,8 @@ def main():
                        endpoint=f"http://127.0.0.1:{provider.server_port}/v1", roles=["all"],
                        enabled=True, tools_enabled=True, context_window=8192, max_tokens=4096,
                        timeout_ms=10000, max_parallel=1, max_turns=2)
-                  for name, model, wire in [("ir-live-a", "ir-model-a", "openai"), ("ir-live-b", "ir-model-b", "anthropic")]]
+                  for name, model, wire in [("ir-live-a", "ir-model-a", "openai"), ("ir-live-b", "ir-model-b", "anthropic"),
+                                           ("ir-live-c", "ir-model-c", "chatgpt")]]
         models_path.write_text(json.dumps(dict(default_agent="ir-live-a", default_delegate="ir-live-a", fallback_chain=[], models=models)))
         sid = api("/v1/sessions/create", {"client_type": "ir-integration"})["session_id"]
         attachment = api(f"/v1/sessions/{sid}/attach", {"surface": "webchat", "owner": f"uid:{os.getuid()}"})["attach_id"]
@@ -233,9 +254,59 @@ def main():
             assert "PRIMARY_OK" in (reply if isinstance(reply, str) else json.dumps(reply)), reply
         print("tool-free Chat retains roles/media; text completion enters directly as IR, buffered and streaming")
 
+        # Real local tool execution with the Go execution-policy owner attached.
+        # The same leaf in a foreign namespace must never reach that executor.
+        for execution_case in (1, 2, 3):
+            execution_requests = 0
+            identity_sid = api("/v1/sessions/create", {"client_type": "ir-identity"})["session_id"]
+            identity_attach = api(f"/v1/sessions/{identity_sid}/attach", dict(
+                surface="webchat", owner=f"uid:{os.getuid()}"))["attach_id"]
+            extra_attachments.append((identity_sid, identity_attach))
+            api(f"/v1/sessions/{identity_sid}/primary", {"agent": "ir-live-c"})
+            raw = api("/v1/chat/stream", dict(attach_id=identity_attach, message="IR_IDENTITY_CALL",
+                      aimee_session_id=identity_sid, cwd=str(home), ir_version=1))
+            records = [json.loads(line) for line in raw.splitlines() if line.strip()]
+            assert records[-1]["event"] == {"kind": "execution", "payload": {"status": "completed"}}, raw
+            assert execution_requests == 2
+            blocks = [block for record in records if record["event"]["kind"] == "message"
+                      for block in record["event"]["payload"]["blocks"]]
+            calls = [block for block in blocks if block["type"] == "tool_use"]
+            results = [block for block in blocks if block["type"] == "tool_result"]
+            assert len(calls) == len(results) == 1, records
+            result = results[0]
+            # Live event IDs are host turn/message scoped; native history keeps
+            # the original call ID for provider replay. Both live blocks pair
+            # through the same complete scoped identity.
+            assert result["tool_id"] == calls[0]["tool_id"], (calls, results)
+            assert result["tool_id"].endswith(":identity-call"), result
+            if execution_case == 2:
+                assert result["is_error"] is False and "IDENTITY_READ_CONTROL" in json.dumps(result), result
+            else:
+                assert result["is_error"] is True and "not advertised" in json.dumps(result), result
+                assert "IDENTITY_READ_CONTROL" not in json.dumps(result), result
+            if execution_case == 1:
+                assert calls[0]["namespace"] == "foreign", calls
+            native_results = [item for item in observed[-1]["input"]
+                              if item.get("type") == "function_call_output"]
+            assert len(native_results) == 1 and native_results[0]["call_id"] == "identity-call", observed[-1]
+            sent = json.dumps(observed[-1])
+            assert ("IDENTITY_READ_CONTROL" in sent) == (execution_case == 2), observed[-1]
+        execution_case = 0
+        for missing in (False, True):
+            tool_reply = api("/v1/tools/execute", dict(tool="read_file", cwd=str(home),
+                session_id=identity_sid, arguments=json.dumps(dict(path=str(identity_path) + (".missing" if missing else "")))))
+            assert tool_reply["is_error"] is missing, tool_reply
+            assert ("IDENTITY_READ_CONTROL" in tool_reply["result"]) is not missing, tool_reply
+        print("canonical dispatch: exact advertised read executes; foreign namespace and unknown identity return durable errors")
+
 
     finally:
         cleanup_error = None
+        for extra_sid, extra_attach in extra_attachments:
+            try:
+                api(f"/v1/sessions/{extra_sid}/detach", {"attach_id": extra_attach})
+            except (OSError, AssertionError) as error:
+                cleanup_error = error
         if sid and attachment:
             try:
                 api(f"/v1/sessions/{sid}/detach", {"attach_id": attachment})

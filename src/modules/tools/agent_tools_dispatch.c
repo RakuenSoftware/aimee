@@ -95,30 +95,6 @@ static void td_outcome_set(const char *verdict, const char *reason)
    g_td_explicit = 1;
 }
 
-/* The exec family returns a SUCCESS-shaped JSON envelope even on failure
- * ({stdout,stderr,exit_code} or {status}), so the "error:" prefix heuristic would
- * mislabel a non-zero exit — the highest-traffic tools — as ok. Classify from the
- * real signal instead: a non-zero exit_code or status="failed" is an error, a
- * stderr beginning "refused:" is the fail-closed sandbox refusal. Only the numeric
- * exit_code, the status string, and a stderr PREFIX are read — no content is
- * stored; the parsed tree is freed. */
-static void td_classify_exec_result(const char *result)
-{
-   cJSON *r = cJSON_Parse(result);
-   if (!r)
-      return; /* not the JSON envelope; the prefix fallback will run */
-   cJSON *stderr_j = cJSON_GetObjectItem(r, "stderr");
-   cJSON *exit_j = cJSON_GetObjectItem(r, "exit_code");
-   cJSON *status_j = cJSON_GetObjectItem(r, "status");
-   if (cJSON_IsString(stderr_j) && strncmp(stderr_j->valuestring, "refused:", 8) == 0)
-      td_outcome_set("refused", "policy");
-   else if (cJSON_IsNumber(exit_j) && exit_j->valuedouble != 0)
-      td_outcome_set("error", "tool_error");
-   else if (cJSON_IsString(status_j) && strcmp(status_j->valuestring, "failed") == 0)
-      td_outcome_set("error", "tool_error");
-   cJSON_Delete(r);
-}
-
 /* db1_session_write_path_record from db1/session_paths.h — declared
  * locally so the dispatch path doesn't pull the full db1 umbrella. */
 int db1_session_write_path_record(const char *session_id, const char *path);
@@ -2039,6 +2015,12 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
  * without the dispatcher's many return paths needing to care. */
 char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms)
 {
+   return dispatch_tool_call_ctx_status(name, arguments_json, timeout_ms, NULL);
+}
+
+char *dispatch_tool_call_ctx_status(const char *name, const char *arguments_json, int timeout_ms,
+                                    int *is_error)
+{
    agent_tools_emit_tool_event("started", name);
    td_outcome_reset();
    char *result = dispatch_tool_call_ctx_inner(name, arguments_json, timeout_ms);
@@ -2053,15 +2035,27 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
    if (!g_td_explicit && result &&
        agent_tools_effect_classification(name ? name : "", g_tool_classifier) ==
            AIMEE_TOOL_CLASS_EXEC)
-      td_classify_exec_result(result);
+   {
+      const char *verdict, *reason;
+      if (agent_tools_effect_exec_failure(result, &verdict, &reason))
+         td_outcome_set(verdict, reason);
+   }
    if (!g_td_explicit && result && strncmp(result, "error: timeout", 14) == 0)
       td_outcome_set("timeout", "timeout");
    else if (!g_td_explicit && result && strncmp(result, "error: timed out", 16) == 0)
       td_outcome_set("timeout", "timeout");
    else if (!g_td_explicit && result && strncmp(result, "error:", 6) == 0)
       td_outcome_set("error", "tool_error");
+   int failed = !result || strcmp(g_td_verdict, "ok") != 0;
+   result = agent_tools_effect_receipt(g_td_verdict, result, &failed);
+   failed = failed || !result;
+   if (failed && !strcmp(g_td_verdict, "ok"))
+      td_outcome_set("error", "effect_contract");
+   else if (!failed && strcmp(g_td_verdict, "ok"))
+      td_outcome_set("ok", ""); /* The owner returned a confirmed prior receipt. */
    agent_tools_effect_finish(g_td_verdict, g_td_reason);
-   result = agent_tools_effect_receipt(g_td_verdict, result);
+   if (is_error)
+      *is_error = failed;
    {
       const char *who = session_id();
       agent_tool_completion_t o = {.actor = (who && who[0]) ? who : "tool",

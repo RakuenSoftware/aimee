@@ -967,6 +967,36 @@ static void test_provider_env_credentials_and_headers(void)
 /* A thin-client-supplied per-turn Codex OAuth token takes precedence over any
  * server-side file, and the account id is injected as the ChatGPT-Account-ID
  * header; clearing removes both. */
+static int refuse_exact_resource(const char *name, cJSON **args, const char *cwd, const char *sid,
+                                 int authorized)
+{
+   (void)args;
+   (void)cwd;
+   (void)sid;
+   (void)authorized;
+   assert(!strcmp(name, "read_file"));
+   return -1;
+}
+static char *structured_resource_refusal(const char *verdict, char *result, int *is_error)
+{
+   assert(!strcmp(verdict, "refused"));
+   free(result);
+   *is_error = 1;
+   return strdup("{\"status\":\"refused\",\"reason\":\"fixture_resource_unavailable\","
+                 "\"dispatch_allowed\":false}");
+}
+static void test_dispatch_carries_owner_failure_status(void)
+{
+   agent_tools_register_action_owner(refuse_exact_resource, structured_resource_refusal);
+   int is_error = 0;
+   char *result = dispatch_tool_call_ctx_status("read_file", "{\"path\":\"unopened-fixture\"}",
+                                                1000, &is_error);
+   assert(result && is_error && !strncmp(result, "{", 1));
+   assert(strstr(result, "fixture_resource_unavailable"));
+   free(result);
+   agent_tools_register_action_owner(NULL, NULL);
+}
+
 static void test_codex_oauth_request_creds(void)
 {
    agent_t ag;
@@ -4032,6 +4062,7 @@ int main(void)
    test_permissions_clamp_the_toolset();
    test_one_delegates_permissions_are_not_anothers();
    test_provider_env_credentials_and_headers();
+   test_dispatch_carries_owner_failure_status();
    test_codex_oauth_request_creds();
    test_codex_credentials_follow_selected_registration();
    test_codex_oauth_reads_vault_only();

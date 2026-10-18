@@ -330,7 +330,7 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
  * decoded only as canonical IR, and rendered by the translation backend once. */
 cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
                               const char *system_prompt, int max_tokens, double temperature,
-                              aimee_wire_t wire, int is_delegate)
+                              aimee_wire_t wire, int is_delegate, aimee_request_t *dispatch_catalog)
 {
    if (!agent || !cJSON_IsArray(messages))
       return NULL;
@@ -426,6 +426,13 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
    if (wire == AIMEE_WIRE_OPENAI_CHAT)
       agent_request_shape_openai_messages(agent, cJSON_GetObjectItemCaseSensitive(profile, key));
    cJSON_Delete(rendered);
+   if (dispatch_catalog)
+   {
+      aimee_request_free(dispatch_catalog);
+      *dispatch_catalog = (aimee_request_t){.tools = ir.tools, .n_tools = ir.n_tools};
+      ir.tools = NULL;
+      ir.n_tools = 0;
+   }
    aimee_request_free(&ir);
    cJSON_Delete(empty);
    return profile;

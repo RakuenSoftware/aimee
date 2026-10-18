@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
     "raw_responses", "build_provider_body", "translate_request",
-    "gateway_delegate_tool_shape", "GW_TOOL_SHAPE_NAMED",
+    "gateway_delegate_tool_shape", "agent_tool_result_usable", "GW_TOOL_SHAPE_NAMED",
     "GW_TOOL_SHAPE_FUNCTION_NESTED", "GW_TOOL_SHAPE_UNSUPPORTED",
     "agent_ir_parse_json_response", "agent_ir_parse_responses",
     "agent_build_openai_assistant_message_from_calls",
@@ -31,6 +31,7 @@ RETIRED = (
 RULES = {
     "retired-api": re.compile(r"\b(?:" + "|".join(RETIRED) + r")\b"),
     "driver-bypass": re.compile(r"->\s*(?:parse_response|build_request)\s*\("),
+    "unclassified-tool-dispatch": re.compile(r"\bdispatch_tool_call(?:_ctx)?\s*\("),
     "native-history-field": re.compile(
         r'"(?:tool_calls|function_call|function_call_output|tool_call_id|tool_use_id|'
         r'call_id|choices|reasoning_content|input_text|output_text|input_schema)"'),
@@ -43,6 +44,12 @@ CANONICAL_FILES = {
     "src/server/primary_session_adapter.c",
 }
 CANONICAL_TREES = ("server-go/modules/economizer/", "server-go/modules/memory/")
+# These call sites consume the tool/receipt owner's semantic outcome. The other
+# native output/compatibility boundaries are not declared globally migrated.
+CLASSIFIED_DISPATCH_FILES = {
+    "src/posix/agent_runtime.c", "src/server/script_rpc.c",
+    "src/server/server_compute_async.c",
+}
 # Match strings first so comment markers inside literal data remain literal data.
 LEXEMES = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`[^`]*`|/\*[\s\S]*?\*/|//[^\n]*')
 
@@ -73,6 +80,8 @@ def findings(root: Path) -> list[dict]:
         canonical = relative in CANONICAL_FILES or relative.startswith(CANONICAL_TREES)
         for rule, pattern in RULES.items():
             if rule == "native-history-field" and not canonical:
+                continue
+            if rule == "unclassified-tool-dispatch" and relative not in CLASSIFIED_DISPATCH_FILES:
                 continue
             for match in pattern.finditer(source):
                 line = source.count("\n", 0, match.start()) + 1

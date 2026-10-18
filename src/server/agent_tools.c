@@ -453,7 +453,8 @@ int agent_ir_strip_delegate_respond(aimee_response_t *response)
    for (int i = 0; i < count; i++)
    {
       aimee_block_t *tool = aimee_ir_response_tool(response, i);
-      if (tool->tool_name && !strcmp(tool->tool_name, "respond"))
+      if (tool->tool_name && !strcmp(tool->tool_name, "respond") &&
+          (!tool->tool_namespace || !tool->tool_namespace[0]))
       {
          if (!first)
             first = tool;
@@ -467,7 +468,8 @@ int agent_ir_strip_delegate_respond(aimee_response_t *response)
       for (int i = count - 1; i >= 0; i--)
       {
          aimee_block_t *tool = aimee_ir_response_tool(response, i);
-         if (tool->tool_name && !strcmp(tool->tool_name, "respond"))
+         if (tool->tool_name && !strcmp(tool->tool_name, "respond") &&
+             (!tool->tool_namespace || !tool->tool_namespace[0]))
             aimee_ir_response_drop_tool(response, i);
       }
       return 2;

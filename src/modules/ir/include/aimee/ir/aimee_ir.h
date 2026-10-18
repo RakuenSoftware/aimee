@@ -407,6 +407,11 @@ int aimee_ir_thinking_binding_valid(const char *binding);
 int aimee_ir_block_valid(const aimee_block_t *block);
 /* Validate completed request content before host policy or native rendering. */
 int aimee_ir_request_admit(const aimee_request_t *request);
+/* Exact advertised function lookup. Names and namespaces are opaque, separate
+ * identities; missing/hosted/ambiguous identities return NULL. Borrowed result. */
+const aimee_tool_t *aimee_ir_find_function(const aimee_request_t *request,
+                                           const char *namespace_name, const char *name);
+
 void aimee_block_free_contents(aimee_block_t *b);
 
 /* Set metadata on one block. Content ownership is unchanged. */

@@ -128,11 +128,12 @@ static cJSON *script_rpc_dispatch(script_rpc_server_t *srv, cJSON *req)
 
    /* Reuse the foreground dispatch path so guardrails, role policy, request_input, and approval
     * routing behave the same for nested script calls as for normal tool calls. */
-   char *result = dispatch_tool_call_ctx(jtool->valuestring, args_json, 120000);
+   int is_error = 1;
+   char *result = dispatch_tool_call_ctx_status(jtool->valuestring, args_json, 120000, &is_error);
    srv->tool_calls++;
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddNumberToObject(resp, "id", id);
-   cJSON_AddBoolToObject(resp, "ok", result && strncmp(result, "error:", 6) != 0);
+   cJSON_AddBoolToObject(resp, "ok", !is_error);
    if (result)
    {
       if (strlen(result) > SCRIPT_RPC_MAX_RESULT)
@@ -142,7 +143,7 @@ static cJSON *script_rpc_dispatch(script_rpc_server_t *srv, cJSON *req)
          cJSON_AddItemToObject(resp, "result", parsed);
       else
          cJSON_AddStringToObject(resp, "result", result);
-      if (strncmp(result, "error:", 6) == 0)
+      if (is_error)
          cJSON_AddStringToObject(resp, "error", result);
    }
    else

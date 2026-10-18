@@ -200,6 +200,27 @@ stop_policy_module() {
     fi
 }
 
+# Governed local file tools need their exact resource owner as well as policy.
+TOOLS_MODULE="$AIMEE_HOME/aimee-module-tools"
+TOOLS_MODULE_PID=""
+install_tools_module() {
+    cp "$DB1_MODULE_BUILT" "$TOOLS_MODULE"
+    chmod 0755 "$TOOLS_MODULE"
+    install_generated_grant tools "$TOOLS_MODULE"
+}
+start_tools_module() {
+    stop_tools_module
+    "$TOOLS_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-tools.log" 2>&1 &
+    TOOLS_MODULE_PID=$!
+}
+stop_tools_module() {
+    if [ -n "$TOOLS_MODULE_PID" ]; then
+        kill "$TOOLS_MODULE_PID" 2>/dev/null || true
+        wait "$TOOLS_MODULE_PID" 2>/dev/null || true
+        TOOLS_MODULE_PID=""
+    fi
+}
+
 # Memory admission and validation are provided by the same Go process used in
 # production. A missing owner is an outage, not native validation fallback.
 MEMORY_MODULE="$AIMEE_HOME/aimee-module-memory"
@@ -479,6 +500,7 @@ install_providers_module
 install_delegates_module
 install_memory_module
 install_policy_module
+install_tools_module
 # Grants are read by the daemon at startup, so this has to happen BEFORE the
 # server is started even though the module itself is not launched until the
 # workflow section. Installing it later produced a module that ran, attached to
@@ -807,6 +829,7 @@ start_server() {
             start_delegates_module
             if [ "$MEMORY_MODULE_ENABLED" -eq 1 ]; then start_memory_module; fi
             start_policy_module
+            start_tools_module
             config_started=1
         fi
         [ -S "$HTTP_SOCK" ] && { start_db1_module; return 0; }
@@ -849,6 +872,7 @@ cleanup() {
     stop_delegates_module
     stop_memory_module
     stop_policy_module
+    stop_tools_module
     local rc=$?
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
         echo ""
@@ -2027,8 +2051,17 @@ fi  # WORKFLOW_MODULE_READY
 
 # Native provider output must cross the same durable IR contract used by
 # browser live delivery and replay, including after model switches.
-check "canonical primary switching and durable replay" \
-    python3 "$REPO_ROOT/src/tests/test_primary_ir_live.py"
+PRIMARY_IR_LOG="$HOME/primary-ir-live.log"
+if python3 "$REPO_ROOT/src/tests/test_primary_ir_live.py" >"$PRIMARY_IR_LOG" 2>&1; then
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: canonical primary switching and durable replay"
+    # This fixture contains synthetic provider data. Preserve bounded client-side
+    # assertion evidence as well as the server tail before cleanup removes HOME.
+    tail -c 12000 "$PRIMARY_IR_LOG"
+    dump_server_log
+    FAIL=$((FAIL + 1))
+fi
 
 # ============================================================
 # 11. Server shutdown

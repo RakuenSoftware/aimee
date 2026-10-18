@@ -66,7 +66,9 @@ typedef int (*agent_tool_classifier_fn)(const char *name, int *classification);
 void agent_tools_register_classifier(agent_tool_classifier_fn classifier);
 typedef int (*agent_tool_action_begin_fn)(const char *, struct cJSON **, const char *, const char *,
                                           int);
-typedef char *(*agent_tool_action_finish_fn)(const char *, char *);
+/* The final flag starts with execution's classification. Only this trusted
+ * owner may update it from its durable receipt; it is not model-provided data. */
+typedef char *(*agent_tool_action_finish_fn)(const char *, char *, int *);
 void agent_tools_register_action_owner(agent_tool_action_begin_fn begin,
                                        agent_tool_action_finish_fn finish);
 
@@ -108,6 +110,12 @@ void agent_tools_sanitize_for_provider(struct cJSON *tools, const char *provider
 void agent_tools_sanitize_for_agent(struct cJSON *tools, const agent_t *agent);
 
 char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms);
+/* Same dispatch and owned text result, plus the tool owner's authoritative
+ * semantic failure flag, including refusals and unconfirmed action receipts.
+ * Consumers must not infer success by parsing or matching the result text. */
+char *dispatch_tool_call_ctx_status(const char *name, const char *arguments_json, int timeout_ms,
+                                    int *is_error);
+
 void agent_tools_set_dispatch_role(const char *role);
 
 /* The toolset THIS THREAD's turn resolves against, overriding the role. Thread-local

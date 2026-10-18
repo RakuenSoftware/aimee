@@ -236,22 +236,6 @@ static int agent_should_inject_respond_tool(const agent_t *agent, const char *ro
    return 1;
 }
 
-static int agent_tool_result_usable(const char *result)
-{
-   int usable = result && result[0] && strncmp(result, "error", 5) != 0;
-   if (usable && result[0] == '{')
-   {
-      cJSON *root = cJSON_Parse(result);
-      if (root)
-      {
-         if (cJSON_GetObjectItemCaseSensitive(root, "error"))
-            usable = 0;
-         cJSON_Delete(root);
-      }
-   }
-   return usable;
-}
-
 static int agent_progress_tool_is_mutation(const char *name)
 {
    if (!name)
@@ -330,13 +314,14 @@ static int agent_bootstrap_repository_evidence(cJSON *messages, int turn, int ti
    cJSON_Delete(arg_obj);
    if (!args)
       return 0;
-   char *result = dispatch_tool_call_ctx(name, args, timeout_ms);
+   int is_error = 1;
+   char *result = dispatch_tool_call_ctx_status(name, args, timeout_ms, &is_error);
    agent_trace_log(0, turn, "tool_call", NULL, name, args, result, NULL);
    if (last_tool_name && last_tool_name_n)
       snprintf(last_tool_name, last_tool_name_n, "%s", name);
    if (last_tool_result && last_tool_result_n)
       snprintf(last_tool_result, last_tool_result_n, "%.500s", result ? result : "");
-   int usable = agent_tool_result_usable(result);
+   int usable = !is_error;
    if (usable)
       agent_session_append_repository_evidence(messages, name, args, result);
    free(result);
@@ -835,6 +820,7 @@ native_provider_http:
       return -1;
    }
 
+   aimee_request_t dispatch_catalog = {0};
    int turn = 0;
    int total_calls = 0;
    int successful_tool_calls = 0;
@@ -1173,16 +1159,16 @@ native_provider_http:
       cJSON *req;
       if (chatgpt)
          req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
-                                      AIMEE_WIRE_RESPONSES, role != NULL);
+                                      AIMEE_WIRE_RESPONSES, role != NULL, &dispatch_catalog);
       else if (anthropic)
       {
          track_anthropic_payload_rewrite(driver, &fb_agent, eff_messages, sys);
          req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
-                                      AIMEE_WIRE_ANTHROPIC, role != NULL);
+                                      AIMEE_WIRE_ANTHROPIC, role != NULL, &dispatch_catalog);
       }
       else
          req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
-                                      AIMEE_WIRE_OPENAI_CHAT, role != NULL);
+                                      AIMEE_WIRE_OPENAI_CHAT, role != NULL, &dispatch_catalog);
 
       char *body = cJSON_PrintUnformatted(req);
       cJSON_Delete(req);
@@ -1295,17 +1281,20 @@ native_provider_http:
 
          cJSON *fb_req;
          if (chatgpt)
-            fb_req = agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok,
-                                            temperature, AIMEE_WIRE_RESPONSES, role != NULL);
+            fb_req =
+                agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok, temperature,
+                                       AIMEE_WIRE_RESPONSES, role != NULL, &dispatch_catalog);
          else if (anthropic)
          {
             track_anthropic_payload_rewrite(driver, &fb_agent, messages, sys);
-            fb_req = agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok,
-                                            temperature, AIMEE_WIRE_ANTHROPIC, role != NULL);
+            fb_req =
+                agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok, temperature,
+                                       AIMEE_WIRE_ANTHROPIC, role != NULL, &dispatch_catalog);
          }
          else
-            fb_req = agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok,
-                                            temperature, AIMEE_WIRE_OPENAI_CHAT, role != NULL);
+            fb_req =
+                agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok, temperature,
+                                       AIMEE_WIRE_OPENAI_CHAT, role != NULL, &dispatch_catalog);
          char *fb_body = cJSON_PrintUnformatted(fb_req);
          cJSON_Delete(fb_req);
          if (fb_body)
@@ -1778,9 +1767,11 @@ native_provider_http:
          aimee_block_t *tool = aimee_ir_response_tool(&response, i);
          char *original =
              tool->tool_input ? cJSON_PrintUnformatted(tool->tool_input) : safe_strdup("{}");
-         tool_arguments[i] = original ? tool_args_canonicalize_json(
-                                            agent_tool_get_schema_cached(tool->tool_name), original)
-                                      : NULL;
+         const aimee_tool_t *advertised =
+             aimee_ir_find_function(&dispatch_catalog, tool->tool_namespace, tool->tool_name);
+         tool_arguments[i] = original && advertised
+                                 ? tool_args_canonicalize_json(advertised->schema, original)
+                                 : NULL;
          if (!tool_arguments[i])
             tool_arguments[i] = original;
          else
@@ -1833,8 +1824,15 @@ native_provider_http:
 
          /* Validate arguments against tool registry */
          char val_err[256] = {0};
-         if (tool_validate(aimee_ir_response_tool(&response, i)->tool_name, tool_arguments[i],
-                           val_err, sizeof(val_err)) != 0)
+         const aimee_block_t *tool = aimee_ir_response_tool(&response, i);
+         const aimee_tool_t *advertised =
+             aimee_ir_find_function(&dispatch_catalog, tool->tool_namespace, tool->tool_name);
+         if (!advertised)
+            snprintf(val_err, sizeof val_err, "tool identity was not advertised for this request");
+         else if (tool->tool_namespace && tool->tool_namespace[0])
+            snprintf(val_err, sizeof val_err, "function namespace has no local execution binding");
+         if (val_err[0] ||
+             tool_validate(tool->tool_name, tool_arguments[i], val_err, sizeof(val_err)) != 0)
          {
             char *err_result = malloc(512);
             if (!err_result)
@@ -1958,8 +1956,10 @@ native_provider_http:
                                            api_call_count);
          }
          agent_tools_set_effect_authorized(1);
-         char *result_str = dispatch_tool_call_ctx(aimee_ir_response_tool(&response, i)->tool_name,
-                                                   tool_arguments[i], agent->timeout_ms);
+         int tool_result_error = 1;
+         char *result_str = dispatch_tool_call_ctx_status(
+             aimee_ir_response_tool(&response, i)->tool_name, tool_arguments[i], agent->timeout_ms,
+             &tool_result_error);
          agent_tools_set_effect_authorized(0);
          result_str = policy_annotate_indexed(aimee_ir_response_tool(&response, i)->tool_name,
                                               tool_arguments[i], exploration_attempt, result_str);
@@ -1968,8 +1968,7 @@ native_provider_http:
          snprintf(last_tool_result, sizeof last_tool_result, "%.500s",
                   result_str ? result_str : "");
          if (aimee_ir_session_emit_tool_result(aimee_ir_response_tool(&response, i)->tool_id,
-                                               result_str,
-                                               !agent_tool_result_usable(result_str)) != 0)
+                                               result_str, tool_result_error) != 0)
          {
             free(result_str);
             delegate_response_release(&response, response_text, tool_arguments, call_count);
@@ -1984,10 +1983,9 @@ native_provider_http:
                db1_agent_job_heartbeat_ext(dj, "", api_call_count);
          }
 
-         /* An attempted lookup is not evidence. Validation/policy/directive
-          * failures never reach this branch; dispatch failures conventionally
-          * return "error:" or a JSON object containing an error member. */
-         int usable_tool_result = agent_tool_result_usable(result_str);
+         /* Execution and receipt owners supply the outcome. A refusal or an
+          * unconfirmed receipt is never evidence, regardless of its text. */
+         int usable_tool_result = !tool_result_error;
          if (usable_tool_result)
             successful_tool_calls++;
 
@@ -2007,7 +2005,7 @@ native_provider_http:
          }
 
          /* Track consecutive tool errors for mw_stall_detect */
-         if (result_str && strncmp(result_str, "error", 5) == 0)
+         if (tool_result_error)
             consecutive_errors++;
          else
             consecutive_errors = 0;
@@ -2022,8 +2020,7 @@ native_provider_http:
                   result_str ? result_str : "");
 
          if (delegate_append_tool_result(messages, aimee_ir_response_tool(&response, i)->tool_id,
-                                         result_str,
-                                         result_str && strncmp(result_str, "error:", 6) == 0) != 0)
+                                         result_str, tool_result_error) != 0)
          {
             free(result_str);
             delegate_response_release(&response, response_text, tool_arguments, call_count);
@@ -2207,6 +2204,7 @@ ir_capture_failed:
       *updated_messages = cJSON_Duplicate(messages, 1);
 
    /* Cleanup */
+   aimee_request_free(&dispatch_catalog);
    agent_tools_set_dispatch_role(NULL);
    cJSON_Delete(tools);
    cJSON_Delete(messages);

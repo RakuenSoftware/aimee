@@ -72,10 +72,14 @@ struct cJSON *agent_build_request_anthropic(const agent_t *agent, struct cJSON *
                                             int max_tokens, double temperature);
 
 /* The runtime stores canonical {role,blocks} messages. Native history is accepted
- * only by this migration adapter, and native requests are built only at egress. */
+ * only by this migration adapter, and native requests are built only at egress.
+ * Optional dispatch_catalog receives the owned, post-policy function catalog on
+ * success, replacing its previous owned value. It never contains conversation
+ * content. Pass NULL at output-only boundaries. */
 struct cJSON *agent_build_request_ir(const agent_t *agent, const struct cJSON *messages,
                                      struct cJSON *tools, const char *system_prompt, int max_tokens,
-                                     double temperature, aimee_wire_t wire, int is_delegate);
+                                     double temperature, aimee_wire_t wire, int is_delegate,
+                                     aimee_request_t *dispatch_catalog);
 
 /* Set the Anthropic `system` field on an outbound request (§3 cache-aware
  * shaping). When cache_marking is non-zero, the STABLE prefix (the text before
