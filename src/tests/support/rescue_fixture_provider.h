@@ -5,8 +5,8 @@
  * server-go/modules/delegates/testdata/xml_fallback_golden.json. Test binaries
  * that reach it host no bus, and for every one of them the parse is SETUP: the
  * subject is what the caller does once a block has a call -- the IR refusing to
- * dispatch one found inside reasoning, the response pipeline rebuilding an
- * assistant message, a driver counting a rescued turn.
+ * dispatch one found inside reasoning, the canonical response retaining prose beside a call,
+ * a driver counting a rescued turn.
  *
  * So this reads back exactly the one spelling those fixtures are written in:
  *

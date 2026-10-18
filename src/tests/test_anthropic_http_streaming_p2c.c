@@ -265,27 +265,6 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
    return g_stream_status;
 }
 
-int agent_ir_parse_json_response(cJSON *root, int anthropic, int rescue_mode, int *n_rescued,
-                                 parsed_response_t *out)
-{
-   (void)root;
-   (void)anthropic;
-   (void)rescue_mode;
-   if (n_rescued)
-      *n_rescued = 0;
-   memset(out, 0, sizeof(*out));
-   return 0;
-}
-
-void agent_free_parsed_response(parsed_response_t *p)
-{
-   if (!p)
-      return;
-   free(p->content);
-   for (int i = 0; i < p->call_count; i++)
-      free(p->calls[i].arguments);
-}
-
 int session_compact_estimate_tokens(cJSON *messages)
 {
    return messages ? cJSON_GetArraySize(messages) : 0;

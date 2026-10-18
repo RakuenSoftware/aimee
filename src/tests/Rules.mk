@@ -7728,7 +7728,7 @@ $(TESTPREFIX)/unit-test-hashline-gate: $(OBJDIR)/tests/test_hashline_gate.o $(OB
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-# Differential parity: legacy agent_parse_response_responses vs IR agent_ir_parse_responses
+# Canonical Responses SSE golden fixtures and complete owned entry semantics
 # on identical codex SSE bytes. Links agent_bridge.o (legacy parser + SSE extractor) with
 # the full IR backend chain and NO weak stubs, so both parsers run for real.
 $(TESTPREFIX)/unit-test-responses-parity: $(OBJDIR)/tests/test_responses_parity.o \

@@ -103,7 +103,9 @@ int agent_request_max_tokens(const agent_t *agent, int requested);
 struct cJSON *agent_responses_sse_response_object(const char *body);
 
 /* Native response entry adapters. The caller owns the full typed response until
- * tool dispatch and history append finish. No text/tool projection occurs here. */
+ * tool dispatch and history append finish. No text/tool projection occurs here.
+ * rescue_mode < 0 skips rescue, 0 admits dialect calls, 1 also admits bare JSON;
+ * n_rescued receives the admitted recovered-call count when provided. */
 #define AGENT_IR_CAPTURE_FAILED (-2)
 struct aimee_anthropic_replay;
 int agent_ir_decode_json_response_bound(const struct cJSON *root, int anthropic, int rescue_mode,
@@ -115,30 +117,8 @@ int agent_ir_decode_json_response(const struct cJSON *root, int anthropic, int r
 int agent_ir_decode_responses(const char *body, int rescue_mode, int *n_rescued,
                               aimee_response_t *out);
 
-/* Parse a provider JSON response through the canonical IR and bridge it into a
- * parsed_response_t (the sole response parser for the JSON wires).
- * `anthropic` selects the anthropic vs openai backend parser. `rescue_mode` gates the
- * XML tool-call rescue the parser owns: <0 skips it, 0 rescues dialect calls but not
- * bare prose JSON, 1 also rescues bare JSON. `*n_rescued` (if non-NULL) receives how
- * many calls the rescue recovered. Returns 0 on success, -1 if the IR could not parse
- * (the caller yields an empty response -- the legacy translators are gone). */
-int agent_ir_parse_json_response(struct cJSON *root, int anthropic, int rescue_mode, int *n_rescued,
-                                 parsed_response_t *out);
-
-/* Parse a Responses/SSE (codex) reply through the canonical IR and bridge it into a
- * parsed_response_t. Extracts the response object from the SSE `body` (via
- * agent_responses_sse_response_object), parses it with responses_backend_parse, and
- * owns the XML rescue (rescue_mode: <0 skips; 0 dialect calls; 1 also bare JSON;
- * *n_rescued receives the count). assistant_message for multi-turn replay is the
- * response's output-item array (function_call items carry call_id). Returns 0 on
- * success, -1 if the IR could not parse. */
-int agent_ir_parse_responses(const char *body, int rescue_mode, int *n_rescued,
-                             parsed_response_t *out);
-
-/* Build an OpenAI assistant message ({role, content:null, tool_calls}) from parsed
- * calls -- used to make a replayable turn after an XML tool-call rescue. */
-struct cJSON *agent_build_openai_assistant_message_from_calls(parsed_response_t *parsed);
-/* Parse a Gemini generateContent response. Tracks cachedContentTokenCount as cache_read_tokens. */
+/* Legacy output-only compatibility values are released here while their
+ * remaining native emitters are retired. Execution never constructs them. */
 void agent_free_parsed_response(parsed_response_t *p);
 
 /* --- Message utilities --- */

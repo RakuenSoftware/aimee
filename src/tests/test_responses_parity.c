@@ -1,5 +1,5 @@
 /* test_responses_parity.c -- golden tests for the IR responses parser
- * (agent_ir_parse_responses, the sole parser for the responses/SSE codex wire).
+ * (agent_ir_decode_responses, the owned entry parser for the responses/SSE codex wire).
  * Originally a legacy-vs-IR differential; the legacy agent_parse_response_responses
  * has since been deleted, so this pins the IR output against known-good values across
  * the shapes codex emits: reasoning-only, message output_text, delta-streamed text
@@ -14,6 +14,8 @@
 #include "aimee.h"
 #include "agent_protocol.h"
 #include "cJSON.h"
+#include "support/ir_response_fixture.h"
+#include <aimee/ir/session_event.h>
 
 /* The dialect rescue consults the tool registry only on bare-JSON/bracket paths, which
  * these explicit cases never hit -- stub it (same pattern as test_agent_ir_parse.c). */
@@ -28,23 +30,26 @@ struct cJSON *agent_tool_get_schema_cached(const char *tool_name)
 static void expect(const char *label, const char *body, const char *want_content,
                    const char *want_call)
 {
-   parsed_response_t p;
-   int rc = agent_ir_parse_responses(body, -1, NULL, &p);
+   aimee_response_t p;
+   int rc = agent_ir_decode_responses(body, -1, NULL, &p);
    assert(rc == 0);
 
-   const char *got = p.content ? p.content : "";
+   char *got = aimee_ir_response_text_alloc(&p);
+   assert(got);
    assert(strcmp(got, want_content ? want_content : "") == 0);
    if (want_call)
    {
-      assert(p.is_tool_call == 1 && p.call_count == 1);
-      assert(strcmp(p.calls[0].name, want_call) == 0);
+      assert(aimee_ir_response_has_tool_use(&p) == 1 && aimee_ir_response_tool_count(&p) == 1);
+      assert(strcmp(aimee_ir_response_tool(&p, 0)->tool_name, want_call) == 0);
    }
    else
    {
-      assert(p.is_tool_call == 0 && p.call_count == 0);
+      assert(aimee_ir_response_has_tool_use(&p) == 0 && aimee_ir_response_tool_count(&p) == 0);
    }
-   printf("  PASS: %s (content_len=%zu tool=%d)\n", label, strlen(got), p.is_tool_call);
-   agent_free_parsed_response(&p);
+   printf("  PASS: %s (content_len=%zu tool=%d)\n", label, strlen(got),
+          aimee_ir_response_has_tool_use(&p));
+   free(got);
+   aimee_response_free(&p);
 }
 
 static void test_owned_sse_boundary(void)
