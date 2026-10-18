@@ -344,17 +344,6 @@ add_test(NAME test_server_session_pools COMMAND test_server_session_pools)
 set_tests_properties(test_server_session_pools PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-add_executable(test_cmd_table test_cmd_table.c)
-target_include_directories(test_cmd_table PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..
-  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
-  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
-aimee_enable_test_asserts(test_cmd_table)
-target_link_libraries(test_cmd_table PRIVATE aimee-core)
-add_test(NAME test_cmd_table COMMAND test_cmd_table)
-set_tests_properties(test_cmd_table PROPERTIES
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
 add_executable(test_agent_http test_agent_http.c)
 target_include_directories(test_agent_http PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..

@@ -7034,7 +7034,7 @@ $(TESTPREFIX)/unit-test-primary-session-adapter: $(OBJDIR)/tests/test_primary_se
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-primary-history-client: $(OBJDIR)/tests/test_primary_history_client.o \
-    $(OBJDIR)/db1_client/sessions.o $(OBJDIR)/primary_session_release.o $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
+    $(OBJDIR)/db1_client/transport.o $(OBJDIR)/db1_client/sessions.o $(OBJDIR)/primary_session_release.o $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-server-session-control: $(OBJDIR)/tests/test_server_session_control.o \
