@@ -730,7 +730,7 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make \
+          timeout 240 sudo apt-get install -y -q gcc make cmake \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Build integrity
@@ -741,6 +741,14 @@ jobs:
       # because they were only ever run by hand — see scripts/validate-aimee-artifacts.sh.
       - name: Build the shipping set
         run: cd src && make -j"$(nproc)" all
+      - name: Native CMake canonical capture fixtures
+        run: |
+          cmake -S . -B build/native-ir-cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF
+          cmake --build build/native-ir-cmake --parallel "$(nproc)" \
+            --target test_server_chat_ir test_server_session_log
+          ctest --test-dir build/native-ir-cmake \
+            -R '^test_server_(chat_ir|session_log)$' --output-on-failure
       - name: Artifact integrity (removed capabilities stay removed)
         run: bash scripts/validate-aimee-artifacts.sh
 

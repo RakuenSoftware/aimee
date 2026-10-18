@@ -1,5 +1,7 @@
 /* Private bootstrap/operator transport. All database I/O stays in postgres. */
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include "session_internal.h"
 #include <errno.h>
 #include <fcntl.h>

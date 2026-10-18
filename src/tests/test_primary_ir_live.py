@@ -313,32 +313,40 @@ def main():
             assert ("IDENTITY_READ_CONTROL" in tool_reply["result"]) is not missing, tool_reply
         print("canonical dispatch: exact advertised read executes; foreign namespace and unknown identity return durable errors")
 
-        # Server delegates require the real sandbox backend; never substitute
-        # a fake executor to make storage qualification appear to pass.
+        # Always exercise workspace/owner/worktree setup, including when Docker
+        # is absent locally. Only real sandboxed completion can qualify readback.
+        workspace = Path(os.environ["AIMEE_IR_DELEGATE_WORKSPACE"])
+        assert (workspace / ".git").is_dir(), "registered integration checkout is missing"
+
+        def learning_task(run):
+            launched = api("/v1/delegate/run", dict(role="format", persona="engineer", via="ir-live-a", tools=False,
+                prompt=f"IR_LEARNING_RECEIPT_{run} return PRIMARY_OK", session_id=sid,
+                cwd=str(workspace), max_turns=2))
+            assert launched.get("job_id", 0) > 0, launched
+            deadline = time.monotonic() + 120
+            while True:
+                status = api("/v1/delegate/status", dict(job_id=launched["job_id"], full_result=True))
+                if status.get("job_status") in ("done", "failed", "partial", "cancelled"):
+                    return status
+                assert time.monotonic() < deadline, status
+                time.sleep(0.05)
+
         docker = shutil.which("docker")
         sandbox_ready = docker and subprocess.run([docker, "version"], stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, timeout=15, check=False).returncode == 0
         if not sandbox_ready:
+            before = len(observed)
+            status = learning_task("sandbox-refusal")
+            assert status["job_status"] == "failed" and "could not be given a sandboxed container" in status["result"], status
+            assert len(observed) == before, "unavailable sandbox must not execute a model task"
+            print("delegate setup: registered workspace and dedicated worktree reach mandatory sandbox refusal")
             print("SKIP: delegate learning completion/readback (real Docker sandbox unavailable)")
         else:
-            # Exercise the real async delegate -> DB1 learning writer -> next-run
-            # prompt reader. Completion must follow capture, not race its readback.
-            workspace = Path(os.environ["AIMEE_IR_DELEGATE_WORKSPACE"])
-            assert (workspace / ".git").is_dir(), "registered integration checkout is missing"
+            # Completion must follow capture, not race its next-run prompt read.
             lesson = "Delegate succeeded in role 'format'"
             for run in range(2):
                 before = len(observed)
-                launched = api("/v1/delegate/run", dict(role="format", persona="engineer", via="ir-live-a", tools=False,
-                    prompt=f"IR_LEARNING_RECEIPT_{run} return PRIMARY_OK", session_id=sid,
-                    cwd=str(workspace), max_turns=2))
-                assert launched.get("job_id", 0) > 0, launched
-                deadline = time.monotonic() + 120
-                while True:
-                    status = api("/v1/delegate/status", dict(job_id=launched["job_id"], full_result=True))
-                    if status.get("job_status") in ("done", "failed", "partial", "cancelled"):
-                        break
-                    assert time.monotonic() < deadline, status
-                    time.sleep(0.05)
+                status = learning_task(run)
                 assert status["job_status"] == "done" and "PRIMARY_OK" in status["result"], status
                 assert len(observed) > before, status
                 assert (lesson in json.dumps(observed[before])) == (run == 1), observed[before]

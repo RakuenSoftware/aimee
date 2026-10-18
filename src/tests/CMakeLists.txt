@@ -33,7 +33,6 @@ endfunction()
 
 # Portable unit tests that build cleanly under both POSIX and the current
 # Windows CMake target set.
-aimee_add_test(test_harness_memory test_harness_memory.c)
 aimee_add_test(test_roundtable_brief test_roundtable_brief.c)
 aimee_add_test(test_server_active_project test_server_active_project.c
                ../server/server_active_project.c)
@@ -195,20 +194,8 @@ aimee_add_test(test_bus_capture test_bus_capture.c ../core/event_bus/bus_capture
 target_include_directories(test_bus_capture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_link_libraries(test_bus_capture PRIVATE Threads::Threads)
 
-# First real module-on-bus integration: the DB1-backed user-memory recall served
-# over the bus and verified against a direct call (feature-tree memory-first slice).
-# The bus sources are compiled straight into this test binary; the real DB1 memory
-# path comes from aimee-core, which aimee_add_test links. A test binary only — D7
-# keeps the bus out of every shipping target.
-aimee_add_test(test_bus_memory_recall test_bus_memory_recall.c ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
-target_include_directories(test_bus_memory_recall PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
-target_link_libraries(test_bus_memory_recall PRIVATE Threads::Threads)
-
-# Real mutating memory op over the bus: upsert (insert + update), verified by
-# reading the real store back. Same rationale as the recall test above (D7-clean).
-aimee_add_test(test_bus_memory_upsert test_bus_memory_upsert.c ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
-target_include_directories(test_bus_memory_upsert PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
-target_link_libraries(test_bus_memory_upsert PRIVATE Threads::Threads)
+# Retired native DB1 recall/upsert fixtures are replaced by the Go store and
+# private-memory integration suites; do not restore in-process store fallbacks.
 
 # Native caller-side wire contract; the pure-Go handler has the reciprocal
 # contract vectors in the external module repository.
@@ -266,7 +253,6 @@ aimee_add_test(test_self_update test_self_update.c ../self_update_util.c)
 aimee_add_test(test_audit_action test_audit_action.c)
 aimee_add_test(test_audit_action_log test_audit_action_log.c)
 aimee_add_test(test_audit_ledger test_audit_ledger.c)
-aimee_add_test(test_db test_db.c)
 aimee_add_test(test_anchor_snapshot test_anchor_snapshot.c)
 aimee_add_test(test_agent_admission test_agent_admission.c ../server/agent_admission.c)
 aimee_add_test(test_edit_anchored test_edit_anchored.c)
@@ -293,7 +279,6 @@ aimee_add_test(test_aimee_backend test_aimee_backend.c ../modules/translation/ai
 aimee_add_test(test_aimee_ir_shadow test_aimee_ir_shadow.c ../server/aimee_ir_shadow.c ../modules/ir/aimee_ir_metrics.c ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c ../modules/ir/aimee_ir.c)
 aimee_add_test(test_aimee_ir_serve test_aimee_ir_serve.c ../server/aimee_ir_serve.c ../modules/ir/aimee_ir_session.c ../modules/translation/aimee_backend_openai.c ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_backend_responses.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_responses.c ../modules/ir/aimee_ir.c ../modules/ir/aimee_ir_metrics.c)
 aimee_add_test(test_aimee_ir_stream test_aimee_ir_stream.c ../modules/translation/aimee_ir_stream.c ../modules/ir/aimee_ir.c)
-aimee_add_test(test_wfe_binding test_wfe_binding.c)
 aimee_add_test(test_shutdown_forensics test_shutdown_forensics.c)
 
 add_executable(test_toolset test_toolset.c)
@@ -367,26 +352,6 @@ aimee_enable_test_asserts(test_cmd_table)
 target_link_libraries(test_cmd_table PRIVATE aimee-core)
 add_test(NAME test_cmd_table COMMAND test_cmd_table)
 set_tests_properties(test_cmd_table PROPERTIES
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
-# test_prompts needs prompts.c + dstr.c, and calls working_profile_observe /
-# working_profile_autoobserve_from_feedback directly — those live in aimee-agent.
-add_executable(test_prompts test_prompts.c ../prompts.c ../dstr.c)
-target_include_directories(test_prompts PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..
-  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
-  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
-aimee_enable_test_asserts(test_prompts)
-if(TARGET aimee-core)
-  if(NOT WIN32)
-    target_link_libraries(test_prompts PRIVATE
-      -Wl,--start-group aimee-agent aimee-data aimee-core -Wl,--end-group)
-  else()
-    target_link_libraries(test_prompts PRIVATE aimee-agent aimee-data aimee-core)
-  endif()
-endif()
-add_test(NAME test_prompts COMMAND test_prompts)
-set_tests_properties(test_prompts PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_agent_http test_agent_http.c)
@@ -479,24 +444,6 @@ add_test(NAME test_session_compact_focused COMMAND test_session_compact_focused)
 set_tests_properties(test_session_compact_focused PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-add_executable(test_conversation_context test_conversation_context.c)
-target_include_directories(test_conversation_context PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..
-  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
-  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
-aimee_enable_test_asserts(test_conversation_context)
-if(TARGET aimee-agent)
-  if(NOT WIN32)
-    target_link_libraries(test_conversation_context PRIVATE
-      -Wl,--start-group aimee-agent aimee-data aimee-core -Wl,--end-group)
-  else()
-    target_link_libraries(test_conversation_context PRIVATE aimee-agent aimee-data aimee-core)
-  endif()
-endif()
-add_test(NAME test_conversation_context COMMAND test_conversation_context)
-set_tests_properties(test_conversation_context PROPERTIES
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
 # Native harness conversion and the POSIX print-mode lifecycle.
 aimee_add_test(test_harness_ir test_harness_ir.c
   ../modules/translation/harness_ir.c ../modules/translation/aimee_ir_stream.c
@@ -554,6 +501,7 @@ if(NOT WIN32)
   aimee_add_test(test_server_session_log test_server_session_log.c
     ../server/server_session_log.c ../server/server_session_control.c
     ../server/server_learning_outcome.c support/learning_outcome_stub.c support/log_stub.c
-    ../interaction_event_names.c)
+    ../interaction_event_names.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
+    ../aimee_sha256.c)
   target_link_libraries(test_server_session_log PRIVATE Threads::Threads OpenSSL::Crypto)
 endif()

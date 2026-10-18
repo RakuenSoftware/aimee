@@ -840,7 +840,9 @@ start_server() {
     # else, and every check that reads only the client's side has to guess.
     SERVER_LOG="$HOME/aimee-server.$$.log"
     local log="$SERVER_LOG"
-    "$AIMEE_SERVER" --foreground >"$log" 2>&1 &
+    # The disposable local mirror has no network-backed forge owner. Use its
+    # known current commit explicitly; production keeps remote-default policy.
+    AIMEE_SESSION_WORKTREE_BASE=current "$AIMEE_SERVER" --foreground >"$log" 2>&1 &
     SERVER_PID=$!
     local config_started=0
     local i
@@ -2161,6 +2163,7 @@ if AIMEE_IR_DELEGATE_WORKSPACE="$MIRROR_CLIENT" python3 "$REPO_ROOT/src/tests/te
     SKIP=$((SKIP + PRIMARY_SKIPS))
     grep '^SKIP:' "$PRIMARY_IR_LOG" || true
     grep '^standalone learning:' "$PRIMARY_IR_LOG" || true
+    grep '^delegate setup:' "$PRIMARY_IR_LOG" || true
 else
     echo "FAIL: canonical primary switching and durable replay"
     # This fixture contains synthetic provider data. Preserve bounded client-side
