@@ -141,6 +141,15 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
          return NULL;
       }
    }
+   if (ir->reasoning_effort != AIMEE_EFFORT_UNSET)
+   {
+      const char *effort = aimee_ir_effort_name(ir->reasoning_effort);
+      if (!effort || !cJSON_AddStringToObject(out, "reasoning_effort", effort))
+      {
+         cJSON_Delete(out);
+         return NULL;
+      }
+   }
    if (ir->model)
       cJSON_AddStringToObject(out, "model", ir->model);
    if (ir->has_max_tokens)
@@ -268,47 +277,13 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
       cJSON *tools = cJSON_AddArrayToObject(out, "tools");
       for (int i = 0; i < ir->n_tools; i++)
       {
-         /* Carry an entry this shape cannot express, verbatim -- the same rule the
-          * Responses backend follows, and needed here because a Responses request
-          * reaches the provider as responses -> IR -> CHAT -> IR -> responses
-          * (aimee_ir_responses_to_chat renders chat, then openai_build_body rebuilds).
-          * Flattening at this hop undid the sidecar the ends preserve: a Codex
-          * `namespace` group became a chat function named mcp__aimee with no schema,
-          * its nineteen nested tools gone by the time the request was rebuilt.
-          *
-          * A tool whose sidecar is a plain named `function` renders normally; anything
-          * else (namespace / custom / web_search / local_shell) passes through. */
-         const cJSON *raw = ir->tools[i].raw;
-         const cJSON *rtype = raw ? cJSON_GetObjectItemCaseSensitive((cJSON *)raw, "type") : NULL;
-         int raw_is_function =
-             !rtype ||
-             (cJSON_IsString(rtype) &&
-              (!strcmp(rtype->valuestring, "function") ||
-               (ir->frontend == AIMEE_WIRE_ANTHROPIC && !strcmp(rtype->valuestring, "custom"))));
-         if (ir->frontend == AIMEE_WIRE_ANTHROPIC && !raw_is_function)
+         cJSON *tool = openai_ir_render_tool(&ir->tools[i], 0);
+         if (!tool || !cJSON_AddItemToArray(tools, tool))
          {
+            cJSON_Delete(tool);
             cJSON_Delete(out);
             return NULL;
          }
-         if (raw && !raw_is_function)
-         {
-            cJSON *verbatim = cJSON_Duplicate((cJSON *)raw, 1);
-            if (verbatim)
-               cJSON_AddItemToArray(tools, verbatim);
-            continue;
-         }
-         if (!ir->tools[i].name || !ir->tools[i].name[0])
-            continue; /* never emit name:"" -- the provider rejects the whole request */
-         cJSON *t = cJSON_CreateObject();
-         cJSON_AddStringToObject(t, "type", "function");
-         cJSON *fn = cJSON_AddObjectToObject(t, "function");
-         cJSON_AddStringToObject(fn, "name", ir->tools[i].name);
-         if (ir->tools[i].description)
-            cJSON_AddStringToObject(fn, "description", ir->tools[i].description);
-         cJSON_AddItemToObject(fn, "parameters",
-                               ir->tools[i].schema ? cJSON_Duplicate(ir->tools[i].schema, 1)
-                                                   : cJSON_CreateObject());
-         cJSON_AddItemToArray(tools, t);
       }
    }
    openai_family_add_tool_choice(out, ir, 0);

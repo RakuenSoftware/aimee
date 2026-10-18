@@ -32,6 +32,12 @@ def main():
                                 {"type": "text", "text": "PRIMARY_OK"}],
                     "stop_reason": "end_turn", "usage": {"input_tokens": 10, "output_tokens": 2},
                 }
+            last_content = request.get("messages", [{}])[-1].get("content", "")
+            if self.path.endswith("/messages") and isinstance(last_content, list) and any(
+                    part.get("type") == "text" and "IR_RESPONSE_TOOLS" in part.get("text", "") for part in last_content):
+                payload["content"].extend(dict(type="tool_use", id=f"call-{index}-" + "i" * 500,
+                                               name="Read", input={"path": "p" * 8192, "index": index}) for index in range(17))
+                payload["stop_reason"] = "tool_use"
             data = json.dumps(payload).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -48,14 +54,16 @@ def main():
             self.sock.settimeout(60)
             self.sock.connect(str(home / "aimee-http.sock"))
 
-    def api(path, body):
+    def api(path, body, headers=None, expected=200):
         connection = Local("localhost")
         try:
-            connection.request("POST", path, json.dumps(body), {"Content-Type": "application/json"})
+            connection.request("POST", path, json.dumps(body), {"Content-Type": "application/json", **(headers or {})})
             response = connection.getresponse()
             data = response.read().decode()
-            assert response.status == 200, (path, response.status, data)
-            return data if path == "/v1/chat/stream" else json.loads(data)
+            assert response.status == expected, (path, response.status, data)
+            if expected != 200:
+                return data
+            return data if path == "/v1/chat/stream" or body.get("stream") else json.loads(data)
         finally:
             connection.close()
 
@@ -122,6 +130,37 @@ def main():
                     response.close()
                 connection.close()
         print(f"canonical primary: A/B/A/B, {len(observed)} native calls, {sequence} durable events, live/replay and resumed-cursor parity passed")
+
+        # A real Responses continuation: canonical signed thinking and every
+        # tool id/argument survive the durable checkpoint and a native provider switch.
+        headers = {"aimee-session-id": sid}
+        first = api("/v1/responses", dict(model="ir-live-b", input="IR_RESPONSE_TOOLS",
+                    instructions="RESPONSE_POLICY", reasoning={"effort": "high"},
+                    text={"format": {"type": "json_schema", "name": "fixture", "strict": True,
+                                     "schema": {"type": "object"}}},
+                    tools=[{"type": "function", "name": "Read", "strict": True,
+                            "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}]), headers)
+        calls = [item for item in first["output"] if item["type"] == "function_call"]
+        assert len(calls) == 17 and all(len(item["call_id"]) > 500 for item in calls), first
+        assert observed[-1]["output_config"]["format"]["schema"] == {"type": "object"}, observed[-1]
+        assert observed[-1]["output_config"]["effort"] == "high", observed[-1]
+        assert all(len(json.loads(item["arguments"])["path"]) == 8192 for item in calls), calls
+        followup = dict(model="ir-live-b", previous_response_id=first["id"], stream=True,
+                        input=[dict(type="function_call_output", call_id=item["call_id"], output=f"RESULT_{index}")
+                               for index, item in enumerate(calls)])
+        raw = api("/v1/responses", followup, headers)
+        completed = [json.loads(line[6:])["response"] for line in raw.splitlines()
+                     if line.startswith("data: ") and json.loads(line[6:]).get("type") == "response.completed"]
+        assert len(completed) == 1 and completed[0]["status"] == "completed", raw
+        sent = json.dumps(observed[-1])
+        assert "IR_RESPONSE_TOOLS" in sent and "fixture-signature" in sent, observed[-1]
+        for index, item in enumerate(calls):
+            assert item["call_id"] in sent and f"RESULT_{index}" in sent, observed[-1]
+        count = len(observed)
+        api("/v1/responses", {**followup, "stream": False}, {"aimee-session-id": "another-scope"}, expected=400)
+        assert len(observed) == count, "Cross-scope continuation reached the provider"
+        print("canonical Responses: 17 long-ID/large-argument tools, native signed replay, durable continuation and cross-scope refusal passed")
+
     finally:
         cleanup_error = None
         if sid and attachment:

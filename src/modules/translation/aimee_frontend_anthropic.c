@@ -235,6 +235,32 @@ int anthropic_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
             out->tools[i].raw = cJSON_Duplicate(t, 1);
             const cJSON *schema = cJSON_GetObjectItemCaseSensitive((cJSON *)t, "input_schema");
             out->tools[i].schema = schema ? cJSON_Duplicate(schema, 1) : NULL;
+            const char *native_type = ostr(t, "type");
+            if (native_type && strcmp(native_type, "custom"))
+            {
+               out->tools[i].kind = AIMEE_TOOL_HOSTED;
+               out->tools[i].provider_wire = AIMEE_WIRE_ANTHROPIC;
+               out->tools[i].native_type = dupstr(native_type);
+               out->tools[i].native_options = cJSON_Duplicate(t, 1);
+               if (!out->tools[i].native_type || !out->tools[i].native_options)
+                  goto oom;
+               const char *fields[] = {"type", "name", "description", "input_schema",
+                                       "cache_control"};
+               for (size_t j = 0; j < sizeof fields / sizeof fields[0]; j++)
+                  cJSON_DeleteItemFromObjectCaseSensitive(out->tools[i].native_options, fields[j]);
+            }
+            const cJSON *strict = cJSON_GetObjectItemCaseSensitive(t, "strict");
+            const cJSON *defer = cJSON_GetObjectItemCaseSensitive(t, "defer_loading");
+            if ((strict && !cJSON_IsBool(strict)) || (defer && !cJSON_IsBool(defer)))
+            {
+               aimee_request_free(out);
+               return -1;
+            }
+            out->tools[i].strict = !strict                ? AIMEE_STRICT_UNSET
+                                   : cJSON_IsTrue(strict) ? AIMEE_STRICT_TRUE
+                                                          : AIMEE_STRICT_FALSE;
+            out->tools[i].has_defer_loading = defer != NULL;
+            out->tools[i].defer_loading = cJSON_IsTrue(defer);
             i++;
          }
       }
@@ -273,6 +299,14 @@ int anthropic_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       }
    }
 
+   const cJSON *effort = cJSON_GetObjectItemCaseSensitive(
+       cJSON_GetObjectItemCaseSensitive(req, "output_config"), "effort");
+   if (effort && (!cJSON_IsString(effort) ||
+                  aimee_ir_effort_parse(effort->valuestring, &out->reasoning_effort)))
+   {
+      aimee_request_free(out);
+      return -1;
+   }
    const cJSON *format = cJSON_GetObjectItemCaseSensitive(
        cJSON_GetObjectItemCaseSensitive(req, "output_config"), "format");
    if (format && !cJSON_IsNull(format))

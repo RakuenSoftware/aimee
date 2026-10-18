@@ -405,6 +405,17 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
       return NULL;
    }
    cJSON_DeleteItemFromObjectCaseSensitive(output_config, "format");
+   cJSON_DeleteItemFromObjectCaseSensitive(output_config, "effort");
+   if (ir->reasoning_effort != AIMEE_EFFORT_UNSET)
+   {
+      const char *effort = aimee_ir_effort_name(ir->reasoning_effort);
+      if (!effort || !cJSON_AddStringToObject(output_config, "effort", effort))
+      {
+         cJSON_Delete(output_config);
+         cJSON_Delete(out);
+         return NULL;
+      }
+   }
    if (ir->output_format.kind == AIMEE_OUTPUT_JSON_SCHEMA)
    {
       cJSON *format = cJSON_AddObjectToObject(output_config, "format");
@@ -477,11 +488,38 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
       cJSON *tools = cJSON_AddArrayToObject(out, "tools");
       for (int i = 0; i < ir->n_tools; i++)
       {
-         cJSON *t = cJSON_CreateObject();
-         cJSON_AddStringToObject(t, "name", ir->tools[i].name ? ir->tools[i].name : "");
+         const aimee_tool_t *tool = &ir->tools[i];
+         if (!aimee_ir_tool_valid(tool) || tool->kind == AIMEE_TOOL_NAMESPACE ||
+             (tool->kind == AIMEE_TOOL_HOSTED && tool->provider_wire != AIMEE_WIRE_ANTHROPIC) ||
+             (tool->kind == AIMEE_TOOL_FUNCTION && tool->native_options &&
+              tool->provider_wire != AIMEE_WIRE_ANTHROPIC))
+         {
+            cJSON_Delete(out);
+            return NULL;
+         }
+         cJSON *t = tool->kind == AIMEE_TOOL_HOSTED && tool->native_options
+                        ? cJSON_Duplicate(tool->native_options, 1)
+                        : cJSON_CreateObject();
+         if (tool->kind == AIMEE_TOOL_HOSTED)
+         {
+            cJSON_DeleteItemFromObjectCaseSensitive(t, "type");
+            cJSON_AddStringToObject(t, "type", tool->native_type);
+         }
+         if (tool->strict == AIMEE_STRICT_TRUE || tool->strict == AIMEE_STRICT_FALSE)
+         {
+            cJSON_DeleteItemFromObjectCaseSensitive(t, "strict");
+            cJSON_AddBoolToObject(t, "strict", tool->strict == AIMEE_STRICT_TRUE);
+         }
+         if (tool->has_defer_loading)
+         {
+            cJSON_DeleteItemFromObjectCaseSensitive(t, "defer_loading");
+            cJSON_AddBoolToObject(t, "defer_loading", tool->defer_loading);
+         }
+         cJSON_AddStringToObject(t, "name", tool->name ? tool->name : "");
          if (ir->tools[i].description)
             cJSON_AddStringToObject(t, "description", ir->tools[i].description);
-         if (ir->tools[i].schema || !preserve_cache || !ir->tools[i].raw)
+         if (ir->tools[i].schema ||
+             (tool->kind == AIMEE_TOOL_FUNCTION && (!preserve_cache || !ir->tools[i].raw)))
             cJSON_AddItemToObject(t, "input_schema",
                                   ir->tools[i].schema ? cJSON_Duplicate(ir->tools[i].schema, 1)
                                                       : cJSON_CreateObject());
@@ -489,9 +527,11 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
             add_cache_control(t, ir->tools[i].cache_control, ir->tools[i].cache_ttl);
          if (preserve_cache)
          {
-            static const char *const fields[] = {"name", "description", "input_schema",
-                                                 "cache_control"};
-            t = native_overlay(ir->tools[i].raw, t, fields, 4);
+            static const char *const fields[] = {"name",          "description", "input_schema",
+                                                 "cache_control", "strict",      "defer_loading",
+                                                 "type"};
+            t = native_overlay(ir->tools[i].raw, t, fields,
+                               tool->kind == AIMEE_TOOL_HOSTED ? 7 : 6);
          }
          if (!t || !cJSON_AddItemToArray(tools, t))
          {

@@ -33,6 +33,8 @@ BUS_TRANSPORT_HEADERS = {"aimee/audit/obs_bus.h", "aimee/postgres/client.h"}
 # Harness translation also consumes the canonical session envelope: this is the
 # same shared IR data contract, not a call into another module's domain service.
 IR_SHARED_TYPE = {
+    # Gateway policing consumes the canonical catalog data contract; policy remains its own owner.
+    ("src/modules/gateway/include/aimee/gateway/gateway_policy.h", "aimee/ir/aimee_ir.h"),
     # Legacy-history entry migration uses the canonical message codec, not a peer service.
     ("src/modules/translation/history_ir.c", "aimee/ir/session_event.h"),
     ("src/modules/delegates/aimee_ir_rescue.c", "aimee/ir/aimee_ir_metrics.h"),

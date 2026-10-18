@@ -371,6 +371,13 @@ static cJSON *converse_tool_choice(const aimee_request_t *ir, int *failed)
 
 cJSON *bedrock_converse_build(const aimee_request_t *ir)
 {
+   if (ir && ir->reasoning_effort != AIMEE_EFFORT_UNSET)
+      return NULL;
+   for (int i = 0; ir && i < ir->n_tools; i++)
+      if (ir->tools[i].kind != AIMEE_TOOL_FUNCTION || ir->tools[i].strict == AIMEE_STRICT_TRUE ||
+          (ir->tools[i].has_defer_loading && ir->tools[i].defer_loading) ||
+          ir->tools[i].native_options)
+         return NULL;
    if (!ir || (ir->output_format.kind != AIMEE_OUTPUT_UNSET &&
                ir->output_format.kind != AIMEE_OUTPUT_TEXT))
       return NULL; /* Refuse unsupported constraints instead of dropping them. */

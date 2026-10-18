@@ -214,6 +214,171 @@ unsupported:
    return -1;
 }
 
+/* A hosted tool is owned by its provider. Configuration is opaque data attached
+ * to that explicit typed capability; it is never mistaken for a local function. */
+static int openai_hosted_tool_type(const char *type)
+{
+   static const char *const types[] = {"web_search",
+                                       "web_search_preview",
+                                       "web_search_preview_2025_03_11",
+                                       "file_search",
+                                       "computer",
+                                       "computer_use_preview",
+                                       "code_interpreter",
+                                       "image_generation",
+                                       "local_shell",
+                                       "shell",
+                                       "apply_patch",
+                                       "mcp",
+                                       "tool_search"};
+   for (size_t i = 0; type && i < sizeof types / sizeof types[0]; i++)
+      if (!strcmp(type, types[i]))
+         return 1;
+   return 0;
+}
+int openai_ir_parse_tool(const cJSON *native, aimee_tool_t *tool, int nested)
+{
+   if (!cJSON_IsObject(native) || !tool)
+      return -1;
+   const char *type = ostr(native, "type");
+   const cJSON *definition = cJSON_GetObjectItemCaseSensitive(native, "function");
+   if (!definition)
+      definition = native;
+   if (type && !strcmp(type, "namespace"))
+   {
+      if (nested)
+         return -1;
+      tool->kind = AIMEE_TOOL_NAMESPACE;
+      definition = native;
+      const cJSON *children = cJSON_GetObjectItemCaseSensitive(native, "tools");
+      int count = cJSON_GetArraySize(children);
+      if (!cJSON_IsArray(children) || count > AIMEE_IR_MAX_BLOCKS)
+         return -1;
+      tool->children = count ? calloc((size_t)count, sizeof *tool->children) : NULL;
+      if (count && !tool->children)
+         return -1;
+      tool->n_children = count;
+      for (int i = 0; i < count; i++)
+         if (openai_ir_parse_tool(cJSON_GetArrayItem(children, i), &tool->children[i], 1) ||
+             tool->children[i].kind != AIMEE_TOOL_FUNCTION)
+            return -1;
+   }
+   else if (type && strcmp(type, "function"))
+   {
+      if (nested || !openai_hosted_tool_type(type))
+         return -1;
+      tool->kind = AIMEE_TOOL_HOSTED;
+      tool->provider_wire = AIMEE_WIRE_RESPONSES;
+      tool->native_type = strdup(type);
+      definition = native;
+      if (!tool->native_type)
+         return -1;
+   }
+   tool->name = dupstr(ostr(definition, "name"));
+   tool->description = dupstr(ostr(definition, "description"));
+   const cJSON *schema = cJSON_GetObjectItemCaseSensitive(definition, "parameters");
+   const cJSON *strict = cJSON_GetObjectItemCaseSensitive(definition, "strict");
+   const cJSON *defer = cJSON_GetObjectItemCaseSensitive(definition, "defer_loading");
+   if ((schema && !cJSON_IsObject(schema)) ||
+       (strict && !cJSON_IsNull(strict) && !cJSON_IsBool(strict)) ||
+       (defer && !cJSON_IsBool(defer)))
+      return -1;
+   tool->schema = schema ? cJSON_Duplicate(schema, 1) : NULL;
+   tool->strict = !strict                ? AIMEE_STRICT_UNSET
+                  : cJSON_IsNull(strict) ? AIMEE_STRICT_NULL
+                  : cJSON_IsTrue(strict) ? AIMEE_STRICT_TRUE
+                                         : AIMEE_STRICT_FALSE;
+   tool->has_defer_loading = defer != NULL;
+   tool->defer_loading = cJSON_IsTrue(defer);
+   tool->raw = cJSON_Duplicate(native, 1);
+   tool->native_options = cJSON_Duplicate(definition, 1);
+   if (!tool->raw || !tool->native_options || (schema && !tool->schema))
+      return -1;
+   const char *fields[] = {"type",   "name",          "description", "parameters",
+                           "strict", "defer_loading", "tools"};
+   for (size_t i = 0; i < sizeof fields / sizeof fields[0]; i++)
+      cJSON_DeleteItemFromObjectCaseSensitive(tool->native_options, fields[i]);
+   if (!cJSON_GetArraySize(tool->native_options))
+   {
+      cJSON_Delete(tool->native_options);
+      tool->native_options = NULL;
+   }
+   if (tool->native_options)
+      tool->provider_wire = AIMEE_WIRE_RESPONSES;
+   return aimee_ir_tool_valid(tool) ? 0 : -1;
+}
+cJSON *openai_ir_render_tool(const aimee_tool_t *tool, int responses_shape)
+{
+   if (!aimee_ir_tool_valid(tool) ||
+       (tool->kind == AIMEE_TOOL_HOSTED && tool->provider_wire != AIMEE_WIRE_RESPONSES) ||
+       (!responses_shape && tool->kind != AIMEE_TOOL_FUNCTION))
+      return NULL;
+   cJSON *out = cJSON_CreateObject();
+   const char *type = tool->kind == AIMEE_TOOL_NAMESPACE ? "namespace"
+                      : tool->kind == AIMEE_TOOL_HOSTED  ? tool->native_type
+                                                         : "function";
+   if (!out || !cJSON_AddStringToObject(out, "type", type))
+      goto fail;
+   cJSON *definition = !responses_shape ? cJSON_AddObjectToObject(out, "function") : out;
+   if (!definition)
+      goto fail;
+   if (tool->native_options)
+   {
+      const cJSON *option;
+      cJSON_ArrayForEach(option, tool->native_options)
+      {
+         if (!option->string || cJSON_GetObjectItemCaseSensitive(definition, option->string) ||
+             !strcmp(option->string, "name") || !strcmp(option->string, "description") ||
+             !strcmp(option->string, "parameters") || !strcmp(option->string, "strict") ||
+             !strcmp(option->string, "defer_loading") || !strcmp(option->string, "tools"))
+            goto fail;
+         if (!cJSON_AddItemToObject(definition, option->string, cJSON_Duplicate(option, 1)))
+            goto fail;
+      }
+   }
+   if ((tool->name && !cJSON_AddStringToObject(definition, "name", tool->name)) ||
+       (tool->description &&
+        !cJSON_AddStringToObject(definition, "description", tool->description)))
+      goto fail;
+   if (tool->kind == AIMEE_TOOL_FUNCTION)
+   {
+      if (!cJSON_AddItemToObject(definition, "parameters",
+                                 tool->schema ? cJSON_Duplicate(tool->schema, 1)
+                                              : cJSON_CreateObject()))
+         goto fail;
+      if (tool->strict == AIMEE_STRICT_NULL)
+      {
+         if (!cJSON_AddNullToObject(definition, "strict"))
+            goto fail;
+      }
+      else if (tool->strict != AIMEE_STRICT_UNSET &&
+               !cJSON_AddBoolToObject(definition, "strict", tool->strict == AIMEE_STRICT_TRUE))
+         goto fail;
+      if (tool->has_defer_loading &&
+          !cJSON_AddBoolToObject(definition, "defer_loading", tool->defer_loading))
+         goto fail;
+   }
+   else if (tool->kind == AIMEE_TOOL_NAMESPACE)
+   {
+      cJSON *children = cJSON_AddArrayToObject(out, "tools");
+      if (!children)
+         goto fail;
+      for (int i = 0; i < tool->n_children; i++)
+      {
+         cJSON *child = openai_ir_render_tool(&tool->children[i], 1);
+         if (!child || !cJSON_AddItemToArray(children, child))
+         {
+            cJSON_Delete(child);
+            goto fail;
+         }
+      }
+   }
+   return out;
+fail:
+   cJSON_Delete(out);
+   return NULL;
+}
+
 int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, size_t errn)
 {
    if (out)
@@ -369,6 +534,15 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
       }
    }
 
+   const cJSON *effort = cJSON_GetObjectItemCaseSensitive(req, "reasoning_effort");
+   if (effort && !cJSON_IsNull(effort) &&
+       (!cJSON_IsString(effort) ||
+        aimee_ir_effort_parse(effort->valuestring, &out->reasoning_effort)))
+   {
+      aimee_request_free(out);
+      return -1;
+   }
+
    /* tools: {type:function, function:{name,description,parameters}} */
    const cJSON *tools = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "tools");
    if (tools && cJSON_IsArray(tools))
@@ -376,23 +550,14 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
       const cJSON *t = NULL;
       cJSON_ArrayForEach(t, tools)
       {
-         const cJSON *fn = cJSON_GetObjectItemCaseSensitive((cJSON *)t, "function");
-         const cJSON *src = fn ? fn : t; /* tolerate a flat tool too */
-         aimee_tool_t *tool = grow1((void **)&out->tools, &out->n_tools, sizeof(aimee_tool_t));
-         if (!tool)
-            goto oom;
-         /* Keep the entry verbatim so a shape this wire cannot express survives the
-          * round trip. A Responses request reaches the provider as
-          * responses -> IR -> chat -> IR -> responses, so without this the sidecar
-          * the Responses frontend set is lost on the way back in and a Codex
-          * `namespace` group is reduced to a nameless function. */
-         tool->raw = cJSON_Duplicate((cJSON *)t, 1);
-         if (!tool->raw)
-            goto oom;
-         tool->name = dupstr(ostr(src, "name"));
-         tool->description = dupstr(ostr(src, "description"));
-         const cJSON *params = cJSON_GetObjectItemCaseSensitive((cJSON *)src, "parameters");
-         tool->schema = params ? cJSON_Duplicate(params, 1) : NULL;
+         aimee_tool_t *tool = grow1((void **)&out->tools, &out->n_tools, sizeof *tool);
+         if (!tool || openai_ir_parse_tool(t, tool, 0))
+         {
+            if (err && errn)
+               snprintf(err, errn, "invalid or unsupported typed tool catalog");
+            aimee_request_free(out);
+            return -1;
+         }
       }
    }
 

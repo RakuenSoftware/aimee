@@ -101,30 +101,6 @@ static char *ir_resolve_persona_instructions(void)
    return persona_compose_primary_instructions(name, NULL);
 }
 
-/* The neutral IR keeps provider-native tool sidecars so a Responses request can
- * survive its intermediate chat-shaped hop and be rebuilt for a Responses
- * backend. That preservation must end at an actual OpenAI chat backend: its
- * `tools` array accepts function entries only (llama.cpp rejects a Codex
- * `custom` tool before inference). Filter only the final provider request, after
- * the driver is known, so chatgpt/Responses still receives native tool types. */
-static void filter_openai_chat_tools(cJSON *provider_request, int is_responses)
-{
-   if (is_responses || !provider_request)
-      return;
-   cJSON *tools = cJSON_GetObjectItemCaseSensitive(provider_request, "tools");
-   if (!cJSON_IsArray(tools))
-      return;
-   for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
-   {
-      cJSON *tool = cJSON_GetArrayItem(tools, i);
-      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(tool, "type"));
-      if (type && strcmp(type, "function") != 0)
-         cJSON_DeleteItemFromArray(tools, i);
-   }
-   if (cJSON_GetArraySize(tools) == 0)
-      cJSON_DeleteItemFromObjectCaseSensitive(provider_request, "tools");
-}
-
 char *aimee_ir_prepend_active_persona_text(const char *text, int conversation_established)
 {
    const char *sid = server_http_identity_session_hdr();
@@ -271,6 +247,11 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled)
                                                    : "none");
 }
 
+void aimee_ir_apply_gateway_request_stages(aimee_request_t *request)
+{
+   aimee_ir_apply_request_stages(request, ir_memory_enabled());
+}
+
 void aimee_ir_apply_native_request_stages(aimee_request_t *request)
 {
    if (config_present() && config_ingress_preinject_anthropic_enabled())
@@ -330,180 +311,4 @@ char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
    if (s)
       aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, AIMEE_WIRE_ANTHROPIC);
    return s;
-}
-
-static const char *jo_str(const cJSON *o, const char *k)
-{
-   const cJSON *it = cJSON_GetObjectItemCaseSensitive((cJSON *)o, k);
-   return (it && cJSON_IsString(it)) ? it->valuestring : NULL;
-}
-
-int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
-                               char **instructions_out, cJSON **messages_out, cJSON **tools_out,
-                               int *stream_out)
-{
-   if (model && model_n)
-      model[0] = '\0';
-   if (instructions_out)
-      *instructions_out = NULL;
-   if (messages_out)
-      *messages_out = NULL;
-   if (tools_out)
-      *tools_out = NULL;
-   if (stream_out)
-      *stream_out = 0;
-
-   aimee_request_t ir = {0};
-   char err[128];
-   if (aimee_frontend_parse_wire(body, body ? strlen(body) : 0, AIMEE_WIRE_RESPONSES, &ir, err,
-                                 sizeof err) != 0)
-   {
-      aimee_ir_metric_inc(AIMEE_IR_M_PARSE_FAIL, AIMEE_WIRE_RESPONSES);
-      return -1;
-   }
-   if (model && model_n && ir.model)
-      snprintf(model, model_n, "%s", ir.model);
-   if (stream_out)
-      *stream_out = ir.stream;
-
-   /* This is an intermediate decode, not provider assembly. Both buffered and
-    * streaming Responses subsequently enter aimee_ir_build_from_chat, which
-    * applies request stages after routing. Applying them here too duplicates Go
-    * recall/guidance and makes the second recall query include the persona. */
-   /* build the chat shape, then split leading system messages -> instructions */
-   cJSON *chat = openai_backend_build(&ir);
-   aimee_request_free(&ir);
-   if (!chat)
-   {
-      aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, AIMEE_WIRE_RESPONSES);
-      return -1;
-   }
-   cJSON *msgs = cJSON_DetachItemFromObjectCaseSensitive(chat, "messages");
-   cJSON *tools = cJSON_DetachItemFromObjectCaseSensitive(chat, "tools");
-   cJSON_Delete(chat);
-
-   char *instr = NULL;
-   size_t ilen = 0;
-   cJSON *first;
-   while (msgs && (first = cJSON_GetArrayItem(msgs, 0)) != NULL)
-   {
-      const char *role = jo_str(first, "role");
-      if (!role || strcmp(role, "system") != 0)
-         break;
-      const char *c = jo_str(first, "content");
-      if (c && c[0])
-      {
-         size_t cl = strlen(c);
-         char *p = realloc(instr, ilen + cl + 3);
-         if (p)
-         {
-            instr = p;
-            if (ilen)
-            {
-               memcpy(instr + ilen, "\n\n", 2);
-               ilen += 2;
-            }
-            memcpy(instr + ilen, c, cl);
-            ilen += cl;
-            instr[ilen] = '\0';
-         }
-      }
-      cJSON_DeleteItemFromArray(msgs, 0);
-   }
-
-   if (instructions_out)
-      *instructions_out = instr;
-   else
-      free(instr);
-   if (messages_out)
-      *messages_out = msgs;
-   else
-      cJSON_Delete(msgs);
-   if (tools_out)
-      *tools_out = tools;
-   else
-      cJSON_Delete(tools);
-   aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, AIMEE_WIRE_RESPONSES);
-   return 0;
-}
-
-cJSON *aimee_ir_build_from_chat_mode(const char *agent_model, const cJSON *messages,
-                                     const cJSON *tools, const char *system,
-                                     const char *driver_name, int max_tokens, double temperature,
-                                     int apply_stages)
-{
-   /* assemble a chat request {model, messages: [system?] + messages, tools} */
-   cJSON *chat = cJSON_CreateObject();
-   if (agent_model)
-      cJSON_AddStringToObject(chat, "model", agent_model);
-   cJSON *msgs = cJSON_AddArrayToObject(chat, "messages");
-   if (system && system[0])
-   {
-      cJSON *sm = cJSON_CreateObject();
-      cJSON_AddStringToObject(sm, "role", "system");
-      cJSON_AddStringToObject(sm, "content", system);
-      cJSON_AddItemToArray(msgs, sm);
-   }
-   if (cJSON_IsArray(messages))
-   {
-      const cJSON *m = NULL;
-      cJSON_ArrayForEach(m, messages) cJSON_AddItemToArray(msgs, cJSON_Duplicate(m, 1));
-   }
-   if (cJSON_IsArray(tools))
-      cJSON_AddItemToObject(chat, "tools", cJSON_Duplicate((cJSON *)tools, 1));
-
-   /* Keep generation controls on the IR path. AIMEE_IR_PATH silently discarded
-    * the output cap, leaving local llama.cpp delegates at n_predict=-1 -- an
-    * unbounded generation where the caller had asked for a bounded one.
-    * Responses-backed provider CLIs keep their established no-cap request
-    * shape, because that wire rejects the chat-completions field. */
-   int is_responses_wire = driver_name && strcmp(driver_name, "chatgpt") == 0;
-   if (!is_responses_wire && max_tokens > 0)
-      cJSON_AddNumberToObject(chat, "max_tokens", max_tokens);
-   if (!is_responses_wire && temperature >= 0.0)
-      cJSON_AddNumberToObject(chat, "temperature", temperature);
-
-   aimee_request_t ir;
-   char err[128];
-   int rc = openai_frontend_parse(chat, &ir, err, sizeof err);
-   cJSON_Delete(chat);
-   if (rc != 0 || aimee_ir_request_admit(&ir))
-   {
-      aimee_request_free(&ir);
-      aimee_ir_metric_inc(AIMEE_IR_M_PARSE_FAIL, AIMEE_WIRE_OPENAI_CHAT);
-      return NULL;
-   }
-   if (agent_model && agent_model[0])
-   {
-      free(ir.model);
-      ir.model = strdup(agent_model);
-   }
-   if (apply_stages)
-      aimee_ir_apply_request_stages(&ir, ir_memory_enabled());
-   if (aimee_ir_request_admit(&ir))
-   {
-      aimee_request_free(&ir);
-      return NULL;
-   }
-
-   int is_anthropic_wire = driver_name && strcmp(driver_name, "anthropic") == 0;
-   cJSON *prov = is_responses_wire   ? responses_backend_build(&ir)
-                 : is_anthropic_wire ? anthropic_backend_build(&ir)
-                                     : openai_backend_build(&ir);
-   aimee_request_free(&ir);
-   if (!is_anthropic_wire)
-      filter_openai_chat_tools(prov, is_responses_wire);
-   if (!prov)
-      aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, AIMEE_WIRE_OPENAI_CHAT);
-   else
-      aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, AIMEE_WIRE_OPENAI_CHAT);
-   return prov;
-}
-
-cJSON *aimee_ir_build_from_chat(const char *agent_model, const cJSON *messages, const cJSON *tools,
-                                const char *system, const char *driver_name, int max_tokens,
-                                double temperature)
-{
-   return aimee_ir_build_from_chat_mode(agent_model, messages, tools, system, driver_name,
-                                        max_tokens, temperature, 1);
 }

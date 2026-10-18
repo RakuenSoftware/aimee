@@ -572,8 +572,75 @@ static void test_owned_output_formats(void)
    puts("  owned structured output preserves schemas and all strict states across model wires OK");
 }
 
+static void test_owned_tool_catalog(void)
+{
+   const char *body =
+       "{\"model\":\"native\",\"input\":\"hi\",\"tools\":["
+       "{\"type\":\"namespace\",\"name\":\"mcp__aimee\",\"description\":\"catalog\",\"tools\":["
+       "{\"type\":\"function\",\"name\":\"Read\",\"parameters\":{\"type\":\"object\"},\"strict\":"
+       "true,\"defer_loading\":false}]},"
+       "{\"type\":\"web_search\",\"search_context_size\":\"high\",\"filters\":{\"allowed_domains\":"
+       "[\"example.test\"]}}]}";
+   aimee_request_t request = {0};
+   char error[128];
+   assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_RESPONSES, &request, error,
+                                     sizeof error));
+   assert(!aimee_ir_request_admit(&request));
+   assert(request.n_tools == 2 && request.tools[0].kind == AIMEE_TOOL_NAMESPACE);
+   assert(request.tools[0].n_children == 1 &&
+          request.tools[0].children[0].strict == AIMEE_STRICT_TRUE);
+   assert(request.tools[0].children[0].has_defer_loading &&
+          !request.tools[0].children[0].defer_loading);
+   assert(request.tools[1].kind == AIMEE_TOOL_HOSTED && !request.tools[1].name);
+   cJSON *original = cJSON_Parse(body);
+   cJSON_Delete(request.raw);
+   request.raw = NULL;
+   for (int i = 0; i < request.n_tools; i++)
+   {
+      cJSON_Delete(request.tools[i].raw);
+      request.tools[i].raw = NULL;
+      for (int j = 0; j < request.tools[i].n_children; j++)
+      {
+         cJSON_Delete(request.tools[i].children[j].raw);
+         request.tools[i].children[j].raw = NULL;
+      }
+   }
+   cJSON *native = responses_backend_build(&request);
+   assert(native && cJSON_Compare(cJSON_GetObjectItem(original, "tools"),
+                                  cJSON_GetObjectItem(native, "tools"), 1));
+   assert(!openai_backend_build(&request) && !anthropic_backend_build(&request));
+   cJSON_Delete(native);
+   free(request.tools[0].children[0].name);
+   request.tools[0].children[0].name = strdup("Changed");
+   char *changed = aimee_backend_render_wire(&request, AIMEE_WIRE_RESPONSES);
+   assert(changed && strstr(changed, "Changed") && !strstr(changed, "\"Read\""));
+   free(changed);
+   cJSON_Delete(original);
+   aimee_request_free(&request);
+   const char *anthropic =
+       "{\"model\":\"native\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],"
+       "\"tools\":[{\"type\":\"web_search_20250305\",\"name\":\"web_search\",\"max_uses\":3}]}";
+   assert(!aimee_frontend_parse_wire(anthropic, strlen(anthropic), AIMEE_WIRE_ANTHROPIC, &request,
+                                     error, sizeof error));
+   assert(!aimee_ir_request_admit(&request));
+   request.cache_policy = AIMEE_CACHE_STABLE_PREFIX;
+   cJSON_Delete(request.tools[0].raw);
+   request.tools[0].raw = NULL;
+   native = anthropic_backend_build(&request);
+   const cJSON *tool = cJSON_GetArrayItem(cJSON_GetObjectItem(native, "tools"), 0);
+   assert(native &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(tool, "type")), "web_search_20250305"));
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItem(tool, "max_uses")) == 3);
+   assert(!cJSON_GetObjectItem(tool, "input_schema"));
+   cJSON_Delete(native);
+   aimee_request_free(&request);
+   puts("  typed namespaces, hosted ownership, strict/deferred tools survive without native "
+        "sidecars OK");
+}
+
 int main(void)
 {
+   test_owned_tool_catalog();
    test_owned_output_formats();
    test_completed_response_usage_admission();
    test_foreign_reasoning_switch_preserves_canonical_state();

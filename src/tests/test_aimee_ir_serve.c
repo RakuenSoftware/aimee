@@ -164,153 +164,71 @@ int main(void)
       free(sb);
    }
 
-   /* bad request -> NULL (caller falls back to legacy) */
+   /* Invalid entry refuses; there is no legacy execution fallback. */
    assert(aimee_ir_build_provider_body(NULL, "openai", "m", 0, 1) == NULL);
    cJSON_Delete(req);
 
-   /* aimee_ir_responses_to_chat: a Responses body -> chat components via the IR
-    * (system lifted to instructions, input -> chat messages) */
-   const char *RBODY = "{\"model\":\"gpt-5.5\",\"stream\":true,\"instructions\":\"be helpful\","
-                       "\"input\":[{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":"
-                       "\"input_text\",\"text\":\"hi\"}]}],"
-                       "\"tools\":[{\"type\":\"function\",\"name\":\"Read\",\"parameters\":{"
-                       "\"type\":\"object\"}}]}";
-   char mdl[64];
-   char *instr = NULL;
-   cJSON *rmsgs = NULL, *rtls = NULL;
-   int strm = 0;
-   assert(aimee_ir_responses_to_chat(RBODY, mdl, sizeof mdl, &instr, &rmsgs, &rtls, &strm) == 0);
-   assert(strcmp(mdl, "gpt-5.5") == 0);
-   assert(strm == 1);
-   assert(instr && strcmp(instr, "be helpful") == 0);
-   assert(rmsgs && cJSON_GetArraySize(rmsgs) == 1);
-   assert(strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(rmsgs, 0), "role")->valuestring, "user") ==
-          0);
-   assert(rtls && cJSON_GetArraySize(rtls) == 1);
-   free(instr);
-   cJSON_Delete(rmsgs);
-   cJSON_Delete(rtls);
-
-   /* Responses decoding must not recall, consume persona delivery or police
-    * tools before routing. The final builder runs those stages once and recalls
-    * the original user query, without persona/guidance contamination. */
+   /* Native Responses enters canonical ownership once and stays there through host stages. */
+   const char *body = "{\"model\":\"native-model\",\"stream\":true,\"instructions\":\"be helpful\","
+                      "\"input\":[{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":"
+                      "\"input_text\",\"text\":\"hi\"}]}],"
+                      "\"tools\":[{\"type\":\"function\",\"name\":\"Read\",\"strict\":true,"
+                      "\"parameters\":{\"type\":\"object\"}}],"
+                      "\"reasoning\":{\"effort\":\"high\"},\"text\":{\"format\":{\"type\":\"json_"
+                      "schema\",\"name\":\"answer\",\"schema\":{\"type\":\"object\"}}}}";
    for (int provider = 0; provider < 3; provider++)
    {
-      const char *drivers[] = {"openai", "anthropic", "chatgpt"};
+      aimee_request_t canonical = {0};
+      char error[128];
       ir_seam_test_session("responses-stage-once");
       ir_seam_test_persona("PERSONA_BOUNDARY_FIXTURE");
       ir_seam_test_memory(1);
-      instr = NULL;
-      rmsgs = rtls = NULL;
-      assert(aimee_ir_responses_to_chat(RBODY, mdl, sizeof mdl, &instr, &rmsgs, &rtls, &strm) == 0);
-      assert(ir_seam_test_plan_calls("context") == 0);
-      assert(ir_seam_test_plan_calls("tools") == 0);
-      assert(strcmp(cJSON_GetStringValue(
-                        cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rmsgs, 0), "content")),
-                    "hi") == 0);
-      cJSON *provider_body =
-          aimee_ir_build_from_chat(mdl, rmsgs, rtls, instr, drivers[provider], 32, 0.2);
-      assert(provider_body);
-      assert(ir_seam_test_plan_calls("context") == 1);
-      assert(ir_seam_test_plan_calls("tools") == 1);
-      assert(strcmp(ir_seam_test_query(), "hi") == 0);
+      assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_RESPONSES, &canonical, error,
+                                        sizeof error));
+      assert(!aimee_ir_request_admit(&canonical));
+      assert(ir_seam_test_plan_calls("context") == 0 && ir_seam_test_plan_calls("tools") == 0);
+      assert(!strcmp(canonical.messages[0].blocks[0].text, "hi"));
+      aimee_ir_apply_gateway_request_stages(&canonical);
+      assert(ir_seam_test_plan_calls("context") == 1 && ir_seam_test_plan_calls("tools") == 1);
+      assert(!strcmp(ir_seam_test_query(), "hi"));
       assert(ir_seam_test_guidance_provided() == 1);
-      char *wire = cJSON_PrintUnformatted(provider_body);
+      cJSON *native = provider == 0   ? openai_backend_build(&canonical)
+                      : provider == 1 ? anthropic_backend_build(&canonical)
+                                      : responses_backend_build(&canonical);
+      char *wire = native ? cJSON_PrintUnformatted(native) : NULL;
       assert(wire && strstr(wire, "be helpful"));
       const char *persona = strstr(wire, "PERSONA_BOUNDARY_FIXTURE");
       assert(persona && !strstr(persona + 1, "PERSONA_BOUNDARY_FIXTURE"));
+      assert(canonical.reasoning_effort == AIMEE_EFFORT_HIGH &&
+             canonical.output_format.kind == AIMEE_OUTPUT_JSON_SCHEMA);
       free(wire);
-      cJSON_Delete(provider_body);
-      free(instr);
-      cJSON_Delete(rmsgs);
-      cJSON_Delete(rtls);
+      cJSON_Delete(native);
+      aimee_request_free(&canonical);
    }
    ir_seam_test_memory(0);
    ir_seam_test_persona(NULL);
    ir_seam_test_session(NULL);
 
-   /* A namespaced tool call in the history survives the CHAT HOP.
-    *
-    * A Responses request does not go responses -> IR -> responses. It goes
-    * responses -> IR -> CHAT -> IR -> responses, and the crossing in the middle is
-    * where a Codex `namespace` group was being dropped -- the same trap that made
-    * fixing only the Responses ends insufficient for the tools array. Chat has no
-    * namespace concept, so the group is carried beside `function` on the tool_call
-    * and read back on the way in. Without that, the provider is told a bare `git`
-    * with no group and the client cannot route the answer. */
-   {
-      const char *NSBODY =
-          "{\"model\":\"gpt-5.5\",\"stream\":true,\"input\":["
-          "{\"type\":\"function_call\",\"call_id\":\"call_7\",\"name\":\"git\","
-          "\"namespace\":\"mcp__aimee\",\"arguments\":\"{\\\"command\\\":\\\"status\\\"}\"}"
-          "]}";
-      char m2[64];
-      char *i2 = NULL;
-      cJSON *m2s = NULL, *t2 = NULL;
-      int s2 = 0;
-      assert(aimee_ir_responses_to_chat(NSBODY, m2, sizeof m2, &i2, &m2s, &t2, &s2) == 0);
-      assert(m2s && cJSON_GetArraySize(m2s) == 1);
-      cJSON *asst = cJSON_GetArrayItem(m2s, 0);
-      cJSON *tcs = cJSON_GetObjectItem(asst, "tool_calls");
-      assert(tcs && cJSON_GetArraySize(tcs) == 1);
-      cJSON *tc0 = cJSON_GetArrayItem(tcs, 0);
-      cJSON *ns = cJSON_GetObjectItem(tc0, "namespace");
-      assert(ns && cJSON_IsString(ns) && strcmp(ns->valuestring, "mcp__aimee") == 0);
-      /* the bare name is untouched -- the pair is what identifies the tool */
-      cJSON *f0 = cJSON_GetObjectItem(tc0, "function");
-      assert(f0 && strcmp(cJSON_GetObjectItem(f0, "name")->valuestring, "git") == 0);
-      free(i2);
-      cJSON_Delete(m2s);
-      cJSON_Delete(t2);
-   }
-
-   {
-      char rejected_model[64], *rejected_instructions = NULL;
-      cJSON *rejected_messages = NULL, *rejected_tools = NULL;
-      int rejected_stream;
-      assert(aimee_ir_responses_to_chat("{\"input\":\"hi\"} trailing", rejected_model,
-                                        sizeof rejected_model, &rejected_instructions,
-                                        &rejected_messages, &rejected_tools, &rejected_stream) < 0);
-      assert(!rejected_instructions && !rejected_messages && !rejected_tools);
-   }
-
-   /* aimee_ir_build_from_chat: agent-path chat components -> provider request via IR */
-   cJSON *cm = cJSON_Parse("[{\"role\":\"user\",\"content\":\"hi\"}]");
-   cJSON *ct = cJSON_Parse("[{\"type\":\"function\",\"function\":{\"name\":\"Read\",\"parameters\":"
-                           "{\"type\":\"object\"}}}]");
-   cJSON *fc =
-       aimee_ir_build_from_chat("gpt-5.5-codex", cm, ct, "be helpful", "chatgpt", 1024, 0.2);
-   assert(fc);
-   assert(strcmp(cJSON_GetObjectItem(fc, "model")->valuestring, "gpt-5.5-codex") == 0);
-   assert(cJSON_IsFalse(cJSON_GetObjectItem(fc, "store"))); /* codex req shape */
-   assert(cJSON_GetObjectItem(fc, "instructions"));         /* system -> instructions */
-   assert(cJSON_GetArraySize(cJSON_GetObjectItem(fc, "input")) >= 1);
-   cJSON_Delete(fc);
-
-   /* Chat/Responses ingress targeting Anthropic must retain policy in its
-    * separate system field and translate tool schemas to the selected wire. */
-   const char *policy = "Do not exceed LIMIT_7; preserve αβ🦊 and identifiers.";
-   fc = aimee_ir_build_from_chat("fixture-anthropic", cm, ct, policy, "anthropic", 32, 0.2);
-   assert(fc);
-   const cJSON *system = cJSON_GetObjectItemCaseSensitive(fc, "system");
-   assert(cJSON_IsArray(system));
-   const cJSON *first_system = cJSON_GetArrayItem(system, 0);
-   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(first_system, "text")),
-                 policy) == 0);
-   const cJSON *wire_messages = cJSON_GetObjectItemCaseSensitive(fc, "messages");
-   assert(cJSON_GetArraySize(wire_messages) == 1);
-   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
-                     cJSON_GetArrayItem(wire_messages, 0), "role")),
-                 "user") == 0);
-   const cJSON *wire_tool = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(fc, "tools"), 0);
-   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(wire_tool, "name")),
-                 "Read") == 0);
-   assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(wire_tool, "input_schema")));
-   assert(!cJSON_GetObjectItemCaseSensitive(wire_tool, "function"));
-   assert(cJSON_GetObjectItemCaseSensitive(fc, "max_tokens")->valueint == 32);
-   cJSON_Delete(fc);
-   cJSON_Delete(cm);
-   cJSON_Delete(ct);
+   /* A foreign canonical request keeps Unicode policy in the native system field. */
+   const char *policy_body =
+       "{\"model\":\"fixture-anthropic\",\"max_tokens\":32,\"messages\":["
+       "{\"role\":\"system\",\"content\":\"Do not exceed LIMIT_7; preserve αβ🦊 and "
+       "identifiers.\"},"
+       "{\"role\":\"user\",\"content\":\"hi\"}],\"tools\":[{\"type\":\"function\",\"function\":{"
+       "\"name\":\"Read\",\"parameters\":{\"type\":\"object\"}}}]}";
+   aimee_request_t policy_request = {0};
+   char policy_error[128];
+   assert(!aimee_frontend_parse_wire(policy_body, strlen(policy_body), AIMEE_WIRE_OPENAI_CHAT,
+                                     &policy_request, policy_error, sizeof policy_error));
+   cJSON *policy_wire = anthropic_backend_build(&policy_request);
+   assert(policy_wire);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(
+                      cJSON_GetArrayItem(cJSON_GetObjectItem(policy_wire, "system"), 0), "text")),
+                  "Do not exceed LIMIT_7; preserve αβ🦊 and identifiers."));
+   assert(cJSON_IsObject(cJSON_GetObjectItem(
+       cJSON_GetArrayItem(cJSON_GetObjectItem(policy_wire, "tools"), 0), "input_schema")));
+   cJSON_Delete(policy_wire);
+   aimee_request_free(&policy_request);
 
    /* LEGACY FLAT PATH: an already-established conversation must be terminal in
     * the durable delivery state. Otherwise a later compacted request, whose

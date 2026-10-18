@@ -87,6 +87,45 @@ int gateway_policy_strip_tools(cJSON *tools, int tools_openai_shape)
    return stripped;
 }
 
+static int police_ir_catalog(aimee_tool_t *tools, int *count)
+{
+   int removed = 0;
+   for (int i = *count - 1; i >= 0; i--)
+   {
+      aimee_tool_t *tool = &tools[i];
+      if (tool->kind == AIMEE_TOOL_NAMESPACE)
+         removed += police_ir_catalog(tool->children, &tool->n_children);
+      if ((tool->name && is_subagent_tool_name(tool->name)) ||
+          (tool->kind == AIMEE_TOOL_NAMESPACE && !tool->n_children))
+      {
+         aimee_tool_free(tool);
+         memmove(tool, tool + 1, (size_t)(*count - i - 1) * sizeof *tool);
+         (*count)--;
+         memset(&tools[*count], 0, sizeof *tool);
+         removed++;
+      }
+   }
+   return removed;
+}
+int gateway_policy_apply_ir(aimee_request_t *request)
+{
+   if (!request || !gateway_prevent_subagents_enabled())
+      return 0;
+   int removed = police_ir_catalog(request->tools, &request->n_tools);
+   if (!removed)
+      return 0;
+   if (!request->n_tools ||
+       (request->tool_choice == AIMEE_TOOL_CHOICE_TOOL && request->tool_choice_name &&
+        is_subagent_tool_name(request->tool_choice_name)))
+   {
+      request->tool_choice = AIMEE_TOOL_CHOICE_AUTO;
+      free(request->tool_choice_name);
+      request->tool_choice_name = NULL;
+   }
+   request->mutated = 1;
+   return removed;
+}
+
 int gateway_policy_apply_request(cJSON *req, int tools_openai_shape)
 {
    cJSON *tools;

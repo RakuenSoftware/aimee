@@ -161,6 +161,67 @@ void aimee_message_free(aimee_message_t *m)
    memset(m, 0, sizeof(*m));
 }
 
+const char *aimee_ir_effort_name(aimee_reasoning_effort_t effort)
+{
+   static const char *const names[] = {NULL,     "none", "minimal", "low",
+                                       "medium", "high", "xhigh",   "max"};
+   return effort > AIMEE_EFFORT_UNSET && effort <= AIMEE_EFFORT_MAX ? names[effort] : NULL;
+}
+int aimee_ir_effort_parse(const char *name, aimee_reasoning_effort_t *effort)
+{
+   if (!effort)
+      return -1;
+   for (int i = AIMEE_EFFORT_NONE; name && i <= AIMEE_EFFORT_MAX; i++)
+      if (!strcmp(name, aimee_ir_effort_name((aimee_reasoning_effort_t)i)))
+      {
+         *effort = (aimee_reasoning_effort_t)i;
+         return 0;
+      }
+   return -1;
+}
+
+void aimee_tool_free(aimee_tool_t *tool)
+{
+   if (!tool)
+      return;
+   free(tool->name);
+   free(tool->description);
+   cJSON_Delete(tool->schema);
+   free(tool->cache_control);
+   free(tool->cache_ttl);
+   free(tool->native_type);
+   cJSON_Delete(tool->native_options);
+   cJSON_Delete(tool->raw);
+   for (int i = 0; i < tool->n_children; i++)
+      aimee_tool_free(&tool->children[i]);
+   free(tool->children);
+   memset(tool, 0, sizeof *tool);
+}
+int aimee_ir_tool_valid(const aimee_tool_t *tool)
+{
+   if (!tool || tool->strict < AIMEE_STRICT_UNSET || tool->strict > AIMEE_STRICT_TRUE ||
+       (tool->native_options && !cJSON_IsObject(tool->native_options)) ||
+       (tool->schema && !cJSON_IsObject(tool->schema)))
+      return 0;
+   if (tool->kind == AIMEE_TOOL_HOSTED)
+      return tool->native_type && tool->native_type[0] &&
+             (tool->provider_wire == AIMEE_WIRE_RESPONSES ||
+              tool->provider_wire == AIMEE_WIRE_ANTHROPIC) &&
+             !tool->n_children &&
+             (tool->provider_wire != AIMEE_WIRE_ANTHROPIC || (tool->name && tool->name[0]));
+   if (!tool->name || !tool->name[0] || (tool->schema && !cJSON_IsObject(tool->schema)))
+      return 0;
+   if (tool->kind == AIMEE_TOOL_FUNCTION)
+      return !tool->n_children;
+   if (tool->kind != AIMEE_TOOL_NAMESPACE || tool->n_children < 0 ||
+       tool->n_children > AIMEE_IR_MAX_BLOCKS || (tool->n_children && !tool->children))
+      return 0;
+   for (int i = 0; i < tool->n_children; i++)
+      if (tool->children[i].kind != AIMEE_TOOL_FUNCTION || !aimee_ir_tool_valid(&tool->children[i]))
+         return 0;
+   return 1;
+}
+
 void aimee_request_free(aimee_request_t *r)
 {
    if (!r)
@@ -177,15 +238,11 @@ void aimee_request_free(aimee_request_t *r)
    {
       for (int i = 0; i < r->n_tools; i++)
       {
-         free_str(r->tools[i].name);
-         free_str(r->tools[i].description);
-         cJSON_Delete(r->tools[i].schema);
-         free_str(r->tools[i].cache_control);
-         free_str(r->tools[i].cache_ttl);
-         cJSON_Delete(r->tools[i].raw);
+         aimee_tool_free(&r->tools[i]);
       }
       free(r->tools);
    }
+   free_str(r->reasoning_summary);
    free_str(r->output_format.name);
    free_str(r->output_format.description);
    cJSON_Delete(r->output_format.schema);
@@ -237,12 +294,7 @@ int aimee_ir_remove_tools(aimee_request_t *request, const cJSON *indices)
    cJSON_ArrayForEach(index, indices)
    {
       int i = index->valueint;
-      free(request->tools[i].name);
-      free(request->tools[i].description);
-      cJSON_Delete(request->tools[i].schema);
-      free(request->tools[i].cache_control);
-      free(request->tools[i].cache_ttl);
-      cJSON_Delete(request->tools[i].raw);
+      aimee_tool_free(&request->tools[i]);
       memmove(&request->tools[i], &request->tools[i + 1],
               (size_t)(request->n_tools - i - 1) * sizeof(request->tools[0]));
       request->n_tools--;
@@ -374,6 +426,23 @@ static int blocks_eq(const aimee_block_t *a, int na, const aimee_block_t *b, int
    return 1;
 }
 
+static int tools_equal(const aimee_tool_t *a, const aimee_tool_t *b, int count)
+{
+   for (int i = 0; i < count; i++)
+      if (a[i].kind != b[i].kind || a[i].provider_wire != b[i].provider_wire ||
+          !str_eq(a[i].name, b[i].name) || !str_eq(a[i].description, b[i].description) ||
+          !str_eq(a[i].cache_control, b[i].cache_control) ||
+          !str_eq(a[i].cache_ttl, b[i].cache_ttl) || !json_eq(a[i].schema, b[i].schema) ||
+          !str_eq(a[i].native_type, b[i].native_type) ||
+          !json_eq(a[i].native_options, b[i].native_options) || a[i].strict != b[i].strict ||
+          a[i].has_defer_loading != b[i].has_defer_loading ||
+          (a[i].has_defer_loading && a[i].defer_loading != b[i].defer_loading) ||
+          a[i].n_children != b[i].n_children ||
+          !tools_equal(a[i].children, b[i].children, a[i].n_children))
+         return 0;
+   return 1;
+}
+
 int aimee_ir_request_equal(const aimee_request_t *a, const aimee_request_t *b)
 {
    if (a == b)
@@ -396,15 +465,11 @@ int aimee_ir_request_equal(const aimee_request_t *a, const aimee_request_t *b)
    }
    if (a->n_tools != b->n_tools)
       return 0;
-   for (int i = 0; i < a->n_tools; i++)
-   {
-      if (!str_eq(a->tools[i].name, b->tools[i].name) ||
-          !str_eq(a->tools[i].description, b->tools[i].description) ||
-          !str_eq(a->tools[i].cache_control, b->tools[i].cache_control) ||
-          !str_eq(a->tools[i].cache_ttl, b->tools[i].cache_ttl) ||
-          !json_eq(a->tools[i].schema, b->tools[i].schema))
-         return 0;
-   }
+   if (!tools_equal(a->tools, b->tools, a->n_tools))
+      return 0;
+   if (a->reasoning_effort != b->reasoning_effort ||
+       !str_eq(a->reasoning_summary, b->reasoning_summary))
+      return 0;
    if (a->output_format.kind != b->output_format.kind ||
        a->output_format.strict != b->output_format.strict ||
        !str_eq(a->output_format.name, b->output_format.name) ||
@@ -699,6 +764,12 @@ int aimee_ir_request_admit(const aimee_request_t *request)
        request->n_tools > AIMEE_IR_MAX_BLOCKS || (request->n_system && !request->system) ||
        (request->n_messages && !request->messages) || (request->n_tools && !request->tools))
       return -1;
+   if (request->reasoning_effort < AIMEE_EFFORT_UNSET ||
+       request->reasoning_effort > AIMEE_EFFORT_MAX ||
+       (request->reasoning_summary && strcmp(request->reasoning_summary, "auto") &&
+        strcmp(request->reasoning_summary, "concise") &&
+        strcmp(request->reasoning_summary, "detailed")))
+      return -1;
    for (int i = 0; i < request->n_system; i++)
       if (!aimee_ir_block_valid(&request->system[i]) ||
           request->system[i].type == AIMEE_BLK_TOOL_USE ||
@@ -724,8 +795,7 @@ int aimee_ir_request_admit(const aimee_request_t *request)
       }
    }
    for (int i = 0; i < request->n_tools; i++)
-      if (!request->tools[i].name || !request->tools[i].name[0] ||
-          (request->tools[i].schema && !cJSON_IsObject(request->tools[i].schema)))
+      if (!aimee_ir_tool_valid(&request->tools[i]))
          return -1;
    return 0;
 }

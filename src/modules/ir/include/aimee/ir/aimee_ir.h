@@ -162,15 +162,42 @@ typedef struct
    struct cJSON *raw; /* sidecar */
 } aimee_message_t;
 
-typedef struct
+typedef enum
 {
-   char *name; /* opaque */
+   AIMEE_STRICT_UNSET = 0,
+   AIMEE_STRICT_NULL,
+   AIMEE_STRICT_FALSE,
+   AIMEE_STRICT_TRUE
+} aimee_strict_mode_t;
+
+typedef enum
+{
+   AIMEE_TOOL_FUNCTION = 0,
+   AIMEE_TOOL_NAMESPACE,
+   AIMEE_TOOL_HOSTED
+} aimee_tool_kind_t;
+
+typedef struct aimee_tool
+{
+   char *name;
    char *description;
-   struct cJSON *schema; /* input JSON schema, opaque; owned */
+   struct cJSON *schema; /* owned opaque function argument schema */
    char *cache_control;
-   char *cache_ttl;   /* optional cache lifetime, e.g. 5m or 1h; owned */
-   struct cJSON *raw; /* sidecar */
+   char *cache_ttl;
+   aimee_tool_kind_t kind;
+   struct aimee_tool *children; /* namespace functions; owned */
+   int n_children;
+   /* Provider-owned execution/configuration is explicit, never a nameless function. */
+   aimee_wire_t provider_wire;
+   char *native_type;
+   struct cJSON *native_options;
+   aimee_strict_mode_t strict;
+   int has_defer_loading, defer_loading;
+   struct cJSON *raw; /* entry sidecar, never the source of the typed catalog */
 } aimee_tool_t;
+
+void aimee_tool_free(aimee_tool_t *tool);
+int aimee_ir_tool_valid(const aimee_tool_t *tool);
 
 /* Which tools the model may or must call. TYPED, not wire-shaped: every wire spells
  * this differently (Anthropic {type:auto|any|tool|none}; OpenAI chat
@@ -195,13 +222,7 @@ typedef enum
    AIMEE_OUTPUT_JSON_OBJECT,
    AIMEE_OUTPUT_JSON_SCHEMA
 } aimee_output_kind_t;
-typedef enum
-{
-   AIMEE_STRICT_UNSET = 0,
-   AIMEE_STRICT_NULL,
-   AIMEE_STRICT_FALSE,
-   AIMEE_STRICT_TRUE
-} aimee_strict_mode_t;
+
 typedef struct
 {
    aimee_output_kind_t kind;
@@ -217,6 +238,20 @@ typedef enum
    AIMEE_CACHE_STABLE_PREFIX, /* explicit host normalization policy */
 } aimee_cache_policy_t;
 
+typedef enum
+{
+   AIMEE_EFFORT_UNSET = 0,
+   AIMEE_EFFORT_NONE,
+   AIMEE_EFFORT_MINIMAL,
+   AIMEE_EFFORT_LOW,
+   AIMEE_EFFORT_MEDIUM,
+   AIMEE_EFFORT_HIGH,
+   AIMEE_EFFORT_XHIGH,
+   AIMEE_EFFORT_MAX
+} aimee_reasoning_effort_t;
+const char *aimee_ir_effort_name(aimee_reasoning_effort_t effort);
+int aimee_ir_effort_parse(const char *name, aimee_reasoning_effort_t *effort);
+
 typedef struct
 {
    char *model;
@@ -228,6 +263,8 @@ typedef struct
    aimee_tool_t *tools;
    int n_tools;
    aimee_output_format_t output_format;
+   aimee_reasoning_effort_t reasoning_effort;
+   char *reasoning_summary; /* owned: auto, concise or detailed */
    aimee_tool_choice_t tool_choice;
    char *tool_choice_name; /* AIMEE_TOOL_CHOICE_TOOL only; opaque tool name; owned */
    /* Whether the model may emit several tool calls in one turn. OpenAI and Responses

@@ -6,6 +6,7 @@
  * the tool_result-grouping ruling in the follow-up; this covers instructions,
  * message text, function_call (tool_use), tools, and response parse. */
 #include <aimee/translation/aimee_backend.h>
+#include <aimee/translation/aimee_frontend.h>
 
 #include "cJSON.h"
 
@@ -110,6 +111,17 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
          cJSON_Delete(out);
          return NULL;
       }
+   }
+   if (ir->reasoning_effort != AIMEE_EFFORT_UNSET || ir->reasoning_summary)
+   {
+      cJSON *reasoning = cJSON_AddObjectToObject(out, "reasoning");
+      const char *effort = aimee_ir_effort_name(ir->reasoning_effort);
+      if (!reasoning ||
+          (ir->reasoning_effort != AIMEE_EFFORT_UNSET &&
+           (!effort || !cJSON_AddStringToObject(reasoning, "effort", effort))) ||
+          (ir->reasoning_summary &&
+           !cJSON_AddStringToObject(reasoning, "summary", ir->reasoning_summary)))
+         goto fail;
    }
    if (ir->model)
       cJSON_AddStringToObject(out, "model", ir->model);
@@ -281,43 +293,13 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
       cJSON *tools = cJSON_AddArrayToObject(out, "tools");
       for (int i = 0; i < ir->n_tools; i++)
       {
-         /* Re-emit anything the IR does not model as a plain named function exactly
-          * as it arrived. A Codex client's `namespace` groups carry their nested tool
-          * list under `tools`, and flattening one into a single function named
-          * mcp__aimee lost all nineteen aimee tools and made the model call a name
-          * Codex then rejected ("unsupported call: mcp__aimee"). `web_search` and
-          * friends carry no name at all, and synthesising `"name": ""` for them made
-          * the provider reject the entire request.
-          *
-          * Only a sidecar whose own type is `function` is safe to re-render from the
-          * modelled fields; everything else goes back verbatim. */
-         const cJSON *raw = ir->tools[i].raw;
-         const cJSON *rtype = raw ? cJSON_GetObjectItemCaseSensitive((cJSON *)raw, "type") : NULL;
-         int raw_is_function =
-             !rtype ||
-             (cJSON_IsString(rtype) &&
-              (!strcmp(rtype->valuestring, "function") ||
-               (ir->frontend == AIMEE_WIRE_ANTHROPIC && !strcmp(rtype->valuestring, "custom"))));
-         if (ir->frontend == AIMEE_WIRE_ANTHROPIC && !raw_is_function)
-            goto fail; /* A foreign hosted tool requires an explicit typed mapping. */
-         if (raw && !raw_is_function)
+         cJSON *tool = openai_ir_render_tool(&ir->tools[i], 1);
+         if (!tool || !cJSON_AddItemToArray(tools, tool))
          {
-            cJSON *verbatim = cJSON_Duplicate((cJSON *)raw, 1);
-            if (verbatim)
-               cJSON_AddItemToArray(tools, verbatim);
-            continue;
+            cJSON_Delete(tool);
+            cJSON_Delete(out);
+            return NULL;
          }
-         if (!ir->tools[i].name || !ir->tools[i].name[0])
-            continue; /* unnamed and unmodelled: never emit name:"" */
-         cJSON *t = cJSON_CreateObject();
-         cJSON_AddStringToObject(t, "type", "function");
-         cJSON_AddStringToObject(t, "name", ir->tools[i].name);
-         if (ir->tools[i].description)
-            cJSON_AddStringToObject(t, "description", ir->tools[i].description);
-         cJSON_AddItemToObject(t, "parameters",
-                               ir->tools[i].schema ? cJSON_Duplicate(ir->tools[i].schema, 1)
-                                                   : cJSON_CreateObject());
-         cJSON_AddItemToArray(tools, t);
       }
    }
    openai_family_add_tool_choice(out, ir, 1);

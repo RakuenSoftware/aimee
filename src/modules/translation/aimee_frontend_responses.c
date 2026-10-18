@@ -95,6 +95,28 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       goto oom;
    }
 
+   const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(req, "reasoning");
+   const cJSON *effort = cJSON_GetObjectItemCaseSensitive(reasoning, "effort");
+   const cJSON *summary = cJSON_GetObjectItemCaseSensitive(reasoning, "summary");
+   if ((reasoning && !cJSON_IsNull(reasoning) && !cJSON_IsObject(reasoning)) ||
+       (effort && !cJSON_IsNull(effort) &&
+        (!cJSON_IsString(effort) ||
+         aimee_ir_effort_parse(effort->valuestring, &out->reasoning_effort))) ||
+       (summary && !cJSON_IsNull(summary) &&
+        (!cJSON_IsString(summary) ||
+         (strcmp(summary->valuestring, "auto") && strcmp(summary->valuestring, "concise") &&
+          strcmp(summary->valuestring, "detailed")))))
+   {
+      aimee_request_free(out);
+      return -1;
+   }
+   if (cJSON_IsString(summary))
+   {
+      out->reasoning_summary = dupstr(summary->valuestring);
+      if (!out->reasoning_summary)
+         goto oom;
+   }
+
    /* instructions -> a single system text block */
    const char *instr = ostr(req, "instructions");
    if (instr && instr[0])
@@ -269,22 +291,14 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       const cJSON *t = NULL;
       cJSON_ArrayForEach(t, tools)
       {
-         aimee_tool_t *tool = grow1((void **)&out->tools, &out->n_tools, sizeof(aimee_tool_t));
-         if (!tool)
-            goto oom;
-         /* Carry the entry verbatim. Only `function` is modelled; a Codex client
-          * also sends namespace / custom / local_shell / web_search / image_generation,
-          * and the backend re-emits those from this sidecar untouched rather than
-          * flattening them into a function. Captured from a real client: of 17 tools,
-          * six were `namespace` groups (mcp__aimee and five others, each holding its
-          * nested function list) and one was `web_search` with no name at all. */
-         tool->raw = cJSON_Duplicate(t, 1);
-         if (!tool->raw)
-            goto oom;
-         tool->name = dupstr(ostr(t, "name"));
-         tool->description = dupstr(ostr(t, "description"));
-         const cJSON *params = cJSON_GetObjectItemCaseSensitive((cJSON *)t, "parameters");
-         tool->schema = params ? cJSON_Duplicate(params, 1) : NULL;
+         aimee_tool_t *tool = grow1((void **)&out->tools, &out->n_tools, sizeof *tool);
+         if (!tool || openai_ir_parse_tool(t, tool, 0))
+         {
+            if (err && errn)
+               snprintf(err, errn, "invalid or unsupported typed tool catalog");
+            aimee_request_free(out);
+            return -1;
+         }
       }
    }
    if (openai_family_output_format_parse(

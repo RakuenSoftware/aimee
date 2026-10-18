@@ -10,6 +10,9 @@
 #include "agent_protocol.h" /* parsed_response_t — type of the police function's argument */
 
 struct cJSON;
+#include <aimee/ir/aimee_ir.h>
+/* Canonical catalog policing includes namespace children. */
+int gateway_policy_apply_ir(aimee_request_t *request);
 
 /* Apply request-side tool policing to a proxied request, in place. `tools` is read
  * from `req`; entries are matched by tool name regardless of API shape
