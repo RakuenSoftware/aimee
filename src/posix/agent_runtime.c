@@ -732,8 +732,9 @@ native_provider_http:
                 : default_exec_instructions;
 
    /* Resolve auth */
-   char auth_header[MAX_API_KEY_LEN + 32];
-   if (agent_resolve_auth(agent, auth_header, sizeof(auth_header)) != 0)
+   char auth_header[MAX_API_KEY_LEN + 32], extra_headers[512];
+   if (agent_resolve_auth_headers(agent, auth_header, sizeof auth_header, extra_headers,
+                                  sizeof extra_headers) != 0)
    {
       snprintf(out->error, sizeof(out->error), "auth resolution failed");
       free(assembled_sys);
@@ -744,8 +745,6 @@ native_provider_http:
          agent_tunnel_stop_all(network->tunnel_mgr);
       return -1;
    }
-   char extra_headers[512];
-   agent_build_extra_headers(agent, extra_headers, sizeof(extra_headers));
 
    /* Mutable copy for model fallback */
    agent_t fb_agent;

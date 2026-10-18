@@ -10,6 +10,7 @@
 #include "cJSON.h"
 #include <assert.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -551,6 +552,79 @@ static void test_concurrent_process_updates(void)
    printf("  PASS: concurrent Vault writers retain all 128 credentials\n");
 }
 
+static void read_snapshot_blob(const char *path, char *blob, size_t capacity, size_t *length)
+{
+   FILE *file = fopen(path, "rb");
+   assert(file);
+   *length = fread(blob, 1, capacity, file);
+   assert(!ferror(file) && *length < capacity && fgetc(file) == EOF);
+   assert(fclose(file) == 0);
+}
+static void replace_snapshot_blob(const char *path, const char *blob, size_t length)
+{
+   char next[1024];
+   snprintf(next, sizeof next, "%s.snapshot-next", path);
+   int fd = open(next, O_CREAT | O_TRUNC | O_WRONLY, 0600);
+   assert(fd >= 0 && write(fd, blob, length) == (ssize_t)length && close(fd) == 0);
+   assert(rename(next, path) == 0);
+}
+static void test_atomic_credential_snapshot(void)
+{
+   const char *principal = "uid:paired-snapshot";
+   uint8_t salt[VAULT_SALT_LEN], kek[VAULT_KEK_LEN];
+   make_kek(kek, 33);
+   assert(!vault_store_get_or_create_salt(principal, salt));
+   assert(!vault_store_set(principal, kek, "codex", "token", "account-a"));
+   assert(!vault_store_set(principal, kek, "codex", "account", "account-a"));
+   char token[128], account[128], absent[128];
+   vault_store_read_t reads[] = {{"token", token, sizeof token, 0},
+                                 {"account", account, sizeof account, 0},
+                                 {"absent", absent, sizeof absent, 1}};
+   assert(!vault_store_read_snapshot(principal, kek, "codex", reads, 3));
+   assert(reads[0].present && reads[1].present && !reads[2].present && !absent[0]);
+   assert(!strcmp(token, "account-a") && !strcmp(account, "account-a"));
+   /* A failure after the first decrypt must not expose half a credential pair. */
+   reads[1].capacity = 1;
+   assert(vault_store_read_snapshot(principal, kek, "codex", reads, 3) == -1);
+   assert(!token[0] && !account[0] && !reads[0].present && !reads[1].present);
+   reads[1].capacity = sizeof account;
+   char path[640], first[8192], second[8192];
+   size_t first_length, second_length;
+   assert(find_vault_file(principal, path, sizeof path));
+   read_snapshot_blob(path, first, sizeof first, &first_length);
+   assert(!vault_store_set(principal, kek, "codex", "token", "account-b"));
+   assert(!vault_store_set(principal, kek, "codex", "account", "account-b"));
+   read_snapshot_blob(path, second, sizeof second, &second_length);
+   replace_snapshot_blob(path, first, first_length);
+   int barrier[2];
+   assert(pipe(barrier) == 0);
+   pid_t writer = fork();
+   assert(writer >= 0);
+   if (!writer)
+   {
+      close(barrier[1]);
+      char start;
+      assert(read(barrier[0], &start, 1) == 1);
+      close(barrier[0]);
+      for (int i = 0; i < 1000; i++)
+         replace_snapshot_blob(path, i & 1 ? second : first, i & 1 ? second_length : first_length);
+      _exit(0);
+   }
+   close(barrier[0]);
+   assert(write(barrier[1], "x", 1) == 1);
+   close(barrier[1]);
+   for (int i = 0; i < 1000; i++)
+   {
+      assert(!vault_store_read_snapshot(principal, kek, "codex", reads, 3));
+      assert(reads[0].present && reads[1].present && !reads[2].present);
+      assert(!strcmp(token, account));
+      assert(!strcmp(token, "account-a") || !strcmp(token, "account-b"));
+   }
+   int status;
+   assert(waitpid(writer, &status, 0) == writer && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+   puts("  PASS: immutable credential snapshots survive concurrent atomic replacement");
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-vault-test-%d", (int)getpid());
@@ -561,6 +635,7 @@ int main(void)
 
    test_corrupt_vault_is_not_missing();
    test_concurrent_process_updates();
+   test_atomic_credential_snapshot();
    test_set_get_roundtrip();
    test_structured_credential_roundtrip();
    test_at_rest_is_ciphertext_only();

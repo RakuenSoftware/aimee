@@ -519,18 +519,10 @@ static int jsonfile_set_server(void *ctx, const char *principal,
    return vault_store_set_impl(principal, NULL, server_kek, agent, cred, secret, 0);
 }
 
-static int jsonfile_get(void *ctx, const char *principal, const uint8_t kek[VAULT_KEK_LEN],
-                        const char *agent, const char *cred, char *out, size_t out_len)
+static int jsonfile_get_from_snapshot(cJSON *root, const char *principal,
+                                      const uint8_t kek[VAULT_KEK_LEN], const char *agent,
+                                      const char *cred, char *out, size_t out_len)
 {
-   if (out && out_len)
-      out[0] = '\0';
-   if (!principal || !kek || !agent || !cred || !out || !out_len)
-      return -1;
-
-   cJSON *root = load_vault(principal);
-   if (!root)
-      return vault_file_missing(principal) ? VAULT_STORE_NO_ENTRY : -1;
-
    int rc = -1;
    uint8_t dek[VAULT_DEK_LEN] = {0};
    uint8_t *pt = NULL;
@@ -595,6 +587,22 @@ out:
    }
    if (rc != 0 && out && out_len)
       OPENSSL_cleanse(out, out_len);
+   return rc;
+}
+
+static int jsonfile_get(void *ctx, const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                        const char *agent, const char *cred, char *out, size_t out_len)
+{
+   if (out && out_len)
+      out[0] = '\0';
+   if (!principal || !kek || !agent || !cred || !out || !out_len)
+      return -1;
+
+   cJSON *root = load_vault(principal);
+   if (!root)
+      return vault_file_missing(principal) ? VAULT_STORE_NO_ENTRY : -1;
+
+   int rc = jsonfile_get_from_snapshot(root, principal, kek, agent, cred, out, out_len);
    cJSON_Delete(root);
    return rc;
 }
@@ -1199,6 +1207,54 @@ int vault_store_add_server_wraps(const char *principal, const uint8_t user_kek[V
 {
    const vault_store_backend_t *backend = store_for(principal);
    return backend->add_server_wraps(backend->ctx, principal, user_kek, server_kek);
+}
+
+int vault_store_read_snapshot(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                              const char *agent, vault_store_read_t *reads, size_t count)
+{
+   if (!reads || !count || count > 16)
+      return -1;
+   int valid = principal && kek && agent;
+   for (size_t i = 0; i < count; i++)
+   {
+      reads[i].present = 0;
+      if (reads[i].value && reads[i].capacity)
+         OPENSSL_cleanse(reads[i].value, reads[i].capacity);
+      else
+         valid = 0;
+      if (!reads[i].credential || !reads[i].credential[0])
+         valid = 0;
+   }
+   if (!valid)
+      return -1;
+   /* Server instance credentials use this local file owner even when tenant
+    * secrets use another backend. Never emulate atomicity with separate reads. */
+   if (store_for(principal) != &jsonfile_backend)
+      return VAULT_STORE_SNAPSHOT_UNSUPPORTED;
+   cJSON *root = load_vault(principal);
+   if (!root)
+      return vault_file_missing(principal) ? 0 : -1;
+   int rc = 0;
+   for (size_t i = 0; i < count; i++)
+   {
+      int read_rc = jsonfile_get_from_snapshot(root, principal, kek, agent, reads[i].credential,
+                                               reads[i].value, reads[i].capacity);
+      if (read_rc == 0)
+         reads[i].present = 1;
+      else if (read_rc != VAULT_STORE_NO_ENTRY)
+      {
+         rc = -1;
+         break;
+      }
+   }
+   cJSON_Delete(root);
+   if (rc)
+      for (size_t i = 0; i < count; i++)
+      {
+         OPENSSL_cleanse(reads[i].value, reads[i].capacity);
+         reads[i].present = 0;
+      }
+   return rc;
 }
 
 int vault_store_get(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,

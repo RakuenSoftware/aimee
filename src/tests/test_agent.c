@@ -15,6 +15,7 @@ extern char test_vault_server_codex_oauth[4096];
 extern char test_vault_codex_connection[128], test_vault_codex_token[4096],
     test_vault_codex_account[128];
 void test_oauth_tokens_reset(void);
+extern int test_oauth_stores, test_oauth_removes, test_oauth_get_fail;
 #include "aimee.h"
 #include "db1_client/db1.h"
 #include "support/store_module_fixture.h"
@@ -22,6 +23,7 @@ void test_oauth_tokens_reset(void);
 #include "agent.h"
 #include "agent_config.h"
 #include "oauth_flow.h"
+#include "vault_service.h"
 #include "runtime_secret.h"
 #include <aimee/delegates/delegate_role.h>
 #include <aimee/tools/agent_tools.h>
@@ -908,6 +910,18 @@ static void restore_env(const char *name, const char *value)
       unsetenv(name);
 }
 
+/* Header-only assertions still use the one production resolution boundary. */
+static int test_auth_header(const agent_t *agent, char *auth, size_t capacity)
+{
+   char headers[512];
+   return agent_resolve_auth_headers(agent, auth, capacity, headers, sizeof headers);
+}
+static void test_extra_headers(const agent_t *agent, char *headers, size_t capacity)
+{
+   char auth[MAX_API_KEY_LEN + 32];
+   (void)agent_resolve_auth_headers(agent, auth, sizeof auth, headers, capacity);
+}
+
 static void test_provider_env_credentials_and_headers(void)
 {
    char old_gemini_mechanism[256] = "";
@@ -928,9 +942,9 @@ static void test_provider_env_credentials_and_headers(void)
    assert(agent_is_available_for_routing(&ag) == 0);
    assert(runtime_secret_store("OPENROUTER_API_KEY", "or-test-key") == 0);
    assert(agent_has_resolvable_credentials(&ag) == 1);
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer or-test-key") == 0);
-   agent_build_extra_headers(&ag, headers, sizeof(headers));
+   test_extra_headers(&ag, headers, sizeof(headers));
    assert(strstr(headers, "HTTP-Referer: https://github.com/JBailes/aimee") != NULL);
    assert(strstr(headers, "X-Title: aimee") != NULL);
 
@@ -938,9 +952,9 @@ static void test_provider_env_credentials_and_headers(void)
    snprintf(ag.provider, sizeof(ag.provider), "%s", "anthropic");
    snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "api_key");
    assert(runtime_secret_store("ANTHROPIC_API_KEY", "anth-test-key") == 0);
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "x-api-key: anth-test-key") == 0);
-   agent_build_extra_headers(&ag, headers, sizeof(headers));
+   test_extra_headers(&ag, headers, sizeof(headers));
    assert(strstr(headers, "anthropic-version: 2023-06-01") != NULL);
 
    memset(&ag, 0, sizeof(ag));
@@ -949,11 +963,11 @@ static void test_provider_env_credentials_and_headers(void)
    runtime_secret_remove("GEMINI_API_KEY");
    unsetenv("GEMINI_API_KEY_AUTH_MECHANISM");
    assert(runtime_secret_store("GOOGLE_API_KEY", "google-test-key") == 0);
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "x-goog-api-key: google-test-key") == 0);
 
    snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "bearer");
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer google-test-key") == 0);
 
    runtime_secret_remove("OPENROUTER_API_KEY");
@@ -967,6 +981,7 @@ static void test_provider_env_credentials_and_headers(void)
 /* A thin-client-supplied per-turn Codex OAuth token takes precedence over any
  * server-side file, and the account id is injected as the ChatGPT-Account-ID
  * header; clearing removes both. */
+
 static int refuse_exact_resource(const char *name, cJSON **args, const char *cwd, const char *sid,
                                  int authorized)
 {
@@ -1007,15 +1022,15 @@ static void test_codex_oauth_request_creds(void)
    snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "codex-oauth");
 
    agent_set_request_codex_creds("REQ-TOKEN", "acct-1");
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer REQ-TOKEN") == 0);
-   agent_build_extra_headers(&ag, headers, sizeof(headers));
+   test_extra_headers(&ag, headers, sizeof(headers));
    assert(strstr(headers, "ChatGPT-Account-ID: acct-1") != NULL);
    assert(strstr(headers, "originator: codex_cli_rs") != NULL);
 
    /* Clearing the per-turn creds removes the token path + header injection. */
    agent_set_request_codex_creds(NULL, NULL);
-   agent_build_extra_headers(&ag, headers, sizeof(headers));
+   test_extra_headers(&ag, headers, sizeof(headers));
    assert(strstr(headers, "ChatGPT-Account-ID:") == NULL);
 }
 
@@ -1038,51 +1053,51 @@ static void test_codex_credentials_follow_selected_registration(void)
        "{\"tokens\":{\"access_token\":\"SERVER-VAULT\",\"refresh_token\":\"SERVER-REFRESH\"}}");
    char auth[512], headers[512];
    agent_set_request_codex_creds("SERVER-TURN", "server-account");
-   assert(agent_resolve_auth(&server, auth, sizeof auth) == 0);
+   assert(test_auth_header(&server, auth, sizeof auth) == 0);
    assert(!strcmp(auth, "Authorization: Bearer SERVER-TURN"));
-   assert(agent_resolve_auth(&work, auth, sizeof auth) == -1 && !auth[0]);
-   agent_build_extra_headers(&work, headers, sizeof headers);
+   assert(test_auth_header(&work, auth, sizeof auth) == -1 && !auth[0]);
+   test_extra_headers(&work, headers, sizeof headers);
    assert(!strstr(headers, "ChatGPT-Account-ID:"));
    agent_set_request_codex_creds_for(&work, "WORK-TURN", "work-account");
    assert(agent_request_codex_token_matches(&work));
    assert(!agent_request_codex_token_matches(&personal));
-   assert(agent_resolve_auth(&work, auth, sizeof auth) == 0);
+   assert(test_auth_header(&work, auth, sizeof auth) == 0);
    assert(!strcmp(auth, "Authorization: Bearer WORK-TURN"));
-   agent_build_extra_headers(&work, headers, sizeof headers);
+   test_extra_headers(&work, headers, sizeof headers);
    assert(strstr(headers, "ChatGPT-Account-ID: work-account"));
-   assert(agent_resolve_auth(&personal, auth, sizeof auth) == -1 && !auth[0]);
+   assert(test_auth_header(&personal, auth, sizeof auth) == -1 && !auth[0]);
    assert(strstr(agent_request_auth_error(), "personal"));
-   agent_build_extra_headers(&personal, headers, sizeof headers);
+   test_extra_headers(&personal, headers, sizeof headers);
    assert(!strstr(headers, "ChatGPT-Account-ID:"));
-   assert(agent_resolve_auth(&server, auth, sizeof auth) == 0);
+   assert(test_auth_header(&server, auth, sizeof auth) == 0);
    assert(!strcmp(auth, "Authorization: Bearer SERVER-VAULT"));
    agent_request_creds_t snapshot;
    agent_request_creds_snapshot(&snapshot);
    assert(!strcmp(snapshot.codex_registration, "work"));
    agent_set_request_codex_creds(NULL, NULL);
    agent_request_creds_restore(&snapshot);
-   assert(agent_resolve_auth(&work, auth, sizeof auth) == 0);
+   assert(test_auth_header(&work, auth, sizeof auth) == 0);
    assert(!strcmp(auth, "Authorization: Bearer WORK-TURN"));
-   assert(agent_resolve_auth(&personal, auth, sizeof auth) == -1);
+   assert(test_auth_header(&personal, auth, sizeof auth) == -1);
    agent_set_request_codex_creds(NULL, NULL);
    snprintf(test_vault_codex_connection, sizeof test_vault_codex_connection, "%s", "work");
    snprintf(test_vault_codex_token, sizeof test_vault_codex_token, "%s", "WORK-VAULT");
    snprintf(test_vault_codex_account, sizeof test_vault_codex_account, "%s", "work-vault-account");
-   assert(agent_resolve_auth(&work, auth, sizeof auth) == 0);
+   assert(test_auth_header(&work, auth, sizeof auth) == 0);
    assert(!strcmp(auth, "Authorization: Bearer WORK-VAULT"));
-   agent_build_extra_headers(&work, headers, sizeof headers);
+   test_extra_headers(&work, headers, sizeof headers);
    assert(strstr(headers, "ChatGPT-Account-ID: work-vault-account"));
-   assert(agent_resolve_auth(&personal, auth, sizeof auth) == -1);
+   assert(test_auth_header(&personal, auth, sizeof auth) == -1);
    /* A model label cannot select another registration's credential slot. */
    snprintf(personal.name, sizeof personal.name, "%s", "work");
-   assert(agent_resolve_auth(&personal, auth, sizeof auth) == -1 && !auth[0]);
-   agent_build_extra_headers(&personal, headers, sizeof headers);
+   assert(test_auth_header(&personal, auth, sizeof auth) == -1 && !auth[0]);
+   test_extra_headers(&personal, headers, sizeof headers);
    assert(!strstr(headers, "ChatGPT-Account-ID:"));
    /* A bound bearer without an account must not borrow the Vault account. */
    agent_set_request_codex_creds_for(&work, "WORK-NO-ACCOUNT", NULL);
-   assert(agent_resolve_auth(&work, auth, sizeof auth) == 0);
+   assert(test_auth_header(&work, auth, sizeof auth) == 0);
    assert(!strcmp(auth, "Authorization: Bearer WORK-NO-ACCOUNT"));
-   agent_build_extra_headers(&work, headers, sizeof headers);
+   test_extra_headers(&work, headers, sizeof headers);
    assert(!strstr(headers, "ChatGPT-Account-ID:"));
    agent_set_request_codex_creds(NULL, NULL);
    test_vault_codex_connection[0] = test_vault_codex_token[0] = test_vault_codex_account[0] = 0;
@@ -1125,7 +1140,7 @@ static void test_codex_oauth_reads_vault_only(void)
             "{\"tokens\":{\"access_token\":\"VAULT-ACCESS-3f9c1\",\"refresh_token\":\"VAULT-"
             "REFRESH\"}}");
    auth[0] = '\0';
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strstr(auth, "Bearer VAULT-ACCESS-3f9c1") != NULL);
    assert(strstr(auth, "DISK-MUST-NOT-WIN") == NULL);
 
@@ -1137,7 +1152,7 @@ static void test_codex_oauth_reads_vault_only(void)
    char current[4096];
    assert(agent_codex_oauth_current_token(current, sizeof(current)) == 0);
    assert(strcmp(current, "REFRESHED-ACCESS") == 0);
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer REFRESHED-ACCESS") == 0);
 
    /* Another process must wait for a refresh already owned by serving. */
@@ -1176,7 +1191,7 @@ static void test_codex_oauth_reads_vault_only(void)
    test_oauth_tokens_reset();
    test_vault_server_codex_oauth[0] = '\0';
    auth[0] = '\0';
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) != 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) != 0);
    if (old_home)
       setenv("HOME", saved_home, 1);
    else
@@ -1625,6 +1640,93 @@ static void test_provider_cli_shell_timeout_covers_prompt_write(void)
    free(large_prompt);
 }
 
+static void test_codex_source_lineage_and_paired_headers(void)
+{
+   agent_t agent = {0};
+   snprintf(agent.registration, sizeof agent.registration, "lineage-fixture");
+   snprintf(agent.auth_type, sizeof agent.auth_type, "codex-oauth");
+   agent_set_request_codex_creds(NULL, NULL);
+   test_oauth_tokens_reset();
+   const char *source_a = "{\"tokens\":{\"access_token\":\"access-a\","
+                          "\"refresh_token\":\"refresh-a\",\"account_id\":\"account-a\"}}";
+   const char *source_b = "{\"tokens\":{\"access_token\":\"access-b\","
+                          "\"refresh_token\":\"refresh-b\",\"account_id\":\"account-b\"}}";
+   assert(vault_service_set_server(agent.registration, "oauth", source_a) == VAULT_OK);
+   agent_codex_credentials_t pair, original;
+   assert(!agent_codex_connection_credentials(agent.registration, &original));
+   assert(!strcmp(original.token, "access-a") && !strcmp(original.account_id, "account-a"));
+   assert(strlen(original.source_digest) == 64);
+   oauth_token_response_t refreshed = {0};
+   snprintf(refreshed.access_token, sizeof refreshed.access_token, "rotated-a");
+   assert(!oauth_token_store(agent.registration, &refreshed));
+   int stores = test_oauth_stores, removes = test_oauth_removes;
+   /* Metadata/formatting changes are not a new login or refresh lineage. */
+   assert(vault_service_set_server(
+              agent.registration, "oauth",
+              "{\"metadata\":42,\"tokens\":{\"account_id\":\"account-a\","
+              "\"refresh_token\":\"refresh-a\",\"access_token\":\"access-a\"}}") == VAULT_OK);
+   assert(!agent_codex_connection_credentials(agent.registration, &pair));
+   assert(!strcmp(pair.token, "rotated-a") && !strcmp(pair.account_id, "account-a"));
+   assert(!strcmp(pair.source_digest, original.source_digest));
+   assert(test_oauth_stores == stores && test_oauth_removes == removes);
+   test_oauth_get_fail = 1;
+   memset(&pair, 'x', sizeof pair);
+   assert(agent_codex_connection_credentials(agent.registration, &pair));
+   for (size_t i = 0; i < sizeof pair; i++)
+      assert(((unsigned char *)&pair)[i] == 0);
+   assert(test_oauth_stores == stores && test_oauth_removes == removes);
+   test_oauth_get_fail = 0;
+   assert(vault_service_set_server(agent.registration, "oauth", source_b) == VAULT_OK);
+   char auth[MAX_API_KEY_LEN + 32], headers[512];
+   assert(!agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   assert(!strcmp(auth, "Authorization: Bearer access-b"));
+   assert(strstr(headers, "ChatGPT-Account-ID: account-b"));
+   assert(!strstr(headers, "account-a"));
+   assert(test_oauth_stores == stores + 1 && test_oauth_removes == removes + 1);
+   assert(!agent_codex_connection_credentials(agent.registration, &pair));
+   assert(strcmp(pair.source_digest, original.source_digest));
+   assert(vault_service_set_server(agent.registration, "oauth", "") == VAULT_OK);
+   assert(agent_codex_connection_credentials(agent.registration, &pair));
+   /* A cached normalized token cannot resurrect a removed login source. */
+   assert(vault_service_set_server(agent.registration, "oauth", source_b) == VAULT_OK);
+   assert(!agent_codex_connection_credentials(agent.registration, &pair));
+   const char *invalid[] = {
+       "{\"tokens\":{\"access_token\":\"a\",\"refresh_token\":\"r\"},\"tokens\":{}}",
+       "{\"access_token\":\"a\",\"access_token\":\"b\",\"refresh_token\":\"r\"}",
+       "{\"tokens\":{\"access_token\":\"a\",\"refresh_token\":\"r\"},\"access_token\":\"b\"}",
+       "{\"access_token\":\"a\\u0000suffix\",\"refresh_token\":\"r\"}",
+       "{\"access_token\":\"a\",\"refresh_token\":\"r\",\"account_id\":\"bad\\r\\nheader\"}",
+       "{\"access_token\":\"a\"}",
+       "[]",
+       "{} trailing"};
+   stores = test_oauth_stores;
+   for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+   {
+      assert(vault_service_set_server(agent.registration, "oauth", invalid[i]) == VAULT_OK);
+      assert(agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+      assert(!auth[0] && test_oauth_stores == stores);
+   }
+   assert(vault_service_set_server(agent.registration, "oauth", source_b) == VAULT_OK);
+   /* Per-turn account custody is equally strict and does not consult Vault. */
+   agent_set_request_codex_creds_for(&agent, "bound-token", "bound-account");
+   snprintf(agent.extra_headers, sizeof agent.extra_headers, "chatgpt-account-id: bound-account");
+   assert(!agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   assert(strstr(headers, "originator: codex_cli_rs"));
+   snprintf(agent.extra_headers, sizeof agent.extra_headers, "ChatGPT-Account-ID: other-account");
+   assert(agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   snprintf(agent.extra_headers, sizeof agent.extra_headers,
+            "ChatGPT-Account-ID: bound-account\nchatgpt-account-id: bound-account");
+   assert(agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   agent.extra_headers[0] = 0;
+   agent_set_request_codex_creds_for(&agent, "bound-token", NULL);
+   assert(!agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   assert(!strstr(headers, "ChatGPT-Account-ID"));
+   assert(strstr(headers, "originator: codex_cli_rs"));
+   agent_set_request_codex_creds(NULL, NULL);
+   test_oauth_tokens_reset();
+   printf("  PASS: test_codex_source_lineage_and_paired_headers\n");
+}
+
 static void test_codex_oauth_auth_resolution(void)
 {
    agent_t ag;
@@ -1635,14 +1737,14 @@ static void test_codex_oauth_auth_resolution(void)
    test_oauth_tokens_reset();
    snprintf(test_vault_server_codex_oauth, sizeof(test_vault_server_codex_oauth),
             "{\"access_token\":\"codex-test-token\",\"refresh_token\":\"codex-refresh\"}");
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer codex-test-token") == 0);
 
    test_oauth_tokens_reset();
    snprintf(test_vault_server_codex_oauth, sizeof(test_vault_server_codex_oauth),
             "{\"tokens\":{\"access_token\":\"codex-cli-token\",\"refresh_token\":\"codex-cli-"
             "refresh\"}}");
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer codex-cli-token") == 0);
    test_oauth_tokens_reset();
    test_vault_server_codex_oauth[0] = '\0';
@@ -4109,6 +4211,7 @@ int main(void)
    test_local_synth_not_masked_by_tmux_codex();
    test_provider_cli_shell_exec_uses_argv_not_shell();
    test_provider_cli_shell_timeout_covers_prompt_write();
+   test_codex_source_lineage_and_paired_headers();
    test_codex_oauth_auth_resolution();
    test_responses_parser_keeps_all_output_text_parts();
    test_responses_parser_accumulates_output_text_deltas();

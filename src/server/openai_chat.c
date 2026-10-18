@@ -1357,12 +1357,11 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
       snprintf(error, capacity, "upstream model provider or endpoint is unavailable");
       return -1;
    }
-   if (agent_resolve_auth(agent, auth, sizeof auth))
+   if (agent_resolve_auth_headers(agent, auth, sizeof auth, headers, sizeof headers))
    {
       snprintf(error, capacity, "upstream model credentials are unavailable");
       return -1;
    }
-   agent_build_extra_headers(agent, headers, sizeof headers);
    aimee_wire_t wire = !strcmp(driver->name, "anthropic") ? AIMEE_WIRE_ANTHROPIC
                        : strstr(url, "/responses")        ? AIMEE_WIRE_RESPONSES
                                                           : AIMEE_WIRE_OPENAI_CHAT;

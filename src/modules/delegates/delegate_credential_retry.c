@@ -15,44 +15,12 @@
 #include <string.h>
 #include <time.h>
 
-/* WP-C.3 codex-oauth migration: if `principal` has a vaulted Codex OAuth token for
- * `agent`, bind it as this turn's token so it OVERRIDES the on-disk/session token.
- * A fresh per-turn client push still wins (we defer when one is already bound).
- * The transient plaintext is cleansed; lifetime mirrors the existing per-turn
- * codex token (overwritten by the next turn's bind on this worker thread). */
-static void codex_oauth_apply_vault_override(const char *principal, const agent_t *target_agent)
-{
-   if (!target_agent)
-      return;
-   if (strcmp(target_agent->auth_type, "codex-oauth") != 0)
-      return;
-   if (agent_request_codex_token_matches(target_agent))
-      return; /* The same selected registration is already bound. */
-
-   char tok[MAX_API_KEY_LEN] = "";
-   char acct[128] = "";
-   vault_status_t st = VAULT_NO_ENTRY;
-
-   (void)principal;
-   const char *registration = target_agent->registration[0] ? target_agent->registration
-                              : target_agent->name[0]       ? target_agent->name
-                                                            : "codex";
-   st = vault_service_get_server_principal(registration, VAULT_CODEX_TOKEN_CRED, tok, sizeof(tok));
-   if (st == VAULT_OK && tok[0])
-   {
-      (void)vault_service_get_server_principal(registration, VAULT_CODEX_ACCOUNT_CRED, acct,
-                                               sizeof(acct));
-      agent_set_request_codex_creds_for(target_agent, tok, acct[0] ? acct : NULL);
-   }
-   OPENSSL_cleanse(tok, sizeof(tok));
-   OPENSSL_cleanse(acct, sizeof(acct));
-}
-
 delegate_cred_resolve_status_t delegate_resolve_credentials(
     const char *vault_principal, agent_t *target_agent, char *leased_principal,
     size_t leased_principal_cap, char *leased_cred_name, size_t leased_cred_name_cap,
     char *credential_state_path, size_t credential_state_path_cap, int *cooldown_secs)
 {
+   (void)vault_principal; /* Actor attribution does not select provider credentials. */
    if (cooldown_secs)
       *cooldown_secs = 0;
    if (!target_agent)
@@ -87,11 +55,11 @@ delegate_cred_resolve_status_t delegate_resolve_credentials(
          snprintf(leased_cred_name, leased_cred_name_cap, "%s", VAULT_API_KEY_CRED);
          return DELEGATE_CRED_RESOLVE_OK;
       }
-      /* miss -> codex override / shared named pool below */
+      /* miss -> shared named pool below */
    }
 
-   /* WP-C.3 codex-oauth: a vaulted token overrides the on-disk/session token. */
-   codex_oauth_apply_vault_override(vault_principal, target_agent);
+   /* Codex serving resolves the selected Vault credential/account together at
+    * dispatch. Do not pin a separately read token on this reusable worker. */
 
    /* Lease one credential from the shared Vault-backed pool (principal ""), if
     * configured. api_key_env is a legacy slot name, never a runtime env read. */

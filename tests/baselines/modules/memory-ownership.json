@@ -2115,8 +2115,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "5915c0eddd7c8f1bd61077490048b08440757ece2d8855274937d391206364ad",
-      "boundary_review": "IR #3036: copy the actual private canonical execution reference before log-scope teardown; session-bound work bypasses the legacy flat role-result cache. Existing six host memory context/recall/insert calls and registered Go policy ownership remain unchanged. This records source-boundary reasoning, not independent production-promotion approval."
+      "sha256": "8eb21239caf23c104b0044dffa9d22c15b47fc5be77cfc7f941dbb0da796ca84",
+      "boundary_review": "IR #3036: copy the actual private canonical execution reference before log-scope teardown; session-bound work bypasses the legacy flat role-result cache. Existing six host memory context/recall/insert calls and registered Go policy ownership remain unchanged. This records source-boundary reasoning, not independent production-promotion approval. Serving now resolves the selected Codex bearer and account headers together through the Vault owner instead of separate calls. No memory context, recall, eligibility or insertion behavior changes."
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
@@ -2639,8 +2639,8 @@
       "symbols": [
         "AIMEE_MEMORY_BACKEND_TOKEN"
       ],
-      "sha256": "79bb15f142b1db23c19eab4e034936beaa1e3747d86b72e70da914a76f6666fc",
-      "reason": "Reviewed 2026-10-17: add a canonical Codex credential getter through the existing attested Vault pipe. AIMEE_MEMORY_BACKEND_TOKEN custody and Go memory ownership are unchanged; no memory policy or fallback is added.",
+      "sha256": "834e9bceb88a851dbf172292c078843f70658f07129bba96bd5e472eff92078e",
+      "reason": "Reviewed 2026-10-18: the existing attested private Vault helper returns the selected Codex token, account and source lineage together using serving's refresh-aware resolver. The computed response remains pipe-only. AIMEE_MEMORY_BACKEND_TOKEN import/custody, grants and the Go memory owner are unchanged. This records source-boundary reasoning, not independent reviewer approval.",
       "evidence": [
         "src/tests/test_agent.c",
         "server-go/modules/providers/inspect_test.go",

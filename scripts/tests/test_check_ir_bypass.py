@@ -37,6 +37,8 @@ class IRBypassTests(unittest.TestCase):
             ("server-go/modules/rogue/rogue.go", "raw_responses := x"),
             ("src/server/rogue.c", "gateway_delegate_tool_shape(1, 0);"),
             ("src/server/rogue.c", "agent_tool_result_usable(text);"),
+            ("src/server/rogue.c", "agent_resolve_auth(agent, token, capacity);"),
+            ("src/server/rogue.c", "agent_build_extra_headers(agent, headers, capacity);"),
             ("src/server/rogue.c", "driver->parse_response(body);"),
             ("src/server/rogue.c", "driver->build_request(input);"),
         ]:

@@ -610,7 +610,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
       goto cleanup;
    }
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
-       agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
+       agent_resolve_auth_headers(ag, auth, sizeof auth, extra, sizeof extra) != 0)
    {
       /* Internal: we never reached the provider — the endpoint or credentials for
        * the primary couldn't be resolved (e.g. a codex-oauth seat with no token).
@@ -631,8 +631,6 @@ static int messages_buffered(const char *body, char *resp, int cap)
    int responses_wire = strstr(url, "/responses") != NULL;
    if (parity)
       build_anthropic_parity_headers(extra, sizeof(extra));
-   else
-      agent_build_extra_headers(ag, extra, sizeof(extra));
 
    wire_fence_route_t wire_route = parity           ? WIRE_FENCE_ANTHROPIC_MESSAGES
                                    : responses_wire ? WIRE_FENCE_OPENAI_RESPONSES
@@ -1257,7 +1255,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       goto cleanup;
    }
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
-       agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
+       agent_resolve_auth_headers(ag, auth, sizeof auth, extra, sizeof extra) != 0)
       goto cleanup;
    /* The Responses replay path is keyed off the actual upstream shape, not the
     * provider label, so Codex aliases that still resolve to /responses stay in
@@ -1265,8 +1263,6 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    responses_wire = strstr(url, "/responses") != NULL;
    if (parity)
       build_anthropic_parity_headers(extra, sizeof(extra));
-   else
-      agent_build_extra_headers(ag, extra, sizeof(extra));
 
    /* Whether we ask the UPSTREAM to stream depends on how we READ the reply, not on
     * what the client asked. The buffered-replay path (prevent-subagents, or a
@@ -1418,7 +1414,7 @@ static int count_tokens(const char *body, char *resp, int cap)
          char extra[640];
          char *response = NULL;
          if (delegate_build_url(driver, ag, url, sizeof(url)) == 0 &&
-             agent_resolve_auth(ag, auth, sizeof(auth)) == 0)
+             agent_resolve_auth_headers(ag, auth, sizeof auth, extra, sizeof extra) == 0)
          {
             int hs;
             snprintf(ct_url, sizeof(ct_url), "%s/count_tokens", url); /* url ends in /messages */

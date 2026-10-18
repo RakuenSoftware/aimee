@@ -165,13 +165,12 @@ int oauth_token_store(const char *client_name, const oauth_token_response_t *res
          rc = -1;
    }
 
-   if (resp->expires_at > 0)
-   {
-      char ea_str[32];
-      snprintf(ea_str, sizeof(ea_str), "%ld", resp->expires_at);
-      if (oauth_secret_store(client_name, OAUTH_VCRED_EXPIRES, ea_str) != 0)
-         rc = -1;
-   }
+   /* An absent expiry belongs to the new token too. Retaining the previous
+    * account/token's expiry can incorrectly expire a newly imported login. */
+   char ea_str[32];
+   snprintf(ea_str, sizeof(ea_str), "%ld", resp->expires_at > 0 ? resp->expires_at : 0L);
+   if (oauth_secret_store(client_name, OAUTH_VCRED_EXPIRES, ea_str) != 0)
+      rc = -1;
 
    /* A usable token is now stored (fresh exchange or an operator re-auth) — clear
     * any standing "re-auth required" marker (D6). */

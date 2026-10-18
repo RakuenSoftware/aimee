@@ -197,18 +197,14 @@ int delegate_build_url(const delegate_driver_t *driver, const agent_t *agent, ch
    return 0;
 }
 
-int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
+int agent_resolve_auth_headers(const agent_t *agent, char *buf, size_t buf_len, char *headers,
+                               size_t headers_capacity)
 {
    (void)agent;
+   if (headers_capacity)
+      headers[0] = 0;
    snprintf(buf, buf_len, "Bearer test");
    return 0;
-}
-
-void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len)
-{
-   (void)agent;
-   if (buf_len)
-      buf[0] = '\0';
 }
 
 cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *tools,

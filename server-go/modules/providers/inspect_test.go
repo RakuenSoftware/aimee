@@ -152,10 +152,8 @@ func TestCodexProbeUsesResponsesAndSelectedOAuthAccount(t *testing.T) {
 		vault.values["codex:api_key"] = "wrong-api-key"
 		if document {
 			vault.values["codex:oauth"] = `{"tokens":{"access_token":"fixture-oauth","account_id":"account-a"}}`
-		} else {
-			vault.values["codex:codex_oauth_token"] = "fixture-oauth"
-			vault.values["codex:codex_account_id"] = "account-a"
 		}
+		vault.values["codex:codex_oauth_credentials"] = codexPair("fixture-oauth", "account-a")
 		network := &fixtureNetwork{replies: []egress.HTTPResponse{response(200, codexCompleted)}}
 		m.SetEgress(network)
 		out := call(t, m, "model.probe", object{"args": []string{"codex:model"}})
@@ -253,38 +251,46 @@ func TestProbeFailureRetainsNativeClientFields(t *testing.T) {
 	}
 }
 
-func TestCodexProbeUsesCurrentVaultTokenInsteadOfStaleDocument(t *testing.T) {
+func codexPair(token, account string) string {
+	value, _ := json.Marshal(object{"token": token, "account_id": account, "source_digest": strings.Repeat("a", 64)})
+	return string(value)
+}
+
+func TestCodexProbeUsesSelectedServingSnapshot(t *testing.T) {
 	m, _, vault := manager(t)
-	vault.values["codex:codex_oauth_current"] = "refreshed-access"
-	vault.values["codex:codex_account_id"] = "account-current"
+	vault.values["codex:codex_oauth_credentials"] = codexPair("refreshed-access", "account-current")
 	vault.values["codex:oauth"] = `{"tokens":{"access_token":"expired-access","account_id":"account-a"}}`
+	vault.values["codex:codex_oauth_token"] = "unpaired-token"
+	vault.values["codex:codex_account_id"] = "unpaired-account"
 	token, account, err := m.resolveCodex(context.Background(), object{"name": "codex"})
 	if err != nil || token != "refreshed-access" || account != "account-current" {
-		t.Fatal("canonical refreshed credential was not selected")
-	}
-	// Explicit selected-connection overrides retain serving's precedence.
-	vault.values["codex:codex_oauth_token"] = "explicit-access"
-	token, _, err = m.resolveCodex(context.Background(), object{"name": "codex"})
-	if err != nil || token != "explicit-access" {
-		t.Fatal("explicit credential precedence changed")
+		t.Fatal("serving snapshot was not selected")
 	}
 	if _, _, err := m.resolveCodex(context.Background(), object{"name": "personal"}); err == nil {
-		t.Fatal("a named connection borrowed the canonical server token")
+		t.Fatal("named connection borrowed server credentials")
 	}
-	// Serving omits the account header when its current Vault slot is absent;
-	// a stale import must not pair an old account with a refreshed token.
-	delete(vault.values, "codex:codex_account_id")
-	delete(vault.values, "codex:codex_oauth_token")
+	vault.values["personal:codex_oauth_credentials"] = codexPair("personal-access", "personal-account")
+	token, account, err = m.resolveCodex(context.Background(), object{"name": "personal"})
+	if err != nil || token != "personal-access" || account != "personal-account" {
+		t.Fatal("selected connection snapshot was not selected")
+	}
+	vault.values["codex:codex_oauth_credentials"] = codexPair("refreshed-access", "")
 	token, account, err = m.resolveCodex(context.Background(), object{"name": "codex"})
 	if err != nil || token != "refreshed-access" || account != "" {
-		t.Fatal("canonical token borrowed account metadata from a stale import")
+		t.Fatal("snapshot borrowed account metadata from a stale import")
+	}
+	for _, invalid := range []string{`{}`, `{"token":"x"}`, "not json", codexPair("bad\r\nheader", "account")} {
+		vault.values["codex:codex_oauth_credentials"] = invalid
+		if _, _, err := m.resolveCodex(context.Background(), object{"name": "codex"}); err == nil {
+			t.Fatal("invalid private credential accepted")
+		}
 	}
 }
 
 type failedCanonicalVault struct{ Resources }
 
 func (v failedCanonicalVault) Credential(ctx context.Context, op, agent, cred, secret string) (string, error) {
-	if agent == "codex" && cred == "codex_oauth_current" {
+	if agent == "codex" && cred == "codex_oauth_credentials" {
 		return "", errors.New("refresh unavailable")
 	}
 	return v.Resources.Credential(ctx, op, agent, cred, secret)

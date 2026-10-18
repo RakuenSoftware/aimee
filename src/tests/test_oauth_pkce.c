@@ -332,6 +332,16 @@ int main(void)
       assert(rc == 0);
       assert(strcmp(loaded, "access-abc") == 0);
 
+      /* A fresh login without expiry cannot inherit the old token's expiry. */
+      to_store.expires_at = 1;
+      assert(oauth_token_store(client, &to_store) == 0);
+      assert(oauth_token_load(client, loaded, sizeof loaded) != 0);
+      to_store.expires_at = 0;
+      snprintf(to_store.access_token, sizeof to_store.access_token, "new-login-no-expiry");
+      assert(oauth_token_store(client, &to_store) == 0);
+      assert(oauth_token_load(client, loaded, sizeof loaded) == 0);
+      assert(!strcmp(loaded, "new-login-no-expiry"));
+
       /* Clean up */
       oauth_token_remove(client);
 

@@ -1065,8 +1065,9 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    }
 
    /* Resolve auth */
-   char auth_header[MAX_API_KEY_LEN + 32];
-   if (agent_resolve_auth(agent, auth_header, sizeof(auth_header)) != 0)
+   char auth_header[MAX_API_KEY_LEN + 32], extra_headers[512];
+   if (agent_resolve_auth_headers(agent, auth_header, sizeof auth_header, extra_headers,
+                                  sizeof extra_headers) != 0)
    {
       /* Prefer an explicit, actionable reason (e.g. codex REAUTH_REQUIRED) over the
        * generic message so the operator knows the remedy (D6). */
@@ -1074,8 +1075,6 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       snprintf(out->error, sizeof(out->error), "%s", why ? why : "auth resolution failed");
       return -1;
    }
-   char extra_headers[512];
-   agent_build_extra_headers(agent, extra_headers, sizeof(extra_headers));
    /* Run PRE_LLM_CALL hooks — appends ephemeral context to user msg, never system_prompt. */
    char *augmented_prompt = plugin_chook_apply_pre_llm(user_prompt);
    const char *effective_user = augmented_prompt ? augmented_prompt : user_prompt;

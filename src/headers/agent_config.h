@@ -288,8 +288,11 @@ void agent_expand_env(const char *src, char *dst, size_t dst_len);
  * empty). Callers own the copy and should runtime_secret_wipe() it when done. */
 int agent_api_key_secret(const agent_t *agent, char *out, size_t out_len);
 
-int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len);
-/* An explicit, actionable reason the LAST agent_resolve_auth call failed (e.g.
+/* One credential resolution produces both native HTTP header sets. Token and
+ * account can never be resolved by different calls while Vault changes. */
+int agent_resolve_auth_headers(const agent_t *agent, char *auth, size_t auth_capacity,
+                               char *headers, size_t headers_capacity);
+/* An explicit, actionable reason the last agent_resolve_auth_headers call failed (e.g.
  * codex REAUTH_REQUIRED), or NULL. Lets the delegate/chat error path surface a
  * remedy instead of a generic provider 401 (D6). Thread-local to the turn. */
 const char *agent_request_auth_error(void);
@@ -315,7 +318,15 @@ int vault_provider_has_credential(const char *provider_name);
  * connection. The caller must keep the returned credential off the module bus. */
 int agent_codex_oauth_current_token(char *buf, size_t len);
 
-void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len);
+typedef struct
+{
+   char token[MAX_API_KEY_LEN];
+   char account_id[128];
+   char source_digest[65]; /* non-secret original credential lineage, stable across refresh */
+} agent_codex_credentials_t;
+/* Selected Vault connection only; no actor/client-file/default-account fallback.
+ * The returned secret must stay off the module bus and be cleansed by its owner. */
+int agent_codex_connection_credentials(const char *registration, agent_codex_credentials_t *out);
 
 /* Host-owned per-turn Codex credentials. The legacy setter binds the server
  * codex connection. The explicit setter binds the selected registration; token
