@@ -509,14 +509,16 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
                                              const char *role, const char *system_prompt,
                                              const char *user_prompt, int max_tokens,
                                              double temperature, cJSON *initial_messages,
-                                             cJSON **updated_messages, agent_result_t *out);
+                                             cJSON **updated_messages, agent_result_t *out,
+                                             const aimee_request_t *seed,
+                                             aimee_response_t *canonical_out);
 
 int agent_execute_with_tools(const agent_t *agent, const agent_network_t *network,
                              const char *system_prompt, const char *user_prompt, int max_tokens,
                              double temperature, agent_result_t *out)
 {
    return agent_execute_with_tools_internal(agent, network, NULL, system_prompt, user_prompt,
-                                            max_tokens, temperature, NULL, NULL, out);
+                                            max_tokens, temperature, NULL, NULL, out, NULL, NULL);
 }
 
 int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_t *network,
@@ -526,7 +528,8 @@ int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_
 {
    if (!server_session_log_active())
       return agent_execute_with_tools_internal(agent, network, role, system_prompt, user_prompt,
-                                               max_tokens, temperature, NULL, NULL, out);
+                                               max_tokens, temperature, NULL, NULL, out, NULL,
+                                               NULL);
    cJSON *history = NULL, *updated = NULL;
    if (server_session_log_history_load(&history) < 0)
    {
@@ -537,7 +540,8 @@ int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_
       return AGENT_RC_CAPTURE_FAILED;
    }
    int rc = agent_execute_with_tools_internal(agent, network, role, system_prompt, user_prompt,
-                                              max_tokens, temperature, history, &updated, out);
+                                              max_tokens, temperature, history, &updated, out, NULL,
+                                              NULL);
    cJSON_Delete(history);
    if (rc == 0 && updated && server_session_log_history_save(updated))
    {
@@ -557,14 +561,96 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
 {
    return agent_execute_with_tools_internal(agent, network, NULL, system_prompt, user_prompt,
                                             max_tokens, temperature, initial_messages,
-                                            updated_messages, out);
+                                            updated_messages, out, NULL, NULL);
+}
+
+int agent_request_with_tools_supported(const aimee_request_t *request)
+{
+   if (!request || request->n_messages < 1 || request->n_messages > AIMEE_IR_MAX_BLOCKS ||
+       !request->messages)
+      return 0;
+   int content = 0;
+   for (int i = 0; i < request->n_messages; i++)
+   {
+      if (request->messages[i].n_blocks < 0 ||
+          request->messages[i].n_blocks > AIMEE_IR_MAX_BLOCKS ||
+          (request->messages[i].n_blocks && !request->messages[i].blocks))
+         return 0;
+      for (int j = 0; j < request->messages[i].n_blocks; j++)
+      {
+         const aimee_block_t *block = &request->messages[i].blocks[j];
+         if (block->type != AIMEE_BLK_TEXT || (block->text && block->text[0]))
+            content = 1;
+      }
+   }
+   return content &&
+          !(request->n_tools ||
+            (request->tool_choice != AIMEE_TOOL_CHOICE_UNSET &&
+             request->tool_choice != AIMEE_TOOL_CHOICE_AUTO) ||
+            request->n_system > 1 ||
+            (request->n_system && request->system[0].type != AIMEE_BLK_TEXT) || request->thinking ||
+            request->metadata || request->service_tier || request->n_stop || request->has_top_p ||
+            request->has_top_k || request->has_parallel_tool_calls || request->reasoning_summary ||
+            request->reasoning_effort || request->output_format.kind > AIMEE_OUTPUT_TEXT);
+}
+
+int agent_execute_request_with_tools(const agent_t *agent, const agent_network_t *network,
+                                     const char *role, const aimee_request_t *request,
+                                     aimee_response_t *response, agent_result_t *out)
+{
+   if (!agent || !request || !response || !out)
+      return -1;
+   *response = (aimee_response_t){0};
+   memset(out, 0, sizeof *out);
+   /* Runs own the server catalog; unsupported client policy is explicit. */
+   if (!agent_request_with_tools_supported(request) ||
+       (is_chatgpt_provider(agent) && (request->has_max_tokens || request->has_temperature)))
+   {
+      snprintf(out->error, sizeof out->error,
+               "run request contains unsupported execution controls");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   cJSON *messages = cJSON_CreateArray(), *updated = NULL;
+   if (!messages)
+      return -1;
+   for (int i = 0; i < request->n_messages; i++)
+   {
+      cJSON *message = aimee_ir_message_json(&request->messages[i]);
+      if (!message || !cJSON_AddItemToArray(messages, message))
+      {
+         cJSON_Delete(message);
+         cJSON_Delete(messages);
+         return -1;
+      }
+   }
+   char query[4096];
+   aimee_ir_last_user_text(request, query, sizeof query);
+   int rc = agent_execute_with_tools_internal(
+       agent, network, role, request->n_system ? request->system[0].text : NULL,
+       query[0] ? query : "Continue the admitted conversation.",
+       request->has_max_tokens ? request->max_tokens : 0,
+       request->has_temperature ? request->temperature : 0.3, messages, &updated, out, request,
+       response);
+   if (!rc && (!updated || server_session_log_history_save(updated)))
+   {
+      out->success = 0;
+      snprintf(out->error, sizeof out->error, "canonical run checkpoint failed");
+      rc = AGENT_RC_CAPTURE_FAILED;
+   }
+   if (rc)
+      aimee_response_free(response);
+   cJSON_Delete(updated);
+   cJSON_Delete(messages);
+   return rc;
 }
 
 static int agent_execute_with_tools_internal(const agent_t *agent, const agent_network_t *network,
                                              const char *role, const char *system_prompt,
                                              const char *user_prompt, int max_tokens,
                                              double temperature, cJSON *initial_messages,
-                                             cJSON **updated_messages, agent_result_t *out)
+                                             cJSON **updated_messages, agent_result_t *out,
+                                             const aimee_request_t *seed,
+                                             aimee_response_t *canonical_out)
 {
    if (updated_messages)
       *updated_messages = NULL;
@@ -609,6 +695,12 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
       }
       if (adapter)
       {
+         if (seed)
+         {
+            snprintf(out->error, sizeof out->error,
+                     "native harness cannot adopt the complete run history");
+            return AGENT_RC_CONTEXT_REFUSED;
+         }
          if (wire_fence_external_backend() != 0)
          {
             snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
@@ -802,8 +894,9 @@ native_provider_http:
       return -1;
    }
    /* System context is assembled per request, never persisted in the session. */
-   cJSON *user_msg = agent_session_text_message("user", user_prompt);
-   if (!user_msg || !cJSON_AddItemToArray(messages, user_msg))
+   cJSON *user_msg = seed ? NULL : agent_session_text_message("user", user_prompt);
+   if ((!seed && (!user_msg || !cJSON_AddItemToArray(messages, user_msg))) ||
+       (seed && server_session_log_history_save(messages)))
    {
       cJSON_Delete(user_msg);
       cJSON_Delete(messages);
@@ -823,6 +916,7 @@ native_provider_http:
    int turn = 0;
    int total_calls = 0;
    int successful_tool_calls = 0;
+   long canonical_usage[5] = {0};
    int api_call_count = 0; /* cumulative provider API calls; published via heartbeat */
    int final_instruction_added = 0;
    int final_tool_retry_count = 0;
@@ -1529,10 +1623,28 @@ native_provider_http:
       }
 
       /* Accumulate tokens */
-      out->prompt_tokens += response.usage_in;
-      out->completion_tokens += response.usage_out;
-      out->cache_write_tokens += response.usage_cache_write;
-      out->cache_read_tokens += response.usage_cache_read;
+      const long counts[5] = {response.usage_in, response.usage_out, response.usage_cache_write,
+                              response.usage_cache_read, response.usage_reasoning};
+      const long usage_limit = LONG_MAX > 9007199254740991LL ? 9007199254740991LL : LONG_MAX;
+      int usage_overflow = 0;
+      for (int i = 0; i < 5; i++)
+         if (counts[i] < 0 || counts[i] > usage_limit - canonical_usage[i])
+            usage_overflow = 1;
+      if (usage_overflow)
+      {
+         delegate_response_release(&response, response_text, tool_arguments, call_count);
+         delegate_capture_stop(out, &capture_failed);
+         snprintf(out->error, sizeof out->error, "aggregate usage exceeds canonical output range");
+         break;
+      }
+      for (int i = 0; i < 5; i++)
+         canonical_usage[i] += counts[i];
+      /* Compatibility counters have an int boundary. The typed response and
+       * canonical per-call observations retain the complete exact counts. */
+      out->prompt_tokens = canonical_usage[0] > INT_MAX ? INT_MAX : (int)canonical_usage[0];
+      out->completion_tokens = canonical_usage[1] > INT_MAX ? INT_MAX : (int)canonical_usage[1];
+      out->cache_write_tokens = canonical_usage[2] > INT_MAX ? INT_MAX : (int)canonical_usage[2];
+      out->cache_read_tokens = canonical_usage[3] > INT_MAX ? INT_MAX : (int)canonical_usage[3];
 
       /* XML tool-call rescue: models without native function-calling embed
        * <tool_call>...</tool_call> blocks in their text. The entry adapter owns
@@ -1578,6 +1690,11 @@ native_provider_http:
                response_text = NULL;
                out->rescue_recoveries++;
                out->success = 1;
+               if (canonical_out)
+               {
+                  *canonical_out = response;
+                  response = (aimee_response_t){0};
+               }
                delegate_response_release(&response, response_text, tool_arguments, call_count);
                break;
             }
@@ -1663,7 +1780,12 @@ native_provider_http:
          /* Final text response */
          if (response_text)
          {
-            if (liveness_is_degenerate_response(response_text))
+            int visible_media = 0;
+            for (int i = 0; canonical_out && i < response.n_content; i++)
+               if (response.content[i].type == AIMEE_BLK_IMAGE ||
+                   response.content[i].type == AIMEE_BLK_DOCUMENT)
+                  visible_media = 1;
+            if (!visible_media && liveness_is_degenerate_response(response_text))
             {
                if (total_calls == 0 && agent_session_retry_degenerate_response(
                                            messages, &turn, &degenerate_retry_count))
@@ -1671,7 +1793,8 @@ native_provider_http:
                   delegate_response_release(&response, response_text, tool_arguments, call_count);
                   continue;
                }
-               /* Empty or punctuation-only response — replace with explicit failure diagnostic. */
+               /* Empty or punctuation-only response — replace with explicit failure diagnostic.
+                */
                char diag[512];
                liveness_format_empty_diagnostic(agent->name, diag, sizeof(diag));
                free(response_text);
@@ -1719,6 +1842,11 @@ native_provider_http:
             }
             out->success = 0;
             snprintf(out->error, sizeof(out->error), "no content in final response");
+         }
+         if (out->success && canonical_out)
+         {
+            *canonical_out = response;
+            response = (aimee_response_t){0};
          }
          delegate_response_release(&response, response_text, tool_arguments, call_count);
          break;
@@ -2199,6 +2327,14 @@ ir_capture_failed:
                "low confidence (%d) after %d tool calls", out->confidence, out->tool_calls);
    }
 
+   if (out->success && canonical_out)
+   {
+      canonical_out->usage_in = canonical_usage[0];
+      canonical_out->usage_out = canonical_usage[1];
+      canonical_out->usage_cache_write = canonical_usage[2];
+      canonical_out->usage_cache_read = canonical_usage[3];
+      canonical_out->usage_reasoning = canonical_usage[4];
+   }
    if (out->success && updated_messages)
       *updated_messages = cJSON_Duplicate(messages, 1);
 

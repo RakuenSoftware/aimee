@@ -9,14 +9,10 @@
  * the server_http translation unit and its unit test (which injects a stub
  * handler instead).
  *
- * /v1/chat/completions supports SSE streaming via chat_stream_handler (the
- * server_http stream seam); /v1/completions and /v1/responses are still
- * non-streaming and reject "stream":true. Streaming computes the full
- * completion, then emits it as chat.completion.chunk deltas (provider-
- * incremental token streaming is a follow-up). The handler runs on the HTTP
- * listener thread, which serves one connection at a time, so a completion
- * blocks that listener for its duration — acceptable for the local
- * single-owner surface this first cut targets. */
+ * Native wire formats cross translation at ingress/egress. Streaming routes
+ * render canonical responses through the HTTP SSE seam. Async /v1/runs owns
+ * the selected registration and complete canonical input; its bounded live
+ * records expose the durable session reference. */
 #include "server_http.h"
 #include "openai_shape.h"
 #include "ingress_preinject.h"
@@ -35,6 +31,7 @@
 #include "config.h" /* legacy_config_record, legacy_config_read */
 #include "agent_config.h"
 #include "agent_exec.h"
+#include "agent_request_build.h"
 #include "agent_protocol.h" /* message_history_repair */
 #include "agent_response_projection.h"
 #include <aimee/ir/session_event.h>
@@ -61,6 +58,8 @@
 #include "token_tracker.h"
 #include "token_audit.h" /* db1_token_audit_insert for the avoided-turn row */
 #include <pthread.h>
+#include <openssl/crypto.h>
+#include <limits.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -69,13 +68,6 @@
 
 #define OPENAI_CHAT_MAX_TOKENS  2048
 #define OPENAI_CHAT_TEMPERATURE 0.7
-
-/* Legacy /v1/runs still accepts the Responses token-cap spelling. */
-static int responses_request_max_tokens(const char *body)
-{
-   int legacy = openai_request_int(body, "max_tokens", 0, 32768);
-   return openai_request_int(body, "max_output_tokens", legacy, 32768);
-}
 
 /* Record a dedup cache hit as a non-billable usage_kind=avoided audit row: the
  * provider call was skipped, so the avoided estimated cost is logged separately
@@ -1370,311 +1362,316 @@ done:
    return 0;
 }
 
-/* Async /v1/runs execution. POST enqueues a background worker and returns the
- * `queued` run immediately; the worker runs inference off the listener thread,
- * publishes live events + status into the runs store, and honors cancellation
- * at the step boundary. There is no provider-incremental token streaming yet, so
- * output deltas are emitted in one batch once the (blocking) step returns —
- * still off-thread, and preceded by a live `response.in_progress` event so
- * subscribers see progress before completion. */
+/* Async inference owns canonical input and a selected registration. The live
+ * run store is an output projection; model history remains in the session log. */
 #define RUN_JSON_CAP (256 * 1024)
-#define RUN_DELTA    80
-
 typedef struct
 {
-   char run_id[64];
-   char model[64];
-   char *prompt; /* heap; owned by the worker, freed there */
-   double temperature;
-   int max_tokens;
+   char run_id[128], canonical_session[128];
+   agent_t selected;
+   aimee_request_t request;
+   request_context_snapshot_t owner;
    long created;
-   /* Request context captured at enqueue time (#3): the worker runs on a
-    * separate thread, so the request-thread's context is snapshotted here and
-    * re-established on the worker before the run, giving the run's audit rows the
-    * originating request id / principal / source. */
-   request_context_t reqctx;
-   int has_reqctx;
+   atomic_int cancel, finished;
 } run_job_t;
 
-/* Build a run object with no output text at the given status into buf. Returns
- * the pointer (buf) on success or "{}" if it does not fit. */
-static const char *run_status_json(const run_job_t *j, const char *status, char *buf, int cap)
+static void run_job_free(run_job_t *job)
 {
-   return openai_format_run(j->run_id, j->model, "", j->created, 0, 0, 0, status, buf, cap) > 0
-              ? buf
-              : "{}";
+   if (!job)
+      return;
+   aimee_request_free(&job->request);
+   request_context_snapshot_clear(&job->owner);
+   OPENSSL_cleanse(job, sizeof *job);
+   free(job);
 }
 
-/* Tool-event hook for /v1/runs: append a `tool_call.started` /
- * `tool_call.completed` event (with the tool name) to the run's event stream as
- * each tool fires during the (blocking) turn. ud is the run_id. */
-static void runs_tool_event_cb(const char *phase, const char *name, void *ud)
+static cJSON *run_object(const run_job_t *job, const char *status, const aimee_response_t *response,
+                         const char *error)
 {
-   const char *run_id = (const char *)ud;
-   char ev[48];
-   snprintf(ev, sizeof(ev), "tool_call.%s", phase ? phase : "");
-   cJSON *f = cJSON_CreateObject();
-   cJSON_AddStringToObject(f, "type", ev);
-   cJSON_AddStringToObject(f, "name", name ? name : "");
-   char *frame = cJSON_PrintUnformatted(f);
-   if (frame)
-   {
-      openai_runs_store_append_event(run_id, ev, frame);
-      free(frame);
-   }
-   cJSON_Delete(f);
-}
-
-static void *run_job_worker(void *arg)
-{
-   run_job_t *j = (run_job_t *)arg;
-   char *buf = (char *)malloc(RUN_JSON_CAP);
-   if (!buf)
-   {
-      free(j->prompt);
-      free(j);
+   aimee_response_t empty = {0};
+   const char *model = job->request.model ? job->request.model : job->selected.name;
+   cJSON *object = aimee_openai_render_response(response ? response : &empty, job->run_id, model,
+                                                job->created, 1);
+   if (!object)
       return NULL;
-   }
-
-   /* Cancelled before we even start. */
-   if (openai_runs_store_cancel_requested(j->run_id))
+   cJSON_ReplaceItemInObjectCaseSensitive(object, "object", cJSON_CreateString("run"));
+   if (status)
+      cJSON_ReplaceItemInObjectCaseSensitive(object, "status", cJSON_CreateString(status));
+   if (job->canonical_session[0])
+      cJSON_AddStringToObject(object, "canonical_session_id", job->canonical_session);
+   if (error && error[0])
    {
-      openai_runs_store_append_event(j->run_id, "response.completed",
-                                     run_status_json(j, "cancelled", buf, RUN_JSON_CAP));
-      openai_runs_store_finalize(j->run_id, OPENAI_RUN_CANCELLED,
-                                 run_status_json(j, "cancelled", buf, RUN_JSON_CAP));
-      goto done;
+      cJSON *detail = cJSON_AddObjectToObject(object, "error");
+      cJSON_AddStringToObject(detail, "code", "server_error");
+      cJSON_AddStringToObject(detail, "message", error);
    }
-
-   openai_runs_store_set_status(j->run_id, OPENAI_RUN_IN_PROGRESS);
-   openai_runs_store_update_json(j->run_id, run_status_json(j, "in_progress", buf, RUN_JSON_CAP));
-   openai_runs_store_append_event(j->run_id, "response.in_progress",
-                                  run_status_json(j, "in_progress", buf, RUN_JSON_CAP));
-
-   /* Registry selection validates the requested model, but the tool loop
-    * routes using a complete configuration. Load it before handing it off. */
-   agent_config_t acfg = {0};
-   agent_t agbuf;
-   agent_t *ag = stream_pick_agent(&agbuf, j->model) == 0 ? &agbuf : NULL;
-   if (agent_load_config(&acfg) != 0 || !ag)
+   return object;
+}
+static char *run_status_json(const run_job_t *job, const char *status, const char *error)
+{
+   cJSON *object = run_object(job, status, NULL, error);
+   char *json = object ? cJSON_PrintUnformatted(object) : NULL;
+   cJSON_Delete(object);
+   return json;
+}
+static void run_finish_status(run_job_t *job, openai_run_status_t status, const char *error)
+{
+   char *json = run_status_json(job, openai_run_status_str(status), error);
+   openai_runs_store_append_event(job->run_id,
+                                  status == OPENAI_RUN_FAILED ? "error" : "response.completed",
+                                  json ? json : "{}");
+   openai_runs_store_finalize(job->run_id, status, json ? json : "{}");
+   free(json);
+}
+static void runs_tool_event_cb(const char *phase, const char *name, void *context)
+{
+   run_job_t *job = context;
+   char event[48];
+   snprintf(event, sizeof event, "tool_call.%s", phase ? phase : "");
+   cJSON *object = cJSON_CreateObject();
+   cJSON_AddStringToObject(object, "type", event);
+   cJSON_AddStringToObject(object, "name", name ? name : "");
+   char *json = cJSON_PrintUnformatted(object);
+   if (json)
+      openai_runs_store_append_event(job->run_id, event, json);
+   free(json);
+   cJSON_Delete(object);
+}
+static void run_emit(void *context, const char *event, const char *json)
+{
+   run_job_t *job = context;
+   openai_runs_store_append_event(job->run_id, event, json);
+   /* Preserve the existing activity event at this explicit native output
+    * boundary, now carrying the complete native message instead of flat text. */
+   if (!strcmp(event, "response.output_item.done"))
    {
-      openai_runs_store_append_event(j->run_id, "error", "{\"error\":\"no agent configured\"}");
-      openai_runs_store_finalize(j->run_id, OPENAI_RUN_FAILED,
-                                 run_status_json(j, "failed", buf, RUN_JSON_CAP));
-      goto done;
-   }
-
-   /* A worker cannot borrow session_id()'s process-parent fallback: the
-    * governed-action journal requires a durable session owned by this caller.
-    * Allocate independently per run, including concurrent callers. */
-   if (j->has_reqctx && j->reqctx.principal[0])
-   {
-      char sid[33];
-      if (platform_random_hex(sid, 32) != 0 ||
-          db1_server_session_create(sid, "openai-run", j->reqctx.principal) != 0)
+      cJSON *frame = cJSON_Parse(json);
+      cJSON *item = cJSON_GetObjectItemCaseSensitive(frame, "item");
+      const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "type"));
+      if (kind && !strcmp(kind, "message"))
       {
-         openai_runs_store_append_event(j->run_id, "error",
-                                        "{\"error\":\"run session owner unavailable\"}");
-         openai_runs_store_finalize(j->run_id, OPENAI_RUN_FAILED,
-                                    run_status_json(j, "failed", buf, RUN_JSON_CAP));
-         goto done;
+         cJSON *completed = cJSON_CreateObject();
+         cJSON_AddStringToObject(completed, "type", "message.completed");
+         cJSON_AddItemToObject(completed, "message", cJSON_Duplicate(item, 1));
+         char *wire = cJSON_PrintUnformatted(completed);
+         if (wire)
+            openai_runs_store_append_event(job->run_id, "message.completed", wire);
+         free(wire);
+         cJSON_Delete(completed);
       }
-      session_id_set_override(sid);
+      cJSON_Delete(frame);
    }
-
-   agent_result_t result;
-   memset(&result, 0, sizeof(result));
-   /* /v1/runs is the agentic endpoint (vs. the stateless /v1/chat/completions):
-    * run tool-enabled so the run can use aimee's tools and emit tool_call events
-    * (AC #7). agent_run_with_tools self-preps the provider catalog and drives the
-    * tool loop; the tool-event hook fires from dispatch_tool_call_ctx within it.
-    * (ag was validated above as a configured agent; agent_run_with_tools routes
-    * by role within the same config — the model field is informational here.) */
-   (void)ag;
-   agent_tools_set_tool_event_cb(runs_tool_event_cb, (void *)j->run_id);
-   /* Re-establish the originating request context on this worker thread (#3) so
-    * the run's audit rows carry the request id / principal captured at enqueue.
-    * Prefer the request-supplied source over the constant when the proxy stamped
-    * one. */
-   if (j->has_reqctx)
-      request_context_set(&j->reqctx);
-   /* /v1/runs drives the agent loop (which logs via agent_log_call); tag that
-    * row as ingress so the run's spend is distinguishable from internal agent
-    * execution, without writing a second row. */
-   agent_set_ingress_source((j->has_reqctx && j->reqctx.source[0]) ? j->reqctx.source
-                                                                   : "openai-ingress");
-   int erc = agent_run_with_tools(&acfg, "execute", NULL, j->prompt, j->max_tokens, &result);
-   agent_set_ingress_source("");
-   if (j->has_reqctx)
+}
+static void *run_cancel_watch(void *context)
+{
+   run_job_t *job = context;
+   while (!atomic_load(&job->finished))
    {
-      ingress_preinject_finish_sources();
-      request_context_clear();
+      openai_run_status_t status;
+      if (openai_runs_store_cancel_requested(job->run_id) ||
+          !openai_runs_store_status(job->run_id, &status))
+         atomic_store(&job->cancel, 1);
+      struct timespec pause = {0, 100000000L};
+      nanosleep(&pause, NULL);
+   }
+   return NULL;
+}
+static void *run_job_worker(void *context)
+{
+   run_job_t *job = context;
+   agent_result_t result = {0};
+   aimee_response_t response = {0};
+   pthread_t watcher;
+   int watching = 0;
+   aimee_ir_session_begin_task();
+   request_context_restore(&job->owner);
+   server_http_identity_bind_request_owner(request_context_get());
+   agent_set_request_vault_principal(job->owner.value.vault_principal);
+   agent_set_request_codex_creds(NULL, NULL);
+   agent_set_request_cancel(&job->cancel);
+   if (openai_runs_store_cancel_requested(job->run_id))
+   {
+      run_finish_status(job, OPENAI_RUN_CANCELLED, NULL);
+      goto done;
+   }
+   char *started = run_status_json(job, "in_progress", NULL);
+   if (!started)
+   {
+      run_finish_status(job, OPENAI_RUN_FAILED, "could not allocate run status");
+      goto done;
+   }
+   openai_runs_store_set_status(job->run_id, OPENAI_RUN_IN_PROGRESS);
+   openai_runs_store_update_json(job->run_id, started);
+   openai_runs_store_append_event(job->run_id, "response.in_progress", started);
+   free(started);
+
+   char session[33];
+   if (platform_random_hex(session, 32) ||
+       db1_server_session_create(session, "openai-run", job->owner.value.vault_principal))
+   {
+      run_finish_status(job, OPENAI_RUN_FAILED, "run session owner unavailable");
+      goto done;
+   }
+   session_id_set_override(session);
+   agent_set_request_session(session);
+   agent_config_t *config = calloc(1, sizeof *config);
+   if (!config)
+   {
+      run_finish_status(job, OPENAI_RUN_FAILED, "could not allocate run configuration");
+      goto done;
+   }
+   if (agent_load_config(config) || pthread_create(&watcher, NULL, run_cancel_watch, job))
+   {
+      free(config);
+      run_finish_status(job, OPENAI_RUN_FAILED, "could not prepare run execution");
+      goto done;
+   }
+   watching = 1;
+   agent_tools_set_tool_event_cb(runs_tool_event_cb, job);
+   agent_set_ingress_source(job->owner.value.source[0] ? job->owner.value.source
+                                                       : "openai-ingress");
+   int rc = agent_run_request_with_tools(config, &job->selected, &job->request, &response, &result);
+   OPENSSL_cleanse(config, sizeof *config);
+   free(config);
+   snprintf(job->canonical_session, sizeof job->canonical_session, "%s",
+            result.canonical_session_id);
+   if (atomic_load(&job->cancel))
+   {
+      run_finish_status(job, OPENAI_RUN_CANCELLED, NULL);
+      goto done;
+   }
+   if (rc || !result.success)
+   {
+      run_finish_status(job, OPENAI_RUN_FAILED, result.error[0] ? result.error : "run failed");
+      goto done;
+   }
+   cJSON *object = run_object(job, NULL, &response, NULL);
+   char *final = object ? cJSON_PrintUnformatted(object) : NULL;
+   cJSON_Delete(object);
+   if (!final || strlen(final) >= RUN_JSON_CAP)
+   {
+      free(final);
+      run_finish_status(
+          job, OPENAI_RUN_FAILED,
+          "run output exceeds the live response boundary; canonical history retained");
+      goto done;
+   }
+   if (aimee_openai_emit_responses_tail(
+           &response, job->run_id, job->request.model ? job->request.model : job->selected.name,
+           job->created, run_emit, job))
+   {
+      free(final);
+      run_finish_status(job, OPENAI_RUN_FAILED, "canonical run output could not be rendered");
+      goto done;
+   }
+   openai_runs_store_finalize(job->run_id,
+                              response.stop_reason == AIMEE_STOP_MAX_TOKENS ? OPENAI_RUN_INCOMPLETE
+                                                                            : OPENAI_RUN_COMPLETED,
+                              final);
+   free(final);
+done:
+   if (watching)
+   {
+      atomic_store(&job->finished, 1);
+      pthread_join(watcher, NULL);
    }
    agent_tools_set_tool_event_cb(NULL, NULL);
-
-   /* Honor a cancel requested while the (blocking) step ran. */
-   if (openai_runs_store_cancel_requested(j->run_id))
-   {
-      free(result.response);
-      openai_runs_store_append_event(j->run_id, "response.completed",
-                                     run_status_json(j, "cancelled", buf, RUN_JSON_CAP));
-      openai_runs_store_finalize(j->run_id, OPENAI_RUN_CANCELLED,
-                                 run_status_json(j, "cancelled", buf, RUN_JSON_CAP));
-      goto done;
-   }
-
-   if (erc != 0 || !result.response)
-   {
-      /* Owner/provider diagnostics can contain quotes, newlines and Unicode.
-       * Serialize the complete string rather than interpolating/truncating JSON. */
-      cJSON *failure = cJSON_CreateObject();
-      cJSON_AddStringToObject(failure, "error", result.error[0] ? result.error : "run failed");
-      char *failure_json = cJSON_PrintUnformatted(failure);
-      openai_runs_store_append_event(j->run_id, "error",
-                                     failure_json ? failure_json : "{\"error\":\"run failed\"}");
-      free(failure_json);
-      cJSON_Delete(failure);
-      openai_runs_store_finalize(j->run_id, OPENAI_RUN_FAILED,
-                                 run_status_json(j, "failed", buf, RUN_JSON_CAP));
-      free(result.response);
-      goto done;
-   }
-
-   /* Success: emit the output as delta events, then a terminal completed frame. */
-   {
-      char item_id[160];
-      snprintf(item_id, sizeof(item_id), "%s-msg", j->run_id);
-      const char *txt = result.response;
-      size_t n = strlen(txt);
-      for (size_t off = 0; off < n; off += RUN_DELTA)
-      {
-         char seg[RUN_DELTA + 1];
-         size_t take = (n - off < RUN_DELTA) ? (n - off) : RUN_DELTA;
-         memcpy(seg, txt + off, take);
-         seg[take] = '\0';
-         char frame[RUN_DELTA * 6 + 256];
-         if (openai_format_responses_delta(item_id, seg, frame, sizeof(frame)) > 0)
-            openai_runs_store_append_event(j->run_id, "response.output_text.delta", frame);
-      }
-      /* message.completed: the full assistant message is now available (the AC's
-       * terminal message event, distinct from the run-level response.completed). */
-      cJSON *mc = cJSON_CreateObject();
-      cJSON_AddStringToObject(mc, "type", "message.completed");
-      cJSON_AddStringToObject(mc, "item_id", item_id);
-      cJSON *msg = cJSON_AddObjectToObject(mc, "message");
-      cJSON_AddStringToObject(msg, "role", "assistant");
-      cJSON_AddStringToObject(msg, "content", txt);
-      char *mframe = cJSON_PrintUnformatted(mc);
-      if (mframe)
-      {
-         openai_runs_store_append_event(j->run_id, "message.completed", mframe);
-         free(mframe);
-      }
-      cJSON_Delete(mc);
-   }
-   if (openai_format_run(j->run_id, j->model, result.response, j->created, result.prompt_tokens,
-                         result.completion_tokens, result.cache_read_tokens, "completed", buf,
-                         RUN_JSON_CAP) > 0)
-   {
-      openai_runs_store_append_event(j->run_id, "response.completed", buf);
-      openai_runs_store_finalize(j->run_id, OPENAI_RUN_COMPLETED, buf);
-   }
-   else
-   {
-      openai_runs_store_finalize(j->run_id, OPENAI_RUN_FAILED,
-                                 "{\"object\":\"run\",\"status\":\"failed\"}");
-   }
-   free(result.response);
-
-done:
+   agent_set_ingress_source("");
+   ingress_preinject_finish_sources();
+   agent_set_request_cancel(NULL);
+   agent_set_request_session(NULL);
+   agent_set_request_codex_creds(NULL, NULL);
+   agent_set_request_vault_principal(NULL);
    session_id_clear_override();
-   free(buf);
-   free(j->prompt);
-   free(j);
+   server_http_identity_clear();
+   request_context_clear();
+   aimee_response_free(&response);
+   free(result.response);
+   run_job_free(job);
    return NULL;
 }
 
-/* POST /v1/runs: parse the request, create a `queued` run, spawn the background
- * worker, and return the queued run object immediately (the listener thread is
- * never blocked on inference). GET /v1/runs/{id}/events streams the worker's
- * live events; POST /v1/runs/{id}/stop requests cancellation. */
 static int runs_handler(const char *body, char *resp, int cap)
 {
-   char model[64] = "";
-   char prev_id[128] = "";
-   char *prompt = NULL;
-   int stream = 0;
-   if (openai_parse_responses_request(body, model, sizeof(model), &prompt, prev_id, sizeof(prev_id),
-                                      &stream) != 0)
+   run_job_t *job = calloc(1, sizeof *job);
+   if (!job)
+      return 500;
+   char error[512] = "invalid canonical run request";
+   request_context_snapshot(&job->owner);
+   if (!job->owner.active || job->owner.value.vault_transport == ATTEST_NONE ||
+       !job->owner.value.vault_principal[0])
    {
-      openai_format_error(resp, cap, "invalid_request_error",
-                          "invalid run request: expected non-empty `input`");
-      return 400;
+      run_job_free(job);
+      openai_format_error(resp, cap, "permission_error", "authenticated run owner required");
+      return 403;
    }
-
-   /* Validate an agent is configured synchronously so callers still get 503 fast. */
-   agent_t agbuf;
-   agent_t *ag = stream_pick_agent(&agbuf, model) == 0 ? &agbuf : NULL;
-   if (!ag)
+   if (responses_admit_request(body, &job->request, error, sizeof error))
+      goto invalid;
+   /* The run entry retains its published max_tokens alias in canonical form.
+    * Conflicting spellings refuse instead of silently selecting a different cap. */
+   long alias = -1;
+   if (aimee_ir_read_usage(job->request.raw, "max_tokens", &alias) || alias == 0 ||
+       alias > INT_MAX ||
+       (alias >= 0 && job->request.has_max_tokens && alias != job->request.max_tokens))
    {
-      free(prompt);
+      snprintf(error, sizeof error, "invalid or conflicting run max_tokens");
+      goto invalid;
+   }
+   if (alias > 0)
+   {
+      job->request.has_max_tokens = 1;
+      job->request.max_tokens = (int)alias;
+   }
+   if (!agent_request_with_tools_supported(&job->request))
+   {
+      snprintf(error, sizeof error, "run request contains unsupported execution controls");
+      goto invalid;
+   }
+   if (stream_pick_agent(&job->selected, job->request.model))
+   {
+      run_job_free(job);
       openai_format_error_code(resp, cap, "server_error", "no agent configured",
                                AIMEE_ERR_NO_PRIMARY);
       return 503;
    }
-
-   double temperature = openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0);
-   int max_tokens = responses_request_max_tokens(body);
-
-   long created = (long)time(NULL);
-   static atomic_ulong g_run_seq = 0; /* connections run concurrently; atomic */
-   char id[64];
-   snprintf(id, sizeof(id), "run_%ld_%lu", created, atomic_fetch_add(&g_run_seq, 1) + 1);
-
-   /* Queued snapshot returned to the caller and stored for GET /v1/runs/{id}. */
-   int len = openai_format_run(id, model, "", created, 0, 0, 0, "queued", resp, cap);
-   if (len < 0)
+   if (is_chatgpt_provider(&job->selected) &&
+       (job->request.has_max_tokens || job->request.has_temperature))
    {
-      free(prompt);
-      openai_format_error(resp, cap, "server_error", "run did not fit the buffer");
+      snprintf(error, sizeof error,
+               "selected Responses backend does not support run output limits or temperature");
+      goto invalid;
+   }
+   job->created = (long)time(NULL);
+   static atomic_ulong sequence;
+   snprintf(job->run_id, sizeof job->run_id, "run_%s_%ld_%lu", openai_runs_store_generation(),
+            job->created, atomic_fetch_add(&sequence, 1) + 1);
+   atomic_init(&job->cancel, 0);
+   atomic_init(&job->finished, 0);
+   char *queued = run_status_json(job, "queued", NULL);
+   if (!queued || strlen(queued) >= (size_t)cap ||
+       !openai_runs_store_create_owned(job->run_id, queued, job->owner.value.vault_principal))
+   {
+      free(queued);
+      run_job_free(job);
+      openai_format_error(resp, cap, "server_error", "could not create run");
       return 500;
    }
-   openai_runs_store_create(id, resp);
-
-   run_job_t *j = (run_job_t *)calloc(1, sizeof(*j));
-   if (!j)
+   snprintf(resp, (size_t)cap, "%s", queued);
+   free(queued);
+   pthread_t worker;
+   if (pthread_create(&worker, NULL, run_job_worker, job))
    {
-      free(prompt);
-      openai_runs_store_finalize(id, OPENAI_RUN_FAILED, resp);
-      return 200; /* resp still holds the queued object */
+      run_finish_status(job, OPENAI_RUN_FAILED, "could not start run worker");
+      run_job_free(job);
+      openai_format_error(resp, cap, "server_error", "could not start run worker");
+      return 500;
    }
-   snprintf(j->run_id, sizeof(j->run_id), "%s", id);
-   snprintf(j->model, sizeof(j->model), "%s", model);
-   j->prompt = prompt; /* ownership moves to the worker */
-   j->temperature = temperature;
-   j->max_tokens = max_tokens;
-   j->created = created;
-   /* Snapshot the request context now, on the request thread, so the worker can
-    * re-establish it (capture-at-enqueue, #3). */
-   {
-      const request_context_t *rc = request_context_get();
-      if (rc)
-      {
-         j->reqctx = *rc;
-         j->has_reqctx = 1;
-      }
-   }
-
-   pthread_t th;
-   if (pthread_create(&th, NULL, run_job_worker, j) != 0)
-   {
-      free(j->prompt);
-      free(j);
-      openai_runs_store_finalize(id, OPENAI_RUN_FAILED, resp);
-      return 200;
-   }
-   pthread_detach(th);
-   return 200; /* resp already holds the queued run object */
+   pthread_detach(worker);
+   return 200;
+invalid:
+   run_job_free(job);
+   openai_format_error(resp, cap, "invalid_request_error", error);
+   return 400;
 }
 
 void openai_chat_register(void)

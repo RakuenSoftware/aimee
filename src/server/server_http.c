@@ -812,6 +812,8 @@ int route_runs_get(const char *id, char *resp, int cap)
 {
    if (!id || !id[0])
       return err_json(resp, cap, 400, "missing run id");
+   if (openai_runs_store_access(id, server_http_identity_principal()) == 0)
+      return err_json(resp, cap, 404, "no such run");
    if (!openai_runs_store_get(id, resp, (size_t)cap))
       return run_missing_response(id, resp, cap);
    return 200;
@@ -825,6 +827,8 @@ int route_runs_stop(const char *id, char *resp, int cap)
 {
    if (!id || !id[0])
       return err_json(resp, cap, 400, "missing run id");
+   if (openai_runs_store_access(id, server_http_identity_principal()) == 0)
+      return err_json(resp, cap, 404, "no such run");
    openai_run_status_t st;
    if (!openai_runs_store_status(id, &st))
       return run_missing_response(id, resp, cap);
@@ -1186,6 +1190,11 @@ static void handle_cli_session_stream(int fd, const char *id, const char *reques
  * valid op-runs return 410; arbitrary unknown ids return 404. */
 static void handle_run_events(int fd, const char *id, const char *request_id)
 {
+   if (openai_runs_store_access(id, server_http_identity_principal()) == 0)
+   {
+      send_response(fd, 404, "{\"error\":\"no such run\"}", request_id);
+      return;
+   }
    openai_run_status_t st0;
    if (!openai_runs_store_status(id, &st0))
    {

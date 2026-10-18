@@ -205,9 +205,11 @@ static const char *admission_ctx(const agent_t *ag, char *buf, size_t n)
  * Slot safety: there is no non-local exit between acquire and release — the
  * executors (agent_execute / agent_execute_with_tools_for_role) return normally
  * (C has no exceptions), so the release always runs and a slot is never leaked. */
-int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char *role,
-                       const char *system_prompt, const char *user_prompt, int max_tokens,
-                       double temperature, int use_tools, agent_result_t *out)
+static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t *net,
+                                       const char *role, const char *system_prompt,
+                                       const char *user_prompt, int max_tokens, double temperature,
+                                       int use_tools, agent_result_t *out,
+                                       const aimee_request_t *request, aimee_response_t *response)
 {
    if (!ag || !out)
       return -1;
@@ -267,13 +269,15 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
    if (durable_job_id > 0)
       db1_agent_job_set_agent(durable_job_id, ag->name);
    server_session_log_t *log_scope = NULL;
-   int capture = server_session_log_begin(role, user_prompt, &log_scope);
+   int capture = server_session_log_begin(role, request ? NULL : user_prompt, &log_scope);
    int rc;
    if (capture < 0)
    {
       rc = AGENT_RC_CAPTURE_FAILED;
       snprintf(out->error, sizeof out->error, "cannot admit canonical session capture");
    }
+   else if (request)
+      rc = agent_execute_request_with_tools(ag, net, role, request, response, out);
    else
       rc = use_tools ? agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt,
                                                          max_tokens, temperature, out)
@@ -318,6 +322,14 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
                 out->error[0] ? out->error : "(no error text)");
    }
    return rc;
+}
+
+int agent_dispatch_one(const agent_t *agent, const agent_network_t *network, const char *role,
+                       const char *system, const char *prompt, int max_tokens, double temperature,
+                       int use_tools, agent_result_t *out)
+{
+   return agent_dispatch_one_internal(agent, network, role, system, prompt, max_tokens, temperature,
+                                      use_tools, out, NULL, NULL);
 }
 
 /* Per-thread tool-mode override for agent_run_ex; see agent_run_force_no_tools. */
@@ -601,7 +613,9 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
 
 static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
                                          const char *system_prompt, const char *user_prompt,
-                                         int max_tokens, int enforce_writes, agent_result_t *out)
+                                         int max_tokens, int enforce_writes, agent_result_t *out,
+                                         const agent_t *selected, const aimee_request_t *request,
+                                         aimee_response_t *response)
 {
    memset(out, 0, sizeof(*out));
 
@@ -620,7 +634,14 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
                                     strlen(user_prompt ? user_prompt : "") + 3) /
                                    4);
    cfg->route_output_tokens = max_tokens > 0 ? max_tokens : 4096;
-   agent_t *ag = agent_route(cfg, role);
+   agent_t pinned;
+   if (selected)
+   {
+      pinned = *selected;
+      pinned.fallback_model[0] = 0;
+   }
+   int route_pinned = selected || cfg->route_pinned;
+   agent_t *ag = selected ? &pinned : agent_route(cfg, role);
    if (!ag)
    {
       agent_route_failure_message(role, out->error, sizeof(out->error));
@@ -683,9 +704,10 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
       ag->write_capable = enforce_writes ? 1 : 0;
    }
 
-   char *hint = (!agent_tools_knowledge_write_allowed() || agent_uses_mistral_delegate_path(ag))
-                    ? NULL
-                    : kb_client_agent_hint_consume(role, user_prompt);
+   char *hint =
+       (request || !agent_tools_knowledge_write_allowed() || agent_uses_mistral_delegate_path(ag))
+           ? NULL
+           : kb_client_agent_hint_consume(role, user_prompt);
    const char *effective_prompt = user_prompt;
    char *enhanced = NULL;
    if (hint)
@@ -702,11 +724,13 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
 
    /* The delegate turn through the single guarded executor (tools enabled): it
     * enforces ag->max_parallel and records provider health. */
-   int rc = agent_dispatch_one(ag, &cfg->network, role, system_prompt, effective_prompt, max_tokens,
-                               0.3, 1 /* use_tools */, out);
+   int rc = agent_dispatch_one_internal(
+       ag, &cfg->network, role, system_prompt, effective_prompt, max_tokens,
+       request && request->has_temperature ? request->temperature : 0.3, 1 /* use_tools */, out,
+       request, response);
    free(enhanced);
 
-   if (!cfg->route_pinned && agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
+   if (!route_pinned && agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
    {
       aimee_log(LOG_INFO, "agent",
                 "delegate agent '%s' retryable/at-limit, trying fallback chain (%d entries)",
@@ -740,7 +764,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
       }
    }
 
-   if (!cfg->route_pinned)
+   if (!route_pinned)
       rc = agent_try_same_tier_fallback(cfg, &ag, role, system_prompt, user_prompt, max_tokens,
                                         enforce_writes, out, rc);
 
@@ -763,7 +787,8 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
 int agent_run_with_tools(agent_config_t *cfg, const char *role, const char *system_prompt,
                          const char *user_prompt, int max_tokens, agent_result_t *out)
 {
-   return agent_run_with_tools_internal(cfg, role, system_prompt, user_prompt, max_tokens, 1, out);
+   return agent_run_with_tools_internal(cfg, role, system_prompt, user_prompt, max_tokens, 1, out,
+                                        NULL, NULL, NULL);
 }
 
 int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
@@ -771,7 +796,7 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
                                        int max_tokens, int enforce_writes, agent_result_t *out)
 {
    return agent_run_with_tools_internal(cfg, role, system_prompt, user_prompt, max_tokens,
-                                        enforce_writes, out);
+                                        enforce_writes, out, NULL, NULL, NULL);
 }
 
 /* The parallel fan-out machinery (parallel_worker, agent_run_parallel) lives in
@@ -2023,4 +2048,19 @@ int agent_get_stats(const char *name, agent_stats_t *out, int max)
       s->total_estimated_cost_usd = rows[i].total_estimated_cost_usd;
    }
    return n;
+}
+
+/* Explicit selected agent and owned canonical input: role policy, admission,
+ * capture and catalog-bound dispatch remain the same owners as other runs. */
+int agent_run_request_with_tools(agent_config_t *config, const agent_t *selected,
+                                 const aimee_request_t *request, aimee_response_t *response,
+                                 agent_result_t *out)
+{
+   if (!config || !selected || !selected->enabled || !request || !response || !out)
+      return -1;
+   char query[4096];
+   aimee_ir_last_user_text(request, query, sizeof query);
+   return agent_run_with_tools_internal(
+       config, "execute", NULL, query[0] ? query : "Continue the admitted conversation.",
+       request->has_max_tokens ? request->max_tokens : 0, 1, out, selected, request, response);
 }

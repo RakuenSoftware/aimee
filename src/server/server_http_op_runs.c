@@ -4,6 +4,7 @@
 #include "server_http_identity.h"
 #include "agent_config.h"
 #include "compute_pool.h"
+#include "server_compute_impl.h"
 #include "openai_runs_store.h"
 #include "roundtable_pipeline_capture.h"
 #include <aimee/ir/session_event.h>
@@ -152,16 +153,19 @@ static void op_run_worker_run(void *arg)
 }
 
 static int submit_op_run_internal(const char *op_method, const char *body_json, uint32_t conn_caps,
-                                  int preflight_caps, char *resp, int cap)
+                                  int preflight_caps, const request_context_snapshot_t *snapshot,
+                                  char *resp, int cap)
 {
    if (!op_method || !op_method[0])
       return err_json(resp, cap, 500, "route has no dispatch method");
-   const request_context_t *owner = request_context_get();
+   const request_context_t *owner = snapshot->active ? &snapshot->value : NULL;
    if (owner && owner->vault_transport != ATTEST_NONE)
       conn_caps &= owner->capabilities;
    uint32_t required = server_capability_for_method(op_method);
    if (preflight_caps && required && (conn_caps & required) == 0)
       return err_json(resp, cap, 403, "forbidden: insufficient capabilities");
+   if (!owner || owner->vault_transport == ATTEST_NONE || !owner->vault_principal[0])
+      return err_json(resp, cap, 403, "an authenticated run owner is required");
    cJSON *req = (body_json && body_json[0]) ? cJSON_Parse(body_json) : cJSON_CreateObject();
    if (!req || !cJSON_IsObject(req))
    {
@@ -204,7 +208,7 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
       return err_json(resp, cap, 500, "out of memory");
 
    char *queued = op_run_snapshot(id, op_method, "queued", created, NULL);
-   if (!queued || !openai_runs_store_create(id, queued))
+   if (!queued || !openai_runs_store_create_owned(id, queued, owner->vault_principal))
    {
       free(queued);
       free(line);
@@ -221,7 +225,7 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
    snprintf(j->run_id, sizeof(j->run_id), "%s", id);
    snprintf(j->op, sizeof(j->op), "%s", op_method);
    j->line = line; /* ownership moves to the worker */
-   request_context_snapshot(&j->request_context);
+   j->request_context = *snapshot;
    if (j->request_context.active)
       j->request_context.value.capabilities = conn_caps;
    j->conn_caps = conn_caps;
@@ -264,13 +268,42 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
    return (n > 0 && n < cap) ? 200 : 200;
 }
 
+/* Capture identity once for both the retained record and the queued worker.
+ * Pipeline callers pass their real connection; HTTP callers inherit ingress
+ * attestation. Display principals and server process identity are never owners. */
+static int submit_op_run_captured(const char *op, const char *body, uint32_t caps,
+                                  const server_conn_t *conn, int preflight, char *resp, int cap)
+{
+   server_conn_t http_conn = {0};
+   if (!conn)
+   {
+      http_conn.capabilities = caps;
+      server_http_identity_apply(&http_conn);
+      conn = &http_conn;
+   }
+   compute_ctx_t captured = {0};
+   compute_ctx_capture_request_context(&captured, conn);
+   int rc = submit_op_run_internal(op, body, captured.conn_caps, preflight,
+                                   &captured.request_context, resp, cap);
+   request_context_snapshot_clear(&captured.request_context);
+   return rc;
+}
+
+int server_http_submit_op_run_owned(const char *op, const char *body, const server_conn_t *conn,
+                                    char *resp, int cap)
+{
+   if (!conn)
+      return err_json(resp, cap, 403, "an authenticated run owner is required");
+   return submit_op_run_captured(op, body, conn->capabilities, conn, 1, resp, cap);
+}
+
 int server_http_submit_op_run(const char *op_method, const char *body_json, uint32_t conn_caps,
                               char *resp, int cap)
 {
-   return submit_op_run_internal(op_method, body_json, conn_caps, 1, resp, cap);
+   return submit_op_run_captured(op_method, body_json, conn_caps, NULL, 1, resp, cap);
 }
 
 int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
 {
-   return submit_op_run_internal(rq->op, rq->body, g_rpc_conn_caps, 0, resp, cap);
+   return submit_op_run_captured(rq->op, rq->body, g_rpc_conn_caps, NULL, 0, resp, cap);
 }

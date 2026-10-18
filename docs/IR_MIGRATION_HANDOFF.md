@@ -8,11 +8,12 @@ The user authorized replacement of #3036 to satisfy the permanent attribution ga
 explicitly requested its retirement. Active work is now on
 [#3038](https://github.com/RakuenSoftware/aimee/pull/3038), branch
 `fix/browser-ir-runtime-personal`, targeting `testing`. It contains all of #3036's migration
-work. Its published checkpoint `6b8d720c0` passes `no-coauthor-trailers` and the renamed
-`Export builds and runtime checks`. Its integration now passes 156/156 in CI, including
-real Docker delegate completion/readback (25 other service-dependent checks skipped).
-The memory release and all four deployment tiers pass; the full sanitizer and script suites
-were still running at this local checkpoint.
+work. Its published checkpoint `07548c7fe` passes all 60 checks, including strict attribution,
+full integration, sanitizers and deployment tiers T1, T2, T2-luks and T3. Integration passes
+156/156 in CI, including real Docker delegate completion/readback (25 other service-dependent
+checks skipped). The earlier note calling all four deployment tiers green on `6b8d720c0`
+was incorrect: the job tool returned only its first page. Full check enumeration confirms
+all 60 pass on `07548c7fe`.
 
 #3036 is closed, its body is empty, and `fix/browser-ir-runtime` was deleted locally and
 remotely. GitHub retains the closed PR record. All older instructions below naming #3036
@@ -847,3 +848,35 @@ receipt-bound feedback to KB. Independently graded learning, synthesis, credenti
 execution, actor-bound native tools, cache-preserving account-bound replay and remaining IR
 consumers remain unfinished. Production .100 remains intentionally disconnected from KB and
 has not been promoted to this migration head.
+
+### 2026-10-18: canonical asynchronous inference runs
+
+`/v1/runs` now admits complete canonical Responses input and pins the selected registration.
+Its governed server tool loop retains ordered roles, media, instructions, sampling and explicit
+output limits, full tool identities/results and exact aggregate typed usage. There is no
+role-transcript flattening or fallback to another model. Unsupported execution controls, client
+catalogs and explicit limit/temperature controls on the Responses/Codex backend refuse before
+execution rather than silently disappearing. The existing bounded live projection exposes the
+private canonical session reference; durable history remains with the session log. Token-limited
+output stays incomplete, and cancellation interrupts an actual in-flight provider request.
+
+Inference and operation run records require their authenticated owner. Read, event and stop routes
+hide foreign records. Generic queued operations use the same captured owner for the record and
+worker; pipeline callers pass their real connection through the existing compute context capture
+owner. A different connection discards inherited caller proof and budget. Pooled worker tests
+verify no previous checkout, credentials, caller proof or budget leaks. CLI polling recognizes
+incomplete as terminal. Five unused input flattening/conversion APIs are removed and guarded
+against reintroduction. The API documentation and its exact memory-boundary disposition are
+reviewed; memory admission remains Go-owned.
+
+Eight affected native fixtures pass (HTTP, dispatch, full agent, session log, OpenAI shape,
+canonical ingress, live run store and CLI polling), including ASan/UBSan with leak detection.
+Full-agent fixtures retain three explicit PostgreSQL-dependent skips. Eight bypass mutation tests
+pass. Server/KB builds pass. Fresh schema ir_integration_runs_final_3038 passes integration
+156/156 with 26 explicit service-dependent skips, including unavailable local Docker. The actual
+run journey exercises full roles/media and a 20KB message, selected-model routing, a governed
+read_file call with a 409-byte identity, complete durable history, exact two-turn usage, native
+SSE output, truncation, malformed-control refusal and cancellation before provider release.
+All 76 lint checks pass. This does not qualify production promotion or finish credential-free
+native execution, actor-scoped native tools, account-bound native replay/cache proof, remaining
+IR capabilities/consumers or the broader standalone learning repair.

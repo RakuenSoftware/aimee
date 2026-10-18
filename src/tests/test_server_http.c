@@ -365,8 +365,11 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
       atomic_store(&g_op_context_clean,
                    run_cmd_get_cwd() == NULL && creds.session_id[0] == '\0' &&
                        creds.codex_token[0] == '\0' && creds.codex_account_id[0] == '\0' &&
-                       creds.vault_principal[0] == '\0' && !request_context_get() &&
-                       conn->attested_transport == ATTEST_NONE && !conn->vault_principal[0]);
+                       !strcmp(creds.vault_principal, "webuser:fresh-op") &&
+                       request_context_get() && !request_context_get()->caller_authorization[0] &&
+                       !request_context_get()->request_budget_present &&
+                       conn->attested_transport == ATTEST_WEBCHAT_TRUSTED &&
+                       !strcmp(conn->vault_principal, "webuser:fresh-op"));
    }
    else if (!strcmp(g_disp_method, "test.inspect_owned_op_context"))
    {
@@ -379,6 +382,15 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
       assert(!strcmp(owner->caller_authorization, "test-only-op-owner-proof"));
       assert(owner->request_budget_present == 1);
       assert(!strcmp(owner->request_budget_limits, "{\"max_tokens\":1234}"));
+   }
+   else if (!strcmp(g_disp_method, "test.inspect_connection_op_context"))
+   {
+      const request_context_t *owner = request_context_get();
+      assert(owner && !strcmp(owner->vault_principal, "cert:pipeline-owner"));
+      assert(conn->attested_transport == ATTEST_MTLS_CLIENT);
+      assert(!strcmp(conn->vault_principal, "cert:pipeline-owner"));
+      assert(conn->capabilities == CAP_DELEGATE);
+      assert(!owner->caller_authorization[0] && !owner->request_budget_present);
    }
    /* Mimic a real method handler: write an NDJSON response to the loopback fd
     * the first-class /v1 route handed us, so the capture path is exercised end to
@@ -396,10 +408,20 @@ server_ctx_t *server_active_ctx(void)
    return g_test_server_ctx_available ? &g_test_server_ctx : NULL;
 }
 
-static void submit_and_wait_op(const char *method)
+static void submit_and_wait_op_owned(const char *method, const server_conn_t *conn)
 {
    char response[8192];
-   assert(server_http_submit_op_run(method, "{}", CAPS_ALL, response, sizeof(response)) == 200);
+   if (!conn && !request_context_get())
+   {
+      request_context_t fresh = {0};
+      fresh.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+      fresh.capabilities = CAPS_ALL;
+      snprintf(fresh.vault_principal, sizeof fresh.vault_principal, "webuser:fresh-op");
+      request_context_set(&fresh);
+   }
+   int rc = conn ? server_http_submit_op_run_owned(method, "{}", conn, response, sizeof(response))
+                 : server_http_submit_op_run(method, "{}", CAPS_ALL, response, sizeof(response));
+   assert(rc == 200);
    /* The submitting HTTP request can end before its queued worker starts. */
    request_context_clear();
    server_http_identity_clear();
@@ -419,6 +441,11 @@ static void submit_and_wait_op(const char *method)
       usleep(10000);
    }
    assert(status == OPENAI_RUN_COMPLETED);
+}
+
+static void submit_and_wait_op(const char *method)
+{
+   submit_and_wait_op_owned(method, NULL);
 }
 
 /* The bus is not started in a unit test, so the module surface is stubbed to
@@ -983,6 +1010,23 @@ int main(void)
       assert(strstr(resp, "\"object\":\"run\""));
       st = server_http_route("POST", "/v1/runs/nope/stop", NULL, 0, resp, sizeof(resp));
       assert(st == 404);
+
+      assert(
+          openai_runs_store_create_owned("run_owned", "{\"id\":\"run_owned\"}", "webuser:owner"));
+      request_context_t owner = {.vault_transport = ATTEST_WEBCHAT_TRUSTED,
+                                 .vault_principal = "webuser:other"};
+      server_http_identity_bind_request_owner(&owner);
+      assert(server_http_route("GET", "/v1/runs/run_owned", NULL, 0, resp, sizeof resp) == 404);
+      assert(server_http_route("POST", "/v1/runs/run_owned/stop", NULL, 0, resp, sizeof resp) ==
+             404);
+      assert(!openai_runs_store_cancel_requested("run_owned"));
+      snprintf(owner.vault_principal, sizeof owner.vault_principal, "%s", "webuser:owner");
+      server_http_identity_bind_request_owner(&owner);
+      assert(server_http_route("GET", "/v1/runs/run_owned", NULL, 0, resp, sizeof resp) == 200);
+      assert(server_http_route("POST", "/v1/runs/run_owned/stop", NULL, 0, resp, sizeof resp) ==
+             200);
+      assert(openai_runs_store_cancel_requested("run_owned"));
+      server_http_identity_clear();
 
       /* /events is served by the SSE path in handle_conn, not this buffered
        * router, so server_http_route does not match it (404 here). */
@@ -2540,6 +2584,10 @@ int main(void)
        * — proving the row matched and dispatched. */
       assert(server_http_route("GET", "/v1/rules", NULL, 0, rb, sizeof(rb)) == 503);
       openai_runs_store_reset();
+      request_context_t initial_op_owner = {.vault_transport = ATTEST_WEBCHAT_TRUSTED,
+                                            .vault_principal = "webuser:initial-op-owner"};
+      request_context_set(&initial_op_owner);
+      server_http_identity_bind_request_owner(&initial_op_owner);
       const char *roundtable_body = "{\"prompt\":\"draft\"}";
       assert(server_http_route("POST", "/v1/roundtable/review", roundtable_body,
                                (int)strlen(roundtable_body), rb, sizeof(rb)) == 200);
@@ -2583,6 +2631,8 @@ int main(void)
       g_disp_body[0] = '\0';
       openai_runs_store_reset();
 
+      request_context_clear();
+      server_http_identity_clear();
       request_context_t op_owner = {0};
       op_owner.vault_transport = ATTEST_WEBCHAT_TRUSTED;
       op_owner.peer_uid = 0;
@@ -2639,6 +2689,16 @@ int main(void)
       request_context_set(&op_owner);
       submit_and_wait_op("test.inspect_owned_op_context");
       assert(!request_context_get());
+      request_context_set(&op_owner);
+      server_conn_t pipeline_owner = {0};
+      pipeline_owner.capabilities = CAP_DELEGATE;
+      pipeline_owner.attested_transport = ATTEST_MTLS_CLIENT;
+      snprintf(pipeline_owner.vault_principal, sizeof pipeline_owner.vault_principal,
+               "cert:pipeline-owner");
+      submit_and_wait_op_owned("test.inspect_connection_op_context", &pipeline_owner);
+      assert(!request_context_get());
+      assert(server_http_submit_op_run("roundtable.review", "{}", CAP_DELEGATE, rb, sizeof rb) ==
+             403);
 
       /* A pooled orchestration worker must begin every op with empty checkout
        * and credential TLS, even when the previous op leaked both. This is the
@@ -2656,6 +2716,7 @@ int main(void)
       assert(server_http_submit_op_run("roundtable.review", "{\"prompt\":\"draft\"}",
                                        CAP_TOOL_EXECUTE, rb, sizeof(rb)) == 403);
       assert(strstr(rb, "insufficient capabilities"));
+      request_context_set(&op_owner);
       g_test_server_ctx_available = 0;
       assert(server_http_submit_op_run("roundtable.review", "{\"prompt\":\"draft\"}", CAP_DELEGATE,
                                        rb, sizeof(rb)) == 503);
@@ -2665,6 +2726,7 @@ int main(void)
       assert(server_http_submit_op_run("roundtable.review", "{\"prompt\":\"draft\"}", CAP_DELEGATE,
                                        rb, sizeof(rb)) == 503);
       assert(strstr(rb, "orchestration unavailable"));
+      request_context_clear();
       /* The /v1/rpc bridge was retired: the path is now unrouted (404). */
       assert(server_http_route("POST", "/v1/rpc", "{}", 2, rb, sizeof(rb)) == 404);
       /* A deeper run path (two segments, no /stop|/events) does not match. */

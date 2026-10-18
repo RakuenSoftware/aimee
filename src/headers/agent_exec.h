@@ -2,6 +2,7 @@
 #define DEC_AGENT_EXEC_H 1
 
 #include "agent_types.h"
+#include <aimee/ir/aimee_ir.h>
 
 struct cJSON; /* forward declaration for gemini_prompt_cache_attach */
 
@@ -20,6 +21,17 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
                                      int max_tokens, double temperature,
                                      struct cJSON *initial_messages,
                                      struct cJSON **updated_messages, agent_result_t *out);
+
+/* Complete canonical conversation for the server-owned tool loop. No user
+ * message is reconstructed from a text projection. The final response remains
+ * typed and owned by the caller; ordinary result text is compatibility only. */
+int agent_request_with_tools_supported(const aimee_request_t *request);
+int agent_execute_request_with_tools(const agent_t *agent, const agent_network_t *network,
+                                     const char *role, const aimee_request_t *request,
+                                     aimee_response_t *response, agent_result_t *out);
+int agent_run_request_with_tools(agent_config_t *config, const agent_t *selected,
+                                 const aimee_request_t *request, aimee_response_t *response,
+                                 agent_result_t *out);
 
 int agent_execute(const agent_t *agent, const char *system_prompt, const char *user_prompt,
                   int max_tokens, double temperature, agent_result_t *out);

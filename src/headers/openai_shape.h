@@ -17,57 +17,6 @@ extern "C"
     * never copy a raw HTML/proxy response or unrelated response fields. */
    void openai_upstream_error_message(int status, const char *body, char *out, size_t cap);
 
-   /* Parse an OpenAI /v1/chat/completions request body. Copies the model id into
-    * model[model_n] (defaults to "aimee" if absent/empty), flattens messages[]
-    * into a newline-joined "role: content" transcript heap-allocated into
-    * *prompt_out (caller frees), and sets *stream_out to 1 if "stream":true.
-    * Returns 0 on success, -1 if body is not valid JSON or has no message with
-    * non-empty string content. On failure *prompt_out is set to NULL. */
-   int openai_parse_chat_request(const char *body, char *model, size_t model_n, char **prompt_out,
-                                 int *stream_out);
-
-   /* Parse an OpenAI /v1/completions request body ({model, prompt, stream}).
-    * Copies model into model[model_n] (default "aimee"), strdups the "prompt"
-    * string into *prompt_out (caller frees), sets *stream_out. Returns 0 on
-    * success, -1 on invalid JSON or missing/empty prompt. *prompt_out NULL on
-    * failure. */
-   int openai_parse_completion_request(const char *body, char *model, size_t model_n,
-                                       char **prompt_out, int *stream_out);
-
-   /* Parse an OpenAI /v1/responses request body
-    * ({model, input, previous_response_id, stream}). `input` may be a string or
-    * an array of items, each either a bare string or {role, content} where
-    * content is a string or an array of {type, text} parts; all text is
-    * flattened into a heap "role: text\n" transcript in *prompt_out (caller
-    * frees). Copies model (default "aimee") and previous_response_id (empty if
-    * absent) into the given buffers, sets *stream_out. Returns 0 on success, -1
-    * on invalid JSON or empty input. *prompt_out NULL on failure. */
-   int openai_parse_responses_request(const char *body, char *model, size_t model_n,
-                                      char **prompt_out, char *prev_id, size_t prev_id_n,
-                                      int *stream_out);
-
-   /* Convert a Codex/OpenAI Responses request into the OpenAI chat shape for the
-    * full-parity ingress: copies `model` (default "aimee"), strdup's
-    * `instructions` into *instructions_out (NULL if absent; caller frees),
-    * builds *messages_out as a chat messages array (message / function_call ->
-    * assistant tool_calls / function_call_output -> role:tool), and *tools_out as
-    * chat function tools (NULL if none; only `function`-type tools kept). Sets
-    * *stream_out. Returns 0 on success, -1 on invalid JSON. On success the caller
-    * owns and cJSON_Delete()s *messages_out and *tools_out. */
-   int openai_parse_responses_to_chat(const char *body, char *model, size_t model_n,
-                                      char **instructions_out, struct cJSON **messages_out,
-                                      struct cJSON **tools_out, int *stream_out);
-
-   /* Split an OpenAI chat-completions request into the three pieces the provider
-    * drivers take separately: leading system turn -> *instructions_out (NULL if
-    * absent; caller frees), remaining turns -> *messages_out verbatim (assistant
-    * `tool_calls` and `role:"tool"` results preserved, so a client-driven tool
-    * loop converges), and `function`-type tools -> *tools_out (NULL if none —
-    * never an empty array). Returns 0 on success, -1 on invalid JSON or an empty
-    * messages array. On success the caller cJSON_Delete()s both arrays. */
-   int openai_split_chat_request(const char *body, char **instructions_out,
-                                 struct cJSON **messages_out, struct cJSON **tools_out);
-
    /* Build the terminal chat.completion.chunk with an empty delta and an
     * explicit finish_reason ("stop", "tool_calls", …). openai_format_chat_chunk's
     * finish frame always says "stop"; a tool-call turn must not. Returns bytes

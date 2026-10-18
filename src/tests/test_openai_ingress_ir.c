@@ -246,8 +246,36 @@ static void test_canonical_response_cache_round_trip(void)
    aimee_response_free(&response);
 }
 
+static void test_responses_run_input_controls(void)
+{
+   aimee_request_t request = {0};
+   char error[160];
+   const char *body = "{\"input\":[\"first\",{\"role\":\"assistant\",\"content\":\"prior\"},"
+                      "{\"role\":\"user\",\"content\":\"last\"}],\"instructions\":\"policy\","
+                      "\"temperature\":0.25,\"max_output_tokens\":1024}";
+   assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_RESPONSES, &request, error,
+                                     sizeof error));
+   assert(request.n_messages == 3 && request.n_system == 1);
+   assert(!strcmp(request.messages[0].role, "user"));
+   assert(!strcmp(request.messages[0].blocks[0].text, "first"));
+   assert(!strcmp(request.messages[1].role, "assistant"));
+   assert(request.has_temperature && request.temperature == 0.25);
+   assert(request.has_max_tokens && request.max_tokens == 1024);
+   aimee_request_free(&request);
+   const char *invalid[] = {
+       "{\"input\":\"x\",\"temperature\":3}", "{\"input\":\"x\",\"temperature\":\"0.3\"}",
+       "{\"input\":\"x\",\"max_output_tokens\":1.5}", "{\"input\":\"x\",\"max_output_tokens\":0}"};
+   for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+   {
+      assert(aimee_frontend_parse_wire(invalid[i], strlen(invalid[i]), AIMEE_WIRE_RESPONSES,
+                                       &request, error, sizeof error));
+      aimee_request_free(&request);
+   }
+}
+
 int main(void)
 {
+   test_responses_run_input_controls();
    test_tool_free_admission_and_text_entry();
    test_canonical_response_cache_round_trip();
    test_owned_http_response_boundaries();

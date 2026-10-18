@@ -221,7 +221,7 @@ extern const int method_registry_count;
  * event loop without waiting; the event loop later reclaims the slot
  * once refcount reaches 0. Connection slots are fixed in place while
  * in use, so worker-held pointers stay valid for their job lifetime. */
-typedef struct
+typedef struct server_conn
 {
    int in_use; /* slot is reserved by an open or closing connection */
    int fd;

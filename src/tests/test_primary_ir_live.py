@@ -21,6 +21,7 @@ def main():
     observed = []
     execution_case = execution_requests = 0
     extra_attachments = []
+    run_started, run_release = threading.Event(), threading.Event()
     identity_path = home / "identity-read.txt"
     identity_path.write_text("IDENTITY_READ_CONTROL")
 
@@ -61,12 +62,34 @@ def main():
                     output = [call]
                 payload = dict(id="identity-response", object="response", status="completed",
                                model="ir-model-c", output=output)
+            if request.get("model") == "ir-model-run":
+                sent = json.dumps(request)
+                if "IR_RUN_CANCEL" in sent:
+                    run_started.set()
+                    assert run_release.wait(15), "cancellation fixture was not released"
+                if "IR_RUN_TYPED_TOOL" in sent:
+                    results = [part for message in request["messages"]
+                               if isinstance(message.get("content"), list)
+                               for part in message["content"] if part.get("type") == "tool_result"]
+                    if not results:
+                        payload["content"] = [dict(type="tool_use", id="run-call-" + "q" * 400,
+                            name="read_file", input=dict(path=str(identity_path)))]
+                        payload["stop_reason"] = "tool_use"
+                    else:
+                        assert "IDENTITY_READ_CONTROL" in json.dumps(results), results
+                        payload["content"] = [dict(type="text", text="RUN_TOOL_OK 雪")]
+                if "IR_RUN_TRUNCATED" in sent:
+                    payload["content"] = [dict(type="text", text="RUN_PARTIAL")]
+                    payload["stop_reason"] = "max_tokens"
             data = json.dumps(payload).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
-            self.wfile.write(data)
+            try:
+                self.wfile.write(data)
+            except (BrokenPipeError, ConnectionResetError):
+                assert run_release.is_set(), "unexpected provider disconnect"
 
         def log_message(self, *_args):
             pass
@@ -77,16 +100,16 @@ def main():
             self.sock.settimeout(60)
             self.sock.connect(str(home / "aimee-http.sock"))
 
-    def api(path, body, headers=None, expected=200):
+    def api(path, body=None, headers=None, expected=200):
         connection = Local("localhost")
         try:
-            connection.request("POST", path, json.dumps(body), {"Content-Type": "application/json", **(headers or {})})
+            connection.request("GET" if body is None else "POST", path, None if body is None else json.dumps(body), {"Content-Type": "application/json", **(headers or {})})
             response = connection.getresponse()
             data = response.read().decode()
             assert response.status == expected, (path, response.status, data)
             if expected != 200:
                 return data
-            return data if path == "/v1/chat/stream" or body.get("stream") else json.loads(data)
+            return data if path == "/v1/chat/stream" or (body and body.get("stream")) or path.endswith("/events") else json.loads(data)
         finally:
             connection.close()
 
@@ -102,7 +125,8 @@ def main():
                        enabled=True, tools_enabled=True, context_window=8192, max_tokens=4096,
                        timeout_ms=10000, max_parallel=1, max_turns=2)
                   for name, model, wire in [("ir-live-a", "ir-model-a", "openai"), ("ir-live-b", "ir-model-b", "anthropic"),
-                                           ("ir-live-c", "ir-model-c", "chatgpt")]]
+                                           ("ir-live-c", "ir-model-c", "chatgpt"), ("ir-live-run", "ir-model-run", "anthropic")]]
+        next(model for model in models if model["name"] == "ir-live-run")["context_window"] = 131072
         models_path.write_text(json.dumps(dict(default_agent="ir-live-a", default_delegate="ir-live-a", fallback_chain=[], models=models)))
         sid = api("/v1/sessions/create", {"client_type": "ir-integration"})["session_id"]
         attachment = api(f"/v1/sessions/{sid}/attach", {"surface": "webchat", "owner": f"uid:{os.getuid()}"})["attach_id"]
@@ -322,6 +346,58 @@ def main():
             assert ("IDENTITY_READ_CONTROL" in tool_reply["result"]) is not missing, tool_reply
         print("canonical dispatch: exact advertised read executes; foreign namespace and unknown identity return durable errors")
 
+        # Runs use the requested registration even though the role's default
+        # delegate is ir-live-a. Its full ordered input is canonical, not a text
+        # transcript, and actual tools execute under the captured caller.
+        def await_run(run_id, timeout=45):
+            deadline = time.monotonic() + timeout
+            while True:
+                result = api(f"/v1/runs/{run_id}")
+                if result["status"] in ("completed", "incomplete", "failed", "cancelled"):
+                    return result
+                assert time.monotonic() < deadline, result
+                time.sleep(0.05)
+
+        original = "IR_RUN_TYPED_TOOL before-" + "x" * 20000 + "-after雪"
+        image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jr1sAAAAASUVORK5CYII="
+        before_run = len(observed)
+        run = api("/v1/runs", dict(model="ir-live-run", instructions="RUN_SYSTEM_INSTRUCTIONS",
+            input=["IR_RUN_LEGACY_STRING", dict(role="assistant", content="IR_RUN_PRIOR_ASSISTANT"),
+                   dict(role="user", content=[dict(type="input_text", text=original),
+                                             dict(type="input_image", image_url=image)])],
+            temperature=0.25, max_tokens=1024))
+        finished = await_run(run["id"])
+        assert finished["status"] == "completed" and "RUN_TOOL_OK" in json.dumps(finished), finished
+        calls = observed[before_run:]
+        assert len(calls) == 2 and all(call["model"] == "ir-model-run" for call in calls), calls
+        assert original in json.dumps(calls[0], ensure_ascii=False) and "IR_RUN_PRIOR_ASSISTANT" in json.dumps(calls[0]), calls[0]
+        assert "IR_RUN_LEGACY_STRING" in json.dumps(calls[0]) and "RUN_SYSTEM_INSTRUCTIONS" in json.dumps(calls[0]), calls[0]
+        assert '"type": "image"' in json.dumps(calls[0]), calls[0]
+        assert calls[0]["max_tokens"] == 1024 and calls[0]["temperature"] == 0.25, calls[0]
+        assert finished["usage"]["input_tokens"] == 20 and finished["usage"]["output_tokens"] == 4, finished
+        source = finished["canonical_session_id"]
+        saved = api("/v1/trajectory/export", dict(session_id=source, compress=False))["trajectory"]
+        assert original in json.dumps(saved, ensure_ascii=False) and "q" * 400 in json.dumps(saved), saved
+        assert "IDENTITY_READ_CONTROL" in json.dumps(saved) and '"type": "image"' in json.dumps(saved), saved
+        events = api(f"/v1/runs/{run['id']}/events")
+        assert "tool_call.started" in events and "message.completed" in events and "RUN_TOOL_OK" in events, events
+        partial = api("/v1/runs", dict(model="ir-live-run", input="IR_RUN_TRUNCATED"))
+        partial = await_run(partial["id"])
+        assert partial["status"] == "incomplete" and partial["incomplete_details"]["reason"] == "max_output_tokens", partial
+        cancelled = api("/v1/runs", dict(model="ir-live-run", input="IR_RUN_CANCEL"))
+        try:
+            assert run_started.wait(10), "run did not reach the real provider"
+            api(f"/v1/runs/{cancelled['id']}/stop", {})
+            assert await_run(cancelled["id"], 10)["status"] == "cancelled"
+        finally:
+            run_release.set()
+        for invalid in (dict(input=""), dict(input=[]), dict(input="x", max_tokens=1.5),
+                        dict(input="x", max_tokens=0), dict(input="x", temperature=3),
+                        dict(input="x", max_tokens=4, max_output_tokens=8),
+                        dict(input="x", tools=[dict(type="function", name="foreign", parameters={})])):
+            api("/v1/runs", dict(model="ir-live-run", **invalid), expected=400)
+        print("canonical runs: full roles/media, requested model, governed tool, exact usage, durable source, typed truncation and live cancellation passed")
+
         # Always exercise workspace/owner/worktree setup, including when Docker
         # is absent locally. Only real sandboxed completion can qualify readback.
         workspace = Path(os.environ["AIMEE_IR_DELEGATE_WORKSPACE"])
@@ -363,6 +439,7 @@ def main():
 
 
     finally:
+        run_release.set()
         cleanup_error = None
         for extra_sid, extra_attach in extra_attachments:
             try:

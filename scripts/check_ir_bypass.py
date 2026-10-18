@@ -16,6 +16,9 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "openai_parse_chat_request", "openai_parse_completion_request",
+    "openai_parse_responses_request", "openai_parse_responses_to_chat",
+    "openai_split_chat_request",
     "raw_responses", "build_provider_body", "translate_request",
     "agent_resolve_auth", "agent_build_extra_headers",
     "parsed_response_t", "parsed_tool_call_t", "agent_free_parsed_response",

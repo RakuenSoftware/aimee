@@ -2115,8 +2115,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "5ab7559a5d9a2dccf5bf1ab9e1aeb8e2770889c454eeaf80a918552c6eeacc12",
-      "boundary_review": "IR #3036: copy the actual private canonical execution reference before log-scope teardown; session-bound work bypasses the legacy flat role-result cache. Existing six host memory context/recall/insert calls and registered Go policy ownership remain unchanged. This records source-boundary reasoning, not independent production-promotion approval. Serving now resolves the selected Codex bearer and account headers together through the Vault owner instead of separate calls. No memory context, recall, eligibility or insertion behavior changes. The same once-prepared pre-LLM user context is retained through simple-completion model fallback instead of discarding it after the primary request. Hook authority, host memory calls and registered Go policy ownership remain unchanged. Standalone learning follow-up: removed the five legacy outcome classification/write call sites and their optional-KB writer. Canonical terminal capture owners now ask Go Learning for an ungraded source-bound observation and persist it through the existing DB1 interaction ledger. The six host memory context/recall/insert calls and their authority are unchanged."
+      "sha256": "b2784f08f1651d39a4193d00fa54b9f64c9e7bafc6dc68fb344dfee49c051332",
+      "boundary_review": "2026-10-18 PR #3038: selected canonical runs enter the same role-policy, admission, context assembly and Go memory-owner calls. The new branch retains complete ordered input and disables flat KB hint substitution for that input. Existing native memory symbols and Go admission authority are unchanged; no native memory engine or independent production approval is introduced."
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
@@ -2740,11 +2740,12 @@
         "AIMEE_MEMORY_HEALTH_ENABLED",
         "memory_stats"
       ],
-      "sha256": "05429582c7b73cfb9a7fe5093accd6e42f14c4fac945e15127519186b9325277",
+      "sha256": "ac2e743098327dbdc45c3266e85ad5157187aba60ed72a487e92e2c7ee63c938",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "2300182f07ec2e86db031af48f23b16f28fdd66843196e911df03f7dbbdaa607"
-      }
+        "api/openapi-server-v1.yaml": "8080f9fbea2e7a7845dc6d05cf03a3aebd9c52c650907634dce95c55f678879b"
+      },
+      "boundary_review": "2026-10-18 PR #3038: only the /runs documentation changes: asynchronous canonical input, owner privacy, preserved controls and incomplete status. Memory routes and their Go ownership are unchanged."
     }
   },
   "namespace_review": "Current KB domain names and paths replace the retired database ordinal; original files and symbols remain immutable, and the checker covers both spellings. Native memory ownership does not change."

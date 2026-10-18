@@ -15,6 +15,8 @@
 #include "cJSON.h"
 
 #include <stdio.h>
+#include <math.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -65,11 +67,34 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
    out->raw = cJSON_Duplicate(req, 1);
    out->model = dupstr(ostr(req, "model"));
 
-   const cJSON *mot = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "max_output_tokens");
-   if (mot && cJSON_IsNumber(mot))
+   const cJSON *mot = cJSON_GetObjectItemCaseSensitive(req, "max_output_tokens");
+   if (mot && !cJSON_IsNull(mot))
    {
-      out->max_tokens = mot->valueint;
+      long maximum = 0;
+      if (aimee_ir_read_usage(req, "max_output_tokens", &maximum) || maximum < 1 ||
+          maximum > INT_MAX)
+      {
+         if (err && errn)
+            snprintf(err, errn, "invalid max_output_tokens");
+         aimee_request_free(out);
+         return -1;
+      }
+      out->max_tokens = (int)maximum;
       out->has_max_tokens = 1;
+   }
+   const cJSON *temperature = cJSON_GetObjectItemCaseSensitive(req, "temperature");
+   if (temperature && !cJSON_IsNull(temperature))
+   {
+      if (!cJSON_IsNumber(temperature) || !isfinite(temperature->valuedouble) ||
+          temperature->valuedouble < 0 || temperature->valuedouble > 2)
+      {
+         if (err && errn)
+            snprintf(err, errn, "invalid temperature");
+         aimee_request_free(out);
+         return -1;
+      }
+      out->temperature = temperature->valuedouble;
+      out->has_temperature = 1;
    }
    const cJSON *top_p = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "top_p");
    if (top_p && cJSON_IsNumber(top_p))
@@ -153,6 +178,26 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       const cJSON *item = NULL;
       cJSON_ArrayForEach(item, input)
       {
+         /* The published run input also accepts bare string items. Admit them
+          * as distinct user messages, never as a flattened role transcript. */
+         if (cJSON_IsString(item))
+         {
+            tool_run = -1;
+            int mi = new_message(out, "user");
+            if (mi < 0)
+               goto oom;
+            aimee_message_t *message = &out->messages[mi];
+            aimee_block_t *block =
+                grow1((void **)&message->blocks, &message->n_blocks, sizeof *block);
+            if (!block)
+               goto oom;
+            block->type = AIMEE_BLK_TEXT;
+            block->text = dupstr(item->valuestring);
+            if (!block->text)
+               goto oom;
+            out->mutated = 1;
+            continue;
+         }
          const char *type = ostr(item, "type");
          if (type && strcmp(type, "function_call_output") == 0)
          {

@@ -1263,7 +1263,16 @@ paths:
           description: No indexed project / no source files
   /runs:
     post:
-      summary: Create and run an inference run (synchronous); retrievable by id
+      summary: Queue an owned inference run using canonical input
+      description: >-
+        Pins the selected model registration and executes the server tool catalog.
+        Input accepts Responses-style ordered messages and content blocks, including
+        images and tool history; bare array strings are separate user messages.
+        Instructions, temperature and output limits are preserved. Unsupported
+        execution controls or client tool catalogs are rejected. Terminal snapshots
+        expose canonical_session_id for durable history; the live store is bounded.
+        A token-limited response has status incomplete. Runs are private to their
+        authenticated owner.
       requestBody:
         required: true
         content:
@@ -1274,11 +1283,13 @@ paths:
               properties:
                 model: { type: string }
                 input: {}
-                temperature: { type: number }
-                max_tokens: { type: integer }
+                instructions: { type: string }
+                temperature: { type: number, minimum: 0, maximum: 2 }
+                max_tokens: { type: integer, minimum: 1 }
+                max_output_tokens: { type: integer, minimum: 1 }
       responses:
         "200":
-          description: Completed run object
+          description: Queued run object
           content:
             application/json:
               schema: { type: object }
@@ -1344,7 +1355,7 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
   /runs/{id}/stop:
     post:
-      summary: Stop a run (no-op for already-completed synchronous runs)
+      summary: Request cancellation of an owned run
       parameters:
         - name: id
           in: path
@@ -1352,7 +1363,7 @@ paths:
           schema: { type: string }
       responses:
         "200":
-          description: The (already-completed) run object
+          description: The run object with cancellation requested, or its existing terminal status
           content:
             application/json:
               schema: { type: object }

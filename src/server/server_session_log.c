@@ -178,7 +178,7 @@ int server_session_log_begin(const char *role, const char *prompt, server_sessio
    if (aimee_ir_session_emit(&started) || publish_child(scope, "running"))
       return -1;
    scope->announced = scope->parent[0] != 0;
-   if (aimee_ir_session_emit(&user))
+   if (prompt && aimee_ir_session_emit(&user))
       return -1; /* Caller must finish *out, including failed admission. */
    return 0;
 fail:
