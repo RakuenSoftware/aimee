@@ -2126,7 +2126,7 @@ int db1_procedure_event_append(const char *principal, const char *procedure_json
 {
    const char *fields[] = {principal,     procedure_json, revision, event_json,
                            exposure_json, scope_kind,     scope_id};
-   char result[64];
+   char result[64] = {0};
    char *const values[] = {result};
    const size_t caps[] = {sizeof result};
    if (call_stage(AIMEE_DB1_OP_PROCEDURE_EVENT_APPEND, fields, 7, values, caps, 1, NULL) !=

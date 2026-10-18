@@ -7956,7 +7956,7 @@ $(TESTPREFIX)/unit-test-server-task-projection: $(OBJDIR)/tests/test_server_task
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-learning-application: $(OBJDIR)/tests/test_learning_application.o \
-                     $(OBJDIR)/server/server_state_audit.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+                     $(OBJDIR)/server/request_context.o $(OBJDIR)/server/server_state_audit.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-server-governed-action: $(OBJDIR)/tests/test_server_governed_action.o $(OBJDIR)/server/server_governed_action.o $(OBJDIR)/vendor/cJSON.o
