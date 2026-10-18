@@ -922,19 +922,52 @@ static int git_validate_ref(const char *ref, int *allowed)
               : result;
 }
 
-static int governance_evaluate(int policy_active, const char *const *tool_names,
+static int governance_evaluate(int policy_active, const aimee_tool_identity_view_t *tools,
                                uint32_t tool_count, const char *stop_reason,
                                aimee_governance_decision_t *decision)
 {
-   uint8_t request[AIMEE_GOVERNANCE_REQUEST_LEN], response[AIMEE_GOVERNANCE_RESPONSE_LEN];
-   uint32_t response_len = 0;
-   if (!decision ||
-       aimee_governance_request_encode(policy_active, tool_names, tool_count, stop_reason, request,
-                                       sizeof(request)) != 0 ||
-       call_module(AIMEE_GOVERNANCE_EVENT_EVALUATE, AIMEE_GOVERNANCE_STAGE_EVALUATE, request,
-                   sizeof(request), response, sizeof(response), &response_len) != 0)
+   if (!decision || !stop_reason || (policy_active != 0 && policy_active != 1) ||
+       tool_count > AIMEE_GOVERNANCE_TOOL_COUNT_MAX || (tool_count && !tools))
       return -1;
-   return aimee_governance_response_decode(response, response_len, tool_count, decision);
+   cJSON *request = cJSON_CreateObject();
+   cJSON *items = request ? cJSON_AddArrayToObject(request, "tools") : NULL;
+   if (!items || !cJSON_AddNumberToObject(request, "version", AIMEE_GOVERNANCE_WIRE_VERSION) ||
+       !cJSON_AddBoolToObject(request, "policy_active", policy_active) ||
+       !cJSON_AddStringToObject(request, "stop_reason", stop_reason))
+      goto invalid;
+   for (uint32_t i = 0; i < tool_count; i++)
+   {
+      cJSON *tool = cJSON_CreateObject();
+      if (!tool)
+         goto invalid;
+      if (!cJSON_AddItemToArray(items, tool))
+      {
+         cJSON_Delete(tool);
+         goto invalid;
+      }
+      if (!tools[i].name || !tools[i].name[0] ||
+          !cJSON_AddStringToObject(tool, "name", tools[i].name) ||
+          (tools[i].namespace_name &&
+           !cJSON_AddStringToObject(tool, "namespace", tools[i].namespace_name)))
+         goto invalid;
+   }
+   char *encoded = cJSON_PrintUnformatted(request);
+   cJSON_Delete(request);
+   if (!encoded)
+      return -1;
+   size_t request_len = strlen(encoded);
+   uint8_t response[AIMEE_GOVERNANCE_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   int result = -1;
+   if (request_len && request_len <= AIMEE_MODULE_MESSAGE_MAX_BODY && request_len <= UINT32_MAX &&
+       call_module(AIMEE_GOVERNANCE_EVENT_EVALUATE, AIMEE_GOVERNANCE_STAGE_EVALUATE, encoded,
+                   (uint32_t)request_len, response, sizeof(response), &response_len) == 0)
+      result = aimee_governance_response_decode(response, response_len, tool_count, decision);
+   free(encoded);
+   return result;
+invalid:
+   cJSON_Delete(request);
+   return -1;
 }
 
 static int workflows_advance_decide(const char *bound_wi, const wfe_advance_args_t *args,

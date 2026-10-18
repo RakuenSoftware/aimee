@@ -354,6 +354,13 @@ typedef enum
    AIMEE_DELTA_ERROR
 } aimee_delta_type_t;
 
+/* Borrowed canonical tool identity for policy views; no native projection. */
+typedef struct
+{
+   const char *name;
+   const char *namespace_name;
+} aimee_tool_identity_view_t;
+
 typedef struct
 {
    aimee_delta_type_t type;

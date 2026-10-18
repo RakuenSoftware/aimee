@@ -18,6 +18,8 @@ static int g_provider_calls;
 static int g_policy_active;
 static int g_provider_mode;
 static const char *expected_policy_stop;
+static const char *expected_name;
+static const char *expected_namespace;
 
 static int denied_tool(const char *name)
 {
@@ -25,7 +27,7 @@ static int denied_tool(const char *name)
           strcmp(name, "RemoteTrigger") == 0 || strcmp(name, "Task") == 0;
 }
 
-static int fake_event_bus_provider(int policy_active, const char *const *tool_names,
+static int fake_event_bus_provider(int policy_active, const aimee_tool_identity_view_t *tools,
                                    uint32_t tool_count, const char *stop_reason,
                                    aimee_governance_decision_t *decision)
 {
@@ -33,6 +35,12 @@ static int fake_event_bus_provider(int policy_active, const char *const *tool_na
    if (expected_policy_stop)
       assert(stop_reason && !strcmp(stop_reason, expected_policy_stop));
    g_policy_active = policy_active;
+   if (expected_name)
+      for (uint32_t i = 0; i < tool_count; i++)
+      {
+         assert(!strcmp(tools[i].name, expected_name));
+         assert(tools[i].namespace_name && !strcmp(tools[i].namespace_name, expected_namespace));
+      }
    if (g_provider_mode == 1)
       return -1;
    memset(decision, 0, sizeof(*decision));
@@ -51,7 +59,7 @@ static int fake_event_bus_provider(int policy_active, const char *const *tool_na
    decision->keep_mask = 0;
    for (uint32_t i = 0; i < tool_count; ++i)
    {
-      if (denied_tool(tool_names[i]))
+      if (denied_tool(tools[i].name))
          decision->drop_count++;
       else
          decision->keep_mask |= 1u << i;
@@ -89,6 +97,33 @@ static aimee_response_t tool_response(int count, const char *first, const char *
    }
    response.stop_reason = AIMEE_STOP_TOOL_USE;
    return response;
+}
+
+static void test_complete_identity_views(void)
+{
+   char name[1201], namespace_name[801];
+   memset(name, 'n', sizeof name - 1);
+   memset(namespace_name, 's', sizeof namespace_name - 1);
+   name[sizeof name - 1] = 0;
+   namespace_name[sizeof namespace_name - 1] = 0;
+   aimee_response_t response = tool_response(40, name, name);
+   for (int i = 0; i < response.n_content; i++)
+      response.content[i].tool_namespace = copy_string(namespace_name);
+   expected_name = name;
+   expected_namespace = namespace_name;
+   g_provider_mode = 0;
+   gw_response_governance_register_provider(fake_event_bus_provider);
+   int before = g_provider_calls;
+   assert(gw_ir_response_run_governance(&response, 1, 1) == 0);
+   assert(g_provider_calls == before + 3);
+   assert(response.n_content == 40);
+   for (int i = 0; i < response.n_content; i++)
+   {
+      assert(!strcmp(response.content[i].tool_name, name));
+      assert(!strcmp(response.content[i].tool_namespace, namespace_name));
+   }
+   expected_name = expected_namespace = NULL;
+   aimee_response_free(&response);
 }
 
 static void test_native_stop_metadata_survives_policy(void)
@@ -136,6 +171,7 @@ static int capture_denial(const aimee_session_event_t *event, void *context)
 
 int main(void)
 {
+   test_complete_identity_views();
    test_native_stop_metadata_survives_policy();
    /* The stage and separately supervised process must share the descriptor's
     * default-OFF posture. Otherwise an unspecified config enables this stage

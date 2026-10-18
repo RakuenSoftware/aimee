@@ -916,6 +916,11 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-authority-ipc
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening
 TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
+TEST_TARGETS += $(TESTPREFIX)/unit-test-governance-bus-bridge
+$(OBJDIR)/tests/test_governance_bus_bridge.o: server/module_stage_adapters.c
+$(TESTPREFIX)/unit-test-governance-bus-bridge: $(OBJDIR)/tests/test_governance_bus_bridge.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS)
+
 TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-store-cert-serial-support \
                 $(TESTPREFIX)/unit-test-kb-store-cjson-support \
@@ -943,7 +948,6 @@ MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/workspace.o \
    $(OBJDIR)/tests/module_handlers/git.o \
    $(OBJDIR)/tests/module_handlers/skills.o \
-   $(OBJDIR)/tests/module_handlers/governance.o \
    $(OBJDIR)/tests/module_handlers/workflows.o \
    $(OBJDIR)/tests/module_handlers/roundtable.o \
    $(OBJDIR)/tests/module_handlers/kb_synthesis.o \
@@ -964,7 +968,6 @@ $(eval $(call module_handler_test_object,tools,tools))
 $(eval $(call module_handler_test_object,workspace,workspace))
 $(eval $(call module_handler_test_object,git,git))
 $(eval $(call module_handler_test_object,skills,skills))
-$(eval $(call module_handler_test_object,governance,governance))
 $(eval $(call module_handler_test_object,workflows,workflows))
 $(eval $(call module_handler_test_object,roundtable,roundtable))
 $(eval $(call module_handler_test_object,kb_synthesis,kb-synthesis))

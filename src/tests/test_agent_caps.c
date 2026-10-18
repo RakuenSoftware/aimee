@@ -7,6 +7,7 @@
 #include "aimee.h"
 #include "agent.h"
 #include "agent_config.h"
+#include "agent_protocol.h"
 #include "model_registry.h"
 
 void test_agent_route_with_caps_honors_tools_enabled(void)

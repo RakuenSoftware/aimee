@@ -5,7 +5,6 @@
 
 #include "gw_stage_governance.h"
 
-#include <aimee/ir/aimee_ir.h>
 #include "gw_response_registry.h"
 
 static gw_governance_decision_provider_fn g_decision_provider;
@@ -55,16 +54,19 @@ static int apply_ir_governance(aimee_response_t *response, int policy_active)
       int size =
           end > (int)AIMEE_GOVERNANCE_TOOL_COUNT_MAX ? (int)AIMEE_GOVERNANCE_TOOL_COUNT_MAX : end;
       int start = end - size;
-      const char *names[AIMEE_GOVERNANCE_TOOL_COUNT_MAX];
+      aimee_tool_identity_view_t tools[AIMEE_GOVERNANCE_TOOL_COUNT_MAX];
       for (int i = 0; i < size; i++)
-         names[i] = aimee_ir_response_tool(response, start + i)->tool_name;
+      {
+         const aimee_block_t *block = aimee_ir_response_tool(response, start + i);
+         tools[i] = (aimee_tool_identity_view_t){block->tool_name, block->tool_namespace};
+      }
       aimee_governance_decision_t decision = {0};
       /* Policy consumes the canonical state. Opaque native metadata belongs
        * to replay/audit and must not overflow the bounded policy vocabulary. */
       const char *reason = aimee_stop_reason_name(response->stop_reason);
       int valid =
           g_decision_provider &&
-          g_decision_provider(policy_active, names, (uint32_t)size, reason, &decision) == 0 &&
+          g_decision_provider(policy_active, tools, (uint32_t)size, reason, &decision) == 0 &&
           decision_valid(&decision, (uint32_t)size);
       for (int i = size - 1; i >= 0; i--)
          if (!valid || !(decision.keep_mask & (1u << (unsigned)i)))

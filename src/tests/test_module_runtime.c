@@ -636,17 +636,26 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    }
    else if (strcmp(name, "governance") == 0)
    {
-      static const char *tools[] = {"read_file", "spawn_agent", "Task"};
+      const char *policy =
+          "{\"version\":2,\"policy_active\":true,\"stop_reason\":\"max_tokens\",\"tools\":["
+          "{\"name\":\"mcp__aimee__preview_blast_radius_with_complete_identity\","
+          "\"namespace\":\"tenant/project/namespace/longer-than-thirty-one-bytes\"},"
+          "{\"name\":\"spawn_agent\"},{\"name\":\"Task\"}]}";
       aimee_governance_decision_t decision;
-      assert(aimee_governance_request_encode(1, tools, 3, "max_tokens", request, sizeof(request)) ==
-             0);
-      request_len = AIMEE_GOVERNANCE_REQUEST_LEN;
+      request_len = (uint32_t)strlen(policy);
+      memcpy(request, policy, request_len);
       assert(aimee_module_client_call(client, kind, AIMEE_GOVERNANCE_STAGE_EVALUATE, 2009, 0,
                                       request, request_len, response, sizeof(response),
                                       &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_governance_response_decode(response, response_len, 3, &decision) == 0);
       assert(decision.keep_mask == 1 && decision.drop_count == 2);
       assert(strcmp(decision.stop_reason, "max_tokens") == 0);
+      uint8_t retired[632] = {0};
+      aimee_governance_put_u32(retired, 0x51564f47u);
+      aimee_governance_put_u32(retired + 4, 1);
+      assert(aimee_module_client_call(client, kind, AIMEE_GOVERNANCE_STAGE_EVALUATE, 2010, 0,
+                                      retired, sizeof(retired), response, sizeof(response),
+                                      &response_len, NULL, NULL) != AIMEE_MODULE_CALL_OK);
    }
    else if (strcmp(name, "roundtable") == 0)
    {

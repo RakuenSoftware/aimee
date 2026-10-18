@@ -300,3 +300,7 @@ d9f9605298a6adc74c951aa552dd9ced7d15e0b3:tests/baselines/modules/memory-ownershi
 # SHA-256 of the reviewed OpenAPI protocol catalog input, not an API credential.
 # tests/baselines/modules/memory-ownership.json: api/openapi-server-v1.yaml
 a08f764739750bcd4094b4c409aa0c4ea99ab75e:tests/baselines/modules/memory-ownership.json:generic-api-key:2737
+
+# Reviewed public OpenAPI SHA-256 input for canonical trajectory export.
+# The digest matches api/openapi-server-v1.yaml; this exact historical finding is not a credential.
+042361d5df49723961a9165c2edaaf4a03299b2b:tests/baselines/modules/memory-ownership.json:generic-api-key:2741

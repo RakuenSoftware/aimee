@@ -8,6 +8,12 @@ import (
 	"unicode/utf8"
 )
 
+// ToolIdentity is the canonical identity-only policy view of a tool use.
+type ToolIdentity struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace,omitempty"`
+}
+
 // Tool is a catalog definition, independent of any native function envelope.
 // Schemas and explicitly provider-owned options remain opaque JSON values.
 type Tool struct {

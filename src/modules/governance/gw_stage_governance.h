@@ -5,12 +5,13 @@
 #define DEC_GW_STAGE_GOVERNANCE_H 1
 
 #include <aimee/governance/module_api.h>
-struct aimee_response;
+#include <aimee/ir/aimee_ir.h>
 
 /* The server-side event-bus bridge implements this provider. The governance
  * stage never evaluates policy locally: when enabled, every decision comes
  * from the separately supervised governance module over the event bus. */
-typedef int (*gw_governance_decision_provider_fn)(int policy_active, const char *const *tool_names,
+typedef int (*gw_governance_decision_provider_fn)(int policy_active,
+                                                  const aimee_tool_identity_view_t *tools,
                                                   uint32_t tool_count, const char *stop_reason,
                                                   aimee_governance_decision_t *decision);
 

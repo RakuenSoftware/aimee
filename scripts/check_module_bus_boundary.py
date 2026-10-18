@@ -34,7 +34,7 @@ BUS_TRANSPORT_HEADERS = {"aimee/audit/obs_bus.h", "aimee/postgres/client.h"}
 # same shared IR data contract, not a call into another module's domain service.
 IR_SHARED_TYPE = {
     # Response stages mutate shared owned IR; governance decisions still cross the bus.
-    ("src/modules/governance/gw_stage_governance.c", "aimee/ir/aimee_ir.h"),
+    ("src/modules/governance/gw_stage_governance.h", "aimee/ir/aimee_ir.h"),
     # Gateway policing consumes the canonical catalog data contract; policy remains its own owner.
     ("src/modules/gateway/include/aimee/gateway/gateway_policy.h", "aimee/ir/aimee_ir.h"),
     # Legacy-history entry migration uses the canonical message codec, not a peer service.
