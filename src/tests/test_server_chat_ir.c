@@ -119,7 +119,6 @@ static void cleanup(compute_ctx_t *c)
    server_control_scope_bind(c->ir_previous_controls);
    server_control_scope_close(c->ir_controls);
    aimee_ir_session_set_sink(c->ir_previous_sink, c->ir_previous_context);
-   cJSON_Delete(c->ir_tool_ids);
    cJSON_Delete(log_entries);
    log_entries = cJSON_CreateArray();
    writes = fail_store = disconnected = cancelled = 0;
@@ -142,12 +141,50 @@ static void response(void)
                            "blocks"),
        0);
    const char *uid = cJSON_GetStringValue(cJSON_GetObjectItem(u, "tool_id"));
-   assert(strstr(uid, "opaque:one") && strcmp(uid, "opaque:one"));
+   assert(!strcmp(uid, "opaque:one"));
    assert(!strcmp(uid, cJSON_GetStringValue(cJSON_GetObjectItem(r, "tool_id"))));
 }
+static void exact_tool_identity(void)
+{
+   compute_ctx_t c = context();
+   assert(!server_chat_ir_begin(&c, "session-one", "native identity"));
+   char id[1025];
+   memset(id, 'x', sizeof id - 1);
+   id[sizeof id - 1] = 0;
+   aimee_block_t use = {.type = AIMEE_BLK_TOOL_USE, .tool_id = id, .tool_name = "read_file"};
+   aimee_message_t message = {.role = "assistant", .blocks = &use, .n_blocks = 1};
+   for (int cycle = 0; cycle < 2; cycle++)
+   {
+      aimee_session_event_t event = {.kind = AIMEE_SESSION_MESSAGE,
+                                     .message_id = cycle ? "second" : "first",
+                                     .message = &message};
+      assert(!aimee_ir_session_emit(&event));
+      assert(!aimee_ir_session_emit_tool_result(id, cycle ? "SECOND" : "FIRST", 0));
+      for (int i = 2 + cycle * 2; i < 4 + cycle * 2; i++)
+      {
+         const cJSON *body = cJSON_GetObjectItem(cJSON_GetArrayItem(log_entries, i), "payload");
+         const cJSON *block = cJSON_GetArrayItem(cJSON_GetObjectItem(body, "blocks"), 0);
+         assert(!strcmp(id, cJSON_GetStringValue(cJSON_GetObjectItem(block, "tool_id"))));
+      }
+   }
+   aimee_delta_t start = {.type = AIMEE_DELTA_BLOCK_START,
+                          .kind = AIMEE_BLK_TOOL_USE,
+                          .tool_id = id,
+                          .tool_name = "read_file"};
+   aimee_session_event_t delta = {
+       .kind = AIMEE_SESSION_DELTA, .role = "assistant", .message_id = "streamed", .delta = &start};
+   assert(!aimee_ir_session_emit(&delta));
+   const cJSON *body = cJSON_GetObjectItem(cJSON_GetArrayItem(log_entries, 6), "payload");
+   assert(!strcmp(id, cJSON_GetStringValue(cJSON_GetObjectItem(body, "tool_id"))));
+   assert(!strcmp(use.tool_id, id) && !strcmp(start.tool_id, id));
+   assert(!server_chat_ir_finish(&c, NULL));
+   cleanup(&c);
+}
+
 int main(void)
 {
    log_entries = cJSON_CreateArray();
+   exact_tool_identity();
    compute_ctx_t legacy = context();
    legacy.ir_delivery = 0;
    assert(!server_chat_ir_begin(&legacy, "session-one", "legacy subscriber"));

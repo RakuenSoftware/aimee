@@ -880,3 +880,32 @@ SSE output, truncation, malformed-control refusal and cancellation before provid
 All 76 lint checks pass. This does not qualify production promotion or finish credential-free
 native execution, actor-scoped native tools, account-bound native replay/cache proof, remaining
 IR capabilities/consumers or the broader standalone learning repair.
+
+### 2026-10-18: retain exact browser tool identities
+
+Browser canonical capture no longer qualifies native tool IDs with host turn/message IDs.
+Event/message identities remain host-qualified; model tool IDs, including streamed block starts,
+remain unchanged. The existing frontend already correlates calls by projection message/block
+identity and execution scope, including repeated native IDs. Removed the obsolete per-compute
+mapping and cleanup. This aligns the durable browser event stream with provider replay rather
+than storing a different model identity for presentation.
+
+The native capture regression exercises 1024-byte identities, repeated IDs in separate model
+responses, exact result pairing and streamed tool starts without mutating producer blocks.
+Normal and ASan/UBSan/leak runs pass. Both focused frontend suites pass (26 tests). The actual
+HTTP journey now requires the exact original call ID on live calls/results and provider replay.
+Fresh schema ir_integration_browser_ids_retry_3038 passes integration 156/156 with 26 explicit
+service skips. The first attempt hit the local /tmp user quota before the new assertions;
+the integration runner now honors TMPDIR for its isolated home, and the rerun passes. All
+76 lint checks passed; the final temp-home adjustment also passes shell syntax and tempdir gates.
+Server/KB builds pass. All 680 declared fixture/helper targets compile locally; local GCC's
+existing unterminated-string-initialization and unused-but-set-variable warnings required
+nonfatal treatment for that broad compile. No CI compiler flags were weakened, and this is not
+a claim that all 680 fixtures were executed.
+
+Fresh CI on the canonical-run publication caught the old minimal-ingress weak free stub's
+void-pointer declaration after agent_exec.h began including the canonical types. Published
+c60e7f20b corrects it to aimee_response_t*. All three consumers compile and pass locally;
+the replacement CI's ordinary unit shards and two PostgreSQL shards have passed so far.
+Continue checking every named job through Aimee git pr checks, not only the first job-list page.
+The overall migration and standalone learning/production work remain unfinished as listed above.

@@ -28,7 +28,8 @@ INTEG_REAL_HOME="$HOME"
 export GOCACHE="${GOCACHE:-$INTEG_REAL_HOME/.cache/go-build}"
 export GOMODCACHE="${GOMODCACHE:-$INTEG_REAL_HOME/go/pkg/mod}"
 export GOFLAGS="${GOFLAGS:--mod=mod}"
-export HOME=$(mktemp -d /tmp/aimee-integ-XXXXXX)
+INTEG_TEST_HOME=$(mktemp -d "${TMPDIR:-/tmp}/aimee-integ-XXXXXX")
+export HOME="$INTEG_TEST_HOME"
 export AIMEE_HOME="$HOME/.config/aimee"
 unset AIMEE_PROFILE
 # One session id for the whole run. Every `aimee mcp-serve` this harness spawns

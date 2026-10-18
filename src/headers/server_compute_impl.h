@@ -47,7 +47,6 @@ typedef struct
    int ir_enabled, ir_delivery, ir_failed, ir_completed;
    unsigned long long ir_counter;
    unsigned long long ir_model_events;
-   cJSON *ir_tool_ids;
    char ir_session[128], ir_turn[128];
    char ir_sequence[32];
    server_control_scope_t *ir_controls, *ir_previous_controls;

@@ -110,47 +110,8 @@ static int chat_ir_sink(const aimee_session_event_t *event, void *context)
       cJSON_ReplaceItemInObjectCaseSensitive(payload, "message_id", cJSON_CreateString(id));
       free(id);
    }
-   cJSON *body = cJSON_GetObjectItemCaseSensitive(payload, "payload");
-   cJSON *blocks = event->kind == AIMEE_SESSION_MESSAGE
-                       ? cJSON_GetObjectItemCaseSensitive(body, "blocks")
-                       : NULL;
-   int count = blocks ? cJSON_GetArraySize(blocks) : (event->kind == AIMEE_SESSION_DELTA ? 1 : 0);
-   for (int i = 0; i < count; i++)
-   {
-      cJSON *block = blocks ? cJSON_GetArrayItem(blocks, i) : body;
-      cJSON *id = cJSON_GetObjectItemCaseSensitive(block, "tool_id");
-      if (!cJSON_IsString(id) || !id->valuestring[0])
-         continue;
-      const cJSON *kind = cJSON_GetObjectItemCaseSensitive(block, blocks ? "type" : "kind");
-      int use = cJSON_IsString(kind) && !strcmp(kind->valuestring, "tool_use");
-      if (!c->ir_tool_ids)
-         c->ir_tool_ids = cJSON_CreateObject();
-      if (!c->ir_tool_ids)
-      {
-         cJSON_Delete(payload);
-         c->ir_failed = 1;
-         return -1;
-      }
-      cJSON *mapped = cJSON_GetObjectItemCaseSensitive(c->ir_tool_ids, id->valuestring);
-      if (use && (blocks || (event->delta && event->delta->type == AIMEE_DELTA_BLOCK_START)))
-      {
-         size_t n = strlen(c->ir_turn) + strlen(event->message_id) + strlen(id->valuestring) + 3;
-         char *qualified = malloc(n);
-         if (!qualified)
-         {
-            cJSON_Delete(payload);
-            c->ir_failed = 1;
-            return -1;
-         }
-         snprintf(qualified, n, "%s:%s:%s", c->ir_turn, event->message_id, id->valuestring);
-         cJSON_DeleteItemFromObjectCaseSensitive(c->ir_tool_ids, id->valuestring);
-         mapped = cJSON_AddStringToObject(c->ir_tool_ids, id->valuestring, qualified);
-         free(qualified);
-      }
-      if (mapped && cJSON_IsString(mapped))
-         cJSON_ReplaceItemInObjectCaseSensitive(block, "tool_id",
-                                                cJSON_CreateString(mapped->valuestring));
-   }
+   /* Tool identities are model content. The projection keys calls by host
+    * message/block identity; rewriting tool IDs here corrupts native replay. */
    if (event->request_id)
    {
       size_t n = strlen(c->ir_turn) + strlen(event->request_id) + 2;

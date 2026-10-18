@@ -321,11 +321,10 @@ def main():
             results = [block for block in blocks if block["type"] == "tool_result"]
             assert len(calls) == len(results) == 1, records
             result = results[0]
-            # Live event IDs are host turn/message scoped; native history keeps
-            # the original call ID for provider replay. Both live blocks pair
-            # through the same complete scoped identity.
+            # Host event/message identity is separate from model tool identity.
+            # The durable event and provider replay retain the exact native ID.
             assert result["tool_id"] == calls[0]["tool_id"], (calls, results)
-            assert result["tool_id"].endswith(":identity-call"), result
+            assert result["tool_id"] == "identity-call", result
             if execution_case == 2:
                 assert result["is_error"] is False and "IDENTITY_READ_CONTROL" in json.dumps(result), result
             else:
