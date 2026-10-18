@@ -1,4 +1,5 @@
 #include "server_session_control.h"
+#include <aimee/ir/session_event.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -150,6 +151,8 @@ static int valid_reply(const cJSON *reply)
    {
       if (!strcmp(field->string, "decision"))
          continue;
+      if (!strcmp(field->string, "content") && cJSON_IsObject(field))
+         continue;
       if (strcmp(field->string, "answers") || !cJSON_IsObject(field))
          return 0;
       const cJSON *answers;
@@ -192,6 +195,11 @@ int server_control_reply(const char *session, const char *qualified, const char 
             continue;
          if (p->reply || p->taken)
             break;
+         if (!aimee_ir_control_reply_valid(p->kind, p->request, reply))
+         {
+            result = -1;
+            break;
+         }
          p->reply = cJSON_Duplicate(reply, 1);
          result = p->reply ? 0 : -1;
          break;

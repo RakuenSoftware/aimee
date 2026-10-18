@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Control } from './session';
-export type ControlReply = { decision: 'allow' | 'deny' | 'cancel'; answers?: Record<string, string[]> };
+import ElicitationForm, { type FormContent } from './ElicitationForm';
+export type ControlReply = { decision: 'allow' | 'deny' | 'cancel'; answers?: Record<string, string[]>; content?: FormContent };
 export type ReplyControl = (requestId: string, reply: ControlReply) => Promise<void>;
 type Question = { id: string; question: string; multiple: boolean; options: { label: string; description?: string }[] };
 function questions(request: Record<string, unknown>): Question[] {
@@ -18,16 +19,18 @@ export default function ControlCard({ id, control, onReply }: { id: string; cont
   const closed = !!control.response || !!control.closed;
   const finalAnswers = Object.fromEntries(items.map(q => [q.id, [...(answers[q.id] ?? []), ...(custom[q.id]?.trim() ? [custom[q.id].trim()] : [])]]));
   const canAnswer = control.kind === 'permission' || (control.kind === 'question' && items.length > 0 && items.every(q => finalAnswers[q.id].length > 0));
-  async function submit(decision: ControlReply['decision']) {
+  async function submit(decision: ControlReply['decision'], content?: FormContent) {
     if (!onReply || closed || pending) return;
     setPending(true); setError('');
-    try { await onReply(id, { decision, ...(decision === 'allow' && control.kind === 'question' ? { answers: finalAnswers } : {}) }); }
+    try { await onReply(id, { decision, ...(decision === 'allow' && control.kind === 'question' ? { answers: finalAnswers } : {}), ...(decision === 'allow' && content ? { content } : {}) }); }
     catch (err) { setError(err instanceof Error ? err.message : 'Could not send reply'); setPending(false); }
   }
   return <details open={!closed}>
     <summary>{control.kind}: {control.response ? 'Resolved' : control.closed ? 'Closed' : pending ? 'Reply sent' : 'Awaiting your reply'}</summary>
     {typeof control.request.title === 'string' && <p>{control.request.title}</p>}
-    {control.kind !== 'question' && <pre>{JSON.stringify(control.request.input ?? control.request, null, 2)}</pre>}
+    {control.kind !== 'question' && control.kind !== 'elicitation' && <pre>{JSON.stringify(control.request.input ?? control.request, null, 2)}</pre>}
+    {!closed && control.kind === 'elicitation' && control.request.form && typeof control.request.form === 'object' &&
+      <ElicitationForm form={control.request.form as Record<string, unknown>} disabled={pending || !onReply} onSubmit={content => void submit('allow', content)} />}
     {!closed && items.map(q => <fieldset key={q.id} disabled={pending || !onReply}>
       <legend>{q.question}</legend>
       {q.options.map(option => <label key={option.label} style={{ display: 'block' }}>
@@ -42,6 +45,7 @@ export default function ControlCard({ id, control, onReply }: { id: string; cont
     {!closed && onReply && <div>
       {canAnswer && <button type="button" disabled={pending} onClick={() => void submit('allow')}>{control.kind === 'question' ? 'Send answers' : 'Allow once'}</button>}
       <button type="button" disabled={pending} onClick={() => void submit('deny')}>Decline</button>
+      <button type="button" disabled={pending} onClick={() => void submit('cancel')}>Cancel</button>
     </div>}
     {control.response && <pre>{JSON.stringify(control.response, null, 2)}</pre>}
     {error && <p role="alert">{error}</p>}

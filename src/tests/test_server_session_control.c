@@ -52,6 +52,47 @@ int main(void)
    cJSON_Delete(reply);
    reply = cJSON_Parse("{\"decision\":\"allow\",\"native_response\":{}}");
    assert(server_control_reply("session", "turn:permission", "alice", reply) < 0);
+   /* Invalid form submissions do not consume the pending native request. */
+   cJSON *form =
+       cJSON_Parse("{\"form\":{\"message\":\"Pick options\",\"schema\":{\"type\":\"object\","
+                   "\"properties\":{\"count\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":4},"
+                   "\"name\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":1},"
+                   "\"enabled\":{\"type\":\"boolean\"},\"tags\":{\"type\":\"array\",\"minItems\":1,"
+                   "\"maxItems\":2,\"items\":{\"anyOf\":[{\"const\":\"a\",\"title\":\"A\"},"
+                   "{\"const\":\"b\",\"title\":\"B\"}]}}},\"required\":[\"count\",\"name\","
+                   "\"enabled\",\"tags\"]}}}");
+   assert(form && server_control_register(scope, "form", "elicitation", form) == 0);
+   const char *invalid[] = {
+       "{}",
+       "{\"count\":1.5,\"name\":\"x\",\"enabled\":true,\"tags\":[\"a\"]}",
+       "{\"count\":5,\"name\":\"x\",\"enabled\":true,\"tags\":[\"a\"]}",
+       "{\"count\":2,\"name\":\"xx\",\"enabled\":true,\"tags\":[\"a\"]}",
+       "{\"count\":2,\"name\":\"x\",\"enabled\":1,\"tags\":[\"a\"]}",
+       "{\"count\":2,\"name\":\"x\",\"enabled\":true,\"tags\":[\"unknown\"]}",
+       "{\"count\":2,\"name\":\"x\",\"enabled\":true,\"tags\":[\"a\",\"a\"]}",
+       "{\"count\":2,\"name\":\"x\",\"enabled\":true,\"tags\":[\"a\"],\"extra\":true}",
+   };
+   for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+   {
+      cJSON *bad = cJSON_CreateObject();
+      cJSON_AddStringToObject(bad, "decision", "allow");
+      cJSON_AddItemToObject(bad, "content", cJSON_Parse(invalid[i]));
+      assert(server_control_reply("session", "turn:form", "alice", bad) < 0);
+      assert(server_control_take(scope, "form", &id, &kind, &original, &decision) == 0);
+      cJSON_Delete(bad);
+   }
+   cJSON *accepted_form = cJSON_Parse("{\"decision\":\"allow\",\"content\":{\"count\":2,"
+                                      "\"name\":\"é\",\"enabled\":false,\"tags\":[\"a\",\"b\"]}}");
+   assert(server_control_reply("session", "turn:form", "mallory", accepted_form) < 0);
+   assert(server_control_reply("session", "turn:form", "alice", accepted_form) == 0);
+   assert(server_control_take(scope, "form", &id, &kind, &original, &decision) == 1);
+   assert(cJSON_Compare(accepted_form, decision, 1));
+   free(id);
+   free(kind);
+   cJSON_Delete(original);
+   cJSON_Delete(decision);
+   cJSON_Delete(form);
+   cJSON_Delete(accepted_form);
    server_control_scope_close(scope);
    assert(!server_control_scope_current());
    cJSON_Delete(reply);

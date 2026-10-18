@@ -44,6 +44,11 @@ int aimee_ir_history_repair(struct cJSON *messages);
 struct cJSON *aimee_ir_delta_json(const aimee_delta_t *delta);
 struct cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event);
 
+/* Flat MCP form data and normalized operator replies. No transport or I/O. */
+int aimee_ir_form_validate(const struct cJSON *schema, const struct cJSON *content);
+int aimee_ir_control_reply_valid(const char *kind, const struct cJSON *request,
+                                 const struct cJSON *reply);
+
 /* Thread-bound emission sink. Adapter boundaries publish typed IR here, not a
  * browser-specific event. A missing sink is legal for non-session consumers;
  * a failing installed sink is returned to the producer, never swallowed. */

@@ -362,6 +362,20 @@ static int aimee_codex_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
       }
       cJSON *normalized =
           control_payload(method, params, cJSON_GetObjectItemCaseSensitive(params, "questions"));
+      if (normalized && !strcmp(kind, "elicitation") && !strcmp(str(params, "mode"), "form"))
+      {
+         cJSON_ReplaceItemInObjectCaseSensitive(normalized, "title",
+                                                cJSON_CreateString("Information requested"));
+         cJSON *form = cJSON_AddObjectToObject(normalized, "form");
+         const cJSON *schema = cJSON_GetObjectItemCaseSensitive(params, "requestedSchema");
+         if (!form || !cJSON_AddStringToObject(form, "message", str(params, "message")) ||
+             !cJSON_AddStringToObject(form, "server", str(params, "serverName")) ||
+             !cJSON_AddItemToObject(form, "schema", cJSON_Duplicate(schema, 1)))
+         {
+            cJSON_Delete(normalized);
+            normalized = NULL;
+         }
+      }
       aimee_session_event_t e = {.kind = AIMEE_SESSION_CONTROL_REQUEST,
                                  .request_id = id,
                                  .control_kind = kind,
@@ -909,16 +923,20 @@ cJSON *aimee_codex_control_reply(const char *method, const cJSON *params, const 
    }
    else if (!strcmp(method, "mcpServer/elicitation/request"))
    {
-      // Form acceptance requires a schema-aware content renderer; decline/cancel
-      // are always representable without inventing an empty accepted answer.
-      if (allow)
+      const cJSON *content = cJSON_GetObjectItemCaseSensitive(decision, "content");
+      if (allow && (strcmp(str(params, "mode"), "form") ||
+                    !aimee_ir_form_validate(
+                        cJSON_GetObjectItemCaseSensitive(params, "requestedSchema"), content)))
       {
          cJSON_Delete(result);
          return NULL;
       }
       cJSON_AddStringToObject(result, "action",
-                              !strcmp(str(decision, "decision"), "cancel") ? "cancel" : "decline");
-      cJSON_AddNullToObject(result, "content");
+                              allow                                          ? "accept"
+                              : !strcmp(str(decision, "decision"), "cancel") ? "cancel"
+                                                                             : "decline");
+      cJSON_AddItemToObject(result, "content",
+                            allow ? cJSON_Duplicate(content, 1) : cJSON_CreateNull());
       cJSON_AddNullToObject(result, "_meta");
    }
    else if (!strcmp(method, "item/commandExecution/requestApproval") ||

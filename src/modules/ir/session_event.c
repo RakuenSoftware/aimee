@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 
 static _Thread_local aimee_ir_session_sink_fn session_sink;
@@ -667,4 +668,146 @@ int aimee_ir_session_emit_tool_result(const char *tool_id, const char *result, i
    int rc = aimee_ir_session_emit(&event);
    cJSON_Delete(content);
    return rc;
+}
+
+/* MCP form controls use the restricted flat JSON Schema contract. The browser
+ * is a renderer; native execution independently validates the submitted values. */
+static int form_enum(const cJSON *schema, const cJSON *value)
+{
+   const cJSON *list = cJSON_GetObjectItemCaseSensitive(schema, "enum");
+   int titled = 0;
+   if (!list)
+   {
+      list = cJSON_GetObjectItemCaseSensitive(schema, "oneOf");
+      if (!list)
+         list = cJSON_GetObjectItemCaseSensitive(schema, "anyOf");
+      titled = 1;
+   }
+   if (!list)
+      return 1;
+   if (!cJSON_IsArray(list) || !cJSON_GetArraySize(list))
+      return 0;
+   const cJSON *option;
+   cJSON_ArrayForEach(
+       option,
+       list) if (cJSON_Compare(titled ? cJSON_GetObjectItemCaseSensitive(option, "const") : option,
+                               value, 1)) return 1;
+   return 0;
+}
+static int form_bound(const cJSON *schema, const char *key, double value, int minimum)
+{
+   const cJSON *bound = cJSON_GetObjectItemCaseSensitive(schema, key);
+   return !bound || (cJSON_IsNumber(bound) && isfinite(bound->valuedouble) &&
+                     (minimum ? value >= bound->valuedouble : value <= bound->valuedouble));
+}
+static int form_value(const cJSON *schema, const cJSON *value)
+{
+   const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(schema, "type"));
+   if (!cJSON_IsObject(schema))
+      return 0;
+   /* Titled enum array items omit type and use const alternatives instead. */
+   if (!type)
+      return cJSON_IsString(value) &&
+             (cJSON_GetObjectItemCaseSensitive(schema, "oneOf") ||
+              cJSON_GetObjectItemCaseSensitive(schema, "anyOf")) &&
+             form_enum(schema, value);
+   if (!strcmp(type, "boolean"))
+      return cJSON_IsBool(value);
+   if (!strcmp(type, "number") || !strcmp(type, "integer"))
+   {
+      if (!cJSON_IsNumber(value) || !isfinite(value->valuedouble) ||
+          fabs(value->valuedouble) > 9007199254740991.0)
+         return 0;
+      if (!strcmp(type, "integer") && (double)(long long)value->valuedouble != value->valuedouble)
+         return 0;
+      return form_bound(schema, "minimum", value->valuedouble, 1) &&
+             form_bound(schema, "maximum", value->valuedouble, 0);
+   }
+   if (!strcmp(type, "string"))
+   {
+      if (!cJSON_IsString(value))
+         return 0;
+      size_t length = 0;
+      for (const unsigned char *p = (const unsigned char *)value->valuestring; *p; p++)
+         if ((*p & 0xc0) != 0x80)
+            length++;
+      return form_bound(schema, "minLength", (double)length, 1) &&
+             form_bound(schema, "maxLength", (double)length, 0) && form_enum(schema, value);
+   }
+   if (!strcmp(type, "array"))
+   {
+      if (!cJSON_IsArray(value) || !form_bound(schema, "minItems", cJSON_GetArraySize(value), 1) ||
+          !form_bound(schema, "maxItems", cJSON_GetArraySize(value), 0))
+         return 0;
+      const cJSON *items = cJSON_GetObjectItemCaseSensitive(schema, "items"), *item;
+      cJSON_ArrayForEach(item, value)
+      {
+         if (!cJSON_IsString(item) || !form_value(items, item))
+            return 0;
+         /* Multi-select content is a set, not repeated selections. */
+         for (const cJSON *old = value->child; old != item; old = old->next)
+            if (cJSON_Compare(old, item, 1))
+               return 0;
+      }
+      return cJSON_IsObject(items);
+   }
+   return 0;
+}
+int aimee_ir_form_validate(const cJSON *schema, const cJSON *content)
+{
+   const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(schema, "type"));
+   const cJSON *properties = cJSON_GetObjectItemCaseSensitive(schema, "properties");
+   const cJSON *required = cJSON_GetObjectItemCaseSensitive(schema, "required");
+   if (!type || strcmp(type, "object") || !cJSON_IsObject(properties) || !cJSON_IsObject(content) ||
+       (required && !cJSON_IsArray(required)))
+      return 0;
+   const cJSON *field;
+   cJSON_ArrayForEach(
+       field,
+       required) if (!cJSON_IsString(field) ||
+                     !cJSON_GetObjectItemCaseSensitive(properties, field->valuestring) ||
+                     !cJSON_GetObjectItemCaseSensitive(content, field->valuestring)) return 0;
+   cJSON_ArrayForEach(field, content)
+   {
+      if (!field->string ||
+          !form_value(cJSON_GetObjectItemCaseSensitive(properties, field->string), field))
+         return 0;
+      for (const cJSON *old = content->child; old != field; old = old->next)
+         if (!strcmp(old->string, field->string))
+            return 0;
+   }
+   return 1;
+}
+int aimee_ir_control_reply_valid(const char *kind, const cJSON *request, const cJSON *reply)
+{
+   const char *decision = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "decision"));
+   if (!decision)
+      return 0;
+   const cJSON *answers = cJSON_GetObjectItemCaseSensitive(reply, "answers");
+   const cJSON *content = cJSON_GetObjectItemCaseSensitive(reply, "content");
+   if (strcmp(decision, "allow"))
+      return (!strcmp(decision, "deny") || !strcmp(decision, "cancel")) && !answers && !content;
+   if (!strcmp(kind, "elicitation"))
+   {
+      const cJSON *form = cJSON_GetObjectItemCaseSensitive(request, "form");
+      return !answers &&
+             aimee_ir_form_validate(cJSON_GetObjectItemCaseSensitive(form, "schema"), content);
+   }
+   if (!strcmp(kind, "question"))
+   {
+      const cJSON *questions = cJSON_GetObjectItemCaseSensitive(request, "questions"), *q;
+      if (content || !cJSON_IsArray(questions) || !cJSON_GetArraySize(questions) ||
+          !cJSON_IsObject(answers) || cJSON_GetArraySize(answers) != cJSON_GetArraySize(questions))
+         return 0;
+      cJSON_ArrayForEach(q, questions)
+      {
+         const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(q, "id"));
+         const cJSON *values = id ? cJSON_GetObjectItemCaseSensitive(answers, id) : NULL, *v;
+         if (!cJSON_IsArray(values) || !cJSON_GetArraySize(values))
+            return 0;
+         cJSON_ArrayForEach(v, values) if (!cJSON_IsString(v) || !v->valuestring[0]) return 0;
+      }
+      return 1;
+   }
+   return !strcmp(kind, "permission") && !answers && !content;
 }

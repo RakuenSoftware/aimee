@@ -34,4 +34,58 @@ describe('canonical browser controls', () => {
     render(<ControlCard id="t:p" control={{ ...permission, closed: true }} onReply={vi.fn()} />);
     expect(screen.queryByRole('button')).toBeNull();
   });
+  it('submits typed MCP form values and selected enum constants', async () => {
+    const onReply = vi.fn().mockResolvedValue(undefined);
+    render(<ControlCard id="t:form" control={{ ...permission, kind: 'elicitation', request: { form: {
+      message: 'Configure the job', server: 'inventory', schema: { type: 'object', required: ['name', 'count', 'enabled', 'tags'], properties: {
+        name: { type: 'string', title: 'Job name', minLength: 1 },
+        count: { type: 'integer', title: 'Count', minimum: 1, maximum: 5 },
+        enabled: { type: 'boolean', title: 'Enabled' },
+        tags: { type: 'array', title: 'Tags', minItems: 1, items: { anyOf: [{ const: 'fast', title: 'Fast mode' }, { const: 'slow', title: 'Slow mode' }] } },
+      } },
+    } } }} onReply={onReply} />);
+    expect(screen.getByText('Configure the job')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Send form' })).toHaveProperty('disabled', true);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Job name' }), { target: { value: 'build' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Count' }), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Fast mode' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send form' }));
+    await waitFor(() => expect(onReply).toHaveBeenCalledWith('t:form', { decision: 'allow', content: { name: 'build', count: 2, enabled: false, tags: ['fast'] } }));
+    expect(screen.getByRole('button', { name: 'Send form' })).toHaveProperty('disabled', true);
+  });
+  it('keeps incomplete and invalid numeric forms unsent', () => {
+    const onReply = vi.fn();
+    render(<ControlCard id="t:form" control={{ ...permission, kind: 'elicitation', request: { form: { schema: {
+      type: 'object', required: ['count'], properties: { count: { type: 'integer', title: 'Count', minimum: 1, maximum: 3 } },
+    } } } }} onReply={onReply} />);
+    for (const value of ['0', '4', '1.5']) {
+      fireEvent.change(screen.getByRole('spinbutton', { name: 'Count' }), { target: { value } });
+      expect(screen.getByRole('button', { name: 'Send form' })).toHaveProperty('disabled', true);
+    }
+    expect(onReply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onReply).toHaveBeenCalledWith('t:form', { decision: 'cancel' });
+  });
+  it('offers decline for unsupported nested forms without fabricating accepted content', () => {
+    render(<ControlCard id="t:form" control={{ ...permission, kind: 'elicitation', request: { form: { schema: {
+      type: 'object', properties: { nested: { type: 'object', properties: {} } },
+    } } } }} onReply={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Send form' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Decline' })).toBeTruthy();
+  });
+
+  it('preserves an empty enum constant and a Unicode character in form content', async () => {
+    const onReply = vi.fn().mockResolvedValue(undefined);
+    render(<ControlCard id="t:form" control={{ ...permission, kind: 'elicitation', request: { form: { schema: {
+      type: 'object', required: ['choice', 'name'], properties: {
+        choice: { type: 'string', title: 'Choice', oneOf: [{ const: '', title: 'None' }, { const: 'x', title: 'X' }] },
+        name: { type: 'string', title: 'Name', minLength: 1, maxLength: 1 },
+      },
+    } } } }} onReply={onReply} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Choice' }), { target: { value: '0' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'é' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send form' }));
+    await waitFor(() => expect(onReply).toHaveBeenCalledWith('t:form', { decision: 'allow', content: { choice: '', name: 'é' } }));
+  });
+
 });

@@ -257,6 +257,27 @@ static void control_outputs(void)
    cJSON_Delete(response);
    cJSON_Delete(decision);
    cJSON_Delete(request);
+   request =
+       cJSON_Parse("{\"mode\":\"form\",\"serverName\":\"inventory\",\"message\":\"Quantity?\","
+                   "\"requestedSchema\":{\"type\":\"object\",\"properties\":{\"quantity\":{"
+                   "\"type\":\"integer\",\"minimum\":1}},\"required\":[\"quantity\"]}}");
+   decision = cJSON_Parse("{\"decision\":\"allow\",\"content\":{\"quantity\":3}}");
+   response = aimee_codex_control_reply("mcpServer/elicitation/request", request, decision);
+   assert(response && !strcmp(string(response, "action"), "accept"));
+   assert(cJSON_Compare(cJSON_GetObjectItem(response, "content"),
+                        cJSON_GetObjectItem(decision, "content"), 1));
+   cJSON_Delete(response);
+   cJSON_Delete(decision);
+   decision = cJSON_Parse("{\"decision\":\"allow\",\"content\":{\"quantity\":0}}");
+   assert(!aimee_codex_control_reply("mcpServer/elicitation/request", request, decision));
+   cJSON_Delete(decision);
+   decision = cJSON_Parse("{\"decision\":\"cancel\"}");
+   response = aimee_codex_control_reply("mcpServer/elicitation/request", request, decision);
+   assert(response && !strcmp(string(response, "action"), "cancel"));
+   assert(cJSON_IsNull(cJSON_GetObjectItem(response, "content")));
+   cJSON_Delete(response);
+   cJSON_Delete(decision);
+   cJSON_Delete(request);
 }
 
 int main(void)
@@ -264,6 +285,22 @@ int main(void)
    control_outputs();
    events = cJSON_CreateArray();
    aimee_ir_session_set_sink(capture, NULL);
+   aimee_harness_ir_t form_state = {0};
+   assert(
+       frame(
+           "{\"id\":42,\"method\":\"mcpServer/elicitation/request\",\"params\":{\"mode\":\"form\","
+           "\"message\":\"Quantity?\",\"serverName\":\"inventory\",\"requestedSchema\":{\"type\":"
+           "\"object\","
+           "\"properties\":{\"quantity\":{\"type\":\"integer\"}}}}}",
+           &form_state, 1) == 0);
+   const cJSON *event = cJSON_GetArrayItem(events, 0);
+   assert(!strcmp(string(event, "control_kind"), "elicitation"));
+   const cJSON *form = cJSON_GetObjectItem(cJSON_GetObjectItem(event, "payload"), "form");
+   assert(form && !strcmp(string(form, "message"), "Quantity?") &&
+          !strcmp(string(form, "server"), "inventory"));
+   assert(cJSON_IsObject(cJSON_GetObjectItem(form, "schema")));
+   aimee_harness_ir_free(&form_state);
+   cJSON_DeleteItemFromArray(events, 0);
    claude();
    claude_block_snapshots();
    codex();

@@ -7954,7 +7954,8 @@ $(TESTPREFIX)/unit-test-primary-history-client: $(OBJDIR)/tests/test_primary_his
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-server-session-control: $(OBJDIR)/tests/test_server_session_control.o \
-    $(OBJDIR)/server/server_session_control.o $(OBJDIR)/cJSON.o
+    $(OBJDIR)/server/server_session_control.o $(OBJDIR)/modules/ir/session_event.o \
+    $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-server-session-log: $(OBJDIR)/tests/test_server_session_log.o \
