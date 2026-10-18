@@ -460,6 +460,63 @@ static const char *openai_finish(const aimee_response_t *r)
    }
 }
 
+/* Content arrays retain the ordering of text and media. Unrepresentable files
+ * fail at this egress boundary rather than silently disappearing from history. */
+cJSON *openai_ir_render_content(const aimee_message_t *message)
+{
+   cJSON *parts = cJSON_CreateArray();
+   if (!parts)
+      return NULL;
+   for (int i = 0; i < message->n_blocks; i++)
+   {
+      const aimee_block_t *block = &message->blocks[i];
+      if (block->type != AIMEE_BLK_TEXT && block->type != AIMEE_BLK_IMAGE &&
+          block->type != AIMEE_BLK_DOCUMENT)
+         continue;
+      cJSON *part = cJSON_CreateObject();
+      if (!part)
+         goto fail;
+      if (block->type == AIMEE_BLK_TEXT)
+      {
+         cJSON_AddStringToObject(part, "type", "text");
+         cJSON_AddStringToObject(part, "text", block->text ? block->text : "");
+      }
+      else
+      {
+         char *ref = aimee_ir_media_url(block);
+         if (!ref)
+         {
+            cJSON_Delete(part);
+            goto fail;
+         }
+         if (block->type == AIMEE_BLK_IMAGE)
+         {
+            cJSON_AddStringToObject(part, "type", "image_url");
+            cJSON *image = cJSON_AddObjectToObject(part, "image_url");
+            cJSON_AddStringToObject(image, "url", ref);
+         }
+         else
+         {
+            if (strncmp(ref, "file-", 5) && strncmp(ref, "data:", 5))
+            {
+               free(ref);
+               cJSON_Delete(part);
+               goto fail;
+            }
+            cJSON_AddStringToObject(part, "type", "file");
+            cJSON *file = cJSON_AddObjectToObject(part, "file");
+            cJSON_AddStringToObject(file, !strncmp(ref, "file-", 5) ? "file_id" : "file_data", ref);
+         }
+         free(ref);
+      }
+      cJSON_AddItemToArray(parts, part);
+   }
+   return parts;
+fail:
+   cJSON_Delete(parts);
+   return NULL;
+}
+
 cJSON *openai_frontend_render(const aimee_response_t *r)
 {
    if (!r)
@@ -521,12 +578,48 @@ cJSON *openai_frontend_render(const aimee_response_t *r)
          }
       }
    }
-   /* content is null when the assistant only emitted tool calls (OpenAI convention) */
-   if (text && text[0])
+   int has_media = 0;
+   for (int i = 0; i < r->n_content; i++)
+      has_media |=
+          r->content[i].type == AIMEE_BLK_IMAGE || r->content[i].type == AIMEE_BLK_DOCUMENT;
+   if (has_media)
+   {
+      aimee_message_t message = {
+          .role = "assistant", .blocks = r->content, .n_blocks = r->n_content};
+      cJSON *content = openai_ir_render_content(&message);
+      if (!content)
+      {
+         free(text);
+         cJSON_Delete(tool_calls);
+         cJSON_Delete(out);
+         return NULL;
+      }
+      cJSON_AddItemToObject(msg, "content", content);
+   }
+   else if (text[0])
       cJSON_AddStringToObject(msg, "content", text);
    else
       cJSON_AddNullToObject(msg, "content");
    free(text);
+   for (int i = 0; i < r->n_content; i++)
+      if (r->content[i].type == AIMEE_BLK_THINKING && r->content[i].text)
+      {
+         const cJSON *old = cJSON_GetObjectItemCaseSensitive(msg, "reasoning_content");
+         const char *previous = cJSON_GetStringValue(old);
+         const char *next = r->content[i].text;
+         size_t length = (previous ? strlen(previous) : 0) + strlen(next) + 1;
+         char *joined = malloc(length);
+         if (!joined)
+         {
+            cJSON_Delete(tool_calls);
+            cJSON_Delete(out);
+            return NULL;
+         }
+         snprintf(joined, length, "%s%s", previous ? previous : "", next);
+         cJSON_DeleteItemFromObjectCaseSensitive(msg, "reasoning_content");
+         cJSON_AddStringToObject(msg, "reasoning_content", joined);
+         free(joined);
+      }
    if (tool_calls)
       cJSON_AddItemToObject(msg, "tool_calls", tool_calls);
 
@@ -535,6 +628,10 @@ cJSON *openai_frontend_render(const aimee_response_t *r)
    cJSON *usage = cJSON_AddObjectToObject(out, "usage");
    cJSON_AddNumberToObject(usage, "prompt_tokens", (double)r->usage_in);
    cJSON_AddNumberToObject(usage, "completion_tokens", (double)r->usage_out);
-   cJSON_AddNumberToObject(usage, "total_tokens", (double)(r->usage_in + r->usage_out));
+   cJSON_AddNumberToObject(usage, "total_tokens", (double)r->usage_in + (double)r->usage_out);
+   cJSON *cached = cJSON_AddObjectToObject(usage, "prompt_tokens_details");
+   cJSON_AddNumberToObject(cached, "cached_tokens", (double)r->usage_cache_read);
+   cJSON *reasoning = cJSON_AddObjectToObject(usage, "completion_tokens_details");
+   cJSON_AddNumberToObject(reasoning, "reasoning_tokens", (double)r->usage_reasoning);
    return out;
 }

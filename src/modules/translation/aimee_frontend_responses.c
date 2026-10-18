@@ -328,24 +328,37 @@ cJSON *responses_frontend_render(const aimee_response_t *r)
    cJSON_AddStringToObject(out, "status",
                            r->stop_reason == AIMEE_STOP_MAX_TOKENS ? "incomplete" : "completed");
 
+   if (r->stop_reason == AIMEE_STOP_MAX_TOKENS)
+      cJSON_AddStringToObject(cJSON_AddObjectToObject(out, "incomplete_details"), "reason",
+                              "max_output_tokens");
    cJSON *output = cJSON_AddArrayToObject(out, "output");
+   cJSON *last_message = NULL;
+   int last_group = -1;
    for (int i = 0; i < r->n_content; i++)
    {
       const aimee_block_t *b = &r->content[i];
       if (b->type == AIMEE_BLK_TEXT)
       {
-         cJSON *item = cJSON_CreateObject();
-         cJSON_AddStringToObject(item, "type", "message");
-         cJSON_AddStringToObject(item, "role", "assistant");
-         cJSON *content = cJSON_AddArrayToObject(item, "content");
+         cJSON *item = last_message;
+         if (!item || last_group != b->message_group)
+         {
+            item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "type", "message");
+            cJSON_AddStringToObject(item, "role", "assistant");
+            cJSON_AddArrayToObject(item, "content");
+            cJSON_AddItemToArray(output, item);
+         }
          cJSON *part = cJSON_CreateObject();
          cJSON_AddStringToObject(part, "type", "output_text");
          cJSON_AddStringToObject(part, "text", b->text ? b->text : "");
-         cJSON_AddItemToArray(content, part);
-         cJSON_AddItemToArray(output, item);
+         cJSON_AddArrayToObject(part, "annotations");
+         cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(item, "content"), part);
+         last_message = item;
+         last_group = b->message_group;
       }
       else if (b->type == AIMEE_BLK_TOOL_USE)
       {
+         last_message = NULL;
          cJSON *item = cJSON_CreateObject();
          cJSON_AddStringToObject(item, "type", "function_call");
          cJSON_AddStringToObject(item, "call_id", b->tool_id ? b->tool_id : "");
@@ -359,18 +372,36 @@ cJSON *responses_frontend_render(const aimee_response_t *r)
       }
       else if (b->type == AIMEE_BLK_THINKING)
       {
+         last_message = NULL;
          cJSON *item = cJSON_CreateObject();
          cJSON_AddStringToObject(item, "type", "reasoning");
          if (b->thinking_id)
             cJSON_AddStringToObject(item, "id", b->thinking_id);
          if (b->thinking_encrypted_content)
             cJSON_AddStringToObject(item, "encrypted_content", b->thinking_encrypted_content);
-         cJSON_AddStringToObject(item, "summary", b->text ? b->text : "");
+         cJSON *summary = cJSON_AddArrayToObject(item, "summary");
+         if (b->text && b->text[0])
+         {
+            cJSON *part = cJSON_CreateObject();
+            cJSON_AddStringToObject(part, "type", "summary_text");
+            cJSON_AddStringToObject(part, "text", b->text);
+            cJSON_AddItemToArray(summary, part);
+         }
          cJSON_AddItemToArray(output, item);
+      }
+      else
+      {
+         /* This client wire cannot represent these admitted native blocks. */
+         cJSON_Delete(out);
+         return NULL;
       }
    }
    cJSON *usage = cJSON_AddObjectToObject(out, "usage");
    cJSON_AddNumberToObject(usage, "input_tokens", (double)r->usage_in);
    cJSON_AddNumberToObject(usage, "output_tokens", (double)r->usage_out);
+   cJSON *cached = cJSON_AddObjectToObject(usage, "input_tokens_details");
+   cJSON_AddNumberToObject(cached, "cached_tokens", (double)r->usage_cache_read);
+   cJSON *reasoning = cJSON_AddObjectToObject(usage, "output_tokens_details");
+   cJSON_AddNumberToObject(reasoning, "reasoning_tokens", (double)r->usage_reasoning);
    return out;
 }

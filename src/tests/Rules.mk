@@ -2704,7 +2704,8 @@ $(TESTPREFIX)/unit-test-openai-ingress-ir: $(OBJDIR)/tests/test_openai_ingress_i
                                        $(OBJDIR)/core/turn_integrity/turn_integrity.o \
                                        $(OBJDIR)/aimee_sha256.o \
                                        $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
-                                       $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/translation/history_ir.o $(OBJDIR)/modules/ir/session_event.o
+                                       $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/cJSON.o $(OBJDIR)/modules/translation/history_ir.o $(OBJDIR)/modules/ir/session_event.o \
+                                       $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Slice 4: IR-delta streaming (pure — cJSON only).

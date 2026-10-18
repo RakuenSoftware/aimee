@@ -70,6 +70,9 @@ struct cJSON *responses_frontend_render(const aimee_response_t *resp);
 /* Shared owned text/media content adapter for Chat request/response boundaries. */
 int openai_ir_parse_content(const struct cJSON *content, aimee_block_t **blocks, int *count);
 
+/* Ordered Chat text/media at either request or response output boundary. */
+struct cJSON *openai_ir_render_content(const aimee_message_t *message);
+
 /* Shared typed output-format entry: Chat nests json_schema, Responses does not. */
 int openai_family_output_format_parse(const struct cJSON *format, int responses_shape,
                                       aimee_request_t *out, char *error, size_t capacity);

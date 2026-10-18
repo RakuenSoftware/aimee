@@ -36,7 +36,11 @@
 #include "config.h" /* legacy_config_record, legacy_config_read */
 #include "agent_config.h"
 #include "agent_exec.h"
-#include "agent_protocol.h"                  /* parsed_response_t, message_history_repair */
+#include "agent_protocol.h" /* message_history_repair */
+#include "agent_response_projection.h"
+#include <aimee/ir/session_event.h>
+#include <aimee/translation/aimee_frontend.h>
+#include <aimee/translation/aimee_backend.h>
 #include "model_registry.h"                  /* configured/catalog context for model discovery */
 #include <aimee/delegates/delegate_driver.h> /* single provider step for the Codex proxy */
 #include "http_retry.h"
@@ -158,30 +162,225 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
  * branch in run_completion is their first caller. */
 static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *tools,
                                   const char *system_prompt, int max_tokens, double temperature,
-                                  parsed_response_t *out, char *error, size_t error_cap,
+                                  aimee_response_t *out, char *error, size_t error_cap,
                                   int preserve_messages, const cJSON *template_kwargs);
 static int openai_governance_enabled(void);
 
-/* Whether a parsed reply was cut off at the token cap. Decided by the canonical
- * value the IR parse carried, not the raw string: that string is the provider's own
- * word ("length", "max_tokens", "incomplete") or a policy stage's, so comparing it
- * against one wire's spelling misses every other wire's truncation. The raw string
- * is consulted only when no IR parse set a value. */
-static int parsed_truncated(const parsed_response_t *p)
+/* The provider result remains owned IR through policy and the client boundary. */
+static cJSON *openai_render_ir(const aimee_response_t *response, const char *id, const char *model,
+                               long created, int responses)
 {
-   if (p->stop == AIMEE_STOP_MAX_TOKENS)
-      return 1;
-   return p->stop == AIMEE_STOP_UNKNOWN && strcmp(p->stop_reason, "length") == 0;
+   aimee_response_t view = *response;
+   view.id = (char *)id;
+   view.model = (char *)model;
+   cJSON *root = responses ? responses_frontend_render(&view) : openai_frontend_render(&view);
+   if (!root)
+      return NULL;
+   cJSON_AddNumberToObject(root, responses ? "created_at" : "created", (double)created);
+   if (responses)
+   {
+      cJSON *item;
+      int index = 0;
+      cJSON_ArrayForEach(item, cJSON_GetObjectItemCaseSensitive(root, "output"))
+      {
+         if (!cJSON_GetObjectItemCaseSensitive(item, "id"))
+         {
+            size_t capacity = strlen(id) + 40;
+            char *item_id = malloc(capacity);
+            if (!item_id)
+            {
+               cJSON_Delete(root);
+               return NULL;
+            }
+            snprintf(item_id, capacity, "%s-item-%d", id, index);
+            cJSON_AddStringToObject(item, "id", item_id);
+            free(item_id);
+         }
+         cJSON_AddStringToObject(item, "status", "completed");
+         index++;
+      }
+   }
+   return root;
 }
-
-/* Chat Completions finish_reason for a text reply. */
-static const char *openai_text_finish(const parsed_response_t *p)
+static int openai_ir_buffered(const aimee_response_t *response, const char *id, const char *model,
+                              long created, int responses, char *buffer, int capacity)
 {
-   if (parsed_truncated(p))
-      return "length";
-   if (p->stop == AIMEE_STOP_CONTENT_FILTER)
-      return "content_filter";
-   return "stop";
+   cJSON *root = openai_render_ir(response, id, model, created, responses);
+   int length =
+       root && cJSON_PrintPreallocated(root, buffer, capacity, 0) ? (int)strlen(buffer) : -1;
+   cJSON_Delete(root);
+   return length;
+}
+static int openai_ir_emit_event(server_http_sse_event_emit emit, void *context, const char *event,
+                                cJSON *payload)
+{
+   if (!payload || !cJSON_AddStringToObject(payload, "type", event))
+   {
+      cJSON_Delete(payload);
+      return -1;
+   }
+   char *json = cJSON_PrintUnformatted(payload);
+   cJSON_Delete(payload);
+   if (!json)
+      return -1;
+   emit(context, event, json);
+   free(json);
+   return 0;
+}
+static int openai_ir_chat_emit(const aimee_response_t *response, const char *id, const char *model,
+                               long created, server_http_sse_emit emit, void *context)
+{
+   cJSON *root = openai_render_ir(response, id, model, created, 0);
+   if (!root)
+      return -1;
+   cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(root, "choices"), 0);
+   cJSON *message = cJSON_DetachItemFromObjectCaseSensitive(choice, "message");
+   cJSON *calls = cJSON_GetObjectItemCaseSensitive(message, "tool_calls"), *call;
+   int index = 0;
+   cJSON_ArrayForEach(call, calls) cJSON_AddNumberToObject(call, "index", index++);
+   cJSON_AddItemToObject(choice, "delta", message);
+   cJSON *finish = cJSON_DetachItemFromObjectCaseSensitive(choice, "finish_reason");
+   cJSON_AddNullToObject(choice, "finish_reason");
+   cJSON_ReplaceItemInObjectCaseSensitive(root, "object",
+                                          cJSON_CreateString("chat.completion.chunk"));
+   cJSON *usage = cJSON_DetachItemFromObjectCaseSensitive(root, "usage");
+   char *json = cJSON_PrintUnformatted(root);
+   if (!json)
+   {
+      cJSON_Delete(finish);
+      cJSON_Delete(usage);
+      cJSON_Delete(root);
+      return -1;
+   }
+   emit(context, json);
+   free(json);
+   cJSON_ReplaceItemInObjectCaseSensitive(choice, "delta", cJSON_CreateObject());
+   cJSON_ReplaceItemInObjectCaseSensitive(choice, "finish_reason", finish);
+   cJSON_AddItemToObject(root, "usage", usage);
+   json = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!json)
+      return -1;
+   emit(context, json);
+   free(json);
+   return 0;
+}
+static cJSON *openai_ir_item_event(const cJSON *item, int index)
+{
+   cJSON *event = cJSON_CreateObject();
+   if (!event || !cJSON_AddNumberToObject(event, "output_index", index) ||
+       !cJSON_AddStringToObject(event, "item_id",
+                                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "id"))))
+   {
+      cJSON_Delete(event);
+      return NULL;
+   }
+   return event;
+}
+static int openai_ir_responses_emit(const aimee_response_t *response, const char *id,
+                                    const char *model, long created,
+                                    server_http_sse_event_emit emit, void *context)
+{
+   cJSON *root = openai_render_ir(response, id, model, created, 1);
+   if (!root)
+      return -1;
+   cJSON *item;
+   int index = 0, rc = -1;
+   cJSON_ArrayForEach(item, cJSON_GetObjectItemCaseSensitive(root, "output"))
+   {
+      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "type"));
+      cJSON *start = cJSON_Duplicate(item, 1);
+      cJSON *event = openai_ir_item_event(item, index);
+      if (!start || !event)
+      {
+         cJSON_Delete(start);
+         cJSON_Delete(event);
+         goto done;
+      }
+      cJSON_ReplaceItemInObjectCaseSensitive(start, "status", cJSON_CreateString("in_progress"));
+      if (!strcmp(type, "message"))
+         cJSON_ReplaceItemInObjectCaseSensitive(start, "content", cJSON_CreateArray());
+      else if (!strcmp(type, "function_call"))
+         cJSON_ReplaceItemInObjectCaseSensitive(start, "arguments", cJSON_CreateString(""));
+      else if (!strcmp(type, "reasoning"))
+      {
+         cJSON_ReplaceItemInObjectCaseSensitive(start, "summary", cJSON_CreateArray());
+         cJSON_DeleteItemFromObjectCaseSensitive(start, "encrypted_content");
+      }
+      cJSON_AddItemToObject(event, "item", start);
+      if (openai_ir_emit_event(emit, context, "response.output_item.added", event))
+         goto done;
+      if (!strcmp(type, "function_call"))
+      {
+         const char *args =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "arguments"));
+         event = openai_ir_item_event(item, index);
+         cJSON_AddStringToObject(event, "delta", args);
+         if (openai_ir_emit_event(emit, context, "response.function_call_arguments.delta", event))
+            goto done;
+         event = openai_ir_item_event(item, index);
+         cJSON_AddStringToObject(event, "arguments", args);
+         if (openai_ir_emit_event(emit, context, "response.function_call_arguments.done", event))
+            goto done;
+      }
+      else
+      {
+         int reasoning = !strcmp(type, "reasoning");
+         const char *parts_name = reasoning ? "summary" : "content";
+         cJSON *part;
+         int part_index = 0;
+         cJSON_ArrayForEach(part, cJSON_GetObjectItemCaseSensitive(item, parts_name))
+         {
+            const char *text = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(part, "text"));
+            const char *position = reasoning ? "summary_index" : "content_index";
+            const char *added =
+                reasoning ? "response.reasoning_summary_part.added" : "response.content_part.added";
+            const char *delta =
+                reasoning ? "response.reasoning_summary_text.delta" : "response.output_text.delta";
+            const char *text_done =
+                reasoning ? "response.reasoning_summary_text.done" : "response.output_text.done";
+            const char *part_done =
+                reasoning ? "response.reasoning_summary_part.done" : "response.content_part.done";
+            cJSON *empty = cJSON_Duplicate(part, 1);
+            cJSON_ReplaceItemInObjectCaseSensitive(empty, "text", cJSON_CreateString(""));
+            event = openai_ir_item_event(item, index);
+            cJSON_AddNumberToObject(event, position, part_index);
+            cJSON_AddItemToObject(event, "part", empty);
+            if (openai_ir_emit_event(emit, context, added, event))
+               goto done;
+            event = openai_ir_item_event(item, index);
+            cJSON_AddNumberToObject(event, position, part_index);
+            cJSON_AddStringToObject(event, "delta", text ? text : "");
+            if (openai_ir_emit_event(emit, context, delta, event))
+               goto done;
+            event = openai_ir_item_event(item, index);
+            cJSON_AddNumberToObject(event, position, part_index);
+            cJSON_AddStringToObject(event, "text", text ? text : "");
+            if (openai_ir_emit_event(emit, context, text_done, event))
+               goto done;
+            event = openai_ir_item_event(item, index);
+            cJSON_AddNumberToObject(event, position, part_index);
+            cJSON_AddItemToObject(event, "part", cJSON_Duplicate(part, 1));
+            if (openai_ir_emit_event(emit, context, part_done, event))
+               goto done;
+            part_index++;
+         }
+      }
+      event = openai_ir_item_event(item, index);
+      cJSON_AddItemToObject(event, "item", cJSON_Duplicate(item, 1));
+      if (openai_ir_emit_event(emit, context, "response.output_item.done", event))
+         goto done;
+      index++;
+   }
+   cJSON *terminal = cJSON_CreateObject();
+   cJSON_AddItemToObject(terminal, "response", cJSON_Duplicate(root, 1));
+   rc = openai_ir_emit_event(emit, context,
+                             response->stop_reason == AIMEE_STOP_MAX_TOKENS ? "response.incomplete"
+                                                                            : "response.completed",
+                             terminal);
+done:
+   cJSON_Delete(root);
+   return rc;
 }
 
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
@@ -293,7 +492,7 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       if (openai_split_chat_request(body, &instructions, &messages, &tools) == 0 &&
           (tools || openai_request_preserves_messages(body)))
       {
-         parsed_response_t parsed;
+         aimee_response_t parsed;
          char upstream_error[512];
          char *legacy_context =
              !aimee_ir_path_enabled() && !instructions
@@ -323,7 +522,7 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
 
          if (trc != 0)
          {
-            agent_free_parsed_response(&parsed);
+            aimee_response_free(&parsed);
             cJSON_Delete(messages);
             cJSON_Delete(tools);
             openai_format_error(resp, cap, wire_fence_error_type(upstream_error), upstream_error);
@@ -331,34 +530,18 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
          }
 
          if (agent_ingress_accounting_enabled())
-            agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
-                                      parsed.prompt_tokens, parsed.completion_tokens,
-                                      parsed.cache_write_tokens, parsed.cache_read_tokens,
-                                      "openai-ingress", NULL);
-
-         if (!(openai_request_preserves_messages(body) && !tools) &&
-             gw_response_run_completion(&parsed, messages, tools, "tool_calls"))
-            LOG_INFO("completion.gate", "continued incomplete OpenAI chat repair");
-
-         /* Same response-side policing the streaming path runs, so a denied
-          * subagent-spawning call cannot reach an external caller. */
-         if (parsed.is_tool_call && parsed.call_count > 0)
-            (void)gw_response_run_governance(&parsed, openai_governance_enabled(),
-                                             gateway_prevent_subagents_enabled());
+            agent_ingress_record_cost(
+                ag->name, ag->model, model,
+                parsed.raw_stop_reason ? parsed.raw_stop_reason
+                                       : aimee_stop_reason_name(parsed.stop_reason),
+                (int)parsed.usage_in, (int)parsed.usage_out, (int)parsed.usage_cache_write,
+                (int)parsed.usage_cache_read, "openai-ingress", NULL);
 
          long tcreated = (long)time(NULL);
-         char tid[48];
-         snprintf(tid, sizeof(tid), "chatcmpl-%ld", tcreated);
-
-         int tlen;
-         if (parsed.is_tool_call && parsed.call_count > 0)
-            tlen =
-                openai_format_chat_completion_tool_calls(tid, model, &parsed, tcreated, resp, cap);
-         else
-            tlen = openai_format_chat_completion_reason(
-                tid, model, parsed.content ? parsed.content : "", tcreated, parsed.prompt_tokens,
-                parsed.completion_tokens, openai_text_finish(&parsed), resp, cap);
-         agent_free_parsed_response(&parsed);
+         char tid[64];
+         snprintf(tid, sizeof tid, "chatcmpl-%ld", tcreated);
+         int tlen = openai_ir_buffered(&parsed, tid, model, tcreated, 0, resp, cap);
+         aimee_response_free(&parsed);
          cJSON_Delete(messages);
          cJSON_Delete(tools);
          if (tlen < 0)
@@ -784,19 +967,6 @@ static void responses_store_turn(const char *id, const char *full, const char *r
  * + the assistant reply) is stored under the freshly minted response id so a
  * follow-up can chain off it in turn. The store is in-process only (not durable
  * across restarts), matching this surface's local single-owner posture. */
-/* Buffered Responses uses the same governed tool-result shape as SSE. */
-static void responses_buffered_tool_result(void *ctx, const char *event, const char *data)
-{
-   if (strcmp(event, "response.completed") != 0)
-      return;
-   cJSON **result = ctx;
-   cJSON *root = cJSON_Parse(data);
-   cJSON *response = cJSON_DetachItemFromObjectCaseSensitive(root, "response");
-   cJSON_Delete(root);
-   cJSON_Delete(*result);
-   *result = response;
-}
-
 static int responses_handler(const char *body, char *resp, int cap)
 {
    char model[64] = "";
@@ -893,7 +1063,7 @@ static int responses_handler(const char *body, char *resp, int cap)
       }
    }
    message_history_repair(messages);
-   parsed_response_t result;
+   aimee_response_t result;
    char upstream_error[512];
    int erc = agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature,
                                     &result, upstream_error, sizeof(upstream_error), 0, NULL);
@@ -901,7 +1071,7 @@ static int responses_handler(const char *body, char *resp, int cap)
    if (erc != 0)
    {
       openai_format_error(resp, cap, wire_fence_error_type(upstream_error), upstream_error);
-      agent_free_parsed_response(&result);
+      aimee_response_free(&result);
       cJSON_Delete(messages);
       cJSON_Delete(tools);
       free(prompt);
@@ -909,39 +1079,25 @@ static int responses_handler(const char *body, char *resp, int cap)
       return wire_fence_error_http_status(upstream_error);
    }
    if (agent_ingress_accounting_enabled())
-      agent_ingress_record_cost(ag->name, ag->model, model, result.stop_reason,
-                                result.prompt_tokens, result.completion_tokens,
-                                result.cache_write_tokens, result.cache_read_tokens,
+      agent_ingress_record_cost(ag->name, ag->model, model,
+                                result.raw_stop_reason ? result.raw_stop_reason
+                                                       : aimee_stop_reason_name(result.stop_reason),
+                                (int)result.usage_in, (int)result.usage_out,
+                                (int)result.usage_cache_write, (int)result.usage_cache_read,
                                 "openai-ingress", NULL);
-   if (gw_response_run_completion(&result, messages, tools, "tool_calls"))
-      LOG_INFO("completion.gate", "continued incomplete buffered OpenAI Responses repair");
-   if (result.is_tool_call && result.call_count > 0)
-      (void)gw_response_run_governance(&result, openai_governance_enabled(),
-                                       gateway_prevent_subagents_enabled());
    cJSON_Delete(messages);
    cJSON_Delete(tools);
-
    long created = (long)time(NULL);
    char id[64];
    responses_mint_id(created, id, sizeof(id));
-   responses_store_turn(id, full, result.content ? result.content : "");
+   char *continuation_text = aimee_ir_response_text_alloc(&result);
+   if (continuation_text)
+      responses_store_turn(id, full, continuation_text);
+   free(continuation_text);
    free(prompt);
    free(combined);
-   int len;
-   if (result.is_tool_call && result.call_count > 0)
-   {
-      cJSON *response = NULL;
-      openai_responses_emit_policed(&result, id, model, created, responses_buffered_tool_result,
-                                    &response);
-      len = response && cJSON_PrintPreallocated(response, resp, cap, 0) ? (int)strlen(resp) : -1;
-      cJSON_Delete(response);
-   }
-   else
-      len = openai_format_response_status(
-          id, model, result.content ? result.content : "", created, result.prompt_tokens,
-          result.completion_tokens, result.cache_read_tokens,
-          parsed_truncated(&result) ? "max_output_tokens" : NULL, resp, cap);
-   agent_free_parsed_response(&result);
+   int len = openai_ir_buffered(&result, id, model, created, 1, resp, cap);
+   aimee_response_free(&result);
    if (len < 0)
    {
       openai_format_error(resp, cap, "server_error", "response did not fit the buffer");
@@ -1026,7 +1182,7 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
       cJSON *messages = NULL, *tools = NULL;
       if (openai_split_chat_request(body, &instructions, &messages, &tools) == 0 && tools)
       {
-         parsed_response_t parsed;
+         aimee_response_t parsed;
          char upstream_error[512];
          int trc =
              agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature,
@@ -1042,47 +1198,29 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
                                 wire_fence_error_type(upstream_error), upstream_error);
             emit(ctx, error_frame);
             emit(ctx, "[DONE]");
-            agent_free_parsed_response(&parsed);
+            aimee_response_free(&parsed);
             cJSON_Delete(messages);
             cJSON_Delete(tools);
             return 0;
          }
 
          if (agent_ingress_accounting_enabled())
-            agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
-                                      parsed.prompt_tokens, parsed.completion_tokens,
-                                      parsed.cache_write_tokens, parsed.cache_read_tokens,
-                                      "openai-ingress", NULL);
+            agent_ingress_record_cost(
+                ag->name, ag->model, model,
+                parsed.raw_stop_reason ? parsed.raw_stop_reason
+                                       : aimee_stop_reason_name(parsed.stop_reason),
+                (int)parsed.usage_in, (int)parsed.usage_out, (int)parsed.usage_cache_write,
+                (int)parsed.usage_cache_read, "openai-ingress", NULL);
 
-         if (gw_response_run_completion(&parsed, messages, tools, "tool_calls"))
-            LOG_INFO("completion.gate", "continued incomplete streaming OpenAI chat repair");
-
-         if (parsed.is_tool_call && parsed.call_count > 0)
-            (void)gw_response_run_governance(&parsed, openai_governance_enabled(),
-                                             gateway_prevent_subagents_enabled());
-
-         if (parsed.is_tool_call && parsed.call_count > 0)
+         if (openai_ir_chat_emit(&parsed, id, model, created, emit, ctx))
          {
-            char frame[4096];
-            if (parsed.content && parsed.content[0])
-               emit_chunk(emit, ctx, id, model, created, 0, parsed.content, 0);
-            if (openai_format_chat_chunk_tool_calls(id, model, created, &parsed, frame,
-                                                    sizeof(frame)) > 0)
-               emit(ctx, frame);
-            if (openai_format_chat_chunk_finish(id, model, created, "tool_calls", frame,
-                                                sizeof(frame)) > 0)
-               emit(ctx, frame);
+            char failure[256];
+            openai_format_error(failure, sizeof failure, "server_error",
+                                "canonical response rendering failed");
+            emit(ctx, failure);
          }
-         else
-         {
-            /* Policing may have dropped every call; fall back to a text turn. */
-            emit_chunk(emit, ctx, id, model, created, 0, parsed.content ? parsed.content : "", 0);
-            char fin[512];
-            if (openai_format_chat_chunk_finish(id, model, created, openai_text_finish(&parsed),
-                                                fin, sizeof(fin)) > 0)
-               emit(ctx, fin);
-         }
-         agent_free_parsed_response(&parsed);
+         emit(ctx, "[DONE]");
+         aimee_response_free(&parsed);
          cJSON_Delete(messages);
          cJSON_Delete(tools);
          return 0;
@@ -1247,7 +1385,7 @@ static int gw_stage_openai_tool_policing(gw_request_t *r, void *ud)
  * it, and parse the reply into *out. Unlike agent_run_with_tools this does NOT
  * execute tool calls — out->calls[] surfaces them so the handler can relay them
  * to Codex. Returns 0 on success, -1 on transport/parse failure. *out is zeroed
- * here; the caller frees it with agent_free_parsed_response(). */
+ * here; the caller frees its owned IR with aimee_response_free(). */
 /* Admission is mandatory even when the caller disables host message edits. */
 static char *openai_build_body(const agent_t *agent, const delegate_driver_t *driver,
                                cJSON *eff_messages, cJSON *eff_tools, const char *eff_system,
@@ -1301,7 +1439,7 @@ static int strip_unusable_tools(cJSON *tools)
 
 static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *tools,
                                   const char *system_prompt, int max_tokens, double temperature,
-                                  parsed_response_t *out, char *error, size_t error_cap,
+                                  aimee_response_t *out, char *error, size_t error_cap,
                                   int preserve_messages, const cJSON *template_kwargs)
 {
    snprintf(error, error_cap, "upstream model request failed");
@@ -1319,7 +1457,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
     * because on three of these paths nothing upstream was ever contacted. */
    delegate_drivers_init();
    const delegate_driver_t *driver = delegate_driver_get(agent->provider);
-   if (!driver || !driver->parse_response)
+   if (!driver)
    {
       LOG_WARN("openai.responses", "no usable driver for provider=%s (agent=%s)",
                agent->provider ? agent->provider : "?", agent->name ? agent->name : "?");
@@ -1522,11 +1660,41 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
       return -1;
    }
 
-   cJSON *root = cJSON_Parse(response_body);
-   driver->parse_response(root, response_body, out);
-   if (root)
-      cJSON_Delete(root);
+   aimee_wire_t wire = wire_route == WIRE_FENCE_ANTHROPIC_MESSAGES ? AIMEE_WIRE_ANTHROPIC
+                       : wire_route == WIRE_FENCE_OPENAI_RESPONSES ? AIMEE_WIRE_RESPONSES
+                                                                   : AIMEE_WIRE_OPENAI_CHAT;
+   int rc =
+       aimee_backend_parse_wire(response_body, strlen(response_body), wire, out, error, error_cap);
    free(response_body);
+   if (rc || out->error_message || aimee_ir_session_emit_buffered_response(out, NULL))
+   {
+      if (!rc)
+         snprintf(error, error_cap, "%s",
+                  out->error_message ? out->error_message
+                                     : "canonical response persistence failed");
+      return -1;
+   }
+   cJSON *policy_native = cJSON_CreateObject();
+   if (!policy_native || !cJSON_AddItemReferenceToObject(policy_native, "messages", messages) ||
+       (tools && !cJSON_AddItemReferenceToObject(policy_native, "tools", tools)))
+   {
+      cJSON_Delete(policy_native);
+      return -1;
+   }
+   aimee_request_t policy = {0};
+   rc = openai_frontend_parse(policy_native, &policy, error, error_cap);
+   cJSON_Delete(policy_native);
+   if (!rc)
+      rc = agent_response_govern(out, openai_governance_enabled(),
+                                 gateway_prevent_subagents_enabled(), NULL, 0);
+   if (rc >= 0 && !preserve_messages)
+      rc = gw_ir_response_run_completion(out, &policy);
+   aimee_request_free(&policy);
+   if (rc < 0)
+   {
+      snprintf(error, error_cap, "canonical response policy or persistence failed");
+      return -1;
+   }
    return 0;
 }
 
@@ -1642,7 +1810,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
     * is NO true token-by-token upstream stream for the OpenAI primary path (hence no
     * S5-style streaming disable-only code). If a future refactor introduces a real
     * agent_http_post_stream path here, it must add the streaming mutation contract. */
-   parsed_response_t parsed;
+   aimee_response_t parsed;
    char upstream_error[512];
    int erc = agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature,
                                     &parsed, upstream_error, sizeof(upstream_error), 0, NULL);
@@ -1669,116 +1837,28 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
                                              : wire_fence_error_type(upstream_error),
                                          upstream_error, frame, sizeof(frame)) > 0)
          emit(ctx, "response.failed", frame);
-      agent_free_parsed_response(&parsed);
+      aimee_response_free(&parsed);
       free(instructions);
       cJSON_Delete(messages);
       cJSON_Delete(tools);
       return 0;
    }
 
-   if (erc == 0)
+   if (agent_ingress_accounting_enabled())
+      agent_ingress_record_cost(ag->name, ag->model, model,
+                                parsed.raw_stop_reason ? parsed.raw_stop_reason
+                                                       : aimee_stop_reason_name(parsed.stop_reason),
+                                (int)parsed.usage_in, (int)parsed.usage_out,
+                                (int)parsed.usage_cache_write, (int)parsed.usage_cache_read,
+                                "openai-ingress", NULL);
+   if (openai_ir_responses_emit(&parsed, id, model, created, emit, ctx))
    {
-      /* Cost accounting: streaming /v1/responses runs the provider call directly.
-       * agent_execute_messages returns a parsed_response_t (no model/agent name),
-       * so synthesize the fields the audit needs from the served agent. */
-      if (agent_ingress_accounting_enabled())
-         agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
-                                   parsed.prompt_tokens, parsed.completion_tokens,
-                                   parsed.cache_write_tokens, parsed.cache_read_tokens,
-                                   "openai-ingress", NULL);
-
-      if (erc == 0 && gw_response_run_completion(&parsed, messages, tools, "tool_calls"))
-         LOG_INFO("completion.gate", "continued incomplete OpenAI Responses repair");
+      if (openai_format_responses_failed(id, model, created, "server_error",
+                                         "canonical response rendering failed", frame,
+                                         sizeof frame) > 0)
+         emit(ctx, "response.failed", frame);
    }
-
-   if (erc == 0 && gw_response_run_completion(&parsed, messages, tools, "tool_calls"))
-      LOG_INFO("completion.gate", "continued incomplete OpenAI Responses repair");
-
-   if (erc == 0 && parsed.is_tool_call && parsed.call_count > 0)
-   {
-      /* P2c streaming: when gateway_prevent_subagents is ON, run the police
-       * event-bus governance module first (drops denied subagent tool_call
-       * entries in place; preserves upstream stop_reason in partial-drop,
-       * rewrites to "end_turn" on all-dropped). The module receives the
-       * already-resolved policy gate; it remains the sole decision path.
-       * Police contract is finalized in PR #677 (buffered) and PR #679
-       * (streaming Anthropic). */
-      int police_drops = 0;
-      police_drops = gw_response_run_governance(&parsed, openai_governance_enabled(),
-                                                gateway_prevent_subagents_enabled());
-      (void)police_drops; /* drop count plumbed through the pipeline total
-                             for the future P2b audit pass; today the only
-                             visible effect is the parsed.calls[] mutation. */
-
-      /* Name every call handed back to the client. A Codex client sends its MCP
-       * servers as `namespace` groups and can only route a call whose name is
-       * namespace-qualified; a bare nested name comes back as
-       * "unsupported call: <name>" and the turn is wasted. Logging the names is the
-       * only way to tell "the provider emitted it bare" from "we stripped it". */
-      for (int ci = 0; ci < parsed.call_count; ci++)
-         LOG_INFO("openai.responses", "returning tool call name=%s",
-                  parsed.calls[ci].name[0] ? parsed.calls[ci].name : "(empty)");
-      openai_responses_emit_policed(&parsed, id, model, created, emit, ctx);
-   }
-   else
-
-   {
-      /* Text turn: a single assistant message item carrying the content. */
-      if (erc == 0 && parsed.content)
-         text_sanitize_utf8(parsed.content);
-      const char *txt =
-          (erc == 0 && parsed.content) ? parsed.content : "the model returned no content";
-      char item_id[72];
-      snprintf(item_id, sizeof(item_id), "%s-msg", id);
-
-      if (openai_format_responses_msg_item_added(item_id, 0, frame, sizeof(frame)) > 0)
-         emit(ctx, "response.output_item.added", frame);
-
-      size_t n = strlen(txt);
-      for (size_t off = 0; off < n;)
-      {
-         char seg[OPENAI_STREAM_CHUNK + 1];
-         size_t take = text_utf8_chunk_len(txt + off, n - off, OPENAI_STREAM_CHUNK);
-         memcpy(seg, txt + off, take);
-         seg[take] = '\0';
-         char dframe[OPENAI_STREAM_CHUNK * 6 + 256];
-         if (openai_format_responses_delta(item_id, seg, dframe, sizeof(dframe)) > 0)
-            emit(ctx, "response.output_text.delta", dframe);
-         off += take;
-      }
-
-      size_t icap = n * 6 + 512;
-      char *itf = malloc(icap);
-      if (itf)
-      {
-         if (openai_format_responses_msg_item_done(item_id, txt, 0, itf, (int)icap) > 0)
-            emit(ctx, "response.output_item.done", itf);
-         free(itf);
-      }
-
-      /* A reply truncated at the token cap, on any upstream wire. The backend reports that as a
-       * terminal response.incomplete{reason:max_output_tokens}, not response.completed; mirror it
-       * so Codex applies its truncation handling. */
-      int truncated = parsed_truncated(&parsed);
-      size_t ccap = n * 6 + 1024;
-      char *cf = malloc(ccap);
-      if (cf)
-      {
-         if (truncated)
-         {
-            if (openai_format_responses_incomplete(id, model, created, "max_output_tokens", cf,
-                                                   (int)ccap) > 0)
-               emit(ctx, "response.incomplete", cf);
-         }
-         else if (openai_format_responses_completed(id, model, txt, created, parsed.prompt_tokens,
-                                                    parsed.completion_tokens,
-                                                    parsed.cache_read_tokens, cf, (int)ccap) > 0)
-            emit(ctx, "response.completed", cf);
-         free(cf);
-      }
-   }
-
-   agent_free_parsed_response(&parsed);
+   aimee_response_free(&parsed);
    free(instructions);
    cJSON_Delete(messages);
    cJSON_Delete(tools);

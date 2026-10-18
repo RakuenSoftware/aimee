@@ -126,63 +126,6 @@ void openai_family_add_tool_choice(cJSON *out, const aimee_request_t *ir, int re
       cJSON_AddBoolToObject(out, "parallel_tool_calls", ir->parallel_tool_calls ? 1 : 0);
 }
 
-/* Content arrays retain the ordering of text and media. Unrepresentable files
- * fail at this egress boundary rather than silently disappearing from history. */
-static cJSON *media_content(const aimee_message_t *message)
-{
-   cJSON *parts = cJSON_CreateArray();
-   if (!parts)
-      return NULL;
-   for (int i = 0; i < message->n_blocks; i++)
-   {
-      const aimee_block_t *block = &message->blocks[i];
-      if (block->type != AIMEE_BLK_TEXT && block->type != AIMEE_BLK_IMAGE &&
-          block->type != AIMEE_BLK_DOCUMENT)
-         continue;
-      cJSON *part = cJSON_CreateObject();
-      if (!part)
-         goto fail;
-      if (block->type == AIMEE_BLK_TEXT)
-      {
-         cJSON_AddStringToObject(part, "type", "text");
-         cJSON_AddStringToObject(part, "text", block->text ? block->text : "");
-      }
-      else
-      {
-         char *ref = aimee_ir_media_url(block);
-         if (!ref)
-         {
-            cJSON_Delete(part);
-            goto fail;
-         }
-         if (block->type == AIMEE_BLK_IMAGE)
-         {
-            cJSON_AddStringToObject(part, "type", "image_url");
-            cJSON *image = cJSON_AddObjectToObject(part, "image_url");
-            cJSON_AddStringToObject(image, "url", ref);
-         }
-         else
-         {
-            if (strncmp(ref, "file-", 5) && strncmp(ref, "data:", 5))
-            {
-               free(ref);
-               cJSON_Delete(part);
-               goto fail;
-            }
-            cJSON_AddStringToObject(part, "type", "file");
-            cJSON *file = cJSON_AddObjectToObject(part, "file");
-            cJSON_AddStringToObject(file, !strncmp(ref, "file-", 5) ? "file_id" : "file_data", ref);
-         }
-         free(ref);
-      }
-      cJSON_AddItemToArray(parts, part);
-   }
-   return parts;
-fail:
-   cJSON_Delete(parts);
-   return NULL;
-}
-
 cJSON *openai_backend_build(const aimee_request_t *ir)
 {
    if (!ir)
@@ -297,7 +240,7 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
              im->blocks[j].type == AIMEE_BLK_IMAGE || im->blocks[j].type == AIMEE_BLK_DOCUMENT;
       if (has_media)
       {
-         cJSON *parts = media_content(im);
+         cJSON *parts = openai_ir_render_content(im);
          if (!parts)
          {
             cJSON_Delete(m);
