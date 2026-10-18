@@ -680,6 +680,12 @@
       "test": "src/tests/test_cmd_hooks_scope.c"
     },
     {
+      "ctest": false,
+      "make": false,
+      "module": "translation",
+      "test": "src/tests/test_codex_native_adoption.py"
+    },
+    {
       "ctest": true,
       "make": true,
       "module": "translation",
