@@ -17,6 +17,7 @@
 static int g_provider_calls;
 static int g_policy_active;
 static int g_provider_mode;
+static const char *expected_policy_stop;
 
 static int denied_tool(const char *name)
 {
@@ -29,6 +30,8 @@ static int fake_event_bus_provider(int policy_active, const char *const *tool_na
                                    aimee_governance_decision_t *decision)
 {
    g_provider_calls++;
+   if (expected_policy_stop)
+      assert(stop_reason && !strcmp(stop_reason, expected_policy_stop));
    g_policy_active = policy_active;
    if (g_provider_mode == 1)
       return -1;
@@ -88,6 +91,34 @@ static aimee_response_t tool_response(int count, const char *first, const char *
    return response;
 }
 
+static void test_native_stop_metadata_survives_policy(void)
+{
+   const aimee_stop_reason_t stops[] = {AIMEE_STOP_TOOL_USE, AIMEE_STOP_MAX_TOKENS,
+                                        AIMEE_STOP_STOP_SEQUENCE, AIMEE_STOP_UNKNOWN};
+   char reason[301];
+   memset(reason, 'r', sizeof reason - 1);
+   memcpy(reason, "native-reason:", 14);
+   reason[sizeof reason - 1] = 0;
+   gw_response_governance_register_provider(fake_event_bus_provider);
+   g_provider_mode = 0;
+   for (size_t i = 0; i < sizeof stops / sizeof stops[0]; i++)
+      for (int partial = 0; partial <= 1; partial++)
+      {
+         aimee_response_t response = tool_response(partial ? 2 : 1, "Agent", "read_file");
+         response.stop_reason = stops[i];
+         expected_policy_stop = aimee_stop_reason_name(stops[i]);
+         response.raw_stop_reason = copy_string(reason);
+         assert(gw_ir_response_run_governance(&response, 1, 1) == 1);
+         if (!partial && stops[i] == AIMEE_STOP_TOOL_USE)
+            assert(response.stop_reason == AIMEE_STOP_END_TURN && !response.raw_stop_reason);
+         else
+            assert(response.stop_reason == stops[i] && response.raw_stop_reason &&
+                   !strcmp(response.raw_stop_reason, reason));
+         aimee_response_free(&response);
+      }
+   expected_policy_stop = NULL;
+}
+
 static int denied_events, reject_event;
 static unsigned denied_ids;
 static int capture_denial(const aimee_session_event_t *event, void *context)
@@ -105,6 +136,7 @@ static int capture_denial(const aimee_session_event_t *event, void *context)
 
 int main(void)
 {
+   test_native_stop_metadata_survives_policy();
    /* The stage and separately supervised process must share the descriptor's
     * default-OFF posture. Otherwise an unspecified config enables this stage
     * without starting the module, and the fail-closed provider path drops every

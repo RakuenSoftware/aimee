@@ -11,6 +11,7 @@
 #include "worktree_scope.h"
 #include "util.h"
 #include <aimee/tools/agent_tools.h>
+#include <aimee/ir/aimee_ir.h>
 #include "agent_exec.h"
 #include <aimee/workspace/workspace.h>
 #include "modules/workspace/workspace_provider.h"
@@ -445,65 +446,6 @@ int agent_tools_append_delegate_respond_tool(cJSON *tools)
    return 1;
 }
 
-static char *delegate_respond_message(const char *arguments_json)
-{
-   cJSON *root = arguments_json ? cJSON_Parse(arguments_json) : NULL;
-   cJSON *msg = root ? cJSON_GetObjectItemCaseSensitive(root, "message") : NULL;
-   char *out = safe_strdup(cJSON_IsString(msg) ? msg->valuestring : "");
-   cJSON_Delete(root);
-   return out;
-}
-
-int agent_tools_strip_delegate_respond(parsed_response_t *parsed)
-{
-   if (!parsed || !parsed->is_tool_call || parsed->call_count <= 0)
-      return 0;
-
-   int respond_count = 0;
-   for (int i = 0; i < parsed->call_count; i++)
-   {
-      if (strcmp(parsed->calls[i].name, "respond") == 0)
-         respond_count++;
-   }
-   if (respond_count == 0)
-      return 0;
-
-   if (respond_count == parsed->call_count)
-   {
-      char *message = delegate_respond_message(parsed->calls[0].arguments);
-      for (int i = 0; i < parsed->call_count; i++)
-      {
-         free(parsed->calls[i].arguments);
-         memset(&parsed->calls[i], 0, sizeof(parsed->calls[i]));
-      }
-      free(parsed->content);
-      parsed->content = message ? message : safe_strdup("");
-      parsed->call_count = 0;
-      parsed->is_tool_call = 0;
-      return 1;
-   }
-
-   int dst = 0;
-   for (int i = 0; i < parsed->call_count; i++)
-   {
-      if (strcmp(parsed->calls[i].name, "respond") == 0)
-      {
-         free(parsed->calls[i].arguments);
-         memset(&parsed->calls[i], 0, sizeof(parsed->calls[i]));
-         continue;
-      }
-      if (dst != i)
-      {
-         parsed->calls[dst] = parsed->calls[i];
-         memset(&parsed->calls[i], 0, sizeof(parsed->calls[i]));
-      }
-      dst++;
-   }
-   parsed->call_count = dst;
-   parsed->is_tool_call = parsed->call_count > 0;
-   return 2;
-}
-
 int agent_ir_strip_delegate_respond(aimee_response_t *response)
 {
    int count = aimee_ir_response_tool_count(response), responds = 0;
@@ -564,9 +506,11 @@ int agent_ir_strip_delegate_respond(aimee_response_t *response)
       free(text);
    response->n_content = write_index;
    if (response->stop_reason == AIMEE_STOP_TOOL_USE)
+   {
       response->stop_reason = AIMEE_STOP_END_TURN;
-   free(response->raw_stop_reason);
-   response->raw_stop_reason = NULL;
+      free(response->raw_stop_reason);
+      response->raw_stop_reason = NULL;
+   }
    cJSON_Delete(response->raw);
    response->raw = NULL;
    return 1;

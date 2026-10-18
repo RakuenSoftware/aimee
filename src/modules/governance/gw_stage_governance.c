@@ -59,9 +59,9 @@ static int apply_ir_governance(aimee_response_t *response, int policy_active)
       for (int i = 0; i < size; i++)
          names[i] = aimee_ir_response_tool(response, start + i)->tool_name;
       aimee_governance_decision_t decision = {0};
-      const char *reason = response->raw_stop_reason
-                               ? response->raw_stop_reason
-                               : aimee_stop_reason_name(response->stop_reason);
+      /* Policy consumes the canonical state. Opaque native metadata belongs
+       * to replay/audit and must not overflow the bounded policy vocabulary. */
+      const char *reason = aimee_stop_reason_name(response->stop_reason);
       int valid =
           g_decision_provider &&
           g_decision_provider(policy_active, names, (uint32_t)size, reason, &decision) == 0 &&
@@ -74,13 +74,14 @@ static int apply_ir_governance(aimee_response_t *response, int policy_active)
          }
       end = start;
    }
-   if (removed)
+   if (removed && response->stop_reason == AIMEE_STOP_TOOL_USE &&
+       !aimee_ir_response_has_tool_use(response))
    {
-      if (response->stop_reason == AIMEE_STOP_TOOL_USE)
-         response->stop_reason =
-             aimee_ir_response_has_tool_use(response) ? AIMEE_STOP_TOOL_USE : AIMEE_STOP_END_TURN;
+      response->stop_reason = AIMEE_STOP_END_TURN;
+      /* This is a host terminal transition, not a new provider spelling.
+       * Otherwise retain the original opaque reason, including truncation. */
       free(response->raw_stop_reason);
-      response->raw_stop_reason = strdup(aimee_stop_reason_name(response->stop_reason));
+      response->raw_stop_reason = NULL;
    }
    return removed;
 }

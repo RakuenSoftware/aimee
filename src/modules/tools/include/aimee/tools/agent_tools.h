@@ -1,7 +1,6 @@
 #ifndef DEC_AGENT_TOOLS_H
 #define DEC_AGENT_TOOLS_H 1
 
-#include "agent_protocol.h"
 struct aimee_response;
 #include "agent_types.h"
 #include "cJSON.h"
@@ -82,7 +81,6 @@ struct cJSON *build_tools_array_responses(void);
 struct cJSON *build_tools_array_anthropic(void);
 struct cJSON *delegate_respond_spec(void);
 int agent_tools_append_delegate_respond_tool(struct cJSON *tools);
-int agent_tools_strip_delegate_respond(parsed_response_t *parsed);
 int agent_ir_strip_delegate_respond(struct aimee_response *response);
 int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name);
 void agent_tools_filter_for_role(struct cJSON *tools, const char *role);

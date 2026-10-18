@@ -9,6 +9,7 @@
 #include "agent_types.h"
 #include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
+#include "support/ir_response_fixture.h"
 
 static void test_registry_init(void)
 {
@@ -208,91 +209,85 @@ static void test_delegate_respond_spec_shape(void)
    cJSON_Delete(tools);
 }
 
+static void check_delegate_respond(const char *respond_id, const char *real_id, const char *answer)
+{
+   aimee_response_t response = {0};
+   response.n_content = real_id ? 2 : 1;
+   response.content = calloc((size_t)response.n_content, sizeof *response.content);
+   assert(response.content);
+   response.content[0] = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                                         .tool_name = strdup("respond"),
+                                         .tool_id = strdup(respond_id),
+                                         .tool_input = cJSON_CreateObject()};
+   assert(cJSON_AddStringToObject(response.content[0].tool_input, "message", answer));
+   if (real_id)
+      response.content[1] = (aimee_block_t){
+          .type = AIMEE_BLK_TOOL_USE,
+          .tool_name = strdup("bash"),
+          .tool_id = strdup(real_id),
+          .tool_input = cJSON_Parse("{\"command\":\"pwd\",\"exact\":9007199254740993}")};
+   assert(agent_ir_strip_delegate_respond(&response) == (real_id ? 2 : 1));
+   if (!real_id)
+   {
+      assert(!aimee_ir_response_has_tool_use(&response));
+      assert_ir_text(&response, answer);
+   }
+   else
+   {
+      assert(aimee_ir_response_tool_count(&response) == 1);
+      const aimee_block_t *tool = aimee_ir_response_tool(&response, 0);
+      assert(!strcmp(tool->tool_id, real_id) && !strcmp(tool->tool_name, "bash"));
+      char *input = cJSON_PrintUnformatted(tool->tool_input);
+      assert(input && !strcmp(input, "{\"command\":\"pwd\",\"exact\":9007199254740993}"));
+      free(input);
+   }
+   aimee_response_free(&response);
+}
+
 static void test_delegate_respond_strip_pure(void)
 {
-   parsed_response_t pr;
-   memset(&pr, 0, sizeof(pr));
-   pr.is_tool_call = 1;
-   pr.call_count = 1;
-   snprintf(pr.calls[0].id, sizeof(pr.calls[0].id), "call_1");
-   snprintf(pr.calls[0].name, sizeof(pr.calls[0].name), "respond");
-   pr.calls[0].arguments = safe_strdup("{\"message\":\"done\"}");
-
-   assert(agent_tools_strip_delegate_respond(&pr) == 1);
-   assert(pr.is_tool_call == 0);
-   assert(pr.call_count == 0);
-   assert(pr.content != NULL);
-   assert(strcmp(pr.content, "done") == 0);
-
-   agent_free_parsed_response(&pr);
+   check_delegate_respond("call_1", NULL, "done");
 }
-
 static void test_delegate_respond_strip_mixed(void)
 {
-   parsed_response_t pr;
-   memset(&pr, 0, sizeof(pr));
-   pr.is_tool_call = 1;
-   pr.call_count = 2;
-   snprintf(pr.calls[0].id, sizeof(pr.calls[0].id), "call_1");
-   snprintf(pr.calls[0].name, sizeof(pr.calls[0].name), "respond");
-   pr.calls[0].arguments = safe_strdup("{\"message\":\"checking\"}");
-   snprintf(pr.calls[1].id, sizeof(pr.calls[1].id), "call_2");
-   snprintf(pr.calls[1].name, sizeof(pr.calls[1].name), "bash");
-   pr.calls[1].arguments = safe_strdup("{\"command\":\"pwd\"}");
-
-   assert(agent_tools_strip_delegate_respond(&pr) == 2);
-   assert(pr.is_tool_call == 1);
-   assert(pr.call_count == 1);
-   assert(strcmp(pr.calls[0].id, "call_2") == 0);
-   assert(strcmp(pr.calls[0].name, "bash") == 0);
-   assert(strcmp(pr.calls[0].arguments, "{\"command\":\"pwd\"}") == 0);
-
-   agent_free_parsed_response(&pr);
+   check_delegate_respond("call_1", "call_2", "checking");
 }
-
 static void test_delegate_respond_rescue_then_strip_mixed(void)
 {
-   /* The subject is the STRIP: a respond call alongside a real tool call is
-    * removed, and the real call survives untouched. Where those two calls came
-    * from is not this test's business, so it states them directly. */
-   parsed_response_t pr;
-   memset(&pr, 0, sizeof(pr));
-   pr.is_tool_call = 1;
-   pr.call_count = 2;
-   snprintf(pr.calls[0].id, sizeof(pr.calls[0].id), "%s", "xml_call_1");
-   snprintf(pr.calls[0].name, sizeof(pr.calls[0].name), "%s", "respond");
-   pr.calls[0].arguments = strdup("{\"message\":\"checking\"}");
-   snprintf(pr.calls[1].id, sizeof(pr.calls[1].id), "%s", "xml_call_2");
-   snprintf(pr.calls[1].name, sizeof(pr.calls[1].name), "%s", "bash");
-   pr.calls[1].arguments = strdup("{\"command\":\"pwd\"}");
-
-   assert(agent_tools_strip_delegate_respond(&pr) == 2);
-   assert(pr.is_tool_call == 1);
-   assert(pr.call_count == 1);
-   assert(strcmp(pr.calls[0].name, "bash") == 0);
-   assert(strcmp(pr.calls[0].arguments, "{\"command\":\"pwd\"}") == 0);
-
-   agent_free_parsed_response(&pr);
+   check_delegate_respond("xml_call_1", "xml_call_2", "checking");
 }
-
 static void test_delegate_respond_xml_rescue_then_strip_pure(void)
 {
-   /* A turn that is ONLY a respond call stops being a tool turn at all, and the
-    * message becomes the content the caller answers with. */
-   parsed_response_t pr;
-   memset(&pr, 0, sizeof(pr));
-   pr.is_tool_call = 1;
-   pr.call_count = 1;
-   snprintf(pr.calls[0].id, sizeof(pr.calls[0].id), "%s", "xml_call_1");
-   snprintf(pr.calls[0].name, sizeof(pr.calls[0].name), "%s", "respond");
-   pr.calls[0].arguments = strdup("{\"message\":\"final answer\"}");
+   check_delegate_respond("xml_call_1", NULL, "final answer");
+}
 
-   assert(agent_tools_strip_delegate_respond(&pr) == 1);
-   assert(pr.is_tool_call == 0);
-   assert(pr.content != NULL);
-   assert(strcmp(pr.content, "final answer") == 0);
-
-   agent_free_parsed_response(&pr);
+static void test_respond_retains_native_stop_metadata(void)
+{
+   const aimee_stop_reason_t stops[] = {AIMEE_STOP_TOOL_USE, AIMEE_STOP_MAX_TOKENS,
+                                        AIMEE_STOP_STOP_SEQUENCE, AIMEE_STOP_UNKNOWN};
+   char reason[301];
+   memset(reason, 'r', sizeof reason - 1);
+   memcpy(reason, "native-reason:", 14);
+   reason[sizeof reason - 1] = 0;
+   for (size_t i = 0; i < sizeof stops / sizeof stops[0]; i++)
+   {
+      aimee_response_t response = {.stop_reason = stops[i], .n_content = 1};
+      response.content = calloc(1, sizeof *response.content);
+      assert(response.content);
+      response.content[0] = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                                            .tool_name = strdup("respond"),
+                                            .tool_id = strdup("final"),
+                                            .tool_input = cJSON_Parse("{\"message\":\"answer\"}")};
+      response.raw_stop_reason = strdup(reason);
+      assert(agent_ir_strip_delegate_respond(&response) == 1);
+      if (stops[i] == AIMEE_STOP_TOOL_USE)
+         assert(response.stop_reason == AIMEE_STOP_END_TURN && !response.raw_stop_reason);
+      else
+         assert(response.stop_reason == stops[i] && response.raw_stop_reason &&
+                !strcmp(response.raw_stop_reason, reason));
+      assert_ir_text(&response, "answer");
+      aimee_response_free(&response);
+   }
 }
 
 static int final_results;
@@ -357,6 +352,7 @@ int main(void)
 {
    printf("delegate_driver: ");
    test_typed_delegate_respond();
+   test_respond_retains_native_stop_metadata();
    test_registry_init();
    printf("registry OK, ");
    test_driver_names();
@@ -365,16 +361,6 @@ int main(void)
    printf("build_url OK, ");
    test_get_caps();
    printf("get_caps OK, ");
-   printf("xml_fallback OK, ");
-   printf("channel_fallback OK, ");
-   printf("qwen_xml_fallback OK, ");
-   printf("mistral_bracket_fallback OK, ");
-   printf("minimax_invoke_fallback OK, ");
-   printf("bare_json_fallback OK, ");
-   printf("unfenced_json_fallback OK, ");
-   printf("unknown_json_rejected OK, ");
-   printf("json_disable_gate OK, ");
-   printf("respond_json_rescue OK, ");
    test_delegate_respond_spec_shape();
    printf("respond_spec OK, ");
    test_delegate_respond_strip_pure();
