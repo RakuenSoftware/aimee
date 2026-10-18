@@ -58,9 +58,6 @@ func isCleanUserTurn(m *JSONValue) bool {
 		return false
 	}
 	content := messageContent(m)
-	if content.IsString() {
-		return true
-	}
 	if content.IsArray() {
 		for _, b := range content.Items {
 			if b.GetString("type") == "tool_result" {
@@ -72,7 +69,7 @@ func isCleanUserTurn(m *JSONValue) bool {
 	return false
 }
 
-// isAssistantToolTurn reports whether m starts a provider-shaped tool cycle.
+// isAssistantToolTurn reports whether m starts a canonical tool cycle.
 // Splitting immediately before this message keeps the assistant call and every
 // following result together. This is the only recurring safe boundary in an
 // autonomous coding loop, which has one initial user request followed by
@@ -80,9 +77,6 @@ func isCleanUserTurn(m *JSONValue) bool {
 func isAssistantToolTurn(m *JSONValue) bool {
 	if m == nil || m.GetString("role") != "assistant" {
 		return false
-	}
-	if calls := m.Get("tool_calls"); calls.IsArray() && calls.Len() > 0 {
-		return true
 	}
 	content := messageContent(m)
 	if !content.IsArray() {
@@ -141,27 +135,13 @@ func skeletonPrefix(b *strings.Builder, role, txt string, registerOn bool) {
 	fmt.Fprintf(b, "%s: ", role)
 }
 
-// skeletonMessage emits one folded message's skeleton line(s) and nominates its
-// identifiers into set.
-//
-// Format-aware and ADDITIVE: a single message can carry multiple shapes at once
-// — an OpenAI assistant turn has both a string `content` AND a top-level
-// `tool_calls` — so the extractors never early-return, and the closet captures
-// identifiers from every provider's calls and results, not just Anthropic's.
+// skeletonMessage projects canonical text and tool evidence only. Provider
+// framing and opaque thinking never enter this lossy evidence view.
 func skeletonMessage(b *strings.Builder, m *JSONValue, turn, excerpt int, registerOn bool, set *CoordSet) {
 	role := m.GetString("role")
 	content := messageContent(m)
 	prov := Provenance{Lane: LaneAgent, TurnID: int64(turn), ToolCallID: -1, ResultIndex: -1}
-
-	// (1) String content (OpenAI/Gemini text, or any plain turn).
-	if content.IsString() {
-		txt := content.Str
-		NominateInto(txt, &prov, set)
-		skeletonPrefix(b, role, txt, registerOn)
-		appendExcerpt(b, txt, excerpt)
-		b.WriteByte('\n')
-	} else if content.IsArray() {
-		// (2) Anthropic content-block array (text / tool_use / tool_result).
+	if content.IsArray() {
 		for _, blk := range content.Items {
 			switch blk.GetString("type") {
 			case "":
@@ -196,49 +176,6 @@ func skeletonMessage(b *strings.Builder, m *JSONValue, turn, excerpt int, regist
 					fmt.Fprintf(b, " (%d bytes)\n", len(cv))
 				}
 			}
-		}
-	}
-
-	// (3) OpenAI / Gemini-as-openai assistant tool calls: a top-level `tool_calls`
-	// array whose function.arguments is a JSON STRING.
-	if toolCalls := m.Get("tool_calls"); toolCalls.IsArray() {
-		for _, tc := range toolCalls.Items {
-			fn := tc.Get("function")
-			name := fn.GetString("name")
-			args := fn.GetString("arguments")
-			if args != "" {
-				NominateInto(args, &prov, set)
-			}
-			if name == "" {
-				name = "tool"
-			}
-			fmt.Fprintf(b, "  $ %s ", name)
-			appendExcerpt(b, args, excerpt)
-			b.WriteByte('\n')
-		}
-	}
-
-	// (4) Responses (chatgpt) top-level items, mirroring the tool_use /
-	// tool_result branches above.
-	switch m.GetString("type") {
-	case "function_call":
-		name := m.GetString("name")
-		args := m.GetString("arguments")
-		if args != "" {
-			NominateInto(args, &prov, set)
-		}
-		if name == "" {
-			name = "tool"
-		}
-		fmt.Fprintf(b, "  $ %s ", name)
-		appendExcerpt(b, args, excerpt)
-		b.WriteByte('\n')
-	case "function_call_output":
-		if ov, ok := m.Get("output").Text(); ok {
-			NominateInto(ov, &prov, set)
-			b.WriteString("    → ")
-			appendExcerpt(b, ov, excerpt)
-			fmt.Fprintf(b, " (%d bytes)\n", len(ov))
 		}
 	}
 }
@@ -290,41 +227,17 @@ func compressBodyField(parent *JSONValue, key string, cc *CompactConfig, turn in
 	return true, len(body)
 }
 
-// compressMessageBodies compresses every oversized tool-result body carried by
-// one message, across all three provider shapes.
-//
-// The shapes are mutually exclusive per message (an OpenAI tool result is a
-// string `content`; an Anthropic tool_result is a block inside an ARRAY
-// `content`; a Responses output is a top-level `output`), so no body is
-// double-counted.
+// compressMessageBodies changes canonical TOOL_RESULT evidence only.
 func compressMessageBodies(m *JSONValue, cc *CompactConfig, turn int, set *CoordSet) (int, int) {
 	n, raw := 0, 0
-	role := m.GetString("role")
-	itype := m.GetString("type")
-
-	// (A) OpenAI / Gemini-as-openai tool result: role=="tool" with string content.
-	if role == "tool" {
-		if ok, b := compressBodyField(m, "content", cc, turn, set); ok {
-			n, raw = n+1, raw+b
-		}
-	}
-
-	// (B) Anthropic tool_result content-block(s) inside a content ARRAY. A role
-	// "tool" message has a STRING content, so this never re-touches it.
-	if content := messageContent(m); content.IsArray() {
-		for _, blk := range content.Items {
-			if blk.GetString("type") == "tool_result" {
-				if ok, b := compressBodyField(blk, "content", cc, turn, set); ok {
-					n, raw = n+1, raw+b
+	if blocks := messageContent(m); blocks.IsArray() {
+		for _, block := range blocks.Items {
+			if block.GetString("type") == "tool_result" {
+				if ok, b := compressBodyField(block, "content", cc, turn, set); ok {
+					n++
+					raw += b
 				}
 			}
-		}
-	}
-
-	// (C) Responses (chatgpt) top-level function_call_output item.
-	if itype == "function_call_output" {
-		if ok, b := compressBodyField(m, "output", cc, turn, set); ok {
-			n, raw = n+1, raw+b
 		}
 	}
 	return n, raw
@@ -334,7 +247,7 @@ func compressMessageBodies(m *JSONValue, cc *CompactConfig, turn int, set *Coord
 //
 // Unlike FoldView this needs NO clean-user-turn boundary: it shrinks oversized
 // bodies in place while keeping the carrying message, its role/type and its
-// tool_use_id / tool_call_id, so a tool_use and its result are never split. It
+// opaque tool_id, so a tool_use and its result are never split. It
 // can engage before an autonomous tool loop has accumulated enough complete
 // cycles for FoldView to use an assistant-tool boundary.
 //
@@ -346,7 +259,7 @@ func compressMessageBodies(m *JSONValue, cc *CompactConfig, turn int, set *Coord
 // each turn, so a growing note costs nothing there.
 func CompressView(messages *JSONValue, cfg *FoldConfig) FoldResult {
 	out := FoldResult{ClosetEvict: EvictNone}
-	if messages == nil || !messages.IsArray() || cfg == nil || !cfg.Enabled {
+	if cfg == nil || !cfg.Enabled || !canonicalHistory(messages) {
 		return out
 	}
 	count := messages.Len()
@@ -424,7 +337,7 @@ func CompressView(messages *JSONValue, cfg *FoldConfig) FoldResult {
 // Never mutates its input or promotes folded evidence to user authority.
 func FoldView(messages *JSONValue, cfg *FoldConfig, freeze *FoldFreeze) FoldResult {
 	out := FoldResult{ClosetEvict: EvictNone}
-	if messages == nil || !messages.IsArray() || cfg == nil || !cfg.Enabled {
+	if cfg == nil || !cfg.Enabled || !canonicalHistory(messages) {
 		return out
 	}
 
@@ -552,27 +465,16 @@ func FoldView(messages *JSONValue, cfg *FoldConfig, freeze *FoldFreeze) FoldResu
 	return out
 }
 
-// Canonical messages are the delegate/session format. Native shapes remain only
-// for ingress callers that have not yet migrated to the shared IR bus contract.
-func messageContent(message *JSONValue) *JSONValue {
-	if blocks := message.Get("blocks"); blocks.IsArray() {
-		return blocks
-	}
-	return message.Get("content")
-}
-
-func evidenceTextMessage(history *JSONValue, text string) *JSONValue {
+// Only the admitted canonical block list is visible to core transforms.
+func messageContent(message *JSONValue) *JSONValue { return message.Get("blocks") }
+func evidenceTextMessage(_ *JSONValue, text string) *JSONValue {
 	message := NewObject()
 	message.Set("role", NewString("assistant"))
-	if history.At(0).Get("blocks").IsArray() {
-		block := NewObject()
-		block.Set("type", NewString("text"))
-		block.Set("text", NewString(text))
-		blocks := NewArray()
-		blocks.Append(block)
-		message.Set("blocks", blocks)
-	} else {
-		message.Set("content", NewString(text))
-	}
+	block := NewObject()
+	block.Set("type", NewString("text"))
+	block.Set("text", NewString(text))
+	blocks := NewArray()
+	blocks.Append(block)
+	message.Set("blocks", blocks)
 	return message
 }

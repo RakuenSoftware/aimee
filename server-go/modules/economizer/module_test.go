@@ -81,15 +81,7 @@ func invokeWithStore(t *testing.T, store StateStore, req ReduceRequest) (ReduceR
 func rawMessages(t *testing.T, n int) json.RawMessage {
 	t.Helper()
 	arr := makeMessages(n)
-	for _, message := range arr.Items {
-		block := NewObject()
-		block.Set("type", NewString("text"))
-		block.Set("text", message.Get("content"))
-		blocks := NewArray()
-		blocks.Append(block)
-		message.Delete("content")
-		message.Set("blocks", blocks)
-	}
+
 	return json.RawMessage(PrintJSONUnformatted(arr))
 }
 

@@ -79,7 +79,7 @@ func TestMixedUserToolContentRemainsWhole(t *testing.T) {
 	text := NewObject()
 	text.Set("type", NewString("text"))
 	text.Set("text", NewString("Do not remove CASE_7."))
-	mixed.Get("content").Append(text)
+	mixed.Get("blocks").Append(text)
 	messages.Append(mixed)
 	for i := 0; i < 8; i++ {
 		appendAutonomousToolTurn(messages, i)

@@ -12,7 +12,7 @@ import (
 // cJSON-compatible JSON printing.
 //
 // The fold embeds serialized sub-objects directly into its skeleton text (a
-// tool_use input, an OpenAI tool_calls arguments string, a tool_result body) and
+// canonical tool input or a structured tool-result body) and
 // hashes serialized messages for the freeze digest. Both of those live inside the
 // folded prefix, which must stay byte-identical turn to turn or the prompt cache
 // goes cold — the exact failure #2552 fixed.
