@@ -1,10 +1,10 @@
 /* kb_store/code_index.c: code-index primitives — Postgres via libpq. */
 
 #include "code_index.h"
-#include "../headers/aimee.h"        /* MAX_PATH_LEN, now_utc */
-#include "../headers/code_match.h"   /* code_match_line (P1b span enrichment) */
-#include "cross_repo_resolver.h"     /* H0b: xrepo_lang_name / xrepo_path_is_vendored */
-#include "../support/kb_store_log.h" /* aimee_log */
+#include "../headers/aimee.h"      /* MAX_PATH_LEN, now_utc */
+#include "../headers/code_match.h" /* code_match_line (P1b span enrichment) */
+#include "cross_repo_resolver.h"   /* H0b: xrepo_lang_name / xrepo_path_is_vendored */
+#include "log.h"                   /* aimee_log */
 #include "kb_store.h"
 #include "kb_store_internal.h"
 #include "db_postgres.h"

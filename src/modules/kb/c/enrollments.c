@@ -5,7 +5,7 @@
 #include "kb_store_internal.h"
 #include "db_postgres.h"
 #include "kb_identity.h" /* kb_cert_serial_normalize for the (issuer,serial) key */
-#include "../support/kb_store_log.h"
+#include "log.h"
 
 #include <openssl/rand.h>
 

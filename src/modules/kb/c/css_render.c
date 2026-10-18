@@ -2,7 +2,7 @@
  * See css_render.h. */
 #include "css_render.h"
 
-#include "../support/kb_store_runtime_config.h"
+#include "config.h"
 #include "kb_store.h"
 #include "kb_store_internal.h"
 #include "db_postgres.h"

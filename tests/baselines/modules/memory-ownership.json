@@ -72,8 +72,7 @@
       "contract": "KB-owned persisted enum/row definitions and PostgreSQL session protocol",
       "reason": "Persisted relation codes and KB domain declarations remain with KB. PostgreSQL alone opens production store connections. The retired DB2 process and wire catalog are removed; their principal and event IDs remain reserved. Go memory owns memory domain operations.",
       "evidence": [
-        "src/tests/test_kb_store_rel_seed_support.c",
-        "src/tests/test_kb_store_rel_type_support.c",
+        "src/tests/test_rel_types.c",
         "src/tests/test_postgres_session_transport.c",
         "server-go/modules/postgres/sessions_test.go",
         "scripts/check_postgres_provider_boundary.py"
@@ -1732,20 +1731,6 @@
       ],
       "sha256": "b2c8b4057575463c42f72d8030f652c9001849ec34b490824ffe56c04bc8b7de"
     },
-    "src/cmd_dogfood.c": {
-      "disposition": "legacy-command",
-      "symbols": [
-        "kb_client_memory_audit_note"
-      ],
-      "sha256": "f95cb9ed44de1b470b19d0218746b6a42801e481a85ebe4a420efb2b9c799db7"
-    },
-    "src/cmd_kb_export.c": {
-      "disposition": "legacy-command",
-      "symbols": [
-        "kb_client_memory_internal"
-      ],
-      "sha256": "2d9f938cbf185de2265cb2d9618e80f6777dd15b3e467d80852499ad148a00a9"
-    },
     "src/cmd_onboard.c": {
       "disposition": "legacy-command",
       "symbols": [
@@ -2350,20 +2335,6 @@
         "memory_insert"
       ],
       "sha256": "95c098e69987ba8d7b5186eb334962549bdfc5d83709ccf18a52636d01f8e31c"
-    },
-    "src/tests/test_kb_store_rel_seed_support.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "memory_node_kind_t"
-      ],
-      "sha256": "1a5b3f68cac93097ec7144ea4c72ac9fbce1c90c076bc22da6fc379cb9a2bd08"
-    },
-    "src/tests/test_kb_store_rel_type_support.c": {
-      "disposition": "host-fixture",
-      "symbols": [
-        "memory_node_kind_t"
-      ],
-      "sha256": "6b3ad4f2de57986aad3157085fdc2fb77d6179f2f027cfeff6187ff2c541e6cc"
     },
     "src/tests/test_dogfood.c": {
       "disposition": "host-fixture",

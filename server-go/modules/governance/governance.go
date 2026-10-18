@@ -3,6 +3,7 @@ package governance
 
 import (
 	"encoding/binary"
+	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
@@ -32,24 +33,6 @@ type policyRequest struct {
 	stopReason string
 }
 
-func zeroPadding(value []byte) bool {
-	for _, item := range value {
-		if item != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func nonzeroText(value []byte) bool {
-	for _, item := range value {
-		if item == 0 {
-			return false
-		}
-	}
-	return true
-}
-
 func decodeRequest(request []byte) (policyRequest, bool) {
 	if len(request) != requestLen || binary.LittleEndian.Uint32(request[0:4]) != requestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion ||
@@ -67,7 +50,7 @@ func decodeRequest(request []byte) (policyRequest, bool) {
 		slotOffset := requestToolNamesOff + index*toolNameSlot
 		slot := request[slotOffset : slotOffset+toolNameSlot]
 		if nameLen > toolNameMax || (index >= count && nameLen != 0) ||
-			!nonzeroText(slot[:nameLen]) || !zeroPadding(slot[nameLen:]) {
+			!modulewire.NonzeroText(slot[:nameLen]) || !modulewire.ZeroPadding(slot[nameLen:]) {
 			return policyRequest{}, false
 		}
 		if index < count {
@@ -76,7 +59,7 @@ func decodeRequest(request []byte) (policyRequest, bool) {
 	}
 	reasonLen := int(binary.LittleEndian.Uint32(request[16:20]))
 	reasonSlot := request[requestStopReasonOff:]
-	if !nonzeroText(reasonSlot[:reasonLen]) || !zeroPadding(reasonSlot[reasonLen:]) {
+	if !modulewire.NonzeroText(reasonSlot[:reasonLen]) || !modulewire.ZeroPadding(reasonSlot[reasonLen:]) {
 		return policyRequest{}, false
 	}
 	return policyRequest{

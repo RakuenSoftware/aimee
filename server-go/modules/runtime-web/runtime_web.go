@@ -3,6 +3,7 @@ package runtimeweb
 
 import (
 	"encoding/binary"
+	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/runtime-web/policy"
@@ -21,24 +22,6 @@ const (
 	responseLen           = 16
 )
 
-func zeroPadding(value []byte) bool {
-	for _, item := range value {
-		if item != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func nonzeroText(value []byte) bool {
-	for _, item := range value {
-		if item == 0 {
-			return false
-		}
-	}
-	return true
-}
-
 func decodeRequest(request []byte) (string, bool) {
 	if len(request) != requestLen || binary.LittleEndian.Uint32(request[0:4]) != requestMagic ||
 		binary.LittleEndian.Uint32(request[4:8]) != wireVersion ||
@@ -51,7 +34,7 @@ func decodeRequest(request []byte) (string, bool) {
 	}
 	kindLen := int(wireLen)
 	slot := request[requestKindOff:]
-	if !nonzeroText(slot[:kindLen]) || !zeroPadding(slot[kindLen:]) {
+	if !modulewire.NonzeroText(slot[:kindLen]) || !modulewire.ZeroPadding(slot[kindLen:]) {
 		return "", false
 	}
 	return string(slot[:kindLen]), true

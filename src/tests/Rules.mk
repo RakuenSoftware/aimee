@@ -79,14 +79,7 @@ TESTPREFIX ?= $(OBJDIR)/tests
 # same JSON event contract as the independently running Go module. This is a bus
 # double, not a second configuration engine: the golden defaults remain owned
 # by and loaded from the pinned external Go module's defaults.json.
-CONFIG_CLIENT_ACCESSOR_OBJS = $(OBJDIR)/config_client_accessors_0.o \
-                              $(OBJDIR)/config_client_accessors_1.o \
-                              $(OBJDIR)/config_client_accessors_2.o \
-                              $(OBJDIR)/config_client_accessors_3.o \
-                              $(OBJDIR)/config_client_accessors_4.o \
-                              $(OBJDIR)/config_client_accessors_5.o \
-                              $(OBJDIR)/config_client_accessors_6.o \
-                              $(OBJDIR)/config_client_accessors_7.o
+CONFIG_CLIENT_ACCESSOR_OBJS = $(OBJDIR)/config_client_accessors.o
 CONFIG_CLIENT_TEST_OBJS = $(OBJDIR)/config_client.o $(OBJDIR)/config_client_contract.o \
                           $(CONFIG_CLIENT_ACCESSOR_OBJS) \
                           $(OBJDIR)/tests/support/config_module_stub.o $(OBJDIR)/session_id.o
@@ -173,7 +166,7 @@ $(TESTPREFIX)/unit-test-http-send-guard: $(OBJDIR)/tests/test_http_send_guard.o 
 TEST_CORE_OBJS = $(OBJDIR)/tests/support/providers_module_stub.o $(KB_STORE_TEST_BACKEND_OBJ) $(OBJDIR)/kb_store/kb_store_test_shim.o $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/client_config.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/interaction_event_names.o \
                  $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS) \
                  $(OBJDIR)/aimee_home.o $(OBJDIR)/shared/kb_paths.o \
-                 $(OBJDIR)/log.o $(OBJDIR)/shutdown_forensics.o $(OBJDIR)/cJSON.o $(OBJDIR)/util_url.o $(OBJDIR)/report_enrichment.o $(OBJDIR)/compact.o $(OBJDIR)/wire_fence.o $(OBJDIR)/slop_detect.o $(OBJDIR)/proxy_bootstrap.o \
+                 $(OBJDIR)/log.o $(OBJDIR)/shutdown_forensics.o $(OBJDIR)/cJSON.o $(OBJDIR)/util_url.o $(OBJDIR)/report_enrichment.o $(OBJDIR)/wire_fence.o $(OBJDIR)/slop_detect.o $(OBJDIR)/proxy_bootstrap.o \
                  $(OBJDIR)/json_fluent.o $(OBJDIR)/markdown.o $(OBJDIR)/integrity_gate.o $(OBJDIR)/integrity_ingress.o $(OBJDIR)/artifact_trust.o $(OBJDIR)/tests/support/obs_durable_stub.o $(OBJDIR)/modules/vault/runtime_secret.o
 TEST_CORE_OBJS += $(OBJDIR)/http_content_encoding.o
 # Extended set for tests that need workspace/worktree/guardrails functions (pulls in agents).
@@ -245,13 +238,13 @@ $(TESTPREFIX)/unit-test-tool-validation $(TESTPREFIX)/unit-test-mcp-native-surfa
 $(TESTPREFIX)/unit-test-notes $(TESTPREFIX)/unit-test-tool-prompts \
 $(TESTPREFIX)/unit-test-delegate-driver $(TESTPREFIX)/unit-test-agent-http: $(TEST_MEMORY_TRANSPORT_OBJS)
 
-$(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/db1_client/runtime.o \
+$(TESTPREFIX)/unit-test-guardrails: $(OBJDIR)/db1_client/runtime.o $(OBJDIR)/db1_client/transport.o \
                                       $(OBJDIR)/tests/support/interaction_events_stub.o
 
 $(TESTPREFIX)/unit-test-tool-validation $(TESTPREFIX)/unit-test-mcp-native-surface \
 $(TESTPREFIX)/unit-test-notes $(TESTPREFIX)/unit-test-tool-prompts \
 $(TESTPREFIX)/unit-test-delegate-driver $(TESTPREFIX)/unit-test-agent-http: \
-    $(OBJDIR)/db1_client/runtime.o $(OBJDIR)/db1_client/telemetry.o
+    $(OBJDIR)/db1_client/runtime.o $(OBJDIR)/db1_client/transport.o $(OBJDIR)/db1_client/telemetry.o $(OBJDIR)/db1_client/transport.o
 
 
 $(TESTPREFIX)/unit-test-kb-client-search: $(OBJDIR)/modules/kb_client/kb_client_pii.o \
@@ -534,7 +527,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-cli-launch $(TESTPREFIX)/unit-test-compu
                $(TESTPREFIX)/unit-test-role-templates \
                $(TESTPREFIX)/unit-test-skill \
                $(TESTPREFIX)/unit-test-web-search \
-               $(TESTPREFIX)/unit-test-compact \
                $(TESTPREFIX)/unit-test-wire-fence \
                $(TESTPREFIX)/unit-test-economizer-live-surface \
                $(TESTPREFIX)/unit-test-token-tracker \
@@ -648,7 +640,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-cli-launch $(TESTPREFIX)/unit-test-compu
                $(TESTPREFIX)/unit-test-json-fluent \
                $(TESTPREFIX)/unit-test-server-memory-setup \
                $(TESTPREFIX)/unit-test-cmd-config \
-               $(TESTPREFIX)/unit-test-cmd-table \
                $(TESTPREFIX)/unit-test-tool-validation \
                $(TESTPREFIX)/unit-test-turn-narration \
                $(TESTPREFIX)/unit-test-markdown \
@@ -709,7 +700,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-cli-launch $(TESTPREFIX)/unit-test-compu
                $(TESTPREFIX)/unit-test-trace-transport \
                $(TESTPREFIX)/unit-test-assertion-transport \
                $(TESTPREFIX)/unit-test-benchmark-context-transport \
-               $(TESTPREFIX)/unit-test-agent-generate-transport \
                $(TESTPREFIX)/unit-test-kb-memory-facts-connection \
                $(TESTPREFIX)/unit-test-server-facts-transport \
                $(TESTPREFIX)/unit-test-server-memory-domain \
@@ -907,24 +897,6 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-offline-hardening
 TEST_TARGETS += $(TESTPREFIX)/unit-test-communication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-process-module-handlers
-TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-store-cert-serial-support \
-                $(TESTPREFIX)/unit-test-kb-store-cjson-support \
-                $(TESTPREFIX)/unit-test-kb-store-cochange-support \
-                $(TESTPREFIX)/unit-test-kb-store-code-audit-graph-support \
-                $(TESTPREFIX)/unit-test-kb-store-code-import-support \
-                $(TESTPREFIX)/unit-test-kb-store-code-match-support \
-                $(TESTPREFIX)/unit-test-kb-store-dstr-support \
-                $(TESTPREFIX)/unit-test-kb-store-extractor-support \
-                $(TESTPREFIX)/unit-test-kb-store-log-support \
-                $(TESTPREFIX)/unit-test-kb-store-management-read-support \
-                $(TESTPREFIX)/unit-test-kb-store-model-validation-support \
-                $(TESTPREFIX)/unit-test-kb-store-random-support \
-                $(TESTPREFIX)/unit-test-kb-store-rel-seed-support \
-                $(TESTPREFIX)/unit-test-kb-store-rel-type-support \
-                $(TESTPREFIX)/unit-test-kb-store-runtime-config-support \
-                $(TESTPREFIX)/unit-test-kb-store-sketch-support \
-                $(TESTPREFIX)/unit-test-kb-store-text-support \
-                $(TESTPREFIX)/unit-test-kb-store-time-support \
 
 MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/learning.o \
@@ -989,24 +961,6 @@ UNIT_TEST_SHARD_COUNT ?= 1
 UNIT_TEST_SHARD_INDEX ?= 0
 UNIT_TEST_SKIP_P1 ?= 0
 ifeq ($(UNIT_TEST_SHARD_INDEX),0)
-UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-kb-store-dstr-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-cert-serial-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-cjson-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-cochange-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-code-audit-graph-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-code-import-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-code-match-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-extractor-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-log-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-management-read-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-model-validation-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-random-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-rel-seed-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-rel-type-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-runtime-config-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-sketch-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-text-support-sanitize \
-                        $(TESTPREFIX)/unit-test-kb-store-time-support-sanitize
 else
 UNIT_TEST_AUX_TARGETS =
 endif
@@ -3772,13 +3726,13 @@ $(TESTPREFIX)/unit-test-cross-repo-deps: $(OBJDIR)/tests/test_cross_repo_deps.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-aimee-client: $(OBJDIR)/tests/test_aimee_client.o $(OBJDIR)/aimee_client.o \
-                                      $(OBJDIR)/posix/platform_net.o $(OBJDIR)/http_uds_client.o \
+                                      $(OBJDIR)/shared/platform_net.o $(OBJDIR)/http_uds_client.o \
                                       $(OBJDIR)/aimee_home.o $(OBJDIR)/http_content_encoding.o \
                                       $(TLS_OBJS) $(CORE_CONNECTION_LIB)
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) $(TLS_LIBS) -lz
 
 $(TESTPREFIX)/unit-test-cli-remote: $(OBJDIR)/tests/test_cli_remote.o $(OBJDIR)/cli_remote.o \
-                                    $(OBJDIR)/aimee_client.o $(OBJDIR)/posix/platform_net.o \
+                                    $(OBJDIR)/aimee_client.o $(OBJDIR)/shared/platform_net.o \
                                     $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o \
                                     $(OBJDIR)/http_content_encoding.o $(TLS_OBJS) $(CORE_CONNECTION_LIB)
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL) $(TLS_LIBS) -lz
@@ -4281,10 +4235,6 @@ $(TESTPREFIX)/unit-test-web-search: $(OBJDIR)/tests/test_web_search.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 
-$(TESTPREFIX)/unit-test-compact: $(OBJDIR)/tests/test_compact.o $(OBJDIR)/compact.o \
-                                  $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 $(TESTPREFIX)/unit-test-wire-fence: \
                                   $(OBJDIR)/tests/test_wire_fence.o \
                                   $(OBJDIR)/wire_fence.o $(OBJDIR)/aimee_sha256.o
@@ -4777,7 +4727,7 @@ $(TESTPREFIX)/unit-test-toolset: \
 # these frames is covered by unit-test-db1-module-stage.
 $(TESTPREFIX)/unit-test-db1-git-ownership-client: \
                                        $(OBJDIR)/tests/test_db1_git_ownership_client.o \
-                                       $(OBJDIR)/db1_client/git_ownership.o \
+                                       $(OBJDIR)/db1_client/git_ownership.o $(OBJDIR)/db1_client/transport.o \
                                        $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
@@ -4810,7 +4760,7 @@ $(OBJDIR)/aimee-module-aimee:
 
 $(TESTPREFIX)/unit-test-db1-conversation-client: \
                                        $(OBJDIR)/tests/test_db1_conversation_client.o \
-                                       $(OBJDIR)/db1_client/conversation.o \
+                                       $(OBJDIR)/db1_client/conversation.o $(OBJDIR)/db1_client/transport.o \
                                        $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
@@ -5821,8 +5771,7 @@ $(TESTPREFIX)/unit-test-cmd-config: $(OBJDIR)/tests/test_cmd_config.o $(OBJDIR)/
                                      $(OBJDIR)/cmd_util.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-cmd-table: $(OBJDIR)/tests/test_cmd_table.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
 
 $(TESTPREFIX)/unit-test-tool-validation: $(OBJDIR)/tests/test_tool_validation.o \
                                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
@@ -6389,937 +6338,6 @@ $(TESTPREFIX)/unit-test-sketch: $(OBJDIR)/tests/test_sketch.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
 
-KB_STORE_CJSON_TEST_FLAGS = -Imodules/kb/support
-
-$(OBJDIR)/tests/test_kb_store_cjson_support.o: tests/test_kb_store_cjson_support.c \
-                                           modules/kb/support/cJSON.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CJSON_TEST_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_cjson_support_impl.o: modules/kb/support/cjson.c \
-                                          modules/kb/support/cJSON.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CJSON_TEST_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-cjson-support: \
-                     $(OBJDIR)/tests/test_kb_store_cjson_support.o \
-                     $(OBJDIR)/tests/kb_store_cjson_support_impl.o
-	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS) -lm
-
-KB_STORE_CJSON_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-cjson-support-sanitize
-
-$(KB_STORE_CJSON_SANITIZE_DIR)/test.o: tests/test_kb_store_cjson_support.c \
-                                        modules/kb/support/cJSON.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CJSON_TEST_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
-	      -c -o $@ $<
-
-$(KB_STORE_CJSON_SANITIZE_DIR)/support.o: modules/kb/support/cjson.c \
-                                           modules/kb/support/cJSON.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CJSON_TEST_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
-	      -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-cjson-support-sanitize: \
-                     $(KB_STORE_CJSON_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_CJSON_SANITIZE_DIR)/support.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -o $@ $^ -lm
-
-.PHONY: unit-test-kb-store-cjson-support unit-test-kb-store-cjson-support-sanitize
-unit-test-kb-store-cjson-support: $(TESTPREFIX)/unit-test-kb-store-cjson-support
-	$<
-
-unit-test-kb-store-cjson-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-cjson-support-sanitize
-	$<
-
-KB_STORE_RANDOM_TEST_FLAGS = -Imodules/kb/support -Iheaders -pthread
-KB_STORE_RANDOM_SUPPORT_RENAMES = \
-   -Dplatform_random_bytes=kb_store_support_platform_random_bytes \
-   -Dplatform_random_hex=kb_store_support_platform_random_hex
-KB_STORE_RANDOM_LEGACY_RENAMES = \
-   -Dplatform_random_bytes=legacy_platform_random_bytes \
-   -Dplatform_random_hex=legacy_platform_random_hex
-KB_STORE_RANDOM_IO_SEAMS = -include tests/support/kb_store_random_io_seam.h
-
-$(OBJDIR)/tests/test_kb_store_random_support.o: tests/test_kb_store_random_support.c \
-                                             modules/kb/support/kb_store_random.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_random_support_real.o: modules/kb/support/random_primitives.c \
-                                               modules/kb/support/kb_store_random.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_random_support_impl.o: modules/kb/support/random_primitives.c \
-                                               modules/kb/support/kb_store_random.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_RANDOM_SUPPORT_RENAMES) \
-	      $(KB_STORE_RANDOM_IO_SEAMS) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_random_legacy_common.o: platform_random.c headers/platform_random.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_RANDOM_LEGACY_RENAMES) \
-	      -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_random_legacy_platform.o: posix/platform_random.c headers/platform_random.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_RANDOM_LEGACY_RENAMES) \
-	      $(KB_STORE_RANDOM_IO_SEAMS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-random-support: \
-                     $(OBJDIR)/tests/test_kb_store_random_support.o \
-                     $(OBJDIR)/tests/kb_store_random_support_real.o \
-                     $(OBJDIR)/tests/kb_store_random_support_impl.o \
-                     $(OBJDIR)/tests/kb_store_random_legacy_common.o \
-                     $(OBJDIR)/tests/kb_store_random_legacy_platform.o
-	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS) -pthread
-
-KB_STORE_RANDOM_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-random-support-sanitize
-
-$(KB_STORE_RANDOM_SANITIZE_DIR)/test.o: tests/test_kb_store_random_support.c \
-                                          modules/kb/support/kb_store_random.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
-	      -c -o $@ $<
-
-$(KB_STORE_RANDOM_SANITIZE_DIR)/real.o: modules/kb/support/random_primitives.c \
-                                          modules/kb/support/kb_store_random.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
-	      -c -o $@ $<
-
-$(KB_STORE_RANDOM_SANITIZE_DIR)/support.o: modules/kb/support/random_primitives.c \
-                                             modules/kb/support/kb_store_random.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
-	      $(KB_STORE_RANDOM_SUPPORT_RENAMES) $(KB_STORE_RANDOM_IO_SEAMS) -c -o $@ $<
-
-$(KB_STORE_RANDOM_SANITIZE_DIR)/legacy-common.o: platform_random.c headers/platform_random.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
-	      $(KB_STORE_RANDOM_LEGACY_RENAMES) -c -o $@ $<
-
-$(KB_STORE_RANDOM_SANITIZE_DIR)/legacy-platform.o: posix/platform_random.c \
-                                                 headers/platform_random.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_RANDOM_TEST_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
-	      $(KB_STORE_RANDOM_LEGACY_RENAMES) $(KB_STORE_RANDOM_IO_SEAMS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-random-support-sanitize: \
-                     $(KB_STORE_RANDOM_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_RANDOM_SANITIZE_DIR)/real.o \
-                     $(KB_STORE_RANDOM_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_RANDOM_SANITIZE_DIR)/legacy-common.o \
-                     $(KB_STORE_RANDOM_SANITIZE_DIR)/legacy-platform.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -o $@ $^ -pthread
-
-.PHONY: unit-test-kb-store-random-support unit-test-kb-store-random-support-sanitize
-unit-test-kb-store-random-support: $(TESTPREFIX)/unit-test-kb-store-random-support
-	$<
-
-unit-test-kb-store-random-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-random-support-sanitize
-	$<
-
-KB_STORE_CERT_SERIAL_SUPPORT_RENAMES = -DAIMEE_KB_STORE_CERT_SERIAL_PREFIX
-KB_STORE_CERT_SERIAL_SECTION_FLAGS = -ffunction-sections -fdata-sections
-
-$(OBJDIR)/tests/kb_store_cert_serial_support_impl.o: \
-                     modules/kb/support/cert_serial_primitives.c \
-                     modules/kb/support/kb_store_cert_serial.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CERT_SERIAL_SUPPORT_RENAMES) \
-	      $(KB_STORE_CERT_SERIAL_SECTION_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_cert_serial_monolith.o: kb/kb_identity.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CERT_SERIAL_SECTION_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-cert-serial-support: \
-                     $(OBJDIR)/tests/test_kb_store_cert_serial_support.o \
-                     $(OBJDIR)/tests/kb_store_cert_serial_support_impl.o \
-                     $(OBJDIR)/tests/kb_store_cert_serial_monolith.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
-
-KB_STORE_CERT_SERIAL_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-cert-serial-support-sanitize
-
-$(KB_STORE_CERT_SERIAL_SANITIZE_DIR)/test.o: tests/test_kb_store_cert_serial_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_CERT_SERIAL_SANITIZE_DIR)/support.o: \
-                     modules/kb/support/cert_serial_primitives.c \
-                     modules/kb/support/kb_store_cert_serial.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CERT_SERIAL_SUPPORT_RENAMES) \
-	      $(KB_STORE_CERT_SERIAL_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_CERT_SERIAL_SANITIZE_DIR)/monolith.o: kb/kb_identity.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CERT_SERIAL_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-cert-serial-support-sanitize: \
-                     $(KB_STORE_CERT_SERIAL_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_CERT_SERIAL_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_CERT_SERIAL_SANITIZE_DIR)/monolith.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-kb-store-cert-serial-support unit-test-kb-store-cert-serial-support-sanitize
-unit-test-kb-store-cert-serial-support: $(TESTPREFIX)/unit-test-kb-store-cert-serial-support
-	$<
-
-unit-test-kb-store-cert-serial-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-kb-store-cert-serial-support-sanitize
-	$<
-
-KB_STORE_COCHANGE_SUPPORT_RENAMES = -DAIMEE_KB_STORE_COCHANGE_PREFIX
-KB_STORE_COCHANGE_SECTION_FLAGS = -ffunction-sections -fdata-sections
-
-$(OBJDIR)/tests/kb_store_cochange_support_impl.o: \
-                     modules/kb/support/cochange_primitives.c \
-                     modules/kb/support/kb_store_cochange.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_COCHANGE_SUPPORT_RENAMES) \
-	      $(KB_STORE_COCHANGE_SECTION_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_cochange_monolith.o: cochange.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_COCHANGE_SECTION_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-cochange-support: \
-                     $(OBJDIR)/tests/test_kb_store_cochange_support.o \
-                     $(OBJDIR)/tests/kb_store_cochange_support_impl.o \
-                     $(OBJDIR)/tests/kb_store_cochange_monolith.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
-
-KB_STORE_COCHANGE_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-cochange-support-sanitize
-
-$(KB_STORE_COCHANGE_SANITIZE_DIR)/test.o: tests/test_kb_store_cochange_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_COCHANGE_SANITIZE_DIR)/support.o: \
-                     modules/kb/support/cochange_primitives.c \
-                     modules/kb/support/kb_store_cochange.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_COCHANGE_SUPPORT_RENAMES) \
-	      $(KB_STORE_COCHANGE_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_COCHANGE_SANITIZE_DIR)/monolith.o: cochange.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_COCHANGE_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-cochange-support-sanitize: \
-                     $(KB_STORE_COCHANGE_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_COCHANGE_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_COCHANGE_SANITIZE_DIR)/monolith.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-kb-store-cochange-support unit-test-kb-store-cochange-support-sanitize
-unit-test-kb-store-cochange-support: $(TESTPREFIX)/unit-test-kb-store-cochange-support
-	$<
-
-unit-test-kb-store-cochange-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-kb-store-cochange-support-sanitize
-	$<
-
-KB_STORE_CODE_MATCH_SUPPORT_RENAMES = -DAIMEE_KB_STORE_CODE_MATCH_PREFIX
-KB_STORE_CODE_MATCH_SECTION_FLAGS = -ffunction-sections -fdata-sections
-
-$(OBJDIR)/tests/kb_store_code_match_support_impl.o: \
-                     modules/kb/support/code_match_primitives.c \
-                     modules/kb/support/kb_store_code_match.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_MATCH_SUPPORT_RENAMES) \
-	      $(KB_STORE_CODE_MATCH_SECTION_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_code_match_monolith.o: code_match.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_MATCH_SECTION_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-code-match-support: \
-                     $(OBJDIR)/tests/test_kb_store_code_match_support.o \
-                     $(OBJDIR)/tests/kb_store_code_match_support_impl.o \
-                     $(OBJDIR)/tests/kb_store_code_match_monolith.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
-
-KB_STORE_CODE_MATCH_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-code-match-support-sanitize
-
-$(KB_STORE_CODE_MATCH_SANITIZE_DIR)/test.o: tests/test_kb_store_code_match_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_CODE_MATCH_SANITIZE_DIR)/support.o: \
-                     modules/kb/support/code_match_primitives.c \
-                     modules/kb/support/kb_store_code_match.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_MATCH_SUPPORT_RENAMES) \
-	      $(KB_STORE_CODE_MATCH_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_CODE_MATCH_SANITIZE_DIR)/monolith.o: code_match.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_MATCH_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-code-match-support-sanitize: \
-                     $(KB_STORE_CODE_MATCH_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_CODE_MATCH_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_CODE_MATCH_SANITIZE_DIR)/monolith.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-kb-store-code-match-support unit-test-kb-store-code-match-support-sanitize
-unit-test-kb-store-code-match-support: $(TESTPREFIX)/unit-test-kb-store-code-match-support
-	$<
-
-unit-test-kb-store-code-match-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-kb-store-code-match-support-sanitize
-	$<
-
-KB_STORE_DSTR_SUPPORT_RENAMES = \
-   -Ddstr_appendf=kb_store_support_dstr_appendf \
-   -Ddstr_init=kb_store_support_dstr_init \
-   -Ddstr_steal=kb_store_support_dstr_steal
-KB_STORE_DSTR_TEST_ALLOCATOR = -Drealloc=kb_store_test_realloc
-
-$(OBJDIR)/tests/kb_store_dstr_support_impl.o: modules/kb/support/dstr_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_DSTR_SUPPORT_RENAMES) \
-	      $(KB_STORE_DSTR_TEST_ALLOCATOR) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_dstr_monolith.o: dstr.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_DSTR_TEST_ALLOCATOR) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-dstr-support: \
-                     $(OBJDIR)/tests/test_kb_store_dstr_support.o \
-                     $(OBJDIR)/tests/kb_store_dstr_support_impl.o \
-                     $(OBJDIR)/tests/kb_store_dstr_monolith.o
-	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS)
-
-KB_STORE_DSTR_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-dstr-support-sanitize
-
-$(KB_STORE_DSTR_SANITIZE_DIR)/test.o: tests/test_kb_store_dstr_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_DSTR_SANITIZE_DIR)/support.o: modules/kb/support/dstr_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_DSTR_SUPPORT_RENAMES) \
-	      $(KB_STORE_DSTR_TEST_ALLOCATOR) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_DSTR_SANITIZE_DIR)/monolith.o: dstr.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_DSTR_TEST_ALLOCATOR) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-dstr-support-sanitize: \
-                     $(KB_STORE_DSTR_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_DSTR_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_DSTR_SANITIZE_DIR)/monolith.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -o $@ $^
-
-.PHONY: unit-test-kb-store-dstr-support unit-test-kb-store-dstr-support-sanitize
-unit-test-kb-store-dstr-support: $(TESTPREFIX)/unit-test-kb-store-dstr-support
-	$<
-
-unit-test-kb-store-dstr-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-dstr-support-sanitize
-	$<
-
-KB_STORE_MGMT_READ_SUPPORT_RENAMES = \
-   -Dserver_mgmt_read_selector_name=kb_store_support_server_mgmt_read_selector_name
-KB_STORE_MGMT_READ_SECTION_FLAGS = -ffunction-sections -fdata-sections
-
-$(OBJDIR)/tests/kb_store_management_read_support_impl.o: \
-                     modules/kb/support/management_read_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MGMT_READ_SUPPORT_RENAMES) \
-	      $(KB_STORE_MGMT_READ_SECTION_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_management_read_monolith.o: shared/management_read.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MGMT_READ_SECTION_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-management-read-support: \
-                     $(OBJDIR)/tests/test_kb_store_management_read_support.o \
-                     $(OBJDIR)/tests/kb_store_management_read_support_impl.o \
-                     $(OBJDIR)/tests/kb_store_management_read_monolith.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
-
-KB_STORE_MGMT_READ_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-management-read-support-sanitize
-
-$(KB_STORE_MGMT_READ_SANITIZE_DIR)/test.o: tests/test_kb_store_management_read_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_MGMT_READ_SANITIZE_DIR)/support.o: \
-                     modules/kb/support/management_read_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MGMT_READ_SUPPORT_RENAMES) \
-	      $(KB_STORE_MGMT_READ_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_MGMT_READ_SANITIZE_DIR)/monolith.o: shared/management_read.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MGMT_READ_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-management-read-support-sanitize: \
-                     $(KB_STORE_MGMT_READ_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_MGMT_READ_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_MGMT_READ_SANITIZE_DIR)/monolith.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-kb-store-management-read-support \
-        unit-test-kb-store-management-read-support-sanitize
-unit-test-kb-store-management-read-support: $(TESTPREFIX)/unit-test-kb-store-management-read-support
-	$<
-
-unit-test-kb-store-management-read-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-kb-store-management-read-support-sanitize
-	$<
-
-KB_STORE_MODEL_VALIDATION_SUPPORT_RENAMES = -DAIMEE_KB_STORE_MODEL_VALIDATION_PREFIX
-KB_STORE_MODEL_VALIDATION_SECTION_FLAGS = -ffunction-sections -fdata-sections
-
-$(OBJDIR)/tests/kb_store_model_validation_support_impl.o: \
-                     modules/kb/support/model_validation_primitives.c \
-                     modules/kb/support/kb_store_model_validation.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MODEL_VALIDATION_SUPPORT_RENAMES) \
-	      $(KB_STORE_MODEL_VALIDATION_SECTION_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_model_validation_monolith.o: kb/http/kb_models_validate.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MODEL_VALIDATION_SECTION_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-model-validation-support: \
-                     $(OBJDIR)/tests/test_kb_store_model_validation_support.o \
-                     $(OBJDIR)/tests/kb_store_model_validation_support_impl.o \
-                     $(OBJDIR)/tests/kb_store_model_validation_monolith.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
-
-KB_STORE_MODEL_VALIDATION_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-model-validation-support-sanitize
-
-$(KB_STORE_MODEL_VALIDATION_SANITIZE_DIR)/test.o: tests/test_kb_store_model_validation_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_MODEL_VALIDATION_SANITIZE_DIR)/support.o: \
-                     modules/kb/support/model_validation_primitives.c \
-                     modules/kb/support/kb_store_model_validation.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MODEL_VALIDATION_SUPPORT_RENAMES) \
-	      $(KB_STORE_MODEL_VALIDATION_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_MODEL_VALIDATION_SANITIZE_DIR)/monolith.o: kb/http/kb_models_validate.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_MODEL_VALIDATION_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-model-validation-support-sanitize: \
-                     $(KB_STORE_MODEL_VALIDATION_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_MODEL_VALIDATION_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_MODEL_VALIDATION_SANITIZE_DIR)/monolith.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-kb-store-model-validation-support \
-        unit-test-kb-store-model-validation-support-sanitize
-unit-test-kb-store-model-validation-support: \
-                     $(TESTPREFIX)/unit-test-kb-store-model-validation-support
-	$<
-
-unit-test-kb-store-model-validation-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-kb-store-model-validation-support-sanitize
-	$<
-
-KB_STORE_TEXT_SUPPORT_RENAMES = -Dtext_sanitize_utf8=kb_store_support_text_sanitize_utf8
-KB_STORE_TEXT_SECTION_FLAGS = -ffunction-sections -fdata-sections
-
-$(OBJDIR)/tests/kb_store_text_support_impl.o: modules/kb/support/text_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TEXT_SUPPORT_RENAMES) \
-	      $(KB_STORE_TEXT_SECTION_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_text_monolith.o: text.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TEXT_SECTION_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-text-support: \
-                     $(OBJDIR)/tests/test_kb_store_text_support.o \
-                     $(OBJDIR)/tests/kb_store_text_support_impl.o \
-                     $(OBJDIR)/tests/kb_store_text_monolith.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
-
-KB_STORE_TEXT_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-text-support-sanitize
-
-$(KB_STORE_TEXT_SANITIZE_DIR)/test.o: tests/test_kb_store_text_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_TEXT_SANITIZE_DIR)/support.o: modules/kb/support/text_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TEXT_SUPPORT_RENAMES) $(KB_STORE_TEXT_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_TEXT_SANITIZE_DIR)/monolith.o: text.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TEXT_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-text-support-sanitize: \
-                     $(KB_STORE_TEXT_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_TEXT_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_TEXT_SANITIZE_DIR)/monolith.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-kb-store-text-support unit-test-kb-store-text-support-sanitize
-unit-test-kb-store-text-support: $(TESTPREFIX)/unit-test-kb-store-text-support
-	$<
-
-unit-test-kb-store-text-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-text-support-sanitize
-	$<
-
-KB_STORE_EXTRACTOR_SECTION_FLAGS = -ffunction-sections -fdata-sections
-
-$(OBJDIR)/tests/kb_store_extractor_support_impl.o: modules/kb/support/extractor_primitives.c \
-                                            modules/kb/support/kb_store_extractors.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) -DAIMEE_KB_STORE_EXTRACTOR_PREFIX $(KB_STORE_EXTRACTOR_SECTION_FLAGS) \
-	      -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-extractor-support: \
-                     $(OBJDIR)/tests/test_kb_store_extractor_support.o \
-                     $(OBJDIR)/tests/kb_store_extractor_support_impl.o \
-                     $(OBJDIR)/extractors.o $(OBJDIR)/extractors_extra.o \
-                     $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
-
-KB_STORE_EXTRACTOR_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-extractor-support-sanitize
-
-$(KB_STORE_EXTRACTOR_SANITIZE_DIR)/test.o: tests/test_kb_store_extractor_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_EXTRACTOR_SANITIZE_DIR)/support.o: modules/kb/support/extractor_primitives.c \
-                                               modules/kb/support/kb_store_extractors.h
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) -DAIMEE_KB_STORE_EXTRACTOR_PREFIX $(KB_STORE_EXTRACTOR_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_EXTRACTOR_SANITIZE_DIR)/extractors.o: extractors.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_EXTRACTOR_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
-	      -c -o $@ $<
-
-$(KB_STORE_EXTRACTOR_SANITIZE_DIR)/extra.o: extractors_extra.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_EXTRACTOR_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
-	      -c -o $@ $<
-
-$(KB_STORE_EXTRACTOR_SANITIZE_DIR)/new-langs.o: extractors_new_langs.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_EXTRACTOR_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
-	      -c -o $@ $<
-
-$(KB_STORE_EXTRACTOR_SANITIZE_DIR)/tree-sitter.o: code_treesitter.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_EXTRACTOR_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) \
-	      -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-extractor-support-sanitize: \
-                     $(KB_STORE_EXTRACTOR_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_EXTRACTOR_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_EXTRACTOR_SANITIZE_DIR)/extractors.o \
-                     $(KB_STORE_EXTRACTOR_SANITIZE_DIR)/extra.o \
-                     $(KB_STORE_EXTRACTOR_SANITIZE_DIR)/new-langs.o \
-                     $(KB_STORE_EXTRACTOR_SANITIZE_DIR)/tree-sitter.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-kb-store-extractor-support unit-test-kb-store-extractor-support-sanitize
-unit-test-kb-store-extractor-support: $(TESTPREFIX)/unit-test-kb-store-extractor-support
-	$<
-
-unit-test-kb-store-extractor-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-kb-store-extractor-support-sanitize
-	$<
-
-KB_STORE_CODE_IMPORT_SUPPORT_RENAMES = \
-   -Dcode_path_import_identity=kb_store_support_code_path_import_identity \
-   -Dcode_import_identity=kb_store_support_code_import_identity \
-   -Dcode_import_resolves_path=kb_store_support_code_import_resolves_path
-KB_STORE_CODE_IMPORT_SECTION_FLAGS = -ffunction-sections -fdata-sections
-
-$(OBJDIR)/tests/kb_store_code_import_support_impl.o: \
-                     modules/kb/support/code_import_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_IMPORT_SUPPORT_RENAMES) \
-	      $(KB_STORE_CODE_IMPORT_SECTION_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_code_import_monolith.o: extractors.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_IMPORT_SECTION_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-code-import-support: \
-                     $(OBJDIR)/tests/test_kb_store_code_import_support.o \
-                     $(OBJDIR)/tests/kb_store_code_import_support_impl.o \
-                     $(OBJDIR)/tests/kb_store_code_import_monolith.o
-	$(CC) $(EXTRA_L_FLAGS) -Wl,--gc-sections -o $@ $^
-
-KB_STORE_CODE_IMPORT_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-code-import-support-sanitize
-
-$(KB_STORE_CODE_IMPORT_SANITIZE_DIR)/test.o: tests/test_kb_store_code_import_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_CODE_IMPORT_SANITIZE_DIR)/support.o: \
-                     modules/kb/support/code_import_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_IMPORT_SUPPORT_RENAMES) \
-	      $(KB_STORE_CODE_IMPORT_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_CODE_IMPORT_SANITIZE_DIR)/monolith.o: extractors.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_IMPORT_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-code-import-support-sanitize: \
-                     $(KB_STORE_CODE_IMPORT_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_CODE_IMPORT_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_CODE_IMPORT_SANITIZE_DIR)/monolith.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-kb-store-code-import-support unit-test-kb-store-code-import-support-sanitize
-unit-test-kb-store-code-import-support: $(TESTPREFIX)/unit-test-kb-store-code-import-support
-	$<
-
-unit-test-kb-store-code-import-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-kb-store-code-import-support-sanitize
-	$<
-
-KB_STORE_CODE_AUDIT_GRAPH_SUPPORT_RENAMES = \
-   -Dcode_audit_dead_exports=kb_store_support_code_audit_dead_exports \
-   -Dcode_audit_find_cycles=kb_store_support_code_audit_find_cycles
-KB_STORE_CODE_AUDIT_GRAPH_SECTION_FLAGS = -ffunction-sections -fdata-sections
-
-$(OBJDIR)/tests/kb_store_code_audit_graph_support_impl.o: \
-                     modules/kb/support/code_audit_graph_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_AUDIT_GRAPH_SUPPORT_RENAMES) \
-	      $(KB_STORE_CODE_AUDIT_GRAPH_SECTION_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_code_audit_graph_monolith.o: code_audit_graph.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_AUDIT_GRAPH_SECTION_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-code-audit-graph-support: \
-                     $(OBJDIR)/tests/test_kb_store_code_audit_graph_support.o \
-                     $(OBJDIR)/tests/kb_store_code_audit_graph_support_impl.o \
-                     $(OBJDIR)/tests/kb_store_code_audit_graph_monolith.o
-	$(CC) $(EXTRA_L_FLAGS) -Wl,--gc-sections -o $@ $^
-
-KB_STORE_CODE_AUDIT_GRAPH_SANITIZE_DIR = \
-                     $(OBJDIR)/tests/kb_store-code-audit-graph-support-sanitize
-
-$(KB_STORE_CODE_AUDIT_GRAPH_SANITIZE_DIR)/test.o: \
-                     tests/test_kb_store_code_audit_graph_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_CODE_AUDIT_GRAPH_SANITIZE_DIR)/support.o: \
-                     modules/kb/support/code_audit_graph_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_AUDIT_GRAPH_SUPPORT_RENAMES) \
-	      $(KB_STORE_CODE_AUDIT_GRAPH_SECTION_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_CODE_AUDIT_GRAPH_SANITIZE_DIR)/monolith.o: code_audit_graph.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_CODE_AUDIT_GRAPH_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-code-audit-graph-support-sanitize: \
-                     $(KB_STORE_CODE_AUDIT_GRAPH_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_CODE_AUDIT_GRAPH_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_CODE_AUDIT_GRAPH_SANITIZE_DIR)/monolith.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-kb-store-code-audit-graph-support \
-        unit-test-kb-store-code-audit-graph-support-sanitize
-unit-test-kb-store-code-audit-graph-support: \
-                     $(TESTPREFIX)/unit-test-kb-store-code-audit-graph-support
-	$<
-
-unit-test-kb-store-code-audit-graph-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-kb-store-code-audit-graph-support-sanitize
-	$<
-
-KB_STORE_TIME_SUPPORT_RENAMES = \
-   -Dnow_utc=kb_store_support_now_utc \
-   -Dparse_utc_ts=kb_store_support_parse_utc_ts
-KB_STORE_TIME_SECTION_FLAGS = -ffunction-sections -fdata-sections
-
-$(OBJDIR)/tests/kb_store_time_support_impl.o: modules/kb/support/time_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TIME_SUPPORT_RENAMES) \
-	      $(KB_STORE_TIME_SECTION_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_time_monolith.o: util.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TIME_SECTION_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-time-support: \
-                     $(OBJDIR)/tests/test_kb_store_time_support.o \
-                     $(OBJDIR)/tests/kb_store_time_support_impl.o \
-                     $(OBJDIR)/tests/kb_store_time_monolith.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
-
-KB_STORE_TIME_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-time-support-sanitize
-
-$(KB_STORE_TIME_SANITIZE_DIR)/test.o: tests/test_kb_store_time_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_TIME_SANITIZE_DIR)/support.o: modules/kb/support/time_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TIME_SUPPORT_RENAMES) $(KB_STORE_TIME_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_TIME_SANITIZE_DIR)/monolith.o: util.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_TIME_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-time-support-sanitize: \
-                     $(KB_STORE_TIME_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_TIME_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_TIME_SANITIZE_DIR)/monolith.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-kb-store-time-support unit-test-kb-store-time-support-sanitize
-unit-test-kb-store-time-support: $(TESTPREFIX)/unit-test-kb-store-time-support
-	$<
-
-unit-test-kb-store-time-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-time-support-sanitize
-	$<
-
-
-unit-test-kb-store-rel-enum-text-support-sanitize: \
-      $(TESTPREFIX)/unit-test-kb-store-rel-enum-text-support-sanitize
-	$<
-
-$(OBJDIR)/tests/kb_store_runtime_config_support_impl.o: \
-                     modules/kb/support/runtime_config_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-runtime-config-support: \
-                     $(OBJDIR)/tests/test_kb_store_runtime_config_support.o \
-                     $(OBJDIR)/tests/kb_store_runtime_config_support_impl.o
-	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS)
-
-KB_STORE_RUNTIME_CONFIG_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-runtime-config-support-sanitize
-
-$(KB_STORE_RUNTIME_CONFIG_SANITIZE_DIR)/test.o: tests/test_kb_store_runtime_config_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_RUNTIME_CONFIG_SANITIZE_DIR)/support.o: \
-                     modules/kb/support/runtime_config_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-runtime-config-support-sanitize: \
-                     $(KB_STORE_RUNTIME_CONFIG_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_RUNTIME_CONFIG_SANITIZE_DIR)/support.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -o $@ $^
-
-.PHONY: unit-test-kb-store-runtime-config-support \
-        unit-test-kb-store-runtime-config-support-sanitize
-unit-test-kb-store-runtime-config-support: $(TESTPREFIX)/unit-test-kb-store-runtime-config-support
-	$<
-
-unit-test-kb-store-runtime-config-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-kb-store-runtime-config-support-sanitize
-	$<
-
-$(OBJDIR)/tests/kb_store_log_support_impl.o: modules/kb/support/log_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-log-support: \
-                     $(OBJDIR)/tests/test_kb_store_log_support.o \
-                     $(OBJDIR)/tests/kb_store_log_support_impl.o
-	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS)
-
-KB_STORE_LOG_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-log-support-sanitize
-
-$(KB_STORE_LOG_SANITIZE_DIR)/test.o: tests/test_kb_store_log_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_LOG_SANITIZE_DIR)/support.o: modules/kb/support/log_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-log-support-sanitize: \
-                     $(KB_STORE_LOG_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_LOG_SANITIZE_DIR)/support.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -o $@ $^
-
-.PHONY: unit-test-kb-store-log-support unit-test-kb-store-log-support-sanitize
-unit-test-kb-store-log-support: $(TESTPREFIX)/unit-test-kb-store-log-support
-	$<
-
-unit-test-kb-store-log-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-log-support-sanitize
-	$<
-
-KB_STORE_REL_TYPE_SUPPORT_RENAMES = \
-   -Drel_type_is_functional=kb_store_support_rel_type_is_functional \
-   -Drel_type_kind_allowed=kb_store_support_rel_type_kind_allowed \
-   -Drel_type_normalize=kb_store_support_rel_type_normalize
-KB_STORE_REL_TYPE_SECTION_FLAGS = -ffunction-sections -fdata-sections
-
-$(OBJDIR)/tests/kb_store_rel_type_support_impl.o: modules/kb/support/rel_type_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_REL_TYPE_SUPPORT_RENAMES) \
-	      $(KB_STORE_REL_TYPE_SECTION_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/kb_store_rel_type_monolith.o: rel_types.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_REL_TYPE_SECTION_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-rel-type-support: \
-                     $(OBJDIR)/tests/test_kb_store_rel_type_support.o \
-                     $(OBJDIR)/tests/kb_store_rel_type_support_impl.o \
-                     $(OBJDIR)/tests/kb_store_rel_type_monolith.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
-
-KB_STORE_REL_TYPE_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-rel-type-support-sanitize
-
-$(KB_STORE_REL_TYPE_SANITIZE_DIR)/test.o: tests/test_kb_store_rel_type_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_REL_TYPE_SANITIZE_DIR)/support.o: modules/kb/support/rel_type_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_REL_TYPE_SUPPORT_RENAMES) $(KB_STORE_REL_TYPE_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_REL_TYPE_SANITIZE_DIR)/monolith.o: rel_types.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_REL_TYPE_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-rel-type-support-sanitize: \
-                     $(KB_STORE_REL_TYPE_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_REL_TYPE_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_REL_TYPE_SANITIZE_DIR)/monolith.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-kb-store-rel-type-support unit-test-kb-store-rel-type-support-sanitize
-unit-test-kb-store-rel-type-support: $(TESTPREFIX)/unit-test-kb-store-rel-type-support
-	$<
-
-unit-test-kb-store-rel-type-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-rel-type-support-sanitize
-	$<
-
-KB_STORE_REL_SEED_SUPPORT_RENAMES = \
-   -Drel_type_normalize=kb_store_support_rel_type_normalize \
-   -Drel_types_seed_at=kb_store_support_rel_types_seed_at \
-   -Drel_types_seed_count=kb_store_support_rel_types_seed_count \
-   -Drel_types_seed_lookup=kb_store_support_rel_types_seed_lookup
-
-$(OBJDIR)/tests/kb_store_rel_seed_support_impl.o: modules/kb/support/rel_seed_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_REL_SEED_SUPPORT_RENAMES) \
-	      $(KB_STORE_REL_TYPE_SECTION_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-rel-seed-support: \
-                     $(OBJDIR)/tests/test_kb_store_rel_seed_support.o \
-                     $(OBJDIR)/tests/kb_store_rel_seed_support_impl.o \
-                     $(OBJDIR)/tests/kb_store_rel_type_support_impl.o \
-                     $(OBJDIR)/tests/kb_store_rel_type_monolith.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
-
-KB_STORE_REL_SEED_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-rel-seed-support-sanitize
-
-$(KB_STORE_REL_SEED_SANITIZE_DIR)/test.o: tests/test_kb_store_rel_seed_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_REL_SEED_SANITIZE_DIR)/support.o: modules/kb/support/rel_seed_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_REL_SEED_SUPPORT_RENAMES) $(KB_STORE_REL_TYPE_SECTION_FLAGS) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-rel-seed-support-sanitize: \
-                     $(KB_STORE_REL_SEED_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_REL_SEED_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_REL_TYPE_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_REL_TYPE_SANITIZE_DIR)/monolith.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-kb-store-rel-seed-support unit-test-kb-store-rel-seed-support-sanitize
-unit-test-kb-store-rel-seed-support: $(TESTPREFIX)/unit-test-kb-store-rel-seed-support
-	$<
-
-unit-test-kb-store-rel-seed-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-rel-seed-support-sanitize
-	$<
-
-KB_STORE_SKETCH_SUPPORT_RENAMES = \
-   -Dsketch_bloom_init=kb_store_support_sketch_bloom_init \
-   -Dsketch_count_min_init=kb_store_support_sketch_count_min_init \
-   -Dsketch_fnv1a=kb_store_support_sketch_fnv1a \
-   -Dsketch_hll_add_hash=kb_store_support_sketch_hll_add_hash \
-   -Dsketch_hll_init=kb_store_support_sketch_hll_init \
-   -Dsketch_lsh_band_hash=kb_store_support_sketch_lsh_band_hash \
-   -Dsketch_minhash_init=kb_store_support_sketch_minhash_init
-
-$(OBJDIR)/tests/kb_store_sketch_support_impl.o: modules/kb/support/sketch_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SKETCH_SUPPORT_RENAMES) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-sketch-support: \
-                     $(OBJDIR)/tests/test_kb_store_sketch_support.o \
-                     $(OBJDIR)/tests/kb_store_sketch_support_impl.o \
-                     $(OBJDIR)/sketch.o
-	$(TESTLINK_MIN) -o $@ $^ $(TEST_L_FLAGS) -lm
-
-KB_STORE_SKETCH_SANITIZE_DIR = $(OBJDIR)/tests/kb_store-sketch-support-sanitize
-# Keep standalone sanitizer executables at a stable address: PIE ASan startup
-# can collide with shadow mappings on the disposable Linux validation host.
-# Production executables retain their PIE hardening.
-KB_STORE_SUPPORT_SANITIZE_FLAGS = -O1 -g -fno-lto -fno-pie -fsanitize=address,undefined \
-                             -fno-omit-frame-pointer -U_FORTIFY_SOURCE \
-                             -D_FORTIFY_SOURCE=3
-
-$(KB_STORE_SKETCH_SANITIZE_DIR)/test.o: tests/test_kb_store_sketch_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_SKETCH_SANITIZE_DIR)/support.o: modules/kb/support/sketch_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SKETCH_SUPPORT_RENAMES) \
-	      $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(KB_STORE_SKETCH_SANITIZE_DIR)/monolith.o: sketch.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-kb-store-sketch-support-sanitize: \
-                     $(KB_STORE_SKETCH_SANITIZE_DIR)/test.o \
-                     $(KB_STORE_SKETCH_SANITIZE_DIR)/support.o \
-                     $(KB_STORE_SKETCH_SANITIZE_DIR)/monolith.o
-	$(CC) $(KB_STORE_SUPPORT_SANITIZE_FLAGS) -no-pie -o $@ $^ -lm
-
-.PHONY: unit-test-kb-store-sketch-support
-unit-test-kb-store-sketch-support: $(TESTPREFIX)/unit-test-kb-store-sketch-support
-	$<
-
-.PHONY: unit-test-kb-store-sketch-support-sanitize
-unit-test-kb-store-sketch-support-sanitize: $(TESTPREFIX)/unit-test-kb-store-sketch-support-sanitize
-	$<
-
 $(TESTPREFIX)/unit-test-kb-lab: $(OBJDIR)/tests/test_kb_lab.o \
                      $(OBJDIR)/kb/kb_lab.o \
                      $(PLATFORM_BASIC_OBJS)
@@ -7840,8 +6858,7 @@ $(TESTPREFIX)/unit-test-benchmark-context-transport: $(OBJDIR)/tests/test_benchm
 $(TESTPREFIX)/unit-test-assertion-transport: $(OBJDIR)/tests/test_assertion_transport.o $(OBJDIR)/kb/kb_store_adapters/kb_service_backend_context.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
 
-$(TESTPREFIX)/unit-test-agent-generate-transport: $(OBJDIR)/tests/test_agent_generate_transport.o $(OBJDIR)/vendor/cJSON.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
+
 
 $(TESTPREFIX)/unit-test-agent-memory-transport: $(OBJDIR)/tests/test_agent_memory_transport.o $(OBJDIR)/posix/td_search_render.o $(OBJDIR)/util.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

@@ -12,7 +12,6 @@
 #include "kb_client.h"
 #include "headers/memory.h"
 #include "headers/agent_exec.h"
-#include "compact.h"
 #include "computer_use.h"
 #include "config.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"

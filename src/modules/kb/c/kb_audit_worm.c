@@ -8,10 +8,10 @@
 #include <string.h>
 
 #include <aimee/audit/audit_worm_chain.h>
-#include "../support/kb_store_runtime_config.h"
+#include "config.h"
 #include "kb_store_internal.h"
 #include "db_postgres.h"
-#include "../support/kb_store_time.h" /* now_utc: portable enqueued_at for the shim path */
+#include "aimee.h" /* now_utc: portable enqueued_at for the shim path */
 #include "kb_audit_worm.h"
 
 /* Retained as a no-op ABI during the module transition. Canonical hashing is
