@@ -891,6 +891,35 @@ static void test_native_admission_failure_sends_no_provider_request(void)
    PASS("native_admission_failure_sends_no_provider_request");
 }
 
+static void test_native_host_guidance_retains_client_cache(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   const char *request =
+       "{\"model\":\"ignored\",\"max_tokens\":16,\"system\":[{\"type\":\"text\",\"text\":"
+       "\"stable\",\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"}}],\"messages\":[{"
+       "\"role\":\"user\",\"content\":\"hi\"}],\"tools\":[{\"name\":\"Bash\",\"input_schema\":{"
+       "\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}}}}]}";
+   char response[4096];
+   reset_capture();
+   g_driver = &anthropic;
+   assert(messages_buffered(request, response, sizeof response) == 200);
+   cJSON *sent = parse(g_last_body);
+   cJSON *system = cJSON_GetObjectItemCaseSensitive(sent, "system");
+   assert(cJSON_IsArray(system) && cJSON_GetArraySize(system) == 2);
+   cJSON *stable = cJSON_GetArrayItem(system, 0);
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(stable, "text")), "stable"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                      cJSON_GetObjectItemCaseSensitive(stable, "cache_control"), "ttl")),
+                  "1h"));
+   assert(strstr(cJSON_GetStringValue(
+                     cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(system, 1), "text")),
+                 "aimee-tool-policy"));
+   cJSON_Delete(sent);
+   reset_capture();
+   PASS("native_host_guidance_retains_client_cache");
+}
+
 static void test_messages_native_frame_retains_exact_bytes(void)
 {
    const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
@@ -1402,6 +1431,7 @@ int main(void)
    test_messages_buffered_anthropic_preserves_request_shape();
    test_messages_buffered_anthropic_parity_passthrough();
    test_native_admission_failure_sends_no_provider_request();
+   test_native_host_guidance_retains_client_cache();
    test_messages_native_frame_retains_exact_bytes();
    test_messages_buffered_anthropic_strips_stream_false_path();
    test_messages_stream_anthropic_preserves_request_shape();

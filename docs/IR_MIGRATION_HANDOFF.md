@@ -342,3 +342,7 @@ as translated requests. With the option off, canonical admission and exact repla
 A native stage fixture verifies that opt-in assembly runs context/tools once, recalls the original
 query and preserves its client cache TTL after persona insertion. Raw foreign-ingress policy stages,
 legacy translated-request fallbacks and response projections still remain to be cut over.
+
+### Cache guidance and worker reuse follow-up
+
+Host tool/completion guidance is appended as a separate native system block before canonical admission; original client system blocks, cache breakpoints and TTLs survive. A new independent task clears a previous ownerless capture-failure latch, while nested work retains the active owner's failure. IR session, HTTP owner and native Anthropic handler fixtures passed with ASan/UBSan and leak detection. Global migration work remains open.

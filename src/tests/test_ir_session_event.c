@@ -182,6 +182,13 @@ int main(void)
    assert(aimee_ir_session_emit_response(&response, "msg-3") == -7);
    assert(captured == 1);
    assert(aimee_ir_session_capture_failed());
+   aimee_ir_session_begin_task();
+   assert(aimee_ir_session_capture_failed()); /* Nested work cannot clear a live owner. */
+   aimee_ir_session_restore_sink(NULL, NULL, 1);
+   assert(aimee_ir_session_capture_failed());
+   aimee_ir_session_begin_task();
+   assert(!aimee_ir_session_capture_failed());
+   aimee_ir_session_set_sink(capture, &failure);
    void *context = NULL;
    assert(aimee_ir_session_get_sink(&context) == capture && context == &failure);
    aimee_ir_session_set_sink(NULL, NULL);

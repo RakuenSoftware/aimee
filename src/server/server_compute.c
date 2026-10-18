@@ -699,6 +699,7 @@ static int delegate_apply_cost_limit(agent_t *agent, double max_cost_usd, int in
 
 void delegate_worker(void *arg)
 {
+   aimee_ir_session_begin_task();
    compute_ctx_t *cctx = (compute_ctx_t *)arg;
    compute_ctx_begin_budget(cctx);
    if (cctx->background_job_id > 0)

@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
+#include <aimee/ir/session_event.h>
 #include "server_http_routes_workspace.h"
 #include "server_http.h"
 #include "shadow_mirror.h"
@@ -1323,6 +1324,7 @@ static char *op_run_snapshot(const char *run_id, const char *op, const char *sta
  * panel/preset/artifact state cannot bleed through worker reuse. */
 static void op_run_clear_thread_context(void)
 {
+   aimee_ir_session_begin_task();
    run_cmd_set_cwd(NULL);
    agent_set_request_session(NULL);
    agent_set_request_codex_creds(NULL, NULL);

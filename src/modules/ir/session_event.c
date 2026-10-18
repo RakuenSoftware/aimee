@@ -550,6 +550,12 @@ void aimee_ir_session_set_sink(aimee_ir_session_sink_fn sink, void *context)
       session_capture_failed = 0;
 }
 
+void aimee_ir_session_begin_task(void)
+{
+   if (!session_sink)
+      session_capture_failed = 0;
+}
+
 void aimee_ir_session_restore_sink(aimee_ir_session_sink_fn sink, void *context, int failed)
 {
    session_sink = sink;

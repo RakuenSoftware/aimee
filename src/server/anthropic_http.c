@@ -412,6 +412,46 @@ static char *build_anthropic_provider_body(const cJSON *in, const agent_t *ag, i
    return body;
 }
 
+/* Host guidance is a new system block. Replacing the client's system with a
+ * flattened string would erase its cache breakpoints and native extensions. */
+static int messages_add_host_guidance(cJSON *request, const cJSON *messages, const cJSON *tools)
+{
+   char *tool = gw_request_tool_system_prompt(tools, NULL);
+   char *completion = gw_request_completion_system_prompt(messages, tool);
+   const char *policy = completion ? completion : tool;
+   if (!policy)
+      return 0;
+   const cJSON *old = cJSON_GetObjectItemCaseSensitive(request, "system");
+   cJSON *system = cJSON_IsArray(old) ? cJSON_Duplicate(old, 1) : cJSON_CreateArray();
+   cJSON *prefix = NULL, *entry = cJSON_CreateObject();
+   int ok = system && entry;
+   if (ok && cJSON_IsString(old))
+   {
+      prefix = cJSON_CreateObject();
+      ok = prefix && cJSON_AddStringToObject(prefix, "type", "text") &&
+           cJSON_AddStringToObject(prefix, "text", old->valuestring) &&
+           cJSON_AddItemToArray(system, prefix);
+      if (ok)
+         prefix = NULL;
+   }
+   ok = ok && cJSON_AddStringToObject(entry, "type", "text") &&
+        cJSON_AddStringToObject(entry, "text", policy) && cJSON_AddItemToArray(system, entry);
+   if (ok)
+   {
+      entry = NULL;
+      ok = old ? cJSON_ReplaceItemInObjectCaseSensitive(request, "system", system)
+               : cJSON_AddItemToObject(request, "system", system);
+      if (ok)
+         system = NULL;
+   }
+   cJSON_Delete(prefix);
+   cJSON_Delete(entry);
+   cJSON_Delete(system);
+   free(completion);
+   free(tool);
+   return ok ? 0 : -1;
+}
+
 /* --- Buffered: POST /v1/messages (stream:false) ------------------------- */
 
 /* Build the upstream provider body from the current `req`. Native Anthropic
@@ -545,48 +585,13 @@ static int messages_buffered(const char *body, char *resp, int cap)
    }
 
    translate_request(req, driver, ag, &messages, &tools, &system_text);
+   if (messages_add_host_guidance(req, messages, tools) != 0)
    {
-      char *tool_system = gw_request_tool_system_prompt(tools, system_text);
-      if (tool_system)
-         LOG_INFO("aimee.tools", "applied CLI-first policy to buffered Anthropic turn");
-      char *completion_system =
-          gw_request_completion_system_prompt(messages, tool_system ? tool_system : system_text);
-      if (completion_system)
-      {
-         LOG_INFO("completion.gate", "applied continuation policy to buffered Anthropic turn");
-         free(system_text);
-         system_text = completion_system;
-         if (parity)
-         {
-            cJSON *system = cJSON_CreateString(system_text);
-            if (system)
-            {
-               if (cJSON_GetObjectItemCaseSensitive(req, "system"))
-                  cJSON_ReplaceItemInObjectCaseSensitive(req, "system", system);
-               else
-                  cJSON_AddItemToObject(req, "system", system);
-            }
-         }
-      }
-      else if (tool_system)
-      {
-         free(system_text);
-         system_text = tool_system;
-         tool_system = NULL;
-         if (parity)
-         {
-            cJSON *system = cJSON_CreateString(system_text);
-            if (system)
-            {
-               if (cJSON_GetObjectItemCaseSensitive(req, "system"))
-                  cJSON_ReplaceItemInObjectCaseSensitive(req, "system", system);
-               else
-                  cJSON_AddItemToObject(req, "system", system);
-            }
-         }
-      }
-      free(tool_system);
+      status = write_error(resp, cap, 500, "api_error", "cannot assemble host guidance", 0);
+      goto cleanup;
    }
+   free(system_text);
+   system_text = anthropic_system_to_text(req);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
    {
@@ -1399,48 +1404,16 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    }
 
    translate_request(req, driver, ag, &messages, &tools, &system_text);
+   if (messages_add_host_guidance(req, messages, tools) != 0)
    {
-      char *tool_system = gw_request_tool_system_prompt(tools, system_text);
-      if (tool_system)
-         LOG_INFO("aimee.tools", "applied CLI-first policy to streamed Anthropic turn");
-      char *completion_system =
-          gw_request_completion_system_prompt(messages, tool_system ? tool_system : system_text);
-      if (completion_system)
-      {
-         LOG_INFO("completion.gate", "applied continuation policy to streamed Anthropic turn");
-         free(system_text);
-         system_text = completion_system;
-         if (parity)
-         {
-            cJSON *system = cJSON_CreateString(system_text);
-            if (system)
-            {
-               if (cJSON_GetObjectItemCaseSensitive(req, "system"))
-                  cJSON_ReplaceItemInObjectCaseSensitive(req, "system", system);
-               else
-                  cJSON_AddItemToObject(req, "system", system);
-            }
-         }
-      }
-      else if (tool_system)
-      {
-         free(system_text);
-         system_text = tool_system;
-         tool_system = NULL;
-         if (parity)
-         {
-            cJSON *system = cJSON_CreateString(system_text);
-            if (system)
-            {
-               if (cJSON_GetObjectItemCaseSensitive(req, "system"))
-                  cJSON_ReplaceItemInObjectCaseSensitive(req, "system", system);
-               else
-                  cJSON_AddItemToObject(req, "system", system);
-            }
-         }
-      }
-      free(tool_system);
+      emit(ctx, "error",
+           "{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"cannot assemble "
+           "host guidance\"}}");
+      stream_status = 500;
+      goto cleanup;
    }
+   free(system_text);
+   system_text = anthropic_system_to_text(req);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
       goto cleanup;

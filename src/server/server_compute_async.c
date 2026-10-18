@@ -295,6 +295,7 @@ static void tool_thread_drain(void)
 
 static void tool_execute_worker_pooled(void *arg)
 {
+   aimee_ir_session_begin_task();
    int async_slot = ((compute_ctx_t *)arg)->async_slot;
    /* The same authenticated session must reach both the pre-check and native
     * dispatch. A worker's process-derived session is not this request's owner. */
@@ -439,6 +440,7 @@ static char *chat_sanitize_message_transcript_tail(const char *message);
 
 static void chat_stream_worker_pooled(void *arg)
 {
+   aimee_ir_session_begin_task();
    compute_ctx_t *cctx = (compute_ctx_t *)arg;
    int async_slot = cctx->async_slot;
 
