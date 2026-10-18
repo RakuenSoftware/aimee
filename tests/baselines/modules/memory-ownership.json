@@ -2206,9 +2206,9 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "9c5796d904576b2093c3caf499522c652057d7cb9eb5e70afeaf90388b140a89",
-      "review": "2026-10-18: clears ownerless IR capture failure at independent op-run task boundaries. Existing memory_stats route, request fields and Go memory-owner calls are unchanged; no memory execution moves into C.",
-      "boundary_review": "IR #3036: pre/post hook HTTP routes validate exact original frame bytes before native JSON parsing can erase identity suffixes or invalid UTF-8. Other dispatch routes and memory handlers keep their existing behavior, capability checks, request fields and Go authority. This records source-boundary reasoning, not independent production approval."
+      "sha256": "a7b852c7344c9defd7f2f53e93a528ad83a1cca26eed4690b328ac225272fbd9",
+      "review": "2026-10-18: async op-run lifecycle moved to server_http_op_runs.c; the memory_stats catalog entry and Go memory-owner calls remain here unchanged. Browser control replies now require an actual interactive attested request, excluding inherited compute owners.",
+      "boundary_review": "IR #3036: queued operations carry an owned verified caller context and intersect its original capability ceiling, so Go policy receives the originating actor instead of an empty or pooled previous actor. This changes caller propagation, not Go memory admission authority. Worker ownership ends only after durable terminal capture. No independent production approval is asserted."
     },
     "src/server/server_mcp.c": {
       "disposition": "host-transport",

@@ -1510,7 +1510,11 @@ void handle_conn(int fd, int is_tcp, int is_management)
    effective_caps =
        server_http_enrollment_caps(effective_caps, is_tcp, mtls_authenticated,
                                    server_conn_io_has_ssl(fd), request_bearer, method, path);
-   /* Capture context only after the certificate and effective caps are known. */
+   /* Capture the verified connection before copying its owner into the request
+    * context. Connection workers clear both on every exit, including refusals. */
+   server_http_identity_capture(fd, is_tcp, buf);
+   if (first_user_principal[0])
+      server_http_identity_override_principal(first_user_principal);
    server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path, effective_caps);
    if (server_http_apply_caller_context(is_tcp, buf, first_user_principal, identity_present,
                                         identity_claims.subject) != 0)
@@ -1667,15 +1671,6 @@ void handle_conn(int fd, int is_tcp, int is_management)
        http_header(buf, "Accept-Encoding", accept_encoding, sizeof(accept_encoding)) &&
        strcasestr(accept_encoding, "gzip") != NULL);
 
-   /* Capture before any streaming handoff too. Connection workers clear this
-    * request-owned identity on every exit, including early streaming returns. */
-   /* WP-C.0 hop 1 of 3: capture the attested vault identity (kernel UDS peer uid,
-    * or a root-UDS-gated webuser assertion) into thread-locals, live until
-    * loopback_rpc copies it into the synthesized conn. Cleared after the route so
-    * a reused worker thread cannot leak it into the next request. */
-   server_http_identity_capture(fd, is_tcp, buf);
-   if (first_user_principal[0])
-      server_http_identity_override_principal(first_user_principal);
    server_http_identity_set_query(query); /* cleared by server_http_identity_clear */
    /* GET /v1/runs/{id}/events takes the SSE path (no body); other run routes
     * fall through to the buffered router below. */

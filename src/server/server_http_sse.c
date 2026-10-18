@@ -66,6 +66,7 @@ typedef struct
    char id[256];
    char request_id[64];
    char principal[VAULT_PRINCIPAL_MAX];
+   request_context_snapshot_t request_context;
 } sse_offload_t;
 
 static atomic_int g_sse_live = 0;
@@ -82,9 +83,14 @@ void server_http_set_max_event_streams(int n)
 static void *sse_offload_thread(void *arg)
 {
    sse_offload_t *o = (sse_offload_t *)arg;
+   request_context_restore(&o->request_context);
+   server_http_identity_bind_request_owner(request_context_get());
    agent_set_request_vault_principal(o->principal);
    o->fn(o->fd, o->id, o->request_id);
    agent_set_request_vault_principal(NULL);
+   server_http_identity_clear();
+   request_context_clear();
+   request_context_snapshot_clear(&o->request_context);
    close(o->fd);
    atomic_fetch_sub(&g_sse_live, 1);
    free(o);
@@ -121,6 +127,7 @@ int server_http_sse_offload(int fd, sse_stream_fn fn, const char *id, const char
       atomic_fetch_sub(&g_sse_live, 1);
       return -1;
    }
+   request_context_snapshot(&o->request_context);
    snprintf(o->principal, sizeof(o->principal), "%s", server_http_identity_principal());
    o->fd = dfd;
    o->fn = fn;
@@ -130,6 +137,7 @@ int server_http_sse_offload(int fd, sse_stream_fn fn, const char *id, const char
    if (pthread_create(&t, NULL, sse_offload_thread, o) != 0)
    {
       close(dfd);
+      request_context_snapshot_clear(&o->request_context);
       free(o);
       atomic_fetch_sub(&g_sse_live, 1);
       return -1;

@@ -7,6 +7,7 @@
 #define _GNU_SOURCE /* struct ucred / SO_PEERCRED via platform_ipc */
 #endif
 #include "server_http_identity.h"
+#include "request_context.h"
 #include "server_http.h"    /* http_header */
 #include "server_conn_io.h" /* server_conn_io_has_ssl/get_ssl — native-TLS attestation */
 #include "server_tls.h"     /* server_tls_peer_identity — mTLS client cert CN */
@@ -67,6 +68,7 @@ int server_http_bearer_matches(const char *presented, const char *bearer_cfg)
  * Defaults are the un-attested, no-vault state. */
 static _Thread_local long tl_peer_uid = -1;
 static _Thread_local attested_transport_t tl_transport = ATTEST_NONE;
+static _Thread_local int tl_inherited_owner;
 static _Thread_local char tl_principal[VAULT_PRINCIPAL_MAX] = "";
 /* Query string of the in-flight request ("k=v&…", no '?'); set around the route
  * call, cleared with the rest. Points into the request buffer — read only within
@@ -90,6 +92,7 @@ static _Thread_local char tl_local_fingerprint[65] = "";
 
 void server_http_identity_capture(int fd, int is_tcp, const char *buf)
 {
+   tl_inherited_owner = 0;
    long peer_uid = -1;
    if (!is_tcp)
    {
@@ -208,6 +211,28 @@ const char *server_http_identity_principal(void)
    return tl_principal;
 }
 
+attested_transport_t server_http_identity_transport(void)
+{
+   return tl_transport;
+}
+
+void server_http_identity_bind_request_owner(const request_context_t *owner)
+{
+   server_http_identity_clear();
+   if (!owner || owner->vault_transport <= ATTEST_NONE ||
+       owner->vault_transport > ATTEST_MTLS_CLIENT)
+      return;
+   tl_inherited_owner = 1;
+   tl_transport = owner->vault_transport;
+   tl_peer_uid = owner->peer_uid;
+   snprintf(tl_principal, sizeof tl_principal, "%s", owner->vault_principal);
+}
+
+int server_http_identity_browser_operator(void)
+{
+   return tl_transport == ATTEST_WEBCHAT_TRUSTED && tl_principal[0] && !tl_inherited_owner;
+}
+
 void server_http_identity_override_principal(const char *principal)
 {
    if (!principal || !principal[0])
@@ -226,6 +251,7 @@ void server_http_identity_apply(server_conn_t *conn)
 
 void server_http_identity_clear(void)
 {
+   tl_inherited_owner = 0;
    tl_peer_uid = -1;
    tl_transport = ATTEST_NONE;
    tl_principal[0] = '\0';

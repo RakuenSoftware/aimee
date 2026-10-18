@@ -299,11 +299,15 @@ static void tool_execute_worker_pooled(void *arg)
 {
    aimee_ir_session_begin_task();
    int async_slot = ((compute_ctx_t *)arg)->async_slot;
+   compute_ctx_bind_request_context(arg);
    /* The same authenticated session must reach both the pre-check and native
     * dispatch. A worker's process-derived session is not this request's owner. */
    const char *sid = json_string(((compute_ctx_t *)arg)->req, "session_id");
    session_id_set_override(sid);
+   agent_set_request_session(sid);
+   agent_set_request_codex_creds(NULL, NULL);
    tool_execute_worker(arg);
+   compute_ctx_clear_request_context();
    session_id_clear_override();
    async_slot_release(async_slot);
    tool_thread_release();
@@ -451,6 +455,7 @@ static void chat_stream_worker_pooled(void *arg)
     * session's attested principal, and the server ctx. Cheap clone per turn;
     * freed below unless a steer is dispatched. */
    cJSON *steer_tmpl = cJSON_Duplicate(cctx->req, 1);
+   request_context_snapshot_t steer_request = cctx->request_context;
    char steer_principal[128];
    snprintf(steer_principal, sizeof(steer_principal), "%s", cctx->vault_principal);
    server_ctx_t *steer_ctx = cctx->server;
@@ -562,9 +567,9 @@ static void chat_stream_worker_pooled(void *arg)
     * turn's value; (2) we clear it after the worker. chat_stream_worker is a plain
     * call with no longjmp/pthread_exit/cancellation in its tree, so the post-call
     * clear always runs on return; together the two make the guard robust. */
-   agent_set_request_vault_principal(cctx->vault_principal);
+   compute_ctx_bind_request_context(cctx);
    chat_stream_worker(arg);
-   agent_set_request_vault_principal(NULL);
+   compute_ctx_clear_request_context();
    agent_set_request_cancel(NULL);
    if (locked)
       presence_turn_release(lock_session, lock_turn);
@@ -601,17 +606,19 @@ static void chat_stream_worker_pooled(void *arg)
          cJSON_ReplaceItemInObjectCaseSensitive(steer_tmpl, "message", m);
       /* Carry the session's principal into create_compute_ctx's thread-local
        * fallback (the NULL-conn path reads it for vault identity). */
+      request_context_restore(&steer_request);
       agent_set_request_vault_principal(steer_principal);
       /* create_compute_ctx DUPLICATES req (cJSON_Duplicate) — it does not adopt
        * steer_tmpl — so steer_tmpl remains ours to free below, and the new ctx
        * owns its own copy that its worker frees. */
       compute_ctx_t *nctx = create_compute_ctx(steer_ctx, NULL, steer_tmpl);
-      agent_set_request_vault_principal(NULL);
+      compute_ctx_clear_request_context();
       if (nctx && chat_stream_dispatch(steer_ctx, nctx) != 0)
          compute_ctx_free(nctx);
       free(steer_msg);
    }
    cJSON_Delete(steer_tmpl);
+   request_context_snapshot_clear(&steer_request);
 
    async_slot_release(async_slot);
    chat_thread_release();

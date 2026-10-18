@@ -184,8 +184,33 @@ static void test_memory_receipt_requirement_is_host_state(void)
    request_context_clear();
 }
 
+static void test_owned_snapshot_and_absent_restore(void)
+{
+   request_context_t owner = {0};
+   owner.capabilities = 7;
+   owner.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+   snprintf(owner.vault_principal, sizeof owner.vault_principal, "webuser:owner");
+   snprintf(owner.caller_authorization, sizeof owner.caller_authorization, "test-only-proof");
+   request_context_set(&owner);
+   request_context_snapshot_t snapshot, absent;
+   request_context_snapshot(&snapshot);
+   request_context_clear();
+   request_context_snapshot(&absent);
+   request_context_restore(&snapshot);
+   assert(request_context_get() && !memcmp(request_context_get(), &owner, sizeof owner));
+   request_context_restore(&absent);
+   assert(!request_context_get());
+   request_context_snapshot_clear(&snapshot);
+   for (size_t i = 0; i < sizeof snapshot; i++)
+      assert(!((const unsigned char *)&snapshot)[i]);
+   request_context_restore(NULL);
+   assert(!request_context_get());
+   PASS("context: owned actor/proof copy, absence restoration and wipe");
+}
+
 int main(void)
 {
+   test_owned_snapshot_and_absent_restore();
    test_memory_receipt_requirement_is_host_state();
    test_assembly_refusal_lifetime();
    test_budget_header();

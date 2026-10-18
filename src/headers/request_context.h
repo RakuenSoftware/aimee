@@ -23,6 +23,7 @@
 
 #include <stddef.h>
 #include "kb_identity_token.h"
+#include "vault_principal.h"
 
 typedef enum
 {
@@ -45,10 +46,14 @@ typedef struct
    long peer_uid;   /* UDS peer uid (SO_PEERCRED), -1 if unknown */
    req_transport_t transport;
    unsigned int capabilities; /* route capability/scope bits for this connection */
-   int trusted;               /* 1 = principal/source headers may be honoured */
-   int compress_disabled;     /* X-Aimee-Compress: 0 — per-request opt-out of ingress
-                               * envelope compression (ingress-compression P1b §1.4/B1).
-                               * 0 = honor config; never forces compression on. */
+   /* Host-attested actor, copied only from the authenticated connection, never
+    * from principal/source headers. Preserved across owned async handoffs. */
+   attested_transport_t vault_transport;
+   char vault_principal[VAULT_PRINCIPAL_MAX];
+   int trusted;           /* 1 = principal/source headers may be honoured */
+   int compress_disabled; /* X-Aimee-Compress: 0 — per-request opt-out of ingress
+                           * envelope compression (ingress-compression P1b §1.4/B1).
+                           * 0 = honor config; never forces compression on. */
    /* Restrictive per-request host limits, copied intact into async contexts.
     * 0 absent, 1 present, -1 malformed/duplicate/oversized transport header. */
    int request_budget_present;
@@ -72,6 +77,17 @@ typedef struct
    char aimee_intervention[40];
    char aimee_tool_transport[16];
 } request_context_t;
+
+/* Owned async copy. An absent context must restore absence, not leave the
+ * previous pooled request's identity or limits installed. */
+typedef struct
+{
+   int active;
+   request_context_t value;
+} request_context_snapshot_t;
+void request_context_snapshot(request_context_snapshot_t *out);
+void request_context_restore(const request_context_snapshot_t *snapshot);
+void request_context_snapshot_clear(request_context_snapshot_t *snapshot);
 
 /* Set the active request context for the current thread (shallow copy). Pass
  * NULL to clear. */

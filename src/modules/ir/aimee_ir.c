@@ -1115,7 +1115,7 @@ int aimee_ir_read_usage(const cJSON *usage, const char *name, long *out)
    if (!value)
       return 0;
    if (!cJSON_IsNumber(value) || !isfinite(value->valuedouble) || value->valuedouble < 0 ||
-       value->valuedouble > 9007199254740991.0 || value->valuedouble > LONG_MAX ||
+       value->valuedouble > 9007199254740991.0 || value->valuedouble > (double)LONG_MAX ||
        (double)(long)value->valuedouble != value->valuedouble)
       return -1;
    *out = (long)value->valuedouble;

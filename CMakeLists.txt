@@ -1059,6 +1059,11 @@ set(SERVER_SRCS
 set(SERVER_DATA_SRCS ${DATA_SRCS})
 list(REMOVE_ITEM SERVER_DATA_SRCS ${SERVER_SRCS} ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c)
 list(APPEND SERVER_DATA_SRCS ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c)
+list(APPEND SERVER_SRCS
+    ${AIMEE_SRC_DIR}/server/server_http_op_runs.c
+    ${AIMEE_SRC_DIR}/server/server_compute_owner.c
+)
+
 set(SERVER_CORE_SRCS ${CORE_SRCS})
 list(REMOVE_ITEM SERVER_CORE_SRCS ${AIMEE_SRC_DIR}/modules/kb/c/db_postgres.c)
 

@@ -674,6 +674,12 @@
       "test": "src/tests/test_aimee_tool_choice.c"
     },
     {
+      "ctest": false,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_cmd_hooks_scope.c"
+    },
+    {
       "ctest": true,
       "make": true,
       "module": "translation",

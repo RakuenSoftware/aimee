@@ -9,6 +9,7 @@
 #include "aimee.h"
 #include "agent_config.h" /* agent_request_creds_t: inherit per-turn creds */
 #include "agent_exec.h"
+#include "request_context.h"
 #include "config.h" /* aimee_resolve_compute_threads */
 #include "log.h"
 
@@ -84,6 +85,7 @@ typedef struct
    agent_task_t *task;
    agent_result_t *result;
    const agent_request_creds_t *creds;
+   const request_context_snapshot_t *request_context;
    char cwd[MAX_PATH_LEN];
    /* Deadline path only (NULL otherwise): the worker signals completion here so a
     * straggler can be abandoned without blocking the join. */
@@ -100,6 +102,7 @@ static void *parallel_worker(void *arg)
     * context (thread-locals are not inherited) so the agent resolves its
     * client-held session key instead of running keyless. */
    agent_request_creds_restore(ctx->creds);
+   request_context_restore(ctx->request_context);
    run_cmd_set_cwd(ctx->cwd[0] ? ctx->cwd : NULL);
    agent_set_request_cancel(&ctx->cancel);
    /* Per-task temperature, defaulting to the historical 0.3 when unset (0). */
@@ -119,6 +122,7 @@ static void *parallel_worker(void *arg)
                    ctx->task->max_tokens, temp, ctx->result);
    agent_run_require_initial_tool_call(0);
    agent_set_request_cancel(NULL);
+   request_context_clear();
    run_cmd_set_cwd(NULL);
    if (ctx->owns_process_permit)
    {
@@ -167,6 +171,8 @@ static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int t
    pthread_condattr_destroy(&attr);
    agent_request_creds_t creds;
    agent_request_creds_snapshot(&creds);
+   request_context_snapshot_t request_context;
+   request_context_snapshot(&request_context);
    /* Parallel seats inherit the worktree that was active when this fan-out was
     * invoked. Later parent-thread changes are intentionally not observed. */
    const char *parent_cwd = run_cmd_get_cwd();
@@ -198,6 +204,7 @@ static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int t
       ctxs[i].task = &tasks[i];
       ctxs[i].result = &out[i];
       ctxs[i].creds = &creds;
+      ctxs[i].request_context = &request_context;
       snprintf(ctxs[i].cwd, sizeof(ctxs[i].cwd), "%s", parent_cwd ? parent_cwd : "");
       ctxs[i].sync = &sync;
       ctxs[i].done = &done[i];
@@ -246,6 +253,7 @@ static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int t
    free(threads);
    free(ctxs);
    free(done);
+   request_context_snapshot_clear(&request_context);
 
    int success = 0;
    for (int i = 0; i < task_count; i++)
@@ -304,6 +312,8 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
     * thread restores it (thread-locals don't cross pthread_create). */
    agent_request_creds_t creds;
    agent_request_creds_snapshot(&creds);
+   request_context_snapshot_t request_context;
+   request_context_snapshot(&request_context);
    /* Capture-at-call-time, matching the deadline path above. */
    const char *parent_cwd = run_cmd_get_cwd();
 
@@ -314,6 +324,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
       ctxs[i].task = &tasks[i];
       ctxs[i].result = &out[i];
       ctxs[i].creds = &creds;
+      ctxs[i].request_context = &request_context;
       snprintf(ctxs[i].cwd, sizeof(ctxs[i].cwd), "%s", parent_cwd ? parent_cwd : "");
       atomic_init(&ctxs[i].cancel, 0);
    }
@@ -338,6 +349,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
    free(thread_ok);
    free(threads);
    free(ctxs);
+   request_context_snapshot_clear(&request_context);
 
    int success_count = 0;
    for (int i = 0; i < task_count; i++)

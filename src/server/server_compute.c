@@ -386,6 +386,7 @@ void compute_ctx_free(compute_ctx_t *cctx)
    if (cctx->conn_fd >= 0)
       close(cctx->conn_fd);
 #endif
+   request_context_snapshot_clear(&cctx->request_context);
    free(cctx);
 }
 
@@ -697,7 +698,7 @@ static int delegate_apply_cost_limit(agent_t *agent, double max_cost_usd, int in
    return 0;
 }
 
-void delegate_worker(void *arg)
+static void delegate_worker_run(void *arg)
 {
    aimee_ir_session_begin_task();
    compute_ctx_t *cctx = (compute_ctx_t *)arg;
@@ -1979,6 +1980,13 @@ delegate_fail:
    compute_ctx_free(cctx);
 }
 
+void delegate_worker(void *arg)
+{
+   compute_ctx_bind_request_context(arg);
+   delegate_worker_run(arg);
+   compute_ctx_clear_request_context();
+}
+
 int handle_delegate_launch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    cJSON *plan = cJSON_GetObjectItemCaseSensitive(req, "plan");
@@ -2037,19 +2045,7 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
 #endif
       cctx->conn_alive = 1;
    }
-   /* Capture the peer's caps for the foreign-cwd trust check (AC #6). A UDS peer
-    * is CAPS_ALL (same filesystem); a remote/TCP peer is less, and its cwd must
-    * not be opened on the server's own fs. A NULL conn is an in-process caller. */
-   cctx->conn_caps = conn ? conn->capabilities : CAPS_ALL;
-
-   /* WP-C vault identity: the conn's attested principal (hop 3) wins; else fall back
-    * to the chat turn's per-turn thread-local — the chat-spawned delegate's loopback
-    * conn carries no restored identity, and the TL is cleared per turn (no leak). */
-   if (conn)
-      cctx->attested_transport = conn->attested_transport;
-   snprintf(cctx->vault_principal, sizeof(cctx->vault_principal), "%s",
-            (conn && conn->vault_principal[0]) ? conn->vault_principal
-                                               : agent_get_request_vault_principal());
+   compute_ctx_capture_request_context(cctx, conn);
 
    /* Clone the request since the original will be freed after dispatch */
    cctx->req = cJSON_Duplicate(req, 1);

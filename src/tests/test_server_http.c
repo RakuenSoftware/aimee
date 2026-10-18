@@ -9,6 +9,7 @@
 #include "server_http_identity.h"
 #include "runtime_secret.h"
 #include "request_context.h"
+#include "server_compute_impl.h"
 #include "http_content_encoding.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
@@ -361,10 +362,23 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    {
       agent_request_creds_t creds;
       agent_request_creds_snapshot(&creds);
-      atomic_store(&g_op_context_clean, run_cmd_get_cwd() == NULL && creds.session_id[0] == '\0' &&
-                                            creds.codex_token[0] == '\0' &&
-                                            creds.codex_account_id[0] == '\0' &&
-                                            creds.vault_principal[0] == '\0');
+      atomic_store(&g_op_context_clean,
+                   run_cmd_get_cwd() == NULL && creds.session_id[0] == '\0' &&
+                       creds.codex_token[0] == '\0' && creds.codex_account_id[0] == '\0' &&
+                       creds.vault_principal[0] == '\0' && !request_context_get() &&
+                       conn->attested_transport == ATTEST_NONE && !conn->vault_principal[0]);
+   }
+   else if (!strcmp(g_disp_method, "test.inspect_owned_op_context"))
+   {
+      const request_context_t *owner = request_context_get();
+      assert(owner && owner->capabilities == CAP_DELEGATE);
+      assert(conn->capabilities == CAP_DELEGATE);
+      assert(conn->attested_transport == ATTEST_WEBCHAT_TRUSTED);
+      assert(!strcmp(conn->vault_principal, "webuser:op-owner"));
+      assert(!strcmp(agent_get_request_vault_principal(), "webuser:op-owner"));
+      assert(!strcmp(owner->caller_authorization, "test-only-op-owner-proof"));
+      assert(owner->request_budget_present == 1);
+      assert(!strcmp(owner->request_budget_limits, "{\"max_tokens\":1234}"));
    }
    /* Mimic a real method handler: write an NDJSON response to the loopback fd
     * the first-class /v1 route handed us, so the capture path is exercised end to
@@ -386,6 +400,9 @@ static void submit_and_wait_op(const char *method)
 {
    char response[8192];
    assert(server_http_submit_op_run(method, "{}", CAPS_ALL, response, sizeof(response)) == 200);
+   /* The submitting HTTP request can end before its queued worker starts. */
+   request_context_clear();
+   server_http_identity_clear();
    cJSON *queued = cJSON_Parse(response);
    assert(queued);
    const char *run_id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(queued, "id"));
@@ -656,6 +673,14 @@ static void test_operator_control_reply_route(void)
    server_http_identity_capture(-1, 1,
                                 "POST /v1/chat/control-reply HTTP/1.1\r\nAuthorization: Bearer "
                                 "model-token\r\nX-Aimee-Webuser: alice\r\n\r\n");
+   assert(server_http_route("POST", "/v1/chat/control-reply", body, (int)strlen(body), response,
+                            sizeof response) == 403);
+   request_context_t model_owner = {0};
+   model_owner.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+   model_owner.peer_uid = 0;
+   snprintf(model_owner.vault_principal, sizeof model_owner.vault_principal, "webuser:alice");
+   server_http_identity_bind_request_owner(&model_owner);
+   assert(!server_http_identity_browser_operator());
    assert(server_http_route("POST", "/v1/chat/control-reply", body, (int)strlen(body), response,
                             sizeof response) == 403);
    int pair[2];
@@ -2558,6 +2583,63 @@ int main(void)
       g_disp_body[0] = '\0';
       openai_runs_store_reset();
 
+      request_context_t op_owner = {0};
+      op_owner.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+      op_owner.peer_uid = 0;
+      op_owner.capabilities = CAP_DELEGATE;
+      op_owner.request_budget_present = 1;
+      snprintf(op_owner.vault_principal, sizeof op_owner.vault_principal, "webuser:op-owner");
+      snprintf(op_owner.caller_authorization, sizeof op_owner.caller_authorization,
+               "test-only-op-owner-proof");
+      snprintf(op_owner.request_budget_limits, sizeof op_owner.request_budget_limits,
+               "{\"max_tokens\":1234}");
+      compute_ctx_t inherited = {0};
+      request_context_set(&op_owner);
+      compute_ctx_capture_request_context(&inherited, NULL);
+      assert(inherited.conn_caps == CAP_DELEGATE);
+      assert(inherited.attested_transport == ATTEST_WEBCHAT_TRUSTED);
+      assert(!strcmp(inherited.vault_principal, "webuser:op-owner"));
+      request_context_clear();
+      compute_ctx_bind_request_context(&inherited);
+      assert(request_context_get()->capabilities == CAP_DELEGATE);
+      assert(!strcmp(request_context_caller_authorization(), "test-only-op-owner-proof"));
+      server_conn_t bound = {0};
+      server_http_identity_apply(&bound);
+      assert(bound.attested_transport == ATTEST_WEBCHAT_TRUSTED);
+      assert(!strcmp(bound.vault_principal, "webuser:op-owner"));
+      compute_ctx_clear_request_context();
+      assert(!request_context_get() && !agent_get_request_vault_principal()[0]);
+      server_http_identity_apply(&bound);
+      assert(bound.attested_transport == ATTEST_NONE);
+      request_context_snapshot_clear(&inherited.request_context);
+
+      /* An explicit authenticated new owner must not inherit the old owner's
+       * caller proof/limits, and an un-attested loopback cannot broaden caps. */
+      request_context_set(&op_owner);
+      server_conn_t scoped = {0};
+      scoped.capabilities = CAPS_ALL;
+      compute_ctx_capture_request_context(&inherited, &scoped);
+      assert(inherited.conn_caps == CAP_DELEGATE);
+      request_context_snapshot_clear(&inherited.request_context);
+      scoped.attested_transport = ATTEST_MTLS_CLIENT;
+      scoped.capabilities = CAP_CHAT;
+      snprintf(scoped.vault_principal, sizeof scoped.vault_principal, "cert:other-owner");
+      compute_ctx_capture_request_context(&inherited, &scoped);
+      assert(inherited.conn_caps == CAP_CHAT && inherited.attested_transport == ATTEST_MTLS_CLIENT);
+      assert(!strcmp(inherited.vault_principal, "cert:other-owner"));
+      assert(!inherited.request_context.value.caller_authorization[0]);
+      assert(!inherited.request_context.value.request_budget_present);
+      assert(inherited.request_context.value.peer_uid == -1);
+      request_context_snapshot_clear(&inherited.request_context);
+      request_context_clear();
+      compute_ctx_capture_request_context(&inherited, NULL);
+      assert(inherited.conn_caps == CAPS_ALL && inherited.attested_transport == ATTEST_NONE);
+      request_context_snapshot_clear(&inherited.request_context);
+
+      request_context_set(&op_owner);
+      submit_and_wait_op("test.inspect_owned_op_context");
+      assert(!request_context_get());
+
       /* A pooled orchestration worker must begin every op with empty checkout
        * and credential TLS, even when the previous op leaked both. This is the
        * roundtable artifact/Codex-seat isolation boundary under concurrency.
@@ -2767,6 +2849,27 @@ int main(void)
    {
       int pair[2];
       assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+      const char *owner_headers = "GET /v1/search HTTP/1.1\r\n"
+                                  "X-Aimee-Principal: webuser:display-only\r\n\r\n";
+      server_http_identity_capture(pair[0], 0, owner_headers);
+      server_conn_t captured_owner = {0};
+      server_http_identity_apply(&captured_owner);
+      server_http_populate_request_context(pair[0], 0, owner_headers, "ctx-uds", "GET",
+                                           "/v1/search", CAPS_ALL);
+      const request_context_t *captured_context = request_context_get();
+      assert(captured_context->vault_transport == captured_owner.attested_transport);
+      assert(!strcmp(captured_context->vault_principal, captured_owner.vault_principal));
+      assert(strcmp(captured_context->vault_principal, "webuser:display-only"));
+      server_http_identity_clear();
+      server_conn_t cleared_owner = {0};
+      server_http_identity_apply(&cleared_owner);
+      assert(cleared_owner.attested_transport == ATTEST_NONE);
+      server_http_identity_bind_request_owner(captured_context);
+      server_http_identity_apply(&cleared_owner);
+      assert(cleared_owner.attested_transport == captured_owner.attested_transport);
+      assert(!strcmp(cleared_owner.vault_principal, captured_owner.vault_principal));
+      server_http_identity_clear();
+      server_http_identity_capture(pair[0], 0, "GET /v1/search HTTP/1.1\r\n\r\n");
       server_http_populate_request_context(pair[0], 0, "GET /v1/search HTTP/1.1\r\n\r\n", "ctx-uds",
                                            "GET", "/v1/search", CAPS_ALL);
       struct passwd *pw = getpwuid(getuid());
