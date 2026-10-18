@@ -18,7 +18,7 @@
 #include <string.h>
 
 
-static db1_family_t family = {"db1.git_ownership", "git ownership", AIMEE_DB1_EVENT_GIT_OWNERSHIP, AIMEE_DB1_STAGE_GIT_OWNERSHIP, 2000, ATOMIC_VAR_INIT(0)};
+static db1_family_t family = {"db1.git_ownership", "git ownership", AIMEE_DB1_EVENT_GIT_OWNERSHIP, AIMEE_DB1_STAGE_GIT_OWNERSHIP, 2000, 0};
 
 
 /* A write answers 0 or -1; the store either took it or it did not. */

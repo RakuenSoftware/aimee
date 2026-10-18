@@ -19,7 +19,7 @@
 #include <string.h>
 
 
-static db1_family_t family = {"db1.jti_replay", "jti replay", AIMEE_DB1_EVENT_JTI_REPLAY, AIMEE_DB1_STAGE_JTI_REPLAY, 2000, ATOMIC_VAR_INIT(0)};
+static db1_family_t family = {"db1.jti_replay", "jti replay", AIMEE_DB1_EVENT_JTI_REPLAY, AIMEE_DB1_STAGE_JTI_REPLAY, 2000, 0};
 
 
 

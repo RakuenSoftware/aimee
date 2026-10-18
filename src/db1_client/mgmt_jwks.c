@@ -18,7 +18,7 @@
 #include <string.h>
 
 
-static db1_family_t family = {"db1.mgmt_jwks", "mgmt jwks", AIMEE_DB1_EVENT_MGMT_JWKS, AIMEE_DB1_STAGE_MGMT_JWKS, 2000, ATOMIC_VAR_INIT(0)};
+static db1_family_t family = {"db1.mgmt_jwks", "mgmt jwks", AIMEE_DB1_EVENT_MGMT_JWKS, AIMEE_DB1_STAGE_MGMT_JWKS, 2000, 0};
 
 
 

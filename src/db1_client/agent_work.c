@@ -21,7 +21,7 @@
 #include <string.h>
 
 
-static db1_family_t family = {"db1.agent_work", "agent work", AIMEE_DB1_EVENT_AGENT_WORK, AIMEE_DB1_STAGE_AGENT_WORK, 2000, ATOMIC_VAR_INIT(0)};
+static db1_family_t family = {"db1.agent_work", "agent work", AIMEE_DB1_EVENT_AGENT_WORK, AIMEE_DB1_STAGE_AGENT_WORK, 2000, 0};
 
 
 /* A write answers 0 or -1; the store either took it or it did not. */

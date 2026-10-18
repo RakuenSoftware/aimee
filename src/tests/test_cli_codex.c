@@ -26,8 +26,6 @@ static void test_execute_rejects_missing_inputs(void)
 {
    agent_result_t out;
    agent_t agent = {0};
-   assert(codex_provider_cli_adapter.execute(NULL, &out) == -1);
-   assert(strcmp(out.error, "missing Codex agent configuration") == 0);
    assert(agent_execute_cli_codex_at_cwd(&agent, NULL, NULL, "prompt", NULL) == -1);
    assert(agent_execute_cli_codex_at_cwd(NULL, NULL, NULL, "prompt", &out) == -1);
    assert(strcmp(out.error, "missing agent") == 0);

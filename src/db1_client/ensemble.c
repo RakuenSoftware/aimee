@@ -18,7 +18,7 @@
 #include <string.h>
 
 
-static db1_family_t family = {"db1.ensemble", "ensemble", AIMEE_DB1_EVENT_ENSEMBLE, AIMEE_DB1_STAGE_ENSEMBLE, 2000, ATOMIC_VAR_INIT(0)};
+static db1_family_t family = {"db1.ensemble", "ensemble", AIMEE_DB1_EVENT_ENSEMBLE, AIMEE_DB1_STAGE_ENSEMBLE, 2000, 0};
 
 
 

@@ -19,7 +19,7 @@
 #include <string.h>
 
 
-static db1_family_t family = {"db1.lifecycle", "lifecycle", AIMEE_DB1_EVENT_LIFECYCLE, AIMEE_DB1_STAGE_LIFECYCLE, 2000, ATOMIC_VAR_INIT(0)};
+static db1_family_t family = {"db1.lifecycle", "lifecycle", AIMEE_DB1_EVENT_LIFECYCLE, AIMEE_DB1_STAGE_LIFECYCLE, 2000, 0};
 
 
 /* A write answers 0 or -1; the store either took it or it did not. */
