@@ -2,7 +2,7 @@
 
 #include "kb_store_hardening.h"
 #include "db_postgres.h"
-#include "../support/kb_store_log.h"
+#include "log.h"
 
 #include <stdio.h>
 #include <stdlib.h>

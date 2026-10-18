@@ -7,12 +7,12 @@
 #include "cross_repo_deps.h"
 
 #include "aimee.h"
-#include "../support/kb_store_runtime_config.h"
+#include "config.h"
 #include "cross_repo_review.h"
 #include "cross_repo_stats.h"
 #include "kb_store.h"
 #include "db_postgres.h"
-#include "../support/kb_store_log.h"
+#include "log.h"
 
 #include <ctype.h>
 #include <stdint.h>

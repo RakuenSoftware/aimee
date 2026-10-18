@@ -9,13 +9,13 @@ and links and fails at runtime as a refusal with no explanation.
 
 That is not hypothetical. Eleven operations shipped exactly that way -- the
 client asked for the value AND the entry point's rc, the module answered only
-the value, and call_stage treats an OK reply narrower than the slots it asked
+the value, and db1_call treats an OK reply narrower than the slots it asked
 for as a contract mismatch and returns -1. Every one of those calls could not
 succeed. They were found by reading the C by hand against the catalog, which is
 not a repeatable way to find the next one.
 
 The catalog is the one description of the wire that neither side wrote. This
-compares both numbers in every call_stage against it:
+compares both numbers in every db1_call against it:
 
   * the request arity -- how many fields the client sends
   * the reply width  -- how many cells it has room for, per row
@@ -36,9 +36,9 @@ CLIENT_DIR = ROOT / "src" / "db1_client"
 CATALOG = ROOT / "server-go" / "modules" / "aimee" / "operations.json"
 MODULE_API = CLIENT_DIR / "db1_module_api.h"
 
-# call_stage(op, fields, count, values, caps, slots, filled)
+# db1_call(family, op, fields, count, values, caps, slots, filled)
 CALL = re.compile(
-    r"call_stage\(\s*AIMEE_DB1_OP_(?P<op>[A-Z0-9_]+)\s*,"
+    r"db1_call\(\s*&family\s*,\s*AIMEE_DB1_OP_(?P<op>[A-Z0-9_]+)\s*,"
     r"\s*(?P<fields>[^,]+?)\s*,"
     r"\s*(?P<count>[^,]+?)\s*,"
     r"\s*(?P<values>[^,]+?)\s*,"

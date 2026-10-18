@@ -22,6 +22,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "identity_claims.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -32,27 +33,10 @@ extern "C"
     * `tier` claim ("off" | "data" | "full"). Values match the server's
     * SERVER_REMOTE_WRITES_* ordering so a verified token maps straight onto the
     * existing gate parameter. */
-   typedef enum
-   {
-      KB_IDENTITY_TIER_OFF = 0,
-      KB_IDENTITY_TIER_DATA = 1,
-      KB_IDENTITY_TIER_FULL = 2
-   } kb_identity_tier_t;
 
    /* The pinned claim set (proposal §4). Every string field is NUL-terminated;
     * the builder rejects an unterminated field. `team_id` must be > 0. */
-   typedef struct
-   {
-      char issuer[256];   /* iss — always the kb identity ("kb")               */
-      char audience[128]; /* aud — the target server_id                        */
-      char subject[577];  /* sub — OIDC (iss,sub) composite or PAM username    */
-      int64_t team_id;    /* team — the tenant team the grant is scoped to     */
-      kb_identity_tier_t tier;
-      char jti[129];      /* unique token id (server-local replay rejection)   */
-      char kid[65];       /* signing-key id (server selects the JWKS key)      */
-      int64_t issued_at;  /* iat (unix seconds)                                */
-      int64_t expires_at; /* exp (unix seconds); must be > issued_at           */
-   } kb_identity_token_claims_t;
+   typedef aimee_identity_claims_t kb_identity_token_claims_t;
 
    typedef int (*kb_identity_token_sign_fn)(void *ctx, const unsigned char *signing_input,
                                             size_t signing_input_len, unsigned char *signature,

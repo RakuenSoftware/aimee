@@ -2,6 +2,7 @@ package roundtable
 
 import (
 	"encoding/binary"
+	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -26,7 +27,7 @@ func decodeRubricResponse(t *testing.T, response []byte) (uint32, string) {
 		t.Fatalf("invalid response %x", response)
 	}
 	severityLen := int(binary.LittleEndian.Uint32(response[8:12]))
-	if severityLen > severityMax || !zeroPadding(response[responseSeverityOff+severityLen:]) {
+	if severityLen > severityMax || !modulewire.ZeroPadding(response[responseSeverityOff+severityLen:]) {
 		t.Fatalf("invalid response severity %x", response)
 	}
 	return binary.LittleEndian.Uint32(response[4:8]),

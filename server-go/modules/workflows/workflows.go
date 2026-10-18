@@ -3,6 +3,7 @@ package workflows
 
 import (
 	"encoding/binary"
+	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
@@ -58,30 +59,12 @@ type advanceRequest struct {
 	haveNonce     bool
 }
 
-func zeroPadding(value []byte) bool {
-	for _, item := range value {
-		if item != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func nonzeroText(value []byte) bool {
-	for _, item := range value {
-		if item == 0 {
-			return false
-		}
-	}
-	return true
-}
-
 func decodeSlot(request []byte, offset, slotSize, length int) (string, bool) {
 	if length >= slotSize {
 		return "", false
 	}
 	slot := request[offset : offset+slotSize]
-	if !nonzeroText(slot[:length]) || !zeroPadding(slot[length:]) {
+	if !modulewire.NonzeroText(slot[:length]) || !modulewire.ZeroPadding(slot[length:]) {
 		return "", false
 	}
 	return string(slot[:length]), true

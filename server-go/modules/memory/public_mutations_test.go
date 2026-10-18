@@ -212,7 +212,9 @@ func exerciseRejectionReplay(t *testing.T, ctx context.Context, tx pgx.Tx, handl
 	if r := call("store", original); r["kind"] != "unavailable" {
 		t.Fatal("re-extraction bypassed refusal", r)
 	}
-	list := call("review_console", map[string]any{"state": "rejected"})
+	// The console shows only the latest 32 rows. A scoped review query must
+	// retain this refusal even after earlier fixtures create unrelated rows.
+	list := call("review_list", map[string]any{"state": "rejected", "scope_context": true, "project": "governance-project"})
 	found := false
 	for _, raw := range list["memories"].([]any) {
 		row := raw.(map[string]any)

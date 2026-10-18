@@ -1,3 +1,4 @@
+#include "cli_dispatch_defs.h"
 /* ===================================================================
  * /v1 thin-client routing: route CLI subcommands through the server's native /v1 HTTP endpoints.
  * Unported commands fail in cli_main before reaching the server.
@@ -130,15 +131,7 @@ static const char *resolve_session_env(const cli_args_t *opts);
 
 /* --- /v1 route table --- */
 
-typedef struct
-{
-   const char *cmd;
-   const char *subcmd; /* NULL = match any (first arg is NOT a subcmd) */
-   const char *method;
-   const char *server_method; /* NULL = same as method */
-   const char *extract;       /* response array field to extract, or NULL */
-   int timeout_ms;            /* 0 = CLIENT_DEFAULT_TIMEOUT_MS */
-} cli_dispatch_row_t;
+typedef cli_dispatch_def_t cli_dispatch_row_t;
 
 static const cli_dispatch_row_t cli_command_routes[] = {
 /* Rows live in server/cli_dispatch_defs_data.h: the server serves them, and

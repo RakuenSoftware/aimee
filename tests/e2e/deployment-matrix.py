@@ -1232,7 +1232,10 @@ with tempfile.TemporaryDirectory() as directory:
             f"SELECT count(*) FROM memories WHERE scope_type='project' AND scope_value='{scope}'") == '2')
         check('rejected draft never enters recall storage', gate.sql(
             f"SELECT count(*) FROM memories WHERE scope_value='{scope}' AND content='rejected model follow-up'") == '0')
-        check('explicit erasure removes original proposal parent', action('delete', dict(id=old_id, authority='user')).get('status') == 'ok')
+        erasure = action('delete', dict(id=old_id, authority='user'))
+        if erasure.get('status') != 'ok':
+            print('Explicit parent erasure response: ' + json.dumps(erasure, sort_keys=True), flush=True)
+        check('explicit erasure removes original proposal parent', erasure.get('status') == 'ok')
         check('parent erasure removes draft payload', action('correction_proposals', dict(proposal_id=pid)).get('proposals') == [])
         erased = gate.mcp_document('MCP erased proposal retry', 'mutate', correction)
         check('erasure does not free a committed proposal retry key', erased.get('reason') == 'idempotent_result_unavailable')

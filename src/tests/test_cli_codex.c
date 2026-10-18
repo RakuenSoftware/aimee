@@ -791,8 +791,17 @@ static void test_operator_replies_reach_native_child(void)
    rmdir(root);
 }
 
+static void test_execute_refuses_missing_configuration(void)
+{
+   agent_result_t out;
+   assert(agent_execute_cli_codex(NULL, "system", "user", &out) == -1);
+   assert(strcmp(out.error, "missing agent") == 0);
+   assert(agent_execute_cli_codex(NULL, "system", "user", NULL) == -1);
+}
+
 int main(void)
 {
+   test_execute_refuses_missing_configuration();
    test_execute_rejects_missing_inputs();
    signal(SIGPIPE, SIG_IGN);
 

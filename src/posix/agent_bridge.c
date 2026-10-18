@@ -1190,6 +1190,8 @@ static int http_read_response(http_conn_t *conn, char **out_body, size_t *out_le
 int agent_http_get_location(const char *url, const char *extra_headers, char *location,
                             size_t location_cap, char **response_buf, int timeout_ms)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
    if (location && location_cap)
       location[0] = '\0';
@@ -1226,6 +1228,8 @@ int agent_http_get_location(const char *url, const char *extra_headers, char *lo
 int agent_http_get_pinned(const char *url, const char *pinned_ip, const char *extra_headers,
                           char **response_buf, int timeout_ms)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
    parsed_url_t pu;
    if (parse_url(url, &pu) < 0)
@@ -1254,6 +1258,8 @@ int agent_http_get_pinned(const char *url, const char *pinned_ip, const char *ex
 
 int agent_http_get(const char *url, const char *extra_headers, char **response_buf, int timeout_ms)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1323,6 +1329,8 @@ int agent_http_post_guarded_bytes(const char *url, const char *auth_header, cons
                                   size_t body_len, char **response_buf, int timeout_ms,
                                   const char *extra_headers, const agent_http_send_guard_t *guard)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1366,6 +1374,8 @@ int agent_http_post_content_type(const char *url, const char *auth_header, const
                                  const char *body, char **response_buf, int timeout_ms,
                                  const char *extra_headers)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1419,6 +1429,8 @@ int agent_http_post_content_type(const char *url, const char *auth_header, const
 int agent_http_put(const char *url, const char *auth_header, const char *body, char **response_buf,
                    int timeout_ms, const char *extra_headers)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1452,6 +1464,8 @@ int agent_http_put(const char *url, const char *auth_header, const char *body, c
 int agent_http_patch(const char *url, const char *auth_header, const char *body,
                      char **response_buf, int timeout_ms, const char *extra_headers)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1483,6 +1497,8 @@ int agent_http_patch(const char *url, const char *auth_header, const char *body,
 
 int agent_http_post_form(const char *url, const char *body, char **response_buf, int timeout_ms)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;

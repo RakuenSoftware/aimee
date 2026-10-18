@@ -1,29 +1,5 @@
-/* db1_client/workflow.c: the workflow family, reached over the bus.
- *
- * WAS GENERATED from the store catalog by scripts/gen_db1_contract.py. Both
- * moved on: the catalog is now server-go/modules/aimee/operations.json, and the
- * generator was deleted with the C module.
- *
- * So this is maintained BY HAND now, and the header used to say "Do not edit"
- * while pointing at a generator that no longer exists and a path that no longer
- * resolves -- which is a dead end at exactly the moment someone needs to change
- * something. Edit it, and keep it agreeing with the catalog:
- * scripts/check-db1-client-contract.py matches every call site here against the
- * catalog by arity and reply width, and runs in lint on every pull request.
- * That check is what replaced the generator.
- *
- * Same functions, same contract, different side of the boundary: the daemon
- * links this instead of the DB1 domain, so nothing that calls these had to
- * change.
- *
- * It lives OUTSIDE modules/db1 deliberately. The module's descriptor owns every
- * .c beside it and compiles them into the DB1 process, so a client with these
- * names in that directory would be linked twice into the one binary that must
- * not have it -- once as the caller and once as the implementation.
- *
- * clang-format is off for the body below: its canonical form is whatever this
- * generator emits, and reflowing generated output would put the file and the
- * catalog permanently one reformat apart. */
+/* workflow.c: typed DB1 operations over the shared bus transport.
+ * Wire operations are owned by server-go/modules/aimee/operations.json. */
 /* clang-format off */
 #include "execution_plans.h"
 #include "execution_trace.h"
@@ -32,6 +8,7 @@
 #include "wfe_binding.h"
 
 #include "db1_module_api.h"
+#include "transport.h"
 
 #include <aimee/audit/obs_bus.h>
 #include <aimee/core/event_bus/module_client.h>
@@ -44,185 +21,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define DB1_WORKFLOW_CALL_TIMEOUT_MS 2000
 
-static void warn_unreachable(int reason)
-{
-   static int warned;
-   if (warned)
-      return;
-   warned = 1;
-   /* Said once per process: enough to tell a store that is down from one that
-      is quiet, without one line per call. The numeric
-      aimee_module_call_result_t, not its name, so this does not pull the whole
-      event-bus library in behind the client for one string. */
-   LOG_WARN("db1.workflow", "DB1 %s is unreachable (module call result %d)", "workflow",
-            reason);
-}
+static db1_family_t family = {"db1.workflow", "workflow", AIMEE_DB1_EVENT_WORKFLOW, AIMEE_DB1_STAGE_WORKFLOW, 2000, 0};
 
-/* Size the frame from the arguments themselves.
-
-   These carry prompts, results and JSON documents, not just identifiers, and
-   in-process callers have always passed them whole. A fixed cap here would
-   refuse exactly those calls and return the same -1 as a broken store -- fine
-   in a test with short strings, wrong the first time a real prompt arrives. The
-   bus bounds the message instead. */
-static int frame_size(const char *const *fields, uint32_t count, size_t *need_out)
-{
-   /* Zero fields is a legal request: an operation that takes no arguments
-      sends the header alone. The upper bound still applies. */
-   if (count > AIMEE_DB1_FIELDS_MAX)
-      return -1;
-   size_t need = 8u;
-   for (uint32_t i = 0; i < count; ++i)
-   {
-      /* Empty is legal on the wire: an optional field the caller left out
-         travels as zero length. Which fields may be empty is the operation's
-         business, checked before the frame is built. */
-      if (!fields[i])
-         return -1;
-      size_t n = strlen(fields[i]);
-      if (n > AIMEE_MODULE_MESSAGE_MAX_BODY - need - 4u)
-         return -1;
-      need += 4u + n;
-   }
-   *need_out = need;
-   return 0;
-}
-
-/* op(u32) | field_count(u32) | (len(u32) | bytes) * count, per db1_module_api.h. */
-static void encode(uint8_t *out, uint32_t op, const char *const *fields, uint32_t count)
-{
-   uint32_t at = 0;
-   aimee_db1_put_u32(out + at, op);
-   at += 4u;
-   aimee_db1_put_u32(out + at, count);
-   at += 4u;
-   for (uint32_t i = 0; i < count; ++i)
-   {
-      uint32_t n = (uint32_t)strlen(fields[i]);
-      aimee_db1_put_u32(out + at, n);
-      at += 4u;
-      memcpy(out + at, fields[i], n);
-      at += n;
-   }
-}
-
-/* Returns the module's status, or -1 when the call never produced one. */
-/* Fills up to `slots` reply values, each into the buffer and capacity the
-   caller supplied. A write passes none; a read passes one; a row passes one per
-   member; a list passes one per member per row it is willing to accept.
-
-   `filled_out` reports how many values the reply actually carried, which is how
-   a list learns its length: the rows are not counted separately on the wire
-   because an operation already knows how wide its rows are. Callers that expect
-   a fixed shape pass NULL. */
-static int call_stage(uint32_t op, const char *const *fields, uint32_t count, char *const *values,
-                      const size_t *caps, uint32_t slots, uint32_t *filled_out)
-{
-   if (filled_out)
-      *filled_out = 0u;
-   for (uint32_t i = 0; i < slots; ++i)
-      if (values[i] && caps[i])
-         values[i][0] = '\0';
-   /* A local check, not a probe: with nothing serving the stage there is no
-      call to make, and saying so beats waiting out a deadline. */
-   if (!obs_bus_module_available(AIMEE_DB1_EVENT_WORKFLOW))
-   {
-      warn_unreachable(AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
-      return -1;
-   }
-
-   size_t request_len = 0;
-   if (frame_size(fields, count, &request_len) != 0)
-      return -1;
-   /* The reply is bounded by the caller's own buffer: it asked for at most
-      value_len bytes, so there is no reason to hold more than that. */
-   size_t response_cap = 8u;
-   for (uint32_t i = 0; i < slots; ++i)
-      response_cap += 4u + caps[i];
-   uint8_t *request = malloc(request_len);
-   uint8_t *response = malloc(response_cap);
-   if (!request || !response)
-   {
-      free(request);
-      free(response);
-      return -1;
-   }
-   encode(request, op, fields, count);
-
-   uint32_t response_len = 0;
-   uint64_t deadline = aimee_module_call_deadline_ns(DB1_WORKFLOW_CALL_TIMEOUT_MS);
-   aimee_module_call_result_t rc =
-       obs_bus_module_call(AIMEE_DB1_EVENT_WORKFLOW, AIMEE_DB1_STAGE_WORKFLOW, 0, deadline,
-                           request, (uint32_t)request_len, response, (uint32_t)response_cap,
-                           &response_len, NULL, NULL);
-   free(request);
-
-   int result = -1;
-   if (rc != AIMEE_MODULE_CALL_OK || response_len < 8u)
-      warn_unreachable((int)rc);
-   else
-   {
-      uint32_t status = aimee_db1_get_u32(response);
-      uint32_t fields_in = aimee_db1_get_u32(response + 4u);
-      /* Read the reply's own count rather than assuming an arity: a status with
-         no values is how a write answers, one value is a read, and a member
-         apiece is a row. */
-      result = (int)status;
-      /* More values than the caller has room for is a contract mismatch, not
-         something to read the first few of: the caller asked for at most this
-         many rows, and a stage answering with more is not answering this call. */
-      if (fields_in > slots)
-         result = -1;
-      else if (filled_out)
-         *filled_out = fields_in;
-      /* Fewer values than the caller has slots for is the same contract
-         mismatch read from the other side, and it used to pass: the unfilled
-         slots keep the empty string cleared above, so the caller reads a row
-         whose last members are blank and cannot tell that from a row that is
-         blank. A list says how many rows it found through filled_out and is
-         variable by construction; every other shape has one arity, and a stage
-         answering with a different one is a stage built against a different
-         version of this contract. Two processes, two binaries, two deployment
-         times -- so say it rather than zero-fill. */
-      else if (status == (uint32_t)AIMEE_DB1_STATUS_OK && fields_in != slots)
-         result = -1;
-      uint32_t at = 8u;
-      for (uint32_t i = 0; i < fields_in && result != -1; ++i)
-      {
-         if (at + 4u > response_len)
-         {
-            result = -1;
-            break;
-         }
-         uint32_t n = aimee_db1_get_u32(response + at);
-         at += 4u;
-         /* A reply whose declared length runs past what arrived is not a reply
-            to read part of. */
-         if (at + n > response_len)
-         {
-            result = -1;
-            break;
-         }
-         if (i < slots && values[i] && caps[i])
-         {
-            /* No room for the terminator is no room: writing it would land one
-               byte past the buffer the caller owns. */
-            if (n >= caps[i])
-               result = -1;
-            else
-            {
-               memcpy(values[i], response + at, n);
-               values[i][n] = '\0';
-            }
-         }
-         at += n;
-      }
-   }
-   free(response);
-   return result;
-}
 
 /* A write answers 0 or -1; the store either took it or it did not. */
 static int write_result(int status)
@@ -240,7 +41,7 @@ int db1_execution_trace_insert(const db1_execution_trace_insert_row_t *row)
    char arg2[32];
    snprintf(arg2, sizeof arg2, "%d", row->turn);
    const char *fields[] = {arg0, row->session_id ? row->session_id : "", arg2, row->direction ? row->direction : "", row->content ? row->content : "", row->tool_name ? row->tool_name : "", row->tool_args ? row->tool_args : "", row->tool_result ? row->tool_result : "", row->context_hash ? row->context_hash : ""};
-   return write_result(call_stage(AIMEE_DB1_OP_EXECUTION_TRACE_INSERT, fields, 9, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_EXECUTION_TRACE_INSERT, fields, 9, NULL, NULL, 0, NULL));
 }
 
 int db1_execution_trace_count_for_session(const char *session_id)
@@ -249,7 +50,7 @@ int db1_execution_trace_count_for_session(const char *session_id)
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_TRACE_COUNT_FOR_SESSION, fields, 1, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_TRACE_COUNT_FOR_SESSION, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -289,7 +90,7 @@ int db1_execution_trace_list_recent(db1_execution_trace_recent_row_t *out, int m
       wire_caps[wire_row * 5u + 4u] = sizeof out[wire_row].created_at;
    }
    uint32_t wire_filled = 0;
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_TRACE_LIST_RECENT, fields, 1, wire_values, wire_caps,
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_TRACE_LIST_RECENT, fields, 1, wire_values, wire_caps,
                            (uint32_t)(max * 5), &wire_filled);
    free(wire_values);
    free(wire_caps);
@@ -321,7 +122,7 @@ int db1_execution_trace_get(int trace_id, db1_execution_trace_detail_t *out)
    memset(out, 0, sizeof *out);
    char *const values[] = {slot0, slot1, slot2, out->direction, out->content, out->tool_name, out->tool_args, out->tool_result, out->context_hash, out->created_at};
    const size_t caps[] = {sizeof slot0, sizeof slot1, sizeof slot2, sizeof out->direction, sizeof out->content, sizeof out->tool_name, sizeof out->tool_args, sizeof out->tool_result, sizeof out->context_hash, sizeof out->created_at};
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_TRACE_GET, fields, 1, values, caps, 10, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_TRACE_GET, fields, 1, values, caps, 10, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
       return -1;
@@ -366,7 +167,7 @@ int db1_execution_trace_list_tool_calls(db1_execution_trace_tool_call_t *out, in
       wire_caps[wire_row * 5u + 4u] = sizeof out[wire_row].tool_result;
    }
    uint32_t wire_filled = 0;
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_TRACE_LIST_TOOL_CALLS, fields, 1, wire_values, wire_caps,
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_TRACE_LIST_TOOL_CALLS, fields, 1, wire_values, wire_caps,
                            (uint32_t)(max * 5), &wire_filled);
    free(wire_values);
    free(wire_caps);
@@ -424,7 +225,7 @@ int db1_execution_trace_list_after_id(int64_t after_id, db1_execution_trace_mini
       wire_caps[wire_row * 7u + 6u] = sizeof out[wire_row].tool_result;
    }
    uint32_t wire_filled = 0;
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_TRACE_LIST_AFTER_ID, fields, 2, wire_values, wire_caps,
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_TRACE_LIST_AFTER_ID, fields, 2, wire_values, wire_caps,
                            (uint32_t)(max * 7), &wire_filled);
    free(wire_values);
    free(wire_caps);
@@ -452,7 +253,7 @@ int db1_wfe_bind(const char *session_id, const char *work_item_id, const char *e
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = call_stage(AIMEE_DB1_OP_WFE_BIND, fields, 3, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_WFE_BIND, fields, 3, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -465,7 +266,7 @@ int db1_wfe_binding_get(const char *session_id, char *wi_out, size_t wi_n, char 
    const char *fields[] = {session_id};
    char *const values[] = {wi_out, stage_out};
    const size_t caps[] = {wi_n, stage_n};
-   int wire_status = call_stage(AIMEE_DB1_OP_WFE_BINDING_GET, fields, 1, values, caps, 2, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_WFE_BINDING_GET, fields, 1, values, caps, 2, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
       return wire_status == (int)AIMEE_DB1_STATUS_MISSING ? 0 : -1;
@@ -478,7 +279,7 @@ int db1_wfe_unbind(const char *session_id)
    if (!session_id || !session_id[0])
       return -1;
    const char *fields[] = {session_id};
-   return write_result(call_stage(AIMEE_DB1_OP_WFE_UNBIND, fields, 1, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_WFE_UNBIND, fields, 1, NULL, NULL, 0, NULL));
 }
 
 int db1_wfe_lease_renew(const char *session_id, int ttl_secs)
@@ -488,7 +289,7 @@ int db1_wfe_lease_renew(const char *session_id, int ttl_secs)
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", ttl_secs);
    const char *fields[] = {session_id, arg1};
-   return write_result(call_stage(AIMEE_DB1_OP_WFE_LEASE_RENEW, fields, 2, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_WFE_LEASE_RENEW, fields, 2, NULL, NULL, 0, NULL));
 }
 
 int db1_wfe_lease_expiry_get(const char *session_id, char *out, size_t n)
@@ -498,7 +299,7 @@ int db1_wfe_lease_expiry_get(const char *session_id, char *out, size_t n)
    const char *fields[] = {session_id};
    char *const values[] = {out};
    const size_t caps[] = {n};
-   int wire_status = call_stage(AIMEE_DB1_OP_WFE_LEASE_EXPIRY_GET, fields, 1, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_WFE_LEASE_EXPIRY_GET, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
       return wire_status == (int)AIMEE_DB1_STATUS_MISSING ? 0 : -1;
@@ -530,7 +331,7 @@ int db1_wfe_lease_stale_work_items(char (*out)[DB1_WFE_WORK_ITEM_ID_LEN], int ma
       wire_caps[wire_row * 1u + 0u] = sizeof out[wire_row];
    }
    uint32_t wire_filled = 0;
-   int wire_status = call_stage(AIMEE_DB1_OP_WFE_LEASE_STALE_WORK_ITEMS, fields, 1, wire_values, wire_caps,
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_WFE_LEASE_STALE_WORK_ITEMS, fields, 1, wire_values, wire_caps,
                            (uint32_t)(max * 1), &wire_filled);
    free(wire_values);
    free(wire_caps);
@@ -548,7 +349,7 @@ int db1_wfe_lease_reclaim_stale()
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = call_stage(AIMEE_DB1_OP_WFE_LEASE_RECLAIM_STALE, fields, 0, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_WFE_LEASE_RECLAIM_STALE, fields, 0, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -562,7 +363,7 @@ int db1_pipeline_create(const char *task, const char *request_classification, co
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = call_stage(AIMEE_DB1_OP_PIPELINE_CREATE, fields, 3, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_PIPELINE_CREATE, fields, 3, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
       return -1;
@@ -586,7 +387,7 @@ int db1_pipeline_get(int pipeline_id, db1_pipeline_t *out)
    memset(out, 0, sizeof *out);
    char *const values[] = {slot0, out->task, out->status, out->current_phase, out->request_classification, out->plan_depth, slot6, slot7, slot8, slot9, out->created_at, out->updated_at};
    const size_t caps[] = {sizeof slot0, sizeof out->task, sizeof out->status, sizeof out->current_phase, sizeof out->request_classification, sizeof out->plan_depth, sizeof slot6, sizeof slot7, sizeof slot8, sizeof slot9, sizeof out->created_at, sizeof out->updated_at};
-   int wire_status = call_stage(AIMEE_DB1_OP_PIPELINE_GET, fields, 1, values, caps, 12, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_PIPELINE_GET, fields, 1, values, caps, 12, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
       return -1;
@@ -612,7 +413,7 @@ int db1_pipeline_update(int pipeline_id, const char *status, const char *current
    char arg8[32];
    snprintf(arg8, sizeof arg8, "%d", clarify_session_id);
    const char *fields[] = {arg0, status ? status : "", current_phase ? current_phase : "", arg3, arg4, arg5, request_classification ? request_classification : "", plan_depth ? plan_depth : "", arg8};
-   return write_result(call_stage(AIMEE_DB1_OP_PIPELINE_UPDATE, fields, 9, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_PIPELINE_UPDATE, fields, 9, NULL, NULL, 0, NULL));
 }
 
 int db1_pipeline_link_plan(int pipeline_id, int plan_id)
@@ -622,7 +423,7 @@ int db1_pipeline_link_plan(int pipeline_id, int plan_id)
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", plan_id);
    const char *fields[] = {arg0, arg1};
-   return write_result(call_stage(AIMEE_DB1_OP_PIPELINE_LINK_PLAN, fields, 2, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_PIPELINE_LINK_PLAN, fields, 2, NULL, NULL, 0, NULL));
 }
 
 int db1_pipeline_link_job(int pipeline_id, int job_id)
@@ -632,7 +433,7 @@ int db1_pipeline_link_job(int pipeline_id, int job_id)
    char arg1[32];
    snprintf(arg1, sizeof arg1, "%d", job_id);
    const char *fields[] = {arg0, arg1};
-   return write_result(call_stage(AIMEE_DB1_OP_PIPELINE_LINK_JOB, fields, 2, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_PIPELINE_LINK_JOB, fields, 2, NULL, NULL, 0, NULL));
 }
 
 int db1_pipeline_cancel(int pipeline_id)
@@ -640,7 +441,7 @@ int db1_pipeline_cancel(int pipeline_id)
    char arg0[32];
    snprintf(arg0, sizeof arg0, "%d", pipeline_id);
    const char *fields[] = {arg0};
-   return write_result(call_stage(AIMEE_DB1_OP_PIPELINE_CANCEL, fields, 1, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_PIPELINE_CANCEL, fields, 1, NULL, NULL, 0, NULL));
 }
 
 int db1_pipeline_list_active(db1_pipeline_t *out, int max)
@@ -691,7 +492,7 @@ int db1_pipeline_list_active(db1_pipeline_t *out, int max)
       wire_caps[wire_row * 12u + 11u] = sizeof out[wire_row].updated_at;
    }
    uint32_t wire_filled = 0;
-   int wire_status = call_stage(AIMEE_DB1_OP_PIPELINE_LIST_ACTIVE, fields, 1, wire_values, wire_caps,
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_PIPELINE_LIST_ACTIVE, fields, 1, wire_values, wire_caps,
                            (uint32_t)(max * 12), &wire_filled);
    free(wire_values);
    free(wire_caps);
@@ -722,7 +523,7 @@ int db1_roadmap_dispatch_upsert(const char *roadmap_id, const char *token_profil
    char arg3[32];
    snprintf(arg3, sizeof arg3, "%d", budget_ceiling_tokens);
    const char *fields[] = {roadmap_id, token_profile ? token_profile : "", arg2, arg3};
-   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_DISPATCH_UPSERT, fields, 4, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_DISPATCH_UPSERT, fields, 4, NULL, NULL, 0, NULL));
 }
 
 int db1_roadmap_dispatch_get(const char *roadmap_id, rdm_dispatch_t *out)
@@ -736,7 +537,7 @@ int db1_roadmap_dispatch_get(const char *roadmap_id, rdm_dispatch_t *out)
    memset(out, 0, sizeof *out);
    char *const values[] = {slot0, out->roadmap_id, out->status, out->phase, out->token_profile, slot5, slot6, out->exit_reason, out->created_at, out->updated_at};
    const size_t caps[] = {sizeof slot0, sizeof out->roadmap_id, sizeof out->status, sizeof out->phase, sizeof out->token_profile, sizeof slot5, sizeof slot6, sizeof out->exit_reason, sizeof out->created_at, sizeof out->updated_at};
-   int wire_status = call_stage(AIMEE_DB1_OP_ROADMAP_DISPATCH_GET, fields, 1, values, caps, 10, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_ROADMAP_DISPATCH_GET, fields, 1, values, caps, 10, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
       return -1;
@@ -752,7 +553,7 @@ int db1_roadmap_dispatch_set_status(const char *roadmap_id, const char *status, 
    if (!roadmap_id || !roadmap_id[0])
       return -1;
    const char *fields[] = {roadmap_id, status ? status : "", exit_reason ? exit_reason : ""};
-   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_DISPATCH_SET_STATUS, fields, 3, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_DISPATCH_SET_STATUS, fields, 3, NULL, NULL, 0, NULL));
 }
 
 int db1_roadmap_dispatch_set_phase(const char *roadmap_id, const char *phase)
@@ -760,7 +561,7 @@ int db1_roadmap_dispatch_set_phase(const char *roadmap_id, const char *phase)
    if (!roadmap_id || !roadmap_id[0])
       return -1;
    const char *fields[] = {roadmap_id, phase ? phase : ""};
-   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_DISPATCH_SET_PHASE, fields, 2, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_DISPATCH_SET_PHASE, fields, 2, NULL, NULL, 0, NULL));
 }
 
 int db1_roadmap_unit_ensure(const char *roadmap_id, const char *unit_id, const char *level, const char *tool_policy_mode)
@@ -768,7 +569,7 @@ int db1_roadmap_unit_ensure(const char *roadmap_id, const char *unit_id, const c
    if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
       return -1;
    const char *fields[] = {roadmap_id, unit_id, level ? level : "", tool_policy_mode ? tool_policy_mode : ""};
-   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_ENSURE, fields, 4, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_ENSURE, fields, 4, NULL, NULL, 0, NULL));
 }
 
 int db1_roadmap_unit_get(const char *roadmap_id, const char *unit_id, rdm_unit_dispatch_t *out)
@@ -783,7 +584,7 @@ int db1_roadmap_unit_get(const char *roadmap_id, const char *unit_id, rdm_unit_d
    memset(out, 0, sizeof *out);
    char *const values[] = {slot0, out->roadmap_id, out->unit_id, out->level, out->state, out->tool_policy_mode, out->claimed_by, out->claimed_at, out->heartbeat_at, slot9, slot10, out->worktree_path, slot12, out->result, out->error, out->created_at, out->updated_at};
    const size_t caps[] = {sizeof slot0, sizeof out->roadmap_id, sizeof out->unit_id, sizeof out->level, sizeof out->state, sizeof out->tool_policy_mode, sizeof out->claimed_by, sizeof out->claimed_at, sizeof out->heartbeat_at, sizeof slot9, sizeof slot10, sizeof out->worktree_path, sizeof slot12, sizeof out->result, sizeof out->error, sizeof out->created_at, sizeof out->updated_at};
-   int wire_status = call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_GET, fields, 2, values, caps, 17, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_GET, fields, 2, values, caps, 17, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
       return -1;
@@ -800,7 +601,7 @@ int db1_roadmap_unit_set_state(const char *roadmap_id, const char *unit_id, cons
    if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
       return -1;
    const char *fields[] = {roadmap_id, unit_id, state ? state : ""};
-   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_SET_STATE, fields, 3, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_SET_STATE, fields, 3, NULL, NULL, 0, NULL));
 }
 
 int db1_roadmap_unit_claim(const char *roadmap_id, const char *unit_id, const char *owner, const char *worktree_path)
@@ -808,7 +609,7 @@ int db1_roadmap_unit_claim(const char *roadmap_id, const char *unit_id, const ch
    if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
       return -1;
    const char *fields[] = {roadmap_id, unit_id, owner ? owner : "", worktree_path ? worktree_path : ""};
-   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_CLAIM, fields, 4, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_CLAIM, fields, 4, NULL, NULL, 0, NULL));
 }
 
 int db1_roadmap_unit_heartbeat(const char *roadmap_id, const char *unit_id)
@@ -816,7 +617,7 @@ int db1_roadmap_unit_heartbeat(const char *roadmap_id, const char *unit_id)
    if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
       return -1;
    const char *fields[] = {roadmap_id, unit_id};
-   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_HEARTBEAT, fields, 2, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_HEARTBEAT, fields, 2, NULL, NULL, 0, NULL));
 }
 
 int db1_roadmap_unit_finish(const char *roadmap_id, const char *unit_id, const char *state, const char *result, const char *error)
@@ -824,7 +625,7 @@ int db1_roadmap_unit_finish(const char *roadmap_id, const char *unit_id, const c
    if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
       return -1;
    const char *fields[] = {roadmap_id, unit_id, state ? state : "", result ? result : "", error ? error : ""};
-   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_FINISH, fields, 5, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_FINISH, fields, 5, NULL, NULL, 0, NULL));
 }
 
 int db1_roadmap_unit_set_coord_job(const char *roadmap_id, const char *unit_id, int coord_job_id)
@@ -834,7 +635,7 @@ int db1_roadmap_unit_set_coord_job(const char *roadmap_id, const char *unit_id, 
    char arg2[32];
    snprintf(arg2, sizeof arg2, "%d", coord_job_id);
    const char *fields[] = {roadmap_id, unit_id, arg2};
-   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_SET_COORD_JOB, fields, 3, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_SET_COORD_JOB, fields, 3, NULL, NULL, 0, NULL));
 }
 
 int db1_roadmap_unit_increment_verify_attempts(const char *roadmap_id, const char *unit_id)
@@ -842,7 +643,7 @@ int db1_roadmap_unit_increment_verify_attempts(const char *roadmap_id, const cha
    if (!roadmap_id || !roadmap_id[0] || !unit_id || !unit_id[0])
       return -1;
    const char *fields[] = {roadmap_id, unit_id};
-   return write_result(call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_INCREMENT_VERIFY_ATTEMPTS, fields, 2, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_INCREMENT_VERIFY_ATTEMPTS, fields, 2, NULL, NULL, 0, NULL));
 }
 
 int db1_roadmap_unit_select_next(const char *roadmap_id, char *out_unit_id, size_t len)
@@ -853,7 +654,7 @@ int db1_roadmap_unit_select_next(const char *roadmap_id, char *out_unit_id, size
    char slot_rc[32];
    char *const values[] = {out_unit_id, slot_rc};
    const size_t caps[] = {len, sizeof slot_rc};
-   int wire_status = call_stage(AIMEE_DB1_OP_ROADMAP_UNIT_SELECT_NEXT, fields, 1, values, caps, 2, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_ROADMAP_UNIT_SELECT_NEXT, fields, 1, values, caps, 2, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtol(slot_rc, NULL, 10);
@@ -867,7 +668,7 @@ int db1_execution_plan_create(const char *agent_name, const char *task, const ch
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_PLAN_CREATE, fields, 3, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_PLAN_CREATE, fields, 3, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -1269,7 +1070,7 @@ int db1_execution_plan_get(int plan_id, plan_t *out)
    memset(out, 0, sizeof *out);
    char *const values[] = {slot0, out->agent_name, out->task, out->status, slot4, out->steps[0].action, out->steps[0].precondition, out->steps[0].success_predicate, out->steps[0].rollback, slot9, slot10, slot11, slot12, slot13, slot14, slot15, slot16, slot17, slot18, out->steps[0].output, slot20, slot21, out->steps[1].action, out->steps[1].precondition, out->steps[1].success_predicate, out->steps[1].rollback, slot26, slot27, slot28, slot29, slot30, slot31, slot32, slot33, slot34, slot35, out->steps[1].output, slot37, slot38, out->steps[2].action, out->steps[2].precondition, out->steps[2].success_predicate, out->steps[2].rollback, slot43, slot44, slot45, slot46, slot47, slot48, slot49, slot50, slot51, slot52, out->steps[2].output, slot54, slot55, out->steps[3].action, out->steps[3].precondition, out->steps[3].success_predicate, out->steps[3].rollback, slot60, slot61, slot62, slot63, slot64, slot65, slot66, slot67, slot68, slot69, out->steps[3].output, slot71, slot72, out->steps[4].action, out->steps[4].precondition, out->steps[4].success_predicate, out->steps[4].rollback, slot77, slot78, slot79, slot80, slot81, slot82, slot83, slot84, slot85, slot86, out->steps[4].output, slot88, slot89, out->steps[5].action, out->steps[5].precondition, out->steps[5].success_predicate, out->steps[5].rollback, slot94, slot95, slot96, slot97, slot98, slot99, slot100, slot101, slot102, slot103, out->steps[5].output, slot105, slot106, out->steps[6].action, out->steps[6].precondition, out->steps[6].success_predicate, out->steps[6].rollback, slot111, slot112, slot113, slot114, slot115, slot116, slot117, slot118, slot119, slot120, out->steps[6].output, slot122, slot123, out->steps[7].action, out->steps[7].precondition, out->steps[7].success_predicate, out->steps[7].rollback, slot128, slot129, slot130, slot131, slot132, slot133, slot134, slot135, slot136, slot137, out->steps[7].output, slot139, slot140, out->steps[8].action, out->steps[8].precondition, out->steps[8].success_predicate, out->steps[8].rollback, slot145, slot146, slot147, slot148, slot149, slot150, slot151, slot152, slot153, slot154, out->steps[8].output, slot156, slot157, out->steps[9].action, out->steps[9].precondition, out->steps[9].success_predicate, out->steps[9].rollback, slot162, slot163, slot164, slot165, slot166, slot167, slot168, slot169, slot170, slot171, out->steps[9].output, slot173, slot174, out->steps[10].action, out->steps[10].precondition, out->steps[10].success_predicate, out->steps[10].rollback, slot179, slot180, slot181, slot182, slot183, slot184, slot185, slot186, slot187, slot188, out->steps[10].output, slot190, slot191, out->steps[11].action, out->steps[11].precondition, out->steps[11].success_predicate, out->steps[11].rollback, slot196, slot197, slot198, slot199, slot200, slot201, slot202, slot203, slot204, slot205, out->steps[11].output, slot207, slot208, out->steps[12].action, out->steps[12].precondition, out->steps[12].success_predicate, out->steps[12].rollback, slot213, slot214, slot215, slot216, slot217, slot218, slot219, slot220, slot221, slot222, out->steps[12].output, slot224, slot225, out->steps[13].action, out->steps[13].precondition, out->steps[13].success_predicate, out->steps[13].rollback, slot230, slot231, slot232, slot233, slot234, slot235, slot236, slot237, slot238, slot239, out->steps[13].output, slot241, slot242, out->steps[14].action, out->steps[14].precondition, out->steps[14].success_predicate, out->steps[14].rollback, slot247, slot248, slot249, slot250, slot251, slot252, slot253, slot254, slot255, slot256, out->steps[14].output, slot258, slot259, out->steps[15].action, out->steps[15].precondition, out->steps[15].success_predicate, out->steps[15].rollback, slot264, slot265, slot266, slot267, slot268, slot269, slot270, slot271, slot272, slot273, out->steps[15].output, slot275, slot276, out->steps[16].action, out->steps[16].precondition, out->steps[16].success_predicate, out->steps[16].rollback, slot281, slot282, slot283, slot284, slot285, slot286, slot287, slot288, slot289, slot290, out->steps[16].output, slot292, slot293, out->steps[17].action, out->steps[17].precondition, out->steps[17].success_predicate, out->steps[17].rollback, slot298, slot299, slot300, slot301, slot302, slot303, slot304, slot305, slot306, slot307, out->steps[17].output, slot309, slot310, out->steps[18].action, out->steps[18].precondition, out->steps[18].success_predicate, out->steps[18].rollback, slot315, slot316, slot317, slot318, slot319, slot320, slot321, slot322, slot323, slot324, out->steps[18].output, slot326, slot327, out->steps[19].action, out->steps[19].precondition, out->steps[19].success_predicate, out->steps[19].rollback, slot332, slot333, slot334, slot335, slot336, slot337, slot338, slot339, slot340, slot341, out->steps[19].output, slot343, slot344, out->steps[20].action, out->steps[20].precondition, out->steps[20].success_predicate, out->steps[20].rollback, slot349, slot350, slot351, slot352, slot353, slot354, slot355, slot356, slot357, slot358, out->steps[20].output, slot360, slot361, out->steps[21].action, out->steps[21].precondition, out->steps[21].success_predicate, out->steps[21].rollback, slot366, slot367, slot368, slot369, slot370, slot371, slot372, slot373, slot374, slot375, out->steps[21].output, slot377, slot378, out->steps[22].action, out->steps[22].precondition, out->steps[22].success_predicate, out->steps[22].rollback, slot383, slot384, slot385, slot386, slot387, slot388, slot389, slot390, slot391, slot392, out->steps[22].output, slot394, slot395, out->steps[23].action, out->steps[23].precondition, out->steps[23].success_predicate, out->steps[23].rollback, slot400, slot401, slot402, slot403, slot404, slot405, slot406, slot407, slot408, slot409, out->steps[23].output, slot411, slot412, out->steps[24].action, out->steps[24].precondition, out->steps[24].success_predicate, out->steps[24].rollback, slot417, slot418, slot419, slot420, slot421, slot422, slot423, slot424, slot425, slot426, out->steps[24].output, slot428, slot429, out->steps[25].action, out->steps[25].precondition, out->steps[25].success_predicate, out->steps[25].rollback, slot434, slot435, slot436, slot437, slot438, slot439, slot440, slot441, slot442, slot443, out->steps[25].output, slot445, slot446, out->steps[26].action, out->steps[26].precondition, out->steps[26].success_predicate, out->steps[26].rollback, slot451, slot452, slot453, slot454, slot455, slot456, slot457, slot458, slot459, slot460, out->steps[26].output, slot462, slot463, out->steps[27].action, out->steps[27].precondition, out->steps[27].success_predicate, out->steps[27].rollback, slot468, slot469, slot470, slot471, slot472, slot473, slot474, slot475, slot476, slot477, out->steps[27].output, slot479, slot480, out->steps[28].action, out->steps[28].precondition, out->steps[28].success_predicate, out->steps[28].rollback, slot485, slot486, slot487, slot488, slot489, slot490, slot491, slot492, slot493, slot494, out->steps[28].output, slot496, slot497, out->steps[29].action, out->steps[29].precondition, out->steps[29].success_predicate, out->steps[29].rollback, slot502, slot503, slot504, slot505, slot506, slot507, slot508, slot509, slot510, slot511, out->steps[29].output, slot513, slot514, out->steps[30].action, out->steps[30].precondition, out->steps[30].success_predicate, out->steps[30].rollback, slot519, slot520, slot521, slot522, slot523, slot524, slot525, slot526, slot527, slot528, out->steps[30].output, slot530, slot531, out->steps[31].action, out->steps[31].precondition, out->steps[31].success_predicate, out->steps[31].rollback, slot536, slot537, slot538, slot539, slot540, slot541, slot542, slot543, slot544, slot545, out->steps[31].output, slot547, slot548};
    const size_t caps[] = {sizeof slot0, sizeof out->agent_name, sizeof out->task, sizeof out->status, sizeof slot4, sizeof out->steps[0].action, sizeof out->steps[0].precondition, sizeof out->steps[0].success_predicate, sizeof out->steps[0].rollback, sizeof slot9, sizeof slot10, sizeof slot11, sizeof slot12, sizeof slot13, sizeof slot14, sizeof slot15, sizeof slot16, sizeof slot17, sizeof slot18, sizeof out->steps[0].output, sizeof slot20, sizeof slot21, sizeof out->steps[1].action, sizeof out->steps[1].precondition, sizeof out->steps[1].success_predicate, sizeof out->steps[1].rollback, sizeof slot26, sizeof slot27, sizeof slot28, sizeof slot29, sizeof slot30, sizeof slot31, sizeof slot32, sizeof slot33, sizeof slot34, sizeof slot35, sizeof out->steps[1].output, sizeof slot37, sizeof slot38, sizeof out->steps[2].action, sizeof out->steps[2].precondition, sizeof out->steps[2].success_predicate, sizeof out->steps[2].rollback, sizeof slot43, sizeof slot44, sizeof slot45, sizeof slot46, sizeof slot47, sizeof slot48, sizeof slot49, sizeof slot50, sizeof slot51, sizeof slot52, sizeof out->steps[2].output, sizeof slot54, sizeof slot55, sizeof out->steps[3].action, sizeof out->steps[3].precondition, sizeof out->steps[3].success_predicate, sizeof out->steps[3].rollback, sizeof slot60, sizeof slot61, sizeof slot62, sizeof slot63, sizeof slot64, sizeof slot65, sizeof slot66, sizeof slot67, sizeof slot68, sizeof slot69, sizeof out->steps[3].output, sizeof slot71, sizeof slot72, sizeof out->steps[4].action, sizeof out->steps[4].precondition, sizeof out->steps[4].success_predicate, sizeof out->steps[4].rollback, sizeof slot77, sizeof slot78, sizeof slot79, sizeof slot80, sizeof slot81, sizeof slot82, sizeof slot83, sizeof slot84, sizeof slot85, sizeof slot86, sizeof out->steps[4].output, sizeof slot88, sizeof slot89, sizeof out->steps[5].action, sizeof out->steps[5].precondition, sizeof out->steps[5].success_predicate, sizeof out->steps[5].rollback, sizeof slot94, sizeof slot95, sizeof slot96, sizeof slot97, sizeof slot98, sizeof slot99, sizeof slot100, sizeof slot101, sizeof slot102, sizeof slot103, sizeof out->steps[5].output, sizeof slot105, sizeof slot106, sizeof out->steps[6].action, sizeof out->steps[6].precondition, sizeof out->steps[6].success_predicate, sizeof out->steps[6].rollback, sizeof slot111, sizeof slot112, sizeof slot113, sizeof slot114, sizeof slot115, sizeof slot116, sizeof slot117, sizeof slot118, sizeof slot119, sizeof slot120, sizeof out->steps[6].output, sizeof slot122, sizeof slot123, sizeof out->steps[7].action, sizeof out->steps[7].precondition, sizeof out->steps[7].success_predicate, sizeof out->steps[7].rollback, sizeof slot128, sizeof slot129, sizeof slot130, sizeof slot131, sizeof slot132, sizeof slot133, sizeof slot134, sizeof slot135, sizeof slot136, sizeof slot137, sizeof out->steps[7].output, sizeof slot139, sizeof slot140, sizeof out->steps[8].action, sizeof out->steps[8].precondition, sizeof out->steps[8].success_predicate, sizeof out->steps[8].rollback, sizeof slot145, sizeof slot146, sizeof slot147, sizeof slot148, sizeof slot149, sizeof slot150, sizeof slot151, sizeof slot152, sizeof slot153, sizeof slot154, sizeof out->steps[8].output, sizeof slot156, sizeof slot157, sizeof out->steps[9].action, sizeof out->steps[9].precondition, sizeof out->steps[9].success_predicate, sizeof out->steps[9].rollback, sizeof slot162, sizeof slot163, sizeof slot164, sizeof slot165, sizeof slot166, sizeof slot167, sizeof slot168, sizeof slot169, sizeof slot170, sizeof slot171, sizeof out->steps[9].output, sizeof slot173, sizeof slot174, sizeof out->steps[10].action, sizeof out->steps[10].precondition, sizeof out->steps[10].success_predicate, sizeof out->steps[10].rollback, sizeof slot179, sizeof slot180, sizeof slot181, sizeof slot182, sizeof slot183, sizeof slot184, sizeof slot185, sizeof slot186, sizeof slot187, sizeof slot188, sizeof out->steps[10].output, sizeof slot190, sizeof slot191, sizeof out->steps[11].action, sizeof out->steps[11].precondition, sizeof out->steps[11].success_predicate, sizeof out->steps[11].rollback, sizeof slot196, sizeof slot197, sizeof slot198, sizeof slot199, sizeof slot200, sizeof slot201, sizeof slot202, sizeof slot203, sizeof slot204, sizeof slot205, sizeof out->steps[11].output, sizeof slot207, sizeof slot208, sizeof out->steps[12].action, sizeof out->steps[12].precondition, sizeof out->steps[12].success_predicate, sizeof out->steps[12].rollback, sizeof slot213, sizeof slot214, sizeof slot215, sizeof slot216, sizeof slot217, sizeof slot218, sizeof slot219, sizeof slot220, sizeof slot221, sizeof slot222, sizeof out->steps[12].output, sizeof slot224, sizeof slot225, sizeof out->steps[13].action, sizeof out->steps[13].precondition, sizeof out->steps[13].success_predicate, sizeof out->steps[13].rollback, sizeof slot230, sizeof slot231, sizeof slot232, sizeof slot233, sizeof slot234, sizeof slot235, sizeof slot236, sizeof slot237, sizeof slot238, sizeof slot239, sizeof out->steps[13].output, sizeof slot241, sizeof slot242, sizeof out->steps[14].action, sizeof out->steps[14].precondition, sizeof out->steps[14].success_predicate, sizeof out->steps[14].rollback, sizeof slot247, sizeof slot248, sizeof slot249, sizeof slot250, sizeof slot251, sizeof slot252, sizeof slot253, sizeof slot254, sizeof slot255, sizeof slot256, sizeof out->steps[14].output, sizeof slot258, sizeof slot259, sizeof out->steps[15].action, sizeof out->steps[15].precondition, sizeof out->steps[15].success_predicate, sizeof out->steps[15].rollback, sizeof slot264, sizeof slot265, sizeof slot266, sizeof slot267, sizeof slot268, sizeof slot269, sizeof slot270, sizeof slot271, sizeof slot272, sizeof slot273, sizeof out->steps[15].output, sizeof slot275, sizeof slot276, sizeof out->steps[16].action, sizeof out->steps[16].precondition, sizeof out->steps[16].success_predicate, sizeof out->steps[16].rollback, sizeof slot281, sizeof slot282, sizeof slot283, sizeof slot284, sizeof slot285, sizeof slot286, sizeof slot287, sizeof slot288, sizeof slot289, sizeof slot290, sizeof out->steps[16].output, sizeof slot292, sizeof slot293, sizeof out->steps[17].action, sizeof out->steps[17].precondition, sizeof out->steps[17].success_predicate, sizeof out->steps[17].rollback, sizeof slot298, sizeof slot299, sizeof slot300, sizeof slot301, sizeof slot302, sizeof slot303, sizeof slot304, sizeof slot305, sizeof slot306, sizeof slot307, sizeof out->steps[17].output, sizeof slot309, sizeof slot310, sizeof out->steps[18].action, sizeof out->steps[18].precondition, sizeof out->steps[18].success_predicate, sizeof out->steps[18].rollback, sizeof slot315, sizeof slot316, sizeof slot317, sizeof slot318, sizeof slot319, sizeof slot320, sizeof slot321, sizeof slot322, sizeof slot323, sizeof slot324, sizeof out->steps[18].output, sizeof slot326, sizeof slot327, sizeof out->steps[19].action, sizeof out->steps[19].precondition, sizeof out->steps[19].success_predicate, sizeof out->steps[19].rollback, sizeof slot332, sizeof slot333, sizeof slot334, sizeof slot335, sizeof slot336, sizeof slot337, sizeof slot338, sizeof slot339, sizeof slot340, sizeof slot341, sizeof out->steps[19].output, sizeof slot343, sizeof slot344, sizeof out->steps[20].action, sizeof out->steps[20].precondition, sizeof out->steps[20].success_predicate, sizeof out->steps[20].rollback, sizeof slot349, sizeof slot350, sizeof slot351, sizeof slot352, sizeof slot353, sizeof slot354, sizeof slot355, sizeof slot356, sizeof slot357, sizeof slot358, sizeof out->steps[20].output, sizeof slot360, sizeof slot361, sizeof out->steps[21].action, sizeof out->steps[21].precondition, sizeof out->steps[21].success_predicate, sizeof out->steps[21].rollback, sizeof slot366, sizeof slot367, sizeof slot368, sizeof slot369, sizeof slot370, sizeof slot371, sizeof slot372, sizeof slot373, sizeof slot374, sizeof slot375, sizeof out->steps[21].output, sizeof slot377, sizeof slot378, sizeof out->steps[22].action, sizeof out->steps[22].precondition, sizeof out->steps[22].success_predicate, sizeof out->steps[22].rollback, sizeof slot383, sizeof slot384, sizeof slot385, sizeof slot386, sizeof slot387, sizeof slot388, sizeof slot389, sizeof slot390, sizeof slot391, sizeof slot392, sizeof out->steps[22].output, sizeof slot394, sizeof slot395, sizeof out->steps[23].action, sizeof out->steps[23].precondition, sizeof out->steps[23].success_predicate, sizeof out->steps[23].rollback, sizeof slot400, sizeof slot401, sizeof slot402, sizeof slot403, sizeof slot404, sizeof slot405, sizeof slot406, sizeof slot407, sizeof slot408, sizeof slot409, sizeof out->steps[23].output, sizeof slot411, sizeof slot412, sizeof out->steps[24].action, sizeof out->steps[24].precondition, sizeof out->steps[24].success_predicate, sizeof out->steps[24].rollback, sizeof slot417, sizeof slot418, sizeof slot419, sizeof slot420, sizeof slot421, sizeof slot422, sizeof slot423, sizeof slot424, sizeof slot425, sizeof slot426, sizeof out->steps[24].output, sizeof slot428, sizeof slot429, sizeof out->steps[25].action, sizeof out->steps[25].precondition, sizeof out->steps[25].success_predicate, sizeof out->steps[25].rollback, sizeof slot434, sizeof slot435, sizeof slot436, sizeof slot437, sizeof slot438, sizeof slot439, sizeof slot440, sizeof slot441, sizeof slot442, sizeof slot443, sizeof out->steps[25].output, sizeof slot445, sizeof slot446, sizeof out->steps[26].action, sizeof out->steps[26].precondition, sizeof out->steps[26].success_predicate, sizeof out->steps[26].rollback, sizeof slot451, sizeof slot452, sizeof slot453, sizeof slot454, sizeof slot455, sizeof slot456, sizeof slot457, sizeof slot458, sizeof slot459, sizeof slot460, sizeof out->steps[26].output, sizeof slot462, sizeof slot463, sizeof out->steps[27].action, sizeof out->steps[27].precondition, sizeof out->steps[27].success_predicate, sizeof out->steps[27].rollback, sizeof slot468, sizeof slot469, sizeof slot470, sizeof slot471, sizeof slot472, sizeof slot473, sizeof slot474, sizeof slot475, sizeof slot476, sizeof slot477, sizeof out->steps[27].output, sizeof slot479, sizeof slot480, sizeof out->steps[28].action, sizeof out->steps[28].precondition, sizeof out->steps[28].success_predicate, sizeof out->steps[28].rollback, sizeof slot485, sizeof slot486, sizeof slot487, sizeof slot488, sizeof slot489, sizeof slot490, sizeof slot491, sizeof slot492, sizeof slot493, sizeof slot494, sizeof out->steps[28].output, sizeof slot496, sizeof slot497, sizeof out->steps[29].action, sizeof out->steps[29].precondition, sizeof out->steps[29].success_predicate, sizeof out->steps[29].rollback, sizeof slot502, sizeof slot503, sizeof slot504, sizeof slot505, sizeof slot506, sizeof slot507, sizeof slot508, sizeof slot509, sizeof slot510, sizeof slot511, sizeof out->steps[29].output, sizeof slot513, sizeof slot514, sizeof out->steps[30].action, sizeof out->steps[30].precondition, sizeof out->steps[30].success_predicate, sizeof out->steps[30].rollback, sizeof slot519, sizeof slot520, sizeof slot521, sizeof slot522, sizeof slot523, sizeof slot524, sizeof slot525, sizeof slot526, sizeof slot527, sizeof slot528, sizeof out->steps[30].output, sizeof slot530, sizeof slot531, sizeof out->steps[31].action, sizeof out->steps[31].precondition, sizeof out->steps[31].success_predicate, sizeof out->steps[31].rollback, sizeof slot536, sizeof slot537, sizeof slot538, sizeof slot539, sizeof slot540, sizeof slot541, sizeof slot542, sizeof slot543, sizeof slot544, sizeof slot545, sizeof out->steps[31].output, sizeof slot547, sizeof slot548};
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_PLAN_GET, fields, 1, values, caps, 549, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_PLAN_GET, fields, 1, values, caps, 549, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
       return -1;
@@ -1689,7 +1490,7 @@ int db1_execution_plan_list_ids(int *out_ids, int max)
       wire_caps[wire_row * 1u + 0u] = sizeof wire_scratch[wire_row * 1u + 0u];
    }
    uint32_t wire_filled = 0;
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_PLAN_LIST_IDS, fields, 1, wire_values, wire_caps,
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_PLAN_LIST_IDS, fields, 1, wire_values, wire_caps,
                            (uint32_t)(max * 1), &wire_filled);
    free(wire_values);
    free(wire_caps);
@@ -1712,7 +1513,7 @@ int db1_execution_plan_exists(int plan_id)
    char arg0[32];
    snprintf(arg0, sizeof arg0, "%d", plan_id);
    const char *fields[] = {arg0};
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_PLAN_EXISTS, fields, 1, NULL, NULL, 0, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_PLAN_EXISTS, fields, 1, NULL, NULL, 0, NULL);
    if (wire_status == (int)AIMEE_DB1_STATUS_MISSING)
       return 0;
    return wire_status == (int)AIMEE_DB1_STATUS_OK ? 1 : -1;
@@ -1726,7 +1527,7 @@ int db1_execution_plan_count_steps(int plan_id)
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_PLAN_COUNT_STEPS, fields, 1, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_PLAN_COUNT_STEPS, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -1758,7 +1559,7 @@ int db1_execution_plan_list_running_ids(int *out_ids, int max)
       wire_caps[wire_row * 1u + 0u] = sizeof wire_scratch[wire_row * 1u + 0u];
    }
    uint32_t wire_filled = 0;
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_PLAN_LIST_RUNNING_IDS, fields, 1, wire_values, wire_caps,
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_PLAN_LIST_RUNNING_IDS, fields, 1, wire_values, wire_caps,
                            (uint32_t)(max * 1), &wire_filled);
    free(wire_values);
    free(wire_caps);
@@ -1814,7 +1615,7 @@ int db1_execution_plan_list_recent_summaries(db1_execution_plan_summary_t *out, 
       wire_caps[wire_row * 7u + 6u] = sizeof wire_scratch[wire_row * 3u + 2u];
    }
    uint32_t wire_filled = 0;
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_PLAN_LIST_RECENT_SUMMARIES, fields, 1, wire_values, wire_caps,
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_PLAN_LIST_RECENT_SUMMARIES, fields, 1, wire_values, wire_caps,
                            (uint32_t)(max * 7), &wire_filled);
    free(wire_values);
    free(wire_caps);
@@ -1842,7 +1643,7 @@ int db1_execution_plan_set_status(int plan_id, const char *status)
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_PLAN_SET_STATUS, fields, 2, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_PLAN_SET_STATUS, fields, 2, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -1856,7 +1657,7 @@ int db1_execution_plan_cancel_by_id(int plan_id, const char *reason)
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_PLAN_CANCEL_BY_ID, fields, 2, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_PLAN_CANCEL_BY_ID, fields, 2, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -1870,7 +1671,7 @@ int db1_execution_plan_cancel_stale(int threshold_seconds, const char *reason)
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = call_stage(AIMEE_DB1_OP_EXECUTION_PLAN_CANCEL_STALE, fields, 2, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_EXECUTION_PLAN_CANCEL_STALE, fields, 2, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -1884,7 +1685,7 @@ int db1_plan_step_set_status(int step_id, const char *status)
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = call_stage(AIMEE_DB1_OP_PLAN_STEP_SET_STATUS, fields, 2, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_PLAN_STEP_SET_STATUS, fields, 2, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -1898,7 +1699,7 @@ int db1_plan_step_set_status_output(int step_id, const char *status, const char 
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = call_stage(AIMEE_DB1_OP_PLAN_STEP_SET_STATUS_OUTPUT, fields, 3, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_PLAN_STEP_SET_STATUS_OUTPUT, fields, 3, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -1912,7 +1713,7 @@ int db1_plan_step_cancel_active_for_plan(int plan_id)
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = call_stage(AIMEE_DB1_OP_PLAN_STEP_CANCEL_ACTIVE_FOR_PLAN, fields, 1, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_PLAN_STEP_CANCEL_ACTIVE_FOR_PLAN, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -1924,7 +1725,7 @@ int db1_plan_step_cancel_orphans()
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = call_stage(AIMEE_DB1_OP_PLAN_STEP_CANCEL_ORPHANS, fields, 0, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_PLAN_STEP_CANCEL_ORPHANS, fields, 0, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -1939,7 +1740,7 @@ int db1_step_evidence_insert(int plan_id, int step_id, const char *kind, const c
    char arg4[32];
    snprintf(arg4, sizeof arg4, "%d", passed);
    const char *fields[] = {arg0, arg1, kind ? kind : "", content ? content : "", arg4, strength ? strength : ""};
-   return write_result(call_stage(AIMEE_DB1_OP_STEP_EVIDENCE_INSERT, fields, 6, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_STEP_EVIDENCE_INSERT, fields, 6, NULL, NULL, 0, NULL));
 }
 
 int db1_step_evidence_get_latest(int step_id, db1_step_evidence_latest_t *out)
@@ -1953,7 +1754,7 @@ int db1_step_evidence_get_latest(int step_id, db1_step_evidence_latest_t *out)
    memset(out, 0, sizeof *out);
    char *const values[] = {out->strength, slot1, out->kind, out->created_at};
    const size_t caps[] = {sizeof out->strength, sizeof slot1, sizeof out->kind, sizeof out->created_at};
-   int wire_status = call_stage(AIMEE_DB1_OP_STEP_EVIDENCE_GET_LATEST, fields, 1, values, caps, 4, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_STEP_EVIDENCE_GET_LATEST, fields, 1, values, caps, 4, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
       return -1;

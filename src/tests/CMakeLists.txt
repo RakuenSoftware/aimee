@@ -19,6 +19,7 @@ function(aimee_add_test test_name)
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${CMAKE_CURRENT_SOURCE_DIR}/../headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+  target_link_libraries(${test_name} PRIVATE aimee-core-codec)
   aimee_enable_test_asserts(${test_name})
   if(WIN32)
     target_compile_definitions(${test_name} PRIVATE AIMEE_WINDOWS _WIN32_WINNT=0x0A00)
@@ -343,17 +344,6 @@ add_test(NAME test_server_session_pools COMMAND test_server_session_pools)
 set_tests_properties(test_server_session_pools PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-add_executable(test_cmd_table test_cmd_table.c)
-target_include_directories(test_cmd_table PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..
-  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
-  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
-aimee_enable_test_asserts(test_cmd_table)
-target_link_libraries(test_cmd_table PRIVATE aimee-core)
-add_test(NAME test_cmd_table COMMAND test_cmd_table)
-set_tests_properties(test_cmd_table PROPERTIES
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
 add_executable(test_agent_http test_agent_http.c)
 target_include_directories(test_agent_http PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
@@ -505,3 +495,14 @@ if(NOT WIN32)
     ../aimee_sha256.c)
   target_link_libraries(test_server_session_log PRIVATE Threads::Threads OpenSSL::Crypto)
 endif()
+# Tenant entry is stubbed to exercise every HTTP failure mapping without a DB.
+add_executable(test_kb_http_common test_kb_http_common.c
+  ../kb/http/kb_http_common.c ../vendor/cJSON.c)
+target_include_directories(test_kb_http_common PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..
+  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+aimee_enable_test_asserts(test_kb_http_common)
+add_test(NAME test_kb_http_common COMMAND test_kb_http_common)
+
+aimee_add_test(test_core_base64 test_core_base64.c)

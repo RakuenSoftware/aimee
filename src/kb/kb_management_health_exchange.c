@@ -1,3 +1,4 @@
+#include <aimee/core/codec/base64.h>
 #include "kb_management_health_exchange.h"
 
 #include "cJSON.h"
@@ -68,64 +69,20 @@ static int exact_object(const cJSON *j, const char *const *names, size_t count)
    return fields == count;
 }
 
-static int b64_value(unsigned char c)
-{
-   if (c >= 'A' && c <= 'Z')
-      return c - 'A';
-   if (c >= 'a' && c <= 'z')
-      return c - 'a' + 26;
-   if (c >= '0' && c <= '9')
-      return c - '0' + 52;
-   return c == '-' ? 62 : (c == '_' ? 63 : -1);
-}
-
 static int nonce_decode(const char *s, unsigned char out[32])
 {
-   if (!s || strlen(s) != 43)
-      return -1;
-   uint32_t acc = 0;
-   unsigned bits = 0;
-   size_t o = 0;
-   for (size_t i = 0; i < 43; i++)
-   {
-      int v = b64_value((unsigned char)s[i]);
-      if (v < 0)
-         return -1;
-      acc = (acc << 6) | (unsigned)v;
-      bits += 6;
-      if (bits >= 8)
-      {
-         bits -= 8;
-         if (o >= 32)
-            return -1;
-         out[o++] = (unsigned char)(acc >> bits);
-         acc &= bits ? (1U << bits) - 1U : 0U;
-      }
-   }
-   return o == 32 && bits == 2 && acc == 0 ? 0 : -1;
+   size_t written = 0;
+   return s && strlen(s) == 43 &&
+                  aimee_codec_base64_decode(s, 43, out, 32, AIMEE_BASE64_URL_CANONICAL, &written) &&
+                  written == 32
+              ? 0
+              : -1;
 }
 
 static void nonce_encode(const unsigned char in[32], char out[44])
 {
-   static const char alphabet[] =
-       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-   uint32_t acc = 0;
-   unsigned bits = 0;
-   size_t o = 0;
-   for (size_t i = 0; i < 32; i++)
-   {
-      acc = (acc << 8) | in[i];
-      bits += 8;
-      while (bits >= 6)
-      {
-         bits -= 6;
-         out[o++] = alphabet[(acc >> bits) & 63];
-         acc &= bits ? (1U << bits) - 1U : 0U;
-      }
-   }
-   if (bits)
-      out[o++] = alphabet[(acc << (6 - bits)) & 63];
-   out[o] = '\0';
+   size_t written = 0;
+   (void)aimee_codec_base64_encode(in, 32, out, 44, AIMEE_BASE64_URL, &written);
 }
 
 static cJSON *parse_exact(const char *raw, size_t len)
