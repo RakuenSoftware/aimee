@@ -2114,7 +2114,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "e076b6594be231c9d1c16b1ecfdf322ddc28b888dbbe7564d9eceda2ec364b44"
+      "sha256": "ceafb3a91bb0d772d1d741c7fa721f2b609e29ec4fbffcdfee93952ada1801c1",
+      "boundary_review": "IR #3036: prepare prefix/chain replay commitment from actual initial/fallback Anthropic request bytes and bind response before canonical capture. Existing six host memory context/recall/insert calls and registered Go policy ownership remain unchanged. This records source-boundary reasoning, not independent production-promotion approval."
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",

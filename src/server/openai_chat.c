@@ -1220,7 +1220,7 @@ static int openai_prepare_ir_request(aimee_request_t *request, const agent_t *ag
 }
 static int openai_post_ir(const agent_t *agent, const aimee_request_t *request, aimee_wire_t wire,
                           const char *url, const char *auth, const char *headers, char **reply,
-                          char *error, size_t capacity)
+                          aimee_anthropic_replay_t *replay, char *error, size_t capacity)
 {
    char *body = openai_build_ir_body(request, wire);
    if (!body)
@@ -1238,6 +1238,14 @@ static int openai_post_ir(const agent_t *agent, const aimee_request_t *request, 
    {
       snprintf(error, capacity, "%s", wire_fence_last_error());
       free(body);
+      return HTTP_RETRY_ADMISSION_REFUSED;
+   }
+   if (wire == AIMEE_WIRE_ANTHROPIC &&
+       aimee_anthropic_replay_prepare(bytes.data, bytes.len, replay))
+   {
+      wire_fence_destroy(snapshot);
+      free(body);
+      snprintf(error, capacity, "cannot bind native replay prefix");
       return HTTP_RETRY_ADMISSION_REFUSED;
    }
    int attempts =
@@ -1419,7 +1427,9 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
       }
    }
    char *reply = NULL;
-   int status = openai_post_ir(agent, request, wire, url, auth, headers, &reply, error, capacity);
+   aimee_anthropic_replay_t replay = {0};
+   int status =
+       openai_post_ir(agent, request, wire, url, auth, headers, &reply, &replay, error, capacity);
    if (status != HTTP_RETRY_ADMISSION_REFUSED && container &&
        gw_buffered_after_status(container, "input", status, &mutation) == GW_POST_RESEND)
    {
@@ -1429,7 +1439,8 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
       reply = NULL;
       if (openai_ir_history_replace(request, cJSON_GetObjectItemCaseSensitive(container, "input")))
          goto refused;
-      status = openai_post_ir(agent, request, wire, url, auth, headers, &reply, error, capacity);
+      status = openai_post_ir(agent, request, wire, url, auth, headers, &reply, &replay, error,
+                              capacity);
    }
    cJSON_Delete(container);
    gw_mutate_ctx_free(&mutation);
@@ -1442,6 +1453,12 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
    }
    int rc = aimee_backend_parse_wire(reply, strlen(reply), wire, out, error, capacity);
    free(reply);
+   if (!rc && wire == AIMEE_WIRE_ANTHROPIC && aimee_anthropic_bind_response(&replay, out))
+   {
+      aimee_ir_session_fail_capture();
+      rc = -1;
+      snprintf(error, capacity, "cannot retain native replay binding");
+   }
    if (rc || out->error_message || aimee_ir_session_emit_buffered_response(out, NULL))
    {
       if (!rc)

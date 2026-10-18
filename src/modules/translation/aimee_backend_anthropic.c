@@ -5,6 +5,8 @@
 #include <aimee/translation/aimee_frontend.h>
 
 #include "cJSON.h"
+#include "aimee_sha256.h"
+#include <stdint.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -98,7 +100,7 @@ static cJSON *block_to_anthropic(const aimee_block_t *b, int preserve_cache)
       current.message_group = original.message_group;
       aimee_request_t left = {.system = &current, .n_system = 1};
       aimee_request_t right = {.system = &original, .n_system = 1};
-      int unchanged = aimee_ir_request_equal(&left, &right);
+      int unchanged = aimee_ir_request_wire_equal(&left, &right);
       aimee_block_free_contents(&original);
       if (unchanged)
          return cJSON_Duplicate(b->raw, 1);
@@ -134,7 +136,9 @@ static cJSON *block_to_anthropic(const aimee_block_t *b, int preserve_cache)
       cJSON_AddStringToObject(el, "tool_use_id", b->tool_id ? b->tool_id : "");
       if (b->tool_is_error)
          cJSON_AddBoolToObject(el, "is_error", 1);
-      cJSON_AddItemToObject(el, "content", tool_result_content(b->tool_result));
+      cJSON_AddItemToObject(el, "content",
+                            preserve_cache && b->tool_result ? cJSON_Duplicate(b->tool_result, 1)
+                                                             : tool_result_content(b->tool_result));
       break;
    case AIMEE_BLK_IMAGE:
    case AIMEE_BLK_DOCUMENT:
@@ -232,6 +236,317 @@ static cJSON *blocks_to_anthropic(const aimee_block_t *blocks, int n, int preser
    return arr;
 }
 
+/* Replay fences bind exact decimal/string content, native message structure and
+ * the thinking chain. They do not authenticate a provider signature. Cache
+ * markers and request parameters outside system/tools/messages are excluded. */
+static const char *binding_string(const cJSON *value, const char *key)
+{
+   return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, key));
+}
+static int binding_string_equal(const char *a, const char *b)
+{
+   return a && b ? !strcmp(a, b) : a == b;
+}
+static void binding_strip_block_cache(cJSON *block)
+{
+   if (!cJSON_IsObject(block))
+      return;
+   cJSON_DeleteItemFromObjectCaseSensitive(block, "cache_control");
+   const char *type = binding_string(block, "type");
+   if (type && !strcmp(type, "tool_result"))
+   {
+      cJSON *parts = cJSON_GetObjectItemCaseSensitive(block, "content"), *part;
+      if (cJSON_IsArray(parts))
+         cJSON_ArrayForEach(part, parts) if (cJSON_IsObject(part))
+             cJSON_DeleteItemFromObjectCaseSensitive(part, "cache_control");
+   }
+}
+static int binding_hash(char digest[65], const char *tag, const cJSON *value, int cache_mode)
+{
+   cJSON *copy = value ? cJSON_Duplicate(value, 1) : NULL;
+   if (value && !copy)
+      return -1;
+   if (cache_mode == 1)
+      binding_strip_block_cache(copy);
+   if (cache_mode == 2 && cJSON_IsArray(copy))
+   {
+      cJSON *part;
+      cJSON_ArrayForEach(part, copy) binding_strip_block_cache(part);
+   }
+   cJSON *canonical = value ? aimee_ir_json_canonical_copy(copy) : NULL;
+   if (value && !canonical)
+   {
+      cJSON_Delete(copy);
+      return -1;
+   }
+   char *json = value ? cJSON_PrintUnformatted(canonical) : strdup("<absent>");
+   cJSON_Delete(canonical);
+   cJSON_Delete(copy);
+   if (!json)
+      return -1;
+   size_t tag_length = strlen(tag), length = strlen(json);
+   if (length > SIZE_MAX - tag_length - 67)
+   {
+      free(json);
+      return -1;
+   }
+   char *input = malloc(66 + tag_length + length);
+   if (!input)
+   {
+      free(json);
+      return -1;
+   }
+   memcpy(input, digest, 64);
+   input[64] = '|';
+   memcpy(input + 65, tag, tag_length);
+   input[65 + tag_length] = '|';
+   memcpy(input + 66 + tag_length, json, length);
+   int rc = aimee_sha256_hex(input, 66 + tag_length + length, digest);
+   free(input);
+   free(json);
+   return rc;
+}
+static int binding_init(aimee_anthropic_replay_t *state, const cJSON *native)
+{
+   memset(state, 0, sizeof *state);
+   static const char prefix[] = "aimee-anthropic-prefix-v1";
+   static const char chain[] = "aimee-anthropic-thinking-chain-v1";
+   if (!cJSON_IsObject(native) || aimee_sha256_hex(prefix, sizeof prefix - 1, state->prefix) ||
+       aimee_sha256_hex(chain, sizeof chain - 1, state->chain) ||
+       binding_hash(state->prefix, "system", cJSON_GetObjectItemCaseSensitive(native, "system"),
+                    2) ||
+       binding_hash(state->prefix, "tools", cJSON_GetObjectItemCaseSensitive(native, "tools"), 2))
+      return -1;
+   return 0;
+}
+typedef struct
+{
+   int message, block;
+} binding_cursor_t;
+static const aimee_block_t *binding_next(const aimee_request_t *request, binding_cursor_t *cursor,
+                                         const cJSON *native)
+{
+   const char *type = binding_string(native, "type");
+   while (request && cursor->message < request->n_messages)
+   {
+      const aimee_message_t *message = &request->messages[cursor->message];
+      if (cursor->block >= message->n_blocks)
+      {
+         cursor->message++;
+         cursor->block = 0;
+         continue;
+      }
+      const aimee_block_t *block = &message->blocks[cursor->block++];
+      if (block->type != AIMEE_BLK_THINKING)
+         continue;
+      if (type && !strcmp(type, "redacted_thinking"))
+      {
+         if (binding_string_equal(block->thinking_redacted, binding_string(native, "data")))
+            return block;
+      }
+      else if (!block->thinking_redacted &&
+               binding_string_equal(block->text, binding_string(native, "thinking")) &&
+               binding_string_equal(block->thinking_signature, binding_string(native, "signature")))
+         return block;
+   }
+   return NULL;
+}
+static int binding_header(aimee_anthropic_replay_t *state, const cJSON *message)
+{
+   cJSON *header = cJSON_Duplicate(message, 1);
+   if (!header)
+      return -1;
+   cJSON_DeleteItemFromObjectCaseSensitive(header, "content");
+   int rc = binding_hash(state->prefix, "message", header, 0);
+   cJSON_Delete(header);
+   return rc;
+}
+/* mode 0: actual sent request; 1: stamp native entry; 2: guard egress;
+ * mode 3: verify exact replay without modifying the native object. */
+static int binding_walk(cJSON *native, const aimee_request_t *request,
+                        aimee_anthropic_replay_t *state, int mode, int *kept, int *opaque)
+{
+   if (binding_init(state, native))
+      return -1;
+   cJSON *messages = cJSON_GetObjectItemCaseSensitive(native, "messages");
+   if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) > AIMEE_IR_MAX_BLOCKS)
+      return -1;
+   binding_cursor_t cursor = {0};
+   int retained_thinking = 0;
+   cJSON *message = messages->child;
+   while (message)
+   {
+      cJSON *next_message = message->next;
+      char before_message[65];
+      memcpy(before_message, state->prefix, sizeof before_message);
+      if (!cJSON_IsObject(message) || binding_header(state, message))
+         return -1;
+      cJSON *content = cJSON_GetObjectItemCaseSensitive(message, "content");
+      int removed = 0;
+      if (cJSON_IsString(content))
+      {
+         if (binding_hash(state->prefix, "content-string", content, 0))
+            return -1;
+      }
+      else if (cJSON_IsArray(content))
+      {
+         cJSON *block = content->child;
+         while (block)
+         {
+            cJSON *next_block = block->next;
+            const char *type = binding_string(block, "type");
+            if (!type)
+               return -1;
+            if (!strcmp(type, "thinking") || !strcmp(type, "redacted_thinking"))
+            {
+               char before[65], chain[65], expected[199];
+               const aimee_block_t *source = mode ? binding_next(request, &cursor, block) : NULL;
+               memcpy(before, state->chain, sizeof before);
+               /* Removing the oldest thinking blocks is legal. The first retained
+                * block may start at its recorded predecessor; later gaps are not. */
+               if (mode >= 2 && !retained_thinking && source && source->thinking_binding &&
+                   aimee_ir_thinking_binding_valid(source->thinking_binding))
+               {
+                  memcpy(before, source->thinking_binding + 69, 64);
+                  before[64] = 0;
+               }
+               memcpy(chain, before, sizeof chain);
+               if (binding_hash(chain, "thinking", block, 1))
+                  return -1;
+               snprintf(expected, sizeof expected, "ap1:%s:%s:%s", state->prefix, before, chain);
+               if (mode == 1)
+               {
+                  if (!source)
+                     return -1;
+                  char *copy = strdup(expected);
+                  if (!copy)
+                     return -1;
+                  aimee_block_t *owned = (aimee_block_t *)source;
+                  free(owned->thinking_binding);
+                  owned->thinking_binding = copy;
+               }
+               else if (mode >= 2 &&
+                        (!source || !anthropic_ir_block_replayable(source) ||
+                         !source->thinking_binding || strcmp(source->thinking_binding, expected)))
+               {
+                  if (mode == 3)
+                     return 1;
+                  cJSON_Delete(cJSON_DetachItemViaPointer(content, block));
+                  removed = 1;
+                  block = next_block;
+                  continue;
+               }
+               memcpy(state->chain, chain, sizeof chain);
+               retained_thinking = 1;
+               if (kept)
+                  (*kept)++;
+               if (opaque && source &&
+                   (source->thinking_signature || source->thinking_redacted ||
+                    source->thinking_encrypted_content))
+                  (*opaque)++;
+            }
+            else if (binding_hash(state->prefix, "block", block, 1))
+               return -1;
+            block = next_block;
+         }
+      }
+      else
+         return -1;
+      if (mode == 2 && removed && !cJSON_GetArraySize(content))
+      {
+         cJSON_Delete(cJSON_DetachItemViaPointer(messages, message));
+         memcpy(state->prefix, before_message, sizeof before_message);
+      }
+      else if (binding_hash(state->prefix, "message-end", NULL, 0))
+         return -1;
+      message = next_message;
+   }
+   state->valid = 1;
+   return 0;
+}
+int aimee_anthropic_bind_request(const cJSON *native, aimee_request_t *request)
+{
+   int thinking = 0;
+   for (int i = 0; i < request->n_messages; i++)
+      for (int j = 0; j < request->messages[i].n_blocks; j++)
+         thinking |= request->messages[i].blocks[j].type == AIMEE_BLK_THINKING;
+   if (!thinking)
+      return 0;
+   aimee_anthropic_replay_t state;
+   return binding_walk((cJSON *)native, request, &state, 1, NULL, NULL);
+}
+int aimee_anthropic_replay_prepare(const void *frame, size_t length,
+                                   aimee_anthropic_replay_t *state)
+{
+   const char *bytes = frame;
+   if (!state)
+      return -1;
+   memset(state, 0, sizeof *state);
+   if (!bytes || !length || length == SIZE_MAX)
+      return -1;
+   const char *end = NULL;
+   cJSON *native = bytes ? cJSON_ParseWithLengthOpts(bytes, length, &end, 0) : NULL;
+   if (end)
+      while (end < bytes + length && (*end == ' ' || *end == '\r' || *end == '\n' || *end == '\t'))
+         end++;
+   int rc = native && end == bytes + length ? binding_walk(native, NULL, state, 0, NULL, NULL) : -1;
+   cJSON_Delete(native);
+   return rc;
+}
+int aimee_anthropic_bind_response(const aimee_anthropic_replay_t *request,
+                                  aimee_response_t *response)
+{
+   if (!request || !request->valid || !response)
+      return -1;
+   aimee_anthropic_replay_t state = *request;
+   cJSON *header = cJSON_CreateObject();
+   if (!header || !cJSON_AddStringToObject(header, "role", "assistant") ||
+       binding_header(&state, header))
+   {
+      cJSON_Delete(header);
+      return -1;
+   }
+   cJSON_Delete(header);
+   for (int i = 0; i < response->n_content; i++)
+   {
+      aimee_block_t *block = &response->content[i];
+      cJSON *native = block_to_anthropic(block, 1);
+      if (!native)
+         return -1;
+      int rc;
+      if (block->type == AIMEE_BLK_THINKING)
+      {
+         char before[65];
+         memcpy(before, state.chain, sizeof before);
+         rc = binding_hash(state.chain, "thinking", native, 1);
+         if (!rc)
+         {
+            char binding[199];
+            snprintf(binding, sizeof binding, "ap1:%s:%s:%s", state.prefix, before, state.chain);
+            char *copy = strdup(binding);
+            if (!copy)
+               rc = -1;
+            else
+            {
+               free(block->thinking_binding);
+               block->thinking_binding = copy;
+            }
+         }
+      }
+      else
+         rc = binding_hash(state.prefix, "block", native, 1);
+      cJSON_Delete(native);
+      if (rc)
+         return -1;
+   }
+   return 0;
+}
+int aimee_anthropic_replay_valid(const aimee_request_t *request, const cJSON *native)
+{
+   aimee_anthropic_replay_t state;
+   return binding_walk((cJSON *)native, request, &state, 3, NULL, NULL) == 0;
+}
+
 /* Render the typed IR tool choice in Anthropic's spelling. Parallel tool use rides
  * inside the choice object as its negation, so a client that only set
  * parallel_tool_calls:false still needs a choice object to carry it. */
@@ -321,16 +636,16 @@ static cJSON *native_request_overlay(const aimee_request_t *ir, cJSON *out)
    {
       aimee_request_t left = {.system = ir->system, .n_system = ir->n_system};
       aimee_request_t right = {.system = original.system, .n_system = original.n_system};
-      int failed =
-          aimee_ir_request_equal(&left, &right) && restore_native_section(out, ir->raw, "system");
+      int failed = aimee_ir_request_wire_equal(&left, &right) &&
+                   restore_native_section(out, ir->raw, "system");
       left = (aimee_request_t){.messages = ir->messages, .n_messages = ir->n_messages};
       right = (aimee_request_t){.messages = original.messages, .n_messages = original.n_messages};
-      failed |=
-          aimee_ir_request_equal(&left, &right) && restore_native_section(out, ir->raw, "messages");
+      failed |= aimee_ir_request_wire_equal(&left, &right) &&
+                restore_native_section(out, ir->raw, "messages");
       left = (aimee_request_t){.tools = ir->tools, .n_tools = ir->n_tools};
       right = (aimee_request_t){.tools = original.tools, .n_tools = original.n_tools};
-      failed |=
-          aimee_ir_request_equal(&left, &right) && restore_native_section(out, ir->raw, "tools");
+      failed |= aimee_ir_request_wire_equal(&left, &right) &&
+                restore_native_section(out, ir->raw, "tools");
       aimee_request_free(&original);
       if (failed)
       {
@@ -347,16 +662,18 @@ static cJSON *native_request_overlay(const aimee_request_t *ir, cJSON *out)
    return native_overlay(ir->raw, out, fields, sizeof fields / sizeof fields[0]);
 }
 
-cJSON *anthropic_backend_build(const aimee_request_t *ir)
+static cJSON *anthropic_backend_build_unbound(const aimee_request_t *ir)
 {
    if (aimee_ir_request_admit(ir))
       return NULL;
+   for (int i = 0; i < ir->n_system; i++)
+      if (ir->system[i].type == AIMEE_BLK_THINKING)
+         return NULL;
    /* Native replay retains client cache breakpoints, TTLs, field ordering and
     * unknown native settings. Verify the typed payload against its entry
     * snapshot as well as the mutation flag: a stage forgetting to report an
     * edit must never cause stale user/tool content to be replayed. */
-   if (ir->frontend == AIMEE_WIRE_ANTHROPIC && ir->raw && !ir->mutated &&
-       ir->cache_policy == AIMEE_CACHE_DEFAULT)
+   if (ir->frontend == AIMEE_WIRE_ANTHROPIC && ir->raw && ir->cache_policy == AIMEE_CACHE_DEFAULT)
    {
       aimee_request_t original = {0};
       char error[128];
@@ -364,7 +681,7 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
       {
          int same_model = (!ir->model && !original.model) ||
                           (ir->model && original.model && !strcmp(ir->model, original.model));
-         int unchanged = same_model && aimee_ir_request_equal(ir, &original);
+         int unchanged = same_model && aimee_ir_request_wire_equal(ir, &original);
          aimee_request_free(&original);
          if (unchanged)
             return cJSON_Duplicate(ir->raw, 1);
@@ -470,6 +787,20 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
       }
       if (!preserve_cache)
          strip_cache_control(content);
+      if (preserve_cache && ir->messages[i].content_scalar && ir->messages[i].n_blocks == 1 &&
+          ir->messages[i].blocks[0].type == AIMEE_BLK_TEXT &&
+          !ir->messages[i].blocks[0].cache_control)
+      {
+         cJSON_Delete(content);
+         content = cJSON_CreateString(
+             ir->messages[i].blocks[0].text ? ir->messages[i].blocks[0].text : "");
+         if (!content)
+         {
+            cJSON_Delete(m);
+            cJSON_Delete(out);
+            return NULL;
+         }
+      }
       cJSON_AddItemToObject(m, "content", content);
       if (preserve_cache)
       {
@@ -552,6 +883,54 @@ cJSON *anthropic_backend_build(const aimee_request_t *ir)
              stop, cJSON_CreateString(ir->stop_sequences[i] ? ir->stop_sequences[i] : ""));
    }
    return preserve_cache && ir->raw ? native_request_overlay(ir, out) : out;
+}
+
+cJSON *anthropic_backend_build(const aimee_request_t *request)
+{
+   cJSON *native = anthropic_backend_build_unbound(request);
+   if (!native)
+      return NULL;
+   aimee_anthropic_replay_t state;
+   if (binding_walk(native, request, &state, 2, NULL, NULL))
+   {
+      cJSON_Delete(native);
+      return NULL;
+   }
+   return native;
+}
+void aimee_anthropic_projection_report(const aimee_request_t *request,
+                                       aimee_wire_projection_report_t *report)
+{
+   memset(report, 0, sizeof *report);
+   for (int i = 0; i < request->n_system; i++)
+      if (request->system[i].type == AIMEE_BLK_THINKING)
+      {
+         report->omitted_reasoning_blocks++;
+         report->omitted_opaque_state_blocks +=
+             !!(request->system[i].thinking_signature || request->system[i].thinking_redacted ||
+                request->system[i].thinking_encrypted_content);
+      }
+   for (int i = 0; i < request->n_messages; i++)
+      for (int j = 0; j < request->messages[i].n_blocks; j++)
+      {
+         const aimee_block_t *block = &request->messages[i].blocks[j];
+         if (block->type == AIMEE_BLK_THINKING)
+         {
+            report->omitted_reasoning_blocks++;
+            report->omitted_opaque_state_blocks +=
+                !!(block->thinking_signature || block->thinking_redacted ||
+                   block->thinking_encrypted_content);
+         }
+      }
+   cJSON *native = anthropic_backend_build_unbound(request);
+   aimee_anthropic_replay_t state;
+   int kept = 0, opaque = 0;
+   if (native && !binding_walk(native, request, &state, 2, &kept, &opaque))
+   {
+      report->omitted_reasoning_blocks -= kept;
+      report->omitted_opaque_state_blocks -= opaque;
+   }
+   cJSON_Delete(native);
 }
 
 /* --- parse: Anthropic response -> IR --- */

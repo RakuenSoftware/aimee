@@ -48,3 +48,33 @@ func TestPolicyViewIsExplicitAndStrict(t *testing.T) {
 		}
 	}
 }
+
+func TestThinkingReplayBindingContract(t *testing.T) {
+	binding := "ap1:" + strings.Repeat("a", 64) + ":" + strings.Repeat("b", 64) + ":" + strings.Repeat("c", 64)
+	encoded := []byte(`{"type":"thinking","text":"reason","thinking_binding":"` + binding + `"}`)
+	if !ValidBlock(encoded) {
+		t.Fatal("refused canonical replay binding")
+	}
+	var block Block
+	if !Decode(encoded, &block) || block.ThinkingBinding == nil || *block.ThinkingBinding != binding {
+		t.Fatal(block)
+	}
+	for _, bad := range []string{strings.Replace(string(encoded), "ap1:", "ap2:", 1), strings.Replace(string(encoded), `"thinking"`, `"text"`, 1), strings.Replace(string(encoded), binding, binding+"a", 1)} {
+		if ValidBlock([]byte(bad)) {
+			t.Fatal("accepted malformed binding", bad)
+		}
+	}
+}
+
+func TestDuplicateJSONMembersRefuse(t *testing.T) {
+	for _, raw := range []string{`{"version":1,"version":2}`, `{"input":{"a":1,"a":2}}`, `{"a":1,"\u0061":2}`} {
+		var value any
+		if Decode([]byte(raw), &value) {
+			t.Fatalf("accepted ambiguous JSON: %s", raw)
+		}
+	}
+	var value any
+	if !Decode([]byte(`{"a":{"n":9007199254740993},"b":{"n":2}}`), &value) {
+		t.Fatal("refused independent object keys")
+	}
+}

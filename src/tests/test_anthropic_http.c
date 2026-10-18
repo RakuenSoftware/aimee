@@ -517,11 +517,20 @@ static const char *native_empty_stream =
     "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
     "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
 
+static const char *native_stream_request =
+    "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"q\"}]}";
 static int stream_sink_calls, stream_sink_fail_at;
 static int stream_sink(const aimee_session_event_t *event, void *context)
 {
    (void)context;
-   assert(event->kind == AIMEE_SESSION_DELTA && event->delta);
+   assert((event->kind == AIMEE_SESSION_DELTA && event->delta) ||
+          (event->kind == AIMEE_SESSION_MESSAGE && event->message));
+   if (event->kind == AIMEE_SESSION_MESSAGE)
+   {
+      assert(event->message->n_blocks == 3);
+      assert(event->message->blocks[0].thinking_binding);
+      assert(event->message->blocks[1].thinking_binding);
+   }
    assert(event->message_id && event->message_id[0]);
    cJSON *wire = aimee_ir_session_event_json(event);
    assert(wire);
@@ -560,6 +569,8 @@ static void test_native_ir_fragmentation_and_persistence(void)
    {
       emit_capture_t cap = {0};
       native_ir_stream_ctx_t stream = {.emit = cap_emit, .emit_ctx = &cap, .model = "model"};
+      assert(!aimee_anthropic_replay_prepare(native_stream_request, strlen(native_stream_request),
+                                             &stream.replay));
       stream_sink_calls = stream_sink_fail_at = 0;
       aimee_ir_session_set_sink(stream_sink, NULL);
       size_t length = strlen(frames);
@@ -569,13 +580,14 @@ static void test_native_ir_fragmentation_and_persistence(void)
       assert(stream.backend.terminal_emitted && !stream.failed);
       assert(stream.backend.pending_usage_in == 120 && stream.backend.pending_usage_out == 55);
       assert(stream.backend.pending_cache_write == 30 && stream.backend.pending_cache_read == 10);
-      assert(stream_sink_calls == 10 && cap.count == 11);
+      assert(stream_sink_calls == 11 && cap.count == 11);
       assert(strstr(cap.data[0], "opaque-id"));
       assert(strstr(cap.data[1], "initial"));
       assert(strstr(cap.data[2], "opaque-signature"));
       assert(strstr(cap.data[4], "opaque-redaction"));
       assert(!strcmp(cap.events[cap.count - 1], "message_stop"));
       aimee_ir_session_set_sink(NULL, NULL);
+      aimee_ir_response_builder_free(&stream.assembled);
       free(stream.data);
       free(stream.message_id);
       sse_parser_free(&stream.parser);
@@ -590,6 +602,7 @@ static void test_native_ir_fragmentation_and_persistence(void)
    assert(cap.count == 1 && stream.failed && aimee_ir_session_capture_failed());
    aimee_ir_session_set_sink(NULL, NULL);
    stream_sink_fail_at = 0;
+   aimee_ir_response_builder_free(&stream.assembled);
    free(stream.data);
    free(stream.message_id);
    sse_parser_free(&stream.parser);
@@ -618,8 +631,9 @@ static void test_native_ir_refuses_incomplete_and_invalid_streams(void)
       emit_capture_t cap = {0};
       reset_capture();
       g_stream_payload = bad[i];
-      assert(messages_stream_native_ir("fixture", "", "{}", 2, "", &agent, "model", cap_emit, &cap,
-                                       NULL) < 0);
+      assert(messages_stream_native_ir("fixture", "", native_stream_request,
+                                       strlen(native_stream_request), "", &agent, "model", cap_emit,
+                                       &cap, NULL) < 0);
       assert(!strcmp(cap.events[cap.count - 1], "error"));
       for (int j = 0; j < cap.count; j++)
          assert(strcmp(cap.events[j], "message_stop"));
@@ -676,8 +690,9 @@ static void test_native_response_retains_all_typed_blocks_and_long_tools(void)
    emit_capture_t cap = {0};
    agent_t agent;
    assert(!agent_registry_default_primary(&agent));
-   messages_stream_buffered_replay("https://example.invalid/v1/messages", "", "{}", 2, "", &agent,
-                                   &driver, "client-model", "client-id", 0, NULL, cap_emit, &cap);
+   messages_stream_buffered_replay("https://example.invalid/v1/messages", "", native_stream_request,
+                                   strlen(native_stream_request), "", &agent, &driver,
+                                   "client-model", "client-id", 0, NULL, cap_emit, &cap);
    int tools = 0, signatures = 0, redacted = 0, images = 0;
    for (int i = 0; i < cap.count; i++)
    {

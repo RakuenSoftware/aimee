@@ -39,8 +39,87 @@ static int buffered_capture(const aimee_session_event_t *event, void *context)
    return buffered_steps == fail_at ? -7 : 0;
 }
 
+static void test_owned_delta_assembly(void)
+{
+   aimee_ir_response_builder_t builder = {0};
+   aimee_delta_t deltas[] = {{.type = AIMEE_DELTA_TURN_START},
+                             {.type = AIMEE_DELTA_BLOCK_START,
+                              .block_id = 0,
+                              .kind = AIMEE_BLK_THINKING,
+                              .text_delta = "reason",
+                              .signature_delta = "sig-"},
+                             {.type = AIMEE_DELTA_BLOCK_DELTA,
+                              .block_id = 0,
+                              .kind = AIMEE_BLK_THINKING,
+                              .text_delta = " more",
+                              .signature_delta = "complete"},
+                             {.type = AIMEE_DELTA_BLOCK_STOP, .block_id = 0},
+                             {.type = AIMEE_DELTA_BLOCK_START,
+                              .block_id = 1,
+                              .kind = AIMEE_BLK_TOOL_USE,
+                              .tool_id = "opaque-id",
+                              .tool_name = "Read"},
+                             {.type = AIMEE_DELTA_BLOCK_DELTA,
+                              .block_id = 1,
+                              .kind = AIMEE_BLK_TOOL_USE,
+                              .tool_args_delta = "{\"id\":9007199254740"},
+                             {.type = AIMEE_DELTA_BLOCK_DELTA,
+                              .block_id = 1,
+                              .kind = AIMEE_BLK_TOOL_USE,
+                              .tool_args_delta = "993}"},
+                             {.type = AIMEE_DELTA_BLOCK_STOP, .block_id = 1},
+                             {.type = AIMEE_DELTA_TURN_STOP,
+                              .stop_reason = AIMEE_STOP_TOOL_USE,
+                              .raw_stop_reason = "tool_use",
+                              .usage_in = 12,
+                              .usage_out = 4,
+                              .usage_cache_read = 9}};
+   for (size_t i = 0; i < sizeof deltas / sizeof deltas[0]; i++)
+      assert(!aimee_ir_response_builder_apply(&builder, &deltas[i]));
+   assert(builder.complete && builder.response.n_content == 2 &&
+          builder.response.usage_cache_read == 9);
+   assert(!strcmp(builder.response.content[0].text, "reason more") &&
+          !strcmp(builder.response.content[0].thinking_signature, "sig-complete"));
+   char *input = cJSON_PrintUnformatted(builder.response.content[1].tool_input);
+   assert(input && !strcmp(input, "{\"id\":9007199254740993}"));
+   free(input);
+   assert(aimee_ir_response_builder_apply(&builder, &deltas[2]) < 0);
+   aimee_ir_response_builder_free(&builder);
+   assert(!aimee_ir_response_builder_apply(&builder, &deltas[0]));
+   assert(aimee_ir_response_builder_apply(&builder, &deltas[0]) < 0);
+   aimee_ir_response_builder_free(&builder);
+   for (int invalid = 0; invalid < 3; invalid++)
+   {
+      assert(!aimee_ir_response_builder_apply(&builder, &deltas[0]));
+      aimee_delta_t start = {.type = AIMEE_DELTA_BLOCK_START,
+                             .block_id = 0,
+                             .kind = AIMEE_BLK_TOOL_USE,
+                             .tool_id = "call",
+                             .tool_name = "Read"};
+      assert(!aimee_ir_response_builder_apply(&builder, &start));
+      if (invalid == 0)
+         assert(aimee_ir_response_builder_apply(&builder, &deltas[8]) < 0);
+      else if (invalid == 1)
+         assert(aimee_ir_response_builder_apply(&builder, &start) < 0);
+      else
+      {
+         aimee_delta_t bad = {.type = AIMEE_DELTA_BLOCK_DELTA,
+                              .block_id = 0,
+                              .kind = AIMEE_BLK_TOOL_USE,
+                              .tool_args_delta = "{} trailing"};
+         assert(!aimee_ir_response_builder_apply(&builder, &bad));
+         bad.type = AIMEE_DELTA_BLOCK_STOP;
+         assert(aimee_ir_response_builder_apply(&builder, &bad) < 0);
+      }
+      aimee_ir_response_builder_free(&builder);
+   }
+   puts("owned canonical delta assembly retains signatures/opaque arguments and refuses incomplete "
+        "lifecycles");
+}
+
 int main(void)
 {
+   test_owned_delta_assembly();
    aimee_block_t blocks[] = {
        {.type = AIMEE_BLK_THINKING,
         .text = "reason",

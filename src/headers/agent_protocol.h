@@ -105,6 +105,11 @@ struct cJSON *agent_responses_sse_response_object(const char *body);
 /* Native response entry adapters. The caller owns the full typed response until
  * tool dispatch and history append finish. No text/tool projection occurs here. */
 #define AGENT_IR_CAPTURE_FAILED (-2)
+struct aimee_anthropic_replay;
+int agent_ir_decode_json_response_bound(const struct cJSON *root, int anthropic, int rescue_mode,
+                                        int *n_rescued,
+                                        const struct aimee_anthropic_replay *request,
+                                        aimee_response_t *out);
 int agent_ir_decode_json_response(const struct cJSON *root, int anthropic, int rescue_mode,
                                   int *n_rescued, aimee_response_t *out);
 int agent_ir_decode_responses(const char *body, int rescue_mode, int *n_rescued,

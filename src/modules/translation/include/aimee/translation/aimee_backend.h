@@ -35,6 +35,22 @@ void aimee_backend_projection_report(const aimee_request_t *request, aimee_wire_
                                      aimee_wire_projection_report_t *report);
 int anthropic_ir_block_replayable(const aimee_block_t *block);
 
+/* A local replay fence from the actual sent Anthropic request. No credentials or
+ * provider state; signatures remain opaque and are still verified upstream. */
+typedef struct aimee_anthropic_replay
+{
+   char prefix[65], chain[65];
+   int valid;
+} aimee_anthropic_replay_t;
+int aimee_anthropic_bind_request(const struct cJSON *native, aimee_request_t *request);
+int aimee_anthropic_replay_prepare(const void *bytes, size_t length,
+                                   aimee_anthropic_replay_t *state);
+int aimee_anthropic_bind_response(const aimee_anthropic_replay_t *request,
+                                  aimee_response_t *response);
+int aimee_anthropic_replay_valid(const aimee_request_t *request, const struct cJSON *native);
+void aimee_anthropic_projection_report(const aimee_request_t *request,
+                                       aimee_wire_projection_report_t *report);
+
 /* Render one admitted block at an explicit Anthropic output boundary. */
 struct cJSON *anthropic_ir_render_block(const aimee_block_t *block);
 

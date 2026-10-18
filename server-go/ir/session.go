@@ -14,6 +14,7 @@ type Block struct {
 	Type             string          `json:"type"`
 	Text             *string         `json:"text,omitempty"`
 	Signature        *string         `json:"signature,omitempty"`
+	ThinkingBinding  *string         `json:"thinking_binding,omitempty"`
 	RedactedContent  *string         `json:"redacted_content,omitempty"`
 	ThinkingID       *string         `json:"thinking_id,omitempty"`
 	EncryptedContent *string         `json:"encrypted_content,omitempty"`
@@ -41,9 +42,10 @@ type Context struct {
 	RevisionEpoch  string `json:"revision_epoch,omitempty"`
 }
 type Message struct {
-	Role     string  `json:"role"`
-	Blocks   []Block `json:"blocks"`
-	Boundary bool    `json:"_compaction_boundary,omitempty"`
+	ContentScalar bool    `json:"content_scalar,omitempty"`
+	Role          string  `json:"role"`
+	Blocks        []Block `json:"blocks"`
+	Boundary      bool    `json:"_compaction_boundary,omitempty"`
 }
 
 // Validate the canonical contract, never a native provider protocol. Stateful
@@ -180,6 +182,9 @@ func Decode(encoded []byte, out any) bool {
 	if len(encoded) == 0 || bytes.Equal(bytes.TrimSpace(encoded), []byte("null")) {
 		return false
 	}
+	if !uniqueJSON(encoded) {
+		return false
+	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(out) != nil {
@@ -200,6 +205,18 @@ func ValidBlock(encoded []byte) bool {
 	if !Decode(encoded, &b) || !irBlockKind(b.Type) || (b.MessageGroup != nil && (*b.MessageGroup < 1 || *b.MessageGroup > 4096)) {
 		return false
 	}
+	if b.ThinkingBinding != nil {
+		value := *b.ThinkingBinding
+		if b.Type != "thinking" || len(value) != 198 || value[:4] != "ap1:" || (value[68] != ':' || value[133] != ':') {
+			return false
+		}
+		for i := 4; i < len(value); i++ {
+			if i != 68 && i != 133 && !(value[i] >= '0' && value[i] <= '9' || value[i] >= 'a' && value[i] <= 'f') {
+				return false
+			}
+		}
+	}
+
 	switch b.Type {
 	case "text", "thinking":
 		return b.Text != nil
@@ -224,9 +241,10 @@ type HistoryEvent struct {
 
 func ValidMessage(raw json.RawMessage) bool {
 	var message struct {
-		Role     string            `json:"role"`
-		Blocks   []json.RawMessage `json:"blocks"`
-		Boundary bool              `json:"_compaction_boundary,omitempty"`
+		Role          string            `json:"role"`
+		Blocks        []json.RawMessage `json:"blocks"`
+		Boundary      bool              `json:"_compaction_boundary,omitempty"`
+		ContentScalar *bool             `json:"content_scalar,omitempty"`
 	}
 	if !Decode(raw, &message) || message.Role == "" || message.Blocks == nil || len(message.Blocks) > 4096 {
 		return false
@@ -252,4 +270,57 @@ func ValidHistoryEvent(raw json.RawMessage) bool {
 	default:
 		return false
 	}
+}
+
+// Reject duplicate member names before typed decoding, including opaque values.
+// Otherwise different producers and stores can disagree on the same JSON bytes.
+func uniqueJSON(encoded []byte) bool {
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	var value func(int) bool
+	value = func(depth int) bool {
+		if depth > 512 {
+			return false
+		}
+		token, err := decoder.Token()
+		if err != nil {
+			return false
+		}
+		delim, ok := token.(json.Delim)
+		if !ok {
+			return true
+		}
+		switch delim {
+		case '{':
+			names := make(map[string]bool)
+			for decoder.More() {
+				token, err := decoder.Token()
+				name, ok := token.(string)
+				if err != nil || !ok || names[name] {
+					return false
+				}
+				names[name] = true
+				if !value(depth + 1) {
+					return false
+				}
+			}
+			token, err = decoder.Token()
+			return err == nil && token == json.Delim('}')
+		case '[':
+			for decoder.More() {
+				if !value(depth + 1) {
+					return false
+				}
+			}
+			token, err = decoder.Token()
+			return err == nil && token == json.Delim(']')
+		default:
+			return false
+		}
+	}
+	if !value(0) {
+		return false
+	}
+	_, err := decoder.Token()
+	return err == io.EOF
 }

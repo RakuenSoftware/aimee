@@ -192,6 +192,11 @@ static int aimee_claude_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
       int rc = anthropic_frontend_parse(req, &ir, error, sizeof(error));
       if (!rc && ir.n_messages == 1)
       {
+         for (int j = 0; j < ir.messages[0].n_blocks; j++)
+         {
+            free(ir.messages[0].blocks[j].thinking_binding);
+            ir.messages[0].blocks[j].thinking_binding = NULL;
+         }
          aimee_session_event_t e = {
              .kind = AIMEE_SESSION_MESSAGE, .message_id = id, .message = &ir.messages[0]};
          rc = aimee_ir_session_emit(&e);

@@ -1269,6 +1269,16 @@ native_provider_http:
          free(body);
          break;
       }
+      aimee_anthropic_replay_t sent_replay = {0};
+      if (anthropic && aimee_anthropic_replay_prepare(wire_body.data, wire_body.len, &sent_replay))
+      {
+         capture_failed = 1;
+         aimee_ir_session_fail_capture();
+         snprintf(out->error, sizeof out->error, "cannot bind native replay prefix");
+         free(body);
+         wire_fence_destroy(wire_snapshot);
+         break;
+      }
       int http_status = wire_fence_post(url, auth_header, wire_body.data, wire_body.len,
                                         &response_body, per_call, extra_headers, ra, rb, rm,
                                         agent->provider, fb_agent.model, session_id, wire_route);
@@ -1333,6 +1343,16 @@ native_provider_http:
                   snprintf(out->stop_reason, sizeof(out->stop_reason), "context_refused");
                snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
                free(fb_body);
+               break;
+            }
+            if (anthropic &&
+                aimee_anthropic_replay_prepare(fb_wire_body.data, fb_wire_body.len, &sent_replay))
+            {
+               capture_failed = 1;
+               aimee_ir_session_fail_capture();
+               snprintf(out->error, sizeof out->error, "cannot bind fallback native replay prefix");
+               free(fb_body);
+               wire_fence_destroy(fb_snapshot);
                break;
             }
             http_status =
@@ -1432,9 +1452,10 @@ native_provider_http:
       else
       {
          cJSON *root = cJSON_Parse(response_body);
-         decode_rc = root ? agent_ir_decode_json_response(root, anthropic, rescue_mode, &n_rescued,
-                                                          &response)
-                          : -1;
+         decode_rc =
+             root ? agent_ir_decode_json_response_bound(root, anthropic, rescue_mode, &n_rescued,
+                                                        anthropic ? &sent_replay : NULL, &response)
+                  : -1;
          cJSON_Delete(root);
       }
       free(response_body);

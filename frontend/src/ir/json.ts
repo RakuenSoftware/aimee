@@ -59,6 +59,7 @@ export function parseJSON(source: string): unknown {
         if (!array) {
           if (source[offset] !== '"') return fail();
           key = string(); whitespace();
+          if (Object.prototype.hasOwnProperty.call(result, key)) return fail();
           if (source[offset++] !== ':') return fail();
         }
         const child = value(depth + 1);

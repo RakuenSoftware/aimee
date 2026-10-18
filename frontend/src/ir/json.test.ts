@@ -14,7 +14,7 @@ describe('canonical opaque JSON', () => {
     const source = '{"version":1,"usage":123,"ratio":0.1,"input":{"__proto__":{"admin":true}},"ok":true,"empty":null}';
     expect(stringifyJSON(parseJSON(source))).toBe(source);
     expect(({} as { admin?: boolean }).admin).toBeUndefined();
-    for (const input of ['', '01', '1.', '1e', '1+2', '[1,]', '{"x":1,}', '"\\q"', '"a\nb"', '{} trailing', '[true false]'])
+    for (const input of ['', '01', '1.', '1e', '1+2', '[1,]', '{"x":1,}', '"\\q"', '"a\nb"', '{} trailing', '[true false]', '{"x":1,"x":2}', '{"tool":{"a":1,"a":2}}'])
       expect(() => parseJSON(input), input).toThrow();
     expect(() => parseJSON('['.repeat(514) + '0' + ']'.repeat(514))).toThrow();
   });

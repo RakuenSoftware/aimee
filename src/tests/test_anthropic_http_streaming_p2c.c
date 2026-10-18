@@ -259,8 +259,9 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
    free(g_last_body);
    g_last_body = strdup(body ? body : "");
    assert(g_last_body != NULL);
-   if (g_stream_payload && callback)
-      assert(callback(g_stream_payload, strlen(g_stream_payload), userdata) == 0);
+   if (g_stream_payload && callback &&
+       callback(g_stream_payload, strlen(g_stream_payload), userdata))
+      return -1;
    return g_stream_status;
 }
 
@@ -843,6 +844,77 @@ static void test_native_completion_followup_reaches_provider_system(void)
    PASS("native_completion_followup_reaches_provider_system");
 }
 
+static cJSON *signed_snapshot;
+static int reject_signed_snapshot;
+static int signed_capture(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   if (event->kind != AIMEE_SESSION_MESSAGE)
+      return 0;
+   cJSON_Delete(signed_snapshot);
+   signed_snapshot = aimee_ir_message_json(event->message);
+   assert(signed_snapshot);
+   assert(event->message->n_blocks == 1);
+   assert(event->message->blocks[0].thinking_binding);
+   return reject_signed_snapshot ? -1 : 0;
+}
+static void test_signed_stream_snapshot_before_completion(void)
+{
+   const delegate_driver_t driver = {.name = "anthropic"};
+   for (int reject = 0; reject < 2; reject++)
+   {
+      reset_capture();
+      aimee_ir_session_set_sink(NULL, NULL);
+      reject_signed_snapshot = reject;
+      g_driver = &driver;
+      g_stream_payload =
+          "event: message_start\ndata: {\"message\":{\"id\":\"signed\",\"role\":\"assistant\"}}\n\n"
+          "event: content_block_start\ndata: "
+          "{\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n"
+          "event: content_block_delta\ndata: "
+          "{\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"reason\"}}\n\n"
+          "event: content_block_delta\ndata: "
+          "{\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"opaque-signature\"}"
+          "}\n\n"
+          "event: content_block_stop\ndata: {\"index\":0}\n\n"
+          "event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+          "event: message_stop\ndata: {}\n\n";
+      aimee_ir_session_set_sink(signed_capture, NULL);
+      replay_cap_t cap = {0};
+      messages_stream("{\"model\":\"ignored\",\"max_tokens\":64,\"stream\":true,"
+                      "\"messages\":[{\"role\":\"user\",\"content\":\"original\"}]}",
+                      replay_capture, &cap);
+      assert(signed_snapshot && g_last_body);
+      int stopped = 0;
+      for (int i = 0; i < cap.count; i++)
+         stopped += !strcmp(cap.events[i], "message_stop");
+      assert(stopped == !reject);
+      if (!reject)
+      {
+         aimee_request_t request = {0};
+         char error[128];
+         assert(!aimee_frontend_parse_wire(g_last_body, strlen(g_last_body), AIMEE_WIRE_ANTHROPIC,
+                                           &request, error, sizeof error));
+         request.messages = realloc(request.messages, 2 * sizeof *request.messages);
+         assert(request.messages);
+         memset(&request.messages[1], 0, sizeof request.messages[1]);
+         assert(!aimee_ir_message_parse(signed_snapshot, &request.messages[1]));
+         request.n_messages = 2;
+         cJSON *native = anthropic_backend_build(&request);
+         char *json = cJSON_PrintUnformatted(native);
+         assert(json && strstr(json, "opaque-signature"));
+         free(json);
+         cJSON_Delete(native);
+         aimee_request_free(&request);
+      }
+      aimee_ir_session_set_sink(NULL, NULL);
+      cJSON_Delete(signed_snapshot);
+      signed_snapshot = NULL;
+   }
+   reset_capture();
+   PASS("signed_native_stream_persists_prefix_bound_snapshot_before_client_completion");
+}
+
 int main(void)
 {
    printf("test_anthropic_http_streaming_p2c:\n");
@@ -850,6 +922,7 @@ int main(void)
    test_streaming_anthropic_police_on_no_tool_use_passthrough();
    test_streaming_anthropic_policy_on_upstream_error_returns_error();
    test_streaming_anthropic_policy_off_uses_ir();
+   test_signed_stream_snapshot_before_completion();
    test_streaming_anthropic_partial_drop_preserves_max_tokens();
    test_streaming_openai_police_drops_subagent_tool_use();
    test_streaming_openai_police_on_no_tool_use_passthrough();

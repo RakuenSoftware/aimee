@@ -67,6 +67,7 @@ cJSON *aimee_ir_block_json(const aimee_block_t *block)
       ok = ok && add_string(out, "text", block->text ? block->text : "");
       if (block->type == AIMEE_BLK_THINKING)
          ok = ok && add_string(out, "signature", block->thinking_signature) &&
+              add_string(out, "thinking_binding", block->thinking_binding) &&
               add_string(out, "thinking_id", block->thinking_id) &&
               add_string(out, "encrypted_content", block->thinking_encrypted_content) &&
               add_string(out, "redacted_content", block->thinking_redacted);
@@ -103,8 +104,12 @@ cJSON *aimee_ir_message_json(const aimee_message_t *message)
    if (!message || !message->role || !message->role[0] || message->n_blocks < 0 ||
        message->n_blocks > 4096 || (message->n_blocks && !message->blocks))
       return NULL;
+   if (message->content_scalar != 0 && message->content_scalar != 1)
+      return NULL;
    cJSON *out = cJSON_CreateObject(), *blocks = cJSON_CreateArray();
    if (!out || !blocks || !add_string(out, "role", message->role))
+      goto fail;
+   if (message->content_scalar && !cJSON_AddBoolToObject(out, "content_scalar", 1))
       goto fail;
    for (int i = 0; i < message->n_blocks; i++)
    {
@@ -216,6 +221,9 @@ static int parse_block(const cJSON *json, aimee_block_t *out)
    case AIMEE_BLK_THINKING:
       return read_string(json, "text", &out->text, 1) ||
                      read_string(json, "signature", &out->thinking_signature, 0) ||
+                     read_string(json, "thinking_binding", &out->thinking_binding, 0) ||
+                     !aimee_ir_thinking_binding_valid(out->thinking_binding) ||
+                     (out->thinking_binding && out->type != AIMEE_BLK_THINKING) ||
                      read_string(json, "thinking_id", &out->thinking_id, 0) ||
                      read_string(json, "encrypted_content", &out->thinking_encrypted_content, 0) ||
                      read_string(json, "redacted_content", &out->thinking_redacted, 0)
@@ -257,9 +265,14 @@ int aimee_ir_message_parse(const cJSON *json, aimee_message_t *out)
       return -1;
    memset(out, 0, sizeof *out);
    const cJSON *blocks = cJSON_GetObjectItemCaseSensitive(json, "blocks");
-   if (!cJSON_IsObject(json) || !cJSON_IsArray(blocks) || cJSON_GetArraySize(blocks) > 4096 ||
-       read_string(json, "role", &out->role, 1) || !out->role[0])
+   if (!cJSON_IsObject(json) || !aimee_ir_json_unique(json) || !cJSON_IsArray(blocks) ||
+       cJSON_GetArraySize(blocks) > 4096 || read_string(json, "role", &out->role, 1) ||
+       !out->role[0])
       goto fail;
+   const cJSON *scalar = cJSON_GetObjectItemCaseSensitive(json, "content_scalar");
+   if (scalar && !cJSON_IsBool(scalar))
+      goto fail;
+   out->content_scalar = cJSON_IsTrue(scalar);
    int count = cJSON_GetArraySize(blocks);
    if (count)
    {

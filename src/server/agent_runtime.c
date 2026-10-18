@@ -1,3 +1,4 @@
+#include <aimee/translation/aimee_backend.h>
 #include "aimee.h"
 #include "wire_fence.h"
 #include "request_context.h"
@@ -946,7 +947,8 @@ static void track_simple_anthropic_payload_rewrite(const delegate_driver_t *driv
 
 /* All native output crosses the same entry adapters as the tool runtime. The
  * legacy result API receives a final text projection only after IR publication. */
-static void parse_response(const char *body, const agent_t *agent, agent_result_t *out)
+static void parse_response(const char *body, const agent_t *agent,
+                           const aimee_anthropic_replay_t *request, agent_result_t *out)
 {
    aimee_response_t response = {0};
    int rc;
@@ -960,7 +962,8 @@ static void parse_response(const char *body, const agent_t *agent, agent_result_
          snprintf(out->error, sizeof out->error, "invalid JSON response");
          return;
       }
-      rc = agent_ir_decode_json_response(root, is_anthropic_provider(agent), -1, NULL, &response);
+      rc = agent_ir_decode_json_response_bound(root, is_anthropic_provider(agent), -1, NULL,
+                                               request, &response);
       cJSON_Delete(root);
    }
    if (rc != 0)
@@ -1079,6 +1082,16 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       return -1;
    }
 
+   aimee_anthropic_replay_t sent_replay = {0};
+   if (is_anthropic_provider(agent) &&
+       aimee_anthropic_replay_prepare(body, strlen(body), &sent_replay))
+   {
+      free(body);
+      snprintf(out->error, sizeof out->error, "cannot bind native replay prefix");
+      aimee_ir_session_fail_capture();
+      return AGENT_RC_CAPTURE_FAILED;
+   }
+
    /* Measure latency */
    struct timespec start, end;
    clock_gettime(CLOCK_MONOTONIC, &start);
@@ -1126,6 +1139,14 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       cJSON_Delete(fb_req);
       if (fb_body)
       {
+         if (is_anthropic_provider(&fb_agent) &&
+             aimee_anthropic_replay_prepare(fb_body, strlen(fb_body), &sent_replay))
+         {
+            free(fb_body);
+            snprintf(out->error, sizeof out->error, "cannot bind fallback native replay prefix");
+            aimee_ir_session_fail_capture();
+            return AGENT_RC_CAPTURE_FAILED;
+         }
          http_status =
              wire_fence_revalidate_sources() != 0
                  ? HTTP_RETRY_ADMISSION_REFUSED
@@ -1176,7 +1197,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
        * pages) undiagnosable in the field. Keep the HTTP status + body snippet
        * unless a real structured message was extracted. */
       out->error[0] = '\0';
-      parse_response(response_body, agent, out);
+      parse_response(response_body, agent, is_anthropic_provider(agent) ? &sent_replay : NULL, out);
       if (!out->error[0] || strcmp(out->error, "invalid JSON response") == 0)
          snprintf(out->error, sizeof(out->error), "HTTP %d (non-JSON body): %s", http_status,
                   snippet);
@@ -1184,7 +1205,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       return !strcmp(out->stop_reason, "capture_failed") ? AGENT_RC_CAPTURE_FAILED : -1;
    }
 
-   parse_response(response_body, agent, out);
+   parse_response(response_body, agent, is_anthropic_provider(agent) ? &sent_replay : NULL, out);
    /* A 200 whose body is not JSON (e.g. an SSE stream leaking through, or a
     * truncated reply) is also masked by the bare "invalid JSON response"; make it
     * say so and show a snippet, so the cause is visible. */

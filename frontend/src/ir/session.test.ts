@@ -209,3 +209,12 @@ it('keeps child references separate from parent model history and replays termin
   ])));
   expect(snapshot.messages[0].blocks[0].input).toEqual(live.messages[0].blocks[0].input);
 });
+
+it('retains and validates thinking replay provenance without placing it in visible text', () => {
+ const binding = `ap1:${'a'.repeat(64)}:${'b'.repeat(64)}:${'c'.repeat(64)}`;
+ const event = envelope(1, message('m', 'assistant', [{type:'thinking',text:'reason',signature:'opaque',thinking_binding:binding}]));
+ const state = reduceSession(emptySession('s'), event);
+ expect(state.messages[0].blocks[0].thinking_binding).toBe(binding);
+ for (const bad of [binding+'a', binding.replace('ap1:', 'ap2:')])
+  expect(() => reduceSession(emptySession('s'), envelope(1,message('m','assistant',[{type:'thinking',text:'reason',thinking_binding:bad}])))).toThrow('replay binding');
+});

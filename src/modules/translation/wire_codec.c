@@ -11,6 +11,8 @@
 static int parse_native_object(const cJSON *native, aimee_wire_t wire, aimee_request_t *out,
                                char *error, size_t capacity)
 {
+   if (!aimee_ir_json_unique(native))
+      return -1;
    return wire == AIMEE_WIRE_ANTHROPIC     ? anthropic_frontend_parse(native, out, error, capacity)
           : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_frontend_parse(native, out, error, capacity)
           : wire == AIMEE_WIRE_RESPONSES   ? responses_frontend_parse(native, out, error, capacity)
@@ -30,7 +32,7 @@ int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire
    if (request && end)
       while (end < body + length && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n'))
          end++;
-   if (!request || !end || end != body + length)
+   if (!request || !end || end != body + length || !aimee_ir_json_unique(request))
    {
       cJSON_Delete(request);
       if (error && error_capacity)
@@ -59,7 +61,7 @@ char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wir
    int native_transport =
        wire != AIMEE_WIRE_RESPONSES ||
        (request->stream && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(request->raw, "store")));
-   if (native_transport && request->frontend == wire && request->raw_bytes && !request->mutated &&
+   if (native_transport && request->frontend == wire && request->raw_bytes &&
        request->cache_policy == AIMEE_CACHE_DEFAULT)
    {
       aimee_request_t original = {0};
@@ -70,10 +72,11 @@ char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wir
          int same_model =
              (!request->model && !original.model) ||
              (request->model && original.model && !strcmp(request->model, original.model));
-         int unchanged = same_model && aimee_ir_request_equal(request, &original) &&
+         int unchanged = same_model && aimee_ir_request_wire_equal(request, &original) &&
                          cJSON_Compare(request->raw, original.raw, 1);
          aimee_request_free(&original);
-         if (unchanged)
+         if (unchanged &&
+             (wire != AIMEE_WIRE_ANTHROPIC || aimee_anthropic_replay_valid(request, request->raw)))
          {
             char *copy = malloc(request->raw_length + 1);
             if (copy)
@@ -109,6 +112,53 @@ int aimee_frontend_parse_native_frame(const cJSON *native, const char *frame, si
       {
          aimee_request_free(out);
          return -1;
+      }
+      if (wire == AIMEE_WIRE_ANTHROPIC)
+      {
+         int mi = 0, bi = 0;
+         for (int i = 0; i < out->n_messages; i++)
+            for (int j = 0; j < out->messages[i].n_blocks; j++)
+            {
+               aimee_block_t *block = &out->messages[i].blocks[j];
+               if (block->type != AIMEE_BLK_THINKING)
+                  continue;
+               const aimee_block_t *source = NULL;
+               while (mi < original.n_messages)
+               {
+                  if (bi == original.messages[mi].n_blocks)
+                  {
+                     mi++;
+                     bi = 0;
+                     continue;
+                  }
+                  const aimee_block_t *candidate = &original.messages[mi].blocks[bi++];
+                  if (candidate->type == AIMEE_BLK_THINKING)
+                  {
+                     source = candidate;
+                     break;
+                  }
+               }
+               aimee_block_t current = *block,
+                             original_block = source ? *source : (aimee_block_t){0};
+               /* Cache marker edits are excluded from the signed prefix. */
+               current.cache_control = current.cache_ttl = NULL;
+               original_block.cache_control = original_block.cache_ttl = NULL;
+               aimee_request_t a = {.system = &current, .n_system = 1};
+               aimee_request_t b = {.system = &original_block, .n_system = source ? 1 : 0};
+               char *binding =
+                   source && source->thinking_binding && aimee_ir_request_wire_equal(&a, &b)
+                       ? strdup(source->thinking_binding)
+                       : NULL;
+               if (source && source->thinking_binding && aimee_ir_request_wire_equal(&a, &b) &&
+                   !binding)
+               {
+                  aimee_request_free(&original);
+                  aimee_request_free(out);
+                  return -1;
+               }
+               free(block->thinking_binding);
+               block->thinking_binding = binding;
+            }
       }
       out->raw_bytes = original.raw_bytes;
       out->raw_length = original.raw_length;
@@ -176,7 +226,7 @@ int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire
       }
    }
    int rc = -1;
-   if (shape && end == frame + length)
+   if (shape && end == frame + length && aimee_ir_json_unique(root))
       rc = wire == AIMEE_WIRE_ANTHROPIC     ? anthropic_backend_parse(root, out, error, capacity)
            : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_backend_parse(root, out, error, capacity)
            : wire == AIMEE_WIRE_RESPONSES   ? responses_backend_parse(root, out, error, capacity)
@@ -220,6 +270,11 @@ void aimee_backend_projection_report(const aimee_request_t *request, aimee_wire_
    memset(report, 0, sizeof *report);
    if (!request)
       return;
+   if (wire == AIMEE_WIRE_ANTHROPIC)
+   {
+      aimee_anthropic_projection_report(request, report);
+      return;
+   }
    report_blocks(request->system, request->n_system, wire, report);
    for (int i = 0; i < request->n_messages; i++)
       report_blocks(request->messages[i].blocks, request->messages[i].n_blocks, wire, report);

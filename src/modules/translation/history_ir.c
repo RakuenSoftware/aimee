@@ -1,6 +1,7 @@
 #include <aimee/translation/aimee_frontend.h>
 #include <aimee/ir/session_event.h>
 #include "cJSON.h"
+#include <stdlib.h>
 
 /* Migration is an entry adapter, never a fallback inside the execution loop. */
 cJSON *aimee_frontend_history_import(const cJSON *messages, aimee_wire_t legacy_wire)
@@ -67,6 +68,12 @@ cJSON *aimee_frontend_history_import(const cJSON *messages, aimee_wire_t legacy_
    }
    for (int i = 0; i < ir.n_messages; i++)
    {
+      /* A legacy message array carries no original system/tools prefix proof. */
+      for (int j = 0; j < ir.messages[i].n_blocks; j++)
+      {
+         free(ir.messages[i].blocks[j].thinking_binding);
+         ir.messages[i].blocks[j].thinking_binding = NULL;
+      }
       cJSON *copy = aimee_ir_message_json(&ir.messages[i]);
       aimee_message_t validated = {0};
       int valid = copy && aimee_ir_message_parse(copy, &validated) == 0;

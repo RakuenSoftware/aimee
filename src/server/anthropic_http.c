@@ -186,12 +186,18 @@ static aimee_wire_t shadow_provider_wire(const delegate_driver_t *driver)
 /* Native response decoding owns the full typed result until policy and the
  * explicit client render boundary finish. Invalid frames never use a fallback. */
 static int messages_decode_response(const char *frame, const delegate_driver_t *driver,
-                                    int responses_wire, aimee_response_t *out)
+                                    int responses_wire, const aimee_anthropic_replay_t *replay,
+                                    aimee_response_t *out)
 {
    char error[160] = "";
    aimee_wire_t wire = responses_wire ? AIMEE_WIRE_RESPONSES : shadow_provider_wire(driver);
    if (aimee_backend_parse_wire(frame, frame ? strlen(frame) : 0, wire, out, error, sizeof error))
       return -1;
+   if (wire == AIMEE_WIRE_ANTHROPIC && (!replay || aimee_anthropic_bind_response(replay, out)))
+   {
+      aimee_ir_session_fail_capture();
+      return -1;
+   }
    if (aimee_ir_session_emit_buffered_response(out, NULL))
       return -1;
    aimee_message_t message = {
@@ -634,6 +640,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    aimee_wire_t wire = parity           ? AIMEE_WIRE_ANTHROPIC
                        : responses_wire ? AIMEE_WIRE_RESPONSES
                                         : AIMEE_WIRE_OPENAI_CHAT;
+   aimee_anthropic_replay_t replay = {0};
    for (int attempt = 0; attempt < 2; attempt++)
    {
       free(prov_body);
@@ -653,6 +660,13 @@ static int messages_buffered(const char *body, char *resp, int cap)
          const char *error = wire_fence_last_error();
          status = write_error(resp, cap, wire_fence_error_http_status(error),
                               wire_fence_error_type(error), error, AIMEE_ERR_REQUEST_PIPELINE);
+         goto cleanup;
+      }
+      if (wire == AIMEE_WIRE_ANTHROPIC &&
+          aimee_anthropic_replay_prepare(wire_body.data, wire_body.len, &replay))
+      {
+         status = write_error(resp, cap, 500, "api_error", "cannot bind native replay prefix",
+                              AIMEE_ERR_REQUEST_PIPELINE);
          goto cleanup;
       }
       http_status = wire_fence_post(url, auth, wire_body.data, wire_body.len, &response,
@@ -701,7 +715,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
       goto cleanup;
    }
 
-   if (messages_decode_response(response, driver, responses_wire, &parsed) ||
+   if (messages_decode_response(response, driver, responses_wire, &replay, &parsed) ||
        agent_response_govern(&parsed, anthropic_governance_enabled(),
                              gateway_prevent_subagents_enabled(), NULL, 0) < 0 ||
        gw_ir_response_run_completion(&parsed, &policy) < 0)
@@ -761,6 +775,8 @@ typedef struct
    int emitted, saw_invalid_request, failed, saw_reasoning;
    anthropic_backend_stream_state_t backend;
    anthropic_stream_state_t frontend;
+   aimee_ir_response_builder_t assembled;
+   aimee_anthropic_replay_t replay;
    const char *model;
    char *message_id;
 } native_ir_stream_ctx_t;
@@ -896,7 +912,8 @@ static int native_ir_flush(native_ir_stream_ctx_t *c)
    const char *type = jo_cstr(payload, "type");
    const char *event = c->event[0] ? c->event : type;
    aimee_delta_t delta;
-   int n = payload && end == c->data + c->data_len && (!type[0] || !strcmp(type, event))
+   int n = payload && aimee_ir_json_unique(payload) && end == c->data + c->data_len &&
+                   (!type[0] || !strcmp(type, event))
                ? anthropic_stream_to_deltas(event, payload, &c->backend, &delta, 1)
                : -1;
    if (gw_stream_anthropic_error_is_invalid_request(c->data))
@@ -908,6 +925,23 @@ static int native_ir_flush(native_ir_stream_ctx_t *c)
       c->message_id = strdup(id[0] ? id : "native");
       if (!c->message_id)
          n = -1;
+   }
+   if (n > 0 && aimee_ir_response_builder_apply(&c->assembled, &delta))
+      n = -1;
+   if (n > 0 && delta.type == AIMEE_DELTA_TURN_STOP)
+   {
+      if (aimee_anthropic_bind_response(&c->replay, &c->assembled.response))
+         n = -1;
+      if (n > 0)
+      {
+         aimee_message_t message = {.role = "assistant",
+                                    .blocks = c->assembled.response.content,
+                                    .n_blocks = c->assembled.response.n_content};
+         aimee_session_event_t snapshot = {
+             .kind = AIMEE_SESSION_MESSAGE, .message_id = c->message_id, .message = &message};
+         if (aimee_ir_session_emit(&snapshot))
+            n = -1;
+      }
    }
    if (n > 0 && messages_publish_delta(c->message_id, &delta))
       n = -1;
@@ -992,12 +1026,24 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
    wire_fence_route_t route = responses_wire                ? WIRE_FENCE_OPENAI_RESPONSES
                               : driver_is_anthropic(driver) ? WIRE_FENCE_ANTHROPIC_MESSAGES
                                                             : WIRE_FENCE_OPENAI_CHAT;
+   aimee_anthropic_replay_t replay = {0};
+   if (route == WIRE_FENCE_ANTHROPIC_MESSAGES &&
+       aimee_anthropic_replay_prepare(prov_body, prov_body_len, &replay))
+   {
+      aimee_delta_t failure = {.type = AIMEE_DELTA_ERROR,
+                               .error_message = "cannot bind native replay prefix"};
+      anthropic_stream_state_t state = {0};
+      if (!messages_publish_delta(msg_id, &failure))
+         anthropic_delta_emit(&failure, &state, msg_id, model, emit, ctx);
+      return;
+   }
    int status =
        wire_fence_post(url, auth, prov_body, prov_body_len, &frame, ag->timeout_ms,
                        extra[0] ? extra : NULL, 1, 0, 0, ag->provider, ag->model, NULL, route);
    if (status == HTTP_RETRY_ADMISSION_REFUSED)
       messages_stream_pipeline_error(emit, ctx);
-   else if (status != 200 || messages_decode_response(frame, driver, responses_wire, &response) ||
+   else if (status != 200 ||
+            messages_decode_response(frame, driver, responses_wire, &replay, &response) ||
             agent_response_govern(&response, anthropic_governance_enabled(),
                                   gateway_prevent_subagents_enabled(), NULL, 0) < 0 ||
             gw_ir_response_run_completion(&response, policy) < 0 ||
@@ -1028,6 +1074,14 @@ static int messages_stream_native_ir(const char *url, const char *auth, const vo
                                      int *invalid_frame_out)
 {
    native_ir_stream_ctx_t stream = {.emit = emit, .emit_ctx = ctx, .model = model};
+   if (aimee_anthropic_replay_prepare(prov_body, prov_body_len, &stream.replay))
+   {
+      aimee_delta_t error = {.type = AIMEE_DELTA_ERROR,
+                             .error_message = "cannot bind native replay prefix"};
+      if (!messages_publish_delta("native", &error))
+         anthropic_delta_emit(&error, &stream.frontend, "native", model, emit, ctx);
+      return -1;
+   }
    sse_parser_init(&stream.parser);
    anthropic_backend_stream_state_init(&stream.backend);
    int status = wire_fence_post_stream(url, auth, prov_body, prov_body_len, native_ir_chunk_cb,
@@ -1066,6 +1120,7 @@ static int messages_stream_native_ir(const char *url, const char *auth, const vo
    sse_parser_free(&stream.parser);
    free(stream.data);
    free(stream.message_id);
+   aimee_ir_response_builder_free(&stream.assembled);
    return status;
 }
 

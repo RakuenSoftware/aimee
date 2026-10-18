@@ -203,6 +203,8 @@ int anthropic_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
          cJSON_ArrayForEach(m, msgs)
          {
             out->messages[i].role = dupstr(ostr(m, "role"));
+            out->messages[i].content_scalar =
+                cJSON_IsString(cJSON_GetObjectItemCaseSensitive(m, "content"));
             out->messages[i].raw = cJSON_Duplicate(m, 1);
             const cJSON *content = cJSON_GetObjectItemCaseSensitive((cJSON *)m, "content");
             if (parse_content(content, &out->messages[i].blocks, &out->messages[i].n_blocks) != 0)
@@ -346,6 +348,13 @@ int anthropic_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
             (void)i;
          }
       }
+   }
+   if (aimee_anthropic_bind_request(req, out))
+   {
+      aimee_request_free(out);
+      if (err && errn)
+         snprintf(err, errn, "cannot bind native thinking replay prefix");
+      return -1;
    }
    return 0;
 

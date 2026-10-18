@@ -217,15 +217,24 @@ static void test_canonical_replay_egress(void)
    assert(anthropic_backend_parse(native, &response, error, sizeof error) == 0);
    assert(response.n_content == 1 && response.content[0].type == AIMEE_BLK_THINKING);
    assert(!strcmp(response.content[0].thinking_redacted, "opaque-redacted"));
+   const char *sent = "{\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":"
+                      "\"question\"}]}]}";
+   aimee_anthropic_replay_t fence;
+   assert(!aimee_anthropic_replay_prepare(sent, strlen(sent), &fence));
+   assert(!aimee_anthropic_bind_response(&fence, &response));
    view = (aimee_message_t){
        .role = "assistant", .blocks = response.content, .n_blocks = response.n_content};
    persisted = aimee_ir_message_json(&view);
    assert(persisted && aimee_ir_message_parse(persisted, &message) == 0);
-   request.messages = &message;
+   aimee_block_t question = {.type = AIMEE_BLK_TEXT, .text = "question"};
+   aimee_message_t replay_messages[] = {{.role = "user", .blocks = &question, .n_blocks = 1},
+                                        message};
+   request.messages = replay_messages;
+   request.n_messages = 2;
    wire = anthropic_backend_build(&request);
    assert(wire);
    parts =
-       cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(wire, "messages"), 0), "content");
+       cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(wire, "messages"), 1), "content");
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(parts, 0), "data")),
                   "opaque-redacted"));
    cJSON_Delete(wire);
@@ -801,6 +810,154 @@ static void test_completed_argument_framing(void)
    puts("  completed request and response arguments reject trailing JSON junk OK");
 }
 
+static int thinking_count(const cJSON *native)
+{
+   int count = 0;
+   const cJSON *message, *block;
+   cJSON_ArrayForEach(message, cJSON_GetObjectItemCaseSensitive(native, "messages"))
+       cJSON_ArrayForEach(block, cJSON_GetObjectItemCaseSensitive(message, "content"))
+   {
+      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(block, "type"));
+      if (type && (!strcmp(type, "thinking") || !strcmp(type, "redacted_thinking")))
+         count++;
+   }
+   return count;
+}
+static void remove_thinking(aimee_request_t *request, int index)
+{
+   aimee_message_t *message = &request->messages[1];
+   aimee_block_free_contents(&message->blocks[index]);
+   memmove(&message->blocks[index], &message->blocks[index + 1],
+           (size_t)(message->n_blocks - index - 1) * sizeof *message->blocks);
+   message->n_blocks--;
+   memset(&message->blocks[message->n_blocks], 0, sizeof *message->blocks);
+}
+
+static void test_json_comparison_view(void)
+{
+   cJSON *a = cJSON_Parse("{\"z\":[1.000,9007199254740993],\"a\":{\"b\":10e-1}}");
+   cJSON *b = cJSON_Parse("{\"a\":{\"b\":1},\"z\":[1e0,9007199254740993.0]}");
+   cJSON *x = aimee_ir_json_canonical_copy(a), *y = aimee_ir_json_canonical_copy(b);
+   char *xs = cJSON_PrintUnformatted(x), *ys = cJSON_PrintUnformatted(y);
+   assert(xs && ys && !strcmp(xs, ys));
+   free(xs);
+   free(ys);
+   cJSON_Delete(x);
+   cJSON_Delete(y);
+   assert(!strcmp(a->child->string, "z")); /* source order and decimal tokens stay untouched */
+   cJSON_Delete(a);
+   cJSON_Delete(b);
+   a = cJSON_Parse("{\"input\":{\"a\":1,\"a\":2}}");
+   assert(a && !aimee_ir_json_unique(a) && !aimee_ir_json_canonical_copy(a));
+   cJSON_Delete(a);
+}
+static void test_native_thinking_replay_binding(void)
+{
+   const char *body =
+       "{\n\"model\":\"m\",\"max_tokens\":64,\"native_counter\":9007199254740993,"
+       "\"system\":[{\"type\":\"text\",\"text\":\"system\",\"cache_control\":{\"type\":"
+       "\"ephemeral\",\"ttl\":\"1h\"}}],"
+       "\"tools\":[{\"name\":\"f\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"cache_"
+       "control\":{\"const\":1}}}}],"
+       "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"question\"}]},"
+       "{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"one\","
+       "\"signature\":\"s1\"},"
+       "{\"type\":\"thinking\",\"thinking\":\"two\",\"signature\":\"s2\"},"
+       "{\"type\":\"thinking\",\"thinking\":\"three\",\"signature\":\"s3\"},{\"type\":\"text\","
+       "\"text\":\"answer\"}]},"
+       "{\"role\":\"user\",\"content\":\"continue\"}]}\n";
+   for (int scenario = 0; scenario < 8; scenario++)
+   {
+      aimee_request_t request = {0};
+      char error[128];
+      assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_ANTHROPIC, &request, error,
+                                        sizeof error));
+      for (int i = 0; i < 3; i++)
+         assert(request.messages[1].blocks[i].thinking_binding &&
+                aimee_ir_thinking_binding_valid(request.messages[1].blocks[i].thinking_binding));
+      int expected = 3;
+      if (scenario == 0)
+      {
+         request.mutated = 1;
+         request.messages[0].blocks[0].context.origin = AIMEE_CTX_ORIGIN_MEMORY;
+         char *exact = aimee_backend_render_wire(&request, AIMEE_WIRE_ANTHROPIC);
+         assert(exact && !strcmp(exact, body));
+         free(exact);
+      }
+      if (scenario == 1)
+      {
+         free(request.system[0].text);
+         request.system[0].text = strdup("edited");
+         expected = 0;
+      }
+      if (scenario == 2)
+      {
+         free(request.system[0].cache_ttl);
+         request.system[0].cache_ttl = strdup("5m");
+      }
+      if (scenario == 3)
+      {
+         remove_thinking(&request, 0);
+         expected = 2;
+      }
+      if (scenario == 4)
+      {
+         remove_thinking(&request, 1);
+         expected = 1;
+      }
+      if (scenario == 5)
+      {
+         cJSON *properties = cJSON_GetObjectItem(request.tools[0].schema, "properties");
+         cJSON_SetNumberValue(
+             cJSON_GetObjectItem(cJSON_GetObjectItem(properties, "cache_control"), "const"), 2);
+         expected = 0; /* A schema field named cache_control is ordinary opaque input. */
+      }
+      if (scenario == 6)
+      {
+         free(request.model);
+         request.model = strdup("other-model");
+         request.max_tokens = 128;
+         request.has_max_tokens = 1;
+      }
+      if (scenario == 7)
+      {
+         for (int i = 0; i < 3; i++)
+         {
+            free(request.messages[1].blocks[i].thinking_binding);
+            request.messages[1].blocks[i].thinking_binding = NULL;
+         }
+         expected =
+             0; /* Historical signatures without a recorded prefix are not fabricated proof. */
+      }
+      cJSON *native = anthropic_backend_build(&request);
+      assert(native && thinking_count(native) == expected);
+      aimee_wire_projection_report_t report;
+      aimee_backend_projection_report(&request, AIMEE_WIRE_ANTHROPIC, &report);
+      int canonical = scenario == 3 || scenario == 4 ? 2 : 3;
+      assert(report.omitted_reasoning_blocks == canonical - expected &&
+             report.omitted_opaque_state_blocks == canonical - expected);
+      assert(
+          request.messages[1].blocks[0].thinking_signature); /* Projection never edits history. */
+      cJSON_Delete(native);
+      aimee_request_free(&request);
+   }
+   cJSON *edited = cJSON_Parse(body);
+   assert(edited);
+   cJSON_SetValuestring(
+       cJSON_GetObjectItem(cJSON_GetArrayItem(cJSON_GetObjectItem(edited, "system"), 0), "text"),
+       "compatibility edit");
+   aimee_request_t request = {0};
+   char error[128];
+   assert(!aimee_frontend_parse_native_frame(edited, body, strlen(body), AIMEE_WIRE_ANTHROPIC,
+                                             &request, error, sizeof error));
+   cJSON *native = anthropic_backend_build(&request);
+   assert(native && thinking_count(native) == 0); /* Keep proof from the original frame. */
+   cJSON_Delete(native);
+   cJSON_Delete(edited);
+   aimee_request_free(&request);
+   puts("  native prefix/chain fences, cache-only edits and honest historical omission OK");
+}
+
 static void test_mandatory_egress_admission(void)
 {
    const char *native = "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
@@ -822,6 +979,8 @@ static void test_mandatory_egress_admission(void)
 
 int main(void)
 {
+   test_json_comparison_view();
+   test_native_thinking_replay_binding();
    test_completed_argument_framing();
    test_opaque_tool_rebuild();
    test_opaque_json_precision();

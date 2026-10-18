@@ -114,6 +114,9 @@ typedef struct
     * REQUIRES it echoed back verbatim on a resubmitted assistant thinking turn, so it
     * must be modeled (not lost to the raw sidecar) for the canonical egress. Owned. */
    char *thinking_signature;
+   /* Host replay fence over the admitted native prefix and thinking chain.
+    * This is provenance metadata, never a replacement vendor signature. */
+   char *thinking_binding;
    char *thinking_id;
    char *thinking_encrypted_content;
    char *thinking_redacted;
@@ -154,7 +157,8 @@ typedef struct
    char *role; /* opaque: "user" / "assistant" / "system" / "tool" / ... */
    aimee_block_t *blocks;
    int n_blocks;
-   struct cJSON *raw; /* sidecar */
+   int content_scalar; /* observed scalar-text form; retained as transport provenance */
+   struct cJSON *raw;  /* sidecar */
 } aimee_message_t;
 
 typedef enum
@@ -293,11 +297,10 @@ typedef struct
     * Opaque, preserved verbatim. Owned. NULL when the client sent none. */
    struct cJSON *thinking;
    aimee_wire_t frontend; /* the client wire this was parsed from */
-   /* Set to 1 by any IR transform that changes the typed fields (a module editing
-    * messages/system/tools). While 0, the request is byte-identical to `raw`, so a
-    * same-protocol backend may emit `raw` verbatim (byte-faithful egress -> prompt
-    * cache preserved). A transform that dirties the IR MUST set this so the backend
-    * re-serializes from the typed fields instead of shipping stale original bytes. */
+   /* A transform reports typed payload changes here. Native replay additionally
+    * compares the complete modeled wire content against its entry snapshot;
+    * provenance-only edits do not change native bytes, and a missed flag cannot
+    * replay stale payloads. */
    int mutated;
    /* Whole-request sidecar: the ORIGINAL request JSON. Enables the same-protocol
     * raw-passthrough fast-path (frontend==backend, unmutated) and lossless replay.
@@ -372,10 +375,28 @@ typedef struct
    const char *error_message; /* ERROR */
 } aimee_delta_t;
 
+/* Bounded owned model-delta assembly for canonical persistence/replay. This
+ * consumer knows no native provider protocol. Free after success or any refusal. */
+typedef struct
+{
+   aimee_response_t response;
+   struct aimee_ir_builder_storage *storage;
+   size_t capacity, bytes;
+   int started, complete;
+} aimee_ir_response_builder_t;
+int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
+                                    const aimee_delta_t *delta);
+void aimee_ir_response_builder_free(aimee_ir_response_builder_t *builder);
+
 /* ---- lifecycle ---- */
 void aimee_message_free(aimee_message_t *message);
 void aimee_request_free(aimee_request_t *r);
 void aimee_response_free(aimee_response_t *r);
+/* Stable comparison-only JSON view; opaque source values remain unchanged.
+ * Duplicate member names refuse rather than acquire conflicting meanings. */
+int aimee_ir_json_unique(const struct cJSON *json);
+struct cJSON *aimee_ir_json_canonical_copy(const struct cJSON *json);
+int aimee_ir_thinking_binding_valid(const char *binding);
 int aimee_ir_block_valid(const aimee_block_t *block);
 /* Validate completed request content before host policy or native rendering. */
 int aimee_ir_request_admit(const aimee_request_t *request);
@@ -471,6 +492,8 @@ aimee_stop_reason_t aimee_stop_reason_parse(const char *canonical_name);
  * (the client's model string). This is the golden-test assertion that an
  * Anthropic-shaped turn and an OpenAI-shaped turn with identical semantics produce
  * identical IR -> identical KB input + identical backend build. */
+/* Native byte equality excludes host provenance/replay metadata only. */
+int aimee_ir_request_wire_equal(const aimee_request_t *a, const aimee_request_t *b);
 int aimee_ir_request_equal(const aimee_request_t *a, const aimee_request_t *b);
 
 /* ----- Request transform stage (the protocol-neutral module seam) -------------

@@ -5,6 +5,7 @@ export type Block = {
   type: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'image' | 'document';
   text?: string;
   signature?: string;
+  thinking_binding?: string;
   thinking_id?: string;
   encrypted_content?: string;
   redacted_content?: string;
@@ -21,7 +22,7 @@ export type Block = {
   media_ref?: string;
   context?: Record<string, unknown>;
 };
-export type Message = { role: string; blocks: Block[] };
+export type Message = { role: string; blocks: Block[]; content_scalar?: boolean };
 export type Delta = {
   type: 'TURN_START' | 'BLOCK_START' | 'BLOCK_DELTA' | 'BLOCK_STOP' | 'TURN_STOP' | 'ERROR';
   block_id?: number;
@@ -97,6 +98,8 @@ function validateBlock(block: Block): void {
   if (!block || !kinds.has(block.type)) throw new Error('Unsupported canonical block');
   if ((block.type === 'text' || block.type === 'thinking') && typeof block.text !== 'string')
     throw new Error('Text block requires text');
+  if (block.thinking_binding !== undefined && (block.type !== 'thinking' || typeof block.thinking_binding !== 'string' ||
+      !/^ap1:[0-9a-f]{64}:[0-9a-f]{64}:[0-9a-f]{64}$/.test(block.thinking_binding))) throw new Error('Invalid thinking replay binding');
   if (block.signature !== undefined && typeof block.signature !== 'string')
     throw new Error('Invalid thinking signature');
   for (const field of ['thinking_id', 'encrypted_content', 'redacted_content', 'cache_control', 'cache_ttl'] as const) {
@@ -153,6 +156,7 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         if (!Number.isSafeInteger(history.index ?? 0) || (history.index ?? 0) < 0 || !history.message ||
             !nonempty(history.message.role) || !Array.isArray(history.message.blocks))
           throw new Error('Invalid history checkpoint message');
+        if (history.message.content_scalar !== undefined && typeof history.message.content_scalar !== 'boolean') throw new Error('Invalid content form');
         history.message.blocks.forEach(validateBlock);
       } else if (!Number.isSafeInteger(history.count ?? 0) || (history.count ?? 0) < 0)
         throw new Error('Invalid history checkpoint count');
@@ -163,6 +167,7 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
     case 'message': {
       if (!nonempty(event.message_id) || !nonempty(event.payload.role) || !Array.isArray(event.payload.blocks) || event.payload.blocks.length > 4096)
         throw new Error('Invalid canonical message');
+      if (event.payload.content_scalar !== undefined && typeof event.payload.content_scalar !== 'boolean') throw new Error('Invalid content form');
       event.payload.blocks.forEach(validateBlock);
       const message: ProjectedMessage = { ...event.payload, id: event.message_id,
         turn: envelope.turn_id, complete: true, argumentFragments: {}, stoppedBlocks: event.payload.blocks.map((_, index) => index) };

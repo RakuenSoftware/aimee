@@ -146,6 +146,9 @@ def main():
         assert observed[-1]["output_config"]["effort"] == "high", observed[-1]
         assert all(len(json.loads(item["arguments"])["path"]) == 8192 for item in calls), calls
         followup = dict(model="ir-live-b", previous_response_id=first["id"], stream=True,
+                        instructions="RESPONSE_POLICY",
+                        tools=[{"type": "function", "name": "Read", "strict": True,
+                                "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}],
                         input=[dict(type="function_call_output", call_id=item["call_id"], output=f"RESULT_{index}")
                                for index, item in enumerate(calls)])
         raw = api("/v1/responses", followup, headers)
@@ -156,6 +159,14 @@ def main():
         assert "IR_RESPONSE_TOOLS" in sent and "fixture-signature" in sent, observed[-1]
         for index, item in enumerate(calls):
             assert item["call_id"] in sent and f"RESULT_{index}" in sent, observed[-1]
+        # Responses does not carry prior instructions/catalog implicitly. An
+        # actual prefix edit omits incompatible native thinking at egress while
+        # the durable checkpoint remains available for unchanged-prefix replay.
+        changed = {key: value for key, value in followup.items() if key not in ("instructions", "tools")}
+        api("/v1/responses", {**changed, "stream": False}, headers)
+        assert "fixture-signature" not in json.dumps(observed[-1]), observed[-1]
+        api("/v1/responses", {**followup, "stream": False}, headers)
+        assert "fixture-signature" in json.dumps(observed[-1]), observed[-1]
         count = len(observed)
         api("/v1/responses", {**followup, "stream": False}, {"aimee-session-id": "another-scope"}, expected=400)
         assert len(observed) == count, "Cross-scope continuation reached the provider"
