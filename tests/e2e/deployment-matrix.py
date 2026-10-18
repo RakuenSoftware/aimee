@@ -1248,6 +1248,9 @@ def main():
                              'also stores a record), then stop: the application gates do not '
                              'depend on how PostgreSQL storage is backed and run in the '
                              'plain-storage legs')
+    parser.add_argument('--skip-kb-gates', action='store_true',
+                        help='boot the KB and prove it stores a record, but leave its direct '
+                             'gates to the T1 leg, which runs them on the identical KB stack')
     parser.add_argument('--skip-kb-free-gate', action='store_true',
                         help='omit the KB-free personal memory gate on the standalone Server; '
                              'T3 runs that gate against the identical composition')
@@ -1284,7 +1287,7 @@ def main():
             code, body = kb.kb_request('/v1/actions/memory.store', dict(key='shared-e2e-' + uuid.uuid4().hex,
                 content='Synthetic shared deployment fixture'))
             check('KB shared memory module stores a record', code == 200 and body.get('status') == 'ok')
-        if kb and not args.boot_only:
+        if kb and not (args.boot_only or args.skip_kb_gates):
             code, preview = kb.kb_request('/v1/actions/memory.hygiene', dict(
                 dry_run=True, scope=dict(type='global', value='_global'), max_rows=16))
             check('Direct KB hygiene accepts its authenticated action envelope',
