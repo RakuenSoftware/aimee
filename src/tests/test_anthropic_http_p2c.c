@@ -573,8 +573,37 @@ static void test_messages_buffered_responses_wire_parses_sse(void)
    PASS("messages_buffered_responses_wire_parses_sse");
 }
 
+static void test_request_policy_uses_admitted_catalog(void)
+{
+   const delegate_driver_t driver = {.name = "anthropic"};
+   reset_capture();
+   g_driver = &driver;
+   g_prevent = 1;
+   char response[8192];
+   assert(messages_buffered("{\"model\":\"ignored\",\"max_tokens\":16,"
+                            "\"system\":[{\"type\":\"text\",\"text\":\"stable\","
+                            "\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"}}],"
+                            "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],"
+                            "\"tools\":[{\"name\":\"Task\",\"input_schema\":{\"type\":\"object\"}},"
+                            "{\"name\":\"Read\",\"input_schema\":{\"type\":\"object\"}}],"
+                            "\"tool_choice\":{\"type\":\"tool\",\"name\":\"Task\"}}",
+                            response, sizeof response) == 200);
+   cJSON *sent = parse(g_last_body);
+   const cJSON *tools = obj(sent, "tools");
+   assert(cJSON_GetArraySize(tools) == 1);
+   assert(!strcmp(cJSON_GetStringValue(obj(cJSON_GetArrayItem(tools, 0), "name")), "Read"));
+   assert(!strcmp(cJSON_GetStringValue(obj(obj(sent, "tool_choice"), "type")), "auto"));
+   const cJSON *cache = obj(cJSON_GetArrayItem(obj(sent, "system"), 0), "cache_control");
+   assert(!strcmp(cJSON_GetStringValue(obj(cache, "ttl")), "1h"));
+   cJSON_Delete(sent);
+   reset_capture();
+   PASS("typed request policing removes denied catalog/choice while retaining native cache "
+        "metadata");
+}
+
 int main(void)
 {
+   test_request_policy_uses_admitted_catalog();
    test_messages_buffered_responses_wire_parses_sse();
    test_messages_buffered_anthropic_police_drops_subagent_tool_use();
    test_messages_buffered_anthropic_police_keeps_non_subagent_tool_use();

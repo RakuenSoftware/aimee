@@ -28,14 +28,12 @@
 #include "gateway_mutate_wire.h"
 #include "server_http_identity.h"
 #include <aimee/gateway/gateway_policy.h>
-#include <aimee/gateway/gateway_pipeline.h>
-#include "gw_stage_registry.h"
 #include "gw_stage_governance.h"
 #include "gw_stage_completion.h"
 #include "agent_response_projection.h"
 #include <aimee/ir/session_event.h>
-#include "router_advise.h"   /* gw_stage_router — the request->workflow seam */
-#include "aimee_ir_shadow.h" /* Slice 3: IR shadow-mode observer */
+#include "router_advise.h"   /* Canonical request routing. */
+#include "aimee_ir_shadow.h" /* Read-only diagnostic observer. */
 #include <aimee/ir/aimee_ir_metrics.h>
 #include "aimee_ir_serve.h" /* Slice 5: IR live request-build */
 #include <aimee/translation/aimee_frontend.h>
@@ -334,133 +332,144 @@ static int messages_emit_response(const aimee_response_t *response, const char *
    return messages_emit_json(emit, context, "message_stop", last);
 }
 
-/* The remaining raw request-policy catalog runs before canonical assembly.
- * Native conversion after it belongs exclusively to frontend/backend adapters. */
-
-/* Tool-policing stage: strip subagent-spawning tools etc. Returns the number of
- * tools stripped (already the contract of gateway_policy_apply_request). */
-static int gw_stage_tool_policing(gw_request_t *r, void *ud)
-{
-   (void)ud;
-   return gateway_policy_apply_request(r->raw, 0 /* Anthropic tool shape */);
-}
-
-/* Model-pin stage (P2b): force the served model to the configured primary's model
- * when the policy is on (no-op by default). Resolves the P1 single-model-shim
- * regression — an operator running a fixed-model Anthropic-compatible shim enables
- * it so an arbitrary client model name is not forwarded and rejected upstream.
- * Returns 1 if the model was changed. */
-static int gw_stage_model_pin(gw_request_t *r, void *ud)
-{
-   const agent_t *ag = (const agent_t *)r->ag;
-   (void)ud;
-   return gateway_policy_pin_model(r->raw, ag ? ag->model : NULL);
-}
-
-/* Run the request pipeline over an inbound Anthropic /v1/messages request, in
- * place, with the same stages and order as the prior inline prelude (memory →
- * policy), plus the model-pin policy. Returns total interventions (≥0) or <0 on a
- * stage error. */
-/* Resolve the governance response toggle: config-store `modules.governance` (canonical) ->
- * deprecated env default. Cached legacy_config_read, so an operator toggle applies without a
- * restart; keeps gw_stage_governance config-free. */
+/* Request policy consumes admitted canonical fields. Native JSON is retained
+ * only as an immutable replay sidecar for the explicit output boundary. */
 static int anthropic_governance_enabled(void)
 {
    int tri = config_present() ? config_module_governance() : -1;
    return config_module_enabled(tri, gw_response_governance_enabled());
 }
 
-static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *driver,
-                                         const agent_t *ag, int parity, int stream)
+static cJSON *messages_ir_history_json(const aimee_request_t *request)
 {
-   /* P5 (§2.3): opt-in to inject the envelope on the Anthropic-native passthrough.
-    * Read config here so gw_stage_memory stays config-free. */
-   int allow_anthropic_inject =
-       (config_present() && config_ingress_preinject_anthropic_enabled()) ? 1 : 0;
-
-   gw_request_t r = {
-       .raw = req,
-       .driver = driver,
-       .ag = ag,
-       /* parity == driver_is_anthropic(driver), so serving_api follows it (the
-        * client is always Anthropic /v1/messages here) — no second predicate call. */
-       .serving_api = parity ? GW_API_ANTHROPIC : GW_API_OPENAI,
-       .mem_target = GW_MEM_ANTHROPIC_MESSAGES,
-       .parity = parity,
-       .stream = stream,
-       .allow_anthropic_inject = allow_anthropic_inject,
-   };
-   /* Memory PORTED to the IR transform seam (aimee_ir_apply_request_stages): it now
-    * fires once on the typed IR after frontend_parse, so it is no longer a pre-IR
-    * wire-anchored stage here. This catalog keeps the stages that still act on the raw
-    * wire request (tool policing, routing, model pin). */
-   const gw_stage_slot_t slots[] = {
-       {"tool_policing", gw_stage_tool_policing, NULL, 1},
-       {"router", gw_stage_router, NULL, 1}, /* S1/S2: unified request->workflow seam */
-       {"model_pin", gw_stage_model_pin, NULL, 1},
-   };
-   gw_stage_t stages[8];
-   int nstages = gw_stage_registry_build(slots, sizeof(slots) / sizeof(slots[0]), stages, 8);
-   if (nstages < 0)
-      return -1; /* misconfigured stage catalog: fail closed rather than run partial */
-   return gw_pipeline_run_request(&r, stages, (size_t)nstages);
-}
-
-/* Anthropic-native ingress is a near-passthrough: Claude Code already speaks
- * Anthropic Messages, so preserve request fields such as system cache_control,
- * tool_choice, thinking, stop_sequences, top_p, and top_k. By default the
- * configured primary model wins over the inbound model name; under parity the
- * concrete provider model is honored verbatim; registered agent aliases resolve
- * to the selected agent's provider model ID, just as on the OpenAI surface. */
-static char *build_anthropic_provider_body(const cJSON *in, const agent_t *ag, int stream,
-                                           int parity, const char *original_frame)
-{
-   cJSON *req;
-   char *body;
-
-   req = cJSON_Duplicate((cJSON *)in, 1);
-   if (!req)
+   cJSON *history = cJSON_CreateArray();
+   if (!history)
       return NULL;
-   const char *requested_model =
-       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "model"));
-   int selected_alias =
-       requested_model && ag &&
-       (!strcmp(requested_model, "aimee") || (ag->name[0] && !strcmp(requested_model, ag->name)));
-   if (!parity || !requested_model || !requested_model[0] || selected_alias)
+   for (int i = 0; i < request->n_messages; i++)
    {
-      const char *served = ag && ag->model[0] ? ag->model : "claude";
-      if (!requested_model || strcmp(requested_model, served))
+      cJSON *message = aimee_ir_message_json(&request->messages[i]);
+      if (!message || !cJSON_AddItemToArray(history, message))
       {
-         cJSON_DeleteItemFromObjectCaseSensitive(req, "model");
-         if (!cJSON_AddStringToObject(req, "model", served))
-         {
-            cJSON_Delete(req);
-            return NULL;
-         }
+         cJSON_Delete(message);
+         cJSON_Delete(history);
+         return NULL;
       }
    }
-   const cJSON *native_stream = cJSON_GetObjectItemCaseSensitive(req, "stream");
-   if (stream && !cJSON_IsTrue(native_stream))
+   return history;
+}
+static int messages_ir_history_replace(aimee_request_t *request, const cJSON *history)
+{
+   int count = cJSON_GetArraySize(history);
+   if (!cJSON_IsArray(history) || count > AIMEE_IR_MAX_BLOCKS)
+      return -1;
+   aimee_request_t replacement = {0};
+   replacement.messages = count ? calloc((size_t)count, sizeof *replacement.messages) : NULL;
+   if (count && !replacement.messages)
+      return -1;
+   replacement.n_messages = count;
+   for (int i = 0; i < count; i++)
+      if (aimee_ir_message_parse(cJSON_GetArrayItem(history, i), &replacement.messages[i]))
+      {
+         aimee_request_free(&replacement);
+         return -1;
+      }
+   for (int i = 0; i < request->n_messages; i++)
+      aimee_message_free(&request->messages[i]);
+   free(request->messages);
+   request->messages = replacement.messages;
+   request->n_messages = replacement.n_messages;
+   request->mutated = 1;
+   return 0;
+}
+static int messages_ir_append_policy(aimee_request_t *request, char *policy)
+{
+   if (!policy)
+      return 0;
+   if (request->n_system >= AIMEE_IR_MAX_BLOCKS)
    {
-      cJSON_DeleteItemFromObjectCaseSensitive(req, "stream");
-      cJSON_AddBoolToObject(req, "stream", 1);
+      free(policy);
+      return -1;
    }
-   else if (!stream && cJSON_IsTrue(native_stream))
-      cJSON_DeleteItemFromObjectCaseSensitive(req, "stream");
-   aimee_request_t ir = {0};
-   char error[128];
-   if (aimee_frontend_parse_native_frame(req, original_frame,
-                                         original_frame ? strlen(original_frame) : 0,
-                                         AIMEE_WIRE_ANTHROPIC, &ir, error, sizeof error))
+   aimee_block_t *blocks =
+       realloc(request->system, (size_t)(request->n_system + 1) * sizeof *blocks);
+   if (!blocks)
    {
-      cJSON_Delete(req);
-      return NULL;
+      free(policy);
+      return -1;
    }
-   aimee_ir_apply_native_request_stages(&ir);
-   body = aimee_backend_render_wire(&ir, AIMEE_WIRE_ANTHROPIC);
-   aimee_request_free(&ir);
-   cJSON_Delete(req);
-   return body;
+   request->system = blocks;
+   aimee_block_t *block = &blocks[request->n_system++];
+   *block = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = policy};
+   aimee_ir_block_set_context(block, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_POLICY,
+                              AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+   request->mutated = 1;
+   return 0;
+}
+static int messages_resolve_model(aimee_request_t *request, const agent_t *agent, int parity)
+{
+   int selected_alias =
+       request->model && (!strcmp(request->model, "aimee") || !strcmp(request->model, agent->name));
+   if (!parity || !request->model || !request->model[0] || selected_alias ||
+       config_gateway_pin_model())
+   {
+      char *model = strdup(agent->model);
+      if (!model)
+         return -1;
+      free(request->model);
+      request->model = model;
+   }
+   return 0;
+}
+
+static int messages_prepare_request(const char *frame, const agent_t *agent, int parity,
+                                    aimee_request_t *request, char *error, size_t capacity)
+{
+   if (aimee_frontend_parse_wire(frame, frame ? strlen(frame) : 0, AIMEE_WIRE_ANTHROPIC, request,
+                                 error, capacity) ||
+       aimee_ir_request_admit(request))
+      return -1;
+   if (messages_resolve_model(request, agent, parity))
+      return -1;
+   if (!parity)
+   {
+      request->max_tokens = agent_request_max_tokens(agent, request->max_tokens);
+      request->has_max_tokens = request->max_tokens > 0;
+      if (!request->has_temperature)
+      {
+         request->temperature = 1.0;
+         request->has_temperature = 1;
+      }
+   }
+   gateway_policy_apply_ir(request);
+   router_advise_ir(request);
+   if (messages_ir_append_policy(request, gw_ir_request_tool_system_prompt(request, NULL)) ||
+       messages_ir_append_policy(request, gw_ir_request_completion_system_prompt(request, NULL)))
+      return -1;
+   if (parity)
+      aimee_ir_apply_native_request_stages(request);
+   else
+      aimee_ir_apply_gateway_request_stages(request);
+   return aimee_ir_request_admit(request);
+}
+
+static int messages_mutate_request(aimee_request_t *request, int parity, cJSON **container,
+                                   gw_mutate_ctx_t *mutation)
+{
+   if (!gw_mutate_upstream_ok(parity))
+      return 0;
+   cJSON *history = messages_ir_history_json(request);
+   *container = cJSON_CreateObject();
+   if (!history || !*container || !cJSON_AddItemToObject(*container, "messages", history))
+   {
+      cJSON_Delete(history);
+      return -1;
+   }
+   gw_buffered_mutate(*container, "messages", request->model, "",
+                      server_http_identity_session_hdr(), server_http_identity_bearer(),
+                      server_http_identity_principal(), mutation);
+   return mutation->mutated ? messages_ir_history_replace(
+                                  request, cJSON_GetObjectItemCaseSensitive(*container, "messages"))
+                            : 0;
 }
 
 /* Approximation consumes canonical messages; it never converts history through
@@ -499,67 +508,11 @@ static int messages_estimate_tokens(const aimee_request_t *request)
    return tokens;
 }
 
-/* Host guidance is a new system block. Replacing the client's system with a
- * flattened string would erase its cache breakpoints and native extensions. */
-static int messages_add_host_guidance(cJSON *request, const aimee_request_t *canonical)
+/* Rendering never reimports a second native projection. */
+static char *anthropic_build_prov_body(aimee_request_t *request, aimee_wire_t wire, int stream)
 {
-   char *tool = gw_ir_request_tool_system_prompt(canonical, NULL);
-   char *completion = gw_ir_request_completion_system_prompt(canonical, tool);
-   const char *policy = completion ? completion : tool;
-   if (!policy)
-      return 0;
-   const cJSON *old = cJSON_GetObjectItemCaseSensitive(request, "system");
-   cJSON *system = cJSON_IsArray(old) ? cJSON_Duplicate(old, 1) : cJSON_CreateArray();
-   cJSON *prefix = NULL, *entry = cJSON_CreateObject();
-   int ok = system && entry;
-   if (ok && cJSON_IsString(old))
-   {
-      prefix = cJSON_CreateObject();
-      ok = prefix && cJSON_AddStringToObject(prefix, "type", "text") &&
-           cJSON_AddStringToObject(prefix, "text", old->valuestring) &&
-           cJSON_AddItemToArray(system, prefix);
-      if (ok)
-         prefix = NULL;
-   }
-   ok = ok && cJSON_AddStringToObject(entry, "type", "text") &&
-        cJSON_AddStringToObject(entry, "text", policy) && cJSON_AddItemToArray(system, entry);
-   if (ok)
-   {
-      entry = NULL;
-      ok = old ? cJSON_ReplaceItemInObjectCaseSensitive(request, "system", system)
-               : cJSON_AddItemToObject(request, "system", system);
-      if (ok)
-         system = NULL;
-   }
-   cJSON_Delete(prefix);
-   cJSON_Delete(entry);
-   cJSON_Delete(system);
-   free(completion);
-   free(tool);
-   return ok ? 0 : -1;
-}
-
-/* --- Buffered: POST /v1/messages (stream:false) ------------------------- */
-
-/* Build the upstream provider body from the current `req`. Every provider request
- * enters canonical admission and renders at its selected output boundary.
- * Re-callable so the gateway-mutation 4xx
- * restore path can rebuild the body from the restored (pristine) req. Returns a
- * malloc'd JSON string (caller frees) or NULL. */
-static char *anthropic_build_prov_body(cJSON *req, const delegate_driver_t *driver,
-                                       const agent_t *ag, int parity, int stream,
-                                       const char *original_frame)
-{
-   char *prov_body = NULL;
-   if (driver_is_anthropic(driver))
-      prov_body = build_anthropic_provider_body(req, ag, stream, parity, original_frame);
-   else
-   {
-      prov_body = aimee_ir_build_provider_body(
-          req, driver ? driver->name : NULL, ag->model,
-          agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)), stream);
-   }
-   return prov_body;
+   request->stream = stream;
+   return aimee_ir_request_admit(request) ? NULL : aimee_backend_render_wire(request, wire);
 }
 
 static int messages_buffered(const char *body, char *resp, int cap)
@@ -570,6 +523,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    cJSON *out = NULL;
    aimee_request_t policy = {0};
    char policy_error[128];
+   cJSON *mutation = NULL;
    char *prov_body = NULL, *response = NULL;
    char url[MAX_ENDPOINT_LEN + 64];
    char auth[MAX_API_KEY_LEN + 32];
@@ -638,37 +592,15 @@ static int messages_buffered(const char *body, char *resp, int cap)
    driver = delegate_driver_get(ag->provider);
    /* Exact-parity passthrough only applies to the Anthropic-native path. */
    int parity = driver_is_anthropic(driver);
-   /* Request stages (memory injection, tool policing) over the canonical IR, then
-    * translate as the terminal render step. Same order/behavior as the prior
-    * inline prelude; no-op stages when nothing is configured. A <0 return is a
-    * stage that hard-failed: abort rather than forward a half-altered request (no
-    * stage returns <0 today; the intervention count is plumbed for P2b's audit). */
-   if (messages_run_request_pipeline(req, driver, ag, parity, 0 /* buffered */) < 0)
+   if (messages_prepare_request(body, ag, parity, &policy, policy_error, sizeof policy_error))
    {
-      status = write_error(resp, cap, 500, "api_error", "gateway request pipeline failed",
-                           AIMEE_ERR_REQUEST_PIPELINE);
+      status = write_error(resp, cap, 400, "invalid_request_error",
+                           "cannot admit canonical provider request", 0);
       goto cleanup;
    }
-   /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
-    * the pointer cached above (line ~397) could now dangle. */
-   model = jo_cstr(req, "model");
-
-   /* Only AGGRESSIVE. Native Anthropic requests are mutated too now: the gateway
-    * holds a per-session freeze, so a folded prefix stays byte-identical after the
-    * turn it first engages, which is what the client's cache prefix needs. */
-   if (gw_mutate_upstream_ok(parity))
+   if (messages_mutate_request(&policy, parity, &mutation, &gwmc))
    {
-      char *mut_sys = anthropic_system_to_text(req);
-      gw_buffered_mutate(req, "messages", model, mut_sys, server_http_identity_session_hdr(),
-                         server_http_identity_bearer(), server_http_identity_principal(), &gwmc);
-      free(mut_sys);
-   }
-
-   if (anthropic_frontend_parse(req, &policy, policy_error, sizeof policy_error) != 0 ||
-       messages_add_host_guidance(req, &policy) != 0)
-   {
-      status =
-          write_error(resp, cap, 500, "api_error", "cannot assemble canonical host guidance", 0);
+      status = write_error(resp, cap, 500, "api_error", "invalid canonical economizer history", 0);
       goto cleanup;
    }
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
@@ -696,53 +628,55 @@ static int messages_buffered(const char *body, char *resp, int cap)
    else
       agent_build_extra_headers(ag, extra, sizeof(extra));
 
-   prov_body = anthropic_build_prov_body(req, driver, ag, parity, responses_wire, body);
-   if (!prov_body)
-   {
-      status = write_error(resp, cap, 500, "api_error",
-                           "could not assemble canonical provider request", 0);
-      goto cleanup;
-   }
-   const char *pristine_body = prov_body ? prov_body : "{}";
-   int economizer_active = econ_mode_current() != ECON_MODE_OFF;
    wire_fence_route_t wire_route = parity           ? WIRE_FENCE_ANTHROPIC_MESSAGES
                                    : responses_wire ? WIRE_FENCE_OPENAI_RESPONSES
                                                     : WIRE_FENCE_OPENAI_CHAT;
-   wire_fence_bytes_t wire_body;
-   if (wire_fence_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
-                         &wire_snapshot, &wire_body) != 0)
+   aimee_wire_t wire = parity           ? AIMEE_WIRE_ANTHROPIC
+                       : responses_wire ? AIMEE_WIRE_RESPONSES
+                                        : AIMEE_WIRE_OPENAI_CHAT;
+   for (int attempt = 0; attempt < 2; attempt++)
    {
-      const char *error = wire_fence_last_error();
-      status = write_error(resp, cap, wire_fence_error_http_status(error),
-                           wire_fence_error_type(error), error, AIMEE_ERR_REQUEST_PIPELINE);
-      goto cleanup;
+      free(prov_body);
+      prov_body = anthropic_build_prov_body(&policy, wire, responses_wire);
+      if (!prov_body)
+      {
+         status = write_error(resp, cap, 500, "api_error",
+                              "could not assemble canonical provider request", 0);
+         goto cleanup;
+      }
+      wire_fence_destroy(wire_snapshot);
+      wire_snapshot = NULL;
+      wire_fence_bytes_t wire_body;
+      if (wire_fence_select(econ_mode_current() != ECON_MODE_OFF, wire_route, prov_body,
+                            strlen(prov_body), &wire_snapshot, &wire_body))
+      {
+         const char *error = wire_fence_last_error();
+         status = write_error(resp, cap, wire_fence_error_http_status(error),
+                              wire_fence_error_type(error), error, AIMEE_ERR_REQUEST_PIPELINE);
+         goto cleanup;
+      }
+      http_status = wire_fence_post(url, auth, wire_body.data, wire_body.len, &response,
+                                    ag->timeout_ms, extra[0] ? extra : NULL, 1, 0, 0, ag->provider,
+                                    ag->model, NULL, wire_route);
+      if (http_status == HTTP_RETRY_ADMISSION_REFUSED)
+      {
+         const char *error = wire_fence_last_error();
+         status = write_error(resp, cap, wire_fence_error_http_status(error),
+                              wire_fence_error_type(error), error, AIMEE_ERR_REQUEST_PIPELINE);
+         goto cleanup;
+      }
+      if (attempt || !mutation ||
+          gw_buffered_after_status(mutation, "messages", http_status, &gwmc) != GW_POST_RESEND)
+         break;
+      if (messages_ir_history_replace(&policy,
+                                      cJSON_GetObjectItemCaseSensitive(mutation, "messages")))
+      {
+         status = write_error(resp, cap, 500, "api_error", "invalid restored canonical history", 0);
+         goto cleanup;
+      }
+      free(response);
+      response = NULL;
    }
-   http_status =
-       wire_fence_post(url, auth, wire_body.data, wire_body.len, &response, ag->timeout_ms,
-                       extra[0] ? extra : NULL, 1, 0, 0, ag->provider, ag->model, NULL, wire_route);
-   if (http_status == HTTP_RETRY_ADMISSION_REFUSED)
-   {
-      const char *error = wire_fence_last_error();
-      status = write_error(resp, cap, wire_fence_error_http_status(error),
-                           wire_fence_error_type(error), error, AIMEE_ERR_REQUEST_PIPELINE);
-      goto cleanup;
-   }
-
-   /* THE GATEWAY SAFETY NET. Until now nothing called this, so a reduced payload
-    * the provider rejected tripped no breaker and repeated on every later turn.
-    * The module decides and disables; the restore happens here because the body
-    * is ours.
-    *
-    * A 4xx also asks for ONE resend of this turn with the restored body, which
-    * this path cannot honour yet: the wire body is built once above and rebuilding
-    * it needs that block made re-runnable. The breaker still trips, so the failure
-    * stops repeating from the next turn -- the recovery of THIS turn is what is
-    * still missing. */
-   if (gw_buffered_after_status(req, "messages", http_status, &gwmc) == GW_POST_RESEND)
-      aimee_log(LOG_INFO, "economizer.gateway",
-                "seam=gateway upstream=%d restored to pristine and breaker tripped; the "
-                "single resend of this turn is not wired yet",
-                http_status);
 
    if (http_status != 200 || !response)
    {
@@ -794,6 +728,7 @@ cleanup:
    free(response);
    free(prov_body);
    aimee_request_free(&policy);
+   cJSON_Delete(mutation);
    cJSON_Delete(req);
    return status;
 }
@@ -1205,6 +1140,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    agent_t *ag = (req && resolve_requested_agent(&agbuf, model) == 0) ? &agbuf : NULL;
    aimee_request_t policy = {0};
    char policy_error[128];
+   cJSON *mutation = NULL;
    char *prov_body = NULL;
    char url[MAX_ENDPOINT_LEN + 64];
    char auth[MAX_API_KEY_LEN + 32];
@@ -1255,40 +1191,14 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    driver = delegate_driver_get(ag->provider);
    /* Exact-parity passthrough only applies to the Anthropic-native path. */
    int parity = driver_is_anthropic(driver);
-   /* Request stages (memory injection, tool policing) over the canonical IR, then
-    * translate as the terminal render step. Same order/behavior as the prior
-    * inline prelude. A <0 return is a stage that hard-failed: emit a clean empty
-    * stream (matching the setup-failure path) so the client's SSE reader
-    * terminates, then abort rather than forward a half-altered request. (No stage
-    * returns <0 today; the count is plumbed for P2b's audit.) */
-   if (messages_run_request_pipeline(req, driver, ag, parity, 1 /* stream */) < 0)
+   if (messages_prepare_request(body, ag, parity, &policy, policy_error, sizeof policy_error) ||
+       messages_mutate_request(&policy, parity, &mutation, &gwmc))
    {
       anthropic_stream_state_t state = {0};
       aimee_delta_t error = {.type = AIMEE_DELTA_ERROR,
-                             .error_message = "Cannot initialize provider request"};
+                             .error_message = "Cannot assemble canonical provider request"};
       anthropic_delta_emit(&error, &state, msg_id, model, emit, ctx);
-      goto cleanup;
-   }
-   /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
-    * the pointer cached at the top of this function could now dangle. */
-   model = jo_cstr(req, "model");
-
-   if (gw_mutate_upstream_ok(parity))
-   {
-      char *mut_sys = anthropic_system_to_text(req);
-      gw_buffered_mutate(req, "messages", model, mut_sys, server_http_identity_session_hdr(),
-                         server_http_identity_bearer(), server_http_identity_principal(), &gwmc);
-      free(mut_sys);
-   }
-
-   if (anthropic_frontend_parse(req, &policy, policy_error, sizeof policy_error) != 0 ||
-       messages_add_host_guidance(req, &policy) != 0)
-   {
-      emit(ctx, "error",
-           "{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"cannot assemble "
-           "canonical "
-           "host guidance\"}}");
-      stream_status = 500;
+      stream_status = 400;
       goto cleanup;
    }
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
@@ -1311,14 +1221,18 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * parity build too, not only the IR/openai build below. */
    /* Any provider may need the response completion stage after an edit. Buffer
     * only armed turns so the bounded completion behavior is independent of the
-    * client/provider protocol pairing. Unarmed native Anthropic turns retain the
-    * byte-for-byte streaming relay. */
+    * client/provider protocol pairing. Unarmed native Anthropic turns retain incremental
+    * canonical relay. */
    int completion_buffered = gw_ir_response_completion_armed(&policy);
    int buffered_replay =
        gateway_prevent_subagents_enabled() || responses_wire || completion_buffered;
    int upstream_stream = responses_wire ? 1 : (buffered_replay ? 0 : 1);
 
-   prov_body = anthropic_build_prov_body(req, driver, ag, parity, upstream_stream, body);
+   prov_body = anthropic_build_prov_body(&policy,
+                                         parity           ? AIMEE_WIRE_ANTHROPIC
+                                         : responses_wire ? AIMEE_WIRE_RESPONSES
+                                                          : AIMEE_WIRE_OPENAI_CHAT,
+                                         upstream_stream);
 
    if (!prov_body)
    {
@@ -1401,6 +1315,7 @@ cleanup:
    gw_mutate_ctx_free(&gwmc);
    free(prov_body);
    aimee_request_free(&policy);
+   cJSON_Delete(mutation);
    cJSON_Delete(req);
    return 0;
 }
@@ -1424,6 +1339,17 @@ static int count_tokens(const char *body, char *resp, int cap)
       cJSON_Delete(req);
       return write_error(resp, cap, 400, "invalid_request_error",
                          "messages is required and must be an array", 0);
+   }
+   aimee_request_t policy = {0};
+   char error[128];
+   if (aimee_frontend_parse_wire(body, body ? strlen(body) : 0, AIMEE_WIRE_ANTHROPIC, &policy,
+                                 error, sizeof error) ||
+       aimee_ir_request_admit(&policy))
+   {
+      aimee_request_free(&policy);
+      cJSON_Delete(req);
+      return write_error(resp, cap, 400, "invalid_request_error", "invalid canonical count request",
+                         0);
    }
    const char *model = jo_cstr(req, "model");
 
@@ -1450,14 +1376,26 @@ static int count_tokens(const char *body, char *resp, int cap)
             int hs;
             snprintf(ct_url, sizeof(ct_url), "%s/count_tokens", url); /* url ends in /messages */
             build_anthropic_parity_headers(extra, sizeof(extra));
-            hs = agent_http_post(ct_url, auth, (body && body[0]) ? body : "{}", &response,
-                                 ag->timeout_ms, extra[0] ? extra : NULL);
+            char *native = messages_resolve_model(&policy, ag, 1) == 0
+                               ? aimee_backend_render_wire(&policy, AIMEE_WIRE_ANTHROPIC)
+                               : NULL;
+            if (!native)
+            {
+               aimee_request_free(&policy);
+               cJSON_Delete(req);
+               return write_error(resp, cap, 400, "invalid_request_error",
+                                  "cannot render canonical count request", 0);
+            }
+            hs = agent_http_post(ct_url, auth, native, &response, ag->timeout_ms,
+                                 extra[0] ? extra : NULL);
+            free(native);
             if (response && (int)strlen(response) < cap)
             {
                /* Relay upstream status + body verbatim (200 with the real count,
                 * or the real error). */
                memcpy(resp, response, strlen(response) + 1);
                free(response);
+               aimee_request_free(&policy);
                cJSON_Delete(req);
                return hs;
             }
@@ -1466,14 +1404,6 @@ static int count_tokens(const char *body, char *resp, int cap)
       }
    }
 
-   aimee_request_t policy = {0};
-   char error[128];
-   if (anthropic_frontend_parse(req, &policy, error, sizeof error) != 0)
-   {
-      cJSON_Delete(req);
-      return write_error(resp, cap, 400, "invalid_request_error", "invalid canonical count request",
-                         0);
-   }
    int n = messages_estimate_tokens(&policy);
    aimee_request_free(&policy);
    if (n < 0)

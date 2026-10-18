@@ -299,3 +299,9 @@ __attribute__((weak)) void aimee_ir_apply_native_request_stages(void *request)
 {
    (void)request;
 }
+
+/* Advisory routing is independent of the ingress codec fixtures. */
+__attribute__((weak)) void router_advise_ir(const void *request)
+{
+   (void)request;
+}

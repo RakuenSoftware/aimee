@@ -14,6 +14,7 @@
 #include "../headers/log.h"
 #include "../headers/server_http.h"
 #include "../headers/request_context.h"
+#include "gateway_mutate_wire.h"
 #include "../vendor/headers/cJSON.h"
 
 #include "support/native_response_fixture.h"
@@ -44,6 +45,8 @@ static const char *g_stream_payload;
 static const char *g_response_body = NULL;
 static int g_response_status = 200;
 static int g_proof_gated = 0;
+static int g_mutation_mode, g_post_count, g_reject_first, g_policy_calls, g_router_calls;
+static char *g_first_body;
 static int g_receipt_refuse, g_receipt_calls;
 int ingress_preinject_revalidate_sources(void)
 {
@@ -69,6 +72,9 @@ static void reset_capture(void)
 {
    free(g_last_body);
    g_last_body = NULL;
+   free(g_first_body);
+   g_first_body = NULL;
+   g_mutation_mode = g_post_count = g_reject_first = g_policy_calls = g_router_calls = 0;
    free(g_last_extra);
    g_last_extra = NULL;
    g_stream_status = 200;
@@ -222,6 +228,13 @@ int agent_http_post(const char *url, const char *auth_header, const char *body, 
    *response_buf = g_response_body ? strdup(g_response_body)
                                    : native_response_fixture(g_driver ? g_driver->name : NULL, "ok",
                                                              NULL, NULL);
+   g_post_count++;
+   if (g_reject_first && g_post_count == 1)
+   {
+      g_first_body = strdup(body);
+      assert(g_first_body);
+      return 400;
+   }
    return g_response_status;
 }
 
@@ -356,17 +369,15 @@ int agent_http_last_retry_after(void)
 }
 /* Gateway policy is no-op in these whitebox shape tests (its own behavior is
  * covered by test_gateway_policy); keeps the request shape unaltered. */
-int gateway_policy_apply_request(cJSON *req, int tools_openai_shape)
+int gateway_policy_apply_ir(aimee_request_t *request)
 {
-   (void)req;
-   (void)tools_openai_shape;
+   assert(!aimee_ir_request_admit(request));
+   g_policy_calls++;
    return 0;
 }
-int gateway_policy_pin_model(cJSON *req, const char *agent_model)
+int config_gateway_pin_model(void)
 {
-   (void)req;
-   (void)agent_model;
-   return 0; /* pin is off in these shape tests; covered by test_gateway_policy */
+   return 0;
 }
 /* P2c streaming branch gate: off by default in these whitebox shape tests
  * (the real predicate is exercised by test_anthropic_http-p2c). */
@@ -382,6 +393,55 @@ int gateway_policy_police_parsed_response(parsed_response_t *p)
 {
    (void)p;
    return 0;
+}
+
+void router_advise_ir(const aimee_request_t *request)
+{
+   assert(!aimee_ir_request_admit(request));
+   g_router_calls++;
+}
+int gw_mutate_upstream_ok(int native)
+{
+   (void)native;
+   return g_mutation_mode != 0;
+}
+void gw_mutate_ctx_free(gw_mutate_ctx_t *context)
+{
+   cJSON_Delete(context->original);
+   context->original = NULL;
+}
+void gw_buffered_mutate(cJSON *container, const char *key, const char *model, const char *system,
+                        const char *session, const char *bearer, const char *principal,
+                        gw_mutate_ctx_t *context)
+{
+   (void)model;
+   (void)system;
+   (void)session;
+   (void)bearer;
+   (void)principal;
+   cJSON *history = cJSON_GetObjectItemCaseSensitive(container, key);
+   assert(cJSON_GetArraySize(history) == 3);
+   for (const cJSON *message = history->child; message; message = message->next)
+      assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(message, "blocks")) &&
+             !cJSON_GetObjectItemCaseSensitive(message, "content"));
+   context->original = cJSON_DetachItemFromObjectCaseSensitive(container, key);
+   cJSON *reduced = cJSON_Parse(
+       g_mutation_mode == 2
+           ? "[{\"role\":\"user\",\"content\":\"invalid native bypass\"}]"
+           : "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"reduced\"}]}]");
+   assert(reduced && cJSON_AddItemToObject(container, key, reduced));
+   context->mutated = 1;
+}
+gw_post_action_t gw_buffered_after_status(cJSON *container, const char *key, int status,
+                                          gw_mutate_ctx_t *context)
+{
+   if (!context->mutated || status != 400)
+      return GW_POST_NONE;
+   cJSON_DeleteItemFromObjectCaseSensitive(container, key);
+   assert(cJSON_AddItemToObject(container, key, context->original));
+   context->original = NULL;
+   context->mutated = 0;
+   return GW_POST_RESEND;
 }
 
 #include "../server/anthropic_http.c"
@@ -764,10 +824,12 @@ static void test_native_admission_failure_sends_no_provider_request(void)
    char response[4096];
    reset_capture();
    g_driver = &anthropic;
-   assert(messages_buffered(request, response, sizeof response) == 500 && !g_last_body);
+   assert(messages_buffered(request, response, sizeof response) == 400 && !g_last_body);
+   assert(!g_policy_calls && !g_router_calls);
    emit_capture_t cap = {0};
    assert(messages_stream(request, cap_emit, &cap) == 0 && !g_last_body);
    assert(cap.count == 1 && !strcmp(cap.events[0], "error"));
+   assert(!g_policy_calls && !g_router_calls);
    reset_capture();
    PASS("native_admission_failure_sends_no_provider_request");
 }
@@ -983,7 +1045,7 @@ static void test_foreign_ingress_cannot_fall_back_from_ir(void)
                             "{\"role\":\"user\",\"content\":\"hi\"}],"
                             "\"tool_choice\":{\"type\":\"unsupported\"}}";
       char reply[1024];
-      assert(messages_buffered(invalid, reply, sizeof reply) == 500);
+      assert(messages_buffered(invalid, reply, sizeof reply) == 400);
       assert(!g_last_body && strstr(reply, "canonical"));
       emit_capture_t cap = {0};
       assert(!messages_stream(invalid, cap_emit, &cap));
@@ -1376,7 +1438,10 @@ static void test_native_alias_uses_provider_model(void)
    snprintf(agent.name, sizeof agent.name, "registered-agent");
    snprintf(agent.model, sizeof agent.model, "actual-provider-model");
    cJSON *request = parse(body);
-   char *wire = build_anthropic_provider_body(request, &agent, 0, 1, body);
+   aimee_request_t canonical = {0};
+   char error[128];
+   assert(!messages_prepare_request(body, &agent, 1, &canonical, error, sizeof error));
+   char *wire = anthropic_build_prov_body(&canonical, AIMEE_WIRE_ANTHROPIC, 0);
    cJSON *native = wire ? cJSON_Parse(wire) : NULL;
    assert(native && !strcmp(cJSON_GetStringValue(obj(native, "model")), "actual-provider-model"));
    assert(cJSON_Compare(obj(request, "system"), obj(native, "system"), 1));
@@ -1384,10 +1449,66 @@ static void test_native_alias_uses_provider_model(void)
    free(wire);
    cJSON_Delete(native);
    cJSON_Delete(request);
+   aimee_request_free(&canonical);
+}
+
+static void test_canonical_economizer_restore_resends_once(void)
+{
+   const delegate_driver_t driver = {.name = "anthropic"};
+   const char *request = "{\"model\":\"ignored\",\"max_tokens\":32,\"messages\":["
+                         "{\"role\":\"user\",\"content\":\"first\"},"
+                         "{\"role\":\"assistant\",\"content\":\"answer\"},"
+                         "{\"role\":\"user\",\"content\":\"last\"}]}";
+   char response[4096];
+   reset_capture();
+   g_driver = &driver;
+   g_mutation_mode = g_reject_first = 1;
+   assert(messages_buffered(request, response, sizeof response) == 200);
+   assert(g_post_count == 2 && g_policy_calls == 1 && g_router_calls == 1);
+   cJSON *reduced = parse(g_first_body), *restored = parse(g_last_body), *original = parse(request);
+   assert(cJSON_GetArraySize(obj(reduced, "messages")) == 1 && strstr(g_first_body, "reduced"));
+   assert(cJSON_Compare(obj(restored, "messages"), obj(original, "messages"), 1));
+   cJSON_Delete(reduced);
+   cJSON_Delete(restored);
+   cJSON_Delete(original);
+   reset_capture();
+   g_driver = &driver;
+   g_mutation_mode = 2;
+   assert(messages_buffered(request, response, sizeof response) == 500 && !g_post_count);
+   reset_capture();
+   PASS("canonical economizer restores original history once; native bypass refuses before "
+        "dispatch");
+}
+
+static void test_native_count_admits_before_dispatch(void)
+{
+   const delegate_driver_t driver = {.name = "anthropic"};
+   const char *invalid[] = {
+       "{\"model\":\"aimee\",\"messages\":[{\"role\":\"forged\",\"content\":\"x\"}]}",
+       "{\"model\":\"aimee\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]} trailing"};
+   for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+   {
+      reset_capture();
+      g_driver = &driver;
+      char response[1024];
+      assert(count_tokens(invalid[i], response, sizeof response) == 400 && !g_post_count);
+   }
+   reset_capture();
+   g_driver = &driver;
+   char response[1024];
+   assert(count_tokens("{\"model\":\"aimee\",\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}",
+                       response, sizeof response) == 200 &&
+          g_post_count == 1);
+   cJSON *sent = parse(g_last_body);
+   assert(!strcmp(cJSON_GetStringValue(obj(sent, "model")), "configured-claude"));
+   cJSON_Delete(sent);
+   reset_capture();
 }
 
 int main(void)
 {
+   test_canonical_economizer_restore_resends_once();
+   test_native_count_admits_before_dispatch();
    test_native_alias_uses_provider_model();
    test_explicit_unknown_model_is_rejected();
    test_messages_stream_anthropic_reasoning_metrics();
