@@ -31,6 +31,8 @@
 #include "aimee.h"            /* KIND_COUNT, required by memory.h */
 #include "memory.h"           /* MEMORY_EMBED_TEST_FIXTURE */
 #include "modules/kb/c/kb_store_test_shim.h"
+#include "modules/kb/c/kb_store_internal.h"
+#include "modules/kb/c/db_postgres.h"
 #include "../kb/kb_evidence_embed.h"
 
 /* ---- stub embedder ---------------------------------------------------- */
@@ -155,6 +157,17 @@ static void test_embed_configured_width(int configured_dim, int returned_dim)
    snprintf(width, sizeof(width), "%d", configured_dim);
    assert(setenv("EMBEDDER_DIMS", width, 1) == 0);
    open_db();
+   if (kb_store_test_shim_is_postgres())
+   {
+      /* The per-process PostgreSQL clone is seeded at 384 dimensions. The
+       * reset above empties its evidence table; size this fixture's column
+       * to the instance width before exercising the worker. */
+      char sql[160], err[256] = "";
+      snprintf(sql, sizeof(sql),
+               "ALTER TABLE evidence_vectors ALTER COLUMN embedding TYPE vector(%d)",
+               configured_dim);
+      assert(aimee_pg_exec(kb_store_conn(), sql, err, sizeof(err)) == 0);
+   }
    g_embed_dim = returned_dim;
    g_embed_calls = 0;
    char id[64];
