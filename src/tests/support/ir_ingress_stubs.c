@@ -239,7 +239,7 @@ __attribute__((weak)) int openai_backend_parse(const void *resp, void *out, char
    (void)errn;
    return -1;
 }
-__attribute__((weak)) void aimee_response_free(void *r)
+__attribute__((weak)) void aimee_response_free(aimee_response_t *r)
 {
    (void)r;
 }
