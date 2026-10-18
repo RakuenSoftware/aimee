@@ -31,5 +31,9 @@ struct cJSON *aimee_claude_control_reply(const char *native_id, const struct cJS
                                          const struct cJSON *decision);
 struct cJSON *aimee_codex_control_reply(const char *method, const struct cJSON *params,
                                         const struct cJSON *decision);
+/* Persist an already-admitted canonical operator decision before native delivery.
+ * It resolves the pending adapter id, so native serialization emits no duplicate. */
+int aimee_harness_control_decision_ir(aimee_harness_ir_t *state, const char *native_id,
+                                      const struct cJSON *decision);
 void aimee_harness_ir_free(aimee_harness_ir_t *state);
 #endif

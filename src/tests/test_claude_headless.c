@@ -34,6 +34,13 @@ static int capture(const aimee_session_event_t *event, void *context)
    cJSON *typed = aimee_ir_session_event_json(event);
    assert(typed);
    cJSON_Delete(typed);
+   if (event->kind == AIMEE_SESSION_CONTROL_RESPONSE)
+   {
+      assert(!strcmp(
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event->control, "decision")),
+          "allow"));
+      assert(!cJSON_GetObjectItemCaseSensitive(event->control, "response"));
+   }
    events++;
    server_control_scope_t *scope = server_control_scope_current();
    if (scope && event->kind == AIMEE_SESSION_CONTROL_REQUEST)
@@ -219,6 +226,16 @@ int main(void)
    reject_after = 1;
    assert(claude_headless_run(&cfg, NULL, NULL, &out) == AGENT_RC_CAPTURE_FAILED);
    assert(!out.success && events == 1 && !strcmp(out.stop_reason, "capture_failed"));
+   reject_after = 0;
+   server_control_scope_close(scope);
+   scope = server_control_scope_open("aimee-one", "test-turn", "alice");
+   assert(scope);
+   server_control_scope_bind(scope);
+   aimee_ir_session_set_sink(capture, NULL);
+   events = 0;
+   reject_after = 2; /* Refuse the decision itself before any native approval bytes. */
+   assert(claude_headless_run(&cfg, NULL, NULL, &out) == AGENT_RC_CAPTURE_FAILED);
+   assert(!out.success && events == 2 && !strcmp(out.stop_reason, "capture_failed"));
    reject_after = 0;
    server_control_scope_close(scope);
    aimee_ir_session_set_sink(NULL, NULL);

@@ -1270,7 +1270,14 @@ static int cli_codex_handle_server_request(cli_codex_t *c, const char *line)
       {
          cJSON *result =
              aimee_codex_control_reply(m, cJSON_GetObjectItemCaseSensitive(obj, "params"), reply);
-         int rc = result
+         if (result && aimee_harness_control_decision_ir(&c->ir, native_id, reply))
+         {
+            cJSON_Delete(result);
+            result = NULL;
+            aimee_ir_session_fail_capture();
+         }
+         int rc = aimee_ir_session_capture_failed() ? -1
+                  : result
                       ? cli_codex_send_jsonrpc_result(c, id, result)
                       : cli_codex_send_jsonrpc_error(
                             c, id, -32602, "Operator reply could not satisfy this control request");

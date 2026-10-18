@@ -700,7 +700,8 @@ static int codex_operator_capture(const aimee_session_event_t *event, void *cont
       cJSON *reply =
           cJSON_Parse(!strcmp(event->control_kind, "question")
                           ? "{\"decision\":\"allow\",\"answers\":{\"direction\":[\"North\"]}}"
-                          : "{\"decision\":\"deny\"}");
+                      : !strcmp(event->control_kind, "elicitation") ? "{\"decision\":\"allow\"}"
+                                                                    : "{\"decision\":\"cancel\"}");
       char id[256];
       snprintf(id, sizeof id, "operator-turn:%s", event->request_id);
       assert(server_control_reply("operator-session", id, "alice", reply) == 0);
@@ -708,7 +709,17 @@ static int codex_operator_capture(const aimee_session_event_t *event, void *cont
       operator_requests++;
    }
    else if (event->kind == AIMEE_SESSION_CONTROL_RESPONSE)
+   {
+      const char *decision =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event->control, "decision"));
+      assert(decision &&
+             !strcmp(decision, !strcmp(event->control_kind, "permission") ? "cancel" : "allow"));
+      if (!strcmp(event->control_kind, "question"))
+         assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(
+             cJSON_GetObjectItemCaseSensitive(event->control, "answers"), "direction")));
+      assert(!cJSON_GetObjectItemCaseSensitive(event->control, "action"));
       operator_responses++;
+   }
    return 0;
 }
 static void test_operator_replies_reach_native_child(void)
@@ -728,7 +739,10 @@ static void test_operator_replies_reach_native_child(void)
          "hello'}, {'decision':'decline'}),\n ('item/tool/requestUserInput', 72, "
          "{'questions':[{'id':'direction','question':'Which "
          "direction?','options':[{'label':'North'}]}]}, "
-         "{'answers':{'direction':{'answers':['North']}}})\n]:\n "
+         "{'answers':{'direction':{'answers':['North']}}}),\n"
+         " ('mcpServer/elicitation/request', 73, {'mode':'url','serverName':'inventory',"
+         "'message':'Authorize access','url':'https://accounts.example.test/authorize',"
+         "'elicitationId':'el-1'}, {'action':'accept','content':None,'_meta':None})\n]:\n "
          "send({'jsonrpc':'2.0','id':ident,'method':method,'params':params})\n "
          "frame=json.loads(sys.stdin.readline())\n assert frame['id']==ident and "
          "frame['result']==expected, "
@@ -752,7 +766,7 @@ static void test_operator_replies_reach_native_child(void)
    codex_stream_capture_t cap = {0};
    assert(cli_codex_chat_stream(&req, codex_capture_cb, &cap, &out) == 0);
    assert(strstr(cap.buf, "Operator replies received"));
-   assert(operator_requests == 2 && operator_responses == 2);
+   assert(operator_requests == 3 && operator_responses == 3);
    aimee_ir_session_set_sink(NULL, NULL);
    server_control_scope_bind(previous);
    server_control_scope_close(scope);

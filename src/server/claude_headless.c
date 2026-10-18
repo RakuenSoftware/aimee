@@ -135,6 +135,7 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
             if (taken == 1)
             {
                cJSON *frame = aimee_claude_control_reply(id, request, reply);
+               int canonical = frame != NULL;
                if (!frame)
                {
                   frame = cJSON_CreateObject();
@@ -145,7 +146,9 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                   cJSON_AddStringToObject(error, "error",
                                           "Operator reply did not satisfy this request");
                }
-               int published = frame ? aimee_claude_frame_ir(frame, &ir) : -1;
+               int published = !frame      ? -1
+                               : canonical ? aimee_harness_control_decision_ir(&ir, id, reply)
+                                           : aimee_claude_frame_ir(frame, &ir);
                free(id);
                free(kind);
                cJSON_Delete(request);

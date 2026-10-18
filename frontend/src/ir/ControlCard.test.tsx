@@ -89,3 +89,28 @@ describe('canonical browser controls', () => {
   });
 
 });
+
+ it('records URL consent once, displays the requesting server/host and never claims completion', async () => {
+  const onReply = vi.fn().mockResolvedValue(undefined);
+  render(<ControlCard id="t:url" control={{ ...permission, kind: 'elicitation', request: { url: {
+    href: 'https://accounts.example.test/authorize?state=opaque', server: 'inventory', message: 'Authorize access', elicitation_id: 'el-1',
+  } } }} onReply={onReply} />);
+  expect(onReply).not.toHaveBeenCalled();
+  expect(screen.getByText('inventory: Authorize access')).toBeTruthy();
+  const link = screen.getByRole('link', { name: 'Allow and open accounts.example.test' });
+  expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  fireEvent.click(link);
+  await waitFor(() => expect(onReply).toHaveBeenCalledWith('t:url', { decision: 'allow' }));
+  fireEvent.click(link);
+  expect(onReply).toHaveBeenCalledTimes(1);
+ });
+ it('keeps unsupported URL schemes and userinfo unavailable while retaining decline/cancel', () => {
+  for (const href of ['javascript:alert(1)', 'data:text/html,secret', 'file:///etc/passwd', 'https://user:password@example.test/', 'https://', 'https://x\\@attacker/']) {
+    const { unmount } = render(<ControlCard id="t:url" control={{ ...permission, kind: 'elicitation', request: { url: {
+      href, server: 'inventory', message: 'Authorize access', elicitation_id: 'el-1',
+    } } }} onReply={vi.fn()} />);
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Decline' })).toBeTruthy();
+    unmount();
+  }
+ });

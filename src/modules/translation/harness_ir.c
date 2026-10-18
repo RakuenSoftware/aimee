@@ -376,6 +376,26 @@ static int aimee_codex_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
             normalized = NULL;
          }
       }
+      if (normalized && !strcmp(kind, "elicitation"))
+      {
+         /* Native correlation stays at the adapter. Browser controls consume only
+          * the normalized form/URL contract, never the native parameter frame. */
+         cJSON_DeleteItemFromObjectCaseSensitive(normalized, "input");
+         if (!strcmp(str(params, "mode"), "url"))
+         {
+            cJSON *url = cJSON_AddObjectToObject(normalized, "url");
+            cJSON_ReplaceItemInObjectCaseSensitive(
+                normalized, "title", cJSON_CreateString("External interaction requested"));
+            if (!url || !cJSON_AddStringToObject(url, "href", str(params, "url")) ||
+                !cJSON_AddStringToObject(url, "message", str(params, "message")) ||
+                !cJSON_AddStringToObject(url, "server", str(params, "serverName")) ||
+                !cJSON_AddStringToObject(url, "elicitation_id", str(params, "elicitationId")))
+            {
+               cJSON_Delete(normalized);
+               normalized = NULL;
+            }
+         }
+      }
       aimee_session_event_t e = {.kind = AIMEE_SESSION_CONTROL_REQUEST,
                                  .request_id = id,
                                  .control_kind = kind,
@@ -504,12 +524,39 @@ static int aimee_codex_reply_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
          const cJSON *result = cJSON_GetObjectItemCaseSensitive(f, "result");
          if (!result)
             result = cJSON_GetObjectItemCaseSensitive(f, "error");
+         const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(s->pending, id));
+         cJSON *normalized = NULL;
+         if (kind && !strcmp(kind, "elicitation"))
+         {
+            const char *action = str(result, "action");
+            const char *decision = !strcmp(action, "accept")    ? "allow"
+                                   : !strcmp(action, "decline") ? "deny"
+                                   : !strcmp(action, "cancel")  ? "cancel"
+                                                                : NULL;
+            normalized = cJSON_CreateObject();
+            if (!decision || !normalized ||
+                !cJSON_AddStringToObject(normalized, "decision", decision))
+            {
+               cJSON_Delete(normalized);
+               free(id);
+               return -1;
+            }
+            const cJSON *content = cJSON_GetObjectItemCaseSensitive(result, "content");
+            if (!strcmp(decision, "allow") && content && !cJSON_IsNull(content) &&
+                !cJSON_AddItemToObject(normalized, "content", cJSON_Duplicate(content, 1)))
+            {
+               cJSON_Delete(normalized);
+               free(id);
+               return -1;
+            }
+         }
          aimee_session_event_t e = {
              .kind = AIMEE_SESSION_CONTROL_RESPONSE,
              .request_id = id,
              .control_kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(s->pending, id)),
-             .control = result};
+             .control = normalized ? normalized : result};
          int rc = aimee_ir_session_emit(&e);
+         cJSON_Delete(normalized);
          cJSON_DeleteItemFromObjectCaseSensitive(s->pending, id);
          free(id);
          return rc;
@@ -779,6 +826,26 @@ static int operator_allowed(const cJSON *decision)
           : (!strcmp(value, "deny") || !strcmp(value, "cancel")) ? 0
                                                                  : -1;
 }
+int aimee_harness_control_decision_ir(aimee_harness_ir_t *state, const char *id,
+                                      const cJSON *decision)
+{
+   const char *kind =
+       state && id ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(state->pending, id))
+                   : NULL;
+   if (!kind || !cJSON_IsObject(decision) || operator_allowed(decision) < 0)
+      return -1;
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_CONTROL_RESPONSE,
+                                  .request_id = id,
+                                  .control_kind = kind,
+                                  .control = decision};
+   int rc = aimee_ir_session_emit(&event);
+   if (!rc)
+      cJSON_DeleteItemFromObjectCaseSensitive(state->pending, id);
+   else
+      aimee_ir_session_fail_capture();
+   return rc;
+}
+
 static int answer_strings(const cJSON *answers)
 {
    if (!cJSON_IsArray(answers) || !cJSON_GetArraySize(answers))
@@ -924,9 +991,27 @@ cJSON *aimee_codex_control_reply(const char *method, const cJSON *params, const 
    else if (!strcmp(method, "mcpServer/elicitation/request"))
    {
       const cJSON *content = cJSON_GetObjectItemCaseSensitive(decision, "content");
-      if (allow && (strcmp(str(params, "mode"), "form") ||
-                    !aimee_ir_form_validate(
-                        cJSON_GetObjectItemCaseSensitive(params, "requestedSchema"), content)))
+      int form_mode = !strcmp(str(params, "mode"), "form");
+      int url_mode = !strcmp(str(params, "mode"), "url");
+      cJSON *url = NULL;
+      if (allow && url_mode)
+      {
+         url = cJSON_CreateObject();
+         if (url)
+         {
+            cJSON_AddStringToObject(url, "href", str(params, "url"));
+            cJSON_AddStringToObject(url, "message", str(params, "message"));
+            cJSON_AddStringToObject(url, "server", str(params, "serverName"));
+            cJSON_AddStringToObject(url, "elicitation_id", str(params, "elicitationId"));
+         }
+      }
+      int valid =
+          !allow ||
+          (form_mode ? aimee_ir_form_validate(
+                           cJSON_GetObjectItemCaseSensitive(params, "requestedSchema"), content)
+                     : url_mode && !content && aimee_ir_elicitation_url_valid(url));
+      cJSON_Delete(url);
+      if (!valid)
       {
          cJSON_Delete(result);
          return NULL;
@@ -936,7 +1021,7 @@ cJSON *aimee_codex_control_reply(const char *method, const cJSON *params, const 
                               : !strcmp(str(decision, "decision"), "cancel") ? "cancel"
                                                                              : "decline");
       cJSON_AddItemToObject(result, "content",
-                            allow ? cJSON_Duplicate(content, 1) : cJSON_CreateNull());
+                            allow && form_mode ? cJSON_Duplicate(content, 1) : cJSON_CreateNull());
       cJSON_AddNullToObject(result, "_meta");
    }
    else if (!strcmp(method, "item/commandExecution/requestApproval") ||

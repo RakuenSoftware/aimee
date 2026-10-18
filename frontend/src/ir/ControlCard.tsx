@@ -11,7 +11,23 @@ function questions(request: Record<string, unknown>): Question[] {
     typeof q.id === 'string' && typeof q.question === 'string' && Array.isArray(q.options))
     .map(q => ({ ...q, options: q.options.filter(option => option && typeof option.label === 'string') }));
 }
+function elicitationURL(request: Record<string, unknown>): { href: string; host: string; message: string; server: string } | undefined {
+  const value = request.url;
+  if (!value || typeof value !== 'object' || request.form) return undefined;
+  const url = value as Record<string, unknown>;
+  const bytes = (value: string) => new TextEncoder().encode(value).length;
+  if (Object.keys(url).length !== 4 || typeof url.href !== 'string' || bytes(url.href) > 8192 || /[\u0000-\u0020\u007f\\]/.test(url.href) ||
+      typeof url.elicitation_id !== 'string' || !url.elicitation_id || bytes(url.elicitation_id) > 1024 ||
+      typeof url.message !== 'string' || bytes(url.message) > 65535 ||
+      typeof url.server !== 'string' || !url.server || bytes(url.server) > 256) return undefined;
+  try {
+    const parsed = new URL(url.href);
+    if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password) return undefined;
+    return { href: url.href, host: parsed.host, message: url.message, server: url.server };
+  } catch { return undefined; }
+}
 export default function ControlCard({ id, control, onReply }: { id: string; control: Control; onReply?: ReplyControl }) {
+  const external = control.kind === 'elicitation' ? elicitationURL(control.request) : undefined;
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
@@ -30,6 +46,18 @@ export default function ControlCard({ id, control, onReply }: { id: string; cont
     <summary>{control.kind}: {control.response ? 'Resolved' : control.closed ? 'Closed' : pending ? 'Reply sent' : 'Awaiting your reply'}</summary>
     {typeof control.request.title === 'string' && <p>{control.request.title}</p>}
     {control.kind !== 'question' && control.kind !== 'elicitation' && <pre>{stringifyJSON(control.request.input ?? control.request, 2)}</pre>}
+    {external && <div>
+      <p>{external.server}: {external.message}</p>
+      <p>Destination: {external.host}</p>
+      {!closed && onReply && <a href={external.href} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer"
+        aria-disabled={pending} onClick={event => { if (pending) event.preventDefault(); else void submit('allow'); }}>
+        Allow and open {external.host}
+      </a>}
+      {control.response?.decision === 'allow' && <>
+        <p>Opening consent recorded. Completion is reported by the external service.</p>
+        <a href={external.href} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Open {external.host} again</a>
+      </>}
+    </div>}
     {!closed && control.kind === 'elicitation' && !!control.request.form && typeof control.request.form === 'object' &&
       <ElicitationForm form={control.request.form as Record<string, unknown>} disabled={pending || !onReply} onSubmit={content => void submit('allow', content)} />}
     {!closed && items.map(q => <fieldset key={q.id} disabled={pending || !onReply}>

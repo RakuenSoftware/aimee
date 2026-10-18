@@ -57,6 +57,7 @@ struct cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event);
 
 /* Flat MCP form data and normalized operator replies. No transport or I/O. */
 int aimee_ir_form_validate(const struct cJSON *schema, const struct cJSON *content);
+int aimee_ir_elicitation_url_valid(const struct cJSON *url);
 int aimee_ir_control_reply_valid(const char *kind, const struct cJSON *request,
                                  const struct cJSON *reply);
 

@@ -1,4 +1,5 @@
 #include "server_session_control.h"
+#include <aimee/ir/session_event.h>
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -93,6 +94,38 @@ int main(void)
    cJSON_Delete(decision);
    cJSON_Delete(form);
    cJSON_Delete(accepted_form);
+   cJSON *url = cJSON_Parse("{\"url\":{\"href\":\"https://accounts.example.test/"
+                            "authorize\",\"message\":\"Authorize\",\"server\":\"inventory\","
+                            "\"elicitation_id\":\"el-1\"}}");
+   assert(url && server_control_register(scope, "url", "elicitation", url) == 0);
+   cJSON *url_reply = cJSON_Parse("{\"decision\":\"allow\",\"content\":{}}");
+   assert(server_control_reply("session", "turn:url", "alice", url_reply) < 0);
+   cJSON_DeleteItemFromObjectCaseSensitive(url_reply, "content");
+   assert(server_control_reply("session", "turn:url", "mallory", url_reply) < 0);
+   assert(server_control_reply("session", "turn:url", "alice", url_reply) == 0);
+   assert(server_control_take(scope, "url", &id, &kind, &original, &decision) == 1);
+   assert(cJSON_Compare(original, url, 1) && cJSON_Compare(decision, url_reply, 1));
+   free(id);
+   free(kind);
+   cJSON_Delete(original);
+   cJSON_Delete(decision);
+   cJSON *href = cJSON_GetObjectItem(cJSON_GetObjectItem(url, "url"), "href");
+   cJSON_SetValuestring(href, "HTTPS://accounts.example.test/authorize");
+   assert(aimee_ir_elicitation_url_valid(cJSON_GetObjectItem(url, "url")));
+   const char *bad_urls[] = {"javascript:alert(1)",
+                             "data:text/html,secret",
+                             "file:///etc/passwd",
+                             "https://user:password@example.test/",
+                             "https://",
+                             "https://x\\@attacker/",
+                             "https://example.test/\nheader"};
+   for (size_t i = 0; i < sizeof bad_urls / sizeof bad_urls[0]; i++)
+   {
+      cJSON_SetValuestring(href, bad_urls[i]);
+      assert(!aimee_ir_elicitation_url_valid(cJSON_GetObjectItem(url, "url")));
+   }
+   cJSON_Delete(url);
+   cJSON_Delete(url_reply);
    server_control_scope_close(scope);
    assert(!server_control_scope_current());
    cJSON_Delete(reply);

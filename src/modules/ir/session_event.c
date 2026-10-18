@@ -1039,6 +1039,38 @@ int aimee_ir_form_validate(const cJSON *schema, const cJSON *content)
    }
    return 1;
 }
+int aimee_ir_elicitation_url_valid(const cJSON *url)
+{
+   if (!cJSON_IsObject(url) || cJSON_GetArraySize(url) != 4)
+      return 0;
+   const char *href = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(url, "href"));
+   const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(url, "elicitation_id"));
+   const char *server = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(url, "server"));
+   const char *message = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(url, "message"));
+   if (!href || !id || !*id || !server || !*server || !message || strlen(href) > 8192 ||
+       strlen(id) > 1024 || strlen(server) > 256 || strlen(message) > 65535)
+      return 0;
+   size_t scheme_length = strcspn(href, ":");
+   char scheme[6] = {0};
+   if (scheme_length != 4 && scheme_length != 5)
+      return 0;
+   for (size_t i = 0; i < scheme_length; i++)
+      scheme[i] = href[i] >= 'A' && href[i] <= 'Z' ? href[i] + ('a' - 'A') : href[i];
+   if ((strcmp(scheme, "https") && strcmp(scheme, "http")) ||
+       strncmp(href + scheme_length, "://", 3))
+      return 0;
+   const char *host = href + scheme_length + 3;
+   if (!host || !*host || *host == ':' || *host == '/' || *host == '?' || *host == '#')
+      return 0;
+   const char *end = host + strcspn(host, "/?#");
+   if (memchr(host, '@', (size_t)(end - host)))
+      return 0;
+   for (const unsigned char *p = (const unsigned char *)href; *p; p++)
+      if (*p <= 0x20 || *p == 0x7f || *p == '\\')
+         return 0;
+   return 1;
+}
+
 int aimee_ir_control_reply_valid(const char *kind, const cJSON *request, const cJSON *reply)
 {
    const char *decision = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "decision"));
@@ -1051,6 +1083,9 @@ int aimee_ir_control_reply_valid(const char *kind, const cJSON *request, const c
    if (!strcmp(kind, "elicitation"))
    {
       const cJSON *form = cJSON_GetObjectItemCaseSensitive(request, "form");
+      const cJSON *url = cJSON_GetObjectItemCaseSensitive(request, "url");
+      if (url)
+         return !form && !answers && !content && aimee_ir_elicitation_url_valid(url);
       return !answers &&
              aimee_ir_form_validate(cJSON_GetObjectItemCaseSensitive(form, "schema"), content);
    }

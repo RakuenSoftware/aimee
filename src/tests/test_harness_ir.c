@@ -280,11 +280,60 @@ static void control_outputs(void)
    cJSON_Delete(request);
 }
 
+static void url_elicitation(void)
+{
+   aimee_harness_ir_t state = {0};
+   assert(frame("{\"id\":73,\"method\":\"mcpServer/elicitation/"
+                "request\",\"params\":{\"mode\":\"url\",\"serverName\":\"inventory\",\"message\":"
+                "\"Authorize "
+                "access\",\"url\":\"https://accounts.example.test/"
+                "approve?state=opaque\",\"elicitationId\":\"el-1\"}}",
+                &state, 1) == 0);
+   const cJSON *event = cJSON_GetArrayItem(events, 0);
+   const cJSON *request = cJSON_GetObjectItem(event, "payload");
+   const cJSON *url = cJSON_GetObjectItem(request, "url");
+   assert(!strcmp(string(event, "control_kind"), "elicitation"));
+   assert(url && !strcmp(string(url, "elicitation_id"), "el-1") &&
+          !strcmp(string(url, "server"), "inventory") && !cJSON_GetObjectItem(request, "input"));
+   assert(aimee_ir_elicitation_url_valid(url));
+   cJSON *params =
+       cJSON_Parse("{\"mode\":\"url\",\"serverName\":\"inventory\",\"message\":\"Authorize "
+                   "access\",\"url\":\"https://accounts.example.test/"
+                   "approve?state=opaque\",\"elicitationId\":\"el-1\"}");
+   cJSON *allow = cJSON_Parse("{\"decision\":\"allow\"}");
+   cJSON *reply = aimee_codex_control_reply("mcpServer/elicitation/request", params, allow);
+   assert(reply && !strcmp(string(reply, "action"), "accept") &&
+          cJSON_IsNull(cJSON_GetObjectItem(reply, "content")));
+   cJSON *native_reply = cJSON_CreateObject();
+   cJSON_AddNumberToObject(native_reply, "id", 73);
+   cJSON_AddItemToObject(native_reply, "result", reply);
+   assert(!aimee_codex_reply_ir(native_reply, &state));
+   const cJSON *completed = cJSON_GetObjectItem(cJSON_GetArrayItem(events, 1), "payload");
+   assert(!strcmp(string(completed, "decision"), "allow") &&
+          !cJSON_GetObjectItem(completed, "action"));
+   cJSON_Delete(native_reply);
+   cJSON_AddObjectToObject(allow, "content");
+   assert(!aimee_codex_control_reply("mcpServer/elicitation/request", params, allow));
+   cJSON_DeleteItemFromObjectCaseSensitive(allow, "content");
+   cJSON_SetValuestring(cJSON_GetObjectItem(params, "url"), "javascript:alert(1)");
+   assert(!aimee_codex_control_reply("mcpServer/elicitation/request", params, allow));
+   cJSON_SetValuestring(cJSON_GetObjectItem(allow, "decision"), "deny");
+   reply = aimee_codex_control_reply("mcpServer/elicitation/request", params, allow);
+   assert(reply && !strcmp(string(reply, "action"), "decline"));
+   cJSON_Delete(reply);
+   cJSON_Delete(allow);
+   cJSON_Delete(params);
+   aimee_harness_ir_free(&state);
+   cJSON_DeleteItemFromArray(events, 0);
+   cJSON_DeleteItemFromArray(events, 0);
+}
+
 int main(void)
 {
    control_outputs();
    events = cJSON_CreateArray();
    aimee_ir_session_set_sink(capture, NULL);
+   url_elicitation();
    aimee_harness_ir_t form_state = {0};
    assert(
        frame(
