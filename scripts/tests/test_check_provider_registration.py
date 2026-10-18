@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib.util
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -160,12 +161,15 @@ class ProviderRegistrationTest(unittest.TestCase):
         broken = "\n".join(l for l in original.splitlines()
                            if "learning_router_register_signal_classifier" not in l)
         self.assertNotEqual(original, broken, "the registration line has moved")
-        try:
-            adapter.write_text(broken + "\n", encoding="utf-8")
+        read_text = Path.read_text
+        def read_with_missing_registration(path, *args, **kwargs):
+            return broken + "\n" if path == adapter else read_text(path, *args, **kwargs)
+        # Inject source bytes without rewriting the checkout other parallel
+        # tests and builds are using. The actual analyser still reads its full
+        # production graph, including the original adapter path identity.
+        with mock.patch.object(Path, "read_text", read_with_missing_registration):
             code, messages = CHECKER.analyse(CHECKER.ROOT, CHECKER.CMAKE, CHECKER.ADAPTERS,
                                              CHECKER.SOURCE_LISTS, CHECKER.UNREACHABLE)
-        finally:
-            adapter.write_text(original, encoding="utf-8")
         self.assertEqual(code, 1)
         self.assertIn("learning_router_register_signal_classifier", "\n".join(messages))
 
