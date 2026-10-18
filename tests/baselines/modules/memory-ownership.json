@@ -2114,8 +2114,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "ceafb3a91bb0d772d1d741c7fa721f2b609e29ec4fbffcdfee93952ada1801c1",
-      "boundary_review": "IR #3036: prepare prefix/chain replay commitment from actual initial/fallback Anthropic request bytes and bind response before canonical capture. Existing six host memory context/recall/insert calls and registered Go policy ownership remain unchanged. This records source-boundary reasoning, not independent production-promotion approval."
+      "sha256": "5915c0eddd7c8f1bd61077490048b08440757ece2d8855274937d391206364ad",
+      "boundary_review": "IR #3036: copy the actual private canonical execution reference before log-scope teardown; session-bound work bypasses the legacy flat role-result cache. Existing six host memory context/recall/insert calls and registered Go policy ownership remain unchanged. This records source-boundary reasoning, not independent production-promotion approval."
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
@@ -2717,6 +2717,7 @@
   "generated_files": {
     "src/schema_data.h": {
       "disposition": "protocol-catalog",
+      "boundary_review": "IR #3036: regenerate the public catalog after trajectory v2 export and owned batch-session contract changes. The two existing memory health/stats symbols and their API contracts remain unchanged. This records input/output source reasoning, not independent production-promotion approval.",
       "symbols": [
         "aimee_memory_hygiene",
         "kb_store_memory_find_facts_like"
@@ -2734,10 +2735,10 @@
         "AIMEE_MEMORY_HEALTH_ENABLED",
         "memory_stats"
       ],
-      "sha256": "e3fc7a8fb5e57cff04c25d4d4bb2a0dfba74704ad7812376e679837ae926e131",
+      "sha256": "05429582c7b73cfb9a7fe5093accd6e42f14c4fac945e15127519186b9325277",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "7a6757ac8d7eb94078139ff8fc66bb964481e876e90a279df428339e32f9e2b0"
+        "api/openapi-server-v1.yaml": "2300182f07ec2e86db031af48f23b16f28fdd66843196e911df03f7dbbdaa607"
       }
     }
   },

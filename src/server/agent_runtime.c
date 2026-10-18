@@ -332,6 +332,13 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
       rc = use_tools ? agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt,
                                                          max_tokens, temperature, out)
                      : agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
+   if (log_scope && capture == 0)
+   {
+      char principal[128];
+      if (server_session_log_identity(out->canonical_session_id, sizeof out->canonical_session_id,
+                                      principal, sizeof principal))
+         rc = AGENT_RC_CAPTURE_FAILED;
+   }
    if (server_session_log_finish(log_scope, rc == 0 && out->success, out->error))
       rc = AGENT_RC_CAPTURE_FAILED;
    agent_admission_release(admit_slot);
@@ -391,7 +398,10 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
    cfg->route_output_tokens = max_tokens > 0 ? max_tokens : 4096;
 
    int cache_enabled = delegate_role_result_cache_enabled(role);
-   if (cache_enabled)
+   /* The legacy role cache stores only flat text, with no canonical provenance.
+    * A user session must execute through its durable IR owner instead. */
+   int session_bound = agent_get_request_session()[0] != 0;
+   if (cache_enabled && !session_bound)
    {
       char *cached = db1_agent_cache_get(role, user_prompt);
       if (cached)
@@ -471,7 +481,7 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
          classify_outcome(out, ag->max_turns, &oc);
          record_outcome(out->agent_name, role, &oc);
 
-         if (cache_enabled && out->response)
+         if (cache_enabled && !session_bound && out->response)
             db1_agent_cache_put(role, user_prompt, out->response);
          return 0;
       }
@@ -814,7 +824,8 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
       classify_outcome(out, ag->max_turns, &oc);
       record_outcome(out->agent_name, role, &oc);
    }
-   if (rc == 0 && delegate_role_result_cache_enabled(role) && out->response)
+   if (rc == 0 && !agent_get_request_session()[0] && delegate_role_result_cache_enabled(role) &&
+       out->response)
       db1_agent_cache_put(role, user_prompt, out->response);
 
    return rc;

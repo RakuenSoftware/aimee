@@ -108,6 +108,20 @@ def main():
         assert any(report == {"model": "ir-model-a", "boundary": "request", "omitted_reasoning_blocks": 1,
                               "omitted_opaque_state_blocks": 1} for report in reports), reports
 
+        # Export exercises transport-attested ownership through the actual HTTP
+        # dispatch hop, not ambient worker state or an interaction-event fixture.
+        exported = api("/v1/trajectory/export", {"session_id": sid, "compress": False})
+        artifact = exported["trajectory"]
+        assert artifact["schema"] == "aimee.trajectory.v2" and artifact["session_id"] == sid, exported
+        assert artifact["source"] == "canonical_session_log" and "outcome" not in artifact, exported
+        assert "governed_actions" not in artifact and "steps" not in artifact, exported
+        assert len(artifact["messages"]) == 8, artifact
+        assert all("blocks" in message for message in artifact["messages"]), artifact
+        assert "fixture-signature" in json.dumps(artifact), artifact
+        for earlier in range(4):
+            assert f"IR_TURN_{earlier}" in json.dumps(artifact), artifact
+        print("canonical trajectory: real HTTP owner identity, complete typed primary history and native signature retained")
+
         # Replay through the authenticated HTTP subscriber, not direct SQL or
         # the in-memory projection. Both initial replay and a resumed cursor
         # must return exactly the envelopes delivered while the turns ran.
@@ -130,6 +144,27 @@ def main():
                     response.close()
                 connection.close()
         print(f"canonical primary: A/B/A/B, {len(observed)} native calls, {sequence} durable events, live/replay and resumed-cursor parity passed")
+
+        # Repeated cache-eligible prompts still produce private canonical
+        # executions. A flat role-cache hit must not bypass the durable owner.
+        tasks = home / "ir-trajectory-tasks.jsonl"
+        tasks.write_text("\n".join(json.dumps(dict(name=f"repeated-{i}", role="summarize",
+            prompt="IR_TRAJECTORY_BATCH", success_check={"type": "contains", "value": "PRIMARY_OK"}))
+            for i in range(2)) + "\n")
+        before_batch = len(observed)
+        batch = api("/v1/trajectory/batch", dict(session_id=sid, tasks_path=str(tasks),
+            out_dir=str(home / "ir-trajectories"), toolset_dist="research", compress=False))
+        assert batch["failures"] == 0 and len(batch["written"]) == 2, batch
+        assert len(observed) == before_batch + 2, "A repeated prompt bypassed canonical execution"
+        child_ids = {item["session_id"] for item in batch["written"]}
+        assert len(child_ids) == 2 and sid not in child_ids, batch
+        for item in batch["written"]:
+            child = json.loads(Path(item["path"]).read_text())
+            assert child["schema"] == "aimee.trajectory.v2" and child["session_id"] == item["session_id"], child
+            assert "IR_TRAJECTORY_BATCH" in json.dumps(child) and "PRIMARY_OK" in json.dumps(child), child
+            assert "IR_TURN_0" not in json.dumps(child), "Parent history leaked into child export"
+        print("canonical batch: two real private executions, repeated-prompt cache bypass and source references passed")
+
 
         # A real Responses continuation: canonical signed thinking and every
         # tool id/argument survive the durable checkpoint and a native provider switch.

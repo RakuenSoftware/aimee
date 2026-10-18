@@ -155,6 +155,29 @@ stop_providers_module() {
     fi
 }
 
+# Batch/private execution tests use the real role policy, including the
+# cache-eligible summarize role. An absent policy owner would make the cache
+# regression vacuous because the safe fallback disables all role caching.
+DELEGATES_MODULE="$AIMEE_HOME/aimee-module-delegates"
+DELEGATES_MODULE_PID=""
+install_delegates_module() {
+    cp "$DB1_MODULE_BUILT" "$DELEGATES_MODULE"
+    chmod 0755 "$DELEGATES_MODULE"
+    install_generated_grant delegates "$DELEGATES_MODULE"
+}
+start_delegates_module() {
+    stop_delegates_module
+    "$DELEGATES_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-delegates.log" 2>&1 &
+    DELEGATES_MODULE_PID=$!
+}
+stop_delegates_module() {
+    if [ -n "$DELEGATES_MODULE_PID" ]; then
+        kill "$DELEGATES_MODULE_PID" 2>/dev/null || true
+        wait "$DELEGATES_MODULE_PID" 2>/dev/null || true
+        DELEGATES_MODULE_PID=""
+    fi
+}
+
 # Native tool admission requires the real execution-policy owner, just as in
 # the shipped Server placement. Absence must remain a refusal in production.
 POLICY_MODULE="$AIMEE_HOME/aimee-module-execution-policy"
@@ -453,6 +476,7 @@ stop_workflow_module() {
 install_db1_module
 install_config_module
 install_providers_module
+install_delegates_module
 install_memory_module
 install_policy_module
 # Grants are read by the daemon at startup, so this has to happen BEFORE the
@@ -780,6 +804,7 @@ start_server() {
         if [ "$config_started" -eq 0 ] && [ -S "$MODULE_BUS_SOCK" ]; then
             start_config_module
             start_providers_module
+            start_delegates_module
             if [ "$MEMORY_MODULE_ENABLED" -eq 1 ]; then start_memory_module; fi
             start_policy_module
             config_started=1
@@ -821,6 +846,7 @@ cleanup() {
     stop_pg_module
     stop_config_module
     stop_providers_module
+    stop_delegates_module
     stop_memory_module
     stop_policy_module
     local rc=$?

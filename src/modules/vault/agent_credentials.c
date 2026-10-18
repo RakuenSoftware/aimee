@@ -236,6 +236,11 @@ void agent_set_request_session(const char *session_id)
       g_request_session_id[0] = '\0';
 }
 
+const char *agent_get_request_session(void)
+{
+   return g_request_session_id;
+}
+
 /* WP-C.2c(3): the attested vault principal for the in-flight chat turn, so a
  * chat-spawned delegate (dispatched through the conn-decoupled agent loop) can
  * reach the originating user's vault. */

@@ -2894,7 +2894,7 @@ $(TESTPREFIX)/unit-test-git-verify-contract: $(OBJDIR)/tests/test_git_verify_con
 
 
 $(TESTPREFIX)/unit-test-trajectory-batch: $(OBJDIR)/tests/test_trajectory_batch.o \
-                               $(OBJDIR)/trajectory_batch.o $(OBJDIR)/trajectory_export.o $(OBJDIR)/modules/audit/audit_ledger.o \
+                               $(OBJDIR)/trajectory_batch.o $(OBJDIR)/trajectory_export.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o \
                                $(CONFIG_CLIENT_TEST_OBJS) \
 \
 \
@@ -7829,7 +7829,7 @@ $(TESTPREFIX)/unit-test-module-commands: $(OBJDIR)/tests/test_module_commands.o 
 unit-test-module-commands: $(TESTPREFIX)/unit-test-module-commands
 	$<
 
-$(TESTPREFIX)/unit-test-trajectory-screen: $(OBJDIR)/tests/test_trajectory_screen.o $(OBJDIR)/trajectory_export.o $(OBJDIR)/cJSON.o
+$(TESTPREFIX)/unit-test-trajectory-screen: $(OBJDIR)/tests/test_trajectory_screen.o $(OBJDIR)/trajectory_export.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-mcp-memory-answer: $(OBJDIR)/tests/test_mcp_memory_answer.o $(OBJDIR)/server/server_mcp.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o

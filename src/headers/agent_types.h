@@ -527,6 +527,9 @@ typedef struct
     * "stop", "length"), when the parser captured it. Empty otherwise. */
    char stop_reason[32];
    char clean_retry_attempt[65];
+   /* Owner-checked canonical history source for this actual execution. Empty
+    * for non-session internal work; never a borrowed connection or parent log. */
+   char canonical_session_id[128];
    char *response;
    int prompt_tokens;
    int completion_tokens;

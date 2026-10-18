@@ -336,6 +336,8 @@ int agent_request_codex_token_present(void);
  * single source (the session-scoped client keyring was retired in P4b).
  * Thread-local. */
 void agent_set_request_session(const char *session_id);
+/* Attested turn session, empty for non-session internal work; never reads env. */
+const char *agent_get_request_session(void);
 
 /* The attested vault principal (WP-C) for the in-flight chat turn, thread-local.
  * The chat worker sets it from its compute_ctx around the agent loop and clears

@@ -1088,19 +1088,25 @@ static void test_codex_oauth_reads_vault_only(void)
  * reaches the user's vault like a same-thread one; empty restores to empty. */
 static void test_request_creds_snapshot_carries_vault_principal(void)
 {
+   agent_set_request_session("owner-session");
    agent_set_request_vault_principal("webuser:dave");
    agent_request_creds_t snap;
    agent_request_creds_snapshot(&snap);
+   assert(!strcmp(agent_get_request_session(), snap.session_id));
    assert(strcmp(snap.vault_principal, "webuser:dave") == 0);
+   agent_set_request_session(NULL);
+   assert(!agent_get_request_session()[0]);
    agent_set_request_vault_principal(NULL); /* fresh fan-out worker starts clear */
    agent_request_creds_restore(&snap);
    assert(strcmp(agent_get_request_vault_principal(), "webuser:dave") == 0);
+   assert(!strcmp(agent_get_request_session(), "owner-session"));
    agent_set_request_vault_principal(NULL);
    agent_request_creds_snapshot(&snap);
    agent_set_request_vault_principal("webuser:eve");
    agent_request_creds_restore(&snap);
    assert(agent_get_request_vault_principal()[0] == '\0');
    agent_set_request_session(NULL); /* restore re-bound session+codex; clear all */
+   assert(!agent_get_request_session()[0]);
    agent_set_request_codex_creds(NULL, NULL);
    agent_set_request_vault_principal(NULL);
 }

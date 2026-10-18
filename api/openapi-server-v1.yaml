@@ -2138,7 +2138,12 @@ paths:
               schema: { type: object }
   /trajectory/export:
     post:
-      summary: Export a session trajectory
+      summary: Export owner-checked canonical session history
+      description: >-
+        Returns aimee.trajectory.v2 with canonical messages and explicit export
+        fidelity. Redaction and tool-result omissions never rewrite native tool
+        identities or signatures. No inferred outcome/reward or cross-session
+        audit overlay is included.
       requestBody:
         required: true
         content:
@@ -3149,9 +3154,26 @@ paths:
       responses: { "200": { description: Explanation, content: { application/json: { schema: { type: object } } } } }
   /trajectory/batch:
     post:
-      summary: Batch trajectory export
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Batch result, content: { application/json: { schema: { type: object } } } } }
+      summary: Export canonical histories from batch executions
+      description: >-
+        Executes under an owned parent session and exports each actual private
+        execution's canonical history. The transport-attested principal owns
+        the parent and child sessions; request data cannot select another owner.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, tasks_path]
+              properties:
+                session_id: { type: string, description: Existing session owned by the authenticated caller }
+                tasks_path: { type: string }
+                toolset_dist: { type: string }
+                out_dir: { type: string }
+                compress: { type: boolean }
+                max_result_bytes: { type: integer, minimum: 1 }
+      responses: { "200": { description: Batch result with canonical execution session references, content: { application/json: { schema: { type: object } } } } }
   /wm/context:
     post:
       summary: Working-memory context
