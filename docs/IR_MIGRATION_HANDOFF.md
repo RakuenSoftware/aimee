@@ -1528,3 +1528,22 @@ CI-pinned 0.153.4 native executable, in addition to the adapter ASan/UBSan fixtu
 The pinned npm JavaScript wrapper initially lacked Node in the deliberately
 restricted local child PATH; invoking its packaged native executable qualified
 the pinned SDK without widening the child environment.
+
+
+## Real native command-item fidelity finding
+
+A credential-free loopback probe through the compiled adapter dispatched only
+`printf command-fixture` in a fresh temporary HOME. The actual provider request
+contains `exec_command` with `{"cmd":"printf command-fixture"}`. SDK observations
+currently reconstruct a synthetic `commandExecution` tool with wrapped shell
+arguments/cwd; their result also differs from the exact provider-visible output
+wrapper. Call/result IDs match, but that is insufficient to certify complete
+native history adoption. Do not relabel this as a qualified native prefix or
+activate cache checkpoints for those records merely because the process passed.
+Artifacts: `/var/tmp/aimee-native-command-probe.py`,
+`/var/tmp/aimee-native-command-probe-report.json`, and
+`/var/tmp/aimee-3050-native-command-qualification.log`.
+
+Published head `1c8eb94ed` passed all 56 applicable CI checks, including Docker T2
+and T3; the two existing platform skips remain. This precedes the recovery,
+execution-profile and compaction increments, which require fresh CI.
