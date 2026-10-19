@@ -1833,3 +1833,12 @@ fields; atomic rotating-token persistence and failure injection remain required
 before claiming custody complete. Attested launch/workspace construction, exact
 native command replay, full effect/human tool admission and independently graded
 KB-free learning also remain unfinished. Production `.100` remains KB-free.
+
+## Fresh Claude broker CI scanner finding
+
+CI on `b70c51d8f` flagged the publicly distributed Claude subscription OAuth
+client ID in the legacy-client fixture (`generic-api-key`, test_agent.c:1916).
+The exact commit/file/rule/line finding is recorded in the existing reviewed
+non-secret fingerprint ledger. No rule/path exclusion, history-scan reduction,
+attribution exemption or gate change is introduced. Atomic-token work remains
+local while this fresh CI failure is repaired.
