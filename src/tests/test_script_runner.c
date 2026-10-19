@@ -4,6 +4,11 @@
 #include "agent_config.h"
 #include "agent_source_authority.h"
 #include "request_context.h"
+#include "script_tool_execution.h"
+#include "script_rpc.h"
+#include <arpa/inet.h>
+#include <sys/ioctl.h>
+#include <signal.h>
 #include "modules/workspace/workspace_provider.h"
 #include "log.h"
 #include <assert.h>
@@ -15,20 +20,34 @@ static int g_dispatch_calls = 0;
 static int g_dispatch_error;
 static int g_scope_capture_refused;
 static int g_source_capture_refused;
+static int g_dispatch_blocked;
+static atomic_int dispatch_entered, dispatch_released;
 
-char *dispatch_tool_call_ctx_status(const char *name, const char *arguments_json, int timeout_ms,
-                                    int *is_error)
+char *server_script_tool_execute(const cJSON *frame, const char *attempt, int *is_error)
 {
+   (void)attempt;
+   const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(frame, "tool"));
+   char *arguments_json = cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(frame, "args"));
    /* Keep this unit fast and focused on RPC framing. Full dispatch-path coverage lives in
     * unit-test-agent, which links the real agent_tools_dispatch implementation. */
    g_dispatch_calls++;
+   if (g_dispatch_blocked)
+   {
+      atomic_store(&dispatch_entered, 1);
+      while (!atomic_load(&dispatch_released))
+         usleep(1000);
+   }
    *is_error = g_dispatch_error;
    if (g_dispatch_error)
+   {
+      free(arguments_json);
       return safe_strdup(
           "{\"status\":\"refused\",\"reason\":\"fixture\",\"dispatch_allowed\":false}");
+   }
    char buf[2048];
    snprintf(buf, sizeof(buf), "{\"tool\":\"%s\",\"args\":%s}", name ? name : "",
             arguments_json ? arguments_json : "{}");
+   free(arguments_json);
    return safe_strdup(buf);
 }
 
@@ -390,8 +409,107 @@ static void test_permission_capture_failure_refuses_script(void)
    }
 }
 
+static void test_rpc_strict_json_frames(void)
+{
+   g_dispatch_calls = 0;
+   char *result = tool_execute_script(
+       "python",
+       "import os, struct, json\n"
+       "fd = int(os.environ['AIMEE_RPC_FD'])\n"
+       "frames = [b'{\"id\":1,\"tool\":\"read_file\",\"args\":{}} trailing',\n"
+       "          b'{\"id\":1,\"tool\":\"read_file\",\"args\":{\"path\":\"a\",\"path\":\"b\"}}',\n"
+       "          b'{\"id\":1,\"tool\":\"read_file\",\"args\":{}}' + bytes([0]) + b'trailing']\n"
+       "for frame in frames:\n"
+       "    os.write(fd, struct.pack('!I', len(frame)) + frame)\n"
+       "    size = struct.unpack('!I', os.read(fd, 4))[0]\n"
+       "    reply = json.loads(os.read(fd, size))\n"
+       "    assert reply['ok'] is False and reply['code'] == 'bad_json'\n"
+       "print('strict frames refused')\n",
+       5, NULL, NULL);
+   cJSON *reply = parse_json_or_die(result);
+   assert(cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == 0 && !g_dispatch_calls);
+   const char *output = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "stdout"));
+   assert(output && strstr(output, "strict frames refused"));
+   cJSON_Delete(reply);
+   free(result);
+}
+
+static atomic_int rpc_stopped;
+static void *stop_partial_rpc(void *context)
+{
+   script_rpc_stop(context);
+   atomic_store(&rpc_stopped, 1);
+   return NULL;
+}
+
+static void test_rpc_stop_interrupts_partial_frame(void)
+{
+   script_rpc_server_t server;
+   int prepared = script_rpc_prepare(&server, NULL);
+   assert(!prepared);
+   int started = script_rpc_start(&server);
+   assert(!started);
+   uint32_t length = htonl(100);
+   ssize_t header = write(server.client_fd, &length, sizeof length);
+   ssize_t body = write(server.client_fd, "{", 1);
+   assert(header == sizeof length && body == 1);
+   int pending = 1;
+   for (int tick = 0; tick < 100 && pending; tick++)
+   {
+      int queried = ioctl(server.listen_fd, FIONREAD, &pending);
+      assert(!queried);
+      if (pending)
+         usleep(10000);
+   }
+   assert(!pending); /* The worker consumed a header and now waits for the absent body. */
+   atomic_store(&rpc_stopped, 0);
+   pthread_t stopper;
+   int created = pthread_create(&stopper, NULL, stop_partial_rpc, &server);
+   assert(!created);
+   for (int tick = 0; tick < 100 && !atomic_load(&rpc_stopped); tick++)
+      usleep(10000);
+   assert(atomic_load(&rpc_stopped));
+   pthread_join(stopper, NULL);
+   script_rpc_cleanup(&server);
+}
+
+static void test_rpc_closed_client_cannot_signal_host(void)
+{
+   struct sigaction original, action = {.sa_handler = SIG_DFL};
+   sigemptyset(&action.sa_mask);
+   int configured = sigaction(SIGPIPE, &action, &original);
+   assert(!configured);
+   script_rpc_server_t server;
+   int prepared = script_rpc_prepare(&server, NULL);
+   assert(!prepared);
+   g_dispatch_blocked = 1;
+   atomic_store(&dispatch_entered, 0);
+   atomic_store(&dispatch_released, 0);
+   int started = script_rpc_start(&server);
+   assert(!started);
+   const char frame[] = "{\"id\":1,\"tool\":\"read_file\",\"args\":{\"path\":\"fixture\"}}";
+   uint32_t length = htonl(sizeof frame - 1);
+   ssize_t header = write(server.client_fd, &length, sizeof length);
+   ssize_t body = write(server.client_fd, frame, sizeof frame - 1);
+   assert(header == sizeof length && body == sizeof frame - 1);
+   for (int tick = 0; tick < 100 && !atomic_load(&dispatch_entered); tick++)
+      usleep(10000);
+   assert(atomic_load(&dispatch_entered));
+   close(server.client_fd);
+   server.client_fd = -1;
+   atomic_store(&dispatch_released, 1);
+   script_rpc_stop(&server);
+   script_rpc_cleanup(&server);
+   g_dispatch_blocked = 0;
+   int restored = sigaction(SIGPIPE, &original, NULL);
+   assert(!restored);
+}
+
 int main(void)
 {
+   test_rpc_closed_client_cannot_signal_host();
+   test_rpc_stop_interrupts_partial_frame();
+   test_rpc_strict_json_frames();
    test_permission_capture_failure_refuses_script();
    test_script_env_scrub();
    test_python_rpc_allowed_tool();

@@ -58,6 +58,7 @@ RULES = {
 # adapters are intentionally outside this set; newly migrated consumers join it.
 CANONICAL_FILES = {
     "src/posix/agent_runtime.c", "src/server/session_compact.c",
+    "src/server/script_tool_execution.c",
     "src/server/agent_request_build.c",
     "src/server/server_session_log.c", "src/server/server_chat_ir.c",
     "src/server/primary_session_adapter.c", "src/server/server_native_cache.c",
@@ -68,7 +69,7 @@ CANONICAL_TREES = ("server-go/modules/economizer/", "server-go/modules/memory/")
 # native output/compatibility boundaries are not declared globally migrated.
 CLASSIFIED_DISPATCH_FILES = {
     "src/posix/agent_runtime.c", "src/server/script_rpc.c",
-    "src/server/server_compute_async.c",
+    "src/server/server_compute_async.c", "src/server/script_tool_execution.c",
 }
 CANONICAL_PROFILE_FUNCTIONS = {
     "agent_build_request_ir", "agent_openai_profile_ir", "agent_responses_profile_ir",
@@ -124,7 +125,7 @@ def findings(root: Path) -> list[dict]:
         for rule, pattern in RULES.items():
             if rule == "post-render-profile" and relative != "src/server/agent_request_build.c":
                 continue
-            if rule == "canonical-dispatch-cache" and relative not in {"src/posix/agent_runtime.c", "src/server/server_compute_async.c"}:
+            if rule == "canonical-dispatch-cache" and relative not in {"src/posix/agent_runtime.c", "src/server/server_compute_async.c", "src/server/script_rpc.c", "src/server/script_tool_execution.c"}:
                 continue
             if rule == "native-schema-lookup" and not canonical:
                 continue

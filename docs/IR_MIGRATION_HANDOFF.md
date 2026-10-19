@@ -2168,3 +2168,37 @@ Cppcheck has no diagnostics. All 653 native binaries, the proxy regressions and
 all 76 lint gates pass. Serial actual CMake runtime/cache checks pass 2/2. Script
 RPC canonical definition/policy admission and running-process cancellation remain
 the next work; production SDK activation and independent learning remain unfinished.
+
+
+## Script RPC admits canonical definitions through supervised policy
+
+Script callbacks now resolve a fresh owned execution definition, admit strict
+unique-field JSON, canonicalize and validate against that definition, then apply
+caller permissions, directives and supervised tools/policy metadata before typed
+IR dispatch. Host-generated attempt identities bind policy receipts to each call.
+Missing tools or execution-policy owners refuse; legacy schema caches and
+name-only dispatch no longer authorize this ingress.
+
+A real Go-owner fixture proves allowed aliased reads, path-policy refusal,
+permission/source/cwd propagation and refusal after either owner disappears. The
+production classifier uses the full-name metadata contract, including a 307-byte
+qualified tool name; the legacy wire ABI remains unchanged. Framing fixtures
+reject duplicate/trailing/NUL-bearing requests. Socket shutdown interrupts partial
+frames, and closed peers cannot terminate the host with SIGPIPE.
+
+Restricted-role PostgreSQL integration passes 167/167 with the 26 existing
+service-dependent skips and no KB. The fixture now creates an owned session
+through HTTP; reads must return file content rather than merely an HTTP success
+wrapper. Normal and ASan/UBSan agent/script fixtures pass, all 653 native binaries
+and proxy regressions pass, changed-source Cppcheck has no diagnostics, focused
+benchmark checks pass 21/21, and actual CMake runtime/cache checks pass 2/2.
+All 76 lint gates ran: 75 passed initially; the memory boundary review ledger
+then identified the added tools-only header declaration. Its unchanged memory
+contract is recorded with the exact source hash, and that gate passes on rerun.
+Published predecessor `4e0ca19c2` has all fresh workflows green. New-head CI must
+be checked separately after publication.
+
+Running-process cancellation, bounded RPC output fidelity, retained human
+controls, production native SDK activation, exact resumed native history and
+independently graded KB-free learning remain unfinished. This increment does not
+qualify production deployment or the two skipped platforms.

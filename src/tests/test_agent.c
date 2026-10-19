@@ -118,6 +118,8 @@ void test_cancelled_durable_job_blocks_tool_dispatch(void);
 void test_native_mcp_permission_admission(void);
 void test_script_rpc_keeps_permission_scope(void);
 void test_script_rpc_keeps_host_context(void);
+int script_rpc_admission_fixture_main(void);
+void test_script_rpc_admission_process(const char *executable);
 void test_delegate_bash_cancel_kills_running_tool(void);
 void test_parent_write_guard_readonly_pipeline(void);
 void test_stale_parent_guard_blocks_other_worktree_then_clear_unblocks(void);
@@ -4509,8 +4511,13 @@ static void test_owned_tool_and_source_handoff(void)
         "isolation");
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+   if (argc == 2 && !strcmp(argv[1], "--script-rpc-admission"))
+      return script_rpc_admission_fixture_main();
+   char test_executable[MAX_PATH_LEN];
+   char *self = realpath(argv[0], test_executable);
+   assert(self);
    /* BEFORE ANYTHING ELSE, because the fixture configures the module runtime and
       starts the bus, and obs_bus refuses to be configured once it is running.
       Several tests below bring the bus up as a side effect, so a fixture started
@@ -4570,8 +4577,7 @@ int main(void)
    test_one_delegates_permissions_are_not_anothers();
    test_owned_tool_and_source_handoff();
    test_native_mcp_permission_admission();
-   test_script_rpc_keeps_permission_scope();
-   test_script_rpc_keeps_host_context();
+   test_script_rpc_admission_process(test_executable);
    test_provider_env_credentials_and_headers();
    test_dispatch_carries_owner_failure_status();
    test_codex_oauth_request_creds();

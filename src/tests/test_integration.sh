@@ -1857,11 +1857,30 @@ check_output "unknown command fails before generic forwarding" "unknown command 
 # tool.execute runs on the compute pool, reached over its first-class local route
 # POST /v1/tools/execute (the `arguments` field is a JSON-encoded string, as the
 # dispatch expects).
-RESP=$(http_rpc '{"method":"tool.execute","tool":"bash","arguments":"{\"command\":\"echo integ-ok\"}","session_id":"t","cwd":"/tmp","timeout_ms":5000}') || true
+RESP=$(http_rpc '{"method":"session.create","client_type":"tool-integration"}') || true
+check_output "tool execution creates an owned session" '"session_id":' echo "$RESP"
+TOOL_SID=$(echo "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_id"])' 2>/dev/null || true)
+tool_rpc() {
+    local request
+    request=$(printf '%s' "$1" | TOOL_RPC_SID="$TOOL_SID" python3 -c 'import json,os,sys; req=json.load(sys.stdin); req["session_id"]=os.environ["TOOL_RPC_SID"]; print(json.dumps(req))')
+    http_rpc "$request"
+}
+
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"bash","arguments":"{\"command\":\"echo integ-ok\"}","session_id":"t","cwd":"/tmp","timeout_ms":5000}') || true
 check_output "tool.execute bash" "integ-ok" echo "$RESP"
 
-RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
-check_output "tool.execute read_file" '"status":"ok"' echo "$RESP"
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute read_file" 'anchored read' echo "$RESP"
+
+# The real tool API must retain the script's cwd and supervised nested admission.
+SCRIPT_REQUEST=$(python3 - <<'PYSCRIPT'
+import json
+body = "import aimee_tools\nr = aimee_tools.call('read_file', {'path':'hostname'})\nassert r['ok'], r\nprint('script-rpc-read-ok')\n"
+print(json.dumps({"method":"tool.execute", "tool":"execute_script", "arguments":json.dumps({"language":"python", "body":body, "timeout_secs":5}), "session_id":"t", "cwd":"/etc"}))
+PYSCRIPT
+)
+RESP=$(tool_rpc "$SCRIPT_REQUEST") || true
+check_output "tool.execute nested script cwd and admission" 'script-rpc-read-ok' echo "$RESP"
 
 # Policy categories come from the required tools owner even without KB rows.
 # A network restriction must match web_read while ordinary file reads keep their
@@ -1873,32 +1892,44 @@ policy = Path(os.environ["AIMEE_HOME"]) / "policy.json"
 assert not policy.exists(), "unexpected pre-existing integration policy"
 policy.write_text('{"approval_levels":{"network":"block"}}')
 PYPOLICY
-RESP=$(http_rpc '{"method":"tool.execute","tool":"web_read","arguments":"{\"ref\":\"http://127.0.0.1:9/policy-fixture\"}","session_id":"t","cwd":"/tmp"}') || true
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"web_read","arguments":"{\"ref\":\"http://127.0.0.1:9/policy-fixture\"}","session_id":"t","cwd":"/tmp"}') || true
 check_output "tool.execute owned network category" 'policy blocks network operations' echo "$RESP"
-RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
-check_output "tool.execute file read under network block" '"status":"ok"' echo "$RESP"
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute file read under network block" 'anchored read' echo "$RESP"
 python3 - <<'PYPOLICY'
 from pathlib import Path
 import os
 (Path(os.environ["AIMEE_HOME"]) / "policy.json").write_text(
     '{"tool_rules":[{"path_prefix":"/etc","allowed_tools":["list_files"]}]}')
 PYPOLICY
-RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"filepath\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"filepath\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
 check_output "tool.execute alias obeys path policy" "not allowed for path /etc" echo "$RESP"
-RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
 check_output "tool.execute canonical path obeys same policy" "not allowed for path /etc" echo "$RESP"
+SCRIPT_REQUEST=$(python3 - <<'PYSCRIPT'
+import json
+body = "import aimee_tools\nr = aimee_tools.call('read_file', {'filepath':'/etc/hostname'})\nassert r['ok'] is False and 'not allowed for path' in r['error'], r\nprint('script-rpc-policy-denied')\n"
+print(json.dumps({"method":"tool.execute", "tool":"execute_script", "arguments":json.dumps({"language":"python", "body":body, "timeout_secs":5}), "session_id":"t", "cwd":"/tmp"}))
+PYSCRIPT
+)
+RESP=$(tool_rpc "$SCRIPT_REQUEST") || true
+check_output "tool.execute nested script alias obeys policy" 'script-rpc-policy-denied' echo "$RESP"
+
 python3 - <<'PYPOLICY'
 from pathlib import Path
 import os
 (Path(os.environ["AIMEE_HOME"]) / "policy.json").unlink()
 PYPOLICY
-RESP=$(http_rpc '{"method":"tool.execute","tool":"unregistered-policy-fixture","arguments":"{}","session_id":"t","cwd":"/tmp"}') || true
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"unregistered-policy-fixture","arguments":"{}","session_id":"t","cwd":"/tmp"}') || true
 check_output "tool.execute unknown has no current canonical definition" 'current execution catalog' echo "$RESP"
-RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\"} trailing","session_id":"t","cwd":"/tmp"}') || true
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\"} trailing","session_id":"t","cwd":"/tmp"}') || true
 check_output "tool.execute rejects trailing argument bytes" 'admission failed' echo "$RESP"
-RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/tmp/x\",\"path\":\"/etc/hostname\"}","session_id":"t","cwd":"/tmp"}') || true
+RESP=$(tool_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/tmp/x\",\"path\":\"/etc/hostname\"}","session_id":"t","cwd":"/tmp"}') || true
 check_output "tool.execute rejects duplicate argument fields" 'admission failed' echo "$RESP"
 
+
+RESP=$(http_rpc "{\"method\":\"session.close\",\"session_id\":\"$TOOL_SID\"}") || true
+check_output "tool execution closes its owned session" '"status":"ok"' echo "$RESP"
 
 # ============================================================
 # 9. Mirror-sync -> reconstructed MCP Git, end to end

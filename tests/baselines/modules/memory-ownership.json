@@ -1838,12 +1838,13 @@
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "96aa7f907d21172f622095e7f7914e7f82f3d13d5b7060b821ab046fafa90fcf",
+      "sha256": "2401f1b5a81547c6a444efd58f21b6156bf52aec5c2595f213799c9b8c3f3e14",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
+      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go.",
+      "boundary_review": "PR #3050: exposes only the tools adapter registration entry point for isolated real-owner qualification. Memory declarations and ownership are unchanged. This records boundary analysis, not independent production-promotion approval."
     },
     "src/headers/rel_types.h": {
       "disposition": "storage-protocol",
@@ -2144,13 +2145,14 @@
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "36ca8e18164875c2c9b756d4c28dbb9b3d914f642f856cc65fc1a4107b82fc5c",
+      "sha256": "2e78687c674ee2725269c3f0e47fb22f5fff19b2a1f66c0132ffc4fab2d5a814",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
       "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go. Oct 18: removed only the response-composition input copy after sharing its API type; memory adapters are unchanged.",
-      "boundary_review": "PR #3050: added only the typed tools metadata transport/registration next to the existing tools classifier. Memory adapter symbols, framing, policy and Go ownership are unchanged. This is not independent production-promotion approval."
+      "boundary_review": "PR #3050: added only the typed tools metadata transport/registration next to the existing tools classifier. Memory adapter symbols, framing, policy and Go ownership are unchanged. This is not independent production-promotion approval.",
+      "boundary_change": " Tools-only adapter registration is extracted with its production initialization order preserved. Tool classification consumes the existing full-name metadata wire; legacy wire serving remains intact. Memory stage registrations, scoped request forwarding and eligibility remain unchanged and Go-owned. This is boundary analysis, not independent reviewer approval."
     },
     "src/server/server.c": {
       "disposition": "host-transport",

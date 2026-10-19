@@ -3,6 +3,8 @@
 #endif
 
 #include "script_rpc.h"
+#include "script_tool_execution.h"
+#include <aimee/ir/aimee_ir.h>
 #include <aimee/tools/agent_tools.h>
 #include "aimee.h"
 #include "cJSON.h"
@@ -38,6 +40,8 @@ struct script_rpc_execution
    atomic_int *cancel;
    char cwd[MAX_PATH_LEN], session[128], principal[VAULT_PRINCIPAL_MAX];
    int job;
+   char attempt_prefix[33];
+   unsigned long long attempts;
 };
 
 static int script_rpc_capture(script_rpc_server_t *srv, const char *cwd)
@@ -46,7 +50,8 @@ static int script_rpc_capture(script_rpc_server_t *srv, const char *cwd)
    srv->execution = scope;
    if (!scope || (cwd && strlen(cwd) >= sizeof scope->cwd) ||
        agent_tools_scope_capture_owned(&scope->tools) != 0 ||
-       agent_source_authority_tls_capture_checked(&scope->source) != 0)
+       agent_source_authority_tls_capture_checked(&scope->source) != 0 ||
+       platform_random_hex(scope->attempt_prefix, 32) != 0)
       return -1;
    /* An ordinary primary must not borrow a concurrent delegate's environment. */
    if (!scope->source.active)
@@ -95,6 +100,35 @@ static int script_rpc_write_all(int fd, const void *buf, size_t len)
    return 0;
 }
 
+/* A disconnected script must never deliver SIGPIPE to its host. */
+static int script_rpc_send_all(int fd, const void *buffer, size_t length)
+{
+#if !defined(MSG_NOSIGNAL) && defined(SO_NOSIGPIPE)
+   int enabled = 1;
+   if (setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof enabled) != 0)
+      return -1;
+#endif
+   const char *bytes = buffer;
+   while (length)
+   {
+      ssize_t sent = -1;
+#ifdef MSG_NOSIGNAL
+      sent = send(fd, bytes, length, MSG_NOSIGNAL);
+#elif defined(SO_NOSIGPIPE)
+      sent = send(fd, bytes, length, 0);
+#else
+      return -1;
+#endif
+      if (sent < 0 && errno == EINTR)
+         continue;
+      if (sent <= 0)
+         return -1;
+      bytes += sent;
+      length -= (size_t)sent;
+   }
+   return 0;
+}
+
 static int script_rpc_read_all(int fd, void *buf, size_t len)
 {
    char *p = (char *)buf;
@@ -118,8 +152,8 @@ static int script_rpc_send_json(int fd, cJSON *json)
       return -1;
    size_t len = strlen(text);
    uint32_t nlen = htonl((uint32_t)len);
-   int rc = len <= SCRIPT_RPC_MAX_FRAME && script_rpc_write_all(fd, &nlen, sizeof(nlen)) == 0 &&
-                    script_rpc_write_all(fd, text, len) == 0
+   int rc = len <= SCRIPT_RPC_MAX_FRAME && script_rpc_send_all(fd, &nlen, sizeof(nlen)) == 0 &&
+                    script_rpc_send_all(fd, text, len) == 0
                 ? 0
                 : -1;
    free(text);
@@ -175,21 +209,17 @@ static cJSON *script_rpc_dispatch(script_rpc_server_t *srv, cJSON *req)
    if (agent_request_cancelled())
       return script_rpc_error(id, "cancelled", "script tool execution cancelled");
 
-   char *args_json = cJSON_PrintUnformatted(jargs);
-   if (!args_json)
-      return script_rpc_error(id, "bad_frame", "failed to serialize args");
-
    if (!script_rpc_allowed_tool(jtool->valuestring))
    {
       srv->policy_denials++;
-      free(args_json);
       return script_rpc_error(id, "policy_denied", "tool is not allowed through script RPC");
    }
 
-   /* Reuse the foreground dispatch path so guardrails, role policy, request_input, and approval
-    * routing behave the same for nested script calls as for normal tool calls. */
+   char attempt[96];
+   snprintf(attempt, sizeof attempt, "script-rpc:%s:%llu", srv->execution->attempt_prefix,
+            ++srv->execution->attempts);
    int is_error = 1;
-   char *result = dispatch_tool_call_ctx_status(jtool->valuestring, args_json, 120000, &is_error);
+   char *result = server_script_tool_execute(req, attempt, &is_error);
    srv->tool_calls++;
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddNumberToObject(resp, "id", id);
@@ -211,7 +241,6 @@ static cJSON *script_rpc_dispatch(script_rpc_server_t *srv, cJSON *req)
       cJSON_AddStringToObject(resp, "error", "tool returned no result");
    }
    free(result);
-   free(args_json);
    return resp;
 }
 
@@ -249,7 +278,7 @@ static void *script_rpc_serve(void *arg)
             free(buf);
             continue;
          }
-         cJSON *req = cJSON_Parse(buf);
+         cJSON *req = aimee_ir_json_parse_frame(buf, len);
          cJSON *resp = req ? script_rpc_dispatch(srv, req)
                            : script_rpc_error(0, "bad_json", "invalid script RPC JSON");
          if (resp)
@@ -300,7 +329,7 @@ static void *script_rpc_serve(void *arg)
          close(fd);
          continue;
       }
-      cJSON *req = cJSON_Parse(buf);
+      cJSON *req = aimee_ir_json_parse_frame(buf, len);
       cJSON *resp = req ? script_rpc_dispatch(srv, req)
                         : script_rpc_error(0, "bad_json", "invalid script RPC JSON");
       if (resp)
@@ -461,7 +490,10 @@ void script_rpc_stop(script_rpc_server_t *srv)
       return;
    atomic_store(&srv->stop, 1);
    if (srv->thread_started)
+   {
+      shutdown(srv->listen_fd, SHUT_RDWR);
       pthread_join(srv->thread, NULL);
+   }
    srv->thread_started = 0;
 }
 

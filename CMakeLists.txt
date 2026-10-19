@@ -693,6 +693,7 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/tool_schema_sanitizer.c
     ${AIMEE_SRC_DIR}/server/script_runner.c
     ${AIMEE_SRC_DIR}/server/script_rpc.c
+    ${AIMEE_SRC_DIR}/server/script_tool_execution.c
     ${AIMEE_SRC_DIR}/server/osv_check.c
     ${AIMEE_SRC_DIR}/server/failover.c
     ${AIMEE_SRC_DIR}/server/http_retry.c
