@@ -186,6 +186,33 @@ def reviewed_memory_equivalent(path: str, frozen: str, current: str) -> bool:
     return current.strip() == frozen.strip()
 
 
+# Exact IR host integrations after the reviewed testing release: Git family
+# resolution before tool admission and its catalog-test regressions/scratch
+# initialization. No LSP implementation, schema, golden signature, or probe input
+# is excluded. Reverse these blocks, then retain the complete frozen comparison.
+REVIEWED_HOST_INTEGRATIONS = json.loads(
+    Path(__file__).with_name("s1-host-integration.json").read_text()
+)
+
+
+def host_integration_base(path: str, current: str) -> str | None:
+    blocks = REVIEWED_HOST_INTEGRATIONS.get(path)
+    if not blocks:
+        return None
+    for block in blocks:
+        if current.count(block["release_text"]) != 1:
+            return None
+        current = current.replace(block["release_text"], block["frozen_text"], 1)
+    return current
+
+
+def reviewed_host_equivalent(path: str, frozen: str, current: str) -> bool:
+    base = host_integration_base(path, current)
+    return base is not None and (
+        base.strip() == frozen.strip() or reviewed_memory_equivalent(path, frozen, base)
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--probe-report", type=Path, required=True)
@@ -261,6 +288,13 @@ def validate(
                 changed = [path for path in changed if path not in BUILD_PATHS]
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             errors.append(f"could not verify semantic-context build contract: {exc}")
+    reviewed_host_paths = [
+        path for path in changed if reviewed_host_equivalent(
+            path, git_output("show", f"{candidate_commit}:{path}"),
+            (ROOT / path).read_text(),
+        )
+    ]
+    changed = [path for path in changed if path not in reviewed_host_paths]
     reviewed_memory_paths = [
         path for path in changed if reviewed_memory_equivalent(
             path, git_output("show", f"{candidate_commit}:{path}"),
@@ -308,6 +342,7 @@ def validate(
         "changed_protected_paths": changed,
         "reviewed_build_integration_paths": reviewed_build_paths,
         "reviewed_memory_integration_paths": reviewed_memory_paths,
+        "reviewed_host_integration_paths": reviewed_host_paths,
         "untracked_protected_paths": untracked,
         "cold_starts_per_provider": cold_starts,
         "release_candidate_matched": not errors,

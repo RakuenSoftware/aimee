@@ -1,0 +1,26 @@
+{
+  "src/modules/protocols/mcp/mcp_tools_extended.c": [
+    {
+      "release_text": "\nint mcp_family_demux(const char *tool, cJSON *args, char *out, size_t n)\n{\n   /* Git has its own advertised multiplexed schema. Resolve it at the same\n    * boundary as the collapsed families, before permission and workflow gates.\n    * Do not truncate a command into a different callable identity. */\n   if (strcmp(tool, \"git\") == 0)\n   {\n      const cJSON *command = cJSON_GetObjectItemCaseSensitive(args, \"command\");\n      if (!cJSON_IsString(command) || !command->valuestring[0])\n         return -1;\n      int length = snprintf(out, n, \"git_%s\", command->valuestring);\n      return length >= 0 && (size_t)length < n ? 1 : -1;\n   }\n   for (const struct fam_def *f = MCP_FAMILIES; f->name; f++)\n   {\n      if (strcmp(tool, f->name) != 0)\n",
+      "frozen_text": "\nint mcp_family_demux(const char *tool, cJSON *args, char *out, size_t n)\n{\n   for (const struct fam_def *f = MCP_FAMILIES; f->name; f++)\n   {\n      if (strcmp(tool, f->name) != 0)\n"
+    },
+    {
+      "release_text": "      for (const struct fam_member *m = f->members; m->command; m++)\n         if (strcmp(jc->valuestring, m->command) == 0)\n         {\n            int length = snprintf(out, n, \"%s\", m->tool);\n            return length >= 0 && (size_t)length < n ? 1 : -1;\n         }\n      return -1;\n   }\n",
+      "frozen_text": "      for (const struct fam_member *m = f->members; m->command; m++)\n         if (strcmp(jc->valuestring, m->command) == 0)\n         {\n            snprintf(out, n, \"%s\", m->tool);\n            return 1;\n         }\n      return -1;\n   }\n"
+    }
+  ],
+  "src/tests/test_mcp_client_registry.c": [
+    {
+      "release_text": "   cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, \"inputSchema\");\n   cJSON *props = cJSON_GetObjectItemCaseSensitive(schema, \"properties\");\n   cJSON *req = cJSON_GetObjectItemCaseSensitive(schema, \"required\");\n   const char *keys[96] = {0};\n   int nk = 0;\n   cJSON *c = NULL;\n   if (cJSON_IsObject(props))\n      cJSON_ArrayForEach(c, props) if (c->string && nk < 96) keys[nk++] = c->string;\n   qsort(keys, (size_t)nk, sizeof(keys[0]), tools_cmp_ptr);\n   const char *rq[48] = {0};\n   int nr = 0;\n   if (cJSON_IsArray(req))\n      cJSON_ArrayForEach(c, req) if (cJSON_IsString(c) && nr < 48) rq[nr++] = c->valuestring;\n",
+      "frozen_text": "   cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, \"inputSchema\");\n   cJSON *props = cJSON_GetObjectItemCaseSensitive(schema, \"properties\");\n   cJSON *req = cJSON_GetObjectItemCaseSensitive(schema, \"required\");\n   const char *keys[96];\n   int nk = 0;\n   cJSON *c = NULL;\n   if (cJSON_IsObject(props))\n      cJSON_ArrayForEach(c, props) if (c->string && nk < 96) keys[nk++] = c->string;\n   qsort(keys, (size_t)nk, sizeof(keys[0]), tools_cmp_ptr);\n   const char *rq[48];\n   int nr = 0;\n   if (cJSON_IsArray(req))\n      cJSON_ArrayForEach(c, req) if (cJSON_IsString(c) && nr < 48) rq[nr++] = c->valuestring;\n"
+    },
+    {
+      "release_text": "   cJSON_AddStringToObject(wrapper, \"name\", \"index\");\n   assert(mcp_call_tool_demux(\"call_tool\", wrapper, &target, &target_args) == -1);\n   cJSON_Delete(wrapper);\n}\n\nstatic void test_git_family_resolves_before_admission(void)\n{\n   cJSON *args = cJSON_Parse(\"{\\\"command\\\":\\\"push\\\"}\");\n   char resolved[96];\n   assert(mcp_family_demux(\"git\", args, resolved, sizeof resolved) == 1);\n   assert(!strcmp(resolved, \"git_push\"));\n   assert(mcp_family_demux(\"git_push\", args, resolved, sizeof resolved) == 0);\n   assert(mcp_family_demux(\"git\", args, resolved, strlen(\"git_push\")) == -1);\n   cJSON_ReplaceItemInObject(args, \"command\", cJSON_CreateString(\"\"));\n   assert(mcp_family_demux(\"git\", args, resolved, sizeof resolved) == -1);\n   cJSON_DeleteItemFromObjectCaseSensitive(args, \"command\");\n   assert(mcp_family_demux(\"git\", args, resolved, sizeof resolved) == -1);\n   cJSON_AddStringToObject(args, \"command\", \"create\");\n   assert(mcp_family_demux(\"note\", args, resolved, sizeof resolved) == 1);\n   assert(!strcmp(resolved, \"create_note\"));\n   assert(mcp_family_demux(\"note\", args, resolved, strlen(\"create_note\")) == -1);\n   cJSON_Delete(args);\n}\n\nstatic int tools_have(cJSON *tools, const char *name)\n",
+      "frozen_text": "   cJSON_AddStringToObject(wrapper, \"name\", \"index\");\n   assert(mcp_call_tool_demux(\"call_tool\", wrapper, &target, &target_args) == -1);\n   cJSON_Delete(wrapper);\n}\n\nstatic int tools_have(cJSON *tools, const char *name)\n"
+    },
+    {
+      "release_text": "   test_tools_list_surface();\n   test_tool_profile_filter();\n   test_call_tool_demux();\n   test_git_family_resolves_before_admission();\n   test_get_help_topics_exist();\n   test_solo_profile_is_gone();\n   test_delegates_disabled_withholds_delegate_tools();\n",
+      "frozen_text": "   test_tools_list_surface();\n   test_tool_profile_filter();\n   test_call_tool_demux();\n   test_get_help_topics_exist();\n   test_solo_profile_is_gone();\n   test_delegates_disabled_withholds_delegate_tools();\n"
+    }
+  ]
+}
