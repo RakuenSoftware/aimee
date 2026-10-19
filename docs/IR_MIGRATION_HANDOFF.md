@@ -33,8 +33,8 @@ independent reviewer under `OWNERS.md`.
 Published `5aa1888d2` passed all 56 applicable CI checks, including every Docker
 tier, with two existing testing-branch platform skips (as did `1a8469ebf`). Published
 `46f6e1085` includes the subsequent plain-request consumer and obsolete shell-driver
-retirement and is undergoing fresh CI. The selected Vault API-key increment at the
-end records its newer source and validation status.
+retirement. Its CI exposed an unchecked POSIX capture receiver, repaired below.
+The selected Vault API-key increment and that CI repair require fresh head CI.
 Installed CLI probes now correctly resolve `aimee` and `wol-lore` from their own
 workspaces without an explicit project override; newer native callback cwd binding
 is separately pending promotion. The overall migration remains unfinished.
@@ -1761,3 +1761,22 @@ ThreadSanitizer, CMake/CTest, all 76 lint checks and zero-diagnostic changed-sou
 static analysis pass. Claude OAuth refresh/custody, actual attestation
 factories, native command fidelity, complete effects/controls and SDK activation
 are still open; this API-key capability is not a production promotion.
+
+
+## CI repair: unchecked POSIX capture output receiver
+
+CI for `46f6e1085` failed Cppcheck shard 0 on `ctunullpointer` in `posix/util.c`:
+the capture helper dereferenced a missing output receiver before validating it.
+It now refuses that call before spawning a child. A focused regression covers
+null receivers, invalid argv clearing stale output, and unchanged valid capture;
+normal and ASan/UBSan fixtures pass. The exact production Make Cppcheck shard
+rerun checks all 124 sources and passes with 99 known diagnostics and no increase.
+Neither the analyzer debt baseline nor attribution policy was changed. The
+aggregate static-analysis check failed from its Cppcheck dependency.
+
+The selected API-key commit was caught locally with a named-file staging omission
+of tracked `agent_credentials.c`; the incomplete unpublished commit was replaced
+using the registered tracked-files commit mode after checking the exact eight-file
+diff. `b2ebad48c` contains the full tested implementation. The first registered
+commit request also returned a transient explicit-workspace availability refusal;
+a retry against the same explicit checkout succeeded. No other checkout was used.
