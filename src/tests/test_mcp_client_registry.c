@@ -659,13 +659,13 @@ static void tool_signature(cJSON *tool, char *out, size_t outsz)
    cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
    cJSON *props = cJSON_GetObjectItemCaseSensitive(schema, "properties");
    cJSON *req = cJSON_GetObjectItemCaseSensitive(schema, "required");
-   const char *keys[96];
+   const char *keys[96] = {0};
    int nk = 0;
    cJSON *c = NULL;
    if (cJSON_IsObject(props))
       cJSON_ArrayForEach(c, props) if (c->string && nk < 96) keys[nk++] = c->string;
    qsort(keys, (size_t)nk, sizeof(keys[0]), tools_cmp_ptr);
-   const char *rq[48];
+   const char *rq[48] = {0};
    int nr = 0;
    if (cJSON_IsArray(req))
       cJSON_ArrayForEach(c, req) if (cJSON_IsString(c) && nr < 48) rq[nr++] = c->valuestring;

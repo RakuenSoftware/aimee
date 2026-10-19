@@ -2418,8 +2418,8 @@
       "symbols": [
         "memory_recall"
       ],
-      "sha256": "e2c470da87e082450f69ea987644adfcfbfa1342014581234a29a907abc5a1e0",
-      "boundary_change": "Adds Git family identity and output-capacity regressions. Existing memory recall catalog assertions are unchanged. This records boundary analysis, not independent approval."
+      "sha256": "86467e00c99b2a03e2eec2ad567cfb417cf4ce756aa530a28e25c5a35740a2b5",
+      "boundary_change": "Adds Git family identity and output-capacity regressions. Existing memory recall catalog assertions are unchanged. This records boundary analysis, not independent approval. Catalog signature scratch arrays are initialized for the pinned static analyzer; schema assertions retain their existing meaning."
     },
     "src/tests/test_mcp_directive_transport.c": {
       "disposition": "host-fixture",
