@@ -1987,3 +1987,39 @@ removed/weakened/duplicated coverage or replacement by an empty catalog.
 The repaired frozen comparison passes all 18 focused S1 cases and the complete
 786-case benchmark unit suite. Fresh CI is required for
 this follow-up; a cancelled or superseded workflow is not a passing result.
+
+## Remaining live tool-policy read fallbacks retired
+
+The delegate loop and async tool execution API now use the same supervised
+metadata/category authorization as native MCP. All live `tool_side_effect`
+callers, its implementation and public declaration are removed. Its name is now
+retired globally by the bypass gate. A missing/unknown tools metadata owner cannot
+become a read. Optional registry disables and custom operator labels retain their
+existing restrictions alongside the owned category set.
+
+The real delegate context-refusal fixture explicitly supplies the tools metadata
+fixture while leaving execution-policy absent, preserving its original gate
+ordering assertions. It additionally refuses missing metadata before execution.
+The full integration harness now checks a network policy block behind web_read,
+ordinary file reads under that same restriction, and unknown-tool refusal.
+
+An independent loopback SDK probe found original command call/argument/result
+notifications on fresh Codex threads after experimental opt-in, but not after a
+new process resumes the thread. The pinned upstream implementation explicitly
+attaches resumed listeners without raw events. That experimental route alone is
+therefore insufficient for durable native command fidelity. No SDK activation or
+faithful resumed command capture is claimed; the gateway's canonical wire boundary
+remains the stable owner to connect for that work.
+
+The complete local integration run passes 159/159 with a fresh PostgreSQL database,
+separate non-superuser migrator/runtime roles and no KB instance. Its 26 existing
+service-dependent skips remain explicit, including real Docker delegation. The
+three new API assertions verify a network-category block, a permitted file read
+under that same policy, and unknown metadata refusal. Earlier missing-module and
+missing-migration-credential fixture attempts are retained as setup failures, not
+passing runs. Four focused native suites pass normally; context, agent and tool
+validation pass ASan/UBSan. The context fixture's hook registration was moved
+outside an assertion after Cppcheck reported its side effect. Changed-source
+Cppcheck has no diagnostics, all 76 lint checks pass, and actual CMake/CTest
+runtime/cache targets pass 2/2. Fresh `6a0b24e2f` benchmark CI is green; its main CI
+snapshot had 52 passing checks, four pending and the two existing platform skips.

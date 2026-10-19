@@ -333,22 +333,6 @@ int tool_policy_metadata(const char *tool, aimee_tool_metadata_t *metadata, char
    return 0;
 }
 
-const char *tool_side_effect(const char *tool_name)
-{
-   /* Fall through aimee-kb so the lookup works in the daemon (KB_STORE-less)
-    * process.  Thread-local buffer mirrors kb_store_tool_registry_side_effect's
-    * legacy contract — caller can treat the pointer as valid until the
-    * next tool_side_effect() call on this thread. */
-   static __thread char buf[32];
-   buf[0] = '\0';
-   int found = 0;
-   if (kb_client_tool_registry_lookup(tool_name ? tool_name : "", NULL, 0, buf, sizeof(buf), NULL,
-                                      &found) != 0 ||
-       !found || !buf[0])
-      snprintf(buf, sizeof(buf), "%s", "read");
-   return buf;
-}
-
 /* --- Tool prompt collection --- */
 
 /* Collect usage prompts from all enabled tools that have a non-empty tool_prompt.

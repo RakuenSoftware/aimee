@@ -16,6 +16,7 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "tool_side_effect",
     "agent_execute_cli_shell_driver", "agent_shell_driver_get", "agent_shell_driver_register",
     "agent_shell_driver_t", "SHELL_EVENT_TEXT_DELTA", "SHELL_EVENT_TOOL_START",
     "SHELL_EVENT_TOOL_COMPLETE", "SHELL_EVENT_SESSION_ID", "SHELL_EVENT_TURN_COMPLETE",
@@ -46,7 +47,6 @@ RULES = {
     "unclassified-tool-dispatch": re.compile(r"\bdispatch_tool_call(?:_ctx)?\s*\("),
     "native-profile-rebuild": re.compile(r"\bagent_build_request_(?:openai|anthropic|responses)\s*\("),
     "post-render-profile": re.compile(r"\b(?:model_sampling_apply_(?:openai|anthropic)|agent_anthropic_set_system|agent_request_shape_openai_messages)\s*\("),
-    "kb-tool-classification": re.compile(r"\btool_side_effect\s*\("),
     "native-schema-lookup": re.compile(r"\b(?:tool_validate|kb_client_tool_registry_lookup)\s*\("),
     "native-hook-field": re.compile(r'"(?:tool_name|tool_input|tool_response|tool_use_id|tool_call_id|tool_namespace)"'),
     "native-history-field": re.compile(
@@ -122,8 +122,6 @@ def findings(root: Path) -> list[dict]:
         profile_spans = profile_function_spans(source) if relative == "src/server/agent_bridge.c" else []
         for rule, pattern in RULES.items():
             if rule == "post-render-profile" and relative != "src/server/agent_request_build.c":
-                continue
-            if rule == "kb-tool-classification" and relative != "src/server/server_native_tool_admission.c":
                 continue
             if rule == "native-schema-lookup" and not canonical:
                 continue

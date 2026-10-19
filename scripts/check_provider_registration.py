@@ -66,10 +66,11 @@ UNREACHABLE = {
         "from the linked aimee-server binary: 'sidecar temp path too long to quote safely' appears "
         "in aimee-kb and not in aimee-server.",
     ("kb", "agent_tools_register_metadata"):
-        "The metadata getter is reached only by server/agent_policy.c:tool_policy_metadata, "
-        "whose production consumer is server/server_native_tool_admission.c. Isolated native "
-        "SDK callbacks are server-owned; the KB target links neither their admission nor runtime. "
-        "The shared tools effect-contract object does not make that callback path reachable.",
+        "The metadata getter serves native MCP admission, the async tool worker and agent runtime. "
+        "The shipping Make KB target does not link the tools effect-contract/dispatcher execution "
+        "surface. Its CMake common source list retains the same unreachable agent runtime as the "
+        "classifier seam below; a shared source list does not enable tool execution in KB. "
+        "An absent metadata provider still refuses rather than granting a default read.",
     ("kb", "agent_tools_register_action_owner"):
         "The action callback has the same native-dispatch consumer as agent_tools_register_classifier. "
         "The Make KB target does not link its owner, and the deployed CT109 KB binary lacks both "

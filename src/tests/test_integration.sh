@@ -1863,6 +1863,28 @@ check_output "tool.execute bash" "integ-ok" echo "$RESP"
 RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
 check_output "tool.execute read_file" '"status":"ok"' echo "$RESP"
 
+# Policy categories come from the required tools owner even without KB rows.
+# A network restriction must match web_read while ordinary file reads keep their
+# existing success path. The loopback discard port bounds a failing regression without external traffic.
+python3 - <<'PYPOLICY'
+from pathlib import Path
+import os
+policy = Path(os.environ["AIMEE_HOME"]) / "policy.json"
+assert not policy.exists(), "unexpected pre-existing integration policy"
+policy.write_text('{"approval_levels":{"network":"block"}}')
+PYPOLICY
+RESP=$(http_rpc '{"method":"tool.execute","tool":"web_read","arguments":"{\"ref\":\"http://127.0.0.1:9/policy-fixture\"}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute owned network category" 'policy blocks network operations' echo "$RESP"
+RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute file read under network block" '"status":"ok"' echo "$RESP"
+python3 - <<'PYPOLICY'
+from pathlib import Path
+import os
+(Path(os.environ["AIMEE_HOME"]) / "policy.json").unlink()
+PYPOLICY
+RESP=$(http_rpc '{"method":"tool.execute","tool":"unregistered-policy-fixture","arguments":"{}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute unknown has no implicit read classification" 'tool policy metadata unavailable' echo "$RESP"
+
 # ============================================================
 # 9. Mirror-sync -> reconstructed MCP Git, end to end
 # ============================================================

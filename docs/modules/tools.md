@@ -34,7 +34,8 @@ primary label and category mask. Over-limit names refuse without prefix truncati
 Unknown names have no metadata; qualified external tools remain remote. Neither
 classification nor metadata grants execution or human approval.
 
-Isolated native MCP admission uses that supervised owner rather than treating a
+The delegate loop, async tool API and isolated native MCP admission use that supervised
+owner rather than treating a
 missing KB side-effect row as `read`. Required execution-policy evaluates all
 owned categories against one loaded operator policy, including adaptive session
 checks. Optional registry disables still veto and custom operator labels remain
@@ -42,7 +43,8 @@ additional restrictions; they cannot erase owned categories. Current built-in
 and flat MCP catalog fixtures require complete metadata coverage. Multiplexed
 capabilities use conservative metadata until operation-specific refinement; this
 does not complete tool effect receipts, native built-in interception, human
-controls or the other legacy callers of `tool_side_effect`.
+controls. The legacy `tool_side_effect` helper and all of its production callers
+are retired; the bypass gate rejects reintroduction.
 
 `agent_tools.h` also declares a turn/snapshot/toolset session-state slice (`agent_tools_begin_turn`,
 `agent_tools_set_snap_id`, `agent_tools_set_active_toolset`) implemented in `src/server/agent_tools.c`:

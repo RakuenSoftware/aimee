@@ -46,6 +46,7 @@ class IRBypassTests(unittest.TestCase):
             ("src/server/rogue.c", "agent_execute_cli_shell_driver(agent, prompt);"),
             ("src/server/rogue.c", "agent_shell_driver_get(name);"),
             ("src/server/rogue.c", "agent_shell_driver_t terminal;"),
+            ("src/server/rogue.c", "tool_side_effect(name);"),
             ("src/server/rogue.c", "emit(SHELL_EVENT_TEXT_DELTA);"),
             ("src/server/rogue.c", "driver->parse_response(body);"),
             ("src/server/rogue.c", "driver->build_request(input);"),
@@ -96,7 +97,7 @@ class IRBypassTests(unittest.TestCase):
 
     def test_native_mcp_cannot_reintroduce_kb_read_fallback(self):
         self.source("src/server/server_native_tool_admission.c", "tool_side_effect(tool);")
-        with self.assertRaisesRegex(ValueError, "kb-tool-classification"):
+        with self.assertRaisesRegex(ValueError, "retired-api"):
             checker.check(self.root)
         self.source("src/server/server_native_tool_admission.c", "tool_policy_metadata(tool, metadata);")
         checker.check(self.root)

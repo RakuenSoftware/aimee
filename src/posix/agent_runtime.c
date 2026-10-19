@@ -2070,10 +2070,14 @@ native_provider_http:
          snprintf(exploration_attempt, sizeof(exploration_attempt), "%d:%d", api_call_count, i);
          /* Check policy */
          char policy_reason[256] = {0};
-         const char *se = tool_side_effect(aimee_ir_response_tool(&response, i)->tool_name);
-         if (policy_check_tool_attempt(aimee_ir_response_tool(&response, i)->tool_name, se,
-                                       tool_arguments[i], exploration_attempt, policy_reason,
-                                       sizeof(policy_reason)) != 0)
+         const char *tool_name = aimee_ir_response_tool(&response, i)->tool_name;
+         aimee_tool_metadata_t metadata;
+         char effect[32];
+         if (tool_policy_metadata(tool_name, &metadata, effect, sizeof effect, policy_reason,
+                                  sizeof policy_reason) != 0 ||
+             policy_check_tool_metadata_attempt(tool_name, &metadata, effect, tool_arguments[i],
+                                                exploration_attempt, policy_reason,
+                                                sizeof policy_reason) != 0)
          {
             char *err_result = malloc(512);
             if (!err_result)

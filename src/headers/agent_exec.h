@@ -265,7 +265,6 @@ int tool_validate_ir(const aimee_tool_t *tool, const char *args_json, char *err_
                      size_t err_len);
 int tool_validate(const char *tool_name, const char *args_json, char *err_out, size_t err_len);
 const char *tool_suggest(const char *name);
-const char *tool_side_effect(const char *tool_name);
 char *agent_collect_tool_prompts(void);
 void agent_trace_log(int plan_id, int turn, const char *direction, const char *content,
                      const char *tool_name, const char *tool_args, const char *tool_result,

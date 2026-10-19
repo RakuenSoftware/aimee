@@ -228,8 +228,12 @@ static void tool_execute_worker(void *arg)
 
    (void)policy_bind_session_exploration(sid);
    char policy_reason[256] = "";
-   if (policy_check_tool_attempt(tool, tool_side_effect(tool), args, "external-tool", policy_reason,
-                                 sizeof(policy_reason)) != 0)
+   aimee_tool_metadata_t metadata;
+   char effect[32];
+   if (tool_policy_metadata(tool, &metadata, effect, sizeof effect, policy_reason,
+                            sizeof policy_reason) != 0 ||
+       policy_check_tool_metadata_attempt(tool, &metadata, effect, args, "external-tool",
+                                          policy_reason, sizeof policy_reason) != 0)
    {
       cJSON *blocked = cJSON_CreateObject();
       cJSON_AddStringToObject(blocked, "status", "blocked");

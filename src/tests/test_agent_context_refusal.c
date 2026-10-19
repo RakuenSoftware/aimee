@@ -3,6 +3,8 @@
  * as Go-owner protocol replies; this test does not reimplement memory policy. */
 #include "aimee.h"
 #include "agent_exec.h"
+#include <aimee/tools/agent_tools.h>
+#include "modules/tools/tool_catalog_data.h"
 #include <aimee/module-runtime/pre_llm_hook.h>
 #include <aimee/ir/session_event.h>
 #include "config.h"
@@ -17,6 +19,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static int metadata_available = 1;
+static int fixture_metadata(const char *name, aimee_tool_metadata_t *out)
+{
+   if (!metadata_available)
+      return -1;
+   *out = aimee_tools_catalog_metadata(name);
+   return 0;
+}
 
 static int wide_parallel, wide_uses, wide_results;
 static int identity_case, identity_results;
@@ -39,7 +50,7 @@ static int capture_identity_result(const aimee_session_event_t *event, void *con
        * must be refused earlier, before policy or tool execution. */
       if (identity_case == 2)
          assert(block->tool_is_error && strstr(result, "blocked by policy") &&
-                strstr(result, "CAPABILITY_ABSENT"));
+                strstr(result, metadata_available ? "CAPABILITY_ABSENT" : "metadata unavailable"));
       else
          assert(block->tool_is_error && strstr(result, "not advertised") &&
                 !strstr(result, "IDENTITY_READ_CONTROL"));
@@ -367,6 +378,7 @@ int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON 
 int main(void)
 {
    delegate_role_seam_install();
+   agent_tools_register_metadata(fixture_metadata);
    char home[4096];
    snprintf(home, sizeof(home), "%s/aimee-context-refusal-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(home));
@@ -521,7 +533,8 @@ int main(void)
       provider_calls = hook_calls = 0;
       expect_hook_prompt = 1;
       plugin_chook_reset();
-      assert(!plugin_chook_register_pre_llm(fallback_hook_context, NULL));
+      int hook_registered = plugin_chook_register_pre_llm(fallback_hook_context, NULL);
+      assert(hook_registered == 0);
       rc = agent_execute(&agent, NULL, "original prompt", 128, 0, &result);
       assert(hook_calls == 1);
       plugin_chook_reset();
@@ -586,6 +599,17 @@ int main(void)
       free(result.response);
       aimee_ir_session_set_sink(NULL, NULL);
    }
+   identity_case = 2;
+   metadata_available = 0;
+   recalls = provider_calls = identity_results = 0;
+   aimee_ir_session_set_sink(capture_identity_result, NULL);
+   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                          &result);
+   assert(rc == 0 && result.success && provider_calls == 2 && identity_results == 1);
+   assert(result.tool_calls == 1 && result.successful_tool_calls == 0);
+   free(result.response);
+   aimee_ir_session_set_sink(NULL, NULL);
+   agent_tools_register_metadata(NULL);
    identity_case = 0;
    puts("agent context refusal: passed");
    return 0;
