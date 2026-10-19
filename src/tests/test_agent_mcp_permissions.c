@@ -157,8 +157,8 @@ void test_script_rpc_keeps_permission_scope(void)
 typedef struct
 {
    const char *directory;
-   atomic_int cancel;
-   int seen, matches;
+   atomic_int cancel, local_cancel;
+   int seen, matches, inherited_scope;
 } script_context_fixture_t;
 static script_context_fixture_t *script_context_fixture;
 
@@ -185,11 +185,11 @@ static int script_context_read(const workspace_provider_t *provider, const char 
    agent_source_authority_snapshot_destroy(&source);
    const workspace_provider_t *shared = workspace_provider_shared();
    int result = shared->read_all(shared, path, out, length);
-   atomic_store(&fixture->cancel, 1); /* The next RPC call must observe the host's cancellation. */
+   atomic_store(fixture->inherited_scope ? &fixture->local_cancel : &fixture->cancel, 1);
    return result;
 }
 
-void test_script_rpc_keeps_host_context(void)
+static void script_rpc_host_context(int inherited_scope)
 {
    request_context_snapshot_t previous_request;
    request_context_snapshot(&previous_request);
@@ -200,6 +200,7 @@ void test_script_rpc_keeps_host_context(void)
    assert(!captured);
    const workspace_provider_t *previous_workspace = workspace_provider_active();
    atomic_int *previous_cancel = agent_get_request_cancel();
+   const agent_request_cancel_scope_t *previous_scope = agent_request_cancel_scope_current();
    char previous_session[128] = "";
    if (session_id_override_active())
       snprintf(previous_session, sizeof previous_session, "%s", session_id());
@@ -212,8 +213,12 @@ void test_script_rpc_keeps_host_context(void)
    assert(file);
    int written = fputs("SCRIPT_CONTEXT_EVIDENCE", file), closed = fclose(file);
    assert(written >= 0 && !closed);
-   script_context_fixture_t fixture = {.directory = directory};
+   script_context_fixture_t fixture = {.directory = directory, .inherited_scope = inherited_scope};
    atomic_init(&fixture.cancel, 0);
+   atomic_init(&fixture.local_cancel, 0);
+   agent_request_cancel_scope_t local = {.flag = &fixture.local_cancel, .parent = previous_scope};
+   if (inherited_scope)
+      agent_request_cancel_scope_bind(&local);
    script_context_fixture = &fixture;
    workspace_provider_t workspace = *workspace_provider_shared();
    workspace.read_all = script_context_read;
@@ -239,12 +244,15 @@ void test_script_rpc_keeps_host_context(void)
    assert(reply && cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == -1);
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "cancelled")));
    assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "timed_out")));
-   assert(fixture.seen == 1 && fixture.matches && atomic_load(&fixture.cancel));
+   assert(fixture.seen == 1 && fixture.matches);
+   assert(atomic_load(&fixture.cancel) == !inherited_scope);
+   assert(atomic_load(&fixture.local_cancel) == inherited_scope);
    const request_context_t *unchanged = request_context_get();
    assert(unchanged && !unchanged->model_execution && unchanged->capabilities == CAPS_ALL);
    cJSON_Delete(reply);
    free(result);
    agent_set_request_cancel(previous_cancel);
+   agent_request_cancel_scope_bind(previous_scope);
    workspace_provider_set_active(previous_workspace);
    script_context_fixture = NULL;
    request_context_restore(&previous_request);
@@ -259,4 +267,10 @@ void test_script_rpc_keeps_host_context(void)
    rmdir(directory);
    puts("  PASS: script RPC retains cwd/provider/identity/source/cancellation without model "
         "credentials");
+}
+
+void test_script_rpc_keeps_host_context(void)
+{
+   script_rpc_host_context(0);
+   script_rpc_host_context(1);
 }

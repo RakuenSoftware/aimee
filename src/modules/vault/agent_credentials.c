@@ -271,6 +271,20 @@ const char *agent_get_request_vault_principal(void)
  * loop; the loop polls agent_request_cancelled() at safe points to abort a
  * detached turn promptly. Thread-local; NULL clears it. */
 static _Thread_local atomic_int *g_request_cancel;
+static _Thread_local const agent_request_cancel_scope_t *g_request_cancel_scope;
+
+const agent_request_cancel_scope_t *agent_request_cancel_scope_current(void)
+{
+   return g_request_cancel_scope;
+}
+
+const agent_request_cancel_scope_t *
+agent_request_cancel_scope_bind(const agent_request_cancel_scope_t *scope)
+{
+   const agent_request_cancel_scope_t *previous = g_request_cancel_scope;
+   g_request_cancel_scope = scope;
+   return previous;
+}
 
 void agent_set_request_cancel(atomic_int *flag)
 {
@@ -284,7 +298,13 @@ atomic_int *agent_get_request_cancel(void)
 
 int agent_request_cancelled(void)
 {
-   return g_request_cancel ? atomic_load(g_request_cancel) : 0;
+   if (g_request_cancel && atomic_load(g_request_cancel))
+      return 1;
+   for (const agent_request_cancel_scope_t *scope = g_request_cancel_scope; scope;
+        scope = scope->parent)
+      if (scope->flag && atomic_load(scope->flag))
+         return 1;
+   return 0;
 }
 
 /* The server preset is the legacy unnamed context. Named registrations never

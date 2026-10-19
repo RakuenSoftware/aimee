@@ -2334,8 +2334,8 @@ and proxy regressions pass; five changed-source Cppcheck inputs have no diagnost
 The actual server builds and passes the 167-check restricted-role integration
 journey against PostgreSQL 18.6 extracted from the exact CI OCI manifest, with
 26 existing service-dependent skips and no KB. That diagnostic harness bounds
-memory teardown and preserves its owner log; no stop failure occurred. Serial
-lint follows before this increment's publication.
+memory teardown and preserves its owner log; no stop failure occurred. All 76 serial
+lint gates pass for the final encoded-argument and local-scope implementation.
 
 Merged CI integration run `39278223901` did time out after a private model-memory
 store failed and memory-owner TERM teardown hung. This remains an open CI defect,
@@ -2367,3 +2367,13 @@ passed the private-memory assertions against that same PostgreSQL 18.6 image.
 That shortened diagnostic run is not full integration qualification: its archive
 had no Git metadata, so an earlier git_status check failed, and it intentionally
 stopped after private memory. The original CI model-write failure remains open.
+
+
+Final script-scope qualification also passes the rebuilt production server,
+actual CMake application/runtime/cache targets (CTest 2/2), and the updated original
+integration harness against the exact CI PostgreSQL 18.6 image: 167/167, with the
+26 existing explicit skips and no KB. The final raw-argument form cannot append
+extra envelope metadata; both argument forms together refuse. The descriptor-only
+legacy/HMAC-ignored control remains a positive test. All 653 native binaries,
+ASan/UBSan agent/script fixtures, five-source Cppcheck and all 76 lint gates pass.
+Fresh branch CI and the unresolved merged model-memory timeout remain separate.

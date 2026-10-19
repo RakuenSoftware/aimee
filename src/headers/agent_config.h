@@ -399,6 +399,17 @@ void agent_set_request_cancel(atomic_int *flag);
 /* Borrow only inside the current host execution; every child worker must join
  * before its owner releases this cancellation flag. Never model authority. */
 atomic_int *agent_get_request_cancel(void);
+/* Additional host-owned cancellation leases. Nodes/links are immutable while
+ * bound; flags are atomic. Every child must join before its enclosing owner's
+ * nodes or flags are released. A local timeout never changes a parent flag. */
+typedef struct agent_request_cancel_scope
+{
+   const atomic_int *flag;
+   const struct agent_request_cancel_scope *parent;
+} agent_request_cancel_scope_t;
+const agent_request_cancel_scope_t *agent_request_cancel_scope_current(void);
+const agent_request_cancel_scope_t *
+agent_request_cancel_scope_bind(const agent_request_cancel_scope_t *scope);
 int agent_request_cancelled(void);
 
 /* Snapshot of the per-turn, thread-local credential context (session id, selected

@@ -40,6 +40,7 @@ struct script_rpc_execution
    agent_source_authority_snapshot_t source;
    const workspace_provider_t *workspace;
    atomic_int *cancel;
+   agent_request_cancel_scope_t cancellation;
    char cwd[MAX_PATH_LEN], session[128], principal[VAULT_PRINCIPAL_MAX];
    int job;
    char attempt_prefix[33];
@@ -70,6 +71,8 @@ static int script_rpc_capture(script_rpc_server_t *srv, const char *cwd)
    snprintf(scope->principal, sizeof scope->principal, "%s", principal ? principal : "");
    scope->workspace = workspace_provider_active();
    scope->cancel = agent_get_request_cancel();
+   scope->cancellation.flag = &srv->stop;
+   scope->cancellation.parent = agent_request_cancel_scope_current();
    scope->job = agent_get_durable_job_id();
    return 0;
 }
@@ -204,7 +207,29 @@ static cJSON *script_rpc_dispatch(script_rpc_server_t *srv, cJSON *req)
    cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "id");
    cJSON *jtool = cJSON_GetObjectItemCaseSensitive(req, "tool");
    cJSON *jargs = cJSON_GetObjectItemCaseSensitive(req, "args");
+   cJSON *encoded = cJSON_GetObjectItemCaseSensitive(req, "args_json");
    int id = cJSON_IsNumber(jid) ? jid->valueint : 0;
+   if (encoded)
+   {
+      if (jargs || !cJSON_IsString(encoded))
+         return script_rpc_error(id, "bad_frame", "ambiguous script tool arguments");
+      cJSON *decoded =
+          aimee_ir_json_parse_frame(encoded->valuestring, strlen(encoded->valuestring));
+      if (!decoded)
+         return script_rpc_error(id, "bad_json", "invalid script tool arguments");
+      if (!cJSON_IsObject(decoded))
+      {
+         cJSON_Delete(decoded);
+         return script_rpc_error(id, "bad_frame", "script tool requires object arguments");
+      }
+      if (!cJSON_AddItemToObject(req, "args", decoded))
+      {
+         cJSON_Delete(decoded);
+         return script_rpc_error(id, "internal", "cannot admit script tool arguments");
+      }
+      cJSON_DeleteItemFromObjectCaseSensitive(req, "args_json");
+      jargs = decoded;
+   }
    if (!cJSON_IsNumber(jid) || !cJSON_IsString(jtool) || !cJSON_IsObject(jargs))
       return script_rpc_error(id, "bad_frame", "missing id, tool, or args");
 
@@ -382,6 +407,7 @@ static void *script_rpc_thread(void *arg)
    agent_set_request_vault_principal(scope->principal);
    session_id_set_override(scope->session);
    agent_set_request_cancel(scope->cancel);
+   agent_request_cancel_scope_bind(&scope->cancellation);
    agent_set_durable_job(scope->job);
    script_rpc_serve(arg);
    /* The caller's resource lease still encloses this entire joined worker. */
@@ -395,6 +421,7 @@ static void *script_rpc_thread(void *arg)
    agent_set_request_session(NULL);
    agent_set_request_vault_principal(NULL);
    agent_set_request_cancel(NULL);
+   agent_request_cancel_scope_bind(NULL);
    agent_set_durable_job(0);
    request_context_clear();
    return NULL;
@@ -417,49 +444,58 @@ static int script_rpc_write_stubs(script_rpc_server_t *srv)
    snprintf(py, sizeof(py), "%s/aimee_tools.py", srv->stub_dir);
    snprintf(sh, sizeof(sh), "%s/aimee", srv->stub_dir);
 
-   const char *py_body =
-       "import json, os, struct\n"
-       "_seq = 0\n"
-       "def call(tool, args=None):\n"
-       "    global _seq\n"
-       "    _seq += 1\n"
-       "    args = args or {}\n"
-       "    args_json = json.dumps(args, separators=(',', ':'), sort_keys=False)\n"
-       "    frame = json.dumps({'id': _seq, 'tool': tool, 'args': args}, "
-       "separators=(',', ':')).encode()\n"
-       "    fd = os.dup(int(os.environ['AIMEE_RPC_FD']))\n"
-       "    os.write(fd, struct.pack('!I', len(frame)) + frame)\n"
-       "    hdr = os.read(fd, 4)\n"
-       "    if len(hdr) != 4:\n"
-       "        os.close(fd)\n"
-       "        raise RuntimeError('short RPC response')\n"
-       "    size = struct.unpack('!I', hdr)[0]\n"
-       "    data = b''\n"
-       "    while len(data) < size:\n"
-       "        chunk = os.read(fd, size - len(data))\n"
-       "        if not chunk:\n"
-       "            os.close(fd)\n"
-       "            raise RuntimeError('short RPC body')\n"
-       "        data += chunk\n"
-       "    os.close(fd)\n"
-       "    return json.loads(data.decode())\n";
+   const char *py_body = "import json, os, struct\n"
+                         "_seq = 0\n"
+                         "def _read_exact(fd, size):\n"
+                         "    data = b''\n"
+                         "    while len(data) < size:\n"
+                         "        chunk = os.read(fd, size - len(data))\n"
+                         "        if not chunk:\n"
+                         "            raise RuntimeError('short RPC response')\n"
+                         "        data += chunk\n"
+                         "    return data\n"
+                         "def _exchange(tool, args, encoded=False):\n"
+                         "    global _seq\n"
+                         "    _seq += 1\n"
+                         "    field = 'args_json' if encoded else 'args'\n"
+                         "    frame = json.dumps({'id': _seq, 'tool': tool, field: args}, "
+                         "separators=(',', ':'), sort_keys=False).encode()\n"
+                         "    if not frame or len(frame) > 65536:\n"
+                         "        raise ValueError('RPC frame exceeds limit')\n"
+                         "    fd = os.dup(int(os.environ['AIMEE_RPC_FD']))\n"
+                         "    try:\n"
+                         "        packet = memoryview(struct.pack('!I', len(frame)) + frame)\n"
+                         "        while packet:\n"
+                         "            sent = os.write(fd, packet)\n"
+                         "            if sent <= 0:\n"
+                         "                raise RuntimeError('short RPC write')\n"
+                         "            packet = packet[sent:]\n"
+                         "        size = struct.unpack('!I', _read_exact(fd, 4))[0]\n"
+                         "        if not 0 < size <= 65536:\n"
+                         "            raise RuntimeError('invalid RPC response size')\n"
+                         "        return _read_exact(fd, size)\n"
+                         "    finally:\n"
+                         "        os.close(fd)\n"
+                         "def call(tool, args=None):\n"
+                         "    args = {} if args is None else args\n"
+                         "    return json.loads(_exchange(tool, args).decode())\n";
    if (script_rpc_write_file(py, py_body, 0600) != 0)
       return -1;
 
-   const char *sh_body =
-       "#!/usr/bin/env bash\n"
-       "if [ \"$1\" != \"tool\" ] || [ -z \"$2\" ]; then\n"
-       "  echo 'usage: aimee tool <name> [json-args]' >&2; exit 2\n"
-       "fi\n"
-       "tool=\"$2\"; shift 2; args=\"${*:-{}}\"\n"
-       "printf '%s\\0%s' \"$tool\" \"$args\" | python3 -c '\n"
-       "import json, sys\n"
-       "import aimee_tools\n"
-       "tool_raw, args_raw = sys.stdin.buffer.read().split(b\"\\0\", 1)\n"
-       "tool = tool_raw.decode()\n"
-       "args = json.JSONDecoder().raw_decode(args_raw.decode().strip())[0]\n"
-       "print(json.dumps(aimee_tools.call(tool, args), separators=(\",\", \":\")))\n"
-       "'\n";
+   const char *sh_body = "#!/usr/bin/env bash\n"
+                         "if [ \"$1\" != \"tool\" ] || [ -z \"$2\" ]; then\n"
+                         "  echo 'usage: aimee tool <name> [json-args]' >&2; exit 2\n"
+                         "fi\n"
+                         "tool=\"$2\"; shift 2\n"
+                         "if [ \"$#\" -eq 0 ]; then args='{}'; else args=\"$*\"; fi\n"
+                         "printf '%s\\0%s' \"$tool\" \"$args\" | python3 -c '\n"
+                         "import sys\n"
+                         "import aimee_tools\n"
+                         "tool_raw, args_raw = sys.stdin.buffer.read().split(b\"\\0\", 1)\n"
+                         "tool = tool_raw.decode()\n"
+                         "sys.stdout.buffer.write(aimee_tools._exchange(tool, args_raw.decode(), "
+                         "encoded=True) + b\"\\n\")\n"
+                         "'\n";
    return script_rpc_write_file(sh, sh_body, 0700);
 }
 

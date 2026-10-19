@@ -2,6 +2,8 @@
 #include "aimee.h"
 #include "../modules/tools/agent_tools_internal.h"
 #include "agent_config.h"
+#include "config_client.h"
+#include "sandbox.h"
 #include <aimee/tools/agent_tools.h>
 #include "request_context.h"
 #include "module_stage_adapters.h"
@@ -116,6 +118,48 @@ static void policy_and_absence(const char *root)
    probe_read(root, 0, "metadata");
 }
 
+static void nested_tool_stop(const char *root)
+{
+   cJSON *previous = config_client_snapshot_copy();
+   assert(previous);
+   cJSON *sets = cJSON_Parse("{\"timeout_script\":{\"tools\":[\"bash\"]}}");
+   cJSON *script = cJSON_Parse("{\"allowed_tools\":\"timeout_script\"}");
+   int configured = config_client_set_value("toolsets", sets);
+   int selected = config_client_set_value("script", script);
+   assert(!configured && !selected);
+   sandbox_set_mode_override_for_test(SANDBOX_MODE_OFF);
+   atomic_int parent_cancel = 0;
+   atomic_int *previous_cancel = agent_get_request_cancel();
+   agent_set_request_cancel(&parent_cancel);
+   char body[MAX_PATH_LEN * 2], ready[MAX_PATH_LEN];
+   snprintf(ready, sizeof ready, "%s/nested-ready", root);
+   snprintf(body, sizeof body,
+            "import aimee_tools\n"
+            "print(aimee_tools.call('bash', {'command':\"exec 1>&- 2>&-; "
+            "trap '' TERM; : > '%s'; sleep 2\"}))\n",
+            ready);
+   char *result = tool_execute_script("python", body, 1, root, NULL);
+   cJSON *reply = result ? cJSON_Parse(result) : NULL;
+   assert(reply && access(ready, F_OK) == 0);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "timed_out")));
+   assert(cJSON_GetObjectItemCaseSensitive(reply, "duration_ms")->valuedouble < 1800);
+   assert(!atomic_load(&parent_cancel) && agent_get_request_cancel() == &parent_cancel);
+   cJSON_Delete(reply);
+   free(result);
+   unlink(ready);
+   agent_set_request_cancel(previous_cancel);
+   sandbox_set_mode_override_for_test(-1);
+   const cJSON *old_sets = cJSON_GetObjectItemCaseSensitive(previous, "toolsets");
+   const cJSON *old_script = cJSON_GetObjectItemCaseSensitive(previous, "script");
+   configured = config_client_set_value("toolsets", old_sets ? cJSON_Duplicate(old_sets, 1)
+                                                             : cJSON_CreateObject());
+   selected = config_client_set_value("script", old_script ? cJSON_Duplicate(old_script, 1)
+                                                           : cJSON_CreateObject());
+   assert(!configured && !selected);
+   cJSON_Delete(previous);
+   puts("script RPC: local timeout cancels an executing tool without cancelling its parent");
+}
+
 int script_rpc_admission_fixture_main(void)
 {
    char root[MAX_PATH_LEN], policy[MAX_PATH_LEN], socket_path[MAX_PATH_LEN];
@@ -200,6 +244,7 @@ int script_rpc_admission_fixture_main(void)
    session_id_set_override("script-fixture-session");
    test_script_rpc_keeps_permission_scope();
    test_script_rpc_keeps_host_context();
+   nested_tool_stop(root);
    policy_and_absence(root);
    puts("script RPC: real tools and execution-policy owner qualification passed");
    return 0;

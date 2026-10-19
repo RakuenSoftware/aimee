@@ -25,6 +25,7 @@ static int g_dispatch_blocked;
 static const char *g_dispatch_result;
 static atomic_int dispatch_entered, dispatch_released;
 static _Thread_local atomic_int *request_cancel;
+static _Thread_local const agent_request_cancel_scope_t *request_cancel_scope;
 
 char *server_script_tool_execute(const cJSON *frame, const char *attempt, int *is_error)
 {
@@ -140,7 +141,24 @@ void agent_set_request_cancel(atomic_int *flag)
 }
 int agent_request_cancelled(void)
 {
-   return request_cancel && atomic_load(request_cancel);
+   if (request_cancel && atomic_load(request_cancel))
+      return 1;
+   for (const agent_request_cancel_scope_t *scope = request_cancel_scope; scope;
+        scope = scope->parent)
+      if (scope->flag && atomic_load(scope->flag))
+         return 1;
+   return 0;
+}
+const agent_request_cancel_scope_t *agent_request_cancel_scope_current(void)
+{
+   return request_cancel_scope;
+}
+const agent_request_cancel_scope_t *
+agent_request_cancel_scope_bind(const agent_request_cancel_scope_t *scope)
+{
+   const agent_request_cancel_scope_t *previous = request_cancel_scope;
+   request_cancel_scope = scope;
+   return previous;
 }
 int agent_get_durable_job_id(void)
 {
@@ -593,12 +611,56 @@ static void test_rpc_strict_json_frames(void)
        "    size = struct.unpack('!I', os.read(fd, 4))[0]\n"
        "    reply = json.loads(os.read(fd, size))\n"
        "    assert reply['ok'] is False and reply['code'] == 'bad_json'\n"
+       "frame = b'{\"id\":1,\"tool\":\"read_file\",\"args\":{},\"args_json\":\"{}\"}'\n"
+       "os.write(fd, struct.pack('!I', len(frame)) + frame)\n"
+       "size = struct.unpack('!I', os.read(fd, 4))[0]\n"
+       "reply = json.loads(os.read(fd, size))\n"
+       "assert reply['ok'] is False and reply['code'] == 'bad_frame'\n"
        "print('strict frames refused')\n",
        5, NULL, NULL);
    cJSON *reply = parse_json_or_die(result);
    assert(cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == 0 && !g_dispatch_calls);
    const char *output = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "stdout"));
    assert(output && strstr(output, "strict frames refused"));
+   cJSON_Delete(reply);
+   free(result);
+}
+
+static void test_bash_shim_preserves_raw_arguments(void)
+{
+   g_dispatch_calls = 0;
+   char *result =
+       tool_execute_script("bash",
+                           "aimee tool read_file '{\"path\":\"first\"} trailing'\n"
+                           "aimee tool read_file '{\"path\":\"first\",\"path\":\"second\"}'\n"
+                           "aimee tool read_file '{\"path\":\"first\"},\"hmac\":\"ignored\"'\n",
+                           5, NULL, NULL);
+   cJSON *reply = parse_json_or_die(result);
+   assert(cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == 0);
+   assert(g_dispatch_calls == 0);
+   const char *output = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "stdout"));
+   assert(output && strstr(output, "bad_json"));
+   cJSON_Delete(reply);
+   free(result);
+   result =
+       tool_execute_script("bash",
+                           "aimee tool read_file "
+                           "'{\"path\":\"fixture\",\"weight\":123.123456789012345678901234567890}'",
+                           5, NULL, NULL);
+   reply = parse_json_or_die(result);
+   output = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "stdout"));
+   assert(cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == 0);
+   assert(g_dispatch_calls == 1 && output && strstr(output, "123.123456789012345678901234567890"));
+   cJSON_Delete(reply);
+   free(result);
+   g_dispatch_calls = 0;
+   result = tool_execute_script("python",
+                                "import aimee_tools\n"
+                                "r = aimee_tools.call('read_file', [])\n"
+                                "assert r['ok'] is False and r['code'] == 'bad_frame'\n",
+                                5, NULL, NULL);
+   reply = parse_json_or_die(result);
+   assert(cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == 0 && !g_dispatch_calls);
    cJSON_Delete(reply);
    free(result);
 }
@@ -676,6 +738,7 @@ static void test_rpc_closed_client_cannot_signal_host(void)
 
 int main(void)
 {
+   test_bash_shim_preserves_raw_arguments();
    test_rpc_result_bounds_and_fidelity();
    test_running_script_cancellation();
    test_closed_output_keeps_timeout();
