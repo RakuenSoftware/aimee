@@ -1,7 +1,7 @@
 /* kb_store/css_migration.c: CSS migration pipeline driver. See css_migration.h. */
 #include "css_migration.h"
 
-#include "../support/kb_store_runtime_config.h"
+#include "config.h"
 #include "kb_store.h"
 #include "kb_store_internal.h"
 #include "db_postgres.h"

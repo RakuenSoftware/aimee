@@ -1944,9 +1944,21 @@ int cli_codex_compact_thread(const cli_codex_compact_request_t *req,
 
 static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
 {
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   if (!cfg)
+   {
+      snprintf(out->error, sizeof(out->error), "missing Codex agent configuration");
+      return -1;
+   }
    const agent_t *agent = cfg->agent;
    const char *cwd = cfg->cwd, *system_prompt = cfg->system_prompt, *user_prompt = cfg->user_prompt;
-   memset(out, 0, sizeof(*out));
+   if (!agent)
+   {
+      snprintf(out->error, sizeof(out->error), "missing agent");
+      return -1;
+   }
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
 
    if (!user_prompt || !user_prompt[0])

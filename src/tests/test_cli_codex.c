@@ -19,6 +19,18 @@ int agent_request_cancelled(void)
    return 0;
 }
 
+static void test_execute_rejects_missing_inputs(void)
+{
+   agent_result_t out;
+   agent_t agent = {0};
+   assert(agent_execute_cli_codex_at_cwd(&agent, NULL, NULL, "prompt", NULL) == -1);
+   assert(agent_execute_cli_codex_at_cwd(NULL, NULL, NULL, "prompt", &out) == -1);
+   assert(strcmp(out.error, "missing agent") == 0);
+   assert(codex_provider_cli_adapter.execute(NULL, &out) == -1);
+   provider_cli_cfg_t cfg = {.agent = &agent, .user_prompt = "prompt"};
+   assert(codex_provider_cli_adapter.execute(&cfg, NULL) == -1);
+}
+
 static void test_parse_agent_message_extracts_text(void)
 {
    const char *line = "{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{"
@@ -993,8 +1005,18 @@ static int native_history_probe(const char *resume, const char *history_file)
    return rc ? 1 : 0;
 }
 
+static void test_execute_refuses_missing_configuration(void)
+{
+   agent_result_t out;
+   assert(agent_execute_cli_codex(NULL, "system", "user", &out) == -1);
+   assert(strcmp(out.error, "missing agent") == 0);
+   assert(agent_execute_cli_codex(NULL, "system", "user", NULL) == -1);
+}
+
 int main(int argc, char **argv)
 {
+   test_execute_refuses_missing_configuration();
+   test_execute_rejects_missing_inputs();
    signal(SIGPIPE, SIG_IGN);
    if (argc >= 2 && !strcmp(argv[1], "--native-history-probe"))
       return native_history_probe(argc == 3 ? argv[2] : NULL,

@@ -4,7 +4,7 @@
 #include "db_postgres.h"
 #include "lifecycle.h" /* kb_store_embedding_dim */
 #include "cJSON.h"
-#include "../support/kb_store_log.h"
+#include "log.h"
 
 #include <pthread.h>
 #include <stdatomic.h>

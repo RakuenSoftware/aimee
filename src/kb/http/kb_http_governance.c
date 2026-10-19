@@ -2,6 +2,7 @@
  * policy-verdict action audit. See kb_http_governance.h. All routes are
  * console-admin-ACL'd upstream. */
 #include "kb_http_governance.h"
+#include "kb_http_common.h"
 #include "kb/kb_module_stage_adapters.h"
 
 #include "cJSON.h"
@@ -169,51 +170,6 @@ static int64_t jint(const cJSON *o, const char *k)
    return cJSON_IsNumber(v) ? (int64_t)v->valuedouble : 0;
 }
 
-/* Read one query param (no percent-decoding needed for our ids/timestamps). */
-static int qparam(const char *qs, const char *key, char *out, size_t cap)
-{
-   if (cap == 0)
-      return 0;
-   out[0] = '\0';
-   if (!qs)
-      return 0;
-   size_t klen = strlen(key);
-   const char *p = qs;
-   while (p && *p)
-   {
-      if (strncmp(p, key, klen) == 0 && p[klen] == '=')
-      {
-         const char *v = p + klen + 1;
-         const char *amp = strchr(v, '&');
-         size_t n = amp ? (size_t)(amp - v) : strlen(v);
-         if (n >= cap)
-            n = cap - 1;
-         memcpy(out, v, n);
-         out[n] = '\0';
-         return 1;
-      }
-      p = strchr(p, '&');
-      if (p)
-         p++;
-   }
-   return 0;
-}
-
-static int emit(cJSON *root, char *out_buf, int out_cap, int status)
-{
-   char *s = cJSON_PrintUnformatted(root);
-   cJSON_Delete(root);
-   if (!s || strlen(s) >= (size_t)out_cap)
-   {
-      free(s);
-      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"response too large\"}");
-      return 500;
-   }
-   snprintf(out_buf, (size_t)out_cap, "%s", s);
-   free(s);
-   return status;
-}
-
 static cJSON *decision_to_json(const kb_store_decision_log_row_t *d)
 {
    cJSON *o = cJSON_CreateObject();
@@ -236,9 +192,9 @@ static cJSON *decision_to_json(const kb_store_decision_log_row_t *d)
 static int list_decisions(const char *qs, char *out_buf, int out_cap)
 {
    char subject[256], status[32], limit_s[16];
-   qparam(qs, "subject", subject, sizeof(subject));
-   qparam(qs, "status", status, sizeof(status));
-   qparam(qs, "limit", limit_s, sizeof(limit_s));
+   kb_http_query_param(qs, "subject", subject, sizeof(subject));
+   kb_http_query_param(qs, "status", status, sizeof(status));
+   kb_http_query_param(qs, "limit", limit_s, sizeof(limit_s));
    int limit = limit_s[0] ? atoi(limit_s) : 50;
    kb_store_decision_log_row_t rows[DECISION_LIST_MAX];
    int n = kb_store_decision_log_list_scoped(subject[0] ? subject : NULL, status[0] ? status : NULL,
@@ -253,7 +209,7 @@ static int list_decisions(const char *qs, char *out_buf, int out_cap)
    for (int i = 0; i < n; i++)
       cJSON_AddItemToArray(arr, decision_to_json(&rows[i]));
    cJSON_AddNumberToObject(root, "count", n);
-   return emit(root, out_buf, out_cap, 200);
+   return kb_http_emit(root, out_buf, out_cap, 200);
 }
 
 /* GET /v1/decisions/{id} — the decision plus its supersede chain (older first). */
@@ -277,7 +233,7 @@ static int get_decision(int64_t id, char *out_buf, int out_cap)
       cJSON_AddItemToArray(chain, decision_to_json(&p));
       prev = p.supersedes_id;
    }
-   return emit(root, out_buf, out_cap, 200);
+   return kb_http_emit(root, out_buf, out_cap, 200);
 }
 
 /* POST /v1/decisions — create (or supersede via supersedes_id). One active
@@ -354,7 +310,7 @@ static int create_decision(const char *body, char *out_buf, int out_cap)
    safe_subj[si] = '\0';
    audit_log("console_decision_create", "id=%lld subject=%s supersedes=%lld", (long long)out.id,
              safe_subj, (long long)supersedes_id);
-   return emit(decision_to_json(&out), out_buf, out_cap, 201);
+   return kb_http_emit(decision_to_json(&out), out_buf, out_cap, 201);
 }
 
 /* POST /v1/decisions/{id}/{outcome|status|revisit} — single-field updates. */
@@ -396,7 +352,7 @@ static int update_decision(int64_t id, const char *action, const char *body, cha
    audit_log("console_decision_update", "id=%lld field=%s", (long long)id, action);
    kb_store_decision_log_row_t d;
    if (kb_store_decision_log_get(id, &d) == 0)
-      return emit(decision_to_json(&d), out_buf, out_cap, 200);
+      return kb_http_emit(decision_to_json(&d), out_buf, out_cap, 200);
    snprintf(out_buf, (size_t)out_cap, "{\"ok\":true}");
    return 200;
 }
@@ -421,10 +377,10 @@ static int supersede_decision(int64_t id, const char *body, char *out_buf, int o
 static int list_audit(const char *qs, char *out_buf, int out_cap)
 {
    char since[32], until[32], scope[32], limit_s[16];
-   qparam(qs, "since", since, sizeof(since));
-   qparam(qs, "until", until, sizeof(until));
-   qparam(qs, "scope_kind", scope, sizeof(scope));
-   qparam(qs, "limit", limit_s, sizeof(limit_s));
+   kb_http_query_param(qs, "since", since, sizeof(since));
+   kb_http_query_param(qs, "until", until, sizeof(until));
+   kb_http_query_param(qs, "scope_kind", scope, sizeof(scope));
+   kb_http_query_param(qs, "limit", limit_s, sizeof(limit_s));
    if (!since[0])
    {
       snprintf(out_buf, (size_t)out_cap,
@@ -457,7 +413,7 @@ static int list_audit(const char *qs, char *out_buf, int out_cap)
       cJSON_AddItemToArray(arr, o);
    }
    cJSON_AddNumberToObject(root, "count", n);
-   return emit(root, out_buf, out_cap, 200);
+   return kb_http_emit(root, out_buf, out_cap, 200);
 }
 
 int kb_http_governance_route(const char *method, const char *path, const char *query_string,

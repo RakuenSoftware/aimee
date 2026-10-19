@@ -2,6 +2,8 @@
 #define DEC_UTIL_H 1
 
 #include <ctype.h>
+#include <limits.h>
+#include <aimee/core/codec/base64.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,26 +55,14 @@ time_t timegm(struct tm *tm);
  * NUL-terminated). Returns the encoded length, or -1 if it wouldn't fit. */
 static inline int util_b64_encode(const char *in, size_t in_len, char *out, size_t out_cap)
 {
-   static const char b64_alphabet[] =
-       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-   size_t out_len = ((in_len + 2) / 3) * 4;
-   if (out_len + 1 > out_cap)
+   size_t written = 0, need = aimee_codec_base64_capacity(in_len, AIMEE_BASE64_STANDARD);
+   if (!need || out_cap < need || need - 1 > INT_MAX)
       return -1;
-   size_t o = 0;
-   for (size_t i = 0; i < in_len; i += 3)
-   {
-      unsigned int v = ((unsigned char)in[i]) << 16;
-      if (i + 1 < in_len)
-         v |= ((unsigned char)in[i + 1]) << 8;
-      if (i + 2 < in_len)
-         v |= (unsigned char)in[i + 2];
-      out[o++] = b64_alphabet[(v >> 18) & 0x3f];
-      out[o++] = b64_alphabet[(v >> 12) & 0x3f];
-      out[o++] = (i + 1 < in_len) ? b64_alphabet[(v >> 6) & 0x3f] : '=';
-      out[o++] = (i + 2 < in_len) ? b64_alphabet[v & 0x3f] : '=';
-   }
-   out[o] = '\0';
-   return (int)o;
+   if (!aimee_codec_base64_encode((const unsigned char *)in, in_len, out, out_cap,
+                                  AIMEE_BASE64_STANDARD, &written) ||
+       written > INT_MAX)
+      return -1;
+   return (int)written;
 }
 
 /* Lowercase-copy `src` into `dst` (<= dst_len, always NUL-terminated). */

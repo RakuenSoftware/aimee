@@ -990,8 +990,16 @@ static void test_canonical_delegate_policy_before_native_egress(void)
    puts("canonical delegate policy before all native outputs/fallback models OK");
 }
 
+static void test_missing_response_output(void)
+{
+   assert(agent_http_get("http://127.0.0.1:9", NULL, NULL, 1) == -1);
+   assert(agent_http_post_content_type("http://127.0.0.1:9", NULL, "application/json", "{}", NULL,
+                                       1, NULL) == -1);
+}
+
 int main(void)
 {
+   test_missing_response_output();
    printf("test_agent_http: ");
 
    test_canonical_delegate_policy_before_native_egress();

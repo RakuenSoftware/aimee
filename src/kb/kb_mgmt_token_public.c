@@ -1,3 +1,4 @@
+#include <aimee/core/codec/base64.h>
 #include "kb_mgmt_token_public.h"
 
 #include <limits.h>
@@ -81,26 +82,10 @@ static int b64url_encode(const uint8_t *value, size_t len, char *out, size_t cap
       *out_len = 0;
    if (!value || !out || !out_len || len > (INT_MAX - 2) / 4 * 3)
       return -1;
-   size_t padded = 4 * ((len + 2) / 3);
-   size_t actual = padded;
-   while (actual &&
-          ((len % 3 == 1 && padded - actual < 2) || (len % 3 == 2 && padded - actual < 1)))
-      --actual;
-   if (actual + 1 > cap)
+   size_t padded = aimee_codec_base64_capacity(len, AIMEE_BASE64_STANDARD);
+   if (!padded || padded - 1 >= KB_MGMT_TOKEN_JWK_MAX)
       return -1;
-   unsigned char tmp[KB_MGMT_TOKEN_JWK_MAX];
-   if (padded >= sizeof(tmp) || EVP_EncodeBlock(tmp, value, (int)len) != (int)padded)
-      goto fail;
-   for (size_t i = 0; i < actual; ++i)
-      out[i] = tmp[i] == '+' ? '-' : (tmp[i] == '/' ? '_' : (char)tmp[i]);
-   out[actual] = 0;
-   *out_len = actual;
-   OPENSSL_cleanse(tmp, sizeof(tmp));
-   return 0;
-fail:
-   OPENSSL_cleanse(tmp, sizeof(tmp));
-   OPENSSL_cleanse(out, cap);
-   return -1;
+   return aimee_codec_base64_encode(value, len, out, cap, AIMEE_BASE64_URL, out_len) ? 0 : -1;
 }
 
 static int b64url_decode(const char *value, size_t len, uint8_t *out, size_t cap, size_t *out_len)
@@ -109,45 +94,14 @@ static int b64url_decode(const char *value, size_t len, uint8_t *out, size_t cap
       OPENSSL_cleanse(out, cap);
    if (out_len)
       *out_len = 0;
-   if (!value || !len || !out || !out_len || len % 4 == 1 || len > KB_MGMT_TOKEN_JWK_MAX - 4)
+   if (!value || !len || !out || !out_len || len > KB_MGMT_TOKEN_JWK_MAX - 4)
       return -1;
-   size_t padded = (len + 3) & ~(size_t)3;
-   unsigned char tmp[KB_MGMT_TOKEN_JWK_MAX] = {0};
-   uint8_t decoded_bytes[KB_MGMT_TOKEN_JWK_MAX] = {0};
-   for (size_t i = 0; i < len; ++i)
-   {
-      unsigned char c = (unsigned char)value[i];
-      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-            c == '-' || c == '_'))
-         goto fail;
-      tmp[i] = c == '-' ? '+' : (c == '_' ? '/' : c);
-   }
-   for (size_t i = len; i < padded; ++i)
-      tmp[i] = '=';
-   size_t decoded = padded / 4 * 3 - (padded - len);
-   int raw_len = EVP_DecodeBlock(decoded_bytes, tmp, (int)padded);
-   if (decoded > cap || raw_len < 0 || (size_t)raw_len != padded / 4 * 3)
-      goto fail;
-   memcpy(out, decoded_bytes, decoded);
-   char canonical[KB_MGMT_TOKEN_JWK_MAX];
-   size_t canonical_len = 0;
-   int ok = !b64url_encode(out, decoded, canonical, sizeof(canonical), &canonical_len) &&
-            canonical_len == len && !CRYPTO_memcmp(canonical, value, len);
-   OPENSSL_cleanse(tmp, sizeof(tmp));
-   OPENSSL_cleanse(decoded_bytes, sizeof(decoded_bytes));
-   OPENSSL_cleanse(canonical, sizeof(canonical));
-   if (!ok)
+   if (!aimee_codec_base64_decode(value, len, out, cap, AIMEE_BASE64_URL_CANONICAL, out_len))
    {
       OPENSSL_cleanse(out, cap);
       return -1;
    }
-   *out_len = decoded;
    return 0;
-fail:
-   OPENSSL_cleanse(tmp, sizeof(tmp));
-   OPENSSL_cleanse(decoded_bytes, sizeof(decoded_bytes));
-   OPENSSL_cleanse(out, cap);
-   return -1;
 }
 
 int kb_mgmt_token_kid(const uint8_t *modulus, size_t modulus_len, char *out, size_t cap)

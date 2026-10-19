@@ -145,14 +145,7 @@ typedef aimee_cmd_tier_t client_cmd_tier_t;
 #define CLIENT_TIER_ADVANCED AIMEE_CMD_TIER_ADVANCED
 #define CLIENT_TIER_ADMIN    AIMEE_CMD_TIER_ADMIN
 
-typedef struct
-{
-   const char *name;
-   const char *help;
-   client_cmd_tier_t tier;
-   int hidden_default;
-   const char *subcommands;
-} client_help_t;
+typedef cli_command_def_t client_help_t;
 
 /* The commands that must work with NO server, and only those.
  *

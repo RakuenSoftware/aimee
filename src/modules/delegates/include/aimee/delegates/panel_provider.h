@@ -3,7 +3,7 @@
 #define AIMEE_DELEGATES_PANEL_PROVIDER_H 1
 
 #include "aimee.h"
-#include <aimee/ir/panel_result.h>
+#include <aimee/core/types/panel_result.h>
 
 #include "agent_types.h"
 #include "roundtable_types.h" /* ensemble_panel_t */
@@ -37,17 +37,6 @@ typedef struct
    void *cancel_ctx;
    const char *parent_session_id;
 } aimee_panel_options_t;
-
-typedef struct
-{
-   char response[8192];
-   int success;
-   double cost_usd;
-   int degraded;
-   int cost_capped;
-   int participants_total;
-   int participants_failed;
-} aimee_panel_aggregate_result_t;
 
 typedef enum
 {

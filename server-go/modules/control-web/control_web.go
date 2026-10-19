@@ -3,6 +3,7 @@ package controlweb
 
 import (
 	"encoding/binary"
+	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/control-web/policy"
@@ -27,30 +28,12 @@ const (
 	responseLen      = 16
 )
 
-func zeroPadding(value []byte) bool {
-	for _, item := range value {
-		if item != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func nonzeroText(value []byte) bool {
-	for _, item := range value {
-		if item == 0 {
-			return false
-		}
-	}
-	return true
-}
-
 func decodeText(slot []byte, wireLength uint32, maximum uint32) (string, bool) {
 	if wireLength > maximum {
 		return "", false
 	}
 	length := int(wireLength)
-	if !nonzeroText(slot[:length]) || !zeroPadding(slot[length:]) {
+	if !modulewire.NonzeroText(slot[:length]) || !modulewire.ZeroPadding(slot[length:]) {
 		return "", false
 	}
 	return string(slot[:length]), true

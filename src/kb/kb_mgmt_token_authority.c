@@ -1,3 +1,4 @@
+#include <aimee/core/codec/base64.h>
 #include "kb_mgmt_token_authority.h"
 
 #include <openssl/bn.h>
@@ -284,41 +285,12 @@ static int sign_rs256(void *opaque, const unsigned char *input, size_t input_len
    return 1;
 }
 
-static int b64_value(unsigned char c)
-{
-   if (c >= 'A' && c <= 'Z')
-      return c - 'A';
-   if (c >= 'a' && c <= 'z')
-      return c - 'a' + 26;
-   if (c >= '0' && c <= '9')
-      return c - '0' + 52;
-   return c == '-' ? 62 : (c == '_' ? 63 : -1);
-}
-
 static int decode_signature(const char *s, size_t n, unsigned char out[384])
 {
-   uint32_t acc = 0;
-   unsigned bits = 0;
-   size_t used = 0;
-   if (!s || n != 512)
-      return 0;
-   for (size_t i = 0; i < n; ++i)
-   {
-      int v = b64_value((unsigned char)s[i]);
-      if (v < 0)
-         return 0;
-      acc = (acc << 6) | (uint32_t)v;
-      bits += 6;
-      if (bits >= 8)
-      {
-         bits -= 8;
-         if (used >= 384)
-            return 0;
-         out[used++] = (unsigned char)(acc >> bits);
-         acc &= bits ? (UINT32_C(1) << bits) - 1 : 0;
-      }
-   }
-   return used == 384 && bits == 0 && acc == 0;
+   size_t written = 0;
+   return s && n == 512 &&
+          aimee_codec_base64_decode(s, n, out, 384, AIMEE_BASE64_URL_CANONICAL, &written) &&
+          written == 384;
 }
 
 static int verify_exact(EVP_PKEY *key, const char *jwt, size_t jwt_len)

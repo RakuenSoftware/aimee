@@ -1203,3 +1203,24 @@ During PR metadata updates its implicit checkout resolution failed; explicit
 the invoking directory as `path`, so do not reintroduce a duplicate source fix or
 weaken checkout confinement. Use explicit paths with that installed CLI until an
 independently reviewed production promotion updates it. Production stays KB-free.
+
+
+## 19 October CI and testing merge repair
+
+Merged `origin/testing` at `123ecafdc` into the continuation. The Makefile keeps
+both testing's native cleanup and the local feedback source; the Codex fixture
+keeps missing-input checks and canonical history adoption/real SDK probe modes.
+The DB1 transport extraction also requires the two new local procedure calls to
+use `db1_call(&family, ...)`, matching the shared transport owner.
+
+The failed Go CI job was a routing process exit before bus admission:
+`install synchronized socket filter: permission denied`. Linux no_new_privs is
+thread-local, so its prerequisite and the following seccomp TSYNC syscall now run
+on a locked OS thread. A positive TSYNC failure-thread result also refuses startup.
+The network restriction is not disabled or narrowed. Twelve fresh-process checks
+cover existing threads refusing both IPv4 and IPv6 while retaining Unix sockets;
+they pass under the race detector. The complete `make go-unit-tests` job, including
+all shipped Go module interop and routing startup, passes locally. The merged
+Codex unit/real pinned SDK adoption fixture, native runtime/local learning fixtures,
+production server build and all 76 lint gates pass. Fresh CI must qualify the
+published merge; the previous aggregate unit failure was the Go job's consequence.

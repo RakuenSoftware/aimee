@@ -3,6 +3,7 @@ package benchmarks
 
 import (
 	"encoding/binary"
+	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 	"math"
 	"sort"
 
@@ -32,15 +33,6 @@ const (
 	latencyResponseLen          = 56
 )
 
-func zeroPadding(value []byte) bool {
-	for _, item := range value {
-		if item != 0 {
-			return false
-		}
-	}
-	return true
-}
-
 func handleScore(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	if len(request) != requestLen ||
 		binary.LittleEndian.Uint32(request[0:4]) != requestMagic ||
@@ -55,8 +47,8 @@ func handleScore(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.M
 	k := int(binary.LittleEndian.Uint32(request[8:12]))
 	retrievedCount := int(binary.LittleEndian.Uint32(request[12:16]))
 	relevantCount := int(binary.LittleEndian.Uint32(request[16:20]))
-	if !zeroPadding(request[requestRetrievedOff+retrievedCount*8:requestRelevantOff]) ||
-		!zeroPadding(request[requestRelevantOff+relevantCount*8:]) {
+	if !modulewire.ZeroPadding(request[requestRetrievedOff+retrievedCount*8:requestRelevantOff]) ||
+		!modulewire.ZeroPadding(request[requestRelevantOff+relevantCount*8:]) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
@@ -98,7 +90,7 @@ func handleLatency(invocation bus.ModuleInvocation, request []byte) ([]byte, bus
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	count := int(binary.LittleEndian.Uint32(request[8:12]))
-	if !zeroPadding(request[latencyValuesOff+count*8:]) {
+	if !modulewire.ZeroPadding(request[latencyValuesOff+count*8:]) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	latencies := make([]float64, count)

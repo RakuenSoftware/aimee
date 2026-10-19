@@ -6,7 +6,7 @@
 
 #include "kb_runtime_state.h"
 
-#include "../support/kb_store_runtime_config.h"
+#include "config.h"
 #include "kb_store_internal.h"
 #include "db_postgres.h"
 
