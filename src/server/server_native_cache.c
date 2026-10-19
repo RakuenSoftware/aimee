@@ -123,6 +123,17 @@ failed:
    return NULL;
 }
 
+static int cache_keys(server_native_cache_t *cache)
+{
+   char seed[160], key_digest[65];
+   snprintf(seed, sizeof seed, "%s:%s:%s", cache->harness, cache->scope, cache->context);
+   if (aimee_sha256_hex(seed, strlen(seed), key_digest))
+      return -1;
+   snprintf(cache->key, sizeof cache->key, "%s-ir-v1-%s", cache->harness, key_digest);
+   snprintf(cache->metadata, sizeof cache->metadata, "%s:cache", cache->key);
+   return 0;
+}
+
 static int checkpoint_valid(const cJSON *value)
 {
    const cJSON *count = cJSON_GetObjectItemCaseSensitive(value, "message_count");
@@ -147,7 +158,7 @@ static int checkpoint_valid(const cJSON *value)
 /* Validate owner and exact sequence continuity while finding the committed proof
  * and the source turn's lifecycle. A duplicate conflicting proof never wins. */
 static int observations(server_native_cache_t *cache, const char *claim, const char *proof_turn,
-                        cJSON **proof, int *state)
+                        cJSON **proof, int *state, int exclusive_source)
 {
    char cursor[32] = "0";
    unsigned long long previous = 0;
@@ -186,12 +197,22 @@ static int observations(server_native_cache_t *cache, const char *claim, const c
          snprintf(cursor, sizeof cursor, "%s", sequence);
          const cJSON *event = cJSON_GetObjectItemCaseSensitive(row, "event");
          const cJSON *payload = cJSON_GetObjectItemCaseSensitive(event, "payload");
+         const char *kind = field(event, "kind");
+         if (exclusive_source && *state && strcmp(field(row, "turn_id"), cache->turn) &&
+             (!strcmp(kind, "execution") || !strcmp(kind, "message") || !strcmp(kind, "history")))
+         {
+            invalid = 1;
+            break;
+         }
          if (!strcmp(field(row, "turn_id"), cache->turn) &&
              !strcmp(field(event, "kind"), "execution"))
          {
             const char *status = field(payload, "status");
-            int next = !strcmp(status, "running") ? 1 : !strcmp(status, "completed") ? 2 : 3;
-            if (*state > 1 || (next == 1 && *state))
+            int next = !strcmp(status, "running")                                    ? 1
+                       : !strcmp(status, "completed")                                ? 2
+                       : (!strcmp(status, "failed") || !strcmp(status, "cancelled")) ? 3
+                                                                                     : 0;
+            if (!next || *state > 1 || (next == 1 && *state))
             {
                invalid = 1;
                break;
@@ -254,12 +275,8 @@ server_native_cache_t *server_native_cache_begin(const char *session, const char
    cJSON_Delete(canonical);
    if (failed)
       goto refused;
-   char seed[160], key_digest[65];
-   snprintf(seed, sizeof seed, "%s:%s:%s", harness, scope, cache->context);
-   if (aimee_sha256_hex(seed, strlen(seed), key_digest))
+   if (cache_keys(cache))
       goto refused;
-   snprintf(cache->key, sizeof cache->key, "%s-ir-v1-%s", harness, key_digest);
-   snprintf(cache->metadata, sizeof cache->metadata, "%s:cache", cache->key);
    char prior[1025] = "", native[1025] = "";
    int found = db1_session_harness_get(session, cache->metadata, prior, sizeof prior, actor);
    if (found < 0 || (found == 0 && strncmp(prior, "complete:", 9) && strncmp(prior, "invalid:", 8)))
@@ -271,7 +288,7 @@ server_native_cache_t *server_native_cache_begin(const char *session, const char
    int state;
    cJSON *proof = NULL;
    if (observations(cache, completed ? old_claim : NULL, completed ? old_turn : NULL, &proof,
-                    &state) ||
+                    &state, 0) ||
        state != 1)
    {
       cJSON_Delete(proof);
@@ -345,7 +362,7 @@ int server_native_cache_complete(server_native_cache_t *cache, const char *nativ
       return -1;
    int state;
    cJSON *unused = NULL;
-   if (observations(cache, NULL, NULL, &unused, &state) || state != 2)
+   if (observations(cache, NULL, NULL, &unused, &state, 1) || state != 2)
       return -1;
    cJSON *source = source_history(cache, "");
    char before[65], prefix[65];
@@ -391,4 +408,52 @@ int server_native_cache_complete(server_native_cache_t *cache, const char *nativ
       return -1;
    cache->phase = 3;
    return 0;
+}
+
+int server_native_cache_recover(const char *session, const char *actor, const char *turn,
+                                const char *harness, const char *scope,
+                                const aimee_request_t *request)
+{
+   if (!identity(session) || !identity(actor) || !identity(turn) || !harness ||
+       (strcmp(harness, "codex") && strcmp(harness, "claude")) || !hex(scope, 64) || !request ||
+       agent_request_cancelled())
+      return -1;
+   server_native_cache_t cache = {0};
+   snprintf(cache.session, sizeof cache.session, "%s", session);
+   snprintf(cache.actor, sizeof cache.actor, "%s", actor);
+   snprintf(cache.turn, sizeof cache.turn, "%s", turn);
+   snprintf(cache.harness, sizeof cache.harness, "%s", harness);
+   snprintf(cache.scope, sizeof cache.scope, "%s", scope);
+   cJSON *canonical = aimee_ir_request_json(request);
+   if (!canonical)
+      return -1;
+   cJSON_DeleteItemFromObjectCaseSensitive(canonical, "messages");
+   int failed = digest(canonical, cache.context) || cache_keys(&cache);
+   cJSON_Delete(canonical);
+   if (failed)
+      return -1;
+   char prior[1025] = "", claim[33], source_turn[129];
+   int found = db1_session_harness_get(session, cache.metadata, prior, sizeof prior, actor);
+   if (found)
+      return found == 1 ? 1 : -1;
+   const char *phase = !strncmp(prior, "pending:", 8)      ? "pending"
+                       : !strncmp(prior, "finishing:", 10) ? "finishing"
+                       : !strncmp(prior, "complete:", 9)   ? "complete"
+                                                           : "invalid";
+   if (token_parts(prior, phase, claim, source_turn))
+      return -1;
+   if (!strcmp(phase, "complete") || !strcmp(phase, "invalid"))
+      return 1;
+   /* A stale recovery caller cannot invalidate a new execution's claim. The
+    * caller must separately prove this exact native child is quiescent. */
+   if (strcmp(source_turn, turn))
+      return -1;
+   int state;
+   cJSON *unused = NULL;
+   if (observations(&cache, NULL, NULL, &unused, &state, 0) || state < 2 ||
+       agent_request_cancelled())
+      return -1;
+   char invalid[192];
+   snprintf(invalid, sizeof invalid, "invalid:%s:%s", claim, turn);
+   return db1_session_harness_compare_swap(session, cache.metadata, prior, invalid, actor) ? -1 : 0;
 }

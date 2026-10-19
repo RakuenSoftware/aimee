@@ -1471,3 +1471,31 @@ and verifies exactly one copy of both the prior prefix and new tail. Artifacts:
 `/var/tmp/aimee-3050-native-cache-tail-integration.log`. This qualifies that subset
 of SDK adoption; it does not qualify native compaction, full execution profiles,
 SDK activation or live provider prompt-cache accounting.
+
+
+## Native cache recovery and execution-profile construction (not activated)
+
+Host-only recovery can invalidate a lost pending/finishing claim after the caller
+independently proves the exact native child quiescent and the durable source turn
+is terminal. It compares the stored source-turn identity and CAS revision, never
+publishes a native handle, and leaves canonical history intact. Running turns,
+source failure, stale recovery and late finalization refuse. Source scanning now
+rejects unknown lifecycle statuses. Finalization also refuses another turn's
+canonical source activity after this turn began: a late child cannot attest a
+prefix containing another execution's messages.
+
+The runtime can construct a separate cache execution scope from its captured
+account/model lineage, canonical session, capabilities, role/toolset/denials,
+write/shell/knowledge ceilings, path guards, source authority and delegate context.
+The host must additionally supply attested digests for the actual SDK build,
+effective launch configuration (sandbox, built-ins, hooks included) and stable
+workspace lease. Missing attestations refuse; process pointers and credentials
+are not profile identity. Denials are treated as a set. Per-turn counters,
+snapshot IDs and local transport nonces do not invalidate a stable profile.
+Account replay provenance remains a distinct binding.
+
+These APIs still are not wired into production SDK spawning. The actual caller
+must qualify and supply those SDK/resource attestations, full native adoption and
+compaction fidelity, effects/human controls and credential custody before that
+cutover. The production KB-free and independent promotion-review requirements
+remain in force.

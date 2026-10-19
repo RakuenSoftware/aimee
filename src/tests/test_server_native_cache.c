@@ -162,6 +162,10 @@ static server_native_cache_t *begin(aimee_request_t *req, const char *turn)
 {
    return server_native_cache_begin("s", "owner", turn, "codex", scope, req);
 }
+static int recover(const aimee_request_t *req, const char *turn)
+{
+   return server_native_cache_recover("s", "owner", turn, "codex", scope, req);
+}
 static void seeded(aimee_request_t *req, const char *native_id)
 {
    reset();
@@ -293,8 +297,9 @@ int main(void)
       lifecycle("next-run", "running");
       assert(!begin(&req, "next-run"));
       append_failure = bind_failure = cas_failure = 0;
-      assert(!server_native_cache_abort(cache));
-      server_native_cache_close(cache);
+      server_native_cache_close(cache); /* host lost the finalization object */
+      int recovered = recover(&req, "failed-finish");
+      assert(recovered == 0);
       cache = begin(&req, "next-run");
       assert(cache && !server_native_cache_resume(cache));
       assert(!server_native_cache_abort(cache));
@@ -324,6 +329,63 @@ int main(void)
    assert(cache);
    server_native_cache_close(cache);
    assert(!begin(&req, "abandoned")); /* close is not evidence that the native child stopped */
+   int recovered = recover(&req, "abandoned");
+   assert(recovered < 0); /* running source is not recoverable */
+   lifecycle("abandoned", "failed");
+   page_failure = 1;
+   recovered = recover(&req, "abandoned");
+   assert(recovered < 0);
+   page_failure = 0;
+   cas_failure = cas_calls + 1;
+   recovered = recover(&req, "abandoned");
+   assert(recovered < 0);
+   cas_failure = 0;
+   recovered = recover(&req, "wrong-turn");
+   assert(recovered < 0);
+   recovered = recover(&req, "abandoned");
+   assert(recovered == 0);
+   recovered = recover(&req, "abandoned");
+   assert(recovered == 1);
+   lifecycle("after-recovery", "running");
+   cache = begin(&req, "after-recovery");
+   assert(cache && !server_native_cache_resume(cache));
+   recovered = recover(&req, "abandoned");
+   assert(recovered < 0); /* late recovery cannot invalidate the replacement */
+   assert(!server_native_cache_abort(cache));
+   server_native_cache_close(cache);
+
+   /* Recovery invalidates an old object too; a late completion cannot bind it. */
+   seeded(&req, "before-recovery");
+   lifecycle("late", "running");
+   cache = begin(&req, "late");
+   assert(cache);
+   req.n_messages = 4;
+   source(&req);
+   lifecycle("late", "completed");
+   recovered = recover(&req, "late");
+   assert(recovered == 0);
+   assert(server_native_cache_complete(cache, "late-native-handle") < 0);
+   server_native_cache_close(cache);
+   lifecycle("replacement", "running");
+   cache = begin(&req, "replacement");
+   assert(cache && !server_native_cache_resume(cache));
+   assert(!server_native_cache_abort(cache));
+   server_native_cache_close(cache);
+
+   /* A late child cannot checkpoint another turn's completed source history. */
+   seeded(&req, "before-other-turn");
+   lifecycle("slow", "running");
+   cache = begin(&req, "slow");
+   assert(cache);
+   lifecycle("slow", "completed");
+   lifecycle("different", "running");
+   req.n_messages = 4;
+   source(&req);
+   lifecycle("different", "completed");
+   int completed = server_native_cache_complete(cache, "did-not-see-other-turn");
+   assert(completed < 0);
+   assert(!server_native_cache_abort(cache));
+   server_native_cache_close(cache);
 
    reset();
    req = request();

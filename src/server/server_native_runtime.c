@@ -379,6 +379,105 @@ const char *server_native_runtime_binding(const server_native_runtime_t *runtime
 {
    return runtime ? runtime->binding : "";
 }
+static int native_name_order(const void *left, const void *right)
+{
+   return strcmp(*(const char *const *)left, *(const char *const *)right);
+}
+
+int server_native_runtime_cache_scope(const server_native_runtime_t *runtime,
+                                      const server_native_execution_profile_t *profile,
+                                      char scope[65])
+{
+   if (scope)
+      scope[0] = 0;
+   if (!scope || !runtime || !runtime->replay || !native_digest_valid(runtime->lineage) ||
+       !runtime->workspace || !runtime->cwd[0] || !profile || !profile->sdk ||
+       (strcmp(profile->sdk, "codex") && strcmp(profile->sdk, "claude")) ||
+       !native_digest_valid(profile->build_digest) ||
+       !native_digest_valid(profile->launch_digest) ||
+       !native_digest_valid(profile->workspace_digest) || runtime->tools.denied_count < 0 ||
+       runtime->tools.denied_count > 4096)
+      return -1;
+   cJSON *value = cJSON_CreateObject(), *denied = cJSON_CreateArray();
+   if (!value || !denied)
+   {
+      cJSON_Delete(value);
+      cJSON_Delete(denied);
+      return -1;
+   }
+   int failed = 0;
+#define PROFILE_TEXT(key, text)  failed |= cJSON_AddStringToObject(value, key, text) == NULL
+#define PROFILE_INT(key, number) failed |= cJSON_AddNumberToObject(value, key, number) == NULL
+   PROFILE_INT("version", 1);
+   PROFILE_TEXT("account_model", runtime->binding);
+   PROFILE_TEXT("auth_type", runtime->selected.auth_type);
+   PROFILE_TEXT("session", runtime->session);
+   PROFILE_TEXT("sdk", profile->sdk);
+   PROFILE_TEXT("sdk_build", profile->build_digest);
+   PROFILE_TEXT("launch", profile->launch_digest);
+   PROFILE_TEXT("workspace", profile->workspace_digest);
+   PROFILE_INT("workspace_kind", runtime->workspace->kind);
+   PROFILE_TEXT("cwd", runtime->cwd);
+   PROFILE_TEXT("role", runtime->tools.role);
+   PROFILE_TEXT("toolset", runtime->tools.toolset);
+   PROFILE_TEXT("read_root", runtime->tools.read_only_root);
+   PROFILE_TEXT("write_root", runtime->tools.write_root);
+   PROFILE_INT("write", runtime->tools.write_capable);
+   PROFILE_INT("shell", runtime->tools.shell);
+   PROFILE_INT("knowledge_write", runtime->tools.knowledge_write);
+   PROFILE_INT("source_active", runtime->source.active);
+   PROFILE_INT("source_authority", runtime->source.authority);
+   PROFILE_TEXT("source_root", runtime->source.root);
+   PROFILE_TEXT("source_paths", runtime->source.paths ? runtime->source.paths : "");
+   PROFILE_INT("delegate_depth", runtime->delegate.depth);
+   PROFILE_TEXT("delegate_parent", runtime->delegate.parent);
+   PROFILE_INT("durable_job", runtime->job_id);
+   char capabilities[32];
+   snprintf(capabilities, sizeof capabilities, "%llu",
+            (unsigned long long)runtime->owner.capabilities);
+   PROFILE_TEXT("capabilities", capabilities);
+#undef PROFILE_TEXT
+#undef PROFILE_INT
+   /* Denials are a set: order changes must not throw away a valid native prefix. */
+   int count = runtime->tools.denied_count;
+   const char **names = count ? calloc((size_t)count, sizeof *names) : NULL;
+   if (count && !names)
+      failed = 1;
+   for (int i = 0; !failed && i < count; i++)
+   {
+      if (!runtime->tools.denied || !runtime->tools.denied[i])
+         failed = 1;
+      else
+         names[i] = runtime->tools.denied[i];
+   }
+   if (!failed && count)
+      qsort(names, (size_t)count, sizeof *names, native_name_order);
+   for (int i = 0; !failed && i < count; i++)
+   {
+      if (i && !strcmp(names[i], names[i - 1]))
+         continue;
+      cJSON *name = cJSON_CreateString(names[i]);
+      if (!name || !cJSON_AddItemToArray(denied, name))
+      {
+         cJSON_Delete(name);
+         failed = 1;
+      }
+   }
+   free(names);
+   if (!cJSON_AddItemToObject(value, "denied", denied))
+   {
+      cJSON_Delete(denied);
+      failed = 1;
+   }
+   char *wire = failed ? NULL : cJSON_PrintUnformatted(value);
+   int rc = wire ? aimee_sha256_hex(wire, strlen(wire), scope) : -1;
+   free(wire);
+   cJSON_Delete(value);
+   if (rc)
+      scope[0] = 0;
+   return rc;
+}
+
 void server_native_runtime_close(server_native_runtime_t *runtime)
 {
    if (!runtime)

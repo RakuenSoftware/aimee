@@ -239,3 +239,12 @@ text. Prompt bodies, tool schemas and opaque configuration stay with the host;
 the Go policy returns descending catalog paths, and the host validates the whole
 patch before changing owned IR. This keeps long transcripts out of the bounded
 bus frame without flattening a native request or losing nested tool identity.
+
+
+Native cache recovery only invalidates an exact abandoned claim after host proof
+that its child stopped and source proof of a terminal turn; it never reconstructs
+canonical history from vendor files. Finalization rejects interleaved later
+source turns. Runtime cache scope construction binds captured host permissions
+and source authority to separately attested SDK/launch/workspace digests, while
+opaque replay provenance keeps its existing account/model identity. Production
+SDK call-site activation and those concrete attestations remain unfinished.

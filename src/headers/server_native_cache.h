@@ -23,4 +23,13 @@ int server_native_cache_complete(server_native_cache_t *cache, const char *nativ
  * canonical source history. Close alone leaves an unresolved claim fail-closed. */
 int server_native_cache_abort(server_native_cache_t *cache);
 void server_native_cache_close(server_native_cache_t *cache);
+/* Recovery after losing the in-memory claim. The host must independently prove
+ * the exact source turn's native child is quiescent before calling. Requires its
+ * durable terminal lifecycle and CAS-invalidates only that turn's pending or
+ * finishing revision. Never publishes/resumes a native handle. Same attested
+ * profile/context as the abandoned request. Returns 0 recovered, 1 no unresolved
+ * claim, -1 refusal/unavailable/stale; canonical source history is retained. */
+int server_native_cache_recover(const char *session, const char *actor, const char *turn,
+                                const char *harness, const char *scope,
+                                const aimee_request_t *request);
 #endif

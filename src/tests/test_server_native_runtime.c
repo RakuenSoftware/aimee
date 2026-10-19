@@ -458,6 +458,89 @@ static void request(const server_native_runtime_t *runtime, const char *path, co
    response[used] = 0;
    aimee_core_socket_close(fd);
 }
+static void test_cache_profile(const agent_t *selected, const request_context_t *owner,
+                               const server_native_runtime_t *original)
+{
+   char build[65], launch[65], lease[65], baseline[65], changed[65];
+   memset(build, 'b', 64);
+   memset(launch, 'c', 64);
+   memset(lease, 'd', 64);
+   build[64] = launch[64] = lease[64] = 0;
+   server_native_execution_profile_t profile = {
+       .sdk = "codex", .build_digest = build, .launch_digest = launch, .workspace_digest = lease};
+   int rc = server_native_runtime_cache_scope(original, &profile, baseline);
+   assert(rc == 0 && strlen(baseline) == 64);
+   for (int i = 0; i < 3; i++)
+   {
+      char *field = i == 0 ? build : i == 1 ? launch : lease;
+      char previous = field[0];
+      field[0] = 'e';
+      rc = server_native_runtime_cache_scope(original, &profile, changed);
+      assert(rc == 0 && strcmp(baseline, changed));
+      field[0] = previous;
+   }
+   profile.workspace_digest = NULL;
+   rc = server_native_runtime_cache_scope(original, &profile, changed);
+   assert(rc < 0 && !changed[0]);
+   profile.workspace_digest = lease;
+
+   owner_tools(1);
+   agent_tools_begin_turn(300);
+   agent_tools_set_snap_id(3000);
+   server_native_runtime_t *copy = server_native_runtime_open(selected, owner, "session-a");
+   assert(copy);
+   rc = server_native_runtime_cache_scope(copy, &profile, changed);
+   assert(rc == 0 && !strcmp(baseline, changed)); /* turn/snapshot/transport nonce are ephemeral */
+   server_native_runtime_close(copy);
+   agent_tools_set_dispatch_role("implement");
+   copy = server_native_runtime_open(selected, owner, "session-a");
+   assert(copy);
+   assert(!strcmp(server_native_runtime_binding(original), server_native_runtime_binding(copy)));
+   rc = server_native_runtime_cache_scope(copy, &profile, changed);
+   assert(rc == 0 && strcmp(baseline, changed)); /* replay lineage is not cache authority */
+   server_native_runtime_close(copy);
+
+   for (int i = 0; i < 4; i++)
+   {
+      owner_tools(1);
+      if (i == 0)
+         agent_tools_write_capable_set(1);
+      else if (i == 1)
+         agent_tools_shell_set(1);
+      else if (i == 2)
+         agent_tools_knowledge_write_set(1);
+      else
+         agent_tools_parent_write_guard_set("/parent/alice", "/different/write/root");
+      copy = server_native_runtime_open(selected, owner, "session-a");
+      assert(copy);
+      rc = server_native_runtime_cache_scope(copy, &profile, changed);
+      assert(rc == 0 && strcmp(baseline, changed));
+      server_native_runtime_close(copy);
+   }
+   owner_tools(1);
+   const char *denied[] = {"write_file", "git_push", "write_file"};
+   agent_tools_denied_set(denied, 3);
+   copy = server_native_runtime_open(selected, owner, "session-a");
+   assert(copy);
+   rc = server_native_runtime_cache_scope(copy, &profile, baseline);
+   assert(rc == 0);
+   server_native_runtime_close(copy);
+   const char *reordered[] = {"git_push", "write_file"};
+   agent_tools_denied_set(reordered, 2);
+   copy = server_native_runtime_open(selected, owner, "session-a");
+   assert(copy);
+   rc = server_native_runtime_cache_scope(copy, &profile, changed);
+   assert(rc == 0 && !strcmp(baseline, changed));
+   server_native_runtime_close(copy);
+   agent_source_authority_tls_set(1, "/different/source", "src/alice.c\n");
+   copy = server_native_runtime_open(selected, owner, "session-a");
+   assert(copy);
+   rc = server_native_runtime_cache_scope(copy, &profile, changed);
+   assert(rc == 0 && strcmp(baseline, changed));
+   server_native_runtime_close(copy);
+   owner_tools(1);
+}
+
 int main(void)
 {
    agent_t selected = {.enabled = 1};
@@ -484,6 +567,7 @@ int main(void)
    owner_tools(0);
    server_native_runtime_t *bob = server_native_runtime_open(&selected, &b, "session-b");
    assert(alice && bob);
+   test_cache_profile(&selected, &a, alice);
    /* Destroy/change every original borrowed host value after the owner copy.
     * Callback workers must retain each captured policy and source independently. */
    owner_tools(1);
