@@ -258,7 +258,19 @@ int agent_tools_effect_exec_failure(const char *result, const char **verdict, co
    cJSON *exit_value = cJSON_GetObjectItem(root, "exit_code");
    cJSON *status_value = cJSON_GetObjectItem(root, "status");
    int failed = 1;
-   if (cJSON_IsString(stderr_value) && !strncmp(stderr_value->valuestring, "refused:", 8))
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "cancelled")))
+   {
+      /* Execution may already have produced effects; cancellation is not a
+       * pre-dispatch refusal. Keep its distinct reason on a failed execution. */
+      *verdict = "error";
+      *reason = "cancelled";
+   }
+   else if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "timed_out")))
+   {
+      *verdict = "timeout";
+      *reason = "timeout";
+   }
+   else if (cJSON_IsString(stderr_value) && !strncmp(stderr_value->valuestring, "refused:", 8))
    {
       *verdict = "refused";
       *reason = "policy";

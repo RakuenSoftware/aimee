@@ -6,6 +6,7 @@
 #include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
 #include "script_rpc.h"
+#include "agent_config.h"
 #include <ctype.h>
 #include <errno.h>
 #include <signal.h>
@@ -212,6 +213,9 @@ char *tool_execute_script(const char *language, const char *body, int timeout_se
       return safe_strdup("error: language must be 'python' or 'bash'");
    if (agent_tools_parent_write_guard_root())
       return safe_strdup("error: execute_script is blocked while the parent worktree is read-only");
+   if (agent_request_cancelled())
+      return safe_strdup("{\"stdout\":\"\",\"stderr\":\"\",\"exit_code\":-1,\"cancelled\":true,"
+                         "\"timed_out\":false}");
 
    if (timeout_secs <= 0)
       timeout_secs = 120;
@@ -377,10 +381,32 @@ char *tool_execute_script(const char *language, const char *body, int timeout_se
 
    size_t out_len = 0, err_len = 0;
    int out_open = 1, err_open = 1, out_truncated = 0, err_truncated = 0, timed_out = 0;
+   int cancelled = 0, reaped = 0, status = 0, wait_failed = 0;
    int max_fd = (stdout_pipe[0] > stderr_pipe[0] ? stdout_pipe[0] : stderr_pipe[0]) + 1;
 
-   while (out_open || err_open)
+   /* EOF is not process completion: a script can close both output descriptors
+    * and continue running. Keep the owning thread cancellable until it is reaped. */
+   while (out_open || err_open || !reaped)
    {
+      if (agent_request_cancelled())
+      {
+         cancelled = 1;
+         break;
+      }
+      if (!out_open && !err_open)
+      {
+         pid_t child = waitpid(pid, &status, WNOHANG);
+         if (child == pid)
+         {
+            reaped = 1;
+            break;
+         }
+         if (child < 0 && errno != EINTR)
+         {
+            wait_failed = 1;
+            break;
+         }
+      }
       struct timespec now;
       clock_gettime(CLOCK_MONOTONIC, &now);
       long elapsed_ms =
@@ -399,16 +425,19 @@ char *tool_execute_script(const char *language, const char *body, int timeout_se
       if (err_open)
          FD_SET(stderr_pipe[0], &rfds);
       struct timeval tv;
-      tv.tv_sec = remain_ms / 1000;
-      tv.tv_usec = (remain_ms % 1000) * 1000;
+      long poll_ms = remain_ms < 50 ? remain_ms : 50;
+      tv.tv_sec = 0;
+      tv.tv_usec = poll_ms * 1000;
       int sel = select(max_fd, &rfds, NULL, NULL, &tv);
       if (sel < 0 && errno == EINTR)
          continue;
-      if (sel <= 0)
+      if (sel < 0)
       {
-         timed_out = 1;
+         wait_failed = 1;
          break;
       }
+      if (!sel)
+         continue;
       if (out_open && FD_ISSET(stdout_pipe[0], &rfds))
          script_read_pipe(stdout_pipe[0], out_buf, SCRIPT_STDOUT_CAP, &out_len, &out_open,
                           &out_truncated);
@@ -423,17 +452,17 @@ char *tool_execute_script(const char *language, const char *body, int timeout_se
       close(stderr_pipe[0]);
 
    int exit_code = -1;
-   if (timed_out)
+   if (timed_out || cancelled || wait_failed)
    {
       kill(-pid, SIGTERM);
       usleep(100000);
       kill(-pid, SIGKILL);
-      waitpid(pid, NULL, 0);
+      while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
+      {
+      }
    }
    else
    {
-      int status = 0;
-      waitpid(pid, &status, 0);
       if (WIFEXITED(status))
          exit_code = WEXITSTATUS(status);
       else if (WIFSIGNALED(status))
@@ -458,6 +487,7 @@ char *tool_execute_script(const char *language, const char *body, int timeout_se
    cJSON_AddNumberToObject(result, "script_hmac_failures", rpc.hmac_failures);
    cJSON_AddNumberToObject(result, "duration_ms", duration_ms);
    cJSON_AddBoolToObject(result, "timed_out", timed_out);
+   cJSON_AddBoolToObject(result, "cancelled", cancelled);
    cJSON_AddBoolToObject(result, "stdout_truncated", out_truncated);
    cJSON_AddBoolToObject(result, "stderr_truncated", err_truncated);
    char *json = cJSON_PrintUnformatted(result);

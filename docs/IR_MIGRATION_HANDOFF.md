@@ -4,14 +4,16 @@ Prepared 17 October 2026, with subsequent continuation checkpoints. The current
 user instruction is to keep implementing the unfinished migration; the historical
 stop/handoff request below is superseded.
 
-## Current continuation status: PR #3050
+## Current continuation status: PR #3050 merged; branch continuation
 
 The user confirmed #3038 and its follow-up #3047 merged and requested the remaining
-migration and standalone learning work. Continue only the existing
-[#3050](https://github.com/RakuenSoftware/aimee/pull/3050), branch
-`fix/browser-ir-native-execution`, based on merged #3047 (`fedfa6728`). Do not reopen
-#3036, create another PR, or mix in WOL work. Automatic review and the strict
-attribution gate remain enabled.
+migration and standalone learning work. #3050 was subsequently merged at
+`4e0ca19c2` (merge `7e17d58be`). Continuation commits remain on
+`fix/browser-ir-native-execution`; its original base was merged #3047 (`fedfa6728`).
+The previous existing-PR-only restriction is retained pending the user’s reply to
+the follow-up PR question. No additional PR has been created. Do not reopen
+#3036 or mix in WOL work. Automatic review and the strict attribution gate
+remain enabled.
 
 The existing browser GUI now has canonical primary loading/model switching,
 durable-log history and standard controls. Request/response streaming, delegate
@@ -2202,3 +2204,47 @@ Running-process cancellation, bounded RPC output fidelity, retained human
 controls, production native SDK activation, exact resumed native history and
 independently graded KB-free learning remain unfinished. This increment does not
 qualify production deployment or the two skipped platforms.
+
+
+## Running script cancellation and bounded result transport
+
+Host cancellation is now checked before launch and throughout script execution.
+The owner polls at most every 50 ms while waiting for output or child exit, so
+closing stdout/stderr no longer escapes the timeout. Cancellation/timeout kills
+the owned process group, including TERM-resistant processes, and the parent reaps
+the child. Results retain separate `cancelled` and `timed_out` fields. The tools
+owner maps cancellation to the existing error/cancelled outcome and timeout to
+its timeout outcome; neither becomes ordinary success from output text.
+
+The running-script regression first failed against the old loop. The fixed real
+host-flag fixture cancels after the child signals readiness, including a child
+that ignores SIGTERM. A separate fixture closes both output descriptors and
+still times out. The real provider-scope fixture now expects cancellation to
+terminate the waiting script, preserving its original actor/source/credential
+and single-read checks.
+
+A second reproduced defect silently cut results at 64 KiB and then exceeded the
+64 KiB encoded frame limit, sending no reply. RPC now measures the complete JSON
+frame. Complete fitting results remain intact; oversized results return a bounded
+UTF-8-safe text preview with `result_truncated:true` and the original `result_bytes`.
+The actual tool success/error status remains unchanged. JSON-looking results use
+strict unique-field full-frame parsing; invalid/trailing/duplicate-bearing text
+remains verbatim text. Tests cover escaped text, error duplication, multibyte
+boundaries, a complete 64,000-byte result and repeated callbacks after a projection.
+
+Cancellation qualification passes all 653 native binaries and proxy regressions.
+Final combined agent/script fixtures pass normally and under ASan/UBSan, and five
+changed-source Cppcheck inputs have no diagnostics. The actual CMake application
+and runtime/cache targets build; CTest passes 2/2. The restricted-role PostgreSQL
+integration run passes 167/167 with the 26 existing explicit service skips and no
+KB. Focused benchmark qualification passes 21/21. All 76 lint gates pass on the
+serial run, avoiding the negative plant racing a build.
+
+GitHub reports #3050 merged at `4e0ca19c2`, merge commit `7e17d58be`.
+The subsequent canonical script-admission commit `5cf885b4c` is pushed on the same
+branch but has no PR workflow run because that PR is closed. The handoff's
+existing-PR-only instruction is retained pending the user's follow-up PR decision;
+no replacement PR has been created. New commits are not claimed CI-qualified.
+Native activation, exact resumed command history, retained human controls and
+independently graded KB-free learning remain unfinished; no production promotion
+has occurred.

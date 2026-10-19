@@ -1,6 +1,7 @@
 /* Native admission checks preserve permission ceilings through bridge/family
  * resolution. Script handoff checks exercise the real joined RPC dispatcher. */
 #include <aimee/tools/agent_tools.h>
+#include "../modules/tools/agent_tools_internal.h"
 #include <aimee/protocols/mcp/mcp_tools.h>
 #include <assert.h>
 #include <stdio.h>
@@ -17,6 +18,16 @@
 
 void test_native_mcp_permission_admission(void)
 {
+   const char *verdict = NULL, *reason = NULL;
+   assert(
+       agent_tools_effect_exec_failure("{\"exit_code\":-1,\"cancelled\":true}", &verdict, &reason));
+   assert(!strcmp(verdict, "error") && !strcmp(reason, "cancelled"));
+   assert(
+       agent_tools_effect_exec_failure("{\"exit_code\":-1,\"timed_out\":true}", &verdict, &reason));
+   assert(!strcmp(verdict, "timeout") && !strcmp(reason, "timeout"));
+   assert(!agent_tools_effect_exec_failure(
+       "{\"exit_code\":0,\"stdout\":\"cancelled timed_out\",\"cancelled\":false}", &verdict,
+       &reason));
    agent_tools_scope_snapshot_t previous, captured;
    agent_tools_scope_bookmark(&previous);
    static const char *const denied[] = {"git_push", "create_note", "vendor:mutate"};
@@ -221,12 +232,13 @@ void test_script_rpc_keeps_host_context(void)
                            "import json, aimee_tools\n"
                            "first = aimee_tools.call('read_file', {'path': 'evidence.txt'})\n"
                            "second = aimee_tools.call('read_file', {'path': 'evidence.txt'})\n"
-                           "print(json.dumps([first, second]))\n",
+                           "print(json.dumps([first, second]), flush=True)\n"
+                           "import time; time.sleep(2)\n",
                            5, directory, NULL);
    cJSON *reply = result ? cJSON_Parse(result) : NULL;
-   assert(reply && cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == 0);
-   const char *output = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "stdout"));
-   assert(output && strstr(output, "SCRIPT_CONTEXT_EVIDENCE") && strstr(output, "cancelled"));
+   assert(reply && cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == -1);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "cancelled")));
+   assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "timed_out")));
    assert(fixture.seen == 1 && fixture.matches && atomic_load(&fixture.cancel));
    const request_context_t *unchanged = request_context_get();
    assert(unchanged && !unchanged->model_execution && unchanged->capabilities == CAPS_ALL);

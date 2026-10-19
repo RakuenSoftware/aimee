@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <sys/ioctl.h>
 #include <signal.h>
+#include <time.h>
 #include "modules/workspace/workspace_provider.h"
 #include "log.h"
 #include <assert.h>
@@ -21,7 +22,9 @@ static int g_dispatch_error;
 static int g_scope_capture_refused;
 static int g_source_capture_refused;
 static int g_dispatch_blocked;
+static const char *g_dispatch_result;
 static atomic_int dispatch_entered, dispatch_released;
+static _Thread_local atomic_int *request_cancel;
 
 char *server_script_tool_execute(const cJSON *frame, const char *attempt, int *is_error)
 {
@@ -38,6 +41,11 @@ char *server_script_tool_execute(const cJSON *frame, const char *attempt, int *i
          usleep(1000);
    }
    *is_error = g_dispatch_error;
+   if (g_dispatch_result)
+   {
+      free(arguments_json);
+      return safe_strdup(g_dispatch_result);
+   }
    if (g_dispatch_error)
    {
       free(arguments_json);
@@ -124,15 +132,15 @@ void agent_set_request_vault_principal(const char *principal)
 }
 atomic_int *agent_get_request_cancel(void)
 {
-   return NULL;
+   return request_cancel;
 }
 void agent_set_request_cancel(atomic_int *flag)
 {
-   (void)flag;
+   request_cancel = flag;
 }
 int agent_request_cancelled(void)
 {
-   return 0;
+   return request_cancel && atomic_load(request_cancel);
 }
 int agent_get_durable_job_id(void)
 {
@@ -362,6 +370,167 @@ static void test_script_timeout(void)
    free(result);
 }
 
+static void *cancel_ready_script(void *context)
+{
+   const char *ready = context;
+   for (int tick = 0; tick < 2000; tick++)
+   {
+      if (access(ready, F_OK) == 0)
+         return (void *)1;
+      usleep(1000);
+   }
+   return NULL;
+}
+
+typedef struct
+{
+   const char *ready;
+   atomic_int *flag;
+} script_canceller_t;
+
+static void *cancel_after_ready(void *context)
+{
+   script_canceller_t *cancel = context;
+   void *ready = cancel_ready_script((void *)cancel->ready);
+   atomic_store(cancel->flag, 1);
+   return ready;
+}
+
+static void test_running_script_cancellation(void)
+{
+   char directory[MAX_PATH_LEN];
+   const char *temporary = getenv("TMPDIR");
+   snprintf(directory, sizeof directory, "%s/script-cancel-XXXXXX",
+            temporary && temporary[0] ? temporary : "/tmp");
+   char *made = mkdtemp(directory);
+   assert(made);
+   char ready[MAX_PATH_LEN], body[MAX_PATH_LEN * 2];
+   snprintf(ready, sizeof ready, "%s/ready", directory);
+   snprintf(body, sizeof body,
+            "import signal,time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "open('%s', 'w').close()\n"
+            "time.sleep(2)\n",
+            ready);
+   atomic_int cancel = 0;
+   request_cancel = &cancel;
+   script_canceller_t context = {.ready = ready, .flag = &cancel};
+   pthread_t thread;
+   int created = pthread_create(&thread, NULL, cancel_after_ready, &context);
+   assert(!created);
+   char *result = tool_execute_script("python", body, 5, NULL, NULL);
+   void *saw_ready = NULL;
+   pthread_join(thread, &saw_ready);
+   request_cancel = NULL;
+   assert(saw_ready);
+   cJSON *json = parse_json_or_die(result);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json, "cancelled")));
+   assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json, "timed_out")));
+   assert(cJSON_GetObjectItemCaseSensitive(json, "exit_code")->valueint == -1);
+   assert(cJSON_GetObjectItemCaseSensitive(json, "duration_ms")->valuedouble < 1500);
+   cJSON_Delete(json);
+   free(result);
+   unlink(ready);
+   rmdir(directory);
+}
+
+static void test_closed_output_keeps_timeout(void)
+{
+   char *result = tool_execute_script(
+       "python", "import os,time; os.close(1); os.close(2); time.sleep(2)", 1, NULL, NULL);
+   cJSON *json = parse_json_or_die(result);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json, "timed_out")));
+   assert(cJSON_GetObjectItemCaseSensitive(json, "exit_code")->valueint == -1);
+   assert(cJSON_GetObjectItemCaseSensitive(json, "duration_ms")->valuedouble < 1800);
+   cJSON_Delete(json);
+   free(result);
+}
+
+static void test_rpc_result_bounds_and_fidelity(void)
+{
+   char *large = malloc(100 * 1024 + 1);
+   assert(large);
+   for (int error = 0; error < 2; error++)
+      for (int escaped = 0; escaped < 2; escaped++)
+      {
+         size_t length = escaped ? 25000 : 100 * 1024;
+         memset(large, escaped ? 1 : 'x', length);
+         large[length] = 0;
+         g_dispatch_result = large;
+         g_dispatch_error = error;
+         char body[1024];
+         snprintf(body, sizeof body,
+                  "import aimee_tools, json\n"
+                  "r = aimee_tools.call('read_file', {'path': 'fixture'})\n"
+                  "assert r['ok'] is %s\n"
+                  "assert r['result_truncated'] is True\n"
+                  "assert r['result_bytes'] == %zu\n"
+                  "assert isinstance(r['result'], str) and len(r['result']) > 0\n"
+                  "assert r['result'] == chr(%d) * len(r['result'])\n"
+                  "assert len(json.dumps(r).encode()) <= 65536\n"
+                  "assert aimee_tools.call('read_file', {'path': 'again'})['result_truncated']\n"
+                  "print('bounded result received')\n",
+                  error ? "False" : "True", length, escaped ? 1 : 'x');
+         char *result = tool_execute_script("python", body, 5, NULL, NULL);
+         cJSON *reply = parse_json_or_die(result);
+         assert(cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == 0);
+         assert(strstr(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "stdout")),
+                       "bounded result received"));
+         cJSON_Delete(reply);
+         free(result);
+      }
+   g_dispatch_error = 0;
+   for (int unicode = 0; unicode < 2; unicode++)
+   {
+      if (unicode)
+      {
+         large[0] = 'x';
+         for (size_t i = 1; i < 100000; i += 3)
+            memcpy(large + i, "\xe2\x82\xac", 3);
+         large[100000] = 0;
+      }
+      else
+      {
+         memset(large, 'x', 64000);
+         large[64000] = 0;
+      }
+      g_dispatch_result = large;
+      char *result =
+          tool_execute_script("python",
+                              "import aimee_tools\n"
+                              "r = aimee_tools.call('read_file', {'path': 'fixture'})\n"
+                              "assert r['ok']\n"
+                              "if r.get('result_truncated'):\n"
+                              "    assert r['result_bytes'] == 100000\n"
+                              "    assert r['result'] == 'x' + chr(8364) * (len(r['result']) - 1)\n"
+                              "else:\n"
+                              "    assert r['result'] == 'x' * 64000\n",
+                              5, NULL, NULL);
+      cJSON *reply = parse_json_or_die(result);
+      assert(cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == 0);
+      cJSON_Delete(reply);
+      free(result);
+   }
+   free(large);
+   const char *ambiguous[] = {"123 trailing", "{\"same\":1,\"same\":2}"};
+   for (size_t i = 0; i < sizeof ambiguous / sizeof ambiguous[0]; i++)
+   {
+      g_dispatch_result = ambiguous[i];
+      char *result =
+          tool_execute_script("python",
+                              "import aimee_tools\n"
+                              "r = aimee_tools.call('read_file', {'path': 'fixture'})\n"
+                              "assert r['ok'] and isinstance(r['result'], str)\n"
+                              "assert r['result'] in ['123 trailing', '{\"same\":1,\"same\":2}']\n",
+                              5, NULL, NULL);
+      cJSON *reply = parse_json_or_die(result);
+      assert(cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == 0);
+      cJSON_Delete(reply);
+      free(result);
+   }
+   g_dispatch_result = NULL;
+}
+
 static void test_script_stdout_cap(void)
 {
    char *result = tool_execute_script("python", "print('x' * 60000)", 5, NULL, NULL);
@@ -507,6 +676,9 @@ static void test_rpc_closed_client_cannot_signal_host(void)
 
 int main(void)
 {
+   test_rpc_result_bounds_and_fidelity();
+   test_running_script_cancellation();
+   test_closed_output_keeps_timeout();
    test_rpc_closed_client_cannot_signal_host();
    test_rpc_stop_interrupts_partial_frame();
    test_rpc_strict_json_frames();

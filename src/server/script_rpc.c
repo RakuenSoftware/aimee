@@ -28,8 +28,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define SCRIPT_RPC_MAX_FRAME  (64 * 1024)
-#define SCRIPT_RPC_MAX_RESULT (64 * 1024)
+#define SCRIPT_RPC_MAX_FRAME (64 * 1024)
+/* A result can appear twice (result/error), and each byte may need six JSON
+ * escape bytes. Reserve envelope space even for that worst-case projection. */
+#define SCRIPT_RPC_PREVIEW_BYTES ((SCRIPT_RPC_MAX_FRAME - 1024) / 12)
 
 struct script_rpc_execution
 {
@@ -226,15 +228,38 @@ static cJSON *script_rpc_dispatch(script_rpc_server_t *srv, cJSON *req)
    cJSON_AddBoolToObject(resp, "ok", !is_error);
    if (result)
    {
-      if (strlen(result) > SCRIPT_RPC_MAX_RESULT)
-         result[SCRIPT_RPC_MAX_RESULT] = '\0';
-      cJSON *parsed = cJSON_Parse(result);
-      if (parsed)
-         cJSON_AddItemToObject(resp, "result", parsed);
-      else
+      size_t bytes = strlen(result);
+      int projected = bytes > SCRIPT_RPC_MAX_FRAME;
+      if (!projected)
+      {
+         /* A valid prefix is not the result. Preserve ambiguous/non-JSON tool
+          * text verbatim rather than silently discarding trailing content. */
+         cJSON *parsed = aimee_ir_json_parse_frame(result, bytes);
+         if (parsed)
+            cJSON_AddItemToObject(resp, "result", parsed);
+         else
+            cJSON_AddStringToObject(resp, "result", result);
+         if (is_error)
+            cJSON_AddStringToObject(resp, "error", result);
+         char *encoded = cJSON_PrintUnformatted(resp);
+         projected = !encoded || strlen(encoded) > SCRIPT_RPC_MAX_FRAME;
+         free(encoded);
+      }
+      if (projected)
+      {
+         cJSON_DeleteItemFromObjectCaseSensitive(resp, "result");
+         cJSON_DeleteItemFromObjectCaseSensitive(resp, "error");
+         size_t prefix = bytes < SCRIPT_RPC_PREVIEW_BYTES ? bytes : SCRIPT_RPC_PREVIEW_BYTES;
+         /* Do not split a UTF-8 character in an otherwise valid text result. */
+         while (prefix && ((unsigned char)result[prefix] & 0xc0) == 0x80)
+            prefix--;
+         result[prefix] = 0;
          cJSON_AddStringToObject(resp, "result", result);
-      if (is_error)
-         cJSON_AddStringToObject(resp, "error", result);
+         if (is_error)
+            cJSON_AddStringToObject(resp, "error", result);
+         cJSON_AddBoolToObject(resp, "result_truncated", 1);
+         cJSON_AddNumberToObject(resp, "result_bytes", (double)bytes);
+      }
    }
    else
    {
