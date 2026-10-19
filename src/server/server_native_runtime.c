@@ -58,7 +58,7 @@ typedef struct
 {
    server_native_runtime_t *runtime;
    aimee_request_t request, admitted;
-   int prepared, guarded;
+   int prepared, guarded, require_complete;
 } native_request_owner_t;
 
 /* The final egress guard sees the actual post-policy catalog. Entry ownership
@@ -69,6 +69,18 @@ static int native_owned_guard(aimee_request_t *request, void *context)
    native_request_owner_t *owner = context;
    if (server_native_replay_restore(request, owner->runtime->replay))
       return -1;
+   if (owner->require_complete)
+   {
+      cJSON *snapshot = aimee_ir_request_json(request);
+      const cJSON *messages = cJSON_GetObjectItemCaseSensitive(snapshot, "messages");
+      int invalid = !snapshot || aimee_ir_history_admit(messages);
+      cJSON_Delete(snapshot);
+      if (invalid)
+      {
+         server_session_capture_fail(owner->runtime->capture);
+         return -1;
+      }
+   }
    aimee_request_t catalog = {
        .model = request->model, .tools = request->tools, .n_tools = request->n_tools, .mutated = 1};
    if (aimee_ir_request_clone(&catalog, &owner->admitted))
@@ -255,6 +267,11 @@ static int native_owned_request(aimee_request_t *request, void *context)
       if (aimee_ir_request_clone(&runtime->request_profile, &owner->request) ||
           server_session_capture_history(runtime->capture, &history))
          goto failed;
+      if (owner->require_complete && aimee_ir_history_admit(history))
+      {
+         cJSON_Delete(history);
+         goto failed; /* A missing result is not permission to invent an outcome. */
+      }
       int count = cJSON_GetArraySize(history);
       owner->request.messages =
           count ? calloc((size_t)count, sizeof *owner->request.messages) : NULL;
@@ -512,7 +529,7 @@ static int native_perform(const char *method, const char *path, const char *head
       free(input);
       return -1;
    }
-   native_request_owner_t request_owner = {.runtime = runtime};
+   native_request_owner_t request_owner = {.runtime = runtime, .require_complete = request_locked};
    agent_tools_scope_snapshot_t previous_tools;
    agent_tools_scope_bookmark(&previous_tools);
    server_delegate_scope_t previous_delegate;

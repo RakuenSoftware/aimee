@@ -67,8 +67,13 @@ struct cJSON *aimee_ir_policy_view_json(const aimee_request_t *request);
 /* Decode canonical persisted content, never a provider protocol. On failure out
  * is empty; on success it owns its fields (aimee_message_free). */
 int aimee_ir_message_parse(const struct cJSON *json, aimee_message_t *out);
-/* Repair canonical tool cycles in order; -1 leaves the original untouched. */
+/* Repair a compatibility view's tool cycles in order; -1 leaves input untouched.
+ * Missing results become explicit platform diagnostics with unknown outcomes,
+ * never cancellation/effect receipts. Authoritative loaders reject any repair. */
 int aimee_ir_history_repair(struct cJSON *messages);
+/* Read-only admission of authoritative model history. Reject incomplete/orphan
+ * cycles and synthetic unresolved-result diagnostics; no effect is authorized. */
+int aimee_ir_history_admit(const struct cJSON *messages);
 struct cJSON *aimee_ir_delta_json(const aimee_delta_t *delta);
 struct cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event);
 

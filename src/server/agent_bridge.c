@@ -757,18 +757,19 @@ int messages_compact_consecutive(cJSON *messages)
  *
  * Scan message history for inconsistencies and repair them:
  * 1. Orphaned tool calls: assistant requested tool_use but no matching result exists.
- *    -> Insert synthetic cancellation result.
+ *    -> Insert unknown-outcome diagnostic result.
  * 2. Orphaned tool results: a tool result exists with no matching tool call.
  *    -> Remove the orphan.
  * 3. Trailing tool calls: conversation ends with unanswered tool calls.
- *    -> Fill with cancellation results.
+ *    -> Fill with unknown-outcome diagnostic results.
  *
  * Handles OpenAI (tool_calls/tool_call_id), Anthropic (tool_use/tool_result),
  * and Responses API (function_call/function_call_output) message formats.
  *
  * Idempotent: running twice produces the same result.
  */
-static const char *CANCEL_MSG = "[Tool call was cancelled or timed out]";
+static const char *MISSING_RESULT_MSG = "[No tool result is available in this history. Execution "
+                                        "outcome is unknown; reconcile before retrying.]";
 
 /* Collect all tool call IDs from a message array.
  * Returns a cJSON object used as a set: keys are IDs, values are true. */
@@ -917,12 +918,12 @@ static int detect_format(cJSON *messages)
    return 0; /* default to OpenAI */
 }
 
-/* Insert synthetic cancellation results for orphaned tool calls (OpenAI format) */
+/* Insert unknown-outcome diagnostic results for orphaned tool calls (OpenAI format) */
 static int repair_orphans_openai(cJSON *messages, cJSON *call_ids, cJSON *result_ids)
 {
    int repairs = 0;
 
-   /* Find orphaned calls (call exists but no result) and insert cancellation */
+   /* Find orphaned calls (call exists but no result) and insert an unknown-outcome diagnostic */
    cJSON *id_item;
    cJSON_ArrayForEach(id_item, call_ids)
    {
@@ -959,7 +960,7 @@ static int repair_orphans_openai(cJSON *messages, cJSON *call_ids, cJSON *result
       cJSON *tool_msg = cJSON_CreateObject();
       cJSON_AddStringToObject(tool_msg, "role", "tool");
       cJSON_AddStringToObject(tool_msg, "tool_call_id", id_item->string);
-      cJSON_AddStringToObject(tool_msg, "content", CANCEL_MSG);
+      cJSON_AddStringToObject(tool_msg, "content", MISSING_RESULT_MSG);
 
       if (insert_after)
       {
@@ -1015,7 +1016,7 @@ static int repair_orphans_openai(cJSON *messages, cJSON *call_ids, cJSON *result
    return repairs;
 }
 
-/* Insert synthetic cancellation results for orphaned tool calls (Anthropic format) */
+/* Insert unknown-outcome diagnostic results for orphaned tool calls (Anthropic format) */
 static int repair_orphans_anthropic(cJSON *messages, cJSON *call_ids, cJSON *result_ids)
 {
    int repairs = 0;
@@ -1075,7 +1076,7 @@ static int repair_orphans_anthropic(cJSON *messages, cJSON *call_ids, cJSON *res
       cJSON *tr = cJSON_CreateObject();
       cJSON_AddStringToObject(tr, "type", "tool_result");
       cJSON_AddStringToObject(tr, "tool_use_id", id_item->string);
-      cJSON_AddStringToObject(tr, "content", CANCEL_MSG);
+      cJSON_AddStringToObject(tr, "content", MISSING_RESULT_MSG);
 
       if (target_user)
       {
@@ -1138,7 +1139,7 @@ static int repair_orphans_anthropic(cJSON *messages, cJSON *call_ids, cJSON *res
    return repairs;
 }
 
-/* Insert synthetic cancellation results for orphaned calls (Responses API format) */
+/* Insert unknown-outcome diagnostic results for orphaned calls (Responses API format) */
 static int repair_orphans_responses(cJSON *messages, cJSON *call_ids, cJSON *result_ids)
 {
    int repairs = 0;
@@ -1153,7 +1154,7 @@ static int repair_orphans_responses(cJSON *messages, cJSON *call_ids, cJSON *res
       cJSON *out_item = cJSON_CreateObject();
       cJSON_AddStringToObject(out_item, "type", "function_call_output");
       cJSON_AddStringToObject(out_item, "call_id", id_item->string);
-      cJSON_AddStringToObject(out_item, "output", CANCEL_MSG);
+      cJSON_AddStringToObject(out_item, "output", MISSING_RESULT_MSG);
       cJSON_AddItemToArray(messages, out_item);
       repairs++;
    }

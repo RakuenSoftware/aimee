@@ -139,7 +139,7 @@ static void test_repair_orphaned_call_openai(void)
    const char *tcid = cJSON_GetStringValue(cJSON_GetObjectItem(last, "tool_call_id"));
    assert(strcmp(tcid, "call_orphan") == 0);
    const char *content = cJSON_GetStringValue(cJSON_GetObjectItem(last, "content"));
-   assert(strstr(content, "cancelled") != NULL);
+   assert(strstr(content, "outcome is unknown") != NULL);
 
    cJSON_Delete(arr);
 }
@@ -183,7 +183,7 @@ static void test_repair_multiple_orphans_openai(void)
       {
          found_b = 1;
          const char *c = cJSON_GetStringValue(cJSON_GetObjectItem(m, "content"));
-         assert(strstr(c, "cancelled") != NULL);
+         assert(strstr(c, "outcome is unknown") != NULL);
       }
    }
    assert(found_b == 1);

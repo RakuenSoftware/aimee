@@ -19,7 +19,7 @@ static struct row
    cJSON *events;
    char *history;
 } rows[16];
-static int count, reject_append, reject_checkpoint, reject_reference, parent_events;
+static int count, reject_append, reject_checkpoint, reject_reference, parent_events, history_fault;
 int test_learning_observations(void);
 void agent_request_creds_snapshot(agent_request_creds_t *out)
 {
@@ -118,7 +118,23 @@ int db1_session_ir_history_load(const char *session, const char *scope, const ch
    pthread_mutex_lock(&lock);
    struct row *r = find(session);
    assert(r && !strcmp(r->actor, actor));
-   *out = r->history ? strdup(r->history) : NULL;
+   const char *source =
+       (history_fault == 1 || history_fault == 3)
+           ? "[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_"
+             "id\":\"pending-write\",\"name\":\"write_file\",\"input\":{\"ratio\":0."
+             "12345678901234567890123456789}}]}]"
+       : history_fault == 2 ? "[{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_"
+                              "id\":\"orphan\",\"content\":\"unmatched\"}]}]"
+                            : r->history;
+   *out = source ? strdup(source) : NULL;
+   if (history_fault == 3 && *out)
+   {
+      cJSON *compatibility = cJSON_Parse(*out);
+      assert(compatibility && aimee_ir_history_repair(compatibility) == 1);
+      free(*out);
+      *out = cJSON_PrintUnformatted(compatibility);
+      cJSON_Delete(compatibility);
+   }
    pthread_mutex_unlock(&lock);
    return *out ? 0 : 1;
 }
@@ -255,6 +271,33 @@ static void *worker(void *arg)
    assert(server_session_log_finish(scope, 1, NULL) == 0);
    return NULL;
 }
+static void unresolved_history_requires_reconciliation(void)
+{
+   aimee_ir_session_set_sink(NULL, NULL);
+   attest("parent", "alice");
+   job = 10; /* Reuse the worker's existing private child and valid source. */
+   server_session_log_t *scope = NULL;
+   assert(!server_session_log_begin("review", "reconcile", &scope));
+   char session[128], actor[VAULT_PRINCIPAL_MAX];
+   assert(!server_session_log_identity(session, sizeof session, actor, sizeof actor));
+   struct row *row = find(session);
+   assert(row && row->history);
+   char *before = strdup(row->history);
+   assert(before);
+   for (history_fault = 1; history_fault <= 3; history_fault++)
+   {
+      cJSON *history = NULL;
+      assert(server_session_log_history_load(&history) == -1 && !history);
+      assert(!strcmp(row->history, before)); /* Never checkpoint a fabricated repair. */
+   }
+   history_fault = 0;
+   cJSON *history = NULL;
+   assert(!server_session_log_history_load(&history) && cJSON_GetArraySize(history) == 1);
+   cJSON_Delete(history);
+   free(before);
+   model_reply();
+   assert(!server_session_log_finish(scope, 1, NULL));
+}
 static void *fail_capture_worker(void *arg)
 {
    server_session_capture_t *capture = arg;
@@ -380,6 +423,7 @@ int main(void)
       references++;
    }
    assert(references >= 10); /* Synchronous and independent concurrent workers. */
+   unresolved_history_requires_reconciliation();
    char long_owner[VAULT_PRINCIPAL_MAX] = "webuser:";
    memset(long_owner + 8, 'a', VAULT_CERT_CN_MAX);
    long_owner[8 + VAULT_CERT_CN_MAX] = 0;

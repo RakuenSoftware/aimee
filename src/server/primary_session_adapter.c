@@ -208,7 +208,7 @@ static int primary_session_load_messages_locked(primary_session_state_t *state,
    {
       cJSON *history = primary_history_import(json, state->provider);
       free(json);
-      if (!history || aimee_ir_history_repair(history) != 0)
+      if (!history || aimee_ir_history_admit(history))
       {
          cJSON_Delete(history);
          return -1;

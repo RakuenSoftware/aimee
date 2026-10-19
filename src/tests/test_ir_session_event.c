@@ -458,13 +458,40 @@ int main(void)
        "{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":\"orphan\","
        "\"content\":\"bad\",\"is_error\":false}]}]");
    assert(history);
+   char *unresolved_before = cJSON_PrintUnformatted(history);
+   assert(unresolved_before && aimee_ir_history_admit(history) == -1);
+   char *unresolved_after = cJSON_PrintUnformatted(history);
+   assert(unresolved_after && !strcmp(unresolved_before, unresolved_after));
+   free(unresolved_before);
+   free(unresolved_after);
    assert(aimee_ir_history_repair(history) == 2);
    assert(cJSON_GetArraySize(history) == 5);
    cJSON *repaired =
        cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(history, 3), "blocks"), 0);
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(repaired, "tool_id")), "same"));
    assert(cJSON_IsTrue(cJSON_GetObjectItem(repaired, "is_error")));
+   const char *diagnostic = cJSON_GetStringValue(cJSON_GetObjectItem(repaired, "content"));
+   assert(diagnostic && strstr(diagnostic, "outcome is unknown") &&
+          !strstr(diagnostic, "cancelled"));
+   const cJSON *diagnostic_context = cJSON_GetObjectItem(repaired, "context");
+   assert(cJSON_GetObjectItem(diagnostic_context, "origin")->valueint == AIMEE_CTX_ORIGIN_PLATFORM);
+   assert(cJSON_GetObjectItem(diagnostic_context, "authority")->valueint ==
+          AIMEE_CTX_AUTH_DIAGNOSTIC);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(diagnostic_context, "revision_scope")),
+                  "unresolved-tool-result"));
+   assert(!strcmp(
+       cJSON_GetStringValue(cJSON_GetObjectItem(
+           cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(history, 1), "blocks"), 0),
+           "content")),
+       "ok"));
    assert(aimee_ir_history_repair(history) == 0);
+   assert(aimee_ir_history_admit(history) == -1); /* Diagnostics do not become receipts. */
+   cJSON *resolved = cJSON_Parse(
+       "[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"same\",\"name\":"
+       "\"write_file\",\"input\":{}}]},{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\","
+       "\"tool_id\":\"same\",\"content\":\"actual receipt\",\"is_error\":false}]}]");
+   assert(resolved && !aimee_ir_history_admit(resolved));
+   cJSON_Delete(resolved);
    assert(!strcmp(
        cJSON_GetStringValue(cJSON_GetObjectItem(
            cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(history, 0), "blocks"), 0),

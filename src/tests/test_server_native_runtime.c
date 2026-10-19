@@ -577,7 +577,7 @@ struct server_native_replay
 {
    char actor[VAULT_PRINCIPAL_MAX], session[128];
 };
-static atomic_int owned_profile_probe, snapshot_generation, tool_source_probe;
+static atomic_int owned_profile_probe, snapshot_generation, tool_source_probe, postpolicy_gap;
 static cJSON *source_rows;
 server_native_replay_t *server_native_replay_open(const char *session, const char *actor,
                                                   const char *scope, const char *model)
@@ -692,6 +692,12 @@ static void probe_replay_scope(const char *path)
          request.raw_bytes = strdup("SDK original bytes");
          request.raw_length = strlen(request.raw_bytes);
          int admitted = request_owner_scope.guard(&request, request_owner_scope.context);
+         if (atomic_load(&snapshot_fault) == 3)
+         {
+            assert(admitted == -1);
+            aimee_request_free(&request);
+            return;
+         }
          assert(!admitted && !strcmp(request.model, "selected-model") && request.mutated);
          assert(!request.raw && !request.raw_bytes && !request.raw_length);
          assert(request.n_system == 1 && !strcmp(request.system[0].text, "host-owned system"));
@@ -702,6 +708,26 @@ static void probe_replay_scope(const char *path)
          assert(aimee_ir_find_function(&request, "aimee", "read_file"));
          assert(request.prompt_cache_key && !request.prompt_cache_key[0]);
          request.max_tokens = 17;
+         if (atomic_load(&postpolicy_gap))
+         {
+            cJSON *gap =
+                cJSON_Parse("[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_"
+                            "id\":\"unresolved-write\",\"name\":\"write_file\",\"input\":{}}]}]");
+            assert(gap && aimee_ir_history_repair(gap) == 1);
+            for (int i = 0; i < request.n_messages; i++)
+               aimee_message_free(&request.messages[i]);
+            free(request.messages);
+            request.n_messages = cJSON_GetArraySize(gap);
+            request.messages = calloc((size_t)request.n_messages, sizeof *request.messages);
+            assert(request.messages);
+            for (int i = 0; i < request.n_messages; i++)
+            {
+               int parsed =
+                   aimee_ir_message_parse(cJSON_GetArrayItem(gap, i), &request.messages[i]);
+               assert(!parsed);
+            }
+            cJSON_Delete(gap);
+         }
          int mode = atomic_load(&tool_source_probe);
          if (mode == 5 || mode == 8)
          {
@@ -712,7 +738,14 @@ static void probe_replay_scope(const char *path)
       }
       else
          assert(!request_owner_scope.guard);
-      assert(!state_guard.guard(&request, state_guard.context));
+      int guarded = state_guard.guard(&request, state_guard.context);
+      if (atomic_load(&postpolicy_gap))
+      {
+         assert(guarded == -1);
+         aimee_request_free(&request);
+         return;
+      }
+      assert(!guarded);
       if (atomic_load(&owned_profile_probe))
          assert(request.max_tokens == 17);
       aimee_request_free(&request);
@@ -877,6 +910,9 @@ int db1_session_ir_running_history_load(const char *session, const char *actor, 
                                                       "\"text\",\"text\":\"fresh durable one\"}]}]"
                                                     : "[{\"role\":\"user\",\"blocks\":[{\"type\":"
                                                       "\"text\",\"text\":\"fresh durable two\"}]}]";
+   if (atomic_load(&snapshot_fault) == 3)
+      wire = "[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"unresolved-"
+             "write\",\"name\":\"write_file\",\"input\":{}}]}]";
    *out = strdup(wire);
    return *out ? 0 : -1;
 }
@@ -1118,7 +1154,7 @@ static void test_retained_capture(const agent_t *selected, const request_context
 
 static void test_native_original_catalog(const agent_t *selected, const request_context_t *owner)
 {
-   for (int mode = 1; mode <= 8; mode++)
+   for (int mode = 1; mode <= 10; mode++)
    {
       owner_tools(1);
       aimee_tool_t function = {.name = "read_file"};
@@ -1143,7 +1179,11 @@ static void test_native_original_catalog(const agent_t *selected, const request_
       captured_rows = cJSON_CreateArray();
       atomic_store(&owned_profile_probe, 1);
       atomic_store(&snapshot_generation, 1);
-      atomic_store(&tool_source_probe, mode);
+      atomic_store(&tool_source_probe, mode <= 8 ? mode : 0);
+      if (mode == 9)
+         atomic_store(&snapshot_fault, 3);
+      if (mode == 10)
+         atomic_store(&postpolicy_gap, 1);
       char response[1024];
       int before = atomic_load(&calls);
       request(runtime, "/v1/mcp/call", server_native_runtime_token(runtime), response);
@@ -1153,7 +1193,8 @@ static void test_native_original_catalog(const agent_t *selected, const request_
       assert(server_session_capture_failed(capture) == refuses);
       /* A refused complete call is never committed or released to the SDK.
        * Earlier stream fragments remain as observed, without an invented stop. */
-      int expected_rows = mode == 3                ? 7
+      int expected_rows = mode >= 9                ? 0
+                          : mode == 3              ? 7
                           : mode == 8              ? 2
                           : mode == 7              ? 3
                           : mode >= 4 && mode != 5 ? 4
@@ -1172,6 +1213,8 @@ static void test_native_original_catalog(const agent_t *selected, const request_
       atomic_store(&owned_profile_probe, 0);
       atomic_store(&snapshot_generation, 0);
       atomic_store(&tool_source_probe, 0);
+      atomic_store(&snapshot_fault, 0);
+      atomic_store(&postpolicy_gap, 0);
       cJSON_Delete(captured_rows);
       captured_rows = NULL;
    }

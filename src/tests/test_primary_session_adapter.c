@@ -1,5 +1,6 @@
 /* Exercise the production primary owner across model switches and restart. */
 #include "primary_session_adapter.h"
+#include <aimee/ir/session_event.h>
 #include "agent_exec.h"
 #include "headers/context_engine.h"
 #include "db1_client/primary_sessions.h"
@@ -182,6 +183,18 @@ int main(void)
    free(canonical_stored);
    canonical_stored = strdup("[{\"role\":\"user\",\"blocks\":[{\"type\":\"bogus\"}]}]");
    turn(&a, 0, 0); /* A broken durable transcript cannot start an empty turn. */
+   primary_session_adapter_reset();
+   cJSON *unresolved =
+       cJSON_Parse("[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":"
+                   "\"pending-write\",\"name\":\"write_file\",\"input\":{}}]}]");
+   assert(unresolved && aimee_ir_history_repair(unresolved) == 1);
+   free(canonical_stored);
+   canonical_stored = cJSON_PrintUnformatted(unresolved);
+   cJSON_Delete(unresolved);
+   char *before_unresolved = strdup(canonical_stored);
+   turn(&a, 0, 0); /* A paired diagnostic is still not a recorded execution outcome. */
+   assert(!strcmp(canonical_stored, before_unresolved));
+   free(before_unresolved);
    primary_session_adapter_reset();
    free(stored);
    free(canonical_stored);

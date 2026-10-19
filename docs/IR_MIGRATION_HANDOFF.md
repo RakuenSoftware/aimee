@@ -38,8 +38,9 @@ audit, fuzz, release and strict attribution workflows also passed. Published
 `118f06bb2` adds host-turn generation/source claims and actual-catalog admission;
 it subsequently completed all 50 main CI jobs and every auxiliary workflow,
 with the same two platform skips. Original-call readback/claim is published
-as `a94bd79ea`; its fresh CI has no failures at this checkpoint, with deployment
-tiers still running. It does not activate native SDK execution.
+as `a94bd79ea`; it completed all 50 main CI jobs and every auxiliary workflow,
+with the same two platform skips. Supervised original-call execution is published
+as `2d49add9b` for fresh CI. Neither commit activates native SDK execution.
 
 Installed CLI probes correctly resolve `aimee` and `wol-lore` from their own
 workspaces without an explicit project override; newer native callback cwd binding
@@ -3302,3 +3303,37 @@ history reconciliation and remaining IR/learning consumers remain unfinished.
 The generic legacy history repair's cancelled/timed-out placeholder is not a
 source receipt for an effect whose result could not be recorded; resolve that
 consumer before native activation. No production promotion occurred.
+
+
+## Missing tool outcomes remain unknown; authoritative history refuses repair
+
+Canonical compatibility repair in C and Go now states that no result is available
+in this history and the execution outcome is unknown. Its synthetic block carries
+explicit platform diagnostic provenance, not a tool owner's outcome or a claim
+that cancellation prevented execution. Original calls/arguments and actual results
+stay unchanged. The remaining legacy native repair views use the same truthful
+warning while those consumers await retirement.
+
+The pure read-only canonical history admission helper rejects incomplete/orphan
+cycles and unresolved-result diagnostics, including a diagnostic that superficially
+pairs with a call. Primary and delegate authoritative loads use that admission;
+they do not checkpoint a repaired view as executed history. Native model generation
+checks the fresh source history at entry and the actual request again before
+egress, preventing a downstream transform from introducing a synthetic resolution.
+Read-only token counting does not need to authorize another model generation.
+
+Focused cases cover unchanged inputs, reused IDs, preserved exact arguments and
+actual results, diagnostic provenance, strict primary/delegate load refusal, and
+pending or newly synthesized post-policy native histories. The normal server build
+and all 657 native entries pass. Five ASan/UBSan fixtures, two ThreadSanitizer
+fixtures, two CMake/CTest owners and the economizer/IR Go race suites pass.
+Cppcheck reports the same three existing agent_bridge diagnostics across ten
+changed C source/fixture files, with no new diagnostics or baseline change.
+PostgreSQL 18 integration passes 167/167 with the same 26 service skips, and
+all 76 final lint gates pass.
+
+Reconciliation still belongs to actual governed-action receipts or an explicit
+host resolution. This change does not infer an effect result from missing data
+or invent a parallel receipt journal. SDK launch/cache activation, source-bound
+live Claude execution, remaining ingress/IR consumers and independent local
+learning qualification remain unfinished. Production remains KB-free and unchanged.

@@ -169,7 +169,7 @@ int server_session_log_history_load(cJSON **out)
    if (rc == 0)
    {
       *out = cJSON_Parse(json);
-      if (!cJSON_IsArray(*out) || aimee_ir_history_repair(*out) < 0)
+      if (!cJSON_IsArray(*out) || aimee_ir_history_admit(*out))
       {
          cJSON_Delete(*out);
          *out = NULL;

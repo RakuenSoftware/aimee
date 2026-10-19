@@ -292,6 +292,38 @@ fail:
    return -1;
 }
 
+int aimee_ir_history_admit(const cJSON *messages)
+{
+   if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) > 4096)
+      return -1;
+   const cJSON *value;
+   cJSON_ArrayForEach(value, messages)
+   {
+      aimee_message_t message = {0};
+      if (aimee_ir_message_parse(value, &message))
+         return -1;
+      int unresolved = 0;
+      for (int i = 0; i < message.n_blocks; i++)
+      {
+         const aimee_block_t *block = &message.blocks[i];
+         unresolved |= block->type == AIMEE_BLK_TOOL_RESULT &&
+                       block->context.origin == AIMEE_CTX_ORIGIN_PLATFORM &&
+                       block->context.authority == AIMEE_CTX_AUTH_DIAGNOSTIC &&
+                       !strcmp(block->context.revision_domain, "history-repair") &&
+                       !strcmp(block->context.revision_scope, "unresolved-tool-result");
+      }
+      aimee_message_free(&message);
+      if (unresolved)
+         return -1;
+   }
+   /* Reuse the ordered cycle contract on a private comparison view. Refusal
+    * never changes the source or presents a synthetic repair as actual output. */
+   cJSON *view = cJSON_Duplicate(messages, 1);
+   int repairs = view ? aimee_ir_history_repair(view) : -1;
+   cJSON_Delete(view);
+   return repairs == 0 ? 0 : -1;
+}
+
 static int flush_pending(cJSON *messages, const char **ids, int count)
 {
    int repaired = 0;
@@ -301,9 +333,15 @@ static int flush_pending(cJSON *messages, const char **ids, int count)
          continue;
       aimee_block_t block = {.type = AIMEE_BLK_TOOL_RESULT,
                              .tool_id = (char *)ids[i],
-                             .tool_result =
-                                 cJSON_CreateString("[Tool call was cancelled or timed out]"),
+                             .tool_result = cJSON_CreateString(
+                                 "[No tool result is available in this history. Execution outcome "
+                                 "is unknown; reconcile before retrying.]"),
                              .tool_is_error = 1};
+      /* Missing history proves neither execution nor cancellation. This is a
+       * platform diagnostic, never a tool owner's outcome/effect receipt. */
+      aimee_ir_block_set_context(&block, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_DIAGNOSTIC,
+                                 AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1,
+                                 "history-repair", "unresolved-tool-result", 0);
       aimee_message_t message = {.role = "tool", .blocks = &block, .n_blocks = 1};
       aimee_request_t request = {.messages = &message, .n_messages = 1};
       aimee_ir_classify_context(&request);
