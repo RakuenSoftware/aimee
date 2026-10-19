@@ -27,6 +27,7 @@
 
 struct server_native_runtime
 {
+   server_control_scope_t *controls;
    cli_proxy_t *listener;
    server_native_replay_t *replay;
    agent_t selected;
@@ -171,7 +172,8 @@ static int native_forward(const char *method, const char *path, const char *head
    snprintf(previous_cwd, sizeof previous_cwd, "%s", cwd ? cwd : "");
    if (session_id_override_active())
       snprintf(previous_session, sizeof previous_session, "%s", session_id());
-   server_control_scope_t *previous_controls = server_control_scope_bind(NULL);
+   server_control_scope_t *previous_controls =
+       server_control_scope_bind(!strncmp(path, "/v1/mcp/", 8) ? runtime->controls : NULL);
    agent_tools_scope_restore(&runtime->tools);
    agent_tools_set_effect_authorized(0);
    agent_source_authority_tls_restore(&bound_source);
@@ -320,7 +322,8 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
    agent_api_credentials_t api_credentials = {0};
    agent_claude_credentials_t claude_credentials = {0};
    if (agent_tools_scope_capture_owned(&runtime->tools) ||
-       agent_source_authority_tls_capture_checked(&runtime->source))
+       agent_source_authority_tls_capture_checked(&runtime->source) ||
+       server_control_scope_capture(session_id, owner->vault_principal, &runtime->controls))
       goto failed;
    /* An ordinary primary has no delegate source overlay. Make that absence
     * explicit rather than falling back to a concurrent delegate's global env. */
@@ -538,6 +541,7 @@ void server_native_runtime_close(server_native_runtime_t *runtime)
       return;
    cli_proxy_stop(runtime->listener);
    server_native_replay_close(runtime->replay);
+   server_control_scope_release(runtime->controls);
    agent_tools_scope_destroy_owned(&runtime->tools);
    agent_source_authority_snapshot_destroy(&runtime->source);
    OPENSSL_cleanse(runtime, sizeof *runtime);

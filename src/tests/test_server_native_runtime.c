@@ -25,7 +25,7 @@ static _Thread_local int job_id, effect_authorized, scope_admitted;
 static void restored_probe(void);
 static _Thread_local server_delegate_scope_t delegate_scope;
 static _Thread_local const workspace_provider_t *workspace;
-static _Thread_local server_control_scope_t *controls;
+static server_control_scope_t *alice_controls;
 static workspace_provider_t alice_workspace = {.kind = WS_PROVIDER_SHARED};
 static workspace_provider_t bob_workspace = {.kind = WS_PROVIDER_SHARED};
 const char *agent_tools_dispatch_role(void)
@@ -59,6 +59,11 @@ int session_id_override_active(void)
 void session_id_set_override(const char *sid)
 {
    snprintf(tool_session, sizeof tool_session, "%s", sid ? sid : "");
+   if (scope_admitted && !tool_session[0])
+   {
+      restored_probe();
+      scope_admitted = 0;
+   }
 }
 void agent_set_durable_job(int id)
 {
@@ -83,17 +88,6 @@ void server_delegate_scope_capture(server_delegate_scope_t *out)
 void server_delegate_scope_restore(const server_delegate_scope_t *scope)
 {
    delegate_scope = *scope;
-}
-server_control_scope_t *server_control_scope_bind(server_control_scope_t *scope)
-{
-   server_control_scope_t *old = controls;
-   controls = scope;
-   if (scope_admitted)
-   {
-      restored_probe();
-      scope_admitted = 0;
-   }
-   return old;
 }
 char *normalize_path(const char *path, const char *cwd, char *out, size_t capacity)
 {
@@ -158,7 +152,7 @@ static void restored_probe(void)
    assert(agent_tools_shell_allowed() && agent_tools_knowledge_write_allowed());
    assert(agent_tools_get_turn() == -1 && !agent_tools_get_snap_id());
    assert(!run_cmd_get_cwd() && !session_id_override_active());
-   assert(!job_id && !workspace && !controls && !effect_authorized);
+   assert(!job_id && !workspace && !effect_authorized);
    assert(!delegate_scope.depth && !delegate_scope.parent[0] && !delegate_scope.mailbox);
    agent_source_authority_snapshot_t previous = {0};
    assert(!agent_source_authority_tls_capture_checked(&previous));
@@ -340,7 +334,9 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    assert(delegate_scope.depth == (alice ? 2 : 0));
    assert(!strcmp(delegate_scope.parent, alice ? "parent-alice" : ""));
    assert(delegate_scope.mailbox == (alice ? (void *)&alice_workspace : NULL));
-   assert(!controls && !effect_authorized);
+   assert(!effect_authorized);
+   assert(server_control_scope_current() ==
+          (alice && !strncmp(path, "/v1/mcp/", 8) ? alice_controls : NULL));
    agent_source_authority_snapshot_t observed = {0};
    assert(!agent_source_authority_tls_capture_checked(&observed));
    assert(observed.active && observed.authority == alice);
@@ -419,9 +415,6 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
                 "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", n, payload);
    return aimee_core_socket_write_all(fd, response, (size_t)size);
 }
-void aimee_ir_session_begin_task(void)
-{
-}
 
 /* The standalone replay fixture exercises the real durable proof owner. This
  * listener fixture verifies its guard/sink are confined to model requests. */
@@ -430,8 +423,6 @@ struct server_native_replay
    char actor[VAULT_PRINCIPAL_MAX];
 };
 static _Thread_local aimee_frontend_state_scope_t state_guard;
-static _Thread_local aimee_ir_session_sink_fn installed_sink;
-static _Thread_local void *sink_context;
 server_native_replay_t *server_native_replay_open(const char *session, const char *actor,
                                                   const char *scope, const char *model)
 {
@@ -464,27 +455,10 @@ aimee_frontend_state_scope_t aimee_frontend_bind_state_guard(aimee_frontend_stat
    state_guard = (aimee_frontend_state_scope_t){guard, context};
    return previous;
 }
-aimee_ir_session_sink_fn aimee_ir_session_get_sink(void **context)
-{
-   *context = sink_context;
-   return installed_sink;
-}
-void aimee_ir_session_set_sink(aimee_ir_session_sink_fn sink, void *context)
-{
-   installed_sink = sink;
-   sink_context = context;
-}
-void aimee_ir_session_restore_sink(aimee_ir_session_sink_fn sink, void *context, int failed)
-{
-   assert(!failed);
-   aimee_ir_session_set_sink(sink, context);
-}
-int aimee_ir_session_capture_failed(void)
-{
-   return 0;
-}
 static void probe_replay_scope(const char *path)
 {
+   void *sink_context = NULL;
+   aimee_ir_session_sink_fn installed_sink = aimee_ir_session_get_sink(&sink_context);
    if (!strcmp(path, "/v1/responses") || !strcmp(path, "/v1/messages"))
    {
       assert(state_guard.guard && installed_sink);
@@ -638,7 +612,10 @@ int main(void)
    atomic_store(&malformed_source, 1);
    assert(!server_native_runtime_open(&selected, &a, "session-a"));
    atomic_store(&malformed_source, 0);
+   alice_controls = server_control_scope_open("session-a", "native-turn", "webuser:alice");
+   assert(alice_controls && !server_control_scope_bind(alice_controls));
    server_native_runtime_t *alice = server_native_runtime_open(&selected, &a, "session-a");
+   assert(server_control_scope_bind(NULL) == alice_controls);
    owner_tools(0);
    server_native_runtime_t *bob = server_native_runtime_open(&selected, &b, "session-b");
    assert(alice && bob);
@@ -703,7 +680,9 @@ int main(void)
    agent_t api_selected = selected;
    strcpy(api_selected.provider, "openai");
    strcpy(api_selected.auth_type, "api_key");
+   assert(!server_control_scope_bind(alice_controls));
    server_native_runtime_t *api = server_native_runtime_open(&api_selected, &a, "session-a");
+   assert(server_control_scope_bind(NULL) == alice_controls);
    assert(api);
    request(api, "/v1/responses", server_native_runtime_token(api), response);
    assert(strstr(response, "200 OK") && !strstr(response, "api-secret"));
@@ -724,7 +703,9 @@ int main(void)
    agent_t claude_selected = selected;
    strcpy(claude_selected.provider, "anthropic");
    strcpy(claude_selected.auth_type, "claude-oauth");
+   assert(!server_control_scope_bind(alice_controls));
    server_native_runtime_t *claude = server_native_runtime_open(&claude_selected, &a, "session-a");
+   assert(server_control_scope_bind(NULL) == alice_controls);
    assert(claude);
    request(claude, "/v1/messages", server_native_runtime_token(claude), response);
    assert(strstr(response, "200 OK") && !strstr(response, "claude-secret"));
@@ -749,5 +730,6 @@ int main(void)
    agent_tools_denied_set(NULL, 0);
    puts("native runtime: owned actor/model/permissions/source, resource leases and cancellation "
         "passed");
+   server_control_scope_close(alice_controls);
    return 0;
 }

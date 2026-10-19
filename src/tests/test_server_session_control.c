@@ -42,8 +42,46 @@ static void long_owner_reply(void)
    server_control_scope_close(scope);
 }
 
+static void *closed_worker(void *arg)
+{
+   server_control_scope_t *scope = arg;
+   assert(!server_control_scope_bind(scope));
+   server_control_scope_t *capture = NULL;
+   assert(server_control_scope_capture("retained", "alice", &capture) < 0 && !capture);
+   cJSON *request = cJSON_Parse("{\"tool_name\":\"Read\",\"input\":{}}");
+   assert(server_control_register(scope, "late", "permission", request) < 0);
+   char *id = NULL, *kind = NULL;
+   cJSON *original = NULL, *reply = NULL;
+   assert(server_control_take(scope, NULL, &id, &kind, &original, &reply) < 0);
+   assert(!id && !kind && !original && !reply);
+   cJSON_Delete(request);
+   assert(server_control_scope_bind(NULL) == scope);
+   server_control_scope_release(scope);
+   return NULL;
+}
+static void retained_owner_teardown(void)
+{
+   server_control_scope_t *capture = NULL;
+   assert(!server_control_scope_capture(NULL, NULL, &capture) && !capture);
+   server_control_scope_t *scope = server_control_scope_open("retained", "turn", "alice");
+   assert(scope && !server_control_scope_bind(scope));
+   assert(server_control_scope_capture("retained", "mallory", &capture) < 0 && !capture);
+   assert(server_control_scope_capture("other", "alice", &capture) < 0 && !capture);
+   assert(!server_control_scope_capture("retained", "alice", &capture) && capture == scope);
+   /* The lease outlives the creator; the new execution may reuse the identity
+    * without a delayed worker registering controls against it. */
+   server_control_scope_close(scope);
+   server_control_scope_t *replacement = server_control_scope_open("retained", "turn", "alice");
+   assert(replacement);
+   pthread_t worker;
+   assert(!pthread_create(&worker, NULL, closed_worker, capture));
+   assert(!pthread_join(worker, NULL));
+   server_control_scope_close(replacement);
+}
+
 int main(void)
 {
+   retained_owner_teardown();
    long_owner_reply();
    server_control_scope_t *scope = server_control_scope_open("session", "turn", "alice");
    assert(scope);
@@ -55,6 +93,17 @@ int main(void)
    assert(server_control_reply("session", "turn:permission", "mallory", reply) < 0);
    assert(server_control_reply("session", "old-turn:permission", "alice", reply) == 1);
    assert(server_control_reply("other-session", "turn:permission", "alice", reply) == 1);
+   const char *ambiguous[] = {
+       "{\"decision\":\"allow\",\"decision\":\"deny\"}",
+       "{\"decision\":\"allow\",\"answers\":{\"a\":[\"x\"],\"a\":[\"y\"]}}",
+       "{\"decision\":\"allow\",\"content\":{\"a\":1,\"a\":2}}",
+   };
+   for (size_t i = 0; i < sizeof ambiguous / sizeof ambiguous[0]; i++)
+   {
+      cJSON *bad = cJSON_Parse(ambiguous[i]);
+      assert(bad && server_control_reply("session", "turn:permission", "alice", bad) < 0);
+      cJSON_Delete(bad);
+   }
    pthread_t threads[4];
    for (size_t i = 0; i < 4; i++)
       assert(!pthread_create(&threads[i], NULL, answer, (void *)i));

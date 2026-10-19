@@ -9,10 +9,12 @@ typedef struct server_native_runtime server_native_runtime_t;
 /* Own one native child's local transport. The source session must already belong
  * to the attested request owner. No operator/global CLI credential is borrowed.
  * Model forwarding requires stable selected Vault source lineage (Codex OAuth
- * or API-key connections); Claude OAuth still requires its custody cutover.
+ * or API-key and Claude OAuth connections).
  * Caller retains its active workspace/delegate resource leases until close.
  * Close only after the native child exits; it joins all admitted callbacks.
- * Callback workers inherit model permissions and never operator controls. */
+ * Callback workers inherit model permissions and never operator authority.
+ * MCP callbacks retain the session/principal-bound pending-control owner;
+ * model-forwarding callbacks have no control binding. */
 server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
                                                     const request_context_t *owner,
                                                     const char *session_id);

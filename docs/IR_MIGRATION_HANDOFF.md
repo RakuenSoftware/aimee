@@ -2377,3 +2377,34 @@ extra envelope metadata; both argument forms together refuse. The descriptor-onl
 legacy/HMAC-ignored control remains a positive test. All 653 native binaries,
 ASan/UBSan agent/script fixtures, five-source Cppcheck and all 76 lint gates pass.
 Fresh branch CI and the unresolved merged model-memory timeout remain separate.
+
+
+## Retained canonical control scopes for joined execution callbacks
+
+Script RPC workers and native MCP callbacks now capture an owned control-scope
+lease bound to the attested session and principal. The creator closes the scope
+immediately for new replies and requests; existing leases retain allocation
+until callback joins and release. A delayed worker cannot register against a
+replacement execution even when its session/turn identity is reused. Missing
+control scope stays a supported case; cross-session/principal capture refuses.
+Native model requests continue without a control binding. No HTTP compute
+context, model credentials or session-event sink crosses the script boundary.
+
+Browser replies reject duplicate JSON fields recursively before consuming a
+pending control, including ambiguous decisions, answers and form content. The
+existing positive permission, question/form validation and exactly-once reply
+contract are retained. Focused fixtures cover creator-before-worker teardown,
+owner/session capture, concurrent replies, real script context propagation and
+control confinement in the actual native listener. This establishes safe control
+leases; the host request_input durable publication bridge and native activation
+remain unfinished.
+
+Retained-control qualification passes all 653 native binaries and proxy
+regressions; four focused ASan/UBSan fixtures (controls, actual native listener,
+script runner and agent); six-source Cppcheck with zero diagnostics; the rebuilt
+production server; actual CMake application plus controls/runtime/cache CTest
+3/3; frozen benchmark assertions 21/21; and the original PostgreSQL 18.6
+integration harness 167/167 with 26 explicit service skips and no KB. The CMake
+control fixture now names its missing canonical IR source dependencies. Fresh
+branch CI and the original merged memory-owner timeout remain unqualified.
+All 76 repository lint gates also pass for this retained-control increment.

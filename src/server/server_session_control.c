@@ -18,7 +18,8 @@ struct pending_control
 struct server_control_scope
 {
    char session[128], turn[128], principal[VAULT_PRINCIPAL_MAX];
-   unsigned count;
+   unsigned count, references;
+   int closed;
    struct pending_control *pending;
    struct server_control_scope *next;
 };
@@ -62,11 +63,61 @@ server_control_scope_t *server_control_scope_open(const char *session, const cha
          free(scope);
          return NULL;
       }
+   scope->references = 1;
    scope->next = scopes;
    scopes = scope;
    scope_count++;
    pthread_mutex_unlock(&lock);
    return scope;
+}
+/* All scope state and lease accounting share the registry lock. No caller
+ * may dereference a borrowed scope after its execution/lease has ended. */
+static void scope_free(server_control_scope_t *scope)
+{
+   struct pending_control *p = scope->pending;
+   while (p)
+   {
+      struct pending_control *next = p->next;
+      free(p->id);
+      free(p->kind);
+      cJSON_Delete(p->request);
+      cJSON_Delete(p->reply);
+      free(p);
+      p = next;
+   }
+   free(scope);
+}
+int server_control_scope_capture(const char *session, const char *principal,
+                                 server_control_scope_t **out)
+{
+   if (!out)
+      return -1;
+   *out = NULL;
+   pthread_mutex_lock(&lock);
+   int result = 0;
+   if (current)
+   {
+      if (current->closed || !session || strcmp(current->session, session) || !principal ||
+          strcmp(current->principal, principal))
+         result = -1;
+      else
+      {
+         current->references++;
+         *out = current;
+      }
+   }
+   pthread_mutex_unlock(&lock);
+   return result;
+}
+void server_control_scope_release(server_control_scope_t *scope)
+{
+   if (!scope)
+      return;
+   pthread_mutex_lock(&lock);
+   int destroy = --scope->references == 0;
+   pthread_mutex_unlock(&lock);
+   if (destroy)
+      scope_free(scope);
 }
 void server_control_scope_close(server_control_scope_t *scope)
 {
@@ -81,21 +132,11 @@ void server_control_scope_close(server_control_scope_t *scope)
       *slot = scope->next;
       scope_count--;
    }
-   struct pending_control *p = scope->pending;
-   while (p)
-   {
-      struct pending_control *next = p->next;
-      free(p->id);
-      free(p->kind);
-      cJSON_Delete(p->request);
-      cJSON_Delete(p->reply);
-      free(p);
-      p = next;
-   }
+   scope->closed = 1;
    if (current == scope)
       current = NULL;
    pthread_mutex_unlock(&lock);
-   free(scope);
+   server_control_scope_release(scope);
 }
 int server_control_register(server_control_scope_t *scope, const char *id, const char *kind,
                             const cJSON *request)
@@ -118,7 +159,7 @@ int server_control_register(server_control_scope_t *scope, const char *id, const
       return -1;
    }
    pthread_mutex_lock(&lock);
-   int valid = scope->count < CONTROL_PENDING_MAX;
+   int valid = !scope->closed && scope->count < CONTROL_PENDING_MAX;
    for (struct pending_control *old = scope->pending; old; old = old->next)
       if (!strcmp(old->id, id))
          valid = 0;
@@ -141,7 +182,7 @@ int server_control_register(server_control_scope_t *scope, const char *id, const
 }
 static int valid_reply(const cJSON *reply)
 {
-   if (!cJSON_IsObject(reply))
+   if (!cJSON_IsObject(reply) || !aimee_ir_json_unique(reply))
       return 0;
    const char *decision = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "decision"));
    if (!decision ||
@@ -220,6 +261,11 @@ int server_control_take(server_control_scope_t *scope, const char *native_id, ch
    *request = NULL;
    *reply = NULL;
    pthread_mutex_lock(&lock);
+   if (scope->closed)
+   {
+      pthread_mutex_unlock(&lock);
+      return -1;
+   }
    for (struct pending_control *p = scope->pending; p; p = p->next)
    {
       if (!p->reply || p->taken || (native_id && strcmp(p->id, native_id)))

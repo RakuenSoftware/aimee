@@ -458,7 +458,8 @@ if(NOT WIN32)
   add_test(NAME test_server_native_tool_admission COMMAND test_server_native_tool_admission)
   add_executable(test_server_native_runtime test_server_native_runtime.c
     ../server/agent_tools.c ../posix/agent_source_authority.c ../modules/ir/aimee_ir.c
-    ../server/server_native_runtime.c ../cli_proxy.c ../server/request_context.c
+    ../server/server_native_runtime.c ../server/server_session_control.c
+    ../modules/ir/session_event.c ../cli_proxy.c ../server/request_context.c
     ../aimee_sha256.c ../platform_random.c ../posix/platform_random.c ../vendor/cJSON.c)
   target_include_directories(test_server_native_runtime PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
     ${AIMEE_SRC_DIR}/modules/kb/c
@@ -523,7 +524,8 @@ endif()
 
 if(NOT WIN32)
   aimee_add_test(test_server_session_control test_server_session_control.c
-    ../server/server_session_control.c ../vendor/cJSON.c)
+    ../server/server_session_control.c ../modules/ir/session_event.c
+    ../modules/ir/aimee_ir.c ../vendor/cJSON.c)
   target_link_libraries(test_server_session_control PRIVATE Threads::Threads)
   aimee_add_test(test_server_session_log test_server_session_log.c
     ../server/server_session_log.c ../server/server_session_control.c

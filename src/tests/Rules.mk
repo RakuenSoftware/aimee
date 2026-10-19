@@ -922,7 +922,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-tool-admission
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-runtime
 $(TESTPREFIX)/unit-test-server-native-runtime: $(OBJDIR)/tests/test_server_native_runtime.o \
     $(OBJDIR)/server/agent_tools.o $(OBJDIR)/posix/agent_source_authority.o $(OBJDIR)/modules/ir/aimee_ir.o \
-    $(OBJDIR)/server/server_native_runtime.o $(OBJDIR)/cli_proxy.o \
+    $(OBJDIR)/server/server_native_runtime.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cli_proxy.o \
     $(OBJDIR)/server/request_context.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o \
     $(OBJDIR)/platform_random.o $(filter %/platform_random.o,$(PLATFORM_BASIC_OBJS)) $(CORE_CONNECTION_LIB)
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto
@@ -1633,7 +1633,7 @@ $(TESTPREFIX)/unit-test-script-runner: $(OBJDIR)/tests/test_script_runner.o \
                       $(OBJDIR)/server/script_runner.o $(OBJDIR)/server/script_rpc.o $(OBJDIR)/toolset.o \
                       $(OBJDIR)/platform_random.o $(OBJDIR)/posix/platform_random.o \
                       $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/dstr.o $(OBJDIR)/log.o $(OBJDIR)/aimee_home.o \
-                      $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
+                      $(OBJDIR)/server/server_session_control.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-provider-cli-adapter: $(OBJDIR)/tests/test_provider_cli_adapter.o \

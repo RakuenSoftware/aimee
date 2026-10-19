@@ -4,6 +4,7 @@
 
 #include "script_rpc.h"
 #include "script_tool_execution.h"
+#include "server_session_control.h"
 #include <aimee/ir/aimee_ir.h>
 #include <aimee/tools/agent_tools.h>
 #include "aimee.h"
@@ -35,6 +36,7 @@
 
 struct script_rpc_execution
 {
+   server_control_scope_t *controls;
    agent_tools_scope_snapshot_t tools;
    request_context_snapshot_t request;
    agent_source_authority_snapshot_t source;
@@ -69,6 +71,8 @@ static int script_rpc_capture(script_rpc_server_t *srv, const char *cwd)
    snprintf(scope->cwd, sizeof scope->cwd, "%s", cwd ? cwd : "");
    snprintf(scope->session, sizeof scope->session, "%s", session ? session : "");
    snprintf(scope->principal, sizeof scope->principal, "%s", principal ? principal : "");
+   if (server_control_scope_capture(scope->session, scope->principal, &scope->controls))
+      return -1;
    scope->workspace = workspace_provider_active();
    scope->cancel = agent_get_request_cancel();
    scope->cancellation.flag = &srv->stop;
@@ -85,6 +89,7 @@ static void script_rpc_release(script_rpc_server_t *srv)
    agent_tools_scope_destroy_owned(&scope->tools);
    agent_source_authority_snapshot_destroy(&scope->source);
    request_context_snapshot_clear(&scope->request);
+   server_control_scope_release(scope->controls);
    free(scope);
    srv->execution = NULL;
 }
@@ -398,6 +403,7 @@ static void *script_rpc_thread(void *arg)
 {
    script_rpc_server_t *srv = arg;
    struct script_rpc_execution *scope = srv->execution;
+   server_control_scope_t *previous_controls = server_control_scope_bind(scope->controls);
    agent_tools_scope_restore(&scope->tools);
    request_context_restore(&scope->request);
    agent_source_authority_tls_restore(&scope->source);
@@ -424,6 +430,7 @@ static void *script_rpc_thread(void *arg)
    agent_request_cancel_scope_bind(NULL);
    agent_set_durable_job(0);
    request_context_clear();
+   server_control_scope_bind(previous_controls);
    return NULL;
 }
 

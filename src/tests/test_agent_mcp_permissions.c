@@ -1,6 +1,7 @@
 /* Native admission checks preserve permission ceilings through bridge/family
  * resolution. Script handoff checks exercise the real joined RPC dispatcher. */
 #include <aimee/tools/agent_tools.h>
+#include "server_session_control.h"
 #include "../modules/tools/agent_tools_internal.h"
 #include <aimee/protocols/mcp/mcp_tools.h>
 #include <assert.h>
@@ -157,6 +158,7 @@ void test_script_rpc_keeps_permission_scope(void)
 typedef struct
 {
    const char *directory;
+   server_control_scope_t *controls;
    atomic_int cancel, local_cancel;
    int seen, matches, inherited_scope;
 } script_context_fixture_t;
@@ -174,11 +176,12 @@ static int script_context_read(const workspace_provider_t *provider, const char 
    const char *cwd = run_cmd_get_cwd();
    fixture->seen++;
    fixture->matches =
-       !captured && source.active && source.authority == 1 && source.paths &&
-       !strcmp(source.paths, "evidence.txt") && !strcmp(source.root, fixture->directory) &&
-       request && !strcmp(request->principal, "script-context-fixture") &&
-       request->model_execution == 1 && request->capabilities == CAPS_AUTHENTICATED && cwd &&
-       !strcmp(cwd, fixture->directory) && !strcmp(session_id(), "script-context-session") &&
+       server_control_scope_current() == fixture->controls && !captured && source.active &&
+       source.authority == 1 && source.paths && !strcmp(source.paths, "evidence.txt") &&
+       !strcmp(source.root, fixture->directory) && request &&
+       !strcmp(request->principal, "script-context-fixture") && request->model_execution == 1 &&
+       request->capabilities == CAPS_AUTHENTICATED && cwd && !strcmp(cwd, fixture->directory) &&
+       !strcmp(session_id(), "script-context-session") &&
        !strcmp(credentials.vault_principal, "webuser:script-context-fixture") &&
        !credentials.codex_token[0] && !credentials.api_key[0] && !credentials.claude_token[0] &&
        workspace_provider_active() == provider && agent_get_request_cancel() == &fixture->cancel;
@@ -232,6 +235,10 @@ static void script_rpc_host_context(int inherited_scope)
    session_id_set_override("script-context-session");
    agent_source_authority_tls_set(1, directory, "evidence.txt");
    agent_set_request_cancel(&fixture.cancel);
+   fixture.controls = server_control_scope_open("script-context-session", "script-turn",
+                                                "webuser:script-context-fixture");
+   assert(fixture.controls);
+   server_control_scope_t *previous_controls = server_control_scope_bind(fixture.controls);
    char *result =
        tool_execute_script("python",
                            "import json, aimee_tools\n"
@@ -245,6 +252,9 @@ static void script_rpc_host_context(int inherited_scope)
    assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "cancelled")));
    assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "timed_out")));
    assert(fixture.seen == 1 && fixture.matches);
+   assert(server_control_scope_current() == fixture.controls);
+   server_control_scope_close(fixture.controls);
+   server_control_scope_bind(previous_controls);
    assert(atomic_load(&fixture.cancel) == !inherited_scope);
    assert(atomic_load(&fixture.local_cancel) == inherited_scope);
    const request_context_t *unchanged = request_context_get();
