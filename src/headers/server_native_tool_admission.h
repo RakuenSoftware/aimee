@@ -8,4 +8,9 @@
  * writes the refusal detail. Does not grant effect or human authorization. */
 const char *server_native_tool_admit(const char *tool, const cJSON *arguments, const char *session,
                                      char *error, size_t error_capacity);
+/* Host-supplied logical attempt after independently verified original-source
+ * claiming. Never pass SDK/model idempotency fields here. */
+const char *server_native_tool_admit_attempt(const char *tool, const cJSON *arguments,
+                                             const char *session, const char *attempt, char *error,
+                                             size_t error_capacity);
 #endif

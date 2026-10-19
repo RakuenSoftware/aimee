@@ -8,7 +8,7 @@ typedef struct server_native_tool_source server_native_tool_source_t;
 typedef struct
 {
    aimee_request_t original; /* One original assistant call and its advertised function. */
-   char sequence[32];
+   char sequence[32], digest[65];
    int block_index;
 } server_native_tool_claim_t;
 /* Caller retains the capture until close; no browser connection is retained.

@@ -501,7 +501,7 @@ if(NOT WIN32)
   add_test(NAME test_server_native_tool_admission COMMAND test_server_native_tool_admission)
   add_executable(test_server_native_runtime test_server_native_runtime.c
     ../server/agent_tools.c ../posix/agent_source_authority.c ../modules/ir/aimee_ir.c
-    ../server/server_native_runtime.c ../server/server_native_tool_source.c ../server/server_session_capture.c ../server/server_session_control.c
+    ../server/server_native_runtime.c ../server/server_native_tool_admission.c ../server/server_session_question.c ../server/server_native_tool_source.c ../server/server_session_capture.c ../server/server_session_control.c
     ../modules/ir/session_event.c ../cli_proxy.c ../server/request_context.c
     ../modules/translation/wire_codec.c
     ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c

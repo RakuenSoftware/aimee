@@ -18,8 +18,9 @@ static const char *refuse(char *error, size_t capacity, const char *reason, cons
    return reason;
 }
 
-const char *server_native_tool_admit(const char *tool, const cJSON *arguments, const char *session,
-                                     char *error, size_t capacity)
+const char *server_native_tool_admit_attempt(const char *tool, const cJSON *arguments,
+                                             const char *session, const char *attempt, char *error,
+                                             size_t capacity)
 {
    if (error && capacity)
       error[0] = 0;
@@ -27,7 +28,7 @@ const char *server_native_tool_admit(const char *tool, const cJSON *arguments, c
    const char *bound_session = session_id();
    if (!agent_tools_scope_isolated() || !owner || !owner->model_execution || !owner->principal[0] ||
        !owner->request_id[0] || !session || !session[0] || !bound_session ||
-       strcmp(session, bound_session))
+       strcmp(session, bound_session) || !attempt || !attempt[0] || strlen(attempt) > 127)
       return refuse(error, capacity, "identity", "native tool execution scope unavailable");
    if (owner->context_refused)
       return refuse(error, capacity, "context", "native tool context was refused");
@@ -55,10 +56,6 @@ const char *server_native_tool_admit(const char *tool, const cJSON *arguments, c
       free(wire);
       return refuse(error, capacity, "directive", detail[0] ? detail : "tool directive refused");
    }
-   /* The callback's random host request id scopes this one attempt. A model's
-    * idempotency/attempt fields cannot borrow a preceding tool's admission. */
-   char attempt[96];
-   snprintf(attempt, sizeof attempt, "native-mcp:%s", owner->request_id);
    aimee_tool_metadata_t metadata;
    char effect[32];
    if (tool_policy_metadata(tool, &metadata, effect, sizeof effect, detail, sizeof detail) != 0)
@@ -78,4 +75,14 @@ const char *server_native_tool_admit(const char *tool, const cJSON *arguments, c
    if (agent_request_cancelled())
       return refuse(error, capacity, "cancelled", "native tool execution cancelled");
    return NULL;
+}
+
+const char *server_native_tool_admit(const char *tool, const cJSON *arguments, const char *session,
+                                     char *error, size_t capacity)
+{
+   const request_context_t *owner = request_context_get();
+   char attempt[96] = "";
+   if (owner && owner->request_id[0])
+      snprintf(attempt, sizeof attempt, "native-mcp:%s", owner->request_id);
+   return server_native_tool_admit_attempt(tool, arguments, session, attempt, error, capacity);
 }

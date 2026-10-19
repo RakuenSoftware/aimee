@@ -335,6 +335,7 @@ int server_native_tool_source_claim(server_native_tool_source_t *source,
    match->claimed = 1;
    snprintf(result.sequence, sizeof result.sequence, "%s", match->last);
    result.block_index = match->index;
+   snprintf(result.digest, sizeof result.digest, "%s", match->digest);
    server_native_tool_claim_free(out);
    *out = result;
    memset(&result, 0, sizeof result);

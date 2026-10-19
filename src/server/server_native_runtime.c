@@ -1,6 +1,9 @@
 /* Native children hold only a lifetime-scoped local capability. Existing HTTP
  * owners admit model/tool requests under the captured actor and registration. */
 #include "server_native_runtime.h"
+#include "server_native_tool_admission.h"
+#include "agent_exec.h"
+#include "agent_coord.h"
 #include <aimee/tools/agent_tools.h>
 #include "agent_source_authority.h"
 #include "agent_tasks.h"
@@ -30,6 +33,7 @@
 
 struct server_native_runtime
 {
+   pthread_t producer;
    server_control_scope_t *controls;
    server_session_capture_t *capture;
    cli_proxy_t *listener;
@@ -327,14 +331,103 @@ static int native_route(const char *method, const char *path, void *context)
           server_http_route_allowed_caps(0, runtime->owner.capabilities, method, path, 0);
 }
 
-static int native_forward(const char *method, const char *path, const char *headers,
+typedef struct
+{
+   const aimee_block_t *call;
+   aimee_block_t *result;
+} native_tool_work_t;
+
+static int native_execute_claimed(server_native_runtime_t *runtime, native_tool_work_t *work)
+{
+   server_native_tool_claim_t claim = {0};
+   aimee_block_t result = {0};
+   char *arguments = NULL, *text = NULL;
+   int rc = -1, is_error = 1;
+   /* This is an explicit host registry binding. Other namespaces, SDK built-ins
+    * and opaque hosted tools cannot acquire this local execution authority. */
+   if (!work->call->tool_namespace || strcmp(work->call->tool_namespace, "aimee") ||
+       server_native_runtime_claim_tool(runtime, work->call, &claim))
+      goto done;
+   const aimee_block_t *original = &claim.original.messages[0].blocks[0];
+   const aimee_tool_t *function =
+       aimee_ir_find_function(&claim.original, original->tool_namespace, original->tool_name);
+   arguments = cJSON_PrintUnformatted(original->tool_input);
+   cJSON *identity = cJSON_CreateObject();
+   int valid = identity &&
+               cJSON_AddStringToObject(identity, "session",
+                                       server_session_capture_session(runtime->capture)) &&
+               cJSON_AddStringToObject(identity, "sequence", claim.sequence) &&
+               cJSON_AddNumberToObject(identity, "block", claim.block_index) &&
+               cJSON_AddStringToObject(identity, "source", claim.digest) &&
+               cJSON_AddStringToObject(identity, "binding", runtime->binding);
+   char *wire = valid ? cJSON_PrintUnformatted(identity) : NULL;
+   cJSON_Delete(identity);
+   char digest[65], attempt[96], detail[512] = "";
+   int hashed = wire ? aimee_sha256_hex(wire, strlen(wire), digest) : -1;
+   free(wire);
+   if (!arguments || !function || hashed)
+      goto done;
+   snprintf(attempt, sizeof attempt, "native-ir:%s", digest);
+   if (tool_validate_ir(function, arguments, detail, sizeof detail))
+      text = strdup(detail[0] ? detail : "tool arguments were refused");
+   else
+   {
+      const char *refusal = server_native_tool_admit_attempt(
+          function->name, original->tool_input, runtime->session, attempt, detail, sizeof detail);
+      if ((refusal && (!strcmp(refusal, "context") || !strcmp(refusal, "cancelled"))) ||
+          agent_request_cancelled() || request_context_get()->context_refused ||
+          !server_session_capture_accepting(runtime->capture))
+         goto done;
+      if (refusal)
+         text = strdup(detail[0] ? detail : "tool policy refused execution");
+      else
+      {
+         agent_tools_set_effect_authorized(1);
+         text = dispatch_tool_call_ir_ctx_status(function, arguments, 120000, &is_error);
+         agent_tools_set_effect_authorized(0);
+         text = policy_annotate_indexed(function->name, arguments, attempt, text);
+      }
+   }
+   /* NULL after dispatch is not evidence that no effect occurred. The durable
+    * governed-action owner retains its outcome; never invent a cancellation. */
+   if (!text)
+      goto done;
+   result.type = AIMEE_BLK_TOOL_RESULT;
+   result.tool_id = strdup(original->tool_id);
+   result.tool_result = cJSON_CreateString(text);
+   result.tool_is_error = is_error;
+   if (!result.tool_id || !result.tool_result)
+      goto done;
+   char message_id[96];
+   snprintf(message_id, sizeof message_id, "native-tool:%s:%d", claim.sequence, claim.block_index);
+   aimee_message_t message = {.role = "tool", .blocks = &result, .n_blocks = 1};
+   aimee_session_event_t event = {
+       .kind = AIMEE_SESSION_MESSAGE, .message_id = message_id, .message = &message};
+   if (aimee_ir_session_emit(&event))
+      goto done;
+   aimee_block_free_contents(work->result);
+   *work->result = result;
+   memset(&result, 0, sizeof result);
+   rc = 0;
+done:
+   agent_tools_set_effect_authorized(0);
+   if (rc)
+      server_session_capture_fail(runtime->capture);
+   free(arguments);
+   free(text);
+   aimee_block_free_contents(&result);
+   server_native_tool_claim_free(&claim);
+   return rc;
+}
+
+static int native_perform(const char *method, const char *path, const char *headers,
                           const void *body, unsigned long length, const char *session,
-                          const cli_proxy_io_t *io, void *context)
+                          const cli_proxy_io_t *io, void *context, native_tool_work_t *work)
 {
    /* The listener admits protocol headers only, never identity or credentials. */
    server_native_runtime_t *runtime = context;
    if (!session || strcmp(session, runtime->session) || length > 4u * 1024u * 1024u ||
-       !native_route(method, path, runtime) ||
+       (!work && !native_route(method, path, runtime)) ||
        (runtime->capture && !server_session_capture_accepting(runtime->capture)))
       return -1;
    db1_server_session_t source;
@@ -354,7 +447,7 @@ static int native_forward(const char *method, const char *path, const char *head
       server_session_capture_fail(runtime->capture);
       return -1;
    }
-   int model_request = !strcmp(method, "POST") && (strncmp(path, "/v1/mcp/", 8) != 0);
+   int model_request = !work && !strcmp(method, "POST") && (strncmp(path, "/v1/mcp/", 8) != 0);
    /* Model state requires the actual selected Vault source's stable lineage.
     * Unsupported credential sources cannot borrow a default account. */
    if (model_request && !runtime->replay)
@@ -365,7 +458,7 @@ static int native_forward(const char *method, const char *path, const char *head
    if (length)
       memcpy(input, body, (size_t)length);
    input[length] = 0;
-   if (!model_request && !strcmp(method, "POST"))
+   if (!work && !model_request && !strcmp(method, "POST"))
    {
       /* Session and project scope are host identity, even inside the MCP body.
        * Tool arguments remain intact; exact numeric spelling is retained. */
@@ -433,7 +526,7 @@ static int native_forward(const char *method, const char *path, const char *head
       snprintf(previous_session, sizeof previous_session, "%s", session_id());
    server_session_capture_t *previous_capture = server_session_capture_bind(runtime->capture);
    server_control_scope_t *previous_controls =
-       server_control_scope_bind(!strncmp(path, "/v1/mcp/", 8) ? runtime->controls : NULL);
+       server_control_scope_bind(work || !strncmp(path, "/v1/mcp/", 8) ? runtime->controls : NULL);
    agent_tools_scope_restore(&runtime->tools);
    agent_tools_set_effect_authorized(0);
    agent_source_authority_tls_restore(&bound_source);
@@ -496,12 +589,14 @@ static int native_forward(const char *method, const char *path, const char *head
                                               current.account_id);
       }
    }
+   atomic_int *previous_cancel = agent_get_request_cancel();
    native_cancellation_t watch = {.io = io};
    pthread_t monitor;
    if (pthread_create(&monitor, NULL, native_cancel_watch, &watch))
       goto restore;
    agent_set_request_cancel(&watch.cancelled);
-   anthropic_http_capture_request_headers(headers);
+   if (!work)
+      anthropic_http_capture_request_headers(headers);
    void *previous_sink_context = NULL;
    aimee_ir_session_sink_fn previous_sink = aimee_ir_session_get_sink(&previous_sink_context);
    int previous_failed = aimee_ir_session_capture_failed();
@@ -517,8 +612,13 @@ static int native_forward(const char *method, const char *path, const char *head
           runtime->owns_request ? (void *)&request_owner : (void *)runtime->replay);
       aimee_ir_session_set_sink(native_model_capture, &model_capture);
    }
-   io->response_started(io->context);
-   rc = server_http_native_forward(io->downstream_fd, method, path, input, (int)length);
+   if (work)
+      rc = native_execute_claimed(runtime, work);
+   else
+   {
+      io->response_started(io->context);
+      rc = server_http_native_forward(io->downstream_fd, method, path, input, (int)length);
+   }
    if (aimee_ir_session_capture_failed())
       server_session_capture_fail(runtime->capture);
    if (model_request)
@@ -534,8 +634,9 @@ static int native_forward(const char *method, const char *path, const char *head
    free(model_capture.source_message);
    atomic_store(&watch.finished, 1);
    pthread_join(monitor, NULL);
-   agent_set_request_cancel(NULL);
-   anthropic_http_capture_request_headers(NULL);
+   agent_set_request_cancel(previous_cancel);
+   if (!work)
+      anthropic_http_capture_request_headers(NULL);
 restore:
    OPENSSL_cleanse(&current_claude, sizeof current_claude);
    OPENSSL_cleanse(&current_api, sizeof current_api);
@@ -564,6 +665,55 @@ restore:
    return rc;
 }
 
+static int native_forward(const char *method, const char *path, const char *headers,
+                          const void *body, unsigned long length, const char *session,
+                          const cli_proxy_io_t *io, void *context)
+{
+   return native_perform(method, path, headers, body, length, session, io, context, NULL);
+}
+
+typedef struct
+{
+   server_native_runtime_t *runtime;
+   const atomic_int *flag;
+   const agent_request_cancel_scope_t *scope;
+} native_tool_cancel_t;
+static int native_tool_cancelled(void *context)
+{
+   native_tool_cancel_t *cancel = context;
+   if (!server_session_capture_accepting(cancel->runtime->capture) ||
+       (cancel->flag && atomic_load(cancel->flag)))
+      return 1;
+   for (const agent_request_cancel_scope_t *scope = cancel->scope; scope; scope = scope->parent)
+      if (scope->flag && atomic_load(scope->flag))
+         return 1;
+   return 0;
+}
+int server_native_runtime_execute_tool(const aimee_block_t *call, aimee_block_t *result,
+                                       void *context)
+{
+   server_native_runtime_t *runtime = context;
+   const request_context_t *owner = request_context_get();
+   const char *cwd = run_cmd_get_cwd();
+   if (!runtime || !runtime->owns_request || !(runtime->owner.capabilities & CAP_TOOL_EXECUTE) ||
+       !call || !result || !pthread_equal(runtime->producer, pthread_self()) ||
+       server_session_capture_current() != runtime->capture || !aimee_ir_session_get_sink(NULL) ||
+       aimee_ir_session_capture_failed() || !owner ||
+       strcmp(owner->vault_principal, runtime->owner.vault_principal) ||
+       strcmp(owner->principal, runtime->owner.principal) ||
+       workspace_provider_active() != runtime->workspace || strcmp(cwd ? cwd : "", runtime->cwd) ||
+       agent_request_cancelled())
+      return -1;
+   native_tool_cancel_t cancel = {.runtime = runtime,
+                                  .flag = agent_get_request_cancel(),
+                                  .scope = agent_request_cancel_scope_current()};
+   cli_proxy_io_t io = {
+       .downstream_fd = -1, .context = &cancel, .cancelled = native_tool_cancelled};
+   native_tool_work_t work = {.call = call, .result = result};
+   return native_perform("CALL", "/native/tool", NULL, NULL, 0, runtime->session, &io, runtime,
+                         &work);
+}
+
 static server_native_runtime_t *native_runtime_open(const agent_t *selected,
                                                     const request_context_t *owner,
                                                     const char *session_id,
@@ -581,6 +731,7 @@ static server_native_runtime_t *native_runtime_open(const agent_t *selected,
    server_native_runtime_t *runtime = calloc(1, sizeof *runtime);
    if (!runtime)
       return NULL;
+   runtime->producer = pthread_self();
    runtime->selected = *selected;
    runtime->owner = *owner;
    runtime->owner.model_execution = 1;

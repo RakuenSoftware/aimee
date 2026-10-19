@@ -43,6 +43,12 @@ server_native_runtime_t *server_native_runtime_open_request(const agent_t *selec
 int server_native_runtime_claim_tool(server_native_runtime_t *runtime,
                                      const aimee_block_t *proposed,
                                      server_native_tool_claim_t *out);
+/* Synchronous typed SDK callback on the creating producer thread, while its
+ * capture, browser sink and workspace lease remain bound. Uses source-owned
+ * arguments/catalog and existing supervised policy/effect/receipt owners.
+ * Commits the actual result before returning it. No worker borrows the sink. */
+int server_native_runtime_execute_tool(const aimee_block_t *call, aimee_block_t *result,
+                                       void *runtime);
 const char *server_native_runtime_url(const server_native_runtime_t *runtime);
 const char *server_native_runtime_token(const server_native_runtime_t *runtime);
 const char *server_native_runtime_binding(const server_native_runtime_t *runtime);

@@ -36,9 +36,10 @@ Published `c77cc0492` completed all 50 main CI jobs, including all Docker tiers
 and identity mint, with two unchanged testing-target platform skips. Export,
 audit, fuzz, release and strict attribution workflows also passed. Published
 `118f06bb2` adds host-turn generation/source claims and actual-catalog admission;
-its fresh CI has no failures, with T2 and T3 still running at this checkpoint.
-The original-call readback/claim increment below is locally qualified and not
-yet published. It does not activate native SDK execution.
+it subsequently completed all 50 main CI jobs and every auxiliary workflow,
+with the same two platform skips. Original-call readback/claim is published
+as `a94bd79ea`; its fresh CI has no failures at this checkpoint, with deployment
+tiers still running. It does not activate native SDK execution.
 
 Installed CLI probes correctly resolve `aimee` and `wol-lore` from their own
 workspaces without an explicit project override; newer native callback cwd binding
@@ -3255,3 +3256,49 @@ sources. PostgreSQL 18 integration passes 167/167 with the same 26 service skips
 All 76 final lint gates pass. Supervised dispatch, source/effect admission synchronization, credential-free
 attested launch and SDK observation suppression remain unfinished; a source
 readback/claim alone does not authorize an effect or attest a launch.
+
+
+## Verified native tool execution through existing supervised owners
+
+The synchronous host SDK callback now consumes a verified once-only original call,
+uses its exact advertised function/schema and original arguments, and invokes the
+existing permission, directive, metadata and execution-policy owners before the
+canonical dispatcher. Its logical attempt binds the committed source prefix,
+sequence/block, session and account/model binding; SDK idempotency fields confer
+no authority. Only the explicit `aimee` namespace binds to the host registry.
+The callback also requires the captured tool-execution capability.
+
+It reuses the runtime's authority setup/restore path, including fresh Vault lineage,
+actor/model/tools, source overlay, delegate scope, workspace, cwd and durable job.
+The producer's existing cancellation flag and immutable cancellation scopes are
+restored after the nested call. Protocol capture state stays untouched. The callback
+runs synchronously on its creator, with its held capture, sink and workspace still
+bound; workers cannot borrow the browser sink. Standard durable host questions
+use the retained control owner. The GUI's independent canonical EventSource keeps
+reading those requests while execution waits for a reply.
+
+Effect authorization is set only around the existing admitted dispatcher. Actual
+results retain the tool owner's status and are durably emitted with a source-bound
+message ID before return to the SDK. Ordinary permission/policy refusals become
+error results without dispatch. Cancellation or context revocation fails the
+capture. If a result cannot be retained after dispatch, execution fails without
+inventing a cancellation or retrying the effect; the governed-action owner remains
+the only durable permit/outcome store. The legacy MCP admission entry still uses
+its existing host-request nonce; its successful behavior is preserved.
+
+Focused cases cover exact 30-digit arguments, permission/policy denial, a real
+recorded host question/reply before dispatch, actual tool-error status, absent
+execution capability, cancellation and context revocation during policy, wrong
+producer thread, restored parent state, duplicate calls and capture/annotation
+failure after a dispatch. Three ASan/UBSan fixtures, the runtime ThreadSanitizer
+fixture, three CMake/CTest owners and Cppcheck on five C sources (zero diagnostics)
+pass. The normal server build and all 657 native suite entries pass.
+PostgreSQL 18 integration passes 167/167 with the same 26 service skips.
+All 76 final lint gates pass.
+
+This callback is not yet wired at SDK launch sites. Credential-free attested launch,
+SDK observation suppression, live Claude custody/source binding, unresolved-effect
+history reconciliation and remaining IR/learning consumers remain unfinished.
+The generic legacy history repair's cancelled/timed-out placeholder is not a
+source receipt for an effect whose result could not be recorded; resolve that
+consumer before native activation. No production promotion occurred.
