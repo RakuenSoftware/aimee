@@ -13,6 +13,8 @@
 
 pub mod client;
 pub mod error;
+mod layout;
+pub mod module_caller;
 pub mod module_protocol;
 pub mod module_runtime;
 mod region;

@@ -2,6 +2,7 @@ package bus
 
 import (
 	"bytes"
+	"encoding/binary"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -149,6 +150,127 @@ func TestCrossLanguageConformance(t *testing.T) {
 	pollFor(func(ev Event) bool { return ev.Frame.EventKind == KIND_CANCEL_ACK }, "cancel ack")
 	t.Log("cancel delivered to the server ok")
 
+	// 4b. Arena across the process boundary (D12): the C side leases and fills
+	// an arena span and publishes it; this Go client reads it through the lease
+	// view, returns the ref on its next poll, and the C side confirms the lease
+	// drained.
+	if !c.ArenaReadable() {
+		t.Fatal("the C host must advertise the lease view")
+	}
+	const arenaLen = 5000
+	var ask [4]byte
+	binary.LittleEndian.PutUint32(ask[:], arenaLen)
+	if err := c.Request(KIND_ARENA_ASK, 0xA1, ask[:]); err != nil {
+		t.Fatalf("request arena: %v", err)
+	}
+	var data Event
+	sawData, sawReply := false, false
+	for !(sawData && sawReply) {
+		ev := pollFor(func(ev Event) bool {
+			return ev.Frame.EventKind == KIND_ARENA_DATA || ev.Frame.EventKind == KIND_ARENA_ASK
+		}, "arena data and ask reply")
+		if ev.Frame.EventKind == KIND_ARENA_ASK {
+			if len(ev.Payload) != 1 || ev.Payload[0] != 0 {
+				t.Fatalf("arena ask refused by the C side: %v", ev.Payload)
+			}
+			sawReply = true
+			continue
+		}
+		data = ev
+		if data.Frame.HdrFlags&FArena == 0 || len(data.Payload) != arenaLen {
+			t.Fatalf("arena data: flags=0x%x len=%d", data.Frame.HdrFlags, len(data.Payload))
+		}
+		for i, b := range data.Payload {
+			if b != byte(i*7+3) {
+				t.Fatalf("arena byte %d = %d", i, b)
+			}
+		}
+		sawData = true
+	}
+	// The next poll returns the ref; then ask the C side what is still live.
+	if _, _, err := c.Poll(); err != nil {
+		t.Fatalf("poll to release: %v", err)
+	}
+	if err := c.Request(KIND_ARENA_STATS, 0xA2, nil); err != nil {
+		t.Fatalf("request stats: %v", err)
+	}
+	stats := pollFor(func(ev Event) bool {
+		return ev.Frame.EventKind == KIND_ARENA_STATS && ev.Frame.HdrFlags&FReply != 0
+	}, "arena stats")
+	if len(stats.Payload) != 4 || binary.LittleEndian.Uint32(stats.Payload) != 0 {
+		t.Fatalf("lease still live after release: %v", stats.Payload)
+	}
+	t.Log("arena payload read across the process boundary and released ok")
+
+	// 4c. Arena-placed requests and replies: this client serves an arena
+	// REQUEST the C side sends it, and reads an arena REPLY to its own request.
+	patternOK := func(p []byte, n int) bool {
+		if len(p) != n {
+			return false
+		}
+		for i, b := range p {
+			if b != byte(i*7+3) {
+				return false
+			}
+		}
+		return true
+	}
+	noLiveLease := func(corr uint64, what string) {
+		if _, _, err := c.Poll(); err != nil { // returns the last arena ref
+			t.Fatalf("%s: poll: %v", what, err)
+		}
+		if err := c.Request(KIND_ARENA_STATS, corr, nil); err != nil {
+			t.Fatalf("%s: stats: %v", what, err)
+		}
+		st := pollFor(func(ev Event) bool {
+			return ev.Frame.EventKind == KIND_ARENA_STATS && ev.Frame.HdrFlags&FReply != 0
+		}, "arena stats")
+		if len(st.Payload) != 4 || binary.LittleEndian.Uint32(st.Payload) != 0 {
+			t.Fatalf("%s: lease still live: %v", what, st.Payload)
+		}
+	}
+	for _, n := range []uint32{193, 60000} {
+		var ask [4]byte
+		binary.LittleEndian.PutUint32(ask[:], n)
+		if err := c.Request(KIND_ARENA_SERVE_ASK, 0xA300+uint64(n), ask[:]); err != nil {
+			t.Fatalf("serve ask: %v", err)
+		}
+		req := pollFor(func(ev Event) bool {
+			return ev.Frame.EventKind == KIND_ARENA_SERVE && ev.Frame.HdrFlags&FRequest != 0
+		}, "arena request")
+		if req.Frame.HdrFlags&FArena == 0 {
+			t.Fatal("the request is not arena-placed")
+		}
+		verdict := byte(0)
+		if patternOK(req.Payload, int(n)) {
+			verdict = 1
+		}
+		if err := c.Reply(KIND_ARENA_SERVE, req.Frame.CorrelationID, []byte{verdict}); err != nil {
+			t.Fatalf("reply to arena request: %v", err)
+		}
+		ans := pollFor(func(ev Event) bool {
+			return ev.Frame.EventKind == KIND_ARENA_SERVE_ASK && ev.Frame.HdrFlags&FReply != 0
+		}, "serve verdict")
+		if ans.Frame.CorrelationID != 0xA300+uint64(n) || len(ans.Payload) != 1 || ans.Payload[0] != 1 {
+			t.Fatalf("len %d: served arena request verdict %v", n, ans.Payload)
+		}
+		noLiveLease(0xA400+uint64(n), "served request")
+
+		binary.LittleEndian.PutUint32(ask[:], n)
+		if err := c.Request(KIND_ARENA_REPLY_ASK, 0xA500+uint64(n), ask[:]); err != nil {
+			t.Fatalf("reply ask: %v", err)
+		}
+		rep := pollFor(func(ev Event) bool {
+			return ev.Frame.EventKind == KIND_ARENA_REPLY_ASK && ev.Frame.HdrFlags&FReply != 0
+		}, "arena reply")
+		if rep.Frame.CorrelationID != 0xA500+uint64(n) || rep.Frame.HdrFlags&FArena == 0 ||
+			!patternOK(rep.Payload, int(n)) {
+			t.Fatalf("len %d: arena reply flags=0x%x len=%d", n, rep.Frame.HdrFlags, len(rep.Payload))
+		}
+		noLiveLease(0xA600+uint64(n), "arena reply")
+	}
+	t.Log("arena requests and replies served and read across the process boundary ok")
+
 	// 5. Reaped-client recovery: this Go client detaches; the host reaps it and
 	// frees its slot. A fresh Go client then attaches into that slot and works —
 	// proving recovery across the language boundary.
@@ -211,9 +333,16 @@ func TestCrossLanguageConformance(t *testing.T) {
 
 const (
 	// Kinds must match bus_conformance_host.c.
-	KIND_NOTIFY     uint32 = 1000
-	KIND_ACK        uint32 = 1001
-	KIND_ECHO       uint32 = 1002
-	KIND_NOSERVER   uint32 = 1003
-	KIND_CANCEL_ACK uint32 = 1004
+	KIND_NOTIFY      uint32 = 1000
+	KIND_ACK         uint32 = 1001
+	KIND_ECHO        uint32 = 1002
+	KIND_NOSERVER    uint32 = 1003
+	KIND_CANCEL_ACK  uint32 = 1004
+	KIND_ARENA_ASK   uint32 = 1005
+	KIND_ARENA_DATA  uint32 = 1006
+	KIND_ARENA_STATS uint32 = 1007
+
+	KIND_ARENA_SERVE_ASK uint32 = 1008
+	KIND_ARENA_SERVE     uint32 = 1009
+	KIND_ARENA_REPLY_ASK uint32 = 1010
 )

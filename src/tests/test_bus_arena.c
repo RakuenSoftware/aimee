@@ -334,6 +334,100 @@ static void test_capacity_stress(void)
    printf("  capacity stress: %u leases, alternating free, no overflow\n", n);
 }
 
+/* D12: the allocator mirrors each lease into the client-visible view at alloc,
+ * generation stored last, and retires the entry (generation 0) at reclaim. */
+static void test_view_mirror(void)
+{
+   bus_arena_t *a = make(64 * 1024, 8, 16);
+   static bus_lease_view_t view[BUS_LEASE_VIEW_SLOTS];
+   memset(view, 0, sizeof view);
+   bus_arena_set_view(a, view);
+
+   uint32_t id = 0;
+   must_result(bus_arena_alloc(a, 0, 1000, &id), BUS_ARENA_OK, "alloc");
+   bus_arena_ref_t ref;
+   must_result(bus_arena_ref(a, id, &ref), BUS_ARENA_OK, "ref");
+   must(atomic_load(&view[id].generation) == ref.generation && ref.generation != 0,
+        "generation mirrored, never 0 for a live lease");
+   must(atomic_load(&view[id].offset) == ref.offset, "offset mirrored");
+   must(atomic_load(&view[id].len) == ref.len, "len mirrored");
+
+   uint64_t off = 0;
+   must(bus_lease_view_resolve(view, id, ref.generation, 1000, 64 * 1024, &off) == BUS_REGION_OK &&
+            off == ref.offset,
+        "a client resolves the lease from the view");
+
+   uint8_t obs = 1;
+   must_result(bus_arena_publish(a, id, &obs, 1), BUS_ARENA_OK, "publish to slot 1");
+   must(atomic_load(&view[id].generation) == ref.generation, "live while a consumer holds it");
+   must_result(bus_arena_release(a, id, ref.generation, 1), BUS_ARENA_OK, "release");
+   must(atomic_load(&view[id].generation) == 0, "retired at reclaim");
+
+   uint32_t again = 0;
+   must_result(bus_arena_alloc(a, 0, 1000, &again), BUS_ARENA_OK, "reuse");
+   must(again == id && atomic_load(&view[id].generation) == ref.generation + 1,
+        "reuse publishes a fresh generation");
+   must(bus_lease_view_resolve(view, id, ref.generation, 1000, 64 * 1024, &off) ==
+            BUS_REGION_ERR_GEOMETRY,
+        "a stale frame cannot resolve the reused lease");
+
+   /* Generation wraps past UINT32_MAX to 1, never 0: 0 is the view's "retired"
+    * marker, so a live lease must never carry it. */
+   uint8_t holder = 1;
+   must_result(bus_arena_publish(a, again, &holder, 1), BUS_ARENA_OK, "publish the reuse");
+   must_result(bus_arena_release(a, again, ref.generation + 1, 1), BUS_ARENA_OK, "release reuse");
+   a->leases[id].generation = UINT32_MAX;
+   uint32_t wrapped = 0;
+   must_result(bus_arena_alloc(a, 0, 1000, &wrapped), BUS_ARENA_OK, "reuse at the wrap");
+   must(wrapped == id, "same table slot");
+   must_result(bus_arena_ref(a, id, &ref), BUS_ARENA_OK, "ref after wrap");
+   must(ref.generation == 1 && atomic_load(&view[id].generation) == 1,
+        "the generation wraps to 1, skipping 0");
+   must(bus_lease_view_resolve(view, id, 0, 1000, 64 * 1024, &off) == BUS_REGION_ERR_ARG,
+        "generation 0 never resolves");
+   must(bus_lease_view_resolve(view, BUS_LEASE_VIEW_SLOTS, 1, 1000, 64 * 1024, &off) ==
+            BUS_REGION_ERR_GEOMETRY,
+        "a lease id past the view never resolves");
+   bus_arena_set_view(a, NULL);
+   printf("  view mirror: placement published at alloc, retired at reclaim (D12)\n");
+}
+
+/* bus_arena_holds and bus_arena_cancel_by: the reference, and the producer, are
+ * what entitle a delivery and a reclaim, not a slot number. */
+static void test_holds_and_cancel_by(void)
+{
+   bus_arena_t *a = make(64 * 1024, 8, 16);
+   uint32_t id = 0;
+   must_result(bus_arena_alloc(a, 2, 500, &id), BUS_ARENA_OK, "alloc by slot 2");
+   bus_arena_ref_t ref;
+   must_result(bus_arena_ref(a, id, &ref), BUS_ARENA_OK, "ref");
+   must_result(bus_arena_cancel_by(a, id, ref.generation, 3), BUS_ARENA_ERR_NOTHOLDER,
+               "another slot cannot reclaim it");
+   must_result(bus_arena_cancel_by(a, id, ref.generation + 1, 2), BUS_ARENA_ERR_STALE,
+               "a stale generation cannot reclaim it");
+   must(bus_arena_live_leases(a, 2) == 1, "still live");
+   must_result(bus_arena_cancel_by(a, id, ref.generation, 2), BUS_ARENA_OK, "its producer can");
+   must(bus_arena_live_leases(a, 2) == 0, "reclaimed");
+
+   must_result(bus_arena_alloc(a, 2, 500, &id), BUS_ARENA_OK, "alloc again");
+   must_result(bus_arena_ref(a, id, &ref), BUS_ARENA_OK, "ref");
+   uint8_t obs[] = {4, 5};
+   must_result(bus_arena_publish(a, id, obs, 2), BUS_ARENA_OK, "publish to 4 and 5");
+   must(bus_arena_holds(a, id, ref.generation, 4) && bus_arena_holds(a, id, ref.generation, 5),
+        "both consumers hold it");
+   must(!bus_arena_holds(a, id, ref.generation, 6), "a bystander does not");
+   must(!bus_arena_holds(a, id, ref.generation + 1, 4), "not at another generation");
+   must(!bus_arena_holds(a, id, ref.generation, 99), "an out-of-range slot holds nothing");
+   bus_arena_reap_consumer(a, 4);
+   must(!bus_arena_holds(a, id, ref.generation, 4), "reap drops slot 4's reference");
+   must(bus_arena_holds(a, id, ref.generation, 5), "slot 5's survives");
+   must_result(bus_arena_cancel_by(a, id, ref.generation, 2), BUS_ARENA_ERR_STATE,
+               "a published lease is the consumers', not the producer's");
+   must_result(bus_arena_release(a, id, ref.generation, 5), BUS_ARENA_OK, "release");
+   must(!bus_arena_holds(a, id, ref.generation, 5), "nothing held after reclaim");
+   printf("  holds / cancel_by: entitlement is the reference and the producer\n");
+}
+
 int main(void)
 {
    printf("test_bus_arena:\n");
@@ -345,6 +439,8 @@ int main(void)
    test_reap_consumer_recovers();
    test_no_fragmentation();
    test_capacity_stress();
+   test_view_mirror();
+   test_holds_and_cancel_by();
    printf("test_bus_arena: OK\n");
    return 0;
 }

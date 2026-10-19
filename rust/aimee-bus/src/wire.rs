@@ -45,6 +45,12 @@ pub const KIND_OVERFLOW: u32 = 5;
 pub const KIND_PRODUCER_REAPED: u32 = 6;
 pub const KIND_EPOCH_CHANGE: u32 = 7;
 pub const KIND_CAPABILITY_DENIED: u32 = 8;
+/// Client -> host (D12): return an arena consumer ref. A control-class
+/// notification whose inline payload is [`LEASE_RELEASE_LEN`] bytes: lease id
+/// then generation, both u32 little-endian. The host consumes it.
+pub const KIND_LEASE_RELEASE: u32 = 9;
+/// Inline payload length of a [`KIND_LEASE_RELEASE`] event.
+pub const LEASE_RELEASE_LEN: usize = 8;
 pub const KIND_MODULE_BASE: u32 = 256;
 
 /// A decoded event header.

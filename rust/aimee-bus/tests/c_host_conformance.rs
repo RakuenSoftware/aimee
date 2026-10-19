@@ -7,7 +7,7 @@
 //! `scripts/test_bus_rust_conformance.sh` builds it and runs this with
 //! `--ignored`, so in CI it cannot be skipped silently.
 
-use aimee_bus::wire::{F_REPLY, KIND_CAPABILITY_ABSENT};
+use aimee_bus::wire::{F_REPLY, F_REQUEST, KIND_CAPABILITY_ABSENT};
 use aimee_bus::{BusError, Client, Event};
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
@@ -21,6 +21,32 @@ const KIND_ACK: u32 = 1001;
 const KIND_ECHO: u32 = 1002;
 const KIND_NOSERVER: u32 = 1003;
 const KIND_CANCEL_ACK: u32 = 1004;
+const KIND_ARENA_ASK: u32 = 1005;
+const KIND_ARENA_DATA: u32 = 1006;
+const KIND_ARENA_STATS: u32 = 1007;
+const KIND_ARENA_SERVE_ASK: u32 = 1008;
+const KIND_ARENA_SERVE: u32 = 1009;
+const KIND_ARENA_REPLY_ASK: u32 = 1010;
+
+fn pattern_ok(payload: &[u8], len: u32) -> bool {
+    payload.len() == len as usize
+        && payload
+            .iter()
+            .enumerate()
+            .all(|(i, b)| *b == (i as u32 * 7 + 3) as u8)
+}
+
+fn assert_no_live_lease(c: &Client, corr: u64, what: &str) {
+    c.request(KIND_ARENA_STATS, corr, &[]).unwrap();
+    let stats = poll_for(c, "arena stats", |e| {
+        e.frame.event_kind == KIND_ARENA_STATS && e.frame.hdr_flags & F_REPLY != 0
+    });
+    assert_eq!(
+        stats.payload,
+        0u32.to_le_bytes(),
+        "{what}: the lease drained"
+    );
+}
 
 struct Harness {
     child: Child,
@@ -138,6 +164,95 @@ fn rust_client_against_c_host() {
     c.request(KIND_ECHO, 0x5151, b"to-cancel").unwrap();
     c.cancel(KIND_ECHO, 0x5151).unwrap();
     poll_for(&c, "cancel ack", |e| e.frame.event_kind == KIND_CANCEL_ACK);
+
+    // 4b. Arena across the process boundary (D12). The C side leases and
+    // fills a span and publishes it; this client reads it through the lease
+    // view and returns the ref; the C side then reports no live lease.
+    assert!(c.arena_readable(), "the C host advertises the lease view");
+    for len in [1u32, 193, 5000, 60_000] {
+        c.request(KIND_ARENA_ASK, 0xA100 + u64::from(len), &len.to_le_bytes())
+            .unwrap();
+        let (mut data, mut replied) = (None, false);
+        while data.is_none() || !replied {
+            let ev = poll_for(&c, "arena data or ask reply", |e| {
+                e.frame.event_kind == KIND_ARENA_DATA || e.frame.event_kind == KIND_ARENA_ASK
+            });
+            if ev.frame.event_kind == KIND_ARENA_ASK {
+                assert_eq!(ev.payload, [0], "the C side leased and published");
+                replied = true;
+            } else {
+                data = Some(ev);
+            }
+        }
+        let data = data.unwrap();
+        assert_ne!(data.frame.hdr_flags & aimee_bus::wire::F_ARENA, 0);
+        assert_eq!(data.payload.len(), len as usize, "len {len}");
+        assert!(
+            data.payload
+                .iter()
+                .enumerate()
+                .all(|(i, b)| *b == (i as u32 * 7 + 3) as u8),
+            "len {len}: the producer's bytes"
+        );
+        assert_eq!(c.pending_releases(), 0, "the ref went back at once");
+        c.request(KIND_ARENA_STATS, 0xA200 + u64::from(len), &[])
+            .unwrap();
+        let stats = poll_for(&c, "arena stats", |e| {
+            e.frame.event_kind == KIND_ARENA_STATS && e.frame.hdr_flags & F_REPLY != 0
+        });
+        assert_eq!(
+            stats.payload,
+            0u32.to_le_bytes(),
+            "len {len}: the lease drained"
+        );
+    }
+
+    // 4c. Arena-placed requests and replies across the boundary. The host
+    // routes them point-to-point; this client serves an arena REQUEST the C
+    // side sends it, and reads an arena REPLY to its own request.
+    for len in [193u32, 60_000] {
+        let ask = 0xA300 + u64::from(len);
+        c.request(KIND_ARENA_SERVE_ASK, ask, &len.to_le_bytes())
+            .unwrap();
+        let req = poll_for(&c, "arena request", |e| {
+            e.frame.event_kind == KIND_ARENA_SERVE && e.frame.hdr_flags & F_REQUEST != 0
+        });
+        assert_ne!(
+            req.frame.hdr_flags & aimee_bus::wire::F_ARENA,
+            0,
+            "arena-placed"
+        );
+        let verdict = u8::from(pattern_ok(&req.payload, len));
+        c.reply(KIND_ARENA_SERVE, req.frame.correlation_id, &[verdict])
+            .unwrap();
+        let answer = poll_for(&c, "serve verdict", |e| {
+            e.frame.event_kind == KIND_ARENA_SERVE_ASK && e.frame.hdr_flags & F_REPLY != 0
+        });
+        assert_eq!(
+            (answer.frame.correlation_id, answer.payload.as_slice()),
+            (ask, &[1u8][..]),
+            "len {len}: the served arena request carried the producer's bytes"
+        );
+        assert_no_live_lease(&c, 0xA400 + u64::from(len), "served request");
+
+        let ask = 0xA500 + u64::from(len);
+        c.request(KIND_ARENA_REPLY_ASK, ask, &len.to_le_bytes())
+            .unwrap();
+        let reply = poll_for(&c, "arena reply", |e| {
+            e.frame.event_kind == KIND_ARENA_REPLY_ASK && e.frame.hdr_flags & F_REPLY != 0
+        });
+        assert_eq!(reply.frame.correlation_id, ask, "correlated to our request");
+        assert_ne!(
+            reply.frame.hdr_flags & aimee_bus::wire::F_ARENA,
+            0,
+            "arena-placed"
+        );
+        assert!(
+            pattern_ok(&reply.payload, len),
+            "len {len}: the reply's bytes"
+        );
+        assert_no_live_lease(&c, 0xA600 + u64::from(len), "arena reply");
+    }
 
     // 5. Oversized and uncorrelated emits are refused locally, not sent.
     assert!(matches!(

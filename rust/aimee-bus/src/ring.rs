@@ -10,15 +10,12 @@ use crate::error::BusError;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-pub(crate) const RING_MAGIC: u32 = 0x474e_4952; // "RING"
-const OFF_SLOT: usize = 4;
-const OFF_CAP: usize = 8;
-const OFF_MASK: usize = 12;
-const OFF_SLOTS: usize = 16;
-const OFF_HEAD: usize = 64;
-const OFF_TAIL: usize = 128;
-/// Byte offset of the slot array, and the size of the ring header.
-pub(crate) const RING_HDR: usize = 192;
+pub(crate) use crate::layout::{RING_HDR, RING_MAGIC};
+use crate::layout::{
+    RING_OFF_CAP as OFF_CAP, RING_OFF_HEAD as OFF_HEAD, RING_OFF_MAGIC as OFF_MAGIC,
+    RING_OFF_MASK as OFF_MASK, RING_OFF_SLOT as OFF_SLOT, RING_OFF_SLOTS as OFF_SLOTS,
+    RING_OFF_TAIL as OFF_TAIL,
+};
 
 /// Bytes a ring of this geometry occupies.
 pub(crate) fn ring_bytes(slot_size: u32, capacity: u32) -> usize {
@@ -58,7 +55,7 @@ impl Ring {
             let u32_at = |o: usize| (*(p.add(o) as *const AtomicU32)).load(Ordering::Acquire);
             let u64_at = |o: usize| (*(p.add(o) as *const AtomicU64)).load(Ordering::Acquire);
             (
-                u32_at(0),
+                u32_at(OFF_MAGIC),
                 u32_at(OFF_SLOT),
                 u32_at(OFF_CAP),
                 u32_at(OFF_MASK),
@@ -151,11 +148,12 @@ impl Ring {
         true
     }
 
-    /// Copy the oldest slot into `out` (which must hold a whole slot) and
-    /// release it. Returns false when the ring is empty.
+    /// Copy the oldest slot into `out` (which must hold a whole slot) without
+    /// releasing it. Returns false when the ring is empty. A peeked slot stays
+    /// the oldest until [`Ring::advance`].
     ///
     /// Callers must be the ring's only consumer.
-    pub(crate) fn consume(&self, out: &mut [u8]) -> bool {
+    pub(crate) fn peek(&self, out: &mut [u8]) -> bool {
         assert!(out.len() >= self.slot_size, "buffer smaller than a slot");
         let tail = self.index(OFF_TAIL).load(Ordering::Relaxed);
         let head = self.index(OFF_HEAD).load(Ordering::Acquire);
@@ -168,9 +166,25 @@ impl Ring {
         unsafe {
             std::ptr::copy_nonoverlapping(self.slot_ptr(tail), out.as_mut_ptr(), self.slot_size)
         };
+        true
+    }
+
+    /// Release the oldest slot. Call only after a successful [`Ring::peek`].
+    pub(crate) fn advance(&self) {
+        let tail = self.index(OFF_TAIL).load(Ordering::Relaxed);
         self.index(OFF_TAIL)
             .store(tail.wrapping_add(1), Ordering::Release);
-        true
+    }
+
+    /// Copy the oldest slot into `out` and release it. Returns false when the
+    /// ring is empty.
+    #[cfg(test)]
+    pub(crate) fn consume(&self, out: &mut [u8]) -> bool {
+        let got = self.peek(out);
+        if got {
+            self.advance();
+        }
+        got
     }
 }
 
@@ -202,7 +216,7 @@ pub(crate) mod testing {
             r.poke_u32(OFF_CAP, capacity);
             r.poke_u32(OFF_MASK, capacity.wrapping_sub(1));
             r.poke_u32(OFF_SLOTS, RING_HDR as u32);
-            r.poke_u32(0, RING_MAGIC);
+            r.poke_u32(OFF_MAGIC, RING_MAGIC);
             r
         }
 

@@ -971,4 +971,43 @@ mod tests {
             .is_err()
         );
     }
+
+    /// A co-located producer can place a request in the arena; the client
+    /// hands the runtime the resolved payload (D12) with F_ARENA set and no
+    /// F_INLINE. The runtime must serve it exactly as an inline request.
+    #[test]
+    fn an_arena_placed_request_is_served_like_an_inline_one() {
+        let bus = Arc::new(FakeBus::default());
+        let body = b"from the arena".to_vec();
+        let mut payload = vec![0u8; MODULE_MESSAGE_HEADER_LEN + body.len()];
+        ModuleMessage {
+            operation: Operation::Invoke,
+            status: ModuleStatus::Ok,
+            stage_id: STAGE,
+            flags: 0,
+            body_len: body.len() as u32,
+            deadline_ns: 0,
+            trace_id: 77,
+        }
+        .encode(&mut payload)
+        .unwrap();
+        payload[MODULE_MESSAGE_HEADER_LEN..].copy_from_slice(&body);
+        let f = Frame {
+            hdr_flags: F_REQUEST | crate::wire::F_ARENA,
+            wire_version: WIRE_VERSION,
+            event_kind: KIND,
+            principal_ref: 90,
+            correlation_id: 41,
+            payload_ref: 3,
+            payload_len: payload.len() as u32,
+            generation: 2,
+            ..Frame::default()
+        };
+        bus.inbox
+            .lock()
+            .unwrap()
+            .push_back(Event { frame: f, payload });
+        serve(Arc::clone(&bus), Some(echo()), &[41]);
+        assert_eq!(result_for(&bus, 41), Some((ModuleStatus::Ok, body)));
+    }
 }

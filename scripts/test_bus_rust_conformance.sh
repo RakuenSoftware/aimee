@@ -9,9 +9,17 @@
 #   2. Interop: the C host, exposed on a Unix socket, driven by the Rust client
 #      across a process boundary (notification, request/reply,
 #      capability_absent, cancel, backpressure, reaped-client recovery).
-#   3. Module runtime interop: the C host and core caller drive a Rust module
-#      process through dispatch, fragmented payloads, deadline, cancellation
-#      and SIGTERM shutdown, admitting it by executable path and peer creds.
+#   3. Module runtime interop, both halves of the module contract:
+#      a. the C host and core caller drive a Rust module process through
+#         dispatch, fragmented payloads, deadline, cancellation and SIGTERM
+#         shutdown, admitting it by executable path and peer creds;
+#      b. the Rust caller, a separate admitted process with its own grant,
+#         calls the C runtime's in-process module and must reach the C core
+#         caller's outcomes (fragmentation, response limit and drain,
+#         deadline, cancellation, stale-reply drain, capability absent and
+#         denied, a shared caller);
+#      c. the Rust caller calls the Rust module process: Rust on both ends,
+#         through the C host.
 #   4. Single-host: the mechanical D8 check, which also holds Rust to
 #      client-only and to no link edge with either reference implementation.
 #
@@ -51,12 +59,24 @@ fi
       cargo test --locked -p aimee-bus --test c_host_conformance -- --ignored --test-threads=1
 )
 
-echo "== 3. module runtime interop: C host/core caller <-> Rust module process =="
+echo "== 3. module runtime interop: C host <-> Rust module process and Rust caller =="
 make -C src --no-print-directory "build/obj/tests/unit-test-module-runtime"
 module_harness="$repo_root/src/build/obj/tests/unit-test-module-runtime"
-( cd rust && cargo build --locked --release -p aimee-bus --bin aimee-bus-module-helper )
+( cd rust && cargo build --locked --release -p aimee-bus \
+     --bin aimee-bus-module-helper --bin aimee-bus-module-caller-check )
 rust_module="$repo_root/rust/target/release/aimee-bus-module-helper"
+rust_caller="$repo_root/rust/target/release/aimee-bus-module-caller-check"
+echo "-- 3a. C core caller -> Rust module process"
 TMPDIR="$work" timeout 60s "$module_harness" "$rust_module"
+echo "-- 3b. Rust caller -> C runtime module"
+out="$(AIMEE_TEST_MODULE_CALLER="$rust_caller" TMPDIR="$work" timeout 90s "$module_harness")"
+echo "$out"
+# The harness runs the external caller only when it is named; prove it did.
+grep -q "external caller matched" <<<"$out" || { echo "FAIL: Rust caller leg did not run" >&2; exit 1; }
+echo "-- 3c. Rust caller -> Rust module process"
+out="$(AIMEE_TEST_MODULE_CALLER="$rust_caller" TMPDIR="$work" timeout 90s "$module_harness" "$rust_module")"
+echo "$out"
+grep -q "external caller matched" <<<"$out" || { echo "FAIL: Rust caller leg did not run" >&2; exit 1; }
 
 echo "== 4. single host, Rust client-only =="
 "$repo_root/scripts/check_bus_single_host.sh"

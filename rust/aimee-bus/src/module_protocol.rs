@@ -4,6 +4,7 @@
 //! little-endian header describes the operation inside each inline payload.
 //! Contract: `src/core/event_bus/include/aimee/core/event_bus/module_protocol.h`.
 
+use crate::layout::*;
 use std::fmt;
 
 /// "AMOD", little-endian.
@@ -124,16 +125,17 @@ impl ModuleMessage {
         self.validate()?;
         let b = &mut out[..MODULE_MESSAGE_HEADER_LEN];
         b.fill(0);
-        b[0..4].copy_from_slice(&MODULE_MESSAGE_MAGIC.to_le_bytes());
-        b[4..6].copy_from_slice(&MODULE_MESSAGE_VERSION.to_le_bytes());
-        b[6..8].copy_from_slice(&(MODULE_MESSAGE_HEADER_LEN as u16).to_le_bytes());
-        b[8..10].copy_from_slice(&(self.operation as u16).to_le_bytes());
-        b[10..12].copy_from_slice(&(self.status as u16).to_le_bytes());
-        b[12..16].copy_from_slice(&self.stage_id.to_le_bytes());
-        b[16..20].copy_from_slice(&self.flags.to_le_bytes());
-        b[20..24].copy_from_slice(&self.body_len.to_le_bytes());
-        b[24..32].copy_from_slice(&self.deadline_ns.to_le_bytes());
-        b[32..40].copy_from_slice(&self.trace_id.to_le_bytes());
+        b[AMOD_OFF_MAGIC..][..4].copy_from_slice(&MODULE_MESSAGE_MAGIC.to_le_bytes());
+        b[AMOD_OFF_VERSION..][..2].copy_from_slice(&MODULE_MESSAGE_VERSION.to_le_bytes());
+        b[AMOD_OFF_HEADER_LEN..][..2]
+            .copy_from_slice(&(MODULE_MESSAGE_HEADER_LEN as u16).to_le_bytes());
+        b[AMOD_OFF_OPERATION..][..2].copy_from_slice(&(self.operation as u16).to_le_bytes());
+        b[AMOD_OFF_STATUS..][..2].copy_from_slice(&(self.status as u16).to_le_bytes());
+        b[AMOD_OFF_STAGE..][..4].copy_from_slice(&self.stage_id.to_le_bytes());
+        b[AMOD_OFF_FLAGS..][..4].copy_from_slice(&self.flags.to_le_bytes());
+        b[AMOD_OFF_BODY_LEN..][..4].copy_from_slice(&self.body_len.to_le_bytes());
+        b[AMOD_OFF_DEADLINE..][..8].copy_from_slice(&self.deadline_ns.to_le_bytes());
+        b[AMOD_OFF_TRACE..][..8].copy_from_slice(&self.trace_id.to_le_bytes());
         Ok(())
     }
 
@@ -146,29 +148,30 @@ impl ModuleMessage {
         let u16_at = |o: usize| u16::from_le_bytes([b[o], b[o + 1]]);
         let u32_at = |o: usize| u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
         let u64_at = |o: usize| u64::from(u32_at(o)) | (u64::from(u32_at(o + 4)) << 32);
-        if u32_at(0) != MODULE_MESSAGE_MAGIC {
+        if u32_at(AMOD_OFF_MAGIC) != MODULE_MESSAGE_MAGIC {
             return Err(MessageError::Magic);
         }
-        if u16_at(4) != MODULE_MESSAGE_VERSION {
+        if u16_at(AMOD_OFF_VERSION) != MODULE_MESSAGE_VERSION {
             return Err(MessageError::Version);
         }
-        if usize::from(u16_at(6)) != MODULE_MESSAGE_HEADER_LEN {
+        if usize::from(u16_at(AMOD_OFF_HEADER_LEN)) != MODULE_MESSAGE_HEADER_LEN {
             return Err(MessageError::Header);
         }
-        let operation = match u16_at(8) {
+        let operation = match u16_at(AMOD_OFF_OPERATION) {
             1 => Operation::Invoke,
             2 => Operation::Result,
             _ => return Err(MessageError::Operation),
         };
-        let status = ModuleStatus::from_wire(u16_at(10)).ok_or(MessageError::Status)?;
+        let status =
+            ModuleStatus::from_wire(u16_at(AMOD_OFF_STATUS)).ok_or(MessageError::Status)?;
         let m = ModuleMessage {
             operation,
             status,
-            stage_id: u32_at(12),
-            flags: u32_at(16),
-            body_len: u32_at(20),
-            deadline_ns: u64_at(24),
-            trace_id: u64_at(32),
+            stage_id: u32_at(AMOD_OFF_STAGE),
+            flags: u32_at(AMOD_OFF_FLAGS),
+            body_len: u32_at(AMOD_OFF_BODY_LEN),
+            deadline_ns: u64_at(AMOD_OFF_DEADLINE),
+            trace_id: u64_at(AMOD_OFF_TRACE),
         };
         m.validate()?;
         if m.body_len as usize > b.len() - MODULE_MESSAGE_HEADER_LEN {

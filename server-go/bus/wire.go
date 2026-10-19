@@ -51,8 +51,16 @@ const (
 	KindOverflow         uint32 = 5
 	KindProducerReaped   uint32 = 6
 	KindEpochChange      uint32 = 7
-	KindModuleBase       uint32 = 256
+	KindCapabilityDenied uint32 = 8
+	// KindLeaseRelease is client -> host (D12): return an arena consumer ref.
+	// A control-class notification whose inline payload is LeaseReleaseLen
+	// bytes, lease id then generation, both u32 little-endian.
+	KindLeaseRelease uint32 = 9
+	KindModuleBase   uint32 = 256
 )
+
+// LeaseReleaseLen is the inline payload length of a KindLeaseRelease event.
+const LeaseReleaseLen = 8
 
 // Frame is a decoded event header. Field names and widths mirror bus_frame_t.
 type Frame struct {

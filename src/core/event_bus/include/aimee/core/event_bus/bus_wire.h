@@ -61,8 +61,7 @@
 
 #define BUS_F_PLACEMENT_MASK (BUS_F_INLINE | BUS_F_ARENA)
 #define BUS_F_PATTERN_MASK   (BUS_F_NOTIFICATION | BUS_F_REQUEST | BUS_F_REPLY | BUS_F_CANCEL)
-#define BUS_F_KNOWN_MASK \
-   (BUS_F_PLACEMENT_MASK | BUS_F_PATTERN_MASK | BUS_F_CONTROL | BUS_F_MORE)
+#define BUS_F_KNOWN_MASK     (BUS_F_PLACEMENT_MASK | BUS_F_PATTERN_MASK | BUS_F_CONTROL | BUS_F_MORE)
 
 /* Reserved event kinds. Kinds below BUS_KIND_MODULE_BASE are the bus's own;
  * the event-contract schema allocates everything at or above it. Keeping the
@@ -76,7 +75,16 @@
 #define BUS_KIND_PRODUCER_REAPED   6u
 #define BUS_KIND_EPOCH_CHANGE      7u
 #define BUS_KIND_CAPABILITY_DENIED 8u
-#define BUS_KIND_MODULE_BASE       256u
+/* Client -> host (D12): "I am done with arena lease N of generation G". A
+ * control-class notification whose inline payload is BUS_LEASE_RELEASE_LEN bytes:
+ * lease_id (u32 LE) then generation (u32 LE). The host consumes it and releases
+ * the sender's consumer ref; it is never routed to another client. */
+#define BUS_KIND_LEASE_RELEASE 9u
+#define BUS_KIND_MODULE_BASE   256u
+
+#define BUS_LEASE_RELEASE_LEN            8u
+#define BUS_LEASE_RELEASE_OFF_LEASE      0u
+#define BUS_LEASE_RELEASE_OFF_GENERATION 4u
 
 /* Decoded frame. Field order here follows the wire layout so the two read
  * together; the encoder writes explicit little-endian bytes, so this struct's

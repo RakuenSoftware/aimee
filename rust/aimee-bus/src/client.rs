@@ -6,9 +6,10 @@
 //! there is exactly one host, and it is the C host.
 
 use crate::error::{AttachStatus, BusError};
-use crate::region::{ARENA_HDR, CTL_BYTES, Control, QueuePair, qpair_bytes};
+use crate::region::{self, Control, QueuePair, qpair_bytes};
 use crate::sys::{self, Mapping};
 use crate::wire::*;
+use std::collections::VecDeque;
 use std::os::fd::{AsFd, BorrowedFd};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -16,10 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-const ATTACH_REQ_MAGIC: u32 = 0x5152_4241; // "ABRQ"
-const ATTACH_REPLY_MAGIC: u32 = 0x5052_4241; // "ABRP"
-const ATTACH_REQ_BYTES: usize = 16;
-const ATTACH_REPLY_BYTES: usize = 48;
+use crate::layout::*;
 const CONNECT_RETRY: Duration = Duration::from_millis(100);
 /// Bound on the attach reply when [`Client::connect`] owns the socket.
 pub const ATTACH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -36,10 +34,11 @@ pub struct Attachment {
     pub host_epoch: u64,
 }
 
-/// One received event. The payload is copied out of the shared slot, so it
-/// stays valid after the slot is released. An arena-placed payload is not
-/// readable by a client without a lease and arrives empty; the frame still
-/// says what it was.
+/// One received event. The payload is copied out of the shared slot, or for
+/// an arena-placed payload out of the arena span its lease names (D12), so it
+/// stays valid after the slot is released and the arena ref returned. From a
+/// host that predates the lease view, or when the lease no longer resolves,
+/// an arena payload arrives empty; the frame still says what it was.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
     pub frame: Frame,
@@ -61,7 +60,13 @@ pub struct Client {
     emit_lock: Mutex<()>,
     poll_lock: Mutex<()>,
     dropped: AtomicU64,
+    /// Arena refs owed back to the host but not yet sent (D12).
+    releases: Mutex<VecDeque<(u32, u32)>>,
 }
+
+/// Arena refs owed but unsent before the client stops taking arena events
+/// until its outbound ring drains.
+pub const MAX_PENDING_RELEASES: usize = 64;
 
 impl Client {
     /// Attach over a connected `SOCK_SEQPACKET` socket as the anonymous
@@ -79,38 +84,39 @@ impl Client {
         principal_ref: u32,
     ) -> Result<Client, BusError> {
         let mut req = [0u8; ATTACH_REQ_BYTES];
-        req[0..4].copy_from_slice(&ATTACH_REQ_MAGIC.to_le_bytes());
-        req[4..6].copy_from_slice(&WIRE_VERSION.to_le_bytes()); // min
-        req[6..8].copy_from_slice(&WIRE_VERSION.to_le_bytes()); // max
-        req[8..12].copy_from_slice(&principal_class.to_le_bytes());
-        req[12..16].copy_from_slice(&principal_ref.to_le_bytes());
+        req[ATTACH_REQ_OFF_MAGIC..][..4].copy_from_slice(&ATTACH_REQ_MAGIC.to_le_bytes());
+        req[ATTACH_REQ_OFF_WIRE_MIN..][..2].copy_from_slice(&WIRE_VERSION.to_le_bytes());
+        req[ATTACH_REQ_OFF_WIRE_MAX..][..2].copy_from_slice(&WIRE_VERSION.to_le_bytes());
+        req[ATTACH_REQ_OFF_CLASS..][..4].copy_from_slice(&principal_class.to_le_bytes());
+        req[ATTACH_REQ_OFF_REF..][..4].copy_from_slice(&principal_ref.to_le_bytes());
         sys::send_packet(sock, &req)?;
 
         let mut reply = [0u8; ATTACH_REPLY_BYTES + 1];
-        let (n, fds, truncated) = sys::recv_with_fds(sock, &mut reply, 3)?;
+        let (n, fds, truncated) = sys::recv_with_fds(sock, &mut reply, ATTACH_FDS)?;
         let r32 =
             |o: usize| u32::from_le_bytes([reply[o], reply[o + 1], reply[o + 2], reply[o + 3]]);
         let r64 = |o: usize| u64::from(r32(o)) | (u64::from(r32(o + 4)) << 32);
-        if truncated || n != ATTACH_REPLY_BYTES || r32(0) != ATTACH_REPLY_MAGIC {
+        if truncated || n != ATTACH_REPLY_BYTES || r32(ATTACH_REPLY_OFF_MAGIC) != ATTACH_REPLY_MAGIC
+        {
             return Err(BusError::Protocol("malformed attach reply"));
         }
-        let status = AttachStatus::from_wire(r32(4));
+        let status = AttachStatus::from_wire(r32(ATTACH_REPLY_OFF_STATUS));
         if status != AttachStatus::Ok {
             return Err(BusError::Denied(status));
         }
-        if fds.len() != 3 {
+        if fds.len() != ATTACH_FDS {
             return Err(BusError::Protocol(
                 "attach must carry exactly three descriptors",
             ));
         }
         let att = Attachment {
-            handle: r32(8),
-            wire_version: r32(12),
-            slot_size: r32(16),
-            inline_budget: r32(20),
-            queue_capacity: r32(24),
-            arena_size: r64(32),
-            host_epoch: r64(40),
+            handle: r32(ATTACH_REPLY_OFF_HANDLE),
+            wire_version: r32(ATTACH_REPLY_OFF_WIRE),
+            slot_size: r32(ATTACH_REPLY_OFF_SLOT),
+            inline_budget: r32(ATTACH_REPLY_OFF_INLINE),
+            queue_capacity: r32(ATTACH_REPLY_OFF_QUEUE_CAP),
+            arena_size: r64(ATTACH_REPLY_OFF_ARENA),
+            host_epoch: r64(ATTACH_REPLY_OFF_EPOCH),
         };
         if att.wire_version != u32::from(WIRE_VERSION) {
             return Err(BusError::Protocol(
@@ -125,10 +131,18 @@ impl Client {
             .ok_or(BusError::Protocol("arena size overflows"))?;
 
         // fds[0] control (read-only), fds[1] arena (rw), fds[2] queue pair (rw).
-        let ctl_map = Mapping::map(fds[0].as_fd(), CTL_BYTES, false)?;
-        let arena_map = Mapping::map(fds[1].as_fd(), arena_len, true)?;
+        // A D12 host's control region carries the lease view after the header;
+        // an older host's is the header alone. Map what is there.
+        let ctl_len = if sys::fd_size(fds[ATTACH_FD_CONTROL].as_fd())? >= CTL_BYTES_WITH_VIEW as u64
+        {
+            CTL_BYTES_WITH_VIEW
+        } else {
+            CTL_BYTES
+        };
+        let ctl_map = Mapping::map(fds[ATTACH_FD_CONTROL].as_fd(), ctl_len, false)?;
+        let arena_map = Mapping::map(fds[ATTACH_FD_ARENA].as_fd(), arena_len, true)?;
         let qp_map = Mapping::map(
-            fds[2].as_fd(),
+            fds[ATTACH_FD_QPAIR].as_fd(),
             qpair_bytes(att.slot_size, att.queue_capacity),
             true,
         )?;
@@ -148,6 +162,8 @@ impl Client {
             ));
         }
         // SAFETY: as above.
+        unsafe { region::check_arena(arena_map.ptr(), arena_map.len(), att.arena_size)? };
+        // SAFETY: as above.
         let qp = unsafe { QueuePair::attach(qp_map.ptr(), qp_map.len())? };
         if qp.inbound.slot_size() != att.slot_size as usize
             || qp.inbound.capacity() != u64::from(att.queue_capacity)
@@ -166,6 +182,7 @@ impl Client {
             emit_lock: Mutex::new(()),
             poll_lock: Mutex::new(()),
             dropped: AtomicU64::new(0),
+            releases: Mutex::new(VecDeque::new()),
         })
     }
 
@@ -365,23 +382,72 @@ impl Client {
         self.emit(F_CANCEL, kind, correlation, &[])
     }
 
+    /// Whether this attachment can read arena-placed payloads: the host
+    /// advertises the D12 lease view.
+    pub fn arena_readable(&self) -> bool {
+        self.control.has_lease_view()
+    }
+
+    /// Arena refs owed to the host and not yet sent.
+    pub fn pending_releases(&self) -> usize {
+        self.releases
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .len()
+    }
+
+    /// Return every owed arena ref the outbound ring has room for. Poll does
+    /// this itself; a consumer that stops polling can call it to drain.
+    /// Returns [`BusError::WouldBlock`] while any remain.
+    pub fn flush_releases(&self) -> Result<(), BusError> {
+        let mut owed = self.releases.lock().unwrap_or_else(|p| p.into_inner());
+        while let Some(&(lease, generation)) = owed.front() {
+            let mut p = [0u8; LEASE_RELEASE_LEN];
+            p[LEASE_RELEASE_OFF_LEASE..][..4].copy_from_slice(&lease.to_le_bytes());
+            p[LEASE_RELEASE_OFF_GENERATION..][..4].copy_from_slice(&generation.to_le_bytes());
+            match self.emit(F_NOTIFICATION | F_CONTROL, KIND_LEASE_RELEASE, 0, &p) {
+                Ok(()) => {}
+                Err(BusError::WouldBlock) => return Err(BusError::WouldBlock),
+                // The host restarted: every ref died with it.
+                Err(BusError::Epoch) => {
+                    owed.clear();
+                    return Err(BusError::Epoch);
+                }
+                Err(_) => {} // unsendable: not retried
+            }
+            owed.pop_front();
+        }
+        Ok(())
+    }
+
     /// Take the next inbound event, or `None` when the ring is empty. A frame
     /// that fails decoding or placement checks is released, counted, and
     /// skipped rather than handed to the caller.
+    ///
+    /// An arena-placed payload is copied out of the arena span its lease
+    /// names (D12), and the ref is returned to the host at once, so the event
+    /// owns its bytes like an inline one. If the host predates the lease view,
+    /// the payload arrives empty, as before.
     pub fn poll(&self) -> Result<Option<Event>, BusError> {
         let _guard = self.poll_lock.lock().unwrap_or_else(|p| p.into_inner());
         if self.epoch_changed() {
             return Err(BusError::Epoch);
         }
+        if self.pending_releases() > 0 {
+            if let Err(BusError::Epoch) = self.flush_releases() {
+                return Err(BusError::Epoch);
+            }
+        }
         let mut slot = vec![0u8; self.att.slot_size as usize];
         loop {
-            if !self.qp.inbound.consume(&mut slot) {
+            if !self.qp.inbound.peek(&mut slot) {
                 return Ok(None);
             }
             let Some(frame) = Frame::decode(&slot).ok().filter(|f| {
                 f.check_placement(self.att.slot_size, self.att.arena_size)
                     .is_ok()
             }) else {
+                self.qp.inbound.advance();
                 self.dropped.fetch_add(1, Ordering::Relaxed);
                 continue;
             };
@@ -389,7 +455,45 @@ impl Client {
             if frame.hdr_flags & F_INLINE != 0 && frame.payload_len > 0 {
                 let start = frame.payload_ref as usize;
                 payload.extend_from_slice(&slot[start..start + frame.payload_len as usize]);
+            } else if frame.hdr_flags & F_ARENA != 0 && self.control.has_lease_view() {
+                // Delivering this frame gave the client a consumer ref, owed
+                // back whether or not the payload resolves. With the backlog
+                // full, leave the frame unread until the outbound ring drains.
+                if self.pending_releases() >= MAX_PENDING_RELEASES {
+                    return Ok(None);
+                }
+                let lease = frame.payload_ref as u32;
+                if let Some(off) = self.control.resolve_lease(
+                    lease,
+                    frame.generation,
+                    frame.payload_len,
+                    self.att.arena_size,
+                ) {
+                    payload = vec![0u8; frame.payload_len as usize];
+                    // SAFETY: resolve_lease bounded off + payload_len by the
+                    // arena size, the arena mapping covers ARENA_HDR + that, and
+                    // this client holds a consumer ref, so the host cannot
+                    // reclaim the span during the copy. A raw copy, because the
+                    // bytes are shared with other processes.
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            self._arena_map.ptr().as_ptr().add(ARENA_HDR + off as usize),
+                            payload.as_mut_ptr(),
+                            payload.len(),
+                        )
+                    };
+                }
+                self.releases
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .push_back((lease, frame.generation));
+                self.qp.inbound.advance();
+                if let Err(BusError::Epoch) = self.flush_releases() {
+                    return Err(BusError::Epoch);
+                }
+                return Ok(Some(Event { frame, payload }));
             }
+            self.qp.inbound.advance();
             return Ok(Some(Event { frame, payload }));
         }
     }

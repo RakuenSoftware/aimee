@@ -12,5 +12,8 @@ void bus_control_bump_epoch(bus_control_t *c);
 void bus_control_heartbeat(bus_control_t *c, uint64_t now);
 bus_region_result_t bus_qpair_init(bus_region_t *r, uint32_t slot_size, uint32_t capacity);
 bus_region_result_t bus_arena_region_init(bus_region_t *r, uint64_t arena_size);
+/* The host's writable view of the lease table in its own control mapping, or
+ * NULL if the region was not created with bus_control_bytes(). */
+bus_lease_view_t *bus_control_lease_view_host(bus_region_t *r);
 
 #endif

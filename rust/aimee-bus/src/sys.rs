@@ -151,6 +151,17 @@ pub(crate) fn recv_with_fds(
     Ok((n, fds, truncated))
 }
 
+/// The size of the object behind `fd`.
+pub(crate) fn fd_size(fd: BorrowedFd<'_>) -> io::Result<u64> {
+    // SAFETY: stat is plain old data.
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    // SAFETY: st is a valid out-pointer for a descriptor we hold.
+    if unsafe { libc::fstat(fd.as_raw_fd(), &mut st) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(st.st_size.max(0) as u64)
+}
+
 /// A `MAP_SHARED` mapping, unmapped on drop.
 #[derive(Debug)]
 pub(crate) struct Mapping {

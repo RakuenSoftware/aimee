@@ -19,3 +19,7 @@ workspace = true
 [[bin]]
 name = "aimee-bus-module-helper"
 path = "src/bin/aimee-bus-module-helper.rs"
+
+[[bin]]
+name = "aimee-bus-module-caller-check"
+path = "src/bin/aimee-bus-module-caller-check.rs"

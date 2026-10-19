@@ -1,5 +1,9 @@
 //! Errors returned by the client and the module runtime.
 
+use crate::layout::{
+    ATTACH_STATUS_DENIED_NOSLOT, ATTACH_STATUS_DENIED_POLICY, ATTACH_STATUS_DENIED_VERSION,
+    ATTACH_STATUS_OK, ATTACH_STATUS_PROTOCOL,
+};
 use std::fmt;
 use std::io;
 
@@ -17,11 +21,11 @@ pub enum AttachStatus {
 impl AttachStatus {
     pub(crate) fn from_wire(v: u32) -> AttachStatus {
         match v {
-            0 => AttachStatus::Ok,
-            1 => AttachStatus::DeniedPolicy,
-            2 => AttachStatus::DeniedVersion,
-            3 => AttachStatus::DeniedNoSlot,
-            4 => AttachStatus::Protocol,
+            ATTACH_STATUS_OK => AttachStatus::Ok,
+            ATTACH_STATUS_DENIED_POLICY => AttachStatus::DeniedPolicy,
+            ATTACH_STATUS_DENIED_VERSION => AttachStatus::DeniedVersion,
+            ATTACH_STATUS_DENIED_NOSLOT => AttachStatus::DeniedNoSlot,
+            ATTACH_STATUS_PROTOCOL => AttachStatus::Protocol,
             other => AttachStatus::Unknown(other),
         }
     }
