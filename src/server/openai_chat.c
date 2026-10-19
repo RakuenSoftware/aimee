@@ -940,6 +940,15 @@ static char *openai_build_ir_body(aimee_request_t *request, aimee_wire_t wire)
    char *body = aimee_backend_render_wire(request, wire);
    if (!body)
       return NULL;
+   aimee_wire_projection_report_t projection;
+   aimee_backend_projection_report(request, wire, &projection);
+   if (aimee_ir_session_emit_projection_controls(
+           request->model, projection.omitted_reasoning_blocks,
+           projection.omitted_opaque_state_blocks, projection.omitted_cache_controls, "request"))
+   {
+      free(body);
+      return NULL;
+   }
    /* A Chat provider's explicitly counted template extension stays at its
     * native boundary. It is never turned into model content or another wire. */
    const cJSON *kwargs =

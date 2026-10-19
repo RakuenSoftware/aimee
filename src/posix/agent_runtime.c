@@ -600,36 +600,6 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
                                             updated_messages, out, NULL, NULL);
 }
 
-int agent_request_with_tools_supported(const aimee_request_t *request)
-{
-   if (!request || request->n_messages < 1 || request->n_messages > AIMEE_IR_MAX_BLOCKS ||
-       !request->messages)
-      return 0;
-   int content = 0;
-   for (int i = 0; i < request->n_messages; i++)
-   {
-      if (request->messages[i].n_blocks < 0 ||
-          request->messages[i].n_blocks > AIMEE_IR_MAX_BLOCKS ||
-          (request->messages[i].n_blocks && !request->messages[i].blocks))
-         return 0;
-      for (int j = 0; j < request->messages[i].n_blocks; j++)
-      {
-         const aimee_block_t *block = &request->messages[i].blocks[j];
-         if (block->type != AIMEE_BLK_TEXT || (block->text && block->text[0]))
-            content = 1;
-      }
-   }
-   return content &&
-          !(request->n_tools ||
-            (request->tool_choice != AIMEE_TOOL_CHOICE_UNSET &&
-             request->tool_choice != AIMEE_TOOL_CHOICE_AUTO) ||
-            request->n_system > 1 ||
-            (request->n_system && request->system[0].type != AIMEE_BLK_TEXT) || request->thinking ||
-            request->metadata || request->service_tier || request->n_stop || request->has_top_p ||
-            request->has_top_k || request->has_parallel_tool_calls || request->reasoning_summary ||
-            request->reasoning_effort || request->output_format.kind > AIMEE_OUTPUT_TEXT);
-}
-
 int agent_execute_request_with_tools(const agent_t *agent, const agent_network_t *network,
                                      const char *role, const aimee_request_t *request,
                                      aimee_response_t *response, agent_result_t *out)

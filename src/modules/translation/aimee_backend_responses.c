@@ -114,6 +114,11 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
    if (aimee_ir_request_admit(ir))
       return NULL;
    cJSON *out = cJSON_CreateObject();
+   if (!out || openai_family_add_prompt_cache(out, ir))
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
    if (ir->output_format.kind != AIMEE_OUTPUT_UNSET)
    {
       cJSON *format = openai_family_output_format_build(&ir->output_format, 1);

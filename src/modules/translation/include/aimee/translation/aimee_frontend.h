@@ -94,6 +94,11 @@ int anthropic_ir_parse_tool(const struct cJSON *native, aimee_tool_t *tool);
 int openai_ir_parse_tool(const struct cJSON *native, aimee_tool_t *tool, int nested);
 struct cJSON *openai_ir_render_tool(const aimee_tool_t *tool, int responses_shape);
 
+/* Shared OpenAI-family cache controls, parsed once into owned canonical fields.
+ * Null uses the provider default; malformed types/ambiguous options refuse. */
+int openai_family_prompt_cache_parse(const struct cJSON *native, aimee_request_t *out, char *error,
+                                     size_t capacity);
+
 /* Native client output boundaries. The response is borrowed canonical IR;
  * rendering never mutates or consumes it. Responses tail excludes the caller's
  * single response.created envelope. Emitters return 0 on success, -1 on failure. */

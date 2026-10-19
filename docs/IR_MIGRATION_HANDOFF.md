@@ -2910,3 +2910,69 @@ with that recursive environment. All seven pass directly, under the reproduced
 environment, and through the actual tests-are-run-check Make gate. No coverage
 selection, assertion, baseline or CI job was removed or exempted. The full script
 suite and fresh CI rerun remain to qualify this repair.
+
+The complete local script suite now passes on 21dec06c0: 73 discovered test files;
+the thin-client proxy suite is run separately with the native suite and real SDK
+qualification. Full-HEAD Gitleaks passes (6,213 commits, no leaks). The native
+runner executes 657 target entries; the reachability gate counts 655 distinct
+names. Those counts describe different denominators, not 657 distinct binaries.
+No test registrations or exemptions changed in the recursive-Make repair.
+
+
+## Canonical OpenAI-family cache configuration and honest projection
+
+The IR now owns prompt_cache_key, prompt_cache_retention and the opaque
+prompt_cache_options object. Chat and Responses entry adapters admit them once;
+both output boundaries rebuild them from typed fields. Native cache-only edits
+invalidate original raw replay even without a mutation flag, including exact
+numeric changes beyond binary-float precision inside cache options. Canonical
+request JSON and Go request consumers retain those values; empty cache keys
+remain distinct from absent keys. No retention/TTL conversion or default policy
+change is introduced. Malformed types and duplicate option keys refuse.
+
+OpenAI-family cache controls cannot be applied by the Anthropic renderer. Their
+omission now has a canonical projection count, including a cache-only report
+with no reasoning loss. Go and frontend admission preserve the old no-op/negative
+report refusals, and the GUI displays cache loss independently of reasoning.
+Actual provider request builders commit fidelity before returning a sendable
+body; failed projection capture refuses the body. Cross-provider rendering keeps
+the canonical configuration rather than deleting it from history/context.
+
+Run-entry capability checks now live beside canonical request-profile ownership
+in agent_bridge.c. The same predicate and refusals are retained; the economizer
+loop does not inspect or mutate provider cache settings. Cache controls not yet
+owned by the external run entry refuse explicitly instead of silently disappearing.
+Six public-entry checks cover both existing external backends without launching
+them, while preserving the pre-existing accounting refusal without cache controls.
+No structural-gate exemption was added.
+
+CMake's frontend/backend/IR-serving fixtures were missing existing renderer,
+SHA-256, turn-integrity and disabled-memory seam dependencies present in Make.
+Their targets now link the actual sources, public core header path, Threads and
+OpenSSL Crypto; all four selected CMake/CTest IR fixtures pass. No crypto stub or
+platform skip was added. Two decoder calls in an older ingress fixture were moved
+out of assert expressions, retaining the assertions and ensuring the calls are
+not conditional on NDEBUG. Cppcheck uses CI's src working directory/include paths:
+13 affected production/bridge sources and six final owner/fixture sources pass
+the ratchet with three existing diagnostics and no increase. Ownership preflight
+also passes, without changing any baseline.
+
+Qualification so far: the complete 657-entry native run (655 distinct target
+names) and proxy regressions pass after the ownership repair; four focused
+ASan/UBSan fixtures pass; three Go packages pass race tests; all 294 frontend
+tests across 35 files and TypeScript checks pass. The normal server build and
+PostgreSQL 18 integration pass 167/167 with 26 existing unavailable-service skips.
+The final ingress assertion cleanup passes its normal and ASan/UBSan rebuilds;
+all 76 lint gates pass. No analyzer baseline or gate exemption changed.
+
+This preserves cache configuration, not evidence of live provider cache billing.
+Per-content prompt_cache_breakpoint ownership remains a separate unimplemented
+consumer; do not claim full explicit-breakpoint replay. Native activation still
+requires owned current request context, original durable-call claims/effect
+receipts, SDK-observation suppression, actual launch/build/workspace attestation
+and live subscription qualification. Production remains KB-free and unpromoted.
+
+Official schema/context: [Chat request cache controls](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)
+and [prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching).
+The controls have independent semantics; this change preserves supplied values
+rather than selecting a model-specific caching or retention policy.

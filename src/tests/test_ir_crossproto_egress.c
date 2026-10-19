@@ -1026,8 +1026,101 @@ static void test_host_state_guard_does_not_mutate_replay_reference(void)
    aimee_request_free(&request);
 }
 
+static void test_prompt_cache_controls(void)
+{
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_RESPONSES};
+   for (int source = 0; source < 2; source++)
+   {
+      const char *content = source ? "\"input\":[{\"role\":\"user\",\"content\":\"question\"}]"
+                                   : "\"messages\":[{\"role\":\"user\",\"content\":\"question\"}]";
+      char body[1024];
+      snprintf(body, sizeof body,
+               "{ \"model\":\"cache-fixture\",\"stream\":true,\"store\":false,%s,"
+               "\"prompt_cache_key\":\"tenant/user\",\"prompt_cache_retention\":\"24h\","
+               "\"prompt_cache_options\":{\"mode\":\"explicit\",\"ttl\":\"30m\","
+               "\"opaque\":0.123456789012345678901234567890} }",
+               content);
+      aimee_request_t request = {0};
+      char error[128];
+      assert(!aimee_frontend_parse_wire(body, strlen(body), wires[source], &request, error,
+                                        sizeof error));
+      char *native = aimee_backend_render_wire(&request, wires[source]);
+      assert(native && !strcmp(native, body));
+      free(native);
+      assert(!strcmp(request.prompt_cache_key, "tenant/user") &&
+             !strcmp(request.prompt_cache_retention, "24h"));
+      for (int target = 0; target < 2; target++)
+      {
+         native = aimee_backend_render_wire(&request, wires[target]);
+         cJSON *output = native ? cJSON_Parse(native) : NULL;
+         assert(output &&
+                !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(output, "prompt_cache_key")),
+                        "tenant/user"));
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(output, "prompt_cache_retention")),
+                        "24h"));
+         assert(cJSON_Compare(cJSON_GetObjectItem(output, "prompt_cache_options"),
+                              request.prompt_cache_options, 1));
+         assert(strstr(native, "0.123456789012345678901234567890"));
+         cJSON_Delete(output);
+         free(native);
+      }
+      /* Cache-only mutations must invalidate raw replay even without a dirty flag. */
+      for (int change = 0; change < 3; change++)
+      {
+         aimee_request_free(&request);
+         assert(!aimee_frontend_parse_wire(body, strlen(body), wires[source], &request, error,
+                                           sizeof error));
+         const char *expected;
+         if (change == 0)
+         {
+            free(request.prompt_cache_key);
+            request.prompt_cache_key = strdup("new-owner-scope");
+            expected = "new-owner-scope";
+         }
+         else if (change == 1)
+         {
+            free(request.prompt_cache_retention);
+            request.prompt_cache_retention = strdup("in_memory");
+            expected = "in_memory";
+         }
+         else
+         {
+            cJSON_ReplaceItemInObject(request.prompt_cache_options, "opaque",
+                                      cJSON_Parse("0.123456789012345678901234567891"));
+            expected = "0.123456789012345678901234567891";
+         }
+         native = aimee_backend_render_wire(&request, wires[source]);
+         assert(native && strstr(native, expected));
+         free(native);
+      }
+      cJSON *canonical = aimee_ir_request_json(&request);
+      assert(canonical && cJSON_Compare(cJSON_GetObjectItem(canonical, "prompt_cache_options"),
+                                        request.prompt_cache_options, 1));
+      cJSON_Delete(canonical);
+      aimee_wire_projection_report_t report;
+      aimee_backend_projection_report(&request, AIMEE_WIRE_ANTHROPIC, &report);
+      assert(report.omitted_cache_controls == 3);
+      aimee_backend_projection_report(&request, wires[source], &report);
+      assert(!report.omitted_cache_controls);
+      aimee_request_free(&request);
+      for (int invalid = 0; invalid < 3; invalid++)
+      {
+         cJSON *json = cJSON_Parse(body);
+         const char *key = (const char *[]){"prompt_cache_key", "prompt_cache_retention",
+                                            "prompt_cache_options"}[invalid];
+         cJSON_ReplaceItemInObject(json, key, cJSON_CreateArray());
+         int rc = source ? responses_frontend_parse(json, &request, error, sizeof error)
+                         : openai_frontend_parse(json, &request, error, sizeof error);
+         assert(rc && !request.prompt_cache_key && !request.prompt_cache_options);
+         aimee_request_free(&request);
+         cJSON_Delete(json);
+      }
+   }
+}
+
 int main(void)
 {
+   test_prompt_cache_controls();
    test_host_state_guard_does_not_mutate_replay_reference();
    test_json_comparison_view();
    test_native_thinking_replay_binding();

@@ -102,6 +102,11 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       out->top_p = top_p->valuedouble;
       out->has_top_p = 1;
    }
+   if (openai_family_prompt_cache_parse(req, out, err, errn))
+   {
+      aimee_request_free(out);
+      return -1;
+   }
    const cJSON *meta = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "metadata");
    if (meta && !cJSON_IsNull(meta))
       out->metadata = cJSON_Duplicate(meta, 1);

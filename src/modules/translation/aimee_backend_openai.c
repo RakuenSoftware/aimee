@@ -208,11 +208,37 @@ static int openai_profile_extensions(const aimee_request_t *ir, cJSON *out)
    return 0;
 }
 
+int openai_family_add_prompt_cache(cJSON *out, const aimee_request_t *request)
+{
+   if (!out || !request)
+      return -1;
+   if ((request->prompt_cache_key &&
+        !cJSON_AddStringToObject(out, "prompt_cache_key", request->prompt_cache_key)) ||
+       (request->prompt_cache_retention &&
+        !cJSON_AddStringToObject(out, "prompt_cache_retention", request->prompt_cache_retention)))
+      return -1;
+   if (request->prompt_cache_options)
+   {
+      cJSON *options = cJSON_Duplicate(request->prompt_cache_options, 1);
+      if (!options || !cJSON_AddItemToObject(out, "prompt_cache_options", options))
+      {
+         cJSON_Delete(options);
+         return -1;
+      }
+   }
+   return 0;
+}
+
 cJSON *openai_backend_build(const aimee_request_t *ir)
 {
    if (aimee_ir_request_admit(ir))
       return NULL;
    cJSON *out = cJSON_CreateObject();
+   if (!out || openai_family_add_prompt_cache(out, ir))
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
    if (ir->output_format.kind != AIMEE_OUTPUT_UNSET)
    {
       cJSON *format = openai_family_output_format_build(&ir->output_format, 0);

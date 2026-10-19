@@ -29,6 +29,7 @@ typedef struct
 {
    int omitted_reasoning_blocks;
    int omitted_opaque_state_blocks;
+   int omitted_cache_controls;
 } aimee_wire_projection_report_t;
 /* Reports wire incompatibility without editing canonical history. */
 void aimee_backend_projection_report(const aimee_request_t *request, aimee_wire_t wire,
@@ -98,6 +99,8 @@ struct cJSON *openai_backend_build_plain(const aimee_request_t *request);
  * {type:function,function:{name}} (Chat). Shared by the Chat and Responses backends. */
 void openai_family_add_tool_choice(struct cJSON *out, const aimee_request_t *ir,
                                    int responses_shape);
+/* Emit only the typed cache controls. Returns -1 on allocation failure. */
+int openai_family_add_prompt_cache(struct cJSON *out, const aimee_request_t *request);
 /* Parse an OpenAI chat.completion response into the IR. */
 int openai_backend_parse(const struct cJSON *resp, aimee_response_t *out, char *err, size_t errn);
 

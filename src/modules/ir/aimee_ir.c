@@ -510,6 +510,9 @@ void aimee_request_free(aimee_request_t *r)
    free_str(r->tool_choice_name);
    cJSON_Delete(r->metadata);
    free_str(r->service_tier);
+   free_str(r->prompt_cache_key);
+   free_str(r->prompt_cache_retention);
+   cJSON_Delete(r->prompt_cache_options);
    cJSON_Delete(r->thinking);
    if (r->stop_sequences)
    {
@@ -853,6 +856,10 @@ static int request_equal(const aimee_request_t *a, const aimee_request_t *b, int
       return 0;
    if (!str_eq(a->service_tier, b->service_tier))
       return 0;
+   if (!str_eq(a->prompt_cache_key, b->prompt_cache_key) ||
+       !str_eq(a->prompt_cache_retention, b->prompt_cache_retention) ||
+       !json_eq(a->prompt_cache_options, b->prompt_cache_options))
+      return 0;
    if (!json_eq(a->thinking, b->thinking))
       return 0;
    if (a->stream != b->stream || a->n_stop != b->n_stop)
@@ -1175,6 +1182,8 @@ int aimee_ir_request_admit(const aimee_request_t *request)
        (request->has_temperature && !isfinite(request->temperature)) ||
        (request->has_top_p && !isfinite(request->top_p)) || request->n_stop < 0 ||
        request->n_stop > AIMEE_IR_MAX_BLOCKS || (request->n_stop && !request->stop_sequences) ||
+       (request->prompt_cache_options && (!cJSON_IsObject(request->prompt_cache_options) ||
+                                          !aimee_ir_json_unique(request->prompt_cache_options))) ||
        (request->thinking &&
         (!cJSON_IsObject(request->thinking) || !aimee_ir_json_unique(request->thinking))) ||
        (request->output_format.schema && !aimee_ir_json_unique(request->output_format.schema)) ||

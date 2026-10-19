@@ -549,6 +549,40 @@ static int agent_anthropic_profile_ir(const agent_t *agent, const cJSON *tools,
 
 /* Host profiles start in IR; compatibility catalogs enter their typed parser.
  * Policy and translation own the complete output and dispatch catalog. */
+/* Execution entry controls belong with canonical request profiles. The loop's
+ * economizer must not own provider cache configuration. */
+int agent_request_with_tools_supported(const aimee_request_t *request)
+{
+   if (!request || request->n_messages < 1 || request->n_messages > AIMEE_IR_MAX_BLOCKS ||
+       !request->messages)
+      return 0;
+   int content = 0;
+   for (int i = 0; i < request->n_messages; i++)
+   {
+      if (request->messages[i].n_blocks < 0 ||
+          request->messages[i].n_blocks > AIMEE_IR_MAX_BLOCKS ||
+          (request->messages[i].n_blocks && !request->messages[i].blocks))
+         return 0;
+      for (int j = 0; j < request->messages[i].n_blocks; j++)
+      {
+         const aimee_block_t *block = &request->messages[i].blocks[j];
+         if (block->type != AIMEE_BLK_TEXT || (block->text && block->text[0]))
+            content = 1;
+      }
+   }
+   return content &&
+          !(request->n_tools ||
+            (request->tool_choice != AIMEE_TOOL_CHOICE_UNSET &&
+             request->tool_choice != AIMEE_TOOL_CHOICE_AUTO) ||
+            request->n_system > 1 ||
+            (request->n_system && request->system[0].type != AIMEE_BLK_TEXT) || request->thinking ||
+            request->metadata || request->service_tier || request->prompt_cache_key ||
+            request->prompt_cache_retention || request->prompt_cache_options || request->n_stop ||
+            request->has_top_p || request->has_top_k || request->has_parallel_tool_calls ||
+            request->reasoning_summary || request->reasoning_effort ||
+            request->output_format.kind > AIMEE_OUTPUT_TEXT);
+}
+
 cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
                               const char *system_prompt, int max_tokens, double temperature,
                               aimee_wire_t wire, int is_delegate, aimee_request_t *dispatch_catalog)
@@ -593,8 +627,9 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
    ir.mutated = 1;
    aimee_wire_projection_report_t projection;
    aimee_backend_projection_report(&ir, wire, &projection);
-   if (aimee_ir_session_emit_projection(ir.model, projection.omitted_reasoning_blocks,
-                                        projection.omitted_opaque_state_blocks, "request"))
+   if (aimee_ir_session_emit_projection_controls(ir.model, projection.omitted_reasoning_blocks,
+                                                 projection.omitted_opaque_state_blocks,
+                                                 projection.omitted_cache_controls, "request"))
       goto fail;
    if (projection.omitted_reasoning_blocks)
       LOG_INFO("translation.projection",

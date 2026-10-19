@@ -1030,6 +1030,9 @@ void aimee_anthropic_projection_report(const aimee_request_t *request,
                                        aimee_wire_projection_report_t *report)
 {
    memset(report, 0, sizeof *report);
+   report->omitted_cache_controls = !!request->prompt_cache_key +
+                                    !!request->prompt_cache_retention +
+                                    !!request->prompt_cache_options;
    for (int i = 0; i < request->n_system; i++)
       if (request->system[i].type == AIMEE_BLK_THINKING)
       {

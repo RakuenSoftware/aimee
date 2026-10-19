@@ -539,7 +539,10 @@ cJSON *aimee_ir_request_json(const aimee_request_t *request)
        (request->has_top_k && !cJSON_AddNumberToObject(out, "top_k", request->top_k)) ||
        !cJSON_AddBoolToObject(out, "stream", request->stream) ||
        !add_copy(out, "metadata", request->metadata) ||
-       !add_string(out, "service_tier", request->service_tier))
+       !add_string(out, "service_tier", request->service_tier) ||
+       !add_string(out, "prompt_cache_key", request->prompt_cache_key) ||
+       !add_string(out, "prompt_cache_retention", request->prompt_cache_retention) ||
+       !add_copy(out, "prompt_cache_options", request->prompt_cache_options))
       goto fail;
    cJSON *stops = cJSON_AddArrayToObject(out, "stop_sequences");
    if (!stops || request->n_stop < 0 || request->n_stop > AIMEE_IR_MAX_BLOCKS ||
@@ -823,8 +826,10 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
       break;
    case AIMEE_SESSION_PROJECTION:
       if (!event->projection_model || !event->projection_model[0] ||
-          event->projection_reasoning <= 0 || event->projection_opaque < 0 ||
-          event->projection_opaque > event->projection_reasoning || !event->projection_boundary ||
+          event->projection_reasoning < 0 || event->projection_cache_controls < 0 ||
+          (!event->projection_reasoning && !event->projection_cache_controls) ||
+          event->projection_opaque < 0 || event->projection_opaque > event->projection_reasoning ||
+          !event->projection_boundary ||
           (strcmp(event->projection_boundary, "request") &&
            strcmp(event->projection_boundary, "response")))
          goto fail;
@@ -835,7 +840,10 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
           !cJSON_AddNumberToObject(payload, "omitted_reasoning_blocks",
                                    event->projection_reasoning) ||
           !cJSON_AddNumberToObject(payload, "omitted_opaque_state_blocks",
-                                   event->projection_opaque))
+                                   event->projection_opaque) ||
+          (event->projection_cache_controls &&
+           !cJSON_AddNumberToObject(payload, "omitted_cache_controls",
+                                    event->projection_cache_controls)))
          goto fail;
       break;
    case AIMEE_SESSION_CHILD_EXECUTION:
@@ -1191,12 +1199,18 @@ int aimee_ir_control_reply_valid(const char *kind, const cJSON *request, const c
 int aimee_ir_session_emit_projection(const char *model, int reasoning, int opaque,
                                      const char *boundary)
 {
-   if (!reasoning && !opaque)
+   return aimee_ir_session_emit_projection_controls(model, reasoning, opaque, 0, boundary);
+}
+int aimee_ir_session_emit_projection_controls(const char *model, int reasoning, int opaque,
+                                              int cache_controls, const char *boundary)
+{
+   if (!reasoning && !opaque && !cache_controls)
       return 0;
    aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
                                   .projection_model = model && model[0] ? model : "selected model",
                                   .projection_boundary = boundary,
                                   .projection_reasoning = reasoning,
-                                  .projection_opaque = opaque};
+                                  .projection_opaque = opaque,
+                                  .projection_cache_controls = cache_controls};
    return aimee_ir_session_emit(&event);
 }

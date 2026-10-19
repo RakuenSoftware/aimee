@@ -4431,6 +4431,20 @@ static void test_canonical_external_run_preserves_budget_refusal(void)
       assert(!strcmp(result.error, "request_budget_unavailable"));
       assert(!response.n_content && !result.response);
       aimee_response_free(&response);
+      for (int control = 0; control < 3; control++)
+      {
+         request.prompt_cache_key = control == 0 ? "" : NULL;
+         request.prompt_cache_retention = control == 1 ? "24h" : NULL;
+         request.prompt_cache_options = control == 2 ? cJSON_CreateObject() : NULL;
+         assert(!agent_request_with_tools_supported(&request));
+         assert(agent_execute_request_with_tools(&agent, NULL, "execute", &request, &response,
+                                                 &result) == AGENT_RC_CONTEXT_REFUSED);
+         assert(!strcmp(result.error, "run request contains unsupported execution controls"));
+         assert(!response.n_content && !result.response);
+         cJSON_Delete(request.prompt_cache_options);
+         request.prompt_cache_key = request.prompt_cache_retention = NULL;
+         request.prompt_cache_options = NULL;
+      }
    }
    request_context_restore(&previous);
    request_context_snapshot_clear(&previous);

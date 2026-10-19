@@ -275,10 +275,40 @@ aimee_add_test(test_wfe_enforce test_wfe_enforce.c)
 aimee_add_test(test_wfe_advance test_wfe_advance.c)
 aimee_add_test(test_aimee_ir test_aimee_ir.c ../modules/ir/aimee_ir.c)
 aimee_add_test(test_aimee_ir_metrics test_aimee_ir_metrics.c ../modules/ir/aimee_ir_metrics.c)
-aimee_add_test(test_aimee_frontend test_aimee_frontend.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c ../modules/translation/aimee_frontend_responses.c ../modules/ir/aimee_ir.c)
-aimee_add_test(test_aimee_backend test_aimee_backend.c ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_backend_openai.c ../modules/translation/aimee_backend_responses.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c ../modules/ir/aimee_ir.c)
+aimee_add_test(test_aimee_frontend test_aimee_frontend.c
+  ../modules/translation/aimee_frontend_anthropic.c
+  ../modules/translation/aimee_frontend_openai.c
+  ../modules/translation/aimee_frontend_responses.c
+  ../modules/translation/aimee_backend_anthropic.c
+  ../modules/translation/aimee_backend_openai.c
+  ../modules/translation/aimee_backend_responses.c
+  ../modules/ir/aimee_ir.c ../aimee_sha256.c)
+aimee_add_test(test_aimee_backend test_aimee_backend.c
+  ../modules/translation/aimee_backend_anthropic.c
+  ../modules/translation/aimee_backend_openai.c
+  ../modules/translation/aimee_backend_responses.c
+  ../modules/translation/aimee_frontend_anthropic.c
+  ../modules/translation/aimee_frontend_openai.c
+  ../modules/ir/aimee_ir.c ../aimee_sha256.c)
 aimee_add_test(test_aimee_ir_shadow test_aimee_ir_shadow.c ../server/aimee_ir_shadow.c ../modules/ir/aimee_ir_metrics.c ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c ../modules/ir/aimee_ir.c)
-aimee_add_test(test_aimee_ir_serve test_aimee_ir_serve.c ../server/aimee_ir_serve.c ../modules/ir/aimee_ir_session.c ../modules/translation/aimee_backend_openai.c ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_backend_responses.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_responses.c ../modules/ir/aimee_ir.c ../modules/ir/aimee_ir_metrics.c)
+aimee_add_test(test_aimee_ir_serve test_aimee_ir_serve.c
+  support/ir_seam_memory_stub.c ../server/aimee_ir_serve.c
+  ../modules/ir/aimee_ir_session.c ../modules/ir/aimee_ir.c
+  ../modules/ir/session_event.c ../modules/ir/aimee_ir_metrics.c
+  ../modules/translation/wire_codec.c ../modules/translation/history_ir.c
+  ../modules/translation/aimee_backend_openai.c
+  ../modules/translation/aimee_backend_anthropic.c
+  ../modules/translation/aimee_backend_responses.c
+  ../modules/translation/aimee_frontend_anthropic.c
+  ../modules/translation/aimee_frontend_openai.c
+  ../modules/translation/aimee_frontend_responses.c
+  ../core/turn_integrity/turn_integrity.c ../aimee_sha256.c)
+target_include_directories(test_aimee_ir_serve PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../core/turn_integrity/include)
+target_link_libraries(test_aimee_ir_serve PRIVATE Threads::Threads)
+foreach(ir_test test_aimee_frontend test_aimee_backend test_aimee_ir_serve)
+  target_link_libraries(${ir_test} PRIVATE OpenSSL::Crypto)
+endforeach()
 aimee_add_test(test_aimee_ir_stream test_aimee_ir_stream.c ../modules/translation/aimee_ir_stream.c ../modules/ir/aimee_ir.c)
 aimee_add_test(test_shutdown_forensics test_shutdown_forensics.c)
 

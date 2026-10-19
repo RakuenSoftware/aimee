@@ -519,9 +519,20 @@ static int messages_estimate_tokens(const aimee_request_t *request)
 static char *anthropic_build_prov_body(aimee_request_t *request, aimee_wire_t wire, int stream)
 {
    request->stream = stream;
-   return aimee_frontend_guard_state(request, NULL, 0) || aimee_ir_request_admit(request)
-              ? NULL
-              : aimee_backend_render_wire(request, wire);
+   if (aimee_frontend_guard_state(request, NULL, 0) || aimee_ir_request_admit(request))
+      return NULL;
+   char *body = aimee_backend_render_wire(request, wire);
+   aimee_wire_projection_report_t projection;
+   aimee_backend_projection_report(request, wire, &projection);
+   if (body &&
+       aimee_ir_session_emit_projection_controls(
+           request->model, projection.omitted_reasoning_blocks,
+           projection.omitted_opaque_state_blocks, projection.omitted_cache_controls, "request"))
+   {
+      free(body);
+      return NULL;
+   }
+   return body;
 }
 
 static int messages_buffered(const char *body, char *resp, int cap)

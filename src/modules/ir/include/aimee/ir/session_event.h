@@ -47,7 +47,7 @@ typedef struct
    const char *child_session, *child_turn, *child_role;
    /* Output-boundary fidelity report; never model content. */
    const char *projection_model, *projection_boundary;
-   int projection_reasoning, projection_opaque;
+   int projection_reasoning, projection_opaque, projection_cache_controls;
    /* Host-observed native state. Digests and the actual sent-prefix binding
     * contain no credential or duplicate transcript. Never model content. */
    const char *replay_scope, *replay_digest, *replay_wire, *replay_binding;
@@ -90,6 +90,8 @@ void aimee_ir_session_begin_task(void);
 void aimee_ir_session_restore_sink(aimee_ir_session_sink_fn sink, void *context, int failed);
 aimee_ir_session_sink_fn aimee_ir_session_get_sink(void **context);
 int aimee_ir_session_emit(const aimee_session_event_t *event);
+int aimee_ir_session_emit_projection_controls(const char *model, int reasoning, int opaque,
+                                              int cache_controls, const char *boundary);
 int aimee_ir_session_emit_projection(const char *model, int reasoning, int opaque,
                                      const char *boundary);
 /* Capture failure is sticky for the installed task sink, including adapter

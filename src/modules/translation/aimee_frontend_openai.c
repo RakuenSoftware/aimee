@@ -16,6 +16,34 @@ static char *dupstr(const char *s)
    return s ? strdup(s) : NULL;
 }
 
+int openai_family_prompt_cache_parse(const cJSON *native, aimee_request_t *out, char *error,
+                                     size_t capacity)
+{
+   if (!out || !cJSON_IsObject(native) || !aimee_ir_json_unique(native))
+      return -1;
+   static const char *const names[] = {"prompt_cache_key", "prompt_cache_retention"};
+   char **values[] = {&out->prompt_cache_key, &out->prompt_cache_retention};
+   for (int i = 0; i < 2; i++)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(native, names[i]);
+      if (!value || cJSON_IsNull(value))
+         continue;
+      if (!cJSON_IsString(value) || !(*values[i] = strdup(value->valuestring)))
+         goto fail;
+   }
+   const cJSON *options = cJSON_GetObjectItemCaseSensitive(native, "prompt_cache_options");
+   if (options && !cJSON_IsNull(options))
+   {
+      if (!cJSON_IsObject(options) || !(out->prompt_cache_options = cJSON_Duplicate(options, 1)))
+         goto fail;
+   }
+   return 0;
+fail:
+   if (error && capacity)
+      snprintf(error, capacity, "invalid OpenAI prompt cache configuration");
+   return -1;
+}
+
 static const char *ostr(const cJSON *o, const char *k)
 {
    const cJSON *it = cJSON_GetObjectItemCaseSensitive((cJSON *)o, k);
@@ -414,6 +442,11 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
    {
       out->top_k = top_k->valueint;
       out->has_top_k = 1;
+   }
+   if (openai_family_prompt_cache_parse(req, out, err, errn))
+   {
+      aimee_request_free(out);
+      return -1;
    }
    const cJSON *meta = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "metadata");
    if (meta && !cJSON_IsNull(meta))

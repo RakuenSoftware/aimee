@@ -31,6 +31,23 @@ it('reports output-boundary loss while retaining the canonical reasoning', () =>
   expect(state.messages[0].blocks[0].signature).toBe('opaque');
 });
 
+it('shows cache projection independently of reasoning without changing history', () => {
+  const initial = emptySession('s');
+  const envelope: Envelope = { version: 1, session_id: 's', sequence: '1', event_id: 'cache', turn_id: 't', actor: 'alice',
+    event: { kind: 'projection', payload: { model: 'model-b', boundary: 'request', omitted_reasoning_blocks: 0,
+      omitted_opaque_state_blocks: 0, omitted_cache_controls: 3 } } };
+  const state = reduceSession(initial, envelope);
+  expect(state.messages).toBe(initial.messages);
+  expect(reduceSession(emptySession('s'), JSON.parse(JSON.stringify(envelope)))).toEqual(state);
+  render(<IRTranscript state={state} />);
+  expect(screen.getByRole('status').textContent).toContain('3 requested cache settings were not applied for model-b');
+  expect(screen.getByRole('status').textContent).not.toContain('0 reasoning');
+  for (const count of [-1, 0, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const invalid = { ...envelope, event: { ...envelope.event, payload: { ...envelope.event.payload, omitted_cache_controls: count } } };
+    expect(() => reduceSession(emptySession('s'), invalid as Envelope)).toThrow('Invalid projection report');
+  }
+});
+
 it('loads an expanded delegate from its private canonical log without adding it to parent messages', () => {
   class Stream {
     static instances: Stream[] = [];

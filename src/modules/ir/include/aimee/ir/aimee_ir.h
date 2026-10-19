@@ -292,6 +292,13 @@ typedef struct
    struct cJSON *metadata;
    /* Anthropic `service_tier` ("auto"/"standard_only"/...); NULL if unset. Owned. */
    char *service_tier;
+   /* OpenAI-family cache routing and retention controls. Owned; NULL means
+    * provider default. Options remain opaque JSON with exact numeric tokens;
+    * retention and options express independent policies, never rewrite one
+    * into the other. Native raw sidecars are not their authority. */
+   char *prompt_cache_key;
+   char *prompt_cache_retention;
+   struct cJSON *prompt_cache_options;
    /* Anthropic extended-thinking CONFIG object ({type:"enabled",budget_tokens:N}) -- a
     * top-level request field, distinct from THINKING content blocks in messages.
     * Opaque, preserved verbatim. Owned. NULL when the client sent none. */

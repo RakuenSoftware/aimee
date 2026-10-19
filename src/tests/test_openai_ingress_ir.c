@@ -222,7 +222,8 @@ static void test_canonical_response_cache_round_trip(void)
    assert(encoded && !strstr(encoded, "native_sidecar_must_not_enter_cache"));
    aimee_response_t restored = {0};
    openai_ir_cache_t replay = {0};
-   assert(!openai_ir_cache_decode(encoded, &restored, &replay));
+   int cache_result = openai_ir_cache_decode(encoded, &restored, &replay);
+   assert(!cache_result);
    assert(!strcmp(replay.client_id, first.client_id) && replay.created == first.created);
    assert(restored.n_content == 3 &&
           !strcmp(restored.content[0].thinking_signature, "opaque-signature"));
@@ -239,7 +240,8 @@ static void test_canonical_response_cache_round_trip(void)
    assert(invalid);
    cJSON_ReplaceItemInObjectCaseSensitive(invalid, "usage_in", cJSON_CreateNumber(-1));
    char *bad = cJSON_PrintUnformatted(invalid);
-   assert(openai_ir_cache_decode(bad, &restored, &replay) && !restored.content);
+   cache_result = openai_ir_cache_decode(bad, &restored, &replay);
+   assert(cache_result && !restored.content);
    free(bad);
    cJSON_Delete(invalid);
    free(encoded);
@@ -321,8 +323,53 @@ static void test_restored_history_rechecks_native_provenance(void)
    aimee_frontend_bind_state_guard(previous.guard, previous.context);
 }
 
+static int cache_projection_capture(const aimee_session_event_t *event, void *context)
+{
+   int *state = context;
+   assert(event->kind == AIMEE_SESSION_PROJECTION && event->projection_cache_controls == 3 &&
+          event->projection_reasoning == 0 && event->projection_opaque == 0);
+   state[0]++;
+   return state[1];
+}
+static void test_cache_configuration_at_actual_ingress(void)
+{
+   const char *body =
+       "{\"model\":\"cache-fixture\",\"input\":\"question\",\"stream\":true,\"store\":false,"
+       "\"prompt_cache_key\":\"owner-scope\",\"prompt_cache_retention\":\"24h\","
+       "\"prompt_cache_options\":{\"mode\":\"explicit\",\"ttl\":\"30m\"}}";
+   aimee_request_t request = {0};
+   char error[128];
+   assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_RESPONSES, &request, error,
+                                     sizeof error));
+   void *previous_context = NULL;
+   aimee_ir_session_sink_fn previous = aimee_ir_session_get_sink(&previous_context);
+   int failed = aimee_ir_session_capture_failed(), state[2] = {0};
+   aimee_ir_session_set_sink(cache_projection_capture, state);
+   const aimee_wire_t wires[] = {AIMEE_WIRE_RESPONSES, AIMEE_WIRE_OPENAI_CHAT,
+                                 AIMEE_WIRE_ANTHROPIC};
+   for (int i = 0; i < 3; i++)
+   {
+      char *native = openai_build_ir_body(&request, wires[i]);
+      cJSON *out = native ? cJSON_Parse(native) : NULL;
+      assert(out);
+      if (i < 2)
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(out, "prompt_cache_key")),
+                        "owner-scope"));
+      else
+         assert(!cJSON_GetObjectItem(out, "prompt_cache_key") && state[0] == 1);
+      cJSON_Delete(out);
+      free(native);
+   }
+   state[1] = -1;
+   assert(!openai_build_ir_body(&request, AIMEE_WIRE_ANTHROPIC));
+   assert(state[0] == 2 && aimee_ir_session_capture_failed());
+   aimee_ir_session_restore_sink(previous, previous_context, failed);
+   aimee_request_free(&request);
+}
+
 int main(void)
 {
+   test_cache_configuration_at_actual_ingress();
    test_restored_history_rechecks_native_provenance();
    test_responses_run_input_controls();
    test_tool_free_admission_and_text_entry();

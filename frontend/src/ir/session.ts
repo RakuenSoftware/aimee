@@ -47,7 +47,7 @@ export type Delta = {
   usage_reasoning?: number;
   error_message?: string;
 };
-export type ProjectionReport = { model: string; boundary: 'request' | 'response'; omitted_reasoning_blocks: number; omitted_opaque_state_blocks: number };
+export type ProjectionReport = { model: string; boundary: 'request' | 'response'; omitted_reasoning_blocks: number; omitted_opaque_state_blocks: number; omitted_cache_controls?: number };
 export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 export type ChildExecution = { session_id: string; turn_id: string; role: string; status: ExecutionStatus };
 export type SessionEvent =
@@ -174,7 +174,9 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
     }
     case 'projection': {
       const report = event.payload;
-      if (!nonempty(report.model) || (report.boundary !== 'request' && report.boundary !== 'response') || !Number.isSafeInteger(report.omitted_reasoning_blocks) || report.omitted_reasoning_blocks <= 0 ||
+      if (!nonempty(report.model) || (report.boundary !== 'request' && report.boundary !== 'response') || !Number.isSafeInteger(report.omitted_reasoning_blocks) || report.omitted_reasoning_blocks < 0 ||
+          !Number.isSafeInteger(report.omitted_cache_controls ?? 0) || (report.omitted_cache_controls ?? 0) < 0 ||
+          (report.omitted_reasoning_blocks === 0 && (report.omitted_cache_controls ?? 0) === 0) ||
           !Number.isSafeInteger(report.omitted_opaque_state_blocks) || report.omitted_opaque_state_blocks < 0 ||
           report.omitted_opaque_state_blocks > report.omitted_reasoning_blocks) throw new Error('Invalid projection report');
       next.projections = [...(state.projections ?? []), { ...report, id: envelope.event_id, turn: envelope.turn_id }];

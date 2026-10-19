@@ -343,6 +343,19 @@ int main(void)
    event.projection_opaque = -1;
    assert(!aimee_ir_session_event_json(&event));
 
+   event.projection_reasoning = 0;
+   event.projection_opaque = 0;
+   event.projection_cache_controls = 3;
+   json = aimee_ir_session_event_json(&event);
+   assert(json &&
+          cJSON_GetObjectItem(cJSON_GetObjectItem(json, "payload"), "omitted_cache_controls")
+                  ->valueint == 3);
+   cJSON_Delete(json);
+   event.projection_cache_controls = -1;
+   assert(!aimee_ir_session_event_json(&event));
+   event.projection_cache_controls = 0;
+   assert(!aimee_ir_session_event_json(&event));
+
    event = (aimee_session_event_t){.kind = AIMEE_SESSION_CHILD_EXECUTION,
                                    .child_session = "private-child",
                                    .child_turn = "child-run",
