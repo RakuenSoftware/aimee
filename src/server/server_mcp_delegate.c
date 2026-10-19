@@ -7,24 +7,36 @@
 
 int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
-static void add_resolved_delegate_cwd(cJSON *dreq, cJSON *args, const char *sid)
+static int add_resolved_delegate_cwd(cJSON *dreq, cJSON *args, const char *sid, char **error)
 {
-   char resolved_cwd[MAX_PATH_LEN] = "";
-   char *mismatch_err = NULL;
+   char previous_cwd[MAX_PATH_LEN], previous_session[128] = "";
+   const char *cwd = run_cmd_get_cwd();
+   snprintf(previous_cwd, sizeof previous_cwd, "%s", cwd ? cwd : "");
+   int previous_override = session_id_override_active();
+   if (previous_override)
+      snprintf(previous_session, sizeof previous_session, "%s", session_id());
+   int previous_worktree = mcp_git_get_worktree();
    if (sid && sid[0])
       session_id_set_override(sid);
-   if (mcp_chdir_git_root(NULL, 0, args, &mismatch_err) > 0)
+   /* Resolution may change both the cwd and the legacy Git ownership session.
+    * Keep those changes inside this lookup; the delegate's parent remains the
+    * host-attested transport session, and the caller's tool scope stays intact. */
+   char *mismatch = NULL;
+   int resolved = mcp_chdir_git_root(NULL, 0, args, &mismatch);
+   if (resolved > 0 && !mismatch)
    {
-      const char *tl_cwd = run_cmd_get_cwd();
-      if (tl_cwd && tl_cwd[0])
-         snprintf(resolved_cwd, sizeof(resolved_cwd), "%s", tl_cwd);
+      const char *root = run_cmd_get_cwd();
+      if (!root || !root[0] || !cJSON_AddStringToObject(dreq, "cwd", root))
+         resolved = -1;
    }
-   run_cmd_set_cwd(NULL);
-   if (sid && sid[0])
+   run_cmd_set_cwd(previous_cwd[0] ? previous_cwd : NULL);
+   mcp_git_set_worktree(previous_worktree);
+   if (previous_override)
+      session_id_set_override(previous_session);
+   else
       session_id_clear_override();
-   free(mismatch_err);
-   if (resolved_cwd[0])
-      cJSON_AddStringToObject(dreq, "cwd", resolved_cwd);
+   *error = mismatch;
+   return resolved < 0 || mismatch ? -1 : 0;
 }
 
 int handle_mcp_delegate_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *args, const char *sid)
@@ -44,6 +56,9 @@ int handle_mcp_delegate_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *args
    cJSON *jdcwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
    cJSON *jpersona = cJSON_GetObjectItemCaseSensitive(args, "persona");
    cJSON *jtools = cJSON_GetObjectItemCaseSensitive(args, "tools");
+   cJSON *jvia = cJSON_GetObjectItemCaseSensitive(args, "via");
+   cJSON *jscope = cJSON_GetObjectItemCaseSensitive(args, "scope");
+   cJSON *jhandoff = cJSON_GetObjectItemCaseSensitive(args, "handoff_json");
    /* A persona is required for every delegate (it sets the delegate's identity
     * and principles). */
    if (!cJSON_IsString(jpersona) || !jpersona->valuestring[0])
@@ -66,12 +81,29 @@ int handle_mcp_delegate_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *args
     * own tools default decides, exactly as it does for the CLI. */
    if (cJSON_IsBool(jtools))
       cJSON_AddBoolToObject(dreq, "tools", cJSON_IsTrue(jtools));
+   if (cJSON_IsString(jvia))
+      cJSON_AddStringToObject(dreq, "via", jvia->valuestring);
+   if (cJSON_IsString(jscope))
+      cJSON_AddStringToObject(dreq, "scope", jscope->valuestring);
+   if (cJSON_IsBool(jhandoff))
+      cJSON_AddBoolToObject(dreq, "handoff_json", cJSON_IsTrue(jhandoff));
    if (sid && sid[0])
       cJSON_AddStringToObject(dreq, "session_id", sid);
    if (cJSON_IsString(jdcwd) && jdcwd->valuestring[0])
       cJSON_AddStringToObject(dreq, "cwd", jdcwd->valuestring);
    else
-      add_resolved_delegate_cwd(dreq, args, sid);
+   {
+      char *error = NULL;
+      if (add_resolved_delegate_cwd(dreq, args, sid, &error))
+      {
+         server_mcp_served_outcome("refused", "context");
+         int rc =
+             server_send_error(conn, error ? error : "delegate worktree is inaccessible", NULL);
+         free(error);
+         cJSON_Delete(dreq);
+         return rc;
+      }
+   }
    /* Delegates are always async (WP-B): the in-model tool always returns a
     * job_id and the model polls delegate_status. Set background=1 for
     * back-compat with a mixed-version server during rollout (a current server

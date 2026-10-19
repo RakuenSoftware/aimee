@@ -747,6 +747,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-kb-dense-vector-scope \
                $(TESTPREFIX)/unit-test-mcp-roundtable-contract \
                $(TESTPREFIX)/unit-test-mcp-delegate-contract \
+               $(TESTPREFIX)/unit-test-server-mcp-delegate \
                $(TESTPREFIX)/unit-test-workspace-prune-dead \
                $(TESTPREFIX)/unit-test-workspace-add-idempotent \
                $(TESTPREFIX)/unit-test-kb-doc-pdf \
@@ -6328,6 +6329,10 @@ $(TESTPREFIX)/unit-test-mcp-roundtable-contract: $(OBJDIR)/tests/test_mcp_roundt
                                      $(OBJDIR)/modules/protocols/mcp/mcp_tools.o \
                                      $(OBJDIR)/cJSON.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-mcp-delegate: $(OBJDIR)/tests/test_server_mcp_delegate.o \
+    $(OBJDIR)/server/server_mcp_delegate.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-mcp-delegate-contract: $(OBJDIR)/tests/test_mcp_delegate_contract.o \
                                      $(OBJDIR)/modules/protocols/mcp/mcp_tools.o \

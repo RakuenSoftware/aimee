@@ -523,6 +523,12 @@ if(NOT WIN32)
 endif()
 
 if(NOT WIN32)
+  add_executable(test_server_mcp_delegate test_server_mcp_delegate.c
+    ../server/server_mcp_delegate.c ../vendor/cJSON.c)
+  target_include_directories(test_server_mcp_delegate PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
+  aimee_enable_test_asserts(test_server_mcp_delegate)
+  add_test(NAME test_server_mcp_delegate COMMAND test_server_mcp_delegate)
   add_executable(test_server_session_question test_server_session_question.c
     ../server/server_session_question.c ../server/server_session_control.c
     ../server/server_compute_mailbox.c

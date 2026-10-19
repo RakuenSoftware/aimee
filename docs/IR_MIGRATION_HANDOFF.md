@@ -2505,3 +2505,36 @@ and focused CTest, rebuilt Linux server and original PostgreSQL 18.6 integration
 harness (167/167, 26 existing service skips, no KB). No fresh Windows or Darwin
 qualification or production promotion is inferred from these Linux results.
 All 76 repository lint checks pass for the mailbox-lease increment.
+
+## MCP delegation preserves model routing and the caller's workspace scope
+
+The served delegate schema already advertises via, scope and handoff_json, and
+the server delegate handler reads them. The MCP wrapper dropped all three.
+It now forwards those fields with their declared types, including explicit
+false; absent options remain absent so server-owned defaults still decide.
+The transport-attested parent session remains authoritative.
+
+Default cwd resolution previously cleared the caller's cwd/session override,
+leaked resolver ownership state, and ignored inaccessible-worktree errors.
+The lookup now restores the caller's cwd, explicit session override (or its
+absence) and Git worktree flag on every outcome. It copies the resolved cwd
+into the new request and refuses negative results or a context mismatch before
+launching a delegate. A genuine unresolved optional cwd still reaches the server
+without a cwd field, with the caller's original context intact. No persona,
+capability or permission ceiling is widened.
+
+Three independent new fixture modes fail against the prior wrapper: dropped
+routing fields, leaked caller context and launching after failed worktree
+resolution. The repair passes, including true/false options, omitted defaults,
+transport-session binding, 127-byte caller sessions, explicit cwd, no override,
+resolver errors and the existing persona/capability refusals. The focused
+ASan/UBSan fixture and two-source Cppcheck pass. This also addresses a remaining
+source of default-project confusion; no production installation is asserted.
+
+The final MCP delegate increment passes all 655 native binaries and proxy
+regressions, the focused ASan/UBSan fixture, two-source Cppcheck, actual CMake
+application/CTest, rebuilt Linux server, original PostgreSQL 18.6 integration
+167/167 (26 existing service skips, no KB), and all 76 lint gates. The unchanged
+frontend suite also passes all 292 tests across 35 files. Production promotion,
+fresh branch CI, native SDK activation/cache fidelity and independent learning
+qualification are still outstanding.
