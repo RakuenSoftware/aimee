@@ -109,10 +109,14 @@ int git_pr_edit_via_api_slug(const char *principal, const char *slug, int number
 typedef struct
 {
    char name[256];
-   char status[16];  /* pass / fail / pending / skipping */
+   char status[16];  /* pass / fail / cancelled / pending / skipping */
    char elapsed[16]; /* "45s", "2m54s", or "0" when pending or zero-length */
    char url[512];    /* details_url */
 } git_pr_check_t;
+
+/* Presentation only; this is not the merge verdict. Cancellation remains
+ * non-green in the separately owned CI grade. Unknown states display pending. */
+const char *git_pr_check_status(const char *status, const char *conclusion);
 
 /* Checks for PR `number`'s head commit into out[], at most `max`, count in
  * *count, sorted by name (see above: ours, not gh's). Returns 0 on success (including no

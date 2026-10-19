@@ -60,6 +60,12 @@ static git_pr_ci_t grade_with(const char *reply)
 int main(void)
 {
    printf("git-pr-ci-grade: ");
+   /* Metadata edits can supersede an in-flight run on the same head. Report its
+    * actual conclusion without either claiming a broken test or granting merge. */
+   assert(!strcmp(git_pr_check_status("completed", "cancelled"), "cancelled"));
+   assert(!strcmp(git_pr_check_status("completed", "failure"), "fail"));
+   assert(!strcmp(git_pr_check_status("in_progress", "cancelled"), "pending"));
+   assert(!strcmp(git_pr_check_status("completed", "unrecognized"), "pending"));
 
    /* Squash merges must suppress GitHub's synthesized commit body. Otherwise
     * child commit trailers can be copied into the feature commit and fail the

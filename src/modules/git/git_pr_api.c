@@ -823,27 +823,6 @@ static void gh_elapsed(const char *started, const char *completed, int completed
       snprintf(out, cap, "%llds", d);
 }
 
-/* GitHub's conclusion vocabulary mapped to the four words gh printed. Anything
- * unrecognised reports "pending" rather than inventing a word: a caller polling
- * for completion keeps polling, which is the safe direction to be wrong in. */
-static const char *gh_check_word(const char *status, const char *conclusion)
-{
-   if (!status || strcmp(status, "completed") != 0)
-      return "pending";
-   if (!conclusion)
-      return "pending";
-   if (strcmp(conclusion, "success") == 0)
-      return "pass";
-   if (strcmp(conclusion, "failure") == 0 || strcmp(conclusion, "timed_out") == 0 ||
-       strcmp(conclusion, "action_required") == 0 || strcmp(conclusion, "startup_failure") == 0 ||
-       strcmp(conclusion, "cancelled") == 0)
-      return "fail";
-   if (strcmp(conclusion, "neutral") == 0 || strcmp(conclusion, "skipped") == 0 ||
-       strcmp(conclusion, "stale") == 0)
-      return "skipping";
-   return "pending";
-}
-
 /* By name, then by url.
  *
  * This is OUR order, not a reproduction of gh's. gh was observed grouping skipped
@@ -926,7 +905,7 @@ int git_pr_checks_via_api_slug(const char *principal, const char *slug, int numb
       memset(row, 0, sizeof(*row));
       snprintf(row->name, sizeof(row->name), "%s", name->valuestring);
       snprintf(row->status, sizeof(row->status), "%s",
-               gh_check_word(status_s, cJSON_IsString(concl) ? concl->valuestring : NULL));
+               git_pr_check_status(status_s, cJSON_IsString(concl) ? concl->valuestring : NULL));
       gh_elapsed(cJSON_IsString(started) ? started->valuestring : NULL,
                  cJSON_IsString(done) ? done->valuestring : NULL,
                  status_s && strcmp(status_s, "completed") == 0, row->elapsed,

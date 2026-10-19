@@ -24,6 +24,26 @@
  * bus deadline here only converts a slow module into a refused merge. */
 #define GIT_PR_CI_GRADE_TIMEOUT_MS 10000
 
+/* Human-readable check rows are not merge verdicts. In particular a cancelled
+ * superseded workflow is neither a failed test nor proof that a check passed.
+ * The Go owner still grades cancellation as non-green for the merge gate. */
+const char *git_pr_check_status(const char *status, const char *conclusion)
+{
+   if (!status || strcmp(status, "completed") || !conclusion)
+      return "pending";
+   if (!strcmp(conclusion, "success"))
+      return "pass";
+   if (!strcmp(conclusion, "cancelled"))
+      return "cancelled";
+   if (!strcmp(conclusion, "failure") || !strcmp(conclusion, "timed_out") ||
+       !strcmp(conclusion, "action_required") || !strcmp(conclusion, "startup_failure"))
+      return "fail";
+   if (!strcmp(conclusion, "neutral") || !strcmp(conclusion, "skipped") ||
+       !strcmp(conclusion, "stale"))
+      return "skipping";
+   return "pending";
+}
+
 int git_pr_ci_permits_merge(git_pr_ci_t ci)
 {
    /* Enumerated, not a default: a new git_pr_ci_t value must be classified here

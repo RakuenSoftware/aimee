@@ -1303,3 +1303,20 @@ contract gap; it does not implement the incremental Responses backend or activat
 the production SDK path. Remaining effects, human controls, canonical prefix/cache
 admission, streaming transport, credential custody, consumers and KB-free learning
 acceptance remain open.
+
+
+## CI cancellation reporting during continuation
+
+Editing live PR metadata deliberately reruns attribution and cancels the older
+same-head CI workflow. At `e7c693d3b`, the registered older CLI displayed those
+cancelled rows as `fail`; the independent GitHub job metadata confirms cancellation,
+and `git pr failures` reports no failing checks. Do not label that as an assertion
+or compiler failure. The current check-row formatter now displays `cancelled`
+explicitly. Go merge grading remains unchanged and refuses cancellation as green;
+C presentation regressions and the Git module's race suite pass.
+
+Keep automatic reviews and attribution checks enabled. Prepare metadata before the
+final push and monitor the replacement run, avoiding unnecessary same-head edits
+while CI is running. Current installed CLI behavior will remain until the reviewed
+runtime promotion; source fixes alone do not update production or establish a
+complete migration. Production remains KB-free.
