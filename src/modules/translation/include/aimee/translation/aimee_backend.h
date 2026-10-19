@@ -63,6 +63,20 @@ struct cJSON *anthropic_backend_build(const aimee_request_t *ir);
 int anthropic_backend_parse(const struct cJSON *resp, aimee_response_t *out, char *err,
                             size_t errn);
 
+/* Host-created OpenAI-compatible settings with no canonical cross-wire meaning.
+ * Translation owns their native representation. Negative sampling values omit;
+ * fallbacks are borrowed and are deduplicated after the selected IR model. */
+typedef struct
+{
+   double min_p, repeat_penalty;
+   int disable_thinking, split_reasoning;
+   const char *const *fallback_models;
+   int n_fallback_models;
+} aimee_openai_host_profile_t;
+/* Requires a fresh Chat IR request without native entry sidecars. Atomic on error. */
+int openai_ir_set_host_profile(aimee_request_t *request,
+                               const aimee_openai_host_profile_t *profile);
+
 /* Build an OpenAI Chat Completions request from the IR (system blocks -> leading
  * system messages; tool_use -> assistant tool_calls; tools -> function tools).
  * Returns a new cJSON the caller owns, or NULL. */

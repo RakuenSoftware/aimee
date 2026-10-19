@@ -46,6 +46,32 @@ int main(void)
    printf("aimee-backend: ");
    char err[128];
 
+   const char *fallbacks[] = {"selected", "fallback", "fallback"};
+   aimee_openai_host_profile_t host_profile = {.min_p = 0.2,
+                                               .repeat_penalty = 1.1,
+                                               .disable_thinking = 1,
+                                               .split_reasoning = 1,
+                                               .fallback_models = fallbacks,
+                                               .n_fallback_models = 3};
+   aimee_request_t host_ir = {.model = strdup("selected"), .frontend = AIMEE_WIRE_OPENAI_CHAT};
+   assert(!openai_ir_set_host_profile(&host_ir, &host_profile));
+   cJSON *host_native = openai_backend_build(&host_ir);
+   assert(host_native);
+   const cJSON *host_models = cJSON_GetObjectItemCaseSensitive(host_native, "models");
+   assert(cJSON_GetArraySize(host_models) == 2);
+   assert(!strcmp(cJSON_GetArrayItem(host_models, 0)->valuestring, "selected"));
+   assert(!strcmp(cJSON_GetArrayItem(host_models, 1)->valuestring, "fallback"));
+   assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(
+       cJSON_GetObjectItemCaseSensitive(host_native, "chat_template_kwargs"), "enable_thinking")));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(host_native, "reasoning_split")));
+   cJSON *entry = host_ir.raw;
+   assert(openai_ir_set_host_profile(&host_ir, &host_profile) == -1 && host_ir.raw == entry);
+   cJSON_Delete(host_native);
+   aimee_request_free(&host_ir);
+   host_ir = (aimee_request_t){.model = strdup("selected"), .frontend = AIMEE_WIRE_RESPONSES};
+   assert(openai_ir_set_host_profile(&host_ir, &host_profile) == -1 && !host_ir.raw);
+   aimee_request_free(&host_ir);
+
    /* Only declared same-wire extensions survive; typed edits and removals
     * cannot be overwritten by the entry snapshot or private root metadata. */
    cJSON *profile = cJSON_Parse(

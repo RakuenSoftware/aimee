@@ -100,6 +100,9 @@ static cJSON *provider_payload_without_private_fields(cJSON *payload)
    strip_private_json_fields(copy);
    return copy;
 }
+static const char *const openrouter_fallbacks[] = {
+    "anthropic/claude-opus-4.7", "google/gemini-2.5-flash", "mistralai/mistral-large-2512"};
+
 static void openrouter_add_routing_hint(const agent_t *agent, cJSON *req)
 {
    if (!agent || strcmp(agent->provider, "openrouter") != 0 || !req)
@@ -112,12 +115,10 @@ static void openrouter_add_routing_hint(const agent_t *agent, cJSON *req)
    if (agent->model[0])
       cJSON_AddItemToArray(models, cJSON_CreateString(agent->model));
 
-   static const char *fallbacks[] = {"anthropic/claude-opus-4.7", "google/gemini-2.5-flash",
-                                     "mistralai/mistral-large-2512", NULL};
-   for (int i = 0; fallbacks[i]; i++)
+   for (size_t i = 0; i < sizeof openrouter_fallbacks / sizeof *openrouter_fallbacks; i++)
    {
-      if (!json_array_contains_string(models, fallbacks[i]))
-         cJSON_AddItemToArray(models, cJSON_CreateString(fallbacks[i]));
+      if (!json_array_contains_string(models, openrouter_fallbacks[i]))
+         cJSON_AddItemToArray(models, cJSON_CreateString(openrouter_fallbacks[i]));
    }
    cJSON_AddItemToObject(req, "models", models);
 }
@@ -394,6 +395,71 @@ static int agent_shape_ir_user(const agent_t *agent, aimee_request_t *ir)
    return 0;
 }
 
+static int agent_openai_profile_ir(const agent_t *agent, const cJSON *tools,
+                                   const char *system_prompt, int max_tokens, double temperature,
+                                   aimee_request_t *ir)
+{
+   ir->frontend = AIMEE_WIRE_OPENAI_CHAT;
+   ir->model = strdup(agent->model);
+   if (!ir->model)
+      return -1;
+   ir->max_tokens = agent_request_max_tokens(agent, max_tokens);
+   ir->has_max_tokens = 1;
+   model_sampling_row_t sampling = model_sampling_resolve(agent, temperature);
+   ir->temperature = sampling.temperature;
+   ir->has_temperature = sampling.temperature >= 0;
+   ir->top_p = sampling.top_p;
+   ir->has_top_p = sampling.top_p >= 0;
+   ir->top_k = sampling.top_k;
+   ir->has_top_k = sampling.top_k >= 0;
+   if (agent_is_mistral_vibe_model(agent))
+      ir->reasoning_effort = AIMEE_EFFORT_HIGH;
+   if (system_prompt && system_prompt[0])
+   {
+      ir->system = calloc(1, sizeof *ir->system);
+      if (!ir->system)
+         return -1;
+      ir->n_system = 1;
+      ir->system[0].type = AIMEE_BLK_TEXT;
+      ir->system[0].text = strdup(system_prompt);
+      if (!ir->system[0].text)
+         return -1;
+   }
+   int count = cJSON_IsArray(tools) ? cJSON_GetArraySize(tools) : 0;
+   ir->tools = count ? calloc((size_t)count, sizeof *ir->tools) : NULL;
+   if (count && !ir->tools)
+      return -1;
+   for (int i = 0; i < count; i++)
+   {
+      ir->n_tools++;
+      if (openai_ir_parse_tool(cJSON_GetArrayItem(tools, i), &ir->tools[i], 1))
+         return -1;
+   }
+   if (count)
+   {
+      int minimax = !strcmp(agent->provider, "minimax") ||
+                    strstr(agent->endpoint, "api.minimax.") || strstr(agent->model, "MiniMax-M2.7");
+      ir->has_parallel_tool_calls = agent_is_local_llama_compat(agent) || minimax;
+      ir->parallel_tool_calls = 0;
+      if (agent->require_initial_tool_call)
+         ir->tool_choice = AIMEE_TOOL_CHOICE_ANY;
+      else if (!strcmp(agent->provider, "mistral") || minimax)
+         ir->tool_choice = AIMEE_TOOL_CHOICE_AUTO;
+   }
+   aimee_openai_host_profile_t profile = {
+       .min_p = sampling.min_p,
+       .repeat_penalty = sampling.repeat_penalty,
+       .disable_thinking =
+           agent_is_local_llama_compat(agent) && !agent_request_prefers_no_think_prompt(agent),
+       .split_reasoning = strstr(agent->model, "MiniMax-M2.7") != NULL};
+   if (!strcmp(agent->provider, "openrouter"))
+   {
+      profile.fallback_models = openrouter_fallbacks;
+      profile.n_fallback_models = sizeof openrouter_fallbacks / sizeof *openrouter_fallbacks;
+   }
+   return openai_ir_set_host_profile(ir, &profile);
+}
+
 /* The host Responses execution profile is born canonical. Only the incoming
  * compatibility catalog crosses a tool parser; no synthetic native request is
  * built and re-admitted to recover fields already known by the host. */
@@ -461,35 +527,26 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
       if (agent_responses_profile_ir(agent, tools, system_prompt, &ir))
          goto fail;
    }
-   else
+   else if (wire == AIMEE_WIRE_OPENAI_CHAT)
+   {
+      if (agent_openai_profile_ir(agent, tools, system_prompt, max_tokens, temperature, &ir))
+         goto fail;
+   }
+   else if (wire == AIMEE_WIRE_ANTHROPIC)
    {
       empty = cJSON_CreateArray();
       if (!empty)
          goto fail;
-      profile = wire == AIMEE_WIRE_ANTHROPIC
-                    ? agent_build_request_anthropic(agent, empty, tools, system_prompt, max_tokens,
-                                                    temperature)
-                    : agent_build_request_openai(agent, empty, tools, max_tokens, temperature);
+      profile = agent_build_request_anthropic(agent, empty, tools, system_prompt, max_tokens,
+                                              temperature);
       if (!profile)
          goto fail;
-      if (wire == AIMEE_WIRE_OPENAI_CHAT && system_prompt && system_prompt[0])
-      {
-         cJSON *system = cJSON_CreateObject();
-         if (!system || !cJSON_AddStringToObject(system, "role", "system") ||
-             !cJSON_AddStringToObject(system, "content", system_prompt) ||
-             !cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(profile, "messages"), system))
-         {
-            cJSON_Delete(system);
-            goto fail;
-         }
-      }
       char error[128];
-      int rc = wire == AIMEE_WIRE_ANTHROPIC
-                   ? anthropic_frontend_parse(profile, &ir, error, sizeof error)
-                   : openai_frontend_parse(profile, &ir, error, sizeof error);
-      if (rc != 0)
+      if (anthropic_frontend_parse(profile, &ir, error, sizeof error))
          goto fail;
    }
+   else
+      goto fail;
    /* The empty profile may carry provider-added system context only. */
    for (int i = 0; i < ir.n_messages; i++)
       aimee_message_free(&ir.messages[i]);

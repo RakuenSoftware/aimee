@@ -1623,3 +1623,21 @@ are unchanged. This prepares their remaining native profile ingress cutover.
 The focused request fixture now also exercises opt-in Qwen sampling through actual
 canonical egress. Source/ASan fixtures and production build pass; module/lint/static
 checks are recorded with the slice.
+
+
+## Typed host Chat profile
+
+The tool-enabled Chat execution profile now starts directly as canonical IR too:
+model, output cap, sampling, system blocks, admitted tool catalog, forced/automatic
+tool choice, serial-call restrictions and reasoning effort. Provider-specific
+min-p/repetition settings, local thinking switches, MiniMax split reasoning and
+OpenRouter fallback routing enter a closed typed translation API; their native
+representation is built only by the translation owner. Existing selected-first
+fallback ordering/deduplication and vendor-specific settings are retained. The
+helper refuses to overwrite an inbound native sidecar or operate across wires.
+
+Chat and Responses no longer build empty native requests to rediscover their host
+profiles. Anthropic still uses the compatibility profile pending preservation of
+its exact scalar/block system-cache form; do not erase its native cache overlay
+merely to remove the remaining call. Existing request/profile, delegate-policy and
+translation fixtures pass through the new Chat path.

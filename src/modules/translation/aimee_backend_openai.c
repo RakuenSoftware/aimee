@@ -126,6 +126,61 @@ void openai_family_add_tool_choice(cJSON *out, const aimee_request_t *ir, int re
       cJSON_AddBoolToObject(out, "parallel_tool_calls", ir->parallel_tool_calls ? 1 : 0);
 }
 
+int openai_ir_set_host_profile(aimee_request_t *ir, const aimee_openai_host_profile_t *profile)
+{
+   if (!ir || !profile || ir->frontend != AIMEE_WIRE_OPENAI_CHAT || !ir->model || ir->raw ||
+       ir->raw_bytes || profile->n_fallback_models < 0 ||
+       (profile->n_fallback_models && !profile->fallback_models))
+      return -1;
+   cJSON *raw = cJSON_CreateObject();
+   if (!raw || !cJSON_AddStringToObject(raw, "model", ir->model))
+      goto fail;
+   if (profile->min_p >= 0 && !cJSON_AddNumberToObject(raw, "min_p", profile->min_p))
+      goto fail;
+   if (profile->repeat_penalty >= 0 &&
+       !cJSON_AddNumberToObject(raw, "repeat_penalty", profile->repeat_penalty))
+      goto fail;
+   if (profile->disable_thinking)
+   {
+      cJSON *kwargs = cJSON_AddObjectToObject(raw, "chat_template_kwargs");
+      if (!kwargs || !cJSON_AddBoolToObject(kwargs, "enable_thinking", 0))
+         goto fail;
+   }
+   if (profile->split_reasoning && !cJSON_AddBoolToObject(raw, "reasoning_split", 1))
+      goto fail;
+   if (profile->n_fallback_models)
+   {
+      if (!cJSON_AddStringToObject(raw, "route", "fallback"))
+         goto fail;
+      cJSON *models = cJSON_AddArrayToObject(raw, "models");
+      if (!models)
+         goto fail;
+      for (int i = -1; i < profile->n_fallback_models; i++)
+      {
+         const char *model = i < 0 ? ir->model : profile->fallback_models[i];
+         if (!model || !model[0])
+            continue;
+         int seen = 0;
+         const cJSON *entry;
+         cJSON_ArrayForEach(entry, models) seen |= !strcmp(entry->valuestring, model);
+         if (!seen)
+         {
+            cJSON *value = cJSON_CreateString(model);
+            if (!value || !cJSON_AddItemToArray(models, value))
+            {
+               cJSON_Delete(value);
+               goto fail;
+            }
+         }
+      }
+   }
+   ir->raw = raw;
+   return 0;
+fail:
+   cJSON_Delete(raw);
+   return -1;
+}
+
 /* Same-wire provider extensions remain owned by translation. The closed list
  * cannot restore stale modeled fields or private host metadata after policy. */
 static int openai_profile_extensions(const aimee_request_t *ir, cJSON *out)
