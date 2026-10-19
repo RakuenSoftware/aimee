@@ -1003,8 +1003,11 @@ static int openai_post_ir(const agent_t *agent, aimee_request_t *request, aimee_
                           aimee_anthropic_replay_t *replay, char *error, size_t capacity,
                           server_responses_stream_t *stream, aimee_response_t *streamed_response)
 {
+   /* Completion repair may append a governed tool call after the answer. Its
+    * existing owner requires buffering before any response is projected. */
    int incremental = stream && wire == AIMEE_WIRE_RESPONSES && !openai_governance_enabled() &&
-                     !gateway_prevent_subagents_enabled();
+                     !gateway_prevent_subagents_enabled() &&
+                     !gw_ir_response_completion_armed(request);
    if (incremental)
       request->stream = 1;
    char *body = openai_build_ir_body(request, wire);

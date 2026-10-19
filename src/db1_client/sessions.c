@@ -791,3 +791,15 @@ int db1_session_harness_bind(const char *session_id, const char *harness, const 
    return write_result(
        db1_call(&family, AIMEE_DB1_OP_SESSION_HARNESS_BIND, fields, 4, NULL, NULL, 0, NULL));
 }
+
+int db1_session_harness_compare_swap(const char *session_id, const char *harness,
+                                     const char *expected, const char *replacement,
+                                     const char *principal)
+{
+   if (!session_id || !harness || !expected || !replacement || !principal)
+      return -1;
+   const char *fields[] = {session_id, harness, expected, replacement, principal};
+   int status =
+       db1_call(&family, AIMEE_DB1_OP_SESSION_HARNESS_COMPARE_SWAP, fields, 5, NULL, NULL, 0, NULL);
+   return status == AIMEE_DB1_STATUS_OK ? 0 : status == AIMEE_DB1_STATUS_MISSING ? 1 : -1;
+}

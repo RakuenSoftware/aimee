@@ -489,6 +489,33 @@ int main(void)
    grouped.message_group = -1;
    assert(!aimee_ir_delta_json(&grouped));
    aimee_ir_response_builder_free(&grouped_builder);
+   char checkpoint_digest[65], checkpoint_claim[33];
+   memset(checkpoint_digest, 'a', 64);
+   checkpoint_digest[64] = 0;
+   memset(checkpoint_claim, 'b', 32);
+   checkpoint_claim[32] = 0;
+   aimee_native_checkpoint_t checkpoint = {.scope = checkpoint_digest,
+                                           .context_digest = checkpoint_digest,
+                                           .prefix_digest = checkpoint_digest,
+                                           .claim = checkpoint_claim,
+                                           .harness = "codex",
+                                           .native_id = "opaque:native",
+                                           .message_count = 2};
+   aimee_session_event_t checkpoint_event = {.kind = AIMEE_SESSION_NATIVE_CHECKPOINT,
+                                             .native_checkpoint = &checkpoint};
+   cJSON *checkpoint_json = aimee_ir_session_event_json(&checkpoint_event);
+   assert(checkpoint_json &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(checkpoint_json, "kind")),
+                  "native_checkpoint"));
+   cJSON_Delete(checkpoint_json);
+   checkpoint.message_count = 0;
+   assert(!aimee_ir_session_event_json(&checkpoint_event));
+   checkpoint.message_count = 2;
+   checkpoint.harness = "unknown";
+   assert(!aimee_ir_session_event_json(&checkpoint_event));
+   checkpoint.harness = "claude";
+   checkpoint.native_id = "";
+   assert(!aimee_ir_session_event_json(&checkpoint_event));
    puts("IR session event tests passed");
    return 0;
 }

@@ -1356,3 +1356,93 @@ checks, including every Docker tier, with zero failures and the two intentional
 platform skips. Its CI does not qualify this new increment. Production remains KB-free;
 SDK effects/human controls/cache/custody/consumer and independent learning/deployment
 acceptance remain open.
+
+## Real Codex resume instruction qualification (continuation)
+
+A real credential-free Codex app-server probe against a loopback Responses peer
+found that accepting `developerInstructions` on `thread/resume` does not establish
+that the next provider request uses it. The installed stable schema accepts the
+field, but the captured next request retained `OLD_NATIVE_POLICY` and contained
+no `CURRENT_NATIVE_POLICY`. The proposed adapter-only field change passed mocks
+and ASan/UBSan, failed this real integration assertion, and was discarded in full.
+Do not reintroduce it as a completed cache/context repair.
+
+Artifacts: `/var/tmp/aimee-native-resume-instructions-probe.py` and
+`/var/tmp/aimee-3050-resume-native-integration.log`. The probe keeps native thread
+identity/history across process restart, uses a temporary credential-free home,
+read-only sandbox and local fixture provider, and never dispatches real upstream
+credentials. Changed or cleared authoritative system context therefore needs a
+verified cache-context mismatch and fresh canonical adoption unless a separately
+qualified native update actually changes model-visible context.
+
+A native resume checkpoint also must be consumed durably before dispatch. Otherwise
+a failed/cancelled/compacted native turn could leave uncheckpointed native content
+behind a previously successful prefix proof. The continuation adds an
+owner-checked atomic compare-and-swap to the existing harness metadata contract;
+real PostgreSQL concurrency tests require one winner and refuse foreign/stale
+completion. The cache/history controller and production SDK activation remain
+unfinished; this storage prerequisite alone does not make any native handle safe
+to resume.
+
+
+## Native cache checkpoint controller (not activated at SDK spawn sites)
+
+The host controller now compares current canonical context/catalog and source-log
+history before claiming a native cache. Same attested scope/context with a valid
+canonical prefix returns the native handle and the unseen history offset. Scope,
+context, model or canonical-prefix changes select fresh full adoption. It never
+loads a vendor transcript as the source. Missing required/unavailable/corrupted source,
+foreign actor/session, sequence gaps, contradictory checkpoint metadata and an
+unresolved existing claim refuse rather than becoming empty history.
+
+A unique pending claim, linked to its canonical source turn, is committed through
+new session operation 34 before any
+resume handle is returned. Completion requires the source turn's durable
+`completed` lifecycle and its canonical history, not process exit success. It
+advances to finishing, appends a typed `native_checkpoint`, binds the native
+handle, then publishes the completed claim revision. Partial failures leave an
+unusable pending/finishing state. After the child is known quiescent, explicit
+abort invalidates only derived cache metadata; close alone does not claim that a
+child stopped. Original native-handle ownership/uniqueness remains in its existing
+owner; checkpoint claims use a separate metadata key. No schema or transcript
+store is added.
+
+The shared C/Go/browser checkpoint contract contains scope/context/prefix digests,
+claim, harness, opaque native ID and message count; consumers do not turn it into
+model messages. The PostgreSQL race fixture has 24 competing claims and requires
+one durable winner, rejects foreign/stale/late completion, and checks the final
+stored value. Native-controller fixtures cover unchanged-prefix resume, context
+and account changes, compaction/prefix mismatch, source failure/corruption,
+failed source turns, lost claim replies, incomplete finalization and unresolved
+claims. A metadata wrapper formatting failure was repaired and its focused gate
+passes; complete final-head qualification is recorded with the checkpoint.
+
+The controller is not yet called by the production SDK spawn sites. Before those
+sites can switch, qualify full captured tool/workspace/sandbox/profile binding,
+native compaction and adopted command-item fidelity, effects/receipts, human
+controls, complete credential custody and the actual browser/delegate journeys.
+The real Codex negative resume-instruction probe above still applies. This slice
+must not be described as SDK activation or overall migration completion, and it
+does not promote production or attach a KB instance.
+
+
+## Checkpoint qualification and host project scope
+
+Published head `c09ecdf2d` passed all 56 applicable CI checks, including the full
+script regression suite and every Docker tier; the existing workflow deliberately
+skipped Windows/macOS. These results precede the cache-controller increment.
+
+The cache increment passed the real PostgreSQL 24-claim race, Go IR/family race
+tests, 291 frontend tests and TypeScript, 76 lint checks, 47 module descriptor
+regressions and 18 registration regressions. The final turn-linked token version
+also passed native cache/IR-event ASan/UBSan fixtures and the registered CTest.
+Cppcheck reports ten existing DB1 wrapper diagnostics, with no increase.
+
+Native MCP forwarding now replaces child-supplied top-level `cwd` with captured
+host project scope, alongside its existing session identity replacement. Nested
+tool arguments retain their own paths and exact numeric values. The native
+runtime fixture exercises a forged project scope and passes normally and under
+ASan/UBSan; this is not a replacement for exact resource/path authorization.
+The production server build and completion-policy/Responses transport fixtures
+also pass. Responses completion-repair mode retains buffered admission because
+its response owner can append a governed tool call after the answer.

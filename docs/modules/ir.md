@@ -59,6 +59,16 @@ this event alone never establishes provenance or authorizes replay. The scoped n
 checks it at entry and after restored history/policy edits, before egress. SDK spawn-site
 activation and live cache/history adoption remain separate, unfinished work.
 
+The host-only `native_checkpoint` event commits an attested scope, current-context digest,
+canonical-prefix digest and message count (1–4096), harness (`codex` or `claude`), opaque native
+handle and random claim identity. It contains no prompt or credential. C, Go and browser validate
+its shape; model-history loading and browser projection advance past it without creating model
+content. The native cache controller additionally verifies the owner, source-log continuity,
+completed source turn and canonical history, and atomically consumes a versioned checkpoint before
+handing out a resume handle. Parsing metadata alone grants no replay authority. Production SDK
+callers have not selected this controller; native adoption/profile/compaction fidelity remains a
+separate qualification before activation.
+
 Thinking deltas can carry `thinking_id` and `encrypted_content` at `BLOCK_START` or
 `BLOCK_DELTA`, using the same field names as complete blocks. These are complete opaque values,
 not fragments: C assembly and browser replay retain late arrivals, accept identical repeats,
@@ -95,7 +105,7 @@ browser consumers; it is immutable after opening the block.
 The Responses frontend renders those deltas from canonical state. Full snapshots, policy completion
 and durable history precede item-done and client-completion events. No partial stream is retried.
 `/v1/responses` selects this transport for Responses-speaking providers when response governance
-and subagent prevention do not require buffered admission; other upstream wires and those policy
+and subagent prevention/completion repair do not require buffered admission; other upstream wires and those policy
 modes retain their existing buffered path. Incremental Responses-to-Anthropic projection remains
 unfinished. The decoder's native framing stays inside translation and never becomes core history.
 

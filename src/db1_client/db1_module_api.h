@@ -263,10 +263,11 @@
 #define AIMEE_DB1_OP_SERVER_SESSION_ERASURE_RECEIPT         27u
 #define AIMEE_DB1_OP_SESSION_IR_APPEND                      28u
 #define AIMEE_DB1_OP_SESSION_IR_PAGE                        29u
-#define AIMEE_DB1_OP_SESSION_HARNESS_GET 30u
-#define AIMEE_DB1_OP_SESSION_HARNESS_BIND 31u
-#define AIMEE_DB1_OP_SESSION_IR_HISTORY_SAVE 32u
-#define AIMEE_DB1_OP_SESSION_IR_HISTORY_LOAD 33u
+#define AIMEE_DB1_OP_SESSION_HARNESS_GET                    30u
+#define AIMEE_DB1_OP_SESSION_HARNESS_BIND                   31u
+#define AIMEE_DB1_OP_SESSION_IR_HISTORY_SAVE                32u
+#define AIMEE_DB1_OP_SESSION_IR_HISTORY_LOAD                33u
+#define AIMEE_DB1_OP_SESSION_HARNESS_COMPARE_SWAP           34u
 
 /* Family 7: machine-local runtime state: caches, this box's operator and
  * clones, the model catalogue it fetched, and the snapshots it took. */
@@ -409,14 +410,14 @@
 #define AIMEE_DB1_EVENT_GUARDRAIL_STATE 11785u
 #define AIMEE_DB1_STAGE_GUARDRAIL_STATE 9u
 
-#define AIMEE_DB1_OP_SESSION_STATE_LOAD         1u
-#define AIMEE_DB1_OP_SESSION_STATE_SAVE         2u
-#define AIMEE_DB1_OP_SESSION_STATE_DELETE       3u
-#define AIMEE_DB1_OP_SESSION_STATE_EXISTS       4u
-#define AIMEE_DB1_OP_SESSION_STATE_LIST         5u
-#define AIMEE_DB1_OP_SESSION_STATE_GET_SUMMARY  6u
-#define AIMEE_DB1_OP_SESSION_STATE_LIST_EXPIRED 7u
-#define AIMEE_DB1_OP_SESSION_EXPLORATION_APPLY  8u
+#define AIMEE_DB1_OP_SESSION_STATE_LOAD            1u
+#define AIMEE_DB1_OP_SESSION_STATE_SAVE            2u
+#define AIMEE_DB1_OP_SESSION_STATE_DELETE          3u
+#define AIMEE_DB1_OP_SESSION_STATE_EXISTS          4u
+#define AIMEE_DB1_OP_SESSION_STATE_LIST            5u
+#define AIMEE_DB1_OP_SESSION_STATE_GET_SUMMARY     6u
+#define AIMEE_DB1_OP_SESSION_STATE_LIST_EXPIRED    7u
+#define AIMEE_DB1_OP_SESSION_EXPLORATION_APPLY     8u
 #define AIMEE_DB1_OP_SESSION_TASK_PROJECTION_APPLY 9u
 #define AIMEE_DB1_OP_GOVERNED_ACTION_APPLY         10u
 
@@ -705,9 +706,8 @@ static inline uint32_t aimee_db1_get_u32(const uint8_t *p)
    return value;
 }
 
-
 /* Server-local immutable procedure experience (telemetry family). */
-#define AIMEE_DB1_OP_PROCEDURE_EVENT_LOAD 59u
+#define AIMEE_DB1_OP_PROCEDURE_EVENT_LOAD   59u
 #define AIMEE_DB1_OP_PROCEDURE_EVENT_APPEND 60u
 
 #endif /* AIMEE_DB1_MODULE_API_H */

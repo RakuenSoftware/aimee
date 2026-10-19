@@ -165,6 +165,27 @@ func ValidSessionEvent(encoded []byte) bool {
 	case "control_request", "control_response":
 		var c map[string]json.RawMessage
 		return e.RequestID != "" && e.ControlKind != "" && Decode(e.Payload, &c) && c != nil
+	case "native_checkpoint":
+		var checkpoint struct {
+			Scope    string `json:"scope"`
+			Context  string `json:"context_digest"`
+			Prefix   string `json:"prefix_digest"`
+			Harness  string `json:"harness"`
+			NativeID string `json:"native_id"`
+			Claim    string `json:"claim"`
+			Count    *int   `json:"message_count"`
+		}
+		if !Decode(e.Payload, &checkpoint) || checkpoint.Count == nil || *checkpoint.Count < 1 || *checkpoint.Count > 4096 ||
+			(checkpoint.Harness != "codex" && checkpoint.Harness != "claude") || len(checkpoint.NativeID) == 0 || len(checkpoint.NativeID) > 1024 ||
+			len(checkpoint.Claim) != 32 || strings.Trim(checkpoint.Claim, "0123456789abcdef") != "" {
+			return false
+		}
+		for _, digest := range []string{checkpoint.Scope, checkpoint.Context, checkpoint.Prefix} {
+			if len(digest) != 64 || strings.Trim(digest, "0123456789abcdef") != "" {
+				return false
+			}
+		}
+		return true
 	case "replay_proof":
 		var proof struct {
 			Scope   string          `json:"scope"`

@@ -766,6 +766,34 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
       kind = event->kind == AIMEE_SESSION_CONTROL_REQUEST ? "control_request" : "control_response";
       payload = cJSON_Duplicate(event->control, 1);
       break;
+   case AIMEE_SESSION_NATIVE_CHECKPOINT:
+   {
+      const aimee_native_checkpoint_t *checkpoint = event->native_checkpoint;
+      if (!checkpoint || !checkpoint->scope || strlen(checkpoint->scope) != 64 ||
+          strspn(checkpoint->scope, "0123456789abcdef") != 64 || !checkpoint->context_digest ||
+          strlen(checkpoint->context_digest) != 64 ||
+          strspn(checkpoint->context_digest, "0123456789abcdef") != 64 ||
+          !checkpoint->prefix_digest || strlen(checkpoint->prefix_digest) != 64 ||
+          strspn(checkpoint->prefix_digest, "0123456789abcdef") != 64 || !checkpoint->claim ||
+          strlen(checkpoint->claim) != 32 || strspn(checkpoint->claim, "0123456789abcdef") != 32 ||
+          !checkpoint->harness ||
+          (strcmp(checkpoint->harness, "codex") && strcmp(checkpoint->harness, "claude")) ||
+          !checkpoint->native_id || !checkpoint->native_id[0] ||
+          strlen(checkpoint->native_id) > 1024 || checkpoint->message_count < 1 ||
+          checkpoint->message_count > AIMEE_IR_MAX_BLOCKS)
+         goto fail;
+      kind = "native_checkpoint";
+      payload = cJSON_CreateObject();
+      if (!payload || !add_string(payload, "scope", checkpoint->scope) ||
+          !add_string(payload, "context_digest", checkpoint->context_digest) ||
+          !add_string(payload, "prefix_digest", checkpoint->prefix_digest) ||
+          !add_string(payload, "harness", checkpoint->harness) ||
+          !add_string(payload, "native_id", checkpoint->native_id) ||
+          !add_string(payload, "claim", checkpoint->claim) ||
+          !cJSON_AddNumberToObject(payload, "message_count", checkpoint->message_count))
+         goto fail;
+      break;
+   }
    case AIMEE_SESSION_REPLAY_PROOF:
       if (!event->replay_scope || strlen(event->replay_scope) != 64 ||
           strspn(event->replay_scope, "0123456789abcdef") != 64 || !event->replay_digest ||

@@ -308,6 +308,9 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
       assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "cwd")),
                      "/work/alice"));
       assert(strstr(body, "9007199254740993"));
+      const cJSON *arguments = cJSON_GetObjectItemCaseSensitive(request, "arguments");
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(arguments, "cwd")),
+                     "/tool/specific/path"));
       cJSON_Delete(request);
    }
 
@@ -428,7 +431,8 @@ static int send_request(const server_native_runtime_t *runtime, const char *path
    const char *body =
        strncmp(path, "/v1/mcp/", 8)
            ? "{}"
-           : "{\"session_id\":\"forged-session\",\"arguments\":{\"large\":9007199254740993}}";
+           : "{\"session_id\":\"forged-session\",\"cwd\":\"/forged/project\","
+             "\"arguments\":{\"cwd\":\"/tool/specific/path\",\"large\":9007199254740993}}";
    int n = snprintf(request, sizeof request,
                     "POST %s HTTP/1.1\r\nHost: 127.0.0.1:%s\r\nAuthorization: Bearer %s\r\n"
                     "X-Aimee-Webuser: mallory\r\naimee-session-id: forged\r\n"

@@ -51,6 +51,7 @@ export type ProjectionReport = { model: string; boundary: 'request' | 'response'
 export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 export type ChildExecution = { session_id: string; turn_id: string; role: string; status: ExecutionStatus };
 export type SessionEvent =
+  | { kind: 'native_checkpoint'; payload: { scope: string; context_digest: string; prefix_digest: string; harness: 'codex' | 'claude'; native_id: string; claim: string; message_count: number } }
   | { kind: 'replay_proof'; payload: { scope: string; block_digest: string; wire: 'anthropic' | 'responses'; thinking_binding?: string } }
   | { kind: 'child_execution'; payload: ChildExecution }
   | { kind: 'projection'; payload: ProjectionReport }
@@ -132,6 +133,16 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       (event.kind === 'message' || event.kind === 'delta' || event.kind === 'control_request'))
     throw new Error('Content follows execution completion');
   switch (event.kind) {
+    case 'native_checkpoint': {
+      const checkpoint = event.payload;
+      if (!Object.keys(checkpoint).every(key => ['scope', 'context_digest', 'prefix_digest', 'harness', 'native_id', 'claim', 'message_count'].includes(key)) ||
+          ![checkpoint.scope, checkpoint.context_digest, checkpoint.prefix_digest].every(value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)) ||
+          typeof checkpoint.claim !== 'string' || !/^[0-9a-f]{32}$/.test(checkpoint.claim) ||
+          !['codex', 'claude'].includes(checkpoint.harness) || !nonempty(checkpoint.native_id) || new TextEncoder().encode(checkpoint.native_id).length > 1024 ||
+          !Number.isInteger(checkpoint.message_count) || checkpoint.message_count < 1 || checkpoint.message_count > 4096)
+        throw new Error('Invalid native cache checkpoint');
+      return next; // host cache metadata advances the cursor, never model content
+    }
     case 'replay_proof': {
       const proof = event.payload;
       if (typeof proof.scope !== 'string' || typeof proof.block_digest !== 'string' ||

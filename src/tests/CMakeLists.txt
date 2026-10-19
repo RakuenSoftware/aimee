@@ -554,3 +554,11 @@ aimee_add_test(test_server_responses_stream test_server_responses_stream.c
     ../modules/translation/aimee_responses_stream.c ../modules/translation/aimee_backend_responses.c
     ../modules/translation/aimee_responses_frontend_stream.c ../modules/translation/aimee_frontend_openai.c
     ../modules/translation/aimee_frontend_responses.c ../modules/ir/aimee_ir.c)
+
+if(NOT WIN32)
+  aimee_add_test(test_server_native_cache test_server_native_cache.c
+      ../server/server_native_cache.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
+      ../aimee_sha256.c ../platform_random.c ../posix/platform_random.c)
+  target_include_directories(test_server_native_cache PRIVATE ${AIMEE_SRC_DIR}/modules/kb/c)
+  target_link_libraries(test_server_native_cache PRIVATE OpenSSL::Crypto)
+endif()

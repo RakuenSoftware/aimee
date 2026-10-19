@@ -96,7 +96,7 @@ func sessionIRHistoryLoad(ctx context.Context, q store.Queryer, f []string) (uin
 			return 0, nil, err
 		}
 		switch event.Kind {
-		case "replay_proof":
+		case "replay_proof", "native_checkpoint":
 			// Host-native provenance advances the source log, never model history.
 			continue
 		case "history":

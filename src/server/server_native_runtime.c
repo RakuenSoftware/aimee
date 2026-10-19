@@ -119,8 +119,8 @@ static int native_forward(const char *method, const char *path, const char *head
    input[length] = 0;
    if (!model_request && !strcmp(method, "POST"))
    {
-      /* Session metadata is host identity, even inside the MCP body. Tool
-       * arguments remain intact; exact numeric argument spelling is retained. */
+      /* Session and project scope are host identity, even inside the MCP body.
+       * Tool arguments remain intact; exact numeric spelling is retained. */
       cJSON *request = aimee_ir_json_parse_frame(input, (size_t)length);
       if (!cJSON_IsObject(request))
       {
@@ -129,9 +129,9 @@ static int native_forward(const char *method, const char *path, const char *head
          return -1;
       }
       cJSON_DeleteItemFromObjectCaseSensitive(request, "session_id");
+      cJSON_DeleteItemFromObjectCaseSensitive(request, "cwd");
       if (!cJSON_AddStringToObject(request, "session_id", runtime->session) ||
-          (runtime->cwd[0] && !cJSON_GetObjectItemCaseSensitive(request, "cwd") &&
-           !cJSON_AddStringToObject(request, "cwd", runtime->cwd)))
+          (runtime->cwd[0] && !cJSON_AddStringToObject(request, "cwd", runtime->cwd)))
       {
          cJSON_Delete(request);
          free(input);

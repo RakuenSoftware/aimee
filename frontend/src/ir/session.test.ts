@@ -313,3 +313,19 @@ it('retains authored text groups in live and durable deltas and rejects misplace
     { type: 'TURN_STOP', message_group: 2 },
   ] as import('./session').Delta[]) expect(() => reduceSession(state, d(3, payload))).toThrow();
 });
+
+
+it('advances native checkpoint cursors without adding model content', () => {
+  const checkpoint = { scope: 'a'.repeat(64), context_digest: 'b'.repeat(64), prefix_digest: 'c'.repeat(64),
+    claim: 'd'.repeat(32), harness: 'codex' as const, native_id: 'opaque:native', message_count: 2 };
+  const event = envelope(1, { kind: 'native_checkpoint', payload: checkpoint });
+  const state = reduceSession(emptySession('s'), event);
+  expect(state).toEqual({ ...emptySession('s'), sequence: '1' });
+  expect(reduceSession(emptySession('s'), JSON.parse(JSON.stringify(event)))).toEqual(state);
+  for (const payload of [
+    { ...checkpoint, scope: '' }, { ...checkpoint, context_digest: null }, { ...checkpoint, prefix_digest: 'X'.repeat(64) },
+    { ...checkpoint, claim: 'd'.repeat(31) }, { ...checkpoint, harness: 'unknown' }, { ...checkpoint, native_id: '' },
+    { ...checkpoint, native_id: '😀'.repeat(257) }, { ...checkpoint, message_count: 0 },
+    { ...checkpoint, message_count: 1.5 }, { ...checkpoint, message_count: 4097 }, { ...checkpoint, unmodeled_prompt: 'private' },
+  ]) expect(() => reduceSession(emptySession('s'), envelope(1, { kind: 'native_checkpoint', payload } as SessionEvent))).toThrow();
+});

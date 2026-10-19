@@ -27989,6 +27989,62 @@
     },
     {
       "family": "sessions",
+      "id": 34,
+      "name": "session_harness_compare_swap",
+      "c_name": "db1_session_harness_compare_swap",
+      "c_params": [
+        "session_id",
+        "harness",
+        "expected",
+        "replacement",
+        "principal"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed",
+        "missing"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "harness",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "expected",
+            "type": "text",
+            "required": false
+          },
+          {
+            "name": "replacement",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 65536
+      }
+    },
+    {
+      "family": "sessions",
       "id": 32,
       "name": "session_ir_history_save",
       "c_name": "db1_session_ir_history_save",
