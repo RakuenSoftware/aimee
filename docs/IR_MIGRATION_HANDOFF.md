@@ -3189,5 +3189,32 @@ unavailable-service skips. All 76 final lint gates pass.
 Published `115677b34` completed all 50 main CI jobs, including every Docker tier,
 with only the two unchanged testing-target platform skips; export, audit, fuzz,
 release and attribution workflows also passed. The later numeric/causal history
-repair is published as `c77cc0492` and needs its own CI completion. Its HEAD scan
-passes Gitleaks (6,218 commits, no leaks). No production promotion occurred.
+repair `c77cc0492` also completed all 50 main CI jobs, including all Docker tiers
+and identity mint, with the same two platform skips. Its HEAD scan passes
+Gitleaks (6,218 commits, no leaks). The shared source-claim change is committed
+as `43b960287`; its HEAD scan found no leaks across 6,219 commits. No production
+promotion occurred.
+
+
+## Original model calls use the actual egress catalog
+
+Owned-profile native forwarding now retains an owned typed catalog from the
+translation replay guard, including the final post-policy pass. It does not
+retain another conversation snapshot. Original buffered tool calls must match
+that catalog's separate namespace and function identity. Original streamed
+calls are assembled with the existing bounded canonical response builder,
+including exact argument fragments, and checked before their BLOCK_STOP can
+commit or be released to the SDK. Changed message identities, overlapping
+response starts, malformed arguments and unadvertised tools fail the capture.
+Earlier committed fragments remain observations; no completed call is invented.
+
+Eight focused cases cover valid buffered and streamed calls, an unadvertised
+SDK tool, wrong namespace, malformed streamed arguments, changed stream identity,
+a removed post-policy tool, and its valid post-policy replacement. Exact
+30-digit arguments remain intact. The existing legacy forwarding success path
+is unchanged. This is original-source catalog admission, not callback source
+verification or effect authorization. Durable source lookup, once-only claims,
+governed dispatch and launch activation still need wiring. The normal server
+build and all 657 native suite entries pass. The focused runtime fixture also
+passes ASan/UBSan, ThreadSanitizer and CMake/CTest. Cppcheck reports zero
+diagnostics for the two changed C sources; all 76 lint gates pass.

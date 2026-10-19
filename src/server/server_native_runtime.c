@@ -49,6 +49,32 @@ struct server_native_runtime
    char session[128], token[65], url[64], binding[65], lineage[65];
 };
 
+typedef struct
+{
+   server_native_runtime_t *runtime;
+   aimee_request_t request, admitted;
+   int prepared, guarded;
+} native_request_owner_t;
+
+/* The final egress guard sees the actual post-policy catalog. Entry ownership
+ * alone is insufficient: downstream policy can remove or alter tools. Keep
+ * only the owned typed catalog, not another conversation snapshot. */
+static int native_owned_guard(aimee_request_t *request, void *context)
+{
+   native_request_owner_t *owner = context;
+   if (server_native_replay_restore(request, owner->runtime->replay))
+      return -1;
+   aimee_request_t catalog = {
+       .model = request->model, .tools = request->tools, .n_tools = request->n_tools, .mutated = 1};
+   if (aimee_ir_request_clone(&catalog, &owner->admitted))
+   {
+      server_session_capture_fail(owner->runtime->capture);
+      return -1;
+   }
+   owner->guarded = 1;
+   return 0;
+}
+
 /* The gateway sees original admitted model content before an SDK can normalize
  * command observations. Keep it in the execution's owned canonical writer.
  * Replay provenance remains derived metadata, never a second model transcript. */
@@ -56,13 +82,66 @@ typedef struct
 {
    server_native_runtime_t *runtime;
    const char *request_id;
+   native_request_owner_t *owner;
+   aimee_ir_response_builder_t builder;
+   char *message_id;
 } native_model_capture_t;
+
+static int native_tool_in_catalog(const native_model_capture_t *capture, const aimee_block_t *call)
+{
+   if (call->type != AIMEE_BLK_TOOL_USE)
+      return 0;
+   if (!capture->owner->guarded ||
+       !aimee_ir_find_function(&capture->owner->admitted, call->tool_namespace, call->tool_name))
+      return -1;
+   /* Admit complete original arguments before the tool-complete delta can be
+    * released to the SDK. The SDK's later command observation is not evidence. */
+   return cJSON_IsObject(call->tool_input) && aimee_ir_block_valid(call) ? 0 : -1;
+}
+
+static int native_capture_admit(native_model_capture_t *capture, const aimee_session_event_t *event)
+{
+   if (!capture->runtime->owns_request)
+      return 0;
+   if (event->kind == AIMEE_SESSION_MESSAGE)
+   {
+      if (!event->message)
+         return -1;
+      for (int i = 0; i < event->message->n_blocks; i++)
+         if (native_tool_in_catalog(capture, &event->message->blocks[i]))
+            return -1;
+   }
+   if (event->kind != AIMEE_SESSION_DELTA)
+      return 0;
+   if (!event->delta || !event->message_id)
+      return -1;
+   if (event->delta->type == AIMEE_DELTA_TURN_START)
+   {
+      if (capture->builder.started && !capture->builder.complete)
+         return -1;
+      aimee_ir_response_builder_free(&capture->builder);
+      free(capture->message_id);
+      capture->message_id = strdup(event->message_id);
+      if (!capture->message_id)
+         return -1;
+   }
+   if (!capture->message_id || strcmp(capture->message_id, event->message_id) ||
+       aimee_ir_response_builder_apply(&capture->builder, event->delta))
+      return -1;
+   if (event->delta->type == AIMEE_DELTA_BLOCK_STOP)
+      return native_tool_in_catalog(capture,
+                                    &capture->builder.response.content[event->delta->block_id]);
+   return 0;
+}
 static int native_model_capture(const aimee_session_event_t *event, void *context)
 {
    native_model_capture_t *capture = context;
    server_native_runtime_t *runtime = capture->runtime;
-   if (!event)
+   if (!event || native_capture_admit(capture, event))
+   {
+      server_session_capture_fail(runtime->capture);
       return -1;
+   }
    if (runtime->capture)
    {
       aimee_session_event_t qualified = *event;
@@ -100,13 +179,6 @@ static int native_digest_valid(const char *digest)
          return 0;
    return 1;
 }
-
-typedef struct
-{
-   server_native_runtime_t *runtime;
-   aimee_request_t request;
-   int prepared;
-} native_request_owner_t;
 
 static int native_owned_request(aimee_request_t *request, void *context)
 {
@@ -369,13 +441,15 @@ static int native_forward(const char *method, const char *path, const char *head
    aimee_ir_session_sink_fn previous_sink = aimee_ir_session_get_sink(&previous_sink_context);
    int previous_failed = aimee_ir_session_capture_failed();
    aimee_frontend_state_scope_t previous_guard = {0}, previous_request_owner = {0};
-   native_model_capture_t model_capture = {.runtime = runtime, .request_id = admitted.request_id};
+   native_model_capture_t model_capture = {
+       .runtime = runtime, .request_id = admitted.request_id, .owner = &request_owner};
    if (model_request)
    {
       previous_request_owner = aimee_frontend_bind_request_owner(
           runtime->owns_request ? native_owned_request : NULL, &request_owner);
-      previous_guard =
-          aimee_frontend_bind_state_guard(server_native_replay_restore, runtime->replay);
+      previous_guard = aimee_frontend_bind_state_guard(
+          runtime->owns_request ? native_owned_guard : server_native_replay_restore,
+          runtime->owns_request ? (void *)&request_owner : (void *)runtime->replay);
       aimee_ir_session_set_sink(native_model_capture, &model_capture);
    }
    io->response_started(io->context);
@@ -390,6 +464,8 @@ static int native_forward(const char *method, const char *path, const char *head
       aimee_ir_session_restore_sink(previous_sink, previous_sink_context,
                                     previous_failed || aimee_ir_session_capture_failed());
    }
+   aimee_ir_response_builder_free(&model_capture.builder);
+   free(model_capture.message_id);
    atomic_store(&watch.finished, 1);
    pthread_join(monitor, NULL);
    agent_set_request_cancel(NULL);
@@ -416,6 +492,7 @@ restore:
    server_control_scope_bind(previous_controls);
    free(input);
    aimee_request_free(&request_owner.request);
+   aimee_request_free(&request_owner.admitted);
    if (request_locked)
       server_session_capture_model_leave(runtime->capture, model_lease);
    return rc;

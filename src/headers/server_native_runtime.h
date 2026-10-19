@@ -27,7 +27,9 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
  * have no original native request bytes and must match the selected model.
  * A retained running capture is required. Every model callback uses its fresh
  * canonical log snapshot, replacing SDK-proposed context/catalog/selectors only
- * at native entry. Parallel model callbacks refuse rather than fork history.
+ * at native entry. Original buffered/streamed calls must match the final
+ * post-policy catalog before tool completion is released to the SDK. Parallel
+ * model callbacks refuse rather than fork history.
  * This constructor alone does not attest a launch or activate SDK execution. */
 server_native_runtime_t *server_native_runtime_open_request(const agent_t *selected,
                                                             const request_context_t *owner,
