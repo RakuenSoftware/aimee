@@ -10,6 +10,7 @@
 #include "support/store_module_fixture.h"
 #include "db1_client/agent_jobs.h"
 #include "agent_tasks.h"
+#include "agent_config.h"
 #include <aimee/tools/agent_tools.h>
 #include "modules/workspace/workspace_provider.h"
 #include "cJSON.h"
@@ -242,6 +243,71 @@ void test_delegate_bash_cancel_kills_running_tool(void)
    free(result);
    db1_shutdown();
    printf("  PASS: test_delegate_bash_cancel_kills_running_tool\n");
+}
+
+typedef struct
+{
+   const char *ready;
+   atomic_int *cancel;
+} bash_host_cancel_t;
+
+static void *bash_cancel_when_ready(void *context)
+{
+   bash_host_cancel_t *host = context;
+   int ready = 0;
+   for (int tick = 0; tick < 2000 && !ready; tick++)
+   {
+      ready = access(host->ready, F_OK) == 0;
+      if (!ready)
+         usleep(1000);
+   }
+   atomic_store(host->cancel, 1);
+   return ready ? (void *)1 : NULL;
+}
+
+void test_bash_host_cancellation_and_closed_output_deadline(void)
+{
+   char root[MAX_PATH_LEN], ready[MAX_PATH_LEN], command[MAX_PATH_LEN * 2];
+   snprintf(root, sizeof root, "%s/bhc.XXXXXX", platform_tmpdir());
+   char *made = platform_mkdtemp(root);
+   assert(made);
+   snprintf(ready, sizeof ready, "%s/ready", root);
+   atomic_int cancel = 0;
+   atomic_int *previous = agent_get_request_cancel();
+   agent_set_request_cancel(&cancel);
+   bash_host_cancel_t host = {.ready = ready, .cancel = &cancel};
+   pthread_t thread;
+   int created = pthread_create(&thread, NULL, bash_cancel_when_ready, &host);
+   assert(!created);
+   snprintf(command, sizeof command, "exec 1>&- 2>&-; trap '' TERM; : > '%s'; sleep 2", ready);
+   char *result = tool_bash(command, 5000);
+   void *saw_ready = NULL;
+   pthread_join(thread, &saw_ready);
+   cJSON *reply = result ? cJSON_Parse(result) : NULL;
+   assert(saw_ready && reply);
+   assert(cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == -1);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "cancelled")));
+   assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "timed_out")));
+   cJSON_Delete(reply);
+   free(result);
+   unlink(ready);
+   snprintf(command, sizeof command, ": > '%s'", ready);
+   result = tool_bash(command, 5000);
+   reply = result ? cJSON_Parse(result) : NULL;
+   assert(reply && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "cancelled")));
+   assert(access(ready, F_OK) != 0); /* A pre-cancelled command must not start. */
+   agent_set_request_cancel(previous);
+   cJSON_Delete(reply);
+   free(result);
+   rmdir(root);
+   result = tool_bash("exec 1>&- 2>&-; sleep 2", 200);
+   reply = result ? cJSON_Parse(result) : NULL;
+   assert(reply && cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == -1);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "timed_out")));
+   assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "cancelled")));
+   cJSON_Delete(reply);
+   free(result);
+   puts("  PASS: bash retains host cancellation and deadlines after output EOF");
 }
 
 void test_parent_write_guard_allows_mkdir_in_delegate_worktree(void)

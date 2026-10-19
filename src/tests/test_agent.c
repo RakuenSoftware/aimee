@@ -121,6 +121,7 @@ void test_script_rpc_keeps_host_context(void);
 int script_rpc_admission_fixture_main(void);
 void test_script_rpc_admission_process(const char *executable);
 void test_delegate_bash_cancel_kills_running_tool(void);
+void test_bash_host_cancellation_and_closed_output_deadline(void);
 void test_parent_write_guard_readonly_pipeline(void);
 void test_stale_parent_guard_blocks_other_worktree_then_clear_unblocks(void);
 void test_parent_write_guard_readonly_large_find(void);
@@ -4686,6 +4687,7 @@ int main(int argc, char **argv)
    test_cancelled_durable_job_blocks_tool_dispatch();
    test_shell_worktree_rewrite_is_applied_not_refused();
    test_delegate_bash_cancel_kills_running_tool();
+   test_bash_host_cancellation_and_closed_output_deadline();
    test_parent_write_guard_readonly_large_find();
    test_agent_trace_log_uses_db1_execution_trace();
 

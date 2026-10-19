@@ -2248,3 +2248,41 @@ no replacement PR has been created. New commits are not claimed CI-qualified.
 Native activation, exact resumed command history, retained human controls and
 independently graded KB-free learning remain unfinished; no production promotion
 has occurred.
+
+
+## Matching host bash cancellation/deadline repair
+
+The production `bash` tool had the same EOF-then-blocking-wait defect as the
+script runner. Its cancellation predicate also consulted durable delegate/job
+state but omitted the host turn's atomic cancellation flag. A new real tool
+fixture reproduced a TERM-resistant command closing both output streams and
+returning successful exit after cancellation. The owning tool now checks that
+flag, refuses pre-cancelled execution, polls child exit without losing its
+deadline after EOF, and preserves separate cancellation/timeout fields for the
+tools owner's semantic outcome classification. Existing sandbox/provider routing
+and ordinary command/output behavior remain intact. Active remote/container
+provider cancellation is not newly qualified by this local-process repair.
+
+The fixture signals readiness before the host cancels, verifies cancellation
+through the real tool, proves a subsequent pre-cancelled command creates no file,
+and separately verifies timeout with both output descriptors closed. It passes
+normally and under ASan/UBSan. Changed-source Cppcheck has no diagnostics. All
+653 native binaries and proxy regressions pass; the actual CMake application
+build and runtime/cache checks pass 2/2. The rebuilt server passes restricted-role
+PostgreSQL integration 167/167, with the same 26 explicit service skips and no KB.
+All 76 serial lint gates pass.
+
+
+Next confirmed script ingress/lifetime work: the generated Bash shim uses Python
+`raw_decode`, which accepts a JSON prefix and collapses duplicate fields before
+host admission. It must forward exact argument JSON to the strict host boundary.
+Also, RPC stop must propagate a local cancellation scope into an executing tool;
+a script-only timeout currently closes its peer but can still wait for a blocking
+nested call's original deadline. Keep the borrowed parent flag and host-owned
+local-stop scope distinct so a tool timeout never changes its parent turn flag.
+Neither finding is fixed by the already qualified host-flag repair.
+
+No registered Aimee command for manual workflow dispatch is available. The local
+personal `gh` has no authenticated host, and no browser is available. No new login
+or connector write was attempted. A follow-up PR decision remains pending; the
+new branch commits have no fresh PR CI qualification after #3050's merge.

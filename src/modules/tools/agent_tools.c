@@ -43,12 +43,14 @@
 #include <openssl/err.h>
 #include <sys/wait.h>
 int agent_get_durable_job_id(void) __attribute__((weak));
+int agent_request_cancelled(void) __attribute__((weak));
 int db1_agent_job_is_cancelled(int job_id) __attribute__((weak));
 int agent_delegation_stop_requested(char *buf, size_t bufsz) __attribute__((weak));
 static int bash_delegate_cancel_requested(void)
 {
    int job_id = agent_get_durable_job_id ? agent_get_durable_job_id() : 0;
-   return (job_id > 0 && db1_agent_job_is_cancelled && db1_agent_job_is_cancelled(job_id)) ||
+   return (agent_request_cancelled && agent_request_cancelled()) ||
+          (job_id > 0 && db1_agent_job_is_cancelled && db1_agent_job_is_cancelled(job_id)) ||
           (agent_delegation_stop_requested && agent_delegation_stop_requested(NULL, 0));
 }
 /* Single source of truth for the per-result MODEL-VISIBLE tool-output cap.
@@ -721,6 +723,9 @@ const char *delegation_active_id(void);
 
 char *tool_bash(const char *command, int timeout_ms)
 {
+   if (bash_delegate_cancel_requested())
+      return safe_strdup("{\"stdout\":\"\",\"stderr\":\"delegate cancelled before bash execution\","
+                         "\"exit_code\":-1,\"cancelled\":true,\"timed_out\":false}");
    /* Detached workspace (turn bound to a serving client): marshal the shell
     * command — with the thread-local cwd — over the reverse-channel so it runs
     * on the CLIENT's tree, not the server's fs. This is the agent-loop seam (the
@@ -1000,6 +1005,7 @@ char *tool_bash(const char *command, int timeout_ms)
    int max_fd = (stdout_pipe[0] > stderr_pipe[0] ? stdout_pipe[0] : stderr_pipe[0]) + 1;
    int stdout_open = 1, stderr_open = 1;
    int cancelled = 0;
+   int reaped = 0, status = 0, wait_failed = 0;
    (void)setpgid(pid, pid);
    if (stdout_pipe[0] >= FD_SETSIZE || stderr_pipe[0] >= FD_SETSIZE)
    {
@@ -1011,8 +1017,27 @@ char *tool_bash(const char *command, int timeout_ms)
       free(err_buf);
       return safe_strdup("{\"stdout\":\"\",\"stderr\":\"fd exceeds FD_SETSIZE\",\"exit_code\":-1}");
    }
-   while (stdout_open || stderr_open)
+   while (stdout_open || stderr_open || !reaped)
    {
+      if (bash_delegate_cancel_requested())
+      {
+         cancelled = 1;
+         break;
+      }
+      if (!stdout_open && !stderr_open)
+      {
+         pid_t child = waitpid(pid, &status, WNOHANG);
+         if (child == pid)
+         {
+            reaped = 1;
+            break;
+         }
+         if (child < 0 && errno != EINTR)
+         {
+            wait_failed = 1;
+            break;
+         }
+      }
       struct timespec now;
       clock_gettime(CLOCK_MONOTONIC, &now);
       long remain_ms =
@@ -1020,11 +1045,6 @@ char *tool_bash(const char *command, int timeout_ms)
       if (remain_ms <= 0)
       {
          timed_out = 1;
-         break;
-      }
-      if (bash_delegate_cancel_requested())
-      {
-         cancelled = 1;
          break;
       }
       fd_set rfds;
@@ -1099,22 +1119,15 @@ char *tool_bash(const char *command, int timeout_ms)
    if (stderr_pipe[0] >= 0)
       close(stderr_pipe[0]);
    int exit_code = -1;
-   if (timed_out)
+   if (timed_out || cancelled || wait_failed)
    {
       bash_kill_child_tree(pid);
-      waitpid(pid, NULL, 0);
-      exit_code = -1;
-   }
-   else if (cancelled)
-   {
-      bash_kill_child_tree(pid);
-      waitpid(pid, NULL, 0);
-      exit_code = -1;
+      while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
+      {
+      }
    }
    else
    {
-      int status = 0;
-      waitpid(pid, &status, 0);
       if (WIFEXITED(status))
          exit_code = WEXITSTATUS(status);
    }
@@ -1129,6 +1142,8 @@ char *tool_bash(const char *command, int timeout_ms)
    else
       cJSON_AddStringToObject(result, "stderr", err_buf);
    cJSON_AddNumberToObject(result, "exit_code", exit_code);
+   cJSON_AddBoolToObject(result, "cancelled", cancelled);
+   cJSON_AddBoolToObject(result, "timed_out", timed_out);
    char *json = cJSON_PrintUnformatted(result);
    cJSON_Delete(result);
 
