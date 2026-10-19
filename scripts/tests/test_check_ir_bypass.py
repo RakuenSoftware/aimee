@@ -71,6 +71,26 @@ class IRBypassTests(unittest.TestCase):
             self.source(relative, 'dispatch_tool_call_ctx_status(tool, args, timeout, &failed);')
         checker.check(self.root)
 
+    def test_canonical_host_profiles_cannot_rebuild_native_requests(self):
+        for function in checker.CANONICAL_PROFILE_FUNCTIONS:
+            for wire in ("openai", "anthropic", "responses"):
+                with self.subTest(function=function, wire=wire):
+                    self.source("src/server/agent_bridge.c", f"""
+                    cJSON *{function}(void) {{
+                        if (condition) {{ log("literal close brace: }}"); }}
+                        /* }} */ return agent_build_request_{wire}(agent);
+                    }}
+                    """)
+                    with self.assertRaisesRegex(ValueError, "native-profile-rebuild"):
+                        checker.check(self.root)
+        self.source("src/server/agent_bridge.c", """
+            cJSON *agent_build_request_ir(void) { return render(ir); }
+            cJSON *compatibility_boundary(void) {
+                return agent_build_request_openai(agent);
+            }
+        """)
+        checker.check(self.root)
+
     def test_native_hook_envelopes_stop_at_entry_adapter(self):
         for relative in checker.CANONICAL_HOOK_FILES:
             path = self.source(relative, 'lookup(payload, "tool_input");')

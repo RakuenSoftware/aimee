@@ -7,6 +7,7 @@
 #include "cJSON.h"
 #include "aimee_sha256.h"
 #include <stdint.h>
+#include <ctype.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -628,6 +629,62 @@ static int restore_native_section(cJSON *out, const cJSON *raw, const char *fiel
    }
    return 0;
 }
+int anthropic_ir_set_host_system(aimee_request_t *ir, const char *system, int cache_marking,
+                                 int min_chars)
+{
+   if (!ir || ir->frontend != AIMEE_WIRE_ANTHROPIC || ir->system || ir->n_system || ir->raw ||
+       ir->raw_bytes)
+      return -1;
+   if (!system || !system[0])
+      return 0;
+   const char *context = strstr(system, "<aimee-context");
+   size_t prefix = context ? (size_t)(context - system) : strlen(system);
+   int content = 0;
+   for (size_t i = 0; i < prefix; i++)
+      content |= !isspace((unsigned char)system[i]);
+   int mark = cache_marking && content && (min_chars <= 0 || prefix >= (size_t)min_chars);
+   aimee_request_t prepared = {0};
+   int count = mark && context ? 2 : 1;
+   prepared.system = calloc((size_t)count, sizeof *prepared.system);
+   if (!prepared.system)
+      goto fail;
+   prepared.n_system = count;
+   for (int i = 0; i < prepared.n_system; i++)
+      prepared.system[i].type = AIMEE_BLK_TEXT;
+   prepared.system[0].text = mark ? strndup(system, prefix) : strdup(system);
+   if (!prepared.system[0].text)
+      goto fail;
+   if (mark)
+   {
+      prepared.system[0].cache_control = strdup("ephemeral");
+      if (!prepared.system[0].cache_control)
+         goto fail;
+   }
+   if (prepared.n_system == 2)
+   {
+      prepared.system[1].text = strdup(context);
+      if (!prepared.system[1].text)
+         goto fail;
+   }
+   /* This translation-owned sidecar records only native system representation.
+    * It contains no alternate conversation, tools or model authority. */
+   prepared.raw = cJSON_CreateObject();
+   cJSON *native = mark ? blocks_to_anthropic(prepared.system, prepared.n_system, 1)
+                        : cJSON_CreateString(system);
+   if (!prepared.raw || !native || !cJSON_AddItemToObject(prepared.raw, "system", native))
+   {
+      cJSON_Delete(native);
+      goto fail;
+   }
+   ir->system = prepared.system;
+   ir->n_system = prepared.n_system;
+   ir->raw = prepared.raw;
+   return 0;
+fail:
+   aimee_request_free(&prepared);
+   return -1;
+}
+
 static cJSON *native_request_overlay(const aimee_request_t *ir, cJSON *out)
 {
    aimee_request_t original = {0};

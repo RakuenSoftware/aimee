@@ -1641,3 +1641,29 @@ profiles. Anthropic still uses the compatibility profile pending preservation of
 its exact scalar/block system-cache form; do not erase its native cache overlay
 merely to remove the remaining call. Existing request/profile, delegate-policy and
 translation fixtures pass through the new Chat path.
+
+
+## Typed Anthropic host profile with cache-form preservation
+
+All three tool-enabled host request profiles now start directly in IR; the
+execution request path no longer constructs/parses an empty native request. The
+Anthropic translation owner prepares canonical system blocks and retains only
+the scalar/block system-cache representation in a translation-owned sidecar. That
+sidecar contains no alternate model, tools or conversation. Typed sampling, output
+cap and tool choice are built by the host, and compatibility catalog ingress uses
+the shared Anthropic tool parser.
+
+The actual request fixture compares exact system wire bytes against the existing
+cache helper across 24 combinations of missing/empty/stable/volatile/whitespace
+system text, cache enablement and size floors. Scalar form and stable-prefix-only
+markers are preserved. The IR bypass gate now rejects native profile rebuild calls
+inside all four migrated request/profile functions, with planted regressions that
+include nested/literal/comment braces; compatibility output boundaries remain
+explicitly outside that migrated function scope. No exception ledger was changed.
+
+Published `1a8469ebf` passed all 56 applicable checks, including all Docker tiers,
+with two existing platform skips. Subsequent Chat/Responses/request-egress slices
+were pushed together as `61bfa8290` and need their own fresh CI. This Anthropic
+increment is newer still; SDK activation, complete command fidelity, resource and
+credential ownership, remaining consumers, independent learning and production
+promotion are still unfinished.

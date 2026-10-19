@@ -512,8 +512,43 @@ static int agent_responses_profile_ir(const agent_t *agent, const cJSON *tools,
    return 0;
 }
 
-/* Compatibility profiles enter IR once; policy and the translation backend own
- * the complete outbound request, including the dispatch catalog. */
+static int agent_anthropic_profile_ir(const agent_t *agent, const cJSON *tools,
+                                      const char *system_prompt, int max_tokens, double temperature,
+                                      aimee_request_t *ir)
+{
+   ir->frontend = AIMEE_WIRE_ANTHROPIC;
+   ir->model = strdup(agent->model);
+   if (!ir->model)
+      return -1;
+   ir->max_tokens = agent_request_max_tokens(agent, max_tokens);
+   ir->has_max_tokens = 1;
+   model_sampling_row_t sampling = model_sampling_resolve(agent, temperature);
+   ir->temperature = sampling.temperature;
+   ir->has_temperature = sampling.temperature >= 0;
+   ir->top_p = sampling.top_p;
+   ir->has_top_p = sampling.top_p >= 0;
+   ir->top_k = sampling.top_k;
+   ir->has_top_k = sampling.top_k >= 0;
+   int cache = config_cache_shaping_enabled();
+   if (anthropic_ir_set_host_system(ir, system_prompt, cache, cache ? config_cache_min_chars() : 0))
+      return -1;
+   int count = cJSON_IsArray(tools) ? cJSON_GetArraySize(tools) : 0;
+   ir->tools = count ? calloc((size_t)count, sizeof *ir->tools) : NULL;
+   if (count && !ir->tools)
+      return -1;
+   for (int i = 0; i < count; i++)
+   {
+      ir->n_tools++;
+      if (anthropic_ir_parse_tool(cJSON_GetArrayItem(tools, i), &ir->tools[i]))
+         return -1;
+   }
+   if (count && agent->require_initial_tool_call)
+      ir->tool_choice = AIMEE_TOOL_CHOICE_ANY;
+   return 0;
+}
+
+/* Host profiles start in IR; compatibility catalogs enter their typed parser.
+ * Policy and translation own the complete output and dispatch catalog. */
 cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
                               const char *system_prompt, int max_tokens, double temperature,
                               aimee_wire_t wire, int is_delegate, aimee_request_t *dispatch_catalog)
@@ -521,7 +556,7 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
    if (!agent || !cJSON_IsArray(messages))
       return NULL;
    aimee_request_t ir = {0};
-   cJSON *empty = NULL, *profile = NULL, *rendered = NULL;
+   cJSON *rendered = NULL;
    if (wire == AIMEE_WIRE_RESPONSES)
    {
       if (agent_responses_profile_ir(agent, tools, system_prompt, &ir))
@@ -534,24 +569,11 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
    }
    else if (wire == AIMEE_WIRE_ANTHROPIC)
    {
-      empty = cJSON_CreateArray();
-      if (!empty)
-         goto fail;
-      profile = agent_build_request_anthropic(agent, empty, tools, system_prompt, max_tokens,
-                                              temperature);
-      if (!profile)
-         goto fail;
-      char error[128];
-      if (anthropic_frontend_parse(profile, &ir, error, sizeof error))
+      if (agent_anthropic_profile_ir(agent, tools, system_prompt, max_tokens, temperature, &ir))
          goto fail;
    }
    else
       goto fail;
-   /* The empty profile may carry provider-added system context only. */
-   for (int i = 0; i < ir.n_messages; i++)
-      aimee_message_free(&ir.messages[i]);
-   free(ir.messages);
-   ir.n_messages = 0;
    int count = cJSON_GetArraySize(messages);
    ir.messages = count ? calloc((size_t)count, sizeof *ir.messages) : NULL;
    if (count && !ir.messages)
@@ -584,9 +606,6 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
                                              : openai_backend_build(&ir);
    if (!rendered)
       goto fail;
-   cJSON_Delete(profile);
-   profile = rendered;
-   rendered = NULL;
    if (dispatch_catalog)
    {
       aimee_request_free(dispatch_catalog);
@@ -595,13 +614,10 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
       ir.n_tools = 0;
    }
    aimee_request_free(&ir);
-   cJSON_Delete(empty);
-   return profile;
+   return rendered;
 fail:
    cJSON_Delete(rendered);
    aimee_request_free(&ir);
-   cJSON_Delete(profile);
-   cJSON_Delete(empty);
    return NULL;
 }
 

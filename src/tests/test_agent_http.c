@@ -21,6 +21,7 @@
 #include "cJSON.h"
 #include "support/ir_response_fixture.h"
 #include <aimee/ir/session_event.h>
+#include <aimee/translation/aimee_backend.h>
 
 static cJSON *make_dummy_tool(void)
 {
@@ -1084,6 +1085,66 @@ static void test_canonical_responses_profile(void)
    puts("typed Responses host profile, forced evidence choice and catalog refusal OK");
 }
 
+static void test_typed_anthropic_system_cache_parity(void)
+{
+   const char *systems[] = {NULL,
+                            "",
+                            "stable",
+                            "stable<aimee-context>volatile",
+                            " <aimee-context>volatile",
+                            "x<aimee-context>long volatile"};
+   for (size_t i = 0; i < sizeof systems / sizeof *systems; i++)
+      for (int cache = 0; cache < 2; cache++)
+         for (int floor = 0; floor <= 8; floor += 8)
+         {
+            cJSON *expected = cJSON_CreateObject();
+            agent_anthropic_set_system(expected, systems[i], cache, floor);
+            aimee_request_t ir = {.model = strdup("selected"),
+                                  .frontend = AIMEE_WIRE_ANTHROPIC,
+                                  .max_tokens = 128,
+                                  .has_max_tokens = 1};
+            assert(!anthropic_ir_set_host_system(&ir, systems[i], cache, floor));
+            cJSON *actual = anthropic_backend_build(&ir);
+            assert(actual);
+            const cJSON *left = cJSON_GetObjectItemCaseSensitive(expected, "system");
+            const cJSON *right = cJSON_GetObjectItemCaseSensitive(actual, "system");
+            assert((!left && !right) || cJSON_Compare(left, right, 1));
+            if (left && right)
+            {
+               char *left_wire = cJSON_PrintUnformatted(left);
+               char *right_wire = cJSON_PrintUnformatted(right);
+               assert(left_wire && right_wire && !strcmp(left_wire, right_wire));
+               free(left_wire);
+               free(right_wire);
+            }
+            cJSON_Delete(actual);
+            cJSON_Delete(expected);
+            aimee_request_free(&ir);
+         }
+   aimee_request_t edited = {.model = strdup("selected"),
+                             .frontend = AIMEE_WIRE_ANTHROPIC,
+                             .max_tokens = 128,
+                             .has_max_tokens = 1};
+   assert(!anthropic_ir_set_host_system(&edited, "old<aimee-context>volatile", 1, 0));
+   cJSON *entry = edited.raw;
+   assert(anthropic_ir_set_host_system(&edited, "replacement", 0, 0) == -1 && edited.raw == entry);
+   free(edited.system[0].text);
+   edited.system[0].text = strdup("policy changed");
+   cJSON *changed = anthropic_backend_build(&edited);
+   assert(changed);
+   const cJSON *blocks = cJSON_GetObjectItemCaseSensitive(changed, "system");
+   assert(cJSON_IsArray(blocks) && cJSON_GetArraySize(blocks) == 2);
+   assert(
+       !strcmp(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(blocks, 0), "text")->valuestring,
+               "policy changed"));
+   assert(
+       !strcmp(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(blocks, 1), "text")->valuestring,
+               "<aimee-context>volatile"));
+   cJSON_Delete(changed);
+   aimee_request_free(&edited);
+   puts("typed Anthropic system/cache scalar and block byte parity OK");
+}
+
 static void test_missing_response_output(void)
 {
    assert(agent_http_get("http://127.0.0.1:9", NULL, NULL, 1) == -1);
@@ -1093,6 +1154,7 @@ static void test_missing_response_output(void)
 
 int main(void)
 {
+   test_typed_anthropic_system_cache_parity();
    test_canonical_responses_profile();
    test_canonical_request_profiles();
    test_missing_response_output();

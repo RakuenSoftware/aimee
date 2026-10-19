@@ -54,6 +54,12 @@ void aimee_anthropic_projection_report(const aimee_request_t *request,
 /* Render one admitted block at an explicit Anthropic output boundary. */
 struct cJSON *anthropic_ir_render_block(const aimee_block_t *block);
 
+/* Prepare owned host system blocks and their scalar/block cache representation.
+ * Cache only the stable prefix before <aimee-context, subject to min_chars.
+ * Requires fresh Anthropic IR without system/native sidecars; atomic on error. */
+int anthropic_ir_set_host_system(aimee_request_t *request, const char *system, int cache_marking,
+                                 int min_chars);
+
 /* Build an Anthropic Messages API request from the IR. Returns a new cJSON object
  * the caller owns (cJSON_Delete), or NULL on bad args. */
 struct cJSON *anthropic_backend_build(const aimee_request_t *ir);
