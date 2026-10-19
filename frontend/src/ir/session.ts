@@ -31,6 +31,8 @@ export type Delta = {
   name?: string;
   text_delta?: string;
   signature_delta?: string;
+  thinking_id?: string;
+  encrypted_content?: string;
   redacted_content?: string;
   namespace?: string;
   input?: Record<string, unknown>;
@@ -205,6 +207,10 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       if (!nonempty(event.message_id) || !nonempty(event.role)) throw new Error('Delta requires message identity');
       const d = event.payload;
       const index = state.messages.findIndex(m => m.id === event.message_id);
+      for (const key of ['thinking_id', 'encrypted_content'] as const) {
+        if (d[key] !== undefined && (typeof d[key] !== 'string' || d.kind !== 'thinking' ||
+          !['BLOCK_START', 'BLOCK_DELTA'].includes(d.type))) throw new Error('Invalid opaque thinking metadata');
+      }
       if (d.type === 'ERROR') {
         const error = d.error_message || 'Runtime error';
         next.errors = [...state.errors, error];
@@ -257,6 +263,8 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         if (d.input !== undefined && (d.kind !== 'tool_use' || !d.input || typeof d.input !== 'object' || Array.isArray(d.input))) throw new Error('Invalid initial tool input');
         const block: Block = { type: d.kind, tool_id: d.tool_id, name: d.name, namespace: d.namespace,
           ...(d.kind === 'tool_use' ? { input: d.input ?? {} } : { text: d.text_delta ?? '' }),
+          ...(d.thinking_id !== undefined ? { thinking_id: d.thinking_id } : {}),
+          ...(d.encrypted_content !== undefined ? { encrypted_content: d.encrypted_content } : {}),
           ...(d.signature_delta !== undefined ? { signature: d.signature_delta } : {}), ...(d.redacted_content !== undefined ? { redacted_content: d.redacted_content } : {}) };
         validateBlock(block);
         // Sparse block indices are not valid canonical message order.
@@ -273,6 +281,12 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
           if (typeof d.text_delta !== 'string') throw new Error('Invalid text delta');
           if (block.type !== 'text' && block.type !== 'thinking') throw new Error('Text in non-text block');
           updated.text = (block.text || '') + d.text_delta;
+        }
+        for (const key of ['thinking_id', 'encrypted_content'] as const) {
+          if (d[key] !== undefined) {
+            if (block[key] !== undefined && block[key] !== d[key]) throw new Error('Opaque thinking metadata changed');
+            updated[key] = d[key];
+          }
         }
         if (d.signature_delta !== undefined) {
           if (typeof d.signature_delta !== 'string' || block.type !== 'thinking') throw new Error('Invalid thinking signature delta');

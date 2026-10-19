@@ -1284,6 +1284,16 @@ static int builder_append(aimee_ir_response_builder_t *builder, char **destinati
       return -1;
    return builder_append_buffer(builder, destination, &buffer, text);
 }
+/* A native final item can repeat metadata first observed at block start.
+ * Identity and ciphertext are complete values, not stream text fragments. */
+static int builder_retain(aimee_ir_response_builder_t *builder, char **destination,
+                          const char *value)
+{
+   if (!value)
+      return 0;
+   return *destination ? (strcmp(*destination, value) ? -1 : 0)
+                       : builder_append(builder, destination, value);
+}
 static int builder_grow(aimee_ir_response_builder_t *builder)
 {
    if ((size_t)builder->response.n_content < builder->capacity)
@@ -1318,6 +1328,10 @@ int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
                                     const aimee_delta_t *delta)
 {
    if (!builder || !delta || builder->complete)
+      return -1;
+   if ((delta->thinking_id || delta->thinking_encrypted_content) &&
+       (delta->kind != AIMEE_BLK_THINKING ||
+        (delta->type != AIMEE_DELTA_BLOCK_START && delta->type != AIMEE_DELTA_BLOCK_DELTA)))
       return -1;
    if (delta->type == AIMEE_DELTA_TURN_START)
    {
@@ -1407,7 +1421,10 @@ int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
                                      delta->text_delta ? delta->text_delta : "") ||
                builder_append_buffer(builder, &block->thinking_signature,
                                      &builder->storage[index].signature, delta->signature_delta) ||
-               builder_append(builder, &block->thinking_redacted, delta->redacted_content))
+               builder_append(builder, &block->thinking_redacted, delta->redacted_content) ||
+               builder_retain(builder, &block->thinking_id, delta->thinking_id) ||
+               builder_retain(builder, &block->thinking_encrypted_content,
+                              delta->thinking_encrypted_content))
          return -1;
       return 0;
    }
@@ -1453,6 +1470,10 @@ int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
                              delta->text_delta) ||
        builder_append_buffer(builder, &block->thinking_signature,
                              &builder->storage[index].signature, delta->signature_delta))
+      return -1;
+   if (builder_retain(builder, &block->thinking_id, delta->thinking_id) ||
+       builder_retain(builder, &block->thinking_encrypted_content,
+                      delta->thinking_encrypted_content))
       return -1;
    if (delta->redacted_content)
    {

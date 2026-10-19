@@ -59,6 +59,13 @@ this event alone never establishes provenance or authorizes replay. The scoped n
 checks it at entry and after restored history/policy edits, before egress. SDK spawn-site
 activation and live cache/history adoption remain separate, unfinished work.
 
+Thinking deltas can carry `thinking_id` and `encrypted_content` at `BLOCK_START` or
+`BLOCK_DELTA`, using the same field names as complete blocks. These are complete opaque values,
+not fragments: C assembly and browser replay retain late arrivals, accept identical repeats,
+and refuse replacement. The fields are invalid on other kinds or lifecycle events. A target
+stream renderer without an opaque-state representation must refuse the delta; any deliberate
+projection and its fidelity decision belong at the translation boundary.
+
 Unknown blocks fail serialization until an entry adapter models them; they are not silently
 flattened into text. The optional thread-bound sink is scoped by its caller, which must restore
 the previous sink before releasing its context or returning a pooled worker. Sink failures
@@ -78,9 +85,10 @@ IDs, signatures, encrypted/redacted reasoning, media references and context meta
 is optional for URL media. Tool input is opaque JSON; completed API function calls additionally
 require an object at their entry adapter.
 
-The migration remains incomplete: legacy ingress/result APIs, publication from every delegate
-worker, historical transcript migration and interactive harness-control replies still require
-cutover. The canonical IR session stream proposal records those remaining boundaries.
+The migration remains incomplete: production SDK activation, full native tool effects and human
+controls, account-bound cache/history admission, incremental Responses streaming, credential
+custody and remaining IR consumers still require cutover. The current
+[handoff](../IR_MIGRATION_HANDOFF.md) records the implemented and unfinished boundaries.
 
 ## Dependencies and consumers
 

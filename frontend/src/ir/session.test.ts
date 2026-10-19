@@ -275,3 +275,24 @@ it('correlates an external result from the following request without reusing a c
   expect(result.byCall.get(toolBlockKey(state.messages[0], 0))?.map(block => block.content)).toEqual(['CROSS_TURN']);
   expect(result.matched.has(toolBlockKey(state.messages[2], 0))).toBe(false);
 });
+
+
+it('retains complete reasoning metadata without concatenation or identity changes', () => {
+  const d = (n: number, payload: import('./session').Delta) => envelope(n, { kind: 'delta', message_id: 'opaque', role: 'assistant', payload });
+  const events = [d(1, { type: 'TURN_START' }),
+    d(2, { type: 'BLOCK_START', block_id: 0, kind: 'thinking', thinking_id: 'rs_original' }),
+    d(3, { type: 'BLOCK_DELTA', block_id: 0, kind: 'thinking', encrypted_content: 'cipher' }),
+    d(4, { type: 'BLOCK_DELTA', block_id: 0, kind: 'thinking', thinking_id: 'rs_original', encrypted_content: 'cipher' })];
+  const partial = events.reduce(reduceSession, emptySession('s'));
+  expect(partial.messages[0].blocks[0]).toMatchObject({ thinking_id: 'rs_original', encrypted_content: 'cipher' });
+  for (const payload of [
+    { type: 'BLOCK_DELTA', block_id: 0, kind: 'thinking', thinking_id: 'changed' },
+    { type: 'BLOCK_DELTA', block_id: 0, kind: 'thinking', encrypted_content: 'replacement' },
+    { type: 'BLOCK_DELTA', block_id: 0, kind: 'text', encrypted_content: 'cipher' },
+    { type: 'BLOCK_STOP', block_id: 0, kind: 'thinking', encrypted_content: 'cipher' },
+    { type: 'TURN_STOP', thinking_id: 'rs_original' },
+  ] as import('./session').Delta[]) expect(() => reduceSession(partial, d(5, payload))).toThrow();
+  const state = [d(5, { type: 'BLOCK_STOP', block_id: 0 }), d(6, { type: 'TURN_STOP' })].reduce(reduceSession, partial);
+  expect(state.messages[0].blocks[0].encrypted_content).toBe('cipher');
+  expect(JSON.parse(JSON.stringify([...events, d(5, { type: 'BLOCK_STOP', block_id: 0 }), d(6, { type: 'TURN_STOP' })])).reduce(reduceSession, emptySession('s'))).toEqual(state);
+});

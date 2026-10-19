@@ -94,6 +94,8 @@ func ValidSessionEvent(encoded []byte) bool {
 			Text            *string         `json:"text_delta"`
 			Arguments       *string         `json:"tool_args_delta"`
 			Signature       *string         `json:"signature_delta"`
+			ThinkingID      json.RawMessage `json:"thinking_id"`
+			Encrypted       json.RawMessage `json:"encrypted_content"`
 			Redacted        *string         `json:"redacted_content"`
 			Namespace       string          `json:"namespace"`
 			Input           json.RawMessage `json:"input"`
@@ -108,6 +110,18 @@ func ValidSessionEvent(encoded []byte) bool {
 		}
 		if e.MessageID == "" || e.Role == "" || !Decode(e.Payload, &d) || (d.RawStopReason != "" && d.Type != "TURN_STOP") {
 			return false
+		}
+		if (d.ThinkingID != nil || d.Encrypted != nil) &&
+			(d.Kind != "thinking" || (d.Type != "BLOCK_START" && d.Type != "BLOCK_DELTA")) {
+			return false
+		}
+		for _, value := range []json.RawMessage{d.ThinkingID, d.Encrypted} {
+			if value != nil {
+				var text string
+				if !Decode(value, &text) {
+					return false
+				}
+			}
 		}
 		switch d.Type {
 		case "TURN_START", "TURN_STOP", "ERROR":

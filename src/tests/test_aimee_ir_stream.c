@@ -385,6 +385,17 @@ int main(void)
 #undef A_DONE
    }
 
+   /* A wire without a representation must refuse opaque Responses state. */
+   {
+      anthropic_stream_state_t state = {0};
+      aimee_delta_t delta = {.type = AIMEE_DELTA_BLOCK_START,
+                             .kind = AIMEE_BLK_THINKING,
+                             .thinking_id = "rs_1",
+                             .thinking_encrypted_content = "cipher"};
+      assert(!anthropic_delta_render(&delta, &state, "m", "model"));
+      assert(anthropic_delta_emit(&delta, &state, "m", "model", NULL, NULL) < 0);
+   }
+
    printf("ok\n");
    return 0;
 }

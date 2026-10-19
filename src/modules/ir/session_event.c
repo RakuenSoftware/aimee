@@ -655,6 +655,10 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
         (delta->usage_in < 0 || delta->usage_out < 0 || delta->usage_cache_read < 0 ||
          delta->usage_cache_write < 0 || delta->usage_reasoning < 0)))
       return NULL;
+   if ((delta->thinking_id || delta->thinking_encrypted_content) &&
+       (delta->kind != AIMEE_BLK_THINKING ||
+        (delta->type != AIMEE_DELTA_BLOCK_START && delta->type != AIMEE_DELTA_BLOCK_DELTA)))
+      return NULL;
    cJSON *out = cJSON_CreateObject();
    if (!out)
       return NULL;
@@ -689,6 +693,8 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
       }
       if (delta->type == AIMEE_DELTA_BLOCK_START || delta->type == AIMEE_DELTA_BLOCK_DELTA)
       {
+         ok = ok && add_string(out, "thinking_id", delta->thinking_id) &&
+              add_string(out, "encrypted_content", delta->thinking_encrypted_content);
          if (delta->signature_delta)
             ok = ok && delta->kind == AIMEE_BLK_THINKING &&
                  add_string(out, "signature_delta", delta->signature_delta);

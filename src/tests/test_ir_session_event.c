@@ -117,9 +117,56 @@ static void test_owned_delta_assembly(void)
         "lifecycles");
 }
 
+static void test_opaque_delta_metadata(void)
+{
+   aimee_ir_response_builder_t builder = {0};
+   aimee_delta_t delta = {.type = AIMEE_DELTA_TURN_START};
+   assert(!aimee_ir_response_builder_apply(&builder, &delta));
+   char native_id[] = "rs_original", cipher[] = "opaque-cipher";
+   delta = (aimee_delta_t){
+       .type = AIMEE_DELTA_BLOCK_START, .kind = AIMEE_BLK_THINKING, .thinking_id = native_id};
+   cJSON *json = aimee_ir_delta_json(&delta);
+   assert(json && !strcmp(cJSON_GetObjectItem(json, "thinking_id")->valuestring, native_id));
+   cJSON_Delete(json);
+   assert(!aimee_ir_response_builder_apply(&builder, &delta));
+   native_id[3] = 'X';
+   delta.type = AIMEE_DELTA_BLOCK_DELTA;
+   delta.thinking_id = "rs_original";
+   delta.thinking_encrypted_content = cipher;
+   assert(!aimee_ir_response_builder_apply(&builder, &delta));
+   json = aimee_ir_delta_json(&delta);
+   assert(json && !strcmp(cJSON_GetObjectItem(json, "encrypted_content")->valuestring, cipher));
+   cJSON_Delete(json);
+   size_t retained = builder.bytes;
+   assert(!aimee_ir_response_builder_apply(&builder, &delta) && builder.bytes == retained);
+   cipher[0] = 'X';
+   assert(!strcmp(builder.response.content[0].thinking_id, "rs_original"));
+   assert(!strcmp(builder.response.content[0].thinking_encrypted_content, "opaque-cipher"));
+   assert(aimee_ir_response_builder_apply(&builder, &delta) < 0);
+   delta.thinking_encrypted_content = "opaque-cipher";
+   delta.thinking_id = "different-id";
+   assert(aimee_ir_response_builder_apply(&builder, &delta) < 0);
+   delta.thinking_id = "rs_original";
+   delta.kind = AIMEE_BLK_TEXT;
+   assert(!aimee_ir_delta_json(&delta));
+   assert(aimee_ir_response_builder_apply(&builder, &delta) < 0);
+   delta.kind = AIMEE_BLK_THINKING;
+   delta.type = AIMEE_DELTA_BLOCK_STOP;
+   assert(!aimee_ir_delta_json(&delta));
+   assert(aimee_ir_response_builder_apply(&builder, &delta) < 0);
+   delta.thinking_id = delta.thinking_encrypted_content = NULL;
+   assert(!aimee_ir_response_builder_apply(&builder, &delta));
+   delta = (aimee_delta_t){.type = AIMEE_DELTA_TURN_STOP, .stop_reason = AIMEE_STOP_END_TURN};
+   assert(!aimee_ir_response_builder_apply(&builder, &delta));
+   assert(builder.complete &&
+          !strcmp(builder.response.content[0].thinking_encrypted_content, "opaque-cipher"));
+   aimee_ir_response_builder_free(&builder);
+}
+
 int main(void)
 {
    test_owned_delta_assembly();
+   test_opaque_delta_metadata();
    aimee_block_t blocks[] = {
        {.type = AIMEE_BLK_THINKING,
         .text = "reason",

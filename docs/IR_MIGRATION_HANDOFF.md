@@ -1284,3 +1284,22 @@ comparison, and retains the full remaining file/build-plan checks. Mutation test
 reject LSP drift, altered/removed/duplicated host blocks and changed assertions.
 All 20 S1 gate/evidence tests pass. Checkpoint `a6834ef00` publishes that repair;
 its fresh CI, and any later checkpoint's CI, still require their own qualification.
+
+
+## Opaque reasoning delta parity for incremental Responses
+
+Canonical deltas now retain `thinking_id` and `encrypted_content`, matching full
+thinking blocks across C serialization/owned assembly, Go session validation and
+browser live/durable projection. They are complete values at block start or a
+later block delta, not text fragments. Identical repeats retain one value and
+consume no additional C byte budget; conflicting identities/ciphertext, wrong
+block kinds and lifecycle-event placement refuse. Owned assembly does not retain
+borrowed provider buffers. The Anthropic stream renderer refuses opaque Responses
+state it cannot represent rather than dropping it.
+
+C session/stream fixtures and ASan/UBSan pass, Go IR/session-family race tests pass,
+and all 289 frontend tests plus TypeScript checking pass. This closes a streaming
+contract gap; it does not implement the incremental Responses backend or activate
+the production SDK path. Remaining effects, human controls, canonical prefix/cache
+admission, streaming transport, credential custody, consumers and KB-free learning
+acceptance remain open.

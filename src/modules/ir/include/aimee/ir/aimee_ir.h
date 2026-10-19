@@ -371,6 +371,10 @@ typedef struct
    const char *tool_name;
    const char *text_delta;
    const char *signature_delta;
+   /* Complete opaque reasoning fields, never concatenated fragments. May arrive
+    * at block start or later; repeated values must be identical. */
+   const char *thinking_id;
+   const char *thinking_encrypted_content;
    const char *redacted_content;
    const char *tool_namespace;
    const struct cJSON *tool_input;  /* BLOCK_START initial arguments; borrowed */
