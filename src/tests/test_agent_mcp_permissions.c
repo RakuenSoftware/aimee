@@ -8,6 +8,12 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include "platform_test_util.h"
+#include "agent_config.h"
+#include "agent_source_authority.h"
+#include "request_context.h"
+#include "server.h"
+#include "util.h"
+#include "modules/workspace/workspace_provider.h"
 
 void test_native_mcp_permission_admission(void)
 {
@@ -119,8 +125,126 @@ void test_script_rpc_keeps_permission_scope(void)
           strstr(output, "SCRIPT_SCOPE_PRIVATE_EVIDENCE"));
    cJSON_Delete(reply);
    free(result);
+   result = tool_execute_script(
+       "python",
+       "import json, aimee_tools\n"
+       "print(json.dumps(aimee_tools.call('read_file', {'path': 'evidence.txt'})))\n",
+       5, directory, NULL);
+   reply = result ? cJSON_Parse(result) : NULL;
+   assert(reply && cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == 0);
+   output = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "stdout"));
+   assert(output && strstr(output, "\"ok\": true") &&
+          strstr(output, "SCRIPT_SCOPE_PRIVATE_EVIDENCE"));
+   cJSON_Delete(reply);
+   free(result);
    unlink(path);
    rmdir(directory);
    agent_tools_scope_restore(&previous);
    puts("  PASS: script RPC retains the caller's denied-tool ceiling");
+}
+
+typedef struct
+{
+   const char *directory;
+   atomic_int cancel;
+   int seen, matches;
+} script_context_fixture_t;
+static script_context_fixture_t *script_context_fixture;
+
+static int script_context_read(const workspace_provider_t *provider, const char *path, char **out,
+                               size_t *length)
+{
+   script_context_fixture_t *fixture = script_context_fixture;
+   const request_context_t *request = request_context_get();
+   agent_request_creds_t credentials;
+   agent_request_creds_snapshot(&credentials);
+   agent_source_authority_snapshot_t source = {0};
+   int captured = agent_source_authority_tls_capture_checked(&source);
+   const char *cwd = run_cmd_get_cwd();
+   fixture->seen++;
+   fixture->matches =
+       !captured && source.active && source.authority == 1 && source.paths &&
+       !strcmp(source.paths, "evidence.txt") && !strcmp(source.root, fixture->directory) &&
+       request && !strcmp(request->principal, "script-context-fixture") &&
+       request->model_execution == 1 && request->capabilities == CAPS_AUTHENTICATED && cwd &&
+       !strcmp(cwd, fixture->directory) && !strcmp(session_id(), "script-context-session") &&
+       !strcmp(credentials.vault_principal, "webuser:script-context-fixture") &&
+       !credentials.codex_token[0] && !credentials.api_key[0] && !credentials.claude_token[0] &&
+       workspace_provider_active() == provider && agent_get_request_cancel() == &fixture->cancel;
+   agent_source_authority_snapshot_destroy(&source);
+   const workspace_provider_t *shared = workspace_provider_shared();
+   int result = shared->read_all(shared, path, out, length);
+   atomic_store(&fixture->cancel, 1); /* The next RPC call must observe the host's cancellation. */
+   return result;
+}
+
+void test_script_rpc_keeps_host_context(void)
+{
+   request_context_snapshot_t previous_request;
+   request_context_snapshot(&previous_request);
+   agent_request_creds_t previous_credentials;
+   agent_request_creds_snapshot(&previous_credentials);
+   agent_source_authority_snapshot_t previous_source;
+   int captured = agent_source_authority_tls_capture_checked(&previous_source);
+   assert(!captured);
+   const workspace_provider_t *previous_workspace = workspace_provider_active();
+   atomic_int *previous_cancel = agent_get_request_cancel();
+   char previous_session[128] = "";
+   if (session_id_override_active())
+      snprintf(previous_session, sizeof previous_session, "%s", session_id());
+   char directory[MAX_PATH_LEN], path[MAX_PATH_LEN];
+   snprintf(directory, sizeof directory, "%s/arc.XXXXXX", platform_tmpdir());
+   char *created = platform_mkdtemp(directory);
+   assert(created);
+   snprintf(path, sizeof path, "%s/evidence.txt", directory);
+   FILE *file = fopen(path, "w");
+   assert(file);
+   int written = fputs("SCRIPT_CONTEXT_EVIDENCE", file), closed = fclose(file);
+   assert(written >= 0 && !closed);
+   script_context_fixture_t fixture = {.directory = directory};
+   atomic_init(&fixture.cancel, 0);
+   script_context_fixture = &fixture;
+   workspace_provider_t workspace = *workspace_provider_shared();
+   workspace.read_all = script_context_read;
+   workspace_provider_set_active(&workspace);
+   request_context_t owner = {.capabilities = CAPS_ALL};
+   snprintf(owner.principal, sizeof owner.principal, "%s", "script-context-fixture");
+   snprintf(owner.request_id, sizeof owner.request_id, "%s", "script-context-request");
+   request_context_set(&owner);
+   agent_set_request_vault_principal("webuser:script-context-fixture");
+   agent_set_request_codex_creds("fixture-only-parent-model-token", "fixture-account");
+   session_id_set_override("script-context-session");
+   agent_source_authority_tls_set(1, directory, "evidence.txt");
+   agent_set_request_cancel(&fixture.cancel);
+   char *result =
+       tool_execute_script("python",
+                           "import json, aimee_tools\n"
+                           "first = aimee_tools.call('read_file', {'path': 'evidence.txt'})\n"
+                           "second = aimee_tools.call('read_file', {'path': 'evidence.txt'})\n"
+                           "print(json.dumps([first, second]))\n",
+                           5, directory, NULL);
+   cJSON *reply = result ? cJSON_Parse(result) : NULL;
+   assert(reply && cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == 0);
+   const char *output = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "stdout"));
+   assert(output && strstr(output, "SCRIPT_CONTEXT_EVIDENCE") && strstr(output, "cancelled"));
+   assert(fixture.seen == 1 && fixture.matches && atomic_load(&fixture.cancel));
+   const request_context_t *unchanged = request_context_get();
+   assert(unchanged && !unchanged->model_execution && unchanged->capabilities == CAPS_ALL);
+   cJSON_Delete(reply);
+   free(result);
+   agent_set_request_cancel(previous_cancel);
+   workspace_provider_set_active(previous_workspace);
+   script_context_fixture = NULL;
+   request_context_restore(&previous_request);
+   request_context_snapshot_clear(&previous_request);
+   agent_request_creds_restore(&previous_credentials);
+   agent_source_authority_tls_restore(&previous_source);
+   if (previous_session[0])
+      session_id_set_override(previous_session);
+   else
+      session_id_clear_override();
+   unlink(path);
+   rmdir(directory);
+   puts("  PASS: script RPC retains cwd/provider/identity/source/cancellation without model "
+        "credentials");
 }

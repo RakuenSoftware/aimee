@@ -277,6 +277,11 @@ void agent_set_request_cancel(atomic_int *flag)
    g_request_cancel = flag;
 }
 
+atomic_int *agent_get_request_cancel(void)
+{
+   return g_request_cancel;
+}
+
 int agent_request_cancelled(void)
 {
    return g_request_cancel ? atomic_load(g_request_cancel) : 0;

@@ -2137,3 +2137,34 @@ separate outstanding work; production native activation and independent learning
 qualification are still unfinished. The previous tool API integration remains
 163/163 with its 26 explicit service skips, not a new integration claim for this
 script increment.
+
+
+## Script RPC owns cwd, identity, source and workspace context
+
+A new real-dispatch regression reproduced an absolute read succeeding while the
+same script's relative `evidence.txt` read used the server process directory and
+failed. The RPC owner now captures the actual script cwd, immutable caller tool
+scope, checked source-authority copy, attested request snapshot, session and Vault
+principal identity, active workspace provider, job identity and cancellation flag.
+The private execution context outlives its joined worker. Source allocations and
+verified request-token snapshots are released/cleared after join; caller resource
+leases enclose the synchronous script execution.
+
+Workers retain model execution limits and remove operator-only capability bits.
+Only session/principal identity is bound into the credential context; parent model
+credentials are not copied. An absent source overlay is explicit, preventing a
+concurrent delegate's process environment from becoming authority. Human control
+scopes/mailboxes are not copied. Their retained owner integration remains separate.
+
+Real fixtures prove relative reads, the caller's actual provider, request/principal,
+source restrictions and shared cancellation flag, empty Codex/Claude/API-key fields,
+and unchanged parent authority. The provider cancels the host flag after one read;
+the next RPC request refuses without another file read. This qualifies RPC
+cancellation admission, not termination of an arbitrary running Python/shell process.
+Permission or source capture failure prevents script startup.
+
+Agent/script framing fixtures pass normally and under ASan/UBSan; changed-source
+Cppcheck has no diagnostics. All 653 native binaries, the proxy regressions and
+all 76 lint gates pass. Serial actual CMake runtime/cache checks pass 2/2. Script
+RPC canonical definition/policy admission and running-process cancellation remain
+the next work; production SDK activation and independent learning remain unfinished.

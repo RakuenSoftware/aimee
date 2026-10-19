@@ -396,6 +396,9 @@ const char *agent_get_request_vault_principal(void);
  * agent loop polls agent_request_cancelled() at safe points to abort a detached
  * turn whose session was closed / the server is shutting down. Thread-local. */
 void agent_set_request_cancel(atomic_int *flag);
+/* Borrow only inside the current host execution; every child worker must join
+ * before its owner releases this cancellation flag. Never model authority. */
+atomic_int *agent_get_request_cancel(void);
 int agent_request_cancelled(void);
 
 /* Snapshot of the per-turn, thread-local credential context (session id, selected
