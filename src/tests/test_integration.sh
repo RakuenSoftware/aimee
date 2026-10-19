@@ -263,6 +263,20 @@ start_memory_module() {
 stop_memory_module() {
     if [ -n "$MEMORY_MODULE_PID" ]; then
         kill "$MEMORY_MODULE_PID" 2>/dev/null || true
+        for attempt in $(seq 1 100); do
+            if ! kill -0 "$MEMORY_MODULE_PID" 2>/dev/null; then break; fi
+            sleep 0.05
+        done
+        if kill -0 "$MEMORY_MODULE_PID" 2>/dev/null; then
+            echo "FAIL: memory owner did not stop within five seconds"
+            FAIL=$((FAIL + 1))
+            # Go prints the blocked owner stacks on QUIT. This is the test's
+            # disposable child; preserve a failing verdict before forcing exit.
+            kill -QUIT "$MEMORY_MODULE_PID" 2>/dev/null || true
+            sleep 0.25
+            tail -n 240 "$HOME/aimee-memory.log" 2>/dev/null || true
+            kill -KILL "$MEMORY_MODULE_PID" 2>/dev/null || true
+        fi
         wait "$MEMORY_MODULE_PID" 2>/dev/null || true
         MEMORY_MODULE_PID=""
     fi
@@ -890,6 +904,7 @@ stop_pg_module() {
 }
 
 cleanup() {
+    local rc=$?
     stop_workflow_module
     stop_db1_module
     stop_pg_module
@@ -900,7 +915,6 @@ cleanup() {
     stop_policy_module
     stop_tools_module
     stop_learning_module
-    local rc=$?
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
         echo ""
         echo "integration: ABORTED after $((PASS + FAIL)) checks (exit $rc)."
@@ -917,6 +931,8 @@ cleanup() {
     # Same rule as the TCP teardown: removing a temp dir must never change the
     # verdict. This one already waits for its server, which is why it never bit.
     rm -rf "$HOME" || true
+    if [ "$FAIL" -ne 0 ]; then rc=1; fi
+    exit "$rc"
 }
 trap cleanup EXIT
 

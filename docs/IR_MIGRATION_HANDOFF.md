@@ -2273,7 +2273,7 @@ PostgreSQL integration 167/167, with the same 26 explicit service skips and no K
 All 76 serial lint gates pass.
 
 
-Next confirmed script ingress/lifetime work: the generated Bash shim uses Python
+Historical script ingress/lifetime findings (fixed by the next increment): the generated Bash shim uses Python
 `raw_decode`, which accepts a JSON prefix and collapses duplicate fields before
 host admission. It must forward exact argument JSON to the strict host boundary.
 Also, RPC stop must propagate a local cancellation scope into an executing tool;
@@ -2304,3 +2304,66 @@ local verification of the repair; a fresh Windows CI run is still required.
 The same merged-run macOS build and macOS real-LSP qualification passed. Linux
 integration and T2/T2-luks were still pending when the Windows failure was found;
 T1/T3 had passed. The merged PR's two platform skips never qualified Windows.
+
+
+## Exact script shim ingress and local cancellation leases
+
+New regressions reproduced the generated Bash shim accepting trailing JSON and
+collapsing duplicate fields before the host saw them. It now forwards exact
+argument JSON as encoded text and exact response bytes through the bounded
+transport. The host decodes that text independently, preventing trailing argument
+bytes from becoming envelope metadata. Legacy object frames and descriptor-only
+authentication remain supported; ambiguous dual argument forms refuse. The strict
+host codec remains the admission owner, including decimal-token fidelity. The
+shim's old default-argument expansion also appended a spare closing brace; that
+is corrected rather than relying on prefix decoding. Python calls preserve the
+explicit argument type: an empty array no longer silently becomes an object.
+Header/body reads and packet writes now handle partial socket I/O and always
+close the duplicated client descriptor.
+
+A real tools/policy owner fixture also reproduced a script-only timeout waiting
+for its nested `bash` tool. The host now has a typed chain of immutable, leased
+cancellation nodes. The RPC worker retains its parent's flag/scope and adds its
+own atomic stop flag. Stop reaches running cancellable tools without changing
+any parent flag. Every enclosing scope outlives its joined children. The real
+context fixture separately qualifies ordinary parent cancellation and inherited
+scope cancellation with the original identity/source/credential checks intact.
+
+Agent/script fixtures pass normally and under ASan/UBSan; all 653 native binaries
+and proxy regressions pass; five changed-source Cppcheck inputs have no diagnostics.
+The actual server builds and passes the 167-check restricted-role integration
+journey against PostgreSQL 18.6 extracted from the exact CI OCI manifest, with
+26 existing service-dependent skips and no KB. That diagnostic harness bounds
+memory teardown and preserves its owner log; no stop failure occurred. Serial
+lint follows before this increment's publication.
+
+Merged CI integration run `39278223901` did time out after a private model-memory
+store failed and memory-owner TERM teardown hung. This remains an open CI defect,
+not a passing or superseded run. Clean local PostgreSQL 17 integration passed
+167/167; a two-thread Go scheduler with 25 extra model writes passed 192/192;
+the exact CI PostgreSQL 18.6 image also passed 167/167. The four merged Docker
+tiers and macOS passed; the separately pushed Windows codec repair still needs
+fresh Windows CI. Investigation is comparing the exact merged C source next.
+
+
+## CI memory teardown retains a failing verdict and owner evidence
+
+The integration harness now bounds its disposable memory child’s TERM shutdown
+at five seconds. A stuck owner records a real test failure, emits Go stacks with
+QUIT and is killed/reaped before the outage/restart checks continue. Assertions
+are retained. Cleanup captures the entry status and forces a nonzero exit for a
+shutdown failure, including a failure discovered after the printed summary.
+
+Three real-process fixtures pass: graceful reaping without a failure; a child
+ignoring TERM/QUIT that is killed and makes final cleanup exit 1; and preservation
+of an existing exit 7. The frozen benchmark checks pass 21/21 without changing any
+baseline or validator. The actual updated integration harness passes 167/167 on
+the exact CI PostgreSQL 18.6 image, with the existing 26 service skips and no KB.
+This fixes the harness’s unbounded wait and adds evidence for the unresolved
+model-memory write timeout; it does not claim that production owner defect fixed.
+
+A separate archive of the exact merged source, built with isolated objects,
+passed the private-memory assertions against that same PostgreSQL 18.6 image.
+That shortened diagnostic run is not full integration qualification: its archive
+had no Git metadata, so an earlier git_status check failed, and it intentionally
+stopped after private memory. The original CI model-write failure remains open.
