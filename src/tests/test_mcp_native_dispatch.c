@@ -21,6 +21,7 @@
 #include "aimee.h" /* MAX_PATH_LEN via agent_types.h */
 #include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
+#include <aimee/ir/aimee_ir.h>
 #include <aimee/tools/module_api.h>
 #include "../modules/tools/agent_tools_internal.h"
 #include <assert.h>
@@ -31,6 +32,7 @@
 #define FAKE_TOOL "index_find_callers"
 
 static int g_call_count;
+static int g_value_schema_string, g_value_is_string;
 static char g_last_tool[64];
 static char g_last_args[256];
 
@@ -43,7 +45,9 @@ static cJSON *fake_advert(const char *tool)
    cJSON_AddStringToObject(t, "description", "Find the call sites of a symbol.");
    cJSON *s = cJSON_AddObjectToObject(t, "inputSchema");
    cJSON_AddStringToObject(s, "type", "object");
-   cJSON_AddObjectToObject(s, "properties");
+   cJSON *properties = cJSON_AddObjectToObject(s, "properties");
+   cJSON *value = cJSON_AddObjectToObject(properties, "value");
+   cJSON_AddStringToObject(value, "type", g_value_schema_string ? "string" : "integer");
    return t;
 }
 
@@ -52,6 +56,7 @@ static cJSON *fake_call(const char *tool, cJSON *args, const char *sid)
 {
    (void)sid;
    g_call_count++;
+   g_value_is_string = cJSON_IsString(cJSON_GetObjectItemCaseSensitive(args, "value"));
    snprintf(g_last_tool, sizeof(g_last_tool), "%s", tool ? tool : "");
    cJSON *sym = args ? cJSON_GetObjectItemCaseSensitive(args, "symbol") : NULL;
    snprintf(g_last_args, sizeof(g_last_args), "%s",
@@ -89,6 +94,37 @@ static void test_registered_tool_dispatches_to_the_provider(void)
    assert(strstr(out, "\n") != NULL);
    free(out);
    printf("  PASS: registered_tool_dispatches_to_the_provider\n");
+}
+
+static void test_admitted_arguments_ignore_stale_schema_cache(void)
+{
+   /* The first dispatch cached the old provider's integer schema. The current
+    * provider now admits a string. A deeper normalizer must not change it. */
+   g_value_schema_string = 1;
+   agent_tools_set_mcp_provider(fake_call, fake_advert);
+   cJSON *definition = fake_advert(FAKE_TOOL);
+   aimee_tool_t admitted = {.name = FAKE_TOOL,
+                            .kind = AIMEE_TOOL_FUNCTION,
+                            .schema = cJSON_GetObjectItemCaseSensitive(definition, "inputSchema")};
+   int is_error = 1;
+   char *out = dispatch_tool_call_ir_ctx_status(&admitted, "{\"value\":\"7\"}", 5000, &is_error);
+   assert(out && !is_error && g_value_is_string);
+   free(out);
+   int calls = g_call_count;
+   cJSON_ReplaceItemInObjectCaseSensitive(
+       cJSON_GetObjectItemCaseSensitive(admitted.schema, "properties"), "value",
+       cJSON_Parse("{\"type\":\"integer\"}"));
+   out = dispatch_tool_call_ir_ctx_status(&admitted, "{\"value\":\"7\"}", 5000, &is_error);
+   assert(out && is_error && g_call_count == calls);
+   free(out);
+   out = dispatch_tool_call_ir_ctx_status(&admitted, "{} trailing", 5000, &is_error);
+   assert(out && is_error && g_call_count == calls);
+   free(out);
+   admitted.kind = AIMEE_TOOL_HOSTED;
+   out = dispatch_tool_call_ir_ctx_status(&admitted, "{}", 5000, &is_error);
+   assert(out && is_error && g_call_count == calls);
+   free(out);
+   cJSON_Delete(definition);
 }
 
 /* An unregistered name must still fall through to the unknown-tool error, not get
@@ -211,6 +247,7 @@ int main(void)
    printf("test_mcp_native_dispatch:\n");
    test_classifier_failure_retains_unknown();
    test_registered_tool_dispatches_to_the_provider();
+   test_admitted_arguments_ignore_stale_schema_cache();
    test_unregistered_name_still_reports_unknown();
    test_no_provider_is_an_error_not_a_crash();
    test_kb_federated_tool_is_advertised();

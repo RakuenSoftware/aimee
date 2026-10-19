@@ -295,9 +295,10 @@ static void agent_progress_retrieval(const char *name, const char *arguments, ch
       snprintf(target, target_sz, "%.255s", arguments);
 }
 
-static int agent_bootstrap_repository_evidence(cJSON *messages, int turn, int timeout_ms,
-                                               char *last_tool_name, size_t last_tool_name_n,
-                                               char *last_tool_result, size_t last_tool_result_n)
+static int agent_bootstrap_repository_evidence(const aimee_request_t *catalog, cJSON *messages,
+                                               int turn, int timeout_ms, char *last_tool_name,
+                                               size_t last_tool_name_n, char *last_tool_result,
+                                               size_t last_tool_result_n)
 {
    static const char *const name = "list_files";
    /* Never let a synthetic evidence call fall back to the server process CWD.
@@ -306,16 +307,34 @@ static int agent_bootstrap_repository_evidence(cJSON *messages, int turn, int ti
    const char *worktree = run_cmd_get_cwd();
    if (!worktree || !worktree[0] || !aimee_path_is_absolute(worktree))
       return 0;
+   const aimee_tool_t *admitted = aimee_ir_find_function(catalog, NULL, name);
+   if (!admitted)
+      return 0;
    cJSON *arg_obj = cJSON_CreateObject();
    if (!arg_obj)
       return 0;
    cJSON_AddStringToObject(arg_obj, "path", worktree);
-   char *args = cJSON_PrintUnformatted(arg_obj);
+   cJSON *canonical = tool_args_canonicalize(admitted->schema, arg_obj);
+   char *args = canonical ? cJSON_PrintUnformatted(canonical) : NULL;
+   cJSON_Delete(canonical);
    cJSON_Delete(arg_obj);
    if (!args)
       return 0;
+   char reason[256] = {0}, effect[32], attempt[64];
+   aimee_tool_metadata_t metadata;
+   snprintf(attempt, sizeof attempt, "bootstrap-repository:%d", turn);
+   if (tool_validate_ir(admitted, args, reason, sizeof reason) != 0 ||
+       directive_check_tool(name, args, reason, sizeof reason) != 0 ||
+       tool_policy_metadata(name, &metadata, effect, sizeof effect, reason, sizeof reason) != 0 ||
+       policy_check_tool_metadata_attempt(name, &metadata, effect, args, attempt, reason,
+                                          sizeof reason) != 0)
+   {
+      aimee_log(LOG_WARN, "agent.evidence", "repository evidence admission refused: %s", reason);
+      free(args);
+      return 0;
+   }
    int is_error = 1;
-   char *result = dispatch_tool_call_ctx_status(name, args, timeout_ms, &is_error);
+   char *result = dispatch_tool_call_ir_ctx_status(admitted, args, timeout_ms, &is_error);
    agent_trace_log(0, turn, "tool_call", NULL, name, args, result, NULL);
    if (last_tool_name && last_tool_name_n)
       snprintf(last_tool_name, last_tool_name_n, "%s", name);
@@ -1639,9 +1658,9 @@ native_provider_http:
                       "provider returned no executable repository call; bootstrapping seat with "
                       "list_files");
          total_calls++;
-         if (agent_bootstrap_repository_evidence(messages, turn, agent->timeout_ms, last_tool_name,
-                                                 sizeof last_tool_name, last_tool_result,
-                                                 sizeof last_tool_result))
+         if (agent_bootstrap_repository_evidence(
+                 &dispatch_catalog, messages, turn, agent->timeout_ms, last_tool_name,
+                 sizeof last_tool_name, last_tool_result, sizeof last_tool_result))
          {
             successful_tool_calls++;
             if (turn >= max_t - 1 && max_t < initial_max_t + 1)
@@ -2119,9 +2138,8 @@ native_provider_http:
          }
          agent_tools_set_effect_authorized(1);
          int tool_result_error = 1;
-         char *result_str = dispatch_tool_call_ctx_status(
-             aimee_ir_response_tool(&response, i)->tool_name, tool_arguments[i], agent->timeout_ms,
-             &tool_result_error);
+         char *result_str = dispatch_tool_call_ir_ctx_status(advertised, tool_arguments[i],
+                                                             agent->timeout_ms, &tool_result_error);
          agent_tools_set_effect_authorized(0);
          result_str = policy_annotate_indexed(aimee_ir_response_tool(&response, i)->tool_name,
                                               tool_arguments[i], exploration_attempt, result_str);

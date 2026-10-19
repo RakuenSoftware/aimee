@@ -2023,3 +2023,27 @@ outside an assertion after Cppcheck reported its side effect. Changed-source
 Cppcheck has no diagnostics, all 76 lint checks pass, and actual CMake/CTest
 runtime/cache targets pass 2/2. Fresh `6a0b24e2f` benchmark CI is green; its main CI
 snapshot had 52 passing checks, four pending and the two existing platform skips.
+
+
+## Admitted arguments survive dispatch; repository bootstrap uses admission
+
+The delegate executor now passes its exact admitted IR function and canonical
+arguments to typed dispatch. That boundary rejects malformed/noncanonical input
+and transfers the parsed object into the existing dispatcher without consulting
+its legacy process-global schema cache. Permission checks, cancellation, effect
+contracts, receipts and completion auditing still run. Legacy script/API ingress
+retains its separately tracked normalization path. The bypass guard now prevents
+the canonical delegate from reintroducing that cached-schema entry point.
+
+Automatic repository evidence must find `list_files` in the actual post-policy
+catalog, canonicalize and validate against that definition, and pass directives
+and supervised metadata/category execution policy before dispatch. An absent
+policy owner cannot produce successful evidence. Both defects were reproduced
+with failing native fixtures before repair. The stale-cache control changes an
+advertised integer field to a string and verifies that the executed value stays
+a string; refusals cannot increment the provider's call count.
+
+The new tools-to-IR header declaration is a shared typed data-contract use in
+`IR_SHARED_TYPE`, not a peer service call or a policy bypass. No new peer service
+coupling or attribution exception is introduced. Exact admitted definitions and
+strict JSON parsing stay at that boundary; policy metadata remains supervised.

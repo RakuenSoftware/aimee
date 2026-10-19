@@ -1,4 +1,6 @@
 #include "aimee.h"
+#include <aimee/ir/aimee_ir.h>
+#include "tool_args_coerce.h"
 #include "agent_tools_internal.h"
 #include "modules/workspace/workspace_provider.h"
 #include <aimee/core/turn_integrity.h>
@@ -313,4 +315,40 @@ int agent_tools_effect_admit(const char *name, cJSON **args, const char *cwd, co
 char *agent_tools_effect_receipt(const char *verdict, char *result, int *is_error)
 {
    return g_action_finish ? g_action_finish(verdict, result, is_error) : result;
+}
+
+static agent_tool_classifier_fn g_tool_classifier;
+
+void agent_tools_register_classifier(agent_tool_classifier_fn classifier)
+{
+   g_tool_classifier = classifier;
+}
+
+int agent_tools_classification(const char *name)
+{
+   return agent_tools_effect_classification(name, g_tool_classifier);
+}
+
+char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *admitted, const char *arguments_json,
+                                       int timeout_ms, int *is_error)
+{
+   if (is_error)
+      *is_error = 1;
+   if (!admitted || admitted->kind != AIMEE_TOOL_FUNCTION || !admitted->name ||
+       !admitted->name[0] || !cJSON_IsObject(admitted->schema) || !arguments_json)
+      return safe_strdup("error: invalid admitted tool definition");
+   cJSON *args = aimee_ir_json_parse_frame(arguments_json, strlen(arguments_json));
+   cJSON *canonical = cJSON_IsObject(args) ? tool_args_canonicalize(admitted->schema, args) : NULL;
+   char *before = args ? cJSON_PrintUnformatted(args) : NULL;
+   char *after = canonical ? cJSON_PrintUnformatted(canonical) : NULL;
+   int unchanged = before && after && strcmp(before, after) == 0;
+   free(before);
+   free(after);
+   cJSON_Delete(canonical);
+   if (!unchanged)
+   {
+      cJSON_Delete(args);
+      return safe_strdup("error: admitted tool arguments are not canonical");
+   }
+   return agent_tools_dispatch_owned(admitted->name, arguments_json, timeout_ms, is_error, args);
 }

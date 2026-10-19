@@ -73,7 +73,16 @@ class IRBypassTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "unclassified-tool-dispatch"):
                     checker.check(self.root)
                 path.unlink()
-            self.source(relative, 'dispatch_tool_call_ctx_status(tool, args, timeout, &failed);')
+            dispatch = ("dispatch_tool_call_ir_ctx_status" if relative == "src/posix/agent_runtime.c"
+                        else "dispatch_tool_call_ctx_status")
+            self.source(relative, dispatch + '(tool, args, timeout, &failed);')
+        checker.check(self.root)
+
+    def test_canonical_dispatch_cannot_recoerce_against_cached_schema(self):
+        self.source("src/posix/agent_runtime.c", 'dispatch_tool_call_ctx_status(name, args, timeout, &failed);')
+        with self.assertRaisesRegex(ValueError, "canonical-dispatch-cache"):
+            checker.check(self.root)
+        self.source("src/posix/agent_runtime.c", 'dispatch_tool_call_ir_ctx_status(admitted, args, timeout, &failed);')
         checker.check(self.root)
 
     def test_plain_consumer_cannot_patch_native_profiles(self):

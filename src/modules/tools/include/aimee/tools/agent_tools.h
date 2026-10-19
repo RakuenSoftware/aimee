@@ -88,6 +88,11 @@ void agent_tools_set_effect_authorized(int authorized);
  * caller frees each entry with aimee_tool_free, then frees the array. Unbound
  * Git capabilities are omitted. No MCP-provider recursion or wire sidecars. */
 struct aimee_tool;
+/* Execute already canonical arguments using their exact admitted definition.
+ * Refuses arguments which would change under that schema. */
+char *dispatch_tool_call_ir_ctx_status(const struct aimee_tool *admitted,
+                                       const char *canonical_arguments_json, int timeout_ms,
+                                       int *is_error);
 int agent_tools_builtin_catalog(struct aimee_tool **out, int *count);
 
 /* Tool definition builders */

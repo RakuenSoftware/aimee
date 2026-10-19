@@ -3,6 +3,7 @@
  * as Go-owner protocol replies; this test does not reimplement memory policy. */
 #include "aimee.h"
 #include "agent_exec.h"
+#include "util.h"
 #include <aimee/tools/agent_tools.h>
 #include "modules/tools/tool_catalog_data.h"
 #include <aimee/module-runtime/pre_llm_hook.h>
@@ -99,6 +100,7 @@ static int recalls;
 static int refuse_after;
 static int provider_calls;
 static int final_response;
+static int bootstrap_case, bootstrap_evidence_seen;
 static int malformed_projection;
 static int transport_refuse;
 static int expect_hook_prompt, hook_calls;
@@ -130,6 +132,20 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
    (void)model;
    (void)session_id;
    provider_calls++;
+   if (bootstrap_case)
+   {
+      char *request = strndup(body, body_len);
+      assert(request);
+      if (strstr(request, "[AIMEE REPOSITORY EVIDENCE FALLBACK]"))
+         bootstrap_evidence_seen = 1;
+      free(request);
+      *response_buf = strdup("{\"id\":\"bootstrap-response\",\"object\":\"response\","
+                             "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
+                             "\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\","
+                             "\"text\":\"Fixture final without repository evidence.\"}]}]}");
+      assert(*response_buf);
+      return 200;
+   }
    if (identity_case)
    {
       cJSON *reply = cJSON_Parse("{\"id\":\"identity-response\",\"object\":\"response\","
@@ -375,6 +391,12 @@ int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON 
    return aimee_module_commands_dispatch_internal(method, args, result);
 }
 
+static int fixture_classifier(const char *name, int *classification)
+{
+   *classification = (int)aimee_tools_catalog_metadata(name).classification;
+   return 0;
+}
+
 int main(void)
 {
    delegate_role_seam_install();
@@ -609,6 +631,20 @@ int main(void)
    assert(result.tool_calls == 1 && result.successful_tool_calls == 0);
    free(result.response);
    aimee_ir_session_set_sink(NULL, NULL);
+   identity_case = 0;
+   metadata_available = 1;
+   bootstrap_case = 1;
+   agent.require_initial_tool_call = 1;
+   agent.max_turns = 1;
+   provider_calls = recalls = bootstrap_evidence_seen = 0;
+   agent_tools_register_classifier(fixture_classifier);
+   run_cmd_set_cwd(home);
+   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                          &result);
+   assert(result.successful_tool_calls == 0 && !bootstrap_evidence_seen);
+   free(result.response);
+   run_cmd_set_cwd(NULL);
+   agent_tools_register_classifier(NULL);
    agent_tools_register_metadata(NULL);
    identity_case = 0;
    puts("agent context refusal: passed");

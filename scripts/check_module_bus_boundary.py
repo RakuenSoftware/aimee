@@ -33,6 +33,9 @@ BUS_TRANSPORT_HEADERS = {"aimee/audit/obs_bus.h", "aimee/postgres/client.h"}
 # Harness translation also consumes the canonical session envelope: this is the
 # same shared IR data contract, not a call into another module's domain service.
 IR_SHARED_TYPE = {
+    # Tool dispatch consumes the exact admitted function data contract. Tool
+    # metadata and execution-policy authority still cross their owned bus seams.
+    ("src/modules/tools/agent_tools_effect_contract.c", "aimee/ir/aimee_ir.h"),
     # Hook admission owns canonical tool intents, not a peer domain service.
     ("src/modules/translation/include/aimee/translation/hook_ir.h", "aimee/ir/aimee_ir.h"),
     # Response stages mutate shared owned IR; governance decisions still cross the bus.
