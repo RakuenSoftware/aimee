@@ -394,6 +394,58 @@ static int agent_shape_ir_user(const agent_t *agent, aimee_request_t *ir)
    return 0;
 }
 
+/* The host Responses execution profile is born canonical. Only the incoming
+ * compatibility catalog crosses a tool parser; no synthetic native request is
+ * built and re-admitted to recover fields already known by the host. */
+static int agent_responses_profile_ir(const agent_t *agent, const cJSON *tools,
+                                      const char *system_prompt, aimee_request_t *ir)
+{
+   ir->frontend = AIMEE_WIRE_RESPONSES;
+   ir->stream = 1;
+   ir->model = strdup(agent->model);
+   ir->system = calloc(1, sizeof *ir->system);
+   if (!ir->model || !ir->system)
+      return -1;
+   ir->n_system = 1;
+   ir->system[0].type = AIMEE_BLK_TEXT;
+   ir->system[0].text =
+       strdup(system_prompt && system_prompt[0] ? system_prompt : "You are an execution agent.");
+   if (!ir->system[0].text)
+      return -1;
+   int count = cJSON_IsArray(tools) ? cJSON_GetArraySize(tools) : 0;
+   ir->tools = count ? calloc((size_t)count, sizeof *ir->tools) : NULL;
+   if (count && !ir->tools)
+      return -1;
+   for (int i = 0; i < count; i++)
+   {
+      ir->n_tools++;
+      if (openai_ir_parse_tool(cJSON_GetArrayItem(tools, i), &ir->tools[i], 0))
+         return -1;
+   }
+   if (!agent->require_initial_tool_call || !count)
+      return 0;
+   static const char *const preferred[] = {"code_search", "find_symbol", "grep",
+                                           "list_files",  "read_file",   NULL};
+   const char *selected = NULL;
+   for (int p = 0; preferred[p] && !selected; p++)
+   {
+      const aimee_tool_t *tool = aimee_ir_find_function(ir, NULL, preferred[p]);
+      if (tool)
+         selected = tool->name;
+   }
+   for (int i = 0; i < ir->n_tools && !selected; i++)
+      if (ir->tools[i].name && ir->tools[i].name[0])
+         selected = ir->tools[i].name;
+   if (selected)
+   {
+      ir->tool_choice = AIMEE_TOOL_CHOICE_TOOL;
+      ir->tool_choice_name = strdup(selected);
+      if (!ir->tool_choice_name)
+         return -1;
+   }
+   return 0;
+}
+
 /* Compatibility profiles enter IR once; policy and the translation backend own
  * the complete outbound request, including the dispatch catalog. */
 cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
@@ -402,37 +454,42 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
 {
    if (!agent || !cJSON_IsArray(messages))
       return NULL;
-   cJSON *empty = cJSON_CreateArray();
-   if (!empty)
-      return NULL;
-   cJSON *profile = wire == AIMEE_WIRE_ANTHROPIC
-                        ? agent_build_request_anthropic(agent, empty, tools, system_prompt,
-                                                        max_tokens, temperature)
-                    : wire == AIMEE_WIRE_RESPONSES
-                        ? agent_build_request_responses(agent, empty, tools, system_prompt)
-                        : agent_build_request_openai(agent, empty, tools, max_tokens, temperature);
-   if (wire == AIMEE_WIRE_OPENAI_CHAT && system_prompt && system_prompt[0])
-   {
-      cJSON *system = cJSON_CreateObject();
-      if (!system || !cJSON_AddStringToObject(system, "role", "system") ||
-          !cJSON_AddStringToObject(system, "content", system_prompt) ||
-          !cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(profile, "messages"), system))
-      {
-         cJSON_Delete(system);
-         cJSON_Delete(profile);
-         cJSON_Delete(empty);
-         return NULL;
-      }
-   }
    aimee_request_t ir = {0};
-   cJSON *rendered = NULL;
-   char error[128];
-   int rc =
-       wire == AIMEE_WIRE_ANTHROPIC   ? anthropic_frontend_parse(profile, &ir, error, sizeof error)
-       : wire == AIMEE_WIRE_RESPONSES ? responses_frontend_parse(profile, &ir, error, sizeof error)
-                                      : openai_frontend_parse(profile, &ir, error, sizeof error);
-   if (rc != 0)
-      goto fail;
+   cJSON *empty = NULL, *profile = NULL, *rendered = NULL;
+   if (wire == AIMEE_WIRE_RESPONSES)
+   {
+      if (agent_responses_profile_ir(agent, tools, system_prompt, &ir))
+         goto fail;
+   }
+   else
+   {
+      empty = cJSON_CreateArray();
+      if (!empty)
+         goto fail;
+      profile = wire == AIMEE_WIRE_ANTHROPIC
+                    ? agent_build_request_anthropic(agent, empty, tools, system_prompt, max_tokens,
+                                                    temperature)
+                    : agent_build_request_openai(agent, empty, tools, max_tokens, temperature);
+      if (!profile)
+         goto fail;
+      if (wire == AIMEE_WIRE_OPENAI_CHAT && system_prompt && system_prompt[0])
+      {
+         cJSON *system = cJSON_CreateObject();
+         if (!system || !cJSON_AddStringToObject(system, "role", "system") ||
+             !cJSON_AddStringToObject(system, "content", system_prompt) ||
+             !cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(profile, "messages"), system))
+         {
+            cJSON_Delete(system);
+            goto fail;
+         }
+      }
+      char error[128];
+      int rc = wire == AIMEE_WIRE_ANTHROPIC
+                   ? anthropic_frontend_parse(profile, &ir, error, sizeof error)
+                   : openai_frontend_parse(profile, &ir, error, sizeof error);
+      if (rc != 0)
+         goto fail;
+   }
    /* The empty profile may carry provider-added system context only. */
    for (int i = 0; i < ir.n_messages; i++)
       aimee_message_free(&ir.messages[i]);

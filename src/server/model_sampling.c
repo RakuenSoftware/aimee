@@ -100,23 +100,25 @@ static int sampling_for_agent(const agent_t *agent, model_sampling_row_t *row)
    return model_sampling_get(agent->model, row);
 }
 
+model_sampling_row_t model_sampling_resolve(const agent_t *agent, double caller_temperature)
+{
+   model_sampling_row_t row = {
+       .temperature = -1, .top_p = -1, .top_k = -1, .min_p = -1, .repeat_penalty = -1};
+   (void)sampling_for_agent(agent, &row);
+   double required = model_sampling_required_temperature(agent);
+   if (required >= 0)
+      row.temperature = required;
+   else if (caller_temperature >= 0)
+      row.temperature = caller_temperature;
+   else if (row.temperature < 0)
+      row.temperature = provider_fixed_temperature(agent);
+   return row;
+}
+
 void model_sampling_apply_openai(const agent_t *agent, struct cJSON *req, double caller_temperature)
 {
-   model_sampling_row_t row;
-   int has_row = sampling_for_agent(agent, &row);
-
-   /* First writer wins (add_number_if_missing), so the model's hard constraint
-    * goes in ahead of the caller's preference rather than losing to it. */
-   add_number_if_missing(req, "temperature", model_sampling_required_temperature(agent));
-   if (caller_temperature >= 0)
-      add_number_if_missing(req, "temperature", caller_temperature);
-   else if (has_row && row.temperature >= 0)
-      add_number_if_missing(req, "temperature", row.temperature);
-   else
-      add_number_if_missing(req, "temperature", provider_fixed_temperature(agent));
-
-   if (!has_row)
-      return;
+   model_sampling_row_t row = model_sampling_resolve(agent, caller_temperature);
+   add_number_if_missing(req, "temperature", row.temperature);
    add_number_if_missing(req, "top_p", row.top_p);
    add_int_if_missing(req, "top_k", row.top_k);
    add_number_if_missing(req, "min_p", row.min_p);
@@ -126,19 +128,8 @@ void model_sampling_apply_openai(const agent_t *agent, struct cJSON *req, double
 void model_sampling_apply_anthropic(const agent_t *agent, struct cJSON *req,
                                     double caller_temperature)
 {
-   model_sampling_row_t row;
-   int has_row = sampling_for_agent(agent, &row);
-
-   add_number_if_missing(req, "temperature", model_sampling_required_temperature(agent));
-   if (caller_temperature >= 0)
-      add_number_if_missing(req, "temperature", caller_temperature);
-   else if (has_row && row.temperature >= 0)
-      add_number_if_missing(req, "temperature", row.temperature);
-   else
-      add_number_if_missing(req, "temperature", provider_fixed_temperature(agent));
-
-   if (!has_row)
-      return;
+   model_sampling_row_t row = model_sampling_resolve(agent, caller_temperature);
+   add_number_if_missing(req, "temperature", row.temperature);
    add_number_if_missing(req, "top_p", row.top_p);
    add_int_if_missing(req, "top_k", row.top_k);
 }

@@ -993,7 +993,7 @@ static void test_canonical_delegate_policy_before_native_egress(void)
 static void test_canonical_request_profiles(void)
 {
    const char *providers[] = {"ollama", "openrouter", "minimax", "mistral", "openai"};
-   const char *models[] = {"qwen.gguf", "selected", "MiniMax-M2.7", "mistral-vibe-cli", "gpt-4o"};
+   const char *models[] = {"qwen3.gguf", "selected", "MiniMax-M2.7", "mistral-vibe-cli", "gpt-4o"};
    cJSON *history =
        cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"inspect\"}]}]");
    cJSON *native_history = cJSON_Parse("[{\"role\":\"user\",\"content\":\"inspect\"}]");
@@ -1003,6 +1003,7 @@ static void test_canonical_request_profiles(void)
       agent_t agent = {0};
       snprintf(agent.provider, sizeof agent.provider, "%s", providers[i]);
       snprintf(agent.model, sizeof agent.model, "%s", models[i]);
+      agent.recommended_sampling = 1;
       cJSON *legacy = agent_build_request_openai(&agent, native_history, NULL, 128, 0.5);
       cJSON *actual = agent_build_request_ir(&agent, history, NULL, NULL, 128, 0.5,
                                              AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
@@ -1043,6 +1044,46 @@ static void test_canonical_request_profiles(void)
    puts("canonical request profile provider settings and source isolation OK");
 }
 
+static void test_canonical_responses_profile(void)
+{
+   agent_t agent = {0};
+   snprintf(agent.model, sizeof agent.model, "%s", "selected");
+   agent.require_initial_tool_call = 1;
+   cJSON *history =
+       cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"inspect\"}]}]");
+   cJSON *tools = cJSON_Parse(
+       "[{\"type\":\"function\",\"name\":\"other\",\"parameters\":{\"type\":\"object\"}},"
+       "{\"type\":\"function\",\"name\":\"read_file\",\"parameters\":{\"type\":\"object\"}},"
+       "{\"type\":\"function\",\"name\":\"code_search\",\"parameters\":{\"type\":\"object\"}}]");
+   assert(history && tools);
+   for (int fallback = 0; fallback < 2; fallback++)
+   {
+      cJSON *actual = agent_build_request_ir(&agent, history, tools, NULL, 777, 0.5,
+                                             AIMEE_WIRE_RESPONSES, 0, NULL);
+      assert(actual && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(actual, "store")));
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(actual, "stream")));
+      assert(!strcmp(cJSON_GetObjectItemCaseSensitive(actual, "instructions")->valuestring,
+                     "You are an execution agent."));
+      const cJSON *choice = cJSON_GetObjectItemCaseSensitive(actual, "tool_choice");
+      assert(choice && !strcmp(cJSON_GetObjectItemCaseSensitive(choice, "name")->valuestring,
+                               fallback ? "other" : "code_search"));
+      assert(!cJSON_GetObjectItemCaseSensitive(actual, "max_output_tokens"));
+      assert(!cJSON_GetObjectItemCaseSensitive(actual, "temperature"));
+      cJSON_Delete(actual);
+      cJSON_DeleteItemFromArray(tools, 2);
+      cJSON_DeleteItemFromArray(tools, 1);
+   }
+   /* Malformed catalog ingress still refuses before any provider dispatch. */
+   cJSON_DeleteItemFromObjectCaseSensitive(cJSON_GetArrayItem(tools, 0), "parameters");
+   cJSON_AddStringToObject(cJSON_GetArrayItem(tools, 0), "parameters", "malformed");
+   cJSON *actual = agent_build_request_ir(&agent, history, tools, "host", 777, 0.5,
+                                          AIMEE_WIRE_RESPONSES, 0, NULL);
+   assert(!actual);
+   cJSON_Delete(history);
+   cJSON_Delete(tools);
+   puts("typed Responses host profile, forced evidence choice and catalog refusal OK");
+}
+
 static void test_missing_response_output(void)
 {
    assert(agent_http_get("http://127.0.0.1:9", NULL, NULL, 1) == -1);
@@ -1052,6 +1093,7 @@ static void test_missing_response_output(void)
 
 int main(void)
 {
+   test_canonical_responses_profile();
    test_canonical_request_profiles();
    test_missing_response_output();
    printf("test_agent_http: ");

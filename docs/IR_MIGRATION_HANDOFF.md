@@ -1604,3 +1604,22 @@ projection tests pass, alongside ASan/UBSan and the production build. Initial
 profile preparation still uses compatibility builders before IR admission; moving
 that remaining ingress to a typed host profile is unfinished. Native SDK activation
 and the other open qualification/promotion requirements above remain open.
+
+
+## Typed host Responses profile and sampling resolution
+
+Responses execution now constructs its host model, instructions, streaming and
+forced evidence-tool choice directly as owned IR. Its compatibility tool catalog
+uses the shared typed tool parser, but no empty Responses request is built and
+reparsed. Default instructions, preferred code_search/read_file selection, first
+available-tool fallback, delegate filtering and malformed-schema refusal retain
+their existing contracts. Codex-unsupported output-token/temperature knobs remain
+absent from Responses egress.
+
+Sampling resolution is available as a typed host value: required model temperature
+precedes caller preference, opt-in recommendations and provider fallback. Existing
+Chat/Anthropic compatibility builders share that resolver; curated recommendations
+are unchanged. This prepares their remaining native profile ingress cutover.
+The focused request fixture now also exercises opt-in Qwen sampling through actual
+canonical egress. Source/ASan fixtures and production build pass; module/lint/static
+checks are recorded with the slice.
