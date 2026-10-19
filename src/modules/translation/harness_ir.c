@@ -82,11 +82,19 @@ static int claude_snapshot(const cJSON *m, const char *id)
    return rc;
 }
 
+static int native_compaction(const char *harness)
+{
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_NATIVE_COMPACTION,
+                                  .native_harness = harness};
+   return aimee_ir_session_emit(&event);
+}
 static int aimee_claude_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
 {
    if (!cJSON_IsObject(f) || !s)
       return -1;
    const char *type = str(f, "type");
+   if (!strcmp(type, "system") && !strcmp(str(f, "subtype"), "compact_boundary"))
+      return native_compaction("claude");
    if (!strcmp(type, "stream_event"))
    {
       const cJSON *event = cJSON_GetObjectItemCaseSensitive(f, "event");
@@ -314,6 +322,8 @@ static int aimee_codex_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
    if (!cJSON_IsObject(f) || !s)
       return -1;
    const char *method = str(f, "method");
+   if (!strcmp(method, "thread/compacted"))
+      return native_compaction("codex");
    const cJSON *params = cJSON_GetObjectItemCaseSensitive(f, "params");
    if (!strcmp(method, "item/agentMessage/delta"))
    {
@@ -446,8 +456,9 @@ static int aimee_codex_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
       }
       return codex_text(item, id, !strcmp(type, "userMessage") ? "user" : "assistant");
    }
-   if (!strcmp(type, "contextCompaction") || !strcmp(type, "enteredReviewMode") ||
-       !strcmp(type, "exitedReviewMode"))
+   if (!strcmp(type, "contextCompaction"))
+      return native_compaction("codex");
+   if (!strcmp(type, "enteredReviewMode") || !strcmp(type, "exitedReviewMode"))
       return 0;
    const char *input_key = NULL, *output_key = NULL, *name = type;
    if (!strcmp(type, "commandExecution"))

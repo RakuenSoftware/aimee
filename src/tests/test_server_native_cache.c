@@ -372,6 +372,28 @@ int main(void)
    assert(!server_native_cache_abort(cache));
    server_native_cache_close(cache);
 
+   seeded(&req, "before-native-compaction");
+   lifecycle("compacting", "running");
+   cache = begin(&req, "compacting");
+   assert(cache);
+   aimee_session_event_t compacted = {.kind = AIMEE_SESSION_NATIVE_COMPACTION,
+                                      .native_harness = "codex"};
+   cJSON *compaction = aimee_ir_session_event_json(&compacted);
+   assert(compaction);
+   record("compacting", compaction);
+   req.n_messages = 4;
+   source(&req);
+   lifecycle("compacting", "completed");
+   int compact_complete = server_native_cache_complete(cache, "rewritten-native-history");
+   assert(compact_complete < 0);
+   assert(!server_native_cache_abort(cache));
+   server_native_cache_close(cache);
+   lifecycle("after-native-compaction", "running");
+   cache = begin(&req, "after-native-compaction");
+   assert(cache && !server_native_cache_resume(cache));
+   assert(!server_native_cache_abort(cache));
+   server_native_cache_close(cache);
+
    /* A late child cannot checkpoint another turn's completed source history. */
    seeded(&req, "before-other-turn");
    lifecycle("slow", "running");

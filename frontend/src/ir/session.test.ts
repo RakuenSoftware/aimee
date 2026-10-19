@@ -329,3 +329,11 @@ it('advances native checkpoint cursors without adding model content', () => {
     { ...checkpoint, message_count: 1.5 }, { ...checkpoint, message_count: 4097 }, { ...checkpoint, unmodeled_prompt: 'private' },
   ]) expect(() => reduceSession(emptySession('s'), envelope(1, { kind: 'native_checkpoint', payload } as SessionEvent))).toThrow();
 });
+
+
+it('records native compaction without replacing canonical model history', () => {
+  const state = reduceSession(emptySession('s'), envelope(1, { kind: 'native_compaction', payload: { harness: 'codex' } }));
+  expect(state).toEqual({ ...emptySession('s'), sequence: '1' });
+  for (const payload of [{}, { harness: 'unknown' }, { harness: null }, { harness: 'claude', summary: 'native summary' }])
+    expect(() => reduceSession(emptySession('s'), envelope(1, { kind: 'native_compaction', payload } as SessionEvent))).toThrow();
+});

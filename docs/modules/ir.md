@@ -248,3 +248,12 @@ source turns. Runtime cache scope construction binds captured host permissions
 and source authority to separately attested SDK/launch/workspace digests, while
 opaque replay provenance keeps its existing account/model identity. Production
 SDK call-site activation and those concrete attestations remain unfinished.
+
+
+The `native_compaction` host event has exactly one payload field, `harness`
+(`codex` or `claude`). Native adapters publish it for SDK compaction boundaries;
+it advances replay cursors without replacing model messages with a vendor
+summary. A native cache cannot be checkpointed after this event in its source
+turn. Once the child is quiescent, abort/recovery discards the derived cache and
+the next execution adopts canonical history afresh. Durable capture refusal
+prevents accepting an unrecorded compaction observation.

@@ -391,11 +391,40 @@ static void url_elicitation(void)
    cJSON_DeleteItemFromArray(events, 0);
 }
 
+static void native_compactions(void)
+{
+   aimee_harness_ir_t state = {0};
+   const char *frames[] = {
+       "{\"method\":\"thread/compacted\",\"params\":{\"threadId\":\"native\"}}",
+       "{\"method\":\"item/"
+       "completed\",\"params\":{\"item\":{\"id\":\"compact\",\"type\":\"contextCompaction\"}}}",
+       "{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"compact_metadata\":{\"trigger\":"
+       "\"auto\"}}"};
+   for (int i = 0; i < 3; i++)
+   {
+      int rc = frame(frames[i], &state, i < 2);
+      assert(rc == 0 && cJSON_GetArraySize(events) == 1);
+      cJSON *event = cJSON_GetArrayItem(events, 0);
+      assert(!strcmp(string(event, "kind"), "native_compaction"));
+      cJSON *payload = cJSON_GetObjectItemCaseSensitive(event, "payload");
+      assert(cJSON_GetArraySize(payload) == 1);
+      assert(!strcmp(string(payload, "harness"), i < 2 ? "codex" : "claude"));
+      cJSON_DeleteItemFromArray(events, 0);
+   }
+   reject = 1;
+   int rc = frame(frames[0], &state, 1);
+   assert(rc < 0 && aimee_ir_session_capture_failed());
+   reject = 0;
+   aimee_ir_session_set_sink(capture, NULL);
+   aimee_harness_ir_free(&state);
+}
+
 int main(void)
 {
    control_outputs();
    events = cJSON_CreateArray();
    aimee_ir_session_set_sink(capture, NULL);
+   native_compactions();
    url_elicitation();
    aimee_harness_ir_t form_state = {0};
    assert(

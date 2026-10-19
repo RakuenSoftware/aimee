@@ -198,6 +198,12 @@ static int observations(server_native_cache_t *cache, const char *claim, const c
          const cJSON *event = cJSON_GetObjectItemCaseSensitive(row, "event");
          const cJSON *payload = cJSON_GetObjectItemCaseSensitive(event, "payload");
          const char *kind = field(event, "kind");
+         if (exclusive_source && !strcmp(kind, "native_compaction") &&
+             !strcmp(field(row, "turn_id"), cache->turn))
+         {
+            invalid = 1;
+            break;
+         }
          if (exclusive_source && *state && strcmp(field(row, "turn_id"), cache->turn) &&
              (!strcmp(kind, "execution") || !strcmp(kind, "message") || !strcmp(kind, "history")))
          {

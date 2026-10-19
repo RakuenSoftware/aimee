@@ -165,6 +165,11 @@ func ValidSessionEvent(encoded []byte) bool {
 	case "control_request", "control_response":
 		var c map[string]json.RawMessage
 		return e.RequestID != "" && e.ControlKind != "" && Decode(e.Payload, &c) && c != nil
+	case "native_compaction":
+		var compaction struct {
+			Harness string `json:"harness"`
+		}
+		return Decode(e.Payload, &compaction) && (compaction.Harness == "codex" || compaction.Harness == "claude")
 	case "native_checkpoint":
 		var checkpoint struct {
 			Scope    string `json:"scope"`

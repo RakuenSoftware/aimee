@@ -420,9 +420,12 @@ int main(void)
    assert(!aimee_ir_session_capture_failed());
    aimee_ir_session_set_sink(capture, &failure);
    void *context = NULL;
-   assert(aimee_ir_session_get_sink(&context) == capture && context == &failure);
+   aimee_ir_session_sink_fn observed_sink = aimee_ir_session_get_sink(&context);
+   int matches_capture = observed_sink == capture;
+   assert(matches_capture && context == &failure);
    aimee_ir_session_set_sink(NULL, NULL);
-   assert(aimee_ir_session_get_sink(&context) == NULL && context == NULL);
+   observed_sink = aimee_ir_session_get_sink(&context);
+   assert(observed_sink == NULL && context == NULL);
    assert(!aimee_ir_session_capture_failed());
    assert(aimee_ir_session_emit_response(&response, "msg-3") == 0);
    cJSON_Delete(blocks[1].tool_input);
@@ -516,6 +519,18 @@ int main(void)
    checkpoint.harness = "claude";
    checkpoint.native_id = "";
    assert(!aimee_ir_session_event_json(&checkpoint_event));
+   aimee_session_event_t compaction_event = {.kind = AIMEE_SESSION_NATIVE_COMPACTION,
+                                             .native_harness = "claude"};
+   cJSON *compaction_json = aimee_ir_session_event_json(&compaction_event);
+   assert(compaction_json);
+   cJSON_Delete(compaction_json);
+   compaction_event.native_harness = "invented";
+   compaction_json = aimee_ir_session_event_json(&compaction_event);
+   assert(!compaction_json);
+   compaction_event.native_harness = NULL;
+   compaction_json = aimee_ir_session_event_json(&compaction_event);
+   assert(!compaction_json);
+
    puts("IR session event tests passed");
    return 0;
 }

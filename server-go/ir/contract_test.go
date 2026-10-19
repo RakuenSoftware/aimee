@@ -185,3 +185,16 @@ func TestNativeCheckpointContract(t *testing.T) {
 		t.Fatal("valid boundary values refused")
 	}
 }
+
+func TestNativeCompactionIsClosedHostMetadata(t *testing.T) {
+	for _, payload := range []string{`{"harness":"codex"}`, `{"harness":"claude"}`} {
+		if !ValidSessionEvent([]byte(`{"kind":"native_compaction","payload":` + payload + `}`)) {
+			t.Fatal(payload)
+		}
+	}
+	for _, payload := range []string{`{}`, `{"harness":"unknown"}`, `{"harness":null}`, `{"harness":"codex","summary":"not model history"}`} {
+		if ValidSessionEvent([]byte(`{"kind":"native_compaction","payload":` + payload + `}`)) {
+			t.Fatal(payload)
+		}
+	}
+}

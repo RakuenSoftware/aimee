@@ -1499,3 +1499,20 @@ must qualify and supply those SDK/resource attestations, full native adoption an
 compaction fidelity, effects/human controls and credential custody before that
 cutover. The production KB-free and independent promotion-review requirements
 remain in force.
+
+
+## Native compaction observation and cache refusal
+
+Native adapters no longer ignore Codex `thread/compacted` / `contextCompaction`
+and Claude `system.compact_boundary`. They emit the shared typed host-only
+`native_compaction` observation (harness only, no native summary). C/Go/browser
+admit that closed contract; durable history reconstruction excludes it from model
+messages. The cache controller refuses to checkpoint the rewritten native prefix.
+After known-quiescent abort/recovery, subsequent execution uses fresh canonical
+adoption. This does not certify compaction fidelity or activate production SDKs.
+
+Native parser and controller fixtures cover both SDK boundaries, capture refusal,
+compaction followed by successful process/turn completion, and fresh adoption
+instead of reviving a rewritten handle. Shared Go IR/family race tests and all
+292 frontend tests plus TypeScript pass. Final sanitizer/static/registration and
+production build qualification is recorded with this checkpoint.

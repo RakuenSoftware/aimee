@@ -766,6 +766,15 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
       kind = event->kind == AIMEE_SESSION_CONTROL_REQUEST ? "control_request" : "control_response";
       payload = cJSON_Duplicate(event->control, 1);
       break;
+   case AIMEE_SESSION_NATIVE_COMPACTION:
+      if (!event->native_harness ||
+          (strcmp(event->native_harness, "codex") && strcmp(event->native_harness, "claude")))
+         goto fail;
+      kind = "native_compaction";
+      payload = cJSON_CreateObject();
+      if (!payload || !add_string(payload, "harness", event->native_harness))
+         goto fail;
+      break;
    case AIMEE_SESSION_NATIVE_CHECKPOINT:
    {
       const aimee_native_checkpoint_t *checkpoint = event->native_checkpoint;
