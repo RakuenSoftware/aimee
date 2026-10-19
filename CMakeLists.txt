@@ -1389,7 +1389,7 @@ target_include_directories(aimee PRIVATE
     ${AIMEE_SRC_DIR}/modules/kb/c)
 target_compile_definitions(aimee PRIVATE AIMEE_ARTIFACT_TRUST_NO_AUDIT=1)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
-target_link_libraries(aimee PRIVATE aimee-core-connection OpenSSL::Crypto)
+target_link_libraries(aimee PRIVATE aimee-core-connection aimee-core-codec OpenSSL::Crypto)
 find_package(ZLIB QUIET)
 if(ZLIB_FOUND)
     target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/http_content_encoding.c)

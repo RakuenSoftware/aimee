@@ -2286,3 +2286,21 @@ No registered Aimee command for manual workflow dispatch is available. The local
 personal `gh` has no authenticated host, and no browser is available. No new login
 or connector write was attempted. A follow-up PR decision remains pending; the
 new branch commits have no fresh PR CI qualification after #3050's merge.
+
+
+## Merged testing CI: Windows thin-client codec linkage
+
+The merged testing commit `7e17d58be` has a real Windows build failure in source
+CI run `39278223901`, job `118147618843`. The final MinGW link cannot resolve
+`aimee_codec_base64_capacity`, `aimee_codec_base64_encode` and
+`aimee_codec_base64_decode` from the thin client's shared `util.c`. The independent
+CLI target omitted the codec library even though the server/core target included
+it. Its CMake link now explicitly names the existing `aimee-core-codec` owner.
+No duplicate codec implementation or platform exemption is introduced.
+
+The actual local CMake CLI build succeeds, its generated link command contains
+the codec library, and the real core base64 vector fixture passes 1/1. This is
+local verification of the repair; a fresh Windows CI run is still required.
+The same merged-run macOS build and macOS real-LSP qualification passed. Linux
+integration and T2/T2-luks were still pending when the Windows failure was found;
+T1/T3 had passed. The merged PR's two platform skips never qualified Windows.
