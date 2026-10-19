@@ -2598,3 +2598,36 @@ The preceding capture-owner commit also passed a full-HEAD Gitleaks scan
 (6,203 commits, no leaks). No production deployment or fresh platform CI claimed.
 
 All 76 repository lint gates pass for the private replay-destination repair.
+
+## Original gateway model responses reach the retained canonical writer
+
+Native model callbacks now send their admitted canonical response events through
+the retained writer before derived replay-proof capture. Tool IDs, names and
+exact JSON arguments are observed before SDK command normalization. Projection
+reports commit once through the writer rather than also through the proof log.
+No-owner runtime operation preserves the existing proof-only behavior.
+
+Each callback uses its host-generated request nonce to qualify message IDs.
+Gateway response helpers can generate the same thread-local ID on fresh callback
+threads; using only the host turn would let a later response replace an earlier
+one in canonical history. Only message identity is qualified; original tool IDs,
+arguments and content are unchanged. The callback-local sink context is restored
+before the forwarding stack returns; the runtime retains the durable owner.
+
+The previous source fails the new listener regression because it commits no
+model responses. The repaired fixture verifies original command name/ID and a
+30-digit fractional argument, distinct messages across two callbacks in one
+turn, single projection publication, primary/private destinations, durable append
+failure and proof failure. Either failure reaches the producer's shared flag
+while its separate TLS flag remains healthy. No host execution terminal or
+completed learning outcome is manufactured by the model callback.
+
+Five native fixtures and their ASan/UBSan runs, two-source Cppcheck, and the actual
+CMake application/listener CTest pass. This is gateway **response** capture, not
+complete native history: request-prefix/current-context reconciliation, actual
+tool-result/effect capture and SDK-observation duplicate suppression must land
+before activating SDK spawn sites or certifying native cache completion. Live
+subscription, independent learning, fresh platform CI and production promotion
+remain outstanding.
+
+All 76 repository lint gates pass for gateway response capture.

@@ -29,7 +29,9 @@ static _Thread_local server_delegate_scope_t delegate_scope;
 static _Thread_local const workspace_provider_t *workspace;
 static server_control_scope_t *alice_controls;
 static _Atomic(server_session_capture_t *) expected_capture;
-static atomic_int reject_proof;
+static atomic_int reject_proof, reject_durable;
+static cJSON *captured_rows;
+static pthread_mutex_t capture_lock = PTHREAD_MUTEX_INITIALIZER;
 static workspace_provider_t alice_workspace = {.kind = WS_PROVIDER_SHARED};
 static workspace_provider_t bob_workspace = {.kind = WS_PROVIDER_SHARED};
 const char *agent_tools_dispatch_role(void)
@@ -479,9 +481,33 @@ static void probe_replay_scope(const char *path)
       assert(state_guard.guard && installed_sink);
       aimee_request_t request = {0};
       assert(!state_guard.guard(&request, state_guard.context));
-      aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION};
+      aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
+                                     .projection_model = "selected-model",
+                                     .projection_boundary = "response",
+                                     .projection_reasoning = 1};
       int captured = aimee_ir_session_emit(&event);
-      assert(captured == (atomic_load(&reject_proof) ? -1 : 0));
+      if (atomic_load(&expected_capture))
+      {
+         assert(captured == (atomic_load(&reject_durable) ? -1 : 0));
+         if (!captured)
+         {
+            const char *arguments = "{\"amount\":123.123456789012345678901234567890}";
+            cJSON *input = aimee_ir_json_parse_frame(arguments, strlen(arguments));
+            assert(input);
+            aimee_block_t block = {.type = AIMEE_BLK_TOOL_USE,
+                                   .tool_id = "wire-call:original",
+                                   .tool_name = "exec_command",
+                                   .tool_input = input};
+            aimee_message_t message = {.role = "assistant", .blocks = &block, .n_blocks = 1};
+            aimee_session_event_t observed = {
+                .kind = AIMEE_SESSION_MESSAGE, .message_id = "wire-response", .message = &message};
+            captured = aimee_ir_session_emit(&observed);
+            cJSON_Delete(input);
+            assert(captured == (atomic_load(&reject_proof) ? -1 : 0));
+         }
+      }
+      else
+         assert(captured == (atomic_load(&reject_proof) ? -1 : 0));
    }
    else
       assert(!state_guard.guard && !installed_sink);
@@ -606,19 +632,26 @@ static void test_cache_profile(const agent_t *selected, const request_context_t 
    owner_tools(1);
 }
 
-/* Gateway capture here is the existing replay-proof fixture, not fabricated
- * model history. Full durable event ownership has its own producer fixtures. */
+/* The model callback emits typed observations; inspect what the actual retained
+ * writer commits, without manufacturing a host execution terminal. */
 int db1_session_ir_append(const char *session, const char *id, const char *turn,
                           const char *principal, const char *wire, char sequence[32])
 {
-   (void)session;
-   (void)id;
-   (void)turn;
-   (void)principal;
-   (void)wire;
-   (void)sequence;
-   assert(!"listener fixture must not invent canonical model history");
-   return -1;
+   server_session_capture_t *owner = atomic_load(&expected_capture);
+   assert(owner && !strcmp(session, server_session_capture_session(owner)));
+   assert(!strcmp(principal, "webuser:alice") && !strcmp(turn, "native-turn"));
+   pthread_mutex_lock(&capture_lock);
+   if (atomic_load(&reject_durable))
+   {
+      pthread_mutex_unlock(&capture_lock);
+      return -1;
+   }
+   cJSON *row = aimee_ir_json_parse_frame(wire, strlen(wire));
+   assert(row && captured_rows && id[0]);
+   cJSON_AddItemToArray(captured_rows, row);
+   snprintf(sequence, 32, "%d", cJSON_GetArraySize(captured_rows));
+   pthread_mutex_unlock(&capture_lock);
+   return 0;
 }
 void server_learning_observe_terminal(const char *session, const char *turn, const char *sequence,
                                       const char *id, const char *actor, const cJSON *event)
@@ -633,10 +666,10 @@ void server_learning_observe_terminal(const char *session, const char *turn, con
 }
 static void test_retained_capture(const agent_t *selected, const request_context_t *owner)
 {
-   for (int variant = 0; variant < 4; variant++)
+   for (int variant = 0; variant < 6; variant++)
    {
-      int failure = variant % 2;
-      const char *destination = variant < 2 ? "session-a" : "private-child";
+      int failure = variant % 3;
+      const char *destination = variant < 3 ? "session-a" : "private-child";
       owner_tools(1);
       server_session_capture_t *capture =
           server_session_capture_open(destination, "native-turn", "webuser:alice", "session-a");
@@ -644,13 +677,40 @@ static void test_retained_capture(const agent_t *selected, const request_context
       server_native_runtime_t *runtime = server_native_runtime_open(selected, owner, "session-a");
       assert(runtime && server_session_capture_bind(NULL) == capture);
       atomic_store(&expected_capture, capture);
-      atomic_store(&reject_proof, failure);
+      atomic_store(&reject_proof, failure == 1);
+      atomic_store(&reject_durable, failure == 2);
+      captured_rows = cJSON_CreateArray();
+      assert(captured_rows);
       char response[1024];
       request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
       assert(strstr(response, "200 OK"));
-      assert(server_session_capture_failed(capture) == failure);
+      assert(server_session_capture_failed(capture) == (failure != 0));
+      if (!failure)
+      {
+         /* A new model callback repeats its thread-local native message ID. It
+          * must append a new model turn instead of replacing the first one. */
+         request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
+         assert(strstr(response, "200 OK"));
+         const cJSON *first = cJSON_GetArrayItem(captured_rows, 1);
+         const cJSON *second = cJSON_GetArrayItem(captured_rows, 3);
+         const char *first_id =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(first, "message_id"));
+         const char *second_id =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(second, "message_id"));
+         assert(first_id && second_id && strcmp(first_id, second_id));
+      }
+      assert(cJSON_GetArraySize(captured_rows) == (failure == 2 ? 0 : failure == 1 ? 2 : 4));
+      if (failure != 2)
+      {
+         char *wire = cJSON_PrintUnformatted(cJSON_GetArrayItem(captured_rows, 1));
+         assert(wire && strstr(wire, "native-turn:") && strstr(wire, ":wire-response") &&
+                strstr(wire, "wire-call:original") && strstr(wire, "exec_command") &&
+                strstr(wire, "123.123456789012345678901234567890"));
+         free(wire);
+      }
       assert(!aimee_ir_session_capture_failed()); /* The failing worker has its own TLS. */
       atomic_store(&reject_proof, 0);
+      atomic_store(&reject_durable, 0);
       if (!failure)
          server_session_capture_close(capture);
       int before = atomic_load(&calls);
@@ -660,6 +720,8 @@ static void test_retained_capture(const agent_t *selected, const request_context
       if (failure)
          server_session_capture_close(capture);
       atomic_store(&expected_capture, NULL);
+      cJSON_Delete(captured_rows);
+      captured_rows = NULL;
    }
 }
 

@@ -21,6 +21,7 @@
 #include <openssl/crypto.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,6 +44,48 @@ struct server_native_runtime
    int job_id, api_key_source, claude_source;
    char session[128], token[65], url[64], binding[65], lineage[65];
 };
+
+/* The gateway sees original admitted model content before an SDK can normalize
+ * command observations. Keep it in the execution's owned canonical writer.
+ * Replay provenance remains derived metadata, never a second model transcript. */
+typedef struct
+{
+   server_native_runtime_t *runtime;
+   const char *request_id;
+} native_model_capture_t;
+static int native_model_capture(const aimee_session_event_t *event, void *context)
+{
+   native_model_capture_t *capture = context;
+   server_native_runtime_t *runtime = capture->runtime;
+   if (!event)
+      return -1;
+   if (runtime->capture)
+   {
+      aimee_session_event_t qualified = *event;
+      char *message_id = NULL;
+      if (event->message_id)
+      {
+         /* Each callback can start on a fresh thread. TLS-generated response
+          * IDs therefore repeat within one host turn. Qualify only the message
+          * identity by the host request nonce; tool IDs and content stay exact. */
+         size_t prefix = strlen(capture->request_id), length = strlen(event->message_id);
+         if (length > SIZE_MAX - prefix - 2 || !(message_id = malloc(prefix + length + 2)))
+            return -1;
+         snprintf(message_id, prefix + length + 2, "%s:%s", capture->request_id, event->message_id);
+         qualified.message_id = message_id;
+      }
+      int rc = server_session_capture_sink(&qualified, runtime->capture);
+      free(message_id);
+      if (rc)
+         return -1;
+      /* The replay owner used to be the only sink for projection reports. The
+       * durable writer has committed this report already, so do not append it
+       * a second time under the proof owner's random turn. */
+      if (event->kind == AIMEE_SESSION_PROJECTION)
+         return 0;
+   }
+   return server_native_replay_capture(event, runtime->replay);
+}
 
 static int native_digest_valid(const char *digest)
 {
@@ -250,11 +293,12 @@ static int native_forward(const char *method, const char *path, const char *head
    aimee_ir_session_sink_fn previous_sink = aimee_ir_session_get_sink(&previous_sink_context);
    int previous_failed = aimee_ir_session_capture_failed();
    aimee_frontend_state_scope_t previous_guard = {0};
+   native_model_capture_t model_capture = {.runtime = runtime, .request_id = admitted.request_id};
    if (model_request)
    {
       previous_guard =
           aimee_frontend_bind_state_guard(server_native_replay_restore, runtime->replay);
-      aimee_ir_session_set_sink(server_native_replay_capture, runtime->replay);
+      aimee_ir_session_set_sink(native_model_capture, &model_capture);
    }
    io->response_started(io->context);
    rc = server_http_native_forward(io->downstream_fd, method, path, input, (int)length);
