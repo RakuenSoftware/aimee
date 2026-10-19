@@ -21,6 +21,16 @@
     {
       "release_text": "   test_tools_list_surface();\n   test_tool_profile_filter();\n   test_call_tool_demux();\n   test_git_family_resolves_before_admission();\n   test_get_help_topics_exist();\n   test_solo_profile_is_gone();\n   test_delegates_disabled_withholds_delegate_tools();\n",
       "frozen_text": "   test_tools_list_surface();\n   test_tool_profile_filter();\n   test_call_tool_demux();\n   test_get_help_topics_exist();\n   test_solo_profile_is_gone();\n   test_delegates_disabled_withholds_delegate_tools();\n"
+    },
+    {
+      "release_text": "#include \"modules/tools/tool_catalog_data.h\"\n",
+      "frozen_text": "",
+      "review": "PR #3050: tools-owner metadata fixture include only; no LSP, memory execution, schema or golden change."
+    },
+    {
+      "release_text": "static void test_tools_list_surface(void)\n{\n   cJSON *flat_metadata = mcp_build_tools_list_flat();\n   const cJSON *entry = NULL;\n   cJSON_ArrayForEach(entry, flat_metadata)\n   {\n      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, \"name\"));\n      aimee_tool_metadata_t metadata = aimee_tools_catalog_metadata(name);\n      if (!aimee_tool_metadata_valid(&metadata))\n         fprintf(stderr, \"missing served MCP policy metadata: %s\\n\", name ? name : \"(null)\");\n      assert(aimee_tool_metadata_valid(&metadata));\n   }\n   cJSON_Delete(flat_metadata);\n\n",
+      "frozen_text": "static void test_tools_list_surface(void)\n{\n",
+      "review": "PR #3050: exact added assertions over the existing flat MCP catalog, requiring tools metadata coverage. Reverse only this assertion block before the complete frozen semantic comparison. No catalog contents, existing assertions, LSP implementation, schemas, golden signatures or probe inputs are excluded."
     }
   ]
 }

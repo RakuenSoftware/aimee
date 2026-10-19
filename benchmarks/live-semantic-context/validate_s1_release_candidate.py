@@ -188,7 +188,8 @@ def reviewed_memory_equivalent(path: str, frozen: str, current: str) -> bool:
 
 # Exact IR host integrations after the reviewed testing release: Git family
 # resolution before tool admission and its catalog-test regressions/scratch
-# initialization. No LSP implementation, schema, golden signature, or probe input
+# initialization, plus tools-owner metadata assertions over the same MCP catalog.
+# No LSP implementation, schema, golden signature, or probe input
 # is excluded. Reverse these blocks, then retain the complete frozen comparison.
 REVIEWED_HOST_INTEGRATIONS = json.loads(
     Path(__file__).with_name("s1-host-integration.json").read_text()

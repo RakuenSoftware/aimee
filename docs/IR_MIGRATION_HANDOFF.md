@@ -1973,3 +1973,17 @@ race suites and multicall tests pass. Actual CMake/CTest runtime/cache tests pas
 increase. Four process-start calls in the touched bus fixture were moved outside
 assertions. The generated catalog's memory-prefixed capability names are reviewed
 as tools metadata in the existing ownership ledger; memory execution remains Go-owned.
+
+## Fresh metadata CI benchmark fixture qualification
+
+`79acd6c01` passed attribution but Benchmark Smoke rejected the added tools-owner
+coverage assertions in the shared MCP fixture under its frozen S1 source
+comparison. The existing reviewed host-integration ledger now reverses exactly
+the new include and assertion block before applying the complete frozen
+comparison. No protected path, LSP implementation, schema, golden, probe input,
+threshold or attribution rule is excluded. A new negative-plant regression rejects
+removed/weakened/duplicated coverage or replacement by an empty catalog.
+
+The repaired frozen comparison passes all 18 focused S1 cases and the complete
+786-case benchmark unit suite. Fresh CI is required for
+this follow-up; a cancelled or superseded workflow is not a passing result.

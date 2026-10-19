@@ -388,6 +388,23 @@ class LiveSemanticContextS1Test(unittest.TestCase):
                     self.assertFalse(validator.reviewed_memory_equivalent(path, frozen, drift))
         self.assertFalse(validator.reviewed_memory_equivalent("src/tests/test_lsp.c", "same", "same"))
 
+    def test_release_validator_refuses_drift_in_tool_metadata_coverage(self) -> None:
+        validator = load_release_validator()
+        path = "src/tests/test_mcp_client_registry.c"
+        frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
+        current = (ROOT / path).read_text()
+        self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+        blocks = validator.REVIEWED_HOST_INTEGRATIONS[path]
+        coverage = next(block["release_text"] for block in blocks
+                        if "flat_metadata" in block["release_text"])
+        for drift in (
+            current.replace("assert(aimee_tool_metadata_valid(&metadata));", "assert(1);", 1),
+            current.replace("flat_metadata = mcp_build_tools_list_flat()", "flat_metadata = cJSON_CreateArray()", 1),
+            current.replace(coverage, "", 1),
+            current + coverage,
+        ):
+            self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
     def test_release_validator_only_allows_exact_host_integration(self) -> None:
         validator = load_release_validator()
         candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
