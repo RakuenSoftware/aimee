@@ -990,6 +990,59 @@ static void test_canonical_delegate_policy_before_native_egress(void)
    puts("canonical delegate policy before all native outputs/fallback models OK");
 }
 
+static void test_canonical_request_profiles(void)
+{
+   const char *providers[] = {"ollama", "openrouter", "minimax", "mistral", "openai"};
+   const char *models[] = {"qwen.gguf", "selected", "MiniMax-M2.7", "mistral-vibe-cli", "gpt-4o"};
+   cJSON *history =
+       cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"inspect\"}]}]");
+   cJSON *native_history = cJSON_Parse("[{\"role\":\"user\",\"content\":\"inspect\"}]");
+   assert(history && native_history);
+   for (size_t i = 0; i < sizeof providers / sizeof *providers; i++)
+   {
+      agent_t agent = {0};
+      snprintf(agent.provider, sizeof agent.provider, "%s", providers[i]);
+      snprintf(agent.model, sizeof agent.model, "%s", models[i]);
+      cJSON *legacy = agent_build_request_openai(&agent, native_history, NULL, 128, 0.5);
+      cJSON *actual = agent_build_request_ir(&agent, history, NULL, NULL, 128, 0.5,
+                                             AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
+      assert(legacy && actual);
+      assert(cJSON_Compare(legacy, actual, 1));
+      cJSON_Delete(legacy);
+      cJSON_Delete(actual);
+   }
+   agent_t qwen = {0};
+   snprintf(qwen.provider, sizeof qwen.provider, "%s", "ollama");
+   snprintf(qwen.model, sizeof qwen.model, "%s", "qwen.gguf");
+   const char *shaping_cases[] = {
+       "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\" \"},"
+       "{\"type\":\"text\",\"text\":\"/no_think\\ninspect\"}]}]",
+       "[{\"role\":\"user\",\"blocks\":[]}]"};
+   const char *expected[] = {" /no_think\ninspect", "/no_think\n"};
+   for (size_t i = 0; i < sizeof shaping_cases / sizeof *shaping_cases; i++)
+   {
+      cJSON *source = cJSON_Parse(shaping_cases[i]);
+      cJSON *before = cJSON_Duplicate(source, 1);
+      cJSON *actual = agent_build_request_ir(&qwen, source, NULL, NULL, 128, 0.5,
+                                             AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
+      assert(actual && cJSON_Compare(source, before, 1));
+      const cJSON *message =
+          cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(actual, "messages"), 0);
+      assert(
+          !strcmp(cJSON_GetObjectItemCaseSensitive(message, "content")->valuestring, expected[i]));
+      cJSON_Delete(actual);
+      cJSON_Delete(before);
+      cJSON_Delete(source);
+   }
+   /* Shaping is idempotent and never edits durable canonical source content. */
+   const cJSON *block = cJSON_GetArrayItem(
+       cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(history, 0), "blocks"), 0);
+   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(block, "text")->valuestring, "inspect"));
+   cJSON_Delete(history);
+   cJSON_Delete(native_history);
+   puts("canonical request profile provider settings and source isolation OK");
+}
+
 static void test_missing_response_output(void)
 {
    assert(agent_http_get("http://127.0.0.1:9", NULL, NULL, 1) == -1);
@@ -999,6 +1052,7 @@ static void test_missing_response_output(void)
 
 int main(void)
 {
+   test_canonical_request_profiles();
    test_missing_response_output();
    printf("test_agent_http: ");
 

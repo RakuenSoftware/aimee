@@ -46,6 +46,45 @@ int main(void)
    printf("aimee-backend: ");
    char err[128];
 
+   /* Only declared same-wire extensions survive; typed edits and removals
+    * cannot be overwritten by the entry snapshot or private root metadata. */
+   cJSON *profile = cJSON_Parse(
+       "{\"model\":\"old\",\"messages\":[],\"temperature\":0.5,"
+       "\"min_p\":0.1,\"repeat_penalty\":1.1,\"chat_template_kwargs\":{\"enable_thinking\":false},"
+       "\"route\":\"fallback\",\"models\":[\"old\",\"fallback\"],\"reasoning_split\":true,"
+       "\"_host_authority\":\"private\",\"unregistered_extension\":true}");
+   aimee_request_t profile_ir = {0};
+   assert(profile && !openai_frontend_parse(profile, &profile_ir, err, sizeof err));
+   profile_ir.has_temperature = 0;
+   profile_ir.mutated = 1;
+   cJSON *projected = openai_backend_build(&profile_ir);
+   assert(projected);
+   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(projected, "model")->valuestring, "old"));
+   assert(!cJSON_GetObjectItemCaseSensitive(projected, "temperature"));
+   assert(!cJSON_GetObjectItemCaseSensitive(projected, "_host_authority"));
+   assert(!cJSON_GetObjectItemCaseSensitive(projected, "unregistered_extension"));
+   const char *extensions[] = {"min_p", "repeat_penalty", "chat_template_kwargs",
+                               "route", "models",         "reasoning_split"};
+   for (size_t i = 0; i < sizeof extensions / sizeof *extensions; i++)
+      assert(cJSON_Compare(cJSON_GetObjectItemCaseSensitive(profile, extensions[i]),
+                           cJSON_GetObjectItemCaseSensitive(projected, extensions[i]), 1));
+   cJSON_Delete(projected);
+   free(profile_ir.model);
+   profile_ir.model = strdup("new");
+   projected = openai_backend_build(&profile_ir);
+   assert(projected && !cJSON_GetObjectItemCaseSensitive(projected, "models"));
+   assert(!cJSON_GetObjectItemCaseSensitive(projected, "reasoning_split"));
+   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(projected, "model")->valuestring, "new"));
+   cJSON_Delete(projected);
+   free(profile_ir.model);
+   profile_ir.model = strdup("old");
+   profile_ir.frontend = AIMEE_WIRE_RESPONSES;
+   projected = openai_backend_build(&profile_ir);
+   assert(projected && !cJSON_GetObjectItemCaseSensitive(projected, "route"));
+   cJSON_Delete(projected);
+   aimee_request_free(&profile_ir);
+   cJSON_Delete(profile);
+
    /* Native Anthropic replay preserves client forms and cache markers. Repeated
     * rendering and parse/render remain deterministic. */
    aimee_request_t air;

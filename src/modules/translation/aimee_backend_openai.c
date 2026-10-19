@@ -126,6 +126,33 @@ void openai_family_add_tool_choice(cJSON *out, const aimee_request_t *ir, int re
       cJSON_AddBoolToObject(out, "parallel_tool_calls", ir->parallel_tool_calls ? 1 : 0);
 }
 
+/* Same-wire provider extensions remain owned by translation. The closed list
+ * cannot restore stale modeled fields or private host metadata after policy. */
+static int openai_profile_extensions(const aimee_request_t *ir, cJSON *out)
+{
+   if (ir->frontend != AIMEE_WIRE_OPENAI_CHAT || !ir->raw)
+      return 0;
+   const char *original_model =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ir->raw, "model"));
+   if (!!original_model != !!ir->model || (original_model && strcmp(original_model, ir->model)))
+      return 0; /* Model-specific routing/sampling cannot follow a model switch. */
+   static const char *const keys[] = {"min_p", "repeat_penalty", "chat_template_kwargs",
+                                      "route", "models",         "reasoning_split"};
+   for (size_t i = 0; i < sizeof keys / sizeof *keys; i++)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(ir->raw, keys[i]);
+      if (!value)
+         continue;
+      cJSON *copy = cJSON_Duplicate(value, 1);
+      if (!copy || !cJSON_AddItemToObject(out, keys[i], copy))
+      {
+         cJSON_Delete(copy);
+         return -1;
+      }
+   }
+   return 0;
+}
+
 cJSON *openai_backend_build(const aimee_request_t *ir)
 {
    if (aimee_ir_request_admit(ir))
@@ -295,6 +322,11 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
       for (int i = 0; i < ir->n_stop; i++)
          cJSON_AddItemToArray(
              stop, cJSON_CreateString(ir->stop_sequences[i] ? ir->stop_sequences[i] : ""));
+   }
+   if (openai_profile_extensions(ir, out))
+   {
+      cJSON_Delete(out);
+      return NULL;
    }
    return out;
 }

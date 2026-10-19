@@ -326,8 +326,76 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
    return req;
 }
 
-/* Provider profiles still own their outbound knobs. Conversation content is
- * decoded only as canonical IR, and rendered by the translation backend once. */
+/* Shape only the owned request copy, before policy and translation. Media and
+ * tool-result-only messages retain the compatibility builder's behavior. */
+static int agent_shape_ir_user(const agent_t *agent, aimee_request_t *ir)
+{
+   if (!agent_request_prefers_no_think_prompt(agent))
+      return 0;
+   for (int i = ir->n_messages - 1; i >= 0; i--)
+   {
+      aimee_message_t *message = &ir->messages[i];
+      if (!message->role || strcmp(message->role, "user"))
+         continue;
+      int first_text = -1, other = 0, has_tool_use = 0, has_text = 0;
+      for (int j = 0; j < message->n_blocks; j++)
+      {
+         aimee_block_t *block = &message->blocks[j];
+         if (block->type == AIMEE_BLK_IMAGE || block->type == AIMEE_BLK_DOCUMENT)
+            return 0;
+         if (block->type != AIMEE_BLK_TOOL_RESULT)
+            other++;
+         has_tool_use |= block->type == AIMEE_BLK_TOOL_USE;
+         has_text |= block->type == AIMEE_BLK_TEXT && block->text && block->text[0];
+         if (block->type == AIMEE_BLK_TEXT && first_text < 0)
+            first_text = j;
+      }
+      if (!other && message->n_blocks)
+         continue;
+      if (has_tool_use && !has_text)
+         return 0; /* The native renderer uses null content for a bare tool call. */
+      if (first_text < 0)
+      {
+         aimee_block_t *blocks =
+             realloc(message->blocks, (size_t)(message->n_blocks + 1) * sizeof *blocks);
+         if (!blocks)
+            return -1;
+         message->blocks = blocks;
+         first_text = message->n_blocks++;
+         message->blocks[first_text] = (aimee_block_t){.type = AIMEE_BLK_TEXT};
+      }
+      size_t length = 0;
+      for (int j = 0; j < message->n_blocks; j++)
+         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text)
+            length += strlen(message->blocks[j].text);
+      char *joined = calloc(length + 1, 1);
+      if (!joined)
+         return -1;
+      for (int j = 0; j < message->n_blocks; j++)
+         if (message->blocks[j].type == AIMEE_BLK_TEXT && message->blocks[j].text)
+            strcat(joined, message->blocks[j].text);
+      char *shaped = agent_request_shape_user_prompt(agent, joined);
+      int changed = shaped && strcmp(joined, shaped);
+      free(joined);
+      if (!shaped)
+         return -1;
+      free(shaped);
+      if (changed)
+      {
+         aimee_block_t *block = &message->blocks[first_text];
+         char *text = agent_request_shape_user_prompt(agent, block->text);
+         if (!text)
+            return -1;
+         free(block->text);
+         block->text = text;
+      }
+      return 0;
+   }
+   return 0;
+}
+
+/* Compatibility profiles enter IR once; policy and the translation backend own
+ * the complete outbound request, including the dispatch catalog. */
 cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
                               const char *system_prompt, int max_tokens, double temperature,
                               aimee_wire_t wire, int is_delegate, aimee_request_t *dispatch_catalog)
@@ -380,6 +448,8 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
       if (aimee_ir_message_parse(cJSON_GetArrayItem(messages, i), &ir.messages[i]) != 0)
          goto fail;
    }
+   if (wire == AIMEE_WIRE_OPENAI_CHAT && agent_shape_ir_user(agent, &ir))
+      goto fail;
    aimee_ir_classify_context(&ir);
    int policy_changes = gateway_delegate_run_request_pipeline(&ir, is_delegate);
    if (policy_changes < 0)
@@ -400,32 +470,9 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
                                              : openai_backend_build(&ir);
    if (!rendered)
       goto fail;
-   const char *key = wire == AIMEE_WIRE_RESPONSES ? "input" : "messages";
-   cJSON *content = cJSON_DetachItemFromObjectCaseSensitive(rendered, key);
-   if (!content || !cJSON_ReplaceItemInObjectCaseSensitive(profile, key, content))
-   {
-      cJSON_Delete(content);
-      goto fail;
-   }
-   if (policy_changes)
-   {
-      /* The typed catalog/choice is authoritative when policy changes it. Other
-       * provider profile knobs retain their established output contract. */
-      const char *policy_keys[] = {"tools", "tool_choice", "parallel_tool_calls"};
-      for (size_t i = 0; i < sizeof policy_keys / sizeof *policy_keys; i++)
-      {
-         cJSON *value = cJSON_DetachItemFromObjectCaseSensitive(rendered, policy_keys[i]);
-         cJSON_DeleteItemFromObjectCaseSensitive(profile, policy_keys[i]);
-         if (value && !cJSON_AddItemToObject(profile, policy_keys[i], value))
-         {
-            cJSON_Delete(value);
-            goto fail;
-         }
-      }
-   }
-   if (wire == AIMEE_WIRE_OPENAI_CHAT)
-      agent_request_shape_openai_messages(agent, cJSON_GetObjectItemCaseSensitive(profile, key));
-   cJSON_Delete(rendered);
+   cJSON_Delete(profile);
+   profile = rendered;
+   rendered = NULL;
    if (dispatch_catalog)
    {
       aimee_request_free(dispatch_catalog);

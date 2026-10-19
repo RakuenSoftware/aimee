@@ -1580,3 +1580,27 @@ removed using format-specific compatibility entry points; the bus boundary gate
 remains unchanged at 188 declared crossings. Published head `db176e1e3` passed all
 56 applicable CI checks (plus the two existing platform skips), including the
 checked-in pinned real SDK replay journey. This catalog increment needs fresh CI.
+
+
+## Authoritative post-policy request egress
+
+`agent_build_request_ir` now returns the complete translation backend result after
+canonical admission and policy. It no longer merges only conversation/tool fields
+into an earlier native profile. Qwen no-think shaping operates on the owned IR
+request before policy, retaining string/media/tool-result behavior and leaving
+durable source history untouched. Split-text existing prefixes remain idempotent.
+
+The OpenAI translation owner retains a closed set of same-wire provider profile
+extensions (min_p, repeat_penalty, chat_template_kwargs, route, models and
+reasoning_split). Typed fields always win; unrelated/private root keys are not
+replayed. Those model-specific extensions are discarded if the typed model differs
+from the entry snapshot, preventing stale routing or MiniMax options on a switch.
+Anthropic retains its existing translation-owned cache-overlay behavior.
+
+Focused actual request-path fixtures compare existing Ollama/Qwen, OpenRouter,
+MiniMax, Mistral and OpenAI profiles, including canonical-source isolation and
+empty/split user text. All three protocol/delegate-policy fixtures and backend
+projection tests pass, alongside ASan/UBSan and the production build. Initial
+profile preparation still uses compatibility builders before IR admission; moving
+that remaining ingress to a typed host profile is unfinished. Native SDK activation
+and the other open qualification/promotion requirements above remain open.
