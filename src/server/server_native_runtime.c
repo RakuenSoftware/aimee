@@ -403,8 +403,13 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
       goto failed;
    if (runtime->lineage[0])
    {
-      runtime->replay = server_native_replay_open(runtime->session, runtime->owner.vault_principal,
-                                                  runtime->binding, runtime->selected.model);
+      /* The verified transport session can be a private execution's parent.
+       * Proofs and projection reports belong to the retained destination history,
+       * never to the parent merely because it owns the SDK transport. */
+      const char *destination = server_session_capture_session(runtime->capture);
+      runtime->replay = server_native_replay_open(destination ? destination : runtime->session,
+                                                  runtime->owner.vault_principal, runtime->binding,
+                                                  runtime->selected.model);
       if (!runtime->replay)
          goto failed;
    }

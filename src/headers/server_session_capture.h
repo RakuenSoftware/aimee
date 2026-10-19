@@ -14,6 +14,9 @@ server_session_capture_t *server_session_capture_open(const char *session, const
                                                       const char *execution_session);
 server_session_capture_t *server_session_capture_bind(server_session_capture_t *owner);
 server_session_capture_t *server_session_capture_current(void);
+/* Immutable destination history identity, valid for the held owner lease.
+ * It may differ from the verified transport/source session. NULL without owner. */
+const char *server_session_capture_session(const server_session_capture_t *owner);
 /* A missing current owner is a successful NULL lease. Bind only inside a creator
  * or retained lease; release after unbinding and joining its callbacks. */
 int server_session_capture_retain_current(const char *execution_session, const char *principal,

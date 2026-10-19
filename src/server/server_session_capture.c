@@ -23,6 +23,10 @@ server_session_capture_t *server_session_capture_current(void)
 {
    return current;
 }
+const char *server_session_capture_session(const server_session_capture_t *owner)
+{
+   return owner ? owner->session : NULL;
+}
 server_session_capture_t *server_session_capture_bind(server_session_capture_t *owner)
 {
    server_session_capture_t *previous = current;

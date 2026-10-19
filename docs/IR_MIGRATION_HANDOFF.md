@@ -2576,3 +2576,25 @@ SDK activation/cache qualification and independent learning qualification remain
 outstanding. The frontend remains qualified at 293 tests plus TypeScript checks.
 
 All 76 repository lint gates pass for the retained capture-owner increment.
+
+## Private native replay metadata follows the retained destination
+
+The native runtime verified transport ownership against the parent execution
+session, then also used that session as the replay log destination. For a private
+execution this put replay proofs and projection reports in the parent history.
+The retained writer now exposes its immutable destination for the duration of
+an owned lease. Replay storage uses that destination; transport/session admission
+and callback context still use the verified source session. Runtime operation
+without a capture owner keeps its existing source-session destination.
+
+A listener regression fails on the previous source when a private child has a
+parent transport. It now checks both primary/private destinations, callback
+binding and failure/closure handling, while preserving the no-owner fallback.
+Copied destination identity is also verified after mutation of constructor input.
+Three native fixtures, their ASan/UBSan runs, four-source Cppcheck, actual CMake
+application and CTest 3/3 pass. This repairs proof/projection placement; it does
+not yet capture complete native model history or activate the SDK runtime.
+The preceding capture-owner commit also passed a full-HEAD Gitleaks scan
+(6,203 commits, no leaks). No production deployment or fresh platform CI claimed.
+
+All 76 repository lint gates pass for the private replay-destination repair.

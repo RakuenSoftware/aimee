@@ -425,7 +425,7 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
  * listener fixture verifies its guard/sink are confined to model requests. */
 struct server_native_replay
 {
-   char actor[VAULT_PRINCIPAL_MAX];
+   char actor[VAULT_PRINCIPAL_MAX], session[128];
 };
 static _Thread_local aimee_frontend_state_scope_t state_guard;
 server_native_replay_t *server_native_replay_open(const char *session, const char *actor,
@@ -435,6 +435,12 @@ server_native_replay_t *server_native_replay_open(const char *session, const cha
    server_native_replay_t *r = calloc(1, sizeof *r);
    assert(r);
    strcpy(r->actor, actor);
+   strcpy(r->session, session);
+   const char *destination = server_session_capture_session(server_session_capture_current());
+   const char *expected = destination                       ? destination
+                          : !strcmp(actor, "webuser:alice") ? "session-a"
+                                                            : "session-b";
+   assert(!strcmp(session, expected));
    return r;
 }
 void server_native_replay_close(server_native_replay_t *r)
@@ -446,6 +452,8 @@ int server_native_replay_restore(aimee_request_t *request, void *context)
    (void)request;
    server_native_replay_t *r = context;
    assert(!strcmp(r->actor, identity));
+   const char *destination = server_session_capture_session(server_session_capture_current());
+   assert(!strcmp(r->session, destination ? destination : session_id()));
    return 0;
 }
 int server_native_replay_capture(const aimee_session_event_t *event, void *context)
@@ -625,11 +633,13 @@ void server_learning_observe_terminal(const char *session, const char *turn, con
 }
 static void test_retained_capture(const agent_t *selected, const request_context_t *owner)
 {
-   for (int failure = 0; failure < 2; failure++)
+   for (int variant = 0; variant < 4; variant++)
    {
+      int failure = variant % 2;
+      const char *destination = variant < 2 ? "session-a" : "private-child";
       owner_tools(1);
       server_session_capture_t *capture =
-          server_session_capture_open("session-a", "native-turn", "webuser:alice", "session-a");
+          server_session_capture_open(destination, "native-turn", "webuser:alice", "session-a");
       assert(capture && !server_session_capture_bind(capture));
       server_native_runtime_t *runtime = server_native_runtime_open(selected, owner, "session-a");
       assert(runtime && server_session_capture_bind(NULL) == capture);

@@ -100,6 +100,8 @@ static void test_concurrent_owner(void)
    memset(turn, 'x', strlen(turn));
    memset(actor, 'x', strlen(actor));
    memset(source, 'x', strlen(source));
+   assert(!server_session_capture_session(NULL));
+   assert(!strcmp(server_session_capture_session(owner), "private-child"));
    server_session_capture_t *lease = NULL;
    int wrong_actor = server_session_capture_retain_current("parent", "mallory", &lease);
    assert(wrong_actor < 0 && !lease);
