@@ -94,6 +94,13 @@ class IRBypassTests(unittest.TestCase):
         self.source("src/server/agent_policy.c", "kb_client_tool_registry_lookup(name, enabled);")
         checker.check(self.root)
 
+    def test_native_mcp_cannot_reintroduce_kb_read_fallback(self):
+        self.source("src/server/server_native_tool_admission.c", "tool_side_effect(tool);")
+        with self.assertRaisesRegex(ValueError, "kb-tool-classification"):
+            checker.check(self.root)
+        self.source("src/server/server_native_tool_admission.c", "tool_policy_metadata(tool, metadata);")
+        checker.check(self.root)
+
     def test_canonical_host_profiles_cannot_rebuild_native_requests(self):
         for function in checker.CANONICAL_PROFILE_FUNCTIONS:
             for wire in ("openai", "anthropic", "responses"):

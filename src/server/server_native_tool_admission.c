@@ -59,8 +59,16 @@ const char *server_native_tool_admit(const char *tool, const cJSON *arguments, c
     * idempotency/attempt fields cannot borrow a preceding tool's admission. */
    char attempt[96];
    snprintf(attempt, sizeof attempt, "native-mcp:%s", owner->request_id);
-   int allowed = policy_check_tool_attempt(tool, tool_side_effect(tool), wire, attempt, detail,
-                                           sizeof detail) == 0;
+   aimee_tool_metadata_t metadata;
+   char effect[32];
+   if (tool_policy_metadata(tool, &metadata, effect, sizeof effect, detail, sizeof detail) != 0)
+   {
+      free(wire);
+      return refuse(error, capacity, "policy",
+                    detail[0] ? detail : "tool policy metadata unavailable");
+   }
+   int allowed = policy_check_tool_metadata_attempt(tool, &metadata, effect, wire, attempt, detail,
+                                                    sizeof detail) == 0;
    free(wire);
    if (!allowed)
       return refuse(error, capacity, "policy",

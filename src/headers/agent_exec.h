@@ -3,6 +3,7 @@
 
 #include "agent_types.h"
 #include <aimee/ir/aimee_ir.h>
+#include <aimee/tools/module_api.h>
 
 struct cJSON; /* forward declaration for gemini_prompt_cache_attach */
 
@@ -274,6 +275,12 @@ int policy_check_tool(const char *tool_name, const char *side_effect, const char
                       char *reason_out, size_t reason_len);
 int policy_check_tool_attempt(const char *tool_name, const char *side_effect, const char *args_json,
                               const char *attempt_id, char *reason_out, size_t reason_len);
+int tool_policy_metadata(const char *tool, aimee_tool_metadata_t *metadata, char *effect,
+                         size_t effect_len, char *reason, size_t reason_len);
+int policy_check_tool_metadata_attempt(const char *tool, const aimee_tool_metadata_t *metadata,
+                                       const char *effect, const char *arguments,
+                                       const char *attempt, char *reason, size_t reason_len);
+
 int policy_check_session_tool(const char *session, const char *tool, const char *arguments,
                               const char *attempt, char *reason, size_t reason_len);
 char *policy_observe_indexed(const char *tool, const char *arguments, const char *attempt,

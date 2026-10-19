@@ -27,6 +27,7 @@
 #include "config_client.h"
 #include <aimee/skills/module_api.h>
 #include <aimee/tools/module_api.h>
+#include "modules/tools/tool_catalog_data.h"
 #include <aimee/workspace/module_api.h>
 #include "economizer_module_client.h"
 
@@ -548,6 +549,42 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_tools_response_decode(response, response_len, &classification) == 0);
       assert(classification == AIMEE_TOOL_CLASS_EXEC);
+      for (size_t i = 0; i < sizeof(aimee_tool_catalog) / sizeof(aimee_tool_catalog[0]); ++i)
+      {
+         const aimee_tool_catalog_entry_t *entry = &aimee_tool_catalog[i];
+         request_len =
+             (uint32_t)aimee_tools_metadata_request_encode(entry->name, request, sizeof request);
+         assert(request_len > 0);
+         assert(aimee_module_client_call(client, kind, 1, 21000 + i, 0, request, request_len,
+                                         response, sizeof response, &response_len, NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+         aimee_tool_metadata_t actual;
+         assert(aimee_tools_metadata_response_decode(response, response_len, &actual) == 0);
+         assert(actual.classification == entry->metadata.classification);
+         assert(actual.primary == entry->metadata.primary);
+         assert(actual.categories == entry->metadata.categories);
+      }
+      request_len = (uint32_t)aimee_tools_metadata_request_encode("unregistered_tool", request,
+                                                                  sizeof request);
+      assert(request_len > 0);
+      assert(aimee_module_client_call(client, kind, 1, 22000, 0, request, request_len, response,
+                                      sizeof response, &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      aimee_tool_metadata_t unknown;
+      assert(aimee_tools_metadata_response_decode(response, response_len, &unknown) == -1);
+      assert(!unknown.categories);
+      char long_name[308];
+      memcpy(long_name, "remote:", 7);
+      memset(long_name + 7, 'x', 300);
+      long_name[307] = 0;
+      request_len =
+          (uint32_t)aimee_tools_metadata_request_encode(long_name, request, sizeof request);
+      assert(request_len > AIMEE_TOOLS_REQUEST_LEN);
+      assert(aimee_module_client_call(client, kind, 1, 22001, 0, request, request_len, response,
+                                      sizeof response, &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_tools_metadata_response_decode(response, response_len, &unknown) == 0);
+      assert(unknown.classification == AIMEE_TOOL_CLASS_REMOTE);
    }
    else if (strcmp(name, "workspace") == 0)
    {
@@ -1149,7 +1186,11 @@ int main(int argc, char **argv)
    uint32_t served[PRODUCTION_STAGE_MAX] = {test_kind};
    size_t serve_count = 1;
    if (argc >= 3)
-      assert(production_contract(argv[2], &test_kind, &module_ref, served, &serve_count) == 0);
+   {
+      int contract_status =
+          production_contract(argv[2], &test_kind, &module_ref, served, &serve_count);
+      assert(contract_status == 0);
+   }
    const int memory_process = argc >= 3 && strcmp(argv[2], "memory") == 0;
    const int egress_process = argc >= 3 && strcmp(argv[2], "egress") == 0;
    const int config_process = memory_process || egress_process;
@@ -1297,7 +1338,10 @@ int main(int argc, char **argv)
    pthread_t startup_thread;
    atomic_init(&startup_replays, 0);
    if (memory_process)
-      assert(pthread_create(&startup_thread, NULL, run_process, &startup) == 0);
+   {
+      int started = pthread_create(&startup_thread, NULL, run_process, &startup);
+      assert(started == 0);
+   }
 
    static const aimee_module_stage_t config_stage[] = {{4609u, 1u}};
    process_thread_t configuration = {.config = {.socket_path = socket_path,
@@ -1310,7 +1354,10 @@ int main(int argc, char **argv)
    pthread_t configuration_thread;
    atomic_init(&startup_snapshots, 0);
    if (config_process)
-      assert(pthread_create(&configuration_thread, NULL, run_process, &configuration) == 0);
+   {
+      int started = pthread_create(&configuration_thread, NULL, run_process, &configuration);
+      assert(started == 0);
+   }
 
    pthread_t module_thread;
    pid_t module_pid = -1;
@@ -1319,7 +1366,10 @@ int main(int argc, char **argv)
       module_pid = spawn_module_child(module_executable, socket_path, NULL);
    }
    else
-      assert(pthread_create(&module_thread, NULL, run_process, &process) == 0);
+   {
+      int started = pthread_create(&module_thread, NULL, run_process, &process);
+      assert(started == 0);
+   }
 
    int caller_fd = -1;
    bus_client_t caller;

@@ -53,7 +53,8 @@ static void policy_session_reason(char *out, size_t cap, const cJSON *result, co
 }
 
 static int policy_baseline(const char *tool_name, const char *side_effect, const char *args_json,
-                           char *reason_out, size_t reason_len, int *discovery);
+                           uint32_t categories, char *reason_out, size_t reason_len,
+                           int *discovery);
 
 static int policy_worktree_on_host(void)
 {
@@ -113,8 +114,38 @@ static void policy_observe_memory_owner(cJSON *request)
    cJSON_Delete(reply);
 }
 
+static int policy_add_categories(cJSON *request, uint32_t categories)
+{
+   if (!categories)
+      return 0; /* compatibility callers retain their existing single label */
+   if (categories & ~AIMEE_TOOL_POLICY_ALL)
+      return -1;
+   cJSON *array = cJSON_CreateArray();
+   if (!array)
+      return -1;
+   for (uint32_t bit = 1; bit <= AIMEE_TOOL_POLICY_CONTROL; bit <<= 1)
+   {
+      if (!(categories & bit))
+         continue;
+      cJSON *label = cJSON_CreateString(aimee_tool_policy_name(bit));
+      if (!label || !cJSON_AddItemToArray(array, label))
+      {
+         cJSON_Delete(label);
+         cJSON_Delete(array);
+         return -1;
+      }
+   }
+   if (!cJSON_AddItemToObject(request, "policy_categories", array))
+   {
+      cJSON_Delete(array);
+      return -1;
+   }
+   return 0;
+}
+
 static int policy_check_exploration(const char *tool, const char *effect, const char *args,
-                                    const char *attempt, char *reason, size_t reason_len)
+                                    const char *attempt, uint32_t categories, char *reason,
+                                    size_t reason_len)
 {
    const request_context_t *ctx = request_context_get();
    cJSON *binding = ctx ? cJSON_Parse(ctx->exploration_binding) : NULL;
@@ -144,6 +175,14 @@ static int policy_check_exploration(const char *tool, const char *effect, const 
       cJSON_Delete(request);
       cJSON_Delete(binding);
       set_reason(reason, reason_len, "tool attempt identity is too long");
+      return -1;
+   }
+   if (policy_add_categories(request, categories) != 0)
+   {
+      cJSON_Delete(arguments);
+      cJSON_Delete(request);
+      cJSON_Delete(binding);
+      set_reason(reason, reason_len, "tool policy categories unavailable");
       return -1;
    }
    cJSON_AddStringToObject(request, "operation", "check");
@@ -185,20 +224,22 @@ int policy_recheck_action_tool(const char *tool, const char *effect, const char 
                                char *reason, size_t reason_len)
 {
    int discovery = 0;
-   return policy_baseline(tool, effect, arguments, reason, reason_len, &discovery);
+   return policy_baseline(tool, effect, arguments, 0, reason, reason_len, &discovery);
 }
 
-int policy_check_tool_attempt(const char *tool, const char *effect, const char *args,
-                              const char *attempt, char *reason, size_t reason_len)
+static int policy_check_attempt(const char *tool, const char *effect, const char *args,
+                                const char *attempt, uint32_t categories, char *reason,
+                                size_t reason_len)
 {
    policy_action_attempt(attempt);
    /* Baseline authorization always runs, including computer-use restrictions. */
    int discovery = 0;
-   if (policy_baseline(tool, effect, args, reason, reason_len, &discovery) != 0)
+   if (policy_baseline(tool, effect, args, categories, reason, reason_len, &discovery) != 0)
       return -1;
    if (!discovery)
       return 0;
-   int decision = policy_check_exploration(tool, effect, args, attempt, reason, reason_len);
+   int decision =
+       policy_check_exploration(tool, effect, args, attempt, categories, reason, reason_len);
    if (decision == 1 && discovery == 2)
    {
       set_reason(reason, reason_len,
@@ -208,8 +249,27 @@ int policy_check_tool_attempt(const char *tool, const char *effect, const char *
    return decision == 1 ? 0 : decision;
 }
 
+int policy_check_tool_attempt(const char *tool, const char *effect, const char *args,
+                              const char *attempt, char *reason, size_t reason_len)
+{
+   return policy_check_attempt(tool, effect, args, attempt, 0, reason, reason_len);
+}
+
+int policy_check_tool_metadata_attempt(const char *tool, const aimee_tool_metadata_t *metadata,
+                                       const char *effect, const char *arguments,
+                                       const char *attempt, char *reason, size_t reason_len)
+{
+   if (!aimee_tool_metadata_valid(metadata))
+   {
+      set_reason(reason, reason_len, "tool policy metadata unavailable");
+      return -1;
+   }
+   return policy_check_attempt(tool, effect, arguments, attempt, metadata->categories, reason,
+                               reason_len);
+}
+
 static int policy_baseline(const char *tool_name, const char *side_effect, const char *args_json,
-                           char *reason_out, size_t reason_len, int *discovery)
+                           uint32_t categories, char *reason_out, size_t reason_len, int *discovery)
 {
    if (!tool_name || !tool_name[0] || !args_json)
    {
@@ -228,6 +288,16 @@ static int policy_baseline(const char *tool_name, const char *side_effect, const
       cJSON_Delete(computer);
       cJSON_Delete(domains);
       set_reason(reason_out, reason_len, "execution-policy request could not be built");
+      return -1;
+   }
+
+   if (policy_add_categories(request, categories) != 0)
+   {
+      cJSON_Delete(request);
+      cJSON_Delete(arguments);
+      cJSON_Delete(computer);
+      cJSON_Delete(domains);
+      set_reason(reason_out, reason_len, "tool policy categories unavailable");
       return -1;
    }
 
@@ -374,7 +444,7 @@ int policy_check_session_tool(const char *session, const char *tool, const char 
 {
    policy_action_attempt(attempt);
    int discovery = 0;
-   if (policy_baseline(tool, "filesystem", arguments, reason, reason_len, &discovery) != 0)
+   if (policy_baseline(tool, "filesystem", arguments, 0, reason, reason_len, &discovery) != 0)
       return -1;
    if (!discovery)
       return 0;
@@ -427,7 +497,7 @@ int policy_check_tool(const char *tool, const char *effect, const char *args, ch
                       size_t reason_len)
 {
    int discovery = 0;
-   int rc = policy_baseline(tool, effect, args, reason, reason_len, &discovery);
+   int rc = policy_baseline(tool, effect, args, 0, reason, reason_len, &discovery);
    if (rc == 0 && discovery == 2)
    {
       set_reason(reason, reason_len,

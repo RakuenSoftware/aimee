@@ -5,6 +5,7 @@
  * alias normalization, type coercion, valid call, recovery hint).
  */
 #include <assert.h>
+#include "modules/tools/tool_catalog_data.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -294,9 +295,58 @@ static void test_ir_catalog_is_schema_authority(void)
    puts("  PASS: admitted IR schema governs validation; registry disable remains effective");
 }
 
+static int owned_metadata(const char *tool, aimee_tool_metadata_t *out)
+{
+   *out = aimee_tools_catalog_metadata(tool);
+   return 0;
+}
+
+static void test_owned_tool_policy_metadata(void)
+{
+   setup_db();
+   aimee_tool_metadata_t metadata = {0};
+   char effect[32], reason[256];
+   assert(tool_policy_metadata("read_file", &metadata, effect, sizeof effect, reason,
+                               sizeof reason) == -1);
+   assert(!metadata.categories && !effect[0] && reason[0]);
+   agent_tools_register_metadata(owned_metadata);
+   assert(tool_policy_metadata("read_file", &metadata, effect, sizeof effect, reason,
+                               sizeof reason) == 0);
+   assert(!strcmp(effect, "read") && !reason[0]);
+   assert(metadata.categories == (AIMEE_TOOL_POLICY_READ | AIMEE_TOOL_POLICY_FILESYSTEM));
+   int changed = aimee_pg_exec(
+       kb_store_conn(),
+       "UPDATE tool_registry SET side_effect = 'custom_operator_label' WHERE name = 'read_file'",
+       NULL, 0);
+   assert(changed == 0);
+   assert(tool_policy_metadata("read_file", &metadata, effect, sizeof effect, reason,
+                               sizeof reason) == 0);
+   assert(!strcmp(effect, "custom_operator_label"));
+   assert(metadata.categories == (AIMEE_TOOL_POLICY_READ | AIMEE_TOOL_POLICY_FILESYSTEM));
+   changed = aimee_pg_exec(
+       kb_store_conn(), "UPDATE tool_registry SET enabled = 0 WHERE name = 'read_file'", NULL, 0);
+   assert(changed == 0);
+   assert(tool_policy_metadata("read_file", &metadata, effect, sizeof effect, reason,
+                               sizeof reason) == -1);
+   assert(!metadata.categories && !effect[0] && strstr(reason, "disabled"));
+   assert(tool_policy_metadata("not_in_owned_catalog", &metadata, effect, sizeof effect, reason,
+                               sizeof reason) == -1);
+   teardown_db();
+   /* The server's built-in catalog is usable without a KB tool-registry row. */
+   assert(tool_policy_metadata("delegate", &metadata, effect, sizeof effect, reason,
+                               sizeof reason) == 0);
+   assert(metadata.classification == AIMEE_TOOL_CLASS_EXEC && !strcmp(effect, "write"));
+   assert(tool_policy_metadata("delegate", &metadata, effect, 1, reason, sizeof reason) == -1);
+   assert(!metadata.categories && !effect[0]);
+   agent_tools_register_metadata(NULL);
+   puts("  PASS: owned metadata works KB-free; optional disables/custom labels remain "
+        "authoritative");
+}
+
 int main(void)
 {
    test_ir_catalog_is_schema_authority();
+   test_owned_tool_policy_metadata();
    printf("test_tool_validation\n");
 
    test_suggest_exact_match();

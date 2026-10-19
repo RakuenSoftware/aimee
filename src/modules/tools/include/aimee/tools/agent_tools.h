@@ -5,6 +5,7 @@ struct aimee_response;
 #include "agent_types.h"
 #include "cJSON.h"
 #include <stdint.h>
+#include <aimee/tools/module_api.h>
 
 /* Tool execution (Unix only) */
 char *tool_bash(const char *command, int timeout_ms);
@@ -64,6 +65,12 @@ char *dispatch_tool_call(const char *name, const char *arguments_json, int timeo
  * leaves the tool unclassified. */
 typedef int (*agent_tool_classifier_fn)(const char *name, int *classification);
 void agent_tools_register_classifier(agent_tool_classifier_fn classifier);
+/* Registration occurs with the existing supervised tools owner at startup.
+ * Missing/unknown metadata refuses; it never becomes an implicit read. */
+typedef int (*agent_tool_metadata_fn)(const char *name, aimee_tool_metadata_t *metadata);
+void agent_tools_register_metadata(agent_tool_metadata_fn provider);
+int agent_tools_metadata(const char *name, aimee_tool_metadata_t *metadata);
+
 typedef int (*agent_tool_action_begin_fn)(const char *, struct cJSON **, const char *, const char *,
                                           int);
 /* The final flag starts with execution's classification. Only this trusted

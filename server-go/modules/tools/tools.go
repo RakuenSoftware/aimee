@@ -2,8 +2,8 @@
 package tools
 
 import (
+	"bytes"
 	"encoding/binary"
-	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
@@ -28,64 +28,48 @@ const (
 	ClassRemote
 )
 
-var (
-	execNames = map[string]struct{}{
-		"bash": {}, "execute_script": {}, "test": {}, "run_tests": {},
-	}
-	writeNames = map[string]struct{}{
-		"write_file": {}, "edit_file": {}, "edit_symbol": {}, "create_note": {},
-		"rules_propose": {}, "learning_propose": {}, "git_commit": {}, "git_push": {},
-		"git_branch": {}, "git_pr": {},
-	}
-	controlNames = map[string]struct{}{
-		"request_input": {}, "context_contract_expand": {}, "clarify_start": {}, "clarify_answer": {},
-		"diagnose_start": {}, "diagnose_observe": {}, "diagnose_hypothesize": {},
-		"diagnose_evidence": {},
-	}
-	readNames = map[string]struct{}{
-		"read_file": {}, "list_files": {}, "grep": {}, "code_search": {},
-		"find_symbol": {}, "read_symbol": {}, "search_memory": {}, "search_docs": {},
-		"list_notes": {}, "search_notes": {},
-		"git_log": {}, "git_diff": {}, "git_status": {},
-	}
-)
+// Keep the original classification contract, now backed by the complete catalog.
+func classify(name string) uint32 { return metadata(name).Class }
 
-// Keep network/forge operations remote before the ordinary write/read sets.
-// This is the same transport contract as the C tools module.
-func classify(name string) uint32 {
-	if strings.ContainsRune(name, ':') || name == "web_search" || name == "web_read" ||
-		name == "git_push" || name == "git_pr" {
-		return ClassRemote
-	}
-	if _, ok := execNames[name]; ok {
-		return ClassExec
-	}
-	if _, ok := writeNames[name]; ok {
-		return ClassWrite
-	}
-	if _, ok := controlNames[name]; ok {
-		return ClassControl
-	}
-	if _, ok := readNames[name]; ok {
-		return ClassRead
-	}
-	return ClassUnknown
-}
+const metadataVersion byte = 2
+const metadataMagic uint32 = 0x4154454d
+const metadataLen = 16
 
 // Handle classifies a tool name without dispatching the tool itself.
 func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	if invocation.StageID == StageActionResource {
 		return handleActionResource(invocation, request)
 	}
-	if invocation.StageID != StageDispatch || len(request) != requestLen ||
-		binary.LittleEndian.Uint32(request[0:4]) != requestMagic || request[4] != wireVersion ||
-		request[5] != 0 || request[7] != 0 || request[6] == 0 || request[6] > nameMax {
+	if invocation.StageID != StageDispatch || len(request) < 8 ||
+		binary.LittleEndian.Uint32(request[0:4]) != requestMagic || request[5] != 0 {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	enriched := request[4] == metadataVersion
+	nameLength := int(request[6])
+	if enriched {
+		nameLength = int(binary.LittleEndian.Uint16(request[6:8]))
+		if nameLength == 0 || nameLength > 4095 || len(request) != nameLength+8 || bytes.IndexByte(request[8:], 0) >= 0 {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+	} else if request[4] != wireVersion || len(request) != requestLen || request[7] != 0 || nameLength == 0 || nameLength > nameMax {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
-	name := string(request[8 : 8+int(request[6])])
+	name := string(request[8 : 8+nameLength])
+	if enriched {
+		if catalogError != nil {
+			return nil, bus.ModuleStatusInternal
+		}
+		value := metadata(name)
+		response := make([]byte, metadataLen)
+		binary.LittleEndian.PutUint32(response[0:4], metadataMagic)
+		binary.LittleEndian.PutUint32(response[4:8], value.Class)
+		binary.LittleEndian.PutUint32(response[8:12], value.Primary)
+		binary.LittleEndian.PutUint32(response[12:16], value.Categories)
+		return response, bus.ModuleStatusOK
+	}
 	response := make([]byte, responseLen)
 	binary.LittleEndian.PutUint32(response[0:4], responseMagic)
 	binary.LittleEndian.PutUint32(response[4:8], classify(name))

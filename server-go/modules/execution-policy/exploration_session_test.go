@@ -453,3 +453,32 @@ func TestSessionIndexInvalidationRetainsOperatorAccounting(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionCheckRetainsOwnedPolicyCategories(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AIMEE_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "policy.json"), []byte(`{"approval_levels":{"network":"block"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	c := testContract(now)
+	issue, _ := json.Marshal(sessionExplorationRequest{Operation: "issue", Binding: c.Binding, Contract: &c})
+	state, _, err := SessionExploration("alice", "session", nil, issue, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := sessionExplorationRequest{Operation: "check", Binding: c.Binding, Tool: "web_read", SideEffect: "read",
+		PolicyCategories: []string{"read", "network", "external"}, Arguments: json.RawMessage(`{"url":"https://example.com"}`), AttemptID: "category-check"}
+	raw, _ := json.Marshal(check)
+	_, reply, err := SessionExploration("alice", "session", state, raw, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decision response
+	if err := json.Unmarshal(reply, &decision); err != nil {
+		t.Fatal(err)
+	}
+	if decision.Allowed || decision.Reason != "policy blocks network operations" {
+		t.Fatalf("session lost categories: %+v", decision)
+	}
+}

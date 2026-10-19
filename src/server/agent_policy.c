@@ -285,6 +285,54 @@ int tool_validate(const char *tool_name, const char *args_json, char *err_out, s
    return rc;
 }
 
+int tool_policy_metadata(const char *tool, aimee_tool_metadata_t *metadata, char *effect,
+                         size_t effect_len, char *reason, size_t reason_len)
+{
+   if (reason && reason_len)
+      reason[0] = 0;
+   if (metadata)
+      memset(metadata, 0, sizeof(*metadata));
+   if (effect && effect_len)
+      effect[0] = 0;
+   if (!effect || !effect_len || agent_tools_metadata(tool, metadata) != 0)
+   {
+      if (reason && reason_len)
+         snprintf(reason, reason_len, "tool policy metadata unavailable");
+      return -1;
+   }
+   /* Optional operator metadata can add a policy label or disable a tool. It
+    * cannot replace the tools owner's classification or remove its categories.
+    * No KB is required for built-in policy metadata. */
+   char configured[32] = "";
+   int found = 0, enabled = 1;
+   if (!strchr(tool, ':') &&
+       !kb_client_tool_registry_lookup(tool, NULL, 0, configured, sizeof(configured), &enabled,
+                                       &found) &&
+       found)
+   {
+      if (!enabled)
+      {
+         if (reason && reason_len)
+            snprintf(reason, reason_len, "tool '%s' is disabled", tool);
+         memset(metadata, 0, sizeof(*metadata));
+         return -1;
+      }
+   }
+   else
+      configured[0] = 0;
+   const char *label = configured[0] ? configured : aimee_tool_policy_name(metadata->primary);
+   int n = snprintf(effect, effect_len, "%s", label);
+   if (n < 0 || (size_t)n >= effect_len)
+   {
+      effect[0] = 0;
+      memset(metadata, 0, sizeof(*metadata));
+      if (reason && reason_len)
+         snprintf(reason, reason_len, "tool policy label exceeds capacity");
+      return -1;
+   }
+   return 0;
+}
+
 const char *tool_side_effect(const char *tool_name)
 {
    /* Fall through aimee-kb so the lookup works in the daemon (KB_STORE-less)

@@ -144,6 +144,18 @@
         "src/tests/test_server_memory_setup.c"
       ],
       "cutover_dependency": "Vault custody precedes memory startup; egress reads the credential through its existing helper."
+    },
+    "tool-policy-catalog": {
+      "owner": "tools module",
+      "contract": "Versioned tools metadata wire in src/modules/tools/include/aimee/tools/module_api.h",
+      "reason": "Generated capability names and metadata only. Memory-prefixed names identify tools; the table contains no memory retrieval, storage, fallback engine or domain implementation.",
+      "evidence": [
+        "server-go/modules/tools/catalog.go",
+        "src/tests/test_module_runtime.c",
+        "src/tests/test_mcp_client_registry.c",
+        "scripts/tests/test_tool_catalog.py"
+      ],
+      "cutover_dependency": "The supervised tools owner serves policy metadata; memory tool execution still dispatches to its existing memory owner."
     }
   },
   "original_files": {
@@ -2132,13 +2144,13 @@
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "062e11349e17e9b16804a6adc00ec6221fcd82086acf47e61bde48011a678467",
+      "sha256": "36ca8e18164875c2c9b756d4c28dbb9b3d914f642f856cc65fc1a4107b82fc5c",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
       "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go. Oct 18: removed only the response-composition input copy after sharing its API type; memory adapters are unchanged.",
-      "boundary_review": "IR #3036: governance transports strict v2 canonical identity views with complete names/namespaces to its existing Go policy owner. The existing five memory transport symbols, authenticated owner calls, erasure and backend authority are unchanged. This records the governance-only source-boundary review and does not assert independent production approval."
+      "boundary_review": "PR #3050: added only the typed tools metadata transport/registration next to the existing tools classifier. Memory adapter symbols, framing, policy and Go ownership are unchanged. This is not independent production-promotion approval."
     },
     "src/server/server.c": {
       "disposition": "host-transport",
@@ -2418,8 +2430,9 @@
       "symbols": [
         "memory_recall"
       ],
-      "sha256": "86467e00c99b2a03e2eec2ad567cfb417cf4ce756aa530a28e25c5a35740a2b5",
-      "boundary_change": "Adds Git family identity and output-capacity regressions. Existing memory recall catalog assertions are unchanged. This records boundary analysis, not independent approval. Catalog signature scratch arrays are initialized for the pinned static analyzer; schema assertions retain their existing meaning."
+      "sha256": "199b2849a9de261527ba6ad9de3da7470dbaaa3bd877ceac1c8b5c6b5ec8b0ea",
+      "boundary_change": "Adds Git family identity and output-capacity regressions. Existing memory recall catalog assertions are unchanged. This records boundary analysis, not independent approval. Catalog signature scratch arrays are initialized for the pinned static analyzer; schema assertions retain their existing meaning.",
+      "boundary_review": "PR #3050: adds a tools metadata coverage assertion over the real flat MCP catalog. Existing memory tool schemas, fixtures, runtime policy and Go ownership are unchanged."
     },
     "src/tests/test_mcp_directive_transport.c": {
       "disposition": "host-fixture",
@@ -2720,6 +2733,23 @@
         "api/openapi-server-v1.yaml": "8080f9fbea2e7a7845dc6d05cf03a3aebd9c52c650907634dce95c55f678879b"
       },
       "boundary_review": "2026-10-18 PR #3038: only the /runs documentation changes: asynchronous canonical input, owner privacy, preserved controls and incomplete status. Memory routes and their Go ownership are unchanged."
+    },
+    "src/modules/tools/tool_catalog_data.h": {
+      "disposition": "tool-policy-catalog",
+      "boundary_review": "PR #3050: explicit generated tool-policy data, with no memory authority or native memory implementation. Input/output hashes require review on changes; this is not independent production-promotion approval.",
+      "symbols": [
+        "memory_alerts",
+        "memory_briefing",
+        "memory_explain_match",
+        "memory_fact_history",
+        "memory_get",
+        "memory_recall"
+      ],
+      "sha256": "3418a9e7780280e3d71de21f2e2fb691541e45922b2452a775c10d951d4fa402",
+      "inputs": {
+        "scripts/generate-tool-catalog.py": "3fc845b7d8370b25d9c7461c493a56cd4e5d51351a7055b8d2ab4e252bec3066",
+        "server-go/modules/tools/catalog.json": "ef4d0dc9919e29e52bf4e8465bce46260f2e2e72e8c71d337f2c306c1d88ca86"
+      }
     }
   },
   "namespace_review": "Current KB domain names and paths replace the retired database ordinal; original files and symbols remain immutable, and the checker covers both spellings. Native memory ownership does not change."

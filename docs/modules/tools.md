@@ -25,6 +25,25 @@ unclassified rather than falling back to a local name table. Tool execution,
 policy and workspace binding, schemas, and result handling are deliberately not
 claimed as ported by this first classification-stage conversion.
 
+`server-go/modules/tools/catalog.json` now explicitly declares built-in/MCP
+classification and policy categories. `scripts/generate-tool-catalog.py` produces
+the C fixture's private table; a script gate rejects drift. Existing version-1
+classification bytes remain supported. Version-2 requests on the same tools
+stage carry complete names up to 4,095 bytes and return a bounded typed classification,
+primary label and category mask. Over-limit names refuse without prefix truncation.
+Unknown names have no metadata; qualified external tools remain remote. Neither
+classification nor metadata grants execution or human approval.
+
+Isolated native MCP admission uses that supervised owner rather than treating a
+missing KB side-effect row as `read`. Required execution-policy evaluates all
+owned categories against one loaded operator policy, including adaptive session
+checks. Optional registry disables still veto and custom operator labels remain
+additional restrictions; they cannot erase owned categories. Current built-in
+and flat MCP catalog fixtures require complete metadata coverage. Multiplexed
+capabilities use conservative metadata until operation-specific refinement; this
+does not complete tool effect receipts, native built-in interception, human
+controls or the other legacy callers of `tool_side_effect`.
+
 `agent_tools.h` also declares a turn/snapshot/toolset session-state slice (`agent_tools_begin_turn`,
 `agent_tools_set_snap_id`, `agent_tools_set_active_toolset`) implemented in `src/server/agent_tools.c`:
 server-side tool-execution session orchestration that is not module-local, the same arrangement by

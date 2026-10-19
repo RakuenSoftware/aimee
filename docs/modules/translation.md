@@ -178,10 +178,13 @@ definition/caller inventory proving no supported journey still selects it.
 
 ## Extension and removal
 
-Add an adapter through the shared IR conversion interface and capability contract rather than copying an
-ingress handler. The parallel legacy and typed builders in `anthropic_http.c` and `openai_chat.c` are
-consolidation candidates, not automatically dead code; parity and mutation branches must be traced first.
-Translation cannot be removed while Aimee supports more than one external/provider wire.
+Extend the owned adapters in `aimee_frontend_openai.c`, `aimee_frontend_anthropic.c`
+and the matching `aimee_backend_*.c` through the public `aimee_frontend.h` and
+`aimee_backend.h` contracts. Admit native frames once, preserve unchanged wire bytes
+at egress, and qualify cache markers, tool identity and streaming parity before
+adding a provider capability. Translation remains required while Aimee supports
+multiple external/provider wires; removing an adapter requires retiring its live
+ingress and egress consumers first.
 
 The [slice 32 liveness audit](../validation/core-modularization-slice-32.md) proves that every owned source
 ships and that each translation unit contains a production path. It separately records seven helpers
@@ -209,7 +212,7 @@ Opaque JSON numeric values survive native entry, canonical ownership and explici
 
 Codex URL-mode MCP elicitation enters as a canonical external-interaction request containing the server, message, destination and opaque elicitation identity. The browser displays the host and requests explicit navigation consent; accepted URL replies contain no form data. HTTP(S), authority and length checks reject unsafe schemes, userinfo and controls. Consent records acceptance, not completion of the external flow. Unsupported device-verification and custom form modes remain decline/cancel only. See the [Codex protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs) and [MCP URL elicitation contract](https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation).
 
-Browser-owned Claude and Codex controls persist the admitted canonical operator decision before native delivery. Native serialization does not become a second history source: the adapter resolves its pending identity before sending the generated native response. This retains cancel intent and complete answer arrays even when the native protocol uses a coarser denial or joined answer string. A capture failure prevents approval bytes reaching the child.
+Browser-owned Claude and Codex controls persist the admitted canonical operator decision before native delivery. Native serialization does not become a second history source: the adapter resolves its registered control identity before sending the generated native response. This retains cancel intent and complete answer arrays even when the native protocol uses a coarser denial or joined answer string. A capture failure prevents approval bytes reaching the child.
 
 ### Native tool hook entry
 

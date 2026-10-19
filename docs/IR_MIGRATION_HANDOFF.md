@@ -1928,3 +1928,48 @@ skipped on metadata edits. Workflow regression tests exercise the actual
 cancellation expression and preserve both event coverage and attribution checks.
 The installed server's cancelled-check display remains unpromoted; source already
 reports cancellation separately, while a current cancelled run still blocks merge.
+
+## Native tool-owned policy metadata
+
+The supervised tools owner now reads one explicit built-in/MCP metadata catalog;
+the C fixture table is generated from those same bytes. The existing version-1
+classification wire is retained. Version-2 requests on the same event/stage return
+classification, primary policy category and a bounded category set. Complete
+external names up to 4,095 bytes are length-framed; over-limit, embedded-NUL and
+trailing input refuse without prefix truncation. Unknown names
+remain unclassified, qualified remote capabilities remain external, and malformed
+metadata/owner failure refuses instead of becoming an implicit `read`.
+
+Isolated native MCP admission now uses the typed owner. Optional KB metadata may
+still disable a tool or supply a custom operator policy label; it cannot replace
+classification or remove owned categories. The required execution-policy owner
+evaluates the complete set against one loaded policy. Adaptive session checks
+retain those categories and bind them into attempt identity. Metadata is neither
+an effect authorization nor a human approval. Broad multiplexers retain
+conservative capability metadata; operation-specific refinement and full effects
+remain required. The other legacy `tool_side_effect` consumers are not cut over
+by this increment.
+
+Coverage checks use actual built-in IR and flat MCP catalogs. C fixture and real
+C-to-Go module-bus tests exercise every catalog entry, including version-1
+compatibility and unknown/malformed refusal. Policy fixtures cover custom labels,
+operator disables, a network block behind a read primary label, and category
+forwarding to adaptive accounting. The bypass gate prevents the native MCP path
+from restoring `tool_side_effect`.
+
+The attribution workflow also passed live qualification at `66e8a1307`: a PR
+body edit completed a new strict attribution run while source run 39255933705
+stayed in progress and metadata source run 39256255876 queued. The preceding
+`70cfaf072` source run and associated workflows completed successfully. The full
+local script suite's only initial failure was a missing Go executable on PATH;
+that three-case generator fixture passed with the installed Go toolchain.
+
+Metadata qualification: production Make, six focused native fixtures and their
+ASan/UBSan builds pass; real C-to-Go bus parity covers the complete catalog and a
+307-byte qualified name. The bus sanitizer rerun uses the rebuilt Go executable;
+the earlier stale-binary attempt is retained separately. Go tools/execution-policy
+race suites and multicall tests pass. Actual CMake/CTest runtime/cache tests pass
+2/2, all 76 lint gates pass, and changed-source Cppcheck has no diagnostic
+increase. Four process-start calls in the touched bus fixture were moved outside
+assertions. The generated catalog's memory-prefixed capability names are reviewed
+as tools metadata in the existing ownership ledger; memory execution remains Go-owned.

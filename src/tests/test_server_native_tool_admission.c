@@ -61,16 +61,29 @@ int directive_check_tool(const char *tool, const char *wire, char *reason, size_
    snprintf(reason, capacity, "directive owner refusal");
    return directive_denied ? -1 : 0;
 }
-const char *tool_side_effect(const char *tool)
+static int metadata_refused;
+int tool_policy_metadata(const char *tool, aimee_tool_metadata_t *metadata, char *effect,
+                         size_t effect_len, char *reason, size_t reason_len)
 {
-   assert(!strcmp(tool, "git_push"));
-   return "external";
+   assert(!strcmp(tool, "git_push") && !strcmp(stages, "RD"));
+   stage('M');
+   if (metadata_refused)
+   {
+      snprintf(reason, reason_len, "metadata owner unavailable");
+      return -1;
+   }
+   *metadata = (aimee_tool_metadata_t){AIMEE_TOOL_CLASS_REMOTE, AIMEE_TOOL_POLICY_EXTERNAL,
+                                       AIMEE_TOOL_POLICY_EXTERNAL | AIMEE_TOOL_POLICY_NETWORK};
+   snprintf(effect, effect_len, "external");
+   return 0;
 }
-int policy_check_tool_attempt(const char *tool, const char *effect, const char *wire,
-                              const char *attempt, char *reason, size_t capacity)
+int policy_check_tool_metadata_attempt(const char *tool, const aimee_tool_metadata_t *metadata,
+                                       const char *effect, const char *wire, const char *attempt,
+                                       char *reason, size_t capacity)
 {
-   assert(!strcmp(stages, "RD") && !strcmp(effect, "external"));
+   assert(!strcmp(stages, "RDM") && !strcmp(effect, "external"));
    check_arguments(tool, wire);
+   assert(metadata->categories == (AIMEE_TOOL_POLICY_EXTERNAL | AIMEE_TOOL_POLICY_NETWORK));
    stage('P');
    snprintf(attempt_seen, sizeof attempt_seen, "%s", attempt);
    snprintf(reason, capacity, "policy owner refusal");
@@ -107,7 +120,7 @@ int main(void)
    char error[256] = "stale refusal";
    const char *result = admit("session-a", arguments, error, sizeof error);
    assert(!result && !error[0]);
-   assert(!strcmp(stages, "RDP") && !strcmp(attempt_seen, "native-mcp:host-callback-one"));
+   assert(!strcmp(stages, "RDMP") && !strcmp(attempt_seen, "native-mcp:host-callback-one"));
    snprintf(owner.request_id, sizeof owner.request_id, "host-callback-two");
    request_context_set(&owner);
    result = admit("session-a", arguments, error, sizeof error);
@@ -122,16 +135,19 @@ int main(void)
    directive_denied = 1;
    expect_refusal("session-a", arguments, "directive", "RD");
    directive_denied = 0;
+   metadata_refused = 1;
+   expect_refusal("session-a", arguments, "policy", "RDM");
+   metadata_refused = 0;
    policy_denied = 1;
-   expect_refusal("session-a", arguments, "policy", "RDP");
+   expect_refusal("session-a", arguments, "policy", "RDMP");
    policy_denied = 0;
    cancel_in_policy = 1;
-   expect_refusal("session-a", arguments, "cancelled", "RDP");
+   expect_refusal("session-a", arguments, "cancelled", "RDMP");
    cancel_in_policy = 0;
    expect_refusal("session-a", arguments, "cancelled", "");
    cancelled = 0;
    refuse_in_policy = 1;
-   expect_refusal("session-a", arguments, "context", "RDP");
+   expect_refusal("session-a", arguments, "context", "RDMP");
    refuse_in_policy = 0;
    expect_refusal("session-a", arguments, "context", "");
    request_context_set(&owner);

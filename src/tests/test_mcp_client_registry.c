@@ -1,3 +1,4 @@
+#include "modules/tools/tool_catalog_data.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -693,6 +694,18 @@ static void tool_signature(cJSON *tool, char *out, size_t outsz)
 }
 static void test_tools_list_surface(void)
 {
+   cJSON *flat_metadata = mcp_build_tools_list_flat();
+   const cJSON *entry = NULL;
+   cJSON_ArrayForEach(entry, flat_metadata)
+   {
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, "name"));
+      aimee_tool_metadata_t metadata = aimee_tools_catalog_metadata(name);
+      if (!aimee_tool_metadata_valid(&metadata))
+         fprintf(stderr, "missing served MCP policy metadata: %s\n", name ? name : "(null)");
+      assert(aimee_tool_metadata_valid(&metadata));
+   }
+   cJSON_Delete(flat_metadata);
+
    cJSON *tools = mcp_build_tools_list();
    assert(cJSON_IsArray(tools));
    static char sigs[256][512];

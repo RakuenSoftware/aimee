@@ -1,3 +1,4 @@
+#include "modules/tools/tool_catalog_data.h"
 #include "support/delegate_role_seam_stub.h"
 #include <aimee/ir/session_event.h>
 #include <assert.h>
@@ -677,12 +678,36 @@ static int tools_has(cJSON *arr, const char *name, int chat)
    return tools_find(arr, name, chat) != NULL;
 }
 
+static int catalog_metadata(const char *name, aimee_tool_metadata_t *out)
+{
+   *out = aimee_tools_catalog_metadata(name);
+   return 0;
+}
+
 static void test_tool_surface_single_source(void)
 {
    aimee_tool_t *canonical = NULL, *independent = NULL;
    int count = 0, independent_count = 0;
    int status = agent_tools_builtin_catalog(&canonical, &count);
    assert(status == 0 && count > 20);
+   aimee_tool_metadata_t metadata = {0};
+   assert(agent_tools_metadata("read_file", &metadata) == -1);
+   agent_tools_register_metadata(catalog_metadata);
+   for (int i = 0; i < count; ++i)
+   {
+      int classified = agent_tools_metadata(canonical[i].name, &metadata);
+      if (classified)
+         fprintf(stderr, "missing built-in policy metadata: %s\n", canonical[i].name);
+      assert(classified == 0 && aimee_tool_metadata_valid(&metadata));
+   }
+   metadata = (aimee_tool_metadata_t){AIMEE_TOOL_CLASS_READ, 1, 1};
+   assert(agent_tools_metadata("unregistered_tool", &metadata) == -1);
+   assert(!metadata.classification && !metadata.primary && !metadata.categories);
+   assert(agent_tools_metadata("remote:unknown", &metadata) == 0);
+   assert(metadata.classification == AIMEE_TOOL_CLASS_REMOTE);
+   assert(metadata.categories & AIMEE_TOOL_POLICY_EXTERNAL);
+   agent_tools_register_metadata(NULL);
+
    status = agent_tools_builtin_catalog(&independent, &independent_count);
    assert(status == 0 && independent_count == count);
    cJSON *chat = build_tools_array();

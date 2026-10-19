@@ -873,6 +873,18 @@ static int delegate_permissions(const uint8_t *request, size_t request_len, uint
    return 0;
 }
 
+static int tool_metadata(const char *name, aimee_tool_metadata_t *metadata)
+{
+   uint8_t request[AIMEE_TOOLS_METADATA_REQUEST_MAX], response[AIMEE_TOOLS_METADATA_LEN];
+   uint32_t response_len = 0;
+   size_t request_len = aimee_tools_metadata_request_encode(name, request, sizeof request);
+   if (!request_len ||
+       call_module(AIMEE_TOOLS_EVENT_DISPATCH, AIMEE_TOOLS_STAGE_DISPATCH, request,
+                   (uint32_t)request_len, response, sizeof(response), &response_len) != 0)
+      return -1;
+   return aimee_tools_metadata_response_decode(response, response_len, metadata);
+}
+
 static int tool_classify(const char *name, int *classification)
 {
    uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
@@ -1117,6 +1129,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_drift_provider(delegate_drift);
    delegate_register_permissions_provider(delegate_permissions);
    agent_tools_register_classifier(tool_classify);
+   agent_tools_register_metadata(tool_metadata);
    agent_tools_register_action_owner(policy_action_begin, policy_action_finish);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path

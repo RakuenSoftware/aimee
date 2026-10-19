@@ -5,6 +5,26 @@
 #include <aimee/tools/agent_tools.h>
 #include <aimee/tools/module_api.h>
 
+static agent_tool_metadata_fn g_tool_metadata;
+
+void agent_tools_register_metadata(agent_tool_metadata_fn provider)
+{
+   g_tool_metadata = provider;
+}
+
+int agent_tools_metadata(const char *name, aimee_tool_metadata_t *metadata)
+{
+   if (!metadata)
+      return -1;
+   memset(metadata, 0, sizeof(*metadata));
+   aimee_tool_metadata_t value = {0};
+   if (!name || !name[0] || !g_tool_metadata || g_tool_metadata(name, &value) != 0 ||
+       !aimee_tool_metadata_valid(&value))
+      return -1;
+   *metadata = value;
+   return 0;
+}
+
 static __thread ti_effect_contract_t g_effect;
 static __thread int g_effect_active;
 static __thread int g_effect_authorized;
