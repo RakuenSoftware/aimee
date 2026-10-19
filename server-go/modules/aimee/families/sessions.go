@@ -51,6 +51,7 @@ const (
 	opSessionIRHistorySave        uint32 = 32
 	opSessionIRHistoryLoad        uint32 = 33
 	opSessionHarnessCompareSwap   uint32 = 34
+	opSessionIRRunningHistoryLoad uint32 = 35
 )
 
 // Persona delivery states. The claim is an UPDATE guarded on unclaimed, so of
@@ -972,6 +973,7 @@ var Sessions = store.Family{
 		opSessionIRPage:               {Name: "session_ir_page", Args: 4, Run: sessionIRPage},
 		opSessionIRHistorySave:        {Name: "session_ir_history_save", Args: 5, Tx: true, Run: sessionIRHistorySave},
 		opSessionIRHistoryLoad:        {Name: "session_ir_history_load", Args: 4, Run: sessionIRHistoryLoad},
+		opSessionIRRunningHistoryLoad: {Name: "session_ir_running_history_load", Args: 3, Run: sessionIRRunningHistoryLoad},
 		opSessionHarnessGet:           {Name: "session_harness_get", Args: 3, Cells: 1, Run: sessionHarnessGet},
 		opSessionHarnessBind:          {Name: "session_harness_bind", Args: 4, Tx: true, Run: sessionHarnessBind},
 		opSessionHarnessCompareSwap:   {Name: "session_harness_compare_swap", Args: 5, Tx: true, Run: sessionHarnessCompareSwap},

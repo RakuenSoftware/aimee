@@ -108,35 +108,6 @@ static cJSON *git_handler(void)
    assert(out);
    return out;
 }
-#define GIT_HANDLER(name)                                                                          \
-   cJSON *handle_git_##name(cJSON *args)                                                           \
-   {                                                                                               \
-      (void)args;                                                                                  \
-      return git_handler();                                                                        \
-   }
-GIT_HANDLER(status)
-GIT_HANDLER(commit)
-GIT_HANDLER(push)
-GIT_HANDLER(branch)
-GIT_HANDLER(log)
-GIT_HANDLER(diff_summary)
-GIT_HANDLER(pr)
-GIT_HANDLER(pull)
-GIT_HANDLER(clone)
-GIT_HANDLER(stash)
-GIT_HANDLER(tag)
-GIT_HANDLER(fetch)
-GIT_HANDLER(reset)
-GIT_HANDLER(restore)
-GIT_HANDLER(issue)
-GIT_HANDLER(merge)
-GIT_HANDLER(rebase)
-GIT_HANDLER(cherry_pick)
-GIT_HANDLER(revert)
-GIT_HANDLER(sync)
-GIT_HANDLER(add)
-GIT_HANDLER(switch)
-GIT_HANDLER(checkout)
 cJSON *handle_git_verify(server_ctx_t *ctx, cJSON *args, const char *session)
 {
    (void)ctx;
@@ -185,3 +156,33 @@ int main(void)
    puts("shared Git dispatcher: caller cwd, session and worktree restored on success and refusals");
    return 0;
 }
+
+#define GIT_HANDLER(name)                                                                          \
+   cJSON *handle_git_##name(cJSON *args)                                                           \
+   {                                                                                               \
+      (void)args;                                                                                  \
+      return git_handler();                                                                        \
+   }
+GIT_HANDLER(status)
+GIT_HANDLER(commit)
+GIT_HANDLER(push)
+GIT_HANDLER(branch)
+GIT_HANDLER(log)
+GIT_HANDLER(diff_summary)
+GIT_HANDLER(pr)
+GIT_HANDLER(pull)
+GIT_HANDLER(clone)
+GIT_HANDLER(stash)
+GIT_HANDLER(tag)
+GIT_HANDLER(fetch)
+GIT_HANDLER(reset)
+GIT_HANDLER(restore)
+GIT_HANDLER(issue)
+GIT_HANDLER(merge)
+GIT_HANDLER(rebase)
+GIT_HANDLER(cherry_pick)
+GIT_HANDLER(revert)
+GIT_HANDLER(sync)
+GIT_HANDLER(add)
+GIT_HANDLER(switch)
+GIT_HANDLER(checkout)

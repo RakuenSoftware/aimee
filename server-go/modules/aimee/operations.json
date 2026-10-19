@@ -28155,6 +28155,55 @@
       }
     },
     {
+      "family": "sessions",
+      "id": 35,
+      "name": "session_ir_running_history_load",
+      "c_name": "db1_session_ir_running_history_load",
+      "c_params": [
+        "session_id",
+        "actor",
+        "active_turn"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "active_turn",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "messages_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 16777216
+      }
+    },
+    {
       "family": "telemetry",
       "id": 59,
       "name": "procedure_event_load",

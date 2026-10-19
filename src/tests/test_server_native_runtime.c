@@ -29,7 +29,7 @@ static _Thread_local server_delegate_scope_t delegate_scope;
 static _Thread_local const workspace_provider_t *workspace;
 static server_control_scope_t *alice_controls;
 static _Atomic(server_session_capture_t *) expected_capture;
-static atomic_int reject_proof, reject_durable;
+static atomic_int reject_proof, reject_durable, snapshot_fault, destination_invalid;
 static cJSON *captured_rows;
 static pthread_mutex_t capture_lock = PTHREAD_MUTEX_INITIALIZER;
 static workspace_provider_t alice_workspace = {.kind = WS_PROVIDER_SHARED};
@@ -272,6 +272,13 @@ int db1_server_session_get(const char *session, db1_server_session_t *out)
       strcpy(out->principal, "webuser:alice");
    else if (!strcmp(session, "session-b"))
       strcpy(out->principal, "webuser:bob");
+   else if (!strcmp(session, "private-child"))
+   {
+      if (atomic_load(&destination_invalid) == 1)
+         return -1;
+      strcpy(out->principal,
+             atomic_load(&destination_invalid) == 2 ? "webuser:bob" : "webuser:alice");
+   }
    else
       return -1;
    return 0;
@@ -632,6 +639,22 @@ static void test_cache_profile(const agent_t *selected, const request_context_t 
    owner_tools(1);
 }
 
+int db1_session_ir_running_history_load(const char *session, const char *actor, const char *turn,
+                                        char **out)
+{
+   server_session_capture_t *owner = server_session_capture_current();
+   assert(owner && !strcmp(session, server_session_capture_session(owner)));
+   assert(!strcmp(actor, "webuser:alice") && !strcmp(turn, "native-turn"));
+   *out = NULL;
+   if (atomic_load(&snapshot_fault) == 1)
+      return -1;
+   const char *wire = atomic_load(&snapshot_fault) == 2
+                          ? "[{\"role\":\"operator\",\"blocks\":[]}]"
+                          : "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":"
+                            "\"canonical source prompt\"}]}]";
+   *out = strdup(wire);
+   return *out ? 0 : -1;
+}
 /* The model callback emits typed observations; inspect what the actual retained
  * writer commits, without manufacturing a host execution terminal. */
 int db1_session_ir_append(const char *session, const char *id, const char *turn,
@@ -676,6 +699,11 @@ static void test_retained_capture(const agent_t *selected, const request_context
       assert(capture && !server_session_capture_bind(capture));
       server_native_runtime_t *runtime = server_native_runtime_open(selected, owner, "session-a");
       assert(runtime && server_session_capture_bind(NULL) == capture);
+      const cJSON *source = server_native_runtime_source_history(runtime);
+      assert(cJSON_IsArray(source) && cJSON_GetArraySize(source) == 1);
+      char *initial = cJSON_PrintUnformatted(source);
+      assert(initial && strstr(initial, "canonical source prompt"));
+      free(initial);
       atomic_store(&expected_capture, capture);
       atomic_store(&reject_proof, failure == 1);
       atomic_store(&reject_durable, failure == 2);
@@ -722,6 +750,47 @@ static void test_retained_capture(const agent_t *selected, const request_context
       atomic_store(&expected_capture, NULL);
       cJSON_Delete(captured_rows);
       captured_rows = NULL;
+   }
+}
+
+static void test_source_snapshot_refusal(const agent_t *selected, const request_context_t *owner)
+{
+   for (int failure = 1; failure <= 2; failure++)
+   {
+      owner_tools(1);
+      server_session_capture_t *capture =
+          server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+      assert(capture && !server_session_capture_bind(capture));
+      atomic_store(&snapshot_fault, failure);
+      server_native_runtime_t *runtime = server_native_runtime_open(selected, owner, "session-a");
+      assert(!runtime && server_session_capture_failed(capture));
+      server_session_capture_close(capture);
+   }
+   atomic_store(&snapshot_fault, 0);
+}
+
+static void test_private_source_revocation(const agent_t *selected, const request_context_t *owner)
+{
+   for (int failure = 1; failure <= 2; failure++)
+   {
+      owner_tools(1);
+      server_session_capture_t *capture =
+          server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+      assert(capture && !server_session_capture_bind(capture));
+      server_native_runtime_t *runtime = server_native_runtime_open(selected, owner, "session-a");
+      assert(runtime && server_session_capture_bind(NULL) == capture);
+      atomic_store(&destination_invalid, failure);
+      int before = atomic_load(&calls);
+      char response[1024];
+      request(runtime, failure == 1 ? "/v1/responses" : "/v1/mcp/call",
+              server_native_runtime_token(runtime), response);
+      assert(strstr(response, "502") && atomic_load(&calls) == before);
+      assert(server_session_capture_failed(capture) && !aimee_ir_session_capture_failed());
+      atomic_store(&destination_invalid, 0);
+      request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
+      assert(strstr(response, "502") && atomic_load(&calls) == before);
+      server_native_runtime_close(runtime);
+      server_session_capture_close(capture);
    }
 }
 
@@ -859,6 +928,8 @@ int main(void)
    server_native_runtime_close(claude);
    atomic_store(&source_changed, 0);
    test_retained_capture(&selected, &a);
+   test_source_snapshot_refusal(&selected, &a);
+   test_private_source_revocation(&selected, &a);
    unsetenv("AIMEE_ACTIVE_TOOLSET");
    unsetenv("AIMEE_DELEGATE_SOURCE_PATHS");
    agent_source_authority_snapshot_t absent = {0};

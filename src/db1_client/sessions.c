@@ -439,6 +439,29 @@ int db1_session_ir_history_load(const char *session_id, const char *scope, const
    return rc;
 }
 
+int db1_session_ir_running_history_load(const char *session_id, const char *actor,
+                                        const char *active_turn, char **out)
+{
+   if (!out)
+      return -1;
+   *out = NULL;
+   if (!session_id || !actor || !active_turn)
+      return -1;
+   const char *fields[] = {session_id, actor, active_turn};
+   char **cells = NULL;
+   uint32_t count = 0;
+   int status = primary_read(AIMEE_DB1_OP_SESSION_IR_RUNNING_HISTORY_LOAD, fields, 3, &cells, &count);
+   int rc = status == AIMEE_DB1_STATUS_MISSING ? 1 : -1;
+   if (status == AIMEE_DB1_STATUS_OK && count == 1)
+   {
+      *out = cells[0];
+      cells[0] = NULL;
+      rc = 0;
+   }
+   primary_cells_free(cells, count);
+   return rc;
+}
+
 int db1_session_ir_history_save(const char *session_id, const char *checkpoint, const char *scope,
                                 const char *actor, const char *messages_json)
 {

@@ -123,6 +123,47 @@ int server_session_capture_counts(server_session_capture_t *owner,
    pthread_mutex_unlock(&owner->lock);
    return 0;
 }
+int server_session_capture_history(server_session_capture_t *owner, cJSON **out)
+{
+   if (!out)
+      return -1;
+   *out = NULL;
+   if (!owner)
+      return -1;
+   pthread_mutex_lock(&owner->lock);
+   if (!server_session_capture_accepting(owner))
+   {
+      pthread_mutex_unlock(&owner->lock);
+      return -1;
+   }
+   char *wire = NULL;
+   int status =
+       db1_session_ir_running_history_load(owner->session, owner->principal, owner->turn, &wire);
+   cJSON *history = !status && wire ? aimee_ir_json_parse_frame(wire, strlen(wire)) : NULL;
+   free(wire);
+   int valid = cJSON_IsArray(history) && cJSON_GetArraySize(history) <= AIMEE_IR_MAX_BLOCKS;
+   const cJSON *item;
+   cJSON_ArrayForEach(item, history)
+   {
+      aimee_message_t message = {0};
+      int parsed = aimee_ir_message_parse(item, &message);
+      aimee_request_t admitted = {.messages = &message, .n_messages = 1};
+      valid = valid && !parsed && !aimee_ir_request_admit(&admitted);
+      aimee_message_free(&message);
+      if (!valid)
+         break;
+   }
+   if (valid)
+      *out = history;
+   else
+   {
+      cJSON_Delete(history);
+      server_session_capture_fail(owner);
+   }
+   pthread_mutex_unlock(&owner->lock);
+   return valid ? 0 : -1;
+}
+
 static int qualify(cJSON *payload, const char *field, const char *turn, const char *native)
 {
    if (!native)

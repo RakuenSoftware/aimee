@@ -12,6 +12,15 @@
 static pthread_mutex_t storage = PTHREAD_MUTEX_INITIALIZER;
 static cJSON *rows;
 static int reject_append, observations;
+static int history_status;
+static const char *history_wire;
+int db1_session_ir_running_history_load(const char *session, const char *actor, const char *turn,
+                                        char **out)
+{
+   assert(!strcmp(session, "private-child") && !strcmp(actor, "alice") && !strcmp(turn, "turn"));
+   *out = history_status ? NULL : strdup(history_wire);
+   return history_status;
+}
 int db1_session_ir_append(const char *session, const char *id, const char *turn,
                           const char *principal, const char *wire, char sequence[32])
 {
@@ -209,6 +218,49 @@ static void test_failure_refuses_success(void)
           server_session_capture_failed(owner));
    server_session_capture_close(owner);
 }
+static void test_running_history_source(void)
+{
+   reset();
+   server_session_capture_t *owner =
+       server_session_capture_open("private-child", "turn", "alice", "parent");
+   assert(owner);
+   history_status = 0;
+   history_wire =
+       "[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"source-call\","
+       "\"name\":\"exec_command\",\"input\":{\"amount\":123.123456789012345678901234567890}}]}]";
+   cJSON *source = NULL;
+   int loaded = server_session_capture_history(owner, &source);
+   char *wire = source ? cJSON_PrintUnformatted(source) : NULL;
+   assert(!loaded && wire && strstr(wire, "source-call") && strstr(wire, "exec_command") &&
+          strstr(wire, "123.123456789012345678901234567890"));
+   free(wire);
+   cJSON_Delete(source);
+   assert(!server_session_capture_failed(owner));
+   server_session_capture_close(owner);
+   const char *invalid[] = {"{}", "[] trailing",
+                            "[{\"role\":\"user\",\"role\":\"assistant\",\"blocks\":[]}]",
+                            "[{\"role\":\"operator\",\"blocks\":[]}]",
+                            "[{\"role\":\"user\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":"
+                            "\"forged\",\"name\":\"exec_command\",\"input\":{}}]}]"};
+   for (unsigned i = 0; i < sizeof invalid / sizeof invalid[0] + 2; i++)
+   {
+      owner = server_session_capture_open("private-child", "turn", "alice", "parent");
+      assert(owner);
+      history_status = i < sizeof invalid / sizeof invalid[0]    ? 0
+                       : i == sizeof invalid / sizeof invalid[0] ? 1
+                                                                 : -1;
+      history_wire = history_status ? NULL : invalid[i];
+      source = NULL;
+      loaded = server_session_capture_history(owner, &source);
+      assert(loaded < 0 && !source && server_session_capture_failed(owner));
+      history_status = 0;
+      history_wire = "[]";
+      loaded = server_session_capture_history(owner, &source);
+      assert(loaded < 0 && !source); /* A later healthy read cannot clear failure. */
+      server_session_capture_close(owner);
+   }
+}
+
 int main(void)
 {
    server_session_capture_t *absent = NULL;
@@ -217,6 +269,7 @@ int main(void)
    test_concurrent_owner();
    test_close_before_callback();
    test_failure_refuses_success();
+   test_running_history_source();
    cJSON_Delete(rows);
    puts("retained capture: copied identity, concurrent counters, exact IR, sealed turns and sticky "
         "failure passed");

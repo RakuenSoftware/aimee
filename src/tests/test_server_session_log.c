@@ -78,6 +78,16 @@ int db1_server_session_create(const char *id, const char *client, const char *ac
    pthread_mutex_unlock(&lock);
    return 0;
 }
+int db1_session_ir_running_history_load(const char *session, const char *actor, const char *turn,
+                                        char **out)
+{
+   (void)session;
+   (void)actor;
+   (void)turn;
+   *out = NULL;
+   assert(!"this producer fixture does not request a native startup snapshot");
+   return -1;
+}
 int db1_session_ir_append(const char *session, const char *id, const char *turn, const char *actor,
                           const char *wire, char sequence[32])
 {

@@ -67,11 +67,32 @@ const sessionIRHistorySQL = `SELECT turn_id, payload FROM session_ir_events
  WHERE session_id=$1 AND EXISTS(SELECT 1 FROM server_sessions WHERE id=$1 AND principal=$2)
  ORDER BY sequence`
 
+const sessionIRRunningHistorySQL = `SELECT sequence::text, turn_id, actor, payload FROM session_ir_events
+ WHERE session_id=$1 AND EXISTS(SELECT 1 FROM server_sessions WHERE id=$1 AND principal=$2)
+ ORDER BY sequence`
+
 func sessionIRHistoryLoad(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	return sessionIRHistoryProject(ctx, q, f, false)
+}
+
+// The host owns this running execution. Include its committed observations for
+// native request reconciliation, without changing completed-history loading.
+func sessionIRRunningHistoryLoad(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	if f[0] == "" || f[1] == "" || f[2] == "" {
 		return store.StatusInvalid, nil, nil
 	}
-	rows, err := q.Query(ctx, sessionIRHistorySQL, f[0], f[2])
+	return sessionIRHistoryProject(ctx, q, []string{f[0], "primary", f[1], f[2]}, true)
+}
+
+func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, running bool) (uint32, []string, error) {
+	if f[0] == "" || f[1] == "" || f[2] == "" {
+		return store.StatusInvalid, nil, nil
+	}
+	query := sessionIRHistorySQL
+	if running {
+		query = sessionIRRunningHistorySQL
+	}
+	rows, err := q.Query(ctx, query, f[0], f[2])
 	if err != nil {
 		return 0, nil, err
 	}
@@ -82,9 +103,24 @@ func sessionIRHistoryLoad(ctx context.Context, q store.Queryer, f []string) (uin
 	positions := map[string]map[string]int{}
 	found := false
 	open := map[string]bool{}
+	var previous uint64
 	for rows.Next() {
 		var turn, payload string
-		if err = rows.Scan(&turn, &payload); err != nil {
+		if running {
+			var sequence, actor string
+			err = rows.Scan(&sequence, &turn, &actor, &payload)
+			if err == nil {
+				n, parseErr := strconv.ParseUint(sequence, 10, 64)
+				if parseErr != nil || n == 0 || strconv.FormatUint(n, 10) != sequence || n != previous+1 ||
+					actor != f[2] || !validSessionIREvent([]byte(payload)) {
+					return 0, nil, fmt.Errorf("invalid running canonical history source")
+				}
+				previous = n
+			}
+		} else {
+			err = rows.Scan(&turn, &payload)
+		}
+		if err != nil {
 			return 0, nil, err
 		}
 		var event struct {
@@ -167,10 +203,25 @@ func sessionIRHistoryLoad(ctx context.Context, q store.Queryer, f []string) (uin
 	if err = rows.Err(); err != nil {
 		return 0, nil, err
 	}
+	if running && len(checkpoints) != 0 {
+		return 0, nil, fmt.Errorf("incomplete canonical history checkpoint")
+	}
 	for turn := range open {
 		if turn != f[3] {
 			return 0, nil, fmt.Errorf("unfinished canonical execution requires reconciliation")
 		}
+	}
+	if running {
+		if !open[f[3]] {
+			return store.StatusMissing, nil, nil
+		}
+		for turn, messages := range pending {
+			if turn != f[3] && len(messages) != 0 {
+				return 0, nil, fmt.Errorf("unfinished canonical observations require reconciliation")
+			}
+		}
+		history = append(history, pending[f[3]]...)
+		found = true
 	}
 	if !found {
 		return store.StatusMissing, nil, nil
@@ -178,6 +229,14 @@ func sessionIRHistoryLoad(ctx context.Context, q store.Queryer, f []string) (uin
 	encoded, err := encodeSessionIR(history)
 	if err != nil {
 		return 0, nil, err
+	}
+	if running {
+		// Session observations allow diagnostic roles. A native request snapshot
+		// must also pass the existing model-history admission contract. Retain
+		// the original JSON, including exact tool arguments, after validation.
+		if _, err = canonical.DecodeMessages(encoded); err != nil {
+			return 0, nil, err
+		}
 	}
 	return store.StatusOK, []string{string(encoded)}, nil
 }

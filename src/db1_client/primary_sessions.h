@@ -45,6 +45,11 @@ extern "C"
                                    const char *scope, const char *actor, const char *messages_json);
    int db1_session_ir_history_load(const char *session_id, const char *scope, const char *actor,
                                    const char *active_turn, char **out);
+   /* Owner-checked primary conversation including this running turn's committed
+    * observations. Missing/non-running returns 1; corruption/outage returns -1.
+    * Existing completed-history loading above keeps excluding pending content. */
+   int db1_session_ir_running_history_load(const char *session_id, const char *actor,
+                                           const char *active_turn, char **out);
 
    /* Native resume metadata; get returns 0 found, 1 missing, -1 failure. */
    int db1_session_harness_get(const char *session_id, const char *harness, char *out_native_id,

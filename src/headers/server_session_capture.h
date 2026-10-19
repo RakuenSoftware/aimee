@@ -28,6 +28,9 @@ int server_session_capture_failed(const server_session_capture_t *owner);
 int server_session_capture_accepting(const server_session_capture_t *owner);
 int server_session_capture_counts(server_session_capture_t *owner,
                                   server_session_capture_counts_t *out);
+/* Owned, admitted canonical conversation including this running turn. Never
+ * imports native files; source absence/corruption makes capture failure sticky. */
+int server_session_capture_history(server_session_capture_t *owner, struct cJSON **out);
 /* Optional owned transport envelope and sequence. Capture failure is sticky;
  * only a failed/cancelled terminal may still be recorded after a failure.
  * A committed terminal seals further event writes without invalidating leases. */

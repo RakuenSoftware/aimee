@@ -5,6 +5,7 @@
 #include "request_context.h"
 
 typedef struct server_native_runtime server_native_runtime_t;
+struct cJSON;
 
 /* Own one native child's local transport. The source session must already belong
  * to the attested request owner. No operator/global CLI credential is borrowed.
@@ -24,6 +25,10 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
 const char *server_native_runtime_url(const server_native_runtime_t *runtime);
 const char *server_native_runtime_token(const server_native_runtime_t *runtime);
 const char *server_native_runtime_binding(const server_native_runtime_t *runtime);
+/* Immutable initial canonical source, including the running host turn. Borrowed
+ * until close; NULL for a runtime without a capture owner. Native files are not
+ * consulted. Later observations do not change this initial snapshot. */
+const struct cJSON *server_native_runtime_source_history(const server_native_runtime_t *runtime);
 /* A cache scope includes the captured host authority and these independently
  * attested launch/resource identities. Digests must describe the actual SDK
  * build, effective launch settings (including sandbox, built-ins and hooks),

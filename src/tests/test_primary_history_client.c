@@ -29,7 +29,24 @@ aimee_module_call_result_t obs_bus_module_call(uint32_t kind, uint32_t stage, ui
    (void)context;
    calls++;
    uint32_t op = aimee_db1_get_u32(request);
-   int load = op == AIMEE_DB1_OP_PRIMARY_SESSION_LOAD;
+   int running = op == AIMEE_DB1_OP_SESSION_IR_RUNNING_HISTORY_LOAD;
+   int load = op == AIMEE_DB1_OP_PRIMARY_SESSION_LOAD || running;
+   if (running)
+   {
+      assert(kind == AIMEE_DB1_EVENT_SESSIONS && stage == AIMEE_DB1_STAGE_SESSIONS);
+      assert(aimee_db1_get_u32((const uint8_t *)request + 4) == 3);
+      const char *expected[] = {"session", "owner", "active"};
+      size_t at = 8;
+      for (unsigned i = 0; i < 3; i++)
+      {
+         uint32_t size = aimee_db1_get_u32((const uint8_t *)request + at);
+         at += 4;
+         assert(size == strlen(expected[i]) && at + size <= request_len);
+         assert(!memcmp((const uint8_t *)request + at, expected[i], size));
+         at += size;
+      }
+      assert(at == request_len);
+   }
    const char *cells[] = {"session", "codex", "chatgpt", "created", "updated", transcript};
    int count = transcript ? (load ? 1 : 6) : 0;
    size_t total = 8;
@@ -62,6 +79,10 @@ int main(void)
    char *loaded = db1_primary_session_load("session", "codex", "chatgpt");
    assert(loaded && !strcmp(loaded, transcript) && calls == 2);
    free(loaded);
+   loaded = NULL;
+   int snapshot = db1_session_ir_running_history_load("session", "owner", "active", &loaded);
+   assert(!snapshot && loaded && !strcmp(loaded, transcript));
+   free(loaded);
    db1_primary_session_row_t row;
    assert(db1_primary_session_get_latest("session", &row) == 0);
    assert(!strcmp(row.messages_json, transcript) && !strcmp(row.provider, "chatgpt"));
@@ -75,6 +96,9 @@ int main(void)
    db1_primary_session_rows_free(rows, 1);
    malformed = 1;
    assert(db1_primary_session_get_latest("session", &row) == -1 && !row.messages_json);
+   loaded = NULL;
+   snapshot = db1_session_ir_running_history_load("session", "owner", "active", &loaded);
+   assert(snapshot == -1 && !loaded);
    malformed = 0;
    too_large = 1;
    unsigned before = calls;
@@ -83,9 +107,13 @@ int main(void)
    free(transcript);
    transcript = NULL;
    assert(db1_primary_session_get_latest("session", &row) == 1);
+   snapshot = db1_session_ir_running_history_load("session", "owner", "active", &loaded);
+   assert(snapshot == 1 && !loaded);
    unavailable = 1;
    assert(db1_primary_session_get_latest("session", &row) == -1);
-   puts(
-       "primary history transport: large load/latest/list/search, bounds and missing/error passed");
+   snapshot = db1_session_ir_running_history_load("session", "owner", "active", &loaded);
+   assert(snapshot == -1 && !loaded);
+   puts("primary history transport: large load/latest/list/search, running snapshots, bounds and "
+        "missing/error passed");
    return 0;
 }

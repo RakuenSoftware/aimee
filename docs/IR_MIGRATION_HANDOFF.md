@@ -2751,3 +2751,49 @@ All 76 lint gates also pass for the expanded real-SDK catalog fixture. The
 unchanged native production code retains the preceding 657-test, sanitizer and
 167-check integration qualification. Fresh PR CI remains pending the follow-up
 PR decision; no new PR, attribution exemption or production deployment made.
+
+
+## Owner-checked snapshots of an active canonical turn
+
+The new sessions operation 35 loads primary history for an exact session, actor
+and running turn. It reads the durable log in one statement, validates contiguous
+sequence, event ownership and model-message admission, and includes the current
+turn's committed observations. The completed-history operation retains its old
+contract. Missing/closed turns, malformed history, unfinished checkpoints and
+unrelated open turns do not produce a partial snapshot. Exact JSON numeric
+lexemes and original tool identities survive projection.
+
+The retained capture owner reads this snapshot using its copied destination,
+principal and turn. Native runtime construction retains an immutable initial
+snapshot and refuses absent/corrupt history. Private callbacks also recheck their
+destination's ownership, in addition to the transport parent's; revocation fails
+the shared capture permanently. This does not implement native request-prefix
+reconciliation or activate SDK execution.
+
+Qualification: the registered 657-binary suite and proxy regressions pass; five
+focused ASan/UBSan fixtures, five CMake/CTest fixtures and the actual application
+build pass. Three Go packages pass race tests, and the new live PostgreSQL 18
+snapshot/ownership/checkpoint regression passes with race detection. Cppcheck on
+eight affected sources reports ten known diagnostics and no increase. The DB1
+client contract check passes. CMake's history-client fixture now links its
+existing transport dependency, as its Make target already did.
+
+The broader PostgreSQL integration run FAILED: 164/168 checks, with 26 existing
+service skips. It reproduced the outstanding CI private model-store timeout and
+blocked memory-owner shutdown; dependent model read/correction checks also fail.
+Its captured stack includes a code-index initialization mutex wait. This remains
+an active defect, not a flaky-test exemption. Full diagnostics are in
+/var/tmp/aimee-ir-script-scope-pg18-integration.log.
+
+The user authorized one follow-up PR after #3050 merged. PR #3052 targets testing
+and has started fresh CI; all further migration work stays in that PR. Automatic
+reviews and the attribution gate remain enabled. Production remains KB-free and
+has not been promoted.
+
+All 76 local lint gates and 21 semantic-context benchmark regressions pass for
+the running-history increment. Fresh #3052 CI found a formatter difference in
+the Git fixture: Ubuntu's clang-format 19.1.1 treats its generated stub group as
+an unfinished declaration before subsequent functions, while local 19.1.7 did
+not. Moving those unchanged generated stubs after the ordinary functions passes
+both exact formatter versions, without a format exemption or toolchain change.
+The attribution/no-coauthor gate has passed on #3052.

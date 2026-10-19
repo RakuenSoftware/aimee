@@ -517,7 +517,8 @@ if(NOT WIN32)
     ../modules/ir/aimee_ir.c ../modules/ir/session_event.c
     ../modules/ir/aimee_ir_metrics.c ../text.c ../util.c ../vendor/cJSON.c)
   add_executable(test_primary_history_client test_primary_history_client.c
-    ../db1_client/sessions.c ../primary_session_release.c ../module_json_call.c ../log.c)
+    ../db1_client/transport.c ../db1_client/sessions.c ../primary_session_release.c
+    ../module_json_call.c ../log.c)
   foreach(history_test test_primary_session_adapter test_primary_history_client)
     target_include_directories(${history_test} PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
       ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../headers

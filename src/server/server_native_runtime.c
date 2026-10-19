@@ -33,6 +33,7 @@ struct server_native_runtime
    server_session_capture_t *capture;
    cli_proxy_t *listener;
    server_native_replay_t *replay;
+   cJSON *source_history;
    agent_t selected;
    request_context_t owner;
    agent_request_creds_t credentials;
@@ -152,7 +153,20 @@ static int native_forward(const char *method, const char *path, const char *head
    db1_server_session_t source;
    if (db1_server_session_get(runtime->session, &source) ||
        strcmp(source.principal, runtime->owner.vault_principal))
+   {
+      server_session_capture_fail(runtime->capture);
       return -1;
+   }
+   const char *destination = server_session_capture_session(runtime->capture);
+   if (destination && strcmp(destination, runtime->session) &&
+       (db1_server_session_get(destination, &source) ||
+        strcmp(source.principal, runtime->owner.vault_principal)))
+   {
+      /* A parent's transport grant does not survive deletion or reassignment
+       * of the private history which this execution would disclose. */
+      server_session_capture_fail(runtime->capture);
+      return -1;
+   }
    int model_request = !strcmp(method, "POST") && (strncmp(path, "/v1/mcp/", 8) != 0);
    /* Model state requires the actual selected Vault source's stable lineage.
     * Unsupported credential sources cannot borrow a default account. */
@@ -377,6 +391,9 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
        server_control_scope_capture(session_id, owner->vault_principal, &runtime->controls) ||
        server_session_capture_retain_current(session_id, owner->vault_principal, &runtime->capture))
       goto failed;
+   if (runtime->capture &&
+       server_session_capture_history(runtime->capture, &runtime->source_history))
+      goto failed;
    /* An ordinary primary has no delegate source overlay. Make that absence
     * explicit rather than falling back to a concurrent delegate's global env. */
    if (!runtime->source.active)
@@ -592,12 +609,18 @@ int server_native_runtime_cache_scope(const server_native_runtime_t *runtime,
    return rc;
 }
 
+const cJSON *server_native_runtime_source_history(const server_native_runtime_t *runtime)
+{
+   return runtime ? runtime->source_history : NULL;
+}
+
 void server_native_runtime_close(server_native_runtime_t *runtime)
 {
    if (!runtime)
       return;
    cli_proxy_stop(runtime->listener);
    server_native_replay_close(runtime->replay);
+   cJSON_Delete(runtime->source_history);
    server_control_scope_release(runtime->controls);
    server_session_capture_release(runtime->capture);
    agent_tools_scope_destroy_owned(&runtime->tools);
