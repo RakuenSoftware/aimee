@@ -3117,3 +3117,38 @@ audit, fuzz, release and attribution workflows also pass. The two testing-target
 platform skips remain unchanged; Windows/macOS were not run on that head.
 This is a qualified checkpoint, not completion of the whole migration. The
 owned-context increment still needs its own published-head CI qualification.
+
+
+## Running history numeric ordering and early streaming tool outcomes
+
+The live streaming-history fixture reproduced a previously hidden running-query
+bug after sequence 9: selecting `sequence::text` and ordering by the unqualified
+output name sorted PostgreSQL rows as 1, 10, 11, ... 2. The reader correctly refused
+that apparent gap. The running loader now orders by the qualified underlying
+BIGINT column; sequence output remains a string for JavaScript precision. The
+completed-history query and paged replay select numeric sequences already and
+were independently checked for the same defect. They do not need a cast fix.
+No stored event is rewritten. Source diagnostics now distinguish sequence,
+actor and event failures without including payload content.
+
+A native SDK can finish an original tool call while its model stream remains
+open, before the final assistant message snapshot commits. The history projector
+now remembers valid assistant TURN_START positions and orders later snapshots by
+that first durable observation, retaining tool outcomes after their original
+calls. Duplicate snapshots replace the same slot; checkpoints and terminal turns
+reset observation indexes. Unmatched starts do not create messages, and their
+tracking is bounded by the canonical message limit. Non-assistant messages keep
+their observed position. This derives history only from the existing log.
+
+Focused running/completed tests cover early outcomes, repeated snapshots,
+unmatched starts, checkpoint reset and tracking bounds. The PostgreSQL 18 fixture
+commits real start/block/argument/stop events plus an outcome before the final
+snapshot, crosses sequence 10, and preserves exact 30-digit arguments. It also
+checks that each stored event remains canonically admitted. The three Go race
+packages pass, as does the normal server/module PostgreSQL integration run:
+167/167 with the same 26 unavailable-service skips. All 76 lint gates pass.
+
+Original tool-source verification still needs to use actual writer-committed IR
+when callbacks precede the final snapshot; an SDK-normalized command is not a
+source receipt. Effects remain with the existing governed-action owner, not a
+new receipt store. SDK launch sites are still unactivated.

@@ -64,6 +64,83 @@ func TestSessionIRRunningHistoryIncludesOnlyOwnedCommittedConversation(t *testin
 	}
 }
 
+// Provider TURN_START precedes SDK execution, but its final message snapshot
+// can arrive after an actual tool result. Both running and completed consumers
+// must retain causal order without making unmatched deltas into content.
+func TestSessionIRHistoryOrdersStreamSnapshotBeforeEarlyToolResult(t *testing.T) {
+	const start = `{"kind":"delta","message_id":"provider-response","role":"assistant","payload":{"type":"TURN_START"}}`
+	const original = `{"kind":"message","message_id":"provider-response","payload":{"role":"assistant","blocks":[{"type":"tool_use","tool_id":"original-call","namespace":"aimee","name":"read_file","input":{"value":0.123456789012345678901234567890}}]}}`
+	const result = `{"kind":"message","message_id":"actual-tool-result","payload":{"role":"tool","blocks":[{"type":"tool_result","tool_id":"original-call","content":"actual result","is_error":false}]}}`
+	const unmatched = `{"kind":"delta","message_id":"no-snapshot","role":"assistant","payload":{"type":"TURN_START"}}`
+	for _, running := range []bool{true, false} {
+		for _, repeat := range []bool{false, true} {
+			db := newSessDB()
+			events := [][2]string{{"active", runningStart}, {"active", runningUser}, {"active", unmatched}, {"active", start}, {"active", result}, {"active", original}}
+			if repeat {
+				events = append(events, [2]string{"active", original})
+			}
+			if !running {
+				events = append(events, [2]string{"active", runningDone})
+			}
+			db.rows = runningHistoryRows(events...)
+			var status uint32
+			var cells []string
+			var err error
+			if running {
+				status, cells, err = sessionIRRunningHistoryLoad(context.Background(), db, []string{"s", "owner", "active"})
+			} else {
+				for i, row := range db.rows {
+					db.rows[i] = []any{row[1], row[3]}
+				}
+				status, cells, err = sessionIRHistoryLoad(context.Background(), db, []string{"s", "primary", "owner", ""})
+			}
+			if err != nil || status != store.StatusOK || len(cells) != 1 {
+				t.Fatal(running, repeat, status, cells, err)
+			}
+			var history []struct {
+				Role   string            `json:"role"`
+				Blocks []json.RawMessage `json:"blocks"`
+			}
+			if json.Unmarshal([]byte(cells[0]), &history) != nil || len(history) != 3 || history[0].Role != "user" || history[1].Role != "assistant" || history[2].Role != "tool" {
+				t.Fatal("causal history order lost", running, repeat, cells)
+			}
+			if !strings.Contains(string(history[1].Blocks[0]), "0.123456789012345678901234567890") || !strings.Contains(string(history[2].Blocks[0]), "actual result") {
+				t.Fatal("original call/result changed", cells)
+			}
+		}
+	}
+}
+
+func TestSessionIRHistoryBoundsUnmatchedStreamStarts(t *testing.T) {
+	db := newSessDB()
+	events := [][2]string{{"active", runningStart}, {"active", runningUser}}
+	for i := 0; i < 4097; i++ {
+		events = append(events, [2]string{"active", fmt.Sprintf(`{"kind":"delta","message_id":"stream-%d","role":"assistant","payload":{"type":"TURN_START"}}`, i)})
+	}
+	db.rows = runningHistoryRows(events...)
+	_, cells, err := sessionIRRunningHistoryLoad(context.Background(), db, []string{"s", "owner", "active"})
+	if err == nil || len(cells) != 0 || !strings.Contains(err.Error(), "capacity") {
+		t.Fatal("unbounded unmatched stream order", cells, err)
+	}
+}
+
+func TestSessionIRHistoryCheckpointResetsStreamObservationOrder(t *testing.T) {
+	const oldStart = `{"kind":"delta","message_id":"reused-id","role":"assistant","payload":{"type":"TURN_START"}}`
+	const checkpointMessage = `{"kind":"history","payload":{"scope":"primary","phase":"message","index":0,"message":{"role":"user","blocks":[{"type":"text","text":"checkpoint"}]}}}`
+	const checkpointCommit = `{"kind":"history","payload":{"scope":"primary","phase":"commit","count":1}}`
+	const first = `{"kind":"message","message_id":"new-id","payload":{"role":"assistant","blocks":[{"type":"text","text":"first after checkpoint"}]}}`
+	const second = `{"kind":"message","message_id":"reused-id","payload":{"role":"assistant","blocks":[{"type":"text","text":"second after checkpoint"}]}}`
+	db := newSessDB()
+	db.rows = runningHistoryRows([2]string{"active", runningStart}, [2]string{"active", oldStart}, [2]string{"checkpoint", checkpointMessage}, [2]string{"checkpoint", checkpointCommit}, [2]string{"active", first}, [2]string{"active", second})
+	status, cells, err := sessionIRRunningHistoryLoad(context.Background(), db, []string{"s", "owner", "active"})
+	if err != nil || status != store.StatusOK || len(cells) != 1 {
+		t.Fatal(status, cells, err)
+	}
+	if strings.Index(cells[0], "first after checkpoint") > strings.Index(cells[0], "second after checkpoint") || !strings.Contains(cells[0], "checkpoint") {
+		t.Fatal("old observed position crossed checkpoint", cells)
+	}
+}
+
 func TestSessionIRRunningHistoryRefusesCorruptAndUnreconciledSource(t *testing.T) {
 	base := func() [][]any {
 		return runningHistoryRows([2]string{"active", runningStart}, [2]string{"active", runningUser})
@@ -167,6 +244,11 @@ func TestSessionIRLiveRunningHistoryOwnerSnapshotAndCheckpoint(t *testing.T) {
 		if err = tx.Commit(ctx); err != nil {
 			t.Fatal(err)
 		}
+		var stored string
+		if err = pool.QueryRow(ctx, `SELECT payload FROM session_ir_events WHERE session_id='s' AND event_id=$1`, id).Scan(&stored); err != nil || !validSessionIREvent([]byte(stored)) {
+			t.Fatalf("stored event %s failed admission: %s (%v)", id, stored, err)
+		}
+
 	}
 	snapshot := func(actor string) (uint32, string, error) {
 		t.Helper()
@@ -214,6 +296,21 @@ func TestSessionIRLiveRunningHistoryOwnerSnapshotAndCheckpoint(t *testing.T) {
 	appendEvent("active:answer", "active", `{"kind":"message","message_id":"answer","payload":{"role":"assistant","blocks":[{"type":"text","text":"actual answer"}]}}`)
 	if status, wire, err = snapshot("owner"); err != nil || status != store.StatusOK || strings.Count(wire, "actual answer") != 1 || strings.Contains(wire, "current user") {
 		t.Fatal(status, wire, err)
+	}
+	appendEvent("active:model-start", "active", `{"kind":"delta","message_id":"streamed-call","role":"assistant","payload":{"type":"TURN_START"}}`)
+	appendEvent("active:call-start", "active", `{"kind":"delta","message_id":"streamed-call","role":"assistant","payload":{"type":"BLOCK_START","block_id":0,"kind":"tool_use","tool_id":"original-call","namespace":"aimee","name":"read_file","input":{}}}`)
+	encodedArguments, err := json.Marshal(`{"value":0.123456789012345678901234567890}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendEvent("active:call-arguments", "active", `{"kind":"delta","message_id":"streamed-call","role":"assistant","payload":{"type":"BLOCK_DELTA","block_id":0,"kind":"tool_use","tool_args_delta":`+string(encodedArguments)+`}}`)
+	appendEvent("active:call-ready", "active", `{"kind":"delta","message_id":"streamed-call","role":"assistant","payload":{"type":"BLOCK_STOP","block_id":0,"kind":"tool_use"}}`)
+	appendEvent("active:call-result", "active", `{"kind":"message","message_id":"actual-call-result","payload":{"role":"tool","blocks":[{"type":"tool_result","tool_id":"original-call","content":"verified result","is_error":false}]}}`)
+	appendEvent("active:model-stop", "active", `{"kind":"delta","message_id":"streamed-call","role":"assistant","payload":{"type":"TURN_STOP"}}`)
+	appendEvent("active:model-snapshot", "active", `{"kind":"message","message_id":"streamed-call","payload":{"role":"assistant","blocks":[{"type":"tool_use","tool_id":"original-call","namespace":"aimee","name":"read_file","input":{"value":0.123456789012345678901234567890}}]}}`)
+	status, wire, err = snapshot("owner")
+	if err != nil || status != store.StatusOK || !strings.Contains(wire, "0.123456789012345678901234567890") || strings.Index(wire, "tool_use") > strings.Index(wire, "tool_result") {
+		t.Fatal("live early tool result reordered before source", status, wire, err)
 	}
 	appendEvent("active:done", "active", runningDone)
 	if status, wire, err = snapshot("owner"); err != nil || status != store.StatusMissing || wire != "" {
