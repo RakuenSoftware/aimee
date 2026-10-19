@@ -42,7 +42,18 @@ def mcp_fixture():
         print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
 
 
-def qualify(adapter_binary, codex_binary):
+def tool_names(tools, prefix=""):
+    result = set()
+    for tool in tools:
+        name = tool.get("name", tool.get("type", "unknown"))
+        if tool.get("type") == "namespace":
+            result.update(tool_names(tool.get("tools", []), prefix + name + "."))
+        else:
+            result.add(prefix + name)
+    return result
+
+
+def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False):
     requests = []
     errors = []
 
@@ -56,6 +67,18 @@ def qualify(adapter_binary, codex_binary):
                 assert not self.headers.get("Content-Encoding")
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 requests.append(body)
+                if bounded_sdk_catalog:
+                    # Inspect every real provider catalog, including restarted
+                    # resume and fresh/tail adoption. An accepted config key
+                    # alone does not establish its effect.
+                    names = tool_names(body["tools"])
+                    # SDK resource helpers route through configured MCP servers.
+                    # This qualifies the catalog, not Aimee's still-unwired
+                    # native resource ingress or its authorization/receipts.
+                    allowed = {"mcp__fixture.fail", "request_user_input",
+                               "functions.request_user_input", "list_mcp_resources",
+                               "list_mcp_resource_templates", "read_mcp_resource"}
+                    assert "mcp__fixture.fail" in names and names <= allowed, sorted(names)
                 number = len(requests)
                 item = {
                     "id": f"msg_fixture_{number}", "type": "message", "role": "assistant",
@@ -107,8 +130,14 @@ def qualify(adapter_binary, codex_binary):
             native = home / ".codex"
             native.mkdir()
             # Config contains only local fixture routing, never auth.json.
+            restricted = (
+                'web_search="disabled"\n[features]\n'
+                'shell_tool=false\nunified_exec=false\nmulti_agent=false\n'
+                'apps=false\nremote_plugin=false\ngoals=false\nview_image=false\n'
+                'image_generation=false\nhooks=false\nshell_snapshot=false\nmemories=false\n'
+            ) if bounded_sdk_catalog else ""
             (native / "config.toml").write_text(
-                'model="fixture-model"\nmodel_provider="fixture"\n'
+                'model="fixture-model"\nmodel_provider="fixture"\n' + restricted +
                 '[model_providers.fixture]\nname="Native fixture"\n'
                 f'base_url="http://127.0.0.1:{server.server_port}/v1"\n'
                 'wire_api="responses"\nrequires_openai_auth=false\n'
@@ -135,7 +164,7 @@ def qualify(adapter_binary, codex_binary):
                     command.extend(["--import", str(history)])
                 process = subprocess.run(command, env=environment, cwd=root, text=True,
                     capture_output=True, timeout=45, check=False)
-                assert process.returncode == 0, (process.stdout, process.stderr)
+                assert process.returncode == 0, (process.stdout, process.stderr, errors)
                 report = json.loads(process.stdout)
                 assert not report["error"], report
                 assert report["thread_id"], report
@@ -224,7 +253,8 @@ def qualify(adapter_binary, codex_binary):
             assert "unseen tool result" in encoded and "unseen assistant" in encoded, resumed
             assert not errors and len(requests) == 5, (errors, len(requests))
             print("PASS: compiled Aimee adapter adopts typed history into the real SDK; "
-                  "restart/resume appends unseen namespaced items without duplicating the committed prefix")
+                  "restart/resume appends unseen namespaced items without duplicating the committed prefix; "
+                  + ("bounded SDK catalog verified" if bounded_sdk_catalog else "ordinary SDK profile"))
     finally:
         server.shutdown()
         server.server_close()
@@ -239,4 +269,6 @@ if __name__ == "__main__":
     parser.add_argument("--adapter-binary", required=True, type=Path)
     parser.add_argument("--codex-binary", required=True, type=Path)
     arguments = parser.parse_args()
-    qualify(arguments.adapter_binary.resolve(strict=True), arguments.codex_binary.resolve(strict=True))
+    for bounded_sdk_catalog in (False, True):
+        qualify(arguments.adapter_binary.resolve(strict=True),
+                arguments.codex_binary.resolve(strict=True), bounded_sdk_catalog=bounded_sdk_catalog)

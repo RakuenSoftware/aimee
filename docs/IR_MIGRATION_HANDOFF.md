@@ -2712,3 +2712,42 @@ run; final native/sanitizer/lint checks include the fixture and gate corrections
 The final registered 657-binary suite and proxy regressions pass, as do both
 rebuilt focused ASan/UBSan fixtures and all 76 lint gates (including six runner
 selection regressions). No temporary-path or coverage baseline exemption added.
+
+## Bounded SDK catalog qualification with the actual MCP transport
+
+The existing real-SDK adoption fixture now runs its complete ordinary scenario
+and a bounded SDK configuration scenario. It preserves all prior namespaced
+call/result, error-result, process-restart, fresh-adoption and unseen-tail
+assertions, and checks every actual provider catalog in the additional scenario.
+Both installed Codex 0.160.1 and CI-pinned 0.153.4 pass both scenarios through the
+compiled Aimee adapter. This is a fixture configuration, not an activated server
+launch profile or evidence of live upstream cache billing.
+
+Independent loopback probes first checked the SDK without an MCP server, then
+the expanded fixture caught additional SDK resource helpers when MCP was enabled.
+The observed bounded catalog permits only the fixture's MCP tool, user input,
+and the three MCP resource helpers. It rejects local command/edit/image, agent,
+goal, web and other unexpected tools across fresh and resumed requests. SDK
+feature listings identify features.view_image as effective for these versions;
+tools.view_image=false alone still advertised view_image in the initial probes.
+The fixture keeps hooks, snapshots, memories, apps and optional SDK execution
+features disabled, without changing the ordinary scenario.
+
+MCP resource helpers are NOT qualified as admitted Aimee tool execution here.
+The existing CLI maps resource reads to direct read APIs, while the scoped native
+proxy admits model and MCP tool routes. That resource ingress still needs an
+owner-preserving cutover before native activation. Full native request-prefix /
+current-context reconciliation and SDK-observation duplicate suppression remain
+open, together with actual launch/build/workspace attestation, live subscription,
+independent learning and fresh CI/deployment qualification.
+
+Current official references: [configuration](https://learn.chatgpt.com/docs/config-file/config-reference)
+and [app-server](https://learn.chatgpt.com/docs/app-server). The feature/call/catalog
+observations above come from the two actual binaries, not from assuming that
+current documentation proves the behavior of a pinned older SDK. The previous
+workspace-source HEAD also passed Gitleaks (6,207 commits, no leaks).
+
+All 76 lint gates also pass for the expanded real-SDK catalog fixture. The
+unchanged native production code retains the preceding 657-test, sanitizer and
+167-check integration qualification. Fresh PR CI remains pending the follow-up
+PR decision; no new PR, attribution exemption or production deployment made.
