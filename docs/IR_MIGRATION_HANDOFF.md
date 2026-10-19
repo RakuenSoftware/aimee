@@ -2839,3 +2839,60 @@ No source-parity assertions or existing test selections were removed. The full
 21-case export build/runtime suite passes (one existing unavailable compiler
 case skipped). All 76 lint gates pass for the memory export repair; focused
 module descriptor/inventory checks additionally cover the history fixture entry.
+
+
+## Typed Codex host-tool callback boundary (not native activation)
+
+Both Codex adapter entry points accept an explicit typed tool catalog and host
+callback together. Tool definitions render from canonical fields into the SDK's
+experimental dynamicTools protocol; unsupported hosted tools, strict true/null
+and cache metadata refuse rather than silently disappear. SDK calls enter as
+owned canonical TOOL_USE blocks with their original ID, namespace, name and
+opaque JSON arguments. The bridge checks current SDK thread/turn acknowledgments,
+exact catalog identity, unique JSON fields and duplicate call IDs before invoking
+the host callback. Host results must be canonical string TOOL_RESULT blocks with
+the same call ID; success/error uses the authoritative flag, not result text.
+Invalid source/results fail capture and stop further SDK work.
+
+The callback grants no effect permission itself: its host owner must still match
+the durable original call and apply fresh execution policy and receipt handling.
+Current production callers do not enable this new option. It does not establish
+an isolated launch profile, reconcile the model request prefix/current catalog,
+suppress SDK model observations, or activate server native execution/cache.
+Those integrations remain required before activation. On resume, the host must
+prove the persisted catalog's scope; the SDK resumes stored definitions and does
+not offer dynamicTools replacement on thread/resume in the tested protocol.
+
+Eighteen process fixtures exercise both adapter entry points: nominal host error
+results, unknown namespace/name, wrong thread/turn, repeated call, host failure,
+wrong result ID and duplicate fields. Pure boundary checks also cover unsupported
+definitions and raw-sidecar substitution. Original 30-digit argument fractions
+survive the callback codec. The existing real-SDK fixture retains its ordinary
+and bounded MCP scenarios and adds a bounded typed-host scenario with no MCP
+server. All three pass through the compiled C adapter on installed Codex 0.160.1
+and CI-pinned 0.153.4, including process restart, fresh canonical adoption and
+unseen-tail resume. The new scenario verifies original callback identity, host
+error results, the exact decimal token and a catalog limited to the host tool and
+SDK user-input helper.
+
+Canonical fixture persistence now uses the C codec's exact message JSON string;
+Python's binary float decoder must not rewrite admitted numeric arguments when
+constructing the re-adoption input. Initial exploratory decoding only appeared
+to show SDK rounding: raw callback frames from both actual binaries preserve all
+30 digits. Separate actual-SDK probes found a reserved flat exec_command name
+collision, while explicit aimee.exec_command namespace calls work. No source
+history or existing tool is silently renamed to work around that collision.
+
+Qualification so far: registered 657-binary native suite and proxy regressions
+pass; two focused ASan/UBSan fixtures pass, with the final strengthened codec
+assertion rebuilt separately. Cppcheck on both changed C files reports zero
+diagnostics; memory-ownership preflight passes. The normal server build and
+PostgreSQL 18 integration pass 167/167 with 26 existing service skips. CMake's
+thin-client application target also builds; that is not a server CMake claim.
+Fresh CI on published 945aceaff has passed lint and integration; remaining Docker
+tiers were still running at the last check. No production promotion performed.
+
+All 76 lint gates pass for the typed callback increment with CI clang-format
+19.1.1. Published 945aceaff CI subsequently reached 48 passing jobs, including
+integration and three Docker tiers; the complete script-regression job failed
+and T2 was still running. That script failure is being investigated next.

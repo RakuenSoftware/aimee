@@ -45,6 +45,14 @@ extern "C"
       /* Canonical items preceding this turn; resume callers supply only unseen tail.
        * Host owns scope/prefix proof. Never a flattened system/user transcript. */
       const aimee_request_t *history;
+      /* Optional typed host tool bridge. Both catalog and callback are required.
+       * Borrowed for this synchronous execution. The host callback must verify
+       * durable source identity and apply current policy/effect authorization;
+       * SDK parameters alone grant no execution authority. It returns an owned
+       * TOOL_RESULT with the same call ID and a string result, or fails closed. */
+      const aimee_request_t *tool_catalog;
+      int (*tool_call)(const aimee_block_t *call, aimee_block_t *result, void *context);
+      void *tool_context;
       const char *model;            /* optional: turn-level model override */
       const char *reasoning_effort; /* optional: low/medium/high/xhigh */
       int timeout_ms;               /* idle timeout; <0 disables while caller stays attached */
@@ -85,6 +93,14 @@ extern "C"
 
    int cli_codex_compact_thread(const cli_codex_compact_request_t *req,
                                 cli_codex_compact_result_t *out);
+
+   /* Explicit Codex SDK tool boundaries. Output JSON/blocks are owned by caller.
+    * Tool definitions come only from typed catalog fields. Calls require an
+    * exact catalog namespace/name match; these helpers do not authorize effects. */
+   struct cJSON *cli_codex_dynamic_tools(const aimee_request_t *catalog);
+   int cli_codex_dynamic_call(const struct cJSON *params, const aimee_request_t *catalog,
+                              aimee_block_t *out);
+   struct cJSON *cli_codex_dynamic_result(const aimee_block_t *result);
 
    /* --- Pure JSON-RPC parse helpers (testable without a subprocess) ---
     * These read one JSON-RPC frame line emitted by `codex app-server`

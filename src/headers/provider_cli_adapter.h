@@ -60,6 +60,14 @@ extern "C"
       const char *user_prompt;
       /* Canonical items to adopt before the current turn (unseen tail on resume). */
       const aimee_request_t *history;
+      /* Optional typed host tool bridge. Both catalog and callback are required.
+       * Borrowed for this synchronous execution. The host callback must verify
+       * durable source identity and apply current policy/effect authorization;
+       * SDK parameters alone grant no execution authority. It returns an owned
+       * TOOL_RESULT with the same call ID and a string result, or fails closed. */
+      const aimee_request_t *tool_catalog;
+      int (*tool_call)(const aimee_block_t *call, aimee_block_t *result, void *context);
+      void *tool_context;
       int control_channel;    /* bidirectional structured input for browser-owned controls */
       int primary;            /* server-owned primary uses its authorized autonomous mode */
       const char *resume_id;  /* structured primary conversation, optional */

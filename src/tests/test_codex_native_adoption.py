@@ -53,7 +53,11 @@ def tool_names(tools, prefix=""):
     return result
 
 
-def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False):
+def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=False):
+    namespace = "fixture" if host_tools else "mcp__fixture"
+    native_arguments = ('{"value":7,"marker":0.123456789012345678901234567890}'
+                        if host_tools else '{"value":7}')
+    expected_arguments = json.loads(native_arguments)
     requests = []
     errors = []
 
@@ -78,7 +82,9 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False):
                     allowed = {"mcp__fixture.fail", "request_user_input",
                                "functions.request_user_input", "list_mcp_resources",
                                "list_mcp_resource_templates", "read_mcp_resource"}
-                    assert "mcp__fixture.fail" in names and names <= allowed, sorted(names)
+                    if host_tools:
+                        allowed = {"fixture.fail", "request_user_input", "functions.request_user_input"}
+                    assert namespace + ".fail" in names and names <= allowed, sorted(names)
                 number = len(requests)
                 item = {
                     "id": f"msg_fixture_{number}", "type": "message", "role": "assistant",
@@ -90,7 +96,7 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False):
                     assert len(tools) == 1, body["tools"]
                     item = {"id": "fc_native_fixture", "type": "function_call",
                             "call_id": "call_native_fixture", "name": "fail",
-                            "namespace": tools[0]["name"], "arguments": json.dumps({"value": 7}), "status": "completed"}
+                            "namespace": tools[0]["name"], "arguments": native_arguments, "status": "completed"}
                 response = {
                     "id": f"resp_fixture_{number}", "object": "response", "status": "completed",
                     "model": "fixture-model", "output": [item],
@@ -141,9 +147,9 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False):
                 '[model_providers.fixture]\nname="Native fixture"\n'
                 f'base_url="http://127.0.0.1:{server.server_port}/v1"\n'
                 'wire_api="responses"\nrequires_openai_auth=false\n'
-                '[mcp_servers.fixture]\n' +
-                'command=' + json.dumps(sys.executable) + '\n' +
-                'args=' + json.dumps([str(Path(__file__).resolve()), "--mcp-fixture"]) + '\n',
+                + ('' if host_tools else '[mcp_servers.fixture]\n' +
+                 'command=' + json.dumps(sys.executable) + '\n' +
+                 'args=' + json.dumps([str(Path(__file__).resolve()), "--mcp-fixture"]) + '\n'),
                 encoding="utf-8")
             executable_dir = home / "bin"
             executable_dir.mkdir()
@@ -158,6 +164,8 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False):
 
             def run(resume=None, history=None):
                 command = [str(adapter_binary), "--native-history-probe"]
+                if host_tools:
+                    command.append("--host-tools")
                 if resume:
                     command.append(resume)
                 if history:
@@ -172,6 +180,12 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False):
 
             first = run()
             assert first["text"] == "<S>fixture final 2<E>", first
+            if host_tools:
+                assert len(first["host_calls"]) == 1, first
+                observed = first["host_calls"][0]
+                assert observed["call_id"] == "call_native_fixture", observed
+                assert observed["namespace"] == namespace and observed["name"] == "fail", observed
+                assert "0.123456789012345678901234567890" in observed["arguments_json"], observed
             # A second adapter invocation starts a new SDK process. Resume must
             # retain the adopted items plus the completed turn without reinjection.
             second = run(first["thread_id"])
@@ -190,7 +204,9 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False):
                 assert len(calls) == len(results) == (1 if number == 0 else 2), items
                 if number:
                     assert calls[1]["call_id"] == results[1]["call_id"] == "call_native_fixture"
-                    assert json.loads(calls[1]["arguments"]) == {"value": 7}
+                    assert json.loads(calls[1]["arguments"]) == expected_arguments
+                    if host_tools:
+                        assert "0.123456789012345678901234567890" in calls[1]["arguments"]
                     assert "refused" in json.dumps(results[1]), results[1]
                 assert calls[0]["call_id"] == results[0]["call_id"] == "call_canonical_fixture"
                 assert json.loads(calls[0]["arguments"]) == {"path": "fixture.txt"}
@@ -206,14 +222,15 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False):
             assert tool_blocks[0]["tool_id"] == tool_blocks[1]["tool_id"], tool_blocks
             assert tool_blocks[0]["name"] == "fail", tool_blocks
             assert tool_blocks[1]["is_error"] is True, tool_blocks
-            assert tool_blocks[0]["input"] == {"value": 7}, tool_blocks
-            assert tool_blocks[0]["namespace"] == "mcp__fixture", tool_blocks
+            assert tool_blocks[0]["input"] == expected_arguments, tool_blocks
+            assert tool_blocks[0]["namespace"] == namespace, tool_blocks
             assert "refused" in json.dumps(tool_blocks[1]["content"]), tool_blocks
             # Rebuild from persisted canonical messages into a different native
             # thread, rather than only proving opaque same-thread continuation.
             persisted = home / "history.json"
-            persisted.write_text(json.dumps([event["payload"] for event in first["events"]
-                if event["kind"] == "message"]), encoding="utf-8")
+            # Persist the canonical C codec's exact JSON, rather than rounding
+            # admitted argument decimals through Python's binary float decoder.
+            persisted.write_text(first["history_json"], encoding="utf-8")
             third = run(history=persisted)
             assert third["thread_id"] != first["thread_id"], third
             assert third["text"] == "<S>fixture final 4<E>", third
@@ -221,8 +238,10 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False):
             call = next(item for item in adopted if item.get("type") == "function_call")
             result = next(item for item in adopted if item.get("type") == "function_call_output")
             assert call["call_id"] == result["call_id"] == "call_native_fixture", adopted
-            assert call["name"] == "fail" and call["namespace"] == "mcp__fixture", call
-            assert json.loads(call["arguments"]) == {"value": 7}, call
+            assert call["name"] == "fail" and call["namespace"] == namespace, call
+            assert json.loads(call["arguments"]) == expected_arguments
+            if host_tools:
+                assert "0.123456789012345678901234567890" in call["arguments"], call
             assert "refused" in json.dumps(result["output"]), result
             assert not errors and len(requests) == 4, (errors, len(requests))
             # A matched cache checkpoint supplies only unseen canonical items.
@@ -231,7 +250,7 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False):
             tail.write_text(json.dumps([
                 {"role": "user", "blocks": [{"type": "text", "text": "unseen canonical tail"}]},
                 {"role": "assistant", "blocks": [{"type": "tool_use", "tool_id": "call_tail_fixture",
-                    "name": "fail", "namespace": "mcp__fixture", "input": {"value": 7}}]},
+                    "name": "fail", "namespace": namespace, "input": {"value": 7}}]},
                 {"role": "user", "blocks": [{"type": "tool_result", "tool_id": "call_tail_fixture",
                     "content": "unseen tool result", "is_error": False}]},
                 {"role": "assistant", "blocks": [{"type": "text", "text": "unseen assistant"}]},
@@ -246,7 +265,7 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False):
                 assert sum(item["call_id"] == call_id for item in calls) == 1, resumed
                 assert sum(item["call_id"] == call_id for item in results) == 1, resumed
             tail_call = next(item for item in calls if item["call_id"] == "call_tail_fixture")
-            assert tail_call["namespace"] == "mcp__fixture" and tail_call["name"] == "fail", tail_call
+            assert tail_call["namespace"] == namespace and tail_call["name"] == "fail", tail_call
             assert json.loads(tail_call["arguments"]) == {"value": 7}, tail_call
             encoded = json.dumps(resumed)
             assert encoded.count("prior user") == encoded.count("unseen canonical tail") == 1, resumed
@@ -254,7 +273,8 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False):
             assert not errors and len(requests) == 5, (errors, len(requests))
             print("PASS: compiled Aimee adapter adopts typed history into the real SDK; "
                   "restart/resume appends unseen namespaced items without duplicating the committed prefix; "
-                  + ("bounded SDK catalog verified" if bounded_sdk_catalog else "ordinary SDK profile"))
+                  + ("typed host tools and exact arguments verified" if host_tools else
+                     "bounded SDK catalog verified" if bounded_sdk_catalog else "ordinary SDK profile"))
     finally:
         server.shutdown()
         server.server_close()
@@ -269,6 +289,7 @@ if __name__ == "__main__":
     parser.add_argument("--adapter-binary", required=True, type=Path)
     parser.add_argument("--codex-binary", required=True, type=Path)
     arguments = parser.parse_args()
-    for bounded_sdk_catalog in (False, True):
+    for bounded_sdk_catalog, host_tools in ((False, False), (True, False), (True, True)):
         qualify(arguments.adapter_binary.resolve(strict=True),
-                arguments.codex_binary.resolve(strict=True), bounded_sdk_catalog=bounded_sdk_catalog)
+                arguments.codex_binary.resolve(strict=True), bounded_sdk_catalog=bounded_sdk_catalog,
+                host_tools=host_tools)

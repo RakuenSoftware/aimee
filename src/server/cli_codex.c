@@ -84,6 +84,14 @@ typedef struct
    aimee_harness_ir_t ir;
    const char *home;
    const char *session_id;
+   const aimee_request_t *tool_catalog;
+   int (*tool_call)(const aimee_block_t *, aimee_block_t *, void *);
+   void *tool_context;
+   cJSON *dynamic_tools;
+   cJSON *dynamic_seen;
+   char *dynamic_thread;
+   char *dynamic_turn;
+   int dynamic_failed;
 } cli_codex_t;
 
 /* Read whatever stderr has buffered without blocking, append to the
@@ -464,6 +472,10 @@ static void cli_codex_close(cli_codex_t *c)
    free(c->line);
    c->line = NULL;
    aimee_harness_ir_free(&c->ir);
+   cJSON_Delete(c->dynamic_tools);
+   cJSON_Delete(c->dynamic_seen);
+   free(c->dynamic_thread);
+   free(c->dynamic_turn);
 }
 
 static int cli_codex_reserve_stdout(cli_codex_t *c, size_t need, cli_codex_read_status_t *status)
@@ -601,7 +613,7 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
    long long line_deadline = timeout_ms > 0 ? util_now_ms() + timeout_ms : 0;
    for (;;)
    {
-      if (agent_request_cancelled() || aimee_ir_session_capture_failed())
+      if (c->dynamic_failed || agent_request_cancelled() || aimee_ir_session_capture_failed())
       {
          if (status)
             *status = CLI_CODEX_READ_READ_ERR;
@@ -1231,6 +1243,190 @@ static int cli_codex_send_elicitation_decision(cli_codex_t *c, cJSON *id)
    return cli_codex_send_jsonrpc_result(c, id, result);
 }
 
+static const char *codex_string(const cJSON *object, const char *key)
+{
+   return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(object, key));
+}
+static cJSON *codex_dynamic_definition(const aimee_tool_t *tool)
+{
+   if (!aimee_ir_tool_valid(tool) || tool->kind == AIMEE_TOOL_HOSTED || tool->cache_control ||
+       tool->cache_ttl || tool->strict == AIMEE_STRICT_TRUE || tool->strict == AIMEE_STRICT_NULL)
+      return NULL;
+   cJSON *out = cJSON_CreateObject();
+   const char *kind = tool->kind == AIMEE_TOOL_NAMESPACE ? "namespace" : "function";
+   if (!out || !cJSON_AddStringToObject(out, "type", kind) ||
+       !cJSON_AddStringToObject(out, "name", tool->name) ||
+       !cJSON_AddStringToObject(out, "description", tool->description ? tool->description : ""))
+      goto fail;
+   if (tool->kind == AIMEE_TOOL_NAMESPACE)
+   {
+      cJSON *children = cJSON_AddArrayToObject(out, "tools");
+      if (!children)
+         goto fail;
+      for (int i = 0; i < tool->n_children; i++)
+      {
+         cJSON *child = codex_dynamic_definition(tool->children + i);
+         if (!child || !cJSON_AddItemToArray(children, child))
+         {
+            cJSON_Delete(child);
+            goto fail;
+         }
+      }
+   }
+   else
+   {
+      cJSON *schema = cJSON_Duplicate(tool->schema, 1);
+      if (!schema || !cJSON_AddItemToObject(out, "inputSchema", schema))
+      {
+         cJSON_Delete(schema);
+         goto fail;
+      }
+      if (tool->has_defer_loading &&
+          !cJSON_AddBoolToObject(out, "deferLoading", tool->defer_loading))
+         goto fail;
+   }
+   return out;
+fail:
+   cJSON_Delete(out);
+   return NULL;
+}
+cJSON *cli_codex_dynamic_tools(const aimee_request_t *catalog)
+{
+   if (!catalog || aimee_ir_request_admit(catalog))
+      return NULL;
+   cJSON *out = cJSON_CreateArray();
+   if (!out)
+      return NULL;
+   for (int i = 0; i < catalog->n_tools; i++)
+   {
+      cJSON *entry = codex_dynamic_definition(catalog->tools + i);
+      if (!entry || !cJSON_AddItemToArray(out, entry))
+      {
+         cJSON_Delete(entry);
+         cJSON_Delete(out);
+         return NULL;
+      }
+   }
+   return out;
+}
+int cli_codex_dynamic_call(const cJSON *params, const aimee_request_t *catalog, aimee_block_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof *out);
+   if (!catalog || !cJSON_IsObject(params) || !aimee_ir_json_unique(params) ||
+       aimee_ir_request_admit(catalog))
+      return -1;
+   const char *name = codex_string(params, "tool"), *id = codex_string(params, "callId");
+   const cJSON *ns = cJSON_GetObjectItemCaseSensitive(params, "namespace");
+   const char *space = cJSON_GetStringValue(ns);
+   const cJSON *arguments = cJSON_GetObjectItemCaseSensitive(params, "arguments");
+   if (!name || !name[0] || !id || !id[0] || !cJSON_IsObject(arguments) ||
+       (ns && !cJSON_IsNull(ns) && (!space || !space[0])))
+      return -1;
+   int matches = 0;
+   for (int i = 0; i < catalog->n_tools; i++)
+   {
+      const aimee_tool_t *tool = catalog->tools + i;
+      if (!space && tool->kind == AIMEE_TOOL_FUNCTION && !strcmp(tool->name, name))
+         matches++;
+      if (space && tool->kind == AIMEE_TOOL_NAMESPACE && !strcmp(tool->name, space))
+         for (int j = 0; j < tool->n_children; j++)
+            if (tool->children[j].kind == AIMEE_TOOL_FUNCTION &&
+                !strcmp(tool->children[j].name, name))
+               matches++;
+   }
+   if (matches != 1)
+      return -1;
+   *out = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                          .tool_id = strdup(id),
+                          .tool_name = strdup(name),
+                          .tool_namespace = space ? strdup(space) : NULL,
+                          .tool_input = cJSON_Duplicate(arguments, 1)};
+   aimee_message_t message = {.role = "assistant", .blocks = out, .n_blocks = 1};
+   aimee_request_t request = {.messages = &message, .n_messages = 1};
+   if (!out->tool_id || !out->tool_name || (space && !out->tool_namespace) || !out->tool_input ||
+       aimee_ir_request_admit(&request))
+   {
+      aimee_block_free_contents(out);
+      memset(out, 0, sizeof *out);
+      return -1;
+   }
+   return 0;
+}
+cJSON *cli_codex_dynamic_result(const aimee_block_t *result)
+{
+   if (!result || result->type != AIMEE_BLK_TOOL_RESULT || !cJSON_IsString(result->tool_result))
+      return NULL;
+   aimee_message_t message = {.role = "user", .blocks = (aimee_block_t *)result, .n_blocks = 1};
+   aimee_request_t request = {.messages = &message, .n_messages = 1};
+   if (aimee_ir_request_admit(&request))
+      return NULL;
+   cJSON *out = cJSON_CreateObject();
+   cJSON *items = out ? cJSON_AddArrayToObject(out, "contentItems") : NULL;
+   cJSON *text = items ? cJSON_CreateObject() : NULL;
+   if (!text || !cJSON_AddItemToArray(items, text))
+   {
+      cJSON_Delete(text);
+      cJSON_Delete(out);
+      return NULL;
+   }
+   if (!cJSON_AddStringToObject(text, "type", "inputText") ||
+       !cJSON_AddStringToObject(text, "text", result->tool_result->valuestring) ||
+       !cJSON_AddBoolToObject(out, "success", !result->tool_is_error))
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
+   return out;
+}
+
+static int codex_bind_dynamic_tools(cli_codex_t *c, const aimee_request_t *catalog,
+                                    int (*call)(const aimee_block_t *, aimee_block_t *, void *),
+                                    void *context)
+{
+   if (!catalog && !call)
+      return 0;
+   if (!catalog || !call)
+      return -1;
+   c->dynamic_tools = cli_codex_dynamic_tools(catalog);
+   c->dynamic_seen = cJSON_CreateObject();
+   if (!c->dynamic_tools || !c->dynamic_seen)
+      return -1;
+   c->tool_catalog = catalog;
+   c->tool_call = call;
+   c->tool_context = context;
+   return 0;
+}
+static int codex_handle_dynamic_call(cli_codex_t *c, const cJSON *frame, cJSON *rpcid)
+{
+   const cJSON *params = cJSON_GetObjectItemCaseSensitive(frame, "params");
+   const char *thread = codex_string(params, "threadId"), *turn = codex_string(params, "turnId");
+   aimee_block_t call = {0}, result = {0};
+   cJSON *reply = NULL;
+   int valid = c->tool_call && c->dynamic_thread && c->dynamic_turn && thread && turn &&
+               !strcmp(thread, c->dynamic_thread) && !strcmp(turn, c->dynamic_turn) &&
+               aimee_ir_json_unique(frame) && (cJSON_IsString(rpcid) || cJSON_IsNumber(rpcid)) &&
+               !cli_codex_dynamic_call(params, c->tool_catalog, &call);
+   if (valid)
+      valid = !cJSON_GetObjectItemCaseSensitive(c->dynamic_seen, call.tool_id) &&
+              cJSON_AddTrueToObject(c->dynamic_seen, call.tool_id);
+   if (valid)
+      valid = !c->tool_call(&call, &result, c->tool_context) && result.tool_id &&
+              !strcmp(result.tool_id, call.tool_id) && (reply = cli_codex_dynamic_result(&result));
+   int rc =
+       valid ? cli_codex_send_jsonrpc_result(c, rpcid, reply)
+             : cli_codex_send_jsonrpc_error(c, rpcid, -32602, "Host tool source or result refused");
+   aimee_block_free_contents(&call);
+   aimee_block_free_contents(&result);
+   if (!valid || rc)
+   {
+      c->dynamic_failed = 1;
+      aimee_ir_session_fail_capture();
+   }
+   return 1;
+}
+
 /* Aimee drives codex app-server headlessly. If the server asks the client for
  * approval or user input and we ignore it, the nested delegate waits forever.
  * Reply explicitly, approving only when Aimee autonomous mode is active. */
@@ -1250,6 +1446,12 @@ static int cli_codex_handle_server_request(cli_codex_t *c, const char *line)
    }
 
    const char *m = method->valuestring;
+   if (!strcmp(m, "item/tool/call"))
+   {
+      int handled = codex_handle_dynamic_call(c, obj, id);
+      cJSON_Delete(obj);
+      return handled;
+   }
    server_control_scope_t *scope = server_control_scope_current();
    int supported = strstr(m, "requestApproval") || !strcmp(m, "item/tool/requestUserInput") ||
                    !strcmp(m, "mcpServer/elicitation/request") ||
@@ -1351,6 +1553,28 @@ static int cli_codex_agent_idle_timeout_ms(const agent_t *agent)
 static cJSON *cli_codex_request(cli_codex_t *c, const char *method, cJSON *params, int id,
                                 long long *deadline_ms, int idle_timeout_ms)
 {
+   if (c->dynamic_tools)
+   {
+      if (!strcmp(method, "initialize"))
+      {
+         cJSON *capabilities = cJSON_AddObjectToObject(params, "capabilities");
+         if (!capabilities || !cJSON_AddTrueToObject(capabilities, "experimentalApi"))
+         {
+            cJSON_Delete(params);
+            return NULL;
+         }
+      }
+      if (!strcmp(method, "thread/start"))
+      {
+         cJSON *tools = cJSON_Duplicate(c->dynamic_tools, 1);
+         if (!tools || !cJSON_AddItemToObject(params, "dynamicTools", tools))
+         {
+            cJSON_Delete(tools);
+            cJSON_Delete(params);
+            return NULL;
+         }
+      }
+   }
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "jsonrpc", "2.0");
    cJSON_AddNumberToObject(req, "id", id);
@@ -1387,6 +1611,34 @@ static cJSON *cli_codex_request(cli_codex_t *c, const char *method, cJSON *param
       cJSON *jid = cJSON_GetObjectItemCaseSensitive(obj, "id");
       if (cJSON_IsNumber(jid) && jid->valueint == id)
       {
+         if (c->dynamic_tools && !cJSON_GetObjectItemCaseSensitive(obj, "error"))
+         {
+            const cJSON *result = cJSON_GetObjectItemCaseSensitive(obj, "result");
+            const char *identity = NULL;
+            char **destination = NULL;
+            if (!strcmp(method, "thread/start") || !strcmp(method, "thread/resume"))
+            {
+               identity = codex_string(cJSON_GetObjectItemCaseSensitive(result, "thread"), "id");
+               destination = &c->dynamic_thread;
+            }
+            else if (!strcmp(method, "turn/start"))
+            {
+               identity = codex_string(cJSON_GetObjectItemCaseSensitive(result, "turn"), "id");
+               destination = &c->dynamic_turn;
+            }
+            if (destination)
+            {
+               char *owned = identity && identity[0] ? strdup(identity) : NULL;
+               if (!owned)
+               {
+                  cJSON_Delete(obj);
+                  c->dynamic_failed = 1;
+                  return NULL;
+               }
+               free(*destination);
+               *destination = owned;
+            }
+         }
          /* Either a "result" or "error" envelope; return for caller to inspect. */
          return obj;
       }
@@ -1511,6 +1763,13 @@ int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_ev
    c.home = req->home;
    c.session_id = req->session_id;
    c.ir.admitted_prompt = req->user_prompt;
+   if (codex_bind_dynamic_tools(&c, req->tool_catalog, req->tool_call, req->tool_context))
+   {
+      if (out)
+         snprintf(out->error, sizeof(out->error), "invalid typed host tool bridge");
+      cli_codex_close(&c);
+      return -1;
+   }
    const char *sandbox_config =
        req->autonomous ? CLI_CODEX_SANDBOX_DANGER_CONFIG : CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG;
    if (cli_codex_spawn(&c, NULL, req->cwd, sandbox_config) != 0)
@@ -1980,6 +2239,13 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
    c.home = cfg->home;
    c.session_id = cfg->session_id;
    c.ir.admitted_prompt = user_prompt;
+   if (codex_bind_dynamic_tools(&c, cfg->tool_catalog, cfg->tool_call, cfg->tool_context))
+   {
+      if (out)
+         snprintf(out->error, sizeof(out->error), "invalid typed host tool bridge");
+      cli_codex_close(&c);
+      return -1;
+   }
    const char *cli_cmd = agent->cli_cmd[0] ? agent->cli_cmd : "codex";
    const char *sandbox_config = agent->write_capable ? CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG
                                                      : CLI_CODEX_SANDBOX_READ_ONLY_CONFIG;
