@@ -2827,3 +2827,15 @@ this is not claimed as a clean whole-package vet result.
 
 Final qualification for the shared-initializer fix: all 76 lint gates pass with
 CI's exact clang-format 19.1.1; no baseline or gate exemptions were added.
+
+
+## Fresh CI export coverage repair
+
+Fresh #3052 export CI caught the new memory regression missing from the explicit
+module bundle source list. The descriptor now includes it, and the exported
+module's existing selected-test command runs that regression too. The running
+canonical-history regression is also included in the Aimee module descriptor.
+No source-parity assertions or existing test selections were removed. The full
+21-case export build/runtime suite passes (one existing unavailable compiler
+case skipped). All 76 lint gates pass for the memory export repair; focused
+module descriptor/inventory checks additionally cover the history fixture entry.

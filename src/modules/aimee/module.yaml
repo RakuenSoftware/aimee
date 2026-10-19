@@ -120,6 +120,7 @@
     "server-go/modules/aimee/families/runtime_caches_utf8_test.go",
     "server-go/modules/aimee/families/session_exploration_live_test.go",
     "server-go/modules/aimee/families/session_ir_history_live_test.go",
+    "server-go/modules/aimee/families/session_ir_running_history_test.go",
     "server-go/modules/aimee/families/session_ir_live_test.go",
     "server-go/modules/aimee/families/session_ir_test.go",
     "server-go/modules/aimee/families/sessions_test.go",

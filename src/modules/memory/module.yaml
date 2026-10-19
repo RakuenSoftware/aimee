@@ -279,6 +279,7 @@
     "server-go/modules/memory/retrieval_eval_test.go",
     "server-go/modules/memory/runtime_role_test.go",
     "server-go/modules/memory/code_index_test.go",
+    "server-go/modules/memory/code_index_owner_test.go",
     "server-go/modules/memory/client_test.go",
     "server-go/modules/memory/fact_write_test.go",
     "server-go/modules/memory/public_commands_test.go",
