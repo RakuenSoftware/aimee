@@ -21,6 +21,8 @@
 #include "aimee.h" /* MAX_PATH_LEN via agent_types.h */
 #include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
+#include <aimee/tools/module_api.h>
+#include "../modules/tools/agent_tools_internal.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -177,9 +179,37 @@ static void test_kb_federated_tool_dispatches_to_kb(void)
    printf("  PASS: kb_federated_tool_dispatches_to_kb\n");
 }
 
+/* A failed provider must not turn its partially written reply into authority. */
+static int classification_status, classification_value;
+static int classification_peer(const char *name, int *classification)
+{
+   assert(!strcmp(name, "fixture-tool"));
+   *classification = classification_value;
+   return classification_status;
+}
+static void test_classifier_failure_retains_unknown(void)
+{
+   int result = agent_tools_effect_classification("fixture-tool", NULL);
+   assert(result == AIMEE_TOOL_CLASS_UNKNOWN);
+   classification_value = AIMEE_TOOL_CLASS_READ;
+   classification_status = -1;
+   result = agent_tools_effect_classification("fixture-tool", classification_peer);
+   assert(result == AIMEE_TOOL_CLASS_UNKNOWN);
+   classification_status = 0;
+   result = agent_tools_effect_classification("fixture-tool", classification_peer);
+   assert(result == AIMEE_TOOL_CLASS_READ);
+   classification_value = AIMEE_TOOL_CLASS_REMOTE + 1;
+   result = agent_tools_effect_classification("fixture-tool", classification_peer);
+   assert(result == AIMEE_TOOL_CLASS_UNKNOWN);
+   classification_value = -1;
+   result = agent_tools_effect_classification("fixture-tool", classification_peer);
+   assert(result == AIMEE_TOOL_CLASS_UNKNOWN);
+}
+
 int main(void)
 {
    printf("test_mcp_native_dispatch:\n");
+   test_classifier_failure_retains_unknown();
    test_registered_tool_dispatches_to_the_provider();
    test_unregistered_name_still_reports_unknown();
    test_no_provider_is_an_error_not_a_crash();

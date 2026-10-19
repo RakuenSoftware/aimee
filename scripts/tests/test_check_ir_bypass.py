@@ -53,8 +53,8 @@ class IRBypassTests(unittest.TestCase):
                 path.unlink()
 
     def test_native_shapes_refused_in_migrated_c_and_go_consumers(self):
-        for relative in ["src/server/session_compact.c", "server-go/modules/economizer/new.go",
-                         "server-go/modules/memory/new.go"]:
+        for relative in [*sorted(checker.CANONICAL_FILES),
+                         "server-go/modules/economizer/new.go", "server-go/modules/memory/new.go"]:
             for field in ["tool_calls", "function_call", "tool_call_id", "reasoning_content"]:
                 path = self.source(relative, f'lookup(message, "{field}");')
                 with self.assertRaisesRegex(ValueError, "native-history-field"):

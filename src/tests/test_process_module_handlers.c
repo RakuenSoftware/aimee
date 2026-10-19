@@ -183,6 +183,10 @@ static void test_tools(void)
    assert(tool_class("read_file") == AIMEE_TOOL_CLASS_READ);
    assert(tool_class("web_search") == AIMEE_TOOL_CLASS_REMOTE);
    assert(tool_class("git_pr") == AIMEE_TOOL_CLASS_REMOTE);
+   assert(tool_class("git_push") == AIMEE_TOOL_CLASS_REMOTE);
+   assert(tool_class("web_read") == AIMEE_TOOL_CLASS_REMOTE);
+   assert(tool_class("context_contract_expand") == AIMEE_TOOL_CLASS_CONTROL);
+   assert(tool_class("git_commit") == AIMEE_TOOL_CLASS_WRITE);
    assert(tool_class("mcp:remote") == AIMEE_TOOL_CLASS_REMOTE);
    assert(tool_class("not_registered") == AIMEE_TOOL_CLASS_UNKNOWN);
 }

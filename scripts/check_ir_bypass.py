@@ -50,7 +50,7 @@ RULES = {
 CANONICAL_FILES = {
     "src/posix/agent_runtime.c", "src/server/session_compact.c",
     "src/server/server_session_log.c", "src/server/server_chat_ir.c",
-    "src/server/primary_session_adapter.c",
+    "src/server/primary_session_adapter.c", "src/server/server_native_cache.c",
 }
 CANONICAL_HOOK_FILES = {"src/cmd_hooks.c", "src/server/server_hooks.c"}
 CANONICAL_TREES = ("server-go/modules/economizer/", "server-go/modules/memory/")

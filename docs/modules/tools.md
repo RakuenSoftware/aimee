@@ -120,3 +120,13 @@ New providers register against the core catalog and dispatch seam with explicit 
 Files named tool that implement Git, memory, gateway messaging, or protocol adapters remain with their
 domain owners. Duplicate schemas/dispatch tables and definitions consumed only by their own tests are
 `duplicated-by-adjacent-module` or `test-only` candidates for a later liveness and consolidation slice.
+
+
+The C and supervised Go classification providers both classify `git_push`,
+`git_pr`, `web_search` and `web_read` as remote operations, before local write/read
+categories. `context_contract_expand` is a control operation in both providers.
+A failed classifier or an invalid returned class remains unclassified, including
+when a failing provider wrote a partial result. This is classification, not an
+effect grant. Native MCP execution-policy preflight still needs its KB-registry
+label lookup removed after the complete served catalog has owned classifications;
+unknown tools must never silently become reads during that cutover.

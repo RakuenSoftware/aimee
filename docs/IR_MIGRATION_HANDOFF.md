@@ -1446,3 +1446,28 @@ ASan/UBSan; this is not a replacement for exact resource/path authorization.
 The production server build and completion-policy/Responses transport fixtures
 also pass. Responses completion-repair mode retains buffered admission because
 its response owner can append a governed tool call after the answer.
+
+
+## Tool classification prerequisites and canonical cache bypass guard
+
+The supervised Go tools provider now agrees with the C module: Git publication
+and web access are remote; `context_contract_expand` is control. Previously Go
+reported Git publication as write and web access as read. The shared effect
+consumer also discards partially written classifications when the provider
+fails, and rejects invalid class values. These changes do not grant effects or
+complete the native MCP KB-registry cutover: the served catalog still needs
+complete owner classifications before that legacy label lookup can be removed.
+
+The canonical history bypass gate now includes `server_native_cache.c`.
+Its planted regression iterates every declared canonical C consumer as well as
+Go consumer trees; native history field readers cannot enter the new cache
+controller through an unguarded allowlist gap. No bypass exception was added.
+
+A credential-free real Codex loopback probe additionally verifies namespaced
+adopted tool calls and their results in the actual provider request. After process
+restart it resumes the same native thread, injects only the unseen canonical tail,
+and verifies exactly one copy of both the prior prefix and new tail. Artifacts:
+`/var/tmp/aimee-native-cache-tail-probe.py` and
+`/var/tmp/aimee-3050-native-cache-tail-integration.log`. This qualifies that subset
+of SDK adoption; it does not qualify native compaction, full execution profiles,
+SDK activation or live provider prompt-cache accounting.

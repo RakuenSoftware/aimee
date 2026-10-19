@@ -23,8 +23,9 @@ void agent_tools_effect_reset(void)
 int agent_tools_effect_classification(const char *name, int (*classifier)(const char *, int *))
 {
    int classification = AIMEE_TOOL_CLASS_UNKNOWN;
-   if (classifier)
-      (void)classifier(name, &classification);
+   if (!classifier || classifier(name, &classification) != 0 ||
+       classification < AIMEE_TOOL_CLASS_UNKNOWN || classification > AIMEE_TOOL_CLASS_REMOTE)
+      return AIMEE_TOOL_CLASS_UNKNOWN;
    return classification;
 }
 

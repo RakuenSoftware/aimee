@@ -18,19 +18,24 @@ func toolRequest(name string) []byte {
 
 func TestToolClassificationParity(t *testing.T) {
 	tests := map[string]uint32{
-		"bash":              ClassExec,
-		"execute_script":    ClassExec,
-		"test":              ClassExec,
-		"run_tests":         ClassExec,
-		"write_file":        ClassWrite,
-		"git_pr":            ClassWrite,
-		"request_input":     ClassControl,
-		"diagnose_evidence": ClassControl,
-		"read_file":         ClassRead,
-		"git_status":        ClassRead,
-		"mcp:remote":        ClassRemote,
-		"bash:remote":       ClassRemote,
-		"not_registered":    ClassUnknown,
+		"bash":                    ClassExec,
+		"execute_script":          ClassExec,
+		"test":                    ClassExec,
+		"run_tests":               ClassExec,
+		"write_file":              ClassWrite,
+		"git_pr":                  ClassRemote,
+		"git_push":                ClassRemote,
+		"web_search":              ClassRemote,
+		"web_read":                ClassRemote,
+		"git_commit":              ClassWrite,
+		"context_contract_expand": ClassControl,
+		"request_input":           ClassControl,
+		"diagnose_evidence":       ClassControl,
+		"read_file":               ClassRead,
+		"git_status":              ClassRead,
+		"mcp:remote":              ClassRemote,
+		"bash:remote":             ClassRemote,
+		"not_registered":          ClassUnknown,
 	}
 	for name, want := range tests {
 		response, status := Handle(bus.ModuleInvocation{StageID: StageDispatch}, toolRequest(name))

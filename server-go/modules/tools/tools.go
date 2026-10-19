@@ -38,20 +38,23 @@ var (
 		"git_branch": {}, "git_pr": {},
 	}
 	controlNames = map[string]struct{}{
-		"request_input": {}, "clarify_start": {}, "clarify_answer": {},
+		"request_input": {}, "context_contract_expand": {}, "clarify_start": {}, "clarify_answer": {},
 		"diagnose_start": {}, "diagnose_observe": {}, "diagnose_hypothesize": {},
 		"diagnose_evidence": {},
 	}
 	readNames = map[string]struct{}{
 		"read_file": {}, "list_files": {}, "grep": {}, "code_search": {},
 		"find_symbol": {}, "read_symbol": {}, "search_memory": {}, "search_docs": {},
-		"web_search": {}, "web_read": {}, "list_notes": {}, "search_notes": {},
+		"list_notes": {}, "search_notes": {},
 		"git_log": {}, "git_diff": {}, "git_status": {},
 	}
 )
 
+// Keep network/forge operations remote before the ordinary write/read sets.
+// This is the same transport contract as the C tools module.
 func classify(name string) uint32 {
-	if strings.ContainsRune(name, ':') {
+	if strings.ContainsRune(name, ':') || name == "web_search" || name == "web_read" ||
+		name == "git_push" || name == "git_pr" {
 		return ClassRemote
 	}
 	if _, ok := execNames[name]; ok {
