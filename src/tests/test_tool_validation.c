@@ -1,6 +1,6 @@
 /* test_tool_validation.c: unit tests for tool call validation and recovery
  *
- * Covers: tool_suggest (nearest-match), tool_validate (unknown tool,
+ * Covers: tool_suggest (nearest-match), tool_validate_ir (unadvertised tool,
  * disabled tool, missing required field, wrong type, malformed JSON,
  * alias normalization, type coercion, valid call, recovery hint).
  */
@@ -31,6 +31,18 @@ static void setup_db(void)
 static void teardown_db(void)
 {
    kb_store_test_shim_close();
+}
+
+/* Exact catalog definitions supplied by the same tools owner as production.
+ * No fixture may rediscover a schema from a mutable registry/name cache. */
+static aimee_request_t catalog;
+static const aimee_tool_t *admitted_tool(const char *name)
+{
+   return aimee_ir_find_function(&catalog, NULL, name);
+}
+static int validate_admitted(const char *name, const char *args, char *err, size_t size)
+{
+   return tool_validate_ir(admitted_tool(name), args, err, size);
 }
 
 /* --- tool_suggest --- */
@@ -69,30 +81,16 @@ static void test_suggest_no_match(void)
    printf("  PASS: tool_suggest returns NULL for distant name\n");
 }
 
-/* --- tool_validate: error cases --- */
+/* --- Admitted IR validation: error cases --- */
 
-static void test_validate_unknown_tool_with_suggestion(void)
+static void test_validate_unadvertised_tool(void)
 {
-   setup_db();
    char err[256] = {0};
-   /* 'read_flie' is close to 'read_file' */
-   int rc = tool_validate("read_flie", "{\"path\":\"/tmp/x\"}", err, sizeof(err));
-   assert(rc == -1);
-   assert(strstr(err, "unknown") != NULL);
-   assert(strstr(err, "read_file") != NULL);
-   teardown_db();
-   printf("  PASS: unknown tool returns -1 with nearest-match suggestion\n");
-}
-
-static void test_validate_unknown_tool_no_suggestion(void)
-{
-   setup_db();
-   char err[256] = {0};
-   int rc = tool_validate("zzz_completely_unknown_tool", "{}", err, sizeof(err));
-   assert(rc == -1);
-   assert(strstr(err, "unknown") != NULL);
-   teardown_db();
-   printf("  PASS: unknown tool with no close match returns -1\n");
+   int rc = validate_admitted("read_flie", "{\"path\":\"/tmp/x\"}", err, sizeof err);
+   assert(rc == -1 && strstr(err, "unavailable"));
+   rc = validate_admitted("unhosted:remote", "{}", err, sizeof err);
+   assert(rc == -1 && strstr(err, "unavailable"));
+   puts("  PASS: unadvertised local/qualified names have no permissive fallback");
 }
 
 static void test_validate_disabled_tool(void)
@@ -101,7 +99,7 @@ static void test_validate_disabled_tool(void)
    (void)aimee_pg_exec(kb_store_conn(), "UPDATE tool_registry SET enabled = 0 WHERE name = 'bash'",
                        NULL, 0);
    char err[256] = {0};
-   int rc = tool_validate("bash", "{\"command\":\"ls\"}", err, sizeof(err));
+   int rc = validate_admitted("bash", "{\"command\":\"ls\"}", err, sizeof(err));
    assert(rc == -1);
    assert(strstr(err, "disabled") != NULL);
    teardown_db();
@@ -113,7 +111,7 @@ static void test_validate_missing_required_field(void)
    setup_db();
    char err[256] = {0};
    /* read_file requires 'path' */
-   int rc = tool_validate("read_file", "{}", err, sizeof(err));
+   int rc = validate_admitted("read_file", "{}", err, sizeof(err));
    assert(rc == -1);
    assert(strstr(err, "path") != NULL);
    teardown_db();
@@ -125,7 +123,7 @@ static void test_validate_wrong_type(void)
    setup_db();
    char err[256] = {0};
    /* 'path' should be string; passing integer should fail */
-   int rc = tool_validate("read_file", "{\"path\":42}", err, sizeof(err));
+   int rc = validate_admitted("read_file", "{\"path\":42}", err, sizeof(err));
    assert(rc == -1);
    teardown_db();
    printf("  PASS: wrong field type returns -1\n");
@@ -135,7 +133,7 @@ static void test_validate_malformed_json(void)
 {
    setup_db();
    char err[256] = {0};
-   int rc = tool_validate("read_file", "{not valid json", err, sizeof(err));
+   int rc = validate_admitted("read_file", "{not valid json", err, sizeof(err));
    assert(rc == -1);
    teardown_db();
    printf("  PASS: malformed JSON returns -1\n");
@@ -146,7 +144,7 @@ static void test_validate_write_file_missing_content(void)
    setup_db();
    char err[256] = {0};
    /* write_file requires both path and content */
-   int rc = tool_validate("write_file", "{\"path\":\"/tmp/out.txt\"}", err, sizeof(err));
+   int rc = validate_admitted("write_file", "{\"path\":\"/tmp/out.txt\"}", err, sizeof(err));
    assert(rc == -1);
    assert(strstr(err, "content") != NULL);
    teardown_db();
@@ -159,7 +157,7 @@ static void test_validate_valid_read_file(void)
 {
    setup_db();
    char err[256] = {0};
-   int rc = tool_validate("read_file", "{\"path\":\"/tmp/test.txt\"}", err, sizeof(err));
+   int rc = validate_admitted("read_file", "{\"path\":\"/tmp/test.txt\"}", err, sizeof(err));
    assert(rc == 0);
    assert(err[0] == '\0');
    teardown_db();
@@ -170,8 +168,8 @@ static void test_validate_valid_write_file(void)
 {
    setup_db();
    char err[256] = {0};
-   int rc = tool_validate("write_file", "{\"path\":\"/tmp/out.txt\",\"content\":\"hello\"}", err,
-                          sizeof(err));
+   int rc = validate_admitted("write_file", "{\"path\":\"/tmp/out.txt\",\"content\":\"hello\"}",
+                              err, sizeof(err));
    assert(rc == 0);
    teardown_db();
    printf("  PASS: valid write_file call returns 0\n");
@@ -181,7 +179,7 @@ static void test_validate_valid_bash(void)
 {
    setup_db();
    char err[256] = {0};
-   int rc = tool_validate("bash", "{\"command\":\"echo hello\"}", err, sizeof(err));
+   int rc = validate_admitted("bash", "{\"command\":\"echo hello\"}", err, sizeof(err));
    assert(rc == 0);
    teardown_db();
    printf("  PASS: valid bash call returns 0\n");
@@ -189,7 +187,7 @@ static void test_validate_valid_bash(void)
 
 /* --- alias resolution across the real pipeline ---------------------------
  *
- * Alias resolution moved OUT of tool_validate. It used to happen on a copy the
+ * Alias resolution occurs before IR validation. It used to happen on a copy the
  * validator discarded, so validation accepted {"filepath": ...} and the tool
  * then received no `path` at all -- validation was more permissive than
  * execution. It now happens once in the canonicalizer, before any gate, and
@@ -199,8 +197,8 @@ static void test_validate_valid_bash(void)
  * every gate judge the bytes that will actually execute. */
 static int canonicalize_then_validate(const char *tool, const char *raw, char *err, size_t err_len)
 {
-   char *canonical = tool_args_canonicalize_json(agent_tool_get_schema_cached(tool), raw);
-   int rc = tool_validate(tool, canonical ? canonical : raw, err, err_len);
+   char *canonical = tool_args_canonicalize_json(admitted_tool(tool)->schema, raw);
+   int rc = validate_admitted(tool, canonical ? canonical : raw, err, err_len);
    free(canonical);
    return rc;
 }
@@ -215,7 +213,7 @@ static void test_validate_alias_filepath_normalized(void)
 
    /* Load-bearing: the alias is resolved in the bytes that go on to execute,
     * not merely inside the validator. */
-   char *canonical = tool_args_canonicalize_json(agent_tool_get_schema_cached("read_file"), raw);
+   char *canonical = tool_args_canonicalize_json(admitted_tool("read_file")->schema, raw);
    assert(canonical != NULL);
    assert(strstr(canonical, "\"path\"") != NULL);
    assert(strstr(canonical, "filepath") == NULL);
@@ -245,17 +243,17 @@ static void test_validate_alias_cmd_normalized(void)
    printf("  PASS: alias 'cmd' resolves to 'command' before the gates\n");
 }
 
-/* tool_validate itself is now pure: it judges, it does not rewrite. If it still
+/* IR validation is pure: it judges, it does not rewrite. If it still
  * normalized internally we would be back to validating one shape and running
  * another, which is the defect the canonicalizer exists to close. */
 static void test_validate_does_not_rewrite_arguments(void)
 {
    setup_db();
    char err[256] = {0};
-   int rc = tool_validate("read_file", "{\"filepath\":\"/doc/a.txt\"}", err, sizeof(err));
+   int rc = validate_admitted("read_file", "{\"filepath\":\"/doc/a.txt\"}", err, sizeof(err));
    assert(rc != 0); /* `path` is required and an un-canonicalized call lacks it */
    teardown_db();
-   printf("  PASS: tool_validate judges without rewriting\n");
+   printf("  PASS: admitted IR validation judges without rewriting\n");
 }
 
 static void test_ir_catalog_is_schema_authority(void)
@@ -345,6 +343,8 @@ static void test_owned_tool_policy_metadata(void)
 
 int main(void)
 {
+   int loaded = agent_tools_builtin_catalog(&catalog.tools, &catalog.n_tools);
+   assert(!loaded && catalog.n_tools > 0);
    test_ir_catalog_is_schema_authority();
    test_owned_tool_policy_metadata();
    printf("test_tool_validation\n");
@@ -354,8 +354,7 @@ int main(void)
    test_suggest_two_edits();
    test_suggest_no_match();
 
-   test_validate_unknown_tool_with_suggestion();
-   test_validate_unknown_tool_no_suggestion();
+   test_validate_unadvertised_tool();
    test_validate_disabled_tool();
    test_validate_missing_required_field();
    test_validate_wrong_type();
@@ -371,6 +370,7 @@ int main(void)
    test_validate_alias_cmd_normalized();
    test_validate_does_not_rewrite_arguments();
 
+   aimee_request_free(&catalog);
    printf("All tool_validation tests passed.\n");
    return 0;
 }

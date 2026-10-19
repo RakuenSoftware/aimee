@@ -215,12 +215,11 @@ int main(void)
       /* The binding invariant: a child exec'd with this env + the inherited fd can
        * read the token via /proc/self/fd/<target> (what the askpass does), but the
        * token is NOT in its /proc/self/environ. */
-      const char *argv[] = {
-          "/bin/sh", "-c",
-          "cat /proc/self/fd/" STR(
-              GIT_CRED_TOKEN_TARGET_FD) "; printf '\\n--ENVIRON--\\n'; tr '\\0' '\\n' < "
-                                        "/proc/self/environ",
-          NULL};
+      const char *argv[] = {"/bin/sh", "-c",
+                            "cat /proc/self/fd/" STR(
+                                GIT_CRED_TOKEN_TARGET_FD) "; printf '\\n--ENVIRON--\\n'; "
+                                                          "cat /proc/self/environ | tr '\\0' '\\n'",
+                            NULL};
       char *out = NULL;
       int rc = safe_exec_capture_cwd_env_fd_timeout(argv, NULL, fe, &out, 1 << 16, 10000, tfd,
                                                     GIT_CRED_TOKEN_TARGET_FD);

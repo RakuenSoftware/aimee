@@ -2047,3 +2047,37 @@ The new tools-to-IR header declaration is a shared typed data-contract use in
 `IR_SHARED_TYPE`, not a peer service call or a policy bypass. No new peer service
 coupling or attribution exception is introduced. Exact admitted definitions and
 strict JSON parsing stay at that boundary; policy metadata remains supervised.
+
+
+## Unused name-only validation retired
+
+`tool_validate` had no production callers after the canonical delegate cutover.
+Its registry-schema fallback and permissive unknown qualified-tool path are now
+removed, along with the declaration. The bypass gate retires the symbol globally.
+Validation fixtures now take exact definitions from the tools owner's canonical
+catalog, including canonicalization before validation and explicit refusal when
+a local or qualified identity was never admitted. Nearest-name suggestion tests
+remain separate; optional operator disables still have their original coverage.
+
+Qualification of admitted dispatch/bootstrap passes five focused native suites,
+three ASan/UBSan suites, CMake runtime/cache 2/2 and all 76 lint gates. The real
+PostgreSQL integration rerun passes 159/159 with the same 26 explicit unavailable
+service checks; no KB is configured. The validator retirement additionally passes
+normal and sanitizer validation/context fixtures and changed-source Cppcheck with
+no diagnostics. Fresh CI is still required after publication.
+
+The full local native suite exposed two compiler portability issues in existing
+Vault fixtures: message/junk arrays lacked space for their string terminator.
+They now infer array size and explicitly exclude the terminator, preserving the
+original signed bytes and wrong-size key file. A credential-isolation fixture
+also now reads `/proc/self/environ` through `cat` before `tr`; direct redirected
+`tr` locally returned no bytes. All original positive FD and negative secret
+assertions remain. The first full-run invocation used unsupported absolute build
+paths and did not launch binaries; the subsequent real run isolated this one
+credential fixture failure, which passes independently after repair. The corrected full-suite rerun passes all 653 native test binaries and both
+auxiliary fixtures, including the 30-case proxy suite. The P1 PostgreSQL preflight
+and store-dependent fixtures explicitly skip without their configured local
+service; the separate restricted-role integration run remains 159/159. Final
+retirement lint passes all 76 gates. Published `2b5aaa6d5` is fully green in fresh
+CI, including all Docker tiers and attribution, with its two existing platform
+skips. That CI result does not qualify the subsequent local commits.

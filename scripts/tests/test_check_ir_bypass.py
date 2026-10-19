@@ -97,7 +97,7 @@ class IRBypassTests(unittest.TestCase):
     def test_canonical_execution_cannot_reload_native_schema_authority(self):
         for name in ("tool_validate", "kb_client_tool_registry_lookup"):
             path = self.source("src/posix/agent_runtime.c", name + '(name, args);')
-            with self.assertRaisesRegex(ValueError, "native-schema-lookup"):
+            with self.assertRaisesRegex(ValueError, "retired-api|native-schema-lookup"):
                 checker.check(self.root)
             path.unlink()
         self.source("src/posix/agent_runtime.c", "tool_validate_ir(admitted, args, error, capacity);")

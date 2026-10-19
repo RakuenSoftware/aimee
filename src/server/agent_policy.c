@@ -6,7 +6,6 @@
 /* agent_policy.c: validation, policy, trace, metrics, env, manifest, contract */
 #include "aimee.h"
 #include "db1_client/db1.h"
-#include "modules/kb/c/tool_registry.h"
 #include "agent.h"
 #include <aimee/tools/agent_tools.h>
 #include "kb_client.h"
@@ -14,7 +13,6 @@
 #include "headers/agent_exec.h"
 #include "computer_use.h"
 #include "config.h"
-#include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "log.h"
 #include "dstr.h"
 #include "otel.h"
@@ -222,67 +220,6 @@ int tool_validate_ir(const aimee_tool_t *tool, const char *args_json, char *err_
       }
    }
    return validate_against_schema(args_json, tool->schema, err_out, err_len);
-}
-
-int tool_validate(const char *tool_name, const char *args_json, char *err_out, size_t err_len)
-{
-   if (!tool_name || !args_json)
-      return 0;
-
-   if (strchr(tool_name, ':') != NULL)
-   {
-      cJSON *remote_tool = NULL;
-      if (mcp_client_registry_get_tool_schema(tool_name, 1000, &remote_tool, err_out, err_len) == 0)
-      {
-         cJSON *schema = cJSON_GetObjectItemCaseSensitive(remote_tool, "inputSchema");
-         int rc = validate_against_schema(args_json, schema, err_out, err_len);
-         cJSON_Delete(remote_tool);
-         return rc;
-      }
-      /* Not a plugin THIS server hosts: it may be federated from aimee-kb (config
-       * install: kb), whose schema we do not hold locally. Defer validation to the
-       * kb, which owns the plugin and validates on tools/call; dispatch routes the
-       * call there (agent_tools_dispatch.c) and surfaces any error. */
-      if (err_out && err_len)
-         err_out[0] = '\0';
-      return 0;
-   }
-
-   tool_registry_entry_t entry;
-   memset(&entry, 0, sizeof(entry));
-   int found = 0;
-   if (kb_client_tool_registry_lookup(tool_name, entry.input_schema, sizeof(entry.input_schema),
-                                      entry.side_effect, sizeof(entry.side_effect), &entry.enabled,
-                                      &found) != 0 ||
-       !found)
-   {
-      cJSON *builtin_schema = agent_tool_get_schema_cached(tool_name);
-      if (builtin_schema)
-         return validate_against_schema(args_json, builtin_schema, err_out, err_len);
-
-      const char *suggestion = tool_suggest(tool_name);
-      if (suggestion)
-         snprintf(err_out, err_len, "unknown tool '%s'. Did you mean '%s'?", tool_name, suggestion);
-      else
-         snprintf(err_out, err_len, "unknown tool '%s'", tool_name);
-      return -1;
-   }
-
-   if (!entry.enabled)
-   {
-      snprintf(err_out, err_len, "tool '%s' is disabled", tool_name);
-      return -1;
-   }
-
-   if (!entry.input_schema[0])
-      return 0;
-
-   cJSON *schema = cJSON_Parse(entry.input_schema);
-   if (!schema)
-      return 0;
-   int rc = validate_against_schema(args_json, schema, err_out, err_len);
-   cJSON_Delete(schema);
-   return rc;
 }
 
 int tool_policy_metadata(const char *tool, aimee_tool_metadata_t *metadata, char *effect,
