@@ -1780,3 +1780,18 @@ using the registered tracked-files commit mode after checking the exact eight-fi
 diff. `b2ebad48c` contains the full tested implementation. The first registered
 commit request also returned a transient explicit-workspace availability refusal;
 a retry against the same explicit checkout succeeded. No other checkout was used.
+
+## OAuth accessor validity repair: 19 October continuation
+
+The high-level Vault OAuth accessor now applies the same expiry check as the
+lower-level loader and refuses `REAUTH_REQUIRED` before and after refresh. A
+transient refresh failure can still use an unexpired access token; it cannot
+return an expired token. Failure clears the caller's output. The previous
+implementation reproduced the expired-token regression before this repair.
+
+Real Vault fixtures cover fresh/expired/unknown-expiry access, marked rejection,
+transient refresh before and after expiry, `invalid_grant`, and successful refresh
+through a private fake curl. OAuth/PKCE and reauthentication fixtures pass normally
+and under ASan/UBSan; changed-source Cppcheck has no diagnostics. This repairs the
+shared accessor already used by selected Codex credentials. Claude custody and
+production SDK activation remain unfinished.

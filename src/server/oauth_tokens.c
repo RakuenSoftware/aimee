@@ -377,7 +377,10 @@ int oauth_token_refresh(const char *client_name, const char *client_id, const ch
 int oauth_token_get(const char *client_name, const char *client_id, const char *token_endpoint,
                     int skew_secs, char *buf, size_t len)
 {
-   if (!client_name || !buf || len == 0)
+   if (!buf || len == 0)
+      return -1;
+   buf[0] = '\0';
+   if (!client_name || oauth_token_reauth_required(client_name))
       return -1;
 
    /* Check whether the stored token is near expiry */
@@ -393,12 +396,18 @@ int oauth_token_get(const char *client_name, const char *client_id, const char *
    }
 
    if (need_refresh && client_id && token_endpoint)
-      oauth_token_refresh(client_name, client_id, token_endpoint);
+   {
+      if (oauth_token_refresh(client_name, client_id, token_endpoint) == OAUTH_REFRESH_REAUTH)
+         return -1;
+   }
 
-   /* Try to load the (possibly refreshed) access token */
-   if (oauth_secret_load(client_name, OAUTH_VCRED_ACCESS, OAUTH_KEY_ACCESS_TOKEN, buf, len) != 0 ||
-       buf[0] == '\0')
+   /* A transient refresh failure may leave a still-valid access token usable,
+    * but must never revive an expired token or a rejected credential. */
+   if (oauth_token_reauth_required(client_name) || oauth_token_load(client_name, buf, len) != 0 ||
+       !buf[0])
+   {
+      OPENSSL_cleanse(buf, len);
       return -1;
-
+   }
    return 0;
 }
