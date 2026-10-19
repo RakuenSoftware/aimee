@@ -17,6 +17,7 @@ struct server_session_capture
    atomic_int closed, failed;
    server_control_scope_t *controls;
    server_session_capture_counts_t counts;
+   char committed_sequence[32];
 };
 static _Thread_local server_session_capture_t *current;
 server_session_capture_t *server_session_capture_current(void)
@@ -120,6 +121,18 @@ int server_session_capture_counts(server_session_capture_t *owner,
       return -1;
    pthread_mutex_lock(&owner->lock);
    *out = owner->counts;
+   pthread_mutex_unlock(&owner->lock);
+   return 0;
+}
+int server_session_capture_cursor(server_session_capture_t *owner, char sequence[32])
+{
+   if (!sequence)
+      return -1;
+   sequence[0] = 0;
+   if (!owner)
+      return -1;
+   pthread_mutex_lock(&owner->lock);
+   snprintf(sequence, 32, "%s", owner->committed_sequence[0] ? owner->committed_sequence : "0");
    pthread_mutex_unlock(&owner->lock);
    return 0;
 }
@@ -237,6 +250,7 @@ int server_session_capture_append(server_session_capture_t *owner,
    free(wire);
    if (result)
       goto finish;
+   snprintf(owner->committed_sequence, sizeof owner->committed_sequence, "%s", committed);
    if (event->kind == AIMEE_SESSION_EXECUTION && strcmp(event->execution_status, "running"))
       server_learning_observe_terminal(owner->session, owner->turn, committed, event_id,
                                        owner->principal, payload);

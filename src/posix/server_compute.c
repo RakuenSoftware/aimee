@@ -407,6 +407,8 @@ static char *read_webchat_system_prompt(const compute_ctx_t *cctx)
 static int codex_stream_event_cb(const char *event, const char *value, void *userdata)
 {
    compute_ctx_t *cctx = (compute_ctx_t *)userdata;
+   if (server_chat_ir_progress(cctx))
+      return -1;
    if (!event)
       return 0;
    if (strcmp(event, "text") == 0 || strcmp(event, "thinking") == 0)

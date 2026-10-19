@@ -106,6 +106,7 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 void server_install_gateway_delegate_policy(void);
 void compute_respond(compute_ctx_t *cctx, cJSON *resp);
 int server_chat_ir_begin(compute_ctx_t *cctx, const char *session, const char *message);
+int server_chat_ir_progress(compute_ctx_t *cctx);
 int server_chat_ir_finish(compute_ctx_t *cctx, const char *error);
 void server_chat_ir_close(compute_ctx_t *cctx);
 void compute_error(compute_ctx_t *cctx, const char *message);

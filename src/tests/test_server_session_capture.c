@@ -154,6 +154,9 @@ static void test_concurrent_owner(void)
       int joined = pthread_join(threads[i], NULL);
       assert(!joined);
    }
+   char cursor[32];
+   int cursor_read = server_session_capture_cursor(owner, cursor);
+   assert(!cursor_read && !strcmp(cursor, "10"));
    server_session_capture_counts_t counts;
    int counted = server_session_capture_counts(owner, &counts);
    assert(!counted && counts.counter == 10 && counts.model_events == 9 &&
@@ -162,6 +165,8 @@ static void test_concurrent_owner(void)
                                      .execution_status = "completed"};
    int finished = server_session_capture_sink(&terminal, owner);
    assert(!finished && observations == 1 && !server_session_capture_accepting(owner));
+   cursor_read = server_session_capture_cursor(owner, cursor);
+   assert(!cursor_read && !strcmp(cursor, "11"));
    int late = server_session_capture_sink(&event, owner);
    assert(late < 0 && cJSON_GetArraySize(rows) == 11 && !server_session_capture_failed(owner));
    cJSON_Delete(input);

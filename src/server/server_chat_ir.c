@@ -28,8 +28,12 @@ static int chat_ir_write_envelope(compute_ctx_t *c, const char *json)
 static int chat_ir_deliver(compute_ctx_t *c, const char *json, const char *sequence)
 {
    unsigned long long target = strtoull(sequence, NULL, 10);
+   /* Gap replay can already have delivered a later callback's event. Never
+    * duplicate it or rewind the live cursor when its producer catches up. */
+   if (c->ir_sequence[0] && target <= strtoull(c->ir_sequence, NULL, 10))
+      return 0;
    if (c->ir_delivery && c->conn_alive && c->ir_sequence[0] &&
-       target > strtoull(c->ir_sequence, NULL, 10) + 1)
+       (!json || target > strtoull(c->ir_sequence, NULL, 10) + 1))
    {
       while (strtoull(c->ir_sequence, NULL, 10) < target)
       {
@@ -68,6 +72,23 @@ static int chat_ir_deliver(compute_ctx_t *c, const char *json, const char *seque
    }
    chat_ir_write_envelope(c, json);
    snprintf(c->ir_sequence, sizeof c->ir_sequence, "%s", sequence);
+   return 0;
+}
+
+/* Called on the producer thread. Retained callback writers never borrow the
+ * browser connection; delivery reads their committed tail from the same log. */
+int server_chat_ir_progress(compute_ctx_t *c)
+{
+   if (!c || !c->ir_enabled || !c->ir_delivery || !c->conn_alive)
+      return 0;
+   char sequence[32];
+   if (!c->ir_sequence[0] || server_session_capture_cursor(c->ir_capture, sequence) ||
+       chat_ir_deliver(c, NULL, sequence))
+   {
+      c->ir_failed = 1;
+      server_session_capture_fail(c->ir_capture);
+      return -1;
+   }
    return 0;
 }
 

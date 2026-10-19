@@ -3018,3 +3018,29 @@ Native activation is still pending: this preparation API is a prerequisite,
 not an activated SDK execution path. Original durable-call claims and supervised
 effect receipts, current-context/history binding, observation suppression,
 launch/profile attestation and live Claude qualification remain required.
+
+
+## Live subscriber progress from retained canonical capture
+
+The retained capture owner exposes its last committed global sequence under the
+writer mutex, including after a terminal event. The primary producer can drain
+through that cursor from the existing owner-checked DB1 session pages. Callback
+workers retain only the durable writer and never a browser connection. The
+Codex primary's existing progress callback now performs that drain; ordinary
+same-thread capture remains an immediate no-op when already delivered.
+
+Delivery refuses page gaps and never rewinds or repeats an envelope already
+included by a page read beyond the sampled target. The fixture now honors the
+128-event page bound and covers 131 retained-worker events, a further commit
+during page retrieval, repeated progress and sealed-writer tail delivery. The
+original event payloads and order match persistence; no SDK observation is used
+to synthesize model content. Disconnect behavior remains subscriber-local.
+
+The two native fixtures and ASan/UBSan pass; the normal production server builds;
+both CMake/CTest owner fixtures pass. Correctly configured Cppcheck covers five
+changed production/fixture sources with one existing diagnostic and no increase.
+The complete 657-entry native suite (655 distinct target names), PostgreSQL 18
+integration (167/167, 26 existing unavailable-service skips), both ThreadSanitizer
+fixtures and all 76 lint gates pass.
+This does not activate the native broker or suppress SDK-normalized observations;
+those still require current-request ownership and durable tool/effect admission.

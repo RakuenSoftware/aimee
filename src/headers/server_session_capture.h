@@ -28,6 +28,10 @@ int server_session_capture_failed(const server_session_capture_t *owner);
 int server_session_capture_accepting(const server_session_capture_t *owner);
 int server_session_capture_counts(server_session_capture_t *owner,
                                   server_session_capture_counts_t *out);
+/* Last committed global session sequence, copied under the writer lock. "0"
+ * means no committed event yet. Readable after a terminal/failure so a producer
+ * can drain its durable tail; this grants no write or tool authority. */
+int server_session_capture_cursor(server_session_capture_t *owner, char sequence[32]);
 /* Owned, admitted canonical conversation including this running turn. Never
  * imports native files; source absence/corruption makes capture failure sticky. */
 int server_session_capture_history(server_session_capture_t *owner, struct cJSON **out);

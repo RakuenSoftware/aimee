@@ -7,7 +7,8 @@
 #include <string.h>
 
 static cJSON *log_entries;
-static int writes, fail_store, disconnected, cancelled;
+static int writes, fail_store, disconnected, cancelled, delivered_sequence;
+static server_session_capture_t *page_writer;
 static char owner[64] = "alice";
 void test_learning_observations_reset(void);
 int test_learning_observations(void);
@@ -74,7 +75,20 @@ char *db1_session_ir_page(const char *sid, const char *after, int limit, const c
 {
    assert(!strcmp(sid, "session-one") && !strcmp(principal, owner) && limit == 128);
    cJSON *events = cJSON_CreateArray();
-   for (int i = atoi(after); i < cJSON_GetArraySize(log_entries); i++)
+   if (page_writer)
+   {
+      /* Another retained callback can commit while the subscriber fetches a
+       * page. Its envelope may be delivered beyond the sampled target. */
+      aimee_block_t text = {.type = AIMEE_BLK_TEXT, .text = "concurrent tail"};
+      aimee_message_t message = {.role = "assistant", .blocks = &text, .n_blocks = 1};
+      aimee_session_event_t event = {
+          .kind = AIMEE_SESSION_MESSAGE, .message_id = "late", .message = &message};
+      int rc = server_session_capture_sink(&event, page_writer);
+      assert(!rc);
+      page_writer = NULL;
+   }
+   int start = atoi(after);
+   for (int i = start; i < cJSON_GetArraySize(log_entries) && i < start + limit; i++)
    {
       cJSON *envelope = cJSON_CreateObject();
       char sequence[32];
@@ -106,7 +120,8 @@ int write_all(int fd, const char *text, size_t length)
    assert(committed > 0);
    const char *sequence = cJSON_GetStringValue(cJSON_GetObjectItem(envelope, "sequence"));
    int delivered = sequence ? atoi(sequence) : 0;
-   assert(delivered > 0 && delivered <= committed);
+   assert(delivered > delivered_sequence && delivered <= committed);
+   delivered_sequence = delivered;
    assert(cJSON_Compare(cJSON_GetObjectItem(envelope, "event"),
                         cJSON_GetArrayItem(log_entries, delivered - 1), 1));
    cJSON_Delete(envelope);
@@ -129,7 +144,8 @@ static void cleanup(compute_ctx_t *c)
    server_chat_ir_close(c);
    cJSON_Delete(log_entries);
    log_entries = cJSON_CreateArray();
-   writes = fail_store = disconnected = cancelled = 0;
+   writes = fail_store = disconnected = cancelled = delivered_sequence = 0;
+   page_writer = NULL;
    test_learning_observations_reset();
 }
 static void response(void)
@@ -219,6 +235,48 @@ static void *fail_capture_worker(void *arg)
    server_session_capture_release(capture);
    return NULL;
 }
+static void *write_retained_tail(void *arg)
+{
+   server_session_capture_t *capture = arg;
+   for (int i = 0; i < 131; i++)
+   {
+      char id[32];
+      snprintf(id, sizeof id, "worker-%d", i);
+      aimee_block_t text = {.type = AIMEE_BLK_TEXT, .text = "original provider content"};
+      aimee_message_t message = {.role = "assistant", .blocks = &text, .n_blocks = 1};
+      aimee_session_event_t event = {
+          .kind = AIMEE_SESSION_MESSAGE, .message_id = id, .message = &message};
+      int written = server_session_capture_sink(&event, capture);
+      assert(!written);
+   }
+   server_session_capture_release(capture);
+   return NULL;
+}
+static void retained_worker_progress_uses_durable_pages(void)
+{
+   compute_ctx_t c = context();
+   int started = server_chat_ir_begin(&c, "session-one", "retained native progress");
+   assert(!started && writes == 2);
+   server_session_capture_t *capture = NULL;
+   int retained = server_session_capture_retain_current("session-one", "alice", &capture);
+   assert(!retained && capture);
+   pthread_t worker;
+   int spawned = pthread_create(&worker, NULL, write_retained_tail, capture);
+   assert(!spawned);
+   int joined = pthread_join(worker, NULL);
+   assert(!joined && writes == 2 && cJSON_GetArraySize(log_entries) == 133);
+   page_writer = c.ir_capture;
+   int progress = server_chat_ir_progress(&c);
+   assert(!progress && writes == 134 && !strcmp(c.ir_sequence, "134"));
+   progress = server_chat_ir_progress(&c);
+   assert(!progress && writes == 134); /* No duplicate or backward cursor. */
+   int finished = server_chat_ir_finish(&c, NULL);
+   assert(!finished && writes == 135 && !strcmp(c.ir_sequence, "135"));
+   progress = server_chat_ir_progress(&c);
+   assert(!progress && writes == 135); /* Sealed writer still exposes its tail. */
+   cleanup(&c);
+}
+
 static void retained_worker_failure_refuses_completion(void)
 {
    for (int model = 0; model < 2; model++)
@@ -249,6 +307,7 @@ int main(void)
    log_entries = cJSON_CreateArray();
    worker_capture_failure_is_sticky();
    retained_worker_failure_refuses_completion();
+   retained_worker_progress_uses_durable_pages();
    exact_tool_identity();
    compute_ctx_t legacy = context();
    legacy.ir_delivery = 0;
