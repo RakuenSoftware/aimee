@@ -71,6 +71,15 @@ class IRBypassTests(unittest.TestCase):
             self.source(relative, 'dispatch_tool_call_ctx_status(tool, args, timeout, &failed);')
         checker.check(self.root)
 
+    def test_plain_consumer_cannot_patch_native_profiles(self):
+        for function in ("model_sampling_apply_openai", "model_sampling_apply_anthropic",
+                         "agent_anthropic_set_system", "agent_request_shape_openai_messages"):
+            self.source("src/server/agent_request_build.c", function + "(agent, request);")
+            with self.assertRaisesRegex(ValueError, "post-render-profile"):
+                checker.check(self.root)
+        self.source("src/server/agent_request_build.c", "sampling = model_sampling_resolve(agent, 0.5);")
+        checker.check(self.root)
+
     def test_canonical_host_profiles_cannot_rebuild_native_requests(self):
         for function in checker.CANONICAL_PROFILE_FUNCTIONS:
             for wire in ("openai", "anthropic", "responses"):

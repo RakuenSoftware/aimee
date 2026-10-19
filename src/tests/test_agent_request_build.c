@@ -254,6 +254,32 @@ static void test_thinking_disabled_is_unchanged(void)
    cJSON_Delete(req);
 }
 
+static void test_typed_sampling_in_plain_requests(void)
+{
+   const char *providers[] = {"openai", "anthropic", "moonshotai"};
+   for (size_t i = 0; i < sizeof providers / sizeof *providers; i++)
+   {
+      agent_t agent = mk_agent(providers[i], i == 2 ? "k3" : "qwen3.gguf");
+      agent.recommended_sampling = 1;
+      cJSON *request = agent_build_request(&agent, "stable<aimee-context>volatile", "inspect", 100,
+                                           i == 2 ? 0.2 : -1);
+      assert(request);
+      const cJSON *temperature = cJSON_GetObjectItemCaseSensitive(request, "temperature");
+      assert(cJSON_IsNumber(temperature) && temperature->valuedouble == (i == 2 ? 1.0 : 0.6));
+      if (i < 2)
+      {
+         const cJSON *top_p = cJSON_GetObjectItemCaseSensitive(request, "top_p");
+         const cJSON *top_k = cJSON_GetObjectItemCaseSensitive(request, "top_k");
+         assert(cJSON_IsNumber(top_p) && top_p->valuedouble == 0.95);
+         assert(cJSON_IsNumber(top_k) && top_k->valueint == 20);
+         const cJSON *min_p = cJSON_GetObjectItemCaseSensitive(request, "min_p");
+         assert(i == 0 ? cJSON_IsNumber(min_p) && min_p->valuedouble == 0 : !min_p);
+      }
+      cJSON_Delete(request);
+   }
+   puts("typed plain sampling retains recommendations, wire scope and hard constraints OK");
+}
+
 int main(void)
 {
    init_config_home();
@@ -296,6 +322,7 @@ int main(void)
    test_thinking_is_anthropic_only();
    test_thinking_disabled_is_unchanged();
 
+   test_typed_sampling_in_plain_requests();
    printf("all agent_request_build goldens passed\n");
    return 0;
 }

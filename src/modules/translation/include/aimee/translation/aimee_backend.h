@@ -64,6 +64,10 @@ int anthropic_ir_set_host_system(aimee_request_t *request, const char *system, i
  * the caller owns (cJSON_Delete), or NULL on bad args. */
 struct cJSON *anthropic_backend_build(const aimee_request_t *ir);
 
+/* Plain host-turn compatibility layout. Values still come entirely from IR;
+ * sampling follows content, and system_last preserves the existing cache layout. */
+struct cJSON *anthropic_backend_build_plain(const aimee_request_t *request, int system_last);
+
 /* Parse an Anthropic Messages API response into the IR. Returns 0 (out owned by
  * caller -> aimee_response_free), -1 on error. */
 int anthropic_backend_parse(const struct cJSON *resp, aimee_response_t *out, char *err,
@@ -87,6 +91,8 @@ int openai_ir_set_host_profile(aimee_request_t *request,
  * system messages; tool_use -> assistant tool_calls; tools -> function tools).
  * Returns a new cJSON the caller owns, or NULL. */
 struct cJSON *openai_backend_build(const aimee_request_t *ir);
+/* Plain host-turn wire layout: typed sampling follows the rendered content. */
+struct cJSON *openai_backend_build_plain(const aimee_request_t *request);
 /* Add the typed IR tool choice and parallel_tool_calls to an OpenAI-family request
  * object. responses_shape selects {type:function,name} (Responses) over
  * {type:function,function:{name}} (Chat). Shared by the Chat and Responses backends. */

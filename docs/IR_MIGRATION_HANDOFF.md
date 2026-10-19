@@ -1667,3 +1667,24 @@ were pushed together as `61bfa8290` and need their own fresh CI. This Anthropic
 increment is newer still; SDK activation, complete command fidelity, resource and
 credential ownership, remaining consumers, independent learning and production
 promotion are still unfinished.
+
+
+## Plain agent request consumer cutover
+
+The plain (system/user) request builder now resolves sampling and cache structure
+in IR before egress. It no longer patches native sampling/system fields after the
+backend, nor removes native sampling fields after adaptive-thinking admission.
+The translation owner supplies plain-turn layouts that preserve the existing
+request bytes, including sampling-at-tail and Anthropic system placement. Signed
+Anthropic binding runs on the final rendered request. Existing adaptive capability
+gates and compatibility stable-prefix behavior are unchanged. Allocation failures
+refuse cleanly instead of falling back to an unshaped prompt or dereferencing a
+missing block allocation.
+
+The unchanged OpenAI/Anthropic/Responses byte goldens and adaptive-thinking tests
+pass. Added actual plain-request checks retain opt-in Qwen sampling, Anthropic's
+exclusion of min-p and Moonshot's hard temperature constraint. The consumer joins
+the canonical-files bypass gate; a planted rule rejects reintroduction of native
+sampling/cache/message shaping there. This raises that focused guard suite to ten
+passing tests without editing the exception ledger. Fresh sanitizer/build/lint
+results are recorded with the slice.

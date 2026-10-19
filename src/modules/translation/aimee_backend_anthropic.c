@@ -955,6 +955,77 @@ cJSON *anthropic_backend_build(const aimee_request_t *request)
    }
    return native;
 }
+static cJSON *plain_request_order(cJSON *native)
+{
+   cJSON *ordered = cJSON_CreateObject();
+   if (!ordered)
+   {
+      cJSON_Delete(native);
+      return NULL;
+   }
+   static const char *const fields[] = {
+       "model",  "max_tokens", "metadata", "service_tier", "output_config", "thinking",
+       "stream", "system",     "messages", "tools",        "tool_choice",   "stop_sequences"};
+   for (size_t i = 0; i < sizeof fields / sizeof *fields; i++)
+   {
+      cJSON *field = cJSON_DetachItemFromObjectCaseSensitive(native, fields[i]);
+      if (field && !cJSON_AddItemToObject(ordered, fields[i], field))
+      {
+         cJSON_Delete(field);
+         goto fail;
+      }
+   }
+   while (native->child)
+   {
+      cJSON *field = cJSON_DetachItemViaPointer(native, native->child);
+      if (!cJSON_AddItemToObject(ordered, field->string, field))
+      {
+         cJSON_Delete(field);
+         goto fail;
+      }
+   }
+   cJSON_Delete(native);
+   return ordered;
+fail:
+   cJSON_Delete(native);
+   cJSON_Delete(ordered);
+   return NULL;
+}
+
+cJSON *anthropic_backend_build_plain(const aimee_request_t *ir, int system_last)
+{
+   if (aimee_ir_request_admit(ir))
+      return NULL;
+   aimee_request_t content = *ir;
+   content.has_temperature = content.has_top_p = content.has_top_k = 0;
+   cJSON *out = anthropic_backend_build_unbound(&content);
+   if (!out)
+      return NULL;
+   out = plain_request_order(out);
+   if (!out)
+      return NULL;
+   if (system_last)
+   {
+      cJSON *system = cJSON_DetachItemFromObjectCaseSensitive(out, "system");
+      if (system && !cJSON_AddItemToObject(out, "system", system))
+      {
+         cJSON_Delete(system);
+         goto fail;
+      }
+   }
+   if ((ir->has_temperature && !cJSON_AddNumberToObject(out, "temperature", ir->temperature)) ||
+       (ir->has_top_p && !cJSON_AddNumberToObject(out, "top_p", ir->top_p)) ||
+       (ir->has_top_k && !cJSON_AddNumberToObject(out, "top_k", ir->top_k)))
+      goto fail;
+   aimee_anthropic_replay_t state;
+   if (binding_walk(out, ir, &state, 2, NULL, NULL))
+      goto fail;
+   return out;
+fail:
+   cJSON_Delete(out);
+   return NULL;
+}
+
 void aimee_anthropic_projection_report(const aimee_request_t *request,
                                        aimee_wire_projection_report_t *report)
 {

@@ -386,6 +386,28 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
    return out;
 }
 
+cJSON *openai_backend_build_plain(const aimee_request_t *ir)
+{
+   if (aimee_ir_request_admit(ir))
+      return NULL;
+   aimee_request_t content = *ir;
+   content.has_temperature = content.has_top_p = content.has_top_k = 0;
+   content.raw = NULL;
+   content.raw_bytes = NULL;
+   cJSON *out = openai_backend_build(&content);
+   if (!out)
+      return NULL;
+   if ((ir->has_temperature && !cJSON_AddNumberToObject(out, "temperature", ir->temperature)) ||
+       (ir->has_top_p && !cJSON_AddNumberToObject(out, "top_p", ir->top_p)) ||
+       (ir->has_top_k && !cJSON_AddNumberToObject(out, "top_k", ir->top_k)) ||
+       openai_profile_extensions(ir, out))
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
+   return out;
+}
+
 static aimee_stop_reason_t finish_to_stop(const char *f)
 {
    if (!f)
