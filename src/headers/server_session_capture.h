@@ -8,7 +8,9 @@ typedef struct
    unsigned long long counter, model_events, model_completions;
 } server_session_capture_counts_t;
 /* The host owns the registered canonical turn. execution_session is its verified
- * source session; a private child has a distinct destination, never a new actor. */
+ * source session; a private child has a distinct destination, never a new actor.
+ * One live writer owns each (session, turn); duplicate opens refuse until all
+ * retained leases release. Consumers retain the existing owner. */
 server_session_capture_t *server_session_capture_open(const char *session, const char *turn,
                                                       const char *principal,
                                                       const char *execution_session);
@@ -32,6 +34,17 @@ int server_session_capture_counts(server_session_capture_t *owner,
  * means no committed event yet. Readable after a terminal/failure so a producer
  * can drain its durable tail; this grants no write or tool authority. */
 int server_session_capture_cursor(server_session_capture_t *owner, char sequence[32]);
+/* One model generation per retained host turn, including across native SDK
+ * runtimes. A successful enter retains the owner until the matching leave;
+ * stale/double leaves never release a later generation. Neither grants tools. */
+int server_session_capture_model_enter(server_session_capture_t *owner, unsigned long long *lease);
+int server_session_capture_model_leave(server_session_capture_t *owner, unsigned long long lease);
+/* Once-only transient admission for an independently host-verified original
+ * call at a committed source sequence/block. 0 claims, 1 already claimed, -1
+ * refuses. This is not source verification or effect authorization; durable
+ * permits/outcomes remain with the existing governed-action owner. */
+int server_session_capture_claim_call(server_session_capture_t *owner, const char *source_sequence,
+                                      int block_index);
 /* Owned, admitted canonical conversation including this running turn. Never
  * imports native files; source absence/corruption makes capture failure sticky. */
 int server_session_capture_history(server_session_capture_t *owner, struct cJSON **out);

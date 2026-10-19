@@ -266,12 +266,168 @@ static void test_running_history_source(void)
    }
 }
 
+typedef struct
+{
+   server_session_capture_t *owner;
+   int result;
+} claim_worker_t;
+static void *claim_original_source(void *context)
+{
+   claim_worker_t *worker = context;
+   worker->result = server_session_capture_claim_call(worker->owner, "1", 0);
+   server_session_capture_release(worker->owner);
+   return NULL;
+}
+static void test_host_turn_generation_and_source_claims(void)
+{
+   reset();
+   server_session_capture_t *owner =
+       server_session_capture_open("private-child", "turn", "alice", "parent");
+   assert(owner && !server_session_capture_bind(owner));
+   server_session_capture_t *duplicate =
+       server_session_capture_open("private-child", "turn", "alice", "parent");
+   assert(!duplicate);
+   duplicate = server_session_capture_open("private-child", "turn", "mallory", "other");
+   assert(!duplicate);
+   unsigned long long first = 0, refused = 0, second = 0;
+   int entered = server_session_capture_model_enter(owner, &first);
+   assert(!entered && first);
+   entered = server_session_capture_model_enter(owner, &refused);
+   assert(entered < 0 && !refused);
+   int left = server_session_capture_model_leave(owner, first + 1);
+   assert(left < 0);
+   entered = server_session_capture_model_enter(owner, &refused);
+   assert(entered < 0 && !refused);
+   left = server_session_capture_model_leave(owner, first);
+   assert(!left);
+   entered = server_session_capture_model_enter(owner, &second);
+   assert(!entered && second > first);
+   left = server_session_capture_model_leave(owner, first);
+   assert(left < 0); /* A stale leave cannot release the newer generation. */
+   entered = server_session_capture_model_enter(owner, &refused);
+   assert(entered < 0 && !refused);
+   left = server_session_capture_model_leave(owner, second);
+   assert(!left);
+   int claim = server_session_capture_claim_call(owner, "1", 0);
+   assert(claim < 0); /* No committed original source exists yet. */
+   cJSON *input = cJSON_CreateObject();
+   aimee_block_t *calls = calloc(AIMEE_IR_MAX_BLOCKS, sizeof *calls);
+   assert(input && calls);
+   for (int i = 0; i < AIMEE_IR_MAX_BLOCKS; i++)
+   {
+      char id[32];
+      snprintf(id, sizeof id, "original-%d", i);
+      calls[i] = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                                 .tool_id = strdup(id),
+                                 .tool_name = "read_file",
+                                 .tool_input = input};
+      assert(calls[i].tool_id);
+   }
+   aimee_message_t message = {
+       .role = "assistant", .blocks = calls, .n_blocks = AIMEE_IR_MAX_BLOCKS};
+   aimee_session_event_t event = {
+       .kind = AIMEE_SESSION_MESSAGE, .message_id = "original", .message = &message};
+   int written = server_session_capture_sink(&event, owner);
+   assert(!written);
+   const char *invalid[] = {"", "0", "01", " 1", "+1", "-1", "18446744073709551616", "2"};
+   for (size_t i = 0; i < sizeof invalid / sizeof *invalid; i++)
+   {
+      claim = server_session_capture_claim_call(owner, invalid[i], 0);
+      assert(claim < 0);
+   }
+   claim = server_session_capture_claim_call(owner, "1", -1);
+   assert(claim < 0);
+   claim = server_session_capture_claim_call(owner, "1", AIMEE_IR_MAX_BLOCKS);
+   assert(claim < 0);
+   pthread_t threads[8];
+   claim_worker_t workers[8];
+   for (int i = 0; i < 8; i++)
+   {
+      int retained = server_session_capture_retain_current("parent", "alice", &workers[i].owner);
+      assert(!retained && workers[i].owner == owner);
+      int spawned = pthread_create(&threads[i], NULL, claim_original_source, &workers[i]);
+      assert(!spawned);
+   }
+   int admitted = 0;
+   for (int i = 0; i < 8; i++)
+   {
+      int joined = pthread_join(threads[i], NULL);
+      assert(!joined && (workers[i].result == 0 || workers[i].result == 1));
+      admitted += workers[i].result == 0;
+   }
+   assert(admitted == 1);
+   for (int i = 1; i < AIMEE_IR_MAX_BLOCKS; i++)
+   {
+      claim = server_session_capture_claim_call(owner, "1", i);
+      assert(!claim);
+   }
+   message.n_blocks = 1;
+   event.message_id = "next";
+   written = server_session_capture_sink(&event, owner);
+   assert(!written);
+   claim = server_session_capture_claim_call(owner, "2", 0);
+   assert(claim < 0); /* Bounded transient claims never become another journal. */
+   claim = server_session_capture_claim_call(owner, "1", 0);
+   assert(claim == 1);
+   for (int i = 0; i < AIMEE_IR_MAX_BLOCKS; i++)
+      free(calls[i].tool_id);
+   free(calls);
+   cJSON_Delete(input);
+   entered = server_session_capture_model_enter(owner, &second);
+   assert(!entered);
+   server_session_capture_close(owner);
+   duplicate = server_session_capture_open("private-child", "turn", "alice", "parent");
+   assert(!duplicate); /* A closed writer's retained generation still owns its identity. */
+   entered = server_session_capture_model_enter(owner, &refused);
+   assert(entered < 0 && !refused);
+   claim = server_session_capture_claim_call(owner, "1", 0);
+   assert(claim < 0);
+   left = server_session_capture_model_leave(owner, second);
+   assert(!left); /* The generation lease owns the last reference after close. */
+}
+
+static void *open_raced_owner(void *context)
+{
+   server_session_capture_t **owner = context;
+   *owner = server_session_capture_open("private-child", "raced", "alice", "parent");
+   return NULL;
+}
+static void test_one_live_writer_per_turn(void)
+{
+   reset();
+   pthread_t threads[8];
+   server_session_capture_t *opened[8] = {0}, *winner = NULL;
+   for (int i = 0; i < 8; i++)
+   {
+      int spawned = pthread_create(&threads[i], NULL, open_raced_owner, &opened[i]);
+      assert(!spawned);
+   }
+   int accepted = 0;
+   for (int i = 0; i < 8; i++)
+   {
+      int joined = pthread_join(threads[i], NULL);
+      assert(!joined);
+      if (opened[i])
+      {
+         winner = opened[i];
+         accepted++;
+      }
+   }
+   assert(accepted == 1 && winner);
+   server_session_capture_close(winner);
+   winner = server_session_capture_open("private-child", "raced", "alice", "parent");
+   assert(winner); /* Final lease release removes the live directory entry. */
+   server_session_capture_close(winner);
+}
+
 int main(void)
 {
    server_session_capture_t *absent = NULL;
    int captured = server_session_capture_retain_current(NULL, NULL, &absent);
    assert(!captured && !absent);
    test_concurrent_owner();
+   test_host_turn_generation_and_source_claims();
+   test_one_live_writer_per_turn();
    test_close_before_callback();
    test_failure_refuses_success();
    test_running_history_source();

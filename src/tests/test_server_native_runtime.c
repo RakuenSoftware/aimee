@@ -845,7 +845,6 @@ static void test_owned_native_context(const agent_t *selected, const request_con
    assert(other);
    scoped = server_native_runtime_cache_scope(other, &execution, changed);
    assert(!scoped && strcmp(baseline, changed));
-   server_native_runtime_close(other);
    aimee_request_free(&profile);
    assert(server_session_capture_bind(NULL) == capture);
    atomic_store(&expected_capture, capture);
@@ -869,6 +868,9 @@ static void test_owned_native_context(const agent_t *selected, const request_con
    assert(atomic_load(&calls) == before + 1);
    request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
    assert(strstr(response, "502") && atomic_load(&calls) == before + 1);
+   request(other, "/v1/responses", server_native_runtime_token(other), response);
+   assert(strstr(response, "502") && atomic_load(&calls) == before + 1);
+   server_native_runtime_close(other);
    close(fd);
    for (int i = 0; i < 300 && !atomic_load(&cancelled); i++)
       usleep(10000);

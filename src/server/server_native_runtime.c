@@ -36,8 +36,7 @@ struct server_native_runtime
    server_native_replay_t *replay;
    cJSON *source_history;
    aimee_request_t request_profile;
-   pthread_mutex_t request_lock;
-   int request_lock_initialized, owns_request;
+   int owns_request;
    agent_t selected;
    request_context_t owner;
    agent_request_creds_t credentials;
@@ -272,8 +271,10 @@ static int native_forward(const char *method, const char *path, const char *head
       free(input);
       return -1;
    }
-   int request_locked = model_request && runtime->owns_request;
-   if (request_locked && pthread_mutex_trylock(&runtime->request_lock))
+   int request_locked =
+       model_request && runtime->owns_request && strcmp(path, "/v1/messages/count_tokens");
+   unsigned long long model_lease = 0;
+   if (request_locked && server_session_capture_model_enter(runtime->capture, &model_lease))
    {
       /* Parallel model generations cannot fork one authoritative running turn. */
       agent_source_authority_snapshot_destroy(&previous_source);
@@ -416,7 +417,7 @@ restore:
    free(input);
    aimee_request_free(&request_owner.request);
    if (request_locked)
-      pthread_mutex_unlock(&runtime->request_lock);
+      server_session_capture_model_leave(runtime->capture, model_lease);
    return rc;
 }
 
@@ -437,12 +438,6 @@ static server_native_runtime_t *native_runtime_open(const agent_t *selected,
    server_native_runtime_t *runtime = calloc(1, sizeof *runtime);
    if (!runtime)
       return NULL;
-   if (pthread_mutex_init(&runtime->request_lock, NULL))
-   {
-      free(runtime);
-      return NULL;
-   }
-   runtime->request_lock_initialized = 1;
    runtime->selected = *selected;
    runtime->owner = *owner;
    runtime->owner.model_execution = 1;
@@ -743,8 +738,6 @@ void server_native_runtime_close(server_native_runtime_t *runtime)
    server_native_replay_close(runtime->replay);
    cJSON_Delete(runtime->source_history);
    aimee_request_free(&runtime->request_profile);
-   if (runtime->request_lock_initialized)
-      pthread_mutex_destroy(&runtime->request_lock);
    server_control_scope_release(runtime->controls);
    server_session_capture_release(runtime->capture);
    agent_tools_scope_destroy_owned(&runtime->tools);

@@ -4,11 +4,18 @@
 #include "db1_client/primary_sessions.h"
 #include "vault_principal.h"
 #include <pthread.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct
+{
+   unsigned long long sequence;
+   int block_index;
+} source_claim_t;
 struct server_session_capture
 {
    char session[128], turn[128], principal[VAULT_PRINCIPAL_MAX], execution_session[128];
@@ -18,8 +25,14 @@ struct server_session_capture
    server_control_scope_t *controls;
    server_session_capture_counts_t counts;
    char committed_sequence[32];
+   unsigned long long model_generation, model_active;
+   source_claim_t *source_claims;
+   int n_claims, claims_capacity;
+   struct server_session_capture *next;
 };
 static _Thread_local server_session_capture_t *current;
+static pthread_mutex_t owners_lock = PTHREAD_MUTEX_INITIALIZER;
+static server_session_capture_t *owners;
 server_session_capture_t *server_session_capture_current(void)
 {
    return current;
@@ -63,6 +76,17 @@ server_session_capture_t *server_session_capture_open(const char *session, const
       server_session_capture_release(owner);
       return NULL;
    }
+   pthread_mutex_lock(&owners_lock);
+   for (server_session_capture_t *existing = owners; existing; existing = existing->next)
+      if (!strcmp(existing->session, owner->session) && !strcmp(existing->turn, owner->turn))
+      {
+         pthread_mutex_unlock(&owners_lock);
+         server_session_capture_release(owner);
+         return NULL;
+      }
+   owner->next = owners;
+   owners = owner;
+   pthread_mutex_unlock(&owners_lock);
    return owner;
 }
 int server_session_capture_failed(const server_session_capture_t *owner)
@@ -98,8 +122,16 @@ void server_session_capture_release(server_session_capture_t *owner)
 {
    if (owner && atomic_fetch_sub(&owner->references, 1) == 1)
    {
+      pthread_mutex_lock(&owners_lock);
+      server_session_capture_t **entry = &owners;
+      while (*entry && *entry != owner)
+         entry = &(*entry)->next;
+      if (*entry)
+         *entry = owner->next;
+      pthread_mutex_unlock(&owners_lock);
       server_control_scope_release(owner->controls);
       pthread_mutex_destroy(&owner->lock);
+      free(owner->source_claims);
       free(owner);
    }
 }
@@ -135,6 +167,81 @@ int server_session_capture_cursor(server_session_capture_t *owner, char sequence
    snprintf(sequence, 32, "%s", owner->committed_sequence[0] ? owner->committed_sequence : "0");
    pthread_mutex_unlock(&owner->lock);
    return 0;
+}
+int server_session_capture_model_enter(server_session_capture_t *owner, unsigned long long *lease)
+{
+   if (!lease)
+      return -1;
+   *lease = 0;
+   if (!owner)
+      return -1;
+   pthread_mutex_lock(&owner->lock);
+   int result = -1;
+   if (server_session_capture_accepting(owner) && !owner->model_active &&
+       owner->model_generation != ULLONG_MAX)
+   {
+      owner->model_active = ++owner->model_generation;
+      *lease = owner->model_active;
+      atomic_fetch_add(&owner->references, 1);
+      result = 0;
+   }
+   pthread_mutex_unlock(&owner->lock);
+   return result;
+}
+int server_session_capture_model_leave(server_session_capture_t *owner, unsigned long long lease)
+{
+   if (!owner || !lease)
+      return -1;
+   pthread_mutex_lock(&owner->lock);
+   int matched = owner->model_active == lease;
+   if (matched)
+      owner->model_active = 0;
+   pthread_mutex_unlock(&owner->lock);
+   if (matched)
+      server_session_capture_release(owner);
+   return matched ? 0 : -1;
+}
+int server_session_capture_claim_call(server_session_capture_t *owner, const char *source_sequence,
+                                      int block_index)
+{
+   if (!owner || !source_sequence || !source_sequence[0] || block_index < 0 ||
+       block_index >= AIMEE_IR_MAX_BLOCKS)
+      return -1;
+   char *end, canonical[32];
+   errno = 0;
+   unsigned long long sequence = strtoull(source_sequence, &end, 10);
+   int invalid = errno || *end || !sequence;
+   snprintf(canonical, sizeof canonical, "%llu", sequence);
+   if (invalid || strcmp(canonical, source_sequence))
+      return -1;
+   pthread_mutex_lock(&owner->lock);
+   int result = -1;
+   unsigned long long committed = strtoull(owner->committed_sequence, NULL, 10);
+   if (!server_session_capture_accepting(owner) || sequence > committed)
+      goto done;
+   for (int i = 0; i < owner->n_claims; i++)
+      if (owner->source_claims[i].sequence == sequence &&
+          owner->source_claims[i].block_index == block_index)
+      {
+         result = 1;
+         goto done;
+      }
+   if (owner->n_claims >= AIMEE_IR_MAX_BLOCKS)
+      goto done;
+   if (owner->n_claims == owner->claims_capacity)
+   {
+      int capacity = owner->claims_capacity ? owner->claims_capacity * 2 : 16;
+      source_claim_t *claims = realloc(owner->source_claims, (size_t)capacity * sizeof *claims);
+      if (!claims)
+         goto done;
+      owner->source_claims = claims;
+      owner->claims_capacity = capacity;
+   }
+   owner->source_claims[owner->n_claims++] = (source_claim_t){sequence, block_index};
+   result = 0;
+done:
+   pthread_mutex_unlock(&owner->lock);
+   return result;
 }
 int server_session_capture_history(server_session_capture_t *owner, cJSON **out)
 {

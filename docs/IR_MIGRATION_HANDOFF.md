@@ -3152,3 +3152,42 @@ Original tool-source verification still needs to use actual writer-committed IR
 when callbacks precede the final snapshot; an SDK-normalized command is not a
 source receipt. Effects remain with the existing governed-action owner, not a
 new receipt store. SDK launch sites are still unactivated.
+
+
+## Shared host-turn generation leases and original-source claims
+
+A retained capture is now the unique live writer for its (session, turn).
+Duplicate opens, including a different actor/source spelling, refuse until every
+retained lease joins/releases. Both production creator sites use fresh random
+turns; consumers already retain the owner. The live directory carries no
+connection or credential state and removes entries at final release.
+
+Model generation admission belongs to this host-turn owner rather than one SDK
+runtime's mutex. A returned generation token retains the writer; a stale/double
+leave cannot release a newer generation. Both runtimes sharing a capture refuse
+parallel model generations; read-only token counting need not take the generation
+lease. Closing a producer seals new admissions while an existing generation can
+still release its final retained reference safely.
+
+The same owner provides bounded once-only claims for independently verified
+committed source-sequence/block pairs. Noncanonical/future sequence values,
+invalid block indexes, sealed/failed owners and excess capacity refuse. A repeat
+reports already claimed. These are transient execution admissions, not source
+verification or a parallel durable receipt journal. Existing governed-action
+permits/outcomes remain authoritative. No production tool dispatch calls the
+claim API yet; original typed source matching and effect wiring remain pending.
+
+Focused tests cover eight racing writer opens, eight racing claims with exactly
+one winner, all 4096 legal source slots, refusal beyond the bound, stale generation
+leaves, closure with the generation holding the last reference, and competing
+native runtimes on one capture. The full 657-entry native suite and normal server
+build pass. Three ASan/UBSan fixtures, two ThreadSanitizer fixtures, three CMake
+owner fixtures and Cppcheck on four source/fixture files (zero diagnostics) pass.
+PostgreSQL 18 integration also passes 167/167 with the same 26
+unavailable-service skips. All 76 final lint gates pass.
+
+Published `115677b34` completed all 50 main CI jobs, including every Docker tier,
+with only the two unchanged testing-target platform skips; export, audit, fuzz,
+release and attribution workflows also passed. The later numeric/causal history
+repair is published as `c77cc0492` and needs its own CI completion. Its HEAD scan
+passes Gitleaks (6,218 commits, no leaks). No production promotion occurred.
