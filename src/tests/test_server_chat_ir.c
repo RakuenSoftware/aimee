@@ -116,9 +116,7 @@ static compute_ctx_t context(void)
 }
 static void cleanup(compute_ctx_t *c)
 {
-   server_control_scope_bind(c->ir_previous_controls);
-   server_control_scope_close(c->ir_controls);
-   aimee_ir_session_set_sink(c->ir_previous_sink, c->ir_previous_context);
+   server_chat_ir_close(c);
    cJSON_Delete(log_entries);
    log_entries = cJSON_CreateArray();
    writes = fail_store = disconnected = cancelled = 0;
@@ -204,10 +202,43 @@ static void worker_capture_failure_is_sticky(void)
    cleanup(&c);
 }
 
+static void *fail_capture_worker(void *arg)
+{
+   server_session_capture_t *capture = arg;
+   server_session_capture_fail(capture);
+   server_session_capture_release(capture);
+   return NULL;
+}
+static void retained_worker_failure_refuses_completion(void)
+{
+   for (int model = 0; model < 2; model++)
+   {
+      compute_ctx_t c = context();
+      int started = server_chat_ir_begin(&c, "session-one", "retained worker");
+      assert(!started);
+      if (model)
+         response();
+      int before = cJSON_GetArraySize(log_entries);
+      server_session_capture_t *capture = NULL;
+      int retained = server_session_capture_retain_current("session-one", "alice", &capture);
+      assert(!retained && capture == c.ir_capture);
+      pthread_t worker;
+      int spawned = pthread_create(&worker, NULL, fail_capture_worker, capture);
+      assert(!spawned);
+      int joined = pthread_join(worker, NULL);
+      assert(!joined && !aimee_ir_session_capture_failed());
+      int completed = server_chat_ir_finish(&c, NULL);
+      assert(completed < 0 && c.ir_failed && cJSON_GetArraySize(log_entries) == before);
+      assert(!test_learning_observations());
+      cleanup(&c);
+   }
+}
+
 int main(void)
 {
    log_entries = cJSON_CreateArray();
    worker_capture_failure_is_sticky();
+   retained_worker_failure_refuses_completion();
    exact_tool_identity();
    compute_ctx_t legacy = context();
    legacy.ir_delivery = 0;

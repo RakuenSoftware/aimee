@@ -1,0 +1,222 @@
+#include "server_session_capture.h"
+#include "server_session_control.h"
+#include "server_learning_outcome.h"
+#include "db1_client/primary_sessions.h"
+#include "cJSON.h"
+#include <assert.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static pthread_mutex_t storage = PTHREAD_MUTEX_INITIALIZER;
+static cJSON *rows;
+static int reject_append, observations;
+int db1_session_ir_append(const char *session, const char *id, const char *turn,
+                          const char *principal, const char *wire, char sequence[32])
+{
+   assert(!strcmp(session, "private-child") && !strcmp(principal, "alice"));
+   assert(!strncmp(id, turn, strlen(turn)) && id[strlen(turn)] == ':');
+   pthread_mutex_lock(&storage);
+   if (reject_append)
+   {
+      pthread_mutex_unlock(&storage);
+      return -1;
+   }
+   cJSON *payload = aimee_ir_json_parse_frame(wire, strlen(wire));
+   assert(payload);
+   cJSON *row = cJSON_CreateObject();
+   assert(row);
+   cJSON_AddStringToObject(row, "id", id);
+   cJSON_AddItemToObject(row, "event", payload);
+   const cJSON *old;
+   cJSON_ArrayForEach(old, rows)
+   {
+      assert(strcmp(id, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(old, "id"))));
+   }
+   cJSON_AddItemToArray(rows, row);
+   snprintf(sequence, 32, "%d", cJSON_GetArraySize(rows));
+   pthread_mutex_unlock(&storage);
+   return 0;
+}
+void server_learning_observe_terminal(const char *session, const char *turn, const char *sequence,
+                                      const char *id, const char *principal, const cJSON *event)
+{
+   assert(!strcmp(session, "private-child") && !strcmp(principal, "alice") && turn[0]);
+   pthread_mutex_lock(&storage);
+   const cJSON *last = cJSON_GetArrayItem(rows, cJSON_GetArraySize(rows) - 1);
+   assert(atoi(sequence) == cJSON_GetArraySize(rows));
+   assert(!strcmp(id, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(last, "id"))));
+   assert(cJSON_Compare(event, cJSON_GetObjectItemCaseSensitive(last, "event"), 1));
+   observations++;
+   pthread_mutex_unlock(&storage);
+}
+static void reset(void)
+{
+   assert(!server_session_capture_current());
+   cJSON_Delete(rows);
+   rows = cJSON_CreateArray();
+   assert(rows);
+   reject_append = observations = 0;
+}
+typedef struct
+{
+   server_session_capture_t *owner;
+   int index;
+} worker_t;
+static void *write_message(void *arg)
+{
+   worker_t *worker = arg;
+   assert(!server_session_capture_bind(worker->owner));
+   char id[32], text[32];
+   snprintf(id, sizeof id, "worker-%d", worker->index);
+   snprintf(text, sizeof text, "answer %d", worker->index);
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = text};
+   aimee_message_t message = {.role = "assistant", .blocks = &block, .n_blocks = 1};
+   aimee_session_event_t event = {
+       .kind = AIMEE_SESSION_MESSAGE, .message_id = id, .message = &message};
+   char *envelope = NULL, sequence[32];
+   int written = server_session_capture_append(worker->owner, &event, &envelope, sequence);
+   assert(!written && envelope && sequence[0]);
+   cJSON *view = aimee_ir_json_parse_frame(envelope, strlen(envelope));
+   assert(view);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(view, "session_id")),
+                  "private-child"));
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(view, "sequence")), sequence));
+   cJSON_Delete(view);
+   free(envelope);
+   assert(server_session_capture_bind(NULL) == worker->owner);
+   server_session_capture_release(worker->owner);
+   return NULL;
+}
+static void test_concurrent_owner(void)
+{
+   reset();
+   char session[] = "private-child", turn[] = "turn", actor[] = "alice", source[] = "parent";
+   server_session_capture_t *owner = server_session_capture_open(session, turn, actor, source);
+   assert(owner && !server_session_capture_bind(owner));
+   memset(session, 'x', strlen(session));
+   memset(turn, 'x', strlen(turn));
+   memset(actor, 'x', strlen(actor));
+   memset(source, 'x', strlen(source));
+   server_session_capture_t *lease = NULL;
+   int wrong_actor = server_session_capture_retain_current("parent", "mallory", &lease);
+   assert(wrong_actor < 0 && !lease);
+   int wrong_source = server_session_capture_retain_current("private-child", "alice", &lease);
+   assert(wrong_source < 0 && !lease);
+   const char *arguments = "{\"amount\":123.123456789012345678901234567890}";
+   cJSON *input = aimee_ir_json_parse_frame(arguments, strlen(arguments));
+   assert(input);
+   aimee_block_t tool = {.type = AIMEE_BLK_TOOL_USE,
+                         .tool_id = "native-call:original",
+                         .tool_name = "exec_command",
+                         .tool_input = input};
+   aimee_message_t assistant = {.role = "assistant", .blocks = &tool, .n_blocks = 1};
+   aimee_session_event_t event = {
+       .kind = AIMEE_SESSION_MESSAGE, .message_id = "assistant", .message = &assistant};
+   int written = server_session_capture_append(owner, &event, NULL, NULL);
+   assert(!written);
+   aimee_ir_session_set_sink(server_session_capture_sink, owner);
+   int result_written =
+       aimee_ir_session_emit_tool_result("native-call:original", "original result", 0);
+   assert(!result_written);
+   aimee_ir_session_set_sink(NULL, NULL);
+   const cJSON *payload = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rows, 0), "event");
+   char *wire = cJSON_PrintUnformatted(payload);
+   assert(wire && strstr(wire, "123.123456789012345678901234567890"));
+   assert(strstr(wire, "native-call:original") && strstr(wire, "exec_command") &&
+          strstr(wire, "turn:assistant"));
+   free(wire);
+   pthread_t threads[8];
+   worker_t workers[8];
+   for (int i = 0; i < 8; i++)
+   {
+      int retained = server_session_capture_retain_current("parent", "alice", &workers[i].owner);
+      assert(!retained && workers[i].owner == owner);
+      workers[i].index = i;
+      int started = pthread_create(&threads[i], NULL, write_message, &workers[i]);
+      assert(!started);
+   }
+   for (int i = 0; i < 8; i++)
+   {
+      int joined = pthread_join(threads[i], NULL);
+      assert(!joined);
+   }
+   server_session_capture_counts_t counts;
+   int counted = server_session_capture_counts(owner, &counts);
+   assert(!counted && counts.counter == 10 && counts.model_events == 9 &&
+          counts.model_completions == 9);
+   aimee_session_event_t terminal = {.kind = AIMEE_SESSION_EXECUTION,
+                                     .execution_status = "completed"};
+   int finished = server_session_capture_sink(&terminal, owner);
+   assert(!finished && observations == 1 && !server_session_capture_accepting(owner));
+   int late = server_session_capture_sink(&event, owner);
+   assert(late < 0 && cJSON_GetArraySize(rows) == 11 && !server_session_capture_failed(owner));
+   cJSON_Delete(input);
+   server_session_capture_close(owner);
+}
+static void *closed_writer(void *arg)
+{
+   server_session_capture_t *owner = arg;
+   assert(!server_session_capture_bind(owner));
+   server_session_capture_t *lease = NULL;
+   int retained = server_session_capture_retain_current("parent", "alice", &lease);
+   assert(retained < 0 && !lease);
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
+   int written = server_session_capture_sink(&event, owner);
+   assert(written < 0);
+   server_session_capture_bind(NULL);
+   server_session_capture_release(owner);
+   return NULL;
+}
+static void test_close_before_callback(void)
+{
+   reset();
+   server_session_capture_t *owner =
+       server_session_capture_open("private-child", "late", "alice", "parent");
+   assert(owner && !server_session_capture_bind(owner));
+   server_session_capture_t *lease = NULL;
+   int retained = server_session_capture_retain_current("parent", "alice", &lease);
+   assert(!retained && lease == owner);
+   server_session_capture_close(owner);
+   pthread_t worker;
+   int started = pthread_create(&worker, NULL, closed_writer, lease);
+   assert(!started);
+   int joined = pthread_join(worker, NULL);
+   assert(!joined && !cJSON_GetArraySize(rows));
+}
+static void test_failure_refuses_success(void)
+{
+   reset();
+   server_session_capture_t *owner =
+       server_session_capture_open("private-child", "failed", "alice", "parent");
+   assert(owner && !server_session_capture_bind(owner));
+   aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
+   reject_append = 1;
+   int refused = server_session_capture_sink(&started, owner);
+   assert(refused < 0 && server_session_capture_failed(owner));
+   reject_append = 0;
+   aimee_session_event_t completed = {.kind = AIMEE_SESSION_EXECUTION,
+                                      .execution_status = "completed"};
+   int no_success = server_session_capture_sink(&completed, owner);
+   assert(no_success < 0 && !cJSON_GetArraySize(rows) && !observations);
+   aimee_session_event_t failed = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "failed"};
+   int recorded = server_session_capture_sink(&failed, owner);
+   assert(!recorded && cJSON_GetArraySize(rows) == 1 && observations == 1 &&
+          server_session_capture_failed(owner));
+   server_session_capture_close(owner);
+}
+int main(void)
+{
+   server_session_capture_t *absent = NULL;
+   int captured = server_session_capture_retain_current(NULL, NULL, &absent);
+   assert(!captured && !absent);
+   test_concurrent_owner();
+   test_close_before_callback();
+   test_failure_refuses_success();
+   cJSON_Delete(rows);
+   puts("retained capture: copied identity, concurrent counters, exact IR, sealed turns and sticky "
+        "failure passed");
+   return 0;
+}

@@ -9,6 +9,7 @@
 #include "cJSON.h"
 #include <aimee/ir/session_event.h>
 #include "server_session_control.h"
+#include "server_session_capture.h"
 #include "request_context.h"
 #include <pthread.h>
 
@@ -45,8 +46,7 @@ typedef struct
    request_context_snapshot_t request_context;
    cJSON *req; /* owned by this context */
    int ir_enabled, ir_delivery, ir_failed, ir_completed;
-   unsigned long long ir_counter;
-   unsigned long long ir_model_events;
+   server_session_capture_t *ir_capture, *ir_previous_capture;
    char ir_session[128], ir_turn[128];
    char ir_sequence[32];
    server_control_scope_t *ir_controls, *ir_previous_controls;
@@ -107,6 +107,7 @@ void server_install_gateway_delegate_policy(void);
 void compute_respond(compute_ctx_t *cctx, cJSON *resp);
 int server_chat_ir_begin(compute_ctx_t *cctx, const char *session, const char *message);
 int server_chat_ir_finish(compute_ctx_t *cctx, const char *error);
+void server_chat_ir_close(compute_ctx_t *cctx);
 void compute_error(compute_ctx_t *cctx, const char *message);
 void compute_ok(compute_ctx_t *cctx);
 void compute_ctx_release_budget(compute_ctx_t *cctx);

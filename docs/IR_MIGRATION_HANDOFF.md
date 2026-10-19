@@ -2547,3 +2547,32 @@ canonical response and observes a resolved control. Control exchange creates no
 model messages. The full frontend suite now passes 293 tests across 35 files,
 and TypeScript project checking passes. Native/source qualification above is
 unchanged; this test does not constitute production browser deployment approval.
+
+## Retained canonical capture owner across joined callbacks
+
+Primary and private producers now share a retained durable writer containing
+copied session/turn/principal/source identities, append counters, a per-owner
+mutex and a shared failure flag. It holds no connection, subscriber, compute
+context or credential state. Delivery remains with the primary producer. Native
+callback workers retain the writer until listener shutdown and restore their
+previous binding on return; creator closure seals writes without freeing an
+outstanding callback lease. A committed terminal seals later event writes.
+
+Source identity and destination history remain distinct: a private child can
+retain its own writer using its verified parent execution session and actor.
+Message/control IDs are qualified once; original tool IDs, names, exact numeric
+arguments and results are preserved. Append failures and callback-only capture
+failures reach the producing execution even when the producer's TLS error flag
+is healthy. Successful completion then refuses; private failed-terminal
+recording remains available. Native replay still captures proofs only; this
+refactor does not activate SDK spawn sites or establish complete native history.
+
+Qualification: all 656 native binaries and proxy regressions, four focused
+ASan/UBSan fixtures, nine-source Cppcheck, actual CMake application plus five
+CTest fixtures, rebuilt Linux server, original PostgreSQL 18.6 integration
+167/167 (26 existing service skips, no KB), and 21 semantic-context benchmark
+checks pass. Fresh platform CI, full native wire capture/reconciliation, actual
+SDK activation/cache qualification and independent learning qualification remain
+outstanding. The frontend remains qualified at 293 tests plus TypeScript checks.
+
+All 76 repository lint gates pass for the retained capture-owner increment.

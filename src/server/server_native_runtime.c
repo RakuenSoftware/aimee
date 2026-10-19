@@ -6,6 +6,7 @@
 #include "agent_tasks.h"
 #include "server_delegate_scope.h"
 #include "server_session_control.h"
+#include "server_session_capture.h"
 #include "modules/workspace/workspace_provider.h"
 #include "util.h"
 #include "server_native_replay.h"
@@ -28,6 +29,7 @@
 struct server_native_runtime
 {
    server_control_scope_t *controls;
+   server_session_capture_t *capture;
    cli_proxy_t *listener;
    server_native_replay_t *replay;
    agent_t selected;
@@ -101,7 +103,8 @@ static int native_forward(const char *method, const char *path, const char *head
    /* The listener admits protocol headers only, never identity or credentials. */
    server_native_runtime_t *runtime = context;
    if (!session || strcmp(session, runtime->session) || length > 4u * 1024u * 1024u ||
-       !native_route(method, path, runtime))
+       !native_route(method, path, runtime) ||
+       (runtime->capture && !server_session_capture_accepting(runtime->capture)))
       return -1;
    db1_server_session_t source;
    if (db1_server_session_get(runtime->session, &source) ||
@@ -172,6 +175,7 @@ static int native_forward(const char *method, const char *path, const char *head
    snprintf(previous_cwd, sizeof previous_cwd, "%s", cwd ? cwd : "");
    if (session_id_override_active())
       snprintf(previous_session, sizeof previous_session, "%s", session_id());
+   server_session_capture_t *previous_capture = server_session_capture_bind(runtime->capture);
    server_control_scope_t *previous_controls =
        server_control_scope_bind(!strncmp(path, "/v1/mcp/", 8) ? runtime->controls : NULL);
    agent_tools_scope_restore(&runtime->tools);
@@ -254,6 +258,8 @@ static int native_forward(const char *method, const char *path, const char *head
    }
    io->response_started(io->context);
    rc = server_http_native_forward(io->downstream_fd, method, path, input, (int)length);
+   if (aimee_ir_session_capture_failed())
+      server_session_capture_fail(runtime->capture);
    if (model_request)
    {
       aimee_frontend_bind_state_guard(previous_guard.guard, previous_guard.context);
@@ -281,6 +287,7 @@ restore:
    workspace_provider_set_active(previous_workspace);
    agent_set_durable_job(previous_job);
    run_cmd_set_cwd(previous_cwd);
+   server_session_capture_bind(previous_capture);
    session_id_set_override(previous_session);
    server_control_scope_bind(previous_controls);
    free(input);
@@ -323,7 +330,8 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
    agent_claude_credentials_t claude_credentials = {0};
    if (agent_tools_scope_capture_owned(&runtime->tools) ||
        agent_source_authority_tls_capture_checked(&runtime->source) ||
-       server_control_scope_capture(session_id, owner->vault_principal, &runtime->controls))
+       server_control_scope_capture(session_id, owner->vault_principal, &runtime->controls) ||
+       server_session_capture_retain_current(session_id, owner->vault_principal, &runtime->capture))
       goto failed;
    /* An ordinary primary has no delegate source overlay. Make that absence
     * explicit rather than falling back to a concurrent delegate's global env. */
@@ -542,6 +550,7 @@ void server_native_runtime_close(server_native_runtime_t *runtime)
    cli_proxy_stop(runtime->listener);
    server_native_replay_close(runtime->replay);
    server_control_scope_release(runtime->controls);
+   server_session_capture_release(runtime->capture);
    agent_tools_scope_destroy_owned(&runtime->tools);
    agent_source_authority_snapshot_destroy(&runtime->source);
    OPENSSL_cleanse(runtime, sizeof *runtime);

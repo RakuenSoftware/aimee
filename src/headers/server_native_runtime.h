@@ -14,7 +14,8 @@ typedef struct server_native_runtime server_native_runtime_t;
  * Close only after the native child exits; it joins all admitted callbacks.
  * Callback workers inherit model permissions and never operator authority.
  * MCP callbacks retain the session/principal-bound pending-control owner;
- * model-forwarding callbacks have no control binding. */
+ * model-forwarding callbacks have no control binding. Both retain the durable
+ * capture owner, independently of the producer connection, until callbacks join. */
 server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
                                                     const request_context_t *owner,
                                                     const char *session_id);

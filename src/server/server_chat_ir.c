@@ -1,6 +1,5 @@
 /* Durable session capture owned by the server compute task. */
 #include "server_compute_impl.h"
-#include "server_learning_outcome.h"
 #include "agent_config.h"
 #include "presence.h"
 #include "db1_client/server_sessions.h"
@@ -77,84 +76,14 @@ static int chat_ir_deliver(compute_ctx_t *c, const char *json, const char *seque
 static int chat_ir_sink(const aimee_session_event_t *event, void *context)
 {
    compute_ctx_t *c = context;
-   if (c->ir_failed || server_control_scope_failed(c->ir_controls))
+   if (c->ir_failed || server_control_scope_failed(c->ir_controls) ||
+       server_session_capture_failed(c->ir_capture))
    {
       c->ir_failed = 1;
       return -1;
    }
-   const char *role =
-       event->kind == AIMEE_SESSION_MESSAGE && event->message ? event->message->role : event->role;
-   if (role && !strcmp(role, "assistant"))
-      c->ir_model_events++;
-   if (event->kind == AIMEE_SESSION_CONTROL_REQUEST &&
-       server_control_register(c->ir_controls, event->request_id, event->control_kind,
-                               event->control) != 0)
-   {
-      c->ir_failed = 1;
-      return -1;
-   }
-   cJSON *payload = aimee_ir_session_event_json(event);
-   if (!payload)
-   {
-      c->ir_failed = 1;
-      return -1;
-   }
-   if (event->message_id)
-   {
-      size_t n = strlen(c->ir_turn) + strlen(event->message_id) + 2;
-      char *id = malloc(n);
-      if (!id)
-      {
-         cJSON_Delete(payload);
-         c->ir_failed = 1;
-         return -1;
-      }
-      snprintf(id, n, "%s:%s", c->ir_turn, event->message_id);
-      cJSON_ReplaceItemInObjectCaseSensitive(payload, "message_id", cJSON_CreateString(id));
-      free(id);
-   }
-   /* Tool identities are model content. The projection keys calls by host
-    * message/block identity; rewriting tool IDs here corrupts native replay. */
-   if (event->request_id)
-   {
-      size_t n = strlen(c->ir_turn) + strlen(event->request_id) + 2;
-      char *id = malloc(n);
-      if (!id)
-      {
-         cJSON_Delete(payload);
-         c->ir_failed = 1;
-         return -1;
-      }
-      snprintf(id, n, "%s:%s", c->ir_turn, event->request_id);
-      cJSON_ReplaceItemInObjectCaseSensitive(payload, "request_id", cJSON_CreateString(id));
-      free(id);
-   }
-   char event_id[192], sequence[32];
-   snprintf(event_id, sizeof(event_id), "%s:%llu", c->ir_turn, ++c->ir_counter);
-   char *json = cJSON_PrintUnformatted(payload);
-   if (!json || db1_session_ir_append(c->ir_session, event_id, c->ir_turn, c->vault_principal, json,
-                                      sequence) != 0)
-   {
-      free(json);
-      cJSON_Delete(payload);
-      c->ir_failed = 1;
-      return -1;
-   }
-   free(json);
-   if (event->kind == AIMEE_SESSION_EXECUTION && strcmp(event->execution_status, "running"))
-      server_learning_observe_terminal(c->ir_session, c->ir_turn, sequence, event_id,
-                                       c->vault_principal, payload);
-   cJSON *envelope = cJSON_CreateObject();
-   cJSON_AddNumberToObject(envelope, "version", 1);
-   cJSON_AddStringToObject(envelope, "session_id", c->ir_session);
-   cJSON_AddStringToObject(envelope, "sequence", sequence);
-   cJSON_AddStringToObject(envelope, "event_id", event_id);
-   cJSON_AddStringToObject(envelope, "turn_id", c->ir_turn);
-   cJSON_AddStringToObject(envelope, "actor", c->vault_principal);
-   cJSON_AddItemToObject(envelope, "event", payload);
-   json = cJSON_PrintUnformatted(envelope);
-   cJSON_Delete(envelope);
-   if (!json)
+   char *json = NULL, sequence[32];
+   if (server_session_capture_append(c->ir_capture, event, &json, sequence))
    {
       c->ir_failed = 1;
       return -1;
@@ -162,7 +91,10 @@ static int chat_ir_sink(const aimee_session_event_t *event, void *context)
    int rc = chat_ir_deliver(c, json, sequence);
    free(json);
    if (rc != 0)
+   {
       c->ir_failed = 1;
+      server_session_capture_fail(c->ir_capture);
+   }
    return rc;
 }
 
@@ -190,6 +122,16 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text
    if (!c->ir_controls)
       return -1;
    c->ir_previous_controls = server_control_scope_bind(c->ir_controls);
+   c->ir_capture =
+       server_session_capture_open(c->ir_session, c->ir_turn, c->vault_principal, c->ir_session);
+   if (!c->ir_capture)
+   {
+      server_control_scope_bind(c->ir_previous_controls);
+      server_control_scope_close(c->ir_controls);
+      c->ir_controls = NULL;
+      return -1;
+   }
+   c->ir_previous_capture = server_session_capture_bind(c->ir_capture);
    c->ir_previous_sink = aimee_ir_session_get_sink(&c->ir_previous_context);
    c->ir_enabled = 1;
    aimee_ir_session_set_sink(chat_ir_sink, c);
@@ -209,7 +151,10 @@ int server_chat_ir_finish(compute_ctx_t *c, const char *error)
    if (!c->ir_enabled || c->ir_completed)
       return 0;
    c->ir_completed = 1;
-   if (!error && !agent_request_cancelled() && !c->ir_model_events)
+   server_session_capture_counts_t counts = {0};
+   if (server_session_capture_counts(c->ir_capture, &counts))
+      error = "canonical capture owner unavailable";
+   if (!error && !agent_request_cancelled() && !counts.model_events)
       error = "Selected harness produced no canonical model output";
    aimee_session_event_t event = {.kind = AIMEE_SESSION_EXECUTION,
                                   .execution_status = agent_request_cancelled()
@@ -217,4 +162,20 @@ int server_chat_ir_finish(compute_ctx_t *c, const char *error)
                                                           : (error ? "failed" : "completed"),
                                   .execution_error = error};
    return aimee_ir_session_emit(&event);
+}
+
+void server_chat_ir_close(compute_ctx_t *c)
+{
+   if (!c->ir_enabled)
+      return;
+   if (!c->ir_completed)
+      server_chat_ir_finish(c, "execution ended without completion");
+   aimee_ir_session_set_sink(c->ir_previous_sink, c->ir_previous_context);
+   server_session_capture_bind(c->ir_previous_capture);
+   server_session_capture_close(c->ir_capture);
+   server_control_scope_bind(c->ir_previous_controls);
+   server_control_scope_close(c->ir_controls);
+   c->ir_capture = NULL;
+   c->ir_controls = NULL;
+   c->ir_enabled = 0;
 }

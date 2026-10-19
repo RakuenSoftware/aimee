@@ -1,5 +1,6 @@
 #include "server_session_log.h"
 #include "server_session_control.h"
+#include "server_session_capture.h"
 #include "agent_config.h"
 #include "db1_client/server_sessions.h"
 #include <aimee/ir/session_event.h>
@@ -244,6 +245,41 @@ static void *worker(void *arg)
    assert(server_session_log_finish(scope, 1, NULL) == 0);
    return NULL;
 }
+static void *fail_capture_worker(void *arg)
+{
+   server_session_capture_t *capture = arg;
+   server_session_capture_fail(capture);
+   server_session_capture_release(capture);
+   return NULL;
+}
+static void retained_private_failure_is_terminal(void)
+{
+   server_session_log_t *scope = NULL;
+   int started = server_session_log_begin("review", "private worker failure", &scope);
+   assert(!started && scope);
+   model_reply();
+   char session[128], actor[VAULT_PRINCIPAL_MAX];
+   int identified = server_session_log_identity(session, sizeof session, actor, sizeof actor);
+   assert(!identified && !strcmp(actor, "alice"));
+   server_session_capture_t *capture = NULL;
+   int retained = server_session_capture_retain_current("parent", "alice", &capture);
+   assert(!retained && capture);
+   pthread_t worker;
+   int spawned = pthread_create(&worker, NULL, fail_capture_worker, capture);
+   assert(!spawned);
+   int joined = pthread_join(worker, NULL);
+   assert(!joined && !aimee_ir_session_capture_failed());
+   int completed = server_session_log_finish(scope, 1, NULL);
+   assert(completed < 0 && aimee_ir_session_capture_failed());
+   struct row *row = find(session);
+   assert(row);
+   const cJSON *event = cJSON_GetArrayItem(row->events, cJSON_GetArraySize(row->events) - 1);
+   const cJSON *payload = cJSON_GetObjectItemCaseSensitive(event, "payload");
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "status")),
+                  "failed"));
+   aimee_ir_session_set_sink(NULL, NULL);
+}
+
 int main(void)
 {
    server_session_log_t *scope = NULL;
@@ -307,6 +343,7 @@ int main(void)
    assert(aimee_ir_session_capture_failed());
    reject_reference = 0;
    aimee_ir_session_set_sink(NULL, NULL);
+   retained_private_failure_is_terminal();
    int before_workers = count;
    int observations_before_workers = test_learning_observations();
    pthread_t threads[2];
@@ -337,7 +374,8 @@ int main(void)
    memset(long_owner + 8, 'a', VAULT_CERT_CN_MAX);
    long_owner[8 + VAULT_CERT_CN_MAX] = 0;
    attest("long-parent", long_owner);
-   assert(!db1_server_session_create("long-parent", "test", long_owner));
+   int created = db1_server_session_create("long-parent", "test", long_owner);
+   assert(!created);
    assert(!server_session_log_begin("review", "long owner", &scope));
    char exact_actor[VAULT_PRINCIPAL_MAX];
    assert(!server_session_log_identity(native_scope, sizeof native_scope, exact_actor,

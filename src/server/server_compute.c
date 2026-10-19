@@ -358,14 +358,7 @@ void compute_ctx_release_budget(compute_ctx_t *cctx)
 
 void compute_ctx_free(compute_ctx_t *cctx)
 {
-   if (cctx->ir_enabled)
-   {
-      if (!cctx->ir_completed)
-         server_chat_ir_finish(cctx, "execution ended without completion");
-      server_control_scope_bind(cctx->ir_previous_controls);
-      server_control_scope_close(cctx->ir_controls);
-      aimee_ir_session_set_sink(cctx->ir_previous_sink, cctx->ir_previous_context);
-   }
+   server_chat_ir_close(cctx);
    if (cctx->background_job_id > 0)
       agent_set_durable_job(0);
    if (cctx->compute_grant > 0)

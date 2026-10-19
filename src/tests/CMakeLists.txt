@@ -458,7 +458,7 @@ if(NOT WIN32)
   add_test(NAME test_server_native_tool_admission COMMAND test_server_native_tool_admission)
   add_executable(test_server_native_runtime test_server_native_runtime.c
     ../server/agent_tools.c ../posix/agent_source_authority.c ../modules/ir/aimee_ir.c
-    ../server/server_native_runtime.c ../server/server_session_control.c
+    ../server/server_native_runtime.c ../server/server_session_capture.c ../server/server_session_control.c
     ../modules/ir/session_event.c ../cli_proxy.c ../server/request_context.c
     ../aimee_sha256.c ../platform_random.c ../posix/platform_random.c ../vendor/cJSON.c)
   target_include_directories(test_server_native_runtime PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
@@ -485,7 +485,7 @@ if(NOT WIN32)
 endif()
 
 if(NOT WIN32)
-  aimee_add_test(test_server_chat_ir test_server_chat_ir.c ../server/server_chat_ir.c ../server/server_session_control.c
+  aimee_add_test(test_server_chat_ir test_server_chat_ir.c ../server/server_chat_ir.c ../server/server_session_capture.c ../server/server_session_control.c
     ../server/server_learning_outcome.c support/learning_outcome_stub.c support/log_stub.c
     ../interaction_event_names.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
   target_link_libraries(test_server_chat_ir PRIVATE OpenSSL::Crypto)
@@ -523,6 +523,14 @@ if(NOT WIN32)
 endif()
 
 if(NOT WIN32)
+  add_executable(test_server_session_capture test_server_session_capture.c
+    ../server/server_session_capture.c ../server/server_session_control.c
+    ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../vendor/cJSON.c)
+  target_include_directories(test_server_session_capture PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
+  target_link_libraries(test_server_session_capture PRIVATE Threads::Threads m)
+  aimee_enable_test_asserts(test_server_session_capture)
+  add_test(NAME test_server_session_capture COMMAND test_server_session_capture)
   add_executable(test_server_mcp_delegate test_server_mcp_delegate.c
     ../server/server_mcp_delegate.c ../vendor/cJSON.c)
   target_include_directories(test_server_mcp_delegate PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
@@ -552,7 +560,7 @@ if(NOT WIN32)
     ../modules/ir/aimee_ir.c ../vendor/cJSON.c)
   target_link_libraries(test_server_session_control PRIVATE Threads::Threads)
   aimee_add_test(test_server_session_log test_server_session_log.c
-    ../server/server_session_log.c ../server/server_session_control.c
+    ../server/server_session_log.c ../server/server_session_capture.c ../server/server_session_control.c
     ../server/server_learning_outcome.c support/learning_outcome_stub.c support/log_stub.c
     ../interaction_event_names.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
     ../aimee_sha256.c)

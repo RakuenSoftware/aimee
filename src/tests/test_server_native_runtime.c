@@ -4,6 +4,8 @@
 #include "agent_tasks.h"
 #include "server_delegate_scope.h"
 #include "server_session_control.h"
+#include "server_session_capture.h"
+#include "server_learning_outcome.h"
 #include "modules/workspace/workspace_provider.h"
 #include "util.h"
 #include "server_native_replay.h"
@@ -26,6 +28,8 @@ static void restored_probe(void);
 static _Thread_local server_delegate_scope_t delegate_scope;
 static _Thread_local const workspace_provider_t *workspace;
 static server_control_scope_t *alice_controls;
+static _Atomic(server_session_capture_t *) expected_capture;
+static atomic_int reject_proof;
 static workspace_provider_t alice_workspace = {.kind = WS_PROVIDER_SHARED};
 static workspace_provider_t bob_workspace = {.kind = WS_PROVIDER_SHARED};
 const char *agent_tools_dispatch_role(void)
@@ -152,7 +156,7 @@ static void restored_probe(void)
    assert(agent_tools_shell_allowed() && agent_tools_knowledge_write_allowed());
    assert(agent_tools_get_turn() == -1 && !agent_tools_get_snap_id());
    assert(!run_cmd_get_cwd() && !session_id_override_active());
-   assert(!job_id && !workspace && !effect_authorized);
+   assert(!job_id && !workspace && !effect_authorized && !server_session_capture_current());
    assert(!delegate_scope.depth && !delegate_scope.parent[0] && !delegate_scope.mailbox);
    agent_source_authority_snapshot_t previous = {0};
    assert(!agent_source_authority_tls_capture_checked(&previous));
@@ -335,6 +339,7 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    assert(!strcmp(delegate_scope.parent, alice ? "parent-alice" : ""));
    assert(delegate_scope.mailbox == (alice ? (void *)&alice_workspace : NULL));
    assert(!effect_authorized);
+   assert(server_session_capture_current() == atomic_load(&expected_capture));
    assert(server_control_scope_current() ==
           (alice && !strncmp(path, "/v1/mcp/", 8) ? alice_controls : NULL));
    agent_source_authority_snapshot_t observed = {0};
@@ -446,6 +451,8 @@ int server_native_replay_restore(aimee_request_t *request, void *context)
 int server_native_replay_capture(const aimee_session_event_t *event, void *context)
 {
    (void)event;
+   if (atomic_load(&reject_proof))
+      return -1;
    return server_native_replay_restore(NULL, context);
 }
 aimee_frontend_state_scope_t aimee_frontend_bind_state_guard(aimee_frontend_state_guard_fn guard,
@@ -465,7 +472,8 @@ static void probe_replay_scope(const char *path)
       aimee_request_t request = {0};
       assert(!state_guard.guard(&request, state_guard.context));
       aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION};
-      assert(!installed_sink(&event, sink_context));
+      int captured = aimee_ir_session_emit(&event);
+      assert(captured == (atomic_load(&reject_proof) ? -1 : 0));
    }
    else
       assert(!state_guard.guard && !installed_sink);
@@ -588,6 +596,61 @@ static void test_cache_profile(const agent_t *selected, const request_context_t 
    assert(rc == 0 && strcmp(baseline, changed));
    server_native_runtime_close(copy);
    owner_tools(1);
+}
+
+/* Gateway capture here is the existing replay-proof fixture, not fabricated
+ * model history. Full durable event ownership has its own producer fixtures. */
+int db1_session_ir_append(const char *session, const char *id, const char *turn,
+                          const char *principal, const char *wire, char sequence[32])
+{
+   (void)session;
+   (void)id;
+   (void)turn;
+   (void)principal;
+   (void)wire;
+   (void)sequence;
+   assert(!"listener fixture must not invent canonical model history");
+   return -1;
+}
+void server_learning_observe_terminal(const char *session, const char *turn, const char *sequence,
+                                      const char *id, const char *actor, const cJSON *event)
+{
+   (void)session;
+   (void)turn;
+   (void)sequence;
+   (void)id;
+   (void)actor;
+   (void)event;
+   assert(!"listener fixture must not invent a completed execution");
+}
+static void test_retained_capture(const agent_t *selected, const request_context_t *owner)
+{
+   for (int failure = 0; failure < 2; failure++)
+   {
+      owner_tools(1);
+      server_session_capture_t *capture =
+          server_session_capture_open("session-a", "native-turn", "webuser:alice", "session-a");
+      assert(capture && !server_session_capture_bind(capture));
+      server_native_runtime_t *runtime = server_native_runtime_open(selected, owner, "session-a");
+      assert(runtime && server_session_capture_bind(NULL) == capture);
+      atomic_store(&expected_capture, capture);
+      atomic_store(&reject_proof, failure);
+      char response[1024];
+      request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
+      assert(strstr(response, "200 OK"));
+      assert(server_session_capture_failed(capture) == failure);
+      assert(!aimee_ir_session_capture_failed()); /* The failing worker has its own TLS. */
+      atomic_store(&reject_proof, 0);
+      if (!failure)
+         server_session_capture_close(capture);
+      int before = atomic_load(&calls);
+      request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
+      assert(strstr(response, "502") && atomic_load(&calls) == before);
+      server_native_runtime_close(runtime);
+      if (failure)
+         server_session_capture_close(capture);
+      atomic_store(&expected_capture, NULL);
+   }
 }
 
 int main(void)
@@ -723,6 +786,7 @@ int main(void)
    server_native_runtime_close(rotated);
    server_native_runtime_close(claude);
    atomic_store(&source_changed, 0);
+   test_retained_capture(&selected, &a);
    unsetenv("AIMEE_ACTIVE_TOOLSET");
    unsetenv("AIMEE_DELEGATE_SOURCE_PATHS");
    agent_source_authority_snapshot_t absent = {0};
