@@ -196,8 +196,35 @@ def qualify(adapter_binary, codex_binary):
             assert json.loads(call["arguments"]) == {"value": 7}, call
             assert "refused" in json.dumps(result["output"]), result
             assert not errors and len(requests) == 4, (errors, len(requests))
+            # A matched cache checkpoint supplies only unseen canonical items.
+            # Exercise resume AND adoption through the actual compiled adapter.
+            tail = home / "tail.json"
+            tail.write_text(json.dumps([
+                {"role": "user", "blocks": [{"type": "text", "text": "unseen canonical tail"}]},
+                {"role": "assistant", "blocks": [{"type": "tool_use", "tool_id": "call_tail_fixture",
+                    "name": "fail", "namespace": "mcp__fixture", "input": {"value": 7}}]},
+                {"role": "user", "blocks": [{"type": "tool_result", "tool_id": "call_tail_fixture",
+                    "content": "unseen tool result", "is_error": False}]},
+                {"role": "assistant", "blocks": [{"type": "text", "text": "unseen assistant"}]},
+            ]), encoding="utf-8")
+            fourth = run(first["thread_id"], history=tail)
+            assert fourth["thread_id"] == first["thread_id"], fourth
+            assert fourth["text"] == "<S>fixture final 5<E>", fourth
+            resumed = requests[4]["input"]
+            calls = [item for item in resumed if item.get("type") == "function_call"]
+            results = [item for item in resumed if item.get("type") == "function_call_output"]
+            for call_id in ("call_canonical_fixture", "call_native_fixture", "call_tail_fixture"):
+                assert sum(item["call_id"] == call_id for item in calls) == 1, resumed
+                assert sum(item["call_id"] == call_id for item in results) == 1, resumed
+            tail_call = next(item for item in calls if item["call_id"] == "call_tail_fixture")
+            assert tail_call["namespace"] == "mcp__fixture" and tail_call["name"] == "fail", tail_call
+            assert json.loads(tail_call["arguments"]) == {"value": 7}, tail_call
+            encoded = json.dumps(resumed)
+            assert encoded.count("prior user") == encoded.count("unseen canonical tail") == 1, resumed
+            assert "unseen tool result" in encoded and "unseen assistant" in encoded, resumed
+            assert not errors and len(requests) == 5, (errors, len(requests))
             print("PASS: compiled Aimee adapter adopts typed history into the real SDK; "
-                  "restart/resume retains roles, tool IDs/results and completed turns")
+                  "restart/resume appends unseen namespaced items without duplicating the committed prefix")
     finally:
         server.shutdown()
         server.server_close()

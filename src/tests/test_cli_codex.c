@@ -1019,8 +1019,19 @@ int main(int argc, char **argv)
    test_execute_rejects_missing_inputs();
    signal(SIGPIPE, SIG_IGN);
    if (argc >= 2 && !strcmp(argv[1], "--native-history-probe"))
-      return native_history_probe(argc == 3 ? argv[2] : NULL,
-                                  argc == 4 && !strcmp(argv[2], "--import") ? argv[3] : NULL);
+   {
+      const char *resume = NULL, *history = NULL;
+      for (int i = 2; i < argc; i++)
+      {
+         if (!strcmp(argv[i], "--import") && !history && i + 1 < argc)
+            history = argv[++i];
+         else if (argv[i][0] != '-' && !resume)
+            resume = argv[i];
+         else
+            return 2;
+      }
+      return native_history_probe(resume, history);
+   }
    test_canonical_history_adoption();
    puts("canonical history: typed adoption, resume protocol and refusal before model turn "
         "passed");

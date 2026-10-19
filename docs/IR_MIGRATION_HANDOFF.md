@@ -1516,3 +1516,15 @@ compaction followed by successful process/turn completion, and fresh adoption
 instead of reviving a rewritten handle. Shared Go IR/family race tests and all
 292 frontend tests plus TypeScript pass. Final sanitizer/static/registration and
 production build qualification is recorded with this checkpoint.
+
+
+The checked-in real SDK qualification `src/tests/test_codex_native_adoption.py`
+now also resumes an existing thread AND imports only an unseen canonical tail
+through the compiled C adapter. It checks unchanged native thread identity,
+exactly one copy of each prior/new call-result pair, tool namespace and argument
+fidelity, roles, and exactly one original/new user prefix. The existing CI build
+job runs this fixture. It passes locally against installed Codex 0.160.1 and the
+CI-pinned 0.153.4 native executable, in addition to the adapter ASan/UBSan fixture.
+The pinned npm JavaScript wrapper initially lacked Node in the deliberately
+restricted local child PATH; invoking its packaged native executable qualified
+the pinned SDK without widening the child environment.
