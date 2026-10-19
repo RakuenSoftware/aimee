@@ -26,6 +26,13 @@ typedef struct
 aimee_frontend_state_scope_t aimee_frontend_bind_state_guard(aimee_frontend_state_guard_fn guard,
                                                              void *context);
 
+/* An authenticated host execution may replace an SDK's proposed request with
+ * its owned canonical context at ENTRY only, before replay-proof restoration.
+ * This callback never runs at egress, so approved downstream transforms remain
+ * effective. Scope/context are borrowed until explicitly restored. */
+aimee_frontend_state_scope_t aimee_frontend_bind_request_owner(aimee_frontend_state_guard_fn owner,
+                                                               void *context);
+
 /* Recheck after host history restoration/transforms, immediately before the
  * actual provider renderer. Failure releases/zeros the owned request. */
 int aimee_frontend_guard_state(aimee_request_t *request, char *error, size_t capacity);

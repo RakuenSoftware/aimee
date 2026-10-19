@@ -1118,8 +1118,124 @@ static void test_prompt_cache_controls(void)
    }
 }
 
+typedef struct
+{
+   aimee_request_t profile;
+   int owners, guards, refuse;
+} owned_entry_fixture_t;
+static int restore_owned_entry(aimee_request_t *request, void *context)
+{
+   owned_entry_fixture_t *fixture = context;
+   fixture->owners++;
+   return fixture->refuse ? -1 : aimee_ir_request_clone(&fixture->profile, request);
+}
+static int inspect_owned_entry(aimee_request_t *request, void *context)
+{
+   owned_entry_fixture_t *fixture = context;
+   fixture->guards++;
+   assert(!strcmp(request->model, "host-model"));
+   assert(request->n_messages == 1 &&
+          !strcmp(request->messages[0].blocks[0].text, "host canonical history"));
+   assert(!request->raw_bytes && !request->raw);
+   return 0;
+}
+static void test_host_profile_sidecars_exclude_native_selectors(void)
+{
+   aimee_request_t profile = {.model = "host-model", .frontend = AIMEE_WIRE_OPENAI_CHAT};
+   const char *layouts[] = {
+       "{\"model\":\"host-model\",\"chat_template_kwargs\":{\"enable_thinking\":false}}",
+       "{\"system\":[{\"type\":\"text\",\"text\":\"host system\","
+       "\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"}}]}"};
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_ANTHROPIC};
+   for (int i = 0; i < 2; i++)
+   {
+      profile.frontend = wires[i];
+      profile.raw = cJSON_Parse(layouts[i]);
+      assert(aimee_backend_host_profile_valid(&profile));
+      cJSON_AddStringToObject(profile.raw, "conversation", "SDK-side history");
+      assert(!aimee_backend_host_profile_valid(&profile));
+      cJSON_Delete(profile.raw);
+   }
+   profile.raw = cJSON_Parse("{\"model\":\"other-model\"}");
+   profile.frontend = AIMEE_WIRE_OPENAI_CHAT;
+   assert(!aimee_backend_host_profile_valid(&profile));
+   profile.frontend = AIMEE_WIRE_RESPONSES;
+   assert(!aimee_backend_host_profile_valid(&profile));
+   cJSON_Delete(profile.raw);
+   profile.raw = NULL;
+   assert(aimee_backend_host_profile_valid(&profile));
+   profile.frontend = AIMEE_WIRE_UNKNOWN;
+   assert(!aimee_backend_host_profile_valid(&profile));
+}
+
+static void test_host_request_owner_precedes_proof_guard(void)
+{
+   aimee_block_t text = {.type = AIMEE_BLK_TEXT, .text = "host canonical history"};
+   aimee_message_t message = {.role = "user", .blocks = &text, .n_blocks = 1};
+   owned_entry_fixture_t fixture = {.profile = {.model = "host-model",
+                                                .messages = &message,
+                                                .n_messages = 1,
+                                                .has_max_tokens = 1,
+                                                .max_tokens = 128,
+                                                .mutated = 1}};
+   const char *bodies[] = {
+       "{\"model\":\"sdk-model\",\"max_tokens\":128,\"system\":\"sdk context\","
+       "\"messages\":[{\"role\":\"user\",\"content\":\"sdk history\"}]}",
+       "{\"model\":\"sdk-model\",\"messages\":[{\"role\":\"system\",\"content\":\"sdk context\"},"
+       "{\"role\":\"user\",\"content\":\"sdk history\"}]}",
+       "{\"model\":\"sdk-model\",\"instructions\":\"sdk context\",\"input\":\"sdk history\"}"};
+   const aimee_wire_t wires[] = {AIMEE_WIRE_ANTHROPIC, AIMEE_WIRE_OPENAI_CHAT,
+                                 AIMEE_WIRE_RESPONSES};
+   aimee_frontend_state_scope_t previous_owner =
+       aimee_frontend_bind_request_owner(restore_owned_entry, &fixture);
+   aimee_frontend_state_scope_t previous_guard =
+       aimee_frontend_bind_state_guard(inspect_owned_entry, &fixture);
+   for (int i = 0; i < 3; i++)
+   {
+      for (int parsed_object = 0; parsed_object < 2; parsed_object++)
+      {
+         aimee_request_t request = {0};
+         char error[128];
+         cJSON *native = cJSON_Parse(bodies[i]);
+         int before = fixture.owners;
+         int rc = parsed_object
+                      ? aimee_frontend_parse_native_frame(native, bodies[i], strlen(bodies[i]),
+                                                          wires[i], &request, error, sizeof error)
+                      : aimee_frontend_parse_wire(bodies[i], strlen(bodies[i]), wires[i], &request,
+                                                  error, sizeof error);
+         cJSON_Delete(native);
+         assert(!rc && fixture.owners == before + 1);
+         request.max_tokens = 17; /* A later approved transform remains effective. */
+         rc = aimee_frontend_guard_state(&request, error, sizeof error);
+         assert(!rc && request.max_tokens == 17 && fixture.owners == before + 1);
+         char *rendered = aimee_backend_render_wire(&request, wires[i]);
+         assert(rendered && strstr(rendered, "host canonical history") &&
+                !strstr(rendered, "sdk history") && !strstr(rendered, "sdk context"));
+         assert(fixture.owners == before + 1); /* Pure comparisons never rebind authority. */
+         free(rendered);
+         aimee_request_free(&request);
+      }
+   }
+   assert(fixture.owners == 6 && fixture.guards == 12);
+   fixture.refuse = 1;
+   aimee_request_t refused = {0};
+   int rc = aimee_frontend_parse_wire(bodies[2], strlen(bodies[2]), AIMEE_WIRE_RESPONSES, &refused,
+                                      NULL, 0);
+   assert(rc < 0 && !refused.model && !refused.messages && !refused.raw_bytes &&
+          fixture.guards == 12);
+   aimee_frontend_bind_request_owner(previous_owner.guard, previous_owner.context);
+   aimee_frontend_bind_state_guard(previous_guard.guard, previous_guard.context);
+   rc = aimee_frontend_parse_wire(bodies[2], strlen(bodies[2]), AIMEE_WIRE_RESPONSES, &refused,
+                                  NULL, 0);
+   assert(!rc && !strcmp(refused.model, "sdk-model"));
+   aimee_request_free(&refused);
+   puts("owned native entry precedes replay proof, preserves later transforms and restores scope");
+}
+
 int main(void)
 {
+   test_host_request_owner_precedes_proof_guard();
+   test_host_profile_sidecars_exclude_native_selectors();
    test_prompt_cache_controls();
    test_host_state_guard_does_not_mutate_replay_reference();
    test_json_comparison_view();

@@ -1408,7 +1408,7 @@ static int count_tokens(const char *body, char *resp, int cap)
       return write_error(resp, cap, 400, "invalid_request_error", "invalid canonical count request",
                          0);
    }
-   const char *model = jo_cstr(req, "model");
+   const char *model = policy.model ? policy.model : "";
 
    /* Proxy to Anthropic's real /v1/messages/count_tokens so Claude Code's
     * context-budget math matches api.anthropic.com, not a local estimate — only

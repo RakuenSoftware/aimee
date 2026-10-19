@@ -409,6 +409,10 @@ void aimee_ir_response_builder_free(aimee_ir_response_builder_t *builder);
 
 /* ---- lifecycle ---- */
 void aimee_message_free(aimee_message_t *message);
+/* Deep owned typed snapshot, including provenance and exact native sidecars.
+ * out must be zero-initialized or owned; success atomically replaces it and
+ * failure leaves it intact. source == out is supported. No wire translation. */
+int aimee_ir_request_clone(const aimee_request_t *source, aimee_request_t *out);
 void aimee_request_free(aimee_request_t *r);
 void aimee_response_free(aimee_response_t *r);
 /* Stable comparison-only JSON view; opaque source values remain unchanged.

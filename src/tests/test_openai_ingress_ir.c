@@ -144,6 +144,30 @@ static void test_owned_http_response_boundaries(void)
    puts("OpenAI HTTP owned response rendering preserves ordered blocks and 17 full tool calls");
 }
 
+static int host_entry_profile(aimee_request_t *request, void *context)
+{
+   return aimee_ir_request_clone(context, request);
+}
+static void test_owned_chat_admission_uses_canonical_history(void)
+{
+   aimee_block_t text = {.type = AIMEE_BLK_TEXT, .text = "owned running history"};
+   aimee_message_t message = {.role = "user", .blocks = &text, .n_blocks = 1};
+   aimee_request_t profile = {
+       .model = "host-model", .messages = &message, .n_messages = 1, .mutated = 1};
+   aimee_frontend_state_scope_t previous =
+       aimee_frontend_bind_request_owner(host_entry_profile, &profile);
+   aimee_request_t admitted = {0};
+   char error[160];
+   int rc = openai_admit_completion(
+       "{\"model\":\"sdk-model\",\"messages\":[{\"role\":\"user\",\"content\":\"SDK history\"}]}",
+       1, &admitted, error, sizeof error);
+   assert(!rc && !admitted.raw && !admitted.raw_bytes && admitted.n_messages == 1);
+   assert(!strcmp(admitted.model, "host-model") &&
+          !strcmp(admitted.messages[0].blocks[0].text, "owned running history"));
+   aimee_request_free(&admitted);
+   aimee_frontend_bind_request_owner(previous.guard, previous.context);
+}
+
 static void test_tool_free_admission_and_text_entry(void)
 {
    char error[160];
@@ -373,6 +397,7 @@ int main(void)
    test_restored_history_rechecks_native_provenance();
    test_responses_run_input_controls();
    test_tool_free_admission_and_text_entry();
+   test_owned_chat_admission_uses_canonical_history();
    test_canonical_response_cache_round_trip();
    test_owned_http_response_boundaries();
    const char *body =

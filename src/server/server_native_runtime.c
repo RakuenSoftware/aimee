@@ -11,6 +11,7 @@
 #include "util.h"
 #include "server_native_replay.h"
 #include <aimee/translation/aimee_frontend.h>
+#include <aimee/translation/aimee_backend.h>
 #include "cli_proxy.h"
 #include "server_http.h"
 #include "server_http_identity.h"
@@ -34,6 +35,9 @@ struct server_native_runtime
    cli_proxy_t *listener;
    server_native_replay_t *replay;
    cJSON *source_history;
+   aimee_request_t request_profile;
+   pthread_mutex_t request_lock;
+   int request_lock_initialized, owns_request;
    agent_t selected;
    request_context_t owner;
    agent_request_creds_t credentials;
@@ -96,6 +100,53 @@ static int native_digest_valid(const char *digest)
       if (!(*p >= '0' && *p <= '9') && !(*p >= 'a' && *p <= 'f'))
          return 0;
    return 1;
+}
+
+typedef struct
+{
+   server_native_runtime_t *runtime;
+   aimee_request_t request;
+   int prepared;
+} native_request_owner_t;
+
+static int native_owned_request(aimee_request_t *request, void *context)
+{
+   native_request_owner_t *owner = context;
+   server_native_runtime_t *runtime = owner->runtime;
+   if (!owner->prepared)
+   {
+      cJSON *history = NULL;
+      if (aimee_ir_request_clone(&runtime->request_profile, &owner->request) ||
+          server_session_capture_history(runtime->capture, &history))
+         goto failed;
+      int count = cJSON_GetArraySize(history);
+      owner->request.messages =
+          count ? calloc((size_t)count, sizeof *owner->request.messages) : NULL;
+      if (count && !owner->request.messages)
+      {
+         cJSON_Delete(history);
+         goto failed;
+      }
+      for (int i = 0; i < count; i++)
+      {
+         owner->request.n_messages = i + 1;
+         if (aimee_ir_message_parse(cJSON_GetArrayItem(history, i), &owner->request.messages[i]))
+         {
+            cJSON_Delete(history);
+            goto failed;
+         }
+      }
+      cJSON_Delete(history);
+      owner->request.mutated = 1;
+      if (aimee_ir_request_admit(&owner->request))
+         goto failed;
+      owner->prepared = 1;
+   }
+   if (!aimee_ir_request_clone(&owner->request, request))
+      return 0;
+failed:
+   server_session_capture_fail(runtime->capture);
+   return -1;
 }
 
 typedef struct
@@ -221,6 +272,16 @@ static int native_forward(const char *method, const char *path, const char *head
       free(input);
       return -1;
    }
+   int request_locked = model_request && runtime->owns_request;
+   if (request_locked && pthread_mutex_trylock(&runtime->request_lock))
+   {
+      /* Parallel model generations cannot fork one authoritative running turn. */
+      agent_source_authority_snapshot_destroy(&previous_source);
+      agent_source_authority_snapshot_destroy(&bound_source);
+      free(input);
+      return -1;
+   }
+   native_request_owner_t request_owner = {.runtime = runtime};
    agent_tools_scope_snapshot_t previous_tools;
    agent_tools_scope_bookmark(&previous_tools);
    server_delegate_scope_t previous_delegate;
@@ -306,10 +367,12 @@ static int native_forward(const char *method, const char *path, const char *head
    void *previous_sink_context = NULL;
    aimee_ir_session_sink_fn previous_sink = aimee_ir_session_get_sink(&previous_sink_context);
    int previous_failed = aimee_ir_session_capture_failed();
-   aimee_frontend_state_scope_t previous_guard = {0};
+   aimee_frontend_state_scope_t previous_guard = {0}, previous_request_owner = {0};
    native_model_capture_t model_capture = {.runtime = runtime, .request_id = admitted.request_id};
    if (model_request)
    {
+      previous_request_owner = aimee_frontend_bind_request_owner(
+          runtime->owns_request ? native_owned_request : NULL, &request_owner);
       previous_guard =
           aimee_frontend_bind_state_guard(server_native_replay_restore, runtime->replay);
       aimee_ir_session_set_sink(native_model_capture, &model_capture);
@@ -320,6 +383,8 @@ static int native_forward(const char *method, const char *path, const char *head
       server_session_capture_fail(runtime->capture);
    if (model_request)
    {
+      aimee_frontend_bind_request_owner(previous_request_owner.guard,
+                                        previous_request_owner.context);
       aimee_frontend_bind_state_guard(previous_guard.guard, previous_guard.context);
       aimee_ir_session_restore_sink(previous_sink, previous_sink_context,
                                     previous_failed || aimee_ir_session_capture_failed());
@@ -349,12 +414,16 @@ restore:
    session_id_set_override(previous_session);
    server_control_scope_bind(previous_controls);
    free(input);
+   aimee_request_free(&request_owner.request);
+   if (request_locked)
+      pthread_mutex_unlock(&runtime->request_lock);
    return rc;
 }
 
-server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
+static server_native_runtime_t *native_runtime_open(const agent_t *selected,
                                                     const request_context_t *owner,
-                                                    const char *session_id)
+                                                    const char *session_id,
+                                                    const aimee_request_t *profile)
 {
    if (!selected || !selected->enabled || !owner || !owner->vault_principal[0] ||
        owner->vault_transport <= ATTEST_TCP_BEARER || owner->vault_transport > ATTEST_MTLS_CLIENT ||
@@ -368,6 +437,12 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
    server_native_runtime_t *runtime = calloc(1, sizeof *runtime);
    if (!runtime)
       return NULL;
+   if (pthread_mutex_init(&runtime->request_lock, NULL))
+   {
+      free(runtime);
+      return NULL;
+   }
+   runtime->request_lock_initialized = 1;
    runtime->selected = *selected;
    runtime->owner = *owner;
    runtime->owner.model_execution = 1;
@@ -394,6 +469,21 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
    if (runtime->capture &&
        server_session_capture_history(runtime->capture, &runtime->source_history))
       goto failed;
+   if (profile)
+   {
+      if (!runtime->capture || !profile->model || strcmp(profile->model, selected->model) ||
+          profile->raw_bytes || profile->raw_length || !profile->mutated ||
+          !aimee_backend_host_profile_valid(profile) ||
+          aimee_ir_request_clone(profile, &runtime->request_profile))
+         goto failed;
+      /* Conversation content comes only from the running durable log. */
+      for (int i = 0; i < runtime->request_profile.n_messages; i++)
+         aimee_message_free(&runtime->request_profile.messages[i]);
+      free(runtime->request_profile.messages);
+      runtime->request_profile.messages = NULL;
+      runtime->request_profile.n_messages = 0;
+      runtime->owns_request = 1;
+   }
    /* An ordinary primary has no delegate source overlay. Make that absence
     * explicit rather than falling back to a concurrent delegate's global env. */
    if (!runtime->source.active)
@@ -498,6 +588,20 @@ failed:
    return NULL;
 }
 
+server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
+                                                    const request_context_t *owner,
+                                                    const char *session_id)
+{
+   return native_runtime_open(selected, owner, session_id, NULL);
+}
+server_native_runtime_t *server_native_runtime_open_request(const agent_t *selected,
+                                                            const request_context_t *owner,
+                                                            const char *session_id,
+                                                            const aimee_request_t *profile)
+{
+   return profile ? native_runtime_open(selected, owner, session_id, profile) : NULL;
+}
+
 const char *server_native_runtime_url(const server_native_runtime_t *runtime)
 {
    return runtime ? runtime->url : "";
@@ -569,6 +673,23 @@ int server_native_runtime_cache_scope(const server_native_runtime_t *runtime,
    PROFILE_TEXT("capabilities", capabilities);
 #undef PROFILE_TEXT
 #undef PROFILE_INT
+   if (runtime->owns_request)
+   {
+      cJSON *request = aimee_ir_request_json(&runtime->request_profile);
+      cJSON *extensions =
+          runtime->request_profile.raw ? cJSON_Duplicate(runtime->request_profile.raw, 1) : NULL;
+      if (!request || !cJSON_AddItemToObject(value, "request_profile", request))
+      {
+         cJSON_Delete(request);
+         failed = 1;
+      }
+      if (runtime->request_profile.raw &&
+          (!extensions || !cJSON_AddItemToObject(value, "host_profile", extensions)))
+      {
+         cJSON_Delete(extensions);
+         failed = 1;
+      }
+   }
    /* Denials are a set: order changes must not throw away a valid native prefix. */
    int count = runtime->tools.denied_count;
    const char **names = count ? calloc((size_t)count, sizeof *names) : NULL;
@@ -621,6 +742,9 @@ void server_native_runtime_close(server_native_runtime_t *runtime)
    cli_proxy_stop(runtime->listener);
    server_native_replay_close(runtime->replay);
    cJSON_Delete(runtime->source_history);
+   aimee_request_free(&runtime->request_profile);
+   if (runtime->request_lock_initialized)
+      pthread_mutex_destroy(&runtime->request_lock);
    server_control_scope_release(runtime->controls);
    server_session_capture_release(runtime->capture);
    agent_tools_scope_destroy_owned(&runtime->tools);

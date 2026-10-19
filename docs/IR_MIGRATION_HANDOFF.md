@@ -3044,3 +3044,76 @@ integration (167/167, 26 existing unavailable-service skips), both ThreadSanitiz
 fixtures and all 76 lint gates pass.
 This does not activate the native broker or suppress SDK-normalized observations;
 those still require current-request ownership and durable tool/effect admission.
+
+
+## Owned current native request context (constructor, not SDK activation)
+
+`aimee_ir_request_clone` provides a deep typed snapshot without a native-wire
+round trip. It retains context provenance, ordered blocks, signatures/opaque
+state, media, nested/hosted tool owners, output/sampling/cache configuration and
+exact sidecars. In-place replacement is supported; failed admission/allocation
+leaves the previous owned output intact. The pure fixture releases the source,
+checks exact long decimal input and injects 64 successive JSON allocation failures.
+
+The translation entry boundary now has a separate scoped host-request owner.
+It runs before replay-proof restoration at native admission, and never runs at
+egress or inside pure renderer comparisons. The three-wire/six-entry fixture
+checks replacement, refusal/cleanup, scope restoration and retention of later
+approved transforms. Native SDK context never becomes authoritative by echo.
+
+`server_native_runtime_open_request` copies a complete host-prepared post-policy
+profile for the selected model. Original native request bytes and a missing
+retained capture refuse. Its conversation content comes only from a fresh
+running-log snapshot for each callback, held consistently across any native
+reparsing within that callback. The owned system/catalog/model/controls replace
+SDK context and side-channel selectors at entry. Original observed model output
+still commits through the existing writer before replay-proof capture. Profile
+identity participates in native cache scope, including the bounded host extension
+sidecar. Parallel model callbacks on one runtime refuse rather than fork its
+running snapshot. Existing constructor success paths remain unchanged.
+
+The scoped-listener fixture releases the input profile, updates durable source
+between callbacks, checks the original selected model/system/namespace/cache key,
+verifies post-entry changes survive proof checks, tests profile-dependent cache
+identity, and covers parallel refusal plus cancellation/join. It also refuses
+unselected models and native-byte profiles without poisoning a valid capture.
+The listener fixture stubs its HTTP/proof boundary but now links the real
+translation scope/codec owners in both Make and CMake; actual entry and consumer
+behavior are also tested separately. This is not claimed as a live SDK launch.
+
+Two live consumers depended on pre-ownership native fields: Chat admission now
+requires canonical messages rather than a raw-sidecar array, and Anthropic token
+counting resolves the admitted canonical model rather than the SDK selector.
+Focused regressions check raw-free host history and count forwarding from an
+owned model/history while refusing normal malformed input as before. Count bodies
+already rendered canonically; no raw-body proxy regression was introduced.
+
+Focused pure IR, cross-protocol, listener, Chat ingress and Anthropic HTTP tests
+pass. Initial clone ASan/UBSan and Cppcheck pass; final broad qualification is
+running. No production SDK spawn caller uses the new constructor yet. Actual
+credential-free launch/build/workspace attestation, original durable-call
+claims/effect receipts, SDK-observation suppression, live subscription and
+independently graded local learning remain required. Production remains KB-free.
+
+The prepared-profile sidecar validator belongs to translation. It allows only
+Chat's existing host routing/template extension keys and Anthropic's host system
+layout; Responses profiles carry no native selector fields. Whole SDK request
+sidecars, unrelated models and conversation selectors refuse before a listener
+can be handed to a child. Golden layout checks retain valid Chat and Anthropic
+cache forms. The listener fixture no longer reimplements translation TLS scopes;
+its real bindings are restored and checked after each joined callback.
+
+The final normal server build and 657-entry native suite pass, as do five
+ASan/UBSan fixtures, four CMake/CTest IR/listener fixtures plus the thin client,
+and correctly configured Cppcheck on ten source/fixture files (zero diagnostics).
+Two older Anthropic fixture calls were moved outside asserts without removing
+assertions. Final PostgreSQL 18 integration passes 167/167 with the same 26
+unavailable-service skips; the real-scope listener passes ThreadSanitizer and
+all 76 lint gates pass. No baseline or test exemption changed.
+
+Published checkpoint `9425078eb` is fully green in fresh main CI run
+`39328706353`: 50 main jobs passed, including T1, T2, T2-luks and T3. Its export,
+audit, fuzz, release and attribution workflows also pass. The two testing-target
+platform skips remain unchanged; Windows/macOS were not run on that head.
+This is a qualified checkpoint, not completion of the whole migration. The
+owned-context increment still needs its own published-head CI qualification.

@@ -653,7 +653,8 @@ static void test_native_response_retains_all_typed_blocks_and_long_tools(void)
    cJSON_Delete(rendered);
    emit_capture_t cap = {0};
    agent_t agent;
-   assert(!agent_registry_default_primary(&agent));
+   int selected = agent_registry_default_primary(&agent);
+   assert(!selected);
    messages_stream_buffered_replay("https://example.invalid/v1/messages", "", native_stream_request,
                                    strlen(native_stream_request), "", &agent, &driver,
                                    "client-model", "client-id", 0, NULL, cap_emit, &cap);
@@ -1353,9 +1354,9 @@ static void test_durable_receipt_refusal_blocks_buffered_and_streamed(void)
                g_receipt_calls = 0;
                memset(&cap, 0, sizeof(cap));
                agent_t agent = {0};
-               assert(messages_stream_ir_relay("fixture", "", "{}", 2, "", &agent, "model",
-                                               "message", 0, cap_emit,
-                                               &cap) == HTTP_RETRY_ADMISSION_REFUSED);
+               int relayed = messages_stream_ir_relay("fixture", "", "{}", 2, "", &agent, "model",
+                                                      "message", 0, cap_emit, &cap);
+               assert(relayed == HTTP_RETRY_ADMISSION_REFUSED);
                assert_terminal_receipt_error(&cap);
             }
             request_context_clear();
@@ -1459,6 +1460,39 @@ static void test_canonical_economizer_restore_resends_once(void)
         "dispatch");
 }
 
+static int count_owned_profile(aimee_request_t *request, void *context)
+{
+   return aimee_ir_request_clone(context, request);
+}
+static void test_count_uses_owned_model_and_history(void)
+{
+   reset_capture();
+   const delegate_driver_t driver = {.name = "anthropic"};
+   g_driver = &driver;
+   aimee_block_t text = {.type = AIMEE_BLK_TEXT, .text = "owned count source"};
+   aimee_message_t message = {.role = "user", .blocks = &text, .n_blocks = 1};
+   aimee_request_t profile = {.model = "aimee",
+                              .frontend = AIMEE_WIRE_ANTHROPIC,
+                              .messages = &message,
+                              .n_messages = 1,
+                              .max_tokens = 128,
+                              .has_max_tokens = 1,
+                              .mutated = 1};
+   aimee_frontend_state_scope_t previous =
+       aimee_frontend_bind_request_owner(count_owned_profile, &profile);
+   char response[1024];
+   int status = count_tokens("{\"model\":\"unknown-sdk-model\",\"messages\":[{\"role\":\"user\","
+                             "\"content\":\"SDK source\"}]}",
+                             response, sizeof response);
+   aimee_frontend_bind_request_owner(previous.guard, previous.context);
+   assert(status == 200 && g_post_count == 1);
+   cJSON *sent = parse(g_last_body);
+   assert(!strcmp(cJSON_GetStringValue(obj(sent, "model")), "configured-claude"));
+   assert(strstr(g_last_body, "owned count source") && !strstr(g_last_body, "SDK source"));
+   cJSON_Delete(sent);
+   reset_capture();
+}
+
 static void test_native_count_admits_before_dispatch(void)
 {
    const delegate_driver_t driver = {.name = "anthropic"};
@@ -1532,6 +1566,7 @@ int main(void)
    test_native_provenance_is_rechecked_at_actual_egress();
    test_canonical_economizer_restore_resends_once();
    test_native_count_admits_before_dispatch();
+   test_count_uses_owned_model_and_history();
    test_native_alias_uses_provider_model();
    test_explicit_unknown_model_is_rejected();
    test_messages_stream_anthropic_reasoning_metrics();

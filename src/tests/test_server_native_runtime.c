@@ -150,6 +150,9 @@ static atomic_int calls, cancelled, wait_for_cancel, source_changed, session_rem
 static void restored_probe(void)
 {
    assert(!current_model && !request_context_get());
+   aimee_frontend_state_scope_t guard = aimee_frontend_bind_state_guard(NULL, NULL);
+   aimee_frontend_state_scope_t owner = aimee_frontend_bind_request_owner(NULL, NULL);
+   assert(!guard.guard && !guard.context && !owner.guard && !owner.context);
    assert(!agent_tools_scope_isolated() && !agent_tools_dispatch_role());
    assert(!agent_tools_active_toolset());
    assert(!agent_tools_tool_denied("git_push") && !agent_tools_tool_denied("write_file"));
@@ -436,7 +439,7 @@ struct server_native_replay
 {
    char actor[VAULT_PRINCIPAL_MAX], session[128];
 };
-static _Thread_local aimee_frontend_state_scope_t state_guard;
+static atomic_int owned_profile_probe, snapshot_generation;
 server_native_replay_t *server_native_replay_open(const char *session, const char *actor,
                                                   const char *scope, const char *model)
 {
@@ -472,22 +475,43 @@ int server_native_replay_capture(const aimee_session_event_t *event, void *conte
       return -1;
    return server_native_replay_restore(NULL, context);
 }
-aimee_frontend_state_scope_t aimee_frontend_bind_state_guard(aimee_frontend_state_guard_fn guard,
-                                                             void *context)
-{
-   aimee_frontend_state_scope_t previous = state_guard;
-   state_guard = (aimee_frontend_state_scope_t){guard, context};
-   return previous;
-}
 static void probe_replay_scope(const char *path)
 {
+   aimee_frontend_state_scope_t state_guard = aimee_frontend_bind_state_guard(NULL, NULL);
+   aimee_frontend_bind_state_guard(state_guard.guard, state_guard.context);
+   aimee_frontend_state_scope_t request_owner_scope = aimee_frontend_bind_request_owner(NULL, NULL);
+   aimee_frontend_bind_request_owner(request_owner_scope.guard, request_owner_scope.context);
    void *sink_context = NULL;
    aimee_ir_session_sink_fn installed_sink = aimee_ir_session_get_sink(&sink_context);
    if (!strcmp(path, "/v1/responses") || !strcmp(path, "/v1/messages"))
    {
       assert(state_guard.guard && installed_sink);
       aimee_request_t request = {0};
+      if (atomic_load(&owned_profile_probe))
+      {
+         assert(request_owner_scope.guard);
+         request.model = strdup("SDK model selector");
+         request.raw = cJSON_Parse("{\"conversation\":\"SDK private history\"}");
+         request.raw_bytes = strdup("SDK original bytes");
+         request.raw_length = strlen(request.raw_bytes);
+         int admitted = request_owner_scope.guard(&request, request_owner_scope.context);
+         assert(!admitted && !strcmp(request.model, "selected-model") && request.mutated);
+         assert(!request.raw && !request.raw_bytes && !request.raw_length);
+         assert(request.n_system == 1 && !strcmp(request.system[0].text, "host-owned system"));
+         assert(request.n_messages == 1 && request.n_tools == 1);
+         assert(!strcmp(request.messages[0].blocks[0].text, atomic_load(&snapshot_generation) == 1
+                                                                ? "fresh durable one"
+                                                                : "fresh durable two"));
+         assert(aimee_ir_find_function(&request, "aimee", "read_file"));
+         assert(request.prompt_cache_key && !request.prompt_cache_key[0]);
+         request.max_tokens = 17;
+      }
+      else
+         assert(!request_owner_scope.guard);
       assert(!state_guard.guard(&request, state_guard.context));
+      if (atomic_load(&owned_profile_probe))
+         assert(request.max_tokens == 17);
+      aimee_request_free(&request);
       aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
                                      .projection_model = "selected-model",
                                      .projection_boundary = "response",
@@ -517,7 +541,7 @@ static void probe_replay_scope(const char *path)
          assert(captured == (atomic_load(&reject_proof) ? -1 : 0));
    }
    else
-      assert(!state_guard.guard && !installed_sink);
+      assert(!state_guard.guard && !request_owner_scope.guard && !installed_sink);
 }
 static int send_request(const server_native_runtime_t *runtime, const char *path, const char *token)
 {
@@ -652,6 +676,11 @@ int db1_session_ir_running_history_load(const char *session, const char *actor, 
                           ? "[{\"role\":\"operator\",\"blocks\":[]}]"
                           : "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":"
                             "\"canonical source prompt\"}]}]";
+   if (!atomic_load(&snapshot_fault) && atomic_load(&snapshot_generation))
+      wire = atomic_load(&snapshot_generation) == 1 ? "[{\"role\":\"user\",\"blocks\":[{\"type\":"
+                                                      "\"text\",\"text\":\"fresh durable one\"}]}]"
+                                                    : "[{\"role\":\"user\",\"blocks\":[{\"type\":"
+                                                      "\"text\",\"text\":\"fresh durable two\"}]}]";
    *out = strdup(wire);
    return *out ? 0 : -1;
 }
@@ -751,6 +780,107 @@ static void test_retained_capture(const agent_t *selected, const request_context
       cJSON_Delete(captured_rows);
       captured_rows = NULL;
    }
+}
+
+static void test_owned_native_context(const agent_t *selected, const request_context_t *owner)
+{
+   owner_tools(1);
+   aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
+   aimee_block_t stale = {.type = AIMEE_BLK_TEXT, .text = "stale initial profile history"};
+   aimee_message_t message = {.role = "user", .blocks = &stale, .n_blocks = 1};
+   aimee_tool_t function = {.name = "read_file"};
+   aimee_tool_t tools = {
+       .kind = AIMEE_TOOL_NAMESPACE, .name = "aimee", .children = &function, .n_children = 1};
+   aimee_request_t seed = {.model = "selected-model",
+                           .frontend = AIMEE_WIRE_RESPONSES,
+                           .system = &system,
+                           .n_system = 1,
+                           .messages = &message,
+                           .n_messages = 1,
+                           .tools = &tools,
+                           .n_tools = 1,
+                           .prompt_cache_key = "",
+                           .max_tokens = 128,
+                           .has_max_tokens = 1,
+                           .mutated = 1};
+   server_native_runtime_t *missing =
+       server_native_runtime_open_request(selected, owner, "session-a", &seed);
+   assert(!missing); /* A profile cannot replace missing durable history ownership. */
+   server_session_capture_t *capture =
+       server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+   assert(capture && !server_session_capture_bind(capture));
+   seed.model = "unselected-model";
+   missing = server_native_runtime_open_request(selected, owner, "session-a", &seed);
+   assert(!missing && !server_session_capture_failed(capture));
+   seed.model = "selected-model";
+   seed.raw_bytes = "native request";
+   seed.raw_length = strlen(seed.raw_bytes);
+   missing = server_native_runtime_open_request(selected, owner, "session-a", &seed);
+   assert(!missing && !server_session_capture_failed(capture));
+   seed.raw_bytes = NULL;
+   seed.raw_length = 0;
+   seed.raw = cJSON_Parse("{\"conversation\":\"SDK private history\"}");
+   missing = server_native_runtime_open_request(selected, owner, "session-a", &seed);
+   assert(!missing && !server_session_capture_failed(capture));
+   cJSON_Delete(seed.raw);
+   seed.raw = NULL;
+   aimee_request_t profile = {0};
+   int cloned = aimee_ir_request_clone(&seed, &profile);
+   assert(!cloned);
+   server_native_runtime_t *runtime =
+       server_native_runtime_open_request(selected, owner, "session-a", &profile);
+   assert(runtime);
+   server_native_execution_profile_t execution = {
+       .sdk = "codex",
+       .build_digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       .launch_digest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       .workspace_digest = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"};
+   char baseline[65], changed[65];
+   int scoped = server_native_runtime_cache_scope(runtime, &execution, baseline);
+   assert(!scoped);
+   free(profile.system[0].text);
+   profile.system[0].text = strdup("different host profile");
+   server_native_runtime_t *other =
+       server_native_runtime_open_request(selected, owner, "session-a", &profile);
+   assert(other);
+   scoped = server_native_runtime_cache_scope(other, &execution, changed);
+   assert(!scoped && strcmp(baseline, changed));
+   server_native_runtime_close(other);
+   aimee_request_free(&profile);
+   assert(server_session_capture_bind(NULL) == capture);
+   atomic_store(&expected_capture, capture);
+   captured_rows = cJSON_CreateArray();
+   atomic_store(&owned_profile_probe, 1);
+   char response[1024];
+   for (int i = 1; i <= 2; i++)
+   {
+      atomic_store(&snapshot_generation, i);
+      request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
+      assert(strstr(response, "200 OK") && !server_session_capture_failed(capture));
+   }
+   /* One authoritative callback stays in flight. A second model generation
+    * cannot fork its running snapshot or execute under the first admission. */
+   int before = atomic_load(&calls);
+   atomic_store(&wait_for_cancel, 1);
+   atomic_store(&cancelled, 0);
+   int fd = send_request(runtime, "/v1/responses", server_native_runtime_token(runtime));
+   for (int i = 0; i < 300 && atomic_load(&calls) == before; i++)
+      usleep(10000);
+   assert(atomic_load(&calls) == before + 1);
+   request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
+   assert(strstr(response, "502") && atomic_load(&calls) == before + 1);
+   close(fd);
+   for (int i = 0; i < 300 && !atomic_load(&cancelled); i++)
+      usleep(10000);
+   assert(atomic_load(&cancelled));
+   server_native_runtime_close(runtime); /* Joins the callback before profile/capture release. */
+   atomic_store(&wait_for_cancel, 0);
+   atomic_store(&owned_profile_probe, 0);
+   atomic_store(&snapshot_generation, 0);
+   server_session_capture_close(capture);
+   atomic_store(&expected_capture, NULL);
+   cJSON_Delete(captured_rows);
+   captured_rows = NULL;
 }
 
 static void test_source_snapshot_refusal(const agent_t *selected, const request_context_t *owner)
@@ -928,6 +1058,7 @@ int main(void)
    server_native_runtime_close(claude);
    atomic_store(&source_changed, 0);
    test_retained_capture(&selected, &a);
+   test_owned_native_context(&selected, &a);
    test_source_snapshot_refusal(&selected, &a);
    test_private_source_revocation(&selected, &a);
    unsetenv("AIMEE_ACTIVE_TOOLSET");

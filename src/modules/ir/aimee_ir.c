@@ -525,6 +525,169 @@ void aimee_request_free(aimee_request_t *r)
    memset(r, 0, sizeof *r);
 }
 
+/* Owned snapshots stay typed. Cloning through a provider renderer would drop
+ * cross-provider state, provenance or host-only profile extensions. */
+static int clone_string(char **out, const char *source)
+{
+   *out = source ? strdup(source) : NULL;
+   return source && !*out ? -1 : 0;
+}
+static int clone_json(cJSON **out, const cJSON *source)
+{
+   *out = source ? cJSON_Duplicate(source, 1) : NULL;
+   return source && !*out ? -1 : 0;
+}
+static int clone_block(aimee_block_t *out, const aimee_block_t *source)
+{
+   *out = (aimee_block_t){.type = source->type,
+                          .context = source->context,
+                          .tool_is_error = source->tool_is_error,
+                          .message_group = source->message_group};
+   return clone_string(&out->text, source->text) ||
+                  clone_string(&out->thinking_signature, source->thinking_signature) ||
+                  clone_string(&out->thinking_binding, source->thinking_binding) ||
+                  clone_string(&out->thinking_id, source->thinking_id) ||
+                  clone_string(&out->thinking_encrypted_content,
+                               source->thinking_encrypted_content) ||
+                  clone_string(&out->thinking_redacted, source->thinking_redacted) ||
+                  clone_string(&out->tool_id, source->tool_id) ||
+                  clone_string(&out->tool_name, source->tool_name) ||
+                  clone_string(&out->tool_namespace, source->tool_namespace) ||
+                  clone_json(&out->tool_input, source->tool_input) ||
+                  clone_json(&out->tool_result, source->tool_result) ||
+                  clone_string(&out->media_type, source->media_type) ||
+                  clone_string(&out->media_ref, source->media_ref) ||
+                  clone_string(&out->cache_control, source->cache_control) ||
+                  clone_string(&out->cache_ttl, source->cache_ttl) ||
+                  clone_json(&out->raw, source->raw)
+              ? -1
+              : 0;
+}
+static int clone_blocks(aimee_block_t **out, int *count, const aimee_block_t *source, int length)
+{
+   *out = length ? calloc((size_t)length, sizeof **out) : NULL;
+   if (length && !*out)
+      return -1;
+   for (int i = 0; i < length; i++)
+   {
+      *count = i + 1; /* The caller also frees a partially copied block. */
+      if (clone_block(&(*out)[i], &source[i]))
+         return -1;
+   }
+   return 0;
+}
+static int clone_tool(aimee_tool_t *out, const aimee_tool_t *source)
+{
+   *out = (aimee_tool_t){.kind = source->kind,
+                         .provider_wire = source->provider_wire,
+                         .strict = source->strict,
+                         .has_defer_loading = source->has_defer_loading,
+                         .defer_loading = source->defer_loading};
+   if (clone_string(&out->name, source->name) ||
+       clone_string(&out->description, source->description) ||
+       clone_json(&out->schema, source->schema) ||
+       clone_string(&out->cache_control, source->cache_control) ||
+       clone_string(&out->cache_ttl, source->cache_ttl) ||
+       clone_string(&out->native_type, source->native_type) ||
+       clone_json(&out->native_options, source->native_options) ||
+       clone_json(&out->raw, source->raw))
+      return -1;
+   out->children =
+       source->n_children ? calloc((size_t)source->n_children, sizeof *out->children) : NULL;
+   if (source->n_children && !out->children)
+      return -1;
+   for (int i = 0; i < source->n_children; i++)
+   {
+      out->n_children = i + 1;
+      if (clone_tool(&out->children[i], &source->children[i]))
+         return -1;
+   }
+   return 0;
+}
+int aimee_ir_request_clone(const aimee_request_t *source, aimee_request_t *out)
+{
+   if (!out || aimee_ir_request_admit(source) || (source->raw_length && !source->raw_bytes) ||
+       source->raw_length == SIZE_MAX)
+      return -1;
+   /* Copy every scalar before allocating owners. No source pointer is ever
+    * released on failure, including an in-place snapshot of an owned request. */
+   aimee_request_t copy = *source;
+   copy.model = copy.reasoning_summary = copy.tool_choice_name = copy.service_tier = NULL;
+   copy.prompt_cache_key = copy.prompt_cache_retention = copy.raw_bytes = NULL;
+   copy.metadata = copy.prompt_cache_options = copy.thinking = copy.raw = NULL;
+   copy.output_format = (aimee_output_format_t){.kind = source->output_format.kind,
+                                                .strict = source->output_format.strict};
+   copy.system = NULL;
+   copy.messages = NULL;
+   copy.tools = NULL;
+   copy.stop_sequences = NULL;
+   copy.n_system = copy.n_messages = copy.n_tools = copy.n_stop = 0;
+   copy.raw_length = 0;
+   if (clone_string(&copy.model, source->model) ||
+       clone_string(&copy.reasoning_summary, source->reasoning_summary) ||
+       clone_string(&copy.tool_choice_name, source->tool_choice_name) ||
+       clone_string(&copy.service_tier, source->service_tier) ||
+       clone_string(&copy.prompt_cache_key, source->prompt_cache_key) ||
+       clone_string(&copy.prompt_cache_retention, source->prompt_cache_retention) ||
+       clone_json(&copy.metadata, source->metadata) ||
+       clone_json(&copy.prompt_cache_options, source->prompt_cache_options) ||
+       clone_json(&copy.thinking, source->thinking) || clone_json(&copy.raw, source->raw) ||
+       clone_string(&copy.output_format.name, source->output_format.name) ||
+       clone_string(&copy.output_format.description, source->output_format.description) ||
+       clone_json(&copy.output_format.schema, source->output_format.schema) ||
+       clone_blocks(&copy.system, &copy.n_system, source->system, source->n_system))
+      goto fail;
+   copy.messages =
+       source->n_messages ? calloc((size_t)source->n_messages, sizeof *copy.messages) : NULL;
+   if (source->n_messages && !copy.messages)
+      goto fail;
+   for (int i = 0; i < source->n_messages; i++)
+   {
+      aimee_message_t *message = &copy.messages[i];
+      const aimee_message_t *original = &source->messages[i];
+      copy.n_messages = i + 1;
+      message->content_scalar = original->content_scalar;
+      if (clone_string(&message->role, original->role) ||
+          clone_json(&message->raw, original->raw) ||
+          clone_blocks(&message->blocks, &message->n_blocks, original->blocks, original->n_blocks))
+         goto fail;
+   }
+   copy.tools = source->n_tools ? calloc((size_t)source->n_tools, sizeof *copy.tools) : NULL;
+   if (source->n_tools && !copy.tools)
+      goto fail;
+   for (int i = 0; i < source->n_tools; i++)
+   {
+      copy.n_tools = i + 1;
+      if (clone_tool(&copy.tools[i], &source->tools[i]))
+         goto fail;
+   }
+   copy.stop_sequences =
+       source->n_stop ? calloc((size_t)source->n_stop, sizeof *copy.stop_sequences) : NULL;
+   if (source->n_stop && !copy.stop_sequences)
+      goto fail;
+   for (int i = 0; i < source->n_stop; i++)
+   {
+      copy.n_stop = i + 1;
+      if (clone_string(&copy.stop_sequences[i], source->stop_sequences[i]))
+         goto fail;
+   }
+   if (source->raw_bytes)
+   {
+      copy.raw_bytes = malloc(source->raw_length + 1);
+      if (!copy.raw_bytes)
+         goto fail;
+      memcpy(copy.raw_bytes, source->raw_bytes, source->raw_length);
+      copy.raw_bytes[source->raw_length] = 0;
+      copy.raw_length = source->raw_length;
+   }
+   aimee_request_free(out);
+   *out = copy;
+   return 0;
+fail:
+   aimee_request_free(&copy);
+   return -1;
+}
+
 void aimee_response_free(aimee_response_t *r)
 {
    if (!r)

@@ -197,8 +197,7 @@ static int openai_admit_completion(const char *body, int chat, aimee_request_t *
                                                             error, capacity);
    if (status || aimee_ir_request_admit(request))
       return -1;
-   if (chat && (!cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(request->raw, "messages")) ||
-                !cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(request->raw, "messages"))))
+   if (chat && request->n_messages == 0)
    {
       snprintf(error, capacity, "messages must be a non-empty array");
       return -1;

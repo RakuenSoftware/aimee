@@ -503,6 +503,10 @@ if(NOT WIN32)
     ../server/agent_tools.c ../posix/agent_source_authority.c ../modules/ir/aimee_ir.c
     ../server/server_native_runtime.c ../server/server_session_capture.c ../server/server_session_control.c
     ../modules/ir/session_event.c ../cli_proxy.c ../server/request_context.c
+    ../modules/translation/wire_codec.c
+    ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c
+    ../modules/translation/aimee_frontend_responses.c ../modules/translation/aimee_backend_anthropic.c
+    ../modules/translation/aimee_backend_openai.c ../modules/translation/aimee_backend_responses.c
     ../aimee_sha256.c ../platform_random.c ../posix/platform_random.c ../vendor/cJSON.c)
   target_include_directories(test_server_native_runtime PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
     ${AIMEE_SRC_DIR}/modules/kb/c

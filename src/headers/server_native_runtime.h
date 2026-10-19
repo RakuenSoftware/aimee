@@ -3,6 +3,7 @@
 
 #include "agent_config.h"
 #include "request_context.h"
+#include <aimee/ir/aimee_ir.h>
 
 typedef struct server_native_runtime server_native_runtime_t;
 struct cJSON;
@@ -22,6 +23,16 @@ struct cJSON;
 server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
                                                     const request_context_t *owner,
                                                     const char *session_id);
+/* Host-prepared, post-policy profile. Copies every owned field; profile must
+ * have no original native request bytes and must match the selected model.
+ * A retained running capture is required. Every model callback uses its fresh
+ * canonical log snapshot, replacing SDK-proposed context/catalog/selectors only
+ * at native entry. Parallel model callbacks refuse rather than fork history.
+ * This constructor alone does not attest a launch or activate SDK execution. */
+server_native_runtime_t *server_native_runtime_open_request(const agent_t *selected,
+                                                            const request_context_t *owner,
+                                                            const char *session_id,
+                                                            const aimee_request_t *profile);
 const char *server_native_runtime_url(const server_native_runtime_t *runtime);
 const char *server_native_runtime_token(const server_native_runtime_t *runtime);
 const char *server_native_runtime_binding(const server_native_runtime_t *runtime);

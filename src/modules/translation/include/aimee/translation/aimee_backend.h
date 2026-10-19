@@ -31,6 +31,9 @@ typedef struct
    int omitted_opaque_state_blocks;
    int omitted_cache_controls;
 } aimee_wire_projection_report_t;
+/* Only translation-created host layout extensions belong in a prepared
+ * execution profile. Whole native conversations/selectors cannot be profiles. */
+int aimee_backend_host_profile_valid(const aimee_request_t *request);
 /* Reports wire incompatibility without editing canonical history. */
 void aimee_backend_projection_report(const aimee_request_t *request, aimee_wire_t wire,
                                      aimee_wire_projection_report_t *report);
