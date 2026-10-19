@@ -211,11 +211,14 @@ int agent_has_resolvable_credentials(const agent_t *agent)
    return agent_provider_env_value(agent->provider, NULL, 0);
 }
 
-/* Per-turn Codex OAuth creds supplied by the thin client (see agent_config.h).
- * Thread-local: each chat/delegate turn runs on its own worker thread. */
+/* Per-request host-resolved credentials (see agent_config.h). Thread-local:
+ * each chat/delegate turn runs on its own worker thread. */
 static _Thread_local char g_request_codex_token[MAX_API_KEY_LEN];
 static _Thread_local char g_request_codex_account_id[128];
 static _Thread_local char g_request_codex_registration[128];
+static _Thread_local char g_request_api_key[MAX_API_KEY_LEN];
+static _Thread_local char g_request_api_registration[128];
+static _Thread_local char g_request_api_target[65];
 
 /* Explicit, actionable reason the current turn's auth resolution failed — set by
  * agent_resolve_auth on a known failure (e.g. codex REAUTH_REQUIRED) so the
@@ -326,6 +329,10 @@ void agent_request_creds_snapshot(agent_request_creds_t *out)
    snprintf(out->codex_account_id, sizeof(out->codex_account_id), "%s", g_request_codex_account_id);
    snprintf(out->codex_registration, sizeof(out->codex_registration), "%s",
             g_request_codex_registration);
+   snprintf(out->api_key, sizeof out->api_key, "%s", g_request_api_key);
+   snprintf(out->api_key_registration, sizeof out->api_key_registration, "%s",
+            g_request_api_registration);
+   snprintf(out->api_key_target, sizeof out->api_key_target, "%s", g_request_api_target);
    snprintf(out->vault_principal, sizeof(out->vault_principal), "%s", g_request_vault_principal);
 }
 
@@ -335,6 +342,11 @@ void agent_request_creds_restore(const agent_request_creds_t *creds)
       return;
    agent_set_request_session(creds->session_id);
    set_codex_creds(creds->codex_registration, creds->codex_token, creds->codex_account_id);
+   OPENSSL_cleanse(g_request_api_key, sizeof g_request_api_key);
+   snprintf(g_request_api_key, sizeof g_request_api_key, "%s", creds->api_key);
+   snprintf(g_request_api_registration, sizeof g_request_api_registration, "%s",
+            creds->api_key_registration);
+   snprintf(g_request_api_target, sizeof g_request_api_target, "%s", creds->api_key_target);
    agent_set_request_vault_principal(creds->vault_principal);
 }
 
@@ -474,8 +486,8 @@ static int credential_text(const cJSON *object, const char *name, char *out, siz
    snprintf(out, capacity, "%s", found->valuestring);
    return 0;
 }
-static int codex_source_digest(const char *token, const char *refresh, const char *account,
-                               char out[65])
+static int credential_source_digest(const char *token, const char *refresh, const char *account,
+                                    char out[65])
 {
    char material[MAX_API_KEY_LEN + 1024 + 128 + 3];
    const char *fields[] = {token, refresh, account};
@@ -528,7 +540,7 @@ static int codex_parse_source(const char *document, oauth_token_response_t *toke
        strpbrk(tokens->access_token, "\r\n") || strpbrk(account, "\r\n"))
       goto done;
    tokens->expires_at = codex_jwt_exp(tokens->access_token);
-   rc = codex_source_digest(tokens->access_token, tokens->refresh_token, account, digest);
+   rc = credential_source_digest(tokens->access_token, tokens->refresh_token, account, digest);
 done:
    credential_json_cleanse(root);
    cJSON_Delete(root);
@@ -550,7 +562,7 @@ static int codex_credentials_locked(const char *registration, agent_codex_creden
          goto done;
       snprintf(out->token, sizeof out->token, "%s", manual);
       snprintf(out->account_id, sizeof out->account_id, "%s", account);
-      rc = codex_source_digest(manual, "", account, out->source_digest);
+      rc = credential_source_digest(manual, "", account, out->source_digest);
       goto done;
    }
    if (fields[2].present && document[0])
@@ -594,7 +606,7 @@ static int codex_credentials_locked(const char *registration, agent_codex_creden
        out->token[0])
    {
       snprintf(out->account_id, sizeof out->account_id, "%s", account);
-      rc = codex_source_digest(out->token, "", account, out->source_digest);
+      rc = credential_source_digest(out->token, "", account, out->source_digest);
    }
 done:
    OPENSSL_cleanse(manual, sizeof manual);
@@ -635,6 +647,119 @@ int agent_codex_connection_credentials(const char *registration, agent_codex_cre
       OPENSSL_cleanse(out, sizeof *out);
    return rc;
 }
+static const char *api_key_auth_prefix(const agent_t *agent)
+{
+   if (!agent)
+      return NULL;
+   const char *kind = agent->auth_type;
+   if (strcmp(kind, "") && strcmp(kind, "api_key") && strcmp(kind, "bearer") &&
+       strcmp(kind, "x-api-key"))
+      return NULL;
+   if (!strcmp(kind, "x-api-key") || !strcmp(agent->provider, "anthropic"))
+      return "x-api-key: ";
+   if (!strcmp(agent->provider, "gemini") && (!kind[0] || !strcmp(kind, "api_key")))
+      return "x-goog-api-key: ";
+   return "Authorization: Bearer ";
+}
+
+static int api_target_digest(const agent_t *agent, char digest[65])
+{
+   if (!agent || !api_key_auth_prefix(agent))
+      return -1;
+   const char *registration = agent->registration[0] ? agent->registration : agent->name;
+   if (!registration[0] || strlen(registration) >= 128)
+      return -1;
+   /* Competing credential headers cannot replace the exact Vault source. Other
+    * account/project selectors remain part of the immutable target commitment. */
+   for (const char *line = agent->extra_headers; line && *line;)
+   {
+      const char *next = strchr(line, '\n');
+      const char *start = line;
+      while (*start == ' ' || *start == '\t')
+         start++;
+      const char *colon = strchr(start, ':');
+      if (colon && (!next || colon < next))
+      {
+         const char *end = colon;
+         while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
+            end--;
+         size_t length = (size_t)(end - start);
+         if ((length == 13 && !strncasecmp(start, "authorization", length)) ||
+             (length == 9 && !strncasecmp(start, "x-api-key", length)) ||
+             (length == 14 && !strncasecmp(start, "x-goog-api-key", length)))
+            return -1;
+      }
+      line = next ? next + 1 : NULL;
+   }
+   const char *parts[] = {"vault-api-key-v1", registration,     agent->provider,
+                          agent->endpoint,    agent->auth_type, agent->extra_headers};
+   size_t capacity = 1;
+   for (size_t i = 0; i < sizeof parts / sizeof *parts; i++)
+      capacity += strlen(parts[i]) + 32;
+   char *wire = malloc(capacity);
+   if (!wire)
+      return -1;
+   size_t used = 0;
+   for (size_t i = 0; i < sizeof parts / sizeof *parts; i++)
+   {
+      int count = snprintf(wire + used, capacity - used, "%zu:%s", strlen(parts[i]), parts[i]);
+      if (count < 0 || (size_t)count >= capacity - used)
+      {
+         OPENSSL_cleanse(wire, capacity);
+         free(wire);
+         return -1;
+      }
+      used += (size_t)count;
+   }
+   int rc = aimee_sha256_hex(wire, used, digest);
+   OPENSSL_cleanse(wire, capacity);
+   free(wire);
+   return rc;
+}
+
+int agent_api_connection_credentials(const agent_t *agent, agent_api_credentials_t *out)
+{
+   if (!out)
+      return -1;
+   OPENSSL_cleanse(out, sizeof *out);
+   if (!agent_get_request_vault_principal()[0] || api_target_digest(agent, out->target_digest))
+   {
+      OPENSSL_cleanse(out, sizeof *out);
+      return -1;
+   }
+   const char *registration = agent->registration[0] ? agent->registration : agent->name;
+   int rc = -1;
+   if (vault_service_inject_api_key(agent_get_request_vault_principal(), registration, out->api_key,
+                                    sizeof out->api_key, time(NULL)) == VAULT_OK &&
+       out->api_key[0] && !strpbrk(out->api_key, "\r\n") &&
+       !credential_source_digest(out->api_key, "vault-api-key-v1", out->target_digest,
+                                 out->source_digest))
+      rc = 0;
+   if (rc)
+      OPENSSL_cleanse(out, sizeof *out);
+   return rc;
+}
+
+int agent_set_request_api_credentials_for(const agent_t *agent,
+                                          const agent_api_credentials_t *credentials)
+{
+   OPENSSL_cleanse(g_request_api_key, sizeof g_request_api_key);
+   g_request_api_registration[0] = g_request_api_target[0] = 0;
+   if (!credentials)
+      return 0;
+   char target[65], source[65];
+   if (!credentials->api_key[0] || strpbrk(credentials->api_key, "\r\n") ||
+       api_target_digest(agent, target) || strcmp(target, credentials->target_digest) ||
+       credential_source_digest(credentials->api_key, "vault-api-key-v1", target, source) ||
+       strcmp(source, credentials->source_digest))
+      return -1;
+   snprintf(g_request_api_key, sizeof g_request_api_key, "%s", credentials->api_key);
+   snprintf(g_request_api_registration, sizeof g_request_api_registration, "%s",
+            agent->registration[0] ? agent->registration : agent->name);
+   snprintf(g_request_api_target, sizeof g_request_api_target, "%s", target);
+   return 0;
+}
+
 int agent_codex_oauth_current_token(char *buf, size_t capacity)
 {
    if (!buf || !capacity)
@@ -857,6 +982,34 @@ int agent_resolve_auth_headers(const agent_t *agent, char *auth, size_t auth_cap
    auth[0] = 0;
    g_request_auth_error[0] = 0;
    build_base_extra_headers(agent, headers, headers_capacity);
+   const char *registration = agent->registration[0] ? agent->registration : agent->name;
+   if (g_request_api_key[0] && !strcmp(registration, g_request_api_registration))
+   {
+      char target[65];
+      if (api_target_digest(agent, target) || strcmp(target, g_request_api_target))
+      {
+         snprintf(g_request_auth_error, sizeof g_request_auth_error,
+                  "selected Vault API-key binding does not match this connection");
+         return -1;
+      }
+      char expected_headers[sizeof agent->extra_headers + 256];
+      build_base_extra_headers(agent, expected_headers, sizeof expected_headers);
+      if (strlen(expected_headers) >= headers_capacity || strcmp(expected_headers, headers))
+      {
+         OPENSSL_cleanse(expected_headers, sizeof expected_headers);
+         OPENSSL_cleanse(headers, headers_capacity);
+         return -1;
+      }
+      OPENSSL_cleanse(expected_headers, sizeof expected_headers);
+      int length =
+          snprintf(auth, auth_capacity, "%s%s", api_key_auth_prefix(agent), g_request_api_key);
+      if (length < 0 || (size_t)length >= auth_capacity)
+      {
+         OPENSSL_cleanse(auth, auth_capacity);
+         return -1;
+      }
+      return 0;
+   }
    if (strcmp(agent->auth_type, "codex-oauth"))
       return resolve_non_codex_auth(agent, auth, auth_capacity);
    agent_codex_credentials_t credentials = {0};

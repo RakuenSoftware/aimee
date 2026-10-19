@@ -7,6 +7,14 @@ and injection, sealing, rotation, and custody-provider binding. It does not own 
 Git or forge protocols, optional OIDC governance, tool execution, workspace selection, or the policy
 that decides whether a caller may request a credential.
 
+Selected native API-key connections use `agent_api_connection_credentials` under the captured
+Vault principal. It resolves only the selected registration, commits the actual key and connection
+profile to opaque lineage, and refuses competing credential headers. A host binds that exact
+credential with `agent_set_request_api_credentials_for` for one request; target edits in that
+registration refuse. Other registrations resolve their own credentials without borrowing the key. These values stay off the module bus and child environment, and are
+cleansed with the per-request credential snapshot. Existing unscoped compatibility resolution is
+unchanged. Claude OAuth custody/refresh and production native activation remain separate work.
+
 ## Public contracts
 
 Canonical implementation lives in `src/modules/vault`: the server-wrap retrieval path begins at

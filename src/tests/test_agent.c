@@ -1,6 +1,8 @@
 #include "support/delegate_role_seam_stub.h"
 #include <aimee/ir/session_event.h>
 #include <assert.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -15,6 +17,7 @@ extern char test_vault_server_codex_oauth[4096];
 extern char test_vault_codex_connection[128], test_vault_codex_token[4096],
     test_vault_codex_account[128];
 void test_oauth_tokens_reset(void);
+extern char test_vault_api_key_agent[64], test_vault_api_key[4096];
 extern int test_oauth_stores, test_oauth_removes, test_oauth_get_fail;
 #include "aimee.h"
 #include "db1_client/db1.h"
@@ -1630,6 +1633,141 @@ static void test_local_synth_not_masked_by_tmux_codex(void)
    else
       unsetenv("PATH");
    printf("  PASS: test_local_synth_not_masked_by_tmux_codex\n");
+}
+
+typedef struct
+{
+   const agent_t *agent;
+   agent_request_creds_t credentials;
+   const char *expected;
+   atomic_int *ready, *start;
+} api_credential_thread_t;
+
+static void *api_credential_thread(void *context)
+{
+   api_credential_thread_t *request = context;
+   agent_request_creds_restore(&request->credentials);
+   atomic_fetch_add(request->ready, 1);
+   while (!atomic_load(request->start))
+      usleep(1000);
+   for (int i = 0; i < 50; i++)
+   {
+      char auth[4096], headers[1024];
+      assert(
+          !agent_resolve_auth_headers(request->agent, auth, sizeof auth, headers, sizeof headers));
+      assert(!strcmp(auth, request->expected));
+      runtime_secret_wipe(auth, sizeof auth);
+      usleep(1000);
+   }
+   agent_request_creds_t empty = {0};
+   agent_request_creds_restore(&empty);
+   return NULL;
+}
+
+static void test_vault_api_key_lineage_and_request_binding(void)
+{
+   agent_request_creds_t previous, empty = {0}, bound;
+   agent_request_creds_snapshot(&previous);
+   agent_request_creds_restore(&empty);
+   agent_set_request_vault_principal("webuser:alice");
+   agent_t agent = {0};
+   snprintf(agent.name, sizeof agent.name, "%s", "api-agent");
+   snprintf(agent.registration, sizeof agent.registration, "%s", "api-selected");
+   snprintf(agent.provider, sizeof agent.provider, "%s", "openai");
+   snprintf(agent.endpoint, sizeof agent.endpoint, "%s",
+            "https://provider.invalid/v1/chat/completions");
+   snprintf(agent.auth_type, sizeof agent.auth_type, "%s", "api_key");
+   snprintf(agent.extra_headers, sizeof agent.extra_headers, "%s", "OpenAI-Project: project-one");
+   snprintf(test_vault_api_key_agent, sizeof test_vault_api_key_agent, "%s", agent.registration);
+   snprintf(test_vault_api_key, sizeof test_vault_api_key, "%s", "vault-one");
+   agent_api_credentials_t original, same, rotated;
+   assert(!agent_api_connection_credentials(&agent, &original));
+   assert(!agent_api_connection_credentials(&agent, &same));
+   assert(!strcmp(original.api_key, "vault-one") && strlen(original.source_digest) == 64 &&
+          strlen(original.target_digest) == 64 && !memcmp(&original, &same, sizeof same));
+   assert(!agent_set_request_api_credentials_for(&agent, &original));
+   agent_request_creds_snapshot(&bound);
+   char auth[4096], headers[1024];
+   snprintf(test_vault_api_key, sizeof test_vault_api_key, "%s", "rotated-key");
+   assert(!agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   assert(!strcmp(auth, "Authorization: Bearer vault-one"));
+   assert(!agent_api_connection_credentials(&agent, &rotated));
+   assert(strcmp(original.source_digest, rotated.source_digest) &&
+          !strcmp(original.target_digest, rotated.target_digest));
+   atomic_int ready = 0, start = 0;
+   api_credential_thread_t requests[2] = {{.agent = &agent,
+                                           .credentials = bound,
+                                           .expected = "Authorization: Bearer vault-one",
+                                           .ready = &ready,
+                                           .start = &start},
+                                          {.agent = &agent,
+                                           .expected = "Authorization: Bearer rotated-key",
+                                           .ready = &ready,
+                                           .start = &start}};
+   assert(!agent_set_request_api_credentials_for(&agent, &rotated));
+   agent_request_creds_snapshot(&requests[1].credentials);
+   agent_request_creds_restore(&bound);
+   pthread_t workers[2];
+   for (int i = 0; i < 2; i++)
+      assert(!pthread_create(&workers[i], NULL, api_credential_thread, &requests[i]));
+   while (atomic_load(&ready) != 2)
+      usleep(1000);
+   atomic_store(&start, 1);
+   for (int i = 0; i < 2; i++)
+      assert(!pthread_join(workers[i], NULL));
+   runtime_secret_wipe(requests, sizeof requests);
+
+   agent_t foreign = agent;
+   snprintf(foreign.registration, sizeof foreign.registration, "%s", "other-slot");
+   snprintf(test_vault_api_key_agent, sizeof test_vault_api_key_agent, "%s", foreign.registration);
+   snprintf(test_vault_api_key, sizeof test_vault_api_key, "%s", "other-connection-key");
+   assert(!agent_resolve_auth_headers(&foreign, auth, sizeof auth, headers, sizeof headers));
+   assert(!strcmp(auth, "Authorization: Bearer other-connection-key"));
+   snprintf(test_vault_api_key_agent, sizeof test_vault_api_key_agent, "%s", agent.registration);
+   snprintf(test_vault_api_key, sizeof test_vault_api_key, "%s", "rotated-key");
+   foreign = agent;
+   snprintf(foreign.endpoint, sizeof foreign.endpoint, "%s", "https://other.invalid");
+   assert(agent_resolve_auth_headers(&foreign, auth, sizeof auth, headers, sizeof headers) &&
+          !auth[0]);
+   foreign = agent;
+   snprintf(foreign.extra_headers, sizeof foreign.extra_headers, "%s",
+            "OpenAI-Project: project-two");
+   assert(agent_resolve_auth_headers(&foreign, auth, sizeof auth, headers, sizeof headers) &&
+          !auth[0]);
+   assert(!agent_api_connection_credentials(&foreign, &same));
+   assert(strcmp(original.target_digest, same.target_digest));
+   assert(agent_set_request_api_credentials_for(&foreign, &original));
+   agent_request_creds_restore(&empty);
+   agent_request_creds_restore(&bound);
+   assert(!agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   assert(!strcmp(auth, "Authorization: Bearer vault-one"));
+   assert(agent_resolve_auth_headers(&agent, auth, 8, headers, sizeof headers) && !auth[0]);
+   assert(agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, 8) && !auth[0] &&
+          !headers[0]);
+   agent_set_request_api_credentials_for(NULL, NULL);
+   agent_set_request_vault_principal("webuser:alice");
+   const char *conflicts[] = {"Authorization: secret", " X-Api-Key : secret",
+                              "x-goog-api-key: secret"};
+   for (size_t i = 0; i < sizeof conflicts / sizeof *conflicts; i++)
+   {
+      foreign = agent;
+      snprintf(foreign.extra_headers, sizeof foreign.extra_headers, "%s", conflicts[i]);
+      assert(agent_api_connection_credentials(&foreign, &same));
+      assert(!same.api_key[0] && !same.source_digest[0]);
+   }
+   snprintf(test_vault_api_key_agent, sizeof test_vault_api_key_agent, "%s", agent.name);
+   assert(agent_api_connection_credentials(&agent, &same)); /* No alias fallback. */
+   snprintf(test_vault_api_key_agent, sizeof test_vault_api_key_agent, "%s", agent.registration);
+   agent_set_request_vault_principal(NULL);
+   assert(agent_api_connection_credentials(&agent, &same));
+   agent_request_creds_restore(&previous);
+   runtime_secret_wipe(&previous, sizeof previous);
+   runtime_secret_wipe(&bound, sizeof bound);
+   runtime_secret_wipe(&original, sizeof original);
+   runtime_secret_wipe(&same, sizeof same);
+   runtime_secret_wipe(&rotated, sizeof rotated);
+   test_vault_api_key_agent[0] = test_vault_api_key[0] = 0;
+   puts("  PASS: selected Vault API-key lineage, rotation and exact request binding");
 }
 
 static void test_codex_source_lineage_and_paired_headers(void)
@@ -4317,6 +4455,7 @@ int main(void)
    test_agent_adapter_registry();
    test_agent_config_deletion_guard();
    test_local_synth_not_masked_by_tmux_codex();
+   test_vault_api_key_lineage_and_request_binding();
    test_codex_source_lineage_and_paired_headers();
    test_codex_oauth_auth_resolution();
    test_responses_parser_keeps_all_output_text_parts();

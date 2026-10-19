@@ -332,6 +332,21 @@ typedef struct
  * The returned secret must stay off the module bus and be cleansed by its owner. */
 int agent_codex_connection_credentials(const char *registration, agent_codex_credentials_t *out);
 
+typedef struct
+{
+   char api_key[MAX_API_KEY_LEN];
+   char target_digest[65]; /* selected registration/provider/endpoint/header profile */
+   char source_digest[65]; /* target + actual selected Vault key; not a credential */
+} agent_api_credentials_t;
+/* Exact selected Vault connection under the current attested principal. No
+ * config/env/name-alias fallback. Secrets remain on the host and must be cleansed. */
+int agent_api_connection_credentials(const agent_t *agent, agent_api_credentials_t *out);
+/* Bind the already resolved credential to this exact connection for one host
+ * request. NULL clears. Target edits within that registration refuse; other
+ * registrations resolve their own credential and never borrow this key. */
+int agent_set_request_api_credentials_for(const agent_t *agent,
+                                          const agent_api_credentials_t *credentials);
+
 /* Host-owned per-turn Codex credentials. The legacy setter binds the server
  * codex connection. The explicit setter binds the selected registration; token
  * and account may only serve that connection. NULL/empty clears both. */
@@ -366,9 +381,8 @@ const char *agent_get_request_vault_principal(void);
 void agent_set_request_cancel(atomic_int *flag);
 int agent_request_cancelled(void);
 
-/* Snapshot of the per-turn, thread-local credential context (session id + Codex
- * creds + WP-C vault principal). agent_set_request_session /
- * agent_set_request_codex_creds / agent_set_request_vault_principal bind these
+/* Snapshot of the per-turn, thread-local credential context (session id, selected
+ * Codex/API-key credentials and WP-C vault principal). The host credential setters bind these
  * on the dispatching thread, but a parallel fan-out (agent_run_parallel) runs
  * each agent on a fresh worker thread that does NOT inherit thread-locals — so
  * the dispatcher snapshots its context and each worker restores it, or the
@@ -380,6 +394,9 @@ typedef struct
    char codex_token[MAX_API_KEY_LEN];
    char codex_account_id[128];
    char codex_registration[128];
+   char api_key[MAX_API_KEY_LEN];
+   char api_key_registration[128];
+   char api_key_target[65];
    char vault_principal[VAULT_PRINCIPAL_MAX];
 } agent_request_creds_t;
 

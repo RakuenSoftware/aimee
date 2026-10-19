@@ -24,17 +24,17 @@ fidelity gap.
 
 The remaining work includes actual credential-free SDK activation with attested
 launch/workspace resources, complete host tool effects/receipts and human controls,
-Claude/generic credential custody, remaining ingress/consumer retirement and
+Claude OAuth and other unsupported credential custody, remaining ingress/consumer retirement and
 independently graded server-local learning with next-run reuse. Production `.100`
 must remain KB-free. Explicit receipt-bound feedback/ungraded observations are not
 independent task grades or synthesis. Production promotion requires the recorded
 independent reviewer under `OWNERS.md`.
 
-Published `1a8469ebf` passed all 56 applicable CI checks, including every Docker
-tier, with two existing testing-branch platform skips. Published `5aa1888d2`
-contains the later canonical host-profile/cache-preserving cutovers and requires
-fresh CI. The subsequent plain-request consumer and obsolete shell-driver
-retirement checkpoints at the end record their narrower source/validation status.
+Published `5aa1888d2` passed all 56 applicable CI checks, including every Docker
+tier, with two existing testing-branch platform skips (as did `1a8469ebf`). Published
+`46f6e1085` includes the subsequent plain-request consumer and obsolete shell-driver
+retirement and is undergoing fresh CI. The selected Vault API-key increment at the
+end records its newer source and validation status.
 Installed CLI probes now correctly resolve `aimee` and `wol-lore` from their own
 workspaces without an explicit project override; newer native callback cwd binding
 is separately pending promotion. The overall migration remains unfinished.
@@ -1731,3 +1731,33 @@ overrides from both the Aimee continuation worktree and `/home/virant/dev/wol-lo
 returning only `aimee` and `wol-lore` hits respectively. This directly rechecks the
 original scope-required failure. It does not claim production SDK activation or
 promotion of the newer native callback cwd binding.
+
+
+## Selected Vault API-key lineage for scoped native transport
+
+The Vault owner resolves selected API-key connections under the captured principal
+without config/environment/default-account/name-alias fallback. It commits the
+actual key and exact registration/provider/endpoint/auth/header target to opaque
+lineage, rejects competing credential headers, and supplies a per-request host
+binding. Serving uses the exact checked credential, refuses target edits within
+that registration and truncated headers, and never swaps its source after admission.
+Other registrations resolve their own credentials, without borrowing this key.
+Snapshot/restore carries and cleans the API-key binding alongside Codex credentials.
+Ordinary unscoped credential compatibility is unchanged.
+
+The scoped native transport can now forward using that API-key lineage as well
+as Codex OAuth. It rechecks the selected source for each callback, refuses a
+rotated/revoked source in the old runtime, and permits a new runtime with a new
+binding. API-key bindings are installed only for model forwarding, so MCP tools
+and their delegates resolve their own credentials. Unsupported/missing native
+credential sources retain MCP-only operation,
+without model replay/cache authority. No key reaches the child or canonical log.
+
+Actual Vault-owner and runtime fixtures exercise selected-key custody, stable and
+rotated lineage, exact headers, no alias fallback, credential snapshots, source
+changes and host-only forwarding. Two concurrent owner threads retain distinct
+checked keys. Production build, ASan/UBSan owner/runtime/fan-out fixtures, runtime
+ThreadSanitizer, CMake/CTest, all 76 lint checks and zero-diagnostic changed-source
+static analysis pass. Claude OAuth refresh/custody, actual attestation
+factories, native command fidelity, complete effects/controls and SDK activation
+are still open; this API-key capability is not a production promotion.

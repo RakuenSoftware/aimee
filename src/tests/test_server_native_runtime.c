@@ -215,6 +215,36 @@ int agent_codex_connection_credentials(const char *registration, agent_codex_cre
           64);
    return 0;
 }
+int agent_api_connection_credentials(const agent_t *agent, agent_api_credentials_t *out)
+{
+   const request_context_t *owner = request_context_get();
+   assert(owner && !strcmp(owner->vault_principal, current_credentials.vault_principal));
+   assert(!strcmp(owner->session_key, current_credentials.session_id));
+   if (strcmp(agent->auth_type, "api_key") || strcmp(agent->registration, "selected-account"))
+      return -1;
+   memset(out, 0, sizeof *out);
+   strcpy(out->api_key, "host-only-api-secret");
+   memset(out->target_digest, 'e', 64);
+   memset(out->source_digest,
+          atomic_load(&malformed_source) ? 'z'
+          : atomic_load(&source_changed) ? 'd'
+                                         : 'c',
+          64);
+   return 0;
+}
+int agent_set_request_api_credentials_for(const agent_t *agent,
+                                          const agent_api_credentials_t *credentials)
+{
+   assert(agent && !strcmp(agent->registration, "selected-account"));
+   assert(credentials && !strcmp(credentials->api_key, "host-only-api-secret"));
+   snprintf(current_credentials.api_key, sizeof current_credentials.api_key, "%s",
+            credentials->api_key);
+   snprintf(current_credentials.api_key_registration,
+            sizeof current_credentials.api_key_registration, "%s", agent->registration);
+   snprintf(current_credentials.api_key_target, sizeof current_credentials.api_key_target, "%s",
+            credentials->target_digest);
+   return 0;
+}
 int db1_server_session_get(const char *session, db1_server_session_t *out)
 {
    memset(out, 0, sizeof *out);
@@ -325,7 +355,23 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    assert(!strcmp(current_credentials.vault_principal, identity));
    assert(!strcmp(current_credentials.session_id, owner->session_key));
    assert(current_model && !strcmp(current_model->registration, "selected-account"));
-   assert(!strcmp(current_credentials.codex_token, "host-only-upstream-secret"));
+   if (!strcmp(current_model->auth_type, "api_key"))
+   {
+      assert(!current_credentials.codex_token[0]);
+      if (!strncmp(path, "/v1/mcp/", 8))
+         assert(
+             !current_credentials.api_key[0]); /* Tools/delegates resolve their own credentials. */
+      else
+      {
+         assert(!strcmp(current_credentials.api_key, "host-only-api-secret"));
+         assert(!strcmp(current_credentials.api_key_registration, current_model->registration));
+      }
+   }
+   else
+   {
+      assert(!current_credentials.api_key[0]);
+      assert(!strcmp(current_credentials.codex_token, "host-only-upstream-secret"));
+   }
    atomic_fetch_add(&calls, 1);
    if (atomic_load(&wait_for_cancel))
    {
@@ -623,6 +669,29 @@ int main(void)
    assert(atomic_load(&cancelled));
    server_native_runtime_close(alice);
    server_native_runtime_close(bob);
+   atomic_store(&wait_for_cancel, 0);
+   owner_tools(1);
+   agent_t api_selected = selected;
+   strcpy(api_selected.provider, "openai");
+   strcpy(api_selected.auth_type, "api_key");
+   server_native_runtime_t *api = server_native_runtime_open(&api_selected, &a, "session-a");
+   assert(api);
+   request(api, "/v1/responses", server_native_runtime_token(api), response);
+   assert(strstr(response, "200 OK") && !strstr(response, "api-secret"));
+   request(api, "/v1/mcp/call", server_native_runtime_token(api), response);
+   assert(strstr(response, "200 OK") && !strstr(response, "api-secret"));
+   before = atomic_load(&calls);
+   atomic_store(&source_changed, 1);
+   request(api, "/v1/responses", server_native_runtime_token(api), response);
+   assert(strstr(response, "502") && atomic_load(&calls) == before);
+   server_native_runtime_t *rotated = server_native_runtime_open(&api_selected, &a, "session-a");
+   assert(rotated &&
+          strcmp(server_native_runtime_binding(api), server_native_runtime_binding(rotated)));
+   request(rotated, "/v1/responses", server_native_runtime_token(rotated), response);
+   assert(strstr(response, "200 OK"));
+   server_native_runtime_close(rotated);
+   server_native_runtime_close(api);
+   atomic_store(&source_changed, 0);
    unsetenv("AIMEE_ACTIVE_TOOLSET");
    unsetenv("AIMEE_DELEGATE_SOURCE_PATHS");
    agent_source_authority_snapshot_t absent = {0};

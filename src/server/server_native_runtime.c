@@ -37,7 +37,7 @@ struct server_native_runtime
    server_delegate_scope_t delegate;
    const workspace_provider_t *workspace;
    char cwd[MAX_PATH_LEN];
-   int job_id;
+   int job_id, api_key_source;
    char session[128], token[65], url[64], binding[65], lineage[65];
 };
 
@@ -107,8 +107,8 @@ static int native_forward(const char *method, const char *path, const char *head
        strcmp(source.principal, runtime->owner.vault_principal))
       return -1;
    int model_request = !strcmp(method, "POST") && (strncmp(path, "/v1/mcp/", 8) != 0);
-   /* Model state is account-bound only once the Vault owner supplies stable
-    * lineage. Other native credential sources still need that custody cutover. */
+   /* Model state requires the actual selected Vault source's stable lineage.
+    * Unsupported credential sources cannot borrow a default account. */
    if (model_request && !runtime->replay)
       return -1;
    char *input = malloc((size_t)length + 1);
@@ -188,6 +188,7 @@ static int native_forward(const char *method, const char *path, const char *head
    aimee_ir_session_begin_task();
    int rc = -1;
    agent_codex_credentials_t current = {0};
+   agent_api_credentials_t current_api = {0};
    request_context_t admitted = runtime->owner;
    unsigned char request_nonce[16];
    if (platform_random_bytes(request_nonce, sizeof request_nonce))
@@ -206,10 +207,21 @@ static int native_forward(const char *method, const char *path, const char *head
    {
       const char *registration = runtime->selected.registration[0] ? runtime->selected.registration
                                                                    : runtime->selected.name;
-      if (agent_codex_connection_credentials(registration, &current) ||
-          strcmp(current.source_digest, runtime->lineage))
-         goto restore;
-      agent_set_request_codex_creds_for(&runtime->selected, current.token, current.account_id);
+      if (runtime->api_key_source)
+      {
+         if (agent_api_connection_credentials(&runtime->selected, &current_api) ||
+             strcmp(current_api.source_digest, runtime->lineage) ||
+             (model_request &&
+              agent_set_request_api_credentials_for(&runtime->selected, &current_api)))
+            goto restore;
+      }
+      else
+      {
+         if (agent_codex_connection_credentials(registration, &current) ||
+             strcmp(current.source_digest, runtime->lineage))
+            goto restore;
+         agent_set_request_codex_creds_for(&runtime->selected, current.token, current.account_id);
+      }
    }
    native_cancellation_t watch = {.io = io};
    pthread_t monitor;
@@ -240,6 +252,7 @@ static int native_forward(const char *method, const char *path, const char *head
    agent_set_request_cancel(NULL);
    anthropic_http_capture_request_headers(NULL);
 restore:
+   OPENSSL_cleanse(&current_api, sizeof current_api);
    OPENSSL_cleanse(&current, sizeof current);
    agent_registry_bind_ingress_model(previous_model);
    agent_request_creds_restore(&previous_credentials);
@@ -292,6 +305,7 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
    snprintf(runtime->credentials.vault_principal, sizeof runtime->credentials.vault_principal, "%s",
             owner->vault_principal);
    agent_codex_credentials_t credentials = {0};
+   agent_api_credentials_t api_credentials = {0};
    if (agent_tools_scope_capture_owned(&runtime->tools) ||
        agent_source_authority_tls_capture_checked(&runtime->source))
       goto failed;
@@ -307,24 +321,37 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
    server_delegate_scope_capture(&runtime->delegate);
    const char *cwd = run_cmd_get_cwd();
    snprintf(runtime->cwd, sizeof runtime->cwd, "%s", cwd ? cwd : "");
-   if (!strcmp(selected->auth_type, "codex-oauth"))
    {
-      const char *registration =
-          selected->registration[0] ? selected->registration : selected->name;
       request_context_snapshot_t previous_request;
       request_context_snapshot(&previous_request);
       agent_request_creds_t previous_credentials;
       agent_request_creds_snapshot(&previous_credentials);
       request_context_set(&runtime->owner);
       agent_request_creds_restore(&runtime->credentials);
-      int rc = agent_codex_connection_credentials(registration, &credentials);
+      int codex = !strcmp(selected->auth_type, "codex-oauth");
+      const char *registration =
+          selected->registration[0] ? selected->registration : selected->name;
+      int rc = codex ? agent_codex_connection_credentials(registration, &credentials)
+                     : agent_api_connection_credentials(selected, &api_credentials);
       agent_request_creds_restore(&previous_credentials);
       OPENSSL_cleanse(&previous_credentials, sizeof previous_credentials);
       request_context_restore(&previous_request);
       request_context_snapshot_clear(&previous_request);
-      if (rc || !native_digest_valid(credentials.source_digest))
-         goto failed;
-      snprintf(runtime->lineage, sizeof runtime->lineage, "%s", credentials.source_digest);
+      if (codex)
+      {
+         if (rc || !native_digest_valid(credentials.source_digest))
+            goto failed;
+         snprintf(runtime->lineage, sizeof runtime->lineage, "%s", credentials.source_digest);
+      }
+      else if (!rc)
+      {
+         if (!native_digest_valid(api_credentials.source_digest))
+            goto failed;
+         runtime->api_key_source = 1;
+         snprintf(runtime->lineage, sizeof runtime->lineage, "%s", api_credentials.source_digest);
+      }
+      /* Unsupported/unconfigured sources retain MCP-only operation. They cannot
+       * forward model traffic or acquire a replay/cache scope without lineage. */
    }
    const char *parts[] = {owner->vault_principal, selected->registration, selected->name,
                           selected->provider,     selected->model,        selected->endpoint,
@@ -359,9 +386,11 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
    if (!runtime->listener)
       goto failed;
    snprintf(runtime->url, sizeof runtime->url, "http://127.0.0.1:%u", port);
+   OPENSSL_cleanse(&api_credentials, sizeof api_credentials);
    OPENSSL_cleanse(&credentials, sizeof credentials);
    return runtime;
 failed:
+   OPENSSL_cleanse(&api_credentials, sizeof api_credentials);
    OPENSSL_cleanse(&credentials, sizeof credentials);
    server_native_runtime_close(runtime);
    return NULL;
