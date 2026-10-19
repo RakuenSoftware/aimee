@@ -2408,3 +2408,49 @@ integration harness 167/167 with 26 explicit service skips and no KB. The CMake
 control fixture now names its missing canonical IR source dependencies. Fresh
 branch CI and the original merged memory-owner timeout remain unqualified.
 All 76 repository lint gates also pass for this retained-control increment.
+
+## Canonical host questions and strict browser reply frames
+
+The server's existing request_input hook now publishes primary/browser and native
+MCP host questions as canonical durable control requests. Its worker retains the
+session/principal-bound control owner, carries no HTTP compute context or model
+sink, and publishes an empty-option free-text question through the existing UI.
+The existing always-on durable EventSource carries independently appended events.
+Request IDs are host-random and turn-qualified; independent control event IDs do
+not share a borrowed primary counter. DB1 remains the only history writer.
+
+Durable publication and consumption run under a per-scope mutex. The registry
+lock covers only membership and reference leases, so a blocked store for one turn
+does not stall another turn's controls. A request is recorded before becoming
+replyable, and a response is recorded before an answer reaches its waiting tool.
+The native harness wildcard consumer cannot take recorded host-question replies.
+Only their specific host ID selects them. A recording failure is shared with the
+parent primary owner and refuses further model capture or successful completion.
+
+Host cancellation and deadlines seal a pending question with a durable cancel
+response; late replies refuse. Declines/cancels return error text, never an effect
+grant. Invalid answers do not consume the request. The real server hook retains
+its old delegate-mailbox fallback when there is no browser control scope. Private
+execution logs still clear the parent's scope; their mailbox and question-routing
+cutover remains unfinished and is not claimed by this increment.
+
+The browser control route now parses the exact frame with the canonical JSON
+codec before selecting session/request/reply fields. Duplicate outer fields,
+trailing documents and embedded NULs refuse without consuming the pending
+request. Authenticated positive routing and these negative controls were run in
+an isolated user namespace, also under ASan/UBSan; untrusted transports retain
+their existing authorization rejection.
+
+Host-question qualification passes all 654 native binaries and proxy regressions;
+seven focused ASan/UBSan fixtures plus authenticated HTTP reply routing in an
+isolated user namespace; nine-source Cppcheck with zero diagnostics; actual
+CMake application and controls/question/runtime/cache CTest 4/4; rebuilt
+production server; and the original PostgreSQL 18.6 integration journey 167/167
+with 26 explicit service skips and no KB. The two fixture setup/assert cleanups
+were rebuilt and rerun normally and under ASan/UBSan. Frozen benchmark checks
+pass 21/21 with no baseline or validator changes. These local results do not
+replace fresh branch CI or explain the merged CI model-memory timeout.
+The exact HTTP-route diff was reviewed for its memory-ownership ledger pin:
+only control-frame decoding changed, with memory_stats and Go authority intact.
+The recorded hash/review was refreshed; no memory gate or inventory was exempted.
+All 76 repository lint checks pass for the final host-question increment.

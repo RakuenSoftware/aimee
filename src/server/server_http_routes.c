@@ -1297,7 +1297,9 @@ static int rh_chat_control_reply(const route_req_t *rq, char *resp, int cap)
    server_http_identity_apply(&identity);
    if (!server_http_identity_browser_operator() || !identity.vault_principal[0])
       return err_json(resp, cap, 403, "control replies require an authenticated browser user");
-   cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
+   cJSON *body = rq->body && rq->body_len > 0
+                     ? aimee_ir_json_parse_frame(rq->body, (size_t)rq->body_len)
+                     : NULL;
    const char *session = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "session_id"));
    const char *request = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "request_id"));
    const cJSON *reply = cJSON_GetObjectItemCaseSensitive(body, "reply");

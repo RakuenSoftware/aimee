@@ -6,6 +6,8 @@
 #endif
 #include "server_compute_internal.h"
 #include "server_delegate_scope.h"
+#include "server_session_question.h"
+#include "server_session_control.h"
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
 #include "db1_client/db1.h"
@@ -188,6 +190,8 @@ const char *delegation_active_id(void)
 /* Called by tool_request_input from within the delegate agent */
 char *delegation_request_input(const char *question)
 {
+   if (server_control_scope_current())
+      return server_session_question(question, DELEGATION_INPUT_TIMEOUT);
    if (!tl_mailbox || !tl_mailbox->active)
       return NULL;
 

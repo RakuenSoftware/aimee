@@ -714,6 +714,29 @@ static void test_operator_control_reply_route(void)
    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
    server_http_identity_capture(
        pair[0], 0, "POST /v1/chat/control-reply HTTP/1.1\r\nX-Aimee-Webuser: alice\r\n\r\n");
+   /* Exact framing precedes field selection: neither duplicate outer routing
+    * fields nor trailing documents can choose a different pending request. */
+   const char *invalid[] = {
+       "{\"session_id\":\"control-session\",\"session_id\":\"other\","
+       "\"request_id\":\"control-turn:71\",\"reply\":{\"decision\":\"deny\"}}",
+       "{\"session_id\":\"control-session\",\"request_id\":\"control-turn:71\","
+       "\"request_id\":\"other:71\",\"reply\":{\"decision\":\"deny\"}}",
+       "{\"session_id\":\"control-session\",\"request_id\":\"control-turn:71\","
+       "\"reply\":{\"decision\":\"allow\"},\"reply\":{\"decision\":\"deny\"}}",
+       "{\"session_id\":\"control-session\",\"request_id\":\"control-turn:71\","
+       "\"reply\":{\"decision\":\"deny\"}} {}",
+   };
+   for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+      assert(server_http_route("POST", "/v1/chat/control-reply", invalid[i],
+                               (int)strlen(invalid[i]), response, sizeof response) ==
+             (getuid() == 0 || i == sizeof invalid / sizeof invalid[0] - 1 ? 400 : 403));
+   char embedded[512];
+   size_t length = strlen(body);
+   assert(length + 4 < sizeof embedded);
+   memcpy(embedded, body, length + 1);
+   memcpy(embedded + length + 1, "{}", 2);
+   assert(server_http_route("POST", "/v1/chat/control-reply", embedded, (int)length + 3, response,
+                            sizeof response) == 400);
    int expected = getuid() == 0 ? 200 : 403;
    assert(server_http_route("POST", "/v1/chat/control-reply", body, (int)strlen(body), response,
                             sizeof response) == expected);

@@ -2206,8 +2206,8 @@
       "symbols": [
         "memory_stats"
       ],
-      "sha256": "a7b852c7344c9defd7f2f53e93a528ad83a1cca26eed4690b328ac225272fbd9",
-      "review": "2026-10-18: async op-run lifecycle moved to server_http_op_runs.c; the memory_stats catalog entry and Go memory-owner calls remain here unchanged. Browser control replies now require an actual interactive attested request, excluding inherited compute owners.",
+      "sha256": "e888862cc07be83ca9c164fced031e0319994dcb5a71eeb7c8ef26a72b6bdb55",
+      "review": "2026-10-18: async op-run lifecycle moved to server_http_op_runs.c; the memory_stats catalog entry and Go memory-owner calls remain here unchanged. Browser control replies now require an actual interactive attested request, excluding inherited compute owners. 2026-10-19: the browser control-reply handler now uses the canonical exact-frame JSON codec before selecting routing fields. The sole memory_stats catalog symbol and all Go memory routing/authority remain unchanged; the diff contains only this control-frame parser replacement.",
       "boundary_review": "IR #3036: queued operations carry an owned verified caller context and intersect its original capability ceiling, so Go policy receives the originating actor instead of an empty or pooled previous actor. This changes caller propagation, not Go memory admission authority. Worker ownership ends only after durable terminal capture. No independent production approval is asserted."
     },
     "src/server/server_mcp.c": {

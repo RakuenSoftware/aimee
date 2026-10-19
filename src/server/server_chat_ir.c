@@ -77,8 +77,11 @@ static int chat_ir_deliver(compute_ctx_t *c, const char *json, const char *seque
 static int chat_ir_sink(const aimee_session_event_t *event, void *context)
 {
    compute_ctx_t *c = context;
-   if (c->ir_failed)
+   if (c->ir_failed || server_control_scope_failed(c->ir_controls))
+   {
+      c->ir_failed = 1;
       return -1;
+   }
    const char *role =
        event->kind == AIMEE_SESSION_MESSAGE && event->message ? event->message->role : event->role;
    if (role && !strcmp(role, "assistant"))

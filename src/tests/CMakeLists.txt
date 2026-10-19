@@ -523,6 +523,24 @@ if(NOT WIN32)
 endif()
 
 if(NOT WIN32)
+  add_executable(test_server_session_question test_server_session_question.c
+    ../server/server_session_question.c ../server/server_session_control.c
+    ../server/server_compute_mailbox.c
+    ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
+    ../platform_random.c ../posix/platform_random.c ../vendor/cJSON.c)
+  target_include_directories(test_server_session_question PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/vendor/headers
+    ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
+  target_link_libraries(test_server_session_question PRIVATE Threads::Threads m)
+  if(APPLE)
+    target_compile_options(test_server_session_question PRIVATE -ffunction-sections -fdata-sections)
+    target_link_options(test_server_session_question PRIVATE -Wl,-dead_strip)
+  else()
+    target_compile_options(test_server_session_question PRIVATE -ffunction-sections -fdata-sections)
+    target_link_options(test_server_session_question PRIVATE -Wl,--gc-sections)
+  endif()
+  aimee_enable_test_asserts(test_server_session_question)
+  add_test(NAME test_server_session_question COMMAND test_server_session_question)
   aimee_add_test(test_server_session_control test_server_session_control.c
     ../server/server_session_control.c ../modules/ir/session_event.c
     ../modules/ir/aimee_ir.c ../vendor/cJSON.c)

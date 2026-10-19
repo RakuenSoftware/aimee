@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 static int results[4];
 static void *answer(void *arg)
 {
@@ -79,8 +80,83 @@ static void retained_owner_teardown(void)
    server_control_scope_close(replacement);
 }
 
+static pthread_mutex_t record_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t record_ready = PTHREAD_COND_INITIALIZER;
+static int recording, record_release;
+static int blocked_record(const char *session, const char *turn, const char *principal,
+                          const aimee_session_event_t *event)
+{
+   assert(!strcmp(session, "blocked") && !strcmp(turn, "turn") && !strcmp(principal, "alice"));
+   assert(!strcmp(event->request_id, "turn:pending"));
+   struct timespec until;
+   assert(!clock_gettime(CLOCK_REALTIME, &until));
+   until.tv_sec += 3;
+   pthread_mutex_lock(&record_lock);
+   recording = 1;
+   pthread_cond_broadcast(&record_ready);
+   while (!record_release)
+      assert(!pthread_cond_timedwait(&record_ready, &record_lock, &until));
+   pthread_mutex_unlock(&record_lock);
+   return 0;
+}
+static void *record_worker(void *arg)
+{
+   cJSON *request = cJSON_Parse("{\"title\":\"Run?\"}");
+   int registered =
+       server_control_register_recorded(arg, "pending", "permission", request, blocked_record);
+   assert(!registered);
+   cJSON_Delete(request);
+   return NULL;
+}
+static void unrelated_scope_remains_responsive(void)
+{
+   server_control_scope_t *blocked = server_control_scope_open("blocked", "turn", "alice");
+   assert(blocked);
+   pthread_t worker;
+   assert(!pthread_create(&worker, NULL, record_worker, blocked));
+   struct timespec until;
+   assert(!clock_gettime(CLOCK_REALTIME, &until));
+   until.tv_sec += 3;
+   pthread_mutex_lock(&record_lock);
+   while (!recording)
+      assert(!pthread_cond_timedwait(&record_ready, &record_lock, &until));
+   pthread_mutex_unlock(&record_lock);
+   server_control_scope_t *other = server_control_scope_open("other", "turn", "bob");
+   assert(other);
+   cJSON *request = cJSON_Parse("{\"title\":\"Independent?\"}");
+   cJSON *reply = cJSON_Parse("{\"decision\":\"deny\"}");
+   assert(!server_control_register(other, "pending", "permission", request));
+   assert(!server_control_reply("other", "turn:pending", "bob", reply));
+   char *id = NULL, *kind = NULL;
+   cJSON *original = NULL, *decision = NULL;
+   assert(server_control_take(other, NULL, &id, &kind, &original, &decision) == 1);
+   free(id);
+   free(kind);
+   cJSON_Delete(original);
+   cJSON_Delete(decision);
+   cJSON_Delete(request);
+   cJSON_Delete(reply);
+   server_control_scope_close(other);
+   pthread_mutex_lock(&record_lock);
+   record_release = 1;
+   pthread_cond_broadcast(&record_ready);
+   pthread_mutex_unlock(&record_lock);
+   assert(!pthread_join(worker, NULL));
+   reply = cJSON_Parse("{\"decision\":\"deny\"}");
+   assert(!server_control_reply("blocked", "turn:pending", "alice", reply));
+   assert(server_control_take(blocked, NULL, &id, &kind, &original, &decision) == 0);
+   assert(server_control_take(blocked, "pending", &id, &kind, &original, &decision) == 1);
+   free(id);
+   free(kind);
+   cJSON_Delete(original);
+   cJSON_Delete(decision);
+   cJSON_Delete(reply);
+   server_control_scope_close(blocked);
+}
+
 int main(void)
 {
+   unrelated_scope_remains_responsive();
    retained_owner_teardown();
    long_owner_reply();
    server_control_scope_t *scope = server_control_scope_open("session", "turn", "alice");

@@ -181,9 +181,33 @@ static void exact_tool_identity(void)
    cleanup(&c);
 }
 
+static int failed_control_record(const char *session, const char *turn, const char *principal,
+                                 const aimee_session_event_t *event)
+{
+   assert(!strcmp(session, "session-one") && turn[0] && !strcmp(principal, "alice"));
+   assert(event->kind == AIMEE_SESSION_CONTROL_REQUEST);
+   return -1;
+}
+static void worker_capture_failure_is_sticky(void)
+{
+   compute_ctx_t c = context();
+   assert(!server_chat_ir_begin(&c, "session-one", "question capture"));
+   cJSON *request = cJSON_Parse("{\"title\":\"Question\"}");
+   assert(server_control_register_recorded(c.ir_controls, "question", "permission", request,
+                                           failed_control_record) < 0);
+   cJSON_Delete(request);
+   assert(server_control_scope_failed(c.ir_controls));
+   aimee_response_t response = {.role = "assistant"};
+   assert(aimee_ir_session_emit_response(&response, "after-worker-failure") < 0);
+   assert(c.ir_failed && writes == 2 && cJSON_GetArraySize(log_entries) == 2);
+   assert(server_chat_ir_finish(&c, NULL) < 0);
+   cleanup(&c);
+}
+
 int main(void)
 {
    log_entries = cJSON_CreateArray();
+   worker_capture_failure_is_sticky();
    exact_tool_identity();
    compute_ctx_t legacy = context();
    legacy.ir_delivery = 0;
