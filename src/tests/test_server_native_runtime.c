@@ -396,7 +396,10 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    else
    {
       assert(!current_credentials.api_key[0]);
-      assert(!strcmp(current_credentials.codex_token, "host-only-upstream-secret"));
+      if (!strncmp(path, "/v1/mcp/", 8))
+         assert(!current_credentials.codex_token[0] && !current_credentials.codex_account_id[0]);
+      else
+         assert(!strcmp(current_credentials.codex_token, "host-only-upstream-secret"));
    }
    atomic_fetch_add(&calls, 1);
    if (atomic_load(&wait_for_cancel))

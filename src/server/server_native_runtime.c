@@ -229,7 +229,9 @@ static int native_forward(const char *method, const char *path, const char *head
          if (agent_codex_connection_credentials(registration, &current) ||
              strcmp(current.source_digest, runtime->lineage))
             goto restore;
-         agent_set_request_codex_creds_for(&runtime->selected, current.token, current.account_id);
+         if (model_request)
+            agent_set_request_codex_creds_for(&runtime->selected, current.token,
+                                              current.account_id);
       }
    }
    native_cancellation_t watch = {.io = io};

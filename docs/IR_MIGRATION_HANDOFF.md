@@ -1901,3 +1901,13 @@ C sources have no Cppcheck diagnostics. The bypass gate's eleven fixtures includ
 a negative plant refusing legacy validation/schema lookup in migrated consumers.
 The separate native MCP side-effect lookup still requires full catalog-owned
 classification; it has not been replaced or relabeled as complete by this change.
+
+## Codex model-only request binding
+
+The native broker now also restricts the per-request Codex token/account override
+to model requests, matching the Claude/API-key callback behavior. MCP callbacks
+still recheck the selected source lineage under the captured principal, but tools
+and delegates resolve their own connection credentials. The loopback regression
+checks that both the Codex token and account override are absent on MCP calls,
+while model requests retain the selected credentials. Production build and the
+native runtime fixture pass normally, under ASan/UBSan and under TSan.
