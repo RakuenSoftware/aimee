@@ -215,6 +215,54 @@ int agent_codex_connection_credentials(const char *registration, agent_codex_cre
           64);
    return 0;
 }
+int agent_claude_connection_credentials(const char *registration, agent_claude_credentials_t *out)
+{
+   agent_codex_credentials_t source;
+   if (agent_codex_connection_credentials(registration, &source))
+      return -1;
+   memset(out, 0, sizeof *out);
+   strcpy(out->token, "host-only-claude-secret");
+   memset(out->source_digest, atomic_load(&source_changed) ? 'f' : 'e', 64);
+   return 0;
+}
+int agent_set_request_claude_creds_for(const agent_t *agent,
+                                       const agent_claude_credentials_t *credentials)
+{
+   assert(agent && credentials && !strcmp(credentials->token, "host-only-claude-secret"));
+   strcpy(current_credentials.claude_token, credentials->token);
+   strcpy(current_credentials.claude_registration, agent->registration);
+   return 0;
+}
+int agent_api_connection_credentials(const agent_t *agent, agent_api_credentials_t *out)
+{
+   const request_context_t *owner = request_context_get();
+   assert(owner && !strcmp(owner->vault_principal, current_credentials.vault_principal));
+   assert(!strcmp(owner->session_key, current_credentials.session_id));
+   if (strcmp(agent->auth_type, "api_key") || strcmp(agent->registration, "selected-account"))
+      return -1;
+   memset(out, 0, sizeof *out);
+   strcpy(out->api_key, "host-only-api-secret");
+   memset(out->target_digest, 'e', 64);
+   memset(out->source_digest,
+          atomic_load(&malformed_source) ? 'z'
+          : atomic_load(&source_changed) ? 'd'
+                                         : 'c',
+          64);
+   return 0;
+}
+int agent_set_request_api_credentials_for(const agent_t *agent,
+                                          const agent_api_credentials_t *credentials)
+{
+   assert(agent && !strcmp(agent->registration, "selected-account"));
+   assert(credentials && !strcmp(credentials->api_key, "host-only-api-secret"));
+   snprintf(current_credentials.api_key, sizeof current_credentials.api_key, "%s",
+            credentials->api_key);
+   snprintf(current_credentials.api_key_registration,
+            sizeof current_credentials.api_key_registration, "%s", agent->registration);
+   snprintf(current_credentials.api_key_target, sizeof current_credentials.api_key_target, "%s",
+            credentials->target_digest);
+   return 0;
+}
 int db1_server_session_get(const char *session, db1_server_session_t *out)
 {
    memset(out, 0, sizeof *out);
@@ -243,7 +291,7 @@ int server_http_route_allowed_caps(int tcp, uint32_t caps, const char *method, c
       return 0;
    if (!strcmp(path, "/v1/chat/control") || !strcmp(path, "/v1/config/set"))
       return 1; /* Parent authority must still be outside the child surface. */
-   return !strcmp(path, "/v1/responses")  ? (caps & CAP_CHAT) != 0
+   return (!strcmp(path, "/v1/responses") || !strcmp(path, "/v1/messages")) ? (caps & CAP_CHAT) != 0
           : !strcmp(path, "/v1/mcp/call") ? (caps & CAP_TOOL_EXECUTE) != 0
                                           : 0;
 }
@@ -308,6 +356,9 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
       assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request, "cwd")),
                      "/work/alice"));
       assert(strstr(body, "9007199254740993"));
+      const cJSON *arguments = cJSON_GetObjectItemCaseSensitive(request, "arguments");
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(arguments, "cwd")),
+                     "/tool/specific/path"));
       cJSON_Delete(request);
    }
 
@@ -322,7 +373,34 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    assert(!strcmp(current_credentials.vault_principal, identity));
    assert(!strcmp(current_credentials.session_id, owner->session_key));
    assert(current_model && !strcmp(current_model->registration, "selected-account"));
-   assert(!strcmp(current_credentials.codex_token, "host-only-upstream-secret"));
+   if (!strcmp(current_model->auth_type, "claude-oauth"))
+   {
+      assert(!current_credentials.codex_token[0] && !current_credentials.api_key[0]);
+      if (!strncmp(path, "/v1/mcp/", 8))
+         assert(!current_credentials.claude_token[0]);
+      else
+         assert(!strcmp(current_credentials.claude_token, "host-only-claude-secret"));
+   }
+   else if (!strcmp(current_model->auth_type, "api_key"))
+   {
+      assert(!current_credentials.codex_token[0]);
+      if (!strncmp(path, "/v1/mcp/", 8))
+         assert(
+             !current_credentials.api_key[0]); /* Tools/delegates resolve their own credentials. */
+      else
+      {
+         assert(!strcmp(current_credentials.api_key, "host-only-api-secret"));
+         assert(!strcmp(current_credentials.api_key_registration, current_model->registration));
+      }
+   }
+   else
+   {
+      assert(!current_credentials.api_key[0]);
+      if (!strncmp(path, "/v1/mcp/", 8))
+         assert(!current_credentials.codex_token[0] && !current_credentials.codex_account_id[0]);
+      else
+         assert(!strcmp(current_credentials.codex_token, "host-only-upstream-secret"));
+   }
    atomic_fetch_add(&calls, 1);
    if (atomic_load(&wait_for_cancel))
    {
@@ -407,7 +485,7 @@ int aimee_ir_session_capture_failed(void)
 }
 static void probe_replay_scope(const char *path)
 {
-   if (!strcmp(path, "/v1/responses"))
+   if (!strcmp(path, "/v1/responses") || !strcmp(path, "/v1/messages"))
    {
       assert(state_guard.guard && installed_sink);
       aimee_request_t request = {0};
@@ -428,7 +506,8 @@ static int send_request(const server_native_runtime_t *runtime, const char *path
    const char *body =
        strncmp(path, "/v1/mcp/", 8)
            ? "{}"
-           : "{\"session_id\":\"forged-session\",\"arguments\":{\"large\":9007199254740993}}";
+           : "{\"session_id\":\"forged-session\",\"cwd\":\"/forged/project\","
+             "\"arguments\":{\"cwd\":\"/tool/specific/path\",\"large\":9007199254740993}}";
    int n = snprintf(request, sizeof request,
                     "POST %s HTTP/1.1\r\nHost: 127.0.0.1:%s\r\nAuthorization: Bearer %s\r\n"
                     "X-Aimee-Webuser: mallory\r\naimee-session-id: forged\r\n"
@@ -454,6 +533,89 @@ static void request(const server_native_runtime_t *runtime, const char *path, co
    response[used] = 0;
    aimee_core_socket_close(fd);
 }
+static void test_cache_profile(const agent_t *selected, const request_context_t *owner,
+                               const server_native_runtime_t *original)
+{
+   char build[65], launch[65], lease[65], baseline[65], changed[65];
+   memset(build, 'b', 64);
+   memset(launch, 'c', 64);
+   memset(lease, 'd', 64);
+   build[64] = launch[64] = lease[64] = 0;
+   server_native_execution_profile_t profile = {
+       .sdk = "codex", .build_digest = build, .launch_digest = launch, .workspace_digest = lease};
+   int rc = server_native_runtime_cache_scope(original, &profile, baseline);
+   assert(rc == 0 && strlen(baseline) == 64);
+   for (int i = 0; i < 3; i++)
+   {
+      char *field = i == 0 ? build : i == 1 ? launch : lease;
+      char previous = field[0];
+      field[0] = 'e';
+      rc = server_native_runtime_cache_scope(original, &profile, changed);
+      assert(rc == 0 && strcmp(baseline, changed));
+      field[0] = previous;
+   }
+   profile.workspace_digest = NULL;
+   rc = server_native_runtime_cache_scope(original, &profile, changed);
+   assert(rc < 0 && !changed[0]);
+   profile.workspace_digest = lease;
+
+   owner_tools(1);
+   agent_tools_begin_turn(300);
+   agent_tools_set_snap_id(3000);
+   server_native_runtime_t *copy = server_native_runtime_open(selected, owner, "session-a");
+   assert(copy);
+   rc = server_native_runtime_cache_scope(copy, &profile, changed);
+   assert(rc == 0 && !strcmp(baseline, changed)); /* turn/snapshot/transport nonce are ephemeral */
+   server_native_runtime_close(copy);
+   agent_tools_set_dispatch_role("implement");
+   copy = server_native_runtime_open(selected, owner, "session-a");
+   assert(copy);
+   assert(!strcmp(server_native_runtime_binding(original), server_native_runtime_binding(copy)));
+   rc = server_native_runtime_cache_scope(copy, &profile, changed);
+   assert(rc == 0 && strcmp(baseline, changed)); /* replay lineage is not cache authority */
+   server_native_runtime_close(copy);
+
+   for (int i = 0; i < 4; i++)
+   {
+      owner_tools(1);
+      if (i == 0)
+         agent_tools_write_capable_set(1);
+      else if (i == 1)
+         agent_tools_shell_set(1);
+      else if (i == 2)
+         agent_tools_knowledge_write_set(1);
+      else
+         agent_tools_parent_write_guard_set("/parent/alice", "/different/write/root");
+      copy = server_native_runtime_open(selected, owner, "session-a");
+      assert(copy);
+      rc = server_native_runtime_cache_scope(copy, &profile, changed);
+      assert(rc == 0 && strcmp(baseline, changed));
+      server_native_runtime_close(copy);
+   }
+   owner_tools(1);
+   const char *denied[] = {"write_file", "git_push", "write_file"};
+   agent_tools_denied_set(denied, 3);
+   copy = server_native_runtime_open(selected, owner, "session-a");
+   assert(copy);
+   rc = server_native_runtime_cache_scope(copy, &profile, baseline);
+   assert(rc == 0);
+   server_native_runtime_close(copy);
+   const char *reordered[] = {"git_push", "write_file"};
+   agent_tools_denied_set(reordered, 2);
+   copy = server_native_runtime_open(selected, owner, "session-a");
+   assert(copy);
+   rc = server_native_runtime_cache_scope(copy, &profile, changed);
+   assert(rc == 0 && !strcmp(baseline, changed));
+   server_native_runtime_close(copy);
+   agent_source_authority_tls_set(1, "/different/source", "src/alice.c\n");
+   copy = server_native_runtime_open(selected, owner, "session-a");
+   assert(copy);
+   rc = server_native_runtime_cache_scope(copy, &profile, changed);
+   assert(rc == 0 && strcmp(baseline, changed));
+   server_native_runtime_close(copy);
+   owner_tools(1);
+}
+
 int main(void)
 {
    agent_t selected = {.enabled = 1};
@@ -480,6 +642,7 @@ int main(void)
    owner_tools(0);
    server_native_runtime_t *bob = server_native_runtime_open(&selected, &b, "session-b");
    assert(alice && bob);
+   test_cache_profile(&selected, &a, alice);
    /* Destroy/change every original borrowed host value after the owner copy.
     * Callback workers must retain each captured policy and source independently. */
    owner_tools(1);
@@ -535,6 +698,50 @@ int main(void)
    assert(atomic_load(&cancelled));
    server_native_runtime_close(alice);
    server_native_runtime_close(bob);
+   atomic_store(&wait_for_cancel, 0);
+   owner_tools(1);
+   agent_t api_selected = selected;
+   strcpy(api_selected.provider, "openai");
+   strcpy(api_selected.auth_type, "api_key");
+   server_native_runtime_t *api = server_native_runtime_open(&api_selected, &a, "session-a");
+   assert(api);
+   request(api, "/v1/responses", server_native_runtime_token(api), response);
+   assert(strstr(response, "200 OK") && !strstr(response, "api-secret"));
+   request(api, "/v1/mcp/call", server_native_runtime_token(api), response);
+   assert(strstr(response, "200 OK") && !strstr(response, "api-secret"));
+   before = atomic_load(&calls);
+   atomic_store(&source_changed, 1);
+   request(api, "/v1/responses", server_native_runtime_token(api), response);
+   assert(strstr(response, "502") && atomic_load(&calls) == before);
+   server_native_runtime_t *rotated = server_native_runtime_open(&api_selected, &a, "session-a");
+   assert(rotated &&
+          strcmp(server_native_runtime_binding(api), server_native_runtime_binding(rotated)));
+   request(rotated, "/v1/responses", server_native_runtime_token(rotated), response);
+   assert(strstr(response, "200 OK"));
+   server_native_runtime_close(rotated);
+   server_native_runtime_close(api);
+   atomic_store(&source_changed, 0);
+   agent_t claude_selected = selected;
+   strcpy(claude_selected.provider, "anthropic");
+   strcpy(claude_selected.auth_type, "claude-oauth");
+   server_native_runtime_t *claude = server_native_runtime_open(&claude_selected, &a, "session-a");
+   assert(claude);
+   request(claude, "/v1/messages", server_native_runtime_token(claude), response);
+   assert(strstr(response, "200 OK") && !strstr(response, "claude-secret"));
+   request(claude, "/v1/mcp/call", server_native_runtime_token(claude), response);
+   assert(strstr(response, "200 OK"));
+   before = atomic_load(&calls);
+   atomic_store(&source_changed, 1);
+   request(claude, "/v1/messages", server_native_runtime_token(claude), response);
+   assert(strstr(response, "502") && atomic_load(&calls) == before);
+   rotated = server_native_runtime_open(&claude_selected, &a, "session-a");
+   assert(rotated &&
+          strcmp(server_native_runtime_binding(claude), server_native_runtime_binding(rotated)));
+   request(rotated, "/v1/messages", server_native_runtime_token(rotated), response);
+   assert(strstr(response, "200 OK"));
+   server_native_runtime_close(rotated);
+   server_native_runtime_close(claude);
+   atomic_store(&source_changed, 0);
    unsetenv("AIMEE_ACTIVE_TOOLSET");
    unsetenv("AIMEE_DELEGATE_SOURCE_PATHS");
    agent_source_authority_snapshot_t absent = {0};

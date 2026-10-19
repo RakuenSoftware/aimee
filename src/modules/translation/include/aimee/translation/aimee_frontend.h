@@ -87,8 +87,10 @@ struct cJSON *openai_frontend_render(const aimee_response_t *resp);
 /* Render an IR response as an OpenAI Responses API response (output items). */
 struct cJSON *responses_frontend_render(const aimee_response_t *resp);
 
-/* Typed OpenAI-family catalog entry/rendering boundaries, including namespace
- * children and explicitly provider-owned hosted-tool options. */
+/* Typed catalog entry/rendering boundaries, including namespace children and
+ * explicitly provider-owned hosted-tool options. Parse outputs start zeroed;
+ * release their owned fields with aimee_tool_free even after failed admission. */
+int anthropic_ir_parse_tool(const struct cJSON *native, aimee_tool_t *tool);
 int openai_ir_parse_tool(const struct cJSON *native, aimee_tool_t *tool, int nested);
 struct cJSON *openai_ir_render_tool(const aimee_tool_t *tool, int responses_shape);
 

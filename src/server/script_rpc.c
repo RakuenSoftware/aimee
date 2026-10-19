@@ -8,6 +8,13 @@
 #include "cJSON.h"
 #include "platform_random.h"
 #include "toolset.h"
+#include "agent_config.h"
+#include "agent_source_authority.h"
+#include "agent_tasks.h"
+#include "request_context.h"
+#include "modules/workspace/workspace_provider.h"
+#include "server.h"
+#include "util.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -21,6 +28,56 @@
 
 #define SCRIPT_RPC_MAX_FRAME  (64 * 1024)
 #define SCRIPT_RPC_MAX_RESULT (64 * 1024)
+
+struct script_rpc_execution
+{
+   agent_tools_scope_snapshot_t tools;
+   request_context_snapshot_t request;
+   agent_source_authority_snapshot_t source;
+   const workspace_provider_t *workspace;
+   atomic_int *cancel;
+   char cwd[MAX_PATH_LEN], session[128], principal[VAULT_PRINCIPAL_MAX];
+   int job;
+};
+
+static int script_rpc_capture(script_rpc_server_t *srv, const char *cwd)
+{
+   struct script_rpc_execution *scope = calloc(1, sizeof *scope);
+   srv->execution = scope;
+   if (!scope || (cwd && strlen(cwd) >= sizeof scope->cwd) ||
+       agent_tools_scope_capture_owned(&scope->tools) != 0 ||
+       agent_source_authority_tls_capture_checked(&scope->source) != 0)
+      return -1;
+   /* An ordinary primary must not borrow a concurrent delegate's environment. */
+   if (!scope->source.active)
+      scope->source.active = 1;
+   request_context_snapshot(&scope->request);
+   if (scope->request.active)
+   {
+      scope->request.value.model_execution = 1;
+      scope->request.value.capabilities &= CAPS_AUTHENTICATED;
+   }
+   const char *session = session_id(), *principal = agent_get_request_vault_principal();
+   snprintf(scope->cwd, sizeof scope->cwd, "%s", cwd ? cwd : "");
+   snprintf(scope->session, sizeof scope->session, "%s", session ? session : "");
+   snprintf(scope->principal, sizeof scope->principal, "%s", principal ? principal : "");
+   scope->workspace = workspace_provider_active();
+   scope->cancel = agent_get_request_cancel();
+   scope->job = agent_get_durable_job_id();
+   return 0;
+}
+
+static void script_rpc_release(script_rpc_server_t *srv)
+{
+   struct script_rpc_execution *scope = srv->execution;
+   if (!scope)
+      return;
+   agent_tools_scope_destroy_owned(&scope->tools);
+   agent_source_authority_snapshot_destroy(&scope->source);
+   request_context_snapshot_clear(&scope->request);
+   free(scope);
+   srv->execution = NULL;
+}
 
 static int script_rpc_write_all(int fd, const void *buf, size_t len)
 {
@@ -115,6 +172,9 @@ static cJSON *script_rpc_dispatch(script_rpc_server_t *srv, cJSON *req)
    if (!cJSON_IsNumber(jid) || !cJSON_IsString(jtool) || !cJSON_IsObject(jargs))
       return script_rpc_error(id, "bad_frame", "missing id, tool, or args");
 
+   if (agent_request_cancelled())
+      return script_rpc_error(id, "cancelled", "script tool execution cancelled");
+
    char *args_json = cJSON_PrintUnformatted(jargs);
    if (!args_json)
       return script_rpc_error(id, "bad_frame", "failed to serialize args");
@@ -155,12 +215,12 @@ static cJSON *script_rpc_dispatch(script_rpc_server_t *srv, cJSON *req)
    return resp;
 }
 
-static void *script_rpc_thread(void *arg)
+static void *script_rpc_serve(void *arg)
 {
    script_rpc_server_t *srv = (script_rpc_server_t *)arg;
    if (srv->use_fd_pair)
    {
-      while (!srv->stop)
+      while (!atomic_load(&srv->stop))
       {
          fd_set rfds;
          FD_ZERO(&rfds);
@@ -203,7 +263,7 @@ static void *script_rpc_thread(void *arg)
       return NULL;
    }
 
-   while (!srv->stop)
+   while (!atomic_load(&srv->stop))
    {
       fd_set rfds;
       FD_ZERO(&rfds);
@@ -252,6 +312,37 @@ static void *script_rpc_thread(void *arg)
       free(buf);
       close(fd);
    }
+   return NULL;
+}
+
+static void *script_rpc_thread(void *arg)
+{
+   script_rpc_server_t *srv = arg;
+   struct script_rpc_execution *scope = srv->execution;
+   agent_tools_scope_restore(&scope->tools);
+   request_context_restore(&scope->request);
+   agent_source_authority_tls_restore(&scope->source);
+   workspace_provider_set_active(scope->workspace);
+   run_cmd_set_cwd(scope->cwd[0] ? scope->cwd : NULL);
+   agent_set_request_session(scope->session);
+   agent_set_request_vault_principal(scope->principal);
+   session_id_set_override(scope->session);
+   agent_set_request_cancel(scope->cancel);
+   agent_set_durable_job(scope->job);
+   script_rpc_serve(arg);
+   /* The caller's resource lease still encloses this entire joined worker. */
+   agent_source_authority_snapshot_t empty_source = {.active = 1};
+   agent_source_authority_tls_restore(&empty_source);
+   agent_tools_scope_snapshot_t empty_tools = {0};
+   agent_tools_scope_restore(&empty_tools);
+   workspace_provider_set_active(NULL);
+   run_cmd_set_cwd(NULL);
+   session_id_clear_override();
+   agent_set_request_session(NULL);
+   agent_set_request_vault_principal(NULL);
+   agent_set_request_cancel(NULL);
+   agent_set_durable_job(0);
+   request_context_clear();
    return NULL;
 }
 
@@ -318,13 +409,16 @@ static int script_rpc_write_stubs(script_rpc_server_t *srv)
    return script_rpc_write_file(sh, sh_body, 0700);
 }
 
-int script_rpc_prepare(script_rpc_server_t *srv)
+int script_rpc_prepare(script_rpc_server_t *srv, const char *cwd)
 {
    if (!srv)
       return -1;
    memset(srv, 0, sizeof(*srv));
    srv->listen_fd = -1;
    srv->client_fd = -1;
+   atomic_init(&srv->stop, 0);
+   if (script_rpc_capture(srv, cwd) != 0)
+      return -1;
    char suffix[17];
    if (platform_random_hex(suffix, 16) != 0)
       return -1;
@@ -353,7 +447,7 @@ int script_rpc_prepare(script_rpc_server_t *srv)
 
 int script_rpc_start(script_rpc_server_t *srv)
 {
-   if (!srv || srv->listen_fd < 0)
+   if (!srv || srv->listen_fd < 0 || !srv->execution)
       return -1;
    if (pthread_create(&srv->thread, NULL, script_rpc_thread, srv) != 0)
       return -1;
@@ -365,7 +459,7 @@ void script_rpc_stop(script_rpc_server_t *srv)
 {
    if (!srv)
       return;
-   srv->stop = 1;
+   atomic_store(&srv->stop, 1);
    if (srv->thread_started)
       pthread_join(srv->thread, NULL);
    srv->thread_started = 0;
@@ -375,6 +469,7 @@ void script_rpc_cleanup(script_rpc_server_t *srv)
 {
    if (!srv)
       return;
+   script_rpc_stop(srv);
    if (srv->listen_fd >= 0)
    {
       close(srv->listen_fd);
@@ -395,4 +490,5 @@ void script_rpc_cleanup(script_rpc_server_t *srv)
       unlink(sh);
       rmdir(srv->stub_dir);
    }
+   script_rpc_release(srv);
 }

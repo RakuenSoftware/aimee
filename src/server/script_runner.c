@@ -239,7 +239,7 @@ char *tool_execute_script(const char *language, const char *body, int timeout_se
    }
 
    script_rpc_server_t rpc;
-   if (script_rpc_prepare(&rpc) != 0)
+   if (script_rpc_prepare(&rpc, workdir && workdir[0] ? workdir : run_cmd_get_cwd()) != 0)
    {
       script_rpc_cleanup(&rpc);
       script_env_free(envp);

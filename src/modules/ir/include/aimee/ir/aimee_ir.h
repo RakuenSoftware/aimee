@@ -366,11 +366,16 @@ typedef struct
    aimee_delta_type_t type;
    int block_id;
    aimee_block_type_t kind;
+   int message_group; /* Optional authored text grouping, BLOCK_START only. */
    /* BLOCK_START of a tool_use carries the id + name (opaque, verbatim). */
    const char *tool_id;
    const char *tool_name;
    const char *text_delta;
    const char *signature_delta;
+   /* Complete opaque reasoning fields, never concatenated fragments. May arrive
+    * at block start or later; repeated values must be identical. */
+   const char *thinking_id;
+   const char *thinking_encrypted_content;
    const char *redacted_content;
    const char *tool_namespace;
    const struct cJSON *tool_input;  /* BLOCK_START initial arguments; borrowed */

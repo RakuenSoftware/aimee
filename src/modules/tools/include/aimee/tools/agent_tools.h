@@ -5,6 +5,7 @@ struct aimee_response;
 #include "agent_types.h"
 #include "cJSON.h"
 #include <stdint.h>
+#include <aimee/tools/module_api.h>
 
 /* Tool execution (Unix only) */
 char *tool_bash(const char *command, int timeout_ms);
@@ -64,6 +65,12 @@ char *dispatch_tool_call(const char *name, const char *arguments_json, int timeo
  * leaves the tool unclassified. */
 typedef int (*agent_tool_classifier_fn)(const char *name, int *classification);
 void agent_tools_register_classifier(agent_tool_classifier_fn classifier);
+/* Registration occurs with the existing supervised tools owner at startup.
+ * Missing/unknown metadata refuses; it never becomes an implicit read. */
+typedef int (*agent_tool_metadata_fn)(const char *name, aimee_tool_metadata_t *metadata);
+void agent_tools_register_metadata(agent_tool_metadata_fn provider);
+int agent_tools_metadata(const char *name, aimee_tool_metadata_t *metadata);
+
 typedef int (*agent_tool_action_begin_fn)(const char *, struct cJSON **, const char *, const char *,
                                           int);
 /* The final flag starts with execution's classification. Only this trusted
@@ -77,6 +84,20 @@ void agent_tools_register_action_owner(agent_tool_action_begin_fn begin,
  * this trusted caller signal; model-provided arguments cannot set it. */
 void agent_tools_set_effect_authorized(int authorized);
 
+/* Owned built-in canonical definitions, before role/policy projection. The
+ * caller frees each entry with aimee_tool_free, then frees the array. Unbound
+ * Git capabilities are omitted. No MCP-provider recursion or wire sidecars. */
+struct aimee_tool;
+/* Execute already canonical arguments using their exact admitted definition.
+ * Refuses arguments which would change under that schema. */
+char *dispatch_tool_call_ir_ctx_status(const struct aimee_tool *admitted,
+                                       const char *canonical_arguments_json, int timeout_ms,
+                                       int *is_error);
+int agent_tools_builtin_catalog(struct aimee_tool **out, int *count);
+/* Fresh owned definition from the current execution owner. Unregistered or
+ * unavailable capabilities refuse; no process-global schema cache is used. */
+int agent_tools_execution_definition(const char *name, struct aimee_tool *out);
+
 /* Tool definition builders */
 struct cJSON *build_tools_array(void);
 struct cJSON *build_tools_array_responses(void);
@@ -86,6 +107,9 @@ int agent_tools_append_delegate_respond_tool(struct cJSON *tools);
 int agent_ir_strip_delegate_respond(struct aimee_response *response);
 int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name);
 void agent_tools_filter_for_role(struct cJSON *tools, const char *role);
+/* Anthropic compatibility ingress; the OpenAI-family helper above accepts Chat
+ * and Responses catalogs. Both decide on translation-admitted IR identities. */
+void agent_tools_filter_anthropic_for_role(struct cJSON *tools, const char *role);
 
 /* Look up a tool's parameter schema (the `function.parameters` object) by
  * tool name. Returns a borrowed pointer into a process-lifetime cache; the
@@ -336,6 +360,20 @@ int agent_tools_shell_allowed(void);
 
 void agent_tools_knowledge_write_set(int allowed);
 int agent_tools_knowledge_write_allowed(void);
+
+/* Query the current captured role/toolset/deny-list and shell/knowledge ceiling.
+ * Call after resolving any family/bridge aliases to the actual callable name.
+ * This is permission admission only; callers still own path, effect and human
+ * approval enforcement. The error helper returns an owned string (NULL if allowed). */
+typedef enum
+{
+   AGENT_TOOL_PERMISSION_ALLOWED = 0,
+   AGENT_TOOL_PERMISSION_SHELL,
+   AGENT_TOOL_PERMISSION_ROLE,
+   AGENT_TOOL_PERMISSION_KNOWLEDGE
+} agent_tool_permission_t;
+agent_tool_permission_t agent_tools_permission_check(const char *name, const cJSON *args);
+char *agent_tools_permission_error(agent_tool_permission_t permission);
 
 /* Read-only-delegate gate (backend-agnostic write capability). A delegate that
  * is not write-capable (see the write_capable field, derived once at dispatch

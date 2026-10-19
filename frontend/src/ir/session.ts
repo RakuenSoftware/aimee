@@ -26,11 +26,14 @@ export type Message = { role: string; blocks: Block[]; content_scalar?: boolean 
 export type Delta = {
   type: 'TURN_START' | 'BLOCK_START' | 'BLOCK_DELTA' | 'BLOCK_STOP' | 'TURN_STOP' | 'ERROR';
   block_id?: number;
+  message_group?: number;
   kind?: Block['type'];
   tool_id?: string;
   name?: string;
   text_delta?: string;
   signature_delta?: string;
+  thinking_id?: string;
+  encrypted_content?: string;
   redacted_content?: string;
   namespace?: string;
   input?: Record<string, unknown>;
@@ -48,6 +51,8 @@ export type ProjectionReport = { model: string; boundary: 'request' | 'response'
 export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 export type ChildExecution = { session_id: string; turn_id: string; role: string; status: ExecutionStatus };
 export type SessionEvent =
+  | { kind: 'native_compaction'; payload: { harness: 'codex' | 'claude' } }
+  | { kind: 'native_checkpoint'; payload: { scope: string; context_digest: string; prefix_digest: string; harness: 'codex' | 'claude'; native_id: string; claim: string; message_count: number } }
   | { kind: 'replay_proof'; payload: { scope: string; block_digest: string; wire: 'anthropic' | 'responses'; thinking_binding?: string } }
   | { kind: 'child_execution'; payload: ChildExecution }
   | { kind: 'projection'; payload: ProjectionReport }
@@ -129,6 +134,21 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       (event.kind === 'message' || event.kind === 'delta' || event.kind === 'control_request'))
     throw new Error('Content follows execution completion');
   switch (event.kind) {
+    case 'native_compaction': {
+      if (Object.keys(event.payload).length !== 1 || !['codex', 'claude'].includes(event.payload.harness))
+        throw new Error('Invalid native compaction observation');
+      return next;
+    }
+    case 'native_checkpoint': {
+      const checkpoint = event.payload;
+      if (!Object.keys(checkpoint).every(key => ['scope', 'context_digest', 'prefix_digest', 'harness', 'native_id', 'claim', 'message_count'].includes(key)) ||
+          ![checkpoint.scope, checkpoint.context_digest, checkpoint.prefix_digest].every(value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)) ||
+          typeof checkpoint.claim !== 'string' || !/^[0-9a-f]{32}$/.test(checkpoint.claim) ||
+          !['codex', 'claude'].includes(checkpoint.harness) || !nonempty(checkpoint.native_id) || new TextEncoder().encode(checkpoint.native_id).length > 1024 ||
+          !Number.isInteger(checkpoint.message_count) || checkpoint.message_count < 1 || checkpoint.message_count > 4096)
+        throw new Error('Invalid native cache checkpoint');
+      return next; // host cache metadata advances the cursor, never model content
+    }
     case 'replay_proof': {
       const proof = event.payload;
       if (typeof proof.scope !== 'string' || typeof proof.block_digest !== 'string' ||
@@ -205,6 +225,11 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       if (!nonempty(event.message_id) || !nonempty(event.role)) throw new Error('Delta requires message identity');
       const d = event.payload;
       const index = state.messages.findIndex(m => m.id === event.message_id);
+      if (d.message_group !== undefined && (!Number.isInteger(d.message_group) || d.message_group < 1 || d.message_group > 4096 || d.type !== 'BLOCK_START' || d.kind !== 'text')) throw new Error('Invalid authored message group');
+      for (const key of ['thinking_id', 'encrypted_content'] as const) {
+        if (d[key] !== undefined && (typeof d[key] !== 'string' || d.kind !== 'thinking' ||
+          !['BLOCK_START', 'BLOCK_DELTA'].includes(d.type))) throw new Error('Invalid opaque thinking metadata');
+      }
       if (d.type === 'ERROR') {
         const error = d.error_message || 'Runtime error';
         next.errors = [...state.errors, error];
@@ -255,8 +280,10 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         if (d.signature_delta !== undefined && (d.kind !== 'thinking' || typeof d.signature_delta !== 'string')) throw new Error('Invalid thinking signature');
         if (d.redacted_content !== undefined && (d.kind !== 'thinking' || typeof d.redacted_content !== 'string')) throw new Error('Invalid redacted content');
         if (d.input !== undefined && (d.kind !== 'tool_use' || !d.input || typeof d.input !== 'object' || Array.isArray(d.input))) throw new Error('Invalid initial tool input');
-        const block: Block = { type: d.kind, tool_id: d.tool_id, name: d.name, namespace: d.namespace,
+        const block: Block = { ...(d.message_group !== undefined ? { message_group: d.message_group } : {}), type: d.kind, tool_id: d.tool_id, name: d.name, namespace: d.namespace,
           ...(d.kind === 'tool_use' ? { input: d.input ?? {} } : { text: d.text_delta ?? '' }),
+          ...(d.thinking_id !== undefined ? { thinking_id: d.thinking_id } : {}),
+          ...(d.encrypted_content !== undefined ? { encrypted_content: d.encrypted_content } : {}),
           ...(d.signature_delta !== undefined ? { signature: d.signature_delta } : {}), ...(d.redacted_content !== undefined ? { redacted_content: d.redacted_content } : {}) };
         validateBlock(block);
         // Sparse block indices are not valid canonical message order.
@@ -273,6 +300,12 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
           if (typeof d.text_delta !== 'string') throw new Error('Invalid text delta');
           if (block.type !== 'text' && block.type !== 'thinking') throw new Error('Text in non-text block');
           updated.text = (block.text || '') + d.text_delta;
+        }
+        for (const key of ['thinking_id', 'encrypted_content'] as const) {
+          if (d[key] !== undefined) {
+            if (block[key] !== undefined && block[key] !== d[key]) throw new Error('Opaque thinking metadata changed');
+            updated[key] = d[key];
+          }
         }
         if (d.signature_delta !== undefined) {
           if (typeof d.signature_delta !== 'string' || block.type !== 'thinking') throw new Error('Invalid thinking signature delta');

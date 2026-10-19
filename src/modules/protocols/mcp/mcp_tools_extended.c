@@ -603,6 +603,17 @@ void mcp_collapse_families(cJSON *tools)
 
 int mcp_family_demux(const char *tool, cJSON *args, char *out, size_t n)
 {
+   /* Git has its own advertised multiplexed schema. Resolve it at the same
+    * boundary as the collapsed families, before permission and workflow gates.
+    * Do not truncate a command into a different callable identity. */
+   if (strcmp(tool, "git") == 0)
+   {
+      const cJSON *command = cJSON_GetObjectItemCaseSensitive(args, "command");
+      if (!cJSON_IsString(command) || !command->valuestring[0])
+         return -1;
+      int length = snprintf(out, n, "git_%s", command->valuestring);
+      return length >= 0 && (size_t)length < n ? 1 : -1;
+   }
    for (const struct fam_def *f = MCP_FAMILIES; f->name; f++)
    {
       if (strcmp(tool, f->name) != 0)
@@ -613,8 +624,8 @@ int mcp_family_demux(const char *tool, cJSON *args, char *out, size_t n)
       for (const struct fam_member *m = f->members; m->command; m++)
          if (strcmp(jc->valuestring, m->command) == 0)
          {
-            snprintf(out, n, "%s", m->tool);
-            return 1;
+            int length = snprintf(out, n, "%s", m->tool);
+            return length >= 0 && (size_t)length < n ? 1 : -1;
          }
       return -1;
    }

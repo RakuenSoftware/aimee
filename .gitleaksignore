@@ -308,3 +308,9 @@ a08f764739750bcd4094b4c409aa0c4ea99ab75e:tests/baselines/modules/memory-ownershi
 # Reviewed public OpenAPI SHA-256 for canonical owned /v1/runs; the exact
 # api/openapi-server-v1.yaml input digest is not a credential.
 764c97560a257b37c9e52c2c6cd34c5528257330:tests/baselines/modules/memory-ownership.json:generic-api-key:2746
+
+# Reviewed public Claude subscription OAuth client ID in the legacy-client
+# compatibility assertion. This identifier ships in Claude 2.1.227's public SDK
+# configuration (CLAUDE_OAUTH_CLIENT_ID in the Vault adapter); it is not a secret.
+# Only this exact historical finding is admitted; full-history scanning remains.
+b70c51d8f4170b4980b6567941c8139b1f2dd3c9:src/tests/test_agent.c:generic-api-key:1916

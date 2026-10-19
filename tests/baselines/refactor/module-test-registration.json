@@ -560,6 +560,12 @@
       "test": "src/tests/test_aimee_ir_stream.c"
     },
     {
+      "ctest": true,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_responses_stream.c"
+    },
+    {
       "ctest": false,
       "make": true,
       "module": "translation",
@@ -582,6 +588,12 @@
       "make": true,
       "module": "translation",
       "test": "src/tests/test_harness_ir.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_server_responses_stream.c"
     },
     {
       "ctest": false,

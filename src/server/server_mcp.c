@@ -1,6 +1,7 @@
 #include "modules/kb_client/kb_client_pii.h"
 /* server_mcp.c: handle mcp.call -- dispatches MCP tool calls within the server */
 #include "server_mcp_internal.h"
+#include "server_native_tool_admission.h"
 #include "server.h"
 #include "server_state_internal.h"
 #include "module_stage_adapters.h"
@@ -2180,6 +2181,25 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
       }
    }
 
+   /* Native SDK callbacks carry an isolated host-owned permission snapshot.
+    * Admit the resolved callable, including call_tool -> family -> member, before
+    * any early handler or gateway branch, then apply directive/execution policy.
+    * Ordinary authenticated MCP clients keep their capability-based admission.
+    * Effects/approvals remain separate. */
+   if (agent_tools_scope_isolated())
+   {
+      char error[512];
+      const char *reason = server_native_tool_admit(tool, jargs, sid, error, sizeof error);
+      if (reason)
+      {
+         served_outcome("refused", reason);
+         int rc = server_send_error(conn, error, NULL);
+         if (owns_jargs)
+            cJSON_Delete(jargs);
+         return rc;
+      }
+   }
+
    /* S2 sub-slice 4: pre-delivery externalization guard at the tool-DISPATCH seam.
     * A bound enforced run whose gate.deliver has not passed may not call an
     * externalization primitive (pr.open/merge, push, egress, ...) regardless of tool
@@ -2312,23 +2332,6 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    else if (strncmp(tool, "git_", 4) == 0)
    {
       content = dispatch_git_tool(ctx, conn, tool, jargs, sid);
-   }
-   else if (strcmp(tool, "git") == 0)
-   {
-      /* Single multiplexed git tool: `command` selects the subcommand, which maps
-       * to the existing git_<command> dispatch (the git_* names stay callable). */
-      cJSON *jc = cJSON_GetObjectItemCaseSensitive(jargs, "command");
-      if (!cJSON_IsString(jc) || !jc->valuestring[0])
-      {
-         served_outcome("error", "bad_args");
-         if (owns_jargs)
-            cJSON_Delete(jargs);
-         return server_send_error(conn, "git requires a 'command' (status, commit, branch, pr, …)",
-                                  NULL);
-      }
-      char gtool[64];
-      snprintf(gtool, sizeof(gtool), "git_%s", jc->valuestring);
-      content = dispatch_git_tool(ctx, conn, gtool, jargs, sid);
    }
    if (!content)
       content = mcp_gateway_tool_dispatch(tool, jargs);

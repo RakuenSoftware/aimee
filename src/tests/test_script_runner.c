@@ -1,6 +1,10 @@
 #include "aimee.h"
 #include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
+#include "agent_config.h"
+#include "agent_source_authority.h"
+#include "request_context.h"
+#include "modules/workspace/workspace_provider.h"
 #include "log.h"
 #include <assert.h>
 #include <stdio.h>
@@ -9,6 +13,8 @@
 
 static int g_dispatch_calls = 0;
 static int g_dispatch_error;
+static int g_scope_capture_refused;
+static int g_source_capture_refused;
 
 char *dispatch_tool_call_ctx_status(const char *name, const char *arguments_json, int timeout_ms,
                                     int *is_error)
@@ -24,6 +30,110 @@ char *dispatch_tool_call_ctx_status(const char *name, const char *arguments_json
    snprintf(buf, sizeof(buf), "{\"tool\":\"%s\",\"args\":%s}", name ? name : "",
             arguments_json ? arguments_json : "{}");
    return safe_strdup(buf);
+}
+
+/* Framing-only fixture: permission semantics use the real tools owner in
+ * test_agent_mcp_permissions.c, including the joined RPC worker. */
+int agent_tools_scope_capture_owned(agent_tools_scope_snapshot_t *out)
+{
+   memset(out, 0, sizeof *out);
+   return g_scope_capture_refused ? -1 : 0;
+}
+void agent_tools_scope_restore(const agent_tools_scope_snapshot_t *scope)
+{
+   (void)scope;
+}
+void agent_tools_scope_destroy_owned(agent_tools_scope_snapshot_t *scope)
+{
+   memset(scope, 0, sizeof *scope);
+}
+
+/* No authenticated host task in this framing-only fixture. Real context
+ * propagation is exercised through unit-test-agent's actual dispatcher. */
+void request_context_snapshot(request_context_snapshot_t *out)
+{
+   memset(out, 0, sizeof *out);
+}
+void request_context_restore(const request_context_snapshot_t *scope)
+{
+   (void)scope;
+}
+void request_context_snapshot_clear(request_context_snapshot_t *scope)
+{
+   memset(scope, 0, sizeof *scope);
+}
+void request_context_clear(void)
+{
+}
+int agent_source_authority_tls_capture_checked(agent_source_authority_snapshot_t *out)
+{
+   memset(out, 0, sizeof *out);
+   return g_source_capture_refused ? -1 : 0;
+}
+void agent_source_authority_tls_restore(agent_source_authority_snapshot_t *scope)
+{
+   scope->paths = NULL;
+}
+void agent_source_authority_snapshot_destroy(agent_source_authority_snapshot_t *scope)
+{
+   free(scope->paths);
+   memset(scope, 0, sizeof *scope);
+}
+const workspace_provider_t *workspace_provider_active(void)
+{
+   return NULL;
+}
+void workspace_provider_set_active(const workspace_provider_t *provider)
+{
+   (void)provider;
+}
+void run_cmd_set_cwd(const char *cwd)
+{
+   (void)cwd;
+}
+void agent_set_request_session(const char *sid)
+{
+   (void)sid;
+}
+const char *agent_get_request_vault_principal(void)
+{
+   return NULL;
+}
+void agent_set_request_vault_principal(const char *principal)
+{
+   (void)principal;
+}
+atomic_int *agent_get_request_cancel(void)
+{
+   return NULL;
+}
+void agent_set_request_cancel(atomic_int *flag)
+{
+   (void)flag;
+}
+int agent_request_cancelled(void)
+{
+   return 0;
+}
+int agent_get_durable_job_id(void)
+{
+   return 0;
+}
+void agent_set_durable_job(int job)
+{
+   (void)job;
+}
+
+/* Session-file persistence is outside this framing-only fixture. */
+int platform_getppid(void)
+{
+   return 0;
+}
+int platform_mkdir_p(const char *path, int mode)
+{
+   (void)path;
+   (void)mode;
+   return -1;
 }
 
 const char *agent_tools_parent_write_guard_root(void)
@@ -260,8 +370,29 @@ static void test_script_stderr_cap(void)
    free(result);
 }
 
+static void test_permission_capture_failure_refuses_script(void)
+{
+   for (int source = 0; source < 2; source++)
+   {
+      g_scope_capture_refused = !source;
+      g_source_capture_refused = source;
+      g_dispatch_calls = 0;
+      char *result = tool_execute_script("python", "print('must-not-start')", 5, NULL, NULL);
+      g_scope_capture_refused = g_source_capture_refused = 0;
+      cJSON *reply = parse_json_or_die(result);
+      assert(cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == -1);
+      const char *error = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "stderr"));
+      const char *output = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "stdout"));
+      assert(error && strstr(error, "RPC setup failed") && output && !output[0] &&
+             !g_dispatch_calls);
+      cJSON_Delete(reply);
+      free(result);
+   }
+}
+
 int main(void)
 {
+   test_permission_capture_failure_refuses_script();
    test_script_env_scrub();
    test_python_rpc_allowed_tool();
    test_python_rpc_structured_refusal();

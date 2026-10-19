@@ -756,6 +756,10 @@ static int delta_build_events(const aimee_delta_t *d, anthropic_stream_state_t *
 {
    if (!d)
       return 0;
+   /* Responses opaque state has no Anthropic stream representation. A caller
+    * must project with an explicit fidelity decision before crossing this wire. */
+   if (d->thinking_id || d->thinking_encrypted_content)
+      return -1;
    switch (d->type)
    {
    case AIMEE_DELTA_TURN_START:
@@ -919,7 +923,7 @@ char *anthropic_delta_render(const aimee_delta_t *d, anthropic_stream_state_t *s
    const char *ev[2] = {NULL, NULL};
    cJSON *js[2] = {NULL, NULL};
    int n = delta_build_events(d, st, msg_id, model, ev, js);
-   if (n == 0)
+   if (n <= 0)
       return NULL;
    char *first = sse_frame(ev[0], js[0]); /* sse_frame takes ownership of js[i] */
    if (n == 1)

@@ -196,6 +196,39 @@ vault_status_t vault_service_set_server(const char *agent, const char *cred, con
    return st;
 }
 
+vault_status_t vault_service_write_server_batch(const char *agent,
+                                                const vault_store_write_t *writes, size_t count)
+{
+   if (!agent || !agent[0] || !writes || !count || count > 16)
+      return VAULT_ERR_BADARG;
+   for (size_t i = 0; i < count; i++)
+   {
+      if (!writes[i].credential || !writes[i].credential[0])
+         return VAULT_ERR_BADARG;
+      for (size_t j = 0; j < i; j++)
+         if (!strcmp(writes[i].credential, writes[j].credential))
+            return VAULT_ERR_BADARG;
+   }
+   uint8_t kek[VAULT_KEK_LEN] = {0}, salt[VAULT_SALT_LEN] = {0};
+   vault_status_t status = VAULT_ERR_CRYPTO;
+   if (vault_server_kek(kek))
+      goto done;
+   status = VAULT_ERR_IO;
+   if (vault_store_get_or_create_salt(VAULT_SERVER_PRINCIPAL, salt))
+      goto done;
+   int rc = vault_store_write_batch(VAULT_SERVER_PRINCIPAL, kek, agent, writes, count);
+   status = !rc                                   ? VAULT_OK
+            : rc == VAULT_STORE_BATCH_UNSUPPORTED ? VAULT_ERR_UNSUPPORTED_OP
+                                                  : VAULT_ERR_IO;
+done:
+   OPENSSL_cleanse(kek, sizeof kek);
+   OPENSSL_cleanse(salt, sizeof salt);
+   for (size_t i = 0; i < count; i++)
+      (void)vaudit(writes[i].secret ? "vault.set" : "vault.delete", VAULT_SERVER_PRINCIPAL, agent,
+                   writes[i].credential, ATTEST_NONE, status);
+   return status;
+}
+
 /* Import autonomous server-wrapped credentials from a historical actor vault.
  * The shared server namespace is authoritative: an existing entry is never
  * overwritten. Conflicting legacy values remain encrypted in their original

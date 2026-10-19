@@ -100,7 +100,7 @@ static void hdr_line(char *buf, size_t n, const char *line)
  * set verbatim, so beta-gated behaviors (fine-grained tool streaming, 1h cache
  * TTL, interleaved thinking, fast mode, …) reach Anthropic exactly as Claude Code
  * requested them. */
-static void build_anthropic_parity_headers(char *buf, size_t n)
+static int build_anthropic_parity_headers(char *buf, size_t n, const agent_t *agent)
 {
    char line[640];
    const char *cver = anthropic_ingress_request_version();
@@ -114,6 +114,7 @@ static void build_anthropic_parity_headers(char *buf, size_t n)
       snprintf(line, sizeof(line), "anthropic-beta: %s", cbeta);
       hdr_line(buf, n, line);
    }
+   return agent_claude_oauth_headers(agent, buf, n);
 }
 
 /* Serialize `obj` into resp (bounded by cap). Returns 200 on success, 500 if it
@@ -631,8 +632,8 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * cJSON_Parse can't read, so the buffered reply came back empty. Keyed off the
     * resolved upstream shape (like the streaming path), not the provider label. */
    int responses_wire = strstr(url, "/responses") != NULL;
-   if (parity)
-      build_anthropic_parity_headers(extra, sizeof(extra));
+   if (parity && build_anthropic_parity_headers(extra, sizeof extra, ag))
+      goto cleanup;
 
    wire_fence_route_t wire_route = parity           ? WIRE_FENCE_ANTHROPIC_MESSAGES
                                    : responses_wire ? WIRE_FENCE_OPENAI_RESPONSES
@@ -1263,8 +1264,8 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * provider label, so Codex aliases that still resolve to /responses stay in
     * the buffered replay path too. */
    responses_wire = strstr(url, "/responses") != NULL;
-   if (parity)
-      build_anthropic_parity_headers(extra, sizeof(extra));
+   if (parity && build_anthropic_parity_headers(extra, sizeof extra, ag))
+      goto cleanup;
 
    /* Whether we ask the UPSTREAM to stream depends on how we READ the reply, not on
     * what the client asked. The buffered-replay path (prevent-subagents, or a
@@ -1420,7 +1421,13 @@ static int count_tokens(const char *body, char *resp, int cap)
          {
             int hs;
             snprintf(ct_url, sizeof(ct_url), "%s/count_tokens", url); /* url ends in /messages */
-            build_anthropic_parity_headers(extra, sizeof(extra));
+            if (build_anthropic_parity_headers(extra, sizeof extra, ag))
+            {
+               aimee_request_free(&policy);
+               cJSON_Delete(req);
+               return write_error(resp, cap, 400, "invalid_request_error",
+                                  "invalid OAuth capability headers", 0);
+            }
             char *native = messages_resolve_model(&policy, ag, 1) == 0
                                ? aimee_backend_render_wire(&policy, AIMEE_WIRE_ANTHROPIC)
                                : NULL;

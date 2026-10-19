@@ -142,3 +142,59 @@ func TestJSONStringsRetainUnicodeScalars(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeCheckpointContract(t *testing.T) {
+	proof := map[string]any{"scope": strings.Repeat("a", 64), "context_digest": strings.Repeat("b", 64),
+		"prefix_digest": strings.Repeat("c", 64), "harness": "codex", "native_id": "opaque:native", "claim": strings.Repeat("d", 32), "message_count": 2}
+	valid := func() bool {
+		raw, err := json.Marshal(map[string]any{"kind": "native_checkpoint", "payload": proof})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ValidSessionEvent(raw)
+	}
+	if !valid() {
+		t.Fatal("valid checkpoint rejected")
+	}
+	for key, values := range map[string][]any{
+		"scope": {nil, "bad", strings.Repeat("A", 64)}, "context_digest": {nil, "", 42}, "prefix_digest": {nil, strings.Repeat("x", 64)},
+		"claim": {nil, strings.Repeat("a", 31), strings.Repeat("A", 32)}, "harness": {nil, "invented"},
+		"native_id": {nil, "", strings.Repeat("x", 1025)}, "message_count": {nil, 0, -1, 1.5, 4097, "2"},
+	} {
+		original := proof[key]
+		delete(proof, key)
+		if valid() {
+			t.Fatalf("missing %s accepted", key)
+		}
+		for _, bad := range values {
+			proof[key] = bad
+			if valid() {
+				t.Fatalf("bad %s accepted: %#v", key, bad)
+			}
+		}
+		proof[key] = original
+	}
+	proof["unmodeled_prompt"] = "must not enter metadata"
+	if valid() {
+		t.Fatal("unknown field accepted")
+	}
+	delete(proof, "unmodeled_prompt")
+	proof["harness"] = "claude"
+	proof["native_id"] = strings.Repeat("x", 1024)
+	if !valid() {
+		t.Fatal("valid boundary values refused")
+	}
+}
+
+func TestNativeCompactionIsClosedHostMetadata(t *testing.T) {
+	for _, payload := range []string{`{"harness":"codex"}`, `{"harness":"claude"}`} {
+		if !ValidSessionEvent([]byte(`{"kind":"native_compaction","payload":` + payload + `}`)) {
+			t.Fatal(payload)
+		}
+	}
+	for _, payload := range []string{`{}`, `{"harness":"unknown"}`, `{"harness":null}`, `{"harness":"codex","summary":"not model history"}`} {
+		if ValidSessionEvent([]byte(`{"kind":"native_compaction","payload":` + payload + `}`)) {
+			t.Fatal(payload)
+		}
+	}
+}

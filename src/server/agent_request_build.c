@@ -5,11 +5,11 @@
 #include "agent_request_build.h"
 
 #include "agent.h"
-#include "agent_protocol.h"        /* agent_anthropic_set_system, agent_request_max_tokens */
+#include "agent_protocol.h"        /* agent_request_max_tokens */
 #include "agent_request_shaping.h" /* agent_request_shape_user_prompt */
 #include "agent_config.h"          /* agent_catalog_provider */
 #include "model_registry.h"        /* model_capability_get, MODEL_CAP_* */
-#include "model_sampling.h"        /* model_sampling_apply_{openai,anthropic} */
+#include "model_sampling.h"        /* typed sampling resolution */
 #include "config.h"
 #include <aimee/ir/aimee_ir.h>
 #include <aimee/translation/aimee_backend.h>
@@ -29,38 +29,59 @@ int is_anthropic_provider(const agent_t *agent)
 
 /* Build the provider request for a plain (system, user) agent turn. Constructs the
  * typed IR and dispatches to the matching backend (anthropic / responses / openai),
- * then applies the request-shaping the IR model does not itself carry: openai
- * /no_think user-prompt shaping, anthropic cache_control system marking, and
- * model_sampling (temperature + curated top_p/top_k/...). Returns a malloc'd cJSON
+ * with host prompt/cache/sampling preparation completed before rendering.
+ * Translation preserves the established plain-turn wire layout. Returns a malloc'd cJSON
  * (caller frees), or NULL on build failure. */
 cJSON *agent_build_request(const agent_t *agent, const char *system_prompt, const char *user_prompt,
                            int max_tokens, double temperature)
 {
+   if (!agent)
+      return NULL;
    const int is_resp = is_chatgpt_provider(agent);
    const int is_anth = is_anthropic_provider(agent);
 
    /* openai /no_think shaping (qwen-local); anthropic/responses do not shape. */
    char *shaped =
        (!is_resp && !is_anth) ? agent_request_shape_user_prompt(agent, user_prompt) : NULL;
+   if (!is_resp && !is_anth && !shaped)
+      return NULL;
    const char *eff_user = shaped ? shaped : user_prompt;
 
-   aimee_request_t ir;
-   memset(&ir, 0, sizeof ir);
+   aimee_request_t ir = {0};
    ir.model = strdup(agent->model);
-   if (system_prompt && system_prompt[0])
+   if (!ir.model)
+      goto fail;
+   int cache_marking = is_anth && config_cache_shaping_enabled();
+   if (cache_marking)
+   {
+      ir.frontend = AIMEE_WIRE_ANTHROPIC;
+      if (anthropic_ir_set_host_system(&ir, system_prompt, 1, config_cache_min_chars()))
+         goto fail;
+   }
+   else if (system_prompt && system_prompt[0])
    {
       ir.system = calloc(1, sizeof *ir.system);
+      if (!ir.system)
+         goto fail;
       ir.n_system = 1;
       ir.system[0].type = AIMEE_BLK_TEXT;
       ir.system[0].text = strdup(system_prompt);
+      if (!ir.system[0].text)
+         goto fail;
    }
    ir.messages = calloc(1, sizeof *ir.messages);
+   if (!ir.messages)
+      goto fail;
    ir.n_messages = 1;
    ir.messages[0].role = strdup("user");
    ir.messages[0].blocks = calloc(1, sizeof(aimee_block_t));
+   if (!ir.messages[0].role || !ir.messages[0].blocks)
+      goto fail;
    ir.messages[0].n_blocks = 1;
    ir.messages[0].blocks[0].type = AIMEE_BLK_TEXT;
    ir.messages[0].blocks[0].text = strdup(eff_user ? eff_user : "");
+   if (!ir.messages[0].blocks[0].text)
+      goto fail;
    /* responses omits max_tokens by design (codex 400s); openai/anthropic emit the cap. */
    if (!is_resp)
    {
@@ -104,54 +125,37 @@ cJSON *agent_build_request(const agent_t *agent, const char *system_prompt, cons
       {
          thinking_on = 1;
          cJSON *think = cJSON_CreateObject();
-         cJSON_AddStringToObject(think, "type", "adaptive");
          ir.thinking = think;
+         if (!think || !cJSON_AddStringToObject(think, "type", "adaptive"))
+            goto fail;
       }
    }
-   /* temperature is layered post-build by model_sampling below (so the curated
-    * top_p/top_k/... the IR model does not carry are applied alongside it). */
-
+   if (!is_resp && !thinking_on)
+   {
+      model_sampling_row_t sampling = model_sampling_resolve(agent, temperature);
+      ir.temperature = sampling.temperature;
+      ir.has_temperature = sampling.temperature >= 0;
+      ir.top_p = sampling.top_p;
+      ir.has_top_p = sampling.top_p >= 0;
+      ir.top_k = sampling.top_k;
+      ir.has_top_k = sampling.top_k >= 0;
+      if (!is_anth)
+      {
+         ir.frontend = AIMEE_WIRE_OPENAI_CHAT;
+         aimee_openai_host_profile_t profile = {.min_p = sampling.min_p,
+                                                .repeat_penalty = sampling.repeat_penalty};
+         if (openai_ir_set_host_profile(&ir, &profile))
+            goto fail;
+      }
+   }
    cJSON *req = is_resp   ? responses_backend_build(&ir)
-                : is_anth ? anthropic_backend_build(&ir)
-                          : openai_backend_build(&ir);
+                : is_anth ? anthropic_backend_build_plain(&ir, cache_marking)
+                          : openai_backend_build_plain(&ir);
    aimee_request_free(&ir);
    free(shaped);
-   if (!req)
-      return NULL;
-
-   if (is_anth)
-   {
-      /* cache_control system marking (default-off): split the system at the
-       * <aimee-context> volatile boundary and mark the stable prefix cacheable. The
-       * IR backend emitted a plain system string; re-apply the marking on top. */
-      if (config_cache_shaping_enabled())
-      {
-         cJSON_DeleteItemFromObjectCaseSensitive(req, "system");
-         agent_anthropic_set_system(req, system_prompt, 1, config_cache_min_chars());
-      }
-      model_sampling_apply_anthropic(agent, req, temperature);
-      /* Strip sampling entirely alongside thinking, rather than pinning
-       * temperature to 1 as this used to.
-       *
-       * Every model that reaches this branch is adaptive-capable, i.e. 4.6 or
-       * later, and across that range removal is the only universally valid
-       * choice: on 4.7 and later ANY of temperature / top_p / top_k is a 400,
-       * while on 4.6 they are merely permitted. Adding temperature=1 was correct
-       * for 4.6 and is itself a rejection on everything newer -- the old code
-       * turned one 400 into two.
-       *
-       * Done after model_sampling has layered the curated values on, because
-       * that is where they arrive; there is nothing to talk out of it earlier. */
-      if (thinking_on)
-      {
-         cJSON_DeleteItemFromObjectCaseSensitive(req, "temperature");
-         cJSON_DeleteItemFromObjectCaseSensitive(req, "top_p");
-         cJSON_DeleteItemFromObjectCaseSensitive(req, "top_k");
-      }
-   }
-   else if (!is_resp)
-   {
-      model_sampling_apply_openai(agent, req, temperature);
-   }
    return req;
+fail:
+   aimee_request_free(&ir);
+   free(shaped);
+   return NULL;
 }

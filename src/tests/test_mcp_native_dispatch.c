@@ -21,6 +21,9 @@
 #include "aimee.h" /* MAX_PATH_LEN via agent_types.h */
 #include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
+#include <aimee/ir/aimee_ir.h>
+#include <aimee/tools/module_api.h>
+#include "../modules/tools/agent_tools_internal.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +32,7 @@
 #define FAKE_TOOL "index_find_callers"
 
 static int g_call_count;
+static int g_value_schema_string, g_value_is_string;
 static char g_last_tool[64];
 static char g_last_args[256];
 
@@ -41,7 +45,9 @@ static cJSON *fake_advert(const char *tool)
    cJSON_AddStringToObject(t, "description", "Find the call sites of a symbol.");
    cJSON *s = cJSON_AddObjectToObject(t, "inputSchema");
    cJSON_AddStringToObject(s, "type", "object");
-   cJSON_AddObjectToObject(s, "properties");
+   cJSON *properties = cJSON_AddObjectToObject(s, "properties");
+   cJSON *value = cJSON_AddObjectToObject(properties, "value");
+   cJSON_AddStringToObject(value, "type", g_value_schema_string ? "string" : "integer");
    return t;
 }
 
@@ -50,6 +56,7 @@ static cJSON *fake_call(const char *tool, cJSON *args, const char *sid)
 {
    (void)sid;
    g_call_count++;
+   g_value_is_string = cJSON_IsString(cJSON_GetObjectItemCaseSensitive(args, "value"));
    snprintf(g_last_tool, sizeof(g_last_tool), "%s", tool ? tool : "");
    cJSON *sym = args ? cJSON_GetObjectItemCaseSensitive(args, "symbol") : NULL;
    snprintf(g_last_args, sizeof(g_last_args), "%s",
@@ -87,6 +94,38 @@ static void test_registered_tool_dispatches_to_the_provider(void)
    assert(strstr(out, "\n") != NULL);
    free(out);
    printf("  PASS: registered_tool_dispatches_to_the_provider\n");
+}
+
+static void test_admitted_arguments_ignore_stale_schema_cache(void)
+{
+   /* The first dispatch cached the old provider's integer schema. The current
+    * provider now admits a string. A deeper normalizer must not change it. */
+   g_value_schema_string = 1;
+   agent_tools_set_mcp_provider(fake_call, fake_advert);
+   aimee_tool_t admitted = {0};
+   int resolved = agent_tools_execution_definition(FAKE_TOOL, &admitted);
+   assert(!resolved && admitted.schema);
+   int is_error = 1;
+   char *out = dispatch_tool_call_ir_ctx_status(&admitted, "{\"value\":\"7\"}", 5000, &is_error);
+   assert(out && !is_error && g_value_is_string);
+   free(out);
+   int calls = g_call_count;
+   cJSON_ReplaceItemInObjectCaseSensitive(
+       cJSON_GetObjectItemCaseSensitive(admitted.schema, "properties"), "value",
+       cJSON_Parse("{\"type\":\"integer\"}"));
+   out = dispatch_tool_call_ir_ctx_status(&admitted, "{\"value\":\"7\"}", 5000, &is_error);
+   assert(out && is_error && g_call_count == calls);
+   free(out);
+   out = dispatch_tool_call_ir_ctx_status(&admitted, "{} trailing", 5000, &is_error);
+   assert(out && is_error && g_call_count == calls);
+   free(out);
+   admitted.kind = AIMEE_TOOL_HOSTED;
+   out = dispatch_tool_call_ir_ctx_status(&admitted, "{}", 5000, &is_error);
+   assert(out && is_error && g_call_count == calls);
+   free(out);
+   aimee_tool_free(&admitted);
+   resolved = agent_tools_execution_definition("not-in-current-catalog", &admitted);
+   assert(resolved == -1 && !admitted.name && !admitted.schema);
 }
 
 /* An unregistered name must still fall through to the unknown-tool error, not get
@@ -177,10 +216,39 @@ static void test_kb_federated_tool_dispatches_to_kb(void)
    printf("  PASS: kb_federated_tool_dispatches_to_kb\n");
 }
 
+/* A failed provider must not turn its partially written reply into authority. */
+static int classification_status, classification_value;
+static int classification_peer(const char *name, int *classification)
+{
+   assert(!strcmp(name, "fixture-tool"));
+   *classification = classification_value;
+   return classification_status;
+}
+static void test_classifier_failure_retains_unknown(void)
+{
+   int result = agent_tools_effect_classification("fixture-tool", NULL);
+   assert(result == AIMEE_TOOL_CLASS_UNKNOWN);
+   classification_value = AIMEE_TOOL_CLASS_READ;
+   classification_status = -1;
+   result = agent_tools_effect_classification("fixture-tool", classification_peer);
+   assert(result == AIMEE_TOOL_CLASS_UNKNOWN);
+   classification_status = 0;
+   result = agent_tools_effect_classification("fixture-tool", classification_peer);
+   assert(result == AIMEE_TOOL_CLASS_READ);
+   classification_value = AIMEE_TOOL_CLASS_REMOTE + 1;
+   result = agent_tools_effect_classification("fixture-tool", classification_peer);
+   assert(result == AIMEE_TOOL_CLASS_UNKNOWN);
+   classification_value = -1;
+   result = agent_tools_effect_classification("fixture-tool", classification_peer);
+   assert(result == AIMEE_TOOL_CLASS_UNKNOWN);
+}
+
 int main(void)
 {
    printf("test_mcp_native_dispatch:\n");
+   test_classifier_failure_retains_unknown();
    test_registered_tool_dispatches_to_the_provider();
+   test_admitted_arguments_ignore_stale_schema_cache();
    test_unregistered_name_still_reports_unknown();
    test_no_provider_is_an_error_not_a_crash();
    test_kb_federated_tool_is_advertised();

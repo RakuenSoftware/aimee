@@ -61,9 +61,17 @@ that ID with different turn, actor, or payload fails. Sequence values remain dec
 in transport envelopes. Authorization and authenticated actor derivation must occur in Server
 before these internal operations are exposed; there is no new browser-accessible route.
 
-This storage contract is not yet the live transcript owner. The cutover must commit each event
-before delivery, propagate storage failures, and replace the old transcript writer rather than
-dual-write competing histories.
+Browser and log-owned delegate capture commit canonical events before delivery. Direct primary
+and delegate IR execution read their canonical history from this log; vendor SDK resume/cache
+activation remains unfinished. Native handles are derived metadata, never a second transcript.
+
+Session operation 34, `session_harness_compare_swap`, compares/replaces an owner-checked native
+metadata value under the existing session-row transaction lock. Empty expected text claims an
+absent key; stale comparisons return `missing` and cannot overwrite another execution's claim or
+completion. The host native-cache controller uses unique claim revisions before dispatch and
+retains an unresolved state if later proof/handle writes fail. Completed prefix commitments live
+in typed `native_checkpoint` session events. This operation introduces no browser route, schema
+migration or parallel history store.
 
 ## Security and privacy
 

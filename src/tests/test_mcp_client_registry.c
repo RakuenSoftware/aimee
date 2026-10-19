@@ -1,3 +1,4 @@
+#include "modules/tools/tool_catalog_data.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -659,13 +660,13 @@ static void tool_signature(cJSON *tool, char *out, size_t outsz)
    cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
    cJSON *props = cJSON_GetObjectItemCaseSensitive(schema, "properties");
    cJSON *req = cJSON_GetObjectItemCaseSensitive(schema, "required");
-   const char *keys[96];
+   const char *keys[96] = {0};
    int nk = 0;
    cJSON *c = NULL;
    if (cJSON_IsObject(props))
       cJSON_ArrayForEach(c, props) if (c->string && nk < 96) keys[nk++] = c->string;
    qsort(keys, (size_t)nk, sizeof(keys[0]), tools_cmp_ptr);
-   const char *rq[48];
+   const char *rq[48] = {0};
    int nr = 0;
    if (cJSON_IsArray(req))
       cJSON_ArrayForEach(c, req) if (cJSON_IsString(c) && nr < 48) rq[nr++] = c->valuestring;
@@ -693,6 +694,18 @@ static void tool_signature(cJSON *tool, char *out, size_t outsz)
 }
 static void test_tools_list_surface(void)
 {
+   cJSON *flat_metadata = mcp_build_tools_list_flat();
+   const cJSON *entry = NULL;
+   cJSON_ArrayForEach(entry, flat_metadata)
+   {
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, "name"));
+      aimee_tool_metadata_t metadata = aimee_tools_catalog_metadata(name);
+      if (!aimee_tool_metadata_valid(&metadata))
+         fprintf(stderr, "missing served MCP policy metadata: %s\n", name ? name : "(null)");
+      assert(aimee_tool_metadata_valid(&metadata));
+   }
+   cJSON_Delete(flat_metadata);
+
    cJSON *tools = mcp_build_tools_list();
    assert(cJSON_IsArray(tools));
    static char sigs[256][512];
@@ -993,6 +1006,25 @@ static void test_call_tool_demux(void)
    cJSON_AddStringToObject(wrapper, "name", "index");
    assert(mcp_call_tool_demux("call_tool", wrapper, &target, &target_args) == -1);
    cJSON_Delete(wrapper);
+}
+
+static void test_git_family_resolves_before_admission(void)
+{
+   cJSON *args = cJSON_Parse("{\"command\":\"push\"}");
+   char resolved[96];
+   assert(mcp_family_demux("git", args, resolved, sizeof resolved) == 1);
+   assert(!strcmp(resolved, "git_push"));
+   assert(mcp_family_demux("git_push", args, resolved, sizeof resolved) == 0);
+   assert(mcp_family_demux("git", args, resolved, strlen("git_push")) == -1);
+   cJSON_ReplaceItemInObject(args, "command", cJSON_CreateString(""));
+   assert(mcp_family_demux("git", args, resolved, sizeof resolved) == -1);
+   cJSON_DeleteItemFromObjectCaseSensitive(args, "command");
+   assert(mcp_family_demux("git", args, resolved, sizeof resolved) == -1);
+   cJSON_AddStringToObject(args, "command", "create");
+   assert(mcp_family_demux("note", args, resolved, sizeof resolved) == 1);
+   assert(!strcmp(resolved, "create_note"));
+   assert(mcp_family_demux("note", args, resolved, strlen("create_note")) == -1);
+   cJSON_Delete(args);
 }
 
 static int tools_have(cJSON *tools, const char *name)
@@ -1374,6 +1406,7 @@ int main(void)
    test_tools_list_surface();
    test_tool_profile_filter();
    test_call_tool_demux();
+   test_git_family_resolves_before_admission();
    test_get_help_topics_exist();
    test_solo_profile_is_gone();
    test_delegates_disabled_withholds_delegate_tools();

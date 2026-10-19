@@ -43,6 +43,11 @@ class IRBypassTests(unittest.TestCase):
             ("src/server/rogue.c", "aimee_ir_shadow_compare_response(result, native, wire);"),
             ("src/server/rogue.c", "openai_responses_emit_policed(result, id, model, time, emit, ctx);"),
             ("src/server/rogue.c", "agent_build_extra_headers(agent, headers, capacity);"),
+            ("src/server/rogue.c", "agent_execute_cli_shell_driver(agent, prompt);"),
+            ("src/server/rogue.c", "agent_shell_driver_get(name);"),
+            ("src/server/rogue.c", "agent_shell_driver_t terminal;"),
+            ("src/server/rogue.c", "tool_side_effect(name);"),
+            ("src/server/rogue.c", "emit(SHELL_EVENT_TEXT_DELTA);"),
             ("src/server/rogue.c", "driver->parse_response(body);"),
             ("src/server/rogue.c", "driver->build_request(input);"),
         ]:
@@ -53,8 +58,8 @@ class IRBypassTests(unittest.TestCase):
                 path.unlink()
 
     def test_native_shapes_refused_in_migrated_c_and_go_consumers(self):
-        for relative in ["src/server/session_compact.c", "server-go/modules/economizer/new.go",
-                         "server-go/modules/memory/new.go"]:
+        for relative in [*sorted(checker.CANONICAL_FILES),
+                         "server-go/modules/economizer/new.go", "server-go/modules/memory/new.go"]:
             for field in ["tool_calls", "function_call", "tool_call_id", "reasoning_content"]:
                 path = self.source(relative, f'lookup(message, "{field}");')
                 with self.assertRaisesRegex(ValueError, "native-history-field"):
@@ -68,7 +73,62 @@ class IRBypassTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "unclassified-tool-dispatch"):
                     checker.check(self.root)
                 path.unlink()
-            self.source(relative, 'dispatch_tool_call_ctx_status(tool, args, timeout, &failed);')
+            dispatch = ("dispatch_tool_call_ir_ctx_status" if relative in {"src/posix/agent_runtime.c", "src/server/server_compute_async.c"}
+                        else "dispatch_tool_call_ctx_status")
+            self.source(relative, dispatch + '(tool, args, timeout, &failed);')
+        checker.check(self.root)
+
+    def test_canonical_dispatch_cannot_recoerce_against_cached_schema(self):
+        self.source("src/posix/agent_runtime.c", 'dispatch_tool_call_ctx_status(name, args, timeout, &failed);')
+        with self.assertRaisesRegex(ValueError, "canonical-dispatch-cache"):
+            checker.check(self.root)
+        self.source("src/posix/agent_runtime.c", 'dispatch_tool_call_ir_ctx_status(admitted, args, timeout, &failed);')
+        checker.check(self.root)
+
+    def test_plain_consumer_cannot_patch_native_profiles(self):
+        for function in ("model_sampling_apply_openai", "model_sampling_apply_anthropic",
+                         "agent_anthropic_set_system", "agent_request_shape_openai_messages"):
+            self.source("src/server/agent_request_build.c", function + "(agent, request);")
+            with self.assertRaisesRegex(ValueError, "post-render-profile"):
+                checker.check(self.root)
+        self.source("src/server/agent_request_build.c", "sampling = model_sampling_resolve(agent, 0.5);")
+        checker.check(self.root)
+
+    def test_canonical_execution_cannot_reload_native_schema_authority(self):
+        for name in ("tool_validate", "kb_client_tool_registry_lookup"):
+            path = self.source("src/posix/agent_runtime.c", name + '(name, args);')
+            with self.assertRaisesRegex(ValueError, "retired-api|native-schema-lookup"):
+                checker.check(self.root)
+            path.unlink()
+        self.source("src/posix/agent_runtime.c", "tool_validate_ir(admitted, args, error, capacity);")
+        self.source("src/server/agent_policy.c", "kb_client_tool_registry_lookup(name, enabled);")
+        checker.check(self.root)
+
+    def test_native_mcp_cannot_reintroduce_kb_read_fallback(self):
+        self.source("src/server/server_native_tool_admission.c", "tool_side_effect(tool);")
+        with self.assertRaisesRegex(ValueError, "retired-api"):
+            checker.check(self.root)
+        self.source("src/server/server_native_tool_admission.c", "tool_policy_metadata(tool, metadata);")
+        checker.check(self.root)
+
+    def test_canonical_host_profiles_cannot_rebuild_native_requests(self):
+        for function in checker.CANONICAL_PROFILE_FUNCTIONS:
+            for wire in ("openai", "anthropic", "responses"):
+                with self.subTest(function=function, wire=wire):
+                    self.source("src/server/agent_bridge.c", f"""
+                    cJSON *{function}(void) {{
+                        if (condition) {{ log("literal close brace: }}"); }}
+                        /* }} */ return agent_build_request_{wire}(agent);
+                    }}
+                    """)
+                    with self.assertRaisesRegex(ValueError, "native-profile-rebuild"):
+                        checker.check(self.root)
+        self.source("src/server/agent_bridge.c", """
+            cJSON *agent_build_request_ir(void) { return render(ir); }
+            cJSON *compatibility_boundary(void) {
+                return agent_build_request_openai(agent);
+            }
+        """)
         checker.check(self.root)
 
     def test_native_hook_envelopes_stop_at_entry_adapter(self):

@@ -144,6 +144,18 @@
         "src/tests/test_server_memory_setup.c"
       ],
       "cutover_dependency": "Vault custody precedes memory startup; egress reads the credential through its existing helper."
+    },
+    "tool-policy-catalog": {
+      "owner": "tools module",
+      "contract": "Versioned tools metadata wire in src/modules/tools/include/aimee/tools/module_api.h",
+      "reason": "Generated capability names and metadata only. Memory-prefixed names identify tools; the table contains no memory retrieval, storage, fallback engine or domain implementation.",
+      "evidence": [
+        "server-go/modules/tools/catalog.go",
+        "src/tests/test_module_runtime.c",
+        "src/tests/test_mcp_client_registry.c",
+        "scripts/tests/test_tool_catalog.py"
+      ],
+      "cutover_dependency": "The supervised tools owner serves policy metadata; memory tool execution still dispatches to its existing memory owner."
     }
   },
   "original_files": {
@@ -2073,15 +2085,16 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "85175c0ba7c8a20cd80398bef0303fda23c1eb6198f58c850df066f6c0d44a62"
+      "sha256": "eac406679570f2be64ef92ee0a4ac6b4ab34b215ac2a6a97711b6af7a9f0f45a",
+      "boundary_change": "Git multiplex commands now resolve before host admission; family identity truncation refuses. Memory tool schema and ownership are unchanged. This records boundary analysis, not independent approval."
     },
     "src/modules/tools/agent_tools_dispatch.c": {
       "disposition": "host-context",
       "symbols": [
         "kb_client_memory_scope_context_apply"
       ],
-      "sha256": "0dc32c36caea15f25402beea92874d1f5338f8197f0455c272f59c0c0c785938",
-      "boundary_change": "The dispatcher now returns its existing execution/receipt owner failure classification alongside the owned text result. Canonical consumers use this flag for is_error, evidence and liveness instead of guessing from text. Receipt completion can mark an unconfirmed outcome as failed before effect completion/audit. The kb_client_memory_scope_context_apply host-context seam and its arguments are unchanged; no memory eligibility, recall or scope policy moves into tools. This records the source change, not independent reviewer approval. Native exec-envelope outcome classification is relocated into the existing tools effect-contract source to keep the dispatcher below the file limit; its signals and policy ownership are unchanged."
+      "sha256": "efe3420e783bbc2dd9aa57e3b63409c4c20ef1b42948b929e6c29820f0706c6f",
+      "boundary_change": "The dispatcher now returns its existing execution/receipt owner failure classification alongside the owned text result. Canonical consumers use this flag for is_error, evidence and liveness instead of guessing from text. Receipt completion can mark an unconfirmed outcome as failed before effect completion/audit. The kb_client_memory_scope_context_apply host-context seam and its arguments are unchanged; no memory eligibility, recall or scope policy moves into tools. This records the source change, not independent reviewer approval. Native exec-envelope outcome classification is relocated into the existing tools effect-contract source to keep the dispatcher below the file limit; its signals and policy ownership are unchanged. Role/toolset/deny-list, shell and knowledge command admission are extracted into a typed tools API shared with isolated served MCP callbacks. Existing memory scope application and policy ownership are unchanged. This records boundary analysis, not independent approval. Canonical callers now transfer their exact admitted argument object through the same dispatcher; only legacy ingress uses cached-schema coercion. Classifier registration moves to the existing effect-contract owner. The memory scope application seam, its arguments, host identity and Go-owned memory policy are unchanged. This is source boundary analysis, not independent reviewer approval."
     },
     "src/rel_types.c": {
       "disposition": "storage-protocol",
@@ -2131,13 +2144,13 @@
         "server_module_memory_erase_subject",
         "server_module_memory_reset_derived"
       ],
-      "sha256": "062e11349e17e9b16804a6adc00ec6221fcd82086acf47e61bde48011a678467",
+      "sha256": "36ca8e18164875c2c9b756d4c28dbb9b3d914f642f856cc65fc1a4107b82fc5c",
       "evidence": [
         "server-go/modules/memory/external_store_test.go",
         "server-go/modules/memory/backendstore/store_test.go"
       ],
       "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go. Oct 18: removed only the response-composition input copy after sharing its API type; memory adapters are unchanged.",
-      "boundary_review": "IR #3036: governance transports strict v2 canonical identity views with complete names/namespaces to its existing Go policy owner. The existing five memory transport symbols, authenticated owner calls, erasure and backend authority are unchanged. This records the governance-only source-boundary review and does not assert independent production approval."
+      "boundary_review": "PR #3050: added only the typed tools metadata transport/registration next to the existing tools classifier. Memory adapter symbols, framing, policy and Go ownership are unchanged. This is not independent production-promotion approval."
     },
     "src/server/server.c": {
       "disposition": "host-transport",
@@ -2204,7 +2217,8 @@
         "kb_client_memory_scope_context_set",
         "server_module_memory_data"
       ],
-      "sha256": "57bf09c0192f973fe087864b79d76d4000d94b3cfa07b2c949fb821168bea8e2"
+      "sha256": "85770235db82e647aad19a076341e2dfb4e8088d479650a5366b19f1bc9c1512",
+      "boundary_change": "Isolated native callbacks apply the existing tools permission owner to the resolved callable before dispatch. Git family expansion moves before workflow externalization admission. Existing authenticated memory transport and scope owners are unchanged. This records boundary analysis, not independent approval. Native admission also delegates directive and execution-policy checks using the host callback identity; no memory eligibility policy or effect/human grant is added."
     },
     "src/server/server_mcp_call_table.c": {
       "disposition": "host-transport",
@@ -2416,7 +2430,9 @@
       "symbols": [
         "memory_recall"
       ],
-      "sha256": "87d4880932d96cee3732bf35bf812c94dc7ea1e2099bd7e7c8546d0b53e5f463"
+      "sha256": "199b2849a9de261527ba6ad9de3da7470dbaaa3bd877ceac1c8b5c6b5ec8b0ea",
+      "boundary_change": "Adds Git family identity and output-capacity regressions. Existing memory recall catalog assertions are unchanged. This records boundary analysis, not independent approval. Catalog signature scratch arrays are initialized for the pinned static analyzer; schema assertions retain their existing meaning.",
+      "boundary_review": "PR #3050: adds a tools metadata coverage assertion over the real flat MCP catalog. Existing memory tool schemas, fixtures, runtime policy and Go ownership are unchanged."
     },
     "src/tests/test_mcp_directive_transport.c": {
       "disposition": "host-fixture",
@@ -2717,6 +2733,23 @@
         "api/openapi-server-v1.yaml": "8080f9fbea2e7a7845dc6d05cf03a3aebd9c52c650907634dce95c55f678879b"
       },
       "boundary_review": "2026-10-18 PR #3038: only the /runs documentation changes: asynchronous canonical input, owner privacy, preserved controls and incomplete status. Memory routes and their Go ownership are unchanged."
+    },
+    "src/modules/tools/tool_catalog_data.h": {
+      "disposition": "tool-policy-catalog",
+      "boundary_review": "PR #3050: explicit generated tool-policy data, with no memory authority or native memory implementation. Input/output hashes require review on changes; this is not independent production-promotion approval.",
+      "symbols": [
+        "memory_alerts",
+        "memory_briefing",
+        "memory_explain_match",
+        "memory_fact_history",
+        "memory_get",
+        "memory_recall"
+      ],
+      "sha256": "3418a9e7780280e3d71de21f2e2fb691541e45922b2452a775c10d951d4fa402",
+      "inputs": {
+        "scripts/generate-tool-catalog.py": "3fc845b7d8370b25d9c7461c493a56cd4e5d51351a7055b8d2ab4e252bec3066",
+        "server-go/modules/tools/catalog.json": "ef4d0dc9919e29e52bf4e8465bce46260f2e2e72e8c71d337f2c306c1d88ca86"
+      }
     }
   },
   "namespace_review": "Current KB domain names and paths replace the retired database ordinal; original files and symbols remain immutable, and the checker covers both spellings. Native memory ownership does not change."

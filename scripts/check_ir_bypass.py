@@ -16,6 +16,11 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "tool_side_effect", "tool_validate",
+    "agent_execute_cli_shell_driver", "agent_shell_driver_get", "agent_shell_driver_register",
+    "agent_shell_driver_t", "SHELL_EVENT_TEXT_DELTA", "SHELL_EVENT_TOOL_START",
+    "SHELL_EVENT_TOOL_COMPLETE", "SHELL_EVENT_SESSION_ID", "SHELL_EVENT_TURN_COMPLETE",
+    "SHELL_EVENT_ERROR",
     "openai_parse_chat_request", "openai_parse_completion_request",
     "openai_parse_responses_request", "openai_parse_responses_to_chat",
     "openai_split_chat_request",
@@ -40,6 +45,10 @@ RULES = {
     "retired-api": re.compile(r"\b(?:" + "|".join(RETIRED) + r")\b"),
     "driver-bypass": re.compile(r"->\s*(?:parse_response|build_request)\s*\("),
     "unclassified-tool-dispatch": re.compile(r"\bdispatch_tool_call(?:_ctx)?\s*\("),
+    "native-profile-rebuild": re.compile(r"\bagent_build_request_(?:openai|anthropic|responses)\s*\("),
+    "post-render-profile": re.compile(r"\b(?:model_sampling_apply_(?:openai|anthropic)|agent_anthropic_set_system|agent_request_shape_openai_messages)\s*\("),
+    "canonical-dispatch-cache": re.compile(r"\bdispatch_tool_call_ctx_status\s*\("),
+    "native-schema-lookup": re.compile(r"\b(?:tool_validate|kb_client_tool_registry_lookup)\s*\("),
     "native-hook-field": re.compile(r'"(?:tool_name|tool_input|tool_response|tool_use_id|tool_call_id|tool_namespace)"'),
     "native-history-field": re.compile(
         r'"(?:tool_calls|function_call|function_call_output|tool_call_id|tool_use_id|'
@@ -49,8 +58,9 @@ RULES = {
 # adapters are intentionally outside this set; newly migrated consumers join it.
 CANONICAL_FILES = {
     "src/posix/agent_runtime.c", "src/server/session_compact.c",
+    "src/server/agent_request_build.c",
     "src/server/server_session_log.c", "src/server/server_chat_ir.c",
-    "src/server/primary_session_adapter.c",
+    "src/server/primary_session_adapter.c", "src/server/server_native_cache.c",
 }
 CANONICAL_HOOK_FILES = {"src/cmd_hooks.c", "src/server/server_hooks.c"}
 CANONICAL_TREES = ("server-go/modules/economizer/", "server-go/modules/memory/")
@@ -60,6 +70,11 @@ CLASSIFIED_DISPATCH_FILES = {
     "src/posix/agent_runtime.c", "src/server/script_rpc.c",
     "src/server/server_compute_async.c",
 }
+CANONICAL_PROFILE_FUNCTIONS = {
+    "agent_build_request_ir", "agent_openai_profile_ir", "agent_responses_profile_ir",
+    "agent_anthropic_profile_ir",
+}
+
 # Match strings first so comment markers inside literal data remain literal data.
 LEXEMES = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`[^`]*`|/\*[\s\S]*?\*/|//[^\n]*')
 
@@ -68,6 +83,23 @@ def without_comments(source: str) -> str:
     return LEXEMES.sub(
         lambda match: re.sub(r"[^\n]", " ", match[0])
         if match[0].startswith(("/*", "//")) else match[0], source)
+
+
+def profile_function_spans(source: str) -> list[tuple[int, int]]:
+    # Ignore literal/comment braces when finding the already migrated function
+    # bodies. Compatibility output APIs elsewhere in this file remain boundaries.
+    code = LEXEMES.sub(lambda match: re.sub(r"[^\n]", " ", match[0]), source)
+    pattern = re.compile(r"\b(?:" + "|".join(sorted(CANONICAL_PROFILE_FUNCTIONS)) +
+                         r")\s*\([^)]*\)\s*\{")
+    spans = []
+    for match in pattern.finditer(code):
+        depth = 1
+        end = match.end()
+        while end < len(code) and depth:
+            depth += (code[end] == "{") - (code[end] == "}")
+            end += 1
+        spans.append((match.end(), end))
+    return spans
 
 
 def sources(root: Path):
@@ -88,7 +120,14 @@ def findings(root: Path) -> list[dict]:
         original = path.read_text(encoding="utf-8")
         source = without_comments(original)
         canonical = relative in CANONICAL_FILES or relative.startswith(CANONICAL_TREES)
+        profile_spans = profile_function_spans(source) if relative == "src/server/agent_bridge.c" else []
         for rule, pattern in RULES.items():
+            if rule == "post-render-profile" and relative != "src/server/agent_request_build.c":
+                continue
+            if rule == "canonical-dispatch-cache" and relative not in {"src/posix/agent_runtime.c", "src/server/server_compute_async.c"}:
+                continue
+            if rule == "native-schema-lookup" and not canonical:
+                continue
             if rule == "native-hook-field" and relative not in CANONICAL_HOOK_FILES:
                 continue
             if rule == "native-history-field" and not canonical:
@@ -96,6 +135,9 @@ def findings(root: Path) -> list[dict]:
             if rule == "unclassified-tool-dispatch" and relative not in CLASSIFIED_DISPATCH_FILES:
                 continue
             for match in pattern.finditer(source):
+                if rule == "native-profile-rebuild" and not any(
+                        start <= match.start() < end for start, end in profile_spans):
+                    continue
                 line = source.count("\n", 0, match.start()) + 1
                 literal = original.splitlines()[line - 1].strip()
                 result.append({"file": relative, "rule": rule, "line": line,

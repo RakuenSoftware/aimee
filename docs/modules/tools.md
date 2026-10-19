@@ -25,6 +25,27 @@ unclassified rather than falling back to a local name table. Tool execution,
 policy and workspace binding, schemas, and result handling are deliberately not
 claimed as ported by this first classification-stage conversion.
 
+`server-go/modules/tools/catalog.json` now explicitly declares built-in/MCP
+classification and policy categories. `scripts/generate-tool-catalog.py` produces
+the C fixture's private table; a script gate rejects drift. Existing version-1
+classification bytes remain supported. Version-2 requests on the same tools
+stage carry complete names up to 4,095 bytes and return a bounded typed classification,
+primary label and category mask. Over-limit names refuse without prefix truncation.
+Unknown names have no metadata; qualified external tools remain remote. Neither
+classification nor metadata grants execution or human approval.
+
+The delegate loop, async tool API and isolated native MCP admission use that supervised
+owner rather than treating a
+missing KB side-effect row as `read`. Required execution-policy evaluates all
+owned categories against one loaded operator policy, including adaptive session
+checks. Optional registry disables still veto and custom operator labels remain
+additional restrictions; they cannot erase owned categories. Current built-in
+and flat MCP catalog fixtures require complete metadata coverage. Multiplexed
+capabilities use conservative metadata until operation-specific refinement; this
+does not complete tool effect receipts, native built-in interception, human
+controls. The legacy `tool_side_effect` helper and all of its production callers
+are retired; the bypass gate rejects reintroduction.
+
 `agent_tools.h` also declares a turn/snapshot/toolset session-state slice (`agent_tools_begin_turn`,
 `agent_tools_set_snap_id`, `agent_tools_set_active_toolset`) implemented in `src/server/agent_tools.c`:
 server-side tool-execution session orchestration that is not module-local, the same arrangement by
@@ -120,3 +141,37 @@ New providers register against the core catalog and dispatch seam with explicit 
 Files named tool that implement Git, memory, gateway messaging, or protocol adapters remain with their
 domain owners. Duplicate schemas/dispatch tables and definitions consumed only by their own tests are
 `duplicated-by-adjacent-module` or `test-only` candidates for a later liveness and consolidation slice.
+
+
+The C and supervised Go classification providers both classify `git_push`,
+`git_pr`, `web_search` and `web_read` as remote operations, before local write/read
+categories. `context_contract_expand` is a control operation in both providers.
+A failed classifier or an invalid returned class remains unclassified, including
+when a failing provider wrote a partial result. This is classification, not an
+effect grant. Native MCP execution-policy preflight still needs its KB-registry
+label lookup removed after the complete served catalog has owned classifications;
+unknown tools must never silently become reads during that cutover.
+
+
+Built-in catalog definitions are constructed and validated as owned `aimee_tool_t`
+values. Chat and Responses compatibility arrays render those definitions through
+the translation owner. `agent_tools_builtin_catalog` returns fresh canonical
+schemas before role/policy projection, excludes Git capabilities without a live
+dispatcher, and does not recurse through MCP advertisements. Consumers must apply
+the captured permissions before exposing them. Dynamic MCP/remote catalog and
+legacy consumer cutovers remain separate work.
+
+Role filtering of compatibility catalogs also admits each entry through the
+translation owner before deciding on its canonical identity. A familiar name on
+an invalid schema no longer makes that entry eligible. Valid entries retain
+their original compatibility bytes; canonical consumers can avoid that shim.
+
+Canonical delegate execution validates arguments against the exact admitted
+`aimee_tool_t` schema saved after request policy. A separately loaded KB or
+provider schema cannot replace that contract after the model answers. Optional
+registry disable state remains an admission veto; a newly admitted host function
+can validate without a KB schema. Validation and execution receive identical
+canonical argument bytes at the existing string-based tool-service boundary.
+The bypass gate prevents migrated consumers from reintroducing legacy schema
+lookups. Compatibility validation APIs and the independent side-effect metadata
+cutover remain separate work.

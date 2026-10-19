@@ -117,9 +117,56 @@ static void test_owned_delta_assembly(void)
         "lifecycles");
 }
 
+static void test_opaque_delta_metadata(void)
+{
+   aimee_ir_response_builder_t builder = {0};
+   aimee_delta_t delta = {.type = AIMEE_DELTA_TURN_START};
+   assert(!aimee_ir_response_builder_apply(&builder, &delta));
+   char native_id[] = "rs_original", cipher[] = "opaque-cipher";
+   delta = (aimee_delta_t){
+       .type = AIMEE_DELTA_BLOCK_START, .kind = AIMEE_BLK_THINKING, .thinking_id = native_id};
+   cJSON *json = aimee_ir_delta_json(&delta);
+   assert(json && !strcmp(cJSON_GetObjectItem(json, "thinking_id")->valuestring, native_id));
+   cJSON_Delete(json);
+   assert(!aimee_ir_response_builder_apply(&builder, &delta));
+   native_id[3] = 'X';
+   delta.type = AIMEE_DELTA_BLOCK_DELTA;
+   delta.thinking_id = "rs_original";
+   delta.thinking_encrypted_content = cipher;
+   assert(!aimee_ir_response_builder_apply(&builder, &delta));
+   json = aimee_ir_delta_json(&delta);
+   assert(json && !strcmp(cJSON_GetObjectItem(json, "encrypted_content")->valuestring, cipher));
+   cJSON_Delete(json);
+   size_t retained = builder.bytes;
+   assert(!aimee_ir_response_builder_apply(&builder, &delta) && builder.bytes == retained);
+   cipher[0] = 'X';
+   assert(!strcmp(builder.response.content[0].thinking_id, "rs_original"));
+   assert(!strcmp(builder.response.content[0].thinking_encrypted_content, "opaque-cipher"));
+   assert(aimee_ir_response_builder_apply(&builder, &delta) < 0);
+   delta.thinking_encrypted_content = "opaque-cipher";
+   delta.thinking_id = "different-id";
+   assert(aimee_ir_response_builder_apply(&builder, &delta) < 0);
+   delta.thinking_id = "rs_original";
+   delta.kind = AIMEE_BLK_TEXT;
+   assert(!aimee_ir_delta_json(&delta));
+   assert(aimee_ir_response_builder_apply(&builder, &delta) < 0);
+   delta.kind = AIMEE_BLK_THINKING;
+   delta.type = AIMEE_DELTA_BLOCK_STOP;
+   assert(!aimee_ir_delta_json(&delta));
+   assert(aimee_ir_response_builder_apply(&builder, &delta) < 0);
+   delta.thinking_id = delta.thinking_encrypted_content = NULL;
+   assert(!aimee_ir_response_builder_apply(&builder, &delta));
+   delta = (aimee_delta_t){.type = AIMEE_DELTA_TURN_STOP, .stop_reason = AIMEE_STOP_END_TURN};
+   assert(!aimee_ir_response_builder_apply(&builder, &delta));
+   assert(builder.complete &&
+          !strcmp(builder.response.content[0].thinking_encrypted_content, "opaque-cipher"));
+   aimee_ir_response_builder_free(&builder);
+}
+
 int main(void)
 {
    test_owned_delta_assembly();
+   test_opaque_delta_metadata();
    aimee_block_t blocks[] = {
        {.type = AIMEE_BLK_THINKING,
         .text = "reason",
@@ -373,9 +420,12 @@ int main(void)
    assert(!aimee_ir_session_capture_failed());
    aimee_ir_session_set_sink(capture, &failure);
    void *context = NULL;
-   assert(aimee_ir_session_get_sink(&context) == capture && context == &failure);
+   aimee_ir_session_sink_fn observed_sink = aimee_ir_session_get_sink(&context);
+   int matches_capture = observed_sink == capture;
+   assert(matches_capture && context == &failure);
    aimee_ir_session_set_sink(NULL, NULL);
-   assert(aimee_ir_session_get_sink(&context) == NULL && context == NULL);
+   observed_sink = aimee_ir_session_get_sink(&context);
+   assert(observed_sink == NULL && context == NULL);
    assert(!aimee_ir_session_capture_failed());
    assert(aimee_ir_session_emit_response(&response, "msg-3") == 0);
    cJSON_Delete(blocks[1].tool_input);
@@ -422,6 +472,65 @@ int main(void)
       assert(buffered_steps == (fail_at ? fail_at : 3));
    }
    aimee_ir_session_set_sink(NULL, NULL);
+   aimee_ir_response_builder_t grouped_builder = {0};
+   aimee_delta_t grouped = {.type = AIMEE_DELTA_TURN_START};
+   assert(!aimee_ir_response_builder_apply(&grouped_builder, &grouped));
+   grouped = (aimee_delta_t){
+       .type = AIMEE_DELTA_BLOCK_START, .kind = AIMEE_BLK_TEXT, .block_id = 0, .message_group = 2};
+   cJSON *grouped_json = aimee_ir_delta_json(&grouped);
+   assert(grouped_json && cJSON_GetObjectItem(grouped_json, "message_group")->valueint == 2);
+   cJSON_Delete(grouped_json);
+   assert(!aimee_ir_response_builder_apply(&grouped_builder, &grouped));
+   assert(grouped_builder.response.content[0].message_group == 2);
+   grouped.type = AIMEE_DELTA_BLOCK_DELTA;
+   assert(!aimee_ir_delta_json(&grouped));
+   assert(aimee_ir_response_builder_apply(&grouped_builder, &grouped) < 0);
+   grouped.type = AIMEE_DELTA_BLOCK_START;
+   grouped.kind = AIMEE_BLK_THINKING;
+   assert(!aimee_ir_delta_json(&grouped));
+   grouped.kind = AIMEE_BLK_TEXT;
+   grouped.message_group = -1;
+   assert(!aimee_ir_delta_json(&grouped));
+   aimee_ir_response_builder_free(&grouped_builder);
+   char checkpoint_digest[65], checkpoint_claim[33];
+   memset(checkpoint_digest, 'a', 64);
+   checkpoint_digest[64] = 0;
+   memset(checkpoint_claim, 'b', 32);
+   checkpoint_claim[32] = 0;
+   aimee_native_checkpoint_t checkpoint = {.scope = checkpoint_digest,
+                                           .context_digest = checkpoint_digest,
+                                           .prefix_digest = checkpoint_digest,
+                                           .claim = checkpoint_claim,
+                                           .harness = "codex",
+                                           .native_id = "opaque:native",
+                                           .message_count = 2};
+   aimee_session_event_t checkpoint_event = {.kind = AIMEE_SESSION_NATIVE_CHECKPOINT,
+                                             .native_checkpoint = &checkpoint};
+   cJSON *checkpoint_json = aimee_ir_session_event_json(&checkpoint_event);
+   assert(checkpoint_json &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(checkpoint_json, "kind")),
+                  "native_checkpoint"));
+   cJSON_Delete(checkpoint_json);
+   checkpoint.message_count = 0;
+   assert(!aimee_ir_session_event_json(&checkpoint_event));
+   checkpoint.message_count = 2;
+   checkpoint.harness = "unknown";
+   assert(!aimee_ir_session_event_json(&checkpoint_event));
+   checkpoint.harness = "claude";
+   checkpoint.native_id = "";
+   assert(!aimee_ir_session_event_json(&checkpoint_event));
+   aimee_session_event_t compaction_event = {.kind = AIMEE_SESSION_NATIVE_COMPACTION,
+                                             .native_harness = "claude"};
+   cJSON *compaction_json = aimee_ir_session_event_json(&compaction_event);
+   assert(compaction_json);
+   cJSON_Delete(compaction_json);
+   compaction_event.native_harness = "invented";
+   compaction_json = aimee_ir_session_event_json(&compaction_event);
+   assert(!compaction_json);
+   compaction_event.native_harness = NULL;
+   compaction_json = aimee_ir_session_event_json(&compaction_event);
+   assert(!compaction_json);
+
    puts("IR session event tests passed");
    return 0;
 }

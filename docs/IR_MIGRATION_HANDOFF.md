@@ -1,19 +1,44 @@
 # Aimee overnight continuation handoff
 
-Prepared 17 October 2026, approximately 23:30 Europe/Amsterdam. The user requested implementation to stop here, the work to be pushed, and a complete handoff for a local session. Do not infer that the overall migration is complete.
+Prepared 17 October 2026, with subsequent continuation checkpoints. The current
+user instruction is to keep implementing the unfinished migration; the historical
+stop/handoff request below is superseded.
 
-## Current continuation status after #3038 merged
+## Current continuation status: PR #3050
 
-The user confirmed #3038 is merged and requested the remaining migration and standalone
-learning work. The follow-up is [#3047](https://github.com/RakuenSoftware/aimee/pull/3047),
-branch `fix/browser-ir-continuation`, based on merged #3038 (`344139139`). Its scoped native
-runtime prerequisites and exact validation limits are recorded at the end of this handoff.
-The scoped runtime now captures and restores replay evidence, with SDK activation still pending.
-The SDK cutover, account-bound cache/history adoption and autonomous learning remain unfinished. Explicit receipt-bound feedback now persists without a KB; this does not establish independent grading or synthesis. Do not treat these prerequisites as overall completion.
+The user confirmed #3038 and its follow-up #3047 merged and requested the remaining
+migration and standalone learning work. Continue only the existing
+[#3050](https://github.com/RakuenSoftware/aimee/pull/3050), branch
+`fix/browser-ir-native-execution`, based on merged #3047 (`fedfa6728`). Do not reopen
+#3036, create another PR, or mix in WOL work. Automatic review and the strict
+attribution gate remain enabled.
 
-Automatic reviews and strict attribution remain enabled. Production `.100` must remain KB-free.
-Do not reopen #3036 or add WOL work. Earlier instructions to continue the now-merged #3038
-are superseded by the user's latest continuation request.
+The existing browser GUI now has canonical primary loading/model switching,
+durable-log history and standard controls. Request/response streaming, delegate
+history, tool catalogs/role admission and all three tool-enabled host request
+profiles use IR. Native cache claims/recovery, execution-profile scope and
+compaction refusal are implemented but are **not activated at production SDK
+spawn sites**. Real replay qualification covers unchanged-prefix plus unseen-tail
+adoption; native command observation still has a confirmed identity/argument/result
+fidelity gap.
+
+The remaining work includes actual credential-free SDK activation with attested
+launch/workspace resources, complete host tool effects/receipts and human controls,
+live Claude subscription qualification and other unsupported credential custody, remaining ingress/consumer retirement and
+independently graded server-local learning with next-run reuse. Production `.100`
+must remain KB-free. Explicit receipt-bound feedback/ungraded observations are not
+independent task grades or synthesis. Production promotion requires the recorded
+independent reviewer under `OWNERS.md`.
+
+Published `5aa1888d2` passed all 56 applicable CI checks, including every Docker
+tier, with two existing testing-branch platform skips (as did `1a8469ebf`). Published
+`46f6e1085` includes the subsequent plain-request consumer and obsolete shell-driver
+retirement. Its CI exposed an unchecked POSIX capture receiver, repaired below.
+Published `1511bd3e9` includes the selected Vault API-key increment and the CI repair.
+Its fresh CI has 55 passing checks and no failures; T2 is still pending at this checkpoint.
+Installed CLI probes now correctly resolve `aimee` and `wol-lore` from their own
+workspaces without an explicit project override; newer native callback cwd binding
+is separately pending promotion. The overall migration remains unfinished.
 
 ## Merged #3038 validation and replacement history: 18 October 2026
 
@@ -1224,3 +1249,922 @@ all shipped Go module interop and routing startup, passes locally. The merged
 Codex unit/real pinned SDK adoption fixture, native runtime/local learning fixtures,
 production server build and all 76 lint gates pass. Fresh CI must qualify the
 published merge; the previous aggregate unit failure was the Go job's consequence.
+
+
+## Native MCP permission admission continuation
+
+PR #3047 merged at `fedfa6728af96c14676a68ece6e4f84bfe8310eb` after all
+58 applicable checks passed; the two PR platform skips are still skips, not
+Windows/macOS qualification. Continuation branch: `fix/browser-ir-native-execution`.
+
+The tools owner now exposes the existing role/toolset/deny-list, shell and
+knowledge-command checks through one typed permission API. In-process dispatch
+retains its refusal classifications and messages. Served isolated native callbacks
+apply that same API after bridge/family resolution and before any handler or gateway
+branch. Ordinary authenticated MCP clients retain their existing capability checks.
+Git multiplex commands now expand before permission and workflow externalization
+gates, so direct `git_push`, `git` command=push and `call_tool` targeting that family
+share an identity. Insufficient family output capacity refuses instead of truncating.
+
+The agent and MCP registry suites pass, including ASan/UBSan. New checks cover
+captured permissions, denied flat/family/bridged Git calls, notes, remote names,
+shell and knowledge-command limits, toolset limits, read access and truncated
+identities. Clean builds also exposed an unused mock counter and Go fixture outputs
+that mishandled absolute OBJDIR; those are corrected without suppressing warnings.
+The memory ownership ledger records unchanged memory symbols and the actual host
+admission boundary change; it does not claim independent reviewer approval.
+
+This is permission admission only. Full served effects, write/path confinement,
+argument-bound human approvals and question round trips still need completion
+before SDK activation. Production callers remain on the old native execution
+path; account-bound prefix/cache admission, real incremental Responses streaming,
+remaining credential custody and IR consumers, independently graded KB-free
+learning and production acceptance remain open. Production must remain KB-free.
+
+
+## Native MCP directive/policy admission and fresh CI repair
+
+The isolated served boundary now also invokes the existing hard-directive and
+execution-policy owners before any handler or gateway branch. Its attempt is
+bound to the callback's host request ID; tool-supplied attempt/side-effect/
+authorization fields do not supply that binding. Missing/mismatched host session
+identity, non-object arguments, cancellation and refused assembly context reject
+execution. Context and cancellation are rechecked after policy admission. This
+preflight grants neither effect authorization nor a human decision.
+
+The admission, real execution-policy transport and native-runtime fixtures pass;
+admission and policy transport also pass ASan/UBSan. The new admission fixture
+passes CMake/CTest with assertions enabled and belongs to the ordinary Make unit
+suite. The production server builds, all 76 lint gates pass and pinned Cppcheck
+2.13 reports zero diagnostics for the new admission source, fixture and served
+route. Full effects/receipts and argument-bound human approval remain open.
+
+Fresh CI for `b833a37b8` found an LSP release-lineage failure and its dependent
+unit aggregate. The retained report has 20/20 successful cold starts for both
+gopls and pyright, complete reference recall and no false positives. The rejected
+source paths are `mcp_tools_extended.c` and `test_mcp_client_registry.c`: this PR's
+Git dispatch changes and tests. `s1-host-integration.json` records those exact
+blocks independently from memory integrations, reverses them for frozen source
+comparison, and retains the full remaining file/build-plan checks. Mutation tests
+reject LSP drift, altered/removed/duplicated host blocks and changed assertions.
+All 20 S1 gate/evidence tests pass. Checkpoint `a6834ef00` publishes that repair;
+its fresh CI, and any later checkpoint's CI, still require their own qualification.
+
+
+## Opaque reasoning delta parity for incremental Responses
+
+Canonical deltas now retain `thinking_id` and `encrypted_content`, matching full
+thinking blocks across C serialization/owned assembly, Go session validation and
+browser live/durable projection. They are complete values at block start or a
+later block delta, not text fragments. Identical repeats retain one value and
+consume no additional C byte budget; conflicting identities/ciphertext, wrong
+block kinds and lifecycle-event placement refuse. Owned assembly does not retain
+borrowed provider buffers. The Anthropic stream renderer refuses opaque Responses
+state it cannot represent rather than dropping it.
+
+C session/stream fixtures and ASan/UBSan pass, Go IR/session-family race tests pass,
+and all 289 frontend tests plus TypeScript checking pass. This closes a streaming
+contract gap; it does not implement the incremental Responses backend or activate
+the production SDK path. Remaining effects, human controls, canonical prefix/cache
+admission, streaming transport, credential custody, consumers and KB-free learning
+acceptance remain open.
+
+
+## CI cancellation reporting during continuation
+
+Editing live PR metadata deliberately reruns attribution and cancels the older
+same-head CI workflow. At `e7c693d3b`, the registered older CLI displayed those
+cancelled rows as `fail`; the independent GitHub job metadata confirms cancellation,
+and `git pr failures` reports no failing checks. Do not label that as an assertion
+or compiler failure. The current check-row formatter now displays `cancelled`
+explicitly. Go merge grading remains unchanged and refuses cancellation as green;
+C presentation regressions and the Git module's race suite pass.
+
+Keep automatic reviews and attribution checks enabled. Prepare metadata before the
+final push and monitor the replacement run, avoiding unnecessary same-head edits
+while CI is running. Current installed CLI behavior will remain until the reviewed
+runtime promotion; source fixes alone do not update production or establish a
+complete migration. Production remains KB-free.
+
+
+## Incremental Responses provider transport
+
+`/v1/responses` now has a true incremental path for Responses-speaking providers.
+The native entry adapter emits owned-validated canonical text/refusal, reasoning
+summary and namespaced function-argument deltas before receiving a terminal frame.
+Its bounded native frame history stays inside translation. At completion, the
+existing full Responses decoder supplies the authoritative full snapshot; emitted
+prefixes, identities, completed-item snapshots, opaque reasoning and structured
+arguments must agree. EOF/truncated framing, conflicting snapshots, unknown semantic
+events, malformed arguments and failed sinks refuse completion. There is no retry
+or economizer resend after the incremental attempt begins.
+
+The frontend consumes canonical deltas and preserves authored text grouping through
+`message_group` on text block starts in C serialization/assembly, Go session
+admission and browser live/durable reduction. It emits item-added before deltas,
+retains opaque reasoning in final items, and verifies the whole projected output
+against the admitted full snapshot before any item-done/client-completion event.
+The host commits the canonical snapshot and durable Responses history before
+publishing completion. Existing routing, request policy/stages, wire fences,
+provider custody, response stages and accounting remain in the prepared executor.
+Response-governance/subagent-prevention modes retain buffered admission; other
+upstream wires and Responses-to-Anthropic ingress still need incremental cutover.
+This is not SDK activation or full migration completion.
+
+Focused parser/frontend and byte-fragmented transport fixtures cover early delivery,
+message parts/groups, namespaced partial arguments, late encrypted reasoning,
+incomplete responses, rewrite/identity refusal, truncated/malformed framing,
+single-use snapshot transfer and persistence failure. Sanitizer, CMake/CTest,
+production build, Go race, frontend and static/lint evidence is recorded with the
+checkpoint. The immediately preceding pushed head `c20f87ac6` passed all 56 applicable
+checks, including every Docker tier, with zero failures and the two intentional
+platform skips. Its CI does not qualify this new increment. Production remains KB-free;
+SDK effects/human controls/cache/custody/consumer and independent learning/deployment
+acceptance remain open.
+
+## Real Codex resume instruction qualification (continuation)
+
+A real credential-free Codex app-server probe against a loopback Responses peer
+found that accepting `developerInstructions` on `thread/resume` does not establish
+that the next provider request uses it. The installed stable schema accepts the
+field, but the captured next request retained `OLD_NATIVE_POLICY` and contained
+no `CURRENT_NATIVE_POLICY`. The proposed adapter-only field change passed mocks
+and ASan/UBSan, failed this real integration assertion, and was discarded in full.
+Do not reintroduce it as a completed cache/context repair.
+
+Artifacts: `/var/tmp/aimee-native-resume-instructions-probe.py` and
+`/var/tmp/aimee-3050-resume-native-integration.log`. The probe keeps native thread
+identity/history across process restart, uses a temporary credential-free home,
+read-only sandbox and local fixture provider, and never dispatches real upstream
+credentials. Changed or cleared authoritative system context therefore needs a
+verified cache-context mismatch and fresh canonical adoption unless a separately
+qualified native update actually changes model-visible context.
+
+A native resume checkpoint also must be consumed durably before dispatch. Otherwise
+a failed/cancelled/compacted native turn could leave uncheckpointed native content
+behind a previously successful prefix proof. The continuation adds an
+owner-checked atomic compare-and-swap to the existing harness metadata contract;
+real PostgreSQL concurrency tests require one winner and refuse foreign/stale
+completion. The cache/history controller and production SDK activation remain
+unfinished; this storage prerequisite alone does not make any native handle safe
+to resume.
+
+
+## Native cache checkpoint controller (not activated at SDK spawn sites)
+
+The host controller now compares current canonical context/catalog and source-log
+history before claiming a native cache. Same attested scope/context with a valid
+canonical prefix returns the native handle and the unseen history offset. Scope,
+context, model or canonical-prefix changes select fresh full adoption. It never
+loads a vendor transcript as the source. Missing required/unavailable/corrupted source,
+foreign actor/session, sequence gaps, contradictory checkpoint metadata and an
+unresolved existing claim refuse rather than becoming empty history.
+
+A unique pending claim, linked to its canonical source turn, is committed through
+new session operation 34 before any
+resume handle is returned. Completion requires the source turn's durable
+`completed` lifecycle and its canonical history, not process exit success. It
+advances to finishing, appends a typed `native_checkpoint`, binds the native
+handle, then publishes the completed claim revision. Partial failures leave an
+unusable pending/finishing state. After the child is known quiescent, explicit
+abort invalidates only derived cache metadata; close alone does not claim that a
+child stopped. Original native-handle ownership/uniqueness remains in its existing
+owner; checkpoint claims use a separate metadata key. No schema or transcript
+store is added.
+
+The shared C/Go/browser checkpoint contract contains scope/context/prefix digests,
+claim, harness, opaque native ID and message count; consumers do not turn it into
+model messages. The PostgreSQL race fixture has 24 competing claims and requires
+one durable winner, rejects foreign/stale/late completion, and checks the final
+stored value. Native-controller fixtures cover unchanged-prefix resume, context
+and account changes, compaction/prefix mismatch, source failure/corruption,
+failed source turns, lost claim replies, incomplete finalization and unresolved
+claims. A metadata wrapper formatting failure was repaired and its focused gate
+passes; complete final-head qualification is recorded with the checkpoint.
+
+The controller is not yet called by the production SDK spawn sites. Before those
+sites can switch, qualify full captured tool/workspace/sandbox/profile binding,
+native compaction and adopted command-item fidelity, effects/receipts, human
+controls, complete credential custody and the actual browser/delegate journeys.
+The real Codex negative resume-instruction probe above still applies. This slice
+must not be described as SDK activation or overall migration completion, and it
+does not promote production or attach a KB instance.
+
+
+## Checkpoint qualification and host project scope
+
+Published head `c09ecdf2d` passed all 56 applicable CI checks, including the full
+script regression suite and every Docker tier; the existing workflow deliberately
+skipped Windows/macOS. These results precede the cache-controller increment.
+
+The cache increment passed the real PostgreSQL 24-claim race, Go IR/family race
+tests, 291 frontend tests and TypeScript, 76 lint checks, 47 module descriptor
+regressions and 18 registration regressions. The final turn-linked token version
+also passed native cache/IR-event ASan/UBSan fixtures and the registered CTest.
+Cppcheck reports ten existing DB1 wrapper diagnostics, with no increase.
+
+Native MCP forwarding now replaces child-supplied top-level `cwd` with captured
+host project scope, alongside its existing session identity replacement. Nested
+tool arguments retain their own paths and exact numeric values. The native
+runtime fixture exercises a forged project scope and passes normally and under
+ASan/UBSan; this is not a replacement for exact resource/path authorization.
+The production server build and completion-policy/Responses transport fixtures
+also pass. Responses completion-repair mode retains buffered admission because
+its response owner can append a governed tool call after the answer.
+
+
+## Tool classification prerequisites and canonical cache bypass guard
+
+The supervised Go tools provider now agrees with the C module: Git publication
+and web access are remote; `context_contract_expand` is control. Previously Go
+reported Git publication as write and web access as read. The shared effect
+consumer also discards partially written classifications when the provider
+fails, and rejects invalid class values. These changes do not grant effects or
+complete the native MCP KB-registry cutover: the served catalog still needs
+complete owner classifications before that legacy label lookup can be removed.
+
+The canonical history bypass gate now includes `server_native_cache.c`.
+Its planted regression iterates every declared canonical C consumer as well as
+Go consumer trees; native history field readers cannot enter the new cache
+controller through an unguarded allowlist gap. No bypass exception was added.
+
+A credential-free real Codex loopback probe additionally verifies namespaced
+adopted tool calls and their results in the actual provider request. After process
+restart it resumes the same native thread, injects only the unseen canonical tail,
+and verifies exactly one copy of both the prior prefix and new tail. Artifacts:
+`/var/tmp/aimee-native-cache-tail-probe.py` and
+`/var/tmp/aimee-3050-native-cache-tail-integration.log`. This qualifies that subset
+of SDK adoption; it does not qualify native compaction, full execution profiles,
+SDK activation or live provider prompt-cache accounting.
+
+
+## Native cache recovery and execution-profile construction (not activated)
+
+Host-only recovery can invalidate a lost pending/finishing claim after the caller
+independently proves the exact native child quiescent and the durable source turn
+is terminal. It compares the stored source-turn identity and CAS revision, never
+publishes a native handle, and leaves canonical history intact. Running turns,
+source failure, stale recovery and late finalization refuse. Source scanning now
+rejects unknown lifecycle statuses. Finalization also refuses another turn's
+canonical source activity after this turn began: a late child cannot attest a
+prefix containing another execution's messages.
+
+The runtime can construct a separate cache execution scope from its captured
+account/model lineage, canonical session, capabilities, role/toolset/denials,
+write/shell/knowledge ceilings, path guards, source authority and delegate context.
+The host must additionally supply attested digests for the actual SDK build,
+effective launch configuration (sandbox, built-ins, hooks included) and stable
+workspace lease. Missing attestations refuse; process pointers and credentials
+are not profile identity. Denials are treated as a set. Per-turn counters,
+snapshot IDs and local transport nonces do not invalidate a stable profile.
+Account replay provenance remains a distinct binding.
+
+These APIs still are not wired into production SDK spawning. The actual caller
+must qualify and supply those SDK/resource attestations, full native adoption and
+compaction fidelity, effects/human controls and credential custody before that
+cutover. The production KB-free and independent promotion-review requirements
+remain in force.
+
+
+## Native compaction observation and cache refusal
+
+Native adapters no longer ignore Codex `thread/compacted` / `contextCompaction`
+and Claude `system.compact_boundary`. They emit the shared typed host-only
+`native_compaction` observation (harness only, no native summary). C/Go/browser
+admit that closed contract; durable history reconstruction excludes it from model
+messages. The cache controller refuses to checkpoint the rewritten native prefix.
+After known-quiescent abort/recovery, subsequent execution uses fresh canonical
+adoption. This does not certify compaction fidelity or activate production SDKs.
+
+Native parser and controller fixtures cover both SDK boundaries, capture refusal,
+compaction followed by successful process/turn completion, and fresh adoption
+instead of reviving a rewritten handle. Shared Go IR/family race tests and all
+292 frontend tests plus TypeScript pass. Final sanitizer/static/registration and
+production build qualification is recorded with this checkpoint.
+
+
+The checked-in real SDK qualification `src/tests/test_codex_native_adoption.py`
+now also resumes an existing thread AND imports only an unseen canonical tail
+through the compiled C adapter. It checks unchanged native thread identity,
+exactly one copy of each prior/new call-result pair, tool namespace and argument
+fidelity, roles, and exactly one original/new user prefix. The existing CI build
+job runs this fixture. It passes locally against installed Codex 0.160.1 and the
+CI-pinned 0.153.4 native executable, in addition to the adapter ASan/UBSan fixture.
+The pinned npm JavaScript wrapper initially lacked Node in the deliberately
+restricted local child PATH; invoking its packaged native executable qualified
+the pinned SDK without widening the child environment.
+
+
+## Real native command-item fidelity finding
+
+A credential-free loopback probe through the compiled adapter dispatched only
+`printf command-fixture` in a fresh temporary HOME. The actual provider request
+contains `exec_command` with `{"cmd":"printf command-fixture"}`. SDK observations
+currently reconstruct a synthetic `commandExecution` tool with wrapped shell
+arguments/cwd; their result also differs from the exact provider-visible output
+wrapper. Call/result IDs match, but that is insufficient to certify complete
+native history adoption. Do not relabel this as a qualified native prefix or
+activate cache checkpoints for those records merely because the process passed.
+Artifacts: `/var/tmp/aimee-native-command-probe.py`,
+`/var/tmp/aimee-native-command-probe-report.json`, and
+`/var/tmp/aimee-3050-native-command-qualification.log`.
+
+Published head `1c8eb94ed` passed all 56 applicable CI checks, including Docker T2
+and T3; the two existing platform skips remain. This precedes the recovery,
+execution-profile and compaction increments, which require fresh CI.
+
+
+## Built-in catalog canonical construction
+
+The server's built-in catalog now constructs validated owned IR tool definitions
+before native rendering. Chat/Responses compatibility builders use the translation
+owner's existing renderer, retaining their declared surface membership and live
+Git-dispatcher availability. A fresh owned canonical built-in catalog is available
+for the SDK host-tool bridge without recursively building MCP-derived adverts or
+sharing mutable schema cache entries. It is not itself role/policy authorization.
+The existing full agent and MCP surface fixtures retain their success paths and
+now check canonical/schema fidelity and independent ownership. Dynamic MCP/remote
+catalog conversion and the native command-item identity gap remain open.
+
+Legacy role-filter compatibility ingress now uses the translation parser and
+makes its decisions from admitted IR tool identities. It no longer reads native
+`function.name` / flat `name` itself. Malformed schemas are excluded before role
+eligibility; Chat, Responses and Anthropic catalogs have planted malformed-entry checks.
+Valid catalog entries and captured role/toolset semantics are preserved.
+
+The actual agent runtime now supplies its catalog wire explicitly for role
+filtering. Anthropic request admission and compatibility role filtering share the
+same owned tool parser, so Anthropic `input_schema` is never mistaken for an
+unmodeled OpenAI option. This retains hosted-tool, strict/deferred and cache
+metadata in their declared translation owner.
+
+Catalog-construction failure now stops the tool-enabled runtime before dispatch
+and propagates through the Anthropic compatibility builder, instead of silently
+becoming an empty tool catalog. The module-header dependency caught by lint was
+removed using format-specific compatibility entry points; the bus boundary gate
+remains unchanged at 188 declared crossings. Published head `db176e1e3` passed all
+56 applicable CI checks (plus the two existing platform skips), including the
+checked-in pinned real SDK replay journey. This catalog increment needs fresh CI.
+
+
+## Authoritative post-policy request egress
+
+`agent_build_request_ir` now returns the complete translation backend result after
+canonical admission and policy. It no longer merges only conversation/tool fields
+into an earlier native profile. Qwen no-think shaping operates on the owned IR
+request before policy, retaining string/media/tool-result behavior and leaving
+durable source history untouched. Split-text existing prefixes remain idempotent.
+
+The OpenAI translation owner retains a closed set of same-wire provider profile
+extensions (min_p, repeat_penalty, chat_template_kwargs, route, models and
+reasoning_split). Typed fields always win; unrelated/private root keys are not
+replayed. Those model-specific extensions are discarded if the typed model differs
+from the entry snapshot, preventing stale routing or MiniMax options on a switch.
+Anthropic retains its existing translation-owned cache-overlay behavior.
+
+Focused actual request-path fixtures compare existing Ollama/Qwen, OpenRouter,
+MiniMax, Mistral and OpenAI profiles, including canonical-source isolation and
+empty/split user text. All three protocol/delegate-policy fixtures and backend
+projection tests pass, alongside ASan/UBSan and the production build. Initial
+profile preparation still uses compatibility builders before IR admission; moving
+that remaining ingress to a typed host profile is unfinished. Native SDK activation
+and the other open qualification/promotion requirements above remain open.
+
+
+## Typed host Responses profile and sampling resolution
+
+Responses execution now constructs its host model, instructions, streaming and
+forced evidence-tool choice directly as owned IR. Its compatibility tool catalog
+uses the shared typed tool parser, but no empty Responses request is built and
+reparsed. Default instructions, preferred code_search/read_file selection, first
+available-tool fallback, delegate filtering and malformed-schema refusal retain
+their existing contracts. Codex-unsupported output-token/temperature knobs remain
+absent from Responses egress.
+
+Sampling resolution is available as a typed host value: required model temperature
+precedes caller preference, opt-in recommendations and provider fallback. Existing
+Chat/Anthropic compatibility builders share that resolver; curated recommendations
+are unchanged. This prepares their remaining native profile ingress cutover.
+The focused request fixture now also exercises opt-in Qwen sampling through actual
+canonical egress. Source/ASan fixtures and production build pass; module/lint/static
+checks are recorded with the slice.
+
+
+## Typed host Chat profile
+
+The tool-enabled Chat execution profile now starts directly as canonical IR too:
+model, output cap, sampling, system blocks, admitted tool catalog, forced/automatic
+tool choice, serial-call restrictions and reasoning effort. Provider-specific
+min-p/repetition settings, local thinking switches, MiniMax split reasoning and
+OpenRouter fallback routing enter a closed typed translation API; their native
+representation is built only by the translation owner. Existing selected-first
+fallback ordering/deduplication and vendor-specific settings are retained. The
+helper refuses to overwrite an inbound native sidecar or operate across wires.
+
+Chat and Responses no longer build empty native requests to rediscover their host
+profiles. Anthropic still uses the compatibility profile pending preservation of
+its exact scalar/block system-cache form; do not erase its native cache overlay
+merely to remove the remaining call. Existing request/profile, delegate-policy and
+translation fixtures pass through the new Chat path.
+
+
+## Typed Anthropic host profile with cache-form preservation
+
+All three tool-enabled host request profiles now start directly in IR; the
+execution request path no longer constructs/parses an empty native request. The
+Anthropic translation owner prepares canonical system blocks and retains only
+the scalar/block system-cache representation in a translation-owned sidecar. That
+sidecar contains no alternate model, tools or conversation. Typed sampling, output
+cap and tool choice are built by the host, and compatibility catalog ingress uses
+the shared Anthropic tool parser.
+
+The actual request fixture compares exact system wire bytes against the existing
+cache helper across 24 combinations of missing/empty/stable/volatile/whitespace
+system text, cache enablement and size floors. Scalar form and stable-prefix-only
+markers are preserved. The IR bypass gate now rejects native profile rebuild calls
+inside all four migrated request/profile functions, with planted regressions that
+include nested/literal/comment braces; compatibility output boundaries remain
+explicitly outside that migrated function scope. No exception ledger was changed.
+
+Published `1a8469ebf` passed all 56 applicable checks, including all Docker tiers,
+with two existing platform skips. Subsequent Chat/Responses/request-egress slices
+were pushed together as `61bfa8290` and need their own fresh CI. This Anthropic
+increment is newer still; SDK activation, complete command fidelity, resource and
+credential ownership, remaining consumers, independent learning and production
+promotion are still unfinished.
+
+
+## Plain agent request consumer cutover
+
+The plain (system/user) request builder now resolves sampling and cache structure
+in IR before egress. It no longer patches native sampling/system fields after the
+backend, nor removes native sampling fields after adaptive-thinking admission.
+The translation owner supplies plain-turn layouts that preserve the existing
+request bytes, including sampling-at-tail and Anthropic system placement. Signed
+Anthropic binding runs on the final rendered request. Existing adaptive capability
+gates and compatibility stable-prefix behavior are unchanged. Allocation failures
+refuse cleanly instead of falling back to an unshaped prompt or dereferencing a
+missing block allocation.
+
+The unchanged OpenAI/Anthropic/Responses byte goldens and adaptive-thinking tests
+pass. Added actual plain-request checks retain opt-in Qwen sampling, Anthropic's
+exclusion of min-p and Moonshot's hard temperature constraint. The consumer joins
+the canonical-files bypass gate; a planted rule rejects reintroduction of native
+sampling/cache/message shaping there. This raises that focused guard suite to ten
+passing tests without editing the exception ledger. Fresh sanitizer/build/lint
+results are recorded with the slice.
+
+
+## Retire unused flattening/terminal shell drivers
+
+Source call-site inspection found no production caller of
+`agent_execute_cli_shell_driver`: only the old full-agent fixture exercised it.
+Removed that prompt-flattening text collector, its unused registry/header, the
+Claude pipe/PTY terminal collectors and the output-discarding Codex stub from both
+Make and CMake. The structured Claude headless and Codex app-server adapters are
+retained. Two obsolete fixture functions (three cases) solely exercising the
+removed generic adapter were retired; active native adapter, cancellation, tool,
+permission and history fixtures remain. The IR gate now rejects the retired shell
+APIs/event types and has planted regressions; no exception was added.
+
+Read-only installed-CLI regression checks now succeed without explicit project
+overrides from both the Aimee continuation worktree and `/home/virant/dev/wol-lore`,
+returning only `aimee` and `wol-lore` hits respectively. This directly rechecks the
+original scope-required failure. It does not claim production SDK activation or
+promotion of the newer native callback cwd binding.
+
+
+## Selected Vault API-key lineage for scoped native transport
+
+The Vault owner resolves selected API-key connections under the captured principal
+without config/environment/default-account/name-alias fallback. It commits the
+actual key and exact registration/provider/endpoint/auth/header target to opaque
+lineage, rejects competing credential headers, and supplies a per-request host
+binding. Serving uses the exact checked credential, refuses target edits within
+that registration and truncated headers, and never swaps its source after admission.
+Other registrations resolve their own credentials, without borrowing this key.
+Snapshot/restore carries and cleans the API-key binding alongside Codex credentials.
+Ordinary unscoped credential compatibility is unchanged.
+
+The scoped native transport can now forward using that API-key lineage as well
+as Codex OAuth. It rechecks the selected source for each callback, refuses a
+rotated/revoked source in the old runtime, and permits a new runtime with a new
+binding. API-key bindings are installed only for model forwarding, so MCP tools
+and their delegates resolve their own credentials. Unsupported/missing native
+credential sources retain MCP-only operation,
+without model replay/cache authority. No key reaches the child or canonical log.
+
+Actual Vault-owner and runtime fixtures exercise selected-key custody, stable and
+rotated lineage, exact headers, no alias fallback, credential snapshots, source
+changes and host-only forwarding. Two concurrent owner threads retain distinct
+checked keys. Production build, ASan/UBSan owner/runtime/fan-out fixtures, runtime
+ThreadSanitizer, CMake/CTest, all 76 lint checks and zero-diagnostic changed-source
+static analysis pass. Claude OAuth refresh/custody, actual attestation
+factories, native command fidelity, complete effects/controls and SDK activation
+are still open; this API-key capability is not a production promotion.
+
+
+## CI repair: unchecked POSIX capture output receiver
+
+CI for `46f6e1085` failed Cppcheck shard 0 on `ctunullpointer` in `posix/util.c`:
+the capture helper dereferenced a missing output receiver before validating it.
+It now refuses that call before spawning a child. A focused regression covers
+null receivers, invalid argv clearing stale output, and unchanged valid capture;
+normal and ASan/UBSan fixtures pass. The exact production Make Cppcheck shard
+rerun checks all 124 sources and passes with 99 known diagnostics and no increase.
+Neither the analyzer debt baseline nor attribution policy was changed. The
+aggregate static-analysis check failed from its Cppcheck dependency.
+
+The selected API-key commit was caught locally with a named-file staging omission
+of tracked `agent_credentials.c`; the incomplete unpublished commit was replaced
+using the registered tracked-files commit mode after checking the exact eight-file
+diff. `b2ebad48c` contains the full tested implementation. The first registered
+commit request also returned a transient explicit-workspace availability refusal;
+a retry against the same explicit checkout succeeded. No other checkout was used.
+
+## OAuth accessor validity repair: 19 October continuation
+
+The high-level Vault OAuth accessor now applies the same expiry check as the
+lower-level loader and refuses `REAUTH_REQUIRED` before and after refresh. A
+transient refresh failure can still use an unexpired access token; it cannot
+return an expired token. Failure clears the caller's output. The previous
+implementation reproduced the expired-token regression before this repair.
+
+Real Vault fixtures cover fresh/expired/unknown-expiry access, marked rejection,
+transient refresh before and after expiry, `invalid_grant`, and successful refresh
+through a private fake curl. OAuth/PKCE and reauthentication fixtures pass normally
+and under ASan/UBSan; changed-source Cppcheck has no diagnostics. This repairs the
+shared accessor already used by selected Codex credentials. Claude custody and
+production SDK activation remain unfinished.
+
+## Selected Claude Vault custody and native broker: 19 October continuation
+
+The selected native broker now supports the sealed Claude login document as well
+as Codex and API keys. The Vault owner validates native `claudeAiOauth` fields,
+converts millisecond expiry, preserves persisted client ID and exact granted
+scopes, and uses the fixed subscription refresh endpoint. The legacy public
+client fallback and document/profile fields were checked against the installed
+Claude 2.1.227 SDK's public source, without reading operator credential files.
+Codex and Claude share the same registration refresh lock/source fence. An
+unchanged imported document cannot overwrite a refreshed token; removal revokes
+it, and switching vendor families cannot reuse the other family's normalized
+access token. Malformed/duplicate source fields and credential headers refuse.
+
+The shared OAuth owner now supports typed JSON/form refresh profiles. Requests
+have bounded curl deadlines and correctly quote the endpoint; refresh bodies stay
+on stdin, full-length form tokens are encoded without truncation, and temporary
+refresh material is cleansed. Only a successful HTTP status can store a token;
+only an actual `error: invalid_grant` marks rejection. The existing form API is
+retained. Model callbacks bind the exact selected Claude bearer and target in the
+credential snapshot. Rotation/revocation refuses an old runtime. Tool/delegate
+callbacks do not inherit that model bearer. Anthropic parity header rebuilding
+preserves the subscription OAuth beta capability alongside caller beta flags.
+
+Seven focused suites (agent, native runtime, three Anthropic ingress/policy suites,
+OAuth reauthentication and PKCE) pass normally and under ASan/UBSan. Native runtime
+also passes TSan, and actual CMake/CTest native runtime/cache targets pass 2/2.
+The full agent fixture retains its three explicit PostgreSQL-dependent skips
+when `AIMEE_STORE_URL` is unset. Changed-source Cppcheck has no diagnostics.
+
+These are local real-Vault refresh/owner and loopback broker qualifications, not
+live Claude subscription acceptance. Production SDK spawn sites remain inactive.
+The normalized OAuth store still writes access/refresh/expiry as separate Vault
+fields; atomic rotating-token persistence and failure injection remain required
+before claiming custody complete. Attested launch/workspace construction, exact
+native command replay, full effect/human tool admission and independently graded
+KB-free learning also remain unfinished. Production `.100` remains KB-free.
+
+## Fresh Claude broker CI scanner finding
+
+CI on `b70c51d8f` flagged the publicly distributed Claude subscription OAuth
+client ID in the legacy-client fixture (`generic-api-key`, test_agent.c:1916).
+The exact commit/file/rule/line finding is recorded in the existing reviewed
+non-secret fingerprint ledger. No rule/path exclusion, history-scan reduction,
+attribution exemption or gate change is introduced. Atomic-token work remains
+local while this fresh CI failure is repaired.
+
+## Atomic OAuth rotation/source seeding: 19 October continuation
+
+The existing Vault file owner now stages related credential fields under its
+write lock, encrypts all of them, and commits one atomic file replacement.
+`vault_store_write_batch` / `vault_service_write_server_batch` reject duplicate
+fields and unsupported storage without sequential emulation. The existing single
+field setters use the same checked envelope staging. Allocation failures in
+metadata/base64 construction can no longer persist an incomplete envelope.
+
+OAuth refresh atomically updates access/refresh/expiry and rejection state. Native
+Codex/Claude source seeding includes the source fence in that same commit and no
+longer removes the previous credential first. No new token layout/store is
+introduced. A refresh response without a refresh token preserves the existing
+one; a new native source must supply its own. Explicit rejection reset prevents
+legacy rejection metadata from resurfacing. Token validity comes from one
+immutable access/expiry/rejection snapshot; missing legacy fields still migrate
+through sealed Vault and custody failures cannot become missing optional fields.
+
+Validation: normal and ASan/UBSan Vault store/service, OAuth reauthentication/PKCE
+and agent fixtures pass. The store fixture injects 94 allocation failures, checks
+second-field failure after staging the first, rejects unsupported/duplicate
+updates, and exercises concurrent snapshots. The real OAuth fixture checks all
+five source/rotation fields under five injected failures and concurrently
+alternates valid/expired generations without exposing the expired token. Bootstrap
+and privilege compatibility fixtures pass. Changed-source Cppcheck and all 76
+lint checks pass; actual CMake/CTest native runtime/cache targets pass 2/2.
+
+The real Vault/OAuth concurrency fixture passes TSan with `WITH_LIBSECRET=0` in a
+separate build and private HOME, qualifying the container file-backend path. The
+default libsecret-linked run reported a GLib `g_queue_pop_tail` race during legacy
+backend discovery before the rotation worker started; that report is retained,
+not suppressed or reported as passing. The post-fork credential-custody refusal
+also remains enforced: request concurrency uses threads, while the store fixture
+uses independently supplied test keys for its process concurrency.
+
+This closes atomic rotating-token persistence, not overall native custody/SDK
+qualification. Actual credential-free SDK spawn activation, launch/workspace
+attestation, native command fidelity, full tool effects/human controls, remaining
+IR consumers and independently graded KB-free learning remain unfinished.
+
+## Canonical tool-schema validation: 19 October continuation
+
+The delegate tool loop already found each callable in the post-policy IR
+`dispatch_catalog`, but then `tool_validate` loaded an independent KB schema.
+It now calls `tool_validate_ir` with the exact admitted `aimee_tool_t`. Registry
+metadata can still disable a tool; it cannot replace the advertised schema after
+the model's response. A newly admitted host function does not need a KB schema.
+This does not change optional tool enablement or policy classification, and the
+same canonical argument bytes still reach validation and the tool-service owner.
+
+The regression supplies an admitted schema that intentionally disagrees with the
+KB schema, verifies the admitted contract wins, checks missing/type/extra/malformed
+arguments, preserves an operator disable, and refuses hosted/missing-schema input.
+Tool validation and full agent suites pass normally and under ASan/UBSan; changed
+C sources have no Cppcheck diagnostics. The bypass gate's eleven fixtures include
+a negative plant refusing legacy validation/schema lookup in migrated consumers.
+The separate native MCP side-effect lookup still requires full catalog-owned
+classification; it has not been replaced or relabeled as complete by this change.
+
+## Codex model-only request binding
+
+The native broker now also restricts the per-request Codex token/account override
+to model requests, matching the Claude/API-key callback behavior. MCP callbacks
+still recheck the selected source lineage under the captured principal, but tools
+and delegates resolve their own connection credentials. The loopback regression
+checks that both the Codex token and account override are absent on MCP calls,
+while model requests retain the selected credentials. Production build and the
+native runtime fixture pass normally, under ASan/UBSan and under TSan.
+
+## Attribution checks without discarding source CI
+
+PR title/body edits previously cancelled long-running source CI because the strict
+attribution job shared its workflow and concurrency group. The unchanged
+`no-coauthor-trailers` job now belongs to `PR attribution`, with independent
+concurrency and the same read-only permissions, commit identity/trailer checks,
+and live opening-app/body checks. There is exactly one owner of that check name.
+No new exemption or rejection-rule change is introduced.
+
+Source CI still handles edited events and runs its complete suite. Known title/body
+edits queue without cancelling an active source run; base changes, code updates
+and unrecognized edits retain cancellation/restart behavior. Source jobs are not
+skipped on metadata edits. Workflow regression tests exercise the actual
+cancellation expression and preserve both event coverage and attribution checks.
+The installed server's cancelled-check display remains unpromoted; source already
+reports cancellation separately, while a current cancelled run still blocks merge.
+
+## Native tool-owned policy metadata
+
+The supervised tools owner now reads one explicit built-in/MCP metadata catalog;
+the C fixture table is generated from those same bytes. The existing version-1
+classification wire is retained. Version-2 requests on the same event/stage return
+classification, primary policy category and a bounded category set. Complete
+external names up to 4,095 bytes are length-framed; over-limit, embedded-NUL and
+trailing input refuse without prefix truncation. Unknown names
+remain unclassified, qualified remote capabilities remain external, and malformed
+metadata/owner failure refuses instead of becoming an implicit `read`.
+
+Isolated native MCP admission now uses the typed owner. Optional KB metadata may
+still disable a tool or supply a custom operator policy label; it cannot replace
+classification or remove owned categories. The required execution-policy owner
+evaluates the complete set against one loaded policy. Adaptive session checks
+retain those categories and bind them into attempt identity. Metadata is neither
+an effect authorization nor a human approval. Broad multiplexers retain
+conservative capability metadata; operation-specific refinement and full effects
+remain required. The other legacy `tool_side_effect` consumers are not cut over
+by this increment.
+
+Coverage checks use actual built-in IR and flat MCP catalogs. C fixture and real
+C-to-Go module-bus tests exercise every catalog entry, including version-1
+compatibility and unknown/malformed refusal. Policy fixtures cover custom labels,
+operator disables, a network block behind a read primary label, and category
+forwarding to adaptive accounting. The bypass gate prevents the native MCP path
+from restoring `tool_side_effect`.
+
+The attribution workflow also passed live qualification at `66e8a1307`: a PR
+body edit completed a new strict attribution run while source run 39255933705
+stayed in progress and metadata source run 39256255876 queued. The preceding
+`70cfaf072` source run and associated workflows completed successfully. The full
+local script suite's only initial failure was a missing Go executable on PATH;
+that three-case generator fixture passed with the installed Go toolchain.
+
+Metadata qualification: production Make, six focused native fixtures and their
+ASan/UBSan builds pass; real C-to-Go bus parity covers the complete catalog and a
+307-byte qualified name. The bus sanitizer rerun uses the rebuilt Go executable;
+the earlier stale-binary attempt is retained separately. Go tools/execution-policy
+race suites and multicall tests pass. Actual CMake/CTest runtime/cache tests pass
+2/2, all 76 lint gates pass, and changed-source Cppcheck has no diagnostic
+increase. Four process-start calls in the touched bus fixture were moved outside
+assertions. The generated catalog's memory-prefixed capability names are reviewed
+as tools metadata in the existing ownership ledger; memory execution remains Go-owned.
+
+## Fresh metadata CI benchmark fixture qualification
+
+`79acd6c01` passed attribution but Benchmark Smoke rejected the added tools-owner
+coverage assertions in the shared MCP fixture under its frozen S1 source
+comparison. The existing reviewed host-integration ledger now reverses exactly
+the new include and assertion block before applying the complete frozen
+comparison. No protected path, LSP implementation, schema, golden, probe input,
+threshold or attribution rule is excluded. A new negative-plant regression rejects
+removed/weakened/duplicated coverage or replacement by an empty catalog.
+
+The repaired frozen comparison passes all 18 focused S1 cases and the complete
+786-case benchmark unit suite. Fresh CI is required for
+this follow-up; a cancelled or superseded workflow is not a passing result.
+
+## Remaining live tool-policy read fallbacks retired
+
+The delegate loop and async tool execution API now use the same supervised
+metadata/category authorization as native MCP. All live `tool_side_effect`
+callers, its implementation and public declaration are removed. Its name is now
+retired globally by the bypass gate. A missing/unknown tools metadata owner cannot
+become a read. Optional registry disables and custom operator labels retain their
+existing restrictions alongside the owned category set.
+
+The real delegate context-refusal fixture explicitly supplies the tools metadata
+fixture while leaving execution-policy absent, preserving its original gate
+ordering assertions. It additionally refuses missing metadata before execution.
+The full integration harness now checks a network policy block behind web_read,
+ordinary file reads under that same restriction, and unknown-tool refusal.
+
+An independent loopback SDK probe found original command call/argument/result
+notifications on fresh Codex threads after experimental opt-in, but not after a
+new process resumes the thread. The pinned upstream implementation explicitly
+attaches resumed listeners without raw events. That experimental route alone is
+therefore insufficient for durable native command fidelity. No SDK activation or
+faithful resumed command capture is claimed; the gateway's canonical wire boundary
+remains the stable owner to connect for that work.
+
+The complete local integration run passes 159/159 with a fresh PostgreSQL database,
+separate non-superuser migrator/runtime roles and no KB instance. Its 26 existing
+service-dependent skips remain explicit, including real Docker delegation. The
+three new API assertions verify a network-category block, a permitted file read
+under that same policy, and unknown metadata refusal. Earlier missing-module and
+missing-migration-credential fixture attempts are retained as setup failures, not
+passing runs. Four focused native suites pass normally; context, agent and tool
+validation pass ASan/UBSan. The context fixture's hook registration was moved
+outside an assertion after Cppcheck reported its side effect. Changed-source
+Cppcheck has no diagnostics, all 76 lint checks pass, and actual CMake/CTest
+runtime/cache targets pass 2/2. Fresh `6a0b24e2f` benchmark CI is green; its main CI
+snapshot had 52 passing checks, four pending and the two existing platform skips.
+
+
+## Admitted arguments survive dispatch; repository bootstrap uses admission
+
+The delegate executor now passes its exact admitted IR function and canonical
+arguments to typed dispatch. That boundary rejects malformed/noncanonical input
+and transfers the parsed object into the existing dispatcher without consulting
+its legacy process-global schema cache. Permission checks, cancellation, effect
+contracts, receipts and completion auditing still run. Legacy script/API ingress
+retains its separately tracked normalization path. The bypass guard now prevents
+the canonical delegate from reintroducing that cached-schema entry point.
+
+Automatic repository evidence must find `list_files` in the actual post-policy
+catalog, canonicalize and validate against that definition, and pass directives
+and supervised metadata/category execution policy before dispatch. An absent
+policy owner cannot produce successful evidence. Both defects were reproduced
+with failing native fixtures before repair. The stale-cache control changes an
+advertised integer field to a string and verifies that the executed value stays
+a string; refusals cannot increment the provider's call count.
+
+The new tools-to-IR header declaration is a shared typed data-contract use in
+`IR_SHARED_TYPE`, not a peer service call or a policy bypass. No new peer service
+coupling or attribution exception is introduced. Exact admitted definitions and
+strict JSON parsing stay at that boundary; policy metadata remains supervised.
+
+
+## Unused name-only validation retired
+
+`tool_validate` had no production callers after the canonical delegate cutover.
+Its registry-schema fallback and permissive unknown qualified-tool path are now
+removed, along with the declaration. The bypass gate retires the symbol globally.
+Validation fixtures now take exact definitions from the tools owner's canonical
+catalog, including canonicalization before validation and explicit refusal when
+a local or qualified identity was never admitted. Nearest-name suggestion tests
+remain separate; optional operator disables still have their original coverage.
+
+Qualification of admitted dispatch/bootstrap passes five focused native suites,
+three ASan/UBSan suites, CMake runtime/cache 2/2 and all 76 lint gates. The real
+PostgreSQL integration rerun passes 159/159 with the same 26 explicit unavailable
+service checks; no KB is configured. The validator retirement additionally passes
+normal and sanitizer validation/context fixtures and changed-source Cppcheck with
+no diagnostics. Fresh CI is still required after publication.
+
+The full local native suite exposed two compiler portability issues in existing
+Vault fixtures: message/junk arrays lacked space for their string terminator.
+They now infer array size and explicitly exclude the terminator, preserving the
+original signed bytes and wrong-size key file. A credential-isolation fixture
+also now reads `/proc/self/environ` through `cat` before `tr`; direct redirected
+`tr` locally returned no bytes. All original positive FD and negative secret
+assertions remain. The first full-run invocation used unsupported absolute build
+paths and did not launch binaries; the subsequent real run isolated this one
+credential fixture failure, which passes independently after repair. The corrected full-suite rerun passes all 653 native test binaries and the
+30-case proxy suite. The P1 PostgreSQL preflight
+and store-dependent fixtures explicitly skip without their configured local
+service; the separate restricted-role integration run remains 159/159. Final
+retirement lint passes all 76 gates. Published `2b5aaa6d5` is fully green in fresh
+CI, including all Docker tiers and attribution, with its two existing platform
+skips. That CI result does not qualify the subsequent local commits.
+
+
+## First-class tool API uses admitted canonical arguments
+
+`tool.execute` now resolves an owned definition from the current execution
+catalog, admits strict object JSON, canonicalizes once, and validates that exact
+schema before directives, workspace/guardrail and supervised metadata/category
+policy checks. Typed dispatch receives those same arguments. Each request gets a
+host-random attempt identity rather than sharing `external-tool` across unrelated
+requests. Missing capabilities, duplicate JSON fields and trailing bytes refuse.
+
+The tools context owner resolves built-ins directly and MCP-derived definitions
+from their live provider. Qualified plugin definitions cross the existing explicit
+compatibility catalog boundary; unrelated entries do not become preconditions
+for a valid requested capability. No process-global cached schema authorizes
+this API. The bypass gate now also protects this consumer from legacy dispatch.
+
+Real restricted-role PostgreSQL integration passes 163/163, with 26 existing
+service-dependent skips and no KB. The four additional assertions cover canonical
+and aliased path-policy parity, trailing argument bytes and duplicate argument
+fields. Fresh-definition dispatch passes normally and under ASan/UBSan;
+changed-source Cppcheck has no diagnostics. The full native run passes all 653
+binaries and the 30-case proxy suite, and all 76 lint gates pass.
+
+Script RPC still needs its caller's execution scope carried into its worker and
+its own admitted-definition cutover. This API increment does not claim those,
+production native SDK activation, resumed native command fidelity or independently
+graded learning complete. Fresh published `591d791e2` benchmark, attribution and
+non-main workflows pass; its source CI remains in progress at this checkpoint.
+
+
+## Script RPC retains caller tool permissions
+
+A real-dispatch regression reproduced a denied `read_file` succeeding through
+script RPC and returning a private fixture file. The RPC worker now restores an
+owned immutable copy of the caller's role, toolset, deny list, shell/knowledge
+permissions and parent-write guard. Cleanup joins the worker before freeing that
+copy, including failed startup paths. The stop flag is atomic rather than volatile.
+No per-call effect authorization or model credential is copied.
+
+The regression now refuses the denied read, proves the parent scope is unchanged,
+and permits a real read after the caller clears its restriction. Framing tests
+also refuse startup when permission capture fails. Agent and script-runner suites
+pass normally and with ASan/UBSan; changed-source Cppcheck has no diagnostics.
+All 653 native binaries and all 76 lint gates pass; serial CMake runtime/cache
+checks pass 2/2. An earlier CMake attempt overlapped lint's deployment-env negative
+plant, which temporarily edits a source file; that failed attempt is retained and
+is not counted as a pass. A local mixed absolute/relative object dependency cache
+was normalized before the actual permission regression qualification.
+
+This is the tool-permission handoff. Script RPC's caller identity/cwd/source and
+workspace handoff, canonical definition/policy admission and cancellation remain
+separate outstanding work; production native activation and independent learning
+qualification are still unfinished. The previous tool API integration remains
+163/163 with its 26 explicit service skips, not a new integration claim for this
+script increment.
+
+
+## Script RPC owns cwd, identity, source and workspace context
+
+A new real-dispatch regression reproduced an absolute read succeeding while the
+same script's relative `evidence.txt` read used the server process directory and
+failed. The RPC owner now captures the actual script cwd, immutable caller tool
+scope, checked source-authority copy, attested request snapshot, session and Vault
+principal identity, active workspace provider, job identity and cancellation flag.
+The private execution context outlives its joined worker. Source allocations and
+verified request-token snapshots are released/cleared after join; caller resource
+leases enclose the synchronous script execution.
+
+Workers retain model execution limits and remove operator-only capability bits.
+Only session/principal identity is bound into the credential context; parent model
+credentials are not copied. An absent source overlay is explicit, preventing a
+concurrent delegate's process environment from becoming authority. Human control
+scopes/mailboxes are not copied. Their retained owner integration remains separate.
+
+Real fixtures prove relative reads, the caller's actual provider, request/principal,
+source restrictions and shared cancellation flag, empty Codex/Claude/API-key fields,
+and unchanged parent authority. The provider cancels the host flag after one read;
+the next RPC request refuses without another file read. This qualifies RPC
+cancellation admission, not termination of an arbitrary running Python/shell process.
+Permission or source capture failure prevents script startup.
+
+Agent/script framing fixtures pass normally and under ASan/UBSan; changed-source
+Cppcheck has no diagnostics. All 653 native binaries, the proxy regressions and
+all 76 lint gates pass. Serial actual CMake runtime/cache checks pass 2/2. Script
+RPC canonical definition/policy admission and running-process cancellation remain
+the next work; production SDK activation and independent learning remain unfinished.

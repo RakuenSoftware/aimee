@@ -104,6 +104,10 @@ vault_status_t vault_service_set(const char *principal, const char *agent, const
  * server master KEK. No unlock required — usable from a TCP client. Returns
  * VAULT_OK, or VAULT_ERR_CRYPTO/IO on a fail-closed error. */
 vault_status_t vault_service_set_server(const char *agent, const char *cred, const char *secret);
+/* Atomic server-credential update; all fields commit together or none do. NULL
+ * values remove fields. Unsupported storage refuses without sequential fallback. */
+vault_status_t vault_service_write_server_batch(const char *agent,
+                                                const vault_store_write_t *writes, size_t count);
 
 /* Read (agent, cred) from the server principal's vault under the server master KEK
  * — no client, no unlock. VAULT_OK (plaintext written), VAULT_NO_ENTRY (no file or

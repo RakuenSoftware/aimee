@@ -603,6 +603,22 @@ static void test_read_complete_bounded_frame(void)
    puts("  PASS: complete bounded binary frames never return a truncated prefix");
 }
 
+#ifndef AIMEE_WINDOWS
+static void test_exec_capture_refuses_missing_output(void)
+{
+   const char *argv[] = {"/bin/echo", "capture fixture", NULL};
+   assert(safe_exec_capture(argv, NULL, 64) == -1);
+   assert(safe_exec_capture_cwd_env_fd_timeout(argv, NULL, NULL, NULL, 64, 1000, -1, -1) == -1);
+   char sentinel[] = "not allocated";
+   char *output = sentinel;
+   assert(safe_exec_capture(NULL, &output, 64) == -1 && !output);
+   assert(safe_exec_capture(argv, &output, 64) == 0 && output);
+   assert(!strcmp(output, "capture fixture\n"));
+   free(output);
+   puts("  PASS: exec capture refuses a missing output receiver and retains valid capture");
+}
+#endif
+
 int main(void)
 {
    test_read_complete_bounded_frame();
@@ -623,6 +639,7 @@ int main(void)
    test_shell_quote_injection_payloads();
    test_strip_ai_attribution();
 #ifndef AIMEE_WINDOWS
+   test_exec_capture_refuses_missing_output();
    test_run_cmd();
    test_run_cmd_scoped_executor();
    test_run_cmd_env();

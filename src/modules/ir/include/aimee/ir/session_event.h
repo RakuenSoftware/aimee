@@ -14,8 +14,19 @@ typedef enum
    AIMEE_SESSION_EXECUTION,
    AIMEE_SESSION_PROJECTION,
    AIMEE_SESSION_CHILD_EXECUTION,
-   AIMEE_SESSION_REPLAY_PROOF
+   AIMEE_SESSION_REPLAY_PROOF,
+   AIMEE_SESSION_NATIVE_CHECKPOINT,
+   AIMEE_SESSION_NATIVE_COMPACTION
 } aimee_session_event_kind_t;
+
+/* Host-only completed native cache observation. Contains commitments and an
+ * opaque handle, never a duplicate transcript or credential. */
+typedef struct
+{
+   const char *scope, *context_digest, *prefix_digest;
+   const char *harness, *native_id, *claim;
+   int message_count;
+} aimee_native_checkpoint_t;
 
 typedef struct
 {
@@ -40,6 +51,8 @@ typedef struct
    /* Host-observed native state. Digests and the actual sent-prefix binding
     * contain no credential or duplicate transcript. Never model content. */
    const char *replay_scope, *replay_digest, *replay_wire, *replay_binding;
+   const aimee_native_checkpoint_t *native_checkpoint;
+   const char *native_harness; /* native compaction invalidates a derived cache only */
 } aimee_session_event_t;
 
 /* Canonical JSON, independent of native protocols. Returned objects are owned

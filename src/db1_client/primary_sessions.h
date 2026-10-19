@@ -52,6 +52,12 @@ extern "C"
    int db1_session_harness_bind(const char *session_id, const char *harness, const char *native_id,
                                 const char *principal);
 
+   /* Atomically consume/complete host cache metadata. Empty expected claims a
+    * missing key. Returns 0 exchanged, 1 stale/missing, -1 storage/refusal. */
+   int db1_session_harness_compare_swap(const char *session_id, const char *harness,
+                                        const char *expected, const char *replacement,
+                                        const char *principal);
+
    /* Upsert the canonical message array JSON for one primary
     * conversation session. Returns 0 on success. */
    int db1_primary_session_save(const char *session_id, const char *agent_name,

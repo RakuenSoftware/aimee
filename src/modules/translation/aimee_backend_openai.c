@@ -126,6 +126,88 @@ void openai_family_add_tool_choice(cJSON *out, const aimee_request_t *ir, int re
       cJSON_AddBoolToObject(out, "parallel_tool_calls", ir->parallel_tool_calls ? 1 : 0);
 }
 
+int openai_ir_set_host_profile(aimee_request_t *ir, const aimee_openai_host_profile_t *profile)
+{
+   if (!ir || !profile || ir->frontend != AIMEE_WIRE_OPENAI_CHAT || !ir->model || ir->raw ||
+       ir->raw_bytes || profile->n_fallback_models < 0 ||
+       (profile->n_fallback_models && !profile->fallback_models))
+      return -1;
+   cJSON *raw = cJSON_CreateObject();
+   if (!raw || !cJSON_AddStringToObject(raw, "model", ir->model))
+      goto fail;
+   if (profile->min_p >= 0 && !cJSON_AddNumberToObject(raw, "min_p", profile->min_p))
+      goto fail;
+   if (profile->repeat_penalty >= 0 &&
+       !cJSON_AddNumberToObject(raw, "repeat_penalty", profile->repeat_penalty))
+      goto fail;
+   if (profile->disable_thinking)
+   {
+      cJSON *kwargs = cJSON_AddObjectToObject(raw, "chat_template_kwargs");
+      if (!kwargs || !cJSON_AddBoolToObject(kwargs, "enable_thinking", 0))
+         goto fail;
+   }
+   if (profile->split_reasoning && !cJSON_AddBoolToObject(raw, "reasoning_split", 1))
+      goto fail;
+   if (profile->n_fallback_models)
+   {
+      if (!cJSON_AddStringToObject(raw, "route", "fallback"))
+         goto fail;
+      cJSON *models = cJSON_AddArrayToObject(raw, "models");
+      if (!models)
+         goto fail;
+      for (int i = -1; i < profile->n_fallback_models; i++)
+      {
+         const char *model = i < 0 ? ir->model : profile->fallback_models[i];
+         if (!model || !model[0])
+            continue;
+         int seen = 0;
+         const cJSON *entry;
+         cJSON_ArrayForEach(entry, models) seen |= !strcmp(entry->valuestring, model);
+         if (!seen)
+         {
+            cJSON *value = cJSON_CreateString(model);
+            if (!value || !cJSON_AddItemToArray(models, value))
+            {
+               cJSON_Delete(value);
+               goto fail;
+            }
+         }
+      }
+   }
+   ir->raw = raw;
+   return 0;
+fail:
+   cJSON_Delete(raw);
+   return -1;
+}
+
+/* Same-wire provider extensions remain owned by translation. The closed list
+ * cannot restore stale modeled fields or private host metadata after policy. */
+static int openai_profile_extensions(const aimee_request_t *ir, cJSON *out)
+{
+   if (ir->frontend != AIMEE_WIRE_OPENAI_CHAT || !ir->raw)
+      return 0;
+   const char *original_model =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ir->raw, "model"));
+   if (!!original_model != !!ir->model || (original_model && strcmp(original_model, ir->model)))
+      return 0; /* Model-specific routing/sampling cannot follow a model switch. */
+   static const char *const keys[] = {"min_p", "repeat_penalty", "chat_template_kwargs",
+                                      "route", "models",         "reasoning_split"};
+   for (size_t i = 0; i < sizeof keys / sizeof *keys; i++)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(ir->raw, keys[i]);
+      if (!value)
+         continue;
+      cJSON *copy = cJSON_Duplicate(value, 1);
+      if (!copy || !cJSON_AddItemToObject(out, keys[i], copy))
+      {
+         cJSON_Delete(copy);
+         return -1;
+      }
+   }
+   return 0;
+}
+
 cJSON *openai_backend_build(const aimee_request_t *ir)
 {
    if (aimee_ir_request_admit(ir))
@@ -295,6 +377,33 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
       for (int i = 0; i < ir->n_stop; i++)
          cJSON_AddItemToArray(
              stop, cJSON_CreateString(ir->stop_sequences[i] ? ir->stop_sequences[i] : ""));
+   }
+   if (openai_profile_extensions(ir, out))
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
+   return out;
+}
+
+cJSON *openai_backend_build_plain(const aimee_request_t *ir)
+{
+   if (aimee_ir_request_admit(ir))
+      return NULL;
+   aimee_request_t content = *ir;
+   content.has_temperature = content.has_top_p = content.has_top_k = 0;
+   content.raw = NULL;
+   content.raw_bytes = NULL;
+   cJSON *out = openai_backend_build(&content);
+   if (!out)
+      return NULL;
+   if ((ir->has_temperature && !cJSON_AddNumberToObject(out, "temperature", ir->temperature)) ||
+       (ir->has_top_p && !cJSON_AddNumberToObject(out, "top_p", ir->top_p)) ||
+       (ir->has_top_k && !cJSON_AddNumberToObject(out, "top_k", ir->top_k)) ||
+       openai_profile_extensions(ir, out))
+   {
+      cJSON_Delete(out);
+      return NULL;
    }
    return out;
 }

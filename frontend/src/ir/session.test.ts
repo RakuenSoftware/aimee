@@ -275,3 +275,65 @@ it('correlates an external result from the following request without reusing a c
   expect(result.byCall.get(toolBlockKey(state.messages[0], 0))?.map(block => block.content)).toEqual(['CROSS_TURN']);
   expect(result.matched.has(toolBlockKey(state.messages[2], 0))).toBe(false);
 });
+
+
+it('retains complete reasoning metadata without concatenation or identity changes', () => {
+  const d = (n: number, payload: import('./session').Delta) => envelope(n, { kind: 'delta', message_id: 'opaque', role: 'assistant', payload });
+  const events = [d(1, { type: 'TURN_START' }),
+    d(2, { type: 'BLOCK_START', block_id: 0, kind: 'thinking', thinking_id: 'rs_original' }),
+    d(3, { type: 'BLOCK_DELTA', block_id: 0, kind: 'thinking', encrypted_content: 'cipher' }),
+    d(4, { type: 'BLOCK_DELTA', block_id: 0, kind: 'thinking', thinking_id: 'rs_original', encrypted_content: 'cipher' })];
+  const partial = events.reduce(reduceSession, emptySession('s'));
+  expect(partial.messages[0].blocks[0]).toMatchObject({ thinking_id: 'rs_original', encrypted_content: 'cipher' });
+  for (const payload of [
+    { type: 'BLOCK_DELTA', block_id: 0, kind: 'thinking', thinking_id: 'changed' },
+    { type: 'BLOCK_DELTA', block_id: 0, kind: 'thinking', encrypted_content: 'replacement' },
+    { type: 'BLOCK_DELTA', block_id: 0, kind: 'text', encrypted_content: 'cipher' },
+    { type: 'BLOCK_STOP', block_id: 0, kind: 'thinking', encrypted_content: 'cipher' },
+    { type: 'TURN_STOP', thinking_id: 'rs_original' },
+  ] as import('./session').Delta[]) expect(() => reduceSession(partial, d(5, payload))).toThrow();
+  const state = [d(5, { type: 'BLOCK_STOP', block_id: 0 }), d(6, { type: 'TURN_STOP' })].reduce(reduceSession, partial);
+  expect(state.messages[0].blocks[0].encrypted_content).toBe('cipher');
+  expect(JSON.parse(JSON.stringify([...events, d(5, { type: 'BLOCK_STOP', block_id: 0 }), d(6, { type: 'TURN_STOP' })])).reduce(reduceSession, emptySession('s'))).toEqual(state);
+});
+
+it('retains authored text groups in live and durable deltas and rejects misplaced groups', () => {
+  const d = (sequence: number, payload: import('./session').Delta) => envelope(sequence, {
+    kind: 'delta', message_id: 'grouped', role: 'assistant', payload,
+  });
+  const events = [d(1, { type: 'TURN_START' }), d(2, { type: 'BLOCK_START', block_id: 0, kind: 'text', message_group: 2 })];
+  const state = events.reduce(reduceSession, emptySession('s'));
+  expect(state.messages[0].blocks[0].message_group).toBe(2);
+  expect(JSON.parse(JSON.stringify(events)).reduce(reduceSession, emptySession('s'))).toEqual(state);
+  for (const payload of [
+    { type: 'BLOCK_DELTA', block_id: 0, kind: 'text', message_group: 2 },
+    { type: 'BLOCK_START', block_id: 1, kind: 'thinking', message_group: 2 },
+    { type: 'BLOCK_START', block_id: 1, kind: 'text', message_group: 0 },
+    { type: 'BLOCK_START', block_id: 1, kind: 'text', message_group: 1.5 },
+    { type: 'TURN_STOP', message_group: 2 },
+  ] as import('./session').Delta[]) expect(() => reduceSession(state, d(3, payload))).toThrow();
+});
+
+
+it('advances native checkpoint cursors without adding model content', () => {
+  const checkpoint = { scope: 'a'.repeat(64), context_digest: 'b'.repeat(64), prefix_digest: 'c'.repeat(64),
+    claim: 'd'.repeat(32), harness: 'codex' as const, native_id: 'opaque:native', message_count: 2 };
+  const event = envelope(1, { kind: 'native_checkpoint', payload: checkpoint });
+  const state = reduceSession(emptySession('s'), event);
+  expect(state).toEqual({ ...emptySession('s'), sequence: '1' });
+  expect(reduceSession(emptySession('s'), JSON.parse(JSON.stringify(event)))).toEqual(state);
+  for (const payload of [
+    { ...checkpoint, scope: '' }, { ...checkpoint, context_digest: null }, { ...checkpoint, prefix_digest: 'X'.repeat(64) },
+    { ...checkpoint, claim: 'd'.repeat(31) }, { ...checkpoint, harness: 'unknown' }, { ...checkpoint, native_id: '' },
+    { ...checkpoint, native_id: '😀'.repeat(257) }, { ...checkpoint, message_count: 0 },
+    { ...checkpoint, message_count: 1.5 }, { ...checkpoint, message_count: 4097 }, { ...checkpoint, unmodeled_prompt: 'private' },
+  ]) expect(() => reduceSession(emptySession('s'), envelope(1, { kind: 'native_checkpoint', payload } as SessionEvent))).toThrow();
+});
+
+
+it('records native compaction without replacing canonical model history', () => {
+  const state = reduceSession(emptySession('s'), envelope(1, { kind: 'native_compaction', payload: { harness: 'codex' } }));
+  expect(state).toEqual({ ...emptySession('s'), sequence: '1' });
+  for (const payload of [{}, { harness: 'unknown' }, { harness: null }, { harness: 'claude', summary: 'native summary' }])
+    expect(() => reduceSession(emptySession('s'), envelope(1, { kind: 'native_compaction', payload } as SessionEvent))).toThrow();
+});

@@ -281,3 +281,14 @@ __attribute__((weak)) void router_advise_ir(const void *request)
 {
    (void)request;
 }
+
+/* Minimal ingress fixtures use synthetic API-key authentication. Claude OAuth
+ * header custody is exercised against the real owner in test_agent; an OAuth
+ * profile must not silently pass this unrelated fake-auth seam. */
+__attribute__((weak)) int agent_claude_oauth_headers(const agent_t *agent, char *headers,
+                                                     size_t capacity)
+{
+   (void)headers;
+   (void)capacity;
+   return agent && !strcmp(agent->auth_type, "claude-oauth") ? -1 : 0;
+}

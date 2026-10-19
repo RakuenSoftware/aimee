@@ -18,6 +18,8 @@
 #include "cJSON.h"
 #include "log.h"
 #include "platform_process.h"
+#include "util.h"
+#include <stdint.h>
 #include <openssl/crypto.h>
 #include <time.h>
 #include <string.h>
@@ -71,8 +73,11 @@ static int oauth_secret_load(const char *client_name, const char *vcred, const c
 {
    if (!buf || len == 0)
       return -1;
-   if (vault_service_get_server_principal(client_name, vcred, buf, len) == VAULT_OK && buf[0])
-      return 0;
+   vault_status_t status = vault_service_get_server_principal(client_name, vcred, buf, len);
+   if (status == VAULT_OK)
+      return buf[0] ? 0 : -1;
+   if (status != VAULT_NO_ENTRY)
+      return -2; /* a custody failure must not become an absent optional field */
    char key[256];
    if (oauth_legacy_key(key, sizeof key, db1_fmt, client_name) != 0)
       return -1;
@@ -82,7 +87,7 @@ static int oauth_secret_load(const char *client_name, const char *vcred, const c
           db1_secret_remove(key) != 0)
       {
          OPENSSL_cleanse(buf, len);
-         return -1;
+         return -2;
       }
       /* Re-read through the only supported authority. This also proves the
        * durable Vault record is usable before the caller receives plaintext. */
@@ -149,35 +154,37 @@ int oauth_token_parse_response(const char *json, oauth_token_response_t *out)
 
 /* ---- Secret-store helpers ---- */
 
+static int oauth_store_tokens(const char *client_name, const oauth_token_response_t *resp,
+                              const char *source_digest)
+{
+   if (!client_name || !resp || !resp->access_token[0] ||
+       (source_digest && (!resp->refresh_token[0] || strlen(source_digest) != 64 ||
+                          strspn(source_digest, "0123456789abcdef") != 64)))
+      return -1;
+   char expiry[32];
+   snprintf(expiry, sizeof expiry, "%ld", resp->expires_at > 0 ? resp->expires_at : 0L);
+   vault_store_write_t writes[5] = {{OAUTH_VCRED_ACCESS, resp->access_token},
+                                    {OAUTH_VCRED_EXPIRES, expiry},
+                                    {OAUTH_VCRED_REAUTH, "0"}};
+   size_t count = 3;
+   if (resp->refresh_token[0])
+      writes[count++] = (vault_store_write_t){OAUTH_VCRED_REFRESH, resp->refresh_token};
+   if (source_digest)
+      writes[count++] = (vault_store_write_t){OAUTH_SOURCE_CREDENTIAL, source_digest};
+   /* An explicit zero marker prevents legacy plaintext rejection state from
+    * resurfacing after this successful atomic update. No token or source fence
+    * becomes visible until all encryption and the one durable replace succeed. */
+   return vault_service_write_server_batch(client_name, writes, count) == VAULT_OK ? 0 : -1;
+}
+
 int oauth_token_store(const char *client_name, const oauth_token_response_t *resp)
 {
-   if (!client_name || !resp || !resp->access_token[0])
-      return -1;
-
-   int rc = 0;
-
-   if (oauth_secret_store(client_name, OAUTH_VCRED_ACCESS, resp->access_token) != 0)
-      rc = -1;
-
-   if (resp->refresh_token[0])
-   {
-      if (oauth_secret_store(client_name, OAUTH_VCRED_REFRESH, resp->refresh_token) != 0)
-         rc = -1;
-   }
-
-   /* An absent expiry belongs to the new token too. Retaining the previous
-    * account/token's expiry can incorrectly expire a newly imported login. */
-   char ea_str[32];
-   snprintf(ea_str, sizeof(ea_str), "%ld", resp->expires_at > 0 ? resp->expires_at : 0L);
-   if (oauth_secret_store(client_name, OAUTH_VCRED_EXPIRES, ea_str) != 0)
-      rc = -1;
-
-   /* A usable token is now stored (fresh exchange or an operator re-auth) — clear
-    * any standing "re-auth required" marker (D6). */
-   if (rc == 0)
-      oauth_secret_remove(client_name, OAUTH_VCRED_REAUTH, OAUTH_DB1FMT_REAUTH);
-
-   return rc;
+   return oauth_store_tokens(client_name, resp, NULL);
+}
+int oauth_token_store_source(const char *client_name, const oauth_token_response_t *resp,
+                             const char *source_digest)
+{
+   return source_digest ? oauth_store_tokens(client_name, resp, source_digest) : -1;
 }
 
 /* True if `client_name`'s OAuth credential is marked REAUTH_REQUIRED — a prior
@@ -195,27 +202,40 @@ int oauth_token_reauth_required(const char *client_name)
 
 int oauth_token_load(const char *client_name, char *buf, size_t len)
 {
-   if (!client_name || !buf || len == 0)
+   if (!buf || !len)
       return -1;
-
-   if (oauth_secret_load(client_name, OAUTH_VCRED_ACCESS, OAUTH_KEY_ACCESS_TOKEN, buf, len) != 0)
+   OPENSSL_cleanse(buf, len);
+   if (!client_name)
       return -1;
-
-   /* Check expiry */
-   char ea_str[32] = "";
-   if (oauth_secret_load(client_name, OAUTH_VCRED_EXPIRES, OAUTH_KEY_EXPIRES_AT, ea_str,
-                         sizeof(ea_str)) == 0 &&
-       ea_str[0])
-   {
-      long expires_at = atol(ea_str);
-      if (expires_at > 0 && time(NULL) >= expires_at)
+   char expiry[32] = "", reauth[8] = "";
+   vault_store_read_t reads[] = {{OAUTH_VCRED_ACCESS, buf, len, 0},
+                                 {OAUTH_VCRED_EXPIRES, expiry, sizeof expiry, 0},
+                                 {OAUTH_VCRED_REAUTH, reauth, sizeof reauth, 0}};
+   if (vault_service_read_server_snapshot(client_name, reads, 3) != VAULT_OK)
+      goto invalid;
+   const char *legacy[] = {OAUTH_KEY_ACCESS_TOKEN, OAUTH_KEY_EXPIRES_AT, OAUTH_DB1FMT_REAUTH};
+   int migrated = 0;
+   for (size_t i = 0; i < 3; i++)
+      if (!reads[i].present)
       {
-         buf[0] = '\0';
-         return -1; /* expired */
+         int rc = oauth_secret_load(client_name, reads[i].credential, legacy[i], reads[i].value,
+                                    reads[i].capacity);
+         if (rc == -2)
+            goto invalid;
+         if (!rc)
+            migrated = 1;
       }
-   }
-
+   /* Compatibility values never escape directly. A migration or concurrent
+    * writer is followed by one fresh, immutable credential/expiry/marker view. */
+   if (migrated && vault_service_read_server_snapshot(client_name, reads, 3) != VAULT_OK)
+      goto invalid;
+   if (!reads[0].present || !buf[0] || reauth[0] == '1' ||
+       (reads[1].present && atol(expiry) > 0 && time(NULL) >= atol(expiry)))
+      goto invalid;
    return 0;
+invalid:
+   OPENSSL_cleanse(buf, len);
+   return -1;
 }
 
 int oauth_token_remove(const char *client_name)
@@ -232,11 +252,11 @@ int oauth_token_remove(const char *client_name)
 
 /*
  * Build and run a curl command for a token endpoint POST.
- * |post_data| is the application/x-www-form-urlencoded body.
+ * |post_data| is the pre-encoded form or JSON body.
  * On success, |*resp_out| is a malloc'd JSON string (caller frees).
  */
-static int curl_post_token(const char *token_endpoint, const char *post_data, char **resp_out,
-                           size_t *resp_len_out, int *http_status_out)
+static int curl_post_token(const char *token_endpoint, const char *post_data, int json_body,
+                           char **resp_out, size_t *resp_len_out, int *http_status_out)
 {
    if (!token_endpoint || !post_data || !resp_out)
       return -1;
@@ -247,15 +267,22 @@ static int curl_post_token(const char *token_endpoint, const char *post_data, ch
     * the caller can tell a rejected refresh (4xx `invalid_grant` → re-auth, D6)
     * from a transient transport/5xx error. `-w '\n%{http_code}'` appends the
     * status after the body; we split it off below. We pre-encode the body. */
+   char *endpoint = shell_quote(token_endpoint);
+   if (!endpoint)
+      return -1;
    char cmd[4096];
-   snprintf(cmd, sizeof(cmd),
-            "curl -s -X POST"
-            " -H 'Content-Type: application/x-www-form-urlencoded'"
-            " -H 'Accept: application/json'"
-            " --data-binary @-"
-            " -w '\\n%%{http_code}'"
-            " '%s'",
-            token_endpoint);
+   int written =
+       snprintf(cmd, sizeof(cmd),
+                "curl -s -X POST --connect-timeout 10 --max-time 30"
+                " -H 'Content-Type: %s'"
+                " -H 'Accept: application/json'"
+                " --data-binary @-"
+                " -w '\\n%%{http_code}'"
+                " --url %s",
+                json_body ? "application/json" : "application/x-www-form-urlencoded", endpoint);
+   free(endpoint);
+   if (written < 0 || (size_t)written >= sizeof cmd)
+      return -1;
 
    char *raw = NULL;
    size_t raw_len = 0;
@@ -283,101 +310,132 @@ static int curl_post_token(const char *token_endpoint, const char *post_data, ch
 
 /* Minimal percent-encoding for OAuth POST body values.
  * Encodes characters that are not unreserved per RFC 3986 §2.3. */
-static void pct_encode(const char *in, char *out, size_t outlen)
+static char *pct_encode(const char *in)
 {
    static const char *safe = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+   size_t length = strlen(in);
+   if (length > (SIZE_MAX - 1) / 3)
+      return NULL;
+   char *out = malloc(length * 3 + 1);
+   if (!out)
+      return NULL;
    size_t pos = 0;
-   for (; *in && pos + 4 < outlen; in++)
+   for (; *in; in++)
    {
       if (strchr(safe, (unsigned char)*in))
          out[pos++] = *in;
       else
       {
-         snprintf(out + pos, outlen - pos, "%%%02X", (unsigned char)*in);
+         snprintf(out + pos, 4, "%%%02X", (unsigned char)*in);
          pos += 3;
       }
    }
    out[pos] = '\0';
+   return out;
+}
+
+static void oauth_cleanse_free(char *value)
+{
+   if (value)
+      OPENSSL_cleanse(value, strlen(value));
+   free(value);
+}
+
+static char *oauth_refresh_body(const oauth_refresh_profile_t *profile, const char *refresh)
+{
+   char *body = NULL;
+   if (profile->format == OAUTH_REFRESH_JSON)
+   {
+      cJSON *json = cJSON_CreateObject();
+      if (json && cJSON_AddStringToObject(json, "grant_type", "refresh_token") &&
+          cJSON_AddStringToObject(json, "refresh_token", refresh) &&
+          cJSON_AddStringToObject(json, "client_id", profile->client_id) &&
+          (!profile->scope || cJSON_AddStringToObject(json, "scope", profile->scope)))
+         body = cJSON_PrintUnformatted(json);
+      /* The temporary tree contains the refresh secret too. */
+      cJSON *secret = cJSON_GetObjectItemCaseSensitive(json, "refresh_token");
+      if (cJSON_IsString(secret))
+         OPENSSL_cleanse(secret->valuestring, strlen(secret->valuestring));
+      cJSON_Delete(json);
+      return body;
+   }
+   char *encoded_refresh = pct_encode(refresh), *encoded_client = pct_encode(profile->client_id);
+   if (encoded_refresh && encoded_client)
+   {
+      size_t capacity = strlen(encoded_refresh) + strlen(encoded_client) + 64;
+      body = malloc(capacity);
+      if (body)
+         snprintf(body, capacity, "grant_type=refresh_token&refresh_token=%s&client_id=%s",
+                  encoded_refresh, encoded_client);
+   }
+   oauth_cleanse_free(encoded_refresh);
+   free(encoded_client);
+   return body;
+}
+
+static int oauth_refresh_profile(const char *client_name, const oauth_refresh_profile_t *profile)
+{
+   if (!client_name || !profile || !profile->client_id || !profile->token_endpoint ||
+       (profile->format != OAUTH_REFRESH_FORM && profile->format != OAUTH_REFRESH_JSON))
+      return OAUTH_REFRESH_TRANSIENT;
+   oauth_token_response_t result = {0};
+   char refresh_token[sizeof result.refresh_token] = "";
+   char *body = NULL, *resp = NULL;
+   int rc = OAUTH_REFRESH_TRANSIENT, http_status = 0;
+   if (oauth_secret_load(client_name, OAUTH_VCRED_REFRESH, OAUTH_KEY_REFRESH_TOKEN, refresh_token,
+                         sizeof refresh_token) ||
+       !refresh_token[0])
+      goto done;
+   body = oauth_refresh_body(profile, refresh_token);
+   if (!body ||
+       curl_post_token(profile->token_endpoint, body, profile->format == OAUTH_REFRESH_JSON, &resp,
+                       NULL, &http_status) ||
+       !resp)
+      goto done;
+
+   /* Only the actual OAuth error field can reject a refresh credential. Proxy
+    * messages mentioning invalid_grant are not an operator reauthentication. */
+   if (http_status >= 400 && http_status < 500)
+   {
+      cJSON *error_body = cJSON_ParseWithOpts(resp, NULL, 1);
+      const cJSON *error = cJSON_GetObjectItemCaseSensitive(error_body, "error");
+      int rejected = cJSON_IsString(error) && !strcmp(error->valuestring, "invalid_grant");
+      cJSON_Delete(error_body);
+      if (rejected)
+      {
+         aimee_log(LOG_ERROR, "oauth_flow", "refresh rejected for %s: reauthentication required",
+                   client_name);
+         (void)oauth_secret_store(client_name, OAUTH_VCRED_REAUTH, "1");
+         rc = OAUTH_REFRESH_REAUTH;
+      }
+      goto done;
+   }
+   /* Never persist an error response even if it carries token-shaped fields. */
+   if (http_status < 200 || http_status >= 300 || oauth_token_parse_response(resp, &result))
+      goto done;
+   rc = oauth_token_store(client_name, &result) ? OAUTH_REFRESH_TRANSIENT : 0;
+done:
+   OPENSSL_cleanse(refresh_token, sizeof refresh_token);
+   OPENSSL_cleanse(&result, sizeof result);
+   oauth_cleanse_free(body);
+   oauth_cleanse_free(resp);
+   return rc;
 }
 
 int oauth_token_refresh(const char *client_name, const char *client_id, const char *token_endpoint)
 {
-   if (!client_name || !client_id || !token_endpoint)
-      return -1;
-
-   /* Load the stored refresh token */
-   char refresh_token[512] = "";
-   if (oauth_secret_load(client_name, OAUTH_VCRED_REFRESH, OAUTH_KEY_REFRESH_TOKEN, refresh_token,
-                         sizeof(refresh_token)) != 0 ||
-       !refresh_token[0])
-   {
-      aimee_log(LOG_WARN, "oauth_flow", "no refresh token stored for %s", client_name);
-      return -1;
-   }
-
-   char enc_refresh[512], enc_client[256];
-   pct_encode(refresh_token, enc_refresh, sizeof(enc_refresh));
-   pct_encode(client_id, enc_client, sizeof(enc_client));
-
-   char body[2048];
-   snprintf(body, sizeof(body),
-            "grant_type=refresh_token"
-            "&refresh_token=%s"
-            "&client_id=%s",
-            enc_refresh, enc_client);
-
-   char *resp = NULL;
-   size_t resp_len = 0;
-   int http_status = 0;
-   if (curl_post_token(token_endpoint, body, &resp, &resp_len, &http_status) != 0 || !resp)
-   {
-      free(resp);
-      aimee_log(LOG_WARN, "oauth_flow", "token refresh failed for %s (transport)", client_name);
-      return OAUTH_REFRESH_TRANSIENT; /* network/transport — retry later, NOT a re-auth */
-   }
-
-   /* A 4xx whose body says `invalid_grant` means the IdP rejected the REFRESH
-    * TOKEN itself (revoked/expired) — the server cannot recover, so mark
-    * REAUTH_REQUIRED and surface an actionable error (D6). Latch ONLY on that
-    * precise OAuth error: a bare 4xx (proxy 403, 429 rate-limit, transient 400)
-    * must NOT pin the marker and force a needless re-auth — those are transient. */
-   if (http_status >= 400 && http_status < 500)
-   {
-      int is_invalid_grant = (strstr(resp, "invalid_grant") != NULL);
-      if (is_invalid_grant)
-      {
-         aimee_log(LOG_ERROR, "oauth_flow",
-                   "refresh REJECTED for %s (HTTP %d invalid_grant) — re-auth required: run "
-                   "`aimee codex reauth`",
-                   client_name, http_status);
-         (void)oauth_secret_store(client_name, OAUTH_VCRED_REAUTH, "1");
-         free(resp);
-         return OAUTH_REFRESH_REAUTH;
-      }
-      aimee_log(LOG_WARN, "oauth_flow",
-                "token refresh got HTTP %d (no invalid_grant) for %s — treating as transient",
-                http_status, client_name);
-      free(resp);
-      return OAUTH_REFRESH_TRANSIENT;
-   }
-
-   oauth_token_response_t result;
-   int rc = oauth_token_parse_response(resp, &result);
-   free(resp);
-   if (rc != 0)
-   {
-      aimee_log(LOG_WARN, "oauth_flow", "token refresh returned invalid JSON for %s (HTTP %d)",
-                client_name, http_status);
-      return OAUTH_REFRESH_TRANSIENT;
-   }
-
-   return oauth_token_store(client_name, &result) == 0 ? 0 : OAUTH_REFRESH_TRANSIENT;
+   const oauth_refresh_profile_t profile = {.client_id = client_id,
+                                            .token_endpoint = token_endpoint};
+   return oauth_refresh_profile(client_name, &profile);
 }
 
-int oauth_token_get(const char *client_name, const char *client_id, const char *token_endpoint,
-                    int skew_secs, char *buf, size_t len)
+int oauth_token_get_profile(const char *client_name, const oauth_refresh_profile_t *profile,
+                            int skew_secs, char *buf, size_t len)
 {
-   if (!client_name || !buf || len == 0)
+   if (!buf || len == 0)
+      return -1;
+   buf[0] = '\0';
+   if (!client_name || oauth_token_reauth_required(client_name))
       return -1;
 
    /* Check whether the stored token is near expiry */
@@ -392,13 +450,27 @@ int oauth_token_get(const char *client_name, const char *client_id, const char *
          need_refresh = 1;
    }
 
-   if (need_refresh && client_id && token_endpoint)
-      oauth_token_refresh(client_name, client_id, token_endpoint);
+   if (need_refresh && profile && profile->client_id && profile->token_endpoint)
+   {
+      if (oauth_refresh_profile(client_name, profile) == OAUTH_REFRESH_REAUTH)
+         return -1;
+   }
 
-   /* Try to load the (possibly refreshed) access token */
-   if (oauth_secret_load(client_name, OAUTH_VCRED_ACCESS, OAUTH_KEY_ACCESS_TOKEN, buf, len) != 0 ||
-       buf[0] == '\0')
+   /* A transient refresh failure may leave a still-valid access token usable,
+    * but must never revive an expired token or a rejected credential. */
+   if (oauth_token_reauth_required(client_name) || oauth_token_load(client_name, buf, len) != 0 ||
+       !buf[0])
+   {
+      OPENSSL_cleanse(buf, len);
       return -1;
-
+   }
    return 0;
+}
+
+int oauth_token_get(const char *client_name, const char *client_id, const char *token_endpoint,
+                    int skew_secs, char *buf, size_t len)
+{
+   const oauth_refresh_profile_t profile = {.client_id = client_id,
+                                            .token_endpoint = token_endpoint};
+   return oauth_token_get_profile(client_name, &profile, skew_secs, buf, len);
 }

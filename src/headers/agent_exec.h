@@ -3,6 +3,7 @@
 
 #include "agent_types.h"
 #include <aimee/ir/aimee_ir.h>
+#include <aimee/tools/module_api.h>
 
 struct cJSON; /* forward declaration for gemini_prompt_cache_attach */
 
@@ -257,9 +258,12 @@ void agent_ssh_cleanup(const agent_network_t *network, const char *key_path,
                        const char *session_id);
 
 /* Policy, trace, confidence */
-int tool_validate(const char *tool_name, const char *args_json, char *err_out, size_t err_len);
+/* Validate against the exact admitted IR function schema. Optional registry
+ * enable/disable state remains policy; registry/provider schemas cannot replace
+ * the advertised contract. Arguments are the same canonical bytes as dispatch. */
+int tool_validate_ir(const aimee_tool_t *tool, const char *args_json, char *err_out,
+                     size_t err_len);
 const char *tool_suggest(const char *name);
-const char *tool_side_effect(const char *tool_name);
 char *agent_collect_tool_prompts(void);
 void agent_trace_log(int plan_id, int turn, const char *direction, const char *content,
                      const char *tool_name, const char *tool_args, const char *tool_result,
@@ -269,6 +273,12 @@ int policy_check_tool(const char *tool_name, const char *side_effect, const char
                       char *reason_out, size_t reason_len);
 int policy_check_tool_attempt(const char *tool_name, const char *side_effect, const char *args_json,
                               const char *attempt_id, char *reason_out, size_t reason_len);
+int tool_policy_metadata(const char *tool, aimee_tool_metadata_t *metadata, char *effect,
+                         size_t effect_len, char *reason, size_t reason_len);
+int policy_check_tool_metadata_attempt(const char *tool, const aimee_tool_metadata_t *metadata,
+                                       const char *effect, const char *arguments,
+                                       const char *attempt, char *reason, size_t reason_len);
+
 int policy_check_session_tool(const char *session, const char *tool, const char *arguments,
                               const char *attempt, char *reason, size_t reason_len);
 char *policy_observe_indexed(const char *tool, const char *arguments, const char *attempt,

@@ -1,0 +1,207 @@
+#include <aimee/translation/aimee_ir_stream.h>
+#include "cJSON.h"
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+
+static aimee_ir_response_builder_t observed;
+static aimee_responses_frontend_t *frontend;
+static int client_deltas, client_done;
+static void capture(void *context, const char *name, const char *json)
+{
+   (void)context;
+   cJSON *event = cJSON_Parse(json);
+   assert(event);
+   if (strstr(name, ".delta"))
+      client_deltas++;
+   if (strstr(name, ".done") || !strcmp(name, "response.completed"))
+      client_done++;
+   cJSON_Delete(event);
+}
+static int sink(void *context, const aimee_delta_t *delta)
+{
+   int *count = context;
+   (*count)++;
+   /* The adapter must leave client completion to the durable host owner. */
+   assert(delta->type != AIMEE_DELTA_TURN_STOP);
+   int rc = aimee_ir_response_builder_apply(&observed, delta);
+   return rc || (frontend && aimee_responses_frontend_delta(frontend, delta, capture, NULL));
+}
+static int event(aimee_responses_stream_t *stream, const char *name, const char *body, int *count)
+{
+   cJSON *payload = cJSON_Parse(body);
+   assert(payload);
+   int rc = aimee_responses_stream_feed(stream, name, payload, sink, count);
+   cJSON_Delete(payload);
+   return rc;
+}
+static aimee_responses_stream_t *start(int *count)
+{
+   aimee_ir_response_builder_free(&observed);
+   *count = 0;
+   aimee_responses_stream_t *stream = aimee_responses_stream_new();
+   assert(stream);
+   assert(!event(stream, "response.output_item.added",
+                 "{\"output_index\":0,\"item\":{\"id\":\"m\",\"type\":\"message\"}}", count));
+   return stream;
+}
+static int text(aimee_responses_stream_t *stream, int *count)
+{
+   return event(stream, "response.output_text.delta",
+                "{\"output_index\":0,\"content_index\":0,\"item_id\":\"m\",\"delta\":\"Hel\"}",
+                count);
+}
+#define COMPLETE                                                                                   \
+   "{\"response\":{\"id\":\"r\",\"status\":\"completed\",\"output\":[{\"type\":\"message\","       \
+   "\"id\":\"m\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hello\"}]}],\"usage\":{"        \
+   "\"input_tokens\":7,\"output_tokens\":2}}}"
+int main(void)
+{
+   int count;
+   aimee_response_t final = {0};
+   frontend = aimee_responses_frontend_new("client", "model", 10);
+   assert(frontend);
+   aimee_responses_stream_t *stream = start(&count);
+   assert(!text(stream, &count));
+   assert(count == 3 && !strcmp(observed.response.content[0].text, "Hel"));
+   assert(client_deltas == 1 && client_done == 0);
+   assert(aimee_responses_stream_take(stream, &final) < 0); /* truncated stream */
+   assert(!event(stream, "response.completed", COMPLETE, &count));
+   assert(!observed.complete && !strcmp(observed.response.content[0].text, "Hello"));
+   assert(!aimee_responses_stream_take(stream, &final));
+   assert(final.usage_in == 7 && final.usage_out == 2 && final.content[0].message_group == 1);
+   assert(!aimee_responses_frontend_matches(frontend, &final));
+   assert(client_done == 0 && client_deltas == 2);
+   assert(!aimee_responses_frontend_complete(frontend, &final, capture, NULL));
+   assert(client_done == 4);
+   assert(aimee_responses_frontend_complete(frontend, &final, capture, NULL) < 0);
+   aimee_responses_frontend_free(frontend);
+   frontend = NULL;
+   assert(aimee_responses_stream_take(stream, &final) < 0);
+   aimee_response_free(&final);
+   aimee_responses_stream_free(stream);
+
+   frontend = aimee_responses_frontend_new("grouped", "model", 1);
+   client_deltas = client_done = 0;
+   stream = start(&count);
+   assert(!text(stream, &count));
+   assert(!event(stream, "response.output_text.delta",
+                 "{\"output_index\":0,\"content_index\":1,\"item_id\":\"m\",\"delta\":\"second\"}",
+                 &count));
+   assert(!event(stream, "response.output_item.added",
+                 "{\"output_index\":1,\"item\":{\"id\":\"m2\",\"type\":\"message\"}}", &count));
+   assert(!event(stream, "response.output_text.delta",
+                 "{\"output_index\":1,\"content_index\":0,\"item_id\":\"m2\",\"delta\":\"third\"}",
+                 &count));
+   assert(!event(stream, "response.completed",
+                 "{\"response\":{\"output\":[{\"id\":\"m\",\"type\":\"message\",\"content\":[{"
+                 "\"type\":\"output_text\",\"text\":\"Hel\"},{\"type\":\"output_text\",\"text\":"
+                 "\"second\"}]},{\"id\":\"m2\",\"type\":\"message\",\"content\":[{\"type\":"
+                 "\"output_text\",\"text\":\"third\"}]}]}}",
+                 &count));
+   assert(!aimee_responses_stream_take(stream, &final));
+   assert(final.n_content == 3 && final.content[0].message_group == 1 &&
+          final.content[1].message_group == 1 && final.content[2].message_group == 2);
+   assert(client_deltas == 3 && !client_done);
+   assert(!aimee_responses_frontend_complete(frontend, &final, capture, NULL));
+   assert(client_done == 9);
+   aimee_responses_frontend_free(frontend);
+   frontend = NULL;
+   aimee_response_free(&final);
+   aimee_responses_stream_free(stream);
+
+   stream = start(&count);
+   assert(!text(stream, &count));
+   assert(event(stream, "response.completed",
+                "{\"response\":{\"output\":[{\"id\":\"m\",\"type\":\"message\",\"content\":[{"
+                "\"type\":\"output_text\",\"text\":\"rewritten\"}]}]}}",
+                &count) < 0);
+   assert(aimee_responses_stream_take(stream, &final) < 0);
+   aimee_responses_stream_free(stream);
+
+   stream = start(&count);
+   assert(
+       event(stream, "response.output_text.delta",
+             "{\"output_index\":0,\"content_index\":0,\"item_id\":\"foreign\",\"delta\":\"bad\"}",
+             &count) < 0);
+   assert(event(stream, "response.completed", COMPLETE, &count) < 0);
+   aimee_responses_stream_free(stream);
+
+   stream = start(&count);
+   assert(!event(stream, "response.output_item.done",
+                 "{\"output_index\":0,\"item\":{\"id\":\"m\",\"type\":\"message\",\"content\":[{"
+                 "\"type\":\"output_text\",\"text\":\"first completed value\"}]}}",
+                 &count));
+   assert(event(stream, "response.completed",
+                "{\"response\":{\"output\":[{\"id\":\"m\",\"type\":\"message\",\"content\":[{"
+                "\"type\":\"output_text\",\"text\":\"conflicting terminal value\"}]}]}}",
+                &count) < 0);
+   assert(aimee_responses_stream_take(stream, &final) < 0);
+   aimee_responses_stream_free(stream);
+
+   aimee_ir_response_builder_free(&observed);
+   stream = aimee_responses_stream_new();
+   count = 0;
+   assert(!event(stream, "response.output_item.added",
+                 "{\"output_index\":0,\"item\":{\"id\":\"fc\",\"type\":\"function_call\",\"call_"
+                 "id\":\"call\",\"name\":\"read\",\"namespace\":\"fs\"}}",
+                 &count));
+   assert(!event(stream, "response.function_call_arguments.delta",
+                 "{\"output_index\":0,\"item_id\":\"fc\",\"delta\":\"{\\\"path\\\":\"}", &count));
+   assert(!event(
+       stream, "response.completed",
+       "{\"response\":{\"output\":[{\"id\":\"fc\",\"type\":\"function_call\",\"call_id\":\"call\","
+       "\"name\":\"read\",\"namespace\":\"fs\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"}]}}",
+       &count));
+   assert(!aimee_responses_stream_take(stream, &final));
+   assert(final.stop_reason == AIMEE_STOP_TOOL_USE &&
+          !strcmp(final.content[0].tool_namespace, "fs"));
+   aimee_response_free(&final);
+   aimee_responses_stream_free(stream);
+
+   aimee_ir_response_builder_free(&observed);
+   stream = aimee_responses_stream_new();
+   assert(!event(stream, "response.output_item.added",
+                 "{\"output_index\":0,\"item\":{\"id\":\"white\",\"type\":\"function_call\",\"call_"
+                 "id\":\"w\",\"name\":\"read\"}}",
+                 &count));
+   assert(!event(stream, "response.function_call_arguments.delta",
+                 "{\"output_index\":0,\"item_id\":\"white\",\"delta\":\"{ \\\"path\\\" : \"}",
+                 &count));
+   assert(!event(stream, "response.completed",
+                 "{\"response\":{\"output\":[{\"id\":\"white\",\"type\":\"function_call\",\"call_"
+                 "id\":\"w\",\"name\":\"read\",\"arguments\":\"{ \\\"path\\\" : \\\"a\\\" }\"}]}}",
+                 &count));
+   assert(!aimee_responses_stream_take(stream, &final));
+   aimee_response_free(&final);
+   aimee_responses_stream_free(stream);
+
+   aimee_ir_response_builder_free(&observed);
+   frontend = aimee_responses_frontend_new("thinking", "model", 1);
+   stream = aimee_responses_stream_new();
+   assert(!event(stream, "response.output_item.added",
+                 "{\"output_index\":0,\"item\":{\"id\":\"rs\",\"type\":\"reasoning\"}}", &count));
+   assert(!event(stream, "response.reasoning_summary_text.delta",
+                 "{\"output_index\":0,\"summary_index\":0,\"item_id\":\"rs\",\"delta\":\"first\"}",
+                 &count));
+   assert(!event(stream, "response.reasoning_summary_text.delta",
+                 "{\"output_index\":0,\"summary_index\":1,\"item_id\":\"rs\",\"delta\":\"second\"}",
+                 &count));
+   assert(!event(stream, "response.incomplete",
+                 "{\"response\":{\"status\":\"incomplete\",\"output\":[{\"id\":\"rs\",\"type\":"
+                 "\"reasoning\",\"encrypted_content\":\"cipher\",\"summary\":[{\"text\":\"first\"},"
+                 "{\"text\":\"second\"}]}]}}",
+                 &count));
+   assert(!aimee_responses_stream_take(stream, &final));
+   assert(final.stop_reason == AIMEE_STOP_MAX_TOKENS);
+   assert(!aimee_responses_frontend_complete(frontend, &final, capture, NULL));
+   aimee_responses_frontend_free(frontend);
+   frontend = NULL;
+   assert(!strcmp(observed.response.content[0].thinking_encrypted_content, "cipher"));
+   assert(!strcmp(observed.response.content[0].text, "first\n\nsecond"));
+   aimee_response_free(&final);
+   aimee_responses_stream_free(stream);
+   aimee_ir_response_builder_free(&observed);
+   puts("responses stream: passed");
+   return 0;
+}

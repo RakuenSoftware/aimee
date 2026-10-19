@@ -37,7 +37,7 @@ struct server_native_runtime
    server_delegate_scope_t delegate;
    const workspace_provider_t *workspace;
    char cwd[MAX_PATH_LEN];
-   int job_id;
+   int job_id, api_key_source, claude_source;
    char session[128], token[65], url[64], binding[65], lineage[65];
 };
 
@@ -107,8 +107,8 @@ static int native_forward(const char *method, const char *path, const char *head
        strcmp(source.principal, runtime->owner.vault_principal))
       return -1;
    int model_request = !strcmp(method, "POST") && (strncmp(path, "/v1/mcp/", 8) != 0);
-   /* Model state is account-bound only once the Vault owner supplies stable
-    * lineage. Other native credential sources still need that custody cutover. */
+   /* Model state requires the actual selected Vault source's stable lineage.
+    * Unsupported credential sources cannot borrow a default account. */
    if (model_request && !runtime->replay)
       return -1;
    char *input = malloc((size_t)length + 1);
@@ -119,8 +119,8 @@ static int native_forward(const char *method, const char *path, const char *head
    input[length] = 0;
    if (!model_request && !strcmp(method, "POST"))
    {
-      /* Session metadata is host identity, even inside the MCP body. Tool
-       * arguments remain intact; exact numeric argument spelling is retained. */
+      /* Session and project scope are host identity, even inside the MCP body.
+       * Tool arguments remain intact; exact numeric spelling is retained. */
       cJSON *request = aimee_ir_json_parse_frame(input, (size_t)length);
       if (!cJSON_IsObject(request))
       {
@@ -129,9 +129,9 @@ static int native_forward(const char *method, const char *path, const char *head
          return -1;
       }
       cJSON_DeleteItemFromObjectCaseSensitive(request, "session_id");
+      cJSON_DeleteItemFromObjectCaseSensitive(request, "cwd");
       if (!cJSON_AddStringToObject(request, "session_id", runtime->session) ||
-          (runtime->cwd[0] && !cJSON_GetObjectItemCaseSensitive(request, "cwd") &&
-           !cJSON_AddStringToObject(request, "cwd", runtime->cwd)))
+          (runtime->cwd[0] && !cJSON_AddStringToObject(request, "cwd", runtime->cwd)))
       {
          cJSON_Delete(request);
          free(input);
@@ -188,6 +188,8 @@ static int native_forward(const char *method, const char *path, const char *head
    aimee_ir_session_begin_task();
    int rc = -1;
    agent_codex_credentials_t current = {0};
+   agent_api_credentials_t current_api = {0};
+   agent_claude_credentials_t current_claude = {0};
    request_context_t admitted = runtime->owner;
    unsigned char request_nonce[16];
    if (platform_random_bytes(request_nonce, sizeof request_nonce))
@@ -206,10 +208,31 @@ static int native_forward(const char *method, const char *path, const char *head
    {
       const char *registration = runtime->selected.registration[0] ? runtime->selected.registration
                                                                    : runtime->selected.name;
-      if (agent_codex_connection_credentials(registration, &current) ||
-          strcmp(current.source_digest, runtime->lineage))
-         goto restore;
-      agent_set_request_codex_creds_for(&runtime->selected, current.token, current.account_id);
+      if (runtime->claude_source)
+      {
+         if (agent_claude_connection_credentials(registration, &current_claude) ||
+             strcmp(current_claude.source_digest, runtime->lineage) ||
+             (model_request &&
+              agent_set_request_claude_creds_for(&runtime->selected, &current_claude)))
+            goto restore;
+      }
+      else if (runtime->api_key_source)
+      {
+         if (agent_api_connection_credentials(&runtime->selected, &current_api) ||
+             strcmp(current_api.source_digest, runtime->lineage) ||
+             (model_request &&
+              agent_set_request_api_credentials_for(&runtime->selected, &current_api)))
+            goto restore;
+      }
+      else
+      {
+         if (agent_codex_connection_credentials(registration, &current) ||
+             strcmp(current.source_digest, runtime->lineage))
+            goto restore;
+         if (model_request)
+            agent_set_request_codex_creds_for(&runtime->selected, current.token,
+                                              current.account_id);
+      }
    }
    native_cancellation_t watch = {.io = io};
    pthread_t monitor;
@@ -240,6 +263,8 @@ static int native_forward(const char *method, const char *path, const char *head
    agent_set_request_cancel(NULL);
    anthropic_http_capture_request_headers(NULL);
 restore:
+   OPENSSL_cleanse(&current_claude, sizeof current_claude);
+   OPENSSL_cleanse(&current_api, sizeof current_api);
    OPENSSL_cleanse(&current, sizeof current);
    agent_registry_bind_ingress_model(previous_model);
    agent_request_creds_restore(&previous_credentials);
@@ -292,6 +317,8 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
    snprintf(runtime->credentials.vault_principal, sizeof runtime->credentials.vault_principal, "%s",
             owner->vault_principal);
    agent_codex_credentials_t credentials = {0};
+   agent_api_credentials_t api_credentials = {0};
+   agent_claude_credentials_t claude_credentials = {0};
    if (agent_tools_scope_capture_owned(&runtime->tools) ||
        agent_source_authority_tls_capture_checked(&runtime->source))
       goto failed;
@@ -307,24 +334,47 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
    server_delegate_scope_capture(&runtime->delegate);
    const char *cwd = run_cmd_get_cwd();
    snprintf(runtime->cwd, sizeof runtime->cwd, "%s", cwd ? cwd : "");
-   if (!strcmp(selected->auth_type, "codex-oauth"))
    {
-      const char *registration =
-          selected->registration[0] ? selected->registration : selected->name;
       request_context_snapshot_t previous_request;
       request_context_snapshot(&previous_request);
       agent_request_creds_t previous_credentials;
       agent_request_creds_snapshot(&previous_credentials);
       request_context_set(&runtime->owner);
       agent_request_creds_restore(&runtime->credentials);
-      int rc = agent_codex_connection_credentials(registration, &credentials);
+      int codex = !strcmp(selected->auth_type, "codex-oauth");
+      int claude = !strcmp(selected->auth_type, "claude-oauth");
+      const char *registration =
+          selected->registration[0] ? selected->registration : selected->name;
+      int rc = codex    ? agent_codex_connection_credentials(registration, &credentials)
+               : claude ? agent_claude_connection_credentials(registration, &claude_credentials)
+                        : agent_api_connection_credentials(selected, &api_credentials);
       agent_request_creds_restore(&previous_credentials);
       OPENSSL_cleanse(&previous_credentials, sizeof previous_credentials);
       request_context_restore(&previous_request);
       request_context_snapshot_clear(&previous_request);
-      if (rc || !native_digest_valid(credentials.source_digest))
-         goto failed;
-      snprintf(runtime->lineage, sizeof runtime->lineage, "%s", credentials.source_digest);
+      if (codex)
+      {
+         if (rc || !native_digest_valid(credentials.source_digest))
+            goto failed;
+         snprintf(runtime->lineage, sizeof runtime->lineage, "%s", credentials.source_digest);
+      }
+      else if (claude)
+      {
+         if (rc || !native_digest_valid(claude_credentials.source_digest))
+            goto failed;
+         runtime->claude_source = 1;
+         snprintf(runtime->lineage, sizeof runtime->lineage, "%s",
+                  claude_credentials.source_digest);
+      }
+      else if (!rc)
+      {
+         if (!native_digest_valid(api_credentials.source_digest))
+            goto failed;
+         runtime->api_key_source = 1;
+         snprintf(runtime->lineage, sizeof runtime->lineage, "%s", api_credentials.source_digest);
+      }
+      /* Unsupported/unconfigured sources retain MCP-only operation. They cannot
+       * forward model traffic or acquire a replay/cache scope without lineage. */
    }
    const char *parts[] = {owner->vault_principal, selected->registration, selected->name,
                           selected->provider,     selected->model,        selected->endpoint,
@@ -359,9 +409,13 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
    if (!runtime->listener)
       goto failed;
    snprintf(runtime->url, sizeof runtime->url, "http://127.0.0.1:%u", port);
+   OPENSSL_cleanse(&claude_credentials, sizeof claude_credentials);
+   OPENSSL_cleanse(&api_credentials, sizeof api_credentials);
    OPENSSL_cleanse(&credentials, sizeof credentials);
    return runtime;
 failed:
+   OPENSSL_cleanse(&claude_credentials, sizeof claude_credentials);
+   OPENSSL_cleanse(&api_credentials, sizeof api_credentials);
    OPENSSL_cleanse(&credentials, sizeof credentials);
    server_native_runtime_close(runtime);
    return NULL;
@@ -379,6 +433,105 @@ const char *server_native_runtime_binding(const server_native_runtime_t *runtime
 {
    return runtime ? runtime->binding : "";
 }
+static int native_name_order(const void *left, const void *right)
+{
+   return strcmp(*(const char *const *)left, *(const char *const *)right);
+}
+
+int server_native_runtime_cache_scope(const server_native_runtime_t *runtime,
+                                      const server_native_execution_profile_t *profile,
+                                      char scope[65])
+{
+   if (scope)
+      scope[0] = 0;
+   if (!scope || !runtime || !runtime->replay || !native_digest_valid(runtime->lineage) ||
+       !runtime->workspace || !runtime->cwd[0] || !profile || !profile->sdk ||
+       (strcmp(profile->sdk, "codex") && strcmp(profile->sdk, "claude")) ||
+       !native_digest_valid(profile->build_digest) ||
+       !native_digest_valid(profile->launch_digest) ||
+       !native_digest_valid(profile->workspace_digest) || runtime->tools.denied_count < 0 ||
+       runtime->tools.denied_count > 4096)
+      return -1;
+   cJSON *value = cJSON_CreateObject(), *denied = cJSON_CreateArray();
+   if (!value || !denied)
+   {
+      cJSON_Delete(value);
+      cJSON_Delete(denied);
+      return -1;
+   }
+   int failed = 0;
+#define PROFILE_TEXT(key, text)  failed |= cJSON_AddStringToObject(value, key, text) == NULL
+#define PROFILE_INT(key, number) failed |= cJSON_AddNumberToObject(value, key, number) == NULL
+   PROFILE_INT("version", 1);
+   PROFILE_TEXT("account_model", runtime->binding);
+   PROFILE_TEXT("auth_type", runtime->selected.auth_type);
+   PROFILE_TEXT("session", runtime->session);
+   PROFILE_TEXT("sdk", profile->sdk);
+   PROFILE_TEXT("sdk_build", profile->build_digest);
+   PROFILE_TEXT("launch", profile->launch_digest);
+   PROFILE_TEXT("workspace", profile->workspace_digest);
+   PROFILE_INT("workspace_kind", runtime->workspace->kind);
+   PROFILE_TEXT("cwd", runtime->cwd);
+   PROFILE_TEXT("role", runtime->tools.role);
+   PROFILE_TEXT("toolset", runtime->tools.toolset);
+   PROFILE_TEXT("read_root", runtime->tools.read_only_root);
+   PROFILE_TEXT("write_root", runtime->tools.write_root);
+   PROFILE_INT("write", runtime->tools.write_capable);
+   PROFILE_INT("shell", runtime->tools.shell);
+   PROFILE_INT("knowledge_write", runtime->tools.knowledge_write);
+   PROFILE_INT("source_active", runtime->source.active);
+   PROFILE_INT("source_authority", runtime->source.authority);
+   PROFILE_TEXT("source_root", runtime->source.root);
+   PROFILE_TEXT("source_paths", runtime->source.paths ? runtime->source.paths : "");
+   PROFILE_INT("delegate_depth", runtime->delegate.depth);
+   PROFILE_TEXT("delegate_parent", runtime->delegate.parent);
+   PROFILE_INT("durable_job", runtime->job_id);
+   char capabilities[32];
+   snprintf(capabilities, sizeof capabilities, "%llu",
+            (unsigned long long)runtime->owner.capabilities);
+   PROFILE_TEXT("capabilities", capabilities);
+#undef PROFILE_TEXT
+#undef PROFILE_INT
+   /* Denials are a set: order changes must not throw away a valid native prefix. */
+   int count = runtime->tools.denied_count;
+   const char **names = count ? calloc((size_t)count, sizeof *names) : NULL;
+   if (count && !names)
+      failed = 1;
+   for (int i = 0; !failed && i < count; i++)
+   {
+      if (!runtime->tools.denied || !runtime->tools.denied[i])
+         failed = 1;
+      else
+         names[i] = runtime->tools.denied[i];
+   }
+   if (!failed && count)
+      qsort(names, (size_t)count, sizeof *names, native_name_order);
+   for (int i = 0; !failed && i < count; i++)
+   {
+      if (i && !strcmp(names[i], names[i - 1]))
+         continue;
+      cJSON *name = cJSON_CreateString(names[i]);
+      if (!name || !cJSON_AddItemToArray(denied, name))
+      {
+         cJSON_Delete(name);
+         failed = 1;
+      }
+   }
+   free(names);
+   if (!cJSON_AddItemToObject(value, "denied", denied))
+   {
+      cJSON_Delete(denied);
+      failed = 1;
+   }
+   char *wire = failed ? NULL : cJSON_PrintUnformatted(value);
+   int rc = wire ? aimee_sha256_hex(wire, strlen(wire), scope) : -1;
+   free(wire);
+   cJSON_Delete(value);
+   if (rc)
+      scope[0] = 0;
+   return rc;
+}
+
 void server_native_runtime_close(server_native_runtime_t *runtime)
 {
    if (!runtime)

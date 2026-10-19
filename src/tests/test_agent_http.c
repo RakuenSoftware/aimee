@@ -21,6 +21,7 @@
 #include "cJSON.h"
 #include "support/ir_response_fixture.h"
 #include <aimee/ir/session_event.h>
+#include <aimee/translation/aimee_backend.h>
 
 static cJSON *make_dummy_tool(void)
 {
@@ -990,6 +991,160 @@ static void test_canonical_delegate_policy_before_native_egress(void)
    puts("canonical delegate policy before all native outputs/fallback models OK");
 }
 
+static void test_canonical_request_profiles(void)
+{
+   const char *providers[] = {"ollama", "openrouter", "minimax", "mistral", "openai"};
+   const char *models[] = {"qwen3.gguf", "selected", "MiniMax-M2.7", "mistral-vibe-cli", "gpt-4o"};
+   cJSON *history =
+       cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"inspect\"}]}]");
+   cJSON *native_history = cJSON_Parse("[{\"role\":\"user\",\"content\":\"inspect\"}]");
+   assert(history && native_history);
+   for (size_t i = 0; i < sizeof providers / sizeof *providers; i++)
+   {
+      agent_t agent = {0};
+      snprintf(agent.provider, sizeof agent.provider, "%s", providers[i]);
+      snprintf(agent.model, sizeof agent.model, "%s", models[i]);
+      agent.recommended_sampling = 1;
+      cJSON *legacy = agent_build_request_openai(&agent, native_history, NULL, 128, 0.5);
+      cJSON *actual = agent_build_request_ir(&agent, history, NULL, NULL, 128, 0.5,
+                                             AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
+      assert(legacy && actual);
+      assert(cJSON_Compare(legacy, actual, 1));
+      cJSON_Delete(legacy);
+      cJSON_Delete(actual);
+   }
+   agent_t qwen = {0};
+   snprintf(qwen.provider, sizeof qwen.provider, "%s", "ollama");
+   snprintf(qwen.model, sizeof qwen.model, "%s", "qwen.gguf");
+   const char *shaping_cases[] = {
+       "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\" \"},"
+       "{\"type\":\"text\",\"text\":\"/no_think\\ninspect\"}]}]",
+       "[{\"role\":\"user\",\"blocks\":[]}]"};
+   const char *expected[] = {" /no_think\ninspect", "/no_think\n"};
+   for (size_t i = 0; i < sizeof shaping_cases / sizeof *shaping_cases; i++)
+   {
+      cJSON *source = cJSON_Parse(shaping_cases[i]);
+      cJSON *before = cJSON_Duplicate(source, 1);
+      cJSON *actual = agent_build_request_ir(&qwen, source, NULL, NULL, 128, 0.5,
+                                             AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
+      assert(actual && cJSON_Compare(source, before, 1));
+      const cJSON *message =
+          cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(actual, "messages"), 0);
+      assert(
+          !strcmp(cJSON_GetObjectItemCaseSensitive(message, "content")->valuestring, expected[i]));
+      cJSON_Delete(actual);
+      cJSON_Delete(before);
+      cJSON_Delete(source);
+   }
+   /* Shaping is idempotent and never edits durable canonical source content. */
+   const cJSON *block = cJSON_GetArrayItem(
+       cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(history, 0), "blocks"), 0);
+   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(block, "text")->valuestring, "inspect"));
+   cJSON_Delete(history);
+   cJSON_Delete(native_history);
+   puts("canonical request profile provider settings and source isolation OK");
+}
+
+static void test_canonical_responses_profile(void)
+{
+   agent_t agent = {0};
+   snprintf(agent.model, sizeof agent.model, "%s", "selected");
+   agent.require_initial_tool_call = 1;
+   cJSON *history =
+       cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"inspect\"}]}]");
+   cJSON *tools = cJSON_Parse(
+       "[{\"type\":\"function\",\"name\":\"other\",\"parameters\":{\"type\":\"object\"}},"
+       "{\"type\":\"function\",\"name\":\"read_file\",\"parameters\":{\"type\":\"object\"}},"
+       "{\"type\":\"function\",\"name\":\"code_search\",\"parameters\":{\"type\":\"object\"}}]");
+   assert(history && tools);
+   for (int fallback = 0; fallback < 2; fallback++)
+   {
+      cJSON *actual = agent_build_request_ir(&agent, history, tools, NULL, 777, 0.5,
+                                             AIMEE_WIRE_RESPONSES, 0, NULL);
+      assert(actual && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(actual, "store")));
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(actual, "stream")));
+      assert(!strcmp(cJSON_GetObjectItemCaseSensitive(actual, "instructions")->valuestring,
+                     "You are an execution agent."));
+      const cJSON *choice = cJSON_GetObjectItemCaseSensitive(actual, "tool_choice");
+      assert(choice && !strcmp(cJSON_GetObjectItemCaseSensitive(choice, "name")->valuestring,
+                               fallback ? "other" : "code_search"));
+      assert(!cJSON_GetObjectItemCaseSensitive(actual, "max_output_tokens"));
+      assert(!cJSON_GetObjectItemCaseSensitive(actual, "temperature"));
+      cJSON_Delete(actual);
+      cJSON_DeleteItemFromArray(tools, 2);
+      cJSON_DeleteItemFromArray(tools, 1);
+   }
+   /* Malformed catalog ingress still refuses before any provider dispatch. */
+   cJSON_DeleteItemFromObjectCaseSensitive(cJSON_GetArrayItem(tools, 0), "parameters");
+   cJSON_AddStringToObject(cJSON_GetArrayItem(tools, 0), "parameters", "malformed");
+   cJSON *actual = agent_build_request_ir(&agent, history, tools, "host", 777, 0.5,
+                                          AIMEE_WIRE_RESPONSES, 0, NULL);
+   assert(!actual);
+   cJSON_Delete(history);
+   cJSON_Delete(tools);
+   puts("typed Responses host profile, forced evidence choice and catalog refusal OK");
+}
+
+static void test_typed_anthropic_system_cache_parity(void)
+{
+   const char *systems[] = {NULL,
+                            "",
+                            "stable",
+                            "stable<aimee-context>volatile",
+                            " <aimee-context>volatile",
+                            "x<aimee-context>long volatile"};
+   for (size_t i = 0; i < sizeof systems / sizeof *systems; i++)
+      for (int cache = 0; cache < 2; cache++)
+         for (int floor = 0; floor <= 8; floor += 8)
+         {
+            cJSON *expected = cJSON_CreateObject();
+            agent_anthropic_set_system(expected, systems[i], cache, floor);
+            aimee_request_t ir = {.model = strdup("selected"),
+                                  .frontend = AIMEE_WIRE_ANTHROPIC,
+                                  .max_tokens = 128,
+                                  .has_max_tokens = 1};
+            assert(!anthropic_ir_set_host_system(&ir, systems[i], cache, floor));
+            cJSON *actual = anthropic_backend_build(&ir);
+            assert(actual);
+            const cJSON *left = cJSON_GetObjectItemCaseSensitive(expected, "system");
+            const cJSON *right = cJSON_GetObjectItemCaseSensitive(actual, "system");
+            assert((!left && !right) || cJSON_Compare(left, right, 1));
+            if (left && right)
+            {
+               char *left_wire = cJSON_PrintUnformatted(left);
+               char *right_wire = cJSON_PrintUnformatted(right);
+               assert(left_wire && right_wire && !strcmp(left_wire, right_wire));
+               free(left_wire);
+               free(right_wire);
+            }
+            cJSON_Delete(actual);
+            cJSON_Delete(expected);
+            aimee_request_free(&ir);
+         }
+   aimee_request_t edited = {.model = strdup("selected"),
+                             .frontend = AIMEE_WIRE_ANTHROPIC,
+                             .max_tokens = 128,
+                             .has_max_tokens = 1};
+   assert(!anthropic_ir_set_host_system(&edited, "old<aimee-context>volatile", 1, 0));
+   cJSON *entry = edited.raw;
+   assert(anthropic_ir_set_host_system(&edited, "replacement", 0, 0) == -1 && edited.raw == entry);
+   free(edited.system[0].text);
+   edited.system[0].text = strdup("policy changed");
+   cJSON *changed = anthropic_backend_build(&edited);
+   assert(changed);
+   const cJSON *blocks = cJSON_GetObjectItemCaseSensitive(changed, "system");
+   assert(cJSON_IsArray(blocks) && cJSON_GetArraySize(blocks) == 2);
+   assert(
+       !strcmp(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(blocks, 0), "text")->valuestring,
+               "policy changed"));
+   assert(
+       !strcmp(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(blocks, 1), "text")->valuestring,
+               "<aimee-context>volatile"));
+   cJSON_Delete(changed);
+   aimee_request_free(&edited);
+   puts("typed Anthropic system/cache scalar and block byte parity OK");
+}
+
 static void test_missing_response_output(void)
 {
    assert(agent_http_get("http://127.0.0.1:9", NULL, NULL, 1) == -1);
@@ -999,6 +1154,9 @@ static void test_missing_response_output(void)
 
 int main(void)
 {
+   test_typed_anthropic_system_cache_parity();
+   test_canonical_responses_profile();
+   test_canonical_request_profiles();
    test_missing_response_output();
    printf("test_agent_http: ");
 

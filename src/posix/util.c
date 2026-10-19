@@ -41,6 +41,8 @@ int safe_exec_capture_cwd_env_fd_timeout(const char *const argv[], const char *c
                                          char *const envp[], char **out_buf, size_t max_out,
                                          int timeout_ms, int inherit_fd, int target_fd)
 {
+   if (!out_buf)
+      return -1;
    *out_buf = NULL;
    if (!argv || !argv[0])
       return -1;

@@ -295,9 +295,10 @@ static void agent_progress_retrieval(const char *name, const char *arguments, ch
       snprintf(target, target_sz, "%.255s", arguments);
 }
 
-static int agent_bootstrap_repository_evidence(cJSON *messages, int turn, int timeout_ms,
-                                               char *last_tool_name, size_t last_tool_name_n,
-                                               char *last_tool_result, size_t last_tool_result_n)
+static int agent_bootstrap_repository_evidence(const aimee_request_t *catalog, cJSON *messages,
+                                               int turn, int timeout_ms, char *last_tool_name,
+                                               size_t last_tool_name_n, char *last_tool_result,
+                                               size_t last_tool_result_n)
 {
    static const char *const name = "list_files";
    /* Never let a synthetic evidence call fall back to the server process CWD.
@@ -306,16 +307,34 @@ static int agent_bootstrap_repository_evidence(cJSON *messages, int turn, int ti
    const char *worktree = run_cmd_get_cwd();
    if (!worktree || !worktree[0] || !aimee_path_is_absolute(worktree))
       return 0;
+   const aimee_tool_t *admitted = aimee_ir_find_function(catalog, NULL, name);
+   if (!admitted)
+      return 0;
    cJSON *arg_obj = cJSON_CreateObject();
    if (!arg_obj)
       return 0;
    cJSON_AddStringToObject(arg_obj, "path", worktree);
-   char *args = cJSON_PrintUnformatted(arg_obj);
+   cJSON *canonical = tool_args_canonicalize(admitted->schema, arg_obj);
+   char *args = canonical ? cJSON_PrintUnformatted(canonical) : NULL;
+   cJSON_Delete(canonical);
    cJSON_Delete(arg_obj);
    if (!args)
       return 0;
+   char reason[256] = {0}, effect[32], attempt[64];
+   aimee_tool_metadata_t metadata;
+   snprintf(attempt, sizeof attempt, "bootstrap-repository:%d", turn);
+   if (tool_validate_ir(admitted, args, reason, sizeof reason) != 0 ||
+       directive_check_tool(name, args, reason, sizeof reason) != 0 ||
+       tool_policy_metadata(name, &metadata, effect, sizeof effect, reason, sizeof reason) != 0 ||
+       policy_check_tool_metadata_attempt(name, &metadata, effect, args, attempt, reason,
+                                          sizeof reason) != 0)
+   {
+      aimee_log(LOG_WARN, "agent.evidence", "repository evidence admission refused: %s", reason);
+      free(args);
+      return 0;
+   }
    int is_error = 1;
-   char *result = dispatch_tool_call_ctx_status(name, args, timeout_ms, &is_error);
+   char *result = dispatch_tool_call_ir_ctx_status(admitted, args, timeout_ms, &is_error);
    agent_trace_log(0, turn, "tool_call", NULL, name, args, result, NULL);
    if (last_tool_name && last_tool_name_n)
       snprintf(last_tool_name, last_tool_name_n, "%s", name);
@@ -878,7 +897,21 @@ native_provider_http:
    cJSON *tools = chatgpt     ? build_tools_array_responses()
                   : anthropic ? build_tools_array_anthropic()
                               : build_tools_array(); /* OpenAI format */
-   agent_tools_filter_for_role(tools, role);
+   if (!tools)
+   {
+      free(assembled_sys);
+      free(task_instructions);
+      if (has_ephemeral_ssh)
+         agent_ssh_cleanup(network, ephemeral_key, session_id);
+      if (has_tunnels && network && network->tunnel_mgr)
+         agent_tunnel_stop_all(network->tunnel_mgr);
+      snprintf(out->error, sizeof out->error, "tool catalog could not be admitted as IR");
+      return -1;
+   }
+   if (anthropic)
+      agent_tools_filter_anthropic_for_role(tools, role);
+   else
+      agent_tools_filter_for_role(tools, role);
    int inject_respond_tool = agent_should_inject_respond_tool(agent, role);
    if (inject_respond_tool)
       agent_tools_append_delegate_respond_tool(tools);
@@ -1625,9 +1658,9 @@ native_provider_http:
                       "provider returned no executable repository call; bootstrapping seat with "
                       "list_files");
          total_calls++;
-         if (agent_bootstrap_repository_evidence(messages, turn, agent->timeout_ms, last_tool_name,
-                                                 sizeof last_tool_name, last_tool_result,
-                                                 sizeof last_tool_result))
+         if (agent_bootstrap_repository_evidence(
+                 &dispatch_catalog, messages, turn, agent->timeout_ms, last_tool_name,
+                 sizeof last_tool_name, last_tool_result, sizeof last_tool_result))
          {
             successful_tool_calls++;
             if (turn >= max_t - 1 && max_t < initial_max_t + 1)
@@ -1966,7 +1999,7 @@ native_provider_http:
 
          total_calls++;
 
-         /* Validate arguments against tool registry */
+         /* Validate the exact advertised canonical function contract. */
          char val_err[256] = {0};
          const aimee_block_t *tool = aimee_ir_response_tool(&response, i);
          const aimee_tool_t *advertised =
@@ -1976,7 +2009,7 @@ native_provider_http:
          else if (tool->tool_namespace && tool->tool_namespace[0])
             snprintf(val_err, sizeof val_err, "function namespace has no local execution binding");
          if (val_err[0] ||
-             tool_validate(tool->tool_name, tool_arguments[i], val_err, sizeof(val_err)) != 0)
+             tool_validate_ir(advertised, tool_arguments[i], val_err, sizeof(val_err)) != 0)
          {
             char *err_result = malloc(512);
             if (!err_result)
@@ -2056,10 +2089,14 @@ native_provider_http:
          snprintf(exploration_attempt, sizeof(exploration_attempt), "%d:%d", api_call_count, i);
          /* Check policy */
          char policy_reason[256] = {0};
-         const char *se = tool_side_effect(aimee_ir_response_tool(&response, i)->tool_name);
-         if (policy_check_tool_attempt(aimee_ir_response_tool(&response, i)->tool_name, se,
-                                       tool_arguments[i], exploration_attempt, policy_reason,
-                                       sizeof(policy_reason)) != 0)
+         const char *tool_name = aimee_ir_response_tool(&response, i)->tool_name;
+         aimee_tool_metadata_t metadata;
+         char effect[32];
+         if (tool_policy_metadata(tool_name, &metadata, effect, sizeof effect, policy_reason,
+                                  sizeof policy_reason) != 0 ||
+             policy_check_tool_metadata_attempt(tool_name, &metadata, effect, tool_arguments[i],
+                                                exploration_attempt, policy_reason,
+                                                sizeof policy_reason) != 0)
          {
             char *err_result = malloc(512);
             if (!err_result)
@@ -2101,9 +2138,8 @@ native_provider_http:
          }
          agent_tools_set_effect_authorized(1);
          int tool_result_error = 1;
-         char *result_str = dispatch_tool_call_ctx_status(
-             aimee_ir_response_tool(&response, i)->tool_name, tool_arguments[i], agent->timeout_ms,
-             &tool_result_error);
+         char *result_str = dispatch_tool_call_ir_ctx_status(advertised, tool_arguments[i],
+                                                             agent->timeout_ms, &tool_result_error);
          agent_tools_set_effect_authorized(0);
          result_str = policy_annotate_indexed(aimee_ir_response_tool(&response, i)->tool_name,
                                               tool_arguments[i], exploration_attempt, result_str);

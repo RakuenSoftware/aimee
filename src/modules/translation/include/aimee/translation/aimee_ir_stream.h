@@ -44,6 +44,22 @@ int openai_chunk_to_deltas(const struct cJSON *chunk, openai_stream_state_t *st,
  * Refuses a stream that never supplied a native finish reason. */
 int openai_stream_finish(openai_stream_state_t *st, aimee_delta_t *out, int max);
 
+/* --- backend: Responses SSE -> canonical deltas and authoritative snapshot --- */
+typedef struct aimee_responses_stream aimee_responses_stream_t;
+typedef int (*aimee_ir_delta_sink_fn)(void *context, const aimee_delta_t *delta);
+/* Owns bounded native framing and delta assembly. A failed sink/parser poisons
+ * the stream. Deltas borrow only for the duration of the sink invocation. */
+aimee_responses_stream_t *aimee_responses_stream_new(void);
+void aimee_responses_stream_free(aimee_responses_stream_t *stream);
+int aimee_responses_stream_feed(aimee_responses_stream_t *stream, const char *event,
+                                const struct cJSON *payload, aimee_ir_delta_sink_fn sink,
+                                void *context);
+/* Available only after an admitted terminal snapshot. No TURN_STOP is emitted:
+ * the host must commit this full snapshot/history before publishing completion.
+ * EOF without a terminal event, failure and any conflicting emitted prefix refuse.
+ * Ownership transfers to out; take is single-use. */
+int aimee_responses_stream_take(aimee_responses_stream_t *stream, aimee_response_t *out);
+
 /* --- backend: AWS Bedrock ConverseStream event -> IR deltas ---
  * The streaming analogue of bedrock_converse_parse: maps ONE decoded ConverseStream
  * event (its `:event-type` header string + the already-parsed payload JSON) to 0+ IR
@@ -119,6 +135,22 @@ void anthropic_backend_stream_state_init(anthropic_backend_stream_state_t *st);
 int anthropic_stream_to_deltas(const char *event_type, const struct cJSON *payload,
                                anthropic_backend_stream_state_t *st, aimee_delta_t *out, int max);
 
+typedef void (*aimee_sse_emit_fn)(void *ctx, const char *event, const char *data_json);
+
+/* Responses frontend owns its projection; completion is separate so durable
+ * history admission precedes all item.done and terminal client events. */
+typedef struct aimee_responses_frontend aimee_responses_frontend_t;
+aimee_responses_frontend_t *aimee_responses_frontend_new(const char *id, const char *model,
+                                                         long created);
+void aimee_responses_frontend_free(aimee_responses_frontend_t *state);
+int aimee_responses_frontend_delta(aimee_responses_frontend_t *state, const aimee_delta_t *delta,
+                                   aimee_sse_emit_fn emit, void *context);
+int aimee_responses_frontend_matches(aimee_responses_frontend_t *state,
+                                     const aimee_response_t *response);
+int aimee_responses_frontend_complete(aimee_responses_frontend_t *state,
+                                      const aimee_response_t *response, aimee_sse_emit_fn emit,
+                                      void *context);
+
 /* --- frontend: IR delta -> Anthropic Messages SSE text --- */
 typedef struct
 {
@@ -134,7 +166,6 @@ char *anthropic_delta_render(const aimee_delta_t *d, anthropic_stream_state_t *s
 /* Split (ctx, event, data_json) SSE sink -- signature-compatible with the
  * server's server_http_sse_event_emit, so the live relay's emit is passed
  * directly. */
-typedef void (*aimee_sse_emit_fn)(void *ctx, const char *event, const char *data_json);
 
 /* Like anthropic_delta_render, but emits each Anthropic SSE event via `emit`
  * (event name + data JSON, unframed) instead of returning a framed string --

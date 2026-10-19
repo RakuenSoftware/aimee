@@ -28,12 +28,9 @@ int main(int argc, char **argv)
 {
    const char *mode = (argc >= 2) ? argv[1] : "happy";
    char line[8192];
-   int step = 0;
 
    while (fgets(line, sizeof(line), stdin))
    {
-      step++;
-
       if (strcmp(mode, "malformed") == 0)
       {
          fputs("{not-json}\n", stdout);

@@ -197,3 +197,36 @@ func TestDiscoveryObserveNeverOverridesBaseline(t *testing.T) {
 		}
 	}
 }
+
+func TestOwnedCategoriesUseOnePolicyAndPreserveOperatorLabel(t *testing.T) {
+	loads := 0
+	policy := &operatorPolicy{ApprovalLevels: map[string]string{"network": "block", "custom_operator_label": "block"}}
+	handler := newHandler(func() (*operatorPolicy, error) { loads++; return policy, nil })
+	body := base("web_read", map[string]any{"url": "https://example.com"})
+	body["side_effect"] = "read"
+	body["policy_categories"] = []string{"read", "network", "external"}
+	result := invoke(t, handler, body)
+	if result.Allowed || result.Reason != "policy blocks network operations" || loads != 1 {
+		t.Fatalf("network category bypass or multiple policy loads: %+v loads=%d", result, loads)
+	}
+	body["side_effect"] = "custom_operator_label"
+	body["policy_categories"] = []string{"read", "filesystem"}
+	if invoke(t, handler, body).Allowed {
+		t.Fatal("custom operator label was lost")
+	}
+	body["side_effect"] = "read"
+	if !invoke(t, handler, body).Allowed {
+		t.Fatal("ordinary read success changed")
+	}
+	body["side_effect"] = ""
+	if invoke(t, handler, body).Allowed {
+		t.Fatal("owned categories lost the mandatory operator label")
+	}
+	body["side_effect"] = "read"
+	for _, categories := range [][]string{{"read", "read"}, {"unknown"}} {
+		body["policy_categories"] = categories
+		if invoke(t, handler, body).Allowed {
+			t.Fatalf("invalid categories permitted: %v", categories)
+		}
+	}
+}

@@ -44,6 +44,18 @@ typedef struct
 int vault_store_read_snapshot(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
                               const char *agent, vault_store_read_t *reads, size_t count);
 
+/* All fields are staged under one write lock and committed by one atomic file
+ * replacement. NULL secret removes a field. Duplicate names and unsupported
+ * backends refuse; never emulate this contract with sequential mutations. */
+typedef struct
+{
+   const char *credential;
+   const char *secret;
+} vault_store_write_t;
+#define VAULT_STORE_BATCH_UNSUPPORTED (-2)
+int vault_store_write_batch(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                            const char *agent, const vault_store_write_t *writes, size_t count);
+
 /* VAULT_STORE_NO_ENTRY: returned by _get when the principal has no such
  * (agent,cred) — the caller falls back to the env/agents.json path (D15),
  * distinct from -1 (a real error: KEK can't unwrap, corrupt file, decrypt

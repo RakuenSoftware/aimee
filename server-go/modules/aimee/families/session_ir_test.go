@@ -4,6 +4,9 @@ import "testing"
 
 func TestSessionIRCanonicalValidation(t *testing.T) {
 	for _, event := range []string{
+		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_START","kind":"text","block_id":0,"message_group":2}}`,
+		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_START","kind":"thinking","block_id":0,"thinking_id":"rs_1"}}`,
+		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_DELTA","kind":"thinking","block_id":0,"thinking_id":"rs_1","encrypted_content":"cipher"}}`,
 		`{"kind":"child_execution","payload":{"session_id":"child","turn_id":"run","role":"review","status":"running"}}`,
 		`{"kind":"projection","payload":{"model":"model-b","boundary":"request","omitted_reasoning_blocks":2,"omitted_opaque_state_blocks":1}}`,
 		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_START","kind":"thinking","block_id":0,"text_delta":"initial","signature_delta":"sig","redacted_content":"opaque"}}`,
@@ -25,6 +28,17 @@ func TestSessionIRCanonicalValidation(t *testing.T) {
 		}
 	}
 	for _, event := range []string{
+		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_START","kind":"text","block_id":0,"message_group":null}}`,
+		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_START","kind":"text","block_id":0,"message_group":0}}`,
+		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_START","kind":"text","block_id":0,"message_group":1.5}}`,
+		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_START","kind":"thinking","block_id":0,"message_group":1}}`,
+		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"TURN_STOP","message_group":2}}`,
+
+		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_START","kind":"text","block_id":0,"thinking_id":"rs_1"}}`,
+		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_DELTA","kind":"thinking","block_id":0,"encrypted_content":null}}`,
+		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_START","kind":"thinking","block_id":0,"thinking_id":42}}`,
+		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"TURN_STOP","thinking_id":"rs_1"}}`,
+		`{"kind":"delta","message_id":"a","role":"assistant","payload":{"type":"BLOCK_STOP","kind":"thinking","block_id":0,"encrypted_content":"cipher"}}`,
 		`{"kind":"child_execution","payload":{"session_id":"child","turn_id":"run","role":"review","status":"invented"}}`,
 		`{"kind":"child_execution","payload":{"session_id":"","turn_id":"run","role":"review","status":"running"}}`,
 		`{"kind":"child_execution","payload":{"session_id":"child","turn_id":"run","status":"running"}}`,

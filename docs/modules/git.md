@@ -180,6 +180,11 @@ list plus the diffstat. Deterministic, with no model call: the commit subjects a
 asking the caller to write one costs a turn to say the same thing. An explicit `title` always wins, and a
 branch with no commits ahead of base is told exactly that.
 
+PR check rows display a cancelled workflow as `cancelled`, separately from a failed test.
+This is presentation only: cancellation remains non-green in the Go-owned merge verdict.
+PR metadata edits run the attribution gate and can supersede an in-flight CI run on the same
+head; inspect the replacement run before treating cancelled checks as test regressions.
+
 ## Data and migrations
 
 Git state includes repository index/refs/commits, verify configuration/state, `git_project` mappings, host

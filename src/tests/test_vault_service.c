@@ -546,6 +546,33 @@ static void test_server_credential_snapshot(void)
    printf("  PASS: test_server_credential_snapshot\n");
 }
 
+static void test_server_credential_batch(void)
+{
+   const vault_store_write_t writes[] = {{"access", "batch-access-secret"},
+                                         {"refresh", "batch-refresh-secret"},
+                                         {"expires", "123456789"}};
+   g_nrecs = 0;
+   vault_service_set_audit_hook(capture_hook);
+   assert(vault_service_write_server_batch("batch", writes, 3) == VAULT_OK);
+   assert(g_nrecs == 3);
+   for (int i = 0; i < 3; i++)
+      expect_rec(i, "vault.set", VAULT_SERVER_PRINCIPAL, "batch", writes[i].credential, ATTEST_NONE,
+                 VAULT_OK);
+   assert_no_secret_leak("batch-access-secret");
+   assert_no_secret_leak("batch-refresh-secret");
+   vault_service_set_audit_hook(NULL);
+   char access[64], refresh[64];
+   vault_store_read_t reads[] = {{"access", access, sizeof access, 0},
+                                 {"refresh", refresh, sizeof refresh, 0}};
+   assert(vault_service_read_server_snapshot("batch", reads, 2) == VAULT_OK);
+   assert(!strcmp(access, "batch-access-secret") && !strcmp(refresh, "batch-refresh-secret"));
+   const vault_store_write_t duplicate[] = {{"access", "must-not-store"}, {"access", "ambiguous"}};
+   assert(vault_service_write_server_batch("batch", duplicate, 2) == VAULT_ERR_BADARG);
+   assert(vault_service_read_server_snapshot("batch", reads, 2) == VAULT_OK);
+   assert(!strcmp(access, "batch-access-secret") && !strcmp(refresh, "batch-refresh-secret"));
+   puts("  PASS: atomic server credential batch and non-secret field audit");
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-vaultsvc-test-%d", (int)getpid());
@@ -569,6 +596,7 @@ int main(void)
    test_audit_hook();
    test_audit_hook_server_and_password();
    test_server_credential_snapshot();
+   test_server_credential_batch();
 
    vault_kek_cache_clear();
    char rm[320];
