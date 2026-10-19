@@ -583,14 +583,13 @@ int agent_request_with_tools_supported(const aimee_request_t *request)
             request->output_format.kind > AIMEE_OUTPUT_TEXT);
 }
 
-cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
-                              const char *system_prompt, int max_tokens, double temperature,
-                              aimee_wire_t wire, int is_delegate, aimee_request_t *dispatch_catalog)
+int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
+                             const char *system_prompt, int max_tokens, double temperature,
+                             aimee_wire_t wire, int is_delegate, aimee_request_t *out)
 {
-   if (!agent || !cJSON_IsArray(messages))
-      return NULL;
+   if (!agent || !out || !cJSON_IsArray(messages))
+      return -1;
    aimee_request_t ir = {0};
-   cJSON *rendered = NULL;
    if (wire == AIMEE_WIRE_RESPONSES)
    {
       if (agent_responses_profile_ir(agent, tools, system_prompt, &ir))
@@ -625,6 +624,25 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
    if (policy_changes < 0)
       goto fail;
    ir.mutated = 1;
+   if (aimee_ir_request_admit(&ir))
+      goto fail;
+   aimee_request_free(out);
+   *out = ir;
+   return 0;
+fail:
+   aimee_request_free(&ir);
+   return -1;
+}
+
+cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
+                              const char *system_prompt, int max_tokens, double temperature,
+                              aimee_wire_t wire, int is_delegate, aimee_request_t *dispatch_catalog)
+{
+   aimee_request_t ir = {0};
+   cJSON *rendered = NULL;
+   if (agent_prepare_request_ir(agent, messages, tools, system_prompt, max_tokens, temperature,
+                                wire, is_delegate, &ir))
+      return NULL;
    aimee_wire_projection_report_t projection;
    aimee_backend_projection_report(&ir, wire, &projection);
    if (aimee_ir_session_emit_projection_controls(ir.model, projection.omitted_reasoning_blocks,

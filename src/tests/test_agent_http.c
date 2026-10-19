@@ -7,6 +7,7 @@
  * that is a MODEL served over the OpenAI shape, not a Gemini protocol. */
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "aimee.h"
 #include "agent_config.h"
@@ -991,6 +992,64 @@ static void test_canonical_delegate_policy_before_native_egress(void)
    puts("canonical delegate policy before all native outputs/fallback models OK");
 }
 
+static void test_owned_canonical_request_preparation(void)
+{
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_ANTHROPIC,
+                                 AIMEE_WIRE_RESPONSES};
+   const char *catalogs[] = {
+       "[{\"type\":\"function\",\"function\":{\"name\":\"Read\",\"parameters\":{\"type\":"
+       "\"object\"}}}]",
+       "[{\"name\":\"Read\",\"input_schema\":{\"type\":\"object\"}}]",
+       "[{\"type\":\"function\",\"name\":\"Read\",\"parameters\":{\"type\":\"object\"}}]"};
+   aimee_request_t owned = {0};
+   for (size_t w = 0; w < sizeof wires / sizeof *wires; w++)
+   {
+      agent_t agent = {0};
+      snprintf(agent.model, sizeof agent.model, "host-model-%zu", w);
+      agent.require_initial_tool_call = 1;
+      cJSON *messages = cJSON_Parse(
+          "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"owned context\"}]},"
+          "{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"original-"
+          "call\","
+          "\"name\":\"Read\",\"input\":{\"exact\":0.123456789012345678901234567890}}]}]");
+      cJSON *tools = cJSON_Parse(catalogs[w]);
+      assert(messages && tools);
+      int rc = agent_prepare_request_ir(&agent, messages, tools, "host system", 321, 0.25, wires[w],
+                                        0, &owned);
+      cJSON_Delete(messages);
+      cJSON_Delete(tools);
+      assert(!rc && !aimee_ir_request_admit(&owned));
+      assert(!strcmp(owned.model, agent.model) && owned.frontend == wires[w]);
+      assert(owned.n_system == 1 && !strcmp(owned.system[0].text, "host system"));
+      assert(owned.n_messages == 2 && owned.n_tools == 1);
+      assert(!strcmp(owned.messages[0].blocks[0].text, "owned context"));
+      const aimee_block_t *call = &owned.messages[1].blocks[0];
+      assert(!strcmp(call->tool_id, "original-call") && !strcmp(call->tool_name, "Read"));
+      char *input = cJSON_PrintUnformatted(call->tool_input);
+      assert(input && !strcmp(input, "{\"exact\":0.123456789012345678901234567890}"));
+      free(input);
+      assert(aimee_ir_find_function(&owned, NULL, "Read"));
+      assert(owned.tool_choice != AIMEE_TOOL_CHOICE_UNSET && owned.mutated);
+      /* The Chat profile may carry its host-owned extension sidecar; it never
+       * receives SDK prompt/catalog bytes or whole-request native replay. */
+      assert(!owned.raw_bytes && !owned.raw_length);
+      assert(!cJSON_GetObjectItemCaseSensitive(owned.raw, "messages"));
+      assert(!cJSON_GetObjectItemCaseSensitive(owned.raw, "tools"));
+      if (wires[w] != AIMEE_WIRE_RESPONSES)
+         assert(owned.has_max_tokens && owned.max_tokens == 321);
+      /* Failed replacement cannot erase the last admitted context/catalog. */
+      char *model = owned.model;
+      aimee_message_t *history = owned.messages;
+      cJSON *invalid = cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"unknown\"}]}]");
+      rc =
+          agent_prepare_request_ir(&agent, invalid, NULL, "replacement", 1, 0, wires[w], 0, &owned);
+      assert(rc < 0 && owned.model == model && owned.messages == history);
+      cJSON_Delete(invalid);
+   }
+   aimee_request_free(&owned);
+   puts("owned canonical host context/catalog survives source release and failed replacement OK");
+}
+
 static void test_canonical_request_profiles(void)
 {
    const char *providers[] = {"ollama", "openrouter", "minimax", "mistral", "openai"};
@@ -1157,6 +1216,7 @@ int main(void)
    test_typed_anthropic_system_cache_parity();
    test_canonical_responses_profile();
    test_canonical_request_profiles();
+   test_owned_canonical_request_preparation();
    test_missing_response_output();
    printf("test_agent_http: ");
 

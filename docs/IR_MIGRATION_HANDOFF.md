@@ -2976,3 +2976,45 @@ Official schema/context: [Chat request cache controls](https://developers.openai
 and [prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching).
 The controls have independent semantics; this change preserves supplied values
 rather than selecting a model-specific caching or retention policy.
+
+
+## Owned host request preparation before native activation
+
+`agent_prepare_request_ir` now returns the complete owned canonical host request
+before provider rendering: model/profile, ordered system blocks, canonical
+history, sampling/output controls and the post-policy tool catalog/choice. The
+existing egress builder uses this same preparation owner, retaining projection
+capture and provider rendering at egress. Preparation emits no projection and
+never imports an SDK request to recover host authority. Success replaces the
+previous owned output; failure leaves that output unchanged. Inputs are borrowed
+and can be freed immediately after success. Chat retains only its existing
+host-created extension sidecar, without whole native prompt bytes.
+
+The focused HTTP fixture covers all three profiles, released source inputs,
+replacement/refusal ownership and exact 30-digit tool input preservation; existing
+provider-profile parity and delegate/fallback catalog regressions also pass.
+ASan/UBSan passes; correctly configured Cppcheck reports three existing production
+diagnostics with no increase. The complete 657-entry native rerun (655 distinct
+target names) and all 76 lint gates pass after the transport-fixture repair.
+
+The broad native run exposed an independent transport-fixture defect: its mock
+captured at most 4095 request bytes, then closed an 8192-byte request with unread
+payload, allowing a TCP reset to invalidate the gzip response. It now drains the
+advertised body while retaining bounded header capture, checks header/body bounds
+and handles interrupted reads. The original gzip round-trip assertions remain;
+30 independent full thin-client fixture processes pass, and Cppcheck reports zero
+diagnostics for the fixture. Production transport behavior is unchanged.
+
+Additional CMake qualification of the existing `test_agent_http` target failed:
+its agent dependency lacks the providers public include path, and its target
+omits existing translation/profile/configuration owners and the Go provider
+fixture build/environment. An exploratory partial wiring repair was removed;
+this target is not qualified. This does not invalidate the four narrower CMake
+IR fixtures qualified in the preceding cache increment. Finish its complete
+owner/fixture wiring as a remaining build consumer; do not skip the target or
+replace the real provider fixture with fabricated successful responses.
+
+Native activation is still pending: this preparation API is a prerequisite,
+not an activated SDK execution path. Original durable-call claims and supervised
+effect receipts, current-context/history binding, observation suppression,
+launch/profile attestation and live Claude qualification remain required.

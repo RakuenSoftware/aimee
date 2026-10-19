@@ -19,6 +19,16 @@ struct cJSON *agent_build_request_anthropic(const agent_t *agent, struct cJSON *
                                             struct cJSON *tools, const char *system_prompt,
                                             int max_tokens, double temperature);
 
+/* Prepare the complete owned host request, after profile shaping and delegate
+ * policy, without provider rendering or projection events. Inputs are borrowed;
+ * out must be zero-initialized or an owned request. Success atomically replaces
+ * it; failure leaves it unchanged. Native producers consume this typed context
+ * rather than recover host authority from SDK-generated native requests. */
+int agent_prepare_request_ir(const agent_t *agent, const struct cJSON *messages,
+                             struct cJSON *tools, const char *system_prompt, int max_tokens,
+                             double temperature, aimee_wire_t wire, int is_delegate,
+                             aimee_request_t *out);
+
 /* The runtime stores canonical {role,blocks} messages. Native history is accepted
  * only by this migration adapter, and native requests are built only at egress.
  * Optional dispatch_catalog receives the owned, post-policy function catalog on
