@@ -469,7 +469,7 @@ static long codex_jwt_exp(const char *jwt)
    return exp;
 }
 
-#define CODEX_SOURCE_CREDENTIAL "codex_oauth_source"
+#define CODEX_SOURCE_CREDENTIAL OAUTH_SOURCE_CREDENTIAL
 
 static void credential_json_cleanse(cJSON *json)
 {
@@ -592,8 +592,7 @@ static int codex_credentials_locked(const char *registration, agent_codex_creden
          /* Reset unknown/prior-account expiry and rotating credentials only for
           * a genuinely new source. Never overwrite a refreshed token from the
           * unchanged original document after a transient/rejected refresh. */
-         if (oauth_token_remove(registration) || oauth_token_store(registration, &source) ||
-             vault_service_set_server(registration, CODEX_SOURCE_CREDENTIAL, digest) != VAULT_OK)
+         if (oauth_token_store_source(registration, &source, digest))
          {
             OPENSSL_cleanse(&source, sizeof source);
             goto done;
@@ -773,8 +772,7 @@ int agent_claude_connection_credentials(const char *registration, agent_claude_c
       goto done;
    if (!fields[1].present || strcmp(marker, digest))
    {
-      if (oauth_token_remove(registration) || oauth_token_store(registration, &source) ||
-          vault_service_set_server(registration, CODEX_SOURCE_CREDENTIAL, digest) != VAULT_OK)
+      if (oauth_token_store_source(registration, &source, digest))
          goto done;
    }
    const oauth_refresh_profile_t profile = {.client_id = client,

@@ -73,8 +73,11 @@ static int oauth_secret_load(const char *client_name, const char *vcred, const c
 {
    if (!buf || len == 0)
       return -1;
-   if (vault_service_get_server_principal(client_name, vcred, buf, len) == VAULT_OK && buf[0])
-      return 0;
+   vault_status_t status = vault_service_get_server_principal(client_name, vcred, buf, len);
+   if (status == VAULT_OK)
+      return buf[0] ? 0 : -1;
+   if (status != VAULT_NO_ENTRY)
+      return -2; /* a custody failure must not become an absent optional field */
    char key[256];
    if (oauth_legacy_key(key, sizeof key, db1_fmt, client_name) != 0)
       return -1;
@@ -84,7 +87,7 @@ static int oauth_secret_load(const char *client_name, const char *vcred, const c
           db1_secret_remove(key) != 0)
       {
          OPENSSL_cleanse(buf, len);
-         return -1;
+         return -2;
       }
       /* Re-read through the only supported authority. This also proves the
        * durable Vault record is usable before the caller receives plaintext. */
@@ -151,35 +154,37 @@ int oauth_token_parse_response(const char *json, oauth_token_response_t *out)
 
 /* ---- Secret-store helpers ---- */
 
+static int oauth_store_tokens(const char *client_name, const oauth_token_response_t *resp,
+                              const char *source_digest)
+{
+   if (!client_name || !resp || !resp->access_token[0] ||
+       (source_digest && (!resp->refresh_token[0] || strlen(source_digest) != 64 ||
+                          strspn(source_digest, "0123456789abcdef") != 64)))
+      return -1;
+   char expiry[32];
+   snprintf(expiry, sizeof expiry, "%ld", resp->expires_at > 0 ? resp->expires_at : 0L);
+   vault_store_write_t writes[5] = {{OAUTH_VCRED_ACCESS, resp->access_token},
+                                    {OAUTH_VCRED_EXPIRES, expiry},
+                                    {OAUTH_VCRED_REAUTH, "0"}};
+   size_t count = 3;
+   if (resp->refresh_token[0])
+      writes[count++] = (vault_store_write_t){OAUTH_VCRED_REFRESH, resp->refresh_token};
+   if (source_digest)
+      writes[count++] = (vault_store_write_t){OAUTH_SOURCE_CREDENTIAL, source_digest};
+   /* An explicit zero marker prevents legacy plaintext rejection state from
+    * resurfacing after this successful atomic update. No token or source fence
+    * becomes visible until all encryption and the one durable replace succeed. */
+   return vault_service_write_server_batch(client_name, writes, count) == VAULT_OK ? 0 : -1;
+}
+
 int oauth_token_store(const char *client_name, const oauth_token_response_t *resp)
 {
-   if (!client_name || !resp || !resp->access_token[0])
-      return -1;
-
-   int rc = 0;
-
-   if (oauth_secret_store(client_name, OAUTH_VCRED_ACCESS, resp->access_token) != 0)
-      rc = -1;
-
-   if (resp->refresh_token[0])
-   {
-      if (oauth_secret_store(client_name, OAUTH_VCRED_REFRESH, resp->refresh_token) != 0)
-         rc = -1;
-   }
-
-   /* An absent expiry belongs to the new token too. Retaining the previous
-    * account/token's expiry can incorrectly expire a newly imported login. */
-   char ea_str[32];
-   snprintf(ea_str, sizeof(ea_str), "%ld", resp->expires_at > 0 ? resp->expires_at : 0L);
-   if (oauth_secret_store(client_name, OAUTH_VCRED_EXPIRES, ea_str) != 0)
-      rc = -1;
-
-   /* A usable token is now stored (fresh exchange or an operator re-auth) — clear
-    * any standing "re-auth required" marker (D6). */
-   if (rc == 0)
-      oauth_secret_remove(client_name, OAUTH_VCRED_REAUTH, OAUTH_DB1FMT_REAUTH);
-
-   return rc;
+   return oauth_store_tokens(client_name, resp, NULL);
+}
+int oauth_token_store_source(const char *client_name, const oauth_token_response_t *resp,
+                             const char *source_digest)
+{
+   return source_digest ? oauth_store_tokens(client_name, resp, source_digest) : -1;
 }
 
 /* True if `client_name`'s OAuth credential is marked REAUTH_REQUIRED — a prior
@@ -197,27 +202,40 @@ int oauth_token_reauth_required(const char *client_name)
 
 int oauth_token_load(const char *client_name, char *buf, size_t len)
 {
-   if (!client_name || !buf || len == 0)
+   if (!buf || !len)
       return -1;
-
-   if (oauth_secret_load(client_name, OAUTH_VCRED_ACCESS, OAUTH_KEY_ACCESS_TOKEN, buf, len) != 0)
+   OPENSSL_cleanse(buf, len);
+   if (!client_name)
       return -1;
-
-   /* Check expiry */
-   char ea_str[32] = "";
-   if (oauth_secret_load(client_name, OAUTH_VCRED_EXPIRES, OAUTH_KEY_EXPIRES_AT, ea_str,
-                         sizeof(ea_str)) == 0 &&
-       ea_str[0])
-   {
-      long expires_at = atol(ea_str);
-      if (expires_at > 0 && time(NULL) >= expires_at)
+   char expiry[32] = "", reauth[8] = "";
+   vault_store_read_t reads[] = {{OAUTH_VCRED_ACCESS, buf, len, 0},
+                                 {OAUTH_VCRED_EXPIRES, expiry, sizeof expiry, 0},
+                                 {OAUTH_VCRED_REAUTH, reauth, sizeof reauth, 0}};
+   if (vault_service_read_server_snapshot(client_name, reads, 3) != VAULT_OK)
+      goto invalid;
+   const char *legacy[] = {OAUTH_KEY_ACCESS_TOKEN, OAUTH_KEY_EXPIRES_AT, OAUTH_DB1FMT_REAUTH};
+   int migrated = 0;
+   for (size_t i = 0; i < 3; i++)
+      if (!reads[i].present)
       {
-         buf[0] = '\0';
-         return -1; /* expired */
+         int rc = oauth_secret_load(client_name, reads[i].credential, legacy[i], reads[i].value,
+                                    reads[i].capacity);
+         if (rc == -2)
+            goto invalid;
+         if (!rc)
+            migrated = 1;
       }
-   }
-
+   /* Compatibility values never escape directly. A migration or concurrent
+    * writer is followed by one fresh, immutable credential/expiry/marker view. */
+   if (migrated && vault_service_read_server_snapshot(client_name, reads, 3) != VAULT_OK)
+      goto invalid;
+   if (!reads[0].present || !buf[0] || reauth[0] == '1' ||
+       (reads[1].present && atol(expiry) > 0 && time(NULL) >= atol(expiry)))
+      goto invalid;
    return 0;
+invalid:
+   OPENSSL_cleanse(buf, len);
+   return -1;
 }
 
 int oauth_token_remove(const char *client_name)

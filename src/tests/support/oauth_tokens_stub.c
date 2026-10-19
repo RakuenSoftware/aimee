@@ -4,6 +4,7 @@
  * (server/oauth_tokens.c) pulls in secret_store + oauth_pkce + http_retry, which
  * a unit test shouldn't need. "no token available" is the correct test default. */
 #include "oauth_flow.h"
+#include "vault_service.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -85,4 +86,14 @@ int oauth_token_get_profile(const char *client_name, const oauth_refresh_profile
    test_oauth_profile_format = profile->format;
    return oauth_token_get(client_name, profile->client_id, profile->token_endpoint, skew_secs, buf,
                           capacity);
+}
+
+int oauth_token_store_source(const char *client_name, const oauth_token_response_t *response,
+                             const char *source_digest)
+{
+   if (oauth_token_store(client_name, response))
+      return -1;
+   return vault_service_set_server(client_name, OAUTH_SOURCE_CREDENTIAL, source_digest) == VAULT_OK
+              ? 0
+              : -1;
 }

@@ -6,6 +6,7 @@
 #define _GNU_SOURCE /* memmem */
 #endif
 #include "vault_store.h"
+#include "vault_internal.h"
 #include "vault_crypto.h"
 #include "cJSON.h"
 #include <assert.h>
@@ -494,7 +495,8 @@ static void test_corrupt_vault_is_not_missing(void)
    assert(find_vault_file(principal, path, sizeof(path)));
    FILE *f = fopen(path, "wb");
    assert(f && fputs("{broken", f) >= 0);
-   assert(fclose(f) == 0);
+   int close_rc = fclose(f);
+   assert(close_rc == 0);
    make_kek(kek, 9);
    assert(vault_store_get(principal, kek, "postgres", "luks", out, sizeof(out)) == -1);
    assert(vault_store_get_server(principal, kek, "postgres", "luks", out, sizeof(out)) == -1);
@@ -558,7 +560,8 @@ static void read_snapshot_blob(const char *path, char *blob, size_t capacity, si
    assert(file);
    *length = fread(blob, 1, capacity, file);
    assert(!ferror(file) && *length < capacity && fgetc(file) == EOF);
-   assert(fclose(file) == 0);
+   int close_rc = fclose(file);
+   assert(close_rc == 0);
 }
 static void replace_snapshot_blob(const char *path, const char *blob, size_t length)
 {
@@ -625,6 +628,97 @@ static void test_atomic_credential_snapshot(void)
    puts("  PASS: immutable credential snapshots survive concurrent atomic replacement");
 }
 
+static int allocation_index, allocation_fail_at;
+static void *batch_test_allocate(size_t size)
+{
+   if (++allocation_index == allocation_fail_at)
+      return NULL;
+   return malloc(size);
+}
+static void test_atomic_batch_updates(void)
+{
+   const char *principal = "uid:atomic-batch";
+   uint8_t salt[VAULT_SALT_LEN], kek[VAULT_KEK_LEN];
+   make_kek(kek, 49);
+   assert(!vault_store_get_or_create_salt(principal, salt));
+   vault_store_write_t old[] = {{"access", "old-pair"}, {"refresh", "old-pair"}};
+   vault_store_write_t next[] = {{"access", "new-pair"}, {"refresh", "new-pair"}};
+   assert(!vault_store_write_batch(principal, kek, "fixture", old, 2));
+   char access[64], refresh[64];
+   vault_store_read_t reads[] = {{"access", access, sizeof access, 0},
+                                 {"refresh", refresh, sizeof refresh, 0}};
+   cJSON_Hooks hooks = {.malloc_fn = batch_test_allocate, .free_fn = free};
+   allocation_index = allocation_fail_at = 0;
+   cJSON_InitHooks(&hooks);
+   int rc = vault_store_write_batch(principal, kek, "fixture", next, 2);
+   int allocations = allocation_index;
+   cJSON_InitHooks(NULL);
+   assert(!rc && allocations > 0);
+   int failed = 0;
+   for (int fail_at = 1; fail_at <= allocations; fail_at++)
+   {
+      assert(!vault_store_write_batch(principal, kek, "fixture", old, 2));
+      allocation_index = 0;
+      allocation_fail_at = fail_at;
+      cJSON_InitHooks(&hooks);
+      rc = vault_store_write_batch(principal, kek, "fixture", next, 2);
+      cJSON_InitHooks(NULL);
+      assert(!vault_store_read_snapshot(principal, kek, "fixture", reads, 2));
+      assert(reads[0].present && reads[1].present && !strcmp(access, refresh));
+      if (rc)
+      {
+         failed++;
+         assert(!strcmp(access, "old-pair"));
+      }
+      else
+         assert(!strcmp(access, "new-pair"));
+   }
+   assert(failed > 0);
+   assert(!vault_store_write_batch(principal, kek, "fixture", old, 2));
+   vault_store_write_t invalid_second[] = {{"access", "must-not-commit"}, {"bad|aad", "bad"}};
+   assert(vault_store_write_batch(principal, kek, "fixture", invalid_second, 2) == -1);
+   assert(!vault_store_read_snapshot(principal, kek, "fixture", reads, 2));
+   assert(!strcmp(access, "old-pair") && !strcmp(refresh, "old-pair"));
+   vault_store_write_t duplicates[] = {{"access", "one"}, {"access", "two"}};
+   assert(vault_store_write_batch(principal, kek, "fixture", duplicates, 2) == -1);
+   vault_store_backend_t unsupported = {.name = "no-atomic-write"};
+   vault_store_set_backend(&unsupported);
+   rc = vault_store_write_batch(principal, kek, "fixture", next, 2);
+   vault_store_set_backend(NULL);
+   assert(rc == VAULT_STORE_BATCH_UNSUPPORTED);
+
+   int barrier[2];
+   assert(!pipe(barrier));
+   pid_t writer = fork();
+   assert(writer >= 0);
+   if (!writer)
+   {
+      close(barrier[1]);
+      char begin;
+      assert(read(barrier[0], &begin, 1) == 1);
+      close(barrier[0]);
+      for (int i = 0; i < 100; i++)
+         assert(!vault_store_write_batch(principal, kek, "fixture", i & 1 ? old : next, 2));
+      _exit(0);
+   }
+   close(barrier[0]);
+   assert(write(barrier[1], "x", 1) == 1);
+   close(barrier[1]);
+   for (int i = 0; i < 300; i++)
+   {
+      assert(!vault_store_read_snapshot(principal, kek, "fixture", reads, 2));
+      assert(reads[0].present && reads[1].present && !strcmp(access, refresh));
+   }
+   int status;
+   assert(waitpid(writer, &status, 0) == writer && WIFEXITED(status) && !WEXITSTATUS(status));
+   vault_store_write_t remove[] = {{"access", NULL}, {"refresh", NULL}};
+   assert(!vault_store_write_batch(principal, kek, "fixture", remove, 2));
+   assert(!vault_store_read_snapshot(principal, kek, "fixture", reads, 2));
+   assert(!reads[0].present && !reads[1].present);
+   printf("  PASS: atomic batch update/delete, %d allocation failures and concurrent snapshots\n",
+          failed);
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-vault-test-%d", (int)getpid());
@@ -636,6 +730,7 @@ int main(void)
    test_corrupt_vault_is_not_missing();
    test_concurrent_process_updates();
    test_atomic_credential_snapshot();
+   test_atomic_batch_updates();
    test_set_get_roundtrip();
    test_structured_credential_roundtrip();
    test_at_rest_is_ciphertext_only();

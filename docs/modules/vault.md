@@ -27,8 +27,16 @@ The native runtime checks that lineage on callbacks and binds the selected beare
 requests. Request snapshots retain the registration/target binding; endpoint/profile edits refuse,
 and MCP tools/delegates resolve their own credentials. OAuth beta admission preserves the other
 Anthropic beta capabilities. Source/refresh fixtures and loopback broker tests do not qualify a live
-Claude subscription or activate production SDK spawning. Atomic multi-field token persistence and
-production native activation remain outstanding.
+Claude subscription or activate production SDK spawning.
+
+OAuth refresh and native-source seeding now use `vault_service_write_server_batch`: access,
+refresh, expiry, rejection state and the selected source fence commit through one encrypted Vault
+file replacement. The existing field layout is retained. Missing refresh in a normal refresh
+response preserves the existing refresh credential; a newly selected source requires its own
+refresh credential. Token validity reads access/expiry/rejection from one immutable snapshot.
+Batch updates reject duplicate fields and unsupported backends, with no sequential fallback. Each
+field emits only non-secret audit metadata. Production native activation and live subscription
+qualification remain outstanding.
 
 ## Public contracts
 

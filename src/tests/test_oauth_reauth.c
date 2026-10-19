@@ -14,10 +14,114 @@
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <unistd.h>
 
 /* Mirrors OAUTH_VCRED_REAUTH in oauth_tokens.c (the marker cred slot). */
 #define REAUTH_VCRED "oauth_reauth_required"
+
+static int allocation_index, allocation_fail_at;
+static void *oauth_test_allocate(size_t size)
+{
+   return ++allocation_index == allocation_fail_at ? NULL : malloc(size);
+}
+typedef struct
+{
+   const oauth_token_response_t *first, *next;
+   atomic_int start;
+   int failed;
+} oauth_rotation_writer_t;
+static void *oauth_rotation_writer(void *context)
+{
+   oauth_rotation_writer_t *writer = context;
+   while (!atomic_load(&writer->start))
+      usleep(1000);
+   for (int i = 0; i < 100; i++)
+      if (oauth_token_store("atomic-fixture", i & 1 ? writer->first : writer->next))
+      {
+         writer->failed = 1;
+         break;
+      }
+   return NULL;
+}
+static void test_atomic_source_and_rotation(void)
+{
+   oauth_token_response_t first = {0}, next = {0};
+   snprintf(first.access_token, sizeof first.access_token, "atomic-access-first");
+   snprintf(first.refresh_token, sizeof first.refresh_token, "atomic-refresh-first");
+   first.expires_at = (long)time(NULL) + 3600;
+   snprintf(next.access_token, sizeof next.access_token, "atomic-access-next");
+   snprintf(next.refresh_token, sizeof next.refresh_token, "atomic-refresh-next");
+   next.expires_at = first.expires_at + 3600;
+   char source_first[65], source_next[65];
+   memset(source_first, 'a', 64);
+   source_first[64] = 0;
+   memset(source_next, 'b', 64);
+   source_next[64] = 0;
+   assert(!oauth_token_store_source("atomic-fixture", &first, source_first));
+   cJSON_Hooks hooks = {.malloc_fn = oauth_test_allocate, .free_fn = free};
+   allocation_index = allocation_fail_at = 0;
+   cJSON_InitHooks(&hooks);
+   int rc = oauth_token_store_source("atomic-fixture", &next, source_next);
+   int allocations = allocation_index;
+   cJSON_InitHooks(NULL);
+   assert(!rc && allocations > 4);
+   const int failure_points[] = {1, allocations / 2, allocations - 2, allocations - 1, allocations};
+   char access[64], refresh[64], expiry[32], rejection[8], source[65];
+   vault_store_read_t reads[] = {{"oauth_access_token", access, sizeof access, 0},
+                                 {"oauth_refresh_token", refresh, sizeof refresh, 0},
+                                 {"oauth_expires_at", expiry, sizeof expiry, 0},
+                                 {REAUTH_VCRED, rejection, sizeof rejection, 0},
+                                 {OAUTH_SOURCE_CREDENTIAL, source, sizeof source, 0}};
+   int failures = 0;
+   for (size_t i = 0; i < sizeof failure_points / sizeof *failure_points; i++)
+   {
+      assert(!oauth_token_store_source("atomic-fixture", &first, source_first));
+      assert(vault_service_set_server("atomic-fixture", REAUTH_VCRED, "1") == VAULT_OK);
+      allocation_index = 0;
+      allocation_fail_at = failure_points[i];
+      cJSON_InitHooks(&hooks);
+      rc = oauth_token_store_source("atomic-fixture", &next, source_next);
+      cJSON_InitHooks(NULL);
+      assert(vault_service_read_server_snapshot("atomic-fixture", reads, 5) == VAULT_OK);
+      const oauth_token_response_t *expected = rc ? &first : &next;
+      assert(!strcmp(access, expected->access_token) && !strcmp(refresh, expected->refresh_token));
+      assert(atol(expiry) == expected->expires_at);
+      assert(!strcmp(source, rc ? source_first : source_next));
+      assert(!strcmp(rejection, rc ? "1" : "0"));
+      if (rc)
+         failures++;
+   }
+   assert(failures > 0);
+   assert(!oauth_token_store_source("atomic-fixture", &first, source_first));
+   next.refresh_token[0] = 0;
+   assert(oauth_token_store_source("atomic-fixture", &next, source_next) == -1);
+   assert(!oauth_token_store("atomic-fixture", &next));
+   assert(vault_service_read_server_snapshot("atomic-fixture", reads, 5) == VAULT_OK);
+   assert(!strcmp(access, next.access_token) && !strcmp(refresh, first.refresh_token));
+   assert(!strcmp(source, source_first));
+
+   /* Readers may see either whole generation; an expired access token must
+    * never acquire the other generation's future expiry. */
+   next.expires_at = (long)time(NULL) - 10;
+   assert(!oauth_token_store("atomic-fixture", &first));
+   /* Server credential custody deliberately refuses inherited post-fork state;
+    * model concurrent request workers without weakening that child boundary. */
+   oauth_rotation_writer_t state = {.first = &first, .next = &next};
+   pthread_t writer;
+   assert(!pthread_create(&writer, NULL, oauth_rotation_writer, &state));
+   atomic_store(&state.start, 1);
+   for (int i = 0; i < 300; i++)
+   {
+      rc = oauth_token_load("atomic-fixture", access, sizeof access);
+      assert(rc ? !access[0] : !strcmp(access, first.access_token));
+   }
+   assert(!pthread_join(writer, NULL) && !state.failed);
+   printf("PASS: atomic OAuth source/refresh/expiry/rejection, %d injected failures and concurrent "
+          "validity\n",
+          failures);
+}
 
 int main(void)
 {
@@ -209,6 +313,7 @@ int main(void)
    assert(!unsetenv("AIMEE_TEST_OAUTH_ARGS"));
    assert(!unsetenv("AIMEE_TEST_OAUTH_BODY"));
 
+   test_atomic_source_and_rotation();
    snprintf(cmd, sizeof(cmd), "rm -rf %s", home);
    (void)system(cmd);
    printf("PASS: OAuth token validity, refresh fallback and REAUTH_REQUIRED (D6)\n");

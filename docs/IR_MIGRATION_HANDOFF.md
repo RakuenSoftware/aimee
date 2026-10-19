@@ -1842,3 +1842,43 @@ The exact commit/file/rule/line finding is recorded in the existing reviewed
 non-secret fingerprint ledger. No rule/path exclusion, history-scan reduction,
 attribution exemption or gate change is introduced. Atomic-token work remains
 local while this fresh CI failure is repaired.
+
+## Atomic OAuth rotation/source seeding: 19 October continuation
+
+The existing Vault file owner now stages related credential fields under its
+write lock, encrypts all of them, and commits one atomic file replacement.
+`vault_store_write_batch` / `vault_service_write_server_batch` reject duplicate
+fields and unsupported storage without sequential emulation. The existing single
+field setters use the same checked envelope staging. Allocation failures in
+metadata/base64 construction can no longer persist an incomplete envelope.
+
+OAuth refresh atomically updates access/refresh/expiry and rejection state. Native
+Codex/Claude source seeding includes the source fence in that same commit and no
+longer removes the previous credential first. No new token layout/store is
+introduced. A refresh response without a refresh token preserves the existing
+one; a new native source must supply its own. Explicit rejection reset prevents
+legacy rejection metadata from resurfacing. Token validity comes from one
+immutable access/expiry/rejection snapshot; missing legacy fields still migrate
+through sealed Vault and custody failures cannot become missing optional fields.
+
+Validation: normal and ASan/UBSan Vault store/service, OAuth reauthentication/PKCE
+and agent fixtures pass. The store fixture injects 94 allocation failures, checks
+second-field failure after staging the first, rejects unsupported/duplicate
+updates, and exercises concurrent snapshots. The real OAuth fixture checks all
+five source/rotation fields under five injected failures and concurrently
+alternates valid/expired generations without exposing the expired token. Bootstrap
+and privilege compatibility fixtures pass. Changed-source Cppcheck and all 76
+lint checks pass; actual CMake/CTest native runtime/cache targets pass 2/2.
+
+The real Vault/OAuth concurrency fixture passes TSan with `WITH_LIBSECRET=0` in a
+separate build and private HOME, qualifying the container file-backend path. The
+default libsecret-linked run reported a GLib `g_queue_pop_tail` race during legacy
+backend discovery before the rotation worker started; that report is retained,
+not suppressed or reported as passing. The post-fork credential-custody refusal
+also remains enforced: request concurrency uses threads, while the store fixture
+uses independently supplied test keys for its process concurrency.
+
+This closes atomic rotating-token persistence, not overall native custody/SDK
+qualification. Actual credential-free SDK spawn activation, launch/workspace
+attestation, native command fidelity, full tool effects/human controls, remaining
+IR consumers and independently graded KB-free learning remain unfinished.

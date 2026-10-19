@@ -1812,7 +1812,7 @@ static void test_codex_source_lineage_and_paired_headers(void)
    assert(!strcmp(auth, "Authorization: Bearer access-b"));
    assert(strstr(headers, "ChatGPT-Account-ID: account-b"));
    assert(!strstr(headers, "account-a"));
-   assert(test_oauth_stores == stores + 1 && test_oauth_removes == removes + 1);
+   assert(test_oauth_stores == stores + 1 && test_oauth_removes == removes);
    assert(!agent_codex_connection_credentials(agent.registration, &pair));
    assert(strcmp(pair.source_digest, original.source_digest));
    assert(vault_service_set_server(agent.registration, "oauth", "") == VAULT_OK);
@@ -1906,7 +1906,7 @@ static void test_claude_selected_vault_lineage(void)
    assert(!agent_claude_connection_credentials(registration, &current));
    assert(!strcmp(current.token, "claude-access"));
    assert(!strcmp(current.source_digest, original.source_digest));
-   assert(test_oauth_stores == stores + 2 && test_oauth_removes == removes + 2);
+   assert(test_oauth_stores == stores + 2 && test_oauth_removes == removes);
 
    const char *legacy = "{\"claudeAiOauth\":{\"accessToken\":\"legacy-claude\","
                         "\"refreshToken\":\"legacy-refresh\",\"expiresAt\":4102444800000,"

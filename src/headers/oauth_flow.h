@@ -40,6 +40,11 @@ int oauth_token_parse_response(const char *json, oauth_token_response_t *out);
 /* Persist the tokens from |resp| for the given MCP client name.
  * Returns 0 on success; -1 if any store call fails. */
 int oauth_token_store(const char *client_name, const oauth_token_response_t *resp);
+/* Persist a newly selected native login and its source fence in the same atomic
+ * update. The historical key is shared by Codex/Claude registration adapters. */
+#define OAUTH_SOURCE_CREDENTIAL "codex_oauth_source"
+int oauth_token_store_source(const char *client_name, const oauth_token_response_t *resp,
+                             const char *source_digest);
 
 /* Load a valid access token for |client_name| into |buf| (size |len|).
  * Returns 0 if a non-expired token is loaded, -1 otherwise. */
