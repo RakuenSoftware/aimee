@@ -43,6 +43,10 @@ class IRBypassTests(unittest.TestCase):
             ("src/server/rogue.c", "aimee_ir_shadow_compare_response(result, native, wire);"),
             ("src/server/rogue.c", "openai_responses_emit_policed(result, id, model, time, emit, ctx);"),
             ("src/server/rogue.c", "agent_build_extra_headers(agent, headers, capacity);"),
+            ("src/server/rogue.c", "agent_execute_cli_shell_driver(agent, prompt);"),
+            ("src/server/rogue.c", "agent_shell_driver_get(name);"),
+            ("src/server/rogue.c", "agent_shell_driver_t terminal;"),
+            ("src/server/rogue.c", "emit(SHELL_EVENT_TEXT_DELTA);"),
             ("src/server/rogue.c", "driver->parse_response(body);"),
             ("src/server/rogue.c", "driver->build_request(input);"),
         ]:

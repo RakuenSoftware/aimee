@@ -36,7 +36,6 @@ extern int test_oauth_stores, test_oauth_removes, test_oauth_get_fail;
 #include "agent_adapter.h"
 #include "provider_cli_adapter.h"
 #include "agent_protocol.h"
-#include "agent_shell.h"
 #include "cJSON.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -111,10 +110,6 @@ char *tool_edit_file(const char *path, const char *old_string, const char *new_s
 char *tool_list_files(const char *path, const char *pattern);
 char *tool_grep(const char *path, const char *pattern, int max_results);
 char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms);
-int agent_execute_cli_shell_driver(const agent_t *agent, const char *driver_name,
-                                   const char *display_name, const char *default_cli_cmd,
-                                   const char *system_prompt, const char *user_prompt,
-                                   agent_result_t *out);
 void test_cancelled_durable_job_blocks_tool_dispatch(void);
 void test_native_mcp_permission_admission(void);
 void test_delegate_bash_cancel_kills_running_tool(void);
@@ -142,11 +137,6 @@ void otel_on_trace(const char *direction, const char *tool_name, const char *too
    (void)tool_args;
    (void)tool_result;
    (void)turn;
-}
-const agent_shell_driver_t *agent_shell_driver_get(const char *name)
-{
-   (void)name;
-   return NULL;
 }
 static cJSON *parse_json_or_die(const char *text)
 {
@@ -1640,54 +1630,6 @@ static void test_local_synth_not_masked_by_tmux_codex(void)
    else
       unsetenv("PATH");
    printf("  PASS: test_local_synth_not_masked_by_tmux_codex\n");
-}
-
-static void test_provider_cli_shell_exec_uses_argv_not_shell(void)
-{
-   agent_t ag;
-   memset(&ag, 0, sizeof(ag));
-   snprintf(ag.name, sizeof(ag.name), "cat-cli");
-   snprintf(ag.cli_cmd, sizeof(ag.cli_cmd), "/bin/cat");
-   ag.cli_idle_timeout_ms = 5000;
-
-   agent_result_t result;
-   memset(&result, 0, sizeof(result));
-   assert(agent_execute_cli_shell_driver(&ag, "missing", "Cat CLI", NULL, "system", "user",
-                                         &result) == 0);
-   assert(result.success == 1);
-   assert(result.response != NULL);
-   assert(strcmp(result.response, "system\n\nuser") == 0);
-   free(result.response);
-
-   memset(&ag, 0, sizeof(ag));
-   snprintf(ag.name, sizeof(ag.name), "bad-cli");
-   snprintf(ag.cli_cmd, sizeof(ag.cli_cmd), "/bin/cat ; /bin/echo injected");
-   ag.cli_idle_timeout_ms = 5000;
-   memset(&result, 0, sizeof(result));
-   assert(agent_execute_cli_shell_driver(&ag, "missing", "Bad CLI", NULL, NULL, "user", &result) !=
-          0);
-   assert(strstr(result.error, "shell operators") != NULL);
-}
-
-static void test_provider_cli_shell_timeout_covers_prompt_write(void)
-{
-   agent_t ag;
-   memset(&ag, 0, sizeof(ag));
-   snprintf(ag.name, sizeof(ag.name), "sleep-cli");
-   snprintf(ag.cli_cmd, sizeof(ag.cli_cmd), "/bin/sleep 2");
-   ag.cli_idle_timeout_ms = 100;
-
-   char *large_prompt = malloc(256 * 1024);
-   assert(large_prompt != NULL);
-   memset(large_prompt, 'x', (256 * 1024) - 1);
-   large_prompt[(256 * 1024) - 1] = '\0';
-
-   agent_result_t result;
-   memset(&result, 0, sizeof(result));
-   assert(agent_execute_cli_shell_driver(&ag, "missing", "Sleep CLI", NULL, NULL, large_prompt,
-                                         &result) != 0);
-   assert(strstr(result.error, "timed out") != NULL);
-   free(large_prompt);
 }
 
 static void test_codex_source_lineage_and_paired_headers(void)
@@ -4375,8 +4317,6 @@ int main(void)
    test_agent_adapter_registry();
    test_agent_config_deletion_guard();
    test_local_synth_not_masked_by_tmux_codex();
-   test_provider_cli_shell_exec_uses_argv_not_shell();
-   test_provider_cli_shell_timeout_covers_prompt_write();
    test_codex_source_lineage_and_paired_headers();
    test_codex_oauth_auth_resolution();
    test_responses_parser_keeps_all_output_text_parts();

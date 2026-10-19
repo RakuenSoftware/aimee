@@ -16,6 +16,10 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "agent_execute_cli_shell_driver", "agent_shell_driver_get", "agent_shell_driver_register",
+    "agent_shell_driver_t", "SHELL_EVENT_TEXT_DELTA", "SHELL_EVENT_TOOL_START",
+    "SHELL_EVENT_TOOL_COMPLETE", "SHELL_EVENT_SESSION_ID", "SHELL_EVENT_TURN_COMPLETE",
+    "SHELL_EVENT_ERROR",
     "openai_parse_chat_request", "openai_parse_completion_request",
     "openai_parse_responses_request", "openai_parse_responses_to_chat",
     "openai_split_chat_request",

@@ -1,19 +1,43 @@
 # Aimee overnight continuation handoff
 
-Prepared 17 October 2026, approximately 23:30 Europe/Amsterdam. The user requested implementation to stop here, the work to be pushed, and a complete handoff for a local session. Do not infer that the overall migration is complete.
+Prepared 17 October 2026, with subsequent continuation checkpoints. The current
+user instruction is to keep implementing the unfinished migration; the historical
+stop/handoff request below is superseded.
 
-## Current continuation status after #3038 merged
+## Current continuation status: PR #3050
 
-The user confirmed #3038 is merged and requested the remaining migration and standalone
-learning work. The follow-up is [#3047](https://github.com/RakuenSoftware/aimee/pull/3047),
-branch `fix/browser-ir-continuation`, based on merged #3038 (`344139139`). Its scoped native
-runtime prerequisites and exact validation limits are recorded at the end of this handoff.
-The scoped runtime now captures and restores replay evidence, with SDK activation still pending.
-The SDK cutover, account-bound cache/history adoption and autonomous learning remain unfinished. Explicit receipt-bound feedback now persists without a KB; this does not establish independent grading or synthesis. Do not treat these prerequisites as overall completion.
+The user confirmed #3038 and its follow-up #3047 merged and requested the remaining
+migration and standalone learning work. Continue only the existing
+[#3050](https://github.com/RakuenSoftware/aimee/pull/3050), branch
+`fix/browser-ir-native-execution`, based on merged #3047 (`fedfa6728`). Do not reopen
+#3036, create another PR, or mix in WOL work. Automatic review and the strict
+attribution gate remain enabled.
 
-Automatic reviews and strict attribution remain enabled. Production `.100` must remain KB-free.
-Do not reopen #3036 or add WOL work. Earlier instructions to continue the now-merged #3038
-are superseded by the user's latest continuation request.
+The existing browser GUI now has canonical primary loading/model switching,
+durable-log history and standard controls. Request/response streaming, delegate
+history, tool catalogs/role admission and all three tool-enabled host request
+profiles use IR. Native cache claims/recovery, execution-profile scope and
+compaction refusal are implemented but are **not activated at production SDK
+spawn sites**. Real replay qualification covers unchanged-prefix plus unseen-tail
+adoption; native command observation still has a confirmed identity/argument/result
+fidelity gap.
+
+The remaining work includes actual credential-free SDK activation with attested
+launch/workspace resources, complete host tool effects/receipts and human controls,
+Claude/generic credential custody, remaining ingress/consumer retirement and
+independently graded server-local learning with next-run reuse. Production `.100`
+must remain KB-free. Explicit receipt-bound feedback/ungraded observations are not
+independent task grades or synthesis. Production promotion requires the recorded
+independent reviewer under `OWNERS.md`.
+
+Published `1a8469ebf` passed all 56 applicable CI checks, including every Docker
+tier, with two existing testing-branch platform skips. Published `5aa1888d2`
+contains the later canonical host-profile/cache-preserving cutovers and requires
+fresh CI. The subsequent plain-request consumer and obsolete shell-driver
+retirement checkpoints at the end record their narrower source/validation status.
+Installed CLI probes now correctly resolve `aimee` and `wol-lore` from their own
+workspaces without an explicit project override; newer native callback cwd binding
+is separately pending promotion. The overall migration remains unfinished.
 
 ## Merged #3038 validation and replacement history: 18 October 2026
 
@@ -1688,3 +1712,22 @@ the canonical-files bypass gate; a planted rule rejects reintroduction of native
 sampling/cache/message shaping there. This raises that focused guard suite to ten
 passing tests without editing the exception ledger. Fresh sanitizer/build/lint
 results are recorded with the slice.
+
+
+## Retire unused flattening/terminal shell drivers
+
+Source call-site inspection found no production caller of
+`agent_execute_cli_shell_driver`: only the old full-agent fixture exercised it.
+Removed that prompt-flattening text collector, its unused registry/header, the
+Claude pipe/PTY terminal collectors and the output-discarding Codex stub from both
+Make and CMake. The structured Claude headless and Codex app-server adapters are
+retained. Two obsolete fixture functions (three cases) solely exercising the
+removed generic adapter were retired; active native adapter, cancellation, tool,
+permission and history fixtures remain. The IR gate now rejects the retired shell
+APIs/event types and has planted regressions; no exception was added.
+
+Read-only installed-CLI regression checks now succeed without explicit project
+overrides from both the Aimee continuation worktree and `/home/virant/dev/wol-lore`,
+returning only `aimee` and `wol-lore` hits respectively. This directly rechecks the
+original scope-required failure. It does not claim production SDK activation or
+promotion of the newer native callback cwd binding.

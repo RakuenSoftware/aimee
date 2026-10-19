@@ -268,9 +268,6 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/sandbox.c
     )
     list(APPEND PLATFORM_AGENT_SRCS
-        ${AIMEE_SRC_DIR}/posix/agent_shell_claude.c
-        ${AIMEE_SRC_DIR}/posix/agent_shell_claude_pty.c
-        ${AIMEE_SRC_DIR}/posix/agent_shell_codex.c
 
     )
     set(PLATFORM_CMD_SRCS
@@ -327,9 +324,6 @@ else()
         ${AIMEE_SRC_DIR}/posix/sandbox.c
     )
     list(APPEND PLATFORM_AGENT_SRCS
-        ${AIMEE_SRC_DIR}/posix/agent_shell_claude.c
-        ${AIMEE_SRC_DIR}/posix/agent_shell_claude_pty.c
-        ${AIMEE_SRC_DIR}/posix/agent_shell_codex.c
 
     )
     set(PLATFORM_CMD_SRCS
@@ -737,8 +731,6 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/oauth_pkce.c
     ${AIMEE_SRC_DIR}/server/oauth_tokens.c
     ${AIMEE_SRC_DIR}/working_profile.c
-    ${AIMEE_SRC_DIR}/server/agent_shell.c
-    ${AIMEE_SRC_DIR}/server/agent_cli_shell.c
     ${AIMEE_SRC_DIR}/server/provider_cli_adapter.c
     ${PLATFORM_AGENT_SRCS}
 )
