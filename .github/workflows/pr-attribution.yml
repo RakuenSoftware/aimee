@@ -1,0 +1,124 @@
+name: PR attribution
+
+on:
+  merge_group:
+    types: [checks_requested]
+    branches: [testing]
+  push:
+    branches: [main, testing, feature/core-modularization]
+  pull_request:
+    branches: [main, testing, feature/core-modularization, 'aimee/feat/**', 'agent/**']
+    types: [opened, synchronize, reopened, edited]
+  workflow_dispatch:
+
+# Metadata must be checked promptly, independently of the long source suite.
+concurrency:
+  group: pr-attribution-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  no-coauthor-trailers:
+    # Standing directive: commits/PRs must never carry AI co-authorship trailers.
+    # Also rejects AI app attribution on the opening PR entry.
+    # Scans only the PR's NEW commits (base..head), so existing history is
+    # grandfathered while any newly introduced trailer fails the PR.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Reject AI author and committer identities in new commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/check-commit-identities.py "$BASE_SHA" "$HEAD_SHA"
+      - name: Reject AI co-authorship trailers in new commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          range="${BASE_SHA}..${HEAD_SHA}"
+          # Match the actual trailer forms only (anchored), not prose that happens
+          # to mention them: a co-authorship trailer line, or the markdown-link
+          # generated-with attribution line.
+          #
+          # Every alternative is line-anchored, which the generated-with one was
+          # NOT until now -- so a commit message describing this check tripped
+          # it, which is exactly how this was found. Anchoring costs nothing:
+          # both are trailer lines by construction, and the leading
+          # [[:space:]]* still allows an indented one.
+          #
+          # Session back-links are the same thing wearing a different hat, and
+          # they were getting through: assistant harnesses append a
+          # "<tool>-Session: <url>" trailer, or a bare session permalink on its
+          # own line, and neither matches the two forms above. A PR landed here
+          # carrying one in all three commits AND the body before this was
+          # widened. The URL alternative is anchored to the session path rather
+          # than the bare host so that citing a docs page is still fine, and the
+          # trailer alternative is line-anchored so prose naming the trailer (a
+          # commit that FIXES this check, for instance) does not trip it.
+          ATTRIBUTION_RE='^[[:space:]]*co-authored-by:'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*[_*]*generated (with|by) \[(claude|codex|chatgpt|copilot|github copilot)'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*(claude|codex|chatgpt|copilot)-session:'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*https?://[^[:space:]]*/(code/)?session[_/-]'
+          export ATTRIBUTION_RE
+          # Immutable commits that entered testing carrying a trailer. They are
+          # grandfathered only for the testing -> main integration PR; exact SHAs
+          # keep the exception from hiding descendants or any newly introduced
+          # trailer.
+          #
+          # These are not ours to strip. The trailer is added by GITHUB, not by
+          # aimee: the WFE authors its commits as aimee-wfe <wfe@aimee.local>, so
+          # squash-merging a PR that mixes its commits with a human's produces a
+          # Co-authored-by line for the second author. Rewriting them would rewrite
+          # published history on testing to fix a message GitHub generated.
+          #
+          # This list grows once per promote until that is addressed at the source
+          # (have the WFE author as the operator, or strip the trailer from the
+          # squash message at merge time). Growth is the signal that it has not
+          # been.
+          hits=$(
+            for commit in $(git rev-list "$range"); do
+              if [ "$BASE_REF" = main ] && [ "$HEAD_REF" = testing ]; then
+                case "$commit" in
+                  9f327867cd62a14e50e9a41af9b871fc7792e4bd|003255217a10a8559e47bf0b6fedeb2c0faa6cce|\
+                  d173e054353a1069bd07a307477ad281a3d39d59|0b694e1970eab860b503b433bb69f708fc445abc|\
+                  d978a2d05356b6f6d8821f4230da5f1de9fe71c0|59d5d9e419fd64326961c5ce8086c43abc09a797|\
+                  af58300e9fd16858ad3195748f4da50bbdcd0e3c|ef9c722bab2b149dadd0fd13c3d3478a4cfda5cf|\
+                  41fe8fbae98386cc9c2895810d284bcf902f8c8e)
+                    continue
+                    ;;
+                esac
+              fi
+              git show -s --format='%H%n%B' "$commit" \
+                | grep -inE "$ATTRIBUTION_RE" || true
+            done
+          )
+          if [ -n "$hits" ]; then
+            echo "::error::New commit(s) in $range carry AI co-authorship trailers; remove them (standing directive)."
+            echo "$hits"
+            exit 1
+          fi
+          echo "no co-authorship trailers in $range — ok"
+      - name: Reject AI attribution in live PR metadata and text
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # The opening entry's "with <app>" badge is structured issue metadata,
+          # not body text. Fetch live state so editing a footer cannot hide it.
+          # An API or schema failure fails this step; there is no empty fallback.
+          gh api --method GET "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}" > "$RUNNER_TEMP/pr-attribution.json"
+          python3 scripts/check-pr-attribution.py "$RUNNER_TEMP/pr-attribution.json"
+

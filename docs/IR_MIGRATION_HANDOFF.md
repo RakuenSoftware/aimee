@@ -1911,3 +1911,20 @@ and delegates resolve their own connection credentials. The loopback regression
 checks that both the Codex token and account override are absent on MCP calls,
 while model requests retain the selected credentials. Production build and the
 native runtime fixture pass normally, under ASan/UBSan and under TSan.
+
+## Attribution checks without discarding source CI
+
+PR title/body edits previously cancelled long-running source CI because the strict
+attribution job shared its workflow and concurrency group. The unchanged
+`no-coauthor-trailers` job now belongs to `PR attribution`, with independent
+concurrency and the same read-only permissions, commit identity/trailer checks,
+and live opening-app/body checks. There is exactly one owner of that check name.
+No new exemption or rejection-rule change is introduced.
+
+Source CI still handles edited events and runs its complete suite. Known title/body
+edits queue without cancelling an active source run; base changes, code updates
+and unrecognized edits retain cancellation/restart behavior. Source jobs are not
+skipped on metadata edits. Workflow regression tests exercise the actual
+cancellation expression and preserve both event coverage and attribution checks.
+The installed server's cancelled-check display remains unpromoted; source already
+reports cancellation separately, while a current cancelled run still blocks merge.

@@ -28,6 +28,12 @@ attribution recorded by GitHub on the opening PR entry (`performed_via_github_ap
 body text does not remove that metadata. The gate fetches the live issue representation and
 fails if attribution cannot be verified. Ordinary documentation references to a tool are allowed.
 
+The `PR attribution` workflow owns this permanent check and runs on every PR edit.
+It has a separate concurrency group so live metadata checks do not wait for the source suite.
+Title/body edits queue source CI without cancelling an active qualification; code pushes and
+base changes still restart it. Edited events retain the full source suite, rather than reporting
+successful skipped required jobs.
+
 Create and edit PRs through the registered `aimee git pr` commands using the operator's GitHub
 credentials. Personally authenticated `gh` is a fallback when the required Aimee operation is
 unavailable. Do not create or modify GitHub state through an assistant connector, and keep automatic
