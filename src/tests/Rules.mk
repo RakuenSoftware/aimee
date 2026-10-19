@@ -918,6 +918,7 @@ $(TESTPREFIX)/unit-test-server-native-replay: $(OBJDIR)/tests/test_server_native
     $(OBJDIR)/platform_random.o $(filter %/platform_random.o,$(PLATFORM_BASIC_OBJS))
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto
 
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-tool-admission
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-runtime
 $(TESTPREFIX)/unit-test-server-native-runtime: $(OBJDIR)/tests/test_server_native_runtime.o \
     $(OBJDIR)/server/agent_tools.o $(OBJDIR)/posix/agent_source_authority.o $(OBJDIR)/modules/ir/aimee_ir.o \
@@ -7071,3 +7072,8 @@ $(TESTPREFIX)/unit-test-server-session-log: $(OBJDIR)/tests/test_server_session_
 $(TESTPREFIX)/unit-test-server-learning-application: $(OBJDIR)/tests/test_server_learning_application.o \
     $(OBJDIR)/server/server_learning_application.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-native-tool-admission: \
+    $(OBJDIR)/tests/test_server_native_tool_admission.o \
+    $(OBJDIR)/server/server_native_tool_admission.o $(OBJDIR)/server/request_context.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)

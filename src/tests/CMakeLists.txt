@@ -450,6 +450,12 @@ if(NOT WIN32)
   target_link_libraries(test_server_native_replay PRIVATE Threads::Threads OpenSSL::Crypto)
   aimee_enable_test_asserts(test_server_native_replay)
   add_test(NAME test_server_native_replay COMMAND test_server_native_replay)
+  add_executable(test_server_native_tool_admission test_server_native_tool_admission.c
+    ../server/server_native_tool_admission.c ../server/request_context.c ../vendor/cJSON.c)
+  target_include_directories(test_server_native_tool_admission PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
+  aimee_enable_test_asserts(test_server_native_tool_admission)
+  add_test(NAME test_server_native_tool_admission COMMAND test_server_native_tool_admission)
   add_executable(test_server_native_runtime test_server_native_runtime.c
     ../server/agent_tools.c ../posix/agent_source_authority.c ../modules/ir/aimee_ir.c
     ../server/server_native_runtime.c ../cli_proxy.c ../server/request_context.c

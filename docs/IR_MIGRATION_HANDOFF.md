@@ -1255,3 +1255,32 @@ before SDK activation. Production callers remain on the old native execution
 path; account-bound prefix/cache admission, real incremental Responses streaming,
 remaining credential custody and IR consumers, independently graded KB-free
 learning and production acceptance remain open. Production must remain KB-free.
+
+
+## Native MCP directive/policy admission and fresh CI repair
+
+The isolated served boundary now also invokes the existing hard-directive and
+execution-policy owners before any handler or gateway branch. Its attempt is
+bound to the callback's host request ID; tool-supplied attempt/side-effect/
+authorization fields do not supply that binding. Missing/mismatched host session
+identity, non-object arguments, cancellation and refused assembly context reject
+execution. Context and cancellation are rechecked after policy admission. This
+preflight grants neither effect authorization nor a human decision.
+
+The admission, real execution-policy transport and native-runtime fixtures pass;
+admission and policy transport also pass ASan/UBSan. The new admission fixture
+passes CMake/CTest with assertions enabled and belongs to the ordinary Make unit
+suite. The production server builds, all 76 lint gates pass and pinned Cppcheck
+2.13 reports zero diagnostics for the new admission source, fixture and served
+route. Full effects/receipts and argument-bound human approval remain open.
+
+Fresh CI for `b833a37b8` found an LSP release-lineage failure and its dependent
+unit aggregate. The retained report has 20/20 successful cold starts for both
+gopls and pyright, complete reference recall and no false positives. The rejected
+source paths are `mcp_tools_extended.c` and `test_mcp_client_registry.c`: this PR's
+Git dispatch changes and tests. `s1-host-integration.json` records those exact
+blocks independently from memory integrations, reverses them for frozen source
+comparison, and retains the full remaining file/build-plan checks. Mutation tests
+reject LSP drift, altered/removed/duplicated host blocks and changed assertions.
+All 20 S1 gate/evidence tests pass. Checkpoint `a6834ef00` publishes that repair;
+its fresh CI, and any later checkpoint's CI, still require their own qualification.

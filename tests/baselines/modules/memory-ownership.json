@@ -2205,8 +2205,8 @@
         "kb_client_memory_scope_context_set",
         "server_module_memory_data"
       ],
-      "sha256": "66ecbe5d620f68c77fd1d08d736045652d679b7b3b185f91271d9a2d1364618d",
-      "boundary_change": "Isolated native callbacks apply the existing tools permission owner to the resolved callable before dispatch. Git family expansion moves before workflow externalization admission. Existing authenticated memory transport and scope owners are unchanged. This records boundary analysis, not independent approval."
+      "sha256": "85770235db82e647aad19a076341e2dfb4e8088d479650a5366b19f1bc9c1512",
+      "boundary_change": "Isolated native callbacks apply the existing tools permission owner to the resolved callable before dispatch. Git family expansion moves before workflow externalization admission. Existing authenticated memory transport and scope owners are unchanged. This records boundary analysis, not independent approval. Native admission also delegates directive and execution-policy checks using the host callback identity; no memory eligibility policy or effect/human grant is added."
     },
     "src/server/server_mcp_call_table.c": {
       "disposition": "host-transport",

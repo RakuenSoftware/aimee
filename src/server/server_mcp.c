@@ -1,6 +1,7 @@
 #include "modules/kb_client/kb_client_pii.h"
 /* server_mcp.c: handle mcp.call -- dispatches MCP tool calls within the server */
 #include "server_mcp_internal.h"
+#include "server_native_tool_admission.h"
 #include "server.h"
 #include "server_state_internal.h"
 #include "module_stage_adapters.h"
@@ -2182,18 +2183,17 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 
    /* Native SDK callbacks carry an isolated host-owned permission snapshot.
     * Admit the resolved callable, including call_tool -> family -> member, before
-    * any early handler or gateway branch. Ordinary authenticated MCP clients keep
-    * their existing capability-based admission. Effects/approvals remain separate. */
+    * any early handler or gateway branch, then apply directive/execution policy.
+    * Ordinary authenticated MCP clients keep their capability-based admission.
+    * Effects/approvals remain separate. */
    if (agent_tools_scope_isolated())
    {
-      agent_tool_permission_t permission = agent_tools_permission_check(tool, jargs);
-      if (permission != AGENT_TOOL_PERMISSION_ALLOWED)
+      char error[512];
+      const char *reason = server_native_tool_admit(tool, jargs, sid, error, sizeof error);
+      if (reason)
       {
-         char *error = agent_tools_permission_error(permission);
-         served_outcome("refused",
-                        permission == AGENT_TOOL_PERMISSION_SHELL ? "permission" : "role");
-         int rc = server_send_error(conn, error ? error : "forbidden: tool permission", NULL);
-         free(error);
+         served_outcome("refused", reason);
+         int rc = server_send_error(conn, error, NULL);
          if (owns_jargs)
             cJSON_Delete(jargs);
          return rc;
