@@ -4,16 +4,16 @@ Prepared 17 October 2026, with subsequent continuation checkpoints. The current
 user instruction is to keep implementing the unfinished migration; the historical
 stop/handoff request below is superseded.
 
-## Current continuation status: PR #3050 merged; branch continuation
+## Current continuation status: PR #3052; migration still unfinished
 
 The user confirmed #3038 and its follow-up #3047 merged and requested the remaining
 migration and standalone learning work. #3050 was subsequently merged at
 `4e0ca19c2` (merge `7e17d58be`). Continuation commits remain on
 `fix/browser-ir-native-execution`; its original base was merged #3047 (`fedfa6728`).
-The previous existing-PR-only restriction is retained pending the user’s reply to
-the follow-up PR question. No additional PR has been created. Do not reopen
-#3036 or mix in WOL work. Automatic review and the strict attribution gate
-remain enabled.
+The user authorized one follow-up PR after #3050 merged: active work is now
+[PR #3052](https://github.com/RakuenSoftware/aimee/pull/3052), targeting testing.
+Keep further migration work in #3052. Do not reopen #3036 or mix in WOL work.
+Automatic review and the strict attribution gate remain enabled.
 
 The existing browser GUI now has canonical primary loading/model switching,
 durable-log history and standard controls. Request/response streaming, delegate
@@ -2797,3 +2797,33 @@ an unfinished declaration before subsequent functions, while local 19.1.7 did
 not. Moving those unchanged generated stubs after the ordinary functions passes
 both exact formatter versions, without a format exemption or toolchain change.
 The attribution/no-coauthor gate has passed on #3052.
+
+
+## Reproduced private-memory initialization deadlock repaired
+
+The PostgreSQL integration failure above exposed a real datastore ownership bug.
+The personal code-index worker held codeIndexState.mu while request dispatch
+copied postgresDataStore by value. A request could inherit a locked independent
+mutex with no owner capable of unlocking it, blocking the module's handler and
+shutdown. Code initialization state is now one constructor-owned pointer shared
+by request-bound copies and the background worker. Schema validation, readiness
+publication and failed-migration retry keep the same initialization path. The
+existing restart fixture resets its initializer with a fresh owned state.
+
+A deterministic regression holds initialization while making the request copy.
+It fails on the old source (the copied mutex never unlocks) and passes 20 runs
+under the race detector after the fix. It also exercises the actual dispatcher
+and verifies completed initialization is not repeated by later request copies.
+The full memory and module-host packages pass race tests. PostgreSQL 18 full
+integration now passes 167/167, with the same 26 unavailable-service skips; the
+private model write, correction/readback and bounded owner shutdown all pass.
+The original failing verdict is retained above as evidence, not reclassified.
+
+The exact CI formatter version 19.1.1 now passes the full source-format target.
+The previous snapshot HEAD also passes Gitleaks (6,209 commits, no leaks). An
+additional exploratory whole-memory go vet still reports existing unkeyed
+fixture literals and a rankingCapture fixture's JSON marshal of a mutex value;
+this is not claimed as a clean whole-package vet result.
+
+Final qualification for the shared-initializer fix: all 76 lint gates pass with
+CI's exact clang-format 19.1.1; no baseline or gate exemptions were added.

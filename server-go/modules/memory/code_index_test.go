@@ -271,7 +271,7 @@ func TestCodeVectorsRejectStaleContentAndModel(t *testing.T) {
 	executor.serving = "model-b"
 	search(0)
 	// A restarted instance resumes pending detached-file embeddings before a query.
-	s.code = codeIndexState{}
+	s.code = &codeIndexState{}
 	if err := p.indexCodeBatch(ctx); err != nil {
 		t.Fatal(err)
 	}

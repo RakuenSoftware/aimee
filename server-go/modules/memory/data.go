@@ -501,7 +501,7 @@ type postgresDataStore struct {
 	episodeCommand  func(context.Context, string, []byte) ([]byte, error)
 	settings        func() (map[string]any, error)
 	fusionEnabled   bool
-	code            codeIndexState
+	code            *codeIndexState
 	personal        *personalVectors
 	db              store.Queryer
 	placement       Placement
@@ -521,7 +521,7 @@ func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, err
 	if err != nil {
 		return nil, err
 	}
-	backend := &postgresDataStore{db: db, placement: placement, fusionEnabled: enabled, health: &healthOwnerState{}}
+	backend := &postgresDataStore{db: db, placement: placement, fusionEnabled: enabled, health: &healthOwnerState{}, code: &codeIndexState{}}
 	if publisher, ok := db.(interface {
 		MemoryAuditAction(context.Context, audit.Action) error
 	}); ok {
