@@ -46,6 +46,7 @@ RULES = {
     "unclassified-tool-dispatch": re.compile(r"\bdispatch_tool_call(?:_ctx)?\s*\("),
     "native-profile-rebuild": re.compile(r"\bagent_build_request_(?:openai|anthropic|responses)\s*\("),
     "post-render-profile": re.compile(r"\b(?:model_sampling_apply_(?:openai|anthropic)|agent_anthropic_set_system|agent_request_shape_openai_messages)\s*\("),
+    "native-schema-lookup": re.compile(r"\b(?:tool_validate|kb_client_tool_registry_lookup)\s*\("),
     "native-hook-field": re.compile(r'"(?:tool_name|tool_input|tool_response|tool_use_id|tool_call_id|tool_namespace)"'),
     "native-history-field": re.compile(
         r'"(?:tool_calls|function_call|function_call_output|tool_call_id|tool_use_id|'
@@ -120,6 +121,8 @@ def findings(root: Path) -> list[dict]:
         profile_spans = profile_function_spans(source) if relative == "src/server/agent_bridge.c" else []
         for rule, pattern in RULES.items():
             if rule == "post-render-profile" and relative != "src/server/agent_request_build.c":
+                continue
+            if rule == "native-schema-lookup" and not canonical:
                 continue
             if rule == "native-hook-field" and relative not in CANONICAL_HOOK_FILES:
                 continue

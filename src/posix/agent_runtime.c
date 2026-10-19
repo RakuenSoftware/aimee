@@ -1980,7 +1980,7 @@ native_provider_http:
 
          total_calls++;
 
-         /* Validate arguments against tool registry */
+         /* Validate the exact advertised canonical function contract. */
          char val_err[256] = {0};
          const aimee_block_t *tool = aimee_ir_response_tool(&response, i);
          const aimee_tool_t *advertised =
@@ -1990,7 +1990,7 @@ native_provider_http:
          else if (tool->tool_namespace && tool->tool_namespace[0])
             snprintf(val_err, sizeof val_err, "function namespace has no local execution binding");
          if (val_err[0] ||
-             tool_validate(tool->tool_name, tool_arguments[i], val_err, sizeof(val_err)) != 0)
+             tool_validate_ir(advertised, tool_arguments[i], val_err, sizeof(val_err)) != 0)
          {
             char *err_result = malloc(512);
             if (!err_result)

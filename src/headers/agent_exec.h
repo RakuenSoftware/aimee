@@ -257,6 +257,11 @@ void agent_ssh_cleanup(const agent_network_t *network, const char *key_path,
                        const char *session_id);
 
 /* Policy, trace, confidence */
+/* Validate against the exact admitted IR function schema. Optional registry
+ * enable/disable state remains policy; registry/provider schemas cannot replace
+ * the advertised contract. Arguments are the same canonical bytes as dispatch. */
+int tool_validate_ir(const aimee_tool_t *tool, const char *args_json, char *err_out,
+                     size_t err_len);
 int tool_validate(const char *tool_name, const char *args_json, char *err_out, size_t err_len);
 const char *tool_suggest(const char *name);
 const char *tool_side_effect(const char *tool_name);

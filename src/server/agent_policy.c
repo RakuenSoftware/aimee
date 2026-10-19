@@ -50,7 +50,7 @@ static const char *tool_prompts_lookup_embedded(const char *name)
    return NULL;
 }
 
-static int validate_against_schema(const char *args_json, cJSON *schema, char *err_out,
+static int validate_against_schema(const char *args_json, const cJSON *schema, char *err_out,
                                    size_t err_len)
 {
    if (!schema)
@@ -196,6 +196,33 @@ const char *tool_suggest(const char *name)
 }
 
 /* --- Tool registry validation --- */
+
+/* Execution validates the exact post-policy IR catalog that was advertised.
+ * Registry state may still disable a tool, but cannot replace that schema with
+ * a stale or differently shaped KB copy after the model has answered. */
+int tool_validate_ir(const aimee_tool_t *tool, const char *args_json, char *err_out, size_t err_len)
+{
+   if (!err_out || !err_len)
+      return -1;
+   err_out[0] = 0;
+   if (!tool || tool->kind != AIMEE_TOOL_FUNCTION || !tool->name || !tool->name[0] ||
+       !cJSON_IsObject(tool->schema) || !args_json)
+   {
+      snprintf(err_out, err_len, "canonical function/schema is unavailable");
+      return -1;
+   }
+   if (!strchr(tool->name, ':'))
+   {
+      int found = 0, enabled = 0;
+      if (!kb_client_tool_registry_lookup(tool->name, NULL, 0, NULL, 0, &enabled, &found) &&
+          found && !enabled)
+      {
+         snprintf(err_out, err_len, "tool '%s' is disabled", tool->name);
+         return -1;
+      }
+   }
+   return validate_against_schema(args_json, tool->schema, err_out, err_len);
+}
 
 int tool_validate(const char *tool_name, const char *args_json, char *err_out, size_t err_len)
 {

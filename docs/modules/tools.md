@@ -144,3 +144,13 @@ Role filtering of compatibility catalogs also admits each entry through the
 translation owner before deciding on its canonical identity. A familiar name on
 an invalid schema no longer makes that entry eligible. Valid entries retain
 their original compatibility bytes; canonical consumers can avoid that shim.
+
+Canonical delegate execution validates arguments against the exact admitted
+`aimee_tool_t` schema saved after request policy. A separately loaded KB or
+provider schema cannot replace that contract after the model answers. Optional
+registry disable state remains an admission veto; a newly admitted host function
+can validate without a KB schema. Validation and execution receive identical
+canonical argument bytes at the existing string-based tool-service boundary.
+The bypass gate prevents migrated consumers from reintroducing legacy schema
+lookups. Compatibility validation APIs and the independent side-effect metadata
+cutover remain separate work.

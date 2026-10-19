@@ -84,6 +84,16 @@ class IRBypassTests(unittest.TestCase):
         self.source("src/server/agent_request_build.c", "sampling = model_sampling_resolve(agent, 0.5);")
         checker.check(self.root)
 
+    def test_canonical_execution_cannot_reload_native_schema_authority(self):
+        for name in ("tool_validate", "kb_client_tool_registry_lookup"):
+            path = self.source("src/posix/agent_runtime.c", name + '(name, args);')
+            with self.assertRaisesRegex(ValueError, "native-schema-lookup"):
+                checker.check(self.root)
+            path.unlink()
+        self.source("src/posix/agent_runtime.c", "tool_validate_ir(admitted, args, error, capacity);")
+        self.source("src/server/agent_policy.c", "kb_client_tool_registry_lookup(name, enabled);")
+        checker.check(self.root)
+
     def test_canonical_host_profiles_cannot_rebuild_native_requests(self):
         for function in checker.CANONICAL_PROFILE_FUNCTIONS:
             for wire in ("openai", "anthropic", "responses"):

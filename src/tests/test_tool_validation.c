@@ -257,8 +257,46 @@ static void test_validate_does_not_rewrite_arguments(void)
    printf("  PASS: tool_validate judges without rewriting\n");
 }
 
+static void test_ir_catalog_is_schema_authority(void)
+{
+   setup_db();
+   cJSON *schema = cJSON_Parse("{\"type\":\"object\",\"required\":[\"admitted_path\"],"
+                               "\"properties\":{\"admitted_path\":{\"type\":\"string\"}},"
+                               "\"additionalProperties\":false}");
+   assert(schema);
+   aimee_tool_t tool = {.name = "read_file", .kind = AIMEE_TOOL_FUNCTION, .schema = schema};
+   char err[256];
+   assert(!tool_validate_ir(&tool, "{\"admitted_path\":\"file.c\"}", err, sizeof err));
+   assert(tool_validate_ir(&tool, "{\"path\":\"stale-kb-contract\"}", err, sizeof err) == -1);
+   assert(strstr(err, "admitted_path"));
+   assert(tool_validate_ir(&tool, "{\"admitted_path\":4}", err, sizeof err) == -1);
+   assert(strstr(err, "string"));
+   assert(tool_validate_ir(&tool, "{broken", err, sizeof err) == -1);
+   assert(strstr(err, "invalid JSON"));
+   assert(tool_validate_ir(&tool, "{\"admitted_path\":\"file.c\",\"extra\":true}", err,
+                           sizeof err) == -1);
+   /* A later operator disable still refuses execution without importing the
+    * registry's independently mutable schema into canonical execution. */
+   assert(!aimee_pg_exec(kb_store_conn(),
+                         "UPDATE tool_registry SET enabled=0 WHERE name='read_file'", NULL, 0));
+   assert(tool_validate_ir(&tool, "{\"admitted_path\":\"file.c\"}", err, sizeof err) == -1);
+   assert(strstr(err, "disabled"));
+   tool.name = "new-admitted-host-function";
+   assert(!tool_validate_ir(&tool, "{\"admitted_path\":\"file.c\"}", err, sizeof err));
+   tool.kind = AIMEE_TOOL_HOSTED;
+   assert(tool_validate_ir(&tool, "{}", err, sizeof err) == -1);
+   tool.kind = AIMEE_TOOL_FUNCTION;
+   tool.schema = NULL;
+   assert(tool_validate_ir(&tool, "{}", err, sizeof err) == -1);
+   assert(tool_validate_ir(NULL, "{}", err, sizeof err) == -1);
+   cJSON_Delete(schema);
+   teardown_db();
+   puts("  PASS: admitted IR schema governs validation; registry disable remains effective");
+}
+
 int main(void)
 {
+   test_ir_catalog_is_schema_authority();
    printf("test_tool_validation\n");
 
    test_suggest_exact_match();

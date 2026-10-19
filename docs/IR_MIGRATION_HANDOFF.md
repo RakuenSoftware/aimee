@@ -1882,3 +1882,22 @@ This closes atomic rotating-token persistence, not overall native custody/SDK
 qualification. Actual credential-free SDK spawn activation, launch/workspace
 attestation, native command fidelity, full tool effects/human controls, remaining
 IR consumers and independently graded KB-free learning remain unfinished.
+
+## Canonical tool-schema validation: 19 October continuation
+
+The delegate tool loop already found each callable in the post-policy IR
+`dispatch_catalog`, but then `tool_validate` loaded an independent KB schema.
+It now calls `tool_validate_ir` with the exact admitted `aimee_tool_t`. Registry
+metadata can still disable a tool; it cannot replace the advertised schema after
+the model's response. A newly admitted host function does not need a KB schema.
+This does not change optional tool enablement or policy classification, and the
+same canonical argument bytes still reach validation and the tool-service owner.
+
+The regression supplies an admitted schema that intentionally disagrees with the
+KB schema, verifies the admitted contract wins, checks missing/type/extra/malformed
+arguments, preserves an operator disable, and refuses hosted/missing-schema input.
+Tool validation and full agent suites pass normally and under ASan/UBSan; changed
+C sources have no Cppcheck diagnostics. The bypass gate's eleven fixtures include
+a negative plant refusing legacy validation/schema lookup in migrated consumers.
+The separate native MCP side-effect lookup still requires full catalog-owned
+classification; it has not been replaced or relabeled as complete by this change.
