@@ -1526,6 +1526,6 @@ finish:
    else
       printf(
           "module runtime (%s): dispatch, fragmented payloads, deadline, and cancellation passed\n",
-          argc == 2 ? "Go process" : "C process");
+          argc == 2 ? "external process" : "C process");
    return 0;
 }

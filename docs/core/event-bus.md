@@ -1,7 +1,7 @@
 # Core C event bus
 
 **Owner:** runtime core
-**Paths:** `src/core/event_bus/`, `server-go/bus/`
+**Paths:** `src/core/event_bus/`, `server-go/bus/`, `rust/aimee-bus/`
 
 `libaimee-core-event-bus.a` is the single POSIX implementation consumed by
 `aimee-server` and `aimee-kb`. Each daemon hosts an independent local bus for
@@ -43,7 +43,7 @@ transport through the resource planes.
 - host sequence, observer routing, and full-stream tap;
 - capture format and observational replay;
 - local `SOCK_SEQPACKET` module attachment and descriptor grant;
-- C/Go vectors and conformance.
+- C/Go/Rust vectors and conformance.
 
 ## Does not own
 
@@ -75,7 +75,12 @@ External C module repositories consume the host-free
 `aimee-core-event-bus-client` target. Go modules use the pure-Go client and
 process runtime under `server-go/bus`; it mirrors authenticated attach, AMOD
 fragmentation, deadlines, cancellation, bounded concurrent handlers,
-heartbeats, and host-epoch shutdown without cgo. The shared host runtime in `bus_runtime.c`
+heartbeats, and host-epoch shutdown without cgo. Rust modules use the Rust
+reference client and process runtime under `rust/aimee-bus`, which mirrors the
+same contract and links nothing from the C or Go implementations. It is the
+third independent client of the one C host; `make -C src rust-bus-tests` holds
+it to the wire vectors and to interop with the C host and the C module-runtime
+caller. The shared host runtime in `bus_runtime.c`
 owns the listener, peer admission, heartbeat, and reap lifecycle. Server and KB
 configure separate endpoints at `<config>/<daemon>-module-bus.sock` and separate
 policies at `<config>/modules.d/<daemon>`; the environment can override those

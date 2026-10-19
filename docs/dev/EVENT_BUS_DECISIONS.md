@@ -1,4 +1,4 @@
-# Event bus v0: rendered decisions (D1–D10)
+# Event bus v0: rendered decisions (D1–D11)
 
 - **State:** DECIDED. 2026-07-23, revision 7, after six rounds of roundtable review.
 - **Companion:** [`EVENT_BUS_FEATURE_TREE.md`](EVENT_BUS_FEATURE_TREE.md). Scope, the twelve slices,
@@ -564,6 +564,29 @@ rather than redefine it.
 Module replay (re-driving a module against recorded inbound events) is **not** delivered by this tree.
 Slice 11 delivers observational replay only, which is exact by construction because nothing is
 re-executed.
+
+---
+
+## D11: The Rust reference client is a third independent client
+
+*Added 2026-10-19, after v0; not part of the roundtable-reviewed revision 7.*
+
+**Decision: `rust/aimee-bus`, a Rust client and module-process runtime with one dependency (`libc`),
+no build script and no link edge with either reference implementation.**
+
+D8's argument applies again: a client that linked the C implementation would test the C code twice.
+The frame codec is written from the spec and held to the committed vectors. Region, ring and attach
+layouts are not in the spec's prose, which defers exact offsets to code, and the vectors cover frames
+only, so those layouts follow the C public headers whose static asserts freeze them
+(`bus_ring.h`, `bus_region.h`, `bus_attach.h`, `module_protocol.h`). Reading a header is not linking,
+importing or generating from it, but it does mean the region layout has two clients' agreement with
+one host rather than a language-neutral fixture. A layout vector table would close that.
+
+`scripts/check_bus_single_host.sh` holds the crate to D8's rules and adds independence: no
+`memfd_create`, `bind`, `listen` or `accept` in its source; no `build.rs` or `#[link]`; no dependency
+but `libc`; and no Rust file writing the vector table. `scripts/test_bus_rust_conformance.sh` runs the
+vectors, the C-host interop and the C module-runtime interop, and CI gates on it through the
+`unit-tests` aggregate.
 
 ---
 
