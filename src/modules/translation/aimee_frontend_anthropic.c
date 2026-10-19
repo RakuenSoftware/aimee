@@ -31,6 +31,46 @@ static char *parse_cache_control(const cJSON *block)
    return dupstr(t ? t : "");
 }
 
+int anthropic_ir_parse_tool(const cJSON *t, aimee_tool_t *out)
+{
+   if (!cJSON_IsObject(t) || !out)
+      return -1;
+   out->name = dupstr(ostr(t, "name"));
+   out->description = dupstr(ostr(t, "description"));
+   out->cache_control = parse_cache_control(t);
+   out->cache_ttl = dupstr(ostr(cJSON_GetObjectItemCaseSensitive(t, "cache_control"), "ttl"));
+   out->raw = cJSON_Duplicate(t, 1);
+   const cJSON *schema = cJSON_GetObjectItemCaseSensitive((cJSON *)t, "input_schema");
+   out->schema = schema ? cJSON_Duplicate(schema, 1) : NULL;
+   const char *native_type = ostr(t, "type");
+   if (native_type && strcmp(native_type, "custom"))
+   {
+      out->kind = AIMEE_TOOL_HOSTED;
+      out->provider_wire = AIMEE_WIRE_ANTHROPIC;
+      out->native_type = dupstr(native_type);
+      out->native_options = cJSON_Duplicate(t, 1);
+      if (!out->native_type || !out->native_options)
+         return -1;
+      const char *fields[] = {"type", "name", "description", "input_schema", "cache_control"};
+      for (size_t j = 0; j < sizeof fields / sizeof fields[0]; j++)
+         cJSON_DeleteItemFromObjectCaseSensitive(out->native_options, fields[j]);
+   }
+   const cJSON *strict = cJSON_GetObjectItemCaseSensitive(t, "strict");
+   const cJSON *defer = cJSON_GetObjectItemCaseSensitive(t, "defer_loading");
+   if ((strict && !cJSON_IsBool(strict)) || (defer && !cJSON_IsBool(defer)))
+   {
+      return -1;
+   }
+   out->strict = !strict                ? AIMEE_STRICT_UNSET
+                 : cJSON_IsTrue(strict) ? AIMEE_STRICT_TRUE
+                                        : AIMEE_STRICT_FALSE;
+   out->has_defer_loading = defer != NULL;
+   out->defer_loading = cJSON_IsTrue(defer);
+   if (!out->raw || (schema && !out->schema))
+      return -1;
+   return aimee_ir_tool_valid(out) ? 0 : -1;
+}
+
 /* Parse one Anthropic content block into `b`. */
 void anthropic_ir_parse_block(const cJSON *el, aimee_block_t *b)
 {
@@ -229,40 +269,13 @@ int anthropic_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
          const cJSON *t = NULL;
          cJSON_ArrayForEach(t, tools)
          {
-            out->tools[i].name = dupstr(ostr(t, "name"));
-            out->tools[i].description = dupstr(ostr(t, "description"));
-            out->tools[i].cache_control = parse_cache_control(t);
-            out->tools[i].cache_ttl =
-                dupstr(ostr(cJSON_GetObjectItemCaseSensitive(t, "cache_control"), "ttl"));
-            out->tools[i].raw = cJSON_Duplicate(t, 1);
-            const cJSON *schema = cJSON_GetObjectItemCaseSensitive((cJSON *)t, "input_schema");
-            out->tools[i].schema = schema ? cJSON_Duplicate(schema, 1) : NULL;
-            const char *native_type = ostr(t, "type");
-            if (native_type && strcmp(native_type, "custom"))
+            if (anthropic_ir_parse_tool(t, &out->tools[i]) != 0)
             {
-               out->tools[i].kind = AIMEE_TOOL_HOSTED;
-               out->tools[i].provider_wire = AIMEE_WIRE_ANTHROPIC;
-               out->tools[i].native_type = dupstr(native_type);
-               out->tools[i].native_options = cJSON_Duplicate(t, 1);
-               if (!out->tools[i].native_type || !out->tools[i].native_options)
-                  goto oom;
-               const char *fields[] = {"type", "name", "description", "input_schema",
-                                       "cache_control"};
-               for (size_t j = 0; j < sizeof fields / sizeof fields[0]; j++)
-                  cJSON_DeleteItemFromObjectCaseSensitive(out->tools[i].native_options, fields[j]);
-            }
-            const cJSON *strict = cJSON_GetObjectItemCaseSensitive(t, "strict");
-            const cJSON *defer = cJSON_GetObjectItemCaseSensitive(t, "defer_loading");
-            if ((strict && !cJSON_IsBool(strict)) || (defer && !cJSON_IsBool(defer)))
-            {
+               if (err && errn)
+                  snprintf(err, errn, "invalid Anthropic tool definition");
                aimee_request_free(out);
                return -1;
             }
-            out->tools[i].strict = !strict                ? AIMEE_STRICT_UNSET
-                                   : cJSON_IsTrue(strict) ? AIMEE_STRICT_TRUE
-                                                          : AIMEE_STRICT_FALSE;
-            out->tools[i].has_defer_loading = defer != NULL;
-            out->tools[i].defer_loading = cJSON_IsTrue(defer);
             i++;
          }
       }

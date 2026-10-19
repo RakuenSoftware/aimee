@@ -686,6 +686,12 @@ static int tools_has(cJSON *arr, const char *name, int chat)
 
 static void test_tool_surface_single_source(void)
 {
+   aimee_tool_t *canonical = NULL, *independent = NULL;
+   int count = 0, independent_count = 0;
+   int status = agent_tools_builtin_catalog(&canonical, &count);
+   assert(status == 0 && count > 20);
+   status = agent_tools_builtin_catalog(&independent, &independent_count);
+   assert(status == 0 && independent_count == count);
    cJSON *chat = build_tools_array();
    cJSON *resp = build_tools_array_responses();
 
@@ -723,6 +729,30 @@ static void test_tool_surface_single_source(void)
                            cJSON_GetObjectItem(rbody, "parameters"), 1));
    }
    assert(shared >= 20); /* the bulk of the surface is shared and now consistent */
+   for (int i = 0; i < count; i++)
+   {
+      assert(aimee_ir_tool_valid(canonical + i));
+      assert(canonical[i].kind == AIMEE_TOOL_FUNCTION && !canonical[i].raw &&
+             !canonical[i].native_options);
+      cJSON *rendered = tools_find(chat, canonical[i].name, 1);
+      if (!rendered)
+         rendered = tools_find(resp, canonical[i].name, 0);
+      assert(rendered);
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(rendered, "description")),
+                     canonical[i].description));
+      assert(cJSON_Compare(cJSON_GetObjectItem(rendered, "parameters"), canonical[i].schema, 1));
+   }
+   canonical[0].name[0] = '!';
+   cJSON_AddBoolToObject(canonical[0].schema, "fixture_mutation", 1);
+   assert(independent[0].name[0] != '!');
+   assert(!cJSON_GetObjectItem(independent[0].schema, "fixture_mutation"));
+   for (int i = 0; i < count; i++)
+   {
+      aimee_tool_free(canonical + i);
+      aimee_tool_free(independent + i);
+   }
+   free(canonical);
+   free(independent);
 
    cJSON_Delete(chat);
    cJSON_Delete(resp);
@@ -757,7 +787,7 @@ static void test_knowledge_write_gates_the_tool_policy(void)
    assert(agent_tools_tool_allowed_for_role("diagnose", "find_symbol") == 0);
    cJSON_Delete(tools);
    tools = build_tools_array_anthropic();
-   agent_tools_filter_for_role(tools, "diagnose");
+   agent_tools_filter_anthropic_for_role(tools, "diagnose");
    assert(tools_array_has_name(tools, "read_file") && !tools_array_has_name(tools, "find_symbol"));
    cJSON_Delete(tools);
    tools = build_tools_array();
@@ -842,6 +872,23 @@ static void test_permissions_clamp_the_toolset(void)
    /* And what the permission does NOT withhold survives the same filter. */
    assert(tools_array_has_name(tools, "read_file"));
    cJSON_Delete(tools);
+   for (int surface = 0; surface < 3; surface++)
+   {
+      tools = surface == 2 ? build_tools_array_anthropic()
+              : surface    ? build_tools_array_responses()
+                           : build_tools_array();
+      cJSON *definition = tools_find(tools, "read_file", surface == 0);
+      assert(definition);
+      cJSON_ReplaceItemInObjectCaseSensitive(
+          definition, surface == 2 ? "input_schema" : "parameters", cJSON_CreateArray());
+      if (surface == 2)
+         agent_tools_filter_anthropic_for_role(tools, "code");
+      else
+         agent_tools_filter_for_role(tools, "code");
+      assert(!tools_has(tools, "read_file", surface == 0));
+      assert(cJSON_GetArraySize(tools) > 0);
+      cJSON_Delete(tools);
+   }
 
    /* Allowed: and the same answer at the gate that runs it. */
    assert(agent_tools_tool_allowed_for_role("code", "write_file") == 0);
@@ -2059,7 +2106,8 @@ static void test_tool_read_file(void)
    free(result);
 
    unsigned char binary_content[] = {0x7f, 'E', 'L', 'F', '\0', 0x01, 0x02, 0x03};
-   assert((fd = open(tmppath, O_WRONLY | O_TRUNC)) >= 0);
+   fd = open(tmppath, O_WRONLY | O_TRUNC);
+   assert(fd >= 0);
    assert(write(fd, binary_content, sizeof(binary_content)) == (ssize_t)sizeof(binary_content));
    close(fd);
    result = tool_read_file(tmppath, 0, 0, 1);
@@ -2069,7 +2117,8 @@ static void test_tool_read_file(void)
    free(result);
 
    /* Anchored mode (default): lines prefixed LINE:HASH| and a snapshot header. */
-   assert((fd = open(tmppath, O_WRONLY | O_TRUNC)) >= 0);
+   fd = open(tmppath, O_WRONLY | O_TRUNC);
+   assert(fd >= 0);
    assert(write(fd, content, strlen(content)) == (ssize_t)strlen(content));
    close(fd);
    result = tool_read_file(tmppath, 0, 0, 0);
@@ -2845,7 +2894,8 @@ static void test_parent_write_guard_blocks_parent_writes(void)
    free(result);
 
    const char *home = getenv("HOME");
-   assert(home && home[0]);
+   if (!home || !home[0])
+      abort();
    char external_bin[512];
    char external_aimee[512];
    snprintf(external_bin, sizeof(external_bin), "%s/.aimee-test-external-bin-XXXXXX", home);

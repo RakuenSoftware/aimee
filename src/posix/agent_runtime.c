@@ -878,7 +878,21 @@ native_provider_http:
    cJSON *tools = chatgpt     ? build_tools_array_responses()
                   : anthropic ? build_tools_array_anthropic()
                               : build_tools_array(); /* OpenAI format */
-   agent_tools_filter_for_role(tools, role);
+   if (!tools)
+   {
+      free(assembled_sys);
+      free(task_instructions);
+      if (has_ephemeral_ssh)
+         agent_ssh_cleanup(network, ephemeral_key, session_id);
+      if (has_tunnels && network && network->tunnel_mgr)
+         agent_tunnel_stop_all(network->tunnel_mgr);
+      snprintf(out->error, sizeof out->error, "tool catalog could not be admitted as IR");
+      return -1;
+   }
+   if (anthropic)
+      agent_tools_filter_anthropic_for_role(tools, role);
+   else
+      agent_tools_filter_for_role(tools, role);
    int inject_respond_tool = agent_should_inject_respond_tool(agent, role);
    if (inject_respond_tool)
       agent_tools_append_delegate_respond_tool(tools);

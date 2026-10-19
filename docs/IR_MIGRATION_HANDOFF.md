@@ -1547,3 +1547,36 @@ Artifacts: `/var/tmp/aimee-native-command-probe.py`,
 Published head `1c8eb94ed` passed all 56 applicable CI checks, including Docker T2
 and T3; the two existing platform skips remain. This precedes the recovery,
 execution-profile and compaction increments, which require fresh CI.
+
+
+## Built-in catalog canonical construction
+
+The server's built-in catalog now constructs validated owned IR tool definitions
+before native rendering. Chat/Responses compatibility builders use the translation
+owner's existing renderer, retaining their declared surface membership and live
+Git-dispatcher availability. A fresh owned canonical built-in catalog is available
+for the SDK host-tool bridge without recursively building MCP-derived adverts or
+sharing mutable schema cache entries. It is not itself role/policy authorization.
+The existing full agent and MCP surface fixtures retain their success paths and
+now check canonical/schema fidelity and independent ownership. Dynamic MCP/remote
+catalog conversion and the native command-item identity gap remain open.
+
+Legacy role-filter compatibility ingress now uses the translation parser and
+makes its decisions from admitted IR tool identities. It no longer reads native
+`function.name` / flat `name` itself. Malformed schemas are excluded before role
+eligibility; Chat, Responses and Anthropic catalogs have planted malformed-entry checks.
+Valid catalog entries and captured role/toolset semantics are preserved.
+
+The actual agent runtime now supplies its catalog wire explicitly for role
+filtering. Anthropic request admission and compatibility role filtering share the
+same owned tool parser, so Anthropic `input_schema` is never mistaken for an
+unmodeled OpenAI option. This retains hosted-tool, strict/deferred and cache
+metadata in their declared translation owner.
+
+Catalog-construction failure now stops the tool-enabled runtime before dispatch
+and propagates through the Anthropic compatibility builder, instead of silently
+becoming an empty tool catalog. The module-header dependency caught by lint was
+removed using format-specific compatibility entry points; the bus boundary gate
+remains unchanged at 188 declared crossings. Published head `db176e1e3` passed all
+56 applicable CI checks (plus the two existing platform skips), including the
+checked-in pinned real SDK replay journey. This catalog increment needs fresh CI.

@@ -77,6 +77,12 @@ void agent_tools_register_action_owner(agent_tool_action_begin_fn begin,
  * this trusted caller signal; model-provided arguments cannot set it. */
 void agent_tools_set_effect_authorized(int authorized);
 
+/* Owned built-in canonical definitions, before role/policy projection. The
+ * caller frees each entry with aimee_tool_free, then frees the array. Unbound
+ * Git capabilities are omitted. No MCP-provider recursion or wire sidecars. */
+struct aimee_tool;
+int agent_tools_builtin_catalog(struct aimee_tool **out, int *count);
+
 /* Tool definition builders */
 struct cJSON *build_tools_array(void);
 struct cJSON *build_tools_array_responses(void);
@@ -86,6 +92,9 @@ int agent_tools_append_delegate_respond_tool(struct cJSON *tools);
 int agent_ir_strip_delegate_respond(struct aimee_response *response);
 int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name);
 void agent_tools_filter_for_role(struct cJSON *tools, const char *role);
+/* Anthropic compatibility ingress; the OpenAI-family helper above accepts Chat
+ * and Responses catalogs. Both decide on translation-admitted IR identities. */
+void agent_tools_filter_anthropic_for_role(struct cJSON *tools, const char *role);
 
 /* Look up a tool's parameter schema (the `function.parameters` object) by
  * tool name. Returns a borrowed pointer into a process-lifetime cache; the

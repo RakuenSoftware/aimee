@@ -130,3 +130,17 @@ when a failing provider wrote a partial result. This is classification, not an
 effect grant. Native MCP execution-policy preflight still needs its KB-registry
 label lookup removed after the complete served catalog has owned classifications;
 unknown tools must never silently become reads during that cutover.
+
+
+Built-in catalog definitions are constructed and validated as owned `aimee_tool_t`
+values. Chat and Responses compatibility arrays render those definitions through
+the translation owner. `agent_tools_builtin_catalog` returns fresh canonical
+schemas before role/policy projection, excludes Git capabilities without a live
+dispatcher, and does not recurse through MCP advertisements. Consumers must apply
+the captured permissions before exposing them. Dynamic MCP/remote catalog and
+legacy consumer cutovers remain separate work.
+
+Role filtering of compatibility catalogs also admits each entry through the
+translation owner before deciding on its canonical identity. A familiar name on
+an invalid schema no longer makes that entry eligible. Valid entries retain
+their original compatibility bytes; canonical consumers can avoid that shim.
