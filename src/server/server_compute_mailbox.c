@@ -61,6 +61,24 @@
 #include <time.h>
 #include <unistd.h>
 
+static int mailbox_condition_init(pthread_cond_t *condition)
+{
+#ifdef __APPLE__
+   /* Darwin supplies a relative wait instead of condition clock selection. */
+   return pthread_cond_init(condition, NULL);
+#else
+   pthread_condattr_t attributes;
+   int result = pthread_condattr_init(&attributes);
+   if (result)
+      return result;
+   result = pthread_condattr_setclock(&attributes, CLOCK_MONOTONIC);
+   if (!result)
+      result = pthread_cond_init(condition, &attributes);
+   pthread_condattr_destroy(&attributes);
+   return result;
+#endif
+}
+
 delegation_mailbox_t *mailbox_acquire(const char *delegation_id)
 {
    pthread_mutex_lock(&g_mailbox_lock);
@@ -70,8 +88,19 @@ delegation_mailbox_t *mailbox_acquire(const char *delegation_id)
       {
          delegation_mailbox_t *mb = &g_mailboxes[i];
          snprintf(mb->delegation_id, sizeof(mb->delegation_id), "%s", delegation_id);
-         pthread_mutex_init(&mb->lock, NULL);
-         pthread_cond_init(&mb->reply_ready, NULL);
+         int result = pthread_mutex_init(&mb->lock, NULL);
+         if (result)
+         {
+            pthread_mutex_unlock(&g_mailbox_lock);
+            return NULL;
+         }
+         result = mailbox_condition_init(&mb->reply_ready);
+         if (result)
+         {
+            pthread_mutex_destroy(&mb->lock);
+            pthread_mutex_unlock(&g_mailbox_lock);
+            return NULL;
+         }
          mb->reply[0] = '\0';
          mb->has_reply = 0;
          mb->active = 1;
@@ -123,22 +152,57 @@ delegation_mailbox_t *mailbox_find(const char *delegation_id)
    return NULL;
 }
 
-/* Wait for a parent reply with timeout. Returns 0 on reply, -1 on timeout. */
+/* Keep the original reply/consume contract, while a stopped host may join the
+ * delegate without waiting for the entire input timeout. Deadlines are monotonic. */
 int mailbox_wait(delegation_mailbox_t *mb, char *out, size_t out_len, int timeout_secs)
 {
-   struct timespec ts;
-   clock_gettime(CLOCK_REALTIME, &ts);
-   ts.tv_sec += timeout_secs;
-
+   struct timespec deadline;
+   if (clock_gettime(CLOCK_MONOTONIC, &deadline))
+      return -1;
+   deadline.tv_sec += timeout_secs;
    pthread_mutex_lock(&mb->lock);
    while (!mb->has_reply)
    {
-      int rc = pthread_cond_timedwait(&mb->reply_ready, &mb->lock, &ts);
-      if (rc != 0) /* ETIMEDOUT or error */
+      struct timespec now;
+      if (agent_request_cancelled() || clock_gettime(CLOCK_MONOTONIC, &now) ||
+          now.tv_sec > deadline.tv_sec ||
+          (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec))
       {
          pthread_mutex_unlock(&mb->lock);
          return -1;
       }
+      struct timespec wake = now;
+      wake.tv_nsec += 20000000;
+      if (wake.tv_nsec >= 1000000000)
+      {
+         wake.tv_sec++;
+         wake.tv_nsec -= 1000000000;
+      }
+      if (wake.tv_sec > deadline.tv_sec ||
+          (wake.tv_sec == deadline.tv_sec && wake.tv_nsec > deadline.tv_nsec))
+         wake = deadline;
+#ifdef __APPLE__
+      struct timespec relative = {.tv_sec = wake.tv_sec - now.tv_sec,
+                                  .tv_nsec = wake.tv_nsec - now.tv_nsec};
+      if (relative.tv_nsec < 0)
+      {
+         relative.tv_sec--;
+         relative.tv_nsec += 1000000000;
+      }
+      int rc = pthread_cond_timedwait_relative_np(&mb->reply_ready, &mb->lock, &relative);
+#else
+      int rc = pthread_cond_timedwait(&mb->reply_ready, &mb->lock, &wake);
+#endif
+      if (rc && rc != ETIMEDOUT)
+      {
+         pthread_mutex_unlock(&mb->lock);
+         return -1;
+      }
+   }
+   if (agent_request_cancelled())
+   {
+      pthread_mutex_unlock(&mb->lock);
+      return -1;
    }
    snprintf(out, out_len, "%s", mb->reply);
    mb->has_reply = 0;

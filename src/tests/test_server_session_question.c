@@ -1,4 +1,5 @@
 #include "server_session_question.h"
+#include "server_compute_internal.h"
 #include "server_session_control.h"
 #include "db1_client/primary_sessions.h"
 #include "db1_client/delegations.h"
@@ -22,15 +23,28 @@ static cJSON *last_response;
 static server_control_scope_t *worker_scope;
 static char *worker_result;
 static int wait_seconds = 2;
+static int legacy_mode, legacy_questions, legacy_replies, legacy_done;
+delegation_mailbox_t g_mailboxes[MAX_ACTIVE_DELEGATIONS];
+pthread_mutex_t g_mailbox_lock = PTHREAD_MUTEX_INITIALIZER;
 char *delegation_request_input(const char *question);
 int db1_delegation_message_record(const char *delegation_id, const char *direction,
                                   const char *content)
 {
-   (void)delegation_id;
-   (void)direction;
-   (void)content;
-   assert(!"browser control execution must not write the legacy delegate mailbox");
-   return -1;
+   assert(legacy_mode && !strcmp(delegation_id, "test-delegate"));
+   pthread_mutex_lock(&lock);
+   if (!strcmp(direction, "delegate_to_parent"))
+   {
+      assert(!strcmp(content, "Which workspace?"));
+      legacy_questions++;
+   }
+   else
+   {
+      assert(!strcmp(direction, "parent_to_delegate") && !strcmp(content, "legacy answer"));
+      legacy_replies++;
+   }
+   pthread_cond_broadcast(&ready);
+   pthread_mutex_unlock(&lock);
+   return 0;
 }
 const char *session_id(void)
 {
@@ -145,6 +159,84 @@ static void test_answer(const char *reply_text, const char *expected)
    assert(requests == 1 && responses == 1 && !server_control_scope_failed(worker_scope));
    server_control_scope_close(worker_scope);
 }
+static void *legacy_ask(void *arg)
+{
+   tl_mailbox = arg;
+   worker_result = delegation_request_input("Which workspace?");
+   tl_mailbox = NULL;
+   pthread_mutex_lock(&lock);
+   legacy_done = 1;
+   pthread_cond_broadcast(&ready);
+   pthread_mutex_unlock(&lock);
+   return NULL;
+}
+static void legacy_wait_for(int *predicate)
+{
+   struct timespec until;
+   int clock_result = clock_gettime(CLOCK_REALTIME, &until);
+   assert(!clock_result);
+   until.tv_sec += 3;
+   pthread_mutex_lock(&lock);
+   while (!*predicate)
+   {
+      int waited = pthread_cond_timedwait(&ready, &lock, &until);
+      assert(!waited);
+   }
+   pthread_mutex_unlock(&lock);
+}
+static void test_delegate_mailbox_wait(void)
+{
+   legacy_mode = 1;
+   for (int cancel = 0; cancel < 2; cancel++)
+   {
+      atomic_store(&cancelled, 0);
+      legacy_questions = legacy_replies = legacy_done = 0;
+      free(worker_result);
+      worker_result = NULL;
+      delegation_mailbox_t *mailbox = mailbox_acquire("test-delegate");
+      assert(mailbox && mailbox_find("test-delegate") == mailbox);
+      pthread_t worker;
+      int started = pthread_create(&worker, NULL, legacy_ask, mailbox);
+      assert(!started);
+      legacy_wait_for(&legacy_questions);
+      if (cancel)
+         atomic_store(&cancelled, 1);
+      else
+         mailbox_reply(mailbox, "legacy answer");
+      legacy_wait_for(&legacy_done);
+      int joined = pthread_join(worker, NULL);
+      assert(!joined);
+      assert(legacy_questions == 1 && legacy_replies == !cancel);
+      assert(cancel ? !worker_result : worker_result && !strcmp(worker_result, "legacy answer"));
+      mailbox_release(mailbox);
+   }
+   atomic_store(&cancelled, 0);
+   delegation_mailbox_t *mailbox = mailbox_acquire("test-delegate");
+   assert(mailbox);
+   char answer[64] = "unchanged";
+   struct timespec before, after;
+   int before_result = clock_gettime(CLOCK_MONOTONIC, &before);
+   assert(!before_result);
+   int timed_out = mailbox_wait(mailbox, answer, sizeof answer, 1);
+   int after_result = clock_gettime(CLOCK_MONOTONIC, &after);
+   assert(!after_result);
+   long long elapsed =
+       (long long)(after.tv_sec - before.tv_sec) * 1000000000 + after.tv_nsec - before.tv_nsec;
+   assert(timed_out < 0 && elapsed >= 900000000 && !strcmp(answer, "unchanged"));
+   mailbox_reply(mailbox, "legacy answer");
+   atomic_store(&cancelled, 1);
+   int stopped = mailbox_wait(mailbox, answer, sizeof answer, 300);
+   assert(stopped < 0 && !strcmp(answer, "unchanged"));
+   atomic_store(&cancelled, 0);
+   int delivered = mailbox_wait(mailbox, answer, sizeof answer, 0);
+   assert(!delivered && !strcmp(answer, "legacy answer"));
+   int consumed = mailbox_wait(mailbox, answer, sizeof answer, 0);
+   assert(consumed < 0);
+   mailbox_release(mailbox);
+   assert(!mailbox_find("test-delegate"));
+   legacy_mode = 0;
+}
+
 int main(void)
 {
    assert(!server_session_question("Which workspace?", 1));
@@ -209,6 +301,7 @@ int main(void)
       assert(requests == 1 && responses == response_failure);
       server_control_scope_close(worker_scope);
    }
+   test_delegate_mailbox_wait();
    free(worker_result);
    cJSON_Delete(last_response);
    puts("host questions: durable request/reply, scoped ownership, cancellation and storage refusal "

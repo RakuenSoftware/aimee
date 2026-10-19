@@ -2454,3 +2454,29 @@ The exact HTTP-route diff was reviewed for its memory-ownership ledger pin:
 only control-frame decoding changed, with memory_stats and Go authority intact.
 The recorded hash/review was refreshed; no memory gate or inventory was exempted.
 All 76 repository lint checks pass for the final host-question increment.
+
+## Delegate mailbox wait preserves reply delivery and observes cancellation
+
+The remaining legacy parent-input wait now checks the active host cancellation
+scope at bounded intervals rather than waiting the entire configured input window (currently 60
+seconds). It retains parent reply delivery and consume-once behavior. The deadline
+uses monotonic time; Linux initializes the condition with that clock and Darwin
+uses its supported relative condition wait (see the [Apple pthread header](https://github.com/apple-oss-distributions/libpthread/blob/main/include/pthread/pthread.h)).
+Condition initialization failure unwinds the newly initialized mutex and leaves
+the slot inactive. This is a waiting/lifecycle repair, not the private question
+or delegate message-history cutover.
+
+The actual prior source was rebuilt against the new fixture: it fails the
+three-second cancellation handshake. Restoring the repair passes. The fixture
+uses the production mailbox allocator, wait, reply, release and real server
+request_input hook: normal parent delivery is retained, cancellation returns
+without a fake parent reply, pre-cancelled consumption refuses, and a real empty
+mailbox waits for its monotonic deadline. A queued reply remains available to
+its owning live wait and is consumed once. The rebuilt Linux production server,
+actual CMake application and focused CTest pass. Darwin is not newly qualified.
+
+The final mailbox-wait fixture also passes ASan/UBSan, two-source Cppcheck with
+zero diagnostics, normal native execution, CMake/CTest and all 76 lint gates.
+The preceding host-question commit `7230d5805` was pushed after one transient
+GitHub internal-server rejection; full HEAD secret scanning found no leaks
+across 6,198 commits. Fresh branch CI remains pending.
