@@ -18,6 +18,15 @@
  * pair it with workspace_turn_unbind_active after the turn), 0 otherwise. */
 int workspace_turn_bind_active(const char *cwd);
 
+/* Nested operations own separate provider storage and leave the enclosing turn's
+ * resource leases intact. A non-NULL scope must be ended even when begin returns
+ * 0 (shared/unresolved cwd). -1 leaves the caller untouched. End is LIFO and
+ * returns -1 without changing state for an out-of-order scope. Join callbacks
+ * borrowing a nested provider before ending its scope. */
+typedef struct workspace_turn_scope workspace_turn_scope_t;
+int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out);
+int workspace_turn_scope_end(workspace_turn_scope_t *scope);
+
 /* Select the client-side repository location that a git MCP call names.
  * `path` is authoritative for every operation except clone, where it is the
  * destination rather than an existing repository. `cwd` remains the fallback.

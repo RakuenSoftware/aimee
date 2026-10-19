@@ -2402,6 +2402,7 @@ models-dev-snapshot-check:
 # A test target defined but named in no run list is not coverage: it cannot fail.
 tests-are-run-check:
 	@python3 -I -S ../scripts/check_tests_are_run.py
+	@python3 -m unittest discover -s ../scripts/tests -p test_check_tests_are_run.py
 
 test-tmpdir-check:
 	@python3 -I -S ../scripts/check_test_tmpdir.py

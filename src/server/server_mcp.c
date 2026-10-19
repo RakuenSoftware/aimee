@@ -1790,7 +1790,13 @@ static cJSON *dispatch_git_tool_inner(server_ctx_t *ctx, server_conn_t *conn, co
     * chat-turn boundary does — so the git tool's rev-parse / exec marshal over
     * the runner channel to the serving client, which holds the real tree (and
     * its own creds). No-op for shared/mirror/unregistered targets (returns 0). */
-   int detached_bound = git_target ? workspace_turn_bind_active(git_target) : 0;
+   workspace_turn_scope_t *workspace_scope = NULL;
+   if (git_target && workspace_turn_scope_begin(git_target, &workspace_scope) < 0)
+   {
+      if (is_verify)
+         conn_active_verify(conn, verify_sid, 0);
+      return text_content("error: cannot retain nested Git workspace context");
+   }
 
    char *mismatch_err = NULL;
    cJSON *resolve_args = args;
@@ -1810,12 +1816,12 @@ static cJSON *dispatch_git_tool_inner(server_ctx_t *ctx, server_conn_t *conn, co
    if (resolved < 0)
    {
       run_cmd_set_cwd(NULL);
-      if (detached_bound)
-         workspace_turn_unbind_active();
+      (void)workspace_turn_scope_end(workspace_scope);
       if (sid && sid[0])
          session_id_clear_override();
       if (is_verify)
          conn_active_verify(conn, verify_sid, 0);
+      free(mismatch_err);
       if (resolved == -2)
          return text_content(
              "error: requested git path is outside the session checkout or unavailable through "
@@ -1839,8 +1845,7 @@ static cJSON *dispatch_git_tool_inner(server_ctx_t *ctx, server_conn_t *conn, co
    if (mismatch_err && is_mutating)
    {
       run_cmd_set_cwd(NULL);
-      if (detached_bound)
-         workspace_turn_unbind_active();
+      (void)workspace_turn_scope_end(workspace_scope);
       if (sid && sid[0])
          session_id_clear_override();
       cJSON *err_resp = text_content(mismatch_err);
@@ -1855,8 +1860,7 @@ static cJSON *dispatch_git_tool_inner(server_ctx_t *ctx, server_conn_t *conn, co
       content = git_fn(args);
 
    run_cmd_set_cwd(NULL);
-   if (detached_bound)
-      workspace_turn_unbind_active();
+   (void)workspace_turn_scope_end(workspace_scope);
    if (sid && sid[0])
       session_id_clear_override();
    if (is_verify)

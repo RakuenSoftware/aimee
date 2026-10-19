@@ -748,6 +748,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-mcp-roundtable-contract \
                $(TESTPREFIX)/unit-test-mcp-delegate-contract \
                $(TESTPREFIX)/unit-test-server-mcp-delegate \
+               $(TESTPREFIX)/unit-test-server-mcp-git-scope \
                $(TESTPREFIX)/unit-test-workspace-prune-dead \
                $(TESTPREFIX)/unit-test-workspace-add-idempotent \
                $(TESTPREFIX)/unit-test-kb-doc-pdf \
@@ -7117,7 +7118,6 @@ $(TESTPREFIX)/unit-test-server-native-cache: $(OBJDIR)/tests/test_server_native_
     $(OBJDIR)/platform_random.o $(filter %/platform_random.o,$(PLATFORM_BASIC_OBJS))
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto
 
-TEST_TARGETS += $(TESTPREFIX)/unit-test-server-mcp-git-scope
 $(OBJDIR)/tests/server_mcp_git_scope_subject.o: server/server_mcp.c
 	@mkdir -p $(dir $@)
 	$(CC) $(C_FLAGS) -ffunction-sections -fdata-sections -c -o $@ $<

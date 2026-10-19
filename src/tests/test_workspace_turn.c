@@ -16,6 +16,7 @@
 #include <stdint.h>
 
 static const char test_shared_workspace[] = "/tmp/ws-shared";
+static const char test_detached_workspace[] = "/tmp/ws-detached";
 
 #include <assert.h>
 #include <stdio.h>
@@ -120,9 +121,9 @@ static void register_standard_workspaces(void)
 {
    (void)config_workspace_remove("/");
    (void)config_workspace_remove("/tmp/ws-mirror-unresolvable");
-   (void)config_workspace_remove("/tmp/ws-detached");
+   (void)config_workspace_remove(test_detached_workspace);
    (void)config_workspace_remove(test_shared_workspace);
-   assert(config_workspace_add("/tmp/ws-detached", "detached", NULL, NULL) == 0);
+   assert(config_workspace_add(test_detached_workspace, "detached", NULL, NULL) == 0);
    assert(config_workspace_add("/tmp/ws-shared", "shared", NULL, NULL) == 0);
 }
 
@@ -143,7 +144,7 @@ int main(void)
 
    /* Restore only explicitly configured detached roots after a cold registry
     * start. A shared, nested, or unknown path cannot create a serving queue. */
-   assert(ws_runner_registry_register_configured("/tmp/ws-detached") == 1);
+   assert(ws_runner_registry_register_configured(test_detached_workspace) == 1);
    assert(ws_runner_registry_register_configured("/tmp/ws-shared") == 0);
    assert(ws_runner_registry_register_configured("/tmp/ws-detached/subdir") == 0);
    assert(ws_runner_registry_register_configured("/tmp/not-registered") == 0);
@@ -158,13 +159,19 @@ int main(void)
       assert(bound == 1);
       const workspace_provider_t *active = workspace_provider_active();
       assert(active != shared && active->kind == WS_PROVIDER_DETACHED);
+      workspace_turn_scope_t *nested = NULL;
+      int rebound = workspace_turn_scope_begin(test_detached_workspace, &nested);
+      assert(rebound == 1 && nested && workspace_provider_active() != active);
+      assert(active->kind == WS_PROVIDER_DETACHED);
+      int restored = workspace_turn_scope_end(nested);
+      assert(!restored && workspace_provider_active() == active);
       workspace_turn_unbind_active();
       assert(workspace_provider_active() == shared); /* restored */
    }
 
    /* the workspace root itself also matches */
    {
-      assert(workspace_turn_bind_active("/tmp/ws-detached") == 1);
+      assert(workspace_turn_bind_active(test_detached_workspace) == 1);
       assert(workspace_provider_active()->kind == WS_PROVIDER_DETACHED);
       workspace_turn_unbind_active();
    }
@@ -262,6 +269,25 @@ int main(void)
           * bound, false once released. */
          assert(workspace_turn_container_bound() == 1);
 
+         /* A nested shared lookup and detached Git operation cannot steal the
+          * container lease or overwrite its provider storage. */
+         workspace_turn_scope_t *outer = NULL, *inner = NULL;
+         int scoped = workspace_turn_scope_begin(test_shared_workspace, &outer);
+         assert(scoped == 0 && outer && workspace_provider_active() == p);
+         assert(workspace_turn_container_bound() && !g_releases);
+         scoped = workspace_turn_scope_begin(test_detached_workspace, &inner);
+         assert(scoped == 1 && inner && workspace_provider_active() != p);
+         const workspace_provider_t *nested = workspace_provider_active();
+         assert(nested->kind == WS_PROVIDER_DETACHED && p->kind == WS_PROVIDER_CONTAINER);
+         assert(!workspace_turn_container_bound() && !g_releases);
+         int closed = workspace_turn_scope_end(outer);
+         assert(closed < 0 && workspace_provider_active() == nested && !g_releases);
+         closed = workspace_turn_scope_end(inner);
+         assert(!closed && workspace_provider_active() == p);
+         assert(workspace_turn_container_bound() && !g_releases);
+         closed = workspace_turn_scope_end(outer);
+         assert(!closed && workspace_provider_active() == p && !g_releases);
+
          /* Unbind must RELEASE the container, not just drop the pointer: a leaked
           * container outlives its turn and pins its workspace. And the active
           * provider must go back to shared — a pooled worker thread that kept the
@@ -342,7 +368,7 @@ int main(void)
       /* A registered root of "/" must NOT authorize the whole host: that is not a
        * workspace registration, it is the absence of one. */
       {
-         assert(config_workspace_remove("/tmp/ws-detached") == 0);
+         assert(config_workspace_remove(test_detached_workspace) == 0);
          assert(config_workspace_remove("/tmp/ws-shared") == 0);
          assert(config_workspace_add("/", "shared", NULL, NULL) == 0);
 

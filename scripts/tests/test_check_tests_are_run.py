@@ -1,0 +1,74 @@
+"""Suite registration must agree with Make's frozen execution list."""
+import importlib.util
+from pathlib import Path
+import subprocess
+import unittest
+
+SPEC = importlib.util.spec_from_file_location(
+    "check_tests_are_run", Path(__file__).resolve().parents[1] / "check_tests_are_run.py"
+)
+CHECK = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(CHECK)
+
+
+class SuiteSelectionTest(unittest.TestCase):
+    def make_selection(self, rules):
+        result = subprocess.run(
+            ["make", "-s", "-f", "-", "print"],
+            input=rules + "\nprint:\n\t@printf '%s\\n' $(UNIT_TEST_TARGETS)\n",
+            text=True, capture_output=True, check=True,
+        )
+        return set(result.stdout.split())
+
+    def test_registration_before_freeze_runs(self):
+        rules = (
+            "TEST_TARGETS = unit-test-first\n"
+            "TEST_TARGETS += unit-test-second\n"
+            "UNIT_TEST_TARGETS := $(TEST_TARGETS)\n"
+        )
+        self.assertEqual(CHECK.selected_tests(rules), self.make_selection(rules))
+        self.assertEqual(CHECK.selected_tests(rules), {"unit-test-first", "unit-test-second"})
+
+    def test_late_registration_is_rejected_even_though_make_accepts_it(self):
+        rules = (
+            "TEST_TARGETS = unit-test-first\n"
+            "UNIT_TEST_TARGETS := $(TEST_TARGETS)\n"
+            "TEST_TARGETS += unit-test-missing\n"
+        )
+        self.assertEqual(self.make_selection(rules), {"unit-test-first"})
+        with self.assertRaisesRegex(ValueError, "after UNIT_TEST_TARGETS is frozen"):
+            CHECK.selected_tests(rules)
+
+    def test_late_multiline_assignment_is_rejected(self):
+        rules = (
+            "TEST_TARGETS = unit-test-first\n"
+            "UNIT_TEST_TARGETS := $(TEST_TARGETS)\n"
+            "TEST_TARGETS += \\\n unit-test-missing\n"
+        )
+        with self.assertRaises(ValueError):
+            CHECK.selected_tests(rules)
+
+    def test_target_definition_may_follow_freeze(self):
+        rules = (
+            "TEST_TARGETS = unit-test-first\n"
+            "UNIT_TEST_TARGETS := $(TEST_TARGETS)\n"
+            "unit-test-first: source.c\n"
+        )
+        self.assertEqual(CHECK.selected_tests(rules), {"unit-test-first"})
+
+    def test_unknown_selection_refuses(self):
+        with self.assertRaisesRegex(ValueError, "cannot locate"):
+            CHECK.selected_tests("TEST_TARGETS = unit-test-first\n")
+
+    def test_shard_snapshot_also_rejects_late_registration(self):
+        rules = (
+            "TEST_TARGETS = unit-test-first\n"
+            "UNIT_TEST_TARGETS := $(shell printf '%s\\n' $(TEST_TARGETS))\n"
+            "TEST_TARGETS += unit-test-missing\n"
+        )
+        with self.assertRaises(ValueError):
+            CHECK.selected_tests(rules)
+
+
+if __name__ == "__main__":
+    unittest.main()

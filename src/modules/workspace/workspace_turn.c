@@ -43,6 +43,16 @@ static __thread char t_turn_cwd[MAX_PATH_LEN];
 static __thread char t_turn_drift[256];
 static __thread char t_test_default_workspace[MAX_PATH_LEN];
 
+struct workspace_turn_scope
+{
+   ws_detached_provider_t detached;
+   int bound;
+   char cwd[MAX_PATH_LEN], drift[256];
+   const workspace_provider_t *previous_provider;
+   struct workspace_turn_scope *previous;
+};
+static __thread workspace_turn_scope_t *t_nested_scope;
+
 /* Is `cwd` inside (or equal to) workspace root `ws`? */
 static int cwd_in_workspace(const char *cwd, const char *ws)
 {
@@ -300,19 +310,19 @@ static int mirror_reconstruct_cwd(const char *cwd, const char *root, const char 
 
 /* Turn binder: drive the lifecycle and stash the remapped cwd + drift line for
  * the turn. Returns 1 when bound (caller must unbind), 0 to fall through. */
-static int bind_mirror(const char *cwd, const char *root, const char *remote, const char *head)
+static int bind_mirror(const char *cwd, const char *root, const char *remote, const char *head,
+                       char resolved[MAX_PATH_LEN], char notice[256])
 {
    ws_mirror_drift_t verdict = WS_MIRROR_DRIFT_UNKNOWN;
    char drift[256] = "";
-   if (!mirror_reconstruct_cwd(cwd, root, remote, head, t_turn_cwd, sizeof(t_turn_cwd), drift,
+   if (!mirror_reconstruct_cwd(cwd, root, remote, head, resolved, MAX_PATH_LEN, drift,
                                sizeof(drift), &verdict))
    {
-      t_turn_cwd[0] = '\0';
+      resolved[0] = '\0';
       return 0; /* fail closed: a remote turn's foreign cwd is rejected upstream */
    }
    if (verdict != WS_MIRROR_IN_SYNC && drift[0])
-      snprintf(t_turn_drift, sizeof(t_turn_drift), "%s", drift);
-   t_turn_bound = 1;
+      snprintf(notice, 256, "%s", drift);
    return 1;
 }
 
@@ -391,11 +401,12 @@ int workspace_turn_resolve_detached_mirror_cwd(const char *cwd, char *out, size_
    return 0;
 }
 
-int workspace_turn_bind_active(const char *cwd)
+static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, int *bound,
+                            char resolved[MAX_PATH_LEN], char drift[256])
 {
-   t_turn_bound = 0;
-   t_turn_cwd[0] = '\0';
-   t_turn_drift[0] = '\0';
+   *bound = 0;
+   resolved[0] = '\0';
+   drift[0] = '\0';
    if (!cwd || !cwd[0])
       return 0;
    for (int i = 0; i < config_workspace_count(); i++)
@@ -418,10 +429,10 @@ int workspace_turn_bind_active(const char *cwd)
             /* Bind both the unary and streaming transports off the same queue so
              * file/exec ops marshal as today AND a local-CLI agent (exec_stream)
              * can stream its output back from the client. */
-            ws_detached_provider_init_ex(&t_turn_detached, ws_runner_queue_transport,
+            ws_detached_provider_init_ex(detached, ws_runner_queue_transport,
                                          ws_runner_queue_transport_stream, q);
-            workspace_provider_set_active(&t_turn_detached.base);
-            t_turn_bound = 1;
+            workspace_provider_set_active(&detached->base);
+            *bound = 1;
             return 1;
          }
       }
@@ -434,11 +445,45 @@ int workspace_turn_bind_active(const char *cwd)
          snprintf(root, sizeof(root), "%s", config_workspaces(i));
          snprintf(remote, sizeof(remote), "%s", config_workspace_vcs_remote(i));
          snprintf(head, sizeof(head), "%s", config_workspace_vcs_head(i));
-         return bind_mirror(cwd, root, remote, head);
+         *bound = bind_mirror(cwd, root, remote, head, resolved, drift);
+         return *bound;
       }
       return 0; /* matched, but shared (or no queue) — stay on shared */
    }
    return 0; /* cwd not in any registered workspace */
+}
+
+int workspace_turn_bind_active(const char *cwd)
+{
+   return bind_active_into(cwd, &t_turn_detached, &t_turn_bound, t_turn_cwd, t_turn_drift);
+}
+int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out)
+{
+   if (!out)
+      return -1;
+   *out = NULL;
+   if (!cwd || !cwd[0])
+      return 0;
+   workspace_turn_scope_t *scope = calloc(1, sizeof *scope);
+   if (!scope)
+      return -1;
+   scope->previous_provider = workspace_provider_active();
+   scope->previous = t_nested_scope;
+   int result = bind_active_into(cwd, &scope->detached, &scope->bound, scope->cwd, scope->drift);
+   t_nested_scope = scope;
+   *out = scope;
+   return result;
+}
+int workspace_turn_scope_end(workspace_turn_scope_t *scope)
+{
+   if (!scope)
+      return 0;
+   if (scope != t_nested_scope)
+      return -1;
+   workspace_provider_set_active(scope->previous_provider);
+   t_nested_scope = scope->previous;
+   free(scope);
+   return 0;
 }
 
 const char *workspace_turn_git_target(const char *tool, const char *path, const char *cwd)
@@ -626,7 +671,7 @@ int workspace_turn_container_bound(void)
 {
    if (s_container_bound_test_override >= 0)
       return s_container_bound_test_override;
-   return t_turn_container_backend != NULL;
+   return t_turn_container_backend != NULL && workspace_provider_active() == &t_turn_container.base;
 }
 
 void workspace_turn_unbind_active(void)
@@ -654,12 +699,14 @@ void workspace_turn_unbind_active(void)
 
 const char *workspace_turn_active_cwd(void)
 {
-   return t_turn_cwd[0] ? t_turn_cwd : NULL;
+   const char *cwd = t_nested_scope ? t_nested_scope->cwd : t_turn_cwd;
+   return cwd[0] ? cwd : NULL;
 }
 
 const char *workspace_turn_drift_notice(void)
 {
-   return t_turn_drift[0] ? t_turn_drift : NULL;
+   const char *drift = t_nested_scope ? t_nested_scope->drift : t_turn_drift;
+   return drift[0] ? drift : NULL;
 }
 
 int workspace_turn_reject_foreign_cwd(int detached_bound, int trusted_local, const char *cwd)

@@ -137,6 +137,20 @@ def fail(message: str) -> int:
     return 1
 
 
+def selected_tests(text: str) -> set[str]:
+    joined = re.sub(r"\\\n", " ", text)
+    frozen = re.search(r"^UNIT_TEST_TARGETS\s*:=.*\$\(TEST_TARGETS\)", joined, re.M)
+    if frozen is None:
+        raise ValueError("cannot locate the unit-suite selection of TEST_TARGETS")
+    run: set[str] = set()
+    for match in re.finditer(r"^TEST_TARGETS\s*[:+]?=(.*)$", joined, re.M):
+        if match.start() > frozen.start():
+            raise ValueError("TEST_TARGETS changes after UNIT_TEST_TARGETS is frozen; "
+                             "move registrations before suite/shard selection")
+        run.update(re.findall(r"unit-test-[a-z0-9-]+", match.group(1)))
+    return run
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
@@ -190,9 +204,10 @@ def main(argv: list[str] | None = None) -> int:
     # run list -- it exists to order an archive dependency -- which is exactly
     # the confusion that let these hide: they were named in a variable, so they
     # looked listed.
-    run: set[str] = set()
-    for match in re.finditer(r"^TEST_TARGETS\s*[:+]?=(.*)$", joined, re.M):
-        run.update(re.findall(r"unit-test-[a-z0-9-]+", match.group(1)))
+    try:
+        run = selected_tests(joined)
+    except ValueError as error:
+        return fail(str(error))
 
     unrun = sorted(
         name for name in defined - run

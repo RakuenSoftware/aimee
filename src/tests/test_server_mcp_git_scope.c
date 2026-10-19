@@ -55,14 +55,35 @@ int workspace_turn_resolve_mirror_cwd(const char *directory, char *out, size_t c
    out[0] = 0;
    return 0;
 }
+static int live_workspace_scopes;
+struct workspace_turn_scope
+{
+   int held;
+};
 int workspace_turn_bind_active(const char *directory)
 {
    (void)directory;
+   assert(!"Git must not overwrite the enclosing turn binding");
    return 0;
 }
 void workspace_turn_unbind_active(void)
 {
-   assert(!"fixture has no nested workspace binding");
+   assert(!"Git must not release the enclosing turn binding");
+}
+int workspace_turn_scope_begin(const char *directory, workspace_turn_scope_t **out)
+{
+   assert(directory && directory[0]);
+   *out = calloc(1, sizeof **out);
+   assert(*out);
+   live_workspace_scopes++;
+   return 0; /* Even a non-detached scope must be paired. */
+}
+int workspace_turn_scope_end(workspace_turn_scope_t *scope)
+{
+   assert(scope && live_workspace_scopes == 1);
+   live_workspace_scopes--;
+   free(scope);
+   return 0;
 }
 int mcp_chdir_git_root_authorized(char *old, size_t capacity, cJSON *args, char **error,
                                   int authorized)
@@ -128,7 +149,7 @@ int main(void)
 {
    for (int variant = 0; variant < 8; variant++)
    {
-      for (int outcome = 0; outcome < 6; outcome++)
+      for (int outcome = 0; outcome < 7; outcome++)
       {
          char original[128];
          memset(original, 's', sizeof original - 1);
@@ -140,8 +161,8 @@ int main(void)
          else
             session_id_clear_override();
          mcp_git_set_worktree(variant & 1);
-         resolution = outcome == 1 ? -1 : outcome == 2 ? -2 : outcome == 5 ? 0 : 1;
-         mismatch = outcome == 3 || outcome == 4;
+         resolution = outcome == 1 ? -1 : outcome == 2 || outcome == 6 ? -2 : outcome == 5 ? 0 : 1;
+         mismatch = outcome == 3 || outcome == 4 || outcome == 6;
          calls = 0;
          cJSON *args = cJSON_CreateObject();
          assert(args);
@@ -150,7 +171,8 @@ int main(void)
          snprintf(operation_sid, sizeof operation_sid, "%s", requested_sid);
          cJSON *response =
              mcp_git_run_tool(outcome == 3 ? "git_commit" : "git_status", args, requested_sid);
-         assert(response && calls == (outcome == 0 || outcome >= 4));
+         assert(response && calls == (outcome == 0 || outcome == 4 || outcome == 5));
+         assert(!live_workspace_scopes);
          assert(session_id_override_active() == had_override);
          assert(!strcmp(session_id(), had_override ? original : "generated-session"));
          assert(had_cwd ? run_cmd_get_cwd() && !strcmp(run_cmd_get_cwd(), "/caller/work")

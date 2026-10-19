@@ -2656,9 +2656,59 @@ Nested workspace-provider ownership is a separate outstanding issue in this
 same dispatch path: its legacy bind/unbind helper can disturb an enclosing turn.
 The cwd/session/worktree repair does not claim to fix that resource lifetime.
 
-The shared Git context increment additionally passes all 657 native binaries and
-proxy regressions, the rebuilt server, original PostgreSQL 18.6 integration
+The shared Git context increment additionally passes all 656 selected native
+binaries, the separately run new Git scope fixture and proxy regressions, the rebuilt server, original PostgreSQL 18.6 integration
 167/167 (26 service-dependent skips, no KB), and 21 semantic-context benchmark
 checks. These Linux checks do not establish fresh platform CI or deployment.
 
 All 76 repository lint gates pass for shared Git caller-context restoration.
+
+## Nested Git workspace scopes retain the enclosing resource owner
+
+Shared Git dispatch now uses a scoped binding with its own detached-provider
+storage and mirror cwd/drift metadata. The scoped and ordinary turn binders use
+the same resolver. Scope close restores the previous provider and metadata in
+LIFO order; it never calls the enclosing turn's unbind or releases its container.
+Even a shared/unresolved nonempty cwd has a scope that must be closed. Allocation
+failure refuses before Git dispatch. Container-bound admission now also checks
+that the active provider is that owned container, so a temporary detached binding
+cannot inherit its shell exemption.
+
+Real workspace-owner fixtures retain an outer detached provider across nesting,
+and retain an outer container across shared and detached nested scopes. The
+container's storage stays valid, no release occurs until its original turn ends,
+and an out-of-order close refuses without changing the active provider. The real
+Git dispatcher fixture checks paired cleanup across all returns, including the
+zero/shared result. Its old unscoped path fails the new regression.
+
+The production resolver also allocates a diagnostic before its unauthorized-path
+-2 return. The dispatcher leaked that string. The expanded fixture reproduces
+eight leaks under ASan; freeing the diagnostic preserves the existing refusal.
+The fixture now covers 56 caller/outcome combinations. Both focused native
+fixtures pass ASan/UBSan and four-source Cppcheck reports no diagnostics. CMake's
+actual application and Git dispatcher fixture build; the workspace fixture is
+Make-owned and has no pre-existing CMake target. All 656 then-selected native
+binaries, the separately run Git fixture and proxy regressions, the rebuilt Linux
+server and original PostgreSQL 18.6 integration 167/167 pass (26 service-dependent skips, no KB). Lint qualification follows
+below; no deployment or fresh CI is claimed.
+
+## Unit-suite registration follows Make's actual selection point
+
+The new Git fixture's TEST_TARGETS addition initially appeared after Make's
+immediate UNIT_TEST_TARGETS snapshot. Focused normal/sanitizer/CMake runs included
+it, but the full runner still selected 656 binaries. The addition now sits before
+suite/shard selection. The reachability gate rejects later TEST_TARGETS changes
+instead of counting their names as coverage. Six regression cases, including
+actual GNU Make execution of the silent-omission case, run from the existing
+lint target. No test exemption is added. Final complete 657-binary qualification
+passes, with the new fixture present in the actual runner log. The earlier 657 full-run description is corrected above.
+
+The first nested-scope lint run also caught three added hardcoded fixture paths.
+The new cases now reuse the fixture's named registered roots; duplicate existing
+root literals share that same constant. Temporary-path debt falls without a
+baseline change. No production behavior changed after the successful integration
+run; final native/sanitizer/lint checks include the fixture and gate corrections.
+
+The final registered 657-binary suite and proxy regressions pass, as do both
+rebuilt focused ASan/UBSan fixtures and all 76 lint gates (including six runner
+selection regressions). No temporary-path or coverage baseline exemption added.
