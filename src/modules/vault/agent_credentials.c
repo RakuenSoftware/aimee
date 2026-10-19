@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <limits.h>
 #include <strings.h> /* strcasecmp: vault names carry operator casing */
 
 #include "runtime_secret.h"
@@ -216,6 +217,9 @@ int agent_has_resolvable_credentials(const agent_t *agent)
 static _Thread_local char g_request_codex_token[MAX_API_KEY_LEN];
 static _Thread_local char g_request_codex_account_id[128];
 static _Thread_local char g_request_codex_registration[128];
+static _Thread_local char g_request_claude_token[MAX_API_KEY_LEN];
+static _Thread_local char g_request_claude_registration[128];
+static _Thread_local char g_request_claude_target[65];
 static _Thread_local char g_request_api_key[MAX_API_KEY_LEN];
 static _Thread_local char g_request_api_registration[128];
 static _Thread_local char g_request_api_target[65];
@@ -329,6 +333,10 @@ void agent_request_creds_snapshot(agent_request_creds_t *out)
    snprintf(out->codex_account_id, sizeof(out->codex_account_id), "%s", g_request_codex_account_id);
    snprintf(out->codex_registration, sizeof(out->codex_registration), "%s",
             g_request_codex_registration);
+   snprintf(out->claude_token, sizeof out->claude_token, "%s", g_request_claude_token);
+   snprintf(out->claude_registration, sizeof out->claude_registration, "%s",
+            g_request_claude_registration);
+   snprintf(out->claude_target, sizeof out->claude_target, "%s", g_request_claude_target);
    snprintf(out->api_key, sizeof out->api_key, "%s", g_request_api_key);
    snprintf(out->api_key_registration, sizeof out->api_key_registration, "%s",
             g_request_api_registration);
@@ -342,6 +350,11 @@ void agent_request_creds_restore(const agent_request_creds_t *creds)
       return;
    agent_set_request_session(creds->session_id);
    set_codex_creds(creds->codex_registration, creds->codex_token, creds->codex_account_id);
+   OPENSSL_cleanse(g_request_claude_token, sizeof g_request_claude_token);
+   snprintf(g_request_claude_token, sizeof g_request_claude_token, "%s", creds->claude_token);
+   snprintf(g_request_claude_registration, sizeof g_request_claude_registration, "%s",
+            creds->claude_registration);
+   snprintf(g_request_claude_target, sizeof g_request_claude_target, "%s", creds->claude_target);
    OPENSSL_cleanse(g_request_api_key, sizeof g_request_api_key);
    snprintf(g_request_api_key, sizeof g_request_api_key, "%s", creds->api_key);
    snprintf(g_request_api_registration, sizeof g_request_api_registration, "%s",
@@ -615,11 +628,10 @@ done:
    OPENSSL_cleanse(marker, sizeof marker);
    return rc;
 }
-int agent_codex_connection_credentials(const char *registration, agent_codex_credentials_t *out)
+/* Both vendor adapters share the normalized token slots and source fence for
+ * a registration. They must also share its refresh lock across family changes. */
+static int oauth_connection_lock(const char *registration)
 {
-   if (!out)
-      return -1;
-   OPENSSL_cleanse(out, sizeof *out);
    if (!registration || !registration[0] || strlen(registration) >= 128)
       return -1;
    char dir[1024], path[1280], suffix[65];
@@ -641,12 +653,149 @@ int agent_codex_connection_credentials(const char *registration, agent_codex_cre
          close(fd);
       return -1;
    }
+   return fd;
+}
+int agent_codex_connection_credentials(const char *registration, agent_codex_credentials_t *out)
+{
+   if (!out)
+      return -1;
+   OPENSSL_cleanse(out, sizeof *out);
+   int fd = oauth_connection_lock(registration);
+   if (fd < 0)
+      return -1;
    int rc = codex_credentials_locked(registration, out);
    close(fd);
    if (rc)
       OPENSSL_cleanse(out, sizeof *out);
    return rc;
 }
+/* Public subscription OAuth metadata from the installed Claude SDK. The
+ * document's persisted clientId wins for newer/custom clients; old logins use
+ * the SDK's legacy public client. No endpoint is taken from a login document. */
+#define CLAUDE_OAUTH_CLIENT_ID      "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+#define CLAUDE_OAUTH_TOKEN_ENDPOINT "https://platform.claude.com/v1/oauth/token"
+
+static const cJSON *credential_unique(const cJSON *object, const char *name)
+{
+   const cJSON *found = NULL;
+   for (const cJSON *item = object ? object->child : NULL; item; item = item->next)
+      if (item->string && !strcmp(item->string, name))
+      {
+         if (found)
+            return NULL;
+         found = item;
+      }
+   return found;
+}
+
+static int claude_parse_source(const char *document, oauth_token_response_t *tokens,
+                               char client[256], char scopes[4096], char digest[65])
+{
+   if (strstr(document, "\\u0000"))
+      return -1;
+   cJSON *root = cJSON_ParseWithOpts(document, NULL, 1);
+   const cJSON *source = credential_unique(root, "claudeAiOauth");
+   const cJSON *expiry = credential_unique(source, "expiresAt");
+   const cJSON *grants = credential_unique(source, "scopes");
+   int rc = -1;
+   if (!cJSON_IsObject(root) || !cJSON_IsObject(source) || !cJSON_IsNumber(expiry) ||
+       !(expiry->valuedouble > 0 && expiry->valuedouble <= 9007199254740991.0) ||
+       expiry->valuedouble / 1000 > (double)LONG_MAX ||
+       (double)(long long)expiry->valuedouble != expiry->valuedouble || !cJSON_IsArray(grants) ||
+       !grants->child ||
+       credential_text(source, "accessToken", tokens->access_token, sizeof tokens->access_token,
+                       1) ||
+       credential_text(source, "refreshToken", tokens->refresh_token, sizeof tokens->refresh_token,
+                       1) ||
+       credential_text(source, "clientId", client, 256, 0) ||
+       strpbrk(tokens->access_token, "\r\n") || strpbrk(client, "\r\n"))
+      goto done;
+   if (!client[0])
+      snprintf(client, 256, "%s", CLAUDE_OAUTH_CLIENT_ID);
+   size_t used = 0;
+   for (const cJSON *grant = grants->child; grant; grant = grant->next)
+   {
+      if (!cJSON_IsString(grant) || !grant->valuestring[0])
+         goto done;
+      for (const unsigned char *p = (const unsigned char *)grant->valuestring; *p; p++)
+         if (*p < 0x21 || *p > 0x7e || *p == '"' || *p == '\\')
+            goto done;
+      int n = snprintf(scopes + used, 4096 - used, "%s%s", used ? " " : "", grant->valuestring);
+      if (n < 0 || (size_t)n >= 4096 - used)
+         goto done;
+      used += (size_t)n;
+   }
+   tokens->expires_at = (long)(expiry->valuedouble / 1000);
+   if (!tokens->expires_at)
+      goto done;
+   /* Hash only effective source fields; cosmetic/native metadata cannot reset
+    * a rotating refresh token. Domain separation fences Codex/Claude switches. */
+   cJSON *identity = cJSON_CreateArray();
+   if (identity && cJSON_AddItemToArray(identity, cJSON_CreateString("claude-oauth-v1")) &&
+       cJSON_AddItemToArray(identity, cJSON_CreateString(tokens->access_token)) &&
+       cJSON_AddItemToArray(identity, cJSON_CreateString(tokens->refresh_token)) &&
+       cJSON_AddItemToArray(identity, cJSON_CreateString(client)) &&
+       cJSON_AddItemToArray(identity, cJSON_CreateString(scopes)) &&
+       cJSON_AddItemToArray(identity, cJSON_CreateNumber(expiry->valuedouble)))
+   {
+      char *material = cJSON_PrintUnformatted(identity);
+      if (material)
+      {
+         rc = aimee_sha256_hex(material, strlen(material), digest);
+         OPENSSL_cleanse(material, strlen(material));
+         free(material);
+      }
+   }
+   credential_json_cleanse(identity);
+   cJSON_Delete(identity);
+done:
+   credential_json_cleanse(root);
+   cJSON_Delete(root);
+   return rc;
+}
+
+int agent_claude_connection_credentials(const char *registration, agent_claude_credentials_t *out)
+{
+   if (!out)
+      return -1;
+   OPENSSL_cleanse(out, sizeof *out);
+   int fd = oauth_connection_lock(registration);
+   if (fd < 0)
+      return -1;
+   char document[64 * 1024 + 1], marker[65], client[256] = "", scopes[4096] = "", digest[65] = "";
+   oauth_token_response_t source = {0};
+   vault_store_read_t fields[] = {{"oauth", document, sizeof document, 0},
+                                  {CODEX_SOURCE_CREDENTIAL, marker, sizeof marker, 0}};
+   int rc = -1;
+   if (vault_service_read_server_snapshot(registration, fields, 2) != VAULT_OK ||
+       !fields[0].present || !document[0] ||
+       claude_parse_source(document, &source, client, scopes, digest))
+      goto done;
+   if (!fields[1].present || strcmp(marker, digest))
+   {
+      if (oauth_token_remove(registration) || oauth_token_store(registration, &source) ||
+          vault_service_set_server(registration, CODEX_SOURCE_CREDENTIAL, digest) != VAULT_OK)
+         goto done;
+   }
+   const oauth_refresh_profile_t profile = {.client_id = client,
+                                            .token_endpoint = CLAUDE_OAUTH_TOKEN_ENDPOINT,
+                                            .scope = scopes,
+                                            .format = OAUTH_REFRESH_JSON};
+   if (oauth_token_get_profile(registration, &profile, 300, out->token, sizeof out->token) ||
+       !out->token[0] || strpbrk(out->token, "\r\n"))
+      goto done;
+   snprintf(out->source_digest, sizeof out->source_digest, "%s", digest);
+   rc = 0;
+done:
+   OPENSSL_cleanse(&source, sizeof source);
+   OPENSSL_cleanse(document, sizeof document);
+   OPENSSL_cleanse(marker, sizeof marker);
+   close(fd);
+   if (rc)
+      OPENSSL_cleanse(out, sizeof *out);
+   return rc;
+}
+
 static const char *api_key_auth_prefix(const agent_t *agent)
 {
    if (!agent)
@@ -662,9 +811,9 @@ static const char *api_key_auth_prefix(const agent_t *agent)
    return "Authorization: Bearer ";
 }
 
-static int api_target_digest(const agent_t *agent, char digest[65])
+static int credential_target_digest(const agent_t *agent, const char *domain, char digest[65])
 {
-   if (!agent || !api_key_auth_prefix(agent))
+   if (!agent || !domain)
       return -1;
    const char *registration = agent->registration[0] ? agent->registration : agent->name;
    if (!registration[0] || strlen(registration) >= 128)
@@ -691,8 +840,8 @@ static int api_target_digest(const agent_t *agent, char digest[65])
       }
       line = next ? next + 1 : NULL;
    }
-   const char *parts[] = {"vault-api-key-v1", registration,     agent->provider,
-                          agent->endpoint,    agent->auth_type, agent->extra_headers};
+   const char *parts[] = {domain,          registration,     agent->provider,
+                          agent->endpoint, agent->auth_type, agent->extra_headers};
    size_t capacity = 1;
    for (size_t i = 0; i < sizeof parts / sizeof *parts; i++)
       capacity += strlen(parts[i]) + 32;
@@ -715,6 +864,37 @@ static int api_target_digest(const agent_t *agent, char digest[65])
    OPENSSL_cleanse(wire, capacity);
    free(wire);
    return rc;
+}
+
+static int api_target_digest(const agent_t *agent, char digest[65])
+{
+   return agent && api_key_auth_prefix(agent)
+              ? credential_target_digest(agent, "vault-api-key-v1", digest)
+              : -1;
+}
+static int claude_target_digest(const agent_t *agent, char digest[65])
+{
+   return agent && !strcmp(agent->auth_type, "claude-oauth") &&
+                  !strcmp(agent->provider, "anthropic")
+              ? credential_target_digest(agent, "vault-claude-oauth-v1", digest)
+              : -1;
+}
+int agent_set_request_claude_creds_for(const agent_t *agent,
+                                       const agent_claude_credentials_t *credentials)
+{
+   OPENSSL_cleanse(g_request_claude_token, sizeof g_request_claude_token);
+   g_request_claude_registration[0] = g_request_claude_target[0] = 0;
+   if (!credentials)
+      return 0;
+   char target[65];
+   if (claude_target_digest(agent, target) || !credentials->token[0] ||
+       strpbrk(credentials->token, "\r\n"))
+      return -1;
+   snprintf(g_request_claude_token, sizeof g_request_claude_token, "%s", credentials->token);
+   snprintf(g_request_claude_registration, sizeof g_request_claude_registration, "%s",
+            agent->registration[0] ? agent->registration : agent->name);
+   snprintf(g_request_claude_target, sizeof g_request_claude_target, "%s", target);
+   return 0;
 }
 
 int agent_api_connection_credentials(const agent_t *agent, agent_api_credentials_t *out)
@@ -974,6 +1154,86 @@ static int account_header(const char *headers, char value[128])
    }
    return found;
 }
+/* Preserve the caller's beta capabilities while requiring the subscription
+ * authentication capability exactly once. No credential is added to this block. */
+int agent_claude_oauth_headers(const agent_t *agent, char *headers, size_t capacity)
+{
+   if (!agent || strcmp(agent->auth_type, "claude-oauth"))
+      return 0;
+   if (!headers || !capacity || strnlen(headers, capacity) == capacity)
+      return -1;
+   const char *required = "oauth-2025-04-20";
+   char *beta_end = NULL;
+   int present = 0;
+   for (char *line = headers; *line;)
+   {
+      char *end = strchr(line, '\n');
+      if (!end)
+         end = line + strlen(line);
+      char *key = line;
+      while (key < end && (*key == ' ' || *key == '\t'))
+         key++;
+      char *colon = memchr(key, ':', (size_t)(end - key));
+      char *key_end = colon;
+      while (key_end && key_end > key && (key_end[-1] == ' ' || key_end[-1] == '\t'))
+         key_end--;
+      if (colon && key_end - key == 14 && !strncasecmp(key, "anthropic-beta", 14))
+      {
+         if (beta_end)
+            return -1;
+         beta_end = end;
+         while (beta_end > colon &&
+                (beta_end[-1] == '\r' || beta_end[-1] == ' ' || beta_end[-1] == '\t'))
+            beta_end--;
+         for (char *value = colon + 1; value < beta_end;)
+         {
+            char *next = memchr(value, ',', (size_t)(beta_end - value));
+            if (!next)
+               next = beta_end;
+            char *last = next;
+            while (value < last && (*value == ' ' || *value == '\t'))
+               value++;
+            while (last > value && (last[-1] == ' ' || last[-1] == '\t'))
+               last--;
+            if ((size_t)(last - value) == strlen(required) &&
+                !memcmp(value, required, strlen(required)))
+            {
+               if (++present > 1)
+                  return -1;
+            }
+            value = next == beta_end ? beta_end : next + 1;
+         }
+      }
+      line = *end ? end + 1 : end;
+   }
+   if (present)
+      return 0;
+   if (beta_end)
+   {
+      char *value_start = beta_end;
+      while (value_start > headers && value_start[-1] != ':' && value_start[-1] != '\n')
+         value_start--;
+      while (value_start < beta_end && (*value_start == ' ' || *value_start == '\t'))
+         value_start++;
+      int separator = value_start != beta_end;
+      size_t extra = strlen(required) + (size_t)separator;
+      if (strlen(headers) + extra >= capacity)
+         return -1;
+      memmove(beta_end + extra, beta_end, strlen(beta_end) + 1);
+      if (separator)
+         *beta_end = ',';
+      memcpy(beta_end + separator, required, strlen(required));
+   }
+   else
+   {
+      const char *line = "anthropic-beta: oauth-2025-04-20";
+      if (strlen(headers) + strlen(line) + 2 >= capacity)
+         return -1;
+      append_header_line(headers, capacity, line);
+   }
+   return 0;
+}
+
 int agent_resolve_auth_headers(const agent_t *agent, char *auth, size_t auth_capacity,
                                char *headers, size_t headers_capacity)
 {
@@ -1009,6 +1269,40 @@ int agent_resolve_auth_headers(const agent_t *agent, char *auth, size_t auth_cap
          return -1;
       }
       return 0;
+   }
+   if (!strcmp(agent->auth_type, "claude-oauth"))
+   {
+      agent_claude_credentials_t credentials = {0};
+      char target[65], expected[sizeof agent->extra_headers + 256];
+      int rc = -1;
+      if (claude_target_digest(agent, target))
+         goto claude_done;
+      build_base_extra_headers(agent, expected, sizeof expected);
+      if (strlen(expected) >= headers_capacity || strcmp(expected, headers))
+         goto claude_done;
+      if (g_request_claude_token[0] && !strcmp(registration, g_request_claude_registration))
+      {
+         if (strcmp(target, g_request_claude_target))
+            goto claude_done;
+         snprintf(credentials.token, sizeof credentials.token, "%s", g_request_claude_token);
+      }
+      else if (agent_claude_connection_credentials(registration, &credentials))
+         goto claude_done;
+      int length = snprintf(auth, auth_capacity, "Authorization: Bearer %s", credentials.token);
+      if (length >= 0 && (size_t)length < auth_capacity &&
+          !agent_claude_oauth_headers(agent, headers, headers_capacity))
+         rc = 0;
+   claude_done:
+      OPENSSL_cleanse(&credentials, sizeof credentials);
+      OPENSSL_cleanse(expected, sizeof expected);
+      if (rc)
+      {
+         OPENSSL_cleanse(auth, auth_capacity);
+         OPENSSL_cleanse(headers, headers_capacity);
+         snprintf(g_request_auth_error, sizeof g_request_auth_error,
+                  "selected Vault Claude OAuth credential or connection binding is unavailable");
+      }
+      return rc;
    }
    if (strcmp(agent->auth_type, "codex-oauth"))
       return resolve_non_codex_auth(agent, auth, auth_capacity);

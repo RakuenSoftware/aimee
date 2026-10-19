@@ -37,7 +37,7 @@ struct server_native_runtime
    server_delegate_scope_t delegate;
    const workspace_provider_t *workspace;
    char cwd[MAX_PATH_LEN];
-   int job_id, api_key_source;
+   int job_id, api_key_source, claude_source;
    char session[128], token[65], url[64], binding[65], lineage[65];
 };
 
@@ -189,6 +189,7 @@ static int native_forward(const char *method, const char *path, const char *head
    int rc = -1;
    agent_codex_credentials_t current = {0};
    agent_api_credentials_t current_api = {0};
+   agent_claude_credentials_t current_claude = {0};
    request_context_t admitted = runtime->owner;
    unsigned char request_nonce[16];
    if (platform_random_bytes(request_nonce, sizeof request_nonce))
@@ -207,7 +208,15 @@ static int native_forward(const char *method, const char *path, const char *head
    {
       const char *registration = runtime->selected.registration[0] ? runtime->selected.registration
                                                                    : runtime->selected.name;
-      if (runtime->api_key_source)
+      if (runtime->claude_source)
+      {
+         if (agent_claude_connection_credentials(registration, &current_claude) ||
+             strcmp(current_claude.source_digest, runtime->lineage) ||
+             (model_request &&
+              agent_set_request_claude_creds_for(&runtime->selected, &current_claude)))
+            goto restore;
+      }
+      else if (runtime->api_key_source)
       {
          if (agent_api_connection_credentials(&runtime->selected, &current_api) ||
              strcmp(current_api.source_digest, runtime->lineage) ||
@@ -252,6 +261,7 @@ static int native_forward(const char *method, const char *path, const char *head
    agent_set_request_cancel(NULL);
    anthropic_http_capture_request_headers(NULL);
 restore:
+   OPENSSL_cleanse(&current_claude, sizeof current_claude);
    OPENSSL_cleanse(&current_api, sizeof current_api);
    OPENSSL_cleanse(&current, sizeof current);
    agent_registry_bind_ingress_model(previous_model);
@@ -306,6 +316,7 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
             owner->vault_principal);
    agent_codex_credentials_t credentials = {0};
    agent_api_credentials_t api_credentials = {0};
+   agent_claude_credentials_t claude_credentials = {0};
    if (agent_tools_scope_capture_owned(&runtime->tools) ||
        agent_source_authority_tls_capture_checked(&runtime->source))
       goto failed;
@@ -329,10 +340,12 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
       request_context_set(&runtime->owner);
       agent_request_creds_restore(&runtime->credentials);
       int codex = !strcmp(selected->auth_type, "codex-oauth");
+      int claude = !strcmp(selected->auth_type, "claude-oauth");
       const char *registration =
           selected->registration[0] ? selected->registration : selected->name;
-      int rc = codex ? agent_codex_connection_credentials(registration, &credentials)
-                     : agent_api_connection_credentials(selected, &api_credentials);
+      int rc = codex    ? agent_codex_connection_credentials(registration, &credentials)
+               : claude ? agent_claude_connection_credentials(registration, &claude_credentials)
+                        : agent_api_connection_credentials(selected, &api_credentials);
       agent_request_creds_restore(&previous_credentials);
       OPENSSL_cleanse(&previous_credentials, sizeof previous_credentials);
       request_context_restore(&previous_request);
@@ -342,6 +355,14 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
          if (rc || !native_digest_valid(credentials.source_digest))
             goto failed;
          snprintf(runtime->lineage, sizeof runtime->lineage, "%s", credentials.source_digest);
+      }
+      else if (claude)
+      {
+         if (rc || !native_digest_valid(claude_credentials.source_digest))
+            goto failed;
+         runtime->claude_source = 1;
+         snprintf(runtime->lineage, sizeof runtime->lineage, "%s",
+                  claude_credentials.source_digest);
       }
       else if (!rc)
       {
@@ -386,10 +407,12 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
    if (!runtime->listener)
       goto failed;
    snprintf(runtime->url, sizeof runtime->url, "http://127.0.0.1:%u", port);
+   OPENSSL_cleanse(&claude_credentials, sizeof claude_credentials);
    OPENSSL_cleanse(&api_credentials, sizeof api_credentials);
    OPENSSL_cleanse(&credentials, sizeof credentials);
    return runtime;
 failed:
+   OPENSSL_cleanse(&claude_credentials, sizeof claude_credentials);
    OPENSSL_cleanse(&api_credentials, sizeof api_credentials);
    OPENSSL_cleanse(&credentials, sizeof credentials);
    server_native_runtime_close(runtime);

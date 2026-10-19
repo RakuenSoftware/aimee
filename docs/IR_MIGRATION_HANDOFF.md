@@ -24,7 +24,7 @@ fidelity gap.
 
 The remaining work includes actual credential-free SDK activation with attested
 launch/workspace resources, complete host tool effects/receipts and human controls,
-Claude OAuth and other unsupported credential custody, remaining ingress/consumer retirement and
+live Claude subscription qualification and other unsupported credential custody, remaining ingress/consumer retirement and
 independently graded server-local learning with next-run reuse. Production `.100`
 must remain KB-free. Explicit receipt-bound feedback/ungraded observations are not
 independent task grades or synthesis. Production promotion requires the recorded
@@ -34,7 +34,8 @@ Published `5aa1888d2` passed all 56 applicable CI checks, including every Docker
 tier, with two existing testing-branch platform skips (as did `1a8469ebf`). Published
 `46f6e1085` includes the subsequent plain-request consumer and obsolete shell-driver
 retirement. Its CI exposed an unchecked POSIX capture receiver, repaired below.
-The selected Vault API-key increment and that CI repair require fresh head CI.
+Published `1511bd3e9` includes the selected Vault API-key increment and the CI repair.
+Its fresh CI has 55 passing checks and no failures; T2 is still pending at this checkpoint.
 Installed CLI probes now correctly resolve `aimee` and `wol-lore` from their own
 workspaces without an explicit project override; newer native callback cwd binding
 is separately pending promotion. The overall migration remains unfinished.
@@ -1795,3 +1796,40 @@ through a private fake curl. OAuth/PKCE and reauthentication fixtures pass norma
 and under ASan/UBSan; changed-source Cppcheck has no diagnostics. This repairs the
 shared accessor already used by selected Codex credentials. Claude custody and
 production SDK activation remain unfinished.
+
+## Selected Claude Vault custody and native broker: 19 October continuation
+
+The selected native broker now supports the sealed Claude login document as well
+as Codex and API keys. The Vault owner validates native `claudeAiOauth` fields,
+converts millisecond expiry, preserves persisted client ID and exact granted
+scopes, and uses the fixed subscription refresh endpoint. The legacy public
+client fallback and document/profile fields were checked against the installed
+Claude 2.1.227 SDK's public source, without reading operator credential files.
+Codex and Claude share the same registration refresh lock/source fence. An
+unchanged imported document cannot overwrite a refreshed token; removal revokes
+it, and switching vendor families cannot reuse the other family's normalized
+access token. Malformed/duplicate source fields and credential headers refuse.
+
+The shared OAuth owner now supports typed JSON/form refresh profiles. Requests
+have bounded curl deadlines and correctly quote the endpoint; refresh bodies stay
+on stdin, full-length form tokens are encoded without truncation, and temporary
+refresh material is cleansed. Only a successful HTTP status can store a token;
+only an actual `error: invalid_grant` marks rejection. The existing form API is
+retained. Model callbacks bind the exact selected Claude bearer and target in the
+credential snapshot. Rotation/revocation refuses an old runtime. Tool/delegate
+callbacks do not inherit that model bearer. Anthropic parity header rebuilding
+preserves the subscription OAuth beta capability alongside caller beta flags.
+
+Seven focused suites (agent, native runtime, three Anthropic ingress/policy suites,
+OAuth reauthentication and PKCE) pass normally and under ASan/UBSan. Native runtime
+also passes TSan, and actual CMake/CTest native runtime/cache targets pass 2/2.
+The full agent fixture retains its three explicit PostgreSQL-dependent skips
+when `AIMEE_STORE_URL` is unset. Changed-source Cppcheck has no diagnostics.
+
+These are local real-Vault refresh/owner and loopback broker qualifications, not
+live Claude subscription acceptance. Production SDK spawn sites remain inactive.
+The normalized OAuth store still writes access/refresh/expiry as separate Vault
+fields; atomic rotating-token persistence and failure injection remain required
+before claiming custody complete. Attested launch/workspace construction, exact
+native command replay, full effect/human tool admission and independently graded
+KB-free learning also remain unfinished. Production `.100` remains KB-free.

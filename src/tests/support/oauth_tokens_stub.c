@@ -71,3 +71,18 @@ int oauth_token_reauth_required(const char *client_name)
    (void)client_name;
    return 0; /* tests don't exercise the REAUTH_REQUIRED marker */
 }
+
+char test_oauth_profile_client[256], test_oauth_profile_scope[4096],
+    test_oauth_profile_endpoint[256];
+int test_oauth_profile_format;
+int oauth_token_get_profile(const char *client_name, const oauth_refresh_profile_t *profile,
+                            int skew_secs, char *buf, size_t capacity)
+{
+   snprintf(test_oauth_profile_client, sizeof test_oauth_profile_client, "%s", profile->client_id);
+   snprintf(test_oauth_profile_scope, sizeof test_oauth_profile_scope, "%s", profile->scope);
+   snprintf(test_oauth_profile_endpoint, sizeof test_oauth_profile_endpoint, "%s",
+            profile->token_endpoint);
+   test_oauth_profile_format = profile->format;
+   return oauth_token_get(client_name, profile->client_id, profile->token_endpoint, skew_secs, buf,
+                          capacity);
+}

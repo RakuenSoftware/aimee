@@ -334,6 +334,23 @@ int agent_codex_connection_credentials(const char *registration, agent_codex_cre
 
 typedef struct
 {
+   char token[MAX_API_KEY_LEN];
+   char source_digest[65]; /* original selected login lineage, stable across refresh */
+} agent_claude_credentials_t;
+/* Exact selected Vault-native Claude login only. Uses the shared registration
+ * refresh lock, persisted client/scopes and server-owned endpoint; no HOME or
+ * default-account fallback. The host must cleanse the returned secret. */
+int agent_claude_connection_credentials(const char *registration, agent_claude_credentials_t *out);
+/* Merge the required subscription beta capability without losing other beta
+ * tokens. Non-Claude profiles are unchanged; duplicates/overflow refuse. */
+int agent_claude_oauth_headers(const agent_t *agent, char *headers, size_t capacity);
+/* Host-only exact request binding; NULL clears. Snapshot carries the selected
+ * registration/target so another connection cannot borrow this bearer. */
+int agent_set_request_claude_creds_for(const agent_t *agent,
+                                       const agent_claude_credentials_t *credentials);
+
+typedef struct
+{
    char api_key[MAX_API_KEY_LEN];
    char target_digest[65]; /* selected registration/provider/endpoint/header profile */
    char source_digest[65]; /* target + actual selected Vault key; not a credential */
@@ -394,6 +411,9 @@ typedef struct
    char codex_token[MAX_API_KEY_LEN];
    char codex_account_id[128];
    char codex_registration[128];
+   char claude_token[MAX_API_KEY_LEN];
+   char claude_registration[128];
+   char claude_target[65];
    char api_key[MAX_API_KEY_LEN];
    char api_key_registration[128];
    char api_key_target[65];

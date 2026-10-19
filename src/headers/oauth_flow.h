@@ -68,6 +68,23 @@ int oauth_token_refresh(const char *client_name, const char *client_id, const ch
  * on the next successful token store. */
 int oauth_token_reauth_required(const char *client_name);
 
+/* Typed refresh request profile. The owner supplies public provider metadata;
+ * refresh secrets are loaded from Vault and sent on curl stdin only. */
+typedef enum
+{
+   OAUTH_REFRESH_FORM = 0,
+   OAUTH_REFRESH_JSON = 1
+} oauth_refresh_format_t;
+typedef struct
+{
+   const char *client_id;
+   const char *token_endpoint;
+   const char *scope; /* JSON profile: exact granted scopes; NULL omits */
+   oauth_refresh_format_t format;
+} oauth_refresh_profile_t;
+int oauth_token_get_profile(const char *client_name, const oauth_refresh_profile_t *profile,
+                            int skew_secs, char *buf, size_t len);
+
 /* ---- High-level accessor ---- */
 
 /* Return a valid access token for |client_name| in |buf| (size |len|).

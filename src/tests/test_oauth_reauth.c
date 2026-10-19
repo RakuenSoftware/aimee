@@ -5,6 +5,7 @@
  * operator re-auth), so a recovered codex credential no longer reports as
  * needing re-auth. */
 #include "oauth_flow.h"
+#include "cJSON.h"
 #include "vault_service.h"
 #include "vault_server_key.h"
 #include <assert.h>
@@ -68,14 +69,22 @@ int main(void)
    snprintf(curl_path, sizeof curl_path, "%s/curl", home);
    FILE *curl = fopen(curl_path, "w");
    assert(curl);
-   assert(fputs("#!/bin/sh\ncat >/dev/null\nprintf '%s' \"$AIMEE_TEST_OAUTH_RESPONSE\"\n", curl) >=
-          0);
+   assert(fputs("#!/bin/sh\n"
+                "printf '%s\\n' \"$@\" >\"$AIMEE_TEST_OAUTH_ARGS\"\n"
+                "cat >\"$AIMEE_TEST_OAUTH_BODY\"\n"
+                "printf '%s' \"$AIMEE_TEST_OAUTH_RESPONSE\"\n",
+                curl) >= 0);
    int close_rc = fclose(curl);
    assert(!close_rc);
    assert(!chmod(curl_path, 0700));
    assert(snprintf(test_path, sizeof test_path, "%s:%s", home,
                    saved_path ? saved_path : "/usr/bin:/bin") < (int)sizeof test_path);
    assert(!setenv("PATH", test_path, 1));
+   char args_path[320], body_path[320];
+   snprintf(args_path, sizeof args_path, "%s/args", home);
+   snprintf(body_path, sizeof body_path, "%s/body", home);
+   assert(!setenv("AIMEE_TEST_OAUTH_ARGS", args_path, 1));
+   assert(!setenv("AIMEE_TEST_OAUTH_BODY", body_path, 1));
 
    resp.expires_at = time(NULL) + 300;
    assert(!oauth_token_store("codex", &resp));
@@ -110,6 +119,81 @@ int main(void)
    assert(!strcmp(buf, "refreshed-fixture"));
    assert(!oauth_token_reauth_required("codex"));
 
+   /* Token-looking 5xx responses and descriptions mentioning invalid_grant
+    * cannot rotate credentials or falsely latch a reauthentication marker. */
+   resp.expires_at = time(NULL) + 300;
+   assert(!oauth_token_store("codex", &resp));
+   assert(!setenv("AIMEE_TEST_OAUTH_RESPONSE", "{\"access_token\":\"must-not-store\"}\n503", 1));
+   assert(!oauth_token_get("codex", "fixture-client", "https://fixture.invalid/token", 600, buf,
+                           sizeof buf));
+   assert(!strcmp(buf, "tok-after-reauth"));
+   assert(!setenv(
+       "AIMEE_TEST_OAUTH_RESPONSE",
+       "{\"error\":\"temporarily_unavailable\",\"description\":\"upstream invalid_grant\"}\n400",
+       1));
+   assert(!oauth_token_get("codex", "fixture-client", "https://fixture.invalid/token", 600, buf,
+                           sizeof buf));
+   assert(!oauth_token_reauth_required("codex"));
+
+   /* Claude's refresh profile is JSON, with the exact granted scope/client and
+    * full-length refresh token. Credentials must stay out of process arguments. */
+   memset(resp.refresh_token, '+', 900);
+   resp.refresh_token[900] = 0;
+   resp.expires_at = time(NULL) - 10;
+   assert(!oauth_token_store("codex", &resp));
+   assert(!setenv("AIMEE_TEST_OAUTH_RESPONSE",
+                  "{\"access_token\":\"json-refreshed\",\"expires_in\":3600}\n200", 1));
+   const oauth_refresh_profile_t profile = {.client_id = "fixture-client",
+                                            .token_endpoint =
+                                                "https://fixture.invalid/token?literal='quote'",
+                                            .scope = "user:profile user:inference",
+                                            .format = OAUTH_REFRESH_JSON};
+   assert(!oauth_token_get_profile("codex", &profile, 600, buf, sizeof buf));
+   assert(!strcmp(buf, "json-refreshed"));
+   char captured[8192];
+   FILE *capture = fopen(body_path, "r");
+   assert(capture);
+   size_t captured_len = fread(captured, 1, sizeof captured - 1, capture);
+   captured[captured_len] = 0;
+   close_rc = fclose(capture);
+   assert(!close_rc);
+   cJSON *json = cJSON_Parse(captured);
+   assert(cJSON_IsObject(json));
+   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(json, "refresh_token")->valuestring,
+                  resp.refresh_token));
+   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(json, "client_id")->valuestring,
+                  profile.client_id));
+   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(json, "scope")->valuestring, profile.scope));
+   cJSON_Delete(json);
+   capture = fopen(args_path, "r");
+   assert(capture);
+   captured_len = fread(captured, 1, sizeof captured - 1, capture);
+   captured[captured_len] = 0;
+   close_rc = fclose(capture);
+   assert(!close_rc);
+   assert(strstr(captured, "application/json") && strstr(captured, "--data-binary\n@-"));
+   assert(strstr(captured, profile.token_endpoint));
+   assert(strstr(captured, "--max-time\n30"));
+   assert(!strstr(captured, resp.refresh_token));
+
+   /* The legacy form profile must encode the whole token, not truncate at the
+    * old 512-byte refresh/encoding buffers. */
+   assert(!oauth_token_store("codex", &resp));
+   assert(!oauth_token_get("codex", "fixture-client", "https://fixture.invalid/token", 600, buf,
+                           sizeof buf));
+   capture = fopen(body_path, "r");
+   assert(capture);
+   captured_len = fread(captured, 1, sizeof captured - 1, capture);
+   captured[captured_len] = 0;
+   close_rc = fclose(capture);
+   assert(!close_rc);
+   const char *encoded = strstr(captured, "refresh_token=");
+   assert(encoded);
+   encoded += strlen("refresh_token=");
+   for (int i = 0; i < 900; i++)
+      assert(!strncmp(encoded + 3 * i, "%2B", 3));
+   assert(!strcmp(encoded + 2700, "&client_id=fixture-client"));
+
    resp.expires_at = 0;
    assert(!oauth_token_store("codex", &resp));
    assert(!oauth_token_get("codex", NULL, NULL, 0, buf, sizeof buf));
@@ -122,6 +206,8 @@ int main(void)
       assert(!unsetenv("PATH"));
    free(saved_path);
    assert(!unsetenv("AIMEE_TEST_OAUTH_RESPONSE"));
+   assert(!unsetenv("AIMEE_TEST_OAUTH_ARGS"));
+   assert(!unsetenv("AIMEE_TEST_OAUTH_BODY"));
 
    snprintf(cmd, sizeof(cmd), "rm -rf %s", home);
    (void)system(cmd);

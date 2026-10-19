@@ -215,6 +215,24 @@ int agent_codex_connection_credentials(const char *registration, agent_codex_cre
           64);
    return 0;
 }
+int agent_claude_connection_credentials(const char *registration, agent_claude_credentials_t *out)
+{
+   agent_codex_credentials_t source;
+   if (agent_codex_connection_credentials(registration, &source))
+      return -1;
+   memset(out, 0, sizeof *out);
+   strcpy(out->token, "host-only-claude-secret");
+   memset(out->source_digest, atomic_load(&source_changed) ? 'f' : 'e', 64);
+   return 0;
+}
+int agent_set_request_claude_creds_for(const agent_t *agent,
+                                       const agent_claude_credentials_t *credentials)
+{
+   assert(agent && credentials && !strcmp(credentials->token, "host-only-claude-secret"));
+   strcpy(current_credentials.claude_token, credentials->token);
+   strcpy(current_credentials.claude_registration, agent->registration);
+   return 0;
+}
 int agent_api_connection_credentials(const agent_t *agent, agent_api_credentials_t *out)
 {
    const request_context_t *owner = request_context_get();
@@ -273,7 +291,7 @@ int server_http_route_allowed_caps(int tcp, uint32_t caps, const char *method, c
       return 0;
    if (!strcmp(path, "/v1/chat/control") || !strcmp(path, "/v1/config/set"))
       return 1; /* Parent authority must still be outside the child surface. */
-   return !strcmp(path, "/v1/responses")  ? (caps & CAP_CHAT) != 0
+   return (!strcmp(path, "/v1/responses") || !strcmp(path, "/v1/messages")) ? (caps & CAP_CHAT) != 0
           : !strcmp(path, "/v1/mcp/call") ? (caps & CAP_TOOL_EXECUTE) != 0
                                           : 0;
 }
@@ -355,7 +373,15 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    assert(!strcmp(current_credentials.vault_principal, identity));
    assert(!strcmp(current_credentials.session_id, owner->session_key));
    assert(current_model && !strcmp(current_model->registration, "selected-account"));
-   if (!strcmp(current_model->auth_type, "api_key"))
+   if (!strcmp(current_model->auth_type, "claude-oauth"))
+   {
+      assert(!current_credentials.codex_token[0] && !current_credentials.api_key[0]);
+      if (!strncmp(path, "/v1/mcp/", 8))
+         assert(!current_credentials.claude_token[0]);
+      else
+         assert(!strcmp(current_credentials.claude_token, "host-only-claude-secret"));
+   }
+   else if (!strcmp(current_model->auth_type, "api_key"))
    {
       assert(!current_credentials.codex_token[0]);
       if (!strncmp(path, "/v1/mcp/", 8))
@@ -456,7 +482,7 @@ int aimee_ir_session_capture_failed(void)
 }
 static void probe_replay_scope(const char *path)
 {
-   if (!strcmp(path, "/v1/responses"))
+   if (!strcmp(path, "/v1/responses") || !strcmp(path, "/v1/messages"))
    {
       assert(state_guard.guard && installed_sink);
       aimee_request_t request = {0};
@@ -691,6 +717,27 @@ int main(void)
    assert(strstr(response, "200 OK"));
    server_native_runtime_close(rotated);
    server_native_runtime_close(api);
+   atomic_store(&source_changed, 0);
+   agent_t claude_selected = selected;
+   strcpy(claude_selected.provider, "anthropic");
+   strcpy(claude_selected.auth_type, "claude-oauth");
+   server_native_runtime_t *claude = server_native_runtime_open(&claude_selected, &a, "session-a");
+   assert(claude);
+   request(claude, "/v1/messages", server_native_runtime_token(claude), response);
+   assert(strstr(response, "200 OK") && !strstr(response, "claude-secret"));
+   request(claude, "/v1/mcp/call", server_native_runtime_token(claude), response);
+   assert(strstr(response, "200 OK"));
+   before = atomic_load(&calls);
+   atomic_store(&source_changed, 1);
+   request(claude, "/v1/messages", server_native_runtime_token(claude), response);
+   assert(strstr(response, "502") && atomic_load(&calls) == before);
+   rotated = server_native_runtime_open(&claude_selected, &a, "session-a");
+   assert(rotated &&
+          strcmp(server_native_runtime_binding(claude), server_native_runtime_binding(rotated)));
+   request(rotated, "/v1/messages", server_native_runtime_token(rotated), response);
+   assert(strstr(response, "200 OK"));
+   server_native_runtime_close(rotated);
+   server_native_runtime_close(claude);
    atomic_store(&source_changed, 0);
    unsetenv("AIMEE_ACTIVE_TOOLSET");
    unsetenv("AIMEE_DELEGATE_SOURCE_PATHS");

@@ -13,7 +13,22 @@ profile to opaque lineage, and refuses competing credential headers. A host bind
 credential with `agent_set_request_api_credentials_for` for one request; target edits in that
 registration refuse. Other registrations resolve their own credentials without borrowing the key. These values stay off the module bus and child environment, and are
 cleansed with the per-request credential snapshot. Existing unscoped compatibility resolution is
-unchanged. Claude OAuth custody/refresh and production native activation remain separate work.
+unchanged.
+
+Selected Claude subscription connections use `agent_claude_connection_credentials`. The source is
+only the selected registration's sealed native login document. The adapter preserves its persisted
+client ID and exact granted scopes, normalizes expiry from milliseconds, and refreshes through a
+fixed server-owned endpoint using a JSON body on stdin. Missing/removed or ambiguous source
+fields refuse; neither client files nor another registration supply a fallback. Codex and Claude
+share the registration's refresh lock and normalized-source fence, preventing a vendor switch from
+reusing the other vendor's rotated token. Successful refresh retains original source lineage.
+
+The native runtime checks that lineage on callbacks and binds the selected bearer only to model
+requests. Request snapshots retain the registration/target binding; endpoint/profile edits refuse,
+and MCP tools/delegates resolve their own credentials. OAuth beta admission preserves the other
+Anthropic beta capabilities. Source/refresh fixtures and loopback broker tests do not qualify a live
+Claude subscription or activate production SDK spawning. Atomic multi-field token persistence and
+production native activation remain outstanding.
 
 ## Public contracts
 

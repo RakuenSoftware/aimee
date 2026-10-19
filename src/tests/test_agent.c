@@ -1857,6 +1857,140 @@ static void test_codex_source_lineage_and_paired_headers(void)
    printf("  PASS: test_codex_source_lineage_and_paired_headers\n");
 }
 
+extern char test_oauth_profile_client[256], test_oauth_profile_scope[4096],
+    test_oauth_profile_endpoint[256];
+extern int test_oauth_profile_format;
+static void test_claude_selected_vault_lineage(void)
+{
+   const char *registration = "claude-lineage-fixture";
+   const char *source =
+       "{\"claudeAiOauth\":{\"accessToken\":\"claude-access\","
+       "\"refreshToken\":\"claude-refresh\",\"expiresAt\":4102444800000,"
+       "\"clientId\":\"persisted-client\",\"scopes\":[\"user:profile\",\"user:inference\"]}}";
+   assert(vault_service_set_server(registration, "oauth", source) == VAULT_OK);
+   agent_claude_credentials_t original, current;
+   assert(!agent_claude_connection_credentials(registration, &original));
+   assert(!strcmp(original.token, "claude-access") && strlen(original.source_digest) == 64);
+   assert(!strcmp(test_oauth_profile_client, "persisted-client"));
+   assert(!strcmp(test_oauth_profile_scope, "user:profile user:inference"));
+   assert(!strcmp(test_oauth_profile_endpoint, "https://platform.claude.com/v1/oauth/token"));
+   assert(test_oauth_profile_format == OAUTH_REFRESH_JSON);
+   oauth_token_response_t rotated = {0};
+   snprintf(rotated.access_token, sizeof rotated.access_token, "refreshed-claude");
+   assert(!oauth_token_store(registration, &rotated));
+   int stores = test_oauth_stores, removes = test_oauth_removes;
+   assert(!agent_claude_connection_credentials(registration, &current));
+   assert(!strcmp(current.token, "refreshed-claude"));
+   assert(!strcmp(original.source_digest, current.source_digest));
+   assert(test_oauth_stores == stores && test_oauth_removes == removes);
+   test_oauth_get_fail = 1;
+   memset(&current, 'x', sizeof current);
+   assert(agent_claude_connection_credentials(registration, &current));
+   for (size_t i = 0; i < sizeof current; i++)
+      assert(!((unsigned char *)&current)[i]);
+   assert(test_oauth_stores == stores && test_oauth_removes == removes);
+   test_oauth_get_fail = 0;
+   assert(agent_claude_connection_credentials("missing-claude-registration", &current));
+   assert(vault_service_set_server(registration, "oauth", "") == VAULT_OK);
+   assert(agent_claude_connection_credentials(registration, &current));
+
+   /* Both adapters fence the same normalized store. Switching back must seed
+    * the original vendor again rather than use the other vendor's access. */
+   const char *codex =
+       "{\"tokens\":{\"access_token\":\"codex-in-same-slot\",\"refresh_token\":\"codex-refresh\"}}";
+   assert(vault_service_set_server(registration, "oauth", codex) == VAULT_OK);
+   agent_codex_credentials_t codex_credentials;
+   assert(!agent_codex_connection_credentials(registration, &codex_credentials));
+   assert(!strcmp(codex_credentials.token, "codex-in-same-slot"));
+   assert(vault_service_set_server(registration, "oauth", source) == VAULT_OK);
+   assert(!agent_claude_connection_credentials(registration, &current));
+   assert(!strcmp(current.token, "claude-access"));
+   assert(!strcmp(current.source_digest, original.source_digest));
+   assert(test_oauth_stores == stores + 2 && test_oauth_removes == removes + 2);
+
+   const char *legacy = "{\"claudeAiOauth\":{\"accessToken\":\"legacy-claude\","
+                        "\"refreshToken\":\"legacy-refresh\",\"expiresAt\":4102444800000,"
+                        "\"scopes\":[\"user:inference\"]}}";
+   assert(vault_service_set_server(registration, "oauth", legacy) == VAULT_OK);
+   assert(!agent_claude_connection_credentials(registration, &current));
+   assert(!strcmp(test_oauth_profile_client, "9d1c250a-e61b-44d9-88ed-5944d1962f5e"));
+   assert(!strcmp(test_oauth_profile_scope, "user:inference"));
+   assert(strcmp(current.source_digest, original.source_digest));
+   agent_t agent = {0};
+   snprintf(agent.name, sizeof agent.name, "claude");
+   snprintf(agent.registration, sizeof agent.registration, "%s", registration);
+   snprintf(agent.provider, sizeof agent.provider, "anthropic");
+   snprintf(agent.auth_type, sizeof agent.auth_type, "claude-oauth");
+   snprintf(agent.endpoint, sizeof agent.endpoint, "https://api.anthropic.com/v1");
+   char auth[8192], headers[1024];
+   agent_request_creds_t previous, bound;
+   agent_request_creds_snapshot(&previous);
+   assert(!agent_set_request_claude_creds_for(&agent, &current));
+   agent_request_creds_snapshot(&bound);
+   test_oauth_get_fail = 1;
+   assert(!agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   assert(!strcmp(auth, "Authorization: Bearer legacy-claude"));
+   assert(strstr(headers, "anthropic-beta: oauth-2025-04-20"));
+   assert(agent_resolve_auth_headers(&agent, auth, 8, headers, sizeof headers) && !auth[0]);
+   snprintf(agent.endpoint, sizeof agent.endpoint, "https://other.invalid");
+   assert(agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers) &&
+          !auth[0]);
+   snprintf(agent.endpoint, sizeof agent.endpoint, "https://api.anthropic.com/v1");
+   assert(!agent_set_request_claude_creds_for(NULL, NULL));
+   assert(agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   agent_request_creds_restore(&bound);
+   assert(!agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   snprintf(agent.registration, sizeof agent.registration, "other-claude-slot");
+   assert(agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   agent_request_creds_restore(&previous);
+   runtime_secret_wipe(&previous, sizeof previous);
+   runtime_secret_wipe(&bound, sizeof bound);
+   test_oauth_get_fail = 0;
+   snprintf(headers, sizeof headers, "Anthropic-Beta: fixture-beta\nX-Other: value");
+   assert(!agent_claude_oauth_headers(&agent, headers, sizeof headers));
+   assert(!strcmp(headers, "Anthropic-Beta: fixture-beta,oauth-2025-04-20\nX-Other: value"));
+   assert(!agent_claude_oauth_headers(&agent, headers, sizeof headers));
+   assert(!strstr(strstr(headers, "oauth-2025-04-20") + 1, "oauth-2025-04-20"));
+   snprintf(headers, sizeof headers, "anthropic-beta: ");
+   assert(!agent_claude_oauth_headers(&agent, headers, sizeof headers));
+   assert(strstr(headers, "anthropic-beta:oauth-2025-04-20") ||
+          strstr(headers, "anthropic-beta: oauth-2025-04-20"));
+   snprintf(headers, sizeof headers, "anthropic-beta: oauth-2025-04-20,oauth-2025-04-20");
+   assert(agent_claude_oauth_headers(&agent, headers, sizeof headers));
+   snprintf(headers, sizeof headers, "anthropic-beta: x\nanthropic-beta: y");
+   assert(agent_claude_oauth_headers(&agent, headers, sizeof headers));
+   headers[0] = 0;
+   assert(agent_claude_oauth_headers(&agent, headers, 8));
+
+   const char *invalid[] = {
+       "{\"claudeAiOauth\":{},\"claudeAiOauth\":{}}",
+       "{\"claudeAiOauth\":{\"accessToken\":\"a\",\"accessToken\":\"b\"}}",
+       "{\"claudeAiOauth\":{\"accessToken\":\"a\",\"refreshToken\":\"r\",\"expiresAt\":\"bad\","
+       "\"scopes\":[\"user:inference\"]}}",
+       "{\"claudeAiOauth\":{\"accessToken\":\"a\",\"refreshToken\":\"r\",\"expiresAt\":"
+       "4102444800000,\"scopes\":[\"user:inference\"],\"scopes\":[]}}",
+       "{\"claudeAiOauth\":{\"accessToken\":\"a\\r\\nInjected: "
+       "x\",\"refreshToken\":\"r\",\"expiresAt\":4102444800000,\"scopes\":[\"user:inference\"]}}",
+       "{\"claudeAiOauth\":{\"accessToken\":\"a\\u0000hidden\",\"refreshToken\":\"r\","
+       "\"expiresAt\":4102444800000,\"scopes\":[\"user:inference\"]}}",
+       "{\"claudeAiOauth\":{\"accessToken\":\"a\",\"refreshToken\":\"r\",\"expiresAt\":"
+       "4102444800000,\"scopes\":[\"broaden scope\"]}}",
+       "[]",
+       "{} trailing"};
+   stores = test_oauth_stores;
+   for (size_t i = 0; i < sizeof invalid / sizeof *invalid; i++)
+   {
+      assert(vault_service_set_server(registration, "oauth", invalid[i]) == VAULT_OK);
+      assert(agent_claude_connection_credentials(registration, &current));
+      assert(!current.token[0] && !current.source_digest[0] && test_oauth_stores == stores);
+   }
+   test_oauth_tokens_reset();
+   runtime_secret_wipe(&original, sizeof original);
+   runtime_secret_wipe(&current, sizeof current);
+   runtime_secret_wipe(&codex_credentials, sizeof codex_credentials);
+   puts("  PASS: selected Vault Claude lineage, exact refresh profile and vendor switching");
+}
+
 static void test_codex_oauth_auth_resolution(void)
 {
    agent_t ag;
@@ -4457,6 +4591,7 @@ int main(void)
    test_local_synth_not_masked_by_tmux_codex();
    test_vault_api_key_lineage_and_request_binding();
    test_codex_source_lineage_and_paired_headers();
+   test_claude_selected_vault_lineage();
    test_codex_oauth_auth_resolution();
    test_responses_parser_keeps_all_output_text_parts();
    test_responses_parser_accumulates_output_text_deltas();
