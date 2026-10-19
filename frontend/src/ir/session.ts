@@ -26,6 +26,7 @@ export type Message = { role: string; blocks: Block[]; content_scalar?: boolean 
 export type Delta = {
   type: 'TURN_START' | 'BLOCK_START' | 'BLOCK_DELTA' | 'BLOCK_STOP' | 'TURN_STOP' | 'ERROR';
   block_id?: number;
+  message_group?: number;
   kind?: Block['type'];
   tool_id?: string;
   name?: string;
@@ -207,6 +208,7 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       if (!nonempty(event.message_id) || !nonempty(event.role)) throw new Error('Delta requires message identity');
       const d = event.payload;
       const index = state.messages.findIndex(m => m.id === event.message_id);
+      if (d.message_group !== undefined && (!Number.isInteger(d.message_group) || d.message_group < 1 || d.message_group > 4096 || d.type !== 'BLOCK_START' || d.kind !== 'text')) throw new Error('Invalid authored message group');
       for (const key of ['thinking_id', 'encrypted_content'] as const) {
         if (d[key] !== undefined && (typeof d[key] !== 'string' || d.kind !== 'thinking' ||
           !['BLOCK_START', 'BLOCK_DELTA'].includes(d.type))) throw new Error('Invalid opaque thinking metadata');
@@ -261,7 +263,7 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         if (d.signature_delta !== undefined && (d.kind !== 'thinking' || typeof d.signature_delta !== 'string')) throw new Error('Invalid thinking signature');
         if (d.redacted_content !== undefined && (d.kind !== 'thinking' || typeof d.redacted_content !== 'string')) throw new Error('Invalid redacted content');
         if (d.input !== undefined && (d.kind !== 'tool_use' || !d.input || typeof d.input !== 'object' || Array.isArray(d.input))) throw new Error('Invalid initial tool input');
-        const block: Block = { type: d.kind, tool_id: d.tool_id, name: d.name, namespace: d.namespace,
+        const block: Block = { ...(d.message_group !== undefined ? { message_group: d.message_group } : {}), type: d.kind, tool_id: d.tool_id, name: d.name, namespace: d.namespace,
           ...(d.kind === 'tool_use' ? { input: d.input ?? {} } : { text: d.text_delta ?? '' }),
           ...(d.thinking_id !== undefined ? { thinking_id: d.thinking_id } : {}),
           ...(d.encrypted_content !== undefined ? { encrypted_content: d.encrypted_content } : {}),

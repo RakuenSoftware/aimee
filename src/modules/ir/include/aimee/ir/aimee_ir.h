@@ -366,6 +366,7 @@ typedef struct
    aimee_delta_type_t type;
    int block_id;
    aimee_block_type_t kind;
+   int message_group; /* Optional authored text grouping, BLOCK_START only. */
    /* BLOCK_START of a tool_use carries the id + name (opaque, verbatim). */
    const char *tool_id;
    const char *tool_name;

@@ -543,3 +543,14 @@ aimee_enable_test_asserts(test_kb_http_common)
 add_test(NAME test_kb_http_common COMMAND test_kb_http_common)
 
 aimee_add_test(test_core_base64 test_core_base64.c)
+
+aimee_add_test(test_aimee_responses_stream test_aimee_responses_stream.c
+    ../modules/translation/aimee_responses_frontend_stream.c ../modules/translation/aimee_frontend_openai.c ../modules/translation/aimee_frontend_responses.c
+    ../modules/translation/aimee_responses_stream.c ../modules/translation/aimee_backend_responses.c
+    ../modules/ir/aimee_ir.c)
+
+aimee_add_test(test_server_responses_stream test_server_responses_stream.c
+    ../server/server_responses_stream.c ../sse_parser.c
+    ../modules/translation/aimee_responses_stream.c ../modules/translation/aimee_backend_responses.c
+    ../modules/translation/aimee_responses_frontend_stream.c ../modules/translation/aimee_frontend_openai.c
+    ../modules/translation/aimee_frontend_responses.c ../modules/ir/aimee_ir.c)

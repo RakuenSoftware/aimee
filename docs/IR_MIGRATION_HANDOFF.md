@@ -1320,3 +1320,39 @@ final push and monitor the replacement run, avoiding unnecessary same-head edits
 while CI is running. Current installed CLI behavior will remain until the reviewed
 runtime promotion; source fixes alone do not update production or establish a
 complete migration. Production remains KB-free.
+
+
+## Incremental Responses provider transport
+
+`/v1/responses` now has a true incremental path for Responses-speaking providers.
+The native entry adapter emits owned-validated canonical text/refusal, reasoning
+summary and namespaced function-argument deltas before receiving a terminal frame.
+Its bounded native frame history stays inside translation. At completion, the
+existing full Responses decoder supplies the authoritative full snapshot; emitted
+prefixes, identities, completed-item snapshots, opaque reasoning and structured
+arguments must agree. EOF/truncated framing, conflicting snapshots, unknown semantic
+events, malformed arguments and failed sinks refuse completion. There is no retry
+or economizer resend after the incremental attempt begins.
+
+The frontend consumes canonical deltas and preserves authored text grouping through
+`message_group` on text block starts in C serialization/assembly, Go session
+admission and browser live/durable reduction. It emits item-added before deltas,
+retains opaque reasoning in final items, and verifies the whole projected output
+against the admitted full snapshot before any item-done/client-completion event.
+The host commits the canonical snapshot and durable Responses history before
+publishing completion. Existing routing, request policy/stages, wire fences,
+provider custody, response stages and accounting remain in the prepared executor.
+Response-governance/subagent-prevention modes retain buffered admission; other
+upstream wires and Responses-to-Anthropic ingress still need incremental cutover.
+This is not SDK activation or full migration completion.
+
+Focused parser/frontend and byte-fragmented transport fixtures cover early delivery,
+message parts/groups, namespaced partial arguments, late encrypted reasoning,
+incomplete responses, rewrite/identity refusal, truncated/malformed framing,
+single-use snapshot transfer and persistence failure. Sanitizer, CMake/CTest,
+production build, Go race, frontend and static/lint evidence is recorded with the
+checkpoint. The immediately preceding pushed head `c20f87ac6` passed all 56 applicable
+checks, including every Docker tier, with zero failures and the two intentional
+platform skips. Its CI does not qualify this new increment. Production remains KB-free;
+SDK effects/human controls/cache/custody/consumer and independent learning/deployment
+acceptance remain open.

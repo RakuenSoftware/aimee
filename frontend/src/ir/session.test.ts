@@ -296,3 +296,20 @@ it('retains complete reasoning metadata without concatenation or identity change
   expect(state.messages[0].blocks[0].encrypted_content).toBe('cipher');
   expect(JSON.parse(JSON.stringify([...events, d(5, { type: 'BLOCK_STOP', block_id: 0 }), d(6, { type: 'TURN_STOP' })])).reduce(reduceSession, emptySession('s'))).toEqual(state);
 });
+
+it('retains authored text groups in live and durable deltas and rejects misplaced groups', () => {
+  const d = (sequence: number, payload: import('./session').Delta) => envelope(sequence, {
+    kind: 'delta', message_id: 'grouped', role: 'assistant', payload,
+  });
+  const events = [d(1, { type: 'TURN_START' }), d(2, { type: 'BLOCK_START', block_id: 0, kind: 'text', message_group: 2 })];
+  const state = events.reduce(reduceSession, emptySession('s'));
+  expect(state.messages[0].blocks[0].message_group).toBe(2);
+  expect(JSON.parse(JSON.stringify(events)).reduce(reduceSession, emptySession('s'))).toEqual(state);
+  for (const payload of [
+    { type: 'BLOCK_DELTA', block_id: 0, kind: 'text', message_group: 2 },
+    { type: 'BLOCK_START', block_id: 1, kind: 'thinking', message_group: 2 },
+    { type: 'BLOCK_START', block_id: 1, kind: 'text', message_group: 0 },
+    { type: 'BLOCK_START', block_id: 1, kind: 'text', message_group: 1.5 },
+    { type: 'TURN_STOP', message_group: 2 },
+  ] as import('./session').Delta[]) expect(() => reduceSession(state, d(3, payload))).toThrow();
+});

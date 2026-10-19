@@ -655,6 +655,10 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
         (delta->usage_in < 0 || delta->usage_out < 0 || delta->usage_cache_read < 0 ||
          delta->usage_cache_write < 0 || delta->usage_reasoning < 0)))
       return NULL;
+   if (delta->message_group &&
+       (delta->message_group < 1 || delta->message_group > AIMEE_IR_MAX_BLOCKS ||
+        delta->type != AIMEE_DELTA_BLOCK_START || delta->kind != AIMEE_BLK_TEXT))
+      return NULL;
    if ((delta->thinking_id || delta->thinking_encrypted_content) &&
        (delta->kind != AIMEE_BLK_THINKING ||
         (delta->type != AIMEE_DELTA_BLOCK_START && delta->type != AIMEE_DELTA_BLOCK_DELTA)))
@@ -663,6 +667,8 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
    if (!out)
       return NULL;
    int ok = add_string(out, "type", types[delta->type]);
+   if (delta->message_group)
+      ok = ok && cJSON_AddNumberToObject(out, "message_group", delta->message_group) != NULL;
    if (delta->type >= AIMEE_DELTA_BLOCK_START && delta->type <= AIMEE_DELTA_BLOCK_STOP)
    {
       ok = ok && delta->block_id >= 0 && delta->block_id <= 4095 &&

@@ -1329,6 +1329,10 @@ int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
 {
    if (!builder || !delta || builder->complete)
       return -1;
+   if (delta->message_group &&
+       (delta->message_group < 1 || delta->message_group > AIMEE_IR_MAX_BLOCKS ||
+        delta->type != AIMEE_DELTA_BLOCK_START || delta->kind != AIMEE_BLK_TEXT))
+      return -1;
    if ((delta->thinking_id || delta->thinking_encrypted_content) &&
        (delta->kind != AIMEE_BLK_THINKING ||
         (delta->type != AIMEE_DELTA_BLOCK_START && delta->type != AIMEE_DELTA_BLOCK_DELTA)))
@@ -1394,6 +1398,7 @@ int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
          return -1;
       aimee_block_t *block = &builder->response.content[builder->response.n_content++];
       block->type = delta->kind;
+      block->message_group = delta->message_group;
       if (delta->kind == AIMEE_BLK_TOOL_USE)
       {
          if (!delta->tool_id || !*delta->tool_id || !delta->tool_name || !*delta->tool_name ||

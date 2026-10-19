@@ -85,9 +85,23 @@ IDs, signatures, encrypted/redacted reasoning, media references and context meta
 is optional for URL media. Tool input is opaque JSON; completed API function calls additionally
 require an object at their entry adapter.
 
+The Responses backend now emits canonical text, refusal text, reasoning summaries and namespaced
+function-argument deltas while the provider connection is open. The entry adapter bounds framing
+and owned state, reconciles emitted prefixes and completed items against the existing full native
+decoder, and refuses conflicting identities, rewritten content, invalid arguments and truncation.
+`message_group` on a text `BLOCK_START` preserves authored message/part boundaries across C, Go and
+browser consumers; it is immutable after opening the block.
+
+The Responses frontend renders those deltas from canonical state. Full snapshots, policy completion
+and durable history precede item-done and client-completion events. No partial stream is retried.
+`/v1/responses` selects this transport for Responses-speaking providers when response governance
+and subagent prevention do not require buffered admission; other upstream wires and those policy
+modes retain their existing buffered path. Incremental Responses-to-Anthropic projection remains
+unfinished. The decoder's native framing stays inside translation and never becomes core history.
+
 The migration remains incomplete: production SDK activation, full native tool effects and human
-controls, account-bound cache/history admission, incremental Responses streaming, credential
-custody and remaining IR consumers still require cutover. The current
+controls, account-bound cache/history admission, credential custody, cross-wire incremental
+Responses ingress and remaining IR consumers still require cutover. The current
 [handoff](../IR_MIGRATION_HANDOFF.md) records the implemented and unfinished boundaries.
 
 ## Dependencies and consumers

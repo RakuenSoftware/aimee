@@ -469,6 +469,26 @@ int main(void)
       assert(buffered_steps == (fail_at ? fail_at : 3));
    }
    aimee_ir_session_set_sink(NULL, NULL);
+   aimee_ir_response_builder_t grouped_builder = {0};
+   aimee_delta_t grouped = {.type = AIMEE_DELTA_TURN_START};
+   assert(!aimee_ir_response_builder_apply(&grouped_builder, &grouped));
+   grouped = (aimee_delta_t){
+       .type = AIMEE_DELTA_BLOCK_START, .kind = AIMEE_BLK_TEXT, .block_id = 0, .message_group = 2};
+   cJSON *grouped_json = aimee_ir_delta_json(&grouped);
+   assert(grouped_json && cJSON_GetObjectItem(grouped_json, "message_group")->valueint == 2);
+   cJSON_Delete(grouped_json);
+   assert(!aimee_ir_response_builder_apply(&grouped_builder, &grouped));
+   assert(grouped_builder.response.content[0].message_group == 2);
+   grouped.type = AIMEE_DELTA_BLOCK_DELTA;
+   assert(!aimee_ir_delta_json(&grouped));
+   assert(aimee_ir_response_builder_apply(&grouped_builder, &grouped) < 0);
+   grouped.type = AIMEE_DELTA_BLOCK_START;
+   grouped.kind = AIMEE_BLK_THINKING;
+   assert(!aimee_ir_delta_json(&grouped));
+   grouped.kind = AIMEE_BLK_TEXT;
+   grouped.message_group = -1;
+   assert(!aimee_ir_delta_json(&grouped));
+   aimee_ir_response_builder_free(&grouped_builder);
    puts("IR session event tests passed");
    return 0;
 }

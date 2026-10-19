@@ -287,7 +287,7 @@ TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(TEST_FACT_MUTATION_MIN_OBJS) $(OBJDIR)/test
 # linking both would produce duplicate-symbol errors.
 TEST_DATA_OBJS_MOCK = $(TEST_DATA_OBJS) $(OBJDIR)/tests/support/mock_agent_http.o
 
-TEST_TARGETS := $(TESTPREFIX)/unit-test-cli-launch $(TESTPREFIX)/unit-test-compute-pool $(TESTPREFIX)/unit-test-postgres-session-transport $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-memory-scope $(TESTPREFIX)/unit-test-harness-memory-spill $(TESTPREFIX)/unit-test-harness-memory-audit $(TESTPREFIX)/unit-test-roundtable-brief $(TESTPREFIX)/unit-test-kb-store $(TESTPREFIX)/unit-test-pg-prepare-classification $(TESTPREFIX)/unit-test-schema-subst $(TESTPREFIX)/unit-test-code-index-ops $(TESTPREFIX)/unit-test-code-project-lifecycle $(TESTPREFIX)/unit-test-curator-version $(TESTPREFIX)/unit-test-curator-invalidate $(TESTPREFIX)/unit-test-curator-notify $(TESTPREFIX)/unit-test-curator-queue $(TESTPREFIX)/unit-test-curator-pipeline-sched $(TESTPREFIX)/unit-test-curator-custom-stages $(TESTPREFIX)/unit-test-pgvec $(TESTPREFIX)/unit-test-rules $(TESTPREFIX)/unit-test-delegate-sandbox-image \
+TEST_TARGETS := $(TESTPREFIX)/unit-test-server-responses-stream $(TESTPREFIX)/unit-test-aimee-responses-stream $(TESTPREFIX)/unit-test-cli-launch $(TESTPREFIX)/unit-test-compute-pool $(TESTPREFIX)/unit-test-postgres-session-transport $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-memory-scope $(TESTPREFIX)/unit-test-harness-memory-spill $(TESTPREFIX)/unit-test-harness-memory-audit $(TESTPREFIX)/unit-test-roundtable-brief $(TESTPREFIX)/unit-test-kb-store $(TESTPREFIX)/unit-test-pg-prepare-classification $(TESTPREFIX)/unit-test-schema-subst $(TESTPREFIX)/unit-test-code-index-ops $(TESTPREFIX)/unit-test-code-project-lifecycle $(TESTPREFIX)/unit-test-curator-version $(TESTPREFIX)/unit-test-curator-invalidate $(TESTPREFIX)/unit-test-curator-notify $(TESTPREFIX)/unit-test-curator-queue $(TESTPREFIX)/unit-test-curator-pipeline-sched $(TESTPREFIX)/unit-test-curator-custom-stages $(TESTPREFIX)/unit-test-pgvec $(TESTPREFIX)/unit-test-rules $(TESTPREFIX)/unit-test-delegate-sandbox-image \
  $(TESTPREFIX)/unit-test-session-degraded-notice $(TESTPREFIX)/unit-test-kb-http-json $(TESTPREFIX)/unit-test-kb-http-common \
                $(TESTPREFIX)/unit-test-cmd-hooks-scope \
                $(TESTPREFIX)/unit-test-agent \
@@ -7077,3 +7077,16 @@ $(TESTPREFIX)/unit-test-server-native-tool-admission: \
     $(OBJDIR)/tests/test_server_native_tool_admission.o \
     $(OBJDIR)/server/server_native_tool_admission.o $(OBJDIR)/server/request_context.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-aimee-responses-stream: $(OBJDIR)/tests/test_aimee_responses_stream.o \
+    $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
+    $(OBJDIR)/modules/translation/aimee_responses_stream.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+    $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-responses-stream: $(OBJDIR)/tests/test_server_responses_stream.o \
+    $(OBJDIR)/server/server_responses_stream.o $(OBJDIR)/sse_parser.o \
+    $(OBJDIR)/modules/translation/aimee_responses_stream.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+    $(OBJDIR)/modules/translation/aimee_responses_frontend_stream.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
+    $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

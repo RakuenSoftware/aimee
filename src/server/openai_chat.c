@@ -55,6 +55,7 @@
 #include "platform_random.h"
 #include "aimee_sha256.h"
 #include "response_dedup.h"
+#include "server_responses_stream.h"
 #include "token_tracker.h"
 #include "token_audit.h" /* db1_token_audit_insert for the avoided-turn row */
 #include <pthread.h>
@@ -161,7 +162,8 @@ typedef struct
 } openai_ir_cache_t;
 static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request_t *request,
                                              aimee_response_t *out, char *error, size_t capacity,
-                                             int preserve, openai_ir_cache_t *cache);
+                                             int preserve, openai_ir_cache_t *cache,
+                                             server_responses_stream_t *stream);
 static int openai_prepare_ir_request(aimee_request_t *request, const agent_t *agent, int max_tokens,
                                      double temperature, int preserve);
 static int openai_admit_completion(const char *body, int chat, aimee_request_t *request,
@@ -243,7 +245,7 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       goto failure;
    }
    if (agent_execute_prepared_ir_request(&agent, &request, &response, error, sizeof error, preserve,
-                                         &cache))
+                                         &cache, NULL))
    {
       status = wire_fence_error_http_status(error);
       goto failure;
@@ -998,8 +1000,13 @@ static int openai_prepare_ir_request(aimee_request_t *request, const agent_t *ag
 }
 static int openai_post_ir(const agent_t *agent, aimee_request_t *request, aimee_wire_t wire,
                           const char *url, const char *auth, const char *headers, char **reply,
-                          aimee_anthropic_replay_t *replay, char *error, size_t capacity)
+                          aimee_anthropic_replay_t *replay, char *error, size_t capacity,
+                          server_responses_stream_t *stream, aimee_response_t *streamed_response)
 {
+   int incremental = stream && wire == AIMEE_WIRE_RESPONSES && !openai_governance_enabled() &&
+                     !gateway_prevent_subagents_enabled();
+   if (incremental)
+      request->stream = 1;
    char *body = openai_build_ir_body(request, wire);
    if (!body)
    {
@@ -1030,9 +1037,12 @@ static int openai_post_ir(const agent_t *agent, aimee_request_t *request, aimee_
        config_retry_max_attempts() > 0 ? config_retry_max_attempts() : HTTP_RETRY_MAX_ATTEMPTS;
    int base = config_retry_base_ms() > 0 ? config_retry_base_ms() : HTTP_RETRY_BASE_MS;
    int maximum = config_retry_max_ms() > 0 ? config_retry_max_ms() : HTTP_RETRY_MAX_MS;
-   int status =
-       wire_fence_post(url, auth, bytes.data, bytes.len, reply, agent->timeout_ms, headers,
-                       attempts, base, maximum, agent->provider, agent->model, NULL, route);
+   int status = incremental ? server_responses_stream_post(stream, url, auth, bytes.data, bytes.len,
+                                                           headers, agent->provider, agent->model,
+                                                           agent->timeout_ms, streamed_response)
+                            : wire_fence_post(url, auth, bytes.data, bytes.len, reply,
+                                              agent->timeout_ms, headers, attempts, base, maximum,
+                                              agent->provider, agent->model, NULL, route);
    wire_fence_destroy(snapshot);
    free(body);
    if (status == HTTP_RETRY_ADMISSION_REFUSED)
@@ -1121,7 +1131,8 @@ invalid:
 
 static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request_t *request,
                                              aimee_response_t *out, char *error, size_t capacity,
-                                             int preserve_messages, openai_ir_cache_t *cache)
+                                             int preserve_messages, openai_ir_cache_t *cache,
+                                             server_responses_stream_t *stream)
 {
    memset(out, 0, sizeof *out);
    snprintf(error, capacity, "canonical provider request failed");
@@ -1205,9 +1216,9 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
    }
    char *reply = NULL;
    aimee_anthropic_replay_t replay = {0};
-   int status =
-       openai_post_ir(agent, request, wire, url, auth, headers, &reply, &replay, error, capacity);
-   if (status != HTTP_RETRY_ADMISSION_REFUSED && container &&
+   int status = openai_post_ir(agent, request, wire, url, auth, headers, &reply, &replay, error,
+                               capacity, stream, out);
+   if (!(stream && stream->used) && status != HTTP_RETRY_ADMISSION_REFUSED && container &&
        gw_buffered_after_status(container, "input", status, &mutation) == GW_POST_RESEND)
    {
       if (cache)
@@ -1217,18 +1228,20 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
       if (openai_ir_history_replace(request, cJSON_GetObjectItemCaseSensitive(container, "input")))
          goto refused;
       status = openai_post_ir(agent, request, wire, url, auth, headers, &reply, &replay, error,
-                              capacity);
+                              capacity, stream, out);
    }
    cJSON_Delete(container);
    gw_mutate_ctx_free(&mutation);
-   if (status != 200 || !reply)
+   if (status != 200 || (!reply && !(stream && stream->used)))
    {
       if (status != HTTP_RETRY_ADMISSION_REFUSED)
          openai_upstream_error_message(status, reply, error, capacity);
       free(reply);
       return -1;
    }
-   int rc = aimee_backend_parse_wire(reply, strlen(reply), wire, out, error, capacity);
+   int rc = stream && stream->used
+                ? 0
+                : aimee_backend_parse_wire(reply, strlen(reply), wire, out, error, capacity);
    free(reply);
    if (!rc && wire == AIMEE_WIRE_ANTHROPIC && aimee_anthropic_bind_response(&replay, out))
    {
@@ -1236,7 +1249,8 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
       rc = -1;
       snprintf(error, capacity, "cannot retain native replay binding");
    }
-   if (rc || out->error_message || aimee_ir_session_emit_buffered_response(out, NULL))
+   if (rc || out->error_message ||
+       (!(stream && stream->used) && aimee_ir_session_emit_buffered_response(out, NULL)))
    {
       if (!rc)
          snprintf(error, capacity, "%s",
@@ -1251,6 +1265,13 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
    if (rc < 0)
    {
       snprintf(error, capacity, "canonical response policy or persistence failed");
+      return -1;
+   }
+   if (stream && stream->used &&
+       (aimee_responses_frontend_matches(stream->frontend, out) ||
+        aimee_ir_session_emit_response(out, stream->message_id)))
+   {
+      snprintf(error, capacity, "canonical streamed response policy or persistence failed");
       return -1;
    }
    if (cache && cache->enabled && !aimee_ir_response_tool_count(out))
@@ -1287,17 +1308,12 @@ static int agent_execute_ir_request(const agent_t *agent, aimee_request_t *reque
       return -1;
    }
    return agent_execute_prepared_ir_request(agent, request, out, error, capacity, preserve_messages,
-                                            NULL);
+                                            NULL, NULL);
 }
-/* SSE streaming for POST /v1/responses — full Codex parity. Converts the Codex
- * Responses request into the OpenAI chat shape (instructions -> system, the
- * message / function_call / function_call_output history -> chat messages,
- * `function` tools passed through), runs ONE provider step on the selected
- * primary agent (NO internal tool loop), and relays the result as Responses-API
- * events: either a message item (text) or function_call items that Codex
- * executes locally and feeds back as function_call_output next turn. The Codex
- * parser requires output_item.added before any delta, so every turn is framed
- * created -> item.added -> delta(s) -> item.done -> completed. Compute-then-chunk. */
+/* POST /v1/responses executes one canonical provider step. Responses-speaking
+ * providers stream through the canonical adapter; other wires and response-policy
+ * modes retain buffered admission. Client item.done/completion follow durable
+ * canonical history, with no retry after incremental transport begins. */
 /* Resolve the governance response toggle: config-store `modules.governance` (canonical) ->
  * deprecated env default. Cached legacy_config_read; keeps gw_stage_governance config-free. */
 static int openai_governance_enabled(void)
@@ -1311,6 +1327,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
 {
    aimee_request_t request = {0};
    aimee_response_t response = {0};
+   server_responses_stream_t stream = {.emit = emit, .context = context};
    char error[512] = "invalid Responses request", id[64], frame[2048];
    long created = (long)time(NULL);
    const char *model = "";
@@ -1338,7 +1355,11 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    if (!model_copy)
       goto failed;
    model = model_copy;
-   if (agent_execute_ir_request(&agent, &request, 0, -1, &response, error, sizeof error, 0))
+   stream.message_id = id;
+   stream.frontend = aimee_responses_frontend_new(id, model, created);
+   if (!stream.frontend || openai_prepare_ir_request(&request, &agent, 0, -1, 0) ||
+       agent_execute_prepared_ir_request(&agent, &request, &response, error, sizeof error, 0, NULL,
+                                         &stream))
       goto failed;
    responses_account(&agent, model, &response);
    if (responses_store_history(id, &request, &response))
@@ -1346,18 +1367,38 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
       snprintf(error, sizeof error, "durable Responses history could not be committed");
       goto failed;
    }
-   if (aimee_openai_emit_responses_tail(&response, id, model, created, emit, context))
+   aimee_delta_t terminal = {.type = AIMEE_DELTA_TURN_STOP,
+                             .stop_reason = response.stop_reason,
+                             .raw_stop_reason = response.raw_stop_reason,
+                             .usage_in = response.usage_in,
+                             .usage_out = response.usage_out,
+                             .usage_cache_read = response.usage_cache_read,
+                             .usage_cache_write = response.usage_cache_write,
+                             .usage_reasoning = response.usage_reasoning};
+   if (stream.used && server_responses_stream_publish(&stream, &terminal))
+   {
+      snprintf(error, sizeof error, "canonical stream completion persistence failed");
+      goto failed;
+   }
+   if (stream.used ? aimee_responses_frontend_complete(stream.frontend, &response, emit, context)
+                   : aimee_openai_emit_responses_tail(&response, id, model, created, emit, context))
    {
       snprintf(error, sizeof error, "canonical response rendering failed");
       goto failed;
    }
    goto done;
 failed:
+   if (stream.used && !stream.terminal)
+   {
+      aimee_delta_t failure = {.type = AIMEE_DELTA_ERROR, .error_message = error};
+      server_responses_stream_publish(&stream, &failure);
+   }
    if (openai_format_responses_failed(id, model, created,
                                       admitted ? "server_error" : "invalid_request_error", error,
                                       frame, sizeof frame) > 0)
       emit(context, "response.failed", frame);
 done:
+   aimee_responses_frontend_free(stream.frontend);
    free(model_copy);
    aimee_response_free(&response);
    aimee_request_free(&request);
