@@ -38,7 +38,8 @@
     "src/tests/test_aimee_ir_stream.c",
     "src/tests/test_harness_ir.c",
     "src/tests/test_cmd_hooks_scope.c",
-    "src/tests/test_aimee_tool_choice.c"
+    "src/tests/test_aimee_tool_choice.c",
+    "src/tests/test_codex_native_adoption.py"
   ],
   "docs": [
     "docs/modules/translation.md"

@@ -458,7 +458,7 @@ static int aimee_codex_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
    else if (!strcmp(type, "mcpToolCall") || !strcmp(type, "dynamicToolCall"))
    {
       input_key = "arguments";
-      output_key = "result";
+      output_key = !strcmp(type, "dynamicToolCall") ? "contentItems" : "result";
       name = str(item, "tool");
    }
    else if (!strcmp(type, "fileChange"))
@@ -504,14 +504,58 @@ static int aimee_codex_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
       if (v)
          cJSON_AddItemToObject(value, key, cJSON_Duplicate(v, 1));
    }
+   const cJSON *exit_code = cJSON_GetObjectItemCaseSensitive(item, "exitCode");
+   const cJSON *error = cJSON_GetObjectItemCaseSensitive(item, "error");
+   const cJSON *success = cJSON_GetObjectItemCaseSensitive(item, "success");
    b.tool_is_error =
-       !strcmp(str(item, "status"), "failed") || !strcmp(str(item, "status"), "declined");
+       complete &&
+       (!strcmp(str(item, "status"), "failed") || !strcmp(str(item, "status"), "declined") ||
+        (!strcmp(type, "commandExecution") && cJSON_IsNumber(exit_code) &&
+         exit_code->valuedouble != 0) ||
+        (!strcmp(type, "dynamicToolCall") && cJSON_IsFalse(success)) ||
+        (!strcmp(type, "mcpToolCall") &&
+         ((error && !cJSON_IsNull(error)) ||
+          cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(source, "isError")))));
    if (complete)
       b.tool_result = value;
    else
       b.tool_input = value;
+   char *native_namespace = NULL;
+   if (!strcmp(type, "mcpToolCall") || !strcmp(type, "dynamicToolCall"))
+   {
+      /* A function call's input is its actual arguments. Host SDK metadata
+       * belongs outside that object; wrapping it changes a replayed call. */
+      if (!complete)
+      {
+         cJSON_Delete(value);
+         value = source ? cJSON_Duplicate(source, 1) : cJSON_CreateObject();
+         if (!value)
+         {
+            free(mid);
+            return -1;
+         }
+         b.tool_input = value;
+      }
+      if (!strcmp(type, "dynamicToolCall"))
+         b.tool_namespace = (char *)str(item, "namespace");
+      else if (str(item, "server")[0])
+      {
+         /* Match the callable namespace advertised by Codex's MCP owner. */
+         size_t capacity = strlen(str(item, "server")) + 6;
+         native_namespace = malloc(capacity);
+         if (!native_namespace)
+         {
+            cJSON_Delete(value);
+            free(mid);
+            return -1;
+         }
+         snprintf(native_namespace, capacity, "mcp__%s", str(item, "server"));
+         b.tool_namespace = native_namespace;
+      }
+   }
    int rc = message(mid, complete ? "tool" : "assistant", &b, 1);
    cJSON_Delete(value);
+   free(native_namespace);
    free(mid);
    return rc;
 }

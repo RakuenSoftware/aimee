@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #endif
 #include "server_compute_internal.h"
+#include "server_delegate_scope.h"
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
 #include "db1_client/db1.h"
@@ -160,6 +161,19 @@ __thread delegation_mailbox_t *tl_mailbox = NULL;
 /* Delegation depth tracking: parent delegation ID and current depth for this thread */
 __thread char tl_parent_delegation_id[64] = {0};
 __thread int tl_delegation_depth = 0;
+
+void server_delegate_scope_capture(server_delegate_scope_t *out)
+{
+   memcpy(out->parent, tl_parent_delegation_id, sizeof out->parent);
+   out->depth = tl_delegation_depth;
+   out->mailbox = tl_mailbox;
+}
+void server_delegate_scope_restore(const server_delegate_scope_t *scope)
+{
+   memcpy(tl_parent_delegation_id, scope->parent, sizeof tl_parent_delegation_id);
+   tl_delegation_depth = scope->depth;
+   tl_mailbox = scope->mailbox;
+}
 
 /* Returns the delegation ID of the currently-running delegate on this
  * thread, or NULL when not inside a delegate. Provides agent_tools_dispatch

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -27,20 +29,30 @@ def load(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def run_validator() -> subprocess.CompletedProcess:
+def run_validator(root: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["python3", "-I", "-S", str(VALIDATOR)], capture_output=True, text=True, cwd=str(ROOT)
+        ["python3", "-I", "-S", str(root / "scripts/validate_module_process_contracts.py")], capture_output=True, text=True, cwd=str(root)
     )
 
 
 class PrincipalRefIsAnIdentity(unittest.TestCase):
     def setUp(self) -> None:
-        self.original = INVENTORY.read_text(encoding="utf-8")
-        self.addCleanup(lambda: INVENTORY.write_text(self.original, encoding="utf-8"))
-        self.inventory = load(INVENTORY)
+        # The script runner executes suites concurrently. Fault injection must
+        # never rewrite the live inventory/contracts another suite is reading.
+        temporary = tempfile.TemporaryDirectory(prefix="principal-ref-fixture-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        sources = [INVENTORY, CONTRACTS, VALIDATOR, *ROOT.glob("src/modules/*/module.yaml")]
+        for source in sources:
+            destination = self.root / source.relative_to(ROOT)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+        self.inventory_path = self.root / INVENTORY.relative_to(ROOT)
+        self.contracts_path = self.root / CONTRACTS.relative_to(ROOT)
+        self.inventory = load(self.inventory_path)
 
     def write(self, data) -> None:
-        INVENTORY.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        self.inventory_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     def test_refs_are_declared_for_every_module(self) -> None:
         refs = self.inventory["principal_refs"]
@@ -50,7 +62,7 @@ class PrincipalRefIsAnIdentity(unittest.TestCase):
 
     def test_event_kinds_are_carved_from_the_declared_ref(self) -> None:
         refs = self.inventory["principal_refs"]
-        for component in load(CONTRACTS)["components"]:
+        for component in load(self.contracts_path)["components"]:
             if component.get("execution") != "process":
                 continue
             ref = refs[component["id"]]
@@ -69,41 +81,41 @@ class PrincipalRefIsAnIdentity(unittest.TestCase):
         Promoting a module from optional to required is a policy decision. It
         must not be an event-kind migration for every module that follows it.
         """
-        data = load(INVENTORY)
+        data = load(self.inventory_path)
         before = dict(data["principal_refs"])
         moved = data["optional"].pop()
         data["required"].append(moved)
         self.write(data)
 
-        after = load(INVENTORY)["principal_refs"]
+        after = load(self.inventory_path)["principal_refs"]
         self.assertEqual(before, after, f"promoting {moved} must not renumber anything")
 
     def test_a_retired_ref_is_never_reissued(self) -> None:
-        data = load(INVENTORY)
+        data = load(self.inventory_path)
         victim = data["optional"][-1]
         retired_ref = data["principal_refs"][victim]
         data["retired_principal_refs"] = [retired_ref]
         self.write(data)
 
-        result = run_validator()
+        result = run_validator(self.root)
         self.assertNotEqual(result.returncode, 0, "a retired ref in use must be rejected")
         self.assertIn("retired", (result.stdout + result.stderr).lower())
 
     def test_a_duplicate_ref_is_rejected(self) -> None:
-        data = load(INVENTORY)
+        data = load(self.inventory_path)
         a, b = data["optional"][0], data["optional"][1]
         data["principal_refs"][b] = data["principal_refs"][a]
         self.write(data)
 
-        result = run_validator()
+        result = run_validator(self.root)
         self.assertNotEqual(result.returncode, 0, "two modules must not share an identity")
 
     def test_the_shipped_inventory_validates(self) -> None:
-        self.assertEqual(run_validator().returncode, 0)
+        self.assertEqual(run_validator(self.root).returncode, 0)
 
     def test_c_build_is_reserved_for_c_processes(self) -> None:
         for identifier in ("memory", "config"):
-            descriptor_path = ROOT / f"src/modules/{identifier}/module.yaml"
+            descriptor_path = self.root / f"src/modules/{identifier}/module.yaml"
             original = descriptor_path.read_text(encoding="utf-8")
             try:
                 descriptor = json.loads(original)
@@ -115,7 +127,7 @@ class PrincipalRefIsAnIdentity(unittest.TestCase):
                 descriptor_path.write_text(
                     json.dumps(descriptor, indent=2) + "\n", encoding="utf-8"
                 )
-                result = run_validator()
+                result = run_validator(self.root)
                 with self.subTest(identifier=identifier):
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("c_build", result.stderr)
@@ -123,7 +135,7 @@ class PrincipalRefIsAnIdentity(unittest.TestCase):
                 descriptor_path.write_text(original, encoding="utf-8")
 
     def test_a_process_cannot_exceed_its_255_stage_carve(self) -> None:
-        original = CONTRACTS.read_text(encoding="utf-8")
+        original = self.contracts_path.read_text(encoding="utf-8")
         try:
             contracts = json.loads(original)
             postgres = next(row for row in contracts["components"] if row["id"] == "postgres")
@@ -131,16 +143,16 @@ class PrincipalRefIsAnIdentity(unittest.TestCase):
                 {"id": index, "name": f"postgres-stage-{index}", "event_kind": 11264 + index}
                 for index in range(1, 257)
             ]
-            CONTRACTS.write_text(json.dumps(contracts, indent=2) + "\n", encoding="utf-8")
-            result = run_validator()
+            self.contracts_path.write_text(json.dumps(contracts, indent=2) + "\n", encoding="utf-8")
+            result = run_validator(self.root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("255-stage carve", result.stderr)
         finally:
-            CONTRACTS.write_text(original, encoding="utf-8")
+            self.contracts_path.write_text(original, encoding="utf-8")
 
     def test_a_module_principal_cannot_enter_the_protocol_half(self) -> None:
-        contracts_original = CONTRACTS.read_text(encoding="utf-8")
-        inventory_original = INVENTORY.read_text(encoding="utf-8")
+        contracts_original = self.contracts_path.read_text(encoding="utf-8")
+        inventory_original = self.inventory_path.read_text(encoding="utf-8")
         try:
             inventory = json.loads(inventory_original)
             inventory["principal_refs"]["postgres"] = 8_388_592
@@ -149,13 +161,13 @@ class PrincipalRefIsAnIdentity(unittest.TestCase):
             postgres = next(row for row in contracts["components"] if row["id"] == "postgres")
             postgres["principal_ref"] = 8_388_592
             postgres["stages"][0]["event_kind"] = 4096 + 8_388_592 * 256 + 1
-            CONTRACTS.write_text(json.dumps(contracts, indent=2) + "\n", encoding="utf-8")
-            result = run_validator()
+            self.contracts_path.write_text(json.dumps(contracts, indent=2) + "\n", encoding="utf-8")
+            result = run_validator(self.root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("protocol event namespace", result.stderr)
         finally:
-            CONTRACTS.write_text(contracts_original, encoding="utf-8")
-            INVENTORY.write_text(inventory_original, encoding="utf-8")
+            self.contracts_path.write_text(contracts_original, encoding="utf-8")
+            self.inventory_path.write_text(inventory_original, encoding="utf-8")
 
 
 if __name__ == "__main__":

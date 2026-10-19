@@ -255,6 +255,30 @@ int main(void)
                            .tool_args_delta = "{"};
    assert(!aimee_ir_delta_json(&delta));
 
+   char digest[65], binding[199];
+   memset(digest, 'a', 64);
+   digest[64] = 0;
+   snprintf(binding, sizeof binding, "ap1:%s:%s:%s", digest, digest, digest);
+   event = (aimee_session_event_t){.kind = AIMEE_SESSION_REPLAY_PROOF,
+                                   .replay_scope = digest,
+                                   .replay_digest = digest,
+                                   .replay_wire = "anthropic",
+                                   .replay_binding = binding};
+   json = aimee_ir_session_event_json(&event);
+   assert(json && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(json, "kind")), "replay_proof"));
+   assert(!cJSON_GetObjectItem(json, "message_id") && !cJSON_GetObjectItem(json, "role"));
+   cJSON_Delete(json);
+   event.replay_binding = "invented";
+   assert(!aimee_ir_session_event_json(&event));
+   event.replay_wire = "responses";
+   assert(!aimee_ir_session_event_json(&event));
+   event.replay_binding = NULL;
+   json = aimee_ir_session_event_json(&event);
+   assert(json);
+   cJSON_Delete(json);
+   event.replay_scope = "not-a-digest";
+   assert(!aimee_ir_session_event_json(&event));
+
    event = (aimee_session_event_t){.kind = AIMEE_SESSION_PROJECTION,
                                    .projection_model = "model-b",
                                    .projection_boundary = "request",

@@ -24,6 +24,14 @@ typedef int (*cli_proxy_forward_fn)(const char *method, const char *path, const 
                                     const void *body, unsigned long body_len,
                                     const char *session_id, const cli_proxy_io_t *io,
                                     void *host_context);
+typedef int (*cli_proxy_route_fn)(const char *method, const char *path, void *host_context);
+
+/* Explicit host runtime policy, in addition to the listener's token/framing
+ * checks. A NULL policy retains the model-only CLI boundary. No client header
+ * can install this policy or widen it. */
+cli_proxy_t *cli_proxy_start_scoped(unsigned port, const char *local_token, const char *session_id,
+                                    unsigned *bound_port, cli_proxy_route_fn route,
+                                    cli_proxy_forward_fn forward, void *host_context);
 
 /* Explicit transport for an already authorized host scope. No global CLI auth
  * is consulted. A nonempty bound session overrides client-supplied correlation.

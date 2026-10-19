@@ -44,6 +44,7 @@ extern int test_oauth_stores, test_oauth_removes, test_oauth_get_fail;
 #include <aimee/audit/audit_worm.h>
 
 void test_agent_route_with_caps_honors_tools_enabled(void);
+void test_agent_ingress_selected_connection_scope(void);
 void test_agent_route_with_caps_honors_context_override(void);
 void test_tools_enabled_capability_default(void);
 void test_agent_default_primary_skips_disabled(void);
@@ -4141,6 +4142,81 @@ static void test_canonical_external_run_preserves_budget_refusal(void)
    puts("canonical external runs retain the existing accounting refusal");
 }
 
+static void test_owned_tool_and_source_handoff(void)
+{
+   agent_tools_scope_snapshot_t previous, owned;
+   agent_tools_scope_bookmark(&previous);
+   char previous_session[128] = "";
+   if (session_id_override_active())
+      snprintf(previous_session, sizeof previous_session, "%s", session_id());
+   char long_session[128];
+   memset(long_session, 's', sizeof long_session - 1);
+   long_session[sizeof long_session - 1] = 0;
+   session_id_set_override(long_session);
+   assert(!strcmp(session_id(), long_session));
+   agent_tools_begin_turn(17);
+   agent_tools_set_snap_id(701);
+   agent_tools_set_dispatch_role(NULL);
+   agent_tools_set_active_toolset(NULL);
+   agent_tools_knowledge_write_set(1);
+   agent_tools_shell_set(1);
+   agent_tools_write_capable_set(1);
+   char denied_name[64] = "deny_original";
+   const char *denied[] = {denied_name};
+   agent_tools_denied_set(denied, 1);
+   assert(!agent_tools_scope_capture_owned(&owned));
+   assert(!strcmp(owned.session, long_session));
+   strcpy(denied_name, "changed_after_capture");
+   agent_tools_set_dispatch_role("reviewer");
+   agent_tools_set_active_toolset("review_indexed");
+   agent_tools_knowledge_write_set(0);
+   agent_tools_shell_set(0);
+   agent_tools_write_capable_set(0);
+   char *old_env = getenv("AIMEE_ACTIVE_TOOLSET") ? strdup(getenv("AIMEE_ACTIVE_TOOLSET")) : NULL;
+   assert(!setenv("AIMEE_ACTIVE_TOOLSET", "readonly", 1));
+   agent_tools_scope_restore(&owned);
+   assert(agent_tools_scope_isolated() && !agent_tools_dispatch_role());
+   assert(!agent_tools_active_toolset());
+   assert(agent_tools_get_turn() == 17 && agent_tools_get_snap_id() == 701);
+   assert(!agent_tools_readonly_delegate_blocks());
+   assert(agent_tools_shell_allowed() && agent_tools_knowledge_write_allowed());
+   assert(agent_tools_tool_denied("deny_original"));
+   assert(!agent_tools_tool_denied("changed_after_capture"));
+   /* Both admission and advertisement must ignore another turn's global env. */
+   assert(agent_tools_tool_allowed_for_role(NULL, "write_file"));
+   cJSON *tools = build_tools_array();
+   agent_tools_filter_for_role(tools, NULL);
+   assert(tools_array_has_name(tools, "write_file"));
+   cJSON_Delete(tools);
+   agent_tools_scope_restore(&previous);
+   agent_tools_scope_destroy_owned(&owned);
+   session_id_set_override(previous_session);
+   if (old_env)
+      setenv("AIMEE_ACTIVE_TOOLSET", old_env, 1);
+   else
+      unsetenv("AIMEE_ACTIVE_TOOLSET");
+   free(old_env);
+
+   agent_source_authority_snapshot_t before = {0}, first = {0}, clone = {0}, observed = {0};
+   assert(!agent_source_authority_tls_capture_checked(&before));
+   agent_source_authority_tls_set(1, "/source/owner", "src/owner.c");
+   assert(!agent_source_authority_tls_capture_checked(&first));
+   assert(!agent_source_authority_snapshot_clone(&first, &clone));
+   assert(agent_source_authority_snapshot_clone(&first, &first) < 0);
+   assert(!strcmp(first.paths, "src/owner.c"));
+   agent_source_authority_tls_set(0, "/other", "other.c");
+   agent_source_authority_snapshot_destroy(&first);
+   agent_source_authority_tls_restore(&clone);
+   assert(!clone.paths);
+   assert(!agent_source_authority_tls_capture_checked(&observed));
+   assert(observed.active && observed.authority && !strcmp(observed.root, "/source/owner"));
+   assert(!strcmp(observed.paths, "src/owner.c"));
+   agent_source_authority_snapshot_destroy(&observed);
+   agent_source_authority_tls_restore(&before);
+   puts("  PASS: owned native tool/source scopes, full session identity and environment "
+        "isolation");
+}
+
 int main(void)
 {
    /* BEFORE ANYTHING ELSE, because the fixture configures the module runtime and
@@ -4192,6 +4268,7 @@ int main(void)
    test_agent_route_primary_turn_marker();
    test_agent_route_client_only_claude_excluded();
    test_agent_routing_block_reason();
+   test_agent_ingress_selected_connection_scope();
    test_agent_route_with_caps_honors_tools_enabled();
    test_agent_route_with_caps_honors_context_override();
    test_knowledge_write_gates_the_tool_policy();
@@ -4199,6 +4276,7 @@ int main(void)
    test_a_delegate_without_shell_cannot_run_commands();
    test_permissions_clamp_the_toolset();
    test_one_delegates_permissions_are_not_anothers();
+   test_owned_tool_and_source_handoff();
    test_provider_env_credentials_and_headers();
    test_dispatch_carries_owner_failure_status();
    test_codex_oauth_request_creds();

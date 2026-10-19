@@ -4,6 +4,7 @@
 
 #include "aimee.h"
 #include "agent_types.h"
+#include <aimee/ir/aimee_ir.h>
 
 #include <stddef.h>
 #include <sys/types.h>
@@ -57,6 +58,8 @@ extern "C"
       const char *cwd;
       const char *system_prompt;
       const char *user_prompt;
+      /* Canonical items to adopt before the current turn (unseen tail on resume). */
+      const aimee_request_t *history;
       int control_channel;    /* bidirectional structured input for browser-owned controls */
       int primary;            /* server-owned primary uses its authorized autonomous mode */
       const char *resume_id;  /* structured primary conversation, optional */

@@ -2,6 +2,7 @@
  * Wire operations are owned by server-go/modules/aimee/operations.json. */
 /* clang-format off */
 #include "approach_failures.h"
+#include "procedure_events.h"
 #include "cost_fold.h"
 #include "diagnose.h"
 #include "eval.h"
@@ -1900,3 +1901,40 @@ int db1_approach_failure_candidates(const char *must_contain, db1_approach_failu
 }
 
 /* clang-format on */
+
+/* Typed, bounded local experience snapshots retain full admitted event JSON. */
+char *db1_procedure_event_load(const char *principal, const char *procedure_json)
+{
+   const char *fields[] = {principal, procedure_json};
+   char *snapshot = malloc(2097152u);
+   if (!snapshot)
+      return NULL;
+   char *const values[] = {snapshot};
+   const size_t caps[] = {2097152u};
+   if (db1_call(&family, AIMEE_DB1_OP_PROCEDURE_EVENT_LOAD, fields, 2, values, caps, 1, NULL) !=
+       AIMEE_DB1_STATUS_OK)
+   {
+      free(snapshot);
+      return NULL;
+   }
+   return snapshot;
+}
+
+int db1_procedure_event_append(const char *principal, const char *procedure_json,
+                               const char *revision, const char *event_json,
+                               const char *exposure_json, const char *scope_kind,
+                               const char *scope_id)
+{
+   const char *fields[] = {principal,     procedure_json, revision, event_json,
+                           exposure_json, scope_kind,     scope_id};
+   char result[64] = {0};
+   char *const values[] = {result};
+   const size_t caps[] = {sizeof result};
+   if (db1_call(&family, AIMEE_DB1_OP_PROCEDURE_EVENT_APPEND, fields, 7, values, caps, 1, NULL) !=
+       AIMEE_DB1_STATUS_OK)
+      return -1;
+   return !strcmp(result, "inserted")    ? 0
+          : !strcmp(result, "duplicate") ? 1
+          : !strcmp(result, "retry")     ? 2
+                                         : -1;
+}

@@ -507,7 +507,10 @@ int server_account_is_person(const char *account)
 
 memory_authority_t server_account_memory_authority(const char *account)
 {
-   return server_account_is_person(account) ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL;
+   const request_context_t *owner = request_context_get();
+   return server_account_is_person(account) && !(owner && owner->model_execution)
+              ? MEMORY_AUTHORITY_USER
+              : MEMORY_AUTHORITY_MODEL;
 }
 
 const char *server_request_account(void)

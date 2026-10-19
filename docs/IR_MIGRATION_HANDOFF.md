@@ -2,7 +2,20 @@
 
 Prepared 17 October 2026, approximately 23:30 Europe/Amsterdam. The user requested implementation to stop here, the work to be pushed, and a complete handoff for a local session. Do not infer that the overall migration is complete.
 
-## Current continuation status: 18 October 2026
+## Current continuation status after #3038 merged
+
+The user confirmed #3038 is merged and requested the remaining migration and standalone
+learning work. The follow-up is [#3047](https://github.com/RakuenSoftware/aimee/pull/3047),
+branch `fix/browser-ir-continuation`, based on merged #3038 (`344139139`). Its scoped native
+runtime prerequisites and exact validation limits are recorded at the end of this handoff.
+The scoped runtime now captures and restores replay evidence, with SDK activation still pending.
+The SDK cutover, account-bound cache/history adoption and autonomous learning remain unfinished. Explicit receipt-bound feedback now persists without a KB; this does not establish independent grading or synthesis. Do not treat these prerequisites as overall completion.
+
+Automatic reviews and strict attribution remain enabled. Production `.100` must remain KB-free.
+Do not reopen #3036 or add WOL work. Earlier instructions to continue the now-merged #3038
+are superseded by the user's latest continuation request.
+
+## Merged #3038 validation and replacement history: 18 October 2026
 
 The user authorized replacement of #3036 to satisfy the permanent attribution gate, then
 explicitly requested its retirement. Active work is now on
@@ -18,8 +31,9 @@ all 60 pass on `07548c7fe`.
 #3036 is closed, its body is empty, and `fix/browser-ir-runtime` was deleted locally and
 remotely. GitHub retains the closed PR record. All older instructions below naming #3036
 as the active PR/branch are historical and superseded. Do not reopen it, restore its branch,
-or create another replacement. Continue on #3038 with automatic reviews and strict attribution
-checks enabled.
+or create another replacement for that closed PR. The historical #3038 continuation instruction
+was superseded when the user confirmed its merge; automatic reviews and strict attribution
+checks remain enabled.
 
 - Canonical primary loading/model switching, durable-log history, standard browser controls, native hook admission, compaction and several credential/consumer cutovers are implemented. The whole migration remains unfinished, especially credential-free native execution, scoped native tools and account-bound replay/cache proof.
 - The user explicitly confirmed that production .100 should NOT use a KB instance right now. Unset KB mode/endpoint are intentional. Do not configure/connect a KB or enable a dependency on one to fix learning. Repair and qualify server-local learning, failed approaches and authenticated task-outcome capture through their existing owners.
@@ -937,3 +951,276 @@ history-adoption refusal had preceded the existing external-backend accounting f
 regression fails before the repair and passes afterward for both tmux/Claude and provider/ACP;
 the final full-agent sanitizer run also passes. Fresh deployment CI is required to qualify the
 complete T3 journey and all later assertions. Keep the attribution gate and automatic reviews.
+
+
+### After merged #3038: scoped native runtime prerequisites (local)
+
+Continuation branch `fix/browser-ir-continuation` starts from merged #3038 (`344139139`).
+This slice prepares the native child boundary; it does **not** activate credential-free SDK
+execution or claim the migration complete.
+
+- The existing local listener now accepts a host-owned route/forward callback. The CLI's
+  ordinary proxy remains model-only. A new server runtime captures an attested session owner,
+  selected registration and restrictive capability set. It admits only model/MCP entry routes,
+  strips operator authority, ignores child-supplied identity/credentials, pins model resolution
+  and cancels an in-flight handler on disconnect. The original browser dedup key cannot collapse
+  separate native requests. Codex Vault reads use the captured actor, retain the paired source
+  lineage and refuse a changed login before forwarding. Server credentials never enter a child
+  response. This is a same-host scoped capability, not a process sandbox.
+- Existing HTTP handlers accept the captured owner through an explicit internal entry. Native
+  children cannot acquire interactive browser-operator authority. The selected-model binding is
+  thread-local, nested and restored; identical vendor model names cannot change the connection.
+- Credential-free homes are available with durable native state partitioned by session and a
+  scope digest. They read no Vault credentials and link no shared native configuration. The
+  production SDK spawn sites still use the old credential-bearing homes until replay and
+  supported model/tool transport are wired and qualified together.
+- The canonical event contract reserves strict `replay_proof` metadata, consistently validated
+  by C, Go and the browser. It is excluded from transcript history. Actual source-proof capture,
+  restored signed-thinking egress, ambiguity handling and account-bound resume adoption are
+  still outstanding; the new event is not yet produced by a live SDK runtime.
+
+Local validation so far: the full agent fixture passes with its three explicit store-dependent
+skips; native listener/runtime, HTTP, native homes and canonical event fixtures pass. The five
+boundary fixtures also pass ASan/UBSan with leak detection. All 288 frontend tests, TypeScript
+checking and Go IR/session-owner race suites pass. All 76 lint checks and server/KB builds pass.
+The new runtime fixture passes through the actual repository CMake graph with assertions enabled.
+Session-erasure, malformed-lineage, full 127-byte session identity and protocol-header cases also
+pass normally and under ASan/UBSan. CI now builds/runs the runtime fixture through CMake. The
+first CI head passed strict attribution but its secret scan flagged the hexadecimal validation
+alphabet. The predicate now uses character comparisons; the scanner and its full-history scope
+remain unchanged. The branch commit is rewritten to remove the flagged line from reachable
+history. The configured local test PostgreSQL endpoint is unavailable, so integration and
+deployment qualification remain with fresh CI; no production qualification is claimed.
+
+The next required work remains actual credential-free native SDK wiring, actor-bound full tools,
+account-bound cache/history adoption, upstream-response replay evidence, Claude refresh custody,
+remaining typed consumers/capabilities and standalone procedure feedback. Production `.100`
+remains intentionally KB-free. Independently graded learning, synthesis and live acceptance
+cannot be inferred from process-success observations. Production promotion still requires the
+independent reviewer specified in `OWNERS.md`.
+
+
+### Scoped native replay provenance (local, after the transport checkpoint)
+
+The scoped runtime now records proof-only metadata from actual canonical upstream responses in
+its existing principal-owned session log. This is a derived, mutex-protected cache rebuilt from
+that log, not another transcript store. Block commitments exclude host-only cache/context markers.
+Anthropic signatures recover their actual observed `ap1` binding; echoed prefixes cannot mint one.
+Conflicting bindings never become last-write-wins. Unknown/account-model-mismatched opaque state
+is omitted from the egress request with a durable fidelity report, preserving the source history.
+The report uses the captured selected model and is emitted once across entry/egress rechecks.
+Source read/write failures refuse, and paging checks actor, session and exact sequence continuity.
+Cancellation interrupts proof paging. The listener also gives each admitted native HTTP request
+its own request identity while preserving the host session and restrictive limits.
+
+The translation owner exposes a borrowed thread-scoped guard. Both HTTP owners recheck actual
+provider egress after history restoration and policy edits. Raw-sidecar comparisons remain pure:
+applying the guard to both sides would let removed opaque bytes look unchanged and reappear.
+The guard/sink apply only to model requests; MCP execution retains its own capture owner. Model
+traffic currently requires the stable Codex Vault lineage; Claude custody/refresh support remains
+open. Production SDK spawn sites are still unchanged and must not be switched before history,
+actor-scoped tools and actual streaming are qualified together.
+
+Local normal fixtures pass for the durable proof owner, scoped runtime, cross-protocol egress,
+OpenAI shapes/ingress and all three Anthropic HTTP variants. They cover eight concurrent proof
+writers, multi-page replay, source corruption/unavailability, failed writes, cancellation,
+connection/model scope, ambiguous proof, explicit omission, late restored-history admission and
+request cleanup on guard failure. The final five focused fixtures pass ASan/UBSan with leak
+detection; the proof/runtime fixtures also pass ThreadSanitizer. The full agent suite passes
+with its three explicit store-dependent skips. Both actual CMake fixtures, server/KB builds and all 76 lint checks pass for this source tree. Fresh CI is still required
+for this replay-provenance slice. Transport checkpoint `8565183b0` finished with 55 passing
+checks and the two existing platform skips, including integration, sanitizers/scripts and
+deployment tiers T1, T2, T2-luks and T3 (CI run `39157560588`).
+
+A real installed Codex `0.160.1` app-server qualification found and exercised the stable
+`thread/inject_items` method, without `experimentalApi`. Using a temporary credential-free home
+and a loopback provider fixture, the actual provider request retained adopted user/assistant
+roles, full call/result identity, prior content and the current user. After process restart,
+`thread/resume` retained the adopted history and completed native turn. This is a supported
+adoption candidate, not yet wired into Aimee or evidence of real upstream cache billing.
+Artifacts: `/var/tmp/aimee-native-inject-http-probe.py` and its captured request JSON. The stable
+and experimental schemas were generated from the installed binary. The separate experimental
+`thread/resume.history` field explicitly says `FOR CODEX CLOUD - DO NOT USE`; it stays unused.
+The official source also declares stable `thread/inject_items` in
+https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/common.rs.
+
+Next: implement and qualify canonical history adoption/cache continuation at the actual SDK
+spawn sites, including changed-model/account scopes and complete tools/workspace/control owner
+handoffs. Preserve same-scope native caches where their canonical prefix is still valid; do not
+silently start blank or flatten roles. SDK internal compaction and true Responses streaming need
+qualification before activation. Claude OAuth custody/refresh, remaining IR consumers/capabilities,
+standalone procedure feedback, independently graded learning and production acceptance remain
+required. `.100` remains intentionally KB-free; no production promotion has occurred.
+
+## Model execution attribution in the continuation
+
+The host request context now carries model-execution intent independently of the
+authenticated principal. Native listener workers always set this intent, and the
+common in-process agent tool loop sets/restores it across all returns. Async
+context snapshots preserve it. A verified person still owns access to their data;
+model-generated memory writes under that identity are classified as model authority
+rather than human feedback. Restoring nested intent preserves receipts accumulated
+inside the execution. No client header can set this host-only field.
+
+Request-context, MCP memory-authority, native-runtime and full agent fixtures pass.
+The first three also pass ASan/UBSan with leak checking. This closes an attribution
+prerequisite; standalone feedback admission and native SDK activation remain open.
+
+## Stable native history boundary and real SDK qualification
+
+Both Codex adapter entry points now accept canonical history and use stable
+`thread/inject_items` before starting a model turn. This is an output-boundary
+implementation; browser/session callers still need account-scoped prefix proof
+and the complete native tool/workspace/control handoff before activation. A typed
+request carries preceding history (only unseen tail on a proven resume), never a
+flattened transcript. Rejection or invalid IR refuses before model execution.
+
+The new opt-in `src/tests/test_codex_native_adoption.py` drives the compiled Aimee
+adapter against the actual installed Codex 0.160.1 and a credential-free loopback
+provider. It passes initial canonical adoption, actual provider-input assertions,
+process restart and native resume retaining prior roles/tool pairs/completed turn.
+This caught and fixed real SDK startup rejection of the obsolete `untrusted`
+approval policy; startup now uses `on-request` and retains host control handling.
+Synthetic provider usage does not establish production cache savings.
+
+## Standalone feedback persistence in the continuation
+
+The KB-free `learning.application` path now uses the existing Learning admission
+and projection owner and DB1 telemetry's local immutable event ledger. The host
+constructs exposure/scope from its principal-owned WORM receipt and replaces JSON
+actor claims with the attested local principal. Host model intent refuses human
+feedback, including on the configured-KB route. Daemon bearer identity alone does
+not establish a user. Existing configured KB behavior is preserved; no KB service
+or endpoint is enabled. Explicitly misconfigured remote mode does not fall back.
+
+Migration 46 adds local observation rows and payload-free erasure intent. Typed
+DB1 snapshot/append operations preserve full JSON, use optimistic cohort digests
+and prevent mutable event-ID replacement. C projects before append and retries
+projection on a concurrent update. No additional active session/project is needed
+for feedback on an existing receipt. Subject erasure and startup replay cover the
+new rows; triggers and the existing epoch fence erased IDs and old RR snapshots.
+
+Local qualification uses a newly built isolated PostgreSQL 17.6 under
+`/var/tmp/aimee-ir-postgres`, loopback port 55449, UTF-8 database `aimee_ir_test`.
+The source archive's published SHA-256 was checked. No production DB is used.
+The complete Go DB1-family and Learning race suites pass with both PostgreSQL
+fixture variables configured. Local feedback ownership/CAS fixtures pass normally
+and under ASan/UBSan. A real Codex adoption/restart regression also passes against
+CI's pinned 0.153.4, and is now included in the build workflow.
+
+This closes local explicit-feedback persistence, not autonomous learning. Native
+SDK activation, account-bound canonical-prefix/cache admission, complete native
+tool/workspace/control snapshots, Claude custody, remaining consumers and actual
+independent learning/grading/synthesis acceptance remain open. Production `.100`
+remains KB-free and is not promoted without the required independent review.
+
+CI follow-up: the native SDK test's registration inventory entry was missing and
+is now recorded without changing the checker. The parallel script run also
+reproduced a shared-checkout fault-injection race: principal-ref and provider
+registration tests wrote their negative cases into actual production files. They
+now use a private fixture/virtual read, with 12 concurrent gate runs passing and
+production inventory/contracts unchanged. These are separate pushed CI repairs;
+the standalone learning slice's fresh CI still follows its own publication.
+
+The standalone feedback slice also passes the repository CMake fixture with
+assertions enabled, the server production build, all 76 lint checks and full
+DB1-family/Learning race suites against a fresh UTF-8 fixture database. Focused
+PostgreSQL retries cover maximum admitted action/gap arrays exceeding 64 KiB,
+without the old 4096-byte DTO. The script suite's observed shared-checkout race
+was repaired and independently stress-run; its complete rerun/fresh CI remain
+the final validation for this checkpoint.
+
+
+## Native execution context handoff
+
+The scoped listener now owns captured tool permissions and source-authority paths,
+including role, toolset, deny list, write/shell/knowledge limits and turn snapshot.
+Callbacks bind the captured workspace, cwd, job, session and delegate context and
+restore the worker context on success or refusal. Empty native scopes cannot fall
+back to another delegate's process environment. Model callbacks clear effect grants
+and operator controls; the SDK reader retains human control ownership. The caller
+must retain workspace/delegate leases until the child exits and listener joins.
+
+MCP bodies receive the host session identity, preserving tool argument numeric
+spelling. Session overrides retain the full 127-character canonical identifier.
+Scoped HTTP workers use the server's 32 MiB stack size for deep model/tool handlers.
+The production server, full agent fixture, native runtime fixture, ASan/UBSan,
+ThreadSanitizer and CMake assertions pass. All 76 lint checks pass; exact CI
+Cppcheck 2.13.0 reports no diagnostics for the six affected production files.
+
+This supplies context handoff, not complete SDK activation or MCP admission.
+The served MCP boundary still needs shared role/permission/effect enforcement;
+carrying a permission snapshot alone does not establish that enforcement. Native
+history/cache prefix proof, streaming and credential custody remain prerequisites.
+
+The full local script rerun passes all 69 tests (one proxy fixture runs separately).
+The feedback route fixture now links the real request-context owner and covers
+local/remote selection plus model-feedback refusal. Its DB1 reply is initialized;
+the exact CI Cppcheck ratchet returns to 46 pre-existing telemetry diagnostics.
+Published checkpoint `4be93529f` has 54 passing checks, two platform skips and
+one Docker tier pending at this observation; no failures. Later commits require
+their own fresh qualification. No production promotion has occurred.
+
+
+## Real SDK tool history qualification
+
+The actual SDK fixture now runs a local stdio MCP server, executes a failed
+read-only tool, resumes after process restart, then adopts the captured canonical
+messages into a separate native thread. Both Codex 0.153.4 (CI pin) and 0.160.1
+pass. The provider receives the same full call/result ID, actual arguments and
+callable namespace on fresh canonical adoption. Structured failure content survives.
+No vendor credential, external model or production service participates.
+
+This found and repaired SDK tool ingress semantics: MCP/dynamic arguments are no
+longer wrapped in an extra host `arguments` object, MCP callable namespaces retain
+the SDK's namespace identity, and dynamic results retain `contentItems`. Failed
+commands with completed status and nonzero exit code, dynamic `success=false`,
+MCP error payloads and SDK failed/declined status all set canonical error intent.
+The narrow C fixtures and ASan/UBSan pass, as do both real SDK qualifications.
+The CMake harness/headless targets now link their required SHA-256 owner and
+OpenSSL dependency; both pass with assertions enabled. All 76 lint gates and
+exact CI Cppcheck pass for this change.
+Old durable records are not heuristically rewritten; earlier wrapped records do
+not establish byte-equivalent native replay. Full account-bound prefix admission,
+compaction qualification and command-item adoption still need completion.
+
+
+## Continuation integration qualification
+
+Checkpoint `16c218fa9` passes the full HTTP integration run: 156/156, with
+26 explicit unavailable-service skips. This includes A/B/A/B primary switching,
+canonical history, ordered durable replay/resumed cursors, source-bound execution
+observations and lost-projection recovery. The local fixture uses PostgreSQL 17.6
+on 127.0.0.1:55449, schema `ir_continuation_16c218fa9`, with a separate
+`aimee_store_runtime` login and `virant` migration role. The first attempt correctly
+refused identical runtime/migration roles; qualification uses separated roles.
+The run does not establish independent grades, Docker completion/readback or
+production acceptance. Log: `/var/tmp/aimee-ir-continuation-final-integration.log`.
+
+The installed registered CLI still points at the older `ir3036-19d839003` release.
+During PR metadata updates its implicit checkout resolution failed; explicit
+`path=<continuation worktree>` succeeded. Current `marshal_git_cli` already stamps
+the invoking directory as `path`, so do not reintroduce a duplicate source fix or
+weaken checkout confinement. Use explicit paths with that installed CLI until an
+independently reviewed production promotion updates it. Production stays KB-free.
+
+
+## 19 October CI and testing merge repair
+
+Merged `origin/testing` at `123ecafdc` into the continuation. The Makefile keeps
+both testing's native cleanup and the local feedback source; the Codex fixture
+keeps missing-input checks and canonical history adoption/real SDK probe modes.
+The DB1 transport extraction also requires the two new local procedure calls to
+use `db1_call(&family, ...)`, matching the shared transport owner.
+
+The failed Go CI job was a routing process exit before bus admission:
+`install synchronized socket filter: permission denied`. Linux no_new_privs is
+thread-local, so its prerequisite and the following seccomp TSYNC syscall now run
+on a locked OS thread. A positive TSYNC failure-thread result also refuses startup.
+The network restriction is not disabled or narrowed. Twelve fresh-process checks
+cover existing threads refusing both IPv4 and IPv6 while retaining Unix sockets;
+they pass under the race detector. The complete `make go-unit-tests` job, including
+all shipped Go module interop and routing startup, passes locally. The merged
+Codex unit/real pinned SDK adoption fixture, native runtime/local learning fixtures,
+production server build and all 76 lint gates pass. Fresh CI must qualify the
+published merge; the previous aggregate unit failure was the Go job's consequence.

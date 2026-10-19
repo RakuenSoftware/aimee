@@ -1,4 +1,5 @@
 #include <aimee/translation/harness_ir.h>
+#include <aimee/translation/aimee_backend.h>
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "aimee_home.h"
@@ -32,7 +33,7 @@
 #define CLI_CODEX_DEFAULT_IDLE_TIMEOUT_MS        -1     /* no idle timeout */
 #define CLI_CODEX_QUIET_POLL_MS                  300000 /* 5 min */
 #define CLI_CODEX_LINE_MAX                       (8 * 1024 * 1024)
-#define CLI_CODEX_APPROVAL_POLICY_CONFIG         "approval_policy=\"untrusted\""
+#define CLI_CODEX_APPROVAL_POLICY_CONFIG         "approval_policy=\"on-request\""
 #define CLI_CODEX_SANDBOX_READ_ONLY_CONFIG       "sandbox_mode=\"read-only\""
 #define CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG "sandbox_mode=\"workspace-write\""
 #define CLI_CODEX_SANDBOX_DANGER_CONFIG          "sandbox_mode=\"danger-full-access\""
@@ -1454,6 +1455,37 @@ static void cli_codex_set_context_error(cli_codex_t *c, const char *context,
       snprintf(out, outsz, "%s", detail);
 }
 
+/* Stable SDK boundary: failed adoption refuses before any model turn starts. */
+static int cli_codex_adopt_history(cli_codex_t *c, const char *thread_id,
+                                   const aimee_request_t *history, int *next_id,
+                                   long long *deadline_ms, int idle_timeout_ms)
+{
+   if (!history)
+      return 0;
+   cJSON *items = aimee_codex_history_items(history);
+   if (!items)
+      return -1;
+   if (!cJSON_GetArraySize(items))
+   {
+      cJSON_Delete(items);
+      return 0;
+   }
+   cJSON *params = cJSON_CreateObject();
+   if (!params || !cJSON_AddStringToObject(params, "threadId", thread_id) ||
+       !cJSON_AddItemToObject(params, "items", items))
+   {
+      cJSON_Delete(items);
+      cJSON_Delete(params);
+      return -1;
+   }
+   cJSON *reply = cli_codex_request(c, "thread/inject_items", params, (*next_id)++, deadline_ms,
+                                    idle_timeout_ms);
+   int accepted = reply && cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(reply, "result")) &&
+                  !cJSON_GetObjectItemCaseSensitive(reply, "error");
+   cJSON_Delete(reply);
+   return accepted ? 0 : -1;
+}
+
 int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_event_cb cb,
                           void *userdata, cli_codex_chat_result_t *out)
 {
@@ -1554,6 +1586,15 @@ int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_ev
             snprintf(out->error, sizeof(out->error), "codex thread/start: no thread id");
          return -1;
       }
+   }
+
+   if (cli_codex_adopt_history(&c, thread_id, req->history, &next_id, &deadline_ms,
+                               idle_timeout_ms) != 0)
+   {
+      if (out)
+         snprintf(out->error, sizeof(out->error), "codex canonical history adoption failed");
+      cli_codex_close(&c);
+      return -1;
    }
 
    if (out)
@@ -1948,6 +1989,7 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
       return -1;
    }
 
+   int next_id = 1;
    /* 1. initialize */
    {
       cJSON *params = cJSON_CreateObject();
@@ -1955,7 +1997,8 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
       cJSON_AddStringToObject(ci, "name", "aimee");
       cJSON_AddStringToObject(ci, "version", AIMEE_VERSION);
       cJSON_AddItemToObject(params, "clientInfo", ci);
-      cJSON *resp = cli_codex_request(&c, "initialize", params, 1, &deadline_ms, idle_timeout_ms);
+      cJSON *resp =
+          cli_codex_request(&c, "initialize", params, next_id++, &deadline_ms, idle_timeout_ms);
       if (!resp || !cJSON_GetObjectItemCaseSensitive(resp, "result"))
       {
          cJSON_Delete(resp);
@@ -1976,8 +2019,8 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
          cJSON_AddStringToObject(params, "threadId", cfg->resume_id);
       else if (system_prompt && system_prompt[0])
          cli_codex_add_utf8_string(params, "developerInstructions", system_prompt);
-      cJSON *resp = cli_codex_request(&c, resume ? "thread/resume" : "thread/start", params, 2,
-                                      &deadline_ms, idle_timeout_ms);
+      cJSON *resp = cli_codex_request(&c, resume ? "thread/resume" : "thread/start", params,
+                                      next_id++, &deadline_ms, idle_timeout_ms);
       int got_id = resp && cli_codex_response_thread_id(resp, thread_id, sizeof thread_id);
       if (!got_id && resume && resp && cJSON_GetObjectItemCaseSensitive(resp, "result"))
       {
@@ -1994,6 +2037,14 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
       }
    }
 
+   if (cli_codex_adopt_history(&c, thread_id, cfg->history, &next_id, &deadline_ms,
+                               idle_timeout_ms) != 0)
+   {
+      snprintf(out->error, sizeof(out->error), "codex canonical history adoption failed");
+      cli_codex_close(&c);
+      return -1;
+   }
+
    /* 3. turn/start */
    {
       cJSON *params = cJSON_CreateObject();
@@ -2002,7 +2053,8 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
          cJSON_AddStringToObject(params, "model", agent->model);
       cJSON *input = cli_codex_text_input_array(user_prompt);
       cJSON_AddItemToObject(params, "input", input);
-      cJSON *resp = cli_codex_request(&c, "turn/start", params, 3, &deadline_ms, idle_timeout_ms);
+      cJSON *resp =
+          cli_codex_request(&c, "turn/start", params, next_id++, &deadline_ms, idle_timeout_ms);
       if (!resp || !cJSON_GetObjectItemCaseSensitive(resp, "result"))
       {
          cJSON_Delete(resp);

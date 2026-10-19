@@ -51,6 +51,14 @@ so serializing a control never grants a model authority to approve it. Host exec
 is separate from each model response's `TURN_STOP`. Session identity, actor, sequence, and
 producer retry identity belong to the transport envelope owned by Server sessions.
 
+The `replay_proof` metadata event reserves the host's native replay evidence: a connection/account
+scope digest, exact canonical block digest, source wire and (for Anthropic) the actual sent-prefix
+binding. It contains no credentials or transcript. C, Go and browser consumers validate the same
+shape; history and browser projection advance past it without creating model messages. Parsing
+this event alone never establishes provenance or authorizes replay. The scoped native runtime captures evidence from actual upstream canonical responses and
+checks it at entry and after restored history/policy edits, before egress. SDK spawn-site
+activation and live cache/history adoption remain separate, unfinished work.
+
 Unknown blocks fail serialization until an entry adapter models them; they are not silently
 flattened into text. The optional thread-bound sink is scoped by its caller, which must restore
 the previous sink before releasing its context or returning a pooled worker. Sink failures

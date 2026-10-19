@@ -13,6 +13,23 @@
 
 struct cJSON;
 
+/* A host may restore/refuse opaque state using its independently observed
+ * provenance after native admission. The borrowed callback is thread-scoped;
+ * restore the returned scope before releasing its context. Pure renderer
+ * comparisons never invoke it or grant echoed state a new provenance. */
+typedef int (*aimee_frontend_state_guard_fn)(aimee_request_t *request, void *context);
+typedef struct
+{
+   aimee_frontend_state_guard_fn guard;
+   void *context;
+} aimee_frontend_state_scope_t;
+aimee_frontend_state_scope_t aimee_frontend_bind_state_guard(aimee_frontend_state_guard_fn guard,
+                                                             void *context);
+
+/* Recheck after host history restoration/transforms, immediately before the
+ * actual provider renderer. Failure releases/zeros the owned request. */
+int aimee_frontend_guard_state(aimee_request_t *request, char *error, size_t capacity);
+
 /* Parse an exact native JSON frame and retain its owned byte representation. */
 int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire,
                               aimee_request_t *out, char *error, size_t error_capacity);

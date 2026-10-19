@@ -107,5 +107,10 @@ func SchemaFileCount() int {
 func ReplayErasureIntents(ctx context.Context, q store.Queryer) (int64, error) {
 	var removed int64
 	err := q.QueryRow(ctx, `SELECT user_memory_replay_erasure_intents()`).Scan(&removed)
-	return removed, err
+	if err != nil {
+		return removed, err
+	}
+	var procedures int64
+	err = q.QueryRow(ctx, `SELECT local_procedure_replay_erasure_intents()`).Scan(&procedures)
+	return removed + procedures, err
 }

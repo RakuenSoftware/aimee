@@ -435,15 +435,46 @@ set_tests_properties(test_session_compact_focused PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # Native harness conversion and the POSIX print-mode lifecycle.
+if(NOT WIN32)
+  add_executable(test_server_learning_application test_server_learning_application.c
+    ../server/server_learning_application.c ../vendor/cJSON.c)
+  target_include_directories(test_server_learning_application PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR}/modules/kb/c)
+  aimee_enable_test_asserts(test_server_learning_application)
+  add_test(NAME test_server_learning_application COMMAND test_server_learning_application)
+  add_executable(test_server_native_replay test_server_native_replay.c
+    ../server/server_native_replay.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
+    ../aimee_sha256.c ../platform_random.c ../posix/platform_random.c ../vendor/cJSON.c)
+  target_include_directories(test_server_native_replay PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR}/modules/kb/c)
+  target_link_libraries(test_server_native_replay PRIVATE Threads::Threads OpenSSL::Crypto)
+  aimee_enable_test_asserts(test_server_native_replay)
+  add_test(NAME test_server_native_replay COMMAND test_server_native_replay)
+  add_executable(test_server_native_runtime test_server_native_runtime.c
+    ../server/agent_tools.c ../posix/agent_source_authority.c ../modules/ir/aimee_ir.c
+    ../server/server_native_runtime.c ../cli_proxy.c ../server/request_context.c
+    ../aimee_sha256.c ../platform_random.c ../posix/platform_random.c ../vendor/cJSON.c)
+  target_include_directories(test_server_native_runtime PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR}/modules/kb/c
+    ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../db1_client ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+  target_link_libraries(test_server_native_runtime PRIVATE
+    aimee-core-connection Threads::Threads OpenSSL::Crypto)
+  aimee_enable_test_asserts(test_server_native_runtime)
+  add_test(NAME test_server_native_runtime COMMAND test_server_native_runtime)
+endif()
+
 aimee_add_test(test_harness_ir test_harness_ir.c
   ../modules/translation/harness_ir.c ../modules/translation/aimee_ir_stream.c
   ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c
-  ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
+  ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c)
+target_link_libraries(test_harness_ir PRIVATE OpenSSL::Crypto)
 if(NOT WIN32)
   aimee_add_test(test_claude_headless test_claude_headless.c ../server/claude_headless.c ../server/server_session_control.c
     ../modules/translation/harness_ir.c ../modules/translation/aimee_ir_stream.c
     ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c
-    ../modules/ir/session_event.c ../modules/ir/aimee_ir.c)
+    ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c)
+  target_link_libraries(test_claude_headless PRIVATE OpenSSL::Crypto)
 endif()
 
 if(NOT WIN32)

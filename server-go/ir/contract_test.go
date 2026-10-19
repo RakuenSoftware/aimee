@@ -6,6 +6,44 @@ import (
 	"testing"
 )
 
+func TestNativeReplayProofContract(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	proof := map[string]any{"scope": digest, "block_digest": digest, "wire": "responses"}
+	valid := func() bool {
+		raw, err := json.Marshal(map[string]any{"kind": "replay_proof", "payload": proof})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ValidSessionEvent(raw)
+	}
+	if !valid() {
+		t.Fatal("Responses proof rejected")
+	}
+	proof["thinking_binding"] = nil
+	if valid() {
+		t.Fatal("explicit null is not an absent native binding")
+	}
+	proof["wire"] = "anthropic"
+	proof["thinking_binding"] = "ap1:" + digest + ":" + digest + ":" + digest
+	if !valid() {
+		t.Fatal("bound Anthropic proof rejected")
+	}
+	for _, field := range []string{"scope", "block_digest", "thinking_binding", "wire"} {
+		original := proof[field]
+		for _, bad := range []any{"invented", nil, 1, map[string]any{}} {
+			proof[field] = bad
+			if valid() {
+				t.Fatalf("malformed %s accepted: %#v", field, bad)
+			}
+		}
+		proof[field] = original
+	}
+	proof["prompt"] = "not metadata"
+	if valid() {
+		t.Fatal("unmodeled content in proof accepted")
+	}
+}
+
 func TestRequestContractPreservesTypedCatalogAndOpaqueValues(t *testing.T) {
 	raw := `{"version":1,"source_wire":"responses","cache_policy":"native","system":[],"messages":[{"role":"user","blocks":[{"type":"text","text":"question"}]}],"tools":[{"kind":"namespace","name":"functions","strict":"unset","children":[{"kind":"function","name":"Read","schema":{"type":"object"},"strict":"null","defer_loading":false}]},{"kind":"hosted","provider":"responses","native_type":"web_search","native_options":{"opaque":9007199254740993},"strict":"unset"}],"tool_choice":{"mode":"tool","name":"Read"},"parallel_tool_calls":false,"max_tokens":77,"temperature":0.2,"top_p":0.9,"stream":false,"stop_sequences":["END"],"reasoning_effort":"high","output_format":{"kind":"json_schema","name":"answer","schema":{"type":"object"},"strict":"true"}}`
 	request, err := DecodeRequest([]byte(raw))

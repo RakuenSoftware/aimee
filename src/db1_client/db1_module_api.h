@@ -705,4 +705,9 @@ static inline uint32_t aimee_db1_get_u32(const uint8_t *p)
    return value;
 }
 
+
+/* Server-local immutable procedure experience (telemetry family). */
+#define AIMEE_DB1_OP_PROCEDURE_EVENT_LOAD 59u
+#define AIMEE_DB1_OP_PROCEDURE_EVENT_APPEND 60u
+
 #endif /* AIMEE_DB1_MODULE_API_H */

@@ -100,3 +100,29 @@ versions are persistent compatibility contracts. The removed SQLite DB1 paths an
 Add a domain operation by registering it in the `families` catalog, assigning a stable stage or typed
 family opcode, adding migrations and failure tests, and updating generated clients. Removal requires a
 versioned consumer migration; principal refs, event kinds, migration owners, and recorded versions are never reused.
+
+### Server-local procedure experience
+
+With KB mode `none`, or unset mode and no configured connection, the existing
+`learning.application` route persists explicit feedback locally. Configured KB
+applications retain their existing owner; an explicitly configured broken KB does
+not silently fall back. The host still reads the principal-owned WORM provider
+receipt and matches exact attempt, procedure revision and exposure references.
+Clients supply neither exposure nor actor authority. Verified UDS users, browser
+users and mTLS clients can submit feedback; model execution intent and daemon
+bearers cannot establish human authority. No active-session/project requirement
+is added to feedback on an existing receipt.
+
+Learning remains the sole admission/projection owner. DB1 telemetry operations 59
+and 60 load a bounded immutable cohort and append against its snapshot digest.
+The host projects before append and re-projects on a concurrent update. Event IDs
+are principal-scoped and immutable; identical retries are idempotent. Migration 46
+owns `local_procedure_events` and payload-free `local_procedure_erasure_intents`.
+These are observation metadata, independent of KB knowledge/artifact storage.
+Full admitted JSON survives the typed interface without the legacy 4096-byte DTO.
+
+Subject erasure captures surviving event-identity digests, removes local rows and
+fences old snapshots through the existing erasure epoch. Startup replay also
+cleans rows resurrected by content-only restores. Runtime roles cannot erase the
+control metadata. No process-success observation becomes a verified task grade.
+This path does not implement autonomous synthesis or independent grading.

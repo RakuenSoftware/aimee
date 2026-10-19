@@ -8,6 +8,7 @@
 
 #include "aimee.h"
 #include "agent_types.h"
+#include <aimee/ir/aimee_ir.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -41,6 +42,9 @@ extern "C"
       const char *cwd;           /* optional: child process working directory */
       const char *system_prompt; /* optional: developerInstructions on new threads */
       const char *user_prompt;
+      /* Canonical items preceding this turn; resume callers supply only unseen tail.
+       * Host owns scope/prefix proof. Never a flattened system/user transcript. */
+      const aimee_request_t *history;
       const char *model;            /* optional: turn-level model override */
       const char *reasoning_effort; /* optional: low/medium/high/xhigh */
       int timeout_ms;               /* idle timeout; <0 disables while caller stays attached */

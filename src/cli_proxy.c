@@ -47,6 +47,7 @@ struct cli_proxy
    proxy_thread_t monitor;
    unsigned port;
    cli_proxy_forward_fn forward;
+   cli_proxy_route_fn route;
    void *forward_context;
    char token[256], session_id[128];
    atomic_int stopping;
@@ -199,9 +200,10 @@ static void proxy_request(proxy_worker_t *worker)
    if (sscanf(buffer, "%15s %2047s %15s %c", method, path, version, &extra) != 3 ||
        strcmp(version, "HTTP/1.1") != 0)
       goto malformed;
-   if (!model_route(method, path))
+   if (!(proxy->route ? proxy->route(method, path, proxy->forward_context)
+                      : model_route(method, path)))
    {
-      proxy_error(fd, 404, "only model API routes are available through the local proxy");
+      proxy_error(fd, 404, "route unavailable in this local scope");
       goto done;
    }
    char forwarded[8192] = "", session[128] = "";
@@ -354,9 +356,9 @@ static void *proxy_worker(void *context)
    return 0;
 }
 
-cli_proxy_t *cli_proxy_start_bound(unsigned port, const char *local_token, const char *session_id,
-                                   unsigned *bound_port, cli_proxy_forward_fn forward,
-                                   void *forward_context)
+cli_proxy_t *cli_proxy_start_scoped(unsigned port, const char *local_token, const char *session_id,
+                                    unsigned *bound_port, cli_proxy_route_fn route,
+                                    cli_proxy_forward_fn forward, void *forward_context)
 {
    char auth[272];
    if (!bound_port || !local_token || strlen(local_token) >= 256 ||
@@ -367,6 +369,7 @@ cli_proxy_t *cli_proxy_start_bound(unsigned port, const char *local_token, const
    if (!proxy)
       return NULL;
    proxy->forward = forward;
+   proxy->route = route;
    proxy->forward_context = forward_context;
    proxy->listener = aimee_core_socket_listen_loopback(port, &proxy->port);
    if (proxy->listener < 0)
@@ -378,23 +381,53 @@ cli_proxy_t *cli_proxy_start_bound(unsigned port, const char *local_token, const
    snprintf(proxy->session_id, sizeof(proxy->session_id), "%s", session_id ? session_id : "");
    atomic_init(&proxy->stopping, 0);
    mutex_init(&proxy->mutex);
+#ifndef AIMEE_WINDOWS
+   pthread_attr_t scoped_attributes;
+   pthread_attr_t *worker_attributes = NULL;
+   if (route)
+   {
+      /* Scoped server callbacks run the same deep RPC handlers as the server
+       * listener, whose explicit stack is 32 MiB. The thin proxy stays default. */
+      if (pthread_attr_init(&scoped_attributes))
+      {
+         cli_proxy_stop(proxy);
+         return NULL;
+      }
+      if (pthread_attr_setstacksize(&scoped_attributes, (size_t)32 * 1024 * 1024))
+      {
+         pthread_attr_destroy(&scoped_attributes);
+         cli_proxy_stop(proxy);
+         return NULL;
+      }
+      worker_attributes = &scoped_attributes;
+   }
+#endif
    for (int i = 0; i < PROXY_WORKERS; i++)
    {
       proxy_worker_t *worker = &proxy->workers[i];
       worker->proxy = proxy;
       worker->downstream = worker->upstream = -1;
 #ifdef AIMEE_WINDOWS
-      worker->thread = (HANDLE)_beginthreadex(NULL, 0, proxy_worker, worker, 0, NULL);
+      worker->thread = (HANDLE)_beginthreadex(NULL, route ? 32u * 1024u * 1024u : 0, proxy_worker,
+                                              worker, 0, NULL);
       if (!worker->thread)
 #else
-      if (pthread_create(&worker->thread, NULL, proxy_worker, worker) != 0)
+      if (pthread_create(&worker->thread, worker_attributes, proxy_worker, worker) != 0)
 #endif
       {
+#ifndef AIMEE_WINDOWS
+         if (worker_attributes)
+            pthread_attr_destroy(worker_attributes);
+#endif
          cli_proxy_stop(proxy);
          return NULL;
       }
       proxy->started++;
    }
+#ifndef AIMEE_WINDOWS
+   if (worker_attributes)
+      pthread_attr_destroy(worker_attributes);
+#endif
 #ifdef AIMEE_WINDOWS
    proxy->monitor = (HANDLE)_beginthreadex(NULL, 0, proxy_monitor, proxy, 0, NULL);
    if (!proxy->monitor)
@@ -408,6 +441,14 @@ cli_proxy_t *cli_proxy_start_bound(unsigned port, const char *local_token, const
    proxy->monitor_started = 1;
    *bound_port = proxy->port;
    return proxy;
+}
+
+cli_proxy_t *cli_proxy_start_bound(unsigned port, const char *local_token, const char *session_id,
+                                   unsigned *bound_port, cli_proxy_forward_fn forward,
+                                   void *host_context)
+{
+   return cli_proxy_start_scoped(port, local_token, session_id, bound_port, NULL, forward,
+                                 host_context);
 }
 
 void cli_proxy_stop(cli_proxy_t *proxy)

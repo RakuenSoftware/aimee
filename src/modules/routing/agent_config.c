@@ -301,12 +301,33 @@ int agent_registry_default_primary(agent_t *out)
    return agent_registry_pick(out, agent_registry_pick_default, NULL);
 }
 
+static _Thread_local const agent_t *g_ingress_model;
+
+const agent_t *agent_registry_bind_ingress_model(const agent_t *selected)
+{
+   const agent_t *previous = g_ingress_model;
+   g_ingress_model = selected;
+   return previous;
+}
+
 int agent_registry_resolve_ingress_model(const char *model, agent_t *out)
 {
    int rc;
 
    if (!out)
       return -1;
+   if (g_ingress_model)
+   {
+      /* SDKs send vendor model IDs rather than Aimee registration names. Only
+       * this host-selected snapshot can resolve either spelling. An unrelated
+       * model must not escape into the ambient registry or another account. */
+      if (!g_ingress_model->enabled ||
+          (model && model[0] && strcmp(model, "aimee") && strcmp(model, g_ingress_model->name) &&
+           strcmp(model, g_ingress_model->model)))
+         return -1;
+      *out = *g_ingress_model;
+      return 0;
+   }
    if (model && model[0] && strcmp(model, "aimee") != 0)
       rc = agent_registry_find(model, out);
    else

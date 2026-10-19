@@ -11,7 +11,7 @@
 static const char *payload = "{\"n\":9007199254740993,\"tiny\":1e-400}";
 typedef struct
 {
-   const char *owner, *session;
+   const char *owner, *session, *path;
    int direct_fd;
    atomic_int calls, wait_for_cancel, saw_cancel;
 } host_scope_t;
@@ -21,7 +21,7 @@ static int forward(const char *method, const char *path, const char *headers, co
                    void *context)
 {
    host_scope_t *scope = context;
-   assert(!strcmp(method, "POST") && !strcmp(path, "/v1/responses"));
+   assert(!strcmp(method, "POST") && !strcmp(path, scope->path ? scope->path : "/v1/responses"));
    assert(!strcmp(session, scope->session));
    assert(!strstr(headers, "spoof") && !strstr(headers, "local-token"));
    assert(body_len == strlen(payload) && !memcmp(body, payload, body_len));
@@ -65,6 +65,12 @@ static int send_request(unsigned port, const char *token, const char *path)
                     path, port, token, strlen(payload), payload);
    assert(!aimee_core_socket_write_all(fd, request, (size_t)n));
    return fd;
+}
+
+static int runtime_route(const char *method, const char *path, void *context)
+{
+   host_scope_t *scope = context;
+   return !strcmp(method, "POST") && !strcmp(path, scope->path);
 }
 
 static void read_response(int fd, char *response, size_t capacity)
@@ -123,6 +129,23 @@ int main(void)
    assert(atomic_load(&a.saw_cancel));
    cli_proxy_stop(a_listener);
    cli_proxy_stop(b_listener);
+   host_scope_t runtime = {
+       .owner = "user-runtime", .session = "runtime-session", .path = "/v1/mcp/call"};
+   cli_proxy_t *runtime_listener = cli_proxy_start_scoped(
+       0, "runtime-token", runtime.session, &a_port, runtime_route, forward, &runtime);
+   assert(runtime_listener);
+   read_response(send_request(a_port, "runtime-token", "/v1/mcp/call"), response, sizeof response);
+   assert(strstr(response, "200 OK") && strstr(response, "user-runtime"));
+   assert(atomic_load(&runtime.calls) == 1);
+   read_response(send_request(a_port, "local-token-a", "/v1/mcp/call"), response, sizeof response);
+   assert(strstr(response, "401") && atomic_load(&runtime.calls) == 1);
+   read_response(send_request(a_port, "runtime-token", "/v1/config/set"), response,
+                 sizeof response);
+   assert(strstr(response, "404") && atomic_load(&runtime.calls) == 1);
+   read_response(send_request(a_port, "runtime-token", "/v1/mcp/call?scope=other"), response,
+                 sizeof response);
+   assert(strstr(response, "404") && atomic_load(&runtime.calls) == 1);
+   cli_proxy_stop(runtime_listener);
    puts("bound model listener: owner/session isolation, framing and cancellation passed");
    return 0;
 }

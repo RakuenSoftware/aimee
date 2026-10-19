@@ -9,6 +9,52 @@
 #include "agent_config.h"
 #include "agent_protocol.h"
 #include "model_registry.h"
+#include <pthread.h>
+
+static void *check_independent_ingress_scope(void *context)
+{
+   const agent_t *selected = context;
+   assert(agent_registry_bind_ingress_model(selected) == NULL);
+   agent_t resolved;
+   assert(!agent_registry_resolve_ingress_model(selected->model, &resolved));
+   assert(!strcmp(resolved.registration, selected->registration));
+   assert(agent_registry_resolve_ingress_model("other-account", &resolved) < 0);
+   assert(agent_registry_bind_ingress_model(NULL) == selected);
+   return NULL;
+}
+
+void test_agent_ingress_selected_connection_scope(void)
+{
+   agent_t selected = {.enabled = 1}, nested = {.enabled = 1}, resolved;
+   strcpy(selected.name, "personal");
+   strcpy(selected.registration, "personal-connection");
+   strcpy(selected.model, "native-model-id");
+   nested = selected;
+   strcpy(nested.name, "work");
+   strcpy(nested.registration, "work-connection");
+   assert(agent_registry_bind_ingress_model(&selected) == NULL);
+   const char *aliases[] = {NULL, "", "aimee", "personal", "native-model-id"};
+   for (size_t i = 0; i < sizeof aliases / sizeof aliases[0]; i++)
+   {
+      assert(!agent_registry_resolve_ingress_model(aliases[i], &resolved));
+      assert(!strcmp(resolved.registration, "personal-connection"));
+   }
+   assert(agent_registry_resolve_ingress_model("work", &resolved) < 0);
+   const agent_t *previous = agent_registry_bind_ingress_model(&nested);
+   assert(previous == &selected);
+   assert(!agent_registry_resolve_ingress_model("native-model-id", &resolved));
+   assert(!strcmp(resolved.registration, "work-connection"));
+   assert(agent_registry_resolve_ingress_model("personal", &resolved) < 0);
+   assert(agent_registry_bind_ingress_model(previous) == &nested);
+   pthread_t worker;
+   assert(!pthread_create(&worker, NULL, check_independent_ingress_scope, &nested));
+   assert(!pthread_join(worker, NULL));
+   assert(!agent_registry_resolve_ingress_model("native-model-id", &resolved));
+   assert(!strcmp(resolved.registration, "personal-connection"));
+   selected.enabled = 0;
+   assert(agent_registry_resolve_ingress_model("aimee", &resolved) < 0);
+   assert(agent_registry_bind_ingress_model(NULL) == &selected);
+}
 
 void test_agent_route_with_caps_honors_tools_enabled(void)
 {

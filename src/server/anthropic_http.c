@@ -518,7 +518,9 @@ static int messages_estimate_tokens(const aimee_request_t *request)
 static char *anthropic_build_prov_body(aimee_request_t *request, aimee_wire_t wire, int stream)
 {
    request->stream = stream;
-   return aimee_ir_request_admit(request) ? NULL : aimee_backend_render_wire(request, wire);
+   return aimee_frontend_guard_state(request, NULL, 0) || aimee_ir_request_admit(request)
+              ? NULL
+              : aimee_backend_render_wire(request, wire);
 }
 
 static int messages_buffered(const char *body, char *resp, int cap)

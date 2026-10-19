@@ -48,6 +48,7 @@ export type ProjectionReport = { model: string; boundary: 'request' | 'response'
 export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 export type ChildExecution = { session_id: string; turn_id: string; role: string; status: ExecutionStatus };
 export type SessionEvent =
+  | { kind: 'replay_proof'; payload: { scope: string; block_digest: string; wire: 'anthropic' | 'responses'; thinking_binding?: string } }
   | { kind: 'child_execution'; payload: ChildExecution }
   | { kind: 'projection'; payload: ProjectionReport }
   | { kind: 'history'; payload: { scope: string; phase: 'message' | 'commit'; index?: number; count?: number; message?: Message } }
@@ -128,6 +129,17 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       (event.kind === 'message' || event.kind === 'delta' || event.kind === 'control_request'))
     throw new Error('Content follows execution completion');
   switch (event.kind) {
+    case 'replay_proof': {
+      const proof = event.payload;
+      if (typeof proof.scope !== 'string' || typeof proof.block_digest !== 'string' ||
+          !Object.keys(proof).every(key => ['scope', 'block_digest', 'wire', 'thinking_binding'].includes(key)) ||
+          !/^[0-9a-f]{64}$/.test(proof.scope) || !/^[0-9a-f]{64}$/.test(proof.block_digest) ||
+          !(proof.wire === 'responses' ? proof.thinking_binding === undefined :
+            proof.wire === 'anthropic' && typeof proof.thinking_binding === 'string' &&
+            /^ap1:[0-9a-f]{64}:[0-9a-f]{64}:[0-9a-f]{64}$/.test(proof.thinking_binding)))
+        throw new Error('Invalid native replay proof');
+      return next; // advance the durable cursor without creating model content
+    }
     case 'child_execution': {
       const child = event.payload;
       if (![child.session_id, child.turn_id, child.role].every(value => nonempty(value) && new TextEncoder().encode(value).length <= 127) ||

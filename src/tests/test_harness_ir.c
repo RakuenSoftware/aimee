@@ -162,6 +162,69 @@ static void codex(void)
                 &s, 1) < 0);
    aimee_harness_ir_free(&s);
 }
+static void codex_tool_results(void)
+{
+   const struct
+   {
+      const char *item;
+      int error;
+      const char *output;
+   } cases[] = {
+       {"{\"type\":\"commandExecution\",\"exitCode\":7}", 1, NULL},
+       {"{\"type\":\"commandExecution\",\"exitCode\":0}", 0, NULL},
+       {"{\"type\":\"commandExecution\",\"exitCode\":null}", 0, NULL},
+       {"{\"type\":\"dynamicToolCall\",\"tool\":\"lookup\",\"namespace\":\"catalog\","
+        "\"success\":false,\"contentItems\":[{\"type\":\"inputText\",\"text\":\"no match\"}]}",
+        1, "no match"},
+       {"{\"type\":\"dynamicToolCall\",\"tool\":\"lookup\",\"namespace\":\"catalog\","
+        "\"success\":true,\"contentItems\":[{\"type\":\"inputText\",\"text\":\"found\"}]}",
+        0, "found"},
+       {"{\"type\":\"mcpToolCall\",\"server\":\"fixture\",\"tool\":\"lookup\","
+        "\"result\":{\"isError\":true,\"content\":[]}}",
+        1, NULL},
+       {"{\"type\":\"mcpToolCall\",\"server\":\"fixture\",\"tool\":\"lookup\","
+        "\"error\":{\"message\":\"transport failed\"}}",
+        1, NULL},
+       {"{\"type\":\"mcpToolCall\",\"server\":\"fixture\",\"tool\":\"lookup\","
+        "\"result\":{\"content\":[]},\"error\":null}",
+        0, NULL}};
+   for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++)
+   {
+      aimee_harness_ir_t state = {0};
+      cJSON *item = cJSON_Parse(cases[i].item);
+      assert(item);
+      cJSON_AddStringToObject(item, "id", "full-call:identity");
+      cJSON_AddStringToObject(item, "status", "completed");
+      cJSON *arguments = cJSON_AddObjectToObject(item, "arguments");
+      cJSON_AddNumberToObject(arguments, "value", 7);
+      cJSON *event = cJSON_CreateObject();
+      cJSON_AddStringToObject(event, "method", "item/started");
+      cJSON *params = cJSON_AddObjectToObject(event, "params");
+      cJSON_AddItemToObject(params, "item", item);
+      int before = cJSON_GetArraySize(events);
+      assert(aimee_codex_frame_ir(event, &state) == 0);
+      cJSON *use = block(before);
+      if (strcmp(string(item, "type"), "commandExecution"))
+      {
+         assert(cJSON_Compare(cJSON_GetObjectItem(use, "input"), arguments, 1));
+         assert(!strcmp(string(use, "namespace"),
+                        !strcmp(string(item, "type"), "mcpToolCall") ? "mcp__fixture" : "catalog"));
+      }
+      cJSON_SetValuestring(cJSON_GetObjectItem(event, "method"), "item/completed");
+      assert(aimee_codex_frame_ir(event, &state) == 0);
+      cJSON *result = block(before + 1);
+      assert(cJSON_IsTrue(cJSON_GetObjectItem(result, "is_error")) == cases[i].error);
+      assert(!strcmp(string(use, "tool_id"), string(result, "tool_id")));
+      if (cases[i].output)
+      {
+         const cJSON *content = cJSON_GetObjectItem(result, "content");
+         const cJSON *output = cJSON_GetArrayItem(cJSON_GetObjectItem(content, "output"), 0);
+         assert(!strcmp(string(output, "text"), cases[i].output));
+      }
+      cJSON_Delete(event);
+      aimee_harness_ir_free(&state);
+   }
+}
 static void acp(void)
 {
    aimee_harness_ir_t s = {0};
@@ -353,6 +416,7 @@ int main(void)
    claude();
    claude_block_snapshots();
    codex();
+   codex_tool_results();
    acp();
    aimee_ir_session_set_sink(NULL, NULL);
    cJSON_Delete(events);

@@ -1,7 +1,4 @@
-/* test_cli_codex.c: pure-parse tests for the codex app-server JSON-RPC
- * helpers in cli_codex.c. No subprocess; we feed synthetic frames
- * captured from a real `codex app-server` session and assert the
- * extracted bits. */
+/* Codex JSON-RPC parsing and child protocol boundary fixtures. */
 #include <assert.h>
 #include <signal.h>
 #include <stdio.h>
@@ -293,7 +290,7 @@ static void test_spawn_failure_captures_stderr_and_exit_status(void)
    int rc = agent_execute_cli_codex(&agent, NULL, "hello", &out);
    assert(rc == -1);
    assert(strstr(out.error, "status 42") != NULL);
-   assert(strstr(out.error, "approval_policy=\"untrusted\"") != NULL);
+   assert(strstr(out.error, "approval_policy=\"on-request\"") != NULL);
    assert(strstr(out.error, "sandbox_mode=\"read-only\"") != NULL);
    assert(strstr(out.error, "fixture-stderr-message") != NULL);
 
@@ -791,6 +788,223 @@ static void test_operator_replies_reach_native_child(void)
    rmdir(root);
 }
 
+static void test_canonical_history_adoption(void)
+{
+   char root[256], script[512], marker[512];
+   snprintf(root, sizeof root, "%s/aimee-codex-adoption-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(root));
+   snprintf(script, sizeof script, "%s/codex", root);
+   snprintf(marker, sizeof marker, "%s/requests", root);
+   FILE *fp = fopen(script, "w");
+   assert(fp);
+   fputs("#!/usr/bin/env python3\nimport json, os, sys\n"
+         "def send(v):\n print(json.dumps(v),flush=True)\n"
+         "adopted=False\nlast=0\n"
+         "for line in sys.stdin:\n f=json.loads(line)\n m=f.get('method')\n"
+         " if m=='initialized': continue\n"
+         " with open(os.environ['AIMEE_TEST_HISTORY_LOG'],'a') as log: "
+         "log.write(json.dumps(f)+'\\n')\n"
+         " assert f['id']>last\n last=f['id']\n p=f.get('params',{})\n"
+         " if m=='initialize': send({'id':f['id'],'result':{}})\n"
+         " elif m in ('thread/start','thread/resume'):\n"
+         "  assert m==os.environ['AIMEE_TEST_HISTORY_SESSION']\n"
+         "  send({'id':f['id'],'result':{'thread':{'id':'t-history'}}})\n"
+         " elif m=='thread/inject_items':\n"
+         "  assert p['threadId']=='t-history'\n  a=p['items']\n"
+         "  assert len(a)==5, a\n"
+         "  assert a[0]['role']=='user' and a[0]['content'][0]['text']=='prior user'\n"
+         "  assert a[1]['type']=='reasoning' and a[1]['id']=='rs_fixture'\n"
+         "  assert a[1]['encrypted_content']=='synthetic-opaque-history'\n"
+         "  assert a[2]['type']=='function_call' and a[2]['call_id']=='call:'+('x'*600)\n"
+         "  assert a[2]['name']=='inspect' and json.loads(a[2]['arguments'])=={'path':'docs'}\n"
+         "  assert a[3]['type']=='function_call_output' and a[3]['call_id']==a[2]['call_id']\n"
+         "  assert a[3]['output']=='completed'\n"
+         "  assert a[4]['role']=='assistant' and a[4]['content'][0]['text']=='prior assistant'\n"
+         "  if os.environ['AIMEE_TEST_HISTORY_REFUSE']=='1':\n"
+         "   send({'id':f['id'],'error':{'code':-32601,'message':'unsupported'}})\n"
+         "  else:\n   adopted=True\n   send({'id':f['id'],'result':{}})\n"
+         " elif m=='turn/start':\n"
+         "  assert adopted and os.environ['AIMEE_TEST_HISTORY_REFUSE']=='0'\n"
+         "  assert p['input']==[{'type':'text','text':'current user','text_elements':[]}]\n"
+         "  send({'id':f['id'],'result':{}})\n"
+         "  send({'method':'item/completed','params':{'item':{'type':'agentMessage',"
+         "'id':'answer','text':'history adopted'}}})\n"
+         "  send({'method':'turn/completed','params':{'turn':{'status':'completed'}}})\n"
+         " else: raise AssertionError(m)\n",
+         fp);
+   assert(fclose(fp) == 0 && chmod(script, 0700) == 0);
+   char *old_path = getenv("PATH") ? strdup(getenv("PATH")) : NULL;
+   char path[16384];
+   snprintf(path, sizeof path, "%s:%s", root, old_path ? old_path : "");
+   assert(!setenv("PATH", path, 1));
+   assert(!setenv("AIMEE_TEST_HISTORY_LOG", marker, 1));
+   char call_id[606] = "call:";
+   memset(call_id + 5, 'x', 600);
+   call_id[605] = 0;
+   cJSON *args = cJSON_Parse("{\"path\":\"docs\"}");
+   cJSON *result = cJSON_CreateString("completed");
+   aimee_block_t blocks[] = {
+       {.type = AIMEE_BLK_TEXT, .text = "prior user"},
+       {.type = AIMEE_BLK_THINKING,
+        .text = "summary",
+        .thinking_id = "rs_fixture",
+        .thinking_encrypted_content = "synthetic-opaque-history"},
+       {.type = AIMEE_BLK_TOOL_USE, .tool_id = call_id, .tool_name = "inspect", .tool_input = args},
+       {.type = AIMEE_BLK_TOOL_RESULT, .tool_id = call_id, .tool_result = result},
+       {.type = AIMEE_BLK_TEXT, .text = "prior assistant"}};
+   aimee_message_t messages[] = {{.role = "user", .blocks = blocks, .n_blocks = 1},
+                                 {.role = "assistant", .blocks = blocks + 1, .n_blocks = 2},
+                                 {.role = "user", .blocks = blocks + 3, .n_blocks = 1},
+                                 {.role = "assistant", .blocks = blocks + 4, .n_blocks = 1}};
+   aimee_request_t history = {.messages = messages, .n_messages = 4};
+   agent_t agent = {0};
+   snprintf(agent.name, sizeof agent.name, "history-fixture");
+   snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s", script);
+   agent.cli_idle_timeout_ms = 5000;
+   for (int provider = 0; provider < 2; provider++)
+      for (int resume = 0; resume < 2; resume++)
+         for (int refuse = 0; refuse < 3; refuse++)
+         {
+            unlink(marker);
+            setenv("AIMEE_TEST_HISTORY_SESSION", resume ? "thread/resume" : "thread/start", 1);
+            setenv("AIMEE_TEST_HISTORY_REFUSE", refuse == 1 ? "1" : "0", 1);
+            /* Invalid canonical content must refuse before injection/turn/start. */
+            blocks[0].type = refuse == 2 ? AIMEE_BLK_UNKNOWN : AIMEE_BLK_TEXT;
+            int rc;
+            if (provider)
+            {
+               provider_cli_cfg_t cfg = {.agent = &agent,
+                                         .cwd = root,
+                                         .history = &history,
+                                         .user_prompt = "current user",
+                                         .resume_id = resume ? "t-history" : NULL};
+               agent_result_t out;
+               rc = codex_provider_cli_adapter.execute(&cfg, &out);
+               if (!refuse)
+                  assert(out.success && out.response && !strcmp(out.response, "history adopted"));
+               else
+                  assert(strstr(out.error, "canonical history adoption failed"));
+               free(out.response);
+            }
+            else
+            {
+               cli_codex_chat_request_t req = {.cwd = root,
+                                               .history = &history,
+                                               .user_prompt = "current user",
+                                               .thread_id = resume ? "t-history" : NULL,
+                                               .timeout_ms = 5000};
+               cli_codex_chat_result_t out;
+               codex_stream_capture_t cap = {0};
+               rc = cli_codex_chat_stream(&req, codex_capture_cb, &cap, &out);
+               if (!refuse && rc)
+                  fprintf(stderr, "adoption rc=%d error=%s\n", rc, out.error);
+               if (!refuse)
+                  assert(strstr(cap.buf, "history adopted"));
+               else
+                  assert(strstr(out.error, "canonical history adoption failed"));
+            }
+            assert(refuse ? rc != 0 : rc == 0);
+            fp = fopen(marker, "r");
+            assert(fp);
+            char log[16384] = {0};
+            size_t n = fread(log, 1, sizeof log - 1, fp);
+            assert(n && !ferror(fp));
+            fclose(fp);
+            assert((strstr(log, "thread/inject_items") != NULL) == (refuse != 2));
+            assert((strstr(log, "turn/start") != NULL) == !refuse);
+         }
+   blocks[0].type = AIMEE_BLK_TEXT;
+   assert(!strcmp(blocks[1].thinking_encrypted_content, "synthetic-opaque-history"));
+   assert(!strcmp(blocks[2].tool_id, call_id));
+   cJSON_Delete(args);
+   cJSON_Delete(result);
+   if (old_path)
+      setenv("PATH", old_path, 1);
+   else
+      unsetenv("PATH");
+   free(old_path);
+   unsetenv("AIMEE_TEST_HISTORY_LOG");
+   unsetenv("AIMEE_TEST_HISTORY_SESSION");
+   unsetenv("AIMEE_TEST_HISTORY_REFUSE");
+   unlink(marker);
+   unlink(script);
+   rmdir(root);
+}
+
+/* Used by the opt-in real SDK integration fixture. All model traffic is sent
+ * to its loopback provider; no server/Vault credential is needed or read. */
+static int native_probe_capture(const aimee_session_event_t *event, void *context)
+{
+   cJSON *json = aimee_ir_session_event_json(event);
+   return json && cJSON_AddItemToArray(context, json) ? 0 : -1;
+}
+
+static int native_history_probe(const char *resume, const char *history_file)
+{
+   cJSON *arguments = cJSON_Parse("{\"path\":\"fixture.txt\"}");
+   cJSON *result = cJSON_CreateString("prior tool result");
+   aimee_block_t blocks[] = {
+       {.type = AIMEE_BLK_TEXT, .text = "prior user"},
+       {.type = AIMEE_BLK_TOOL_USE,
+        .tool_id = "call_canonical_fixture",
+        .tool_name = "read_file",
+        .tool_input = arguments},
+       {.type = AIMEE_BLK_TOOL_RESULT, .tool_id = "call_canonical_fixture", .tool_result = result},
+       {.type = AIMEE_BLK_TEXT, .text = "prior assistant"}};
+   aimee_message_t messages[] = {{.role = "user", .blocks = blocks, .n_blocks = 1},
+                                 {.role = "assistant", .blocks = blocks + 1, .n_blocks = 1},
+                                 {.role = "user", .blocks = blocks + 2, .n_blocks = 1},
+                                 {.role = "assistant", .blocks = blocks + 3, .n_blocks = 1}};
+   aimee_request_t history = {.messages = messages, .n_messages = 4};
+   aimee_request_t adopted = {0};
+   if (history_file)
+   {
+      FILE *file = fopen(history_file, "rb");
+      assert(file);
+      char input[65536];
+      size_t size = fread(input, 1, sizeof input - 1, file);
+      assert(feof(file) && !ferror(file));
+      fclose(file);
+      cJSON *json = aimee_ir_json_parse_frame(input, size);
+      assert(cJSON_IsArray(json));
+      adopted.n_messages = cJSON_GetArraySize(json);
+      assert(adopted.n_messages > 0 && adopted.n_messages <= 128);
+      adopted.messages = calloc((size_t)adopted.n_messages, sizeof *adopted.messages);
+      assert(adopted.messages);
+      for (int i = 0; i < adopted.n_messages; i++)
+         assert(aimee_ir_message_parse(cJSON_GetArrayItem(json, i), adopted.messages + i) == 0);
+      cJSON_Delete(json);
+   }
+   cli_codex_chat_request_t req = {.thread_id = resume,
+                                   .history = history_file ? &adopted
+                                              : resume     ? NULL
+                                                           : &history,
+                                   .user_prompt = resume ? "after restart" : "current user",
+                                   .model = "fixture-model",
+                                   .system_prompt = "Local native protocol fixture.",
+                                   .timeout_ms = 15000};
+   cli_codex_chat_result_t out;
+   codex_stream_capture_t captured = {0};
+   cJSON *events = cJSON_CreateArray();
+   aimee_ir_session_set_sink(native_probe_capture, events);
+   int rc = cli_codex_chat_stream(&req, codex_capture_cb, &captured, &out);
+   aimee_ir_session_set_sink(NULL, NULL);
+   cJSON *report = cJSON_CreateObject();
+   cJSON_AddItemToObject(report, "events", events);
+   cJSON_AddStringToObject(report, "thread_id", out.thread_id);
+   cJSON_AddStringToObject(report, "text", captured.buf);
+   cJSON_AddStringToObject(report, "error", out.error);
+   char *raw = cJSON_PrintUnformatted(report);
+   if (raw)
+      puts(raw);
+   free(raw);
+   cJSON_Delete(report);
+   cJSON_Delete(arguments);
+   cJSON_Delete(result);
+   aimee_request_free(&adopted);
+   return rc ? 1 : 0;
+}
+
 static void test_execute_refuses_missing_configuration(void)
 {
    agent_result_t out;
@@ -799,11 +1013,17 @@ static void test_execute_refuses_missing_configuration(void)
    assert(agent_execute_cli_codex(NULL, "system", "user", NULL) == -1);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
    test_execute_refuses_missing_configuration();
    test_execute_rejects_missing_inputs();
    signal(SIGPIPE, SIG_IGN);
+   if (argc >= 2 && !strcmp(argv[1], "--native-history-probe"))
+      return native_history_probe(argc == 3 ? argv[2] : NULL,
+                                  argc == 4 && !strcmp(argv[2], "--import") ? argv[3] : NULL);
+   test_canonical_history_adoption();
+   puts("canonical history: typed adoption, resume protocol and refusal before model turn "
+        "passed");
 
    printf("test_parse_agent_message_extracts_text... ");
    test_parse_agent_message_extracts_text();

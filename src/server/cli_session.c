@@ -1706,3 +1706,58 @@ int cli_session_harness_home(const char *vendor, const char *cwd, const char *si
    }
    return 0;
 }
+
+int cli_session_native_home(const char *vendor, const char *cwd, const char *sid,
+                            const char *binding, char *home, size_t capacity,
+                            cli_session_t *cleanup)
+{
+   if (!vendor || (strcmp(vendor, "claude") && strcmp(vendor, "codex")) || !sid || !sid[0] ||
+       strlen(sid) >= 128 ||
+       strspn(sid, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") !=
+           strlen(sid) ||
+       !binding || strlen(binding) != 64 || strspn(binding, "0123456789abcdef") != 64 || !home ||
+       !capacity || !cleanup)
+      return -1;
+   home[0] = 0;
+   char base[PATH_MAX], candidate[PATH_MAX], directory[PATH_MAX], history[PATH_MAX], link[PATH_MAX];
+   if (cli_runtime_vendor_base(vendor, base, sizeof base) ||
+       snprintf(candidate, sizeof candidate, "%s/n.XXXXXX", base) >= (int)sizeof candidate ||
+       strlen(candidate) >= capacity || !mkdtemp(candidate))
+      return -1;
+   snprintf(home, capacity, "%s", candidate);
+   cli_session_set_isolated_home(cleanup, home);
+   const char *state = !strcmp(vendor, "claude") ? "projects" : "sessions";
+   if (snprintf(directory, sizeof directory, "%s/.%s", home, vendor) >= (int)sizeof directory ||
+       mkdir(directory, 0700) ||
+       snprintf(history, sizeof history, "%s/browser-%s/%s/%s/%s", aimee_home(), vendor, sid,
+                binding, state) >= (int)sizeof history ||
+       platform_mkdir_p(history, 0700) ||
+       snprintf(link, sizeof link, "%s/%s", directory, state) >= (int)sizeof link ||
+       symlink(history, link))
+      goto failed;
+   if (!strcmp(vendor, "claude"))
+   {
+      cJSON *root = cJSON_CreateObject();
+      cJSON *projects = root ? cJSON_AddObjectToObject(root, "projects") : NULL;
+      cJSON *project = projects && cwd && cwd[0] ? cJSON_AddObjectToObject(projects, cwd) : NULL;
+      if (!root || !projects || !cJSON_AddBoolToObject(root, "hasCompletedOnboarding", 1) ||
+          (cwd && cwd[0] &&
+           (!project || !cJSON_AddBoolToObject(project, "hasTrustDialogAccepted", 1))))
+      {
+         cJSON_Delete(root);
+         goto failed;
+      }
+      char *json = cJSON_PrintUnformatted(root);
+      cJSON_Delete(root);
+      int rc = snprintf(link, sizeof link, "%s/.claude.json", home) >= (int)sizeof link || !json ||
+               cli_write_file_atomic(link, json);
+      free(json);
+      if (rc)
+         goto failed;
+   }
+   return 0;
+failed:
+   cli_session_destroy(cleanup);
+   home[0] = 0;
+   return -1;
+}

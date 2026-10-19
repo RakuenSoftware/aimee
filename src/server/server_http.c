@@ -1172,6 +1172,58 @@ static void handle_messages_stream(int fd, const char *body, const char *request
    server_http_sse_live_run(fd, body, g_messages_stream_handler);
 }
 
+int server_http_native_forward(int fd, const char *method, const char *path, const char *body,
+                               int body_len)
+{
+   const request_context_t *owner = request_context_get();
+   if (!owner || owner->vault_transport == ATTEST_NONE || !owner->vault_principal[0] ||
+       server_http_identity_transport() != owner->vault_transport ||
+       strcmp(server_http_identity_principal(), owner->vault_principal) ||
+       server_http_identity_browser_operator() || !method || !path || strncmp(path, "/v1/", 4) ||
+       strchr(path, '?') || strchr(path, '#') || body_len < 0 ||
+       !server_http_route_allowed_caps(0, owner->capabilities, method, path, 0))
+   {
+      send_response(fd, 403, "{\"error\":\"native request scope unavailable\"}", NULL);
+      return -1;
+   }
+   if (strcmp(method, "POST") == 0 && !server_http_json_body_is_single_value(body, body_len))
+   {
+      send_response(fd, 400, "{\"error\":\"invalid JSON body\"}", NULL);
+      return -1;
+   }
+   uint32_t previous_caps = g_rpc_conn_caps;
+   g_rpc_conn_caps = owner->capabilities;
+   server_http_keepalive_set(0);
+   server_http_gzip_set(0);
+   int rc = 0;
+   if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
+       !strcmp(path, "/v1/responses") && g_responses_stream_handler)
+      handle_responses_stream(fd, body, owner->request_id);
+   else if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
+            !strcmp(path, "/v1/messages") && g_messages_stream_handler)
+      handle_messages_stream(fd, body, owner->request_id);
+   else if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
+            !strcmp(path, "/v1/chat/completions") && g_chat_stream_handler)
+      handle_stream(fd, body, g_chat_stream_handler, owner->request_id);
+   else
+   {
+      char *response = malloc(SHTTP_RESP_MAX);
+      if (response)
+      {
+         int status = server_http_route(method, path, body, body_len, response, SHTTP_RESP_MAX);
+         send_response(fd, status, response, owner->request_id);
+         free(response);
+      }
+      else
+      {
+         send_response(fd, 500, "{\"error\":\"out of memory\"}", owner->request_id);
+         rc = -1;
+      }
+   }
+   g_rpc_conn_caps = previous_caps;
+   return rc;
+}
+
 static void handle_cli_session_stream(int fd, const char *id, const char *request_id)
 {
    if (!cli_session_pty_forwarding_enabled())

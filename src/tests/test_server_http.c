@@ -726,6 +726,57 @@ static void test_operator_control_reply_route(void)
    server_control_scope_close(scope);
 }
 
+static int native_owner_probe(const char *body, char *response, int capacity)
+{
+   assert(!strcmp(body, "{}"));
+   assert(!strcmp(server_http_identity_principal(), "webuser:native-owner"));
+   assert(!strcmp(server_http_identity_session_hdr(), "native-session"));
+   assert(server_http_identity_transport() == ATTEST_WEBCHAT_TRUSTED);
+   assert(!server_http_identity_browser_operator());
+   assert(request_context_get()->capabilities == CAP_CHAT);
+   snprintf(response, (size_t)capacity, "{\"native_owner\":true}");
+   return 200;
+}
+
+static void test_native_http_handoff_preserves_owner_and_caps(void)
+{
+   request_context_t owner = {.vault_transport = ATTEST_WEBCHAT_TRUSTED, .capabilities = CAP_CHAT};
+   strcpy(owner.vault_principal, "webuser:native-owner");
+   strcpy(owner.session_key, "native-session");
+   request_context_t long_owner = owner;
+   memset(long_owner.session_key, 's', sizeof long_owner.session_key - 1);
+   server_http_identity_bind_request_owner(&long_owner);
+   assert(!strcmp(server_http_identity_session_hdr(), long_owner.session_key));
+   assert(strlen(server_http_identity_session_hdr()) == SERVER_SESSION_ID_MAX - 1);
+   server_http_identity_clear();
+   server_http_set_chat_handler(native_owner_probe);
+   for (int mode = 0; mode < 4; mode++)
+   {
+      int pair[2];
+      assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
+      owner.capabilities = mode == 1 ? CAP_MEMORY_READ : CAP_CHAT;
+      request_context_set(mode == 0 ? NULL : &owner);
+      server_http_identity_bind_request_owner(request_context_get());
+      const char *body = mode == 2 ? "{} trailing" : "{}";
+      int rc = server_http_native_forward(pair[0], "POST", "/v1/chat/completions", body,
+                                          (int)strlen(body));
+      assert((rc == 0) == (mode == 3));
+      shutdown(pair[0], SHUT_WR);
+      char response[2048];
+      ssize_t n = read(pair[1], response, sizeof response - 1);
+      assert(n > 0);
+      response[n] = 0;
+      assert(strstr(response, mode < 2 ? "403" : mode == 2 ? "400" : "200"));
+      if (mode == 3)
+         assert(strstr(response, "\"native_owner\":true"));
+      close(pair[0]);
+      close(pair[1]);
+      request_context_clear();
+      server_http_identity_clear();
+   }
+   server_http_set_chat_handler(NULL);
+}
+
 int main(void)
 {
    test_stream_handoff_retains_attested_owner();
@@ -742,6 +793,7 @@ int main(void)
    server_error_kind_register_http_status_provider(NULL);
 
    test_json_number_serialization_is_exact();
+   test_native_http_handoff_preserves_owner_and_caps();
    test_role_template_show_reports_what_the_role_came_to();
    printf("server_http: ");
 

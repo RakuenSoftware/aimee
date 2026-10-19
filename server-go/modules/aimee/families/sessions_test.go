@@ -102,6 +102,8 @@ func (d *sessDB) QueryRow(_ context.Context, sql string, args ...any) store.Row 
 	d.executed = append(d.executed, sql)
 	d.args = append(d.args, args)
 	switch {
+	case strings.Contains(sql, "local_procedure_prepare_subject_erasure"):
+		return sessRow{db: d, sql: sql, values: []any{int64(0)}}
 	case strings.Contains(sql, "user_memory_prepare_subject_erasure"):
 		return sessRow{db: d, sql: sql, values: d.receiptRow}
 	case strings.Contains(sql, "SELECT persona_delivery_state"):

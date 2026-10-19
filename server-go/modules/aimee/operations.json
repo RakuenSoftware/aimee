@@ -28097,6 +28097,120 @@
         ],
         "max_bytes": 16777216
       }
+    },
+    {
+      "family": "telemetry",
+      "id": 59,
+      "name": "procedure_event_load",
+      "c_name": "db1_procedure_event_load",
+      "c_params": [
+        "principal",
+        "procedure_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "principal",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "procedure_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "snapshot_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 2097152
+      }
+    },
+    {
+      "family": "telemetry",
+      "id": 60,
+      "name": "procedure_event_append",
+      "c_name": "db1_procedure_event_append",
+      "c_params": [
+        "principal",
+        "procedure_json",
+        "revision",
+        "event_json",
+        "exposure_json",
+        "scope_kind",
+        "scope_id"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "principal",
+      "transaction": "required",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "procedure_json",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "revision",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "event_json",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "exposure_json",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "scope_kind",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "scope_id",
+            "type": "text",
+            "required": false
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "result",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 64
+      }
     }
   ]
 }
