@@ -9,8 +9,8 @@ HTTP retries, authorize tool calls, or own the external protocol listener.
 
 ## Public contracts
 
-`src/modules/translation/module.yaml` is the complete module-local ownership inventory: ten shipping
-translation units, four canonical public headers, seven direct tests, and this module document.
+`src/modules/translation/module.yaml` is the complete module-local ownership inventory for shipping
+translation units, canonical public headers, direct tests, and this module document.
 `ownership_complete: true` rejects an unlisted module-local C or private-header file and omission of the
 canonical document. Canonical public-header placement remains enforced by the descriptor-derived
 header-layout gate. This physical ownership claim does not imply that every exported adapter helper is
@@ -41,6 +41,15 @@ machines convert Anthropic events, OpenAI Chat chunks and decoded Bedrock Conver
 render IR deltas as Anthropic stream events. They do not decode Bedrock binary framing, write HTTP/SSE
 responses, or select the live relay. Direct coverage lives in `src/tests/test_aimee_ir_stream.c` and
 `src/tests/test_aimee_converse_stream.c`.
+
+Incremental Responses conversion lives in `aimee_responses_stream.c` and
+`aimee_responses_frontend_stream.c` under this module. The backend emits canonical text,
+reasoning and function-argument deltas before completion, then reconciles prefixes and item
+snapshots through the existing full Responses decoder. The frontend preserves authored message
+groups and opaque reasoning and defers item-done/completion to the host's durable-history boundary.
+Native framing remains bounded inside the entry adapter; transport, policy and persistence stay
+with their existing owners. `test_aimee_responses_stream.c` and
+`test_server_responses_stream.c` cover conversion and fragmented host transport.
 
 Native harness conversion lives in `src/modules/translation/harness_ir.c`, exposed by
 `src/modules/translation/include/aimee/translation/harness_ir.h`. Claude stream-json, Codex
