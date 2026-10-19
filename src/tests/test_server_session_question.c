@@ -187,19 +187,23 @@ static void legacy_wait_for(int *predicate)
 static void test_delegate_mailbox_wait(void)
 {
    legacy_mode = 1;
-   for (int cancel = 0; cancel < 2; cancel++)
+   for (int cancel = 0; cancel < 3; cancel++)
    {
       atomic_store(&cancelled, 0);
       legacy_questions = legacy_replies = legacy_done = 0;
       free(worker_result);
       worker_result = NULL;
       delegation_mailbox_t *mailbox = mailbox_acquire("test-delegate");
-      assert(mailbox && mailbox_find("test-delegate") == mailbox);
+      delegation_mailbox_t *found = mailbox_find("test-delegate");
+      assert(mailbox && found == mailbox);
+      mailbox_put(found);
       pthread_t worker;
       int started = pthread_create(&worker, NULL, legacy_ask, mailbox);
       assert(!started);
       legacy_wait_for(&legacy_questions);
-      if (cancel)
+      if (cancel == 2)
+         mailbox_release(mailbox);
+      else if (cancel)
          atomic_store(&cancelled, 1);
       else
          mailbox_reply(mailbox, "legacy answer");
@@ -208,7 +212,8 @@ static void test_delegate_mailbox_wait(void)
       assert(!joined);
       assert(legacy_questions == 1 && legacy_replies == !cancel);
       assert(cancel ? !worker_result : worker_result && !strcmp(worker_result, "legacy answer"));
-      mailbox_release(mailbox);
+      if (cancel != 2)
+         mailbox_release(mailbox);
    }
    atomic_store(&cancelled, 0);
    delegation_mailbox_t *mailbox = mailbox_acquire("test-delegate");
@@ -235,6 +240,30 @@ static void test_delegate_mailbox_wait(void)
    mailbox_release(mailbox);
    assert(!mailbox_find("test-delegate"));
    legacy_mode = 0;
+}
+
+static void test_retired_mailbox_lease(void)
+{
+   delegation_mailbox_t *old = mailbox_acquire("retired-delegate");
+   delegation_mailbox_t *lease = mailbox_find("retired-delegate");
+   assert(old && lease == old);
+   mailbox_release(old);
+   assert(!mailbox_find("retired-delegate"));
+   delegation_mailbox_t *next = mailbox_acquire("next-delegate");
+   assert(next && next != old);
+   int refused = mailbox_reply(lease, "late answer for old delegate");
+   assert(refused == 1);
+   char answer[64] = "unchanged";
+   int absent = mailbox_wait(next, answer, sizeof answer, 0);
+   assert(absent < 0 && !strcmp(answer, "unchanged"));
+   mailbox_put(lease);
+   delegation_mailbox_t *replacement = mailbox_acquire("replacement-delegate");
+   assert(replacement == old);
+   int queued = mailbox_reply(replacement, "replacement answer");
+   int delivered = mailbox_wait(replacement, answer, sizeof answer, 0);
+   assert(!queued && !delivered && !strcmp(answer, "replacement answer"));
+   mailbox_release(replacement);
+   mailbox_release(next);
 }
 
 int main(void)
@@ -302,6 +331,7 @@ int main(void)
       server_control_scope_close(worker_scope);
    }
    test_delegate_mailbox_wait();
+   test_retired_mailbox_lease();
    free(worker_result);
    cJSON_Delete(last_response);
    puts("host questions: durable request/reply, scoped ownership, cancellation and storage refusal "

@@ -84,7 +84,7 @@ delegation_mailbox_t *mailbox_acquire(const char *delegation_id)
    pthread_mutex_lock(&g_mailbox_lock);
    for (int i = 0; i < MAX_ACTIVE_DELEGATIONS; i++)
    {
-      if (!g_mailboxes[i].active)
+      if (!g_mailboxes[i].references)
       {
          delegation_mailbox_t *mb = &g_mailboxes[i];
          snprintf(mb->delegation_id, sizeof(mb->delegation_id), "%s", delegation_id);
@@ -104,6 +104,7 @@ delegation_mailbox_t *mailbox_acquire(const char *delegation_id)
          mb->reply[0] = '\0';
          mb->has_reply = 0;
          mb->active = 1;
+         mb->references = 1;
          pthread_mutex_unlock(&g_mailbox_lock);
          return mb;
       }
@@ -124,15 +125,46 @@ int delegate_agent_uses_mistral_path(const agent_t *agent)
            strcmp(agent->cli_kind, "vibe-plan") == 0);
 }
 
+static int mailbox_retain(delegation_mailbox_t *mb)
+{
+   if (!mb)
+      return 0;
+   pthread_mutex_lock(&g_mailbox_lock);
+   int retained = mb->references && mb->active;
+   if (retained)
+      mb->references++;
+   pthread_mutex_unlock(&g_mailbox_lock);
+   return retained;
+}
+static void mailbox_put_locked(delegation_mailbox_t *mb)
+{
+   if (--mb->references == 0)
+   {
+      pthread_cond_destroy(&mb->reply_ready);
+      pthread_mutex_destroy(&mb->lock);
+      mb->delegation_id[0] = '\0';
+      mb->reply[0] = '\0';
+      mb->has_reply = 0;
+   }
+}
+void mailbox_put(delegation_mailbox_t *mb)
+{
+   if (!mb)
+      return;
+   pthread_mutex_lock(&g_mailbox_lock);
+   mailbox_put_locked(mb);
+   pthread_mutex_unlock(&g_mailbox_lock);
+}
 void mailbox_release(delegation_mailbox_t *mb)
 {
    if (!mb)
       return;
    pthread_mutex_lock(&g_mailbox_lock);
+   pthread_mutex_lock(&mb->lock);
    mb->active = 0;
-   mb->delegation_id[0] = '\0';
-   pthread_mutex_destroy(&mb->lock);
-   pthread_cond_destroy(&mb->reply_ready);
+   pthread_cond_broadcast(&mb->reply_ready);
+   pthread_mutex_unlock(&mb->lock);
+   mailbox_put_locked(mb);
    pthread_mutex_unlock(&g_mailbox_lock);
 }
 
@@ -144,6 +176,7 @@ delegation_mailbox_t *mailbox_find(const char *delegation_id)
       if (g_mailboxes[i].active && strcmp(g_mailboxes[i].delegation_id, delegation_id) == 0)
       {
          delegation_mailbox_t *mb = &g_mailboxes[i];
+         mb->references++;
          pthread_mutex_unlock(&g_mailbox_lock);
          return mb;
       }
@@ -156,19 +189,25 @@ delegation_mailbox_t *mailbox_find(const char *delegation_id)
  * delegate without waiting for the entire input timeout. Deadlines are monotonic. */
 int mailbox_wait(delegation_mailbox_t *mb, char *out, size_t out_len, int timeout_secs)
 {
+   if (!mailbox_retain(mb))
+      return -1;
    struct timespec deadline;
    if (clock_gettime(CLOCK_MONOTONIC, &deadline))
+   {
+      mailbox_put(mb);
       return -1;
+   }
    deadline.tv_sec += timeout_secs;
    pthread_mutex_lock(&mb->lock);
    while (!mb->has_reply)
    {
       struct timespec now;
-      if (agent_request_cancelled() || clock_gettime(CLOCK_MONOTONIC, &now) ||
+      if (!mb->active || agent_request_cancelled() || clock_gettime(CLOCK_MONOTONIC, &now) ||
           now.tv_sec > deadline.tv_sec ||
           (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec))
       {
          pthread_mutex_unlock(&mb->lock);
+         mailbox_put(mb);
          return -1;
       }
       struct timespec wake = now;
@@ -196,29 +235,38 @@ int mailbox_wait(delegation_mailbox_t *mb, char *out, size_t out_len, int timeou
       if (rc && rc != ETIMEDOUT)
       {
          pthread_mutex_unlock(&mb->lock);
+         mailbox_put(mb);
          return -1;
       }
    }
-   if (agent_request_cancelled())
+   if (!mb->active || agent_request_cancelled())
    {
       pthread_mutex_unlock(&mb->lock);
+      mailbox_put(mb);
       return -1;
    }
    snprintf(out, out_len, "%s", mb->reply);
    mb->has_reply = 0;
    mb->reply[0] = '\0';
    pthread_mutex_unlock(&mb->lock);
+   mailbox_put(mb);
    return 0;
 }
 
 /* Send a reply to a waiting delegate. */
-void mailbox_reply(delegation_mailbox_t *mb, const char *content)
+int mailbox_reply(delegation_mailbox_t *mb, const char *content)
 {
    pthread_mutex_lock(&mb->lock);
+   if (!mb->active)
+   {
+      pthread_mutex_unlock(&mb->lock);
+      return 1;
+   }
    snprintf(mb->reply, sizeof(mb->reply), "%s", content);
    mb->has_reply = 1;
    pthread_cond_signal(&mb->reply_ready);
    pthread_mutex_unlock(&mb->lock);
+   return 0;
 }
 
 /* Global: current delegation mailbox for the calling thread (used by tool_request_input) */
@@ -256,20 +304,25 @@ char *delegation_request_input(const char *question)
 {
    if (server_control_scope_current())
       return server_session_question(question, DELEGATION_INPUT_TIMEOUT);
-   if (!tl_mailbox || !tl_mailbox->active)
+   delegation_mailbox_t *mailbox = tl_mailbox;
+   if (!mailbox_retain(mailbox))
       return NULL;
 
    /* Record the question */
-   (void)db1_delegation_message_record(tl_mailbox->delegation_id, "delegate_to_parent", question);
+   (void)db1_delegation_message_record(mailbox->delegation_id, "delegate_to_parent", question);
 
    /* Wait for parent reply */
    char reply[4096];
-   if (mailbox_wait(tl_mailbox, reply, sizeof(reply), DELEGATION_INPUT_TIMEOUT) != 0)
-      return NULL; /* timeout */
+   if (mailbox_wait(mailbox, reply, sizeof(reply), DELEGATION_INPUT_TIMEOUT) != 0)
+   {
+      mailbox_put(mailbox);
+      return NULL;
+   }
 
    /* Record the reply */
-   (void)db1_delegation_message_record(tl_mailbox->delegation_id, "parent_to_delegate", reply);
+   (void)db1_delegation_message_record(mailbox->delegation_id, "parent_to_delegate", reply);
 
+   mailbox_put(mailbox);
    size_t len = strlen(reply);
    char *out = malloc(len + 1);
    if (out)

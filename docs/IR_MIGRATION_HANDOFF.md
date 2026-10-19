@@ -2480,3 +2480,28 @@ zero diagnostics, normal native execution, CMake/CTest and all 76 lint gates.
 The preceding host-question commit `7230d5805` was pushed after one transient
 GitHub internal-server rejection; full HEAD secret scanning found no leaks
 across 6,198 commits. Fresh branch CI remains pending.
+
+## Delegate mailbox reply leases survive creator teardown
+
+The reply handler previously received a borrowed mailbox pointer from lookup;
+creator cleanup could destroy its mutex or reuse its slot before the reply was
+queued. Lookup now returns a retained lease. Creator release retires the mailbox,
+wakes waiters and drops only its reference. Waiters and the legacy input hook
+retain the mailbox while operating; synchronization objects and the slot are
+reclaimed only after the last lease ends. Closed mailboxes reject late replies.
+The sole production reply handler puts its lookup lease on both outcomes and
+reports a closure race as an error instead of success.
+
+Focused fixtures preserve normal parent delivery and cancellation, close the
+creator while the real input hook is active, and hold a reply lease past closure.
+A retired slot cannot be allocated to another delegate while that lease exists;
+a late reply refuses without reaching the new delegate. The slot is reusable
+after the lease is released, and a valid replacement reply is delivered once.
+This retains legacy delegate conversation semantics; private canonical question
+routing/history cutover remains unfinished. All 654 native binaries and proxy
+regressions, the focused ASan/UBSan fixture and three-source Cppcheck pass.
+The mailbox-lease increment additionally passes the actual CMake application
+and focused CTest, rebuilt Linux server and original PostgreSQL 18.6 integration
+harness (167/167, 26 existing service skips, no KB). No fresh Windows or Darwin
+qualification or production promotion is inferred from these Linux results.
+All 76 repository lint checks pass for the mailbox-lease increment.

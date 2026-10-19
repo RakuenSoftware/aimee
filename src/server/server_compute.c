@@ -2367,7 +2367,15 @@ int handle_delegate_reply(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, augmented, NULL);
    }
 
-   mailbox_reply(mb, jcontent->valuestring);
+   int queued = mailbox_reply(mb, jcontent->valuestring);
+   mailbox_put(mb);
+   if (queued)
+   {
+      char augmented[1024];
+      delegation_augment_error("delegation closed before the reply was queued", augmented,
+                               sizeof(augmented));
+      return server_send_error(conn, augmented, NULL);
+   }
    cJSON *resp = jo_ok();
    return server_send_ok(conn, resp);
 }
