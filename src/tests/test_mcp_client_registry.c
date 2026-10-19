@@ -995,6 +995,25 @@ static void test_call_tool_demux(void)
    cJSON_Delete(wrapper);
 }
 
+static void test_git_family_resolves_before_admission(void)
+{
+   cJSON *args = cJSON_Parse("{\"command\":\"push\"}");
+   char resolved[96];
+   assert(mcp_family_demux("git", args, resolved, sizeof resolved) == 1);
+   assert(!strcmp(resolved, "git_push"));
+   assert(mcp_family_demux("git_push", args, resolved, sizeof resolved) == 0);
+   assert(mcp_family_demux("git", args, resolved, strlen("git_push")) == -1);
+   cJSON_ReplaceItemInObject(args, "command", cJSON_CreateString(""));
+   assert(mcp_family_demux("git", args, resolved, sizeof resolved) == -1);
+   cJSON_DeleteItemFromObjectCaseSensitive(args, "command");
+   assert(mcp_family_demux("git", args, resolved, sizeof resolved) == -1);
+   cJSON_AddStringToObject(args, "command", "create");
+   assert(mcp_family_demux("note", args, resolved, sizeof resolved) == 1);
+   assert(!strcmp(resolved, "create_note"));
+   assert(mcp_family_demux("note", args, resolved, strlen("create_note")) == -1);
+   cJSON_Delete(args);
+}
+
 static int tools_have(cJSON *tools, const char *name)
 {
    cJSON *t = NULL;
@@ -1374,6 +1393,7 @@ int main(void)
    test_tools_list_surface();
    test_tool_profile_filter();
    test_call_tool_demux();
+   test_git_family_resolves_before_admission();
    test_get_help_topics_exist();
    test_solo_profile_is_gone();
    test_delegates_disabled_withholds_delegate_tools();

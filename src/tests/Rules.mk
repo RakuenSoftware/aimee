@@ -2821,7 +2821,10 @@ $(TESTPREFIX)/unit-test-client-integrations: $(OBJDIR)/tests/test_client_integra
 # The three that DO read the store back are gated on store_module_fixture, the
 # convention seven other suites here already use: bring the real module up, or
 # skip saying why.
-$(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/support/agent_admission_stub.o | $(OBJDIR)/aimee-module
+$(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent_mcp_permissions.o \
+                      $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o \
+                      $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o \
+                      $(OBJDIR)/tests/support/agent_admission_stub.o | $(OBJDIR)/aimee-module
 $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/server/osv_check.o $(OBJDIR)/command_registry.o $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o $(OBJDIR)/module_commands.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test_agent_caps.o \
                       $(OBJDIR)/core/turn_integrity/turn_integrity.o \
                       $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/tests/support/store_module_fixture.o $(DB1_CLIENT_OBJS) \
@@ -6890,7 +6893,7 @@ $(TESTPREFIX)/unit-test-response-completion-stage: $(OBJDIR)/tests/test_response
 # Real Go provider owner behind the native test transport.
 $(OBJDIR)/aimee-providers-fixture: $(wildcard ../server-go/modules/providers/*.go) ../server-go/modules/providers/testdata/nativefixture/main.go
 	@mkdir -p $(dir $@)
-	cd ../server-go && go build -o ../src/$@ ./modules/providers/testdata/nativefixture
+	cd ../server-go && $(GO) build -o "$(abspath $@)" ./modules/providers/testdata/nativefixture
 
 
 
@@ -6937,7 +6940,7 @@ $(TESTPREFIX)/unit-test-memory-view-transport: $(OBJDIR)/tests/test_memory_view_
 # imports shared bus, store, audit and metric helpers outside the memory tree.
 $(OBJDIR)/aimee-memory-fixture: $(AIMEE_MODULE_GO_SRCS)
 	@mkdir -p $(dir $@)
-	cd ../server-go && CGO_ENABLED=0 $(GO) build -o ../src/$@ ./modules/memory/testdata/nativefixture
+	cd ../server-go && CGO_ENABLED=0 $(GO) build -o "$(abspath $@)" ./modules/memory/testdata/nativefixture
 
 $(TESTPREFIX)/unit-test-memory-demotion-transport: $(OBJDIR)/tests/test_memory_demotion_transport.o $(OBJDIR)/kb/kb_service_agent.o $(OBJDIR)/kb/kb_intel_payload.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

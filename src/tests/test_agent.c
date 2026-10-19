@@ -116,6 +116,7 @@ int agent_execute_cli_shell_driver(const agent_t *agent, const char *driver_name
                                    const char *system_prompt, const char *user_prompt,
                                    agent_result_t *out);
 void test_cancelled_durable_job_blocks_tool_dispatch(void);
+void test_native_mcp_permission_admission(void);
 void test_delegate_bash_cancel_kills_running_tool(void);
 void test_parent_write_guard_readonly_pipeline(void);
 void test_stale_parent_guard_blocks_other_worktree_then_clear_unblocks(void);
@@ -4277,6 +4278,7 @@ int main(void)
    test_permissions_clamp_the_toolset();
    test_one_delegates_permissions_are_not_anothers();
    test_owned_tool_and_source_handoff();
+   test_native_mcp_permission_admission();
    test_provider_env_credentials_and_headers();
    test_dispatch_carries_owner_failure_status();
    test_codex_oauth_request_creds();

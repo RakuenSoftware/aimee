@@ -269,6 +269,49 @@ static char *current_code_role_policy_error(const char *role, const char *detail
    return safe_strdup(err);
 }
 
+agent_tool_permission_t agent_tools_permission_check(const char *name, const cJSON *args)
+{
+   if (!name || !name[0])
+      return AGENT_TOOL_PERMISSION_ROLE;
+   if ((strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0) &&
+       !agent_tools_shell_allowed())
+      return AGENT_TOOL_PERMISSION_SHELL;
+   if (!agent_tools_tool_allowed_for_role(agent_tools_dispatch_role(), name))
+      return AGENT_TOOL_PERMISSION_ROLE;
+   if (!agent_tools_knowledge_write_allowed())
+   {
+      const char *key = strcmp(name, "bash") == 0             ? "command"
+                        : strcmp(name, "execute_script") == 0 ? "body"
+                                                              : NULL;
+      const cJSON *command = key ? cJSON_GetObjectItem(args, key) : NULL;
+      if (cJSON_IsString(command) && command_uses_aimee_stale_context(command->valuestring))
+         return AGENT_TOOL_PERMISSION_KNOWLEDGE;
+   }
+   return AGENT_TOOL_PERMISSION_ALLOWED;
+}
+
+char *agent_tools_permission_error(agent_tool_permission_t permission)
+{
+   switch (permission)
+   {
+   case AGENT_TOOL_PERMISSION_ALLOWED:
+      return NULL;
+   case AGENT_TOOL_PERMISSION_SHELL:
+      return safe_strdup("error: this delegate does not hold the `shell` permission, so it "
+                         "cannot run commands. Use the file and index tools, or give the role "
+                         "`shell` in its template's permissions block.");
+   case AGENT_TOOL_PERMISSION_KNOWLEDGE:
+      return current_code_role_policy_error(
+          agent_tools_dispatch_role(),
+          "mutating or broad aimee context commands are disabled for this role");
+   case AGENT_TOOL_PERMISSION_ROLE:
+   default:
+      return current_code_role_policy_error(
+          agent_tools_dispatch_role(), "indexed, memory, docs, notes, and remote MCP tools are "
+                                       "disabled for this role");
+   }
+}
+
 /* Surgical edit: replace old_string with new_string in an existing file.
  * Reads the whole file (raw, untruncated — tool_read_file caps at 4 KB and
  * would corrupt a round-trip), checks old_string is present and unique (unless
@@ -2101,53 +2144,14 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       }
    }
 
-   /* The `shell` permission, enforced where the command would run.
-    *
-    * Deliberately ahead of the toolset check and independent of it: a delegate
-    * gets its toolset from a map keyed on the role NAME, so a role an operator
-    * defined without `shell` still resolves to one carrying bash. This is the
-    * check that binds it. */
-   if ((strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0) &&
-       !agent_tools_shell_allowed())
+   /* Shared by in-process execution and isolated native MCP callbacks. Toolset
+    * membership cannot grant a permission withheld by the captured role. */
+   agent_tool_permission_t permission = agent_tools_permission_check(name, args);
+   if (permission != AGENT_TOOL_PERMISSION_ALLOWED)
    {
       cJSON_Delete(args);
-      td_outcome_set("refused", "permission");
-      return safe_strdup("error: this delegate does not hold the `shell` permission, so it "
-                         "cannot run commands. Use the file and index tools, or give the role "
-                         "`shell` in its template's permissions block.");
-   }
-
-   const char *active_role = agent_tools_dispatch_role();
-   if (!agent_tools_tool_allowed_for_role(active_role, name))
-   {
-      cJSON_Delete(args);
-      td_outcome_set("refused", "role");
-      return current_code_role_policy_error(
-          active_role, "indexed, memory, docs, notes, and remote MCP tools are "
-                       "disabled for this role");
-   }
-   if (!agent_tools_knowledge_write_allowed())
-   {
-      const char *command = NULL;
-      if (strcmp(name, "bash") == 0)
-      {
-         cJSON *cmd = cJSON_GetObjectItem(args, "command");
-         if (cJSON_IsString(cmd))
-            command = cmd->valuestring;
-      }
-      else if (strcmp(name, "execute_script") == 0)
-      {
-         cJSON *body = cJSON_GetObjectItem(args, "body");
-         if (cJSON_IsString(body))
-            command = body->valuestring;
-      }
-      if (command_uses_aimee_stale_context(command))
-      {
-         cJSON_Delete(args);
-         td_outcome_set("refused", "role");
-         return current_code_role_policy_error(
-             active_role, "mutating or broad aimee context commands are disabled for this role");
-      }
+      td_outcome_set("refused", permission == AGENT_TOOL_PERMISSION_SHELL ? "permission" : "role");
+      return agent_tools_permission_error(permission);
    }
 
    /* --- Guardrail enforcement for ALL tool execution paths --- */

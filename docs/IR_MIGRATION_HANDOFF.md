@@ -1224,3 +1224,34 @@ all shipped Go module interop and routing startup, passes locally. The merged
 Codex unit/real pinned SDK adoption fixture, native runtime/local learning fixtures,
 production server build and all 76 lint gates pass. Fresh CI must qualify the
 published merge; the previous aggregate unit failure was the Go job's consequence.
+
+
+## Native MCP permission admission continuation
+
+PR #3047 merged at `fedfa6728af96c14676a68ece6e4f84bfe8310eb` after all
+58 applicable checks passed; the two PR platform skips are still skips, not
+Windows/macOS qualification. Continuation branch: `fix/browser-ir-native-execution`.
+
+The tools owner now exposes the existing role/toolset/deny-list, shell and
+knowledge-command checks through one typed permission API. In-process dispatch
+retains its refusal classifications and messages. Served isolated native callbacks
+apply that same API after bridge/family resolution and before any handler or gateway
+branch. Ordinary authenticated MCP clients retain their existing capability checks.
+Git multiplex commands now expand before permission and workflow externalization
+gates, so direct `git_push`, `git` command=push and `call_tool` targeting that family
+share an identity. Insufficient family output capacity refuses instead of truncating.
+
+The agent and MCP registry suites pass, including ASan/UBSan. New checks cover
+captured permissions, denied flat/family/bridged Git calls, notes, remote names,
+shell and knowledge-command limits, toolset limits, read access and truncated
+identities. Clean builds also exposed an unused mock counter and Go fixture outputs
+that mishandled absolute OBJDIR; those are corrected without suppressing warnings.
+The memory ownership ledger records unchanged memory symbols and the actual host
+admission boundary change; it does not claim independent reviewer approval.
+
+This is permission admission only. Full served effects, write/path confinement,
+argument-bound human approvals and question round trips still need completion
+before SDK activation. Production callers remain on the old native execution
+path; account-bound prefix/cache admission, real incremental Responses streaming,
+remaining credential custody and IR consumers, independently graded KB-free
+learning and production acceptance remain open. Production must remain KB-free.

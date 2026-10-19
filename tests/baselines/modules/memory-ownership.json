@@ -2073,15 +2073,16 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "85175c0ba7c8a20cd80398bef0303fda23c1eb6198f58c850df066f6c0d44a62"
+      "sha256": "eac406679570f2be64ef92ee0a4ac6b4ab34b215ac2a6a97711b6af7a9f0f45a",
+      "boundary_change": "Git multiplex commands now resolve before host admission; family identity truncation refuses. Memory tool schema and ownership are unchanged. This records boundary analysis, not independent approval."
     },
     "src/modules/tools/agent_tools_dispatch.c": {
       "disposition": "host-context",
       "symbols": [
         "kb_client_memory_scope_context_apply"
       ],
-      "sha256": "0dc32c36caea15f25402beea92874d1f5338f8197f0455c272f59c0c0c785938",
-      "boundary_change": "The dispatcher now returns its existing execution/receipt owner failure classification alongside the owned text result. Canonical consumers use this flag for is_error, evidence and liveness instead of guessing from text. Receipt completion can mark an unconfirmed outcome as failed before effect completion/audit. The kb_client_memory_scope_context_apply host-context seam and its arguments are unchanged; no memory eligibility, recall or scope policy moves into tools. This records the source change, not independent reviewer approval. Native exec-envelope outcome classification is relocated into the existing tools effect-contract source to keep the dispatcher below the file limit; its signals and policy ownership are unchanged."
+      "sha256": "1f017e85cdebf33ac2f665c39173a4747788b6020d0c8744701b7d35b161bea2",
+      "boundary_change": "The dispatcher now returns its existing execution/receipt owner failure classification alongside the owned text result. Canonical consumers use this flag for is_error, evidence and liveness instead of guessing from text. Receipt completion can mark an unconfirmed outcome as failed before effect completion/audit. The kb_client_memory_scope_context_apply host-context seam and its arguments are unchanged; no memory eligibility, recall or scope policy moves into tools. This records the source change, not independent reviewer approval. Native exec-envelope outcome classification is relocated into the existing tools effect-contract source to keep the dispatcher below the file limit; its signals and policy ownership are unchanged. Role/toolset/deny-list, shell and knowledge command admission are extracted into a typed tools API shared with isolated served MCP callbacks. Existing memory scope application and policy ownership are unchanged. This records boundary analysis, not independent approval."
     },
     "src/rel_types.c": {
       "disposition": "storage-protocol",
@@ -2204,7 +2205,8 @@
         "kb_client_memory_scope_context_set",
         "server_module_memory_data"
       ],
-      "sha256": "57bf09c0192f973fe087864b79d76d4000d94b3cfa07b2c949fb821168bea8e2"
+      "sha256": "66ecbe5d620f68c77fd1d08d736045652d679b7b3b185f91271d9a2d1364618d",
+      "boundary_change": "Isolated native callbacks apply the existing tools permission owner to the resolved callable before dispatch. Git family expansion moves before workflow externalization admission. Existing authenticated memory transport and scope owners are unchanged. This records boundary analysis, not independent approval."
     },
     "src/server/server_mcp_call_table.c": {
       "disposition": "host-transport",
@@ -2416,7 +2418,8 @@
       "symbols": [
         "memory_recall"
       ],
-      "sha256": "87d4880932d96cee3732bf35bf812c94dc7ea1e2099bd7e7c8546d0b53e5f463"
+      "sha256": "e2c470da87e082450f69ea987644adfcfbfa1342014581234a29a907abc5a1e0",
+      "boundary_change": "Adds Git family identity and output-capacity regressions. Existing memory recall catalog assertions are unchanged. This records boundary analysis, not independent approval."
     },
     "src/tests/test_mcp_directive_transport.c": {
       "disposition": "host-fixture",

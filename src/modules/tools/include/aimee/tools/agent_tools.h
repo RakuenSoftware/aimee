@@ -337,6 +337,20 @@ int agent_tools_shell_allowed(void);
 void agent_tools_knowledge_write_set(int allowed);
 int agent_tools_knowledge_write_allowed(void);
 
+/* Query the current captured role/toolset/deny-list and shell/knowledge ceiling.
+ * Call after resolving any family/bridge aliases to the actual callable name.
+ * This is permission admission only; callers still own path, effect and human
+ * approval enforcement. The error helper returns an owned string (NULL if allowed). */
+typedef enum
+{
+   AGENT_TOOL_PERMISSION_ALLOWED = 0,
+   AGENT_TOOL_PERMISSION_SHELL,
+   AGENT_TOOL_PERMISSION_ROLE,
+   AGENT_TOOL_PERMISSION_KNOWLEDGE
+} agent_tool_permission_t;
+agent_tool_permission_t agent_tools_permission_check(const char *name, const cJSON *args);
+char *agent_tools_permission_error(agent_tool_permission_t permission);
+
 /* Read-only-delegate gate (backend-agnostic write capability). A delegate that
  * is not write-capable (see the write_capable field, derived once at dispatch
  * from role + write policy) is blocked from ALL file writes on the native tool

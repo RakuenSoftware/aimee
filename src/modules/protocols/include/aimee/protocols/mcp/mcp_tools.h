@@ -93,9 +93,9 @@ void mcp_add_extended_tools(cJSON *tools);
  * action discriminator. Called by mcp_build_tools_list after all members exist. */
 void mcp_collapse_families(cJSON *tools);
 
-/* If `tool` is a collapsed family name, resolve args[command|action] to the
+/* If `tool` is a collapsed family name (or git), resolve args[command|action] to the
  * legacy member tool name into `out`. Returns 1 (rewritten), 0 (not a family),
- * or -1 (family but missing/unknown command). */
+ * or -1 (family but missing/unknown command or insufficient output capacity). */
 int mcp_family_demux(const char *tool, cJSON *args, char *out, size_t n);
 
 #endif /* DEC_MCP_TOOLS_H */
