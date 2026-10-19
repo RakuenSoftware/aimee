@@ -1,8 +1,10 @@
 """Suite registration must agree with Make's frozen execution list."""
 import importlib.util
+import os
 from pathlib import Path
 import subprocess
 import unittest
+from unittest import mock
 
 SPEC = importlib.util.spec_from_file_location(
     "check_tests_are_run", Path(__file__).resolve().parents[1] / "check_tests_are_run.py"
@@ -14,7 +16,7 @@ SPEC.loader.exec_module(CHECK)
 class SuiteSelectionTest(unittest.TestCase):
     def make_selection(self, rules):
         result = subprocess.run(
-            ["make", "-s", "-f", "-", "print"],
+            ["make", "--no-print-directory", "-s", "-f", "-", "print"],
             input=rules + "\nprint:\n\t@printf '%s\\n' $(UNIT_TEST_TARGETS)\n",
             text=True, capture_output=True, check=True,
         )
@@ -28,6 +30,15 @@ class SuiteSelectionTest(unittest.TestCase):
         )
         self.assertEqual(CHECK.selected_tests(rules), self.make_selection(rules))
         self.assertEqual(CHECK.selected_tests(rules), {"unit-test-first", "unit-test-second"})
+
+    def test_nested_make_banners_do_not_become_test_names(self):
+        rules = ("TEST_TARGETS = unit-test-first\n"
+                 "UNIT_TEST_TARGETS := $(TEST_TARGETS)\n")
+        # CI's script-tests lane is launched by make -C, unlike direct Python
+        # execution. Preserve the real recursive-Make environment that exposed
+        # the failure and keep checking exact stdout, not a filtered subset.
+        with mock.patch.dict(os.environ, {"MAKELEVEL": "1", "MAKEFLAGS": "w"}):
+            self.assertEqual(self.make_selection(rules), {"unit-test-first"})
 
     def test_late_registration_is_rejected_even_though_make_accepts_it(self):
         rules = (

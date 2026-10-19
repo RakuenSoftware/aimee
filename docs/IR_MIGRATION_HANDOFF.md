@@ -2896,3 +2896,17 @@ All 76 lint gates pass for the typed callback increment with CI clang-format
 19.1.1. Published 945aceaff CI subsequently reached 48 passing jobs, including
 integration and three Docker tiers; the complete script-regression job failed
 and T2 was still running. That script failure is being investigated next.
+
+
+## Recursive Make script-fixture repair from fresh CI
+
+The complete script-regression job on 945aceaff failed two suite-selection
+assertions. Its nested make -C invocation exports directory-printing state, so
+the miniature GNU Make fixture's stdout included Entering/Leaving banners as
+well as its actual test names. The failure reproduces locally with MAKELEVEL=1
+and MAKEFLAGS=w. The fixture now requests --no-print-directory explicitly and
+retains exact stdout/set comparisons. A seventh regression invokes actual Make
+with that recursive environment. All seven pass directly, under the reproduced
+environment, and through the actual tests-are-run-check Make gate. No coverage
+selection, assertion, baseline or CI job was removed or exempted. The full script
+suite and fresh CI rerun remain to qualify this repair.
