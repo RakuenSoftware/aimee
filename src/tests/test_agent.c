@@ -116,6 +116,7 @@ char *tool_grep(const char *path, const char *pattern, int max_results);
 char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms);
 void test_cancelled_durable_job_blocks_tool_dispatch(void);
 void test_native_mcp_permission_admission(void);
+void test_script_rpc_keeps_permission_scope(void);
 void test_delegate_bash_cancel_kills_running_tool(void);
 void test_parent_write_guard_readonly_pipeline(void);
 void test_stale_parent_guard_blocks_other_worktree_then_clear_unblocks(void);
@@ -4568,6 +4569,7 @@ int main(void)
    test_one_delegates_permissions_are_not_anothers();
    test_owned_tool_and_source_handoff();
    test_native_mcp_permission_admission();
+   test_script_rpc_keeps_permission_scope();
    test_provider_env_credentials_and_headers();
    test_dispatch_carries_owner_failure_status();
    test_codex_oauth_request_creds();

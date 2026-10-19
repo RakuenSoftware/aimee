@@ -2110,3 +2110,30 @@ its own admitted-definition cutover. This API increment does not claim those,
 production native SDK activation, resumed native command fidelity or independently
 graded learning complete. Fresh published `591d791e2` benchmark, attribution and
 non-main workflows pass; its source CI remains in progress at this checkpoint.
+
+
+## Script RPC retains caller tool permissions
+
+A real-dispatch regression reproduced a denied `read_file` succeeding through
+script RPC and returning a private fixture file. The RPC worker now restores an
+owned immutable copy of the caller's role, toolset, deny list, shell/knowledge
+permissions and parent-write guard. Cleanup joins the worker before freeing that
+copy, including failed startup paths. The stop flag is atomic rather than volatile.
+No per-call effect authorization or model credential is copied.
+
+The regression now refuses the denied read, proves the parent scope is unchanged,
+and permits a real read after the caller clears its restriction. Framing tests
+also refuse startup when permission capture fails. Agent and script-runner suites
+pass normally and with ASan/UBSan; changed-source Cppcheck has no diagnostics.
+All 653 native binaries and all 76 lint gates pass; serial CMake runtime/cache
+checks pass 2/2. An earlier CMake attempt overlapped lint's deployment-env negative
+plant, which temporarily edits a source file; that failed attempt is retained and
+is not counted as a pass. A local mixed absolute/relative object dependency cache
+was normalized before the actual permission regression qualification.
+
+This is the tool-permission handoff. Script RPC's caller identity/cwd/source and
+workspace handoff, canonical definition/policy admission and cancellation remain
+separate outstanding work; production native activation and independent learning
+qualification are still unfinished. The previous tool API integration remains
+163/163 with its 26 explicit service skips, not a new integration claim for this
+script increment.

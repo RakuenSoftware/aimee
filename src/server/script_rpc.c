@@ -158,9 +158,10 @@ static cJSON *script_rpc_dispatch(script_rpc_server_t *srv, cJSON *req)
 static void *script_rpc_thread(void *arg)
 {
    script_rpc_server_t *srv = (script_rpc_server_t *)arg;
+   agent_tools_scope_restore(&srv->tools);
    if (srv->use_fd_pair)
    {
-      while (!srv->stop)
+      while (!atomic_load(&srv->stop))
       {
          fd_set rfds;
          FD_ZERO(&rfds);
@@ -203,7 +204,7 @@ static void *script_rpc_thread(void *arg)
       return NULL;
    }
 
-   while (!srv->stop)
+   while (!atomic_load(&srv->stop))
    {
       fd_set rfds;
       FD_ZERO(&rfds);
@@ -325,6 +326,9 @@ int script_rpc_prepare(script_rpc_server_t *srv)
    memset(srv, 0, sizeof(*srv));
    srv->listen_fd = -1;
    srv->client_fd = -1;
+   atomic_init(&srv->stop, 0);
+   if (agent_tools_scope_capture_owned(&srv->tools) != 0)
+      return -1;
    char suffix[17];
    if (platform_random_hex(suffix, 16) != 0)
       return -1;
@@ -365,7 +369,7 @@ void script_rpc_stop(script_rpc_server_t *srv)
 {
    if (!srv)
       return;
-   srv->stop = 1;
+   atomic_store(&srv->stop, 1);
    if (srv->thread_started)
       pthread_join(srv->thread, NULL);
    srv->thread_started = 0;
@@ -375,6 +379,7 @@ void script_rpc_cleanup(script_rpc_server_t *srv)
 {
    if (!srv)
       return;
+   script_rpc_stop(srv);
    if (srv->listen_fd >= 0)
    {
       close(srv->listen_fd);
@@ -395,4 +400,5 @@ void script_rpc_cleanup(script_rpc_server_t *srv)
       unlink(sh);
       rmdir(srv->stub_dir);
    }
+   agent_tools_scope_destroy_owned(&srv->tools);
 }

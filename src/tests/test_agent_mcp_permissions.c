@@ -1,10 +1,13 @@
-/* Permission ceilings must survive the same bridge/family resolution used by
- * served native calls. No tool handler runs in these admission checks. */
+/* Native admission checks preserve permission ceilings through bridge/family
+ * resolution. Script handoff checks exercise the real joined RPC dispatcher. */
 #include <aimee/tools/agent_tools.h>
 #include <aimee/protocols/mcp/mcp_tools.h>
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include "platform_test_util.h"
 
 void test_native_mcp_permission_admission(void)
 {
@@ -68,4 +71,56 @@ void test_native_mcp_permission_admission(void)
    agent_tools_scope_restore(&previous);
    agent_tools_scope_destroy_owned(&captured);
    puts("  PASS: native MCP bridge/family calls retain captured permission ceilings");
+}
+
+void test_script_rpc_keeps_permission_scope(void)
+{
+   agent_tools_scope_snapshot_t previous;
+   agent_tools_scope_bookmark(&previous);
+   static const char *const denied[] = {"read_file"};
+   agent_tools_set_dispatch_role(NULL);
+   agent_tools_set_active_toolset(NULL);
+   agent_tools_denied_set(denied, 1);
+   char directory[MAX_PATH_LEN], path[MAX_PATH_LEN], body[MAX_PATH_LEN * 2];
+   snprintf(directory, sizeof directory, "%s/ars.XXXXXX", platform_tmpdir());
+   char *created = platform_mkdtemp(directory);
+   assert(created);
+   snprintf(path, sizeof path, "%s/evidence.txt", directory);
+   FILE *file = fopen(path, "w");
+   assert(file);
+   int written = fputs("SCRIPT_SCOPE_PRIVATE_EVIDENCE", file);
+   int closed = fclose(file);
+   assert(written >= 0 && !closed);
+   cJSON *literal = cJSON_CreateString(path);
+   char *quoted = cJSON_PrintUnformatted(literal);
+   cJSON_Delete(literal);
+   assert(quoted);
+   int length = snprintf(body, sizeof body,
+                         "import json, aimee_tools\n"
+                         "print(json.dumps(aimee_tools.call('read_file', {'path': %s})))\n",
+                         quoted);
+   free(quoted);
+   assert(length > 0 && (size_t)length < sizeof body);
+   char *result = tool_execute_script("python", body, 5, directory, NULL);
+   cJSON *reply = result ? cJSON_Parse(result) : NULL;
+   assert(reply && cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == 0);
+   const char *output = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "stdout"));
+   assert(output && strstr(output, "\"ok\": false") &&
+          !strstr(output, "SCRIPT_SCOPE_PRIVATE_EVIDENCE"));
+   cJSON_Delete(reply);
+   free(result);
+   assert(agent_tools_permission_check("read_file", NULL) == AGENT_TOOL_PERMISSION_ROLE);
+   agent_tools_denied_set(NULL, 0);
+   result = tool_execute_script("python", body, 5, directory, NULL);
+   reply = result ? cJSON_Parse(result) : NULL;
+   assert(reply && cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == 0);
+   output = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "stdout"));
+   assert(output && strstr(output, "\"ok\": true") &&
+          strstr(output, "SCRIPT_SCOPE_PRIVATE_EVIDENCE"));
+   cJSON_Delete(reply);
+   free(result);
+   unlink(path);
+   rmdir(directory);
+   agent_tools_scope_restore(&previous);
+   puts("  PASS: script RPC retains the caller's denied-tool ceiling");
 }

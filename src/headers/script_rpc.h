@@ -2,6 +2,8 @@
 #define DEC_SCRIPT_RPC_H 1
 
 #include "aimee.h"
+#include <aimee/tools/agent_tools.h>
+#include <stdatomic.h>
 #include <pthread.h>
 
 typedef struct script_rpc_server
@@ -9,7 +11,9 @@ typedef struct script_rpc_server
    int listen_fd;
    int client_fd;
    int use_fd_pair;
-   volatile int stop;
+   atomic_int stop;
+   /* Immutable permission copy; destroyed only after the RPC worker joins. */
+   agent_tools_scope_snapshot_t tools;
    pthread_t thread;
    int thread_started;
    char stub_dir[MAX_PATH_LEN];
