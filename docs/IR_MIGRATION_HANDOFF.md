@@ -32,13 +32,15 @@ must remain KB-free. Explicit receipt-bound feedback/ungraded observations are n
 independent task grades or synthesis. Production promotion requires the recorded
 independent reviewer under `OWNERS.md`.
 
-Published `5aa1888d2` passed all 56 applicable CI checks, including every Docker
-tier, with two existing testing-branch platform skips (as did `1a8469ebf`). Published
-`46f6e1085` includes the subsequent plain-request consumer and obsolete shell-driver
-retirement. Its CI exposed an unchecked POSIX capture receiver, repaired below.
-Published `1511bd3e9` includes the selected Vault API-key increment and the CI repair.
-Its fresh CI has 55 passing checks and no failures; T2 is still pending at this checkpoint.
-Installed CLI probes now correctly resolve `aimee` and `wol-lore` from their own
+Published `c77cc0492` completed all 50 main CI jobs, including all Docker tiers
+and identity mint, with two unchanged testing-target platform skips. Export,
+audit, fuzz, release and strict attribution workflows also passed. Published
+`118f06bb2` adds host-turn generation/source claims and actual-catalog admission;
+its fresh CI has no failures, with T2 and T3 still running at this checkpoint.
+The original-call readback/claim increment below is locally qualified and not
+yet published. It does not activate native SDK execution.
+
+Installed CLI probes correctly resolve `aimee` and `wol-lore` from their own
 workspaces without an explicit project override; newer native callback cwd binding
 is separately pending promotion. The overall migration remains unfinished.
 
@@ -3218,3 +3220,38 @@ governed dispatch and launch activation still need wiring. The normal server
 build and all 657 native suite entries pass. The focused runtime fixture also
 passes ASan/UBSan, ThreadSanitizer and CMake/CTest. Cppcheck reports zero
 diagnostics for the two changed C sources; all 76 lint gates pass.
+
+
+## Original-call readback and shared once-only admission
+
+Owned native model callbacks now retain only bounded derived call admissions:
+the original typed call, its actual advertised function, and an immutable hash
+commitment to the writer-committed response prefix through call completion. The
+comparison hash uses canonical JSON; original opaque arguments stay untouched.
+Full message snapshots repeat existing streamed call slots without resetting
+their source or claim. Message identities remain host-qualified.
+
+A host callback can resolve exactly one matching unclaimed original ID, namespace,
+name and argument object, read back the entire committed response prefix through
+its source sequence, recheck both session incarnation identities, and claim once
+through the shared retained capture. A missing/changed prefix, deleted/recreated
+session, ambiguous provider ID or duplicate claim refuses. Claims return owned
+original arguments and the exact advertised function. No SDK-proposed arguments
+become execution authority. The cache is bounded to 4096 calls and 16 MiB of
+canonical call/catalog content, with no alternate durable history or receipt store.
+
+Focused tests cover buffered and streamed sources, exact 30-digit arguments,
+earlier argument-fragment replacement while preserving the later BLOCK_STOP,
+source erasure, session recreation, wrong arguments/namespace, two ambiguous
+original responses, output preservation on refusal and eight racing claimants
+with exactly one winner. Owned-profile transports also refuse legacy MCP
+routes, preventing an alternate tool ingress around original-source claims;
+legacy authenticated forwarding retains its existing successful behavior.
+Source readback requests only through the committed completion sequence, avoiding
+unrelated later content. These tests execute no effects. The normal server build and all 657 native
+suite entries pass. The final runtime fixture passes ASan/UBSan, ThreadSanitizer
+and CMake/CTest; Cppcheck reports zero diagnostics across all three changed C
+sources. PostgreSQL 18 integration passes 167/167 with the same 26 service skips.
+All 76 final lint gates pass. Supervised dispatch, source/effect admission synchronization, credential-free
+attested launch and SDK observation suppression remain unfinished; a source
+readback/claim alone does not authorize an effect or attest a launch.

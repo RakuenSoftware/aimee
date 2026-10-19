@@ -3,6 +3,7 @@
 
 #include "agent_config.h"
 #include "request_context.h"
+#include "server_native_tool_source.h"
 #include <aimee/ir/aimee_ir.h>
 
 typedef struct server_native_runtime server_native_runtime_t;
@@ -35,6 +36,13 @@ server_native_runtime_t *server_native_runtime_open_request(const agent_t *selec
                                                             const request_context_t *owner,
                                                             const char *session_id,
                                                             const aimee_request_t *profile);
+/* Host-only original-call admission. Revalidates the committed source prefix
+ * and claims once for this turn; it does not execute or authorize any effect.
+ * out is zero-initialized or previously owned. SDK callbacks still require
+ * the supervised dispatcher after this succeeds. */
+int server_native_runtime_claim_tool(server_native_runtime_t *runtime,
+                                     const aimee_block_t *proposed,
+                                     server_native_tool_claim_t *out);
 const char *server_native_runtime_url(const server_native_runtime_t *runtime);
 const char *server_native_runtime_token(const server_native_runtime_t *runtime);
 const char *server_native_runtime_binding(const server_native_runtime_t *runtime);

@@ -144,6 +144,7 @@ static pthread_mutex_t ids_mutex = PTHREAD_MUTEX_INITIALIZER;
 static char seen_ids[64][64];
 static int seen_count;
 static void probe_replay_scope(const char *path);
+static atomic_int source_missing, source_tampered, source_recreated;
 static atomic_int calls, cancelled, wait_for_cancel, source_changed, session_removed,
     malformed_source;
 
@@ -269,6 +270,8 @@ int agent_set_request_api_credentials_for(const agent_t *agent,
 int db1_server_session_get(const char *session, db1_server_session_t *out)
 {
    memset(out, 0, sizeof *out);
+   snprintf(out->created_at, sizeof out->created_at, "%s",
+            atomic_load(&source_recreated) ? "2026-10-20T00:01:00Z" : "2026-10-20T00:00:00Z");
    if (atomic_load(&session_removed))
       return -1;
    if (!strcmp(session, "session-a"))
@@ -440,6 +443,7 @@ struct server_native_replay
    char actor[VAULT_PRINCIPAL_MAX], session[128];
 };
 static atomic_int owned_profile_probe, snapshot_generation, tool_source_probe;
+static cJSON *source_rows;
 server_native_replay_t *server_native_replay_open(const char *session, const char *actor,
                                                   const char *scope, const char *model)
 {
@@ -475,6 +479,22 @@ int server_native_replay_capture(const aimee_session_event_t *event, void *conte
       return -1;
    return server_native_replay_restore(NULL, context);
 }
+static int probe_tool_snapshot(const char *name, const char *space, const char *arguments)
+{
+   cJSON *input = aimee_ir_json_parse_frame(arguments, strlen(arguments));
+   assert(input);
+   aimee_block_t block = {.type = AIMEE_BLK_TOOL_USE,
+                          .tool_id = "wire-call:original",
+                          .tool_name = (char *)name,
+                          .tool_namespace = (char *)space,
+                          .tool_input = input};
+   aimee_message_t message = {.role = "assistant", .blocks = &block, .n_blocks = 1};
+   aimee_session_event_t observed = {
+       .kind = AIMEE_SESSION_MESSAGE, .message_id = "wire-response", .message = &message};
+   int captured = aimee_ir_session_emit(&observed);
+   cJSON_Delete(input);
+   return captured;
+}
 static int probe_original_tool(void)
 {
    int mode = atomic_load(&tool_source_probe);
@@ -489,21 +509,7 @@ static int probe_original_tool(void)
       name = "postpolicy_read";
    const char *arguments = "{\"amount\":123.123456789012345678901234567890}";
    if (mode < 3 || mode == 5 || mode == 8)
-   {
-      cJSON *input = aimee_ir_json_parse_frame(arguments, strlen(arguments));
-      assert(input);
-      aimee_block_t block = {.type = AIMEE_BLK_TOOL_USE,
-                             .tool_id = "wire-call:original",
-                             .tool_name = (char *)name,
-                             .tool_namespace = (char *)space,
-                             .tool_input = input};
-      aimee_message_t message = {.role = "assistant", .blocks = &block, .n_blocks = 1};
-      aimee_session_event_t observed = {
-          .kind = AIMEE_SESSION_MESSAGE, .message_id = "wire-response", .message = &message};
-      int captured = aimee_ir_session_emit(&observed);
-      cJSON_Delete(input);
-      return captured;
-   }
+      return probe_tool_snapshot(name, space, arguments);
    aimee_delta_t deltas[] = {{.type = AIMEE_DELTA_TURN_START},
                              {.type = AIMEE_DELTA_BLOCK_START,
                               .kind = AIMEE_BLK_TOOL_USE,
@@ -528,7 +534,8 @@ static int probe_original_tool(void)
       if (rc)
          return rc;
    }
-   return 0;
+   /* A final full snapshot must not create a second claimable original call. */
+   return mode == 3 ? probe_tool_snapshot(name, space, arguments) : 0;
 }
 static void probe_replay_scope(const char *path)
 {
@@ -754,11 +761,148 @@ int db1_session_ir_append(const char *session, const char *id, const char *turn,
    }
    cJSON *row = aimee_ir_json_parse_frame(wire, strlen(wire));
    assert(row && captured_rows && id[0]);
+   if (!cJSON_GetArraySize(captured_rows))
+   {
+      cJSON_Delete(source_rows);
+      source_rows = cJSON_CreateArray();
+   }
    cJSON_AddItemToArray(captured_rows, row);
    snprintf(sequence, 32, "%d", cJSON_GetArraySize(captured_rows));
+   cJSON *envelope = cJSON_CreateObject();
+   assert(envelope && source_rows);
+   cJSON_AddNumberToObject(envelope, "version", 1);
+   cJSON_AddStringToObject(envelope, "session_id", session);
+   cJSON_AddStringToObject(envelope, "sequence", sequence);
+   cJSON_AddStringToObject(envelope, "event_id", id);
+   cJSON_AddStringToObject(envelope, "turn_id", turn);
+   cJSON_AddStringToObject(envelope, "actor", principal);
+   cJSON_AddItemToObject(envelope, "event", cJSON_Duplicate(row, 1));
+   cJSON_AddItemToArray(source_rows, envelope);
    pthread_mutex_unlock(&capture_lock);
    return 0;
 }
+char *db1_session_ir_page(const char *session, const char *after, int limit, const char *actor)
+{
+   assert(!strcmp(session, "private-child") && !strcmp(actor, "webuser:alice"));
+   assert(limit >= 1 && limit <= 128);
+   pthread_mutex_lock(&capture_lock);
+   cJSON *page = cJSON_CreateArray();
+   int offset = atoi(after);
+   for (int i = offset;
+        !atomic_load(&source_missing) && i < cJSON_GetArraySize(source_rows) && i < offset + limit;
+        i++)
+   {
+      cJSON *row = cJSON_Duplicate(cJSON_GetArrayItem(source_rows, i), 1);
+      cJSON *event = cJSON_GetObjectItemCaseSensitive(row, "event");
+      cJSON *delta = cJSON_GetObjectItemCaseSensitive(event, "payload");
+      cJSON *fragment = cJSON_GetObjectItemCaseSensitive(delta, "tool_args_delta");
+      if (atomic_load(&source_tampered) && fragment)
+         cJSON_SetValuestring(fragment, "{\"amount\":999}");
+      cJSON_AddItemToArray(page, row);
+   }
+   char *wire = cJSON_PrintUnformatted(page);
+   cJSON_Delete(page);
+   pthread_mutex_unlock(&capture_lock);
+   return wire;
+}
+
+typedef struct
+{
+   server_native_runtime_t *runtime;
+   const aimee_block_t *proposed;
+   server_native_tool_claim_t claim;
+   int result;
+} source_claim_worker_t;
+static void *claim_source_worker(void *context)
+{
+   source_claim_worker_t *worker = context;
+   worker->result =
+       server_native_runtime_claim_tool(worker->runtime, worker->proposed, &worker->claim);
+   return NULL;
+}
+
+static void test_source_claim(server_native_runtime_t *runtime, const char *name, int streamed)
+{
+   const char *arguments = "{\"amount\":123.123456789012345678901234567890}";
+   cJSON *input = aimee_ir_json_parse_frame(arguments, strlen(arguments));
+   aimee_block_t proposed = {.type = AIMEE_BLK_TOOL_USE,
+                             .tool_id = "wire-call:original",
+                             .tool_namespace = "aimee",
+                             .tool_name = (char *)name,
+                             .tool_input = input};
+   server_native_tool_claim_t claim = {0};
+   cJSON *wrong = cJSON_Parse("{\"amount\":999}");
+   proposed.tool_input = wrong;
+   int rc = server_native_runtime_claim_tool(runtime, &proposed, &claim);
+   assert(rc == -1 && !claim.original.n_messages);
+   cJSON_Delete(wrong);
+   proposed.tool_input = input;
+   proposed.tool_namespace = NULL;
+   rc = server_native_runtime_claim_tool(runtime, &proposed, &claim);
+   assert(rc == -1);
+   proposed.tool_namespace = "aimee";
+   atomic_store(&source_missing, 1);
+   rc = server_native_runtime_claim_tool(runtime, &proposed, &claim);
+   assert(rc == -1);
+   atomic_store(&source_missing, 0);
+   atomic_store(&source_recreated, 1);
+   rc = server_native_runtime_claim_tool(runtime, &proposed, &claim);
+   assert(rc == -1);
+   atomic_store(&source_recreated, 0);
+   if (streamed)
+   {
+      /* Replacing an earlier argument fragment while preserving BLOCK_STOP
+       * must invalidate the entire committed source prefix. */
+      atomic_store(&source_tampered, 1);
+      rc = server_native_runtime_claim_tool(runtime, &proposed, &claim);
+      assert(rc == -1);
+      atomic_store(&source_tampered, 0);
+   }
+   if (streamed)
+   {
+      source_claim_worker_t workers[8] = {0};
+      pthread_t threads[8];
+      for (int i = 0; i < 8; i++)
+      {
+         workers[i].runtime = runtime;
+         workers[i].proposed = &proposed;
+         rc = pthread_create(&threads[i], NULL, claim_source_worker, &workers[i]);
+         assert(!rc);
+      }
+      int winners = 0;
+      for (int i = 0; i < 8; i++)
+      {
+         rc = pthread_join(threads[i], NULL);
+         assert(!rc);
+         if (!workers[i].result)
+         {
+            winners++;
+            claim = workers[i].claim;
+            memset(&workers[i].claim, 0, sizeof workers[i].claim);
+         }
+         else
+            assert(workers[i].result == -1 && !workers[i].claim.original.n_messages);
+         server_native_tool_claim_free(&workers[i].claim);
+      }
+      assert(winners == 1);
+   }
+   else
+   {
+      rc = server_native_runtime_claim_tool(runtime, &proposed, &claim);
+      assert(!rc);
+   }
+   assert(claim.original.n_messages == 1 && claim.block_index == 0);
+   const aimee_block_t *original = &claim.original.messages[0].blocks[0];
+   char *wire = cJSON_PrintUnformatted(original->tool_input);
+   assert(wire && !strcmp(wire, arguments));
+   free(wire);
+   assert(aimee_ir_find_function(&claim.original, "aimee", name));
+   rc = server_native_runtime_claim_tool(runtime, &proposed, &claim);
+   assert(rc == -1 && claim.original.n_messages == 1); /* Failure preserves output. */
+   server_native_tool_claim_free(&claim);
+   cJSON_Delete(input);
+}
+
 void server_learning_observe_terminal(const char *session, const char *turn, const char *sequence,
                                       const char *id, const char *actor, const cJSON *event)
 {
@@ -865,12 +1009,15 @@ static void test_native_original_catalog(const agent_t *selected, const request_
       atomic_store(&snapshot_generation, 1);
       atomic_store(&tool_source_probe, mode);
       char response[1024];
+      int before = atomic_load(&calls);
+      request(runtime, "/v1/mcp/call", server_native_runtime_token(runtime), response);
+      assert(strstr(response, "404") && atomic_load(&calls) == before);
       request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
       int refuses = mode != 3 && mode != 8;
       assert(server_session_capture_failed(capture) == refuses);
       /* A refused complete call is never committed or released to the SDK.
        * Earlier stream fragments remain as observed, without an invented stop. */
-      int expected_rows = mode == 3                ? 6
+      int expected_rows = mode == 3                ? 7
                           : mode == 8              ? 2
                           : mode == 7              ? 3
                           : mode >= 4 && mode != 5 ? 4
@@ -881,6 +1028,7 @@ static void test_native_original_catalog(const agent_t *selected, const request_
          char *wire = cJSON_PrintUnformatted(captured_rows);
          assert(wire && strstr(wire, "123.123456789012345678901234567890"));
          free(wire);
+         test_source_claim(runtime, mode == 8 ? "postpolicy_read" : "read_file", mode == 3);
       }
       server_native_runtime_close(runtime);
       server_session_capture_close(capture);
@@ -968,6 +1116,18 @@ static void test_owned_native_context(const agent_t *selected, const request_con
       request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
       assert(strstr(response, "200 OK") && !server_session_capture_failed(capture));
    }
+   /* Identical provider IDs/arguments from two distinct original responses
+    * are ambiguous; an SDK observation cannot select whichever ran last. */
+   cJSON *ambiguous_input = cJSON_Parse("{\"amount\":123.123456789012345678901234567890}");
+   aimee_block_t ambiguous = {.type = AIMEE_BLK_TOOL_USE,
+                              .tool_id = "wire-call:original",
+                              .tool_namespace = "aimee",
+                              .tool_name = "read_file",
+                              .tool_input = ambiguous_input};
+   server_native_tool_claim_t no_claim = {0};
+   int claimed = server_native_runtime_claim_tool(runtime, &ambiguous, &no_claim);
+   assert(claimed == -1 && !no_claim.original.n_messages);
+   cJSON_Delete(ambiguous_input);
    /* One authoritative callback stays in flight. A second model generation
     * cannot fork its running snapshot or execute under the first admission. */
    int before = atomic_load(&calls);
@@ -1183,5 +1343,6 @@ int main(void)
    puts("native runtime: owned actor/model/permissions/source, resource leases and cancellation "
         "passed");
    server_control_scope_close(alice_controls);
+   cJSON_Delete(source_rows);
    return 0;
 }

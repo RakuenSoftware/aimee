@@ -924,7 +924,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-tool-admission
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-runtime
 $(TESTPREFIX)/unit-test-server-native-runtime: $(OBJDIR)/tests/test_server_native_runtime.o \
     $(OBJDIR)/server/agent_tools.o $(OBJDIR)/posix/agent_source_authority.o $(OBJDIR)/modules/ir/aimee_ir.o \
-    $(OBJDIR)/server/server_native_runtime.o $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cli_proxy.o \
+    $(OBJDIR)/server/server_native_runtime.o $(OBJDIR)/server/server_native_tool_source.o $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cli_proxy.o \
     $(OBJDIR)/modules/translation/wire_codec.o \
     $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
     $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \

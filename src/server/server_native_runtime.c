@@ -34,6 +34,7 @@ struct server_native_runtime
    server_session_capture_t *capture;
    cli_proxy_t *listener;
    server_native_replay_t *replay;
+   server_native_tool_source_t *tool_source;
    cJSON *source_history;
    aimee_request_t request_profile;
    int owns_request;
@@ -84,7 +85,8 @@ typedef struct
    const char *request_id;
    native_request_owner_t *owner;
    aimee_ir_response_builder_t builder;
-   char *message_id;
+   char *message_id, *source_message;
+   char source_first[32], source_digest[65];
 } native_model_capture_t;
 
 static int native_tool_in_catalog(const native_model_capture_t *capture, const aimee_block_t *call)
@@ -105,7 +107,9 @@ static int native_capture_admit(native_model_capture_t *capture, const aimee_ses
       return 0;
    if (event->kind == AIMEE_SESSION_MESSAGE)
    {
-      if (!event->message)
+      if (!event->message || !event->message->role || strcmp(event->message->role, "assistant") ||
+          (capture->builder.started &&
+           (!event->message_id || strcmp(event->message_id, capture->message_id))))
          return -1;
       for (int i = 0; i < event->message->n_blocks; i++)
          if (native_tool_in_catalog(capture, &event->message->blocks[i]))
@@ -113,7 +117,7 @@ static int native_capture_admit(native_model_capture_t *capture, const aimee_ses
    }
    if (event->kind != AIMEE_SESSION_DELTA)
       return 0;
-   if (!event->delta || !event->message_id)
+   if (!event->delta || !event->message_id || !event->role || strcmp(event->role, "assistant"))
       return -1;
    if (event->delta->type == AIMEE_DELTA_TURN_START)
    {
@@ -133,6 +137,55 @@ static int native_capture_admit(native_model_capture_t *capture, const aimee_ses
                                     &capture->builder.response.content[event->delta->block_id]);
    return 0;
 }
+static int native_record_source(native_model_capture_t *capture, const aimee_session_event_t *event,
+                                const char *wire)
+{
+   if (!capture->runtime->owns_request ||
+       (event->kind != AIMEE_SESSION_DELTA && event->kind != AIMEE_SESSION_MESSAGE))
+      return 0;
+   cJSON *row = wire ? aimee_ir_json_parse_frame(wire, strlen(wire)) : NULL;
+   const cJSON *payload = cJSON_GetObjectItemCaseSensitive(row, "event");
+   const char *message_id =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "message_id"));
+   const char *sequence = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "sequence"));
+   int rc = -1;
+   if (!message_id || !sequence)
+      goto done;
+   if (!capture->source_message || strcmp(capture->source_message, message_id))
+   {
+      free(capture->source_message);
+      capture->source_message = strdup(message_id);
+      capture->source_digest[0] = 0;
+      snprintf(capture->source_first, sizeof capture->source_first, "%s", sequence);
+      if (!capture->source_message)
+         goto done;
+   }
+   if (server_native_tool_source_digest(capture->source_digest, row, capture->source_digest))
+      goto done;
+   rc = 0;
+   int first = 0, count = 0;
+   const aimee_block_t *blocks = NULL;
+   if (event->kind == AIMEE_SESSION_MESSAGE)
+   {
+      blocks = event->message->blocks;
+      count = event->message->n_blocks;
+   }
+   else if (event->delta->type == AIMEE_DELTA_BLOCK_STOP)
+   {
+      blocks = capture->builder.response.content;
+      first = event->delta->block_id;
+      count = first + 1;
+   }
+   for (int i = first; i < count && !rc; i++)
+      if (blocks[i].type == AIMEE_BLK_TOOL_USE)
+         rc = server_native_tool_source_record(
+             capture->runtime->tool_source, &capture->owner->admitted, &blocks[i], message_id,
+             capture->source_first, sequence, capture->source_digest, i);
+done:
+   cJSON_Delete(row);
+   return rc;
+}
+
 static int native_model_capture(const aimee_session_event_t *event, void *context)
 {
    native_model_capture_t *capture = context;
@@ -157,10 +210,18 @@ static int native_model_capture(const aimee_session_event_t *event, void *contex
          snprintf(message_id, prefix + length + 2, "%s:%s", capture->request_id, event->message_id);
          qualified.message_id = message_id;
       }
-      int rc = server_session_capture_sink(&qualified, runtime->capture);
+      char *envelope = NULL;
+      int rc = server_session_capture_append(runtime->capture, &qualified,
+                                             runtime->owns_request ? &envelope : NULL, NULL);
       free(message_id);
+      if (!rc)
+         rc = native_record_source(capture, event, envelope);
+      free(envelope);
       if (rc)
+      {
+         server_session_capture_fail(runtime->capture);
          return -1;
+      }
       /* The replay owner used to be the only sink for projection reports. The
        * durable writer has committed this report already, so do not append it
        * a second time under the proof owner's random turn. */
@@ -249,6 +310,10 @@ static int native_route(const char *method, const char *path, void *context)
     * Operator controls, session replies and arbitrary CLI methods are never
     * native model authority, even when the parent transport is an operator. */
    if (!method || !path || strchr(path, '?') || strchr(path, '#'))
+      return 0;
+   /* The canonical host callback is the sole tool ingress for owned profiles.
+    * A child must not bypass original-source claims through legacy MCP routes. */
+   if (runtime->owns_request && !strncmp(path, "/v1/mcp/", 8))
       return 0;
    int admitted = !strcmp(method, "GET") &&
                   (!strcmp(path, "/v1/models") || !strcmp(path, "/v1/cli/manifest") ||
@@ -466,6 +531,7 @@ static int native_forward(const char *method, const char *path, const char *head
    }
    aimee_ir_response_builder_free(&model_capture.builder);
    free(model_capture.message_id);
+   free(model_capture.source_message);
    atomic_store(&watch.finished, 1);
    pthread_join(monitor, NULL);
    agent_set_request_cancel(NULL);
@@ -554,6 +620,10 @@ static server_native_runtime_t *native_runtime_open(const agent_t *selected,
       free(runtime->request_profile.messages);
       runtime->request_profile.messages = NULL;
       runtime->request_profile.n_messages = 0;
+      runtime->tool_source = server_native_tool_source_open(runtime->capture, runtime->session,
+                                                            runtime->owner.vault_principal);
+      if (!runtime->tool_source)
+         goto failed;
       runtime->owns_request = 1;
    }
    /* An ordinary primary has no delegate source overlay. Make that absence
@@ -802,6 +872,14 @@ int server_native_runtime_cache_scope(const server_native_runtime_t *runtime,
    return rc;
 }
 
+int server_native_runtime_claim_tool(server_native_runtime_t *runtime,
+                                     const aimee_block_t *proposed, server_native_tool_claim_t *out)
+{
+   return runtime && runtime->owns_request
+              ? server_native_tool_source_claim(runtime->tool_source, proposed, out)
+              : -1;
+}
+
 const cJSON *server_native_runtime_source_history(const server_native_runtime_t *runtime)
 {
    return runtime ? runtime->source_history : NULL;
@@ -813,6 +891,7 @@ void server_native_runtime_close(server_native_runtime_t *runtime)
       return;
    cli_proxy_stop(runtime->listener);
    server_native_replay_close(runtime->replay);
+   server_native_tool_source_close(runtime->tool_source);
    cJSON_Delete(runtime->source_history);
    aimee_request_free(&runtime->request_profile);
    server_control_scope_release(runtime->controls);
