@@ -1,6 +1,6 @@
 import { parseJSON } from './json';
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 import IRTranscript from './Transcript';
@@ -107,4 +107,35 @@ it('keeps reused native tool results on their own cards and shows ambiguous evid
   expect(screen.getAllByText(/SECOND_ONLY/)).toHaveLength(1);
   expect(screen.getByText('VISIBLE_ORPHAN')).toBeTruthy();
   expect(screen.getAllByText(/VISIBLE_AMBIGUOUS/)).toHaveLength(1);
+});
+
+
+it('answers a durable free-text host question and resolves it without creating model messages', async () => {
+  const envelope = (sequence: string, event: Envelope['event']): Envelope => ({
+    version: 1, session_id: 'primary', sequence, event_id: `host-question-${sequence}`,
+    turn_id: 'host-turn', actor: 'alice', event,
+  });
+  const state = reduceSession(emptySession('primary'), envelope('1', {
+    kind: 'control_request', request_id: 'host-turn:question', control_kind: 'question',
+    payload: { questions: [{ id: 'answer', question: 'Which workspace?', multiple: false, options: [] }] },
+  }));
+  const onReply = vi.fn().mockResolvedValue(undefined);
+  const view = render(<IRTranscript state={state} onReply={onReply} />);
+  expect(screen.queryByRole('button', { name: 'Send answers' })).toBeNull();
+  fireEvent.change(screen.getByRole('textbox', { name: 'Your answer: Which workspace?' }), {
+    target: { value: 'aimee' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Send answers' }));
+  await waitFor(() => expect(onReply).toHaveBeenCalledWith('host-turn:question', {
+    decision: 'allow', answers: { answer: ['aimee'] },
+  }));
+  expect(onReply).toHaveBeenCalledTimes(1);
+  const answered = reduceSession(state, envelope('2', {
+    kind: 'control_response', request_id: 'host-turn:question', control_kind: 'question',
+    payload: { decision: 'allow', answers: { answer: ['aimee'] } },
+  }));
+  view.rerender(<IRTranscript state={answered} onReply={onReply} />);
+  expect(screen.getByText('question: Resolved')).toBeTruthy();
+  expect(screen.queryByRole('button')).toBeNull();
+  expect(answered.messages).toEqual([]);
 });

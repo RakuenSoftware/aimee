@@ -2538,3 +2538,12 @@ application/CTest, rebuilt Linux server, original PostgreSQL 18.6 integration
 frontend suite also passes all 292 tests across 35 files. Production promotion,
 fresh branch CI, native SDK activation/cache fidelity and independent learning
 qualification are still outstanding.
+
+## Browser host-question round trip
+
+A frontend regression projects the durable empty-options question emitted by the
+host bridge, enters free text, verifies the qualified reply, then applies the
+canonical response and observes a resolved control. Control exchange creates no
+model messages. The full frontend suite now passes 293 tests across 35 files,
+and TypeScript project checking passes. Native/source qualification above is
+unchanged; this test does not constitute production browser deployment approval.
