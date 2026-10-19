@@ -2631,3 +2631,34 @@ subscription, independent learning, fresh platform CI and production promotion
 remain outstanding.
 
 All 76 repository lint gates pass for gateway response capture.
+
+## Shared Git dispatch retains the caller's project context
+
+The same lost-context pattern repaired in the delegate cwd resolver also existed
+in the shared Git dispatcher used by external MCP and native agent Git tools.
+Its inner cleanup cleared the caller's cwd/session override and leaked the Git
+worktree flag. An outer scope now bookmarks and restores those values across
+all existing success/refusal returns. It also owns an exact operation-session
+copy because the supplied session can borrow the TLS override changed by worktree
+resolution. Existing workspace, mismatch, mutation and Git verification decisions
+remain in the inner dispatcher.
+
+A new fixture links the actual production dispatcher with unrelated sections
+removed by the linker. The previous source fails its scope assertion. Forty-eight
+combinations cover success, both resolver errors, mutating mismatch refusal,
+permitted read-only mismatch, unresolved cwd, present/absent cwd and override,
+a 127-byte caller session and operation identity borrowed from TLS. The fixture,
+ASan/UBSan, two-source Cppcheck and actual CMake application/CTest pass. The memory
+ownership ledger records review of the exact Git-only source diff, with its
+existing memory symbols and owners retained; no exemption or approval is added.
+
+Nested workspace-provider ownership is a separate outstanding issue in this
+same dispatch path: its legacy bind/unbind helper can disturb an enclosing turn.
+The cwd/session/worktree repair does not claim to fix that resource lifetime.
+
+The shared Git context increment additionally passes all 657 native binaries and
+proxy regressions, the rebuilt server, original PostgreSQL 18.6 integration
+167/167 (26 service-dependent skips, no KB), and 21 semantic-context benchmark
+checks. These Linux checks do not establish fresh platform CI or deployment.
+
+All 76 repository lint gates pass for shared Git caller-context restoration.

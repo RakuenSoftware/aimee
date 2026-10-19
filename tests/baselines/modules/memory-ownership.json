@@ -2219,8 +2219,8 @@
         "kb_client_memory_scope_context_set",
         "server_module_memory_data"
       ],
-      "sha256": "85770235db82e647aad19a076341e2dfb4e8088d479650a5366b19f1bc9c1512",
-      "boundary_change": "Isolated native callbacks apply the existing tools permission owner to the resolved callable before dispatch. Git family expansion moves before workflow externalization admission. Existing authenticated memory transport and scope owners are unchanged. This records boundary analysis, not independent approval. Native admission also delegates directive and execution-policy checks using the host callback identity; no memory eligibility policy or effect/human grant is added."
+      "sha256": "89dd138bb99afe315d3c87763b13be107c90b135a30b35fdf159875f2c6b3330",
+      "boundary_change": "Isolated native callbacks apply the existing tools permission owner to the resolved callable before dispatch. Git family expansion moves before workflow externalization admission. Existing authenticated memory transport and scope owners are unchanged. This records boundary analysis, not independent approval. Native admission also delegates directive and execution-policy checks using the host callback identity; no memory eligibility policy or effect/human grant is added. Shared Git dispatch now restores its caller cwd/session/worktree context on every existing return and owns a copy of a potentially TLS-borrowed operation session. Review of this diff finds no changes to memory symbols, admission, transport or eligibility; this is source-boundary analysis, not independent release approval."
     },
     "src/server/server_mcp_call_table.c": {
       "disposition": "host-transport",

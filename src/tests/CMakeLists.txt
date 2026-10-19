@@ -442,6 +442,19 @@ if(NOT WIN32)
     ${AIMEE_SRC_DIR}/modules/kb/c)
   aimee_enable_test_asserts(test_server_learning_application)
   add_test(NAME test_server_learning_application COMMAND test_server_learning_application)
+  add_executable(test_server_mcp_git_scope test_server_mcp_git_scope.c
+    ../server/server_mcp.c ../vendor/cJSON.c)
+  target_include_directories(test_server_mcp_git_scope PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
+  target_compile_options(test_server_mcp_git_scope PRIVATE -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(test_server_mcp_git_scope PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(test_server_mcp_git_scope PRIVATE -Wl,--gc-sections)
+  endif()
+  target_link_libraries(test_server_mcp_git_scope PRIVATE Threads::Threads)
+  aimee_enable_test_asserts(test_server_mcp_git_scope)
+  add_test(NAME test_server_mcp_git_scope COMMAND test_server_mcp_git_scope)
   add_executable(test_server_native_replay test_server_native_replay.c
     ../server/server_native_replay.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
     ../aimee_sha256.c ../platform_random.c ../posix/platform_random.c ../vendor/cJSON.c)

@@ -7116,3 +7116,10 @@ $(TESTPREFIX)/unit-test-server-native-cache: $(OBJDIR)/tests/test_server_native_
     $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o \
     $(OBJDIR)/platform_random.o $(filter %/platform_random.o,$(PLATFORM_BASIC_OBJS))
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto
+
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-mcp-git-scope
+$(OBJDIR)/tests/server_mcp_git_scope_subject.o: server/server_mcp.c
+	@mkdir -p $(dir $@)
+	$(CC) $(C_FLAGS) -ffunction-sections -fdata-sections -c -o $@ $<
+$(TESTPREFIX)/unit-test-server-mcp-git-scope: $(OBJDIR)/tests/test_server_mcp_git_scope.o $(OBJDIR)/tests/server_mcp_git_scope_subject.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lpthread

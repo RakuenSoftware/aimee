@@ -1744,8 +1744,8 @@ static const struct
     {"git_checkout", handle_git_checkout, 1},
 };
 
-static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const char *tool,
-                                cJSON *args, const char *sid)
+static cJSON *dispatch_git_tool_inner(server_ctx_t *ctx, server_conn_t *conn, const char *tool,
+                                      cJSON *args, const char *sid)
 {
    char verify_sid_buf[SERVER_SESSION_ID_MAX] = "";
    const char *verify_sid = sid;
@@ -1885,6 +1885,33 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
       free(mismatch_err);
    }
 
+   return content;
+}
+
+/* Git resolution may temporarily replace legacy ownership context. Restore the
+ * caller rather than assuming that this tool is the outermost request. */
+static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const char *tool,
+                                cJSON *args, const char *sid)
+{
+   char previous_cwd[MAX_PATH_LEN], previous_session[128] = "";
+   const char *cwd = run_cmd_get_cwd();
+   snprintf(previous_cwd, sizeof previous_cwd, "%s", cwd ? cwd : "");
+   int previous_override = session_id_override_active();
+   if (previous_override)
+      snprintf(previous_session, sizeof previous_session, "%s", session_id());
+   int previous_worktree = mcp_git_get_worktree();
+   /* sid can itself borrow the caller's TLS override, which resolution changes. */
+   char *operation_session = sid ? strdup(sid) : NULL;
+   if (sid && !operation_session)
+      return text_content("error: cannot retain Git session context");
+   cJSON *content = dispatch_git_tool_inner(ctx, conn, tool, args, operation_session);
+   free(operation_session);
+   run_cmd_set_cwd(previous_cwd[0] ? previous_cwd : NULL);
+   mcp_git_set_worktree(previous_worktree);
+   if (previous_override)
+      session_id_set_override(previous_session);
+   else
+      session_id_clear_override();
    return content;
 }
 
