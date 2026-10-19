@@ -1880,10 +1880,25 @@ check_output "tool.execute file read under network block" '"status":"ok"' echo "
 python3 - <<'PYPOLICY'
 from pathlib import Path
 import os
+(Path(os.environ["AIMEE_HOME"]) / "policy.json").write_text(
+    '{"tool_rules":[{"path_prefix":"/etc","allowed_tools":["list_files"]}]}')
+PYPOLICY
+RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"filepath\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute alias obeys path policy" "not allowed for path /etc" echo "$RESP"
+RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\",\"limit\":1}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute canonical path obeys same policy" "not allowed for path /etc" echo "$RESP"
+python3 - <<'PYPOLICY'
+from pathlib import Path
+import os
 (Path(os.environ["AIMEE_HOME"]) / "policy.json").unlink()
 PYPOLICY
 RESP=$(http_rpc '{"method":"tool.execute","tool":"unregistered-policy-fixture","arguments":"{}","session_id":"t","cwd":"/tmp"}') || true
-check_output "tool.execute unknown has no implicit read classification" 'tool policy metadata unavailable' echo "$RESP"
+check_output "tool.execute unknown has no current canonical definition" 'current execution catalog' echo "$RESP"
+RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/etc/hostname\"} trailing","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute rejects trailing argument bytes" 'admission failed' echo "$RESP"
+RESP=$(http_rpc '{"method":"tool.execute","tool":"read_file","arguments":"{\"path\":\"/tmp/x\",\"path\":\"/etc/hostname\"}","session_id":"t","cwd":"/tmp"}') || true
+check_output "tool.execute rejects duplicate argument fields" 'admission failed' echo "$RESP"
+
 
 # ============================================================
 # 9. Mirror-sync -> reconstructed MCP Git, end to end

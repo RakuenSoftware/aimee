@@ -1924,6 +1924,69 @@ int agent_tools_builtin_catalog(aimee_tool_t **out, int *count)
    return 0;
 }
 
+int agent_tools_execution_definition(const char *name, aimee_tool_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof *out);
+   if (!name || !name[0])
+      return -1;
+   for (size_t i = 0; i < sizeof g_builtin_tools / sizeof *g_builtin_tools; i++)
+      if (!strcmp(name, g_builtin_tools[i].name))
+         return agent_tools_is_git_write(name) && !g_git_write_fn
+                    ? -1
+                    : builtin_ir_definition(g_builtin_tools + i, out);
+   if (agent_tools_is_mcp_derived(name) && g_mcp_call_fn && g_mcp_advert_fn)
+   {
+      cJSON *advert = g_mcp_advert_fn(name);
+      out->name = strdup(name);
+      out->schema = cJSON_DetachItemFromObjectCaseSensitive(advert, "inputSchema");
+      const char *description =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(advert, "description"));
+      out->description = description ? strdup(description) : NULL;
+      cJSON_Delete(advert);
+      if (out->name && out->description && aimee_ir_tool_valid(out))
+         return 0;
+      aimee_tool_free(out);
+      return -1;
+   }
+   /* Qualified plugins enter from their current explicit compatibility catalog,
+    * including configured federation. Unqualified names cannot invent a tool. */
+   if (!strchr(name, ':'))
+      return -1;
+   cJSON *catalog = build_tools_array(), *entry;
+   int found = 0, invalid = 0;
+   cJSON_ArrayForEach(entry, catalog)
+   {
+      const cJSON *function = cJSON_GetObjectItemCaseSensitive(entry, "function");
+      const char *identity =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(function, "name"));
+      if (!identity || strcmp(identity, name))
+         continue;
+      aimee_tool_t candidate = {0};
+      if (openai_ir_parse_tool(entry, &candidate, 1))
+      {
+         aimee_tool_free(&candidate);
+         invalid = 1;
+         break;
+      }
+      if (candidate.kind == AIMEE_TOOL_FUNCTION && !strcmp(candidate.name, name))
+      {
+         if (++found == 1)
+         {
+            *out = candidate;
+            candidate = (aimee_tool_t){0};
+         }
+      }
+      aimee_tool_free(&candidate);
+   }
+   cJSON_Delete(catalog);
+   if (found == 1 && !invalid)
+      return 0;
+   aimee_tool_free(out);
+   return -1;
+}
+
 static int emit_builtin_tools(cJSON *tools, unsigned surface)
 {
    size_t n = sizeof(g_builtin_tools) / sizeof(g_builtin_tools[0]);

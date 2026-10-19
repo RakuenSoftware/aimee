@@ -2074,10 +2074,39 @@ also now reads `/proc/self/environ` through `cat` before `tr`; direct redirected
 `tr` locally returned no bytes. All original positive FD and negative secret
 assertions remain. The first full-run invocation used unsupported absolute build
 paths and did not launch binaries; the subsequent real run isolated this one
-credential fixture failure, which passes independently after repair. The corrected full-suite rerun passes all 653 native test binaries and both
-auxiliary fixtures, including the 30-case proxy suite. The P1 PostgreSQL preflight
+credential fixture failure, which passes independently after repair. The corrected full-suite rerun passes all 653 native test binaries and the
+30-case proxy suite. The P1 PostgreSQL preflight
 and store-dependent fixtures explicitly skip without their configured local
 service; the separate restricted-role integration run remains 159/159. Final
 retirement lint passes all 76 gates. Published `2b5aaa6d5` is fully green in fresh
 CI, including all Docker tiers and attribution, with its two existing platform
 skips. That CI result does not qualify the subsequent local commits.
+
+
+## First-class tool API uses admitted canonical arguments
+
+`tool.execute` now resolves an owned definition from the current execution
+catalog, admits strict object JSON, canonicalizes once, and validates that exact
+schema before directives, workspace/guardrail and supervised metadata/category
+policy checks. Typed dispatch receives those same arguments. Each request gets a
+host-random attempt identity rather than sharing `external-tool` across unrelated
+requests. Missing capabilities, duplicate JSON fields and trailing bytes refuse.
+
+The tools context owner resolves built-ins directly and MCP-derived definitions
+from their live provider. Qualified plugin definitions cross the existing explicit
+compatibility catalog boundary; unrelated entries do not become preconditions
+for a valid requested capability. No process-global cached schema authorizes
+this API. The bypass gate now also protects this consumer from legacy dispatch.
+
+Real restricted-role PostgreSQL integration passes 163/163, with 26 existing
+service-dependent skips and no KB. The four additional assertions cover canonical
+and aliased path-policy parity, trailing argument bytes and duplicate argument
+fields. Fresh-definition dispatch passes normally and under ASan/UBSan;
+changed-source Cppcheck has no diagnostics. The full native run passes all 653
+binaries and the 30-case proxy suite, and all 76 lint gates pass.
+
+Script RPC still needs its caller's execution scope carried into its worker and
+its own admitted-definition cutover. This API increment does not claim those,
+production native SDK activation, resumed native command fidelity or independently
+graded learning complete. Fresh published `591d791e2` benchmark, attribution and
+non-main workflows pass; its source CI remains in progress at this checkpoint.

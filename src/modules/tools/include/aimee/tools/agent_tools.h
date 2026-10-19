@@ -94,6 +94,9 @@ char *dispatch_tool_call_ir_ctx_status(const struct aimee_tool *admitted,
                                        const char *canonical_arguments_json, int timeout_ms,
                                        int *is_error);
 int agent_tools_builtin_catalog(struct aimee_tool **out, int *count);
+/* Fresh owned definition from the current execution owner. Unregistered or
+ * unavailable capabilities refuse; no process-global schema cache is used. */
+int agent_tools_execution_definition(const char *name, struct aimee_tool *out);
 
 /* Tool definition builders */
 struct cJSON *build_tools_array(void);

@@ -102,10 +102,9 @@ static void test_admitted_arguments_ignore_stale_schema_cache(void)
     * provider now admits a string. A deeper normalizer must not change it. */
    g_value_schema_string = 1;
    agent_tools_set_mcp_provider(fake_call, fake_advert);
-   cJSON *definition = fake_advert(FAKE_TOOL);
-   aimee_tool_t admitted = {.name = FAKE_TOOL,
-                            .kind = AIMEE_TOOL_FUNCTION,
-                            .schema = cJSON_GetObjectItemCaseSensitive(definition, "inputSchema")};
+   aimee_tool_t admitted = {0};
+   int resolved = agent_tools_execution_definition(FAKE_TOOL, &admitted);
+   assert(!resolved && admitted.schema);
    int is_error = 1;
    char *out = dispatch_tool_call_ir_ctx_status(&admitted, "{\"value\":\"7\"}", 5000, &is_error);
    assert(out && !is_error && g_value_is_string);
@@ -124,7 +123,9 @@ static void test_admitted_arguments_ignore_stale_schema_cache(void)
    out = dispatch_tool_call_ir_ctx_status(&admitted, "{}", 5000, &is_error);
    assert(out && is_error && g_call_count == calls);
    free(out);
-   cJSON_Delete(definition);
+   aimee_tool_free(&admitted);
+   resolved = agent_tools_execution_definition("not-in-current-catalog", &admitted);
+   assert(resolved == -1 && !admitted.name && !admitted.schema);
 }
 
 /* An unregistered name must still fall through to the unknown-tool error, not get

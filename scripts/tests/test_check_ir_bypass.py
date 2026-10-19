@@ -73,7 +73,7 @@ class IRBypassTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "unclassified-tool-dispatch"):
                     checker.check(self.root)
                 path.unlink()
-            dispatch = ("dispatch_tool_call_ir_ctx_status" if relative == "src/posix/agent_runtime.c"
+            dispatch = ("dispatch_tool_call_ir_ctx_status" if relative in {"src/posix/agent_runtime.c", "src/server/server_compute_async.c"}
                         else "dispatch_tool_call_ctx_status")
             self.source(relative, dispatch + '(tool, args, timeout, &failed);')
         checker.check(self.root)

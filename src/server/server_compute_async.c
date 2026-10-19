@@ -2,6 +2,7 @@
 #include "server_compute_impl.h"
 #include "aimee.h"
 #include "agent_exec.h"
+#include "agent_coord.h"
 #include "agent_config.h" /* agent_set_request_codex_creds */
 #include "json_fluent.h"  /* jo_ok, jo_str */
 #include <aimee/tools/agent_tools.h>
@@ -12,6 +13,8 @@
 #include "log.h"
 #include "modules/workspace/workspace_turn.h"
 #include "cJSON.h"
+#include "tool_args_coerce.h"
+#include "platform_random.h"
 #include <ctype.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -140,6 +143,16 @@ static void async_slot_release(int slot)
 
 /* --- tool.execute worker --- */
 
+static char *tool_execute_arguments(const aimee_tool_t *definition, const char *wire)
+{
+   cJSON *raw = aimee_ir_json_parse_frame(wire, strlen(wire));
+   cJSON *canonical = cJSON_IsObject(raw) ? tool_args_canonicalize(definition->schema, raw) : NULL;
+   char *result = canonical ? cJSON_PrintUnformatted(canonical) : NULL;
+   cJSON_Delete(canonical);
+   cJSON_Delete(raw);
+   return result;
+}
+
 static void tool_execute_worker(void *arg)
 {
    compute_ctx_t *cctx = (compute_ctx_t *)arg;
@@ -153,7 +166,7 @@ static void tool_execute_worker(void *arg)
    cJSON *jtimeout = cJSON_GetObjectItemCaseSensitive(req, "timeout_ms");
 
    const char *tool = cJSON_IsString(jtool) ? jtool->valuestring : "";
-   const char *args = cJSON_IsString(jargs) ? jargs->valuestring : "{}";
+   const char *args = cJSON_GetStringValue(jargs);
    const char *cwd = cJSON_IsString(jcwd) ? jcwd->valuestring : "";
    const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : "unknown";
    int timeout_ms = cJSON_IsNumber(jtimeout) ? (int)jtimeout->valuedouble : 30000;
@@ -174,6 +187,44 @@ static void tool_execute_worker(void *arg)
       return;
    }
 
+   if (jargs && !cJSON_IsString(jargs))
+   {
+      compute_error(cctx, "tool arguments must be a JSON string");
+      compute_ctx_free(cctx);
+      return;
+   }
+   if (!args)
+      args = "{}";
+   aimee_tool_t admitted = {0};
+   char admission_error[256] = {0}, attempt[33];
+   char *canonical = NULL;
+   if (agent_tools_execution_definition(tool, &admitted) != 0 ||
+       !(canonical = tool_execute_arguments(&admitted, args)) ||
+       tool_validate_ir(&admitted, canonical, admission_error, sizeof admission_error) != 0 ||
+       directive_check_tool(tool, canonical, admission_error, sizeof admission_error) != 0 ||
+       platform_random_hex(attempt, 32) != 0)
+   {
+      free(canonical);
+      aimee_tool_free(&admitted);
+      compute_error(cctx, admission_error[0]
+                              ? admission_error
+                              : "tool is not in current execution catalog or admission failed");
+      compute_ctx_free(cctx);
+      return;
+   }
+   cJSON *canonical_value = cJSON_CreateString(canonical);
+   free(canonical);
+   cJSON_DeleteItemFromObjectCaseSensitive(req, "arguments");
+   if (!canonical_value || !cJSON_AddItemToObject(req, "arguments", canonical_value))
+   {
+      cJSON_Delete(canonical_value);
+      aimee_tool_free(&admitted);
+      compute_error(cctx, "cannot retain admitted tool arguments");
+      compute_ctx_free(cctx);
+      return;
+   }
+   args = canonical_value->valuestring;
+
    /* If the tool's cwd is a registered `detached` workspace, bind that workspace's
     * provider so the tool's file/exec ops marshal to the serving client (just as
     * a chat turn does). AC #6: a remote peer with a raw foreign cwd that binds no
@@ -183,6 +234,7 @@ static void tool_execute_worker(void *arg)
    if (workspace_turn_reject_foreign_cwd(detached_bound, trusted_local, cwd))
    {
       workspace_turn_unbind_active();
+      aimee_tool_free(&admitted);
       compute_error(cctx, "workspace: a remote session must act within a registered `detached` "
                           "workspace; raw server-side path not accepted");
       compute_ctx_free(cctx);
@@ -222,6 +274,7 @@ static void tool_execute_worker(void *arg)
       compute_respond(cctx, resp);
       run_cmd_set_cwd(NULL);
       workspace_turn_unbind_active();
+      aimee_tool_free(&admitted);
       compute_ctx_free(cctx);
       return;
    }
@@ -232,8 +285,8 @@ static void tool_execute_worker(void *arg)
    char effect[32];
    if (tool_policy_metadata(tool, &metadata, effect, sizeof effect, policy_reason,
                             sizeof policy_reason) != 0 ||
-       policy_check_tool_metadata_attempt(tool, &metadata, effect, args, "external-tool",
-                                          policy_reason, sizeof policy_reason) != 0)
+       policy_check_tool_metadata_attempt(tool, &metadata, effect, args, attempt, policy_reason,
+                                          sizeof policy_reason) != 0)
    {
       cJSON *blocked = cJSON_CreateObject();
       cJSON_AddStringToObject(blocked, "status", "blocked");
@@ -241,6 +294,7 @@ static void tool_execute_worker(void *arg)
       compute_respond(cctx, blocked);
       run_cmd_set_cwd(NULL);
       workspace_turn_unbind_active();
+      aimee_tool_free(&admitted);
       compute_ctx_free(cctx);
       return;
    }
@@ -251,9 +305,9 @@ static void tool_execute_worker(void *arg)
     * first-class API; capability-limited remote callers do not inherit it. */
    agent_tools_set_effect_authorized(trusted_local);
    int is_error = 1;
-   char *result = dispatch_tool_call_ctx_status(tool, args, timeout_ms, &is_error);
+   char *result = dispatch_tool_call_ir_ctx_status(&admitted, args, timeout_ms, &is_error);
    agent_tools_set_effect_authorized(0);
-   result = policy_annotate_indexed(tool, args, "external-tool", result);
+   result = policy_annotate_indexed(tool, args, attempt, result);
 
    /* Clear thread-local CWD + the detached provider binding */
    run_cmd_set_cwd(NULL);
@@ -263,6 +317,7 @@ static void tool_execute_worker(void *arg)
    cJSON_AddBoolToObject(resp, "is_error", is_error);
    cJSON_AddStringToObject(resp, "result", result ? result : "");
    free(result);
+   aimee_tool_free(&admitted);
    compute_respond(cctx, resp);
    compute_ctx_free(cctx);
 }

@@ -124,7 +124,7 @@ def findings(root: Path) -> list[dict]:
         for rule, pattern in RULES.items():
             if rule == "post-render-profile" and relative != "src/server/agent_request_build.c":
                 continue
-            if rule == "canonical-dispatch-cache" and relative != "src/posix/agent_runtime.c":
+            if rule == "canonical-dispatch-cache" and relative not in {"src/posix/agent_runtime.c", "src/server/server_compute_async.c"}:
                 continue
             if rule == "native-schema-lookup" and not canonical:
                 continue
