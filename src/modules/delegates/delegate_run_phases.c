@@ -82,9 +82,9 @@ int delegate_record_exit_learning(const char *sid, const char *role, const agent
    dlm.success = (rc == 0);
    dlm.error = result->error[0] ? result->error : NULL;
    dlm.max_turns_limit = max_turns > 0 ? max_turns : 0; /* 0 = unlimited (default -1) */
-   dlm.write_enforce_fired = dlm.error && strstr(dlm.error, "write_enforce") ? 1 : 0;
-   dlm.had_writes = dlm.write_enforce_fired ? (strstr(dlm.error, "no Write or Edit") ? 0 : 1)
-                                            : (rc == 0 ? 1 : 0);
+   /* Completion/error text cannot attest filesystem effects. Until an actual
+    * effect receipt is supplied, retain unknown rather than inventing writes. */
+   dlm.had_writes = -1;
    dl_classification_t dlc;
    classify_delegate_exit(&dlm, &dlc);
    agent_t *event_agent =

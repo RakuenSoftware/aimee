@@ -98,6 +98,21 @@ resource intents/results, a 2 KiB opaque session ID, a 200 KiB prompt and bounde
 Independent local task grading/reuse and remaining deployment qualification still require completion.
 Continue those after publication rather than ending the task.
 
+## Active continuation: local learning evidence and legacy injection retirement
+
+ACP owner cutover is published as `af0943cf2`. Its full native regression, focused ASan/UBSan,
+CMake targets, actual PostgreSQL/SDK integration (168 configured checks), static analysis, full-history
+secret scan and all 76 default-invocation lint gates passed. Fresh CI remains under observation.
+
+The current learning repair keeps delegate process completion distinct from correctness. Missing
+mutation receipts remain unknown; opaque failures no longer become successful or turn-budget
+classifications. Pending exit observations have automatic application disabled. The old role-only
+prompt injection operation is a wire tombstone and cannot read or inject other owners' unreviewed
+lessons. Canonical memory remains the path for scoped reviewed procedure context. The integration
+fixture now requires real retained delegate observations while checking both subsequent prompts
+exclude ungraded exit lessons. This is not independent task grading or qualified positive reuse.
+Those remain required before completion.
+
 ## Active continuation: owned results, exact-request cache and workspace hooks
 
 The current implementation retains full owned canonical responses in internal agent results.

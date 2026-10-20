@@ -128,3 +128,9 @@ Add a detector or sink by extending the typed router, evidence rules, caps, revi
 tests together. Self-contained experiments with no production caller should be deleted rather than
 declared as learning. The core `learning` module cannot be removed; model-heavy candidate generation can
 remain provider-gated without splitting the user-learning contract into a second optional subsystem.
+
+Delegate exits retain process completion separately from task correctness. A successful exit
+cannot establish writes, validate a prompt pattern or provide an independent grade. Missing effect
+receipts remain unknown. Pending exit observations are retained with automatic application disabled.
+The legacy role-only prompt-injection operation is a wire tombstone and never reads storage; the
+canonical memory owner supplies scoped reviewed procedure context.

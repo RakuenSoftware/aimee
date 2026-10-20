@@ -1475,12 +1475,8 @@ static void delegate_worker_run(void *arg)
       if (handoff_prompt)
          run_prompt = handoff_prompt;
    }
-   char *learning_sys_prompt =
-       delegate_agent_uses_mistral_path(target_agent)
-           ? NULL
-           : db1_delegate_learning_inject_prompt(role, system_prompt ? system_prompt : "", 3);
-   if (learning_sys_prompt)
-      system_prompt = learning_sys_prompt;
+   /* Reviewed procedure context is assembled by the canonical memory owner.
+    * A role-wide list of pending exit lessons is not scoped reuse authority. */
 
    int rc = -1;
    int cost_limit_failed = 0;
@@ -1881,7 +1877,6 @@ static void delegate_worker_run(void *arg)
    free(handoff_prompt);
    free(resolved_prompt);
    free(template_sys_prompt);
-   free(learning_sys_prompt);
    compute_respond(cctx, resp);
 
    /* Unified-presence "speak first": tell the launching session's surfaces this

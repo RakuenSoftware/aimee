@@ -448,15 +448,22 @@ def main():
             print("delegate setup: registered workspace and dedicated worktree reach mandatory sandbox refusal")
             print("SKIP: delegate learning completion/readback (real Docker sandbox unavailable)")
         else:
-            # Completion must follow capture, not race its next-run prompt read.
-            lesson = "Delegate succeeded in role 'format'"
+            # Process completion is retained without becoming next-run authority.
+            lessons = ("Delegate succeeded in role 'format'", "Delegate process completed in role 'format'")
             for run in range(2):
                 before = len(observed)
                 status = learning_task(run)
                 assert status["job_status"] == "done" and "PRIMARY_OK" in status["result"], status
                 assert len(observed) > before, status
-                assert (lesson in json.dumps(observed[before])) == (run == 1), observed[before]
-            print("delegate learning: terminal completion precedes durable learning readback into the next actual execution")
+                assert not any(lesson in json.dumps(observed[before]) for lesson in lessons), observed[before]
+            verification = subprocess.run([os.environ.get("GO", "go"), "-C",
+                str(Path(__file__).resolve().parents[2] / "server-go"), "test", "./modules/learning",
+                "-run", "^TestDelegateExitLiveUngradedRetention$", "-count=1"],
+                env={**os.environ, "AIMEE_LEARNING_LIVE_SESSION": sid,
+                     "AIMEE_LEARNING_LIVE_ACTOR": f"uid:{os.getuid()}"},
+                capture_output=True, text=True, timeout=120)
+            assert verification.returncode == 0, verification.stdout + verification.stderr
+            print("delegate learning: actual exits persist without fabricated writes/grades or next-run prompt authority")
 
         from test_native_ir_browser_control import prepare_browser_workspace
         mirror = prepare_browser_workspace(api, home, workspace, "queued-delegate-client")

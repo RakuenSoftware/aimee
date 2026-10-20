@@ -64,10 +64,8 @@ const (
 	// spawnStaleHours is how long a spawn may sit active before the sweep
 	// cancels it.
 	spawnStaleHours = 24
-	// learningCap and learningInjectMax bound the learning store and the
-	// prompt it produces.
-	learningCap       = 200
-	learningInjectMax = 10
+	// Bound retained exit observations; these are not automatic prompt authority.
+	learningCap = 200
 	// treeDepthMax bounds both recursive walks. The C had no bound: a cycle in
 	// parent_delegation_id -- which nothing prevents on write -- made the CTE
 	// recurse until the process gave up. A delegation tree is never remotely
@@ -1036,12 +1034,7 @@ const (
 	learningRecordSQL = `INSERT INTO delegate_learnings
 	        (session_id, role, failure_mode, lesson, evidence_json, confidence,
 	         auto_applied, review_status)
-	    VALUES ($1, $2, $3, $4, $5, $6, 1, 'pending')`
-
-	learningInjectSQL = `SELECT lesson, confidence FROM delegate_learnings
-	                      WHERE role = $1 AND auto_applied = 1
-	                      ORDER BY confidence DESC, created_at DESC, id DESC
-	                      LIMIT $2`
+	    VALUES ($1, $2, $3, $4, $5, $6, 0, 'pending')`
 )
 
 var (
@@ -1089,39 +1082,11 @@ func delegateLearningRecord(ctx context.Context, q store.Queryer, f []string) (u
 	return store.StatusOK, nil, nil
 }
 
-// delegateLearningInjectPrompt is op 44: the top lessons for a role.
-//
-// The module returns the lessons; composing them into a prompt is the caller's
-// job, and was already -- what the C did here was the query.
-func delegateLearningInjectPrompt(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
-	if f[0] == "" {
-		return store.StatusInvalid, nil, nil
-	}
-	topN, ok := store.Atoi(f[2])
-	if !ok || topN <= 0 {
-		topN = 3
-	}
-	if topN > learningInjectMax {
-		topN = learningInjectMax
-	}
-	rows, err := q.Query(ctx, learningInjectSQL, f[0], topN)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer rows.Close()
-	var cells []string
-	for rows.Next() {
-		var lesson string
-		var confidence float64
-		if err := rows.Scan(&lesson, &confidence); err != nil {
-			return 0, nil, err
-		}
-		cells = append(cells, lesson)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, nil, err
-	}
-	return store.StatusOK, cells, nil
+// Op 44 is a wire-compatible tombstone. Its role-only query had neither owner
+// nor project authority and promoted pending observations into instructions.
+// Reviewed procedure reuse belongs to the canonical memory context owner.
+func delegateLearningInjectPrompt(_ context.Context, _ store.Queryer, _ []string) (uint32, []string, error) {
+	return store.StatusInvalid, nil, nil
 }
 
 // Delegation is the family, ready to be bound to kind 11781.

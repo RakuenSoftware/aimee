@@ -45,6 +45,8 @@ class IRBypassTests(unittest.TestCase):
             ("src/server/rogue.c", "agent_build_extra_headers(agent, headers, capacity);"),
             ("src/server/rogue.c", "agent_execute_cli_shell_driver(agent, prompt);"),
             ("src/server/rogue.c", "agent_shell_driver_get(name);"),
+            ("src/server/rogue.c", "acp_serve_client_request(frame, cwd);"),
+            ("src/server/rogue.c", "provider_cli_collect_child(config, result);"),
             ("src/server/rogue.c", "agent_shell_driver_t terminal;"),
             ("src/server/rogue.c", "tool_side_effect(name);"),
             ("src/server/rogue.c", "emit(SHELL_EVENT_TEXT_DELTA);"),
@@ -56,6 +58,14 @@ class IRBypassTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "IR bypasses"):
                     checker.check(self.root)
                 path.unlink()
+
+    def test_legacy_learning_wire_tombstone_cannot_become_prompt_authority(self):
+        self.source("src/db1_client/delegation.c", "char *db1_delegate_learning_inject_prompt(void); ")
+        self.source("src/db1_client/delegate_learning.h", "char *db1_delegate_learning_inject_prompt(void); ")
+        checker.check(self.root)
+        self.source("src/server/new.c", "prompt = db1_delegate_learning_inject_prompt(role, prompt, 3);")
+        with self.assertRaisesRegex(ValueError, "unqualified-learning-prompt"):
+            checker.check(self.root)
 
     def test_native_shapes_refused_in_migrated_c_and_go_consumers(self):
         for relative in [*sorted(checker.CANONICAL_FILES),

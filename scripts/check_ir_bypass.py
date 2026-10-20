@@ -49,6 +49,7 @@ RETIRED = (
     "anthropic_stream_get_usage", "anthropic_stream_free", "emit_message_as_sse",
 )
 RULES = {
+    "unqualified-learning-prompt": re.compile(r"\bdb1_delegate_learning_inject_prompt\s*\("),
     "retired-api": re.compile(r"\b(?:" + "|".join(RETIRED) + r")\b"),
     "driver-bypass": re.compile(r"->\s*(?:parse_response|build_request)\s*\("),
     "unclassified-tool-dispatch": re.compile(r"\bdispatch_tool_call(?:_ctx)?\s*\("),
@@ -133,6 +134,8 @@ def findings(root: Path) -> list[dict]:
         history_spans = (profile_function_spans(source, {"message_history_repair"})
                          if relative == "src/server/agent_bridge.c" else [])
         for rule, pattern in RULES.items():
+            if rule == "unqualified-learning-prompt" and relative in {"src/db1_client/delegation.c", "src/db1_client/delegate_learning.h"}:
+                continue
             if rule == "post-render-profile" and relative != "src/server/agent_request_build.c":
                 continue
             if rule == "canonical-dispatch-cache" and relative not in {"src/posix/agent_runtime.c", "src/server/server_compute_async.c", "src/server/script_rpc.c", "src/server/script_tool_execution.c"}:
