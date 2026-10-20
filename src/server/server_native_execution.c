@@ -1,12 +1,15 @@
 /* Credential-free SDK scheduler resources. The durable capture and existing
  * native-cache owner, not SDK files or process exit, own conversation truth. */
 #include "server_native_execution.h"
+#include "cli_claude_native.h"
+#include "claude_headless.h"
 #include "server_native_runtime.h"
 #include "server_native_cache.h"
 #include "server_session_capture.h"
 #include "request_context.h"
 #include "agent_exec.h"
 #include "agent_protocol.h"
+#include "agent_request_build.h"
 #include "agent_adapter.h"
 #include <aimee/tools/agent_tools.h>
 #include <aimee/ir/session_event.h>
@@ -22,6 +25,7 @@
 #include <openssl/crypto.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <dirent.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdio.h>
@@ -47,6 +51,10 @@ typedef struct
    aimee_request_t profile, adoption;
    cli_session_t home_cleanup;
    cli_codex_host_launch_t launch;
+   cli_claude_host_launch_t claude;
+   provider_cli_cfg_t launching;
+   char *mcp_config;
+   char claude_digest[65];
    char home[4096], cwd[4096], build[65], workspace[65];
    int executable_fd, scheduler_fd, workspace_fd;
    cJSON *config;
@@ -88,6 +96,7 @@ static void native_execution_close(native_execution_t *execution)
    aimee_request_free(&execution->profile);
    aimee_request_free(&execution->adoption);
    cJSON_Delete(execution->config);
+   free(execution->mcp_config);
    for (size_t i = 0; i < sizeof execution->environment / sizeof execution->environment[0]; i++)
       free(execution->environment[i]);
    server_session_capture_release(execution->capture);
@@ -98,16 +107,34 @@ static void native_execution_close(native_execution_t *execution)
 /* The descriptor launch is qualified for Linux's default configuration
  * hierarchy. A nonempty ambient/managed SDK configuration is outside this
  * credential-free profile; never let it load secrets before effective readback. */
-static int native_ambient_config_absent(void)
+static int native_ambient_config_absent(const char *sdk)
 {
-   const char *paths[] = {"/etc/codex/config.toml", "/etc/codex/managed_config.toml",
+   const char *codex[] = {"/etc/codex/config.toml", "/etc/codex/managed_config.toml",
                           "/etc/codex/requirements.toml"};
-   for (size_t i = 0; i < sizeof paths / sizeof paths[0]; i++)
+   const char *claude[] = {"/etc/claude-code/managed-settings.json",
+                           "/etc/claude-code/managed-mcp.json",
+                           "/etc/claude-code/managed-settings.d"};
+   const char *const *paths = !strcmp(sdk, "claude") ? claude : codex;
+   for (size_t i = 0; i < 3; i++)
    {
       struct stat status;
       if (lstat(paths[i], &status) == 0)
       {
-         if (!S_ISREG(status.st_mode) || status.st_size != 0)
+         if (!strcmp(sdk, "claude") && i == 2 && S_ISDIR(status.st_mode))
+         {
+            DIR *directory = opendir(paths[i]);
+            if (!directory)
+               return 0;
+            struct dirent *entry;
+            int empty = 1;
+            while ((entry = readdir(directory)))
+               if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, ".."))
+                  empty = 0;
+            closedir(directory);
+            if (!empty)
+               return 0;
+         }
+         else if (!S_ISREG(status.st_mode) || status.st_size != 0)
             return 0;
       }
       else if (errno != ENOENT)
@@ -169,8 +196,10 @@ refused:
 static int native_environment(native_execution_t *execution)
 {
    char codex[4200], temporary[4200];
-   if (snprintf(codex, sizeof codex, "CODEX_HOME=%s/.codex", execution->home) >=
-           (int)sizeof codex ||
+   int claude = !strcmp(execution->selected.cli_kind, "claude");
+   if (snprintf(codex, sizeof codex,
+                claude ? "CLAUDE_CONFIG_DIR=%s/.claude" : "CODEX_HOME=%s/.codex",
+                execution->home) >= (int)sizeof codex ||
        snprintf(temporary, sizeof temporary, "TMPDIR=%s/tmp", execution->home) >=
            (int)sizeof temporary)
       return -1;
@@ -193,21 +222,43 @@ static int native_environment(native_execution_t *execution)
       if (!execution->environment[i])
          return -1;
    }
+   if (claude)
+   {
+      char key[512], url[512];
+      if (snprintf(key, sizeof key, "ANTHROPIC_API_KEY=%s",
+                   server_native_runtime_token(execution->runtime)) >= (int)sizeof key ||
+          snprintf(url, sizeof url, "ANTHROPIC_BASE_URL=%s",
+                   server_native_runtime_url(execution->runtime)) >= (int)sizeof url)
+         return -1;
+      const char *extra[] = {key, url, "DISABLE_AUTOUPDATER=1",
+                             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"};
+      for (unsigned i = 0; i < sizeof extra / sizeof extra[0]; i++)
+      {
+         execution->environment[9 + i] = strdup(extra[i]);
+         if (!execution->environment[9 + i])
+            return -1;
+      }
+   }
    return 0;
 }
-static int native_write_config(native_execution_t *execution, const agent_t *selected)
+static int native_prepare_directory(native_execution_t *execution)
 {
-   /* A native scheduler never enters the host tool workspace. Its built-ins are
-    * disabled, and all project context/effects come through the canonical host. */
    if (snprintf(execution->cwd, sizeof execution->cwd, "%s/workspace", execution->home) >=
            (int)sizeof execution->cwd ||
        mkdir(execution->cwd, 0700))
       return -1;
    execution->scheduler_fd = open(execution->cwd, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
    char temporary[4200];
-   if (execution->scheduler_fd < 0 ||
-       snprintf(temporary, sizeof temporary, "%s/tmp", execution->home) >= (int)sizeof temporary ||
-       mkdir(temporary, 0700))
+   return execution->scheduler_fd < 0 ||
+                  snprintf(temporary, sizeof temporary, "%s/tmp", execution->home) >=
+                      (int)sizeof temporary ||
+                  mkdir(temporary, 0700)
+              ? -1
+              : 0;
+}
+static int native_write_config(native_execution_t *execution, const agent_t *selected)
+{
+   if (native_prepare_directory(execution))
       return -1;
    execution->config = cJSON_CreateObject();
    cJSON *config = execution->config;
@@ -292,33 +343,50 @@ static int native_write_config(native_execution_t *execution, const agent_t *sel
       valid = 0;
    return valid ? native_environment(execution) : -1;
 }
-static int native_registry_namespace(aimee_request_t *profile)
+static int native_registry_open(native_execution_t *execution, const request_context_t *owner)
 {
-   if (!profile->n_tools)
-      return 0;
+   aimee_request_t *profile = &execution->profile;
+   int claude = !strcmp(execution->selected.cli_kind, "claude");
+   server_native_tool_binding_t *bindings =
+       profile->n_tools ? calloc((size_t)profile->n_tools, sizeof *bindings) : NULL;
+   if (profile->n_tools && !bindings)
+      return -1;
+   int rc = -1;
    for (int i = 0; i < profile->n_tools; i++)
-      if (profile->tools[i].kind != AIMEE_TOOL_FUNCTION)
-         return -1;
-   aimee_tool_t *space = calloc(1, sizeof *space);
-   if (!space)
-      return -1;
-   space->kind = AIMEE_TOOL_NAMESPACE;
-   space->name = strdup("aimee");
-   if (!space->name)
    {
-      free(space);
-      return -1;
+      aimee_tool_t *tool = profile->tools + i;
+      if (tool->kind != AIMEE_TOOL_FUNCTION)
+         goto done;
+      bindings[i].registry_name = strdup(tool->name);
+      if (!bindings[i].registry_name)
+         goto done;
+      if (claude)
+      {
+         size_t size = strlen(tool->name) + sizeof "mcp__aimee__";
+         char *alias = malloc(size);
+         if (!alias)
+            goto done;
+         snprintf(alias, size, "mcp__aimee__%s", tool->name);
+         free(tool->name);
+         tool->name = alias;
+         bindings[i].mcp_name = bindings[i].registry_name;
+      }
+      bindings[i].name = tool->name;
    }
-   space->children = profile->tools;
-   space->n_children = profile->n_tools;
-   profile->tools = space;
-   profile->n_tools = 1;
-   return aimee_ir_request_admit(profile);
+   execution->runtime = server_native_runtime_open_bound_request(
+       &execution->selected, owner, execution->source_session, profile, bindings, profile->n_tools);
+   rc = execution->runtime ? 0 : -1;
+done:
+   for (int i = 0; i < profile->n_tools; i++)
+      free((void *)bindings[i].registry_name);
+   free(bindings);
+   return rc;
 }
-static int native_ready(const char *launch_digest, cli_codex_host_replay_t *replay, void *context)
+static int native_cache_ready(native_execution_t *execution, const char *launch_digest,
+                              cli_codex_host_replay_t *replay)
 {
-   native_execution_t *execution = context;
-   server_native_execution_profile_t profile = {.sdk = "codex",
+   const char *sdk = execution->selected.cli_kind;
+   server_native_execution_profile_t profile = {.sdk = sdk,
                                                 .build_digest = execution->build,
                                                 .launch_digest = launch_digest,
                                                 .workspace_digest = execution->workspace};
@@ -327,14 +395,14 @@ static int native_ready(const char *launch_digest, cli_codex_host_replay_t *repl
       return -1;
    execution->cache = server_native_cache_begin(
        server_session_capture_session(execution->capture), execution->actor,
-       server_session_capture_turn(execution->capture), "codex", scope, &execution->profile);
+       server_session_capture_turn(execution->capture), sdk, scope, &execution->profile);
    if (!execution->cache || aimee_ir_request_clone(&execution->profile, &execution->adoption))
       return -1;
    int offset = server_native_cache_history_offset(execution->cache);
    if (offset < 0 || offset > execution->adoption.n_messages)
       return -1;
    for (int i = 0; i < offset; i++)
-      aimee_message_free(&execution->adoption.messages[i]);
+      aimee_message_free(execution->adoption.messages + i);
    execution->adoption.n_messages -= offset;
    if (execution->adoption.n_messages)
       memmove(execution->adoption.messages, execution->adoption.messages + offset,
@@ -343,10 +411,20 @@ static int native_ready(const char *launch_digest, cli_codex_host_replay_t *repl
    replay->resume_id = server_native_cache_resume(execution->cache);
    return 0;
 }
+static int native_ready(const char *digest, cli_codex_host_replay_t *replay, void *context)
+{
+   native_execution_t *execution = context;
+   return server_native_runtime_attest_launch(execution->runtime, digest)
+              ? -1
+              : native_cache_ready(execution, digest, replay);
+}
 static int native_bind(const char *id, void *context)
 {
    native_execution_t *execution = context;
    if (!id || !id[0] || strlen(id) >= sizeof execution->native_id || execution->native_id[0])
+      return -1;
+   const char *resume = server_native_cache_resume(execution->cache);
+   if (resume && resume[0] && strcmp(resume, id))
       return -1;
    snprintf(execution->native_id, sizeof execution->native_id, "%s", id);
    return 0;
@@ -402,16 +480,25 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
              : status == 0 && stored ? aimee_ir_json_parse_frame(stored, strlen(stored))
                                      : NULL;
    free(stored);
-   cJSON *tools = build_tools_array_responses();
+   aimee_wire_t wire = is_anthropic_provider(selected) ? AIMEE_WIRE_ANTHROPIC
+                       : is_chatgpt_provider(selected) ? AIMEE_WIRE_RESPONSES
+                                                       : AIMEE_WIRE_OPENAI_CHAT;
+   cJSON *tools = wire == AIMEE_WIRE_ANTHROPIC   ? build_tools_array_anthropic()
+                  : wire == AIMEE_WIRE_RESPONSES ? build_tools_array_responses()
+                                                 : build_tools_array();
    if (tools)
-      agent_tools_filter_for_role(tools, cfg->role);
+   {
+      if (wire == AIMEE_WIRE_ANTHROPIC)
+         agent_tools_filter_anthropic_for_role(tools, cfg->role);
+      else
+         agent_tools_filter_for_role(tools, cfg->role);
+   }
    char *system =
        agent_build_exec_context_checked(selected, cfg->network, cfg->role, cfg->system_prompt,
                                         !agent_tools_knowledge_write_allowed(), error, 512);
-   int prepared =
-       empty && history && !aimee_ir_history_admit(history) && tools && system &&
-       !agent_prepare_request_ir(selected, empty, tools, system, 0, 0, AIMEE_WIRE_RESPONSES,
-                                 cfg->role != NULL, &execution->profile);
+   int prepared = empty && history && !aimee_ir_history_admit(history) && tools && system &&
+                  !agent_prepare_request_ir(selected, empty, tools, system, 0, -1, wire,
+                                            cfg->role != NULL, &execution->profile);
    free(system);
    cJSON_Delete(empty);
    cJSON_Delete(tools);
@@ -437,17 +524,18 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    if (prepared && cfg->reasoning_effort &&
        aimee_ir_effort_parse(cfg->reasoning_effort, &execution->profile.reasoning_effort))
       prepared = 0;
-   if (!prepared || native_registry_namespace(&execution->profile))
+   if (!prepared || native_registry_open(execution, owner))
       goto refused;
-   execution->runtime = server_native_runtime_open_request(
-       selected, owner, execution->source_session, &execution->profile);
-   if (!execution->runtime || !native_ambient_config_absent() ||
-       cli_session_native_home("codex", cwd, server_session_capture_session(execution->capture),
+   const char *sdk = execution->selected.cli_kind;
+   if (!native_ambient_config_absent(sdk) ||
+       cli_session_native_home(sdk, cwd, server_session_capture_session(execution->capture),
                                server_native_runtime_binding(execution->runtime), execution->home,
                                sizeof execution->home, &execution->home_cleanup) ||
-       (execution->executable_fd = native_executable_open(cfg->agent->cli_cmd, execution->build)) <
-           0 ||
-       native_write_config(execution, selected))
+       (execution->executable_fd = native_executable_open(
+            cfg->agent->cli_cmd[0] ? cfg->agent->cli_cmd : sdk, execution->build)) < 0 ||
+       (!strcmp(sdk, "codex")
+            ? native_write_config(execution, selected)
+            : native_prepare_directory(execution) || native_environment(execution)))
       goto refused;
    execution->launch =
        (cli_codex_host_launch_t){.executable_fd = execution->executable_fd,
@@ -506,15 +594,97 @@ static int native_execution_result(native_execution_t *execution, agent_result_t
    out->cache_read_tokens = (int)original.usage_cache_read;
    out->cache_write_tokens = (int)original.usage_cache_write;
    snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
-            original.raw_stop_reason ? original.raw_stop_reason : "end_turn");
+            original.raw_stop_reason ? original.raw_stop_reason
+                                     : aimee_stop_reason_name(original.stop_reason));
    aimee_response_free(&original);
    return 0;
 }
+static int native_claude_init(const cJSON *frame, void *context)
+{
+   native_execution_t *execution = context;
+   const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(frame, "session_id"));
+   const char *resume = server_native_cache_resume(execution->cache);
+   char proof[65];
+   if (!id || !id[0] || strlen(id) >= sizeof execution->native_id ||
+       (resume && resume[0] && strcmp(resume, id)) ||
+       cli_claude_native_launch_digest(&execution->launching, proof) ||
+       strcmp(proof, execution->claude_digest))
+      return -1;
+   return server_native_runtime_attest_launch(execution->runtime, proof);
+}
+static int native_claude_execute(native_execution_t *execution, const provider_cli_cfg_t *cfg,
+                                 agent_result_t *out)
+{
+   cJSON *config = cJSON_CreateObject();
+   cJSON *servers = config ? cJSON_AddObjectToObject(config, "mcpServers") : NULL;
+   int valid = servers != NULL;
+   if (valid && execution->profile.n_tools)
+   {
+      cJSON *server = cJSON_AddObjectToObject(servers, "aimee");
+      cJSON *headers = server ? cJSON_AddObjectToObject(server, "headers") : NULL;
+      char url[512], authorization[512];
+      valid =
+          server && headers &&
+          snprintf(url, sizeof url, "%s/v1/mcp/call",
+                   server_native_runtime_url(execution->runtime)) < (int)sizeof url &&
+          snprintf(authorization, sizeof authorization, "Bearer %s",
+                   server_native_runtime_token(execution->runtime)) < (int)sizeof authorization &&
+          cJSON_AddStringToObject(server, "type", "http") &&
+          cJSON_AddStringToObject(server, "url", url) &&
+          cJSON_AddStringToObject(headers, "Authorization", authorization);
+   }
+   execution->mcp_config = valid ? cJSON_PrintUnformatted(config) : NULL;
+   cJSON_Delete(config);
+   if (!execution->mcp_config)
+      return -1;
+   execution->claude =
+       (cli_claude_host_launch_t){.executable_fd = execution->executable_fd,
+                                  .cwd_fd = execution->scheduler_fd,
+                                  .home = execution->home,
+                                  .cwd = execution->cwd,
+                                  .mcp_config = execution->mcp_config,
+                                  .gateway_url = server_native_runtime_url(execution->runtime),
+                                  .gateway_token = server_native_runtime_token(execution->runtime),
+                                  .environment = execution->environment,
+                                  .catalog = &execution->profile,
+                                  .init = native_claude_init,
+                                  .context = execution,
+                                  .progress = cfg->native_progress,
+                                  .progress_context = cfg->native_progress_context};
+   execution->launching = *cfg;
+   provider_cli_cfg_t *owned = &execution->launching;
+   owned->agent = &execution->selected;
+   owned->cwd = execution->cwd;
+   owned->home = NULL;
+   owned->claude_host = &execution->claude;
+   owned->codex_host = NULL;
+   /* SDK user/slash syntax is not an ingress. The original task and complete
+    * history are already owned by the model gateway's canonical request. */
+   owned->user_prompt = "Continue the server-owned canonical turn.";
+   owned->system_prompt = NULL;
+   owned->history = NULL;
+   owned->resume_id = NULL;
+   owned->tool_catalog = NULL;
+   owned->tool_call = NULL;
+   owned->tool_context = NULL;
+   owned->bind_session = native_bind;
+   owned->bind_context = execution;
+   if (cli_claude_native_launch_digest(owned, execution->claude_digest))
+      return -1;
+   execution->claude.expected_profile = execution->claude_digest;
+   cli_codex_host_replay_t replay = {0};
+   if (native_cache_ready(execution, execution->claude_digest, &replay))
+      return -1;
+   owned->resume_id = replay.resume_id;
+   return claude_headless_run(owned, native_bind, execution, out);
+}
+
 int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
 {
    if (!out)
       return -1;
-   if (!cfg || !cfg->agent || strcmp(cfg->agent->cli_kind, "codex"))
+   if (!cfg || !cfg->agent ||
+       (strcmp(cfg->agent->cli_kind, "codex") && strcmp(cfg->agent->cli_kind, "claude")))
       return 1;
    memset(out, 0, sizeof *out);
    native_execution_t *execution = native_execution_open(cfg, out->error);
@@ -523,6 +693,8 @@ int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg, agent_resul
    provider_cli_cfg_t owned = *cfg;
    owned.cwd = execution->cwd;
    owned.home = NULL;
+   owned.user_prompt = "Continue the server-owned canonical turn.";
+   owned.system_prompt = NULL;
    owned.codex_host = &execution->launch;
    owned.history = NULL;
    owned.resume_id = NULL;
@@ -531,7 +703,9 @@ int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg, agent_resul
    owned.tool_context = execution->runtime;
    owned.bind_session = native_bind;
    owned.bind_context = execution;
-   int rc = codex_provider_cli_adapter.execute(&owned, out);
+   int rc = !strcmp(execution->selected.cli_kind, "claude")
+                ? native_claude_execute(execution, &owned, out)
+                : codex_provider_cli_adapter.execute(&owned, out);
    if (!rc && out->success)
       rc = native_execution_result(execution, out);
    native_execution_close(execution);
@@ -554,6 +728,7 @@ int server_native_codex_chat_stream(const agent_t *selected,
       return -1;
    memset(out, 0, sizeof *out);
    provider_cli_cfg_t cfg = {.agent = selected,
+                             .network = request->network,
                              .reasoning_effort = request->reasoning_effort,
                              .cwd = run_cmd_get_cwd(),
                              .system_prompt = request->system_prompt,
@@ -565,6 +740,8 @@ int server_native_codex_chat_stream(const agent_t *selected,
    cli_codex_chat_request_t owned = *request;
    owned.home = NULL;
    owned.cwd = execution->cwd;
+   owned.user_prompt = "Continue the server-owned canonical turn.";
+   owned.system_prompt = NULL;
    owned.host_launch = &execution->launch;
    owned.thread_id = NULL;
    owned.history = NULL;
@@ -574,9 +751,10 @@ int server_native_codex_chat_stream(const agent_t *selected,
    int rc = cli_codex_chat_stream(&owned, callback, context, out);
    if (!rc)
    {
-      snprintf(execution->native_id, sizeof execution->native_id, "%s", out->thread_id);
+      rc = native_bind(out->thread_id, execution);
       agent_result_t result = {0};
-      rc = native_execution_result(execution, &result);
+      if (!rc)
+         rc = native_execution_result(execution, &result);
       free(result.response);
       if (!rc)
       {

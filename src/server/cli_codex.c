@@ -86,6 +86,8 @@ typedef struct
    aimee_harness_ir_t ir;
    const char *home;
    const cli_codex_host_launch_t *host_launch;
+   int (*progress)(void *context);
+   void *progress_context;
    const char *session_id;
    const aimee_request_t *tool_catalog;
    int (*tool_call)(const aimee_block_t *, aimee_block_t *, void *);
@@ -641,6 +643,13 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
    long long line_deadline = timeout_ms > 0 ? util_now_ms() + timeout_ms : 0;
    for (;;)
    {
+      if (c->progress && c->progress(c->progress_context))
+      {
+         aimee_ir_session_fail_capture();
+         if (status)
+            *status = CLI_CODEX_READ_READ_ERR;
+         return NULL;
+      }
       if (c->dynamic_failed || agent_request_cancelled() || aimee_ir_session_capture_failed())
       {
          if (status)
@@ -2198,6 +2207,8 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
    c.autonomous = agent->autonomous;
    c.home = cfg->home;
    c.host_launch = cfg->codex_host;
+   c.progress = cfg->native_progress;
+   c.progress_context = cfg->native_progress_context;
    c.ir.host_model_capture = c.host_launch != NULL;
    c.session_id = cfg->session_id;
    c.ir.admitted_prompt = user_prompt;

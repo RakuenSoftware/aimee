@@ -406,22 +406,6 @@ static char *read_webchat_system_prompt(const compute_ctx_t *cctx)
    return result ? result : safe_strdup("");
 }
 
-static int codex_stream_event_cb(const char *event, const char *value, void *userdata)
-{
-   compute_ctx_t *cctx = (compute_ctx_t *)userdata;
-   if (server_chat_ir_progress(cctx))
-      return -1;
-   if (cctx->ir_native_owned || !event)
-      return 0;
-   if (strcmp(event, "text") == 0 || strcmp(event, "thinking") == 0)
-      return stream_event(cctx, event, "content", value ? value : "");
-   if (strcmp(event, "session") == 0)
-      return stream_event(cctx, "session", "id", value ? value : "");
-   if (strcmp(event, "error") == 0)
-      return stream_event(cctx, "error", "message", value ? value : "server error");
-   return stream_event(cctx, event, NULL, NULL);
-}
-
 static int chat_model_passthrough_allowed(const char *model)
 {
    return model && model[0] && strcmp(model, "aimee") != 0 && strncmp(model, "aimee:", 6) != 0;
@@ -483,127 +467,21 @@ static void chat_log_turn_transcript(const char *aimee_sid, const char *agent_na
    free(json);
 }
 
-static int chat_codex_effort_allowed(const char *effort)
-{
-   return effort && (strcmp(effort, "low") == 0 || strcmp(effort, "medium") == 0 ||
-                     strcmp(effort, "high") == 0 || strcmp(effort, "xhigh") == 0);
-}
-
 static void chat_agent_add_builtin_provider(agent_config_t *acfg, const char *provider);
 static int chat_agent_select_provider(agent_config_t *acfg, const char *provider, char *selected,
                                       size_t selected_len);
+static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, const char *cwd,
+                                     const char *aimee_sid, const char *provider,
+                                     const char *model_override);
 static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message, const char *provider,
                                      const char *thread_id, const char *cwd, const char *model,
                                      const char *effort)
 {
-   compute_pool_set_job(POOL_JOB_CHAT, "provider=codex thread=%s",
-                        thread_id && thread_id[0] ? thread_id : "new");
-
-   char *system_prompt = read_webchat_system_prompt(cctx);
-
-   cli_codex_chat_request_t creq;
-   memset(&creq, 0, sizeof(creq));
-   creq.thread_id = thread_id && thread_id[0] ? thread_id : NULL;
-   creq.cwd = cwd && cwd[0] ? cwd : NULL;
-   creq.system_prompt = system_prompt;
-   creq.user_prompt = message;
-   /* Both are copied out: creq holds them across the blocking Codex stream
-    * below, far past the point an accessor's thread-local buffer is reclaimed. */
-   char codex_model_buf[CONFIG_COPY_MAX] = "";
-   char codex_effort_buf[CONFIG_COPY_MAX] = "";
-   if (chat_model_passthrough_allowed(model))
-      snprintf(codex_model_buf, sizeof(codex_model_buf), "%s", model);
-   else
-      config_codex_model_copy(codex_model_buf, sizeof(codex_model_buf));
-   creq.model = codex_model_buf[0] ? codex_model_buf : NULL;
-
-   int codex_effort_explicit = chat_codex_effort_allowed(effort);
-   if (codex_effort_explicit)
-      snprintf(codex_effort_buf, sizeof(codex_effort_buf), "%s", effort);
-   else
-      config_model_reasoning_effort_copy(codex_effort_buf, sizeof(codex_effort_buf));
-   const char *codex_effort = codex_effort_buf;
-   /* §5: cap (only lower) the config-derived effort by turn complexity. An
-    * explicit per-request override is left untouched. */
-   if (config_reasoning_cap_enabled() && !codex_effort_explicit)
-   {
-      int score = reasoning_complexity_score(1, message ? strlen(message) : 0, 1);
-      codex_effort = reasoning_effort_capped(codex_effort, score);
-   }
-   creq.reasoning_effort = chat_codex_effort_allowed(codex_effort) ? codex_effort : NULL;
-   creq.timeout_ms = -1;
-   creq.autonomous = config_autonomous();
-
-   /* Release the compute budget slot before entering the blocking Codex
-    * app-server stream. Codex may call back into aimee MCP tools, and those
-    * tool workers also need compute budget; holding it here can deadlock the
-    * chat worker against its own nested tool call. */
-   compute_ctx_release_budget(cctx);
-
-   cli_codex_chat_result_t result = {0};
-   int rc = -1;
-   if (cctx->ir_enabled)
-   {
-      agent_config_t *agents = calloc(1, sizeof *agents);
-      if (!agents || agent_load_config(agents))
-         snprintf(result.error, sizeof result.error, "could not load selected native connection");
-      else
-      {
-         const char *lookup = provider;
-         if (!agent_find(agents, provider) &&
-             (!strcmp(provider, "codex") || !strcmp(provider, "codex-cli") ||
-              !strcmp(provider, "codex-oauth")))
-         {
-            chat_agent_add_builtin_provider(agents, "codex-oauth");
-            lookup = "codex-oauth";
-         }
-         char selected[MAX_AGENT_NAME];
-         if (chat_agent_select_provider(agents, lookup, selected, sizeof selected))
-            snprintf(result.error, sizeof result.error,
-                     "selected native connection is unavailable");
-         else
-         {
-            agent_t *agent = agent_find(agents, selected);
-            if (!agent)
-               snprintf(result.error, sizeof result.error,
-                        "selected native connection is unavailable");
-            else
-            {
-               if (!chat_model_passthrough_allowed(model) && agent->model[0])
-                  snprintf(codex_model_buf, sizeof codex_model_buf, "%s", agent->model);
-               if (codex_model_buf[0])
-                  snprintf(agent->model, sizeof agent->model, "%s", codex_model_buf);
-               creq.model = agent->model;
-               creq.session_id = cctx->ir_session;
-               snprintf(cctx->ir_harness, sizeof cctx->ir_harness, "codex");
-               cctx->ir_native_owned = 1;
-               if (!cctx->ir_delivery)
-                  cctx->ir_legacy_emit = stream_event;
-               rc = server_native_codex_chat_stream(agent, &creq, codex_stream_event_cb, cctx,
-                                                    &result);
-               if (server_chat_ir_progress(cctx))
-                  rc = -1;
-            }
-         }
-      }
-      free(agents);
-   }
-   else
-      rc = cli_codex_chat_stream(&creq, codex_stream_event_cb, cctx, &result);
-   free(system_prompt);
-
-   if (rc != 0)
-   {
-      compute_error(cctx, result.error[0] ? result.error : "codex app-server failed");
-      compute_ctx_free(cctx);
-      return;
-   }
-
-   if (!cctx->ir_native_owned && result.thread_id[0])
-      stream_event(cctx, "session", "id", result.thread_id);
-   stream_event(cctx, "done", NULL, NULL);
-   compute_ok(cctx);
-   compute_ctx_free(cctx);
+   /* All browser-native launchers share the registered workspace/turn owner.
+    * Client native handles never replace the canonical session's scoped cache. */
+   (void)thread_id;
+   (void)effort;
+   chat_stream_worker_agent(cctx, message, cwd, cctx->ir_session, provider, model);
 }
 
 static void chat_agent_add_default_roles(agent_t *ag)
@@ -671,7 +549,18 @@ static void chat_agent_add_builtin_provider_cli(agent_config_t *acfg, const char
    snprintf(ag->name, sizeof(ag->name), "%s", name);
    snprintf(ag->auth_type, sizeof(ag->auth_type), "bearer");
    snprintf(ag->provider, sizeof(ag->provider), "%s", name);
-   if (!strcmp(cli_kind, "codex"))
+   if (!strcmp(cli_kind, "claude"))
+   {
+      const agent_adapter_t *adapter = agent_adapter_for_name("anthropic");
+      if (adapter)
+      {
+         snprintf(ag->provider, sizeof ag->provider, "%s", adapter->provider);
+         snprintf(ag->endpoint, sizeof ag->endpoint, "%s", adapter->default_endpoint);
+         snprintf(ag->auth_type, sizeof ag->auth_type, "%s", "claude-oauth");
+         snprintf(ag->registration, sizeof ag->registration, "%s", "claude");
+      }
+   }
+   else if (!strcmp(cli_kind, "codex"))
    {
       const agent_adapter_t *adapter = agent_adapter_for_name("codex");
       if (adapter)
@@ -806,43 +695,51 @@ static void chat_tool_event_cb(const char *phase, const char *name, void *ud)
    stream_event(cctx, ev, "name", name ? name : "");
 }
 
-static int chat_claude_bind_session(const char *native_id, void *context)
+static int chat_native_progress(void *context)
 {
-   compute_ctx_t *c = context;
-   return db1_session_harness_bind(c->ir_session, "claude", native_id, c->vault_principal);
+   return server_chat_ir_progress(context);
 }
-
-/* A headless Claude process is the harness. Only its native structured frames
- * enter translation; stdout diagnostics and terminal screens are never content. */
-static int chat_claude_print(compute_ctx_t *c, const agent_t *agent, const char *cwd,
-                             const char *system, const char *prompt, agent_result_t *out)
+/* The original task stays with the canonical host request; the native process
+ * only schedules model/tool exchanges through its scoped local capability. */
+static int chat_native_print(compute_ctx_t *c, const agent_t *agent, const agent_network_t *network,
+                             const char *cwd, const char *system, const char *prompt,
+                             agent_result_t *out)
 {
-   char home[4096] = "", resume[1025] = "";
-   int rc = -1;
-   cli_session_t cleanup = {0};
-   if (cli_session_harness_home("claude", cwd, c->ir_session, home, sizeof(home), &cleanup) != 0)
-   {
-      snprintf(out->error, sizeof(out->error), "could not prepare Vault-backed Claude runtime");
-      return -1;
-   }
-   if (db1_session_harness_get(c->ir_session, "claude", resume, sizeof(resume),
-                               c->vault_principal) < 0)
-   {
-      snprintf(out->error, sizeof(out->error), "could not load Claude resume state");
-      goto finish;
-   }
-   provider_cli_cfg_t cfg = {.agent = agent,
+   agent_t selected = *agent;
+   if (!strcmp(selected.cli_kind, "claude-code"))
+      snprintf(selected.cli_kind, sizeof selected.cli_kind, "%s", "claude");
+   provider_cli_cfg_t cfg = {.agent = &selected,
+                             .network = network,
                              .cwd = cwd,
                              .system_prompt = system,
                              .user_prompt = prompt,
                              .primary = 1,
                              .control_channel = c->ir_delivery,
-                             .resume_id = resume,
-                             .home = home,
-                             .session_id = c->ir_session};
-   rc = claude_headless_run(&cfg, chat_claude_bind_session, c, out);
-finish:
-   cli_session_destroy(&cleanup);
+                             .session_id = c->ir_session,
+                             .native_progress = chat_native_progress,
+                             .native_progress_context = c};
+   const cJSON *effort = cJSON_GetObjectItemCaseSensitive(c->req, "reasoning_effort");
+   if (effort && !cJSON_IsString(effort))
+   {
+      out->success = 0;
+      snprintf(out->error, sizeof out->error, "reasoning_effort must be a string");
+      aimee_ir_session_fail_capture();
+      return AGENT_RC_CAPTURE_FAILED;
+   }
+   cfg.reasoning_effort = cJSON_GetStringValue(effort);
+   c->ir_native_owned = 1;
+   if (!c->ir_delivery)
+      c->ir_legacy_emit = stream_event;
+   int rc = provider_cli_adapter_host_execute(&cfg, out);
+   if (rc == 1)
+   {
+      out->success = 0;
+      snprintf(out->error, sizeof out->error, "canonical native scheduler is unavailable");
+      aimee_ir_session_fail_capture();
+      rc = AGENT_RC_CAPTURE_FAILED;
+   }
+   if (server_chat_ir_progress(c))
+      rc = AGENT_RC_CAPTURE_FAILED;
    return rc;
 }
 
@@ -947,7 +844,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
     * bind/guard are preventive for the turn. Behind the ingestor opt-in flag AND
     * the enforce dial (both default-off), so the hot path is untouched by default.
     * A missing sid is a no-op (never a silent pretend-enforced). */
-   if (primary_cli_ingestor_enabled() && aimee_sid && aimee_sid[0])
+   if (!cctx->ir_enabled && primary_cli_ingestor_enabled() && aimee_sid && aimee_sid[0])
       primary_cli_ingestor_enforce_preturn(aimee_sid, message, use_cwd);
 
    agent_result_t result;
@@ -958,16 +855,22 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
     * any delegation the turn spawns (other worker threads) stays policed. */
    agent_routing_set_primary_turn(1);
    agent_t *selected_agent = agent_find(&acfg, selected);
-   int structured_claude =
-       cctx->ir_enabled && selected_agent &&
-       (!strcmp(selected_agent->cli_kind, "claude") ||
-        !strcmp(selected_agent->cli_kind, "claude-code") || !strcmp(provider, "claude") ||
-        !strcmp(provider, "claude-oauth") || !strcmp(provider, "claude-code"));
-   int rc = structured_claude
-                ? chat_claude_print(cctx, selected_agent, use_cwd,
-                                    system_prompt ? system_prompt : "", message, &result)
-                : agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
-                                       AGENT_DEFAULT_MAX_TOKENS, &result);
+   int native = selected_agent && (!strcmp(selected_agent->cli_kind, "claude") ||
+                                   !strcmp(selected_agent->cli_kind, "claude-code") ||
+                                   !strcmp(selected_agent->cli_kind, "codex"));
+   int rc;
+   if (native && !cctx->ir_enabled)
+   {
+      snprintf(result.error, sizeof result.error,
+               "native execution requires canonical history ownership");
+      rc = AGENT_RC_CAPTURE_FAILED;
+   }
+   else if (native)
+      rc = chat_native_print(cctx, selected_agent, &acfg.network, use_cwd,
+                             system_prompt ? system_prompt : "", message, &result);
+   else
+      rc = agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
+                                AGENT_DEFAULT_MAX_TOKENS, &result);
    agent_routing_set_primary_turn(0);
 
    agent_tools_set_tool_event_cb(NULL, NULL);
@@ -1013,7 +916,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       chat_log_turn_transcript(aimee_sid, selected, provider, message, result.response);
 
    /* If the reply already streamed incrementally, don't re-emit it whole. */
-   if (result.response && result.response[0])
+   if (!cctx->ir_native_owned && result.response && result.response[0])
       stream_event(cctx, "text", "content", result.response);
    stream_event(cctx, "turn_end", NULL, NULL);
    stream_event(cctx, "done", NULL, NULL);

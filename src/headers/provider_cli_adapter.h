@@ -75,6 +75,9 @@ extern "C"
       int primary;           /* server-owned primary uses its authorized autonomous mode */
       const char *resume_id; /* structured primary conversation, optional */
       const char *home;      /* parent-materialized runtime credential HOME */
+      int (*native_progress)(void *context);
+      void *native_progress_context;
+      const struct cli_claude_host_launch *claude_host;
       const struct cli_codex_host_launch *codex_host; /* host-owned native resources */
       const char *session_id;                         /* host-owned Aimee identity for MCP/hooks */
       int (*bind_session)(const char *native_id, void *context);

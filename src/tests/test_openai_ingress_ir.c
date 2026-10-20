@@ -3,6 +3,23 @@
 #include <assert.h>
 void ir_seam_test_memory(int enabled);
 int ir_seam_test_plan_calls(const char *phase);
+/* This fixture has no stored previous-response checkpoint. Owned profiles
+ * must not ask the legacy Responses continuation owner for SDK history. */
+const char *server_http_identity_principal(void)
+{
+   return "fixture-owner";
+}
+int db1_session_ir_history_load(const char *session, const char *scope, const char *actor,
+                                const char *turn, char **out)
+{
+   (void)session;
+   (void)scope;
+   (void)actor;
+   (void)turn;
+   (void)out;
+   assert(0 && "unexpected SDK history lookup");
+   return -1;
+}
 static char *captured_stream;
 static size_t captured_length;
 static int added_items, done_items, tool_deltas, terminal_events, chat_frames;
@@ -165,6 +182,14 @@ static void test_owned_chat_admission_uses_canonical_history(void)
    assert(!strcmp(admitted.model, "host-model") &&
           !strcmp(admitted.messages[0].blocks[0].text, "owned running history"));
    aimee_request_free(&admitted);
+   rc = responses_admit_request("{\"model\":\"sdk-model\",\"input\":\"SDK history\"}", &admitted,
+                                error, sizeof error);
+   assert(!rc && !admitted.raw && !admitted.raw_bytes && admitted.n_messages == 1);
+   assert(!strcmp(admitted.model, "host-model") &&
+          !strcmp(admitted.messages[0].blocks[0].text, "owned running history"));
+   aimee_request_free(&admitted);
+   assert(responses_admit_request("{\"model\":\"sdk-model\",\"input\":42}", &admitted, error,
+                                  sizeof error));
    aimee_frontend_bind_request_owner(previous.guard, previous.context);
 }
 

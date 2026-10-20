@@ -22,13 +22,17 @@ profiles use IR. The Codex browser/delegate launch sites now use the host-owned
 canonical scheduler for qualified Linux executable-descriptor launches; this code
 has not been promoted to production. Its host model source, original tool calls,
 result projection, scoped cache claims and durable-terminal checkpointing replace
-SDK conversation observations. Other native launchers remain unfinished. Real
-replay qualification covers unchanged-prefix plus unseen-tail adoption. Claude
-still has a confirmed normalized argument/result fidelity gap.
+SDK conversation observations. The next local continuation also activates Claude
+through a source-bound MCP bridge: original host calls, rather than SDK-normalized
+arguments, supply tool effects. Both Linux native SDKs pass actual-server model,
+tool, durable replay and resumed-turn journeys across all three provider wires.
+Its full local regression, sanitizer and pinned-SDK PostgreSQL integration
+qualification passed, together with all 76 lint gates. Fresh CI follows publication. Native
+launch/platform coverage beyond the qualified Linux executables remains unfinished.
 
-The remaining work includes Claude credential-free SDK activation with attested
-launch/workspace resources, full native launch/platform coverage, complete host
-tool effects/receipts and human controls, live Claude subscription qualification and other unsupported credential custody, remaining ingress/consumer retirement and
+The remaining work includes full native launch/platform coverage, broader real
+host-effect/human-control journeys, live Claude subscription qualification and
+other unsupported credential custody, remaining ingress/consumer retirement and
 independently graded server-local learning with next-run reuse. Production `.100`
 must remain KB-free. Explicit receipt-bound feedback/ungraded observations are not
 independent task grades or synthesis. Production promotion requires the recorded
@@ -3493,3 +3497,45 @@ Qualification logs use `/var/tmp/aimee-ir-native-factory-*`. This qualification
 is not live subscription or production deployment evidence. Fresh CI remains
 required for the published commit; production promotion and the overall
 migration remain unfinished.
+
+
+## Claude original-call execution continuation: 20 October 2026
+
+The local continuation adds explicit logical-tool/registry bindings and a private
+Streamable HTTP MCP owner. Claude's `claudecode/toolUseId` selects a unique committed
+original call; SDK-rounded arguments never become effect input. The same source
+readback, once-only claim, current registry definition, supervised policy/effect
+and durable receipt owners apply to Codex and Claude. Missing or reused source IDs,
+unknown aliases and failed persistence refuse execution. Model forwarding waits
+for creator-side launch attestation. Actual Claude initialization must report the
+owned cwd, credential source, permission mode, exact tool catalog, connected MCP
+server and empty plugin set before that release.
+
+Both browser native SDKs now use the general agent worker's registered workspace
+and isolation owner. The SDK sees an opaque scheduler trigger; complete task,
+context, selected Vault authority and post-policy tools come from canonical host
+IR. Claude runs with held executable/cwd descriptors, a private credential-free
+HOME, closed environment, bare mode and strict MCP configuration. Configured Linux
+managed settings/MCP files refuse the supported launch profile. A real SDK probe
+confirmed `/v1/messages?beta=true`; only that exact query and its count-token
+counterpart normalize to existing native model routes. Other queries remain refused.
+
+Actual-server qualification exposed and repaired two Responses defects: admission
+looked for SDK raw input after canonical context replacement, and canonical output
+omitted the SDK-required `usage.total_tokens`. Focused persistent regressions cover
+both. Actual local Codex 0.160.1 and Claude 2.1.227 each pass three provider wires,
+real README tool effects/receipts, durable browser replay and a second resumed turn.
+CI now installs pinned Codex 0.153.4 and Claude 2.1.227 native platform packages and
+requires the same six cases in its PostgreSQL integration job; no credentials or
+production KB are needed. The separate Codex adoption probe now includes a fifth,
+flat host-tool catalog mode.
+
+Qualification completed locally: all 658 native binaries, seven focused
+ASan/UBSan fixtures, two TSan fixtures, four CMake fixtures, five real Codex
+adoption modes on both 0.153.4 and 0.160.1, Cppcheck without increased diagnostics,
+and full pinned-SDK PostgreSQL integration (168/168; 26 other checks require
+unavailable local services), plus all 76 lint gates. Fresh CI follows publication. Production has not been promoted; `.100`
+remains KB-free. This is a continuation checkpoint, not completion of the overall
+migration. Retire the remaining private SDK compaction/ingress paths and finish
+independently graded local learning/reuse after publishing this qualified slice
+in the existing PR #3052.

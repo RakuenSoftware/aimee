@@ -39,5 +39,13 @@ int server_native_tool_source_record(server_native_tool_source_t *source,
  */
 int server_native_tool_source_claim(server_native_tool_source_t *source,
                                     const aimee_block_t *proposed, server_native_tool_claim_t *out);
+/* Host-bound SDK reference, not an argument proposal. The caller must bind the
+ * SDK tool alias explicitly to this namespace/name. The original ID must occur
+ * exactly once in this source, including already claimed calls. Exact committed
+ * prefix/incarnation proof and the same once-only claim still apply. Returned
+ * original arguments are the only execution source; no effect is authorized. */
+int server_native_tool_source_claim_reference(server_native_tool_source_t *source, const char *id,
+                                              const char *space, const char *name,
+                                              server_native_tool_claim_t *out);
 void server_native_tool_claim_free(server_native_tool_claim_t *claim);
 #endif

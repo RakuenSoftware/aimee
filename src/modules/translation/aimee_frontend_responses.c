@@ -471,6 +471,7 @@ cJSON *responses_frontend_render(const aimee_response_t *r)
    cJSON *usage = cJSON_AddObjectToObject(out, "usage");
    cJSON_AddNumberToObject(usage, "input_tokens", (double)r->usage_in);
    cJSON_AddNumberToObject(usage, "output_tokens", (double)r->usage_out);
+   cJSON_AddNumberToObject(usage, "total_tokens", (double)r->usage_in + (double)r->usage_out);
    cJSON *cached = cJSON_AddObjectToObject(usage, "input_tokens_details");
    cJSON_AddNumberToObject(cached, "cached_tokens", (double)r->usage_cache_read);
    cJSON *reasoning = cJSON_AddObjectToObject(usage, "output_tokens_details");

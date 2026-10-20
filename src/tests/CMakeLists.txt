@@ -500,7 +500,7 @@ if(NOT WIN32)
   aimee_enable_test_asserts(test_server_native_tool_admission)
   add_test(NAME test_server_native_tool_admission COMMAND test_server_native_tool_admission)
   add_executable(test_server_native_execution test_server_native_execution.c
-    ../server/server_native_execution.c ../server/cli_session.c ../server/agent_adapter.c
+    ../server/server_native_execution.c ../server/cli_claude_native.c ../server/agent_request_build.c ../server/cli_session.c ../server/agent_adapter.c
     ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c
     ../posix/workspace_provider.c ../util.c ../text.c ../aimee_home.c ../log.c
     ../vendor/cJSON.c ${PLATFORM_CORE_SRCS})
@@ -516,7 +516,7 @@ if(NOT WIN32)
     aimee-core-connection Threads::Threads OpenSSL::Crypto)
   aimee_enable_test_asserts(test_server_native_execution)
   add_test(NAME test_server_native_execution COMMAND test_server_native_execution)
-  add_executable(test_server_native_runtime test_server_native_runtime.c
+  add_executable(test_server_native_runtime test_server_native_runtime.c support/log_stub.c
     ../server/agent_tools.c ../posix/agent_source_authority.c ../modules/ir/aimee_ir.c
     ../server/server_native_runtime.c ../server/server_native_tool_admission.c ../server/server_session_question.c ../server/server_native_tool_source.c ../server/server_session_capture.c ../server/server_session_control.c
     ../modules/ir/session_event.c ../cli_proxy.c ../server/request_context.c
@@ -541,7 +541,7 @@ aimee_add_test(test_harness_ir test_harness_ir.c
   ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c)
 target_link_libraries(test_harness_ir PRIVATE OpenSSL::Crypto)
 if(NOT WIN32)
-  aimee_add_test(test_claude_headless test_claude_headless.c ../server/claude_headless.c ../server/server_session_control.c
+  aimee_add_test(test_claude_headless test_claude_headless.c ../server/claude_headless.c ../server/cli_claude_native.c ../server/server_session_control.c
     ../modules/translation/harness_ir.c ../modules/translation/aimee_ir_stream.c
     ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c
     ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c)

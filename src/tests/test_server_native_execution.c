@@ -2,6 +2,8 @@
  * executable descriptors, launch configuration and cleanup use production code.
  * Actual SDK/config protocol fidelity is covered by test_codex_native_adoption.py. */
 #include "server_native_execution.h"
+#include "cli_claude_native.h"
+#include "claude_headless.h"
 #include "server_native_runtime.h"
 #include "server_native_cache.h"
 #include "server_session_capture.h"
@@ -45,6 +47,7 @@ static int mode, retained, opened, joined, child_closed, began, completed, abort
 static int terminal_committed, sdk_calls, restored, ready_calls, rejected_terminal;
 static char parent_role[64], private_home[4096], host_workspace[4096];
 static int child_executable, child_directory;
+static const char *active_sdk = "codex";
 static const char digest[] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const request_context_t *request_context_get(void)
 {
@@ -131,10 +134,23 @@ cJSON *build_tools_array_responses(void)
 {
    return cJSON_CreateArray();
 }
+cJSON *build_tools_array(void)
+{
+   return cJSON_CreateArray();
+}
+cJSON *build_tools_array_anthropic(void)
+{
+   return cJSON_CreateArray();
+}
+
 void agent_tools_filter_for_role(cJSON *tools, const char *role)
 {
    assert(cJSON_IsArray(tools));
    assert(!strcmp(parent_role, role ? role : "primary"));
+}
+void agent_tools_filter_anthropic_for_role(cJSON *tools, const char *role)
+{
+   agent_tools_filter_for_role(tools, role);
 }
 char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
                                        const char *role, const char *custom, int skip, char *error,
@@ -178,19 +194,22 @@ int db1_session_ir_history_load(const char *session, const char *kind, const cha
                                         : "[]");
    return mode == 1 ? -1 : 0;
 }
-server_native_runtime_t *server_native_runtime_open_request(const agent_t *selected,
-                                                            const request_context_t *request_owner,
-                                                            const char *source,
-                                                            const aimee_request_t *profile)
+server_native_runtime_t *server_native_runtime_open_bound_request(
+    const agent_t *selected, const request_context_t *request_owner, const char *source,
+    const aimee_request_t *profile, const server_native_tool_binding_t *bindings, int count)
 {
    assert(request_owner == &owner && !strcmp(source, "transport"));
    assert(!strcmp(selected->model, "selected-model") &&
           profile->n_messages == (mode == 10 ? 2 : 0));
    assert(!strcmp(selected->provider, "chatgpt"));
-   assert(profile->n_tools == 1 && profile->tools[0].kind == AIMEE_TOOL_NAMESPACE);
-   assert(!strcmp(profile->tools[0].name, "aimee"));
-   assert(profile->tools[0].n_children == 1 &&
-          !strcmp(profile->tools[0].children[0].name, "read_file"));
+   assert(profile->n_tools == 1 && profile->tools[0].kind == AIMEE_TOOL_FUNCTION);
+   const char *logical = !strcmp(active_sdk, "claude") ? "mcp__aimee__read_file" : "read_file";
+   assert(!strcmp(profile->tools[0].name, logical));
+   assert(count == 1 && bindings && !bindings[0].space);
+   assert(!strcmp(bindings[0].name, logical) && !strcmp(bindings[0].registry_name, "read_file"));
+   assert(!strcmp(active_sdk, "claude")
+              ? bindings[0].mcp_name && !strcmp(bindings[0].mcp_name, "read_file")
+              : !bindings[0].mcp_name);
    opened++;
    return &runtime;
 }
@@ -209,13 +228,22 @@ const char *server_native_runtime_binding(const server_native_runtime_t *r)
    assert(r == &runtime);
    return digest;
 }
+int server_native_runtime_attest_launch(server_native_runtime_t *r, const char *proof)
+{
+   assert(r == &runtime && strlen(proof) == 64 && !child_closed);
+   if (!strcmp(active_sdk, "codex"))
+      assert(!strcmp(proof, digest));
+   return 0;
+}
 int server_native_runtime_cache_scope(const server_native_runtime_t *r,
                                       const server_native_execution_profile_t *profile,
                                       char scope[65])
 {
-   assert(r == &runtime && !strcmp(profile->sdk, "codex"));
+   assert(r == &runtime && !strcmp(profile->sdk, active_sdk));
    assert(strlen(profile->build_digest) == 64 && strcmp(profile->build_digest, digest));
-   assert(!strcmp(profile->launch_digest, digest) && !strcmp(profile->workspace_digest, digest));
+   assert(strlen(profile->launch_digest) == 64 && !strcmp(profile->workspace_digest, digest));
+   if (!strcmp(active_sdk, "codex"))
+      assert(!strcmp(profile->launch_digest, digest));
    snprintf(scope, 65, "%s", digest);
    return 0;
 }
@@ -262,7 +290,7 @@ server_native_cache_t *server_native_cache_begin(const char *session, const char
                                                  const char *scope, const aimee_request_t *profile)
 {
    assert(!strcmp(session, "destination") && !strcmp(actor, "actor") && !strcmp(turn, "turn"));
-   assert(!strcmp(harness, "codex") && !strcmp(scope, digest));
+   assert(!strcmp(harness, active_sdk) && !strcmp(scope, digest));
    assert(profile->n_messages == (mode == 10 ? 2 : 0));
    began++;
    return &cache;
@@ -275,7 +303,7 @@ int server_native_cache_history_offset(const server_native_cache_t *c)
 const char *server_native_cache_resume(const server_native_cache_t *c)
 {
    assert(c == &cache);
-   return "private-resume";
+   return "native-result";
 }
 int server_native_cache_complete(server_native_cache_t *c, const char *id)
 {
@@ -322,7 +350,7 @@ static int sdk_peer(const cli_codex_host_launch_t *launch)
    assert(!launch->ready(digest, &replay, launch->context));
    ready_calls++;
    assert(replay.history && replay.history->n_messages == (mode == 10 ? 1 : 0) &&
-          !strcmp(replay.resume_id, "private-resume"));
+          !strcmp(replay.resume_id, "native-result"));
    if (mode == 10)
    {
       assert(!strcmp(replay.history->messages[0].role, "assistant"));
@@ -356,6 +384,73 @@ int cli_codex_chat_stream(const cli_codex_chat_request_t *request, cli_codex_cha
    snprintf(out->thread_id, sizeof out->thread_id, "native-result");
    return rc;
 }
+int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_fn bind,
+                        void *context, agent_result_t *out)
+{
+   assert(!strcmp(active_sdk, "claude") && cfg->claude_host && !cfg->codex_host && !cfg->home);
+   assert(!strcmp(cfg->user_prompt, "Continue the server-owned canonical turn.") &&
+          !cfg->system_prompt);
+   assert(!cfg->history && !strcmp(cfg->resume_id, "native-result") && began == 1);
+   const cli_claude_host_launch_t *host = cfg->claude_host;
+   char proof[65];
+   assert(!cli_claude_native_launch_digest(cfg, proof) && !strcmp(proof, host->expected_profile));
+   snprintf(private_home, sizeof private_home, "%s", host->home);
+   child_executable = host->executable_fd;
+   child_directory = host->cwd_fd;
+   char path[4200];
+   snprintf(path, sizeof path, "%s/.claude/.credentials.json", host->home);
+   assert(access(path, F_OK));
+   cJSON *frame = cJSON_CreateObject();
+   cJSON_AddStringToObject(frame, "type", "system");
+   cJSON_AddStringToObject(frame, "subtype", "init");
+   cJSON_AddStringToObject(frame, "cwd", host->cwd);
+   cJSON_AddStringToObject(frame, "session_id", "native-result");
+   cJSON_AddStringToObject(frame, "apiKeySource", "ANTHROPIC_API_KEY");
+   cJSON_AddStringToObject(frame, "permissionMode", "default");
+   cJSON *tools = cJSON_AddArrayToObject(frame, "tools");
+   cJSON_AddItemToArray(tools, cJSON_CreateString("mcp__aimee__read_file"));
+   cJSON *servers = cJSON_AddArrayToObject(frame, "mcp_servers"), *server = cJSON_CreateObject();
+   cJSON_AddStringToObject(server, "name", "aimee");
+   cJSON_AddStringToObject(server, "status", "connected");
+   cJSON_AddItemToArray(servers, server);
+   cJSON_AddArrayToObject(frame, "plugins");
+   assert(!cli_claude_native_verify(host, frame));
+   const char *bad_keys[] = {"cwd", "apiKeySource", "permissionMode", "subtype"};
+   for (unsigned i = 0; i < sizeof bad_keys / sizeof bad_keys[0]; i++)
+   {
+      cJSON *bad = cJSON_Duplicate(frame, 1);
+      cJSON_ReplaceItemInObjectCaseSensitive(bad, bad_keys[i], cJSON_CreateString("foreign"));
+      assert(cli_claude_native_verify(host, bad));
+      cJSON_Delete(bad);
+   }
+   for (int i = 0; i < 4; i++)
+   {
+      cJSON *bad = cJSON_Duplicate(frame, 1);
+      if (i == 0)
+         cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(bad, "tools"),
+                              cJSON_CreateString("Bash"));
+      else if (i == 1)
+         cJSON_DeleteItemFromArray(cJSON_GetObjectItemCaseSensitive(bad, "tools"), 0);
+      else if (i == 2)
+         cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(bad, "plugins"),
+                              cJSON_CreateString("unowned-plugin"));
+      else
+         cJSON_ReplaceItemInObjectCaseSensitive(
+             cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(bad, "mcp_servers"), 0), "status",
+             cJSON_CreateString("failed"));
+      assert(cli_claude_native_verify(host, bad));
+      cJSON_Delete(bad);
+   }
+   assert(!host->init(frame, host->context));
+   assert(!bind("native-result", context));
+   cJSON_Delete(frame);
+   sdk_calls++;
+   child_closed = 1;
+   out->success = 1;
+   out->response = strdup("SDK REWRITE MUST NOT BECOME CANONICAL");
+   return 0;
+}
+
 static void reset(int next)
 {
    assert(!terminal && !retained);
@@ -451,6 +546,17 @@ int main(void)
    assert(!retained && restored == 1 && access(private_home, F_OK));
    finish(1);
    assert(completed == 1 && closed == 1);
+   reset(0);
+   active_sdk = "claude";
+   snprintf(selected.cli_kind, sizeof selected.cli_kind, "%s", "claude");
+   agent_result_t claude = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &claude));
+   assert(!strcmp(claude.response, "ORIGINAL canonical output") && !retained && joined);
+   assert(access(private_home, F_OK));
+   free(claude.response);
+   finish(1);
+   assert(completed == 1 && closed == 1);
+   active_sdk = "codex";
    cfg.agent = NULL;
    assert(provider_cli_adapter_host_execute(&cfg, &denied) == 1);
 #else

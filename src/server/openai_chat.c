@@ -658,15 +658,21 @@ static int responses_store_history(const char *id, const aimee_request_t *reques
 static int responses_admit_request(const char *body, aimee_request_t *request, char *error,
                                    size_t capacity)
 {
-   if (aimee_frontend_parse_wire(body, body ? strlen(body) : 0, AIMEE_WIRE_RESPONSES, request,
-                                 error, capacity))
-      return -1;
-   const cJSON *input = cJSON_GetObjectItemCaseSensitive(request->raw, "input");
-   if ((!cJSON_IsString(input) && !cJSON_IsArray(input)) || aimee_ir_request_admit(request))
+   /* Validate ingress shape before the host owner replaces SDK state. Its
+    * canonical profile deliberately has no SDK raw input or history sidecar. */
+   cJSON *native = body ? aimee_ir_json_parse_frame(body, strlen(body)) : NULL;
+   const cJSON *input = cJSON_GetObjectItemCaseSensitive(native, "input");
+   int valid_input = cJSON_IsString(input) || cJSON_IsArray(input);
+   cJSON_Delete(native);
+   if (!valid_input)
    {
       snprintf(error, capacity, "invalid canonical Responses input");
       return -1;
    }
+   if (aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_RESPONSES, request, error,
+                                 capacity) ||
+       aimee_ir_request_admit(request))
+      return -1;
    if (responses_restore_history(request, error, capacity) || aimee_ir_request_admit(request))
       return -1;
    return 0;

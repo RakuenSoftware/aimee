@@ -54,8 +54,9 @@ extern "C"
 
    typedef struct
    {
-      const char *thread_id;                      /* optional: resume this Codex thread */
-      const char *home;                           /* host-materialized Vault credential HOME */
+      const agent_network_t *network; /* borrowed host environment for native execution */
+      const char *thread_id;          /* optional: resume this Codex thread */
+      const char *home;               /* host-materialized Vault credential HOME */
       const cli_codex_host_launch_t *host_launch; /* scoped canonical scheduler */
       const char *session_id;                     /* host-owned Aimee session for MCP */
       const char *cwd;                            /* optional: child process working directory */

@@ -93,6 +93,10 @@ static int aimee_claude_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
    if (!cJSON_IsObject(f) || !s)
       return -1;
    const char *type = str(f, "type");
+   if (s->host_model_capture && (!strcmp(type, "stream_event") || !strcmp(type, "assistant") ||
+                                 !strcmp(type, "user") || !strcmp(type, "result")))
+      return 0; /* Original host capture owns model/tool/history observations. */
+
    if (!strcmp(type, "system") && !strcmp(str(f, "subtype"), "compact_boundary"))
       return native_compaction("claude");
    if (!strcmp(type, "stream_event"))

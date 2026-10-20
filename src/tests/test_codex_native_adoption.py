@@ -54,8 +54,8 @@ def tool_names(tools, prefix=""):
     return result
 
 
-def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=False, owned_launch=False):
-    namespace = "fixture" if host_tools else "mcp__fixture"
+def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=False, owned_launch=False, flat_tools=False):
+    namespace = None if flat_tools else "fixture" if host_tools else "mcp__fixture"
     native_arguments = ('{"value":7,"marker":0.123456789012345678901234567890}'
                         if host_tools else '{"value":7}')
     expected_arguments = json.loads(native_arguments)
@@ -85,7 +85,10 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=
                                "list_mcp_resource_templates", "read_mcp_resource"}
                     if host_tools:
                         allowed = {"fixture.fail", "request_user_input", "functions.request_user_input"}
-                    assert namespace + ".fail" in names and names <= allowed, sorted(names)
+                    if flat_tools:
+                        allowed = {"fail", "request_user_input", "functions.request_user_input"}
+                    expected_tool = "fail" if flat_tools else namespace + ".fail"
+                    assert expected_tool in names and names <= allowed, sorted(names)
                 number = len(requests)
                 item = {
                     "id": f"msg_fixture_{number}", "type": "message", "role": "assistant",
@@ -93,11 +96,14 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=
                     "text": f"fixture final {number}", "annotations": []}],
                 }
                 if number == 1:
-                    tools = [tool for tool in body["tools"] if "fixture" in tool.get("name", "")]
+                    tools = [tool for tool in body["tools"]
+                             if (tool.get("name") == "fail" if flat_tools else "fixture" in tool.get("name", ""))]
                     assert len(tools) == 1, body["tools"]
                     item = {"id": "fc_native_fixture", "type": "function_call",
                             "call_id": "call_native_fixture", "name": "fail",
-                            "namespace": tools[0]["name"], "arguments": native_arguments, "status": "completed"}
+                            "arguments": native_arguments, "status": "completed"}
+                    if not flat_tools:
+                        item["namespace"] = tools[0]["name"]
                 response = {
                     "id": f"resp_fixture_{number}", "object": "response", "status": "completed",
                     "model": "fixture-model", "output": [item],
@@ -183,6 +189,8 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=
                 "ALL_PROXY": "http://127.0.0.1:9", "NO_PROXY": "127.0.0.1,localhost",
             }
 
+            if flat_tools:
+                environment["AIMEE_TEST_FLAT_HOST_TOOLS"] = "1"
             if owned_launch:
                 environment.update(AIMEE_TEST_OWNED_CODEX_CONFIG=str(expected_file),
                     AIMEE_TEST_OWNED_CODEX_BINARY=str(codex_binary),
@@ -381,8 +389,9 @@ if __name__ == "__main__":
     parser.add_argument("--adapter-binary", required=True, type=Path)
     parser.add_argument("--codex-binary", required=True, type=Path)
     arguments = parser.parse_args()
-    for bounded_sdk_catalog, host_tools, owned_launch in (
-            (False, False, False), (True, False, False), (True, True, False), (True, True, True)):
+    for bounded_sdk_catalog, host_tools, owned_launch, flat_tools in (
+            (False, False, False, False), (True, False, False, False),
+            (True, True, False, False), (True, True, True, False), (True, True, True, True)):
         qualify(arguments.adapter_binary.resolve(strict=True),
                 arguments.codex_binary.resolve(strict=True), bounded_sdk_catalog=bounded_sdk_catalog,
-                host_tools=host_tools, owned_launch=owned_launch)
+                host_tools=host_tools, owned_launch=owned_launch, flat_tools=flat_tools)

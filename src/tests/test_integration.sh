@@ -2277,6 +2277,21 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# Extended native qualification uses explicitly supplied executable descriptors.
+# Baseline service runs do not discover or install an ambient provider SDK.
+if [ -n "${AIMEE_TEST_NATIVE_CODEX:-}" ] && [ -n "${AIMEE_TEST_NATIVE_CLAUDE:-}" ]; then
+    NATIVE_IR_LOG="$HOME/native-ir-live.log"
+    if AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$REPO_ROOT/src/tests/test_native_ir_live.py" >"$NATIVE_IR_LOG" 2>&1; then
+        PASS=$((PASS + 1))
+        grep '^native integration:' "$NATIVE_IR_LOG" || true
+    else
+        echo "FAIL: actual native SDK canonical execution"
+        tail -c 16000 "$NATIVE_IR_LOG"
+        dump_server_log
+        FAIL=$((FAIL + 1))
+    fi
+fi
+
 # ============================================================
 # 11. Server shutdown
 # ============================================================

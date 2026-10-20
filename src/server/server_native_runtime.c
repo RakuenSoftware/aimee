@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 struct server_native_runtime
@@ -43,7 +44,10 @@ struct server_native_runtime
    aimee_request_t request_profile;
    aimee_response_t last_response;
    int last_complete;
-   int owns_request;
+   int owns_request, bound_registry, n_bindings;
+   atomic_int launch_attested;
+   char launch_digest[65];
+   server_native_tool_binding_t *bindings;
    agent_t selected;
    request_context_t owner;
    agent_request_creds_t credentials;
@@ -377,9 +381,33 @@ static void *native_cancel_watch(void *context)
    return NULL;
 }
 
+static int native_mcp_enabled(const server_native_runtime_t *runtime)
+{
+   for (int i = 0; runtime->bound_registry && i < runtime->n_bindings; i++)
+      if (runtime->bindings[i].mcp_name)
+         return 1;
+   return 0;
+}
+
+/* The Anthropic SDK marks beta transport with this exact query. It carries
+ * no model, identity or provider selection and resolves to the same host owner.
+ * Other queries remain outside the private capability's route set. */
+static const char *native_model_path(const char *path, const server_native_runtime_t *runtime)
+{
+   if (path && runtime->owns_request)
+   {
+      if (!strcmp(path, "/v1/messages?beta=true"))
+         return "/v1/messages";
+      if (!strcmp(path, "/v1/messages/count_tokens?beta=true"))
+         return "/v1/messages/count_tokens";
+   }
+   return path;
+}
+
 static int native_route(const char *method, const char *path, void *context)
 {
    const server_native_runtime_t *runtime = context;
+   path = native_model_path(path, runtime);
    /* The child reaches model entry and the existing MCP tool owner only.
     * Operator controls, session replies and arbitrary CLI methods are never
     * native model authority, even when the parent transport is an operator. */
@@ -387,8 +415,11 @@ static int native_route(const char *method, const char *path, void *context)
       return 0;
    /* The canonical host callback is the sole tool ingress for owned profiles.
     * A child must not bypass original-source claims through legacy MCP routes. */
-   if (runtime->owns_request &&
-       (!strncmp(path, "/v1/mcp/", 8) || !strcmp(path, "/v1/responses/compact")))
+   if (runtime->owns_request && !strncmp(path, "/v1/mcp/", 8))
+      return native_mcp_enabled(runtime) && !strcmp(path, "/v1/mcp/call") &&
+             (!strcmp(method, "POST") || !strcmp(method, "GET")) &&
+             (runtime->owner.capabilities & CAP_TOOL_EXECUTE);
+   if (runtime->owns_request && !strcmp(path, "/v1/responses/compact"))
       return 0;
    int admitted = !strcmp(method, "GET") &&
                   (!strcmp(path, "/v1/models") || !strcmp(path, "/v1/cli/manifest") ||
@@ -406,7 +437,27 @@ typedef struct
 {
    const aimee_block_t *call;
    aimee_block_t *result;
+   int reference;
+   const cJSON *rpc;
 } native_tool_work_t;
+
+static const server_native_tool_binding_t *
+native_tool_binding(const server_native_runtime_t *runtime, const char *space, const char *name,
+                    int mcp)
+{
+   if (!name)
+      return NULL;
+   for (int i = 0; i < runtime->n_bindings; i++)
+   {
+      const server_native_tool_binding_t *binding = runtime->bindings + i;
+      if (mcp ? binding->mcp_name && !strcmp(binding->mcp_name, name)
+              : !strcmp(binding->name, name) &&
+                    ((!space && !binding->space) ||
+                     (space && binding->space && !strcmp(space, binding->space))))
+         return binding;
+   }
+   return NULL;
+}
 
 static int native_execute_claimed(server_native_runtime_t *runtime, native_tool_work_t *work)
 {
@@ -414,14 +465,32 @@ static int native_execute_claimed(server_native_runtime_t *runtime, native_tool_
    aimee_block_t result = {0};
    char *arguments = NULL, *text = NULL;
    int rc = -1, is_error = 1;
-   /* This is an explicit host registry binding. Other namespaces, SDK built-ins
-    * and opaque hosted tools cannot acquire this local execution authority. */
-   if (!work->call->tool_namespace || strcmp(work->call->tool_namespace, "aimee") ||
-       server_native_runtime_claim_tool(runtime, work->call, &claim))
+   aimee_tool_t registered = {0};
+   const server_native_tool_binding_t *binding =
+       native_tool_binding(runtime, work->call->tool_namespace, work->call->tool_name, 0);
+   if (runtime->bound_registry
+           ? !binding
+           : !work->call->tool_namespace || strcmp(work->call->tool_namespace, "aimee"))
+      goto done;
+   int claimed = work->reference
+                     ? server_native_runtime_claim_reference(runtime, work->call->tool_id,
+                                                             work->call->tool_namespace,
+                                                             work->call->tool_name, &claim)
+                     : server_native_runtime_claim_tool(runtime, work->call, &claim);
+   if (claimed)
       goto done;
    const aimee_block_t *original = &claim.original.messages[0].blocks[0];
-   const aimee_tool_t *function =
+   const aimee_tool_t *advertised =
        aimee_ir_find_function(&claim.original, original->tool_namespace, original->tool_name);
+   const aimee_tool_t *function = advertised;
+   if (binding)
+   {
+      if (agent_tools_execution_definition(binding->registry_name, &registered) ||
+          registered.kind != AIMEE_TOOL_FUNCTION || !registered.name ||
+          strcmp(registered.name, binding->registry_name))
+         goto done;
+      function = &registered;
+   }
    arguments = cJSON_PrintUnformatted(original->tool_input);
    cJSON *identity = cJSON_CreateObject();
    int valid = identity &&
@@ -439,7 +508,8 @@ static int native_execute_claimed(server_native_runtime_t *runtime, native_tool_
    if (!arguments || !function || hashed)
       goto done;
    snprintf(attempt, sizeof attempt, "native-ir:%s", digest);
-   if (tool_validate_ir(function, arguments, detail, sizeof detail))
+   if (!advertised || tool_validate_ir(advertised, arguments, detail, sizeof detail) ||
+       (function != advertised && tool_validate_ir(function, arguments, detail, sizeof detail)))
       text = strdup(detail[0] ? detail : "tool arguments were refused");
    else
    {
@@ -488,6 +558,189 @@ done:
    free(text);
    aimee_block_free_contents(&result);
    server_native_tool_claim_free(&claim);
+   aimee_tool_free(&registered);
+   return rc;
+}
+
+/* Stateless Streamable HTTP endpoint on this lifetime-scoped local capability.
+ * No SDK transcript, alternate effect journal or browser pointer is retained.
+ * https://modelcontextprotocol.io/specification/2025-11-25/basic/transports */
+static int native_mcp_write(const cli_proxy_io_t *io, int status, const cJSON *body)
+{
+   char *wire = body ? cJSON_PrintUnformatted(body) : NULL;
+   if (body && !wire)
+      return -1;
+   size_t length = wire ? strlen(wire) : 0;
+   char header[256];
+   int count =
+       snprintf(header, sizeof header,
+                "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: %zu\r\n"
+                "Connection: close\r\n%s\r\n",
+                status,
+                status == 200   ? "OK"
+                : status == 202 ? "Accepted"
+                : status == 405 ? "Method Not Allowed"
+                                : "Bad Request",
+                length, status == 405 ? "Allow: POST\r\n" : "");
+   int rc = count < 0 || (size_t)count >= sizeof header
+                ? -1
+                : io->write_response(header, (unsigned long)count, io->context);
+   if (!rc && length)
+      rc = io->write_response(wire, (unsigned long)length, io->context);
+   free(wire);
+   return rc;
+}
+static cJSON *native_mcp_error(int code, const char *message)
+{
+   cJSON *error = cJSON_CreateObject();
+   if (!error || !cJSON_AddNumberToObject(error, "code", code) ||
+       !cJSON_AddStringToObject(error, "message", message))
+   {
+      cJSON_Delete(error);
+      return NULL;
+   }
+   return error;
+}
+static int native_mcp_dispatch(server_native_runtime_t *runtime, native_tool_work_t *work,
+                               const cli_proxy_io_t *io)
+{
+   const cJSON *rpc = work->rpc;
+   const char *method = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(rpc, "method"));
+   const cJSON *id = cJSON_GetObjectItemCaseSensitive(rpc, "id");
+   const cJSON *params = cJSON_GetObjectItemCaseSensitive(rpc, "params");
+   if (!id)
+      return !strcmp(method, "notifications/initialized") ? native_mcp_write(io, 202, NULL)
+                                                          : native_mcp_write(io, 400, NULL);
+   cJSON *result = NULL, *error = NULL;
+   if (params && !cJSON_IsObject(params))
+      error = native_mcp_error(-32602, "MCP params must be an object");
+   else if (!strcmp(method, "initialize"))
+   {
+      const char *version =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(params, "protocolVersion"));
+      result = version ? cJSON_CreateObject() : NULL;
+      cJSON *capabilities = result ? cJSON_AddObjectToObject(result, "capabilities") : NULL;
+      cJSON *server = result ? cJSON_AddObjectToObject(result, "serverInfo") : NULL;
+      if (!result || !capabilities || !server ||
+          !cJSON_AddStringToObject(result, "protocolVersion",
+                                   !strcmp(version, "2025-11-25") ? version : "2025-03-26") ||
+          !cJSON_AddObjectToObject(capabilities, "tools") ||
+          !cJSON_AddStringToObject(server, "name", "aimee") ||
+          !cJSON_AddStringToObject(server, "version", "1"))
+      {
+         cJSON_Delete(result);
+         result = NULL;
+         if (!version)
+            error = native_mcp_error(-32602, "MCP initialization requires a protocol version");
+      }
+   }
+   else if (!strcmp(method, "ping"))
+      result = cJSON_CreateObject();
+   else if (!strcmp(method, "tools/list"))
+   {
+      result = cJSON_CreateObject();
+      cJSON *tools = result ? cJSON_AddArrayToObject(result, "tools") : NULL;
+      if (!tools)
+      {
+         cJSON_Delete(result);
+         result = NULL;
+      }
+      for (int i = 0; tools && i < runtime->n_bindings; i++)
+      {
+         const server_native_tool_binding_t *binding = runtime->bindings + i;
+         if (!binding->mcp_name)
+            continue;
+         const aimee_tool_t *function =
+             aimee_ir_find_function(&runtime->request_profile, binding->space, binding->name);
+         cJSON *definition = function ? cJSON_CreateObject() : NULL;
+         cJSON *schema = function && function->schema ? cJSON_Duplicate(function->schema, 1)
+                                                      : cJSON_CreateObject();
+         if (!definition || !schema ||
+             !cJSON_AddStringToObject(definition, "name", binding->mcp_name) ||
+             !cJSON_AddStringToObject(definition, "description",
+                                      function->description ? function->description : "") ||
+             !cJSON_AddItemToObject(definition, "inputSchema", schema))
+         {
+            cJSON_Delete(definition);
+            cJSON_Delete(schema);
+            cJSON_Delete(result);
+            result = NULL;
+            break;
+         }
+         if (!cJSON_AddItemToArray(tools, definition))
+         {
+            cJSON_Delete(definition);
+            cJSON_Delete(result);
+            result = NULL;
+            break;
+         }
+      }
+   }
+   else if (!strcmp(method, "tools/call"))
+   {
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(params, "name"));
+      const cJSON *arguments = cJSON_GetObjectItemCaseSensitive(params, "arguments");
+      const cJSON *meta = cJSON_GetObjectItemCaseSensitive(params, "_meta");
+      const char *original_id =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(meta, "claudecode/toolUseId"));
+      const server_native_tool_binding_t *binding = native_tool_binding(runtime, NULL, name, 1);
+      aimee_block_t original = {.type = AIMEE_BLK_TOOL_USE,
+                                .tool_id = (char *)original_id,
+                                .tool_namespace = binding ? (char *)binding->space : NULL,
+                                .tool_name = binding ? (char *)binding->name : NULL};
+      aimee_block_t actual = {0};
+      native_tool_work_t execution = {.call = &original, .result = &actual, .reference = 1};
+      if (!binding || !original_id || !original_id[0] ||
+          (arguments && !cJSON_IsObject(arguments)) || native_execute_claimed(runtime, &execution))
+      {
+         server_session_capture_fail(runtime->capture);
+         error = native_mcp_error(-32000, "original canonical tool source was refused");
+      }
+      else
+      {
+         result = cJSON_CreateObject();
+         cJSON *content = result ? cJSON_AddArrayToObject(result, "content") : NULL;
+         cJSON *item = content ? cJSON_CreateObject() : NULL;
+         if (!item || !cJSON_AddStringToObject(item, "type", "text") ||
+             !cJSON_AddStringToObject(item, "text", cJSON_GetStringValue(actual.tool_result)) ||
+             !cJSON_AddBoolToObject(result, "isError", actual.tool_is_error))
+         {
+            cJSON_Delete(item);
+            cJSON_Delete(result);
+            result = NULL;
+         }
+         else if (!cJSON_AddItemToArray(content, item))
+         {
+            cJSON_Delete(item);
+            cJSON_Delete(result);
+            result = NULL;
+         }
+      }
+      aimee_block_free_contents(&actual);
+   }
+   else
+      error = native_mcp_error(-32601, "MCP method is not supported by this native tool owner");
+   cJSON *response = cJSON_CreateObject();
+   cJSON *identity = cJSON_Duplicate(id, 1);
+   if ((!result && !error) || !response || !identity ||
+       !cJSON_AddStringToObject(response, "jsonrpc", "2.0") ||
+       !cJSON_AddItemToObject(response, "id", identity))
+   {
+      cJSON_Delete(result);
+      cJSON_Delete(error);
+      cJSON_Delete(response);
+      cJSON_Delete(identity);
+      return -1;
+   }
+   cJSON *payload = error ? error : result;
+   if (!cJSON_AddItemToObject(response, error ? "error" : "result", payload))
+   {
+      cJSON_Delete(payload);
+      cJSON_Delete(response);
+      return -1;
+   }
+   int rc = native_mcp_write(io, 200, response);
+   cJSON_Delete(response);
    return rc;
 }
 
@@ -497,6 +750,7 @@ static int native_perform(const char *method, const char *path, const char *head
 {
    /* The listener admits protocol headers only, never identity or credentials. */
    server_native_runtime_t *runtime = context;
+   path = native_model_path(path, runtime);
    if (!session || strcmp(session, runtime->session) || length > 4u * 1024u * 1024u ||
        (!work && !native_route(method, path, runtime)) ||
        (runtime->capture && !server_session_capture_accepting(runtime->capture)))
@@ -523,6 +777,22 @@ static int native_perform(const char *method, const char *path, const char *head
     * Unsupported credential sources cannot borrow a default account. */
    if (model_request && !runtime->replay)
       return -1;
+   if (model_request && runtime->bound_registry)
+   {
+      const struct timespec tick = {.tv_nsec = 10000000};
+      int waited = 0;
+      while (!atomic_load(&runtime->launch_attested) && waited++ < 6000)
+      {
+         if (io->cancelled(io->context) || !server_session_capture_accepting(runtime->capture))
+            return -1;
+         nanosleep(&tick, NULL);
+      }
+      if (!atomic_load(&runtime->launch_attested))
+      {
+         server_session_capture_fail(runtime->capture);
+         return -1;
+      }
+   }
    char *input = malloc((size_t)length + 1);
    if (!input)
       return -1;
@@ -683,8 +953,12 @@ static int native_perform(const char *method, const char *path, const char *head
           runtime->owns_request ? (void *)&request_owner : (void *)runtime->replay);
       aimee_ir_session_set_sink(native_model_capture, &model_capture);
    }
+   int retained_writer = work && !pthread_equal(runtime->producer, pthread_self());
+   if (retained_writer)
+      aimee_ir_session_set_sink(server_session_capture_sink, runtime->capture);
    if (work)
-      rc = native_execute_claimed(runtime, work);
+      rc = work->rpc ? native_mcp_dispatch(runtime, work, io)
+                     : native_execute_claimed(runtime, work);
    else
    {
       io->response_started(io->context);
@@ -692,6 +966,9 @@ static int native_perform(const char *method, const char *path, const char *head
    }
    if (aimee_ir_session_capture_failed())
       server_session_capture_fail(runtime->capture);
+   if (retained_writer)
+      aimee_ir_session_restore_sink(previous_sink, previous_sink_context,
+                                    previous_failed || aimee_ir_session_capture_failed());
    if (model_request)
    {
       aimee_frontend_bind_request_owner(previous_request_owner.guard,
@@ -740,6 +1017,47 @@ static int native_forward(const char *method, const char *path, const char *head
                           const void *body, unsigned long length, const char *session,
                           const cli_proxy_io_t *io, void *context)
 {
+   server_native_runtime_t *runtime = context;
+   if (runtime->owns_request && native_mcp_enabled(runtime) && !strcmp(path, "/v1/mcp/call"))
+   {
+      if (!strcmp(method, "GET"))
+         return native_mcp_write(io, 405, NULL);
+      /* Forwarded protocol headers are bounded and parsed by the existing
+       * listener; Origin/authority/transfer-encoding headers already refuse. */
+      const char *line = headers ? headers : "";
+      int versions = 0;
+      while (*line)
+      {
+         const char *end = strstr(line, "\r\n");
+         if (!end)
+            return native_mcp_write(io, 400, NULL);
+         const char *prefix = "MCP-Protocol-Version: ";
+         size_t n = strlen(prefix), size = (size_t)(end - line);
+         if (size >= n && !strncasecmp(line, prefix, n))
+         {
+            if (++versions > 1 || !((size - n == 10 && !memcmp(line + n, "2025-11-25", 10)) ||
+                                    (size - n == 10 && !memcmp(line + n, "2025-03-26", 10))))
+               return native_mcp_write(io, 400, NULL);
+         }
+         line = end + 2;
+      }
+      cJSON *rpc = body ? aimee_ir_json_parse_frame(body, (size_t)length) : NULL;
+      const char *version = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(rpc, "jsonrpc"));
+      const char *operation = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(rpc, "method"));
+      const cJSON *id = cJSON_GetObjectItemCaseSensitive(rpc, "id");
+      if (!cJSON_IsObject(rpc) || !version || strcmp(version, "2.0") || !operation ||
+          !operation[0] || (id && !cJSON_IsNumber(id) && !cJSON_IsString(id)) ||
+          cJSON_GetObjectItemCaseSensitive(rpc, "result") ||
+          cJSON_GetObjectItemCaseSensitive(rpc, "error"))
+      {
+         cJSON_Delete(rpc);
+         return native_mcp_write(io, 400, NULL);
+      }
+      native_tool_work_t work = {.rpc = rpc};
+      int rc = native_perform(method, path, headers, NULL, 0, session, io, runtime, &work);
+      cJSON_Delete(rpc);
+      return rc;
+   }
    return native_perform(method, path, headers, body, length, session, io, context, NULL);
 }
 
@@ -785,10 +1103,10 @@ int server_native_runtime_execute_tool(const aimee_block_t *call, aimee_block_t 
                          &work);
 }
 
-static server_native_runtime_t *native_runtime_open(const agent_t *selected,
-                                                    const request_context_t *owner,
-                                                    const char *session_id,
-                                                    const aimee_request_t *profile)
+static server_native_runtime_t *
+native_runtime_open(const agent_t *selected, const request_context_t *owner, const char *session_id,
+                    const aimee_request_t *profile, const server_native_tool_binding_t *bindings,
+                    int binding_count, int bound_registry)
 {
    if (!selected || !selected->enabled || !owner || !owner->vault_principal[0] ||
        owner->vault_transport <= ATTEST_TCP_BEARER || owner->vault_transport > ATTEST_MTLS_CLIENT ||
@@ -847,6 +1165,49 @@ static server_native_runtime_t *native_runtime_open(const agent_t *selected,
       if (!runtime->tool_source)
          goto failed;
       runtime->owns_request = 1;
+   }
+   if (bound_registry)
+   {
+      if (!profile || binding_count < 0 || binding_count > AIMEE_IR_MAX_BLOCKS ||
+          (binding_count && !bindings))
+         goto failed;
+      runtime->bound_registry = 1;
+      runtime->bindings =
+          binding_count ? calloc((size_t)binding_count, sizeof *runtime->bindings) : NULL;
+      if (binding_count && !runtime->bindings)
+         goto failed;
+      for (int i = 0; i < binding_count; i++)
+      {
+         const server_native_tool_binding_t *binding = bindings + i;
+         if (!binding->name || !binding->name[0] || !binding->registry_name ||
+             !binding->registry_name[0] || (binding->space && !binding->space[0]) ||
+             (binding->mcp_name && !binding->mcp_name[0]) ||
+             !aimee_ir_find_function(profile, binding->space, binding->name))
+            goto failed;
+         for (int j = 0; j < i; j++)
+            if ((!strcmp(bindings[j].name, binding->name) &&
+                 ((!bindings[j].space && !binding->space) ||
+                  (bindings[j].space && binding->space &&
+                   !strcmp(bindings[j].space, binding->space)))) ||
+                (binding->mcp_name && bindings[j].mcp_name &&
+                 !strcmp(binding->mcp_name, bindings[j].mcp_name)))
+               goto failed;
+         aimee_tool_t registered = {0};
+         int found = agent_tools_execution_definition(binding->registry_name, &registered);
+         int valid = !found && registered.kind == AIMEE_TOOL_FUNCTION && registered.name &&
+                     !strcmp(registered.name, binding->registry_name);
+         aimee_tool_free(&registered);
+         if (!valid)
+            goto failed;
+         server_native_tool_binding_t *owned = runtime->bindings + runtime->n_bindings++;
+         owned->name = strdup(binding->name);
+         owned->registry_name = strdup(binding->registry_name);
+         owned->space = binding->space ? strdup(binding->space) : NULL;
+         owned->mcp_name = binding->mcp_name ? strdup(binding->mcp_name) : NULL;
+         if (!owned->name || !owned->registry_name || (binding->space && !owned->space) ||
+             (binding->mcp_name && !owned->mcp_name))
+            goto failed;
+      }
    }
    /* An ordinary primary has no delegate source overlay. Make that absence
     * explicit rather than falling back to a concurrent delegate's global env. */
@@ -956,14 +1317,34 @@ server_native_runtime_t *server_native_runtime_open(const agent_t *selected,
                                                     const request_context_t *owner,
                                                     const char *session_id)
 {
-   return native_runtime_open(selected, owner, session_id, NULL);
+   return native_runtime_open(selected, owner, session_id, NULL, NULL, 0, 0);
 }
 server_native_runtime_t *server_native_runtime_open_request(const agent_t *selected,
                                                             const request_context_t *owner,
                                                             const char *session_id,
                                                             const aimee_request_t *profile)
 {
-   return profile ? native_runtime_open(selected, owner, session_id, profile) : NULL;
+   return profile ? native_runtime_open(selected, owner, session_id, profile, NULL, 0, 0) : NULL;
+}
+
+server_native_runtime_t *
+server_native_runtime_open_bound_request(const agent_t *selected, const request_context_t *owner,
+                                         const char *session, const aimee_request_t *profile,
+                                         const server_native_tool_binding_t *bindings, int count)
+{
+   return native_runtime_open(selected, owner, session, profile, bindings, count, 1);
+}
+
+int server_native_runtime_attest_launch(server_native_runtime_t *runtime, const char *digest)
+{
+   if (!runtime || !runtime->bound_registry || !runtime->owns_request ||
+       !native_digest_valid(digest) || !pthread_equal(runtime->producer, pthread_self()) ||
+       !server_session_capture_accepting(runtime->capture) ||
+       atomic_load(&runtime->launch_attested))
+      return -1;
+   memcpy(runtime->launch_digest, digest, 65);
+   atomic_store(&runtime->launch_attested, 1);
+   return 0;
 }
 
 const char *server_native_runtime_url(const server_native_runtime_t *runtime)
@@ -983,6 +1364,49 @@ static int native_name_order(const void *left, const void *right)
    return strcmp(*(const char *const *)left, *(const char *const *)right);
 }
 
+static int native_binding_order(const void *left, const void *right)
+{
+   const server_native_tool_binding_t *a = *(const server_native_tool_binding_t *const *)left;
+   const server_native_tool_binding_t *b = *(const server_native_tool_binding_t *const *)right;
+   int space = strcmp(a->space ? a->space : "", b->space ? b->space : "");
+   return space ? space : strcmp(a->name, b->name);
+}
+static cJSON *native_bindings_json(const server_native_runtime_t *runtime)
+{
+   cJSON *bindings = cJSON_CreateArray();
+   const server_native_tool_binding_t **ordered =
+       runtime->n_bindings ? calloc((size_t)runtime->n_bindings, sizeof *ordered) : NULL;
+   if (!bindings || (runtime->n_bindings && !ordered))
+   {
+      cJSON_Delete(bindings);
+      free(ordered);
+      return NULL;
+   }
+   for (int i = 0; i < runtime->n_bindings; i++)
+      ordered[i] = runtime->bindings + i;
+   if (runtime->n_bindings)
+      qsort(ordered, (size_t)runtime->n_bindings, sizeof *ordered, native_binding_order);
+   for (int i = 0; i < runtime->n_bindings; i++)
+   {
+      const server_native_tool_binding_t *binding = ordered[i];
+      cJSON *entry = cJSON_CreateObject();
+      if (!entry ||
+          !cJSON_AddStringToObject(entry, "namespace", binding->space ? binding->space : "") ||
+          !cJSON_AddStringToObject(entry, "name", binding->name) ||
+          !cJSON_AddStringToObject(entry, "registry", binding->registry_name) ||
+          !cJSON_AddStringToObject(entry, "mcp", binding->mcp_name ? binding->mcp_name : "") ||
+          !cJSON_AddItemToArray(bindings, entry))
+      {
+         cJSON_Delete(entry);
+         cJSON_Delete(bindings);
+         bindings = NULL;
+         break;
+      }
+   }
+   free(ordered);
+   return bindings;
+}
+
 int server_native_runtime_cache_scope(const server_native_runtime_t *runtime,
                                       const server_native_execution_profile_t *profile,
                                       char scope[65])
@@ -996,6 +1420,9 @@ int server_native_runtime_cache_scope(const server_native_runtime_t *runtime,
        !native_digest_valid(profile->launch_digest) ||
        !native_digest_valid(profile->workspace_digest) || runtime->tools.denied_count < 0 ||
        runtime->tools.denied_count > 4096)
+      return -1;
+   if (atomic_load(&runtime->launch_attested) &&
+       strcmp(runtime->launch_digest, profile->launch_digest))
       return -1;
    cJSON *value = cJSON_CreateObject(), *denied = cJSON_CreateArray();
    if (!value || !denied)
@@ -1054,6 +1481,15 @@ int server_native_runtime_cache_scope(const server_native_runtime_t *runtime,
          failed = 1;
       }
    }
+   if (runtime->bound_registry)
+   {
+      cJSON *bindings = native_bindings_json(runtime);
+      if (!bindings || !cJSON_AddItemToObject(value, "registry_bindings", bindings))
+      {
+         cJSON_Delete(bindings);
+         failed = 1;
+      }
+   }
    /* Denials are a set: order changes must not throw away a valid native prefix. */
    int count = runtime->tools.denied_count;
    const char **names = count ? calloc((size_t)count, sizeof *names) : NULL;
@@ -1102,6 +1538,15 @@ int server_native_runtime_claim_tool(server_native_runtime_t *runtime,
               : -1;
 }
 
+int server_native_runtime_claim_reference(server_native_runtime_t *runtime, const char *id,
+                                          const char *space, const char *name,
+                                          server_native_tool_claim_t *out)
+{
+   return runtime && runtime->owns_request ? server_native_tool_source_claim_reference(
+                                                 runtime->tool_source, id, space, name, out)
+                                           : -1;
+}
+
 const cJSON *server_native_runtime_source_history(const server_native_runtime_t *runtime)
 {
    return runtime ? runtime->source_history : NULL;
@@ -1128,6 +1573,14 @@ void server_native_runtime_close(server_native_runtime_t *runtime)
    if (!runtime)
       return;
    server_native_runtime_quiesce(runtime);
+   for (int i = 0; i < runtime->n_bindings; i++)
+   {
+      free((void *)runtime->bindings[i].space);
+      free((void *)runtime->bindings[i].name);
+      free((void *)runtime->bindings[i].registry_name);
+      free((void *)runtime->bindings[i].mcp_name);
+   }
+   free(runtime->bindings);
    aimee_response_free(&runtime->last_response);
    server_native_replay_close(runtime->replay);
    server_native_tool_source_close(runtime->tool_source);

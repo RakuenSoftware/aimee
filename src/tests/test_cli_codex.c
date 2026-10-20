@@ -1199,13 +1199,17 @@ static void test_dynamic_host_execution(void)
 static int native_probe_host_tool(const aimee_block_t *call, aimee_block_t *result, void *context)
 {
    assert(!strcmp(call->tool_id, "call_native_fixture"));
-   assert(!strcmp(call->tool_name, "fail") && !strcmp(call->tool_namespace, "fixture"));
+   assert(!strcmp(call->tool_name, "fail"));
+   int flat = getenv("AIMEE_TEST_FLAT_HOST_TOOLS") != NULL;
+   assert(flat ? !call->tool_namespace
+               : call->tool_namespace && !strcmp(call->tool_namespace, "fixture"));
    char *arguments = cJSON_PrintUnformatted(call->tool_input);
    assert(arguments && strstr(arguments, "0.123456789012345678901234567890"));
    cJSON *entry = cJSON_CreateObject();
    assert(entry && cJSON_AddStringToObject(entry, "call_id", call->tool_id) &&
           cJSON_AddStringToObject(entry, "name", call->tool_name) &&
-          cJSON_AddStringToObject(entry, "namespace", call->tool_namespace) &&
+          (call->tool_namespace ? cJSON_AddStringToObject(entry, "namespace", call->tool_namespace)
+                                : cJSON_AddNullToObject(entry, "namespace")) &&
           cJSON_AddStringToObject(entry, "arguments_json", arguments) &&
           cJSON_AddItemToArray(context, entry));
    free(arguments);
@@ -1270,7 +1274,8 @@ static int native_history_probe(const char *resume, const char *history_file, in
                          .kind = AIMEE_TOOL_NAMESPACE,
                          .children = &child,
                          .n_children = 1};
-   aimee_request_t catalog = {.tools = &space, .n_tools = 1};
+   aimee_request_t catalog = {.tools = getenv("AIMEE_TEST_FLAT_HOST_TOOLS") ? &child : &space,
+                              .n_tools = 1};
    cli_codex_chat_request_t req = {.thread_id = resume,
                                    .history = history_file ? &adopted
                                               : resume     ? NULL

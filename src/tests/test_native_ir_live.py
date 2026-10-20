@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""Actual native SDKs against a disposable server, Vault and durable session log.
+
+Invoked by test_integration.sh when both explicit native executable paths are set.
+Local synthetic providers exercise all model wires; no subscription or KB is used.
+"""
+import http.client
+import json
+import os
+from pathlib import Path
+import socket
+import threading
+import traceback
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+class Local(http.client.HTTPConnection):
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX)
+        self.sock.settimeout(90)
+        self.sock.connect(str(Path(os.environ["AIMEE_HOME"]) / "aimee-http.sock"))
+
+
+def api(path, body=None):
+    connection = Local("localhost")
+    try:
+        connection.request("GET" if body is None else "POST", path,
+                           None if body is None else json.dumps(body),
+                           {"Content-Type": "application/json"})
+        response = connection.getresponse()
+        text = response.read().decode()
+        assert response.status == 200, (path, response.status, text)
+        return text if path == "/v1/chat/stream" or path.endswith("/events") else json.loads(text)
+    finally:
+        connection.close()
+
+
+def main():
+    home = Path(os.environ["AIMEE_HOME"])
+    workspace = Path(os.environ["AIMEE_IR_DELEGATE_WORKSPACE"])
+    binaries = {kind: str(Path(os.environ["AIMEE_TEST_NATIVE_" + kind.upper()]).resolve(strict=True))
+                for kind in ("codex", "claude")}
+    for executable in binaries.values():
+        with open(executable, "rb") as stream:
+            assert stream.read(4) == b"\x7fELF", executable
+    cases = [("codex", "chatgpt"), ("codex", "anthropic"), ("codex", "openai"),
+             ("claude", "anthropic"), ("claude", "chatgpt"), ("claude", "openai")]
+    active = None
+    observed = []
+    errors = []
+    count = 0
+
+    class Provider(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_POST(self):
+            nonlocal count
+            try:
+                request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                assert active is not None
+                kind, wire, marker, call_id = active
+                observed.append(request)
+                (home / "native-provider-requests.json").write_text(json.dumps(observed, indent=2))
+                if self.path.endswith("/count_tokens"):
+                    self.send_payload({"input_tokens": 100})
+                    return
+                count += 1
+                assert count <= 3, (active, count)
+                encoded = json.dumps(request, ensure_ascii=False)
+                assert marker + "_FIRST" in encoded, encoded[:2000]
+                assert request["model"] == marker, request.get("model")
+                assert "Continue the server-owned canonical turn." not in encoded, encoded[:2000]
+                if wire == "anthropic":
+                    assert self.headers.get("x-api-key") == "native-fixture-only"
+                else:
+                    assert self.headers.get("Authorization") == "Bearer native-fixture-only"
+                logical = "mcp__aimee__read_file" if kind == "claude" else "read_file"
+                tools = request.get("tools", [])
+                names = {tool.get("name", tool.get("function", {}).get("name")) for tool in tools}
+                assert logical in names, (logical, names)
+                if count > 1:
+                    assert call_id in encoded and "canonical delegate fixture" in encoded, encoded[-4000:]
+                if count == 3:
+                    assert marker + "_FOLLOWUP" in encoded
+                text = marker + ("_FINAL" if count == 2 else "_RESUMED")
+                arguments = json.dumps({"path": "README.md"})
+                if wire == "anthropic":
+                    assert self.path.endswith("/messages"), self.path
+                    content = [{"type": "tool_use", "id": call_id, "name": logical,
+                                "input": {"path": "README.md"}}] if count == 1 else [{"type": "text", "text": text}]
+                    payload = {"id": "msg_" + marker + str(count), "type": "message", "role": "assistant",
+                               "model": marker, "content": content,
+                               "stop_reason": "tool_use" if count == 1 else "end_turn",
+                               "stop_sequence": None, "usage": {"input_tokens": 100, "output_tokens": 10}}
+                    frames = [("message_start", {"type": "message_start", "message": {
+                        **payload, "content": [], "stop_reason": None}})]
+                    block = dict(content[0])
+                    if count == 1:
+                        block["input"] = {}
+                    else:
+                        block["text"] = ""
+                    frames += [("content_block_start", {"type": "content_block_start", "index": 0, "content_block": block}),
+                               ("content_block_delta", {"type": "content_block_delta", "index": 0,
+                                "delta": {"type": "input_json_delta", "partial_json": arguments} if count == 1 else
+                                         {"type": "text_delta", "text": text}}),
+                               ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+                               ("message_delta", {"type": "message_delta", "delta": {
+                                   "stop_reason": payload["stop_reason"], "stop_sequence": None}, "usage": {"output_tokens": 10}}),
+                               ("message_stop", {"type": "message_stop"})]
+                elif wire == "chatgpt":
+                    assert self.path.endswith("/responses"), self.path
+                    item = {"type": "function_call", "id": "fc_" + marker, "call_id": call_id,
+                            "name": logical, "arguments": arguments, "status": "completed"} if count == 1 else {
+                            "type": "message", "id": "msg_" + marker + str(count), "role": "assistant",
+                            "status": "completed", "content": [{"type": "output_text", "text": text, "annotations": []}]}
+                    payload = {"id": "resp_" + marker + str(count), "object": "response", "status": "completed",
+                               "model": marker, "output": [item], "usage": {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110}}
+                    frames = [("response.created", {"type": "response.created", "response": {**payload, "status": "in_progress", "output": []}}),
+                              ("response.output_item.added", {"type": "response.output_item.added", "output_index": 0,
+                               "item": {**item, "status": "in_progress", **({"arguments": ""} if count == 1 else {"content": []})}})]
+                    frames += [("response.function_call_arguments.delta", {"type": "response.function_call_arguments.delta",
+                               "output_index": 0, "item_id": item["id"], "delta": arguments})] if count == 1 else [
+                              ("response.output_text.delta", {"type": "response.output_text.delta", "output_index": 0,
+                               "content_index": 0, "item_id": item["id"], "delta": text})]
+                    frames += [("response.output_item.done", {"type": "response.output_item.done", "output_index": 0, "item": item}),
+                               ("response.completed", {"type": "response.completed", "response": payload})]
+                else:
+                    assert self.path.endswith("/chat/completions"), self.path
+                    delta = {"tool_calls": [{"index": 0, "id": call_id, "type": "function",
+                              "function": {"name": logical, "arguments": arguments}}]} if count == 1 else {"content": text}
+                    payload = {"id": "chat_" + marker + str(count), "object": "chat.completion.chunk", "model": marker,
+                               "choices": [{"index": 0, "delta": delta, "finish_reason": None}]}
+                    frames = [(None, payload), (None, {**payload, "choices": [{"index": 0, "delta": {},
+                        "finish_reason": "tool_calls" if count == 1 else "stop"}],
+                        "usage": {"prompt_tokens": 100, "completion_tokens": 10}})]
+                if request.get("stream"):
+                    data = "".join(("event: " + name + "\n" if name else "") + "data: " + json.dumps(value) + "\n\n"
+                                   for name, value in frames).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                elif wire != "openai":
+                    self.send_payload(payload)
+                else:
+                    message = {"role": "assistant", "content": text if count != 1 else None}
+                    if count == 1:
+                        message["tool_calls"] = [{"id": call_id, "type": "function", "function": {"name": logical, "arguments": arguments}}]
+                    self.send_payload({"id": "chat_" + marker + str(count), "object": "chat.completion", "model": marker,
+                        "choices": [{"message": message, "finish_reason": "tool_calls" if count == 1 else "stop"}],
+                        "usage": {"prompt_tokens": 100, "completion_tokens": 10}})
+            except Exception as error:
+                errors.append(repr(error))
+                print("native provider failure:", active, count, repr(error), flush=True)
+                traceback.print_exc()
+                self.send_error(500)
+
+        def send_payload(self, payload):
+            data = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    models_path = home / "models.json"
+    previous = models_path.read_bytes() if models_path.exists() else None
+    try:
+        actor = "uid:" + str(os.getuid())
+        api("/v1/vault/capability", {"action": "grant", "principal": actor})
+        models = []
+        for kind, wire in cases:
+            name = "native-" + kind + "-" + wire
+            models.append(dict(name=name, model=name, provider=wire, auth_type="api_key",
+                endpoint=f"http://127.0.0.1:{server.server_port}/v1", backend="provider-cli", cli_kind=kind,
+                cli_cmd=binaries[kind], roles=["all"], enabled=True, tools_enabled=True,
+                context_window=131072, max_tokens=4096, timeout_ms=15000, cli_idle_timeout_ms=15000,
+                max_parallel=1, max_turns=4))
+            api("/v1/vault/set_server", {"agent": name, "cred": "api_key", "secret": "native-fixture-only"})
+        models_path.write_text(json.dumps(dict(default_agent=models[0]["name"], default_delegate=models[0]["name"],
+                                               fallback_chain=[], models=models)))
+        for kind, wire in cases:
+            marker = "native-" + kind + "-" + wire
+            active = (kind, wire, marker, "toolu_" + marker.replace("-", "_"))
+            count = 0
+            sid = api("/v1/sessions/create", {"client_type": "native-ir-integration"})["session_id"]
+            attachment = api(f"/v1/sessions/{sid}/attach", {"surface": "webchat", "owner": actor})["attach_id"]
+            api(f"/v1/sessions/{sid}/primary", {"agent": marker})
+            try:
+                for label in ("FIRST", "FOLLOWUP"):
+                    raw = api("/v1/chat/stream", {"attach_id": attachment, "message": marker + "_" + label,
+                              "aimee_session_id": sid, "cwd": str(workspace), "ir_version": 1})
+                    records = [json.loads(line) for line in raw.splitlines() if line.strip()]
+                    assert not errors, errors
+                    assert records and records[-1]["event"] == {"kind": "execution", "payload": {"status": "completed"}}, (active, count, raw[-8000:])
+                    expected = marker + ("_FINAL" if label == "FIRST" else "_RESUMED")
+                    assert expected in raw, raw[-8000:]
+                assert count == 3, (active, count)
+                connection = Local("localhost")
+                try:
+                    connection.request("GET", f"/v1/sessions/{sid}/events?format=ir&cursor=0")
+                    response = connection.getresponse()
+                    assert response.status == 200
+                    replayed = []
+                    target = int(records[-1]["sequence"])
+                    while not replayed or int(replayed[-1]["sequence"]) < target:
+                        line = response.readline().decode()
+                        assert line, (sid, target, replayed)
+                        if line.startswith("data: "):
+                            replayed.append(json.loads(line[6:]))
+                    replay = json.dumps(replayed, ensure_ascii=False)
+                finally:
+                    connection.close()
+                assert marker + "_FIRST" in replay and marker + "_FOLLOWUP" in replay
+                assert "canonical delegate fixture" in replay and active[3] in replay
+                assert "Continue the server-owned canonical turn." not in replay
+                print("native integration:", kind, wire, "original tool/result, canonical context and resumed turn pass", flush=True)
+            finally:
+                api(f"/v1/sessions/{sid}/detach", {"attach_id": attachment})
+    finally:
+        if previous is None:
+            models_path.unlink(missing_ok=True)
+        else:
+            models_path.write_bytes(previous)
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+if __name__ == "__main__":
+    main()

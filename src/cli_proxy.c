@@ -86,8 +86,8 @@ static int model_route(const char *method, const char *path)
 static int protocol_header(const char *name)
 {
    static const char *const allowed[] = {
-       "content-type",   "content-encoding", "accept", "anthropic-version",
-       "anthropic-beta", "openai-beta",      NULL};
+       "content-type", "content-encoding",     "accept", "anthropic-version", "anthropic-beta",
+       "openai-beta",  "mcp-protocol-version", NULL};
    for (int i = 0; allowed[i]; i++)
       if (strcasecmp(name, allowed[i]) == 0)
          return 1;
@@ -264,8 +264,13 @@ static void proxy_request(proxy_worker_t *worker)
             }
          }
       }
+      else if (strcasecmp(line, "Origin") == 0)
+      {
+         proxy_error(fd, 403, "browser origins are not admitted by this native capability");
+         goto done;
+      }
       else if (strcasecmp(line, "Transfer-Encoding") == 0 || strcasecmp(line, "Expect") == 0 ||
-               strcasecmp(line, "Upgrade") == 0 || strcasecmp(line, "Origin") == 0)
+               strcasecmp(line, "Upgrade") == 0)
          goto malformed;
       else if (strcasecmp(line, "session_id") == 0)
       {

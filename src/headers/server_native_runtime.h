@@ -36,6 +36,21 @@ server_native_runtime_t *server_native_runtime_open_request(const agent_t *selec
                                                             const request_context_t *owner,
                                                             const char *session_id,
                                                             const aimee_request_t *profile);
+/* Explicit host binding from an advertised logical tool to the existing
+ * registry. mcp_name is the exact MCP tools/list name, or NULL for Codex tools.
+ * This is a derived protocol mapping, never a registry or effect permission. */
+typedef struct
+{
+   const char *space, *name, *registry_name, *mcp_name;
+} server_native_tool_binding_t;
+server_native_runtime_t *
+server_native_runtime_open_bound_request(const agent_t *selected, const request_context_t *owner,
+                                         const char *session, const aimee_request_t *profile,
+                                         const server_native_tool_binding_t *bindings, int count);
+/* Creator-only release after independently verifying this actual native launch.
+ * Bound runtimes hold model forwarding until release; SDK bytes cannot release
+ * it. Digest is non-secret launch configuration identity, not a credential. */
+int server_native_runtime_attest_launch(server_native_runtime_t *runtime, const char *digest);
 /* Host-only original-call admission. Revalidates the committed source prefix
  * and claims once for this turn; it does not execute or authorize any effect.
  * out is zero-initialized or previously owned. SDK callbacks still require
@@ -43,6 +58,13 @@ server_native_runtime_t *server_native_runtime_open_request(const agent_t *selec
 int server_native_runtime_claim_tool(server_native_runtime_t *runtime,
                                      const aimee_block_t *proposed,
                                      server_native_tool_claim_t *out);
+/* Resolve a host-bound original-ID reference under the same source proof and
+ * once-only claim. A reused ID refuses even if its old occurrence was claimed.
+ * This does not accept SDK arguments or authorize execution; the original
+ * proposed-call API retains its exact argument comparison. */
+int server_native_runtime_claim_reference(server_native_runtime_t *runtime, const char *id,
+                                          const char *space, const char *name,
+                                          server_native_tool_claim_t *out);
 /* Synchronous typed SDK callback on the creating producer thread, while its
  * capture, browser sink and workspace lease remain bound. Uses source-owned
  * arguments/catalog and existing supervised policy/effect/receipt owners.

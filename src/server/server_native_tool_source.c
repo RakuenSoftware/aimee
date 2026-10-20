@@ -310,10 +310,13 @@ void server_native_tool_claim_free(server_native_tool_claim_t *claim)
       memset(claim, 0, sizeof *claim);
    }
 }
-int server_native_tool_source_claim(server_native_tool_source_t *source,
-                                    const aimee_block_t *proposed, server_native_tool_claim_t *out)
+static int source_claim(server_native_tool_source_t *source, const aimee_block_t *proposed,
+                        int reference, server_native_tool_claim_t *out)
 {
-   if (!source || !out || !aimee_ir_block_valid(proposed) || proposed->type != AIMEE_BLK_TOOL_USE)
+   if (!source || !out || !proposed || proposed->type != AIMEE_BLK_TOOL_USE || !proposed->tool_id ||
+       !proposed->tool_id[0] || !proposed->tool_name || !proposed->tool_name[0] ||
+       (proposed->tool_namespace && !proposed->tool_namespace[0]) ||
+       (!reference && !aimee_ir_block_valid(proposed)))
       return -1;
    pthread_mutex_lock(&source->lock);
    int rc = -1;
@@ -321,13 +324,27 @@ int server_native_tool_source_claim(server_native_tool_source_t *source,
    server_native_tool_claim_t result = {0};
    if (!server_session_capture_accepting(source->capture) || !fresh(source))
       goto done;
+   unsigned identity_count = 0;
    for (source_call_t *entry = source->calls; entry; entry = entry->next)
-      if (!entry->claimed && same_call(&entry->original.messages[0].blocks[0], proposed))
+   {
+      const aimee_block_t *original = &entry->original.messages[0].blocks[0];
+      if (reference && same_text(original->tool_id, proposed->tool_id))
+         identity_count++;
+      int matches = reference ? same_text(original->tool_id, proposed->tool_id) &&
+                                    same_text(original->tool_namespace, proposed->tool_namespace) &&
+                                    same_text(original->tool_name, proposed->tool_name)
+                              : same_call(original, proposed);
+      if (!entry->claimed && matches)
       {
          if (match)
             goto done; /* Never choose the newest of ambiguous original calls. */
          match = entry;
       }
+   }
+   /* A reference has no exact proposed arguments to distinguish reused IDs.
+    * Even a previously claimed occurrence makes this identity ambiguous. */
+   if (reference && identity_count != 1)
+      goto done;
    if (!match || verify(source, match) || !fresh(source) ||
        aimee_ir_request_clone(&match->original, &result.original) ||
        server_session_capture_claim_call(source->capture, match->last, match->index))
@@ -344,4 +361,20 @@ done:
    server_native_tool_claim_free(&result);
    pthread_mutex_unlock(&source->lock);
    return rc;
+}
+
+int server_native_tool_source_claim(server_native_tool_source_t *source,
+                                    const aimee_block_t *proposed, server_native_tool_claim_t *out)
+{
+   return source_claim(source, proposed, 0, out);
+}
+int server_native_tool_source_claim_reference(server_native_tool_source_t *source, const char *id,
+                                              const char *space, const char *name,
+                                              server_native_tool_claim_t *out)
+{
+   aimee_block_t reference = {.type = AIMEE_BLK_TOOL_USE,
+                              .tool_id = (char *)id,
+                              .tool_namespace = (char *)space,
+                              .tool_name = (char *)name};
+   return source_claim(source, &reference, 1, out);
 }
