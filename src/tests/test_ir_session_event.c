@@ -117,6 +117,30 @@ static void test_owned_delta_assembly(void)
         "lifecycles");
 }
 
+static void test_argument_frame_admission(void)
+{
+   const char *arguments[] = {"{\"path\":\"before\\u0000after\"}", "{\"amount\":1,\"amount\":2}",
+                              "{} {}", "{\"path\":\"\xff\"}"};
+   for (unsigned i = 0; i < sizeof arguments / sizeof *arguments; i++)
+   {
+      aimee_ir_response_builder_t builder = {0};
+      aimee_delta_t delta = {.type = AIMEE_DELTA_TURN_START};
+      assert(!aimee_ir_response_builder_apply(&builder, &delta));
+      delta = (aimee_delta_t){.type = AIMEE_DELTA_BLOCK_START,
+                              .kind = AIMEE_BLK_TOOL_USE,
+                              .tool_id = "original",
+                              .tool_name = "read_file"};
+      assert(!aimee_ir_response_builder_apply(&builder, &delta));
+      delta = (aimee_delta_t){.type = AIMEE_DELTA_BLOCK_DELTA,
+                              .kind = AIMEE_BLK_TOOL_USE,
+                              .tool_args_delta = arguments[i]};
+      assert(!aimee_ir_response_builder_apply(&builder, &delta));
+      delta = (aimee_delta_t){.type = AIMEE_DELTA_BLOCK_STOP};
+      assert(aimee_ir_response_builder_apply(&builder, &delta) == -1);
+      aimee_ir_response_builder_free(&builder);
+   }
+}
+
 static void test_opaque_delta_metadata(void)
 {
    aimee_ir_response_builder_t builder = {0};
@@ -167,6 +191,7 @@ int main(void)
 {
    test_owned_delta_assembly();
    test_opaque_delta_metadata();
+   test_argument_frame_admission();
    aimee_block_t blocks[] = {
        {.type = AIMEE_BLK_THINKING,
         .text = "reason",

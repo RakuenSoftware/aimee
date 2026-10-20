@@ -265,13 +265,13 @@ int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire
    memset(out, 0, sizeof *out);
    if (error && capacity)
       error[0] = 0;
-   if (!frame || !length || length == SIZE_MAX)
+   if (!frame || !length || length == SIZE_MAX || memchr(frame, 0, length))
+   {
+      if (error && capacity)
+         snprintf(error, capacity, "invalid native provider response frame");
       return -1;
-   const char *end = NULL;
-   cJSON *root = cJSON_ParseWithLengthOpts(frame, length, &end, 0);
-   if (root && end)
-      while (end < frame + length && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n'))
-         end++;
+   }
+   cJSON *root = aimee_ir_json_parse_frame(frame, length);
    if (!root && wire == AIMEE_WIRE_RESPONSES)
    {
       char *bounded = malloc(length + 1);
@@ -281,7 +281,6 @@ int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire
       bounded[length] = 0;
       root = responses_backend_sse_object(bounded);
       free(bounded);
-      end = root ? frame + length : NULL;
    }
    int shape = cJSON_IsObject(root);
    const cJSON *failure = cJSON_GetObjectItemCaseSensitive(root, "error");
@@ -314,7 +313,7 @@ int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire
       }
    }
    int rc = -1;
-   if (shape && end == frame + length && aimee_ir_json_unique(root))
+   if (shape && aimee_ir_json_unique(root))
       rc = wire == AIMEE_WIRE_ANTHROPIC     ? anthropic_backend_parse(root, out, error, capacity)
            : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_backend_parse(root, out, error, capacity)
            : wire == AIMEE_WIRE_RESPONSES   ? responses_backend_parse(root, out, error, capacity)

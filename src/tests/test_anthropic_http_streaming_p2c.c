@@ -49,6 +49,7 @@ static char *g_last_body;
 static char *g_last_extra;
 static int g_stream_status;
 static const char *g_stream_payload;
+static size_t g_stream_payload_length;
 /* Fake upstream response body for the BUFFERED fetch on the policy-ON path.
  * The streaming path uses agent_http_post (not the streaming variant) when
  * the policy is on, so we hook the same `g_response_body` machinery as the
@@ -101,6 +102,7 @@ static void reset_capture(void)
    g_last_extra = NULL;
    g_stream_status = 200;
    g_stream_payload = NULL;
+   g_stream_payload_length = 0;
    g_response_body = NULL;
    g_response_status = 200;
    g_prevent = 0;
@@ -256,7 +258,9 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
    g_last_body = strdup(body ? body : "");
    assert(g_last_body != NULL);
    if (g_stream_payload && callback &&
-       callback(g_stream_payload, strlen(g_stream_payload), userdata))
+       callback(g_stream_payload,
+                g_stream_payload_length ? g_stream_payload_length : strlen(g_stream_payload),
+                userdata))
       return -1;
    return g_stream_status;
 }
@@ -890,6 +894,64 @@ static void test_signed_stream_snapshot_before_completion(void)
    PASS("signed_native_stream_persists_prefix_bound_snapshot_before_client_completion");
 }
 
+static void test_strict_provider_stream_frames(void)
+{
+   static const char native_nul[] =
+       "event: message_start\ndata: "
+       "{\"message\":{\"id\":\"before\\u0000after\",\"role\":\"assistant\"}}\n\n";
+   static const char native_raw_nul[] =
+       "event: message_start\ndata: "
+       "{\"message\":{\"id\":\"prefix\",\"role\":\"assistant\"}}\0{}\n\n";
+   static const char native_trailing[] =
+       "event: message_start\ndata: {\"message\":{\"id\":\"prefix\",\"role\":\"assistant\"}} "
+       "{}\n\n";
+   static const char chat_nul[] =
+       "data: {\"choices\":[{\"delta\":{\"content\":\"before\\u0000after\"}}]}\n\n";
+   static const char chat_raw_nul[] =
+       "data: {\"choices\":[{\"delta\":{\"content\":\"prefix\"}}]}\0{}\n\n";
+   static const char chat_duplicate[] =
+       "data: {\"choices\":[],\"choices\":[{\"delta\":{\"content\":\"prefix\"}}]}\n\n";
+   struct
+   {
+      const char *driver, *bytes;
+      size_t length;
+   } cases[] = {{"anthropic", native_nul, sizeof native_nul - 1},
+                {"anthropic", native_raw_nul, sizeof native_raw_nul - 1},
+                {"anthropic", native_trailing, sizeof native_trailing - 1},
+                {"openai", chat_nul, sizeof chat_nul - 1},
+                {"openai", chat_raw_nul, sizeof chat_raw_nul - 1},
+                {"openai", chat_duplicate, sizeof chat_duplicate - 1}};
+   for (unsigned i = 0; i < sizeof cases / sizeof *cases; i++)
+   {
+      reset_capture();
+      aimee_ir_session_set_sink(NULL, NULL);
+      delegate_driver_t driver = {.name = cases[i].driver};
+      g_driver = &driver;
+      g_stream_payload = cases[i].bytes;
+      g_stream_payload_length = cases[i].length;
+      assert(memchr(cases[i].bytes, '\n', cases[i].length));
+      if (i == 1 || i == 4)
+         assert(strlen(cases[i].bytes) < cases[i].length); /* Exercise the full byte frame. */
+      else
+         assert(strlen(cases[i].bytes) == cases[i].length);
+      replay_cap_t cap = {0};
+      messages_stream("{\"model\":\"ignored\",\"max_tokens\":64,\"stream\":true,\"messages\":[{"
+                      "\"role\":\"user\",\"content\":\"original\"}]}",
+                      replay_capture, &cap);
+      int errors = 0;
+      for (int j = 0; j < cap.count; j++)
+      {
+         errors += !strcmp(cap.events[j], "error");
+         assert(strcmp(cap.events[j], "message_stop"));
+         assert(strcmp(cap.events[j], "content_block_start"));
+      }
+      assert(errors == 1);
+   }
+   reset_capture();
+   aimee_ir_session_set_sink(NULL, NULL);
+   PASS("strict_provider_stream_frames");
+}
+
 int main(void)
 {
    printf("test_anthropic_http_streaming_p2c:\n");
@@ -898,6 +960,7 @@ int main(void)
    test_streaming_anthropic_policy_on_upstream_error_returns_error();
    test_streaming_anthropic_policy_off_uses_ir();
    test_signed_stream_snapshot_before_completion();
+   test_strict_provider_stream_frames();
    test_streaming_anthropic_partial_drop_preserves_max_tokens();
    test_streaming_openai_police_drops_subagent_tool_use();
    test_streaming_openai_police_on_no_tool_use_passthrough();

@@ -1361,6 +1361,11 @@ int agent_http_post_guarded_bytes(const char *url, const char *auth_header, cons
    size_t resp_len = 0;
    int status = http_read_response(&conn, response_buf, &resp_len);
    conn_close(&conn);
+   /* This JSON POST API returns a C string. Refuse before discarding the
+    * transport length: otherwise a valid JSON prefix can hide later bytes.
+    * Streaming and explicit content-type transports retain their binary contract. */
+   if (status >= 0 && *response_buf && memchr(*response_buf, '\0', resp_len))
+      status = -1;
    if (status < 0)
    {
       free(*response_buf);

@@ -40,7 +40,8 @@ it subsequently completed all 50 main CI jobs and every auxiliary workflow,
 with the same two platform skips. Original-call readback/claim is published
 as `a94bd79ea`; it completed all 50 main CI jobs and every auxiliary workflow,
 with the same two platform skips. Supervised original-call execution is published
-as `2d49add9b` for fresh CI. Neither commit activates native SDK execution.
+as `2d49add9b`; it completed all 50 main CI jobs and every auxiliary workflow,
+with the same two platform skips. These commits do not activate native SDK execution.
 
 Installed CLI probes correctly resolve `aimee` and `wol-lore` from their own
 workspaces without an explicit project override; newer native callback cwd binding
@@ -3337,3 +3338,34 @@ host resolution. This change does not infer an effect result from missing data
 or invent a parallel receipt journal. SDK launch/cache activation, source-bound
 live Claude execution, remaining ingress/IR consumers and independent local
 learning qualification remain unfinished. Production remains KB-free and unchanged.
+
+
+## Strict SDK/provider frame admission before C-string conversion
+
+The Codex JSON-RPC reader admits the exact raw line before copying it into a
+C string. Embedded/escaped NUL, invalid UTF-8, duplicate fields and trailing JSON
+refuse capture with `invalid-json-rpc-frame`. Dynamic callback replay is keyed by
+canonical, type-sensitive RPC identity: repeated numeric IDs refuse, while a
+provider call ID reused by a later independently admitted original call can
+proceed. The durable source owner still claims each original call once.
+
+Nested completed tool arguments and buffered/streamed provider frames use the
+shared strict parser at translation boundaries. The buffered Responses SSE
+fallback cannot hide bytes behind a NUL. Buffered JSON HTTP POST now rejects
+embedded NUL using the actual received length before returning a C string;
+fixed-length and chunked socket regressions also verify that exact-length binary
+streaming remains intact and the send guard is released before response reads.
+Outbound immutable request bytes retain their existing contract.
+
+The focused SDK fixture covers 18 cases for each primary/delegate entry, including
+RPC numeric/string identity, distinct original calls with reused provider IDs,
+and malformed frames rejected before callback dispatch. Both real Codex pins
+(0.160.1 and 0.153.4) pass ordinary, bounded-catalog and typed-host-tool replay
+qualification. These are local protocol qualifications, not production factory or
+credential-custody evidence. Six ASan/UBSan fixtures and five CMake fixtures pass;
+Cppcheck reports zero diagnostics across the eleven changed production sources.
+The normal server build and all 657 native entries pass. PostgreSQL integration
+passes 167/167 (26 service-dependent checks unavailable locally); all 76 lint
+gates pass. The previously published `2d49add9b` also completed every CI job.
+Native SDK activation, cache lifecycle ownership and live Claude custody remain
+unfinished; do not substitute these protocol results for that work.

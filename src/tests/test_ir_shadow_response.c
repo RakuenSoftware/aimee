@@ -8,6 +8,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void refuse_frame(const char *frame, size_t length, aimee_wire_t wire)
+{
+   aimee_response_t refused = {0};
+   char error[256] = "";
+   int rc = aimee_backend_parse_wire(frame, length, wire, &refused, error, sizeof error);
+   assert(rc == -1 && !refused.content && !refused.model && !refused.n_content && error[0]);
+   aimee_response_free(&refused);
+}
+
 static void roundtrip(aimee_wire_t wire, aimee_stop_reason_t stop)
 {
    aimee_response_t expected = {.stop_reason = stop,
@@ -63,6 +72,43 @@ static void roundtrip(aimee_wire_t wire, aimee_stop_reason_t stop)
       free(arguments);
    }
    aimee_response_free(&actual);
+   const char *model_at = strstr(frame, "native-model");
+   assert(model_at);
+   const char *escaped_nul = "before\\u0000after";
+   size_t prefix = (size_t)(model_at - frame), suffix = strlen(model_at + strlen("native-model"));
+   size_t malformed_length = prefix + strlen(escaped_nul) + suffix;
+   char *malformed = malloc(malformed_length + 1);
+   assert(malformed);
+   memcpy(malformed, frame, prefix);
+   memcpy(malformed + prefix, escaped_nul, strlen(escaped_nul));
+   memcpy(malformed + prefix + strlen(escaped_nul), model_at + strlen("native-model"), suffix + 1);
+   refuse_frame(malformed, malformed_length, wire);
+   free(malformed);
+   if (wire == AIMEE_WIRE_RESPONSES && stop == AIMEE_STOP_TOOL_USE)
+   {
+      cJSON *completed = cJSON_CreateObject();
+      assert(completed);
+      cJSON_AddStringToObject(completed, "type", "response.completed");
+      cJSON_AddItemToObject(completed, "response", cJSON_Duplicate(native, 1));
+      char *payload = cJSON_PrintUnformatted(completed);
+      cJSON_Delete(completed);
+      assert(payload);
+      size_t capacity = strlen(payload) + 64;
+      char *sse = malloc(capacity);
+      assert(sse);
+      int bytes = snprintf(sse, capacity, "event: response.completed\ndata: %s\n\n", payload);
+      free(payload);
+      assert(bytes > 0 && (size_t)bytes + 3 < capacity);
+      assert(!aimee_backend_parse_wire(sse, (size_t)bytes, wire, &actual, error, sizeof error));
+      assert(actual.n_content == expected.n_content);
+      aimee_response_free(&actual);
+      sse[bytes] = 0;
+      sse[bytes + 1] = '{';
+      sse[bytes + 2] = '}';
+      /* A valid SSE prefix must not launder an invalid full byte response. */
+      refuse_frame(sse, (size_t)bytes + 3, wire);
+      free(sse);
+   }
    aimee_response_free(&expected);
    cJSON_Delete(native);
    free(frame);

@@ -199,7 +199,9 @@ static void test_tool_free_admission_and_text_entry(void)
    assert(native && strstr(native, "raw prompt") && strstr(native, "stop_sequences"));
    free(native);
    aimee_request_free(&request);
-   const char *invalid[] = {"{\"prompt\":\"x\"} trailing",
+   const char *invalid[] = {"{\"prompt\":\"before\\u0000after\"}",
+                            "{\"prompt\":\"first\",\"prompt\":\"second\"}",
+                            "{\"prompt\":\"x\"} trailing",
                             "{\"prompt\":[]}",
                             "{\"prompt\":\"x\",\"max_tokens\":1.5}",
                             "{\"prompt\":\"x\",\"temperature\":3}",

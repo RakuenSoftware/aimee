@@ -485,12 +485,8 @@ int aimee_anthropic_replay_prepare(const void *frame, size_t length,
    memset(state, 0, sizeof *state);
    if (!bytes || !length || length == SIZE_MAX)
       return -1;
-   const char *end = NULL;
-   cJSON *native = bytes ? cJSON_ParseWithLengthOpts(bytes, length, &end, 0) : NULL;
-   if (end)
-      while (end < bytes + length && (*end == ' ' || *end == '\r' || *end == '\n' || *end == '\t'))
-         end++;
-   int rc = native && end == bytes + length ? binding_walk(native, NULL, state, 0, NULL, NULL) : -1;
+   cJSON *native = aimee_ir_json_parse_frame(bytes, length);
+   int rc = native ? binding_walk(native, NULL, state, 0, NULL, NULL) : -1;
    cJSON_Delete(native);
    return rc;
 }

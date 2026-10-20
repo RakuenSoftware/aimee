@@ -1018,7 +1018,7 @@ static void test_dynamic_tool_boundaries(void)
 typedef struct
 {
    int variant;
-   int calls;
+   int calls, dispatches;
 } dynamic_host_fixture_t;
 static int dynamic_host_fixture(const aimee_block_t *call, aimee_block_t *result, void *context)
 {
@@ -1029,8 +1029,9 @@ static int dynamic_host_fixture(const aimee_block_t *call, aimee_block_t *result
    char *arguments = cJSON_PrintUnformatted(call->tool_input);
    assert(arguments && strstr(arguments, "0.123456789012345678901234567890"));
    free(arguments);
-   if (state->variant == 6)
-      return -1;
+   if (state->variant == 6 || (state->variant == 5 && state->calls > 1))
+      return -1; /* The host source owner, not the SDK call ID, refuses a repeat. */
+   state->dispatches++;
    *result = (aimee_block_t){.type = AIMEE_BLK_TOOL_RESULT,
                              .tool_id = strdup(state->variant == 7 ? "wrong-call" : call->tool_id),
                              .tool_result = cJSON_CreateString("host refused\nexact stderr"),
@@ -1065,13 +1066,26 @@ static void test_dynamic_host_execution(void)
          "call=call.replace('\"thread-owned\"','\"other-thread\"')\n  if mode==4: "
          "call=call.replace('\"turn-owned\"','\"other-turn\"')\n  if mode==8: "
          "call=call.replace('\"tool\":\"exec_command\"','\"tool\":\"exec_command\",\"tool\":\"exec_"
-         "command\"')\n  print(call,flush=True)\n  reply=json.loads(sys.stdin.readline())\n  if "
-         "mode==5:\n   assert reply['result']['success'] is False\n   "
-         "print(call.replace('700','701'),flush=True)\n   reply=json.loads(sys.stdin.readline())\n "
-         " with open(os.environ['AIMEE_TEST_DYNAMIC_REPLY'],'w') as log: "
-         "log.write(json.dumps(reply))\n  if mode==0:\n   assert "
+         "command\"')\n  if mode==13: call+='\\x00{}'.encode().decode('unicode_escape')\n  if "
+         "mode==14: call=call.replace('\"aimee\"','\"aimee\\u0000forged\"')\n  if mode==15: "
+         "call+=' {}'\n  if mode==17: call=call.replace('\"id\":700','\"id\":700,\"id\":701')\n  "
+         "if mode in (8,13,14,15,16,17):\n   with open(os.environ['AIMEE_TEST_DYNAMIC_REPLY'],'w') "
+         "as log: log.write('invalid-frame')\n   raw=call.encode()\n   if mode==16: "
+         "raw=raw.replace(b'aimee',b'aimee\\xff'.decode('unicode_escape').encode('latin1'))\n   "
+         "sys.stdout.buffer.write(raw+b'\\n'.decode('unicode_escape').encode()); "
+         "sys.stdout.buffer.flush()\n   sys.stdin.readline()\n   break\n  print(call,flush=True)\n "
+         " reply=json.loads(sys.stdin.readline())\n  if mode in (5,9,10,11,12):\n   assert "
+         "reply['result']['success'] is False\n   if mode in (5,9): "
+         "second=call.replace('\"id\":700','\"id\":701')\n   elif mode==12: "
+         "second=call.replace('\"id\":700','\"id\":\"700\"')\n   else: "
+         "second=call.replace('\"call:original\"','\"different-call\"')\n   if mode==11: "
+         "second=second.replace('\"id\":700','\"id\":7e2')\n   print(second,flush=True)\n   "
+         "reply=json.loads(sys.stdin.readline())\n   if mode==12: assert reply['id']=='700'\n   "
+         "elif mode in (5,9): assert reply['id']==701\n  with "
+         "open(os.environ['AIMEE_TEST_DYNAMIC_REPLY'],'w') as log: log.write(json.dumps(reply))\n  "
+         "if mode in (0,9,12):\n   assert "
          "reply['result']=={'contentItems':[{'type':'inputText','text':'host refused\\nexact "
-         "stderr'}],'success':False}\n   "
+         "stderr'.encode().decode('unicode_escape')}],'success':False}\n   "
          "send({'method':'item/"
          "completed','params':{'item':{'type':'agentMessage','id':'answer','text':'host "
          "complete'}}})\n   "
@@ -1098,7 +1112,7 @@ static void test_dynamic_host_execution(void)
    snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s", script);
    agent.cli_idle_timeout_ms = 5000;
    for (int provider = 0; provider < 2; provider++)
-      for (int variant = 0; variant < 9; variant++)
+      for (int variant = 0; variant < 18; variant++)
       {
          unlink(marker);
          char mode[16];
@@ -1106,6 +1120,8 @@ static void test_dynamic_host_execution(void)
          assert(!setenv("AIMEE_TEST_DYNAMIC_VARIANT", mode, 1));
          aimee_ir_session_restore_sink(NULL, NULL, 0);
          dynamic_host_fixture_t state = {.variant = variant};
+         int success = variant == 0 || variant == 9 || variant == 12;
+         int invalid_frame = variant == 8 || variant >= 13;
          int rc;
          if (provider)
          {
@@ -1117,7 +1133,9 @@ static void test_dynamic_host_execution(void)
                                       .tool_context = &state};
             agent_result_t out;
             rc = codex_provider_cli_adapter.execute(&cfg, &out);
-            if (!variant)
+            if (invalid_frame)
+               assert(strstr(out.error, "invalid-json-rpc-frame"));
+            if (success)
                assert(out.success && out.response && !strcmp(out.response, "host complete"));
             free(out.response);
          }
@@ -1132,20 +1150,32 @@ static void test_dynamic_host_execution(void)
             cli_codex_chat_result_t out;
             codex_stream_capture_t captured = {0};
             rc = cli_codex_chat_stream(&req, codex_capture_cb, &captured, &out);
-            if (!variant && rc)
+            if (invalid_frame)
+               assert(strstr(out.error, "invalid-json-rpc-frame"));
+            if (success && rc)
                fprintf(stderr, "dynamic host error: %s\n", out.error);
-            if (!variant)
+            if (success)
                assert(strstr(captured.buf, "host complete"));
          }
-         assert(variant ? rc != 0 : rc == 0);
-         assert(state.calls == (variant == 0 || variant == 5 || variant == 6 || variant == 7));
+         assert(success ? rc == 0 : rc != 0);
+         int calls_expected =
+             variant == 5 || variant == 9 || variant == 12                                    ? 2
+             : variant == 0 || variant == 6 || variant == 7 || variant == 10 || variant == 11 ? 1
+                                                                                              : 0;
+         int dispatches_expected =
+             variant == 9 || variant == 12                                                    ? 2
+             : variant == 0 || variant == 5 || variant == 7 || variant == 10 || variant == 11 ? 1
+                                                                                              : 0;
+         assert(state.calls == calls_expected && state.dispatches == dispatches_expected);
          file = fopen(marker, "r");
          assert(file);
          char reply[4096] = {0};
          assert(fread(reply, 1, sizeof reply - 1, file) && !ferror(file));
          fclose(file);
-         if (!variant)
+         if (success)
             assert(strstr(reply, "host refused") && strstr(reply, "false"));
+         else if (invalid_frame)
+            assert(!strcmp(reply, "invalid-frame") && !state.calls && !state.dispatches);
          else
             assert(strstr(reply, "error") && strstr(reply, "-32602"));
       }

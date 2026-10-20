@@ -242,7 +242,7 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
              * name is bare in that case and only the pair identifies the tool. */
             b->tool_namespace = dupstr(ostr(item, "namespace"));
             const char *args = ostr(item, "arguments");
-            b->tool_input = args ? cJSON_ParseWithOpts(args, NULL, 1) : NULL;
+            b->tool_input = args ? aimee_ir_json_parse_frame(args, strlen(args)) : NULL;
             if (!cJSON_IsObject(b->tool_input))
             {
                if (err && errn)

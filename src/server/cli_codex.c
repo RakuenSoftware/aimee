@@ -51,6 +51,7 @@ typedef enum
    CLI_CODEX_READ_READ_ERR,
    CLI_CODEX_READ_LINE_TOO_LARGE,
    CLI_CODEX_READ_OOM,
+   CLI_CODEX_READ_FRAME_ERR,
 } cli_codex_read_status_t;
 
 typedef struct
@@ -623,25 +624,41 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
       char *nl = c->buf ? memchr(c->buf, '\n', c->buf_len) : NULL;
       if (nl)
       {
-         *nl = '\0';
-         /* Stash the line bounds; shift buffer afterwards. */
+         size_t length = (size_t)(nl - c->buf);
+         /* Admit the exact byte frame before any C-string operation can hide
+          * an embedded NUL, a duplicate field or trailing JSON. */
+         cJSON *frame = aimee_ir_json_parse_frame(c->buf, length);
+         if (!cJSON_IsObject(frame))
+         {
+            cJSON_Delete(frame);
+            c->dynamic_failed = 1;
+            aimee_ir_session_fail_capture();
+            if (status)
+               *status = CLI_CODEX_READ_FRAME_ERR;
+            return NULL;
+         }
+         char *line_dup = malloc(length + 1);
+         if (!line_dup)
+         {
+            cJSON_Delete(frame);
+            if (status)
+               *status = CLI_CODEX_READ_OOM;
+            return NULL;
+         }
+         memcpy(line_dup, c->buf, length);
+         line_dup[length] = 0;
          free(c->line);
-         c->line = strdup(c->buf);
-         char *line_dup = c->line;
-         size_t consumed = (size_t)(nl - c->buf) + 1;
+         c->line = line_dup;
+         size_t consumed = length + 1;
          memmove(c->buf, c->buf + consumed, c->buf_len - consumed);
          c->buf_len -= consumed;
-         if (line_dup && aimee_ir_session_get_sink(NULL))
+         int rc = aimee_ir_session_get_sink(NULL) ? aimee_codex_frame_ir(frame, &c->ir) : 0;
+         cJSON_Delete(frame);
+         if (rc)
          {
-            cJSON *frame = cJSON_Parse(line_dup);
-            int rc = aimee_codex_frame_ir(frame, &c->ir);
-            cJSON_Delete(frame);
-            if (rc != 0)
-            {
-               if (status)
-                  *status = CLI_CODEX_READ_READ_ERR;
-               return NULL;
-            }
+            if (status)
+               *status = CLI_CODEX_READ_READ_ERR;
+            return NULL;
          }
          return line_dup;
       }
@@ -775,6 +792,8 @@ static const char *cli_codex_read_status_str(cli_codex_read_status_t s)
       return "line-too-large";
    case CLI_CODEX_READ_OOM:
       return "out-of-memory";
+   case CLI_CODEX_READ_FRAME_ERR:
+      return "invalid-json-rpc-frame";
    }
    return "unknown";
 }
@@ -1408,9 +1427,16 @@ static int codex_handle_dynamic_call(cli_codex_t *c, const cJSON *frame, cJSON *
                !strcmp(thread, c->dynamic_thread) && !strcmp(turn, c->dynamic_turn) &&
                aimee_ir_json_unique(frame) && (cJSON_IsString(rpcid) || cJSON_IsNumber(rpcid)) &&
                !cli_codex_dynamic_call(params, c->tool_catalog, &call);
+   /* Provider call IDs can repeat in later model responses. Only a repeated
+    * JSON-RPC request is a transport replay; original-source claims belong to
+    * the host callback. Keep string and numeric RPC identities distinct. */
+   cJSON *identity = valid ? aimee_ir_json_canonical_copy(rpcid) : NULL;
+   char *key = identity ? cJSON_PrintUnformatted(identity) : NULL;
+   cJSON_Delete(identity);
    if (valid)
-      valid = !cJSON_GetObjectItemCaseSensitive(c->dynamic_seen, call.tool_id) &&
-              cJSON_AddTrueToObject(c->dynamic_seen, call.tool_id);
+      valid = key && !cJSON_GetObjectItemCaseSensitive(c->dynamic_seen, key) &&
+              cJSON_AddTrueToObject(c->dynamic_seen, key);
+   free(key);
    if (valid)
       valid = !c->tool_call(&call, &result, c->tool_context) && result.tool_id &&
               !strcmp(result.tool_id, call.tool_id) && (reply = cli_codex_dynamic_result(&result));

@@ -559,8 +559,8 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
                const cJSON *fn = cJSON_GetObjectItemCaseSensitive((cJSON *)call, "function");
                b->tool_name = dupstr(fn ? ostr(fn, "name") : NULL);
                const char *args = fn ? ostr(fn, "arguments") : NULL;
-               b->tool_input =
-                   args ? cJSON_ParseWithOpts(args, NULL, 1) : NULL; /* derived-once parse */
+               b->tool_input = args ? aimee_ir_json_parse_frame(args, strlen(args))
+                                    : NULL; /* derived-once parse */
                if (!cJSON_IsObject(b->tool_input))
                {
                   if (err && errn)
@@ -654,13 +654,8 @@ int aimee_frontend_parse_text_completion(const char *body, size_t length, aimee_
    if (!out)
       return -1;
    memset(out, 0, sizeof *out);
-   const char *end = NULL;
-   cJSON *root = body && length && length != SIZE_MAX
-                     ? cJSON_ParseWithLengthOpts(body, length, &end, 0)
-                     : NULL;
-   if (root && end)
-      while (end < body + length && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n'))
-         end++;
+   cJSON *root =
+       body && length && length != SIZE_MAX ? aimee_ir_json_parse_frame(body, length) : NULL;
    const char *prompt = ostr(root, "prompt");
    const cJSON *model = cJSON_GetObjectItemCaseSensitive(root, "model");
    const cJSON *stream = cJSON_GetObjectItemCaseSensitive(root, "stream");
@@ -681,8 +676,8 @@ int aimee_frontend_parse_text_completion(const char *body, size_t length, aimee_
       top_p = NULL;
    if (cJSON_IsNull(top_k))
       top_k = NULL;
-   if (!cJSON_IsObject(root) || end != body + length || !prompt || !prompt[0] ||
-       (model && !cJSON_IsString(model)) || (stream && !cJSON_IsBool(stream)) ||
+   if (!cJSON_IsObject(root) || !prompt || !prompt[0] || (model && !cJSON_IsString(model)) ||
+       (stream && !cJSON_IsBool(stream)) ||
        (maximum &&
         (!cJSON_IsNumber(maximum) || !isfinite(maximum->valuedouble) || maximum->valuedouble < 1 ||
          maximum->valuedouble > INT_MAX || maximum->valuedouble != floor(maximum->valuedouble))) ||

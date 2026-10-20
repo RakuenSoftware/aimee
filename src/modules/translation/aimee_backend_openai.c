@@ -717,8 +717,7 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
             const cJSON *fn = cJSON_GetObjectItemCaseSensitive((cJSON *)c, "function");
             b->tool_name = dupstr(fn ? ostr(fn, "name") : NULL);
             const char *args = fn ? ostr(fn, "arguments") : NULL;
-            const char *end = NULL;
-            b->tool_input = args ? cJSON_ParseWithOpts(args, &end, 1) : NULL;
+            b->tool_input = args ? aimee_ir_json_parse_frame(args, strlen(args)) : NULL;
             if (!cJSON_IsObject(b->tool_input))
             {
                aimee_response_free(out);

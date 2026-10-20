@@ -1614,7 +1614,8 @@ int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
       {
          if (builder->storage[index].arguments && *builder->storage[index].arguments)
          {
-            cJSON *input = cJSON_ParseWithOpts(builder->storage[index].arguments, NULL, 1);
+            cJSON *input = aimee_ir_json_parse_frame(builder->storage[index].arguments,
+                                                     strlen(builder->storage[index].arguments));
             if (!cJSON_IsObject(input))
             {
                cJSON_Delete(input);

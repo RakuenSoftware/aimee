@@ -806,10 +806,13 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
    if (len >= 5 && strncmp(line, "data:", 5) == 0)
    {
       const char *p = line + 5;
-      while (*p == ' ')
+      while (p < line + len && *p == ' ')
          p++;
+      size_t data_length = (size_t)(line + len - p);
+      if (!data_length)
+         return 0;
       {
-         if (strcmp(p, "[DONE]") == 0)
+         if (data_length == 6 && !memcmp(p, "[DONE]", 6))
          {
             aimee_delta_t terminal;
             int n = openai_stream_finish(&c->ir_ost, &terminal, 1);
@@ -831,7 +834,13 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
             }
             return 0;
          }
-         cJSON *chunk = cJSON_Parse(p);
+         cJSON *chunk = aimee_ir_json_parse_frame(p, data_length);
+         if (!chunk)
+         {
+            c->ir_failed = 1;
+            aimee_ir_session_fail_capture();
+            return -1;
+         }
          if (chunk)
          {
             /* A finish chunk closes EVERY open block (reasoning + text + up to
@@ -915,17 +924,11 @@ static int native_ir_flush(native_ir_stream_ctx_t *c)
       c->event[0] = 0;
       return 0;
    }
-   const char *end = NULL;
-   cJSON *payload = cJSON_ParseWithLengthOpts(c->data, c->data_len, &end, 0);
-   if (end)
-      while (end < c->data + c->data_len &&
-             (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n'))
-         end++;
+   cJSON *payload = aimee_ir_json_parse_frame(c->data, c->data_len);
    const char *type = jo_cstr(payload, "type");
    const char *event = c->event[0] ? c->event : type;
    aimee_delta_t delta;
-   int n = payload && aimee_ir_json_unique(payload) && end == c->data + c->data_len &&
-                   (!type[0] || !strcmp(type, event))
+   int n = payload && (!type[0] || !strcmp(type, event))
                ? anthropic_stream_to_deltas(event, payload, &c->backend, &delta, 1)
                : -1;
    if (gw_stream_anthropic_error_is_invalid_request(c->data))
