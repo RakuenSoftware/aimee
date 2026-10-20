@@ -4015,3 +4015,13 @@ local grading/reuse, broader platforms/live subscription and reviewed production
 promotion remain unfinished. Recovered queued work without its original held
 capability fails closed; this is not qualification of restart/resume. Production
 remains KB-free and unpromoted.
+
+## Minimal template fixture sanitizer linkage: 20 October 2026
+
+Published d6f350086 fails native unit shard 1/4 during the sanitizer link of
+delegate-role: role_templates now requires platform_path_is_beneath, but this
+minimal fixture did not link the platform path object. Both minimal consumers,
+delegate-role and cmd-delegate, now declare that dependency using the existing
+platform-selected object list. Both rebuilt fixtures pass ASan/UBSan. The
+containment check and sanitizer gate remain intact. Pending Git MCP source work
+is stashed separately while this CI repair is published.
