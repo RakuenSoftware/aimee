@@ -1397,7 +1397,8 @@ static int pre_tool_check_impl(const char *tool_name, const char *input_json,
        * worktree. This handles "cd /path/.aimee-foo-sid/src && make" where cwd
        * is the real repo but the command operates inside the worktree. */
       int cmd_targets_worktree = command_targets_worktree;
-      int target_is_worktree = is_aimee_worktree_path(target) || git_dir_is_linked_worktree(target);
+      int target_is_worktree =
+          is_aimee_worktree_path(target) || git_dir_is_linked_worktree(target_dir);
       int cwd_is_aimee_worktree = is_aimee_worktree_path(effective_cwd);
       /* Whether the *current directory* is itself a worktree. This gates shell
        * redirection only: relative shell paths resolve against the cwd, so a
@@ -1476,7 +1477,16 @@ static int pre_tool_check_impl(const char *tool_name, const char *input_json,
                size_t gr_len = strlen(git_root_buf);
                char rewritten[MAX_PATH_LEN];
                if (fp && cJSON_IsString(fp))
+               {
+                  if (strncmp(target, git_root_buf, gr_len) ||
+                      (target[gr_len] && target[gr_len] != '/'))
+                  {
+                     snprintf(msg_buf, msg_len, "path is outside the resolved repository root");
+                     cJSON_Delete(root);
+                     return 2;
+                  }
                   snprintf(rewritten, sizeof(rewritten), "%s%s", wt_path, target + gr_len);
+               }
                else
                   snprintf(rewritten, sizeof(rewritten), "%s", wt_path);
                LOG_INFO("guardrails", "worktree rewrite: %s -> %s", target, rewritten);

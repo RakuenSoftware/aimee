@@ -62,7 +62,8 @@ const char *workspace_turn_git_target(const char *tool, const char *path, const 
  * needs a live container handle, so the caller that owns the delegate decides. */
 /* Is `workspace` a tree aimee may hand a delegate? Canonicalizes into `out` (which
  * is what the caller must then mount — the check and the mount must be the same
- * path) and returns 1 if it lives inside a REGISTERED workspace root. Refusals are
+ * path) and returns 1 for a REGISTERED root or the exact actively held mirror
+ * reconstruction of one. Refusals are
  * logged. Repository-ness is not authorization; the registered roots are the bound.
  * Exposed so every path that can hand a workspace to the backend shares ONE bound —
  * a second copy is a second thing to forget. */

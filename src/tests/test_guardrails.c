@@ -2074,6 +2074,35 @@ static void test_shell_in_main_checkout_forced_to_worktree(void)
    system(cmd);
 }
 
+static void test_read_file_in_arbitrary_linked_worktree(void)
+{
+   char root[256], command[2048], checkout[512], input[1024], message[1024] = {0};
+   snprintf(root, sizeof root, "%s/aimee-linked-read-XXXXXX", platform_tmpdir());
+   char *created = mkdtemp(root);
+   assert(created);
+   snprintf(checkout, sizeof checkout, "%s/checkout", root);
+   snprintf(command, sizeof command,
+            "git init -q '%s/source' && git -C '%s/source' config user.email t@t && "
+            "git -C '%s/source' config user.name t && echo x > '%s/source/f' && "
+            "git -C '%s/source' add f && git -C '%s/source' commit -q -m fixture && "
+            "git clone -q --bare '%s/source' '%s/mirror' && "
+            "git --git-dir='%s/mirror' worktree add -q '%s' HEAD",
+            root, root, root, root, root, root, root, root, root, checkout);
+   int rc = system(command);
+   assert(!rc);
+   guardrails_open_test_sqlite();
+   session_state_t state = {0};
+   strcpy(state.session_mode, MODE_IMPLEMENT);
+   strcpy(state.guardrail_mode, MODE_APPROVE);
+   snprintf(input, sizeof input, "{\"file_path\":\"%s/f\"}", checkout);
+   rc = pre_tool_check("Read", input, &state, MODE_APPROVE, checkout, message, sizeof message);
+   assert(!rc);
+   guardrails_close_test_sqlite();
+   snprintf(command, sizeof command, "rm -rf '%s'", root);
+   rc = system(command);
+   assert(!rc);
+}
+
 static void test_path_tool_redirect_is_cwd_independent(void)
 {
    /* Regression: a path tool carries an absolute, cwd-independent target, so its
@@ -4049,6 +4078,7 @@ int main(void)
    test_external_default_checkout_blocks_writes();
    test_non_git_work_and_worktree_opt_out();
    test_shell_in_main_checkout_forced_to_worktree();
+   test_read_file_in_arbitrary_linked_worktree();
    test_path_tool_redirect_is_cwd_independent();
    test_git_commands_allowed_by_default();
    test_c_source_has_bare_string_newline();

@@ -41,6 +41,8 @@ def api(path, body=None, expected=200):
 def main():
     home = Path(os.environ["AIMEE_HOME"])
     workspace = Path(os.environ["AIMEE_IR_DELEGATE_WORKSPACE"])
+    from test_native_ir_browser_control import prepare_browser_workspace
+    workspace = prepare_browser_workspace(api, home, workspace)
     binaries = {kind: str(Path(os.environ["AIMEE_TEST_NATIVE_" + kind.upper()]).resolve(strict=True))
                 for kind in ("codex", "claude")}
     for kind, executable in binaries.items():
@@ -107,7 +109,7 @@ def main():
                 names = {tool.get("name", tool.get("function", {}).get("name")) for tool in tools}
                 assert logical in names, (logical, names)
                 if count > 1:
-                    assert call_id in encoded and ("BROWSER_REPLY" if browser_question else "canonical delegate fixture") in encoded, encoded[-4000:]
+                    assert call_id in encoded and ("BROWSER_REPLY" if browser_question else "canonical delegate fixture") in encoded, json.dumps(request.get("input", request.get("messages", [])), ensure_ascii=False)[-4000:]
                 if count == 3:
                     assert marker + "_FOLLOWUP" in encoded
                 text = marker + ("_FINAL" if count == 2 else "_RESUMED")

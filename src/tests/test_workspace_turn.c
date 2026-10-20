@@ -131,6 +131,10 @@ static void register_standard_workspaces(void)
 
 int main(void)
 {
+   /* A failed owner acquisition is never a truthy authorization, even locally. */
+   int rejected = workspace_turn_reject_foreign_cwd(-1, 1, "/tmp/owner-acquisition-failed");
+   assert(rejected);
+
    /* Isolated temp HOME for the module caller's process-level helpers. */
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-wsturn-XXXXXX", platform_tmpdir());

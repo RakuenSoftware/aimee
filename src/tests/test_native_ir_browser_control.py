@@ -35,6 +35,19 @@ connection.close()
 '''
 
 
+def prepare_browser_workspace(api, home, source):
+    """Register an explicit mirror, preserving the browser foreign-path guard."""
+    client = Path(home).parent / "native-browser-client"
+    subprocess.run(["git", "clone", "--quiet", "--shared", str(source), str(client)], check=True)
+    head = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+    registered = api("/v1/workspaces", {"root": str(client), "provider": "mirror",
+                                       "remote": str(source), "head": head})
+    assert registered.get("status") == "ok", registered
+    # The mirror must use the approved committed source, not open this foreign cwd.
+    (client / "README.md").write_text("CLIENT_CWD_MUST_NOT_BE_READ\n")
+    return client
+
+
 def run_browser_control(api, home, workspace, marker):
     """Deliver a question on the live browser stream, then reply as its operator."""
     prefix = [] if os.geteuid() == 0 else ["sudo", "-n"]
@@ -74,6 +87,7 @@ def run_browser_control(api, home, workspace, marker):
         if not line.strip():
             return
         record = json.loads(line)
+        assert "event" in record, ("noncanonical browser stream frame", record)
         stream_records.append(record)
         if record["event"]["kind"] == "control_request":
             events.put(record["event"])

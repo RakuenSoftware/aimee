@@ -3701,3 +3701,39 @@ concurrency policy. No workflow gate, automatic review, attribution rule or
 production configuration is changed. Registered PR commands expose check/failure
 reads but no workflow cancellation. Personal gh is not authenticated and no
 browser is available; no connector mutation or new login was attempted.
+
+
+## Native browser mirror qualification repair: 20 October 2026
+
+CI run 39368971570 passed all sixteen API/OAuth native journeys and real Docker
+delegate learning/readback, then failed the new browser fixture on a noncanonical
+early frame. The fixture had supplied an unregistered raw browser workspace. Its
+stream diagnostics now retain the full rejected frame and it registers a mirror
+through the ordinary workspace owner. The client clone is deliberately dirtied;
+all model read effects must still see the approved committed mirror content.
+
+This exposed two production defects. Native workspace identity rejected the
+owner's reconstructed directory because its path differs from the client root.
+The owner now holds the exact directory inode through the turn, authorizes only
+that active reconstruction, rejects replaced paths and escaping repository
+symlinks, and duplicates that descriptor for native identity. Failed acquisitions
+never count as a truthy grant. Mirror binding also selects the shared filesystem
+provider explicitly, preserving enclosing scope restoration. No general allowance
+for paths under the mirror directory is added.
+
+The file guard had passed a file path to git's directory worktree probe, then
+used a different bare-repository prefix length to rewrite the path. It now probes
+the target directory and verifies the repository prefix before rewriting. The
+ordinary-checkout redirect remains covered, alongside the new arbitrary linked
+worktree read regression.
+
+Workspace/guardrail suites and both ASan/UBSan fixtures pass; Cppcheck has no new
+diagnostics. Sixteen actual native API/OAuth browser/seeded journeys pass through
+the explicit mirror with the dirty-client fallback detector. All 76 lint checks
+pass across the complete run and the final ownership-pin review rerun. Reversing
+just the guardrail path edits reproduces its previous pinned source exactly; the
+memory adapter is unchanged. Fresh CI must still qualify the root operator
+question journeys. Continue with owned mirror-lease capture/restore on retained
+native callback threads and native mirror delegation; the read/question fixtures
+do not establish that broader callback/delegate qualification. Independent local
+grading/reuse and production review/promotion remain unfinished and KB-free.

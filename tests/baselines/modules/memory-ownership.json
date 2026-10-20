@@ -1952,7 +1952,8 @@
       "symbols": [
         "kb_client_memory_check_drift"
       ],
-      "sha256": "c832adf84ba6074a8669a501b7066e0a1b7d0611d57484aabdc66f3de6656baf"
+      "sha256": "3ada731999bf07db57b4a3067f6c539b784ab5408c13935e33500af2a04fb339",
+      "boundary_review": "2026-10-20 PR #3052: reviewed only linked-worktree directory detection and checked path-prefix rewriting. Reversing these two changes exactly reproduces the previously pinned source. The memory drift adapter, its inputs and Go-owned policy remain unchanged."
     },
     "src/modules/kb_client/kb_client.h": {
       "disposition": "kb-client",

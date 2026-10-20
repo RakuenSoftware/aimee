@@ -34,6 +34,7 @@ extern char **environ;
  * duration (the active-provider pointer aliases &t_turn_detached.base). */
 static __thread ws_detached_provider_t t_turn_detached;
 static __thread int t_turn_bound;
+static __thread int t_turn_mirror_fd = -1;
 static __thread char t_turn_detached_epoch[65], t_turn_container_epoch[65];
 /* Same, for a delegate turn bound to its own container. Held separately from
  * t_turn_detached because this one owns a CONTAINER: unbinding has to release it,
@@ -53,6 +54,7 @@ struct workspace_turn_scope
 {
    ws_detached_provider_t detached;
    int bound;
+   int mirror_fd;
    char epoch[65];
    char cwd[MAX_PATH_LEN], drift[256];
    const workspace_provider_t *previous_provider;
@@ -312,6 +314,19 @@ static int mirror_reconstruct_cwd(const char *cwd, const char *root, const char 
       out[0] = '\0';
       return 0;
    }
+   /* A repository symlink cannot turn a client suffix into host authority. */
+   char root_real[MAX_PATH_LEN], cwd_real[MAX_PATH_LEN];
+   if (!realpath(work_dir, root_real) || !realpath(out, cwd_real) ||
+       !cwd_in_workspace(cwd_real, root_real))
+   {
+      out[0] = 0;
+      return 0;
+   }
+   if (snprintf(out, out_cap, "%s", cwd_real) >= (int)out_cap)
+   {
+      out[0] = 0;
+      return 0;
+   }
    return 1;
 }
 
@@ -409,9 +424,10 @@ int workspace_turn_resolve_detached_mirror_cwd(const char *cwd, char *out, size_
 }
 
 static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, int *bound,
-                            char resolved[MAX_PATH_LEN], char drift[256])
+                            int *mirror_fd, char resolved[MAX_PATH_LEN], char drift[256])
 {
    *bound = 0;
+   *mirror_fd = -1;
    resolved[0] = '\0';
    drift[0] = '\0';
    if (!cwd || !cwd[0])
@@ -453,6 +469,15 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, i
          snprintf(remote, sizeof(remote), "%s", config_workspace_vcs_remote(i));
          snprintf(head, sizeof(head), "%s", config_workspace_vcs_head(i));
          *bound = bind_mirror(cwd, root, remote, head, resolved, drift);
+         if (*bound &&
+             (*mirror_fd = open(resolved, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)) < 0)
+         {
+            *bound = 0;
+            resolved[0] = 0;
+            return -1;
+         }
+         if (*bound)
+            workspace_provider_set_active(workspace_provider_shared());
          return *bound;
       }
       return 0; /* matched, but shared (or no queue) — stay on shared */
@@ -462,7 +487,10 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, i
 
 int workspace_turn_bind_active(const char *cwd)
 {
-   int result = bind_active_into(cwd, &t_turn_detached, &t_turn_bound, t_turn_cwd, t_turn_drift);
+   if (t_turn_mirror_fd >= 0)
+      close(t_turn_mirror_fd);
+   int result = bind_active_into(cwd, &t_turn_detached, &t_turn_bound, &t_turn_mirror_fd,
+                                 t_turn_cwd, t_turn_drift);
    t_turn_detached_epoch[0] = 0;
    if (result > 0 && workspace_provider_active() == &t_turn_detached.base &&
        platform_random_hex(t_turn_detached_epoch, 64))
@@ -485,7 +513,8 @@ int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out)
       return -1;
    scope->previous_provider = workspace_provider_active();
    scope->previous = t_nested_scope;
-   int result = bind_active_into(cwd, &scope->detached, &scope->bound, scope->cwd, scope->drift);
+   int result = bind_active_into(cwd, &scope->detached, &scope->bound, &scope->mirror_fd,
+                                 scope->cwd, scope->drift);
    if (result > 0 && workspace_provider_active() == &scope->detached.base &&
        platform_random_hex(scope->epoch, 64))
    {
@@ -505,6 +534,8 @@ int workspace_turn_scope_end(workspace_turn_scope_t *scope)
       return -1;
    workspace_provider_set_active(scope->previous_provider);
    t_nested_scope = scope->previous;
+   if (scope->mirror_fd >= 0)
+      close(scope->mirror_fd);
    free(scope);
    return 0;
 }
@@ -514,6 +545,24 @@ const char *workspace_turn_git_target(const char *tool, const char *path, const 
    if ((!tool || strcmp(tool, "git_clone") != 0) && path && path[0])
       return path;
    return (cwd && cwd[0]) ? cwd : NULL;
+}
+
+/* Only the actively reconstructed directory is a mirror lease. A held inode
+ * prevents a replaced path/symlink from becoming a new filesystem grant. */
+static int mirror_lease_matches(const char *real, const char *path, int fd)
+{
+   char bound[MAX_PATH_LEN];
+   struct stat held, current;
+   return fd >= 0 && path[0] && realpath(path, bound) && strcmp(bound, "/") &&
+          !strcmp(real, bound) && !fstat(fd, &held) && !stat(bound, &current) &&
+          S_ISDIR(held.st_mode) && held.st_dev == current.st_dev && held.st_ino == current.st_ino;
+}
+static int active_mirror_lease(const char *real)
+{
+   for (workspace_turn_scope_t *scope = t_nested_scope; scope; scope = scope->previous)
+      if (mirror_lease_matches(real, scope->cwd, scope->mirror_fd))
+         return scope->mirror_fd;
+   return mirror_lease_matches(real, t_turn_cwd, t_turn_mirror_fd) ? t_turn_mirror_fd : -1;
 }
 
 /* Is `workspace` a tree aimee may hand a delegate? Canonicalizes into `out` and
@@ -540,6 +589,11 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
       LOG_ERROR("delegate-sandbox", "workspace '%s' does not resolve (%s)", workspace,
                 strerror(errno));
       return 0;
+   }
+   if (active_mirror_lease(real) >= 0)
+   {
+      snprintf(out, out_cap, "%s", real);
+      return 1;
    }
    /* Aimee's OWN managed worktrees — a WFE per-slice tree under
     * $AIMEE_HOME/wfe-worktrees, or a session worktree under $AIMEE_HOME/.aimee/
@@ -723,6 +777,9 @@ void workspace_turn_unbind_active(void)
       t_turn_container_epoch[0] = 0;
    }
    t_turn_detached_epoch[0] = 0;
+   if (t_turn_mirror_fd >= 0)
+      close(t_turn_mirror_fd);
+   t_turn_mirror_fd = -1;
    t_turn_cwd[0] = '\0';
    t_turn_drift[0] = '\0';
 }
@@ -741,6 +798,8 @@ const char *workspace_turn_drift_notice(void)
 
 int workspace_turn_reject_foreign_cwd(int detached_bound, int trusted_local, const char *cwd)
 {
+   if (detached_bound < 0)
+      return 1;
    /* No cwd, or not an absolute path → the turn runs in the server's own process
     * cwd; there is no foreign path to open, so nothing to reject. */
    if (!cwd || cwd[0] != '/')
@@ -794,9 +853,14 @@ int workspace_turn_resource_identity(const char *cwd, int *directory_fd, char di
    else if (provider->kind == WS_PROVIDER_SHARED || provider->kind == WS_PROVIDER_MIRROR)
    {
       char actual[MAX_PATH_LEN];
-      if (!workspace_turn_workspace_authorized(cwd, actual, sizeof actual) ||
-          (fd = open(actual, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)) < 0 ||
-          fstat(fd, &status))
+      int mirror = -1;
+      if (realpath(cwd, actual))
+         mirror = active_mirror_lease(actual);
+      if (mirror >= 0)
+         fd = fcntl(mirror, F_DUPFD_CLOEXEC, 3);
+      else if (workspace_turn_workspace_authorized(cwd, actual, sizeof actual))
+         fd = open(actual, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+      if (fd < 0 || fstat(fd, &status))
       {
          if (fd >= 0)
             close(fd);
