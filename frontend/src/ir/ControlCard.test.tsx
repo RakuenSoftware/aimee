@@ -19,7 +19,7 @@ describe('canonical browser controls', () => {
     render(<ControlCard id="t:q" control={{ ...permission, kind: 'question', request: { questions: [
       { id: 'q1', question: 'Which model?', multiple: false, options: [{ label: 'A' }, { label: 'B' }] },
     ] } }} onReply={onReply} />);
-    expect(screen.queryByRole('button', { name: 'Send answers' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Send answers' }).hasAttribute('disabled')).toBe(true);
     fireEvent.click(screen.getByRole('radio', { name: 'B' }));
     fireEvent.click(screen.getByRole('button', { name: 'Send answers' }));
     await waitFor(() => expect(onReply).toHaveBeenCalledWith('t:q', { decision: 'allow', answers: { q1: ['B'] } }));

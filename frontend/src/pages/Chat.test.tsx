@@ -55,6 +55,8 @@ async function tick(ms = 100) {
 async function start() {
   const view = render(<StrictMode><Chat /></StrictMode>);
   await act(async () => {});
+  const source = sources.filter(source => !source.closed).at(-1)!;
+  await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
   fireEvent.change(screen.getByPlaceholderText(/^Type a message/), { target: { value: 'Please investigate' } });
   fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter', shiftKey: false });
   await act(async () => {});
@@ -95,6 +97,49 @@ afterEach(() => {
 });
 
 describe('canonical browser chat', () => {
+  it('merges delayed channel history with repeated live frames and reconnect snapshots', async () => {
+    localStorage.setItem('aimee_active_channel', 'room');
+    const ordinaryFetch = fetchMock.getMockImplementation()!;
+    let resolveHistory!: (response: Response) => void;
+    const history = new Promise<Response>(resolve => { resolveHistory = resolve; });
+    fetchMock.mockImplementation((url: string) => url === '/api/channels/room/messages' ? history.then(response => response.clone()) : ordinaryFetch(url));
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const source = sources.findLast(source => !source.closed && source.url.includes('/channels/room/events'))!;
+    const second = { id: '2', sender: 'user', text: 'Live channel message' };
+    await act(async () => {
+      source.listeners.get('message')?.({ data: JSON.stringify(second) });
+      source.listeners.get('message')?.({ data: JSON.stringify(second) });
+      resolveHistory(new Response(JSON.stringify({ messages: [{ id: '1', sender: 'user', text: 'Saved channel message' }, second] })));
+    });
+    expect(screen.getAllByText('Live channel message')).toHaveLength(1);
+    expect(screen.getAllByText('Saved channel message')).toHaveLength(1);
+  });
+
+  it('waits for replay before offering controls and does not retrigger replies on duplicate delivery', async () => {
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const source = sources.filter(source => !source.closed).at(-1)!;
+    const old = envelope({ kind: 'control_request', request_id: 'old', control_kind: 'permission', payload: { title: 'Historical request' } });
+    await act(async () => { source.emit(old); });
+    await tick();
+    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull();
+    const resolved = envelope({ kind: 'control_response', request_id: 'old', control_kind: 'permission', payload: { decision: 'allow' } });
+    const current = envelope({ kind: 'control_request', request_id: 'current', control_kind: 'permission', payload: { title: 'Current request' } });
+    await act(async () => { source.emit(resolved); source.emit(current); });
+    await tick();
+    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull();
+    await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: String(sequence) }) }); });
+    const allow = screen.getByRole('button', { name: 'Allow once' });
+    fireEvent.click(allow);
+    fireEvent.click(allow);
+    await act(async () => { source.emit(current); });
+    await tick();
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/control-reply')).toHaveLength(1);
+    expect(screen.getAllByText('Current request')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Allow once' }).hasAttribute('disabled')).toBe(true);
+  });
+
   it('renders typed tool arguments and paired results', async () => {
     await start();
     await ir({ kind: 'message', message_id: 'use', payload: { role: 'assistant', blocks: [

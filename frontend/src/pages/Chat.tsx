@@ -1,4 +1,6 @@
 import { parseJSON, stringifyJSON } from '../ir/json';
+import './chat.css';
+import { mergeChannelMessages, type ChannelMessage } from './chat/channelMessages';
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import { AutoGrowTextarea, Button, Drawer, Spinner, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
@@ -75,12 +77,6 @@ interface WorkflowSessionInfo {
 
 interface ChannelInfo {
   name: string;
-  created_at?: string;
-}
-
-interface ChannelMessage {
-  sender: string;
-  text: string;
   created_at?: string;
 }
 
@@ -1129,13 +1125,13 @@ function ChannelView({ channelName, messages, agents, onSend }: ChannelViewProps
           <div style={{ color: tokens.textPale, fontSize: '13px' }}>No messages yet.</div>
         )}
         {messages.map((m, i) => (
-          <div key={i} style={{ fontSize: '13px' }}>
+          <div key={m.id ?? i} style={{ fontSize: '13px' }}>
             <span style={{ fontWeight: 600, color: tokens.primary, marginRight: '6px' }}>
               {m.sender}
             </span>
             {m.created_at && (
               <span style={{ fontSize: '11px', color: tokens.textPale, marginRight: '8px' }}>
-                {new Date(m.created_at + 'Z').toLocaleTimeString()}
+                {new Date(/(?:Z|[+-]\d\d:\d\d)$/.test(m.created_at) ? m.created_at : m.created_at + 'Z').toLocaleTimeString()}
               </span>
             )}
             <span
@@ -1311,6 +1307,7 @@ export default function Chat() {
   const irFlush = useRef<number | null>(null);
   const [, setIRRevision] = useState(0);
   const [irTransportErrors, setIRTransportErrors] = useState<Record<string, string>>({});
+  const [irReady, setIRReady] = useState<Record<string, boolean>>({});
   function ingestIR(owner: string, raw: Record<string, unknown>) {
     if (raw.status === 'error') throw new Error(String(raw.message || 'Session capture failed'));
     const envelope = raw as unknown as Envelope;
@@ -1450,11 +1447,11 @@ export default function Chat() {
   /* Channel state */
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [activeChannel, setActiveChannel] = useState<string | null>(loadActiveChannel);
+  const [channelsOpen, setChannelsOpen] = useState(() => !!loadActiveChannel());
   const [channelMsgs, setChannelMsgs] = useState<Record<string, ChannelMessage[]>>({});
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const channelSseRef = useRef<EventSource | null>(null);
   const presenceSseRef = useRef<EventSource | null>(null);
-  const activeChannelRef = useRef<string | null>(activeChannel);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1541,8 +1538,8 @@ export default function Chat() {
   // tab opens windowed, not expanded from a previous one.
   const [visibleCount, setVisibleCount] = useState(TRANSCRIPT_WINDOW);
   useEffect(() => { setVisibleCount(TRANSCRIPT_WINDOW); }, [activePersonaSid]);
-  const hiddenCount = Math.max(0, streamMsgs.length - visibleCount);
-  const windowedMsgs = hiddenCount > 0 ? streamMsgs.slice(hiddenCount) : streamMsgs;
+  const hiddenLegacyCount = Math.max(0, streamMsgs.length - visibleCount);
+  const windowedMsgs = hiddenLegacyCount > 0 ? streamMsgs.slice(hiddenLegacyCount) : streamMsgs;
 
   useEffect(() => { scrollToBottom(); }, [streamMsgs, working, scrollToBottom]);
   useEffect(() => { streamMsgsRef.current = streamMsgs; }, [streamMsgs]);
@@ -1602,10 +1599,30 @@ export default function Chat() {
   const activeAimeeSid = tabs[activeIdx]?.aimeeSid ?? '';
   useEffect(() => {
     if (!activeAimeeSid) return;
+    let disposed = false;
+    setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
     const state = irSessions.current[activeAimeeSid] ?? emptySession(activeAimeeSid);
     const es = new EventSource(`/api/chat/session-events?format=ir&sid=${encodeURIComponent(activeAimeeSid)}&cursor=${state.sequence}`);
     presenceSseRef.current = es;
+    es.addEventListener('error', () => {
+      if (!disposed) setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+    });
+    es.addEventListener('replay_complete', (event: MessageEvent<string>) => {
+      if (disposed) return;
+      try {
+        const ready = parseJSON(event.data) as { session_id?: string; cursor?: string };
+        const cursor = irSessions.current[activeAimeeSid]?.sequence ?? '0';
+        if (ready.session_id !== activeAimeeSid || typeof ready.cursor !== 'string' ||
+            !/^(0|[1-9][0-9]*)$/.test(ready.cursor) || BigInt(ready.cursor) > BigInt(cursor))
+          throw new Error('Invalid conversation replay boundary');
+        setIRReady(prev => prev[activeAimeeSid] ? prev : { ...prev, [activeAimeeSid]: true });
+      } catch (error) {
+        setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: error instanceof Error ? error.message : 'Session replay failed' }));
+        es.close();
+      }
+    });
     es.addEventListener('ir', (event: MessageEvent<string>) => {
+      if (disposed) return;
       try {
         ingestIR(activeAimeeSid, parseJSON(event.data) as Record<string, unknown>);
         setIRTransportErrors(prev => prev[activeAimeeSid] ? { ...prev, [activeAimeeSid]: '' } : prev);
@@ -1614,27 +1631,44 @@ export default function Chat() {
         es.close();
       }
     });
-    return () => { es.close(); if (presenceSseRef.current === es) presenceSseRef.current = null; };
+    return () => { disposed = true; es.close(); if (presenceSseRef.current === es) presenceSseRef.current = null; };
   }, [activeAimeeSid]);
   const canonicalState = irSessions.current[activeAimeeSid];
+  const hiddenCount = canonicalState?.messages.length
+    ? Math.max(0, canonicalState.messages.length - visibleCount) : hiddenLegacyCount;
+  const submittedControls = useRef(new Set<string>());
+  const [pendingReplies, setPendingReplies] = useState<Record<string, ReadonlySet<string>>>({});
   const replyControl = useCallback(async (requestId: string, reply: ControlReply) => {
-    const response = await fetch('/api/chat/control-reply', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: stringifyJSON({ session_id: activeAimeeSid, request_id: requestId, reply }),
-    });
-    const body = await response.json().catch(() => ({})) as { error?: string };
-    if (!response.ok) throw new Error(body.error || 'Could not send the reply');
+    const key = `${activeAimeeSid}\0${requestId}`;
+    if (submittedControls.current.has(key)) return;
+    submittedControls.current.add(key);
+    setPendingReplies(prev => ({ ...prev, [activeAimeeSid]: new Set([...(prev[activeAimeeSid] ?? []), requestId]) }));
+    try {
+      const response = await fetch('/api/chat/control-reply', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: stringifyJSON({ session_id: activeAimeeSid, request_id: requestId, reply }),
+      });
+      const body = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(body.error || 'Could not send the reply');
+    } catch (error) {
+      submittedControls.current.delete(key);
+      setPendingReplies(prev => {
+        const remaining = new Set(prev[activeAimeeSid]); remaining.delete(requestId);
+        return { ...prev, [activeAimeeSid]: remaining };
+      });
+      throw error;
+    }
   }, [activeAimeeSid]);
 
   const usage = canonicalState?.messages.slice().reverse().find(m => m.usage)?.usage;
   const lastUsage = usage ? { in: usage.input, out: usage.output, cost: 0 } : null;
   useEffect(() => {
-    const running = !!canonicalState?.activeTurns.length;
+    const running = !!irReady[activeAimeeSid] && !!canonicalState?.activeTurns.length;
     remoteTurnActiveRef.current = running;
     setRemoteTurnActive(running);
     setRemoteTurnText('');
     scrollToBottom();
-  }, [canonicalState, scrollToBottom]);
+  }, [canonicalState, irReady, activeAimeeSid, scrollToBottom]);
   useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
 
   /* Rebuild per-sid pending/queued counts from the live send refs. Iteration
@@ -1842,9 +1876,6 @@ export default function Chat() {
     setSessionUsage({ in: 0, out: 0, cost: 0, kind: 'realized' });
   }, [activeIdx]);
 
-  /* Keep activeChannelRef in sync for SSE handler closure */
-  useEffect(() => { activeChannelRef.current = activeChannel; }, [activeChannel]);
-
   /* Persist active channel to localStorage */
   useEffect(() => { saveActiveChannel(activeChannel); }, [activeChannel]);
 
@@ -1853,33 +1884,32 @@ export default function Chat() {
     if (channelSseRef.current) { channelSseRef.current.close(); channelSseRef.current = null; }
     if (!activeChannel) return;
 
-    /* Fetch existing messages first */
-    fetch(`/api/channels/${encodeURIComponent(activeChannel)}/messages`)
-      .then(r => r.json())
-      .then((d: { messages?: ChannelMessage[] }) => {
-        setChannelMsgs(prev => ({ ...prev, [activeChannel]: d.messages ?? [] }));
-        setUnreadCounts(prev => ({ ...prev, [activeChannel]: 0 }));
-      })
-      .catch(() => {});
-
+    let disposed = false;
+    const abort = new AbortController();
+    const refresh = () => {
+      void fetch(`/api/channels/${encodeURIComponent(activeChannel)}/messages`, { signal: abort.signal })
+        .then(r => { if (!r.ok) throw new Error('Channel history unavailable'); return r.json(); })
+        .then((d: { messages?: ChannelMessage[] }) => {
+          if (disposed) return;
+          setChannelMsgs(prev => ({ ...prev, [activeChannel]: mergeChannelMessages(d.messages ?? [], prev[activeChannel] ?? []) }));
+          setUnreadCounts(prev => ({ ...prev, [activeChannel]: 0 }));
+        }).catch(() => {});
+    };
     const es = new EventSource(`/api/channels/${encodeURIComponent(activeChannel)}/events`);
     channelSseRef.current = es;
-
+    // Refresh after every successful connection, including reconnects. Merge
+    // the snapshot with live arrivals instead of replacing the live timeline.
+    es.addEventListener('open', refresh);
+    refresh();
     es.addEventListener('message', (ev: MessageEvent<string>) => {
+      if (disposed) return;
       try {
         const msg = JSON.parse(ev.data) as ChannelMessage;
-        const ch = activeChannelRef.current;
-        setChannelMsgs(prev => ({
-          ...prev,
-          [activeChannel]: [...(prev[activeChannel] ?? []), msg],
-        }));
-        if (ch !== activeChannel) {
-          setUnreadCounts(prev => ({ ...prev, [activeChannel]: (prev[activeChannel] ?? 0) + 1 }));
-        }
-      } catch { /* ignore */ }
+        if (typeof msg.sender !== 'string' || typeof msg.text !== 'string') return;
+        setChannelMsgs(prev => ({ ...prev, [activeChannel]: mergeChannelMessages(prev[activeChannel] ?? [], [msg]) }));
+      } catch { /* ignore malformed frames */ }
     });
-
-    return () => { es.close(); channelSseRef.current = null; };
+    return () => { disposed = true; abort.abort(); es.close(); channelSseRef.current = null; };
   }, [activeChannel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function selectChannel(name: string): void {
@@ -2653,7 +2683,7 @@ export default function Chat() {
   }
 
   return (
-    <div style={{
+    <div className="chat-shell" style={{
       display: 'flex', flexDirection: 'column', height: '100%',
       overflow: 'hidden', background: tokens.surface,
     }}>
@@ -2662,7 +2692,7 @@ export default function Chat() {
           button resets this conversation (fresh provider session). */}
       {/* Reserve the tutorial launcher's top-right corner. Without this padding,
           its absolute "?" button sits directly over Clear and steals clicks. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 48, boxSizing: 'border-box' }}>
+      <div className="chat-session-toolbar" style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 48, boxSizing: 'border-box' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <ProjectPicker
             key={activeSessionId}
@@ -2674,6 +2704,8 @@ export default function Chat() {
             }}
           />
         </div>
+        <Button size="md" aria-expanded={channelsOpen} aria-controls="chat-channels"
+          onClick={() => setChannelsOpen(open => !open)}>Channels{channels.length ? ` (${channels.length})` : ''}</Button>
         <Button
           variant="default"
           size="md"
@@ -2696,6 +2728,7 @@ export default function Chat() {
       {/* Main content area: channel sidebar + chat + optional rules panel */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
         {/* Channel sidebar */}
+        {channelsOpen && <aside id="chat-channels" className="chat-channels" aria-label="Channels">
         <ChannelSidebar
           channels={channels}
           activeChannel={activeChannel}
@@ -2703,10 +2736,10 @@ export default function Chat() {
           onSelect={selectChannel}
           onDeselect={() => setActiveChannel(null)}
           onCreateChannel={name => { void createChannel(name); }}
-        />
+        /></aside>}
 
         {/* Chat column — shows channel view when a channel is active */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="chat-column" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {activeChannel ? (
           <ChannelView
@@ -2717,6 +2750,8 @@ export default function Chat() {
           />
         ) : (<>
 
+      <details className="chat-workflow" open={workflowInfo ? true : undefined}>
+      <summary>{workflowInfo ? `Workflow · ${workflowInfo.status}` : 'Workflow options'}</summary>
       <WorkflowStatusCard
         channel={workflowChannel}
         session={workflowInfo}
@@ -2726,7 +2761,7 @@ export default function Chat() {
         onChannelChange={setCurrentWorkflowChannel}
         onRefresh={() => { void refreshWorkflow(); }}
         onPause={() => { void pauseWorkflow(); }}
-      />
+      /></details>
 
       {/* Bootstrap banner */}
       {banner && (
@@ -2739,6 +2774,7 @@ export default function Chat() {
 
       {/* Messages */}
       <div
+        className="chat-messages" role="log" aria-label="Conversation" aria-live="off"
         onScroll={handleMessagesScroll}
         style={{
           flex: 1, overflowY: 'auto', padding: '16px',
@@ -2755,11 +2791,8 @@ export default function Chat() {
             Show earlier messages ({hiddenCount})
           </Button>
         )}
-        {canonicalState && (canonicalState.messages.length > 0 || Object.keys(canonicalState.children ?? {}).length > 0) ? <>
-          {windowedMsgs.length > 0 && <details><summary>Earlier text-only history</summary>
-            <Transcript messages={windowedMsgs} working={false} activeSid={activeAimeeSid} />
-          </details>}
-          <IRTranscript state={canonicalState} onReply={replyControl} /></> :
+        {canonicalState && (canonicalState.messages.length > 0 || Object.keys(canonicalState.children ?? {}).length > 0 || Object.keys(canonicalState.controls).length > 0) ? <>
+          <IRTranscript state={canonicalState} onReply={replyControl} controlsReady={!!irReady[activeAimeeSid]} messageLimit={visibleCount} pendingReplies={pendingReplies[activeAimeeSid]} /></> :
           <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />}
         {irTransportErrors[activeAimeeSid] && <div role="alert">{irTransportErrors[activeAimeeSid]}</div>}
         {working && <div style={{ alignSelf: 'flex-start' }}><TypingIndicator /></div>}

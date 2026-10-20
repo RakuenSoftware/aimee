@@ -48,10 +48,18 @@ function ChildExecutionView({ reference, ancestors }: { reference: ChildExecutio
   </details>;
 }
 
-export default function IRTranscript({ state, onReply, ancestors = [] }: { state: SessionState; onReply?: ReplyControl; ancestors?: string[] }) {
+export default function IRTranscript({ state, onReply, ancestors = [], controlsReady = true, messageLimit, pendingReplies }: {
+  state: SessionState; onReply?: ReplyControl; ancestors?: string[]; controlsReady?: boolean; messageLimit?: number; pendingReplies?: ReadonlySet<string>;
+}) {
   const { byCall, matched } = toolResults(state);
+  const messages = messageLimit === undefined ? state.messages : state.messages.slice(-messageLimit);
+  const visibleTurns = new Set(messages.map(message => message.turn));
+  const messageTurns = new Set(state.messages.map(message => message.turn));
+  const pendingControls = controlsReady ? Object.entries(state.controls).filter(([, control]) => !control.response && !control.closed) : [];
+  const resolvedControls = Object.entries(state.controls).filter(([, control]) =>
+    (control.response || control.closed) && (messageLimit === undefined || visibleTurns.has(control.turn) || !messageTurns.has(control.turn)));
   return <>
-    {state.messages.flatMap(m => m.blocks.map((b, index) => {
+    {messages.flatMap(m => m.blocks.map((b, index) => {
       const key = toolBlockKey(m, index);
       switch (b.type) {
         case 'text': {
@@ -80,7 +88,11 @@ export default function IRTranscript({ state, onReply, ancestors = [] }: { state
         }
       }
     }))}
-    {Object.entries(state.controls).map(([id, control]) => <ControlCard key={id} id={id} control={control} onReply={onReply} />)}
+    {pendingControls.map(([id, control]) => <ControlCard key={id} id={id} control={control} onReply={onReply} replyPending={pendingReplies?.has(id)} />)}
+    {resolvedControls.length > 0 && <details className="ir-resolved-controls">
+      <summary>Resolved requests ({resolvedControls.length})</summary>
+      {resolvedControls.map(([id, control]) => <ControlCard key={id} id={id} control={control} />)}
+    </details>}
     {Object.values(state.children ?? {}).map(child => <ChildExecutionView
       key={`${child.session_id}:${child.turn_id}`} reference={child} ancestors={[...ancestors, state.session]} />)}
     {(state.projections ?? []).map(report => <p role="status" key={report.id}>

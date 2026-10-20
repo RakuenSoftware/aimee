@@ -1,4 +1,5 @@
 import { Component, useEffect, useRef, useState } from 'react';
+import './app.css';
 import type { ErrorInfo, ReactNode } from 'react';
 import { Routes, Route, Navigate, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { Toast, ThemeToggle } from '@rakuensoftware/smoothgui';
@@ -212,7 +213,7 @@ export default function App() {
 
   return (
     <SessionProvider>
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      <div className="aimee-shell" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
         {/* Top bar: brand + session tabs + logout. Runtime options live on the
             Settings page and the tabs that own them — there is no gear menu. */}
         <header
@@ -232,8 +233,9 @@ export default function App() {
         </header>
         <SilentBoundary><HealthBanner /></SilentBoundary>
         {/* Body: vertical tool nav (left) + content. */}
-        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+        <div className="aimee-body" style={{ display: 'flex', flex: 1, minHeight: 0 }}>
           <nav
+            className="aimee-navigation" aria-label="Workspace tools"
             style={{
               display: 'flex', flexDirection: 'column', gap: 2, width: 132, flexShrink: 0,
               background: 'var(--sg-dark-surface)', borderRight: '1px solid var(--sg-dark-border)', padding: '8px 6px',

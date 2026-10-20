@@ -127,6 +127,22 @@ it('keeps reused native tool results on their own cards and shows ambiguous evid
 });
 
 
+it('bounds mounted canonical history while keeping current requests available', () => {
+  let state = emptySession('windowed');
+  for (let index = 1; index <= 200; index++) state = reduceSession(state, {
+    version: 1, session_id: 'windowed', sequence: String(index), event_id: String(index), turn_id: `turn-${index}`, actor: 'alice',
+    event: { kind: 'message', message_id: `message-${index}`, payload: { role: 'assistant', blocks: [{ type: 'text', text: `Message ${index}` }] } },
+  });
+  state = reduceSession(state, { version: 1, session_id: 'windowed', sequence: '201', event_id: 'pending', turn_id: 'older-turn', actor: 'alice',
+    event: { kind: 'control_request', request_id: 'pending', control_kind: 'permission', payload: { title: 'Still needs your reply' } } });
+  const view = render(<IRTranscript state={state} messageLimit={10} onReply={vi.fn()} />);
+  expect(screen.queryByText('Message 190')).toBeNull();
+  expect(screen.getAllByText(/^Message \d+$/)).toHaveLength(10);
+  expect(screen.getByRole('button', { name: 'Allow once' })).toBeTruthy();
+  view.rerender(<IRTranscript state={state} messageLimit={200} onReply={vi.fn()} />);
+  expect(screen.getAllByText(/^Message \d+$/)).toHaveLength(200);
+});
+
 it('answers a durable free-text host question and resolves it without creating model messages', async () => {
   const envelope = (sequence: string, event: Envelope['event']): Envelope => ({
     version: 1, session_id: 'primary', sequence, event_id: `host-question-${sequence}`,
@@ -138,7 +154,7 @@ it('answers a durable free-text host question and resolves it without creating m
   }));
   const onReply = vi.fn().mockResolvedValue(undefined);
   const view = render(<IRTranscript state={state} onReply={onReply} />);
-  expect(screen.queryByRole('button', { name: 'Send answers' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Send answers' }).hasAttribute('disabled')).toBe(true);
   fireEvent.change(screen.getByRole('textbox', { name: 'Your answer: Which workspace?' }), {
     target: { value: 'aimee' },
   });

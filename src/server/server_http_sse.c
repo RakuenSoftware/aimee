@@ -238,7 +238,7 @@ static void handle_session_ir_events(int fd, const char *input, const char *requ
       return;
    }
    write_sse_headers(fd, request_id);
-   int seen = 0, quiet = 0;
+   int seen = 0, quiet = 0, replay_complete = 0;
    for (;;)
    {
       if (db1_server_session_get(session, &row) == 0)
@@ -310,6 +310,28 @@ static void handle_session_ir_events(int fd, const char *input, const char *requ
       }
       else if (seen)
          break; /* deletion/store outage never becomes an empty successful replay */
+      /* A browser must not offer historical controls while their saved replies
+       * are still being replayed. This is transport readiness, not an IR event
+       * or a new durable sequence. Existing consumers may ignore it. */
+      if (!replay_complete && seen)
+      {
+         cJSON *ready = cJSON_CreateObject();
+         if (!ready || !cJSON_AddStringToObject(ready, "session_id", session) ||
+             !cJSON_AddStringToObject(ready, "cursor", after))
+         {
+            cJSON_Delete(ready);
+            break;
+         }
+         char *line = cJSON_PrintUnformatted(ready);
+         cJSON_Delete(ready);
+         const char prefix[] = "event: replay_complete\ndata: ";
+         int failed = !line || write_all_fd(fd, prefix, sizeof(prefix) - 1) < 0 ||
+                      write_all_fd(fd, line, strlen(line)) < 0 || write_all_fd(fd, "\n\n", 2) < 0;
+         free(line);
+         if (failed)
+            break;
+         replay_complete = 1;
+      }
       if ((quiet++ % 25) == 0 && write_all_fd(fd, ": keep-alive\n\n", 14) < 0)
          break;
       struct timespec pause = {0, 200000000L};

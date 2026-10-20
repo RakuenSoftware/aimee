@@ -210,6 +210,17 @@ def main():
                     if line.startswith(b"data: "):
                         replay.append(json.loads(line[6:]))
                 assert replay == [event for event in live if int(event["sequence"]) > cursor], (cursor, replay)
+                # Transport readiness must follow all historical controls and
+                # responses, without claiming a new durable IR sequence.
+                while True:
+                    line = response.readline()
+                    assert line, "Replay ended before readiness"
+                    if line.startswith(b"event: "):
+                        assert line.strip() == b"event: replay_complete", line
+                        boundary = response.readline()
+                        assert boundary.startswith(b"data: "), boundary
+                        assert json.loads(boundary[6:]) == {"session_id": sid, "cursor": str(sequence)}
+                        break
             finally:
                 if response:
                     response.close()

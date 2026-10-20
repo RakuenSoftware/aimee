@@ -60,7 +60,7 @@ export const Message = memo(function Message({ role, text, streaming }: { role: 
     hyphens: 'none',
     alignSelf: role === 'user' ? 'flex-end' : 'flex-start',
     background: role === 'user' ? 'var(--sg-info-bg)' : tokens.surface,
-    color: role === 'user' ? 'var(--sg-info-border)' : tokens.text,
+    color: tokens.text,
     border: role === 'assistant' ? `1px solid ${tokens.border}` : 'none',
     borderBottomRightRadius: role === 'user' ? 2 : 10,
     borderBottomLeftRadius: role === 'assistant' ? 2 : 10,

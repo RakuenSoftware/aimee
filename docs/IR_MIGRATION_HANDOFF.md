@@ -4049,3 +4049,51 @@ unchanged. This records boundary analysis, not independent release approval.
 Fresh CI remains required for this snapshot. The earlier pending migration,
 independent learning, platform/live and production qualifications remain open;
 production stays KB-free and unpromoted.
+
+## Browser usability and replay controls: 20 October 2026
+
+The published Git-source snapshot 5b62ff5f is green in fresh CI: 56 checks pass,
+with the two existing thin-client platform skips. The user's next manual browser
+pass takes priority over the remaining migration work.
+
+The browser now uses a horizontal tool navigation on narrow screens and hides the
+empty channel rail until requested. Workflow options start collapsed when no
+workflow is bound. Conversation text uses readable foreground colors; permission
+and question forms have consistent spacing, focus states and buttons. Question
+submission remains visible but disabled until every answer is valid. The canonical
+transcript obeys the existing history window and no longer adds a duplicate
+text-only copy. Resolved requests are collapsed; control-only turns retain their
+acknowledgments.
+
+The owner-checked canonical SSE subscriber sends a transport-only
+`replay_complete` frame containing `session_id` and the decimal `cursor` after
+initial durable catch-up. It does not allocate an IR sequence or write another
+history event. The browser validates that boundary against ingested history and
+withholds controls until it arrives, including after reconnect or returning to a
+tab. Disposed subscriptions cannot update the UI. Reply guards prevent duplicate
+submission during overlapping delivery, rapid clicks and tab changes; an HTTP
+failure releases the guard for retry. This prevents historical unanswered-looking
+requests from briefly becoming actionable before their saved replies replay.
+
+Channel history and live frames now include the SQLite message ID as a decimal
+string. SSE resumes with Last-Event-ID and reads ordered rows from the durable
+store; the broker only wakes it, with periodic catch-up for missed notifications.
+The initial history query returns the latest 200 rows in chronological order.
+The browser merges snapshots and live arrivals by ID, preserving distinct
+identical-text messages and ignoring late responses from disposed subscriptions.
+A successful reconnect refreshes the snapshot as well.
+
+Validation: 298 frontend tests, production web and console builds, Chromium setup
+recovery and canonical webchat regressions, runtime-web Go race tests, PostgreSQL
+integration 168/168 (26 unavailable local-service checks), twenty actual native
+SDK/browser journeys, four budget refusals, focused server HTTP/dispatch
+ASan/UBSan fixtures, and Cppcheck without increased diagnostics pass. The actual
+server replay fixture verifies readiness follows the last committed envelope for
+both full and resumed replay. Chromium checks POST/SSE overlap, reconnect,
+navigation/reload, a duplicate question and its reply, and the 390px layout.
+This browser fixture uses a deterministic backend; it is separate from the actual
+SDK integration qualification.
+
+All 76 repository lint gates also pass. Fresh CI is required for the browser-fix snapshot. The migration, independent
+learning qualification, broader platform/live checks and reviewed production
+promotion remain unfinished. Production stays KB-free and unpromoted.
