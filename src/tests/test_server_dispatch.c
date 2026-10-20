@@ -121,6 +121,11 @@ int workspace_turn_resource_identity(const char *cwd, int *fd, char digest[65])
    digest[0] = '\0';
    return -1;
 }
+int workspace_turn_source_identity(const char *cwd, int *fd, char digest[65])
+{
+   return workspace_turn_resource_identity(cwd, fd, digest);
+}
+
 int server_learning_project_from_cwd(const char *cwd, char *out, size_t cap)
 {
    (void)cwd;

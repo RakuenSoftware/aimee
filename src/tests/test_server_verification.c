@@ -72,7 +72,7 @@ char *verify_compute_file_hash(const char *root)
    assert(!strncmp(root, "/proc/", 6));
    return strdup(tree_id);
 }
-int workspace_turn_resource_identity(const char *root, int *fd, char digest[65])
+int workspace_turn_source_identity(const char *root, int *fd, char digest[65])
 {
    assert(!strcmp(root, source_root));
    *fd = open(root, O_RDONLY | O_DIRECTORY | O_CLOEXEC);

@@ -43,6 +43,9 @@ static __thread ws_container_provider_t t_turn_container;
 static __thread delegate_backend_t *t_turn_container_backend;
 static __thread void *t_turn_container_state;
 static __thread int t_turn_container_hibernate;
+/* Host source custody is separate from the container file/exec provider. */
+static __thread int t_turn_container_source_fd = -1;
+static __thread char t_turn_container_source_cwd[MAX_PATH_LEN];
 /* For a `mirror` workspace the turn acts directly on a server-side reconstructed
  * worktree (the `shared` provider), so instead of binding a provider we remap
  * the turn's cwd into that worktree and stash the drift line to surface. */
@@ -819,6 +822,8 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
 {
    if (!task_id || !task_id[0])
       return 0;
+   if (t_turn_container_backend || t_turn_container_source_fd >= 0)
+      return -1; /* Never overwrite a live source/provider owner. */
    /* A delegate IS a sandboxed container. There is no second execution model to
     * fall back to, so every failure below refuses (-1) rather than returning 0.
     *
@@ -843,6 +848,14 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
       return -1;
    }
 
+   int source_fd = open(ws_real, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+   struct stat source_status;
+   if (source_fd < 0 || fstat(source_fd, &source_status))
+   {
+      if (source_fd >= 0)
+         close(source_fd);
+      return -1;
+   }
    delegate_backend_t *b = delegate_backend_lookup("docker");
    if (!b || !b->acquire)
    {
@@ -850,6 +863,7 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
                 "delegate '%s': the docker backend is unavailable — refusing to run. A delegate "
                 "runs in a container or not at all",
                 task_id);
+      close(source_fd);
       return -1;
    }
 
@@ -868,6 +882,7 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
       LOG_ERROR("delegate-sandbox",
                 "delegate '%s': refusing to run — the runtime did not provide network isolation",
                 task_id);
+      close(source_fd);
       return -1;
    }
    if (arc != 0 || !state)
@@ -875,19 +890,32 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
       LOG_ERROR("delegate-sandbox",
                 "delegate '%s': could not acquire a container (image=%s) — refusing to run",
                 task_id, bcfg.image ? bcfg.image : "<default>");
+      close(source_fd);
       return -1;
    }
 
+   struct stat current;
+   if (stat(ws_real, &current) || current.st_dev != source_status.st_dev ||
+       current.st_ino != source_status.st_ino || !S_ISDIR(current.st_mode))
+   {
+      b->release(b, state, 0);
+      close(source_fd);
+      return -1;
+   }
    if (ws_container_provider_init(&t_turn_container, b, state) != 0)
    {
       b->release(b, state, 0);
+      close(source_fd);
       return -1;
    }
    if (platform_random_hex(t_turn_container_epoch, 64))
    {
       b->release(b, state, 0);
+      close(source_fd);
       return -1;
    }
+   t_turn_container_source_fd = source_fd;
+   snprintf(t_turn_container_source_cwd, sizeof t_turn_container_source_cwd, "%s", ws_real);
    workspace_provider_set_active(&t_turn_container.base);
    t_turn_container_backend = b;
    t_turn_container_state = state;
@@ -941,6 +969,10 @@ void workspace_turn_unbind_active(void)
       t_turn_container_hibernate = 0;
       t_turn_container_epoch[0] = 0;
    }
+   if (t_turn_container_source_fd >= 0)
+      close(t_turn_container_source_fd);
+   t_turn_container_source_fd = -1;
+   t_turn_container_source_cwd[0] = 0;
    t_turn_detached_epoch[0] = 0;
    if (t_turn_mirror_fd >= 0)
       close(t_turn_mirror_fd);
@@ -1042,6 +1074,54 @@ int workspace_turn_resource_identity(const char *cwd, int *directory_fd, char di
    {
       if (fd >= 0)
          close(fd);
+      return -1;
+   }
+   *directory_fd = fd;
+   return 0;
+}
+
+/* The mounted source is a host-owned capability, not the container execution
+ * namespace. Callers may inspect this exact source for scoped verification and
+ * project identity; no tool provider or execution grant changes here. */
+int workspace_turn_source_identity(const char *cwd, int *directory_fd, char digest[65])
+{
+   if (directory_fd)
+      *directory_fd = -1;
+   if (digest)
+      digest[0] = 0;
+   if (!cwd || !cwd[0] || !directory_fd || !digest)
+      return -1;
+   const workspace_provider_t *provider = workspace_provider_active();
+   if (!provider)
+      return -1;
+   if (provider->kind != WS_PROVIDER_CONTAINER)
+   {
+      if (workspace_turn_resource_identity(cwd, directory_fd, digest))
+         return -1;
+      if (*directory_fd >= 0)
+         return 0;
+      digest[0] = 0;
+      return -1; /* A detached execution identity is not a local source. */
+   }
+   char actual[MAX_PATH_LEN];
+   struct stat held, current;
+   if (provider != &t_turn_container.base || !t_turn_container_backend || !t_turn_container_state ||
+       t_turn_container_source_fd < 0 || !realpath(cwd, actual) ||
+       strcmp(actual, t_turn_container_source_cwd) || fstat(t_turn_container_source_fd, &held) ||
+       stat(actual, &current) || held.st_dev != current.st_dev || held.st_ino != current.st_ino ||
+       !S_ISDIR(held.st_mode))
+      return -1;
+   int fd = fcntl(t_turn_container_source_fd, F_DUPFD_CLOEXEC, 3);
+   if (fd < 0)
+      return -1;
+   char identity[MAX_PATH_LEN + 128];
+   int length = snprintf(identity, sizeof identity, "workspace-source-v1:%ju:%ju:%s",
+                         (uintmax_t)held.st_dev, (uintmax_t)held.st_ino, actual);
+   if (length < 0 || (size_t)length >= sizeof identity ||
+       aimee_sha256_hex(identity, (size_t)length, digest))
+   {
+      close(fd);
+      digest[0] = 0;
       return -1;
    }
    *directory_fd = fd;

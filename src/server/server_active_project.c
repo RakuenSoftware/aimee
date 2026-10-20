@@ -140,7 +140,7 @@ int server_learning_project_from_cwd(const char *cwd, char *out, size_t outlen)
       return -1;
    int fd = -1;
    char identity[65];
-   if (workspace_turn_resource_identity(cwd, &fd, identity) || fd < 0)
+   if (workspace_turn_source_identity(cwd, &fd, identity) || fd < 0)
    {
       if (fd >= 0)
          close(fd);

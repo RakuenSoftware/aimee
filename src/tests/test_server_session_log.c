@@ -107,7 +107,7 @@ void db1_agent_job_free(db1_agent_job_t *row)
 {
    (void)row;
 }
-int workspace_turn_resource_identity(const char *cwd, int *fd, char digest[65])
+int workspace_turn_source_identity(const char *cwd, int *fd, char digest[65])
 {
    assert(cwd && cwd[0]);
    *fd = -1;

@@ -129,7 +129,7 @@ static cJSON *delegate_binding(const char *role, const char *agent, const char *
    const char *cwd = run_cmd_get_cwd();
    char identity[65], project[257];
    int fd = -1;
-   if (!cwd || workspace_turn_resource_identity(cwd, &fd, identity))
+   if (!cwd || workspace_turn_source_identity(cwd, &fd, identity))
       return NULL; /* No process-CWD or unapproved workspace fallback. */
    int resolved = server_learning_project_from_cwd(cwd, project, sizeof project);
    if (fd >= 0)

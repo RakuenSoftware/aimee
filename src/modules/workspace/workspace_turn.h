@@ -52,6 +52,13 @@ void workspace_turn_mirror_release(workspace_turn_mirror_lease_t *lease);
  * The caller retains its turn lease and closes any returned fd. No access grant
  * or path/provider fallback is created. Failure leaves fd=-1 and digest empty. */
 int workspace_turn_resource_identity(const char *cwd, int *directory_fd, char digest[65]);
+/* Approved local source custody, independent of the active execution namespace.
+ * A container turn returns a duplicate of the exact directory retained when its
+ * approved source was bound; the pathname must still name that held inode.
+ * Shared/mirror sources retain their existing local owner rules. Detached-only,
+ * sibling, replaced, unbound and unapproved sources refuse. This API grants no
+ * host tool execution or provider fallback; caller closes the returned fd. */
+int workspace_turn_source_identity(const char *cwd, int *directory_fd, char digest[65]);
 
 /* Select the client-side repository location that a git MCP call names.
  * `path` is authoritative for every operation except clone, where it is the

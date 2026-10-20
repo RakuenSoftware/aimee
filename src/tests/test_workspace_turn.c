@@ -14,6 +14,7 @@
 #include "util.h"
 #include <aimee/workspace/module_api.h>
 #include <stdint.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -71,6 +72,20 @@ static int g_acquires, g_releases, g_last_hibernate, g_acquire_fails;
 static char g_last_workspace[512];
 static int g_last_read_only;
 static int g_fake_state = 1;
+static int g_replace_workspace;
+static char g_retired_workspace[1024];
+
+static int count_source_fds(const char *source)
+{
+   struct stat expected, current;
+   assert(!stat(source, &expected));
+   int count = 0;
+   for (int fd = 0; fd < 1024; fd++)
+      if (!fstat(fd, &current) && current.st_dev == expected.st_dev &&
+          current.st_ino == expected.st_ino)
+         count++;
+   return count;
+}
 
 static int fake_acquire(delegate_backend_t *self, const char *task_id,
                         const delegate_backend_config_t *cfg, void **out)
@@ -83,6 +98,11 @@ static int fake_acquire(delegate_backend_t *self, const char *task_id,
    g_last_read_only = cfg ? cfg->workspace_read_only : -1;
    if (g_acquire_fails)
       return -1;
+   if (g_replace_workspace)
+   {
+      assert(!rename(cfg->workspace, g_retired_workspace));
+      assert(!mkdir(cfg->workspace, 0700));
+   }
    *out = &g_fake_state;
    return 0;
 }
@@ -533,6 +553,65 @@ int main(void)
          assert(g_releases == 2);
       }
 
+      /* Source inspection has its own exact local capability; file/exec stays
+       * container-bound and detached nesting cannot borrow that capability. */
+      {
+         char source[768], sibling[768], retired[768], digest[65], resource[65];
+         snprintf(source, sizeof source, "%s/container-source", tmpdir);
+         snprintf(sibling, sizeof sibling, "%s/container-sibling", tmpdir);
+         snprintf(retired, sizeof retired, "%s/container-retired", tmpdir);
+         assert(!mkdir(source, 0700) && !mkdir(sibling, 0700));
+         assert(!config_workspace_add(source, "shared", NULL, NULL));
+         assert(!config_workspace_add(sibling, "shared", NULL, NULL));
+         g_acquires = g_releases = 0;
+         int before = count_source_fds(source);
+         g_acquire_fails = 1;
+         assert(workspace_turn_bind_container("source-failed", NULL, source, 0) < 0);
+         assert(count_source_fds(source) == before && workspace_provider_active() == shared);
+         g_acquire_fails = 0;
+         snprintf(g_retired_workspace, sizeof g_retired_workspace, "%s", retired);
+         g_replace_workspace = 1;
+         assert(workspace_turn_bind_container("source-replaced-during-acquire", NULL, source, 0) <
+                0);
+         assert(g_releases == 1 && workspace_provider_active() == shared);
+         assert(count_source_fds(retired) == before);
+         assert(!rmdir(source) && !rename(retired, source));
+         g_replace_workspace = 0;
+         g_acquires = g_releases = 0;
+         assert(workspace_turn_bind_container("source-owned", NULL, source, 0) == 1);
+         const workspace_provider_t *container = workspace_provider_active();
+         assert(container->kind == WS_PROVIDER_CONTAINER && count_source_fds(source) == before + 1);
+         int fd = -1;
+         assert(!workspace_turn_resource_identity(source, &fd, resource) && fd == -1);
+         assert(!workspace_turn_source_identity(source, &fd, digest) && fd >= 0);
+         struct stat measured, actual;
+         assert(!fstat(fd, &measured) && !stat(source, &actual) &&
+                measured.st_ino == actual.st_ino);
+         close(fd);
+         assert(workspace_turn_source_identity(sibling, &fd, digest) < 0 && fd == -1 && !digest[0]);
+         assert(workspace_provider_active() == container);
+         workspace_turn_scope_t *nested = NULL;
+         assert(workspace_turn_scope_begin(test_detached_workspace, &nested) == 1 && nested);
+         assert(workspace_turn_source_identity(source, &fd, digest) < 0 && fd == -1 && !digest[0]);
+         assert(workspace_turn_source_identity(test_detached_workspace, &fd, digest) < 0 &&
+                fd == -1);
+         assert(!workspace_turn_scope_end(nested) && workspace_provider_active() == container);
+         assert(!rename(source, retired) && !mkdir(source, 0700));
+         assert(workspace_turn_source_identity(source, &fd, digest) < 0 && fd == -1 && !digest[0]);
+         assert(!rmdir(source) && !rename(retired, source));
+         assert(!workspace_turn_source_identity(source, &fd, digest) && fd >= 0);
+         close(fd);
+         /* An acquired exact source survives registration churn for this turn;
+          * unbinding closes it and cannot grant a now-unregistered host path. */
+         assert(!config_workspace_remove(source));
+         assert(!workspace_turn_source_identity(source, &fd, digest) && fd >= 0);
+         close(fd);
+         workspace_turn_unbind_active();
+         assert(g_releases == 1 && count_source_fds(source) == before);
+         assert(workspace_turn_source_identity(source, &fd, digest) < 0 && fd == -1 && !digest[0]);
+         assert(!config_workspace_remove(sibling));
+         assert(!rmdir(source) && !rmdir(sibling));
+      }
       /* The complete tree reaches the backend. */
       {
          g_acquires = g_releases = 0;

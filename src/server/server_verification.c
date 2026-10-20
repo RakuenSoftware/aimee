@@ -532,7 +532,7 @@ static int begin(const char *root, const char *session, const verify_config_t *c
        !v->capture)
       goto unavailable;
    reason = "approved_local_source_required";
-   if (workspace_turn_resource_identity(root, &v->source_fd, identity) || v->source_fd < 0)
+   if (workspace_turn_source_identity(root, &v->source_fd, identity) || v->source_fd < 0)
       goto unavailable;
    reason = "mirror_custody_unavailable";
    if (workspace_turn_mirror_capture(root, &v->mirror))

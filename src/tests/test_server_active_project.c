@@ -27,7 +27,7 @@ static const project_info_t *g_listed; /* what kb_client_index_list reports */
 static int g_listed_count;             /* negative => the list is unavailable */
 static int g_list_calls, g_approved, g_held_identity, g_resource_fd = -1;
 
-int workspace_turn_resource_identity(const char *cwd, int *fd, char digest[65])
+int workspace_turn_source_identity(const char *cwd, int *fd, char digest[65])
 {
    *fd = -1;
    if (!g_approved || strcmp(cwd, "/approved/repo"))

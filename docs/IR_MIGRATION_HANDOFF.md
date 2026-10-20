@@ -13,8 +13,13 @@ regression now passes 789 tests. Its full-history scan found no leaks. Fresh CI,
 including mandatory actual-Docker delegate and restart/outbox recovery, exposed
 two failures. `2353731e8` repairs invalid descriptor documentation entries; all
 47 descriptor regressions pass. The actual delegate now completes, but its
-container-bound workspace identity supplies no local source FD, so verification
-and learning binding decline. A retained approved-source repair is in progress.
+container-bound execution identity intentionally supplies no local source FD.
+The continuation fixes verification and learning binding with a separate approved
+source API: retain the exact source directory at successful container bind,
+recheck its inode after acquire and at lookup, and close it on unbind/failure.
+The tools still use the container provider. Focused normal/sanitizer owner tests,
+wrong/replaced-source and nested-scope regressions, exact ownership review and
+strict semantic-context gates pass; actual Docker CI must qualify the repair.
 These local results do not substitute for that integration qualification.
 The latest delegate repair makes native `git_verify` available to its actual
 `current_code` role while retaining ordinary `core` membership and permission
