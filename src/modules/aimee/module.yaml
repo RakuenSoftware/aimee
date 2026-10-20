@@ -160,10 +160,7 @@
     "server-go/modules/aimee/families/session_native_recovery_live_test.go"
   ],
   "docs": [
-    "docs/modules/aimee.md",
-    "docs/SESSION_SEARCH.md",
-    "docs/validation/canonical-learning-outbox.md",
-    "docs/NATIVE_CACHE_RECOVERY.md"
+    "docs/modules/aimee.md"
   ],
   "go_assets": [
     "server-go/modules/aimee/families/schema_agent_work.sql",
