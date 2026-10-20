@@ -12,6 +12,17 @@ import sys
 import threading
 
 
+def assert_completed_parent(records):
+    """Cache checkpoints and child notices may follow the parent's terminal."""
+    starts = [record for record in records if record["event"]["kind"] == "execution" and
+              record["event"]["payload"]["status"] == "running"]
+    assert starts, "canonical parent execution never started"
+    parent = starts[0]["turn_id"]
+    statuses = [record["event"]["payload"]["status"] for record in records
+                if record["turn_id"] == parent and record["event"]["kind"] == "execution"]
+    assert statuses == ["running", "completed"], (parent, statuses)
+
+
 ROOT_HTTP = r'''
 import http.client, json, socket, sys
 request = json.load(sys.stdin)
@@ -117,7 +128,7 @@ def run_browser_control(api, home, workspace, marker):
         operator("/v1/chat/control-reply", reply)
         worker.join(timeout=95)
         assert not worker.is_alive() and not stream_errors, stream_errors
-        assert stream_records[-1]["event"] == {"kind": "execution", "payload": {"status": "completed"}}, stream_records[-5:]
+        assert_completed_parent(stream_records)
         assert any(record["event"]["kind"] == "control_response" and
                    record["event"]["request_id"] == pending["request_id"] for record in stream_records)
         assert marker + "_FINAL" in json.dumps(stream_records)

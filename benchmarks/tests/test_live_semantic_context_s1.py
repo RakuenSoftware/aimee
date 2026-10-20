@@ -420,8 +420,12 @@ class LiveSemanticContextS1Test(unittest.TestCase):
                     current + blocks[0]["release_text"],
                     current.replace(blocks[0]["release_text"], "", 1),
                     current.replace("git_push", "git_status", 1)
-                    if "test_mcp" in path else current.replace('"git_%s"', '"%s"', 1),
+                    if "test_mcp" in path else
+                    current.replace('{"lsp_context",', '{"lsp_context_drift",', 1)
+                    if path.endswith("server_mcp_call_table.c") else
+                    current.replace('"git_%s"', '"%s"', 1),
                 ):
+                    self.assertNotEqual(current, drift)
                     self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
         self.assertFalse(validator.reviewed_host_equivalent("src/tests/test_lsp.c", "same", "same"))
 

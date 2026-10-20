@@ -46,7 +46,7 @@ def api(path, body=None, expected=200, limits=None):
 def main():
     home = Path(os.environ["AIMEE_HOME"])
     workspace = Path(os.environ["AIMEE_IR_DELEGATE_WORKSPACE"])
-    from test_native_ir_browser_control import prepare_browser_workspace
+    from test_native_ir_browser_control import prepare_browser_workspace, assert_completed_parent
     workspace = prepare_browser_workspace(api, home, workspace)
     binaries = {kind: str(Path(os.environ["AIMEE_TEST_NATIVE_" + kind.upper()]).resolve(strict=True))
                 for kind in ("codex", "claude")}
@@ -293,9 +293,9 @@ def main():
                         compact = api("/v1/chat/stream", {"attach_id": attachment,
                             "aimee_session_id": sid, "provider_session_id": "untrusted-sdk-handle",
                             "compact": True, "ir_version": 1})
-                        checkpoint = [json.loads(line)["event"] for line in compact.splitlines()]
-                        terminal = checkpoint[-1]
-                        assert terminal == {"kind": "execution", "payload": {"status": "completed"}}, compact
+                        compact_records = [json.loads(line) for line in compact.splitlines()]
+                        assert_completed_parent(compact_records)
+                        checkpoint = [record["event"] for record in compact_records]
                         assert all(event["kind"] in ("execution", "history") for event in checkpoint), compact
                         assert any(event["kind"] == "history" and event["payload"]["phase"] == "commit"
                                    for event in checkpoint), compact
@@ -304,7 +304,7 @@ def main():
                               "aimee_session_id": sid, "cwd": str(workspace), "ir_version": 1})
                     records = [json.loads(line) for line in raw.splitlines() if line.strip()]
                     assert not errors, errors
-                    assert records and records[-1]["event"] == {"kind": "execution", "payload": {"status": "completed"}}, (active, count, raw[-8000:])
+                    assert_completed_parent(records)
                     expected = marker + ("_FINAL" if label == "FIRST" else "_RESUMED")
                     assert expected in raw, raw[-8000:]
                 assert count == 3, (active, count)
@@ -395,7 +395,7 @@ def main():
                 raw = api("/v1/chat/stream", dict(attach_id=attachment, message=marker + "_FIRST",
                     aimee_session_id=sid, cwd=str(workspace), ir_version=1))
                 records = [json.loads(line) for line in raw.splitlines() if line.strip()]
-                assert records[-1]["event"] == dict(kind="execution", payload=dict(status="completed")), raw[-8000:]
+                assert_completed_parent(records)
                 assert count == 3 and not errors, (count, errors)
             finally:
                 api(f"/v1/sessions/{sid}/detach", dict(attach_id=attachment))

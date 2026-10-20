@@ -32,5 +32,19 @@
       "frozen_text": "static void test_tools_list_surface(void)\n{\n",
       "review": "PR #3050: exact added assertions over the existing flat MCP catalog, requiring tools metadata coverage. Reverse only this assertion block before the complete frozen semantic comparison. No catalog contents, existing assertions, LSP implementation, schemas, golden signatures or probe inputs are excluded."
     }
+  ],
+  "src/server/server_mcp_call_table.c": [
+    {
+      "release_text": "static cJSON *mcph_delegate_native(struct mcp_call *c)\n{\n   char *response = server_mcp_delegate_native(c->tool, c->jargs, c->sid);\n   cJSON *content =\n       text_content(response ? response : \"error: native orchestration owner unavailable\");\n   free(response);\n   return content;\n}\n",
+      "frozen_text": ""
+    },
+    {
+      "release_text": " * call passes ctx=NULL and conn=NULL. Orchestration wrappers use the existing\n * dispatch seam under the attested model owner rather than a client connection.\n * Today no handler touches ctx and only\n",
+      "frozen_text": " * call passes ctx=NULL and conn=NULL. Today no handler touches ctx and only\n"
+    },
+    {
+      "release_text": "    {\"delegate\", mcph_delegate_native, \"primary\"},\n    {\"delegate_status\", mcph_delegate_native, \"primary\"},\n",
+      "frozen_text": ""
+    }
   ]
 }

@@ -3953,3 +3953,32 @@ last complete enumeration it has 55 passing checks and two existing platform
 skips, including all deployment tiers. The migration, independently graded local learning/reuse, remaining IR
 consumers, native platforms/live subscription and reviewed production promotion
 remain unfinished. Production remains KB-free.
+
+
+## Native terminal and frozen LSP gate CI repairs: 20 October 2026
+
+Published d036a2326 completes its ordinary native unit shards and all deployment
+tiers, but hosted integration fails on the Claude delegation stream: its parent
+execution completes and then emits a native cache checkpoint. The fixture had
+incorrectly required the final frame itself to be the completion. Fixtures now
+require the exact parent execution outcomes running/completed, independently of
+cache metadata and child notices. Failed, cancelled, missing and duplicate parent
+terminals still refuse. Native cache persistence is unchanged.
+
+The real-provider LSP job separately rejects the new orchestration wrapper in
+the shared MCP table against its frozen source pin; the unit-tests aggregate
+therefore fails too. Both actual providers pass 20/20 cold starts, full reference
+recall and zero false positives. Three exact host-only deltas now reverse to the
+previous MCP table before the full frozen comparison. No LSP implementation,
+protected path, threshold or denominator is exempted. The original unmodified CI
+artifact passes the repaired release validator; deliberate containment-policy and
+catalog mutations still fail. All eighteen S1 contract tests and three terminal
+regressions pass.
+
+The rebuilt published runtime with the corrected fixtures passes PostgreSQL
+integration 168/168 (26 unavailable local-service checks), all twenty actual-SDK
+journeys including both browser operator replies, and four budget refusals in a
+root user namespace. Fresh CI must qualify the complete hosted execution again.
+The early queued-source acquisition and role/persona reader repairs remain
+stashed separately; the overall migration and independent learning are unfinished.
+Production remains KB-free and unpromoted.
