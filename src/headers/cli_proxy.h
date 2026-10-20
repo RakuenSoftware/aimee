@@ -44,6 +44,10 @@ cli_proxy_t *cli_proxy_start_bound(unsigned port, const char *local_token, const
  * be loaded before start and remain immutable until stop. */
 cli_proxy_t *cli_proxy_start(unsigned port, const char *local_token, const char *session_id,
                              unsigned *bound_port);
+/* Join all routes/IO workers and erase their callback authority, but keep the
+ * original listening socket bound. Host custody must later call stop once its
+ * exact native process boundary is empty. No accepting thread survives. */
+void cli_proxy_deactivate_hold_port(cli_proxy_t *proxy);
 void cli_proxy_stop(cli_proxy_t *proxy);
 int cli_proxy_cmd(int argc, char **argv);
 /* Own the listener while a provider client runs, then stop it and return the

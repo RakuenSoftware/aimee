@@ -74,3 +74,24 @@ func TestSessionNativeRecoveryRequiresHostAndExactInput(t *testing.T) {
 		t.Fatal("claim overwrote unresolved owner", status, err)
 	}
 }
+
+func TestSessionNativeActiveOwnedRequiresHostAndExactSession(t *testing.T) {
+	if !Sessions.Ops[opSessionNativeActiveOwned].HostOnly {
+		t.Fatal("active source discovery lost host gate")
+	}
+	for _, f := range [][]string{nil, {"actor"}, {"", "session"}, {"actor", ""}, {"actor", strings.Repeat("s", 129)}, {"actor", "session", "extra"}} {
+		status, cells, err := sessionNativeActiveOwned(context.Background(), newSessDB(), f)
+		if err != nil || status != store.StatusInvalid || len(cells) != 0 {
+			t.Fatal(status, cells, err)
+		}
+	}
+	db := newSessDB()
+	frame, err := wire.EncodeFields(opSessionNativeActiveOwned, []string{"actor", "session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, status := Sessions.Handler(db)(bus.ModuleInvocation{StageID: StageSessions, PrincipalRef: 7}, frame)
+	if status != bus.ModuleStatusInvalidRequest || len(db.executed) != 0 {
+		t.Fatal("untrusted discovery bypassed host admission", status, db.executed)
+	}
+}

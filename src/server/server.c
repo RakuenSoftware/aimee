@@ -5,6 +5,7 @@
 #endif
 #include "workspace_hook_scope.h"
 #include <aimee/translation/hook_ir.h>
+#include <aimee/ir/session_event.h>
 #include "server_internal.h"
 #include "aimee.h"
 #include "harness_memory_scope.h" /* hmem_scope_for_client */
@@ -34,6 +35,10 @@
 #include "server_coord_dispatcher.h"
 #include "server_skill.h"
 #include "server_compute_impl.h"
+#include "server_native_execution.h"
+#include "server_native_history.h"
+#include "server_unknown_effect_policy.h"
+#include "primary_session_adapter.h"
 #include "module_stage_adapters.h"
 #include "trigger_scheduler.h"
 #include "server_trigger.h"
@@ -1940,6 +1945,14 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
       return -1;
    }
 
+   /* Install host custody/policy before any background worker starts. Detached
+    * delegates can outlive a bounded shutdown drain, so these fail-closed hooks
+    * remain installed for the process lifetime, including store teardown. */
+   primary_session_adapter_set_native_reconcile(server_native_session_reconcile);
+   primary_session_adapter_set_native_history_load(server_native_history_load);
+   aimee_ir_history_set_host_admission(server_native_history_admit_current);
+   policy_set_unknown_effect_gate(server_unknown_effect_policy_stage);
+
    /* The legacy NDJSON RPC listener was removed: aimee-server serves only the
     * /v1 HTTP surface (server_http.c binds its own UDS + optional TCP). No Unix
     * RPC socket is created here, so there is no stale-socket / symlink check and
@@ -2277,6 +2290,7 @@ void server_shutdown(server_ctx_t *ctx)
    delegate_ondemand_drain(5000);
    /* Shut down compute pool (drain in-flight work) */
    compute_pool_shutdown(&ctx->pool);
+   server_native_execution_shutdown();
    pthread_cond_destroy(&ctx->compute_budget_cond);
    pthread_mutex_destroy(&ctx->compute_budget_mutex);
    pthread_mutex_destroy(&ctx->conns_mutex);

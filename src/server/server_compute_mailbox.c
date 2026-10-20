@@ -304,28 +304,5 @@ char *delegation_request_input(const char *question)
 {
    if (server_control_scope_current())
       return server_session_question(question, DELEGATION_INPUT_TIMEOUT);
-   delegation_mailbox_t *mailbox = tl_mailbox;
-   if (!mailbox_retain(mailbox))
-      return NULL;
-
-   /* Record the question */
-   (void)db1_delegation_message_record(mailbox->delegation_id, "delegate_to_parent", question);
-
-   /* Wait for parent reply */
-   char reply[4096];
-   if (mailbox_wait(mailbox, reply, sizeof(reply), DELEGATION_INPUT_TIMEOUT) != 0)
-   {
-      mailbox_put(mailbox);
-      return NULL;
-   }
-
-   /* Record the reply */
-   (void)db1_delegation_message_record(mailbox->delegation_id, "parent_to_delegate", reply);
-
-   mailbox_put(mailbox);
-   size_t len = strlen(reply);
-   char *out = malloc(len + 1);
-   if (out)
-      memcpy(out, reply, len + 1);
-   return out;
+   return safe_strdup("error: request_input requires an owned canonical execution control scope");
 }

@@ -8,6 +8,30 @@
 #include <string.h>
 #include <time.h>
 static int results[4];
+static void private_execution_alias(void)
+{
+   server_control_scope_t *scope =
+       server_control_scope_open_execution("child", "child-turn", "alice", "parent");
+   assert(scope && !server_control_scope_bind(scope));
+   server_control_scope_t *lease = NULL;
+   assert(!server_control_scope_capture("parent", "alice", &lease) && lease == scope);
+   server_control_scope_release(lease);
+   assert(!server_control_scope_capture("child", "alice", &lease) && lease == scope);
+   server_control_scope_release(lease);
+   assert(server_control_scope_capture("parent", "mallory", &lease) < 0 && !lease);
+   assert(server_control_scope_capture("other-child", "alice", &lease) < 0 && !lease);
+   cJSON *request = cJSON_Parse("{\"tool\":\"write_file\",\"input\":{}}");
+   cJSON *reply = cJSON_Parse("{\"decision\":\"deny\"}");
+   assert(!server_control_register(scope, "p", "permission", request));
+   assert(server_control_reply("parent", "child-turn:p", "alice", reply) == 1);
+   assert(server_control_reply("child", "wrong-turn:p", "alice", reply) == 1);
+   assert(server_control_reply("child", "child-turn:p", "mallory", reply) < 0);
+   assert(!server_control_reply("child", "child-turn:p", "alice", reply));
+   server_control_scope_close(scope);
+   assert(server_control_reply("child", "child-turn:p", "alice", reply) == 1);
+   cJSON_Delete(request);
+   cJSON_Delete(reply);
+}
 static void *answer(void *arg)
 {
    size_t n = (size_t)arg;
@@ -191,6 +215,7 @@ static void host_control_reservation(void)
 
 int main(void)
 {
+   private_execution_alias();
    host_control_reservation();
    unrelated_scope_remains_responsive();
    retained_owner_teardown();

@@ -80,6 +80,7 @@ const { chromium } = require('../frontend/node_modules/playwright');
     ];
     const bindings = [];
     let controlReplies = 0;
+    let lastControlReply;
     let lookupAgent = '', lookupPersona = 'engineer';
     await page.route(`${origin}/**`, async route => {
       const request = route.request();
@@ -87,7 +88,7 @@ const { chromium } = require('../frontend/node_modules/playwright');
       const p = url.pathname;
       if (p === '/api/chat/send' || p === '/api/chat/session-events') return route.continue();
       if (!p.startsWith('/api/')) return route.fulfill({ contentType: 'text/html', body: html });
-      if (p === '/api/chat/control-reply') controlReplies++;
+      if (p === '/api/chat/control-reply') { controlReplies++; lastControlReply = request.postDataJSON(); }
       if ((p === '/api/chat/primary' || p === '/api/chat/persona') && request.method() === 'POST')
         return route.fulfill({contentType:'application/json',body:JSON.stringify(request.postDataJSON())});
       if (p === '/api/chat/session' && request.method() === 'POST') {
@@ -272,8 +273,178 @@ const { chromium } = require('../frontend/node_modules/playwright');
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await page.waitForFunction(() => document.querySelector('select[aria-label="Persona"]')?.value === '');
     assert.equal(await page.getByRole('combobox', {name:'Persona',exact:true}).locator('option:checked').textContent(), 'Session default');
+    event({ kind: 'message', message_id: 'interrupted-call', partial: true, native_owner: { version: 1, harness: 'codex', owner_id: 'a'.repeat(32), binding_sha256: 'b'.repeat(64), containment_sha256: 'c'.repeat(64), epoch: '0' }, payload: { role: 'assistant', blocks: [
+      { type: 'tool_use', tool_id: 'lost-effect', name: 'write_file', input: { path: 'report.md' } },
+    ] } });
+    const interrupted = histories.get(sent.aimee_session_id).at(-1);
+    await page.getByText('Running: write_file', { exact: true }).waitFor();
+    event({ kind: 'execution', payload: { status: 'cancelled' } });
+    const terminal = histories.get(sent.aimee_session_id).at(-1);
+    const interruption = event({ kind: 'tool_interruption', payload: { version: 1,
+      source: { session_id: interrupted.session_id, turn_id: interrupted.turn_id, sequence: interrupted.sequence,
+        event_id: interrupted.event_id, actor: interrupted.actor, message_id: 'interrupted-call', block_index: 0,
+        tool_id: 'lost-effect', name: 'write_file' },
+      owner: { owner_id: 'a'.repeat(32), binding_sha256: 'b'.repeat(64), containment_sha256: 'c'.repeat(64), epoch: '0' },
+      terminal_sequence: terminal.sequence, outcome: 'unknown', retry: 'explicit_permission_required' } });
+    const unknown = page.getByText('Tool: write_file — outcome unknown', { exact: true });
+    await unknown.waitFor();
+    await unknown.click();
+    await page.getByText("The host lost this tool's completion result.", { exact: false }).waitFor();
+    const outcomeNote = page.getByRole('note');
+    assert.equal(await outcomeNote.getAttribute('aria-live'), 'off', 'Historical unknown outcome is a passive note');
+    const outcomeContrast = () => outcomeNote.evaluate(element => {
+      const rgb = value => (value.match(/[\d.]+/g) || []).map(Number);
+      const luminance = color => color.slice(0, 3).map(channel => {
+        const value = channel / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+      const card = element.closest('details');
+      const background = rgb(getComputedStyle(card).backgroundColor);
+      const foreground = rgb(getComputedStyle(element).color);
+      return (Math.max(luminance(background), luminance(foreground)) + 0.05) /
+        (Math.min(luminance(background), luminance(foreground)) + 0.05);
+    });
+    const previousTheme = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+      const warningContrast = await outcomeContrast();
+      assert.ok(warningContrast >= 4.5, `${theme} unknown outcome note contrast was ${warningContrast.toFixed(2)}:1`);
+    }
+    await page.evaluate(theme => {
+      if (theme === null) delete document.documentElement.dataset.theme;
+      else document.documentElement.dataset.theme = theme;
+    }, previousTheme);
+    const cardColors = await page.evaluate(() => {
+      const cards = [...document.querySelectorAll('.chat-messages details')];
+      const unknown = cards.find(card => card.querySelector('p[role="note"]'));
+      const ordinary = cards.find(card => card.querySelector('summary')?.textContent === 'Tool: inspect_workspace');
+      return [getComputedStyle(unknown).backgroundColor, getComputedStyle(unknown).borderLeftColor,
+        getComputedStyle(ordinary).backgroundColor, getComputedStyle(ordinary).borderLeftColor];
+    });
+    assert.notEqual(cardColors[0], cardColors[2], 'Unknown effect must have a distinct background');
+    assert.notEqual(cardColors[1], cardColors[3], 'Unknown effect must have a distinct border');
+    for (const response of subscribers.get(sent.aimee_session_id) || []) response.write(interruption);
+    assert.equal(await unknown.count(), 1);
+    assert.equal(controlReplies, 1);
+    assert.equal(await page.getByRole('button', { name: 'Send answers', exact: true }).count(), 0);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.getByText("The host lost this tool's completion result.", { exact: false }).scrollIntoViewIfNeeded();
+    const metadataReconnect = page.waitForRequest(request => new URL(request.url()).pathname === '/api/chat/session-events');
+    for (const response of subscribers.get(sent.aimee_session_id) || []) response.end();
+    await metadataReconnect;
+    await unknown.waitFor();
+    assert.equal(await unknown.count(), 1);
+    assert.equal(controlReplies, 1);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.getByText("The host lost this tool's completion result.", { exact: false }).scrollIntoViewIfNeeded();
+    currentTurn = 'unknown-permission-turn';
+    event({ kind: 'execution', payload: { status: 'running' } });
+    const permissionDescription = "An earlier tool's effects are unknown. Allow this requested action once? This does not confirm or retry the earlier action automatically.";
+    const permissionID = `${currentTurn}:unknown-effect:${'d'.repeat(64)}`;
+    const permissionFrame = event({ kind: 'control_request', request_id: permissionID, control_kind: 'permission',
+      payload: { tool: 'write_file', description: permissionDescription,
+        input: { session_id: sent.aimee_session_id, turn_id: currentTurn, actor: 'private-actor', request_id: 'private-provider-request', attempt_id: 'private-host-attempt',
+          tool: 'write_file', arguments: { path: 'new-report.md', content: 'A separately requested action' },
+          unknown_receipts: { sha256: 'e'.repeat(64), count: 1, displayed: 1,
+            sources: [{ event_id: 'private-receipt-event', session_id: sent.aimee_session_id, turn_id: 'private-old-turn', sequence: interrupted.sequence, tool_id: 'lost-effect', name: 'write_file' }] } } } });
+    await page.getByText(permissionDescription, { exact: true }).waitFor();
+    const permissionCard = page.locator('.ir-control').filter({ hasText: permissionDescription });
+    assert.match(await permissionCard.textContent(), /1 earlier tool outcome remains unknown/);
+    assert.match(await permissionCard.textContent(), /new-report\.md/);
+    assert.match(await permissionCard.textContent(), /A separately requested action/);
+    for (const hidden of [sent.aimee_session_id, 'private-actor', currentTurn, 'private-provider-request', 'private-host-attempt', 'private-receipt-event', 'e'.repeat(64), 'unknown_receipts', 'sha256'])
+      assert.ok(!(await permissionCard.textContent()).includes(hidden), `Internal permission metadata shown: ${hidden}`);
+    currentTurn = 'rejected-steer-turn';
+    const steeringReason = 'Steering continuation was not dispatched; no model or tool executed. Send it again explicitly.';
+    event({ kind: 'execution', payload: { status: 'running' } });
+    event({ kind: 'execution', payload: { status: 'failed', error: JSON.stringify({ reason: steeringReason, dispatched: false,
+      submitted_input_sha256: 'e'.repeat(64), submitted_input_bytes: 2000,
+      submitted_input_preview: '<script>Do not execute this submitted text.</script>\nReview the changes first.', submitted_input_truncated: true }) } });
+    await page.getByText(steeringReason, { exact: true }).waitFor();
+    assert.equal(await page.getByText('Submitted text (shortened):', { exact: true }).count(), 1);
+    assert.equal(await page.locator('blockquote').textContent(), '<script>Do not execute this submitted text.</script>\nReview the changes first.');
+    assert.equal(await page.getByText('submitted_input_sha256', { exact: false }).count(), 0);
+    for (const [name, width, theme] of [['desktop', 1280, 'light'], ['mobile', 390, 'light'], ['dark', 1280, 'dark']]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+      await page.locator('.ir-control').filter({ hasText: permissionDescription }).scrollIntoViewIfNeeded();
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Permission and steering diagnostics overflow ${name}`);
+      if (process.env.AIMEE_BROWSER_DIAGNOSTIC_SCREENSHOT_PREFIX)
+        await page.screenshot({ path: `${process.env.AIMEE_BROWSER_DIAGNOSTIC_SCREENSHOT_PREFIX}-${name}.png` });
+      await page.locator('blockquote').scrollIntoViewIfNeeded();
+      if (process.env.AIMEE_BROWSER_DIAGNOSTIC_SCREENSHOT_PREFIX)
+        await page.screenshot({ path: `${process.env.AIMEE_BROWSER_DIAGNOSTIC_SCREENSHOT_PREFIX}-steer-${name}.png` });
+    }
+    assert.equal(controlReplies, 1, 'Presenting diagnostics and a new permission must not send a reply');
+    const decline = page.getByRole('button', { name: 'Decline', exact: true });
+    await decline.click();
+    await page.getByText('permission: Reply sent', { exact: false }).waitFor();
+    assert.equal(controlReplies, 2);
+    const permissionReconnect = page.waitForRequest(request => new URL(request.url()).pathname === '/api/chat/session-events');
+    for (const response of subscribers.get(sent.aimee_session_id) || []) response.end();
+    await permissionReconnect;
+    await page.getByText('permission: Reply sent', { exact: false }).waitFor();
+    assert.equal(await decline.isDisabled(), true);
+    assert.equal(controlReplies, 2, 'Reconnect must not resend the declined permission');
+    currentTurn = 'unknown-permission-turn';
+    event({ kind: 'control_response', request_id: permissionID, control_kind: 'permission', payload: { decision: 'deny' } });
+    event({ kind: 'execution', payload: { status: 'completed' } });
+    for (const response of subscribers.get(sent.aimee_session_id) || []) response.write(permissionFrame);
+    await page.getByText('Resolved requests (2)', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Allow once', exact: true }).count(), 0);
+    assert.equal(controlReplies, 2, 'Duplicate historical permission cannot reopen or resubmit');
+    const deniedReconnect = page.waitForRequest(request => new URL(request.url()).pathname === '/api/chat/session-events');
+    for (const response of subscribers.get(sent.aimee_session_id) || []) response.end();
+    await deniedReconnect;
+    await page.getByText('Resolved requests (2)', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Allow once', exact: true }).count(), 0);
+    assert.equal(controlReplies, 2);
+    currentTurn = 'delegating-parent';
+    event({ kind: 'execution', payload: { status: 'running' } });
+    event({ kind: 'child_execution', payload: { session_id: 'private-browser-child', turn_id: 'child-turn', role: 'review', status: 'running' } });
+    event({ kind: 'execution', payload: { status: 'completed' } });
+    const childHistory = [];
+    histories.set('private-browser-child', childHistory);
+    const childEvent = value => {
+      const record = { version: 1, session_id: 'private-browser-child', turn_id: 'child-turn', sequence: String(childHistory.length + 1),
+        event_id: `child-${childHistory.length + 1}`, actor: 'alice', event: value };
+      childHistory.push(record);
+      for (const response of subscribers.get('private-browser-child') || []) response.write(encode(record));
+    };
+    childEvent({ kind: 'execution', payload: { status: 'running' } });
+    childEvent({ kind: 'control_request', request_id: 'child-turn:question', control_kind: 'question', payload: { questions: [
+      { id: 'answer', question: 'Child needs approval?', multiple: false, options: [] },
+    ] } });
+    const childDetails = page.getByText('Delegate: review — running', { exact: true });
+    await childDetails.click();
+    const childAnswer = page.getByRole('button', { name: 'Send answers', exact: true });
+    await childAnswer.waitFor();
+    await page.getByRole('textbox', { name: 'Your answer: Child needs approval?' }).fill('Approved child answer');
+    await childAnswer.click();
+    await page.getByText('question: Reply sent', { exact: false }).waitFor();
+    assert.deepEqual(lastControlReply, { session_id: 'private-browser-child', request_id: 'child-turn:question',
+      reply: { decision: 'allow', answers: { answer: ['Approved child answer'] } } });
+    assert.equal(controlReplies, 3);
+    await childDetails.click();
+    await childDetails.click();
+    await childAnswer.waitFor();
+    assert.equal(await childAnswer.isDisabled(), true, 'Child collapse/reopen must retain accepted pending reply');
+    assert.equal(controlReplies, 3);
+    childEvent({ kind: 'control_response', request_id: 'child-turn:question', control_kind: 'question', payload: {
+      decision: 'allow', answers: { answer: ['Approved child answer'] } } });
+    childEvent({ kind: 'control_request', request_id: 'child-turn:late-permission', control_kind: 'permission', payload: { title: 'Child finishing request' } });
+    await page.getByRole('button', { name: 'Allow once', exact: true }).waitFor();
+    childEvent({ kind: 'execution', payload: { status: 'cancelled' } });
+    await page.getByText('permission: Closed', { exact: false }).waitFor({ state: 'attached' });
+    assert.equal(await page.getByRole('button', { name: 'Allow once', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: 'Send answers', exact: true }).count(), 0);
+    await childDetails.click();
+    await childDetails.click();
+    await page.getByText('permission: Closed', { exact: false }).waitFor({ state: 'attached' });
+    assert.equal(await page.getByRole('button', { name: 'Allow once', exact: true }).count(), 0);
+    assert.equal(controlReplies, 3, 'Child terminal replay must never reopen or resend controls');
     assert.deepEqual(errors, []);
-    console.log('Webchat browser regressions passed: canonical POST/SSE overlap and reconnect stay unique; history survives refresh, reordering, navigation and reload; projects stay bound; tool output remains readable; mobile conversation/composer and wrapped session preferences remain usable.');
+    console.log('Webchat browser regressions passed: canonical POST/SSE overlap and reconnect stay unique; history survives refresh, reordering, navigation and reload; projects stay bound; tool output remains readable; interrupted effects stay unknown through replay without control retries; mobile conversation/composer and wrapped session preferences remain usable.');
   } finally {
     if (browser) await browser.close();
     server.closeAllConnections();

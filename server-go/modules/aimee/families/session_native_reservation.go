@@ -211,6 +211,9 @@ func nativeReservationFence(ctx context.Context, q store.Queryer, v nativeReserv
 		}
 		terminal = cells[0]
 	}
+	if err := nativeRecordInterruptions(ctx, q, v, terminal); err != nil {
+		return "", err
+	}
 	sequence, err := strconv.ParseInt(terminal, 10, 64)
 	if err != nil || sequence < 1 {
 		return "", fmt.Errorf("invalid native reservation terminal")
@@ -399,7 +402,34 @@ func sessionNativeReservationFinish(ctx context.Context, q store.Queryer, f []st
 	}
 	v, err := nativeReservationRead(ctx, q, r)
 	if store.IsNoRows(err) {
-		return store.StatusMissing, nil, nil
+		// No SDK was admitted by this nonce. A real terminal plus the held session
+		// lock permanently prevents a delayed reserve from admitting it afterwards.
+		if r.Expected != "" {
+			return store.StatusInvalid, nil, nil
+		}
+		epoch, err := nativeEpochCurrent(ctx, q, r, f[0])
+		if err != nil {
+			return 0, nil, err
+		}
+		if epoch != r.Epoch {
+			return store.StatusMissing, nil, nil
+		}
+		state, terminal, _, err := nativeOwnerLifecycle(ctx, q, f[0], nativeOwnerRequest{Session: r.Session, Turn: r.Turn})
+		if err != nil {
+			return 0, nil, err
+		}
+		if state == "running" {
+			return store.StatusInvalid, nil, nil
+		}
+		var active, claimed bool
+		err = q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM session_native_reservations WHERE session_id=$1 AND harness=$2 AND binding_sha256=$3 AND state='active'),EXISTS(SELECT 1 FROM session_native_cache_owners WHERE session_id=$1 AND harness=$2 AND binding_sha256=$3 AND owner_id=$4)`, r.Session, r.Harness, r.Binding, r.Owner).Scan(&active, &claimed)
+		if err != nil {
+			return 0, nil, err
+		}
+		if active || claimed {
+			return store.StatusMissing, nil, nil
+		}
+		return store.StatusOK, []string{terminal, epoch, "absent"}, nil
 	}
 	if err != nil {
 		return 0, nil, err
@@ -425,7 +455,7 @@ func sessionNativeReservationFinish(ctx context.Context, q store.Queryer, f []st
 		if r.Expected != v.FinishedFrom || terminal != v.Terminal {
 			return store.StatusInvalid, nil, nil
 		}
-		return store.StatusOK, []string{terminal, epoch}, nil
+		return store.StatusOK, []string{terminal, epoch, "finished"}, nil
 	}
 	if v.Claim != "" {
 		ownerRequest := nativeReservationSource(v)
@@ -447,10 +477,13 @@ func sessionNativeReservationFinish(ctx context.Context, q store.Queryer, f []st
 	} else if r.Expected != "" {
 		return store.StatusInvalid, nil, nil
 	}
+	if err := nativeRecordInterruptions(ctx, q, v, terminal); err != nil {
+		return 0, nil, err
+	}
 	sequence, err := strconv.ParseInt(terminal, 10, 64)
 	if err != nil || sequence < 1 {
 		return 0, nil, fmt.Errorf("invalid native finish terminal")
 	}
 	_, err = q.Exec(ctx, `UPDATE session_native_reservations SET state='finished',terminal_sequence=$5,finished_from=$6 WHERE session_id=$1 AND harness=$2 AND binding_sha256=$3 AND owner_id=$4`, r.Session, r.Harness, r.Binding, r.Owner, sequence, r.Expected)
-	return store.StatusOK, []string{terminal, epoch}, err
+	return store.StatusOK, []string{terminal, epoch, "finished"}, err
 }

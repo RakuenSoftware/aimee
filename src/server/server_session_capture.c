@@ -477,7 +477,10 @@ int server_session_capture_append(server_session_capture_t *owner,
    snprintf(event_id, sizeof event_id, "%s:%llu", owner->turn, ++owner->counts.counter);
    char *wire = cJSON_PrintUnformatted(payload);
    if (wire)
-      result = admitted.verification_proofs
+      result = admitted.native_owner
+                   ? db1_session_native_source_append(owner->session, event_id, owner->turn,
+                                                      owner->principal, wire, committed)
+               : admitted.verification_proofs
                    ? db1_session_ir_append_verified(owner->session, event_id, owner->turn,
                                                     owner->principal, wire, committed)
                    : db1_session_ir_append(owner->session, event_id, owner->turn, owner->principal,

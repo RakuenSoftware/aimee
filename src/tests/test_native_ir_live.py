@@ -7,6 +7,7 @@ no live subscription or KB is used.
 """
 import base64
 import http.client
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ import socket
 import shutil
 import subprocess
 import threading
+import tempfile
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,8 +45,85 @@ def api(path, body=None, expected=200, limits=None):
         connection.close()
 
 
+# This probe is read-only. Qualification requires actual daemon-created source,
+# reservation and cache-owner rows; an enabled option or successful fallback is
+# insufficient. It never fabricates lifecycle or cache state.
+READ_CONTAINMENT = r'''
+package main
+import("context";"encoding/json";"os";"time";"github.com/jackc/pgx/v5")
+func main(){
+ ctx,cancel:=context.WithTimeout(context.Background(),15*time.Second);defer cancel()
+ conn,err:=pgx.Connect(ctx,os.Getenv("AIMEE_STORE_URL"));if err!=nil{panic("qualification PostgreSQL unavailable")};defer conn.Close(ctx)
+ rows,err:=conn.Query(ctx,`SELECT jsonb_build_object('reservation',to_jsonb(r),
+ 'terminal',e.payload::jsonb,'terminal_actor',e.actor,'terminal_turn',e.turn_id,
+ 'running_count',(SELECT count(*) FROM session_ir_events x WHERE x.session_id=r.session_id AND x.turn_id=r.turn_id AND x.actor=r.actor AND x.payload::jsonb->>'kind'='execution' AND x.payload::jsonb->'payload'->>'status'='running'),
+ 'terminal_count',(SELECT count(*) FROM session_ir_events x WHERE x.session_id=r.session_id AND x.turn_id=r.turn_id AND x.payload::jsonb->>'kind'='execution' AND x.payload::jsonb->'payload'->>'status' IN ('completed','failed','cancelled')),
+ 'owner',to_jsonb(o),'cache_token',h.native_id)::text
+ FROM session_native_reservations r JOIN server_sessions s ON s.id=r.session_id AND s.principal=$2
+ LEFT JOIN session_ir_events e ON e.session_id=r.session_id AND e.sequence=r.terminal_sequence
+ LEFT JOIN session_native_cache_owners o ON o.session_id=r.session_id AND o.owner_id=r.owner_id AND o.turn_id=r.turn_id
+ LEFT JOIN session_harness_handles h ON h.session_id=o.session_id AND h.harness=o.cache_key
+ WHERE r.session_id=$1 AND r.actor=$2 AND r.harness=$3 ORDER BY r.created_at,r.owner_id LIMIT 17`,os.Args[1],os.Args[2],os.Args[3]);if err!=nil{panic(err)};defer rows.Close()
+ out:=[]json.RawMessage{};for rows.Next(){var raw string;if err=rows.Scan(&raw);err!=nil{panic(err)};out=append(out,json.RawMessage(raw))};if err=rows.Err();err!=nil{panic(err)}
+ if err=json.NewEncoder(os.Stdout).Encode(out);err!=nil{panic(err)}
+}
+'''
+
+
+def assert_containment_rows(rows, sid, actor, kind, turns):
+    assert len(rows) == len(turns) == 2, ("required containment used fallback or leaked ownership", sid, rows)
+    assert {row["reservation"]["turn_id"] for row in rows} == set(turns), rows
+    for row in rows:
+        reservation = row["reservation"]
+        assert reservation["session_id"] == sid and reservation["actor"] == actor, row
+        assert reservation["harness"] == kind and reservation["state"] == "finished", row
+        assert reservation["terminal_sequence"] > 0 and row["terminal_actor"] == actor, row
+        assert row["terminal_turn"] == reservation["turn_id"], row
+        assert row["terminal"]["kind"] == "execution" and row["terminal"]["payload"]["status"] == "completed", row
+        assert row["running_count"] == row["terminal_count"] == 1, row
+        for field, length in (("binding_sha256", 64), ("containment_sha256", 64),
+                              ("scope_sha256", 64), ("context_sha256", 64),
+                              ("owner_id", 32), ("claim_id", 32)):
+            value = reservation[field]
+            assert len(value) == length and all(c in "0123456789abcdef" for c in value), (field, row)
+        manifest_text = reservation["containment_json"]
+        assert hashlib.sha256(manifest_text.encode()).hexdigest() == reservation["containment_sha256"], row
+        manifest = json.loads(manifest_text)
+        assert manifest["version"] == 1 and manifest["kind"] == "linux_cgroup_v2_namespace", row
+        assert manifest["protocol"] == "user-mount-pid-cgroup-network-write-preexec-v3", row
+        assert len(manifest["tcp_ports"]) == 1 and 0 < manifest["tcp_ports"][0] <= 65535, row
+        token = "complete:" + reservation["claim_id"] + ":" + reservation["turn_id"]
+        assert reservation["finished_from"] == token and not reservation["recovery_epoch"], row
+    # A resumed turn may replace the first turn's cache owner row. The latest
+    # actual owner must still agree with its durable reservation and cache CAS.
+    latest = rows[-1]
+    owner = latest["owner"]
+    assert owner, latest
+    for field in ("actor", "turn_id", "harness", "scope_sha256", "context_sha256",
+                  "binding_sha256", "owner_id", "claim_id", "containment_sha256"):
+        assert owner[field] == latest["reservation"][field], latest
+    assert latest["cache_token"] == latest["reservation"]["finished_from"], latest
+
+
+def build_containment_probe(directory):
+    source = Path(directory) / "containment.go"
+    source.write_text(READ_CONTAINMENT)
+    probe = Path(directory) / "read-containment"
+    repository = Path(__file__).resolve().parents[2]
+    built = subprocess.run([os.environ.get("GO", "go"), "-C", str(repository / "server-go"),
+                            "build", "-o", str(probe), str(source)],
+                           capture_output=True, text=True, timeout=120)
+    assert built.returncode == 0, built.stdout + built.stderr
+    return probe
+
+
 def main():
     home = Path(os.environ["AIMEE_HOME"])
+    require_containment = os.environ.get("AIMEE_TEST_NATIVE_REQUIRE_CONTAINMENT") == "1"
+    if require_containment:
+        assert os.environ.get("AIMEE_NATIVE_CONTAINMENT_ROOT"), "required containment root unset"
+    qualification_directory = tempfile.TemporaryDirectory(prefix="native-qualification-", dir=home) if require_containment else None
+    qualification_probe = build_containment_probe(qualification_directory.name) if require_containment else None
     workspace = Path(os.environ["AIMEE_IR_DELEGATE_WORKSPACE"])
     from test_native_ir_browser_control import prepare_browser_workspace, assert_completed_parent
     workspace = prepare_browser_workspace(api, home, workspace)
@@ -67,6 +146,7 @@ def main():
     active = None
     async_case = False
     browser_question = False
+    browser_delegate_question = False
     delegation_case = False
     delegation_released = threading.Event()
     child_requests = []
@@ -91,11 +171,15 @@ def main():
                     results = [message for message in request.get("messages", []) if message.get("role") == "tool"]
                     message = dict(role="assistant", content="CHILD_MIRROR_OK")
                     if not results:
+                        tool = "request_input" if browser_delegate_question else "read_file"
+                        assert tool in names, (tool, names)
                         message = dict(role="assistant", tool_calls=[dict(id="native-child-read", type="function",
-                            function=dict(name="read_file", arguments=json.dumps(dict(path="README.md"))))])
+                            function=dict(name=tool, arguments=json.dumps(dict(question="DELEGATE_BROWSER_QUESTION") if browser_delegate_question else dict(path="README.md"))))])
                     else:
-                        assert "canonical delegate fixture" in json.dumps(results), results
+                        assert ("DELEGATE_BROWSER_REPLY" if browser_delegate_question else "canonical delegate fixture") in json.dumps(results), results
                         assert "CLIENT_CWD_MUST_NOT_BE_READ" not in json.dumps(results), results
+                        if browser_delegate_question:
+                            message["content"] = "CHILD_BROWSER_QUESTION_OK"
                     self.send_payload(dict(id="native-child-response", model="native-delegate-child",
                         choices=[dict(index=0, message=message, finish_reason="stop" if results else "tool_calls")],
                         usage=dict(prompt_tokens=100, completion_tokens=10)))
@@ -144,7 +228,7 @@ def main():
                     assert marker + "_FOLLOWUP" in encoded
                 text = marker + ("_FINAL" if count == (3 if delegation_case else 2) else "_RESUMED")
                 arguments = json.dumps(dict(role="diagnose", persona="engineer", via="native-delegate-child", tools=True,
-                    prompt="Read README.md and report the committed source") if delegation_case else
+                    prompt="Ask the browser operator a question and report its actual answer" if browser_delegate_question else "Read README.md and report the committed source") if delegation_case else
                     {"question": "BROWSER_QUESTION"} if browser_question else {"path": "README.md"})
                 if delegation_case and count == 2:
                     jobs = set(job_ids(request))
@@ -277,6 +361,7 @@ def main():
             attachment = api(f"/v1/sessions/{sid}/attach", {"surface": "webchat", "owner": actor})["attach_id"]
             api(f"/v1/sessions/{sid}/primary", {"agent": marker})
             try:
+                qualified_turns = []
                 for label in ("FIRST", "FOLLOWUP"):
                     if label == "FOLLOWUP":
                         if auth != "api_key":
@@ -305,9 +390,28 @@ def main():
                     records = [json.loads(line) for line in raw.splitlines() if line.strip()]
                     assert not errors, errors
                     assert_completed_parent(records)
+                    actual_turns = {record["turn_id"] for record in records
+                                    if record["event"]["kind"] == "execution"
+                                    and record["event"]["payload"]["status"] == "running"}
+                    assert len(actual_turns) == 1, records
+                    qualified_turns.extend(actual_turns)
                     expected = marker + ("_FINAL" if label == "FIRST" else "_RESUMED")
                     assert expected in raw, raw[-8000:]
                 assert count == 3, (active, count)
+                if qualification_probe:
+                    deadline = time.monotonic() + 10
+                    while True:
+                        checked = subprocess.run([str(qualification_probe), sid, actor, kind],
+                                                 capture_output=True, text=True, timeout=20)
+                        assert checked.returncode == 0, checked.stderr
+                        ownership = json.loads(checked.stdout)
+                        if len(ownership) == 2 and all(row["reservation"]["state"] == "finished" for row in ownership):
+                            break
+                        assert time.monotonic() < deadline, ("required containment fallback or unfinished owner", sid, ownership)
+                        time.sleep(0.05)
+                    assert_containment_rows(ownership, sid, actor, kind, qualified_turns)
+                    print("native containment qualification:", kind, wire, auth,
+                          "actual tool/model + resumed SDK turns, v3 descriptor/hash, terminal and cache custody pass", flush=True)
                 connection = Local("localhost")
                 try:
                     connection.request("GET", f"/v1/sessions/{sid}/events?format=ir&cursor=0")
@@ -432,6 +536,20 @@ def main():
                 run_browser_control(api, home, workspace, marker)
                 assert count == 2 and not errors, (active, count, errors)
             browser_question = False
+            if sandbox_ready:
+                from test_native_ir_browser_control import run_browser_delegate_control
+                delegation_case = browser_delegate_question = True
+                for kind, wire in (("codex", "chatgpt"), ("claude", "anthropic")):
+                    marker = case_name(kind, wire, "api_key")
+                    active = (kind, wire, marker, "toolu_browser_delegate_" + kind)
+                    count = 0
+                    child_before = len(child_requests)
+                    run_browser_delegate_control(api, home, workspace, marker, delegation_released)
+                    assert count == 3 and len(child_requests) == child_before + 2 and not errors, (count, child_requests[child_before:], errors)
+                delegation_case = browser_delegate_question = False
+            else:
+                assert not os.environ.get("CI"), "CI delegate browser controls require actual Docker"
+                print("native integration: SKIP private delegate browser controls require actual Docker", flush=True)
         # Qualified SDKs must still stop at the actual host wire boundary when
         # the inherited cap admits no bytes. A live SDK is not a budget bypass.
         for kind, wire in (("codex", "chatgpt"), ("claude", "anthropic")):
@@ -485,6 +603,8 @@ def main():
         server.shutdown()
         server.server_close()
         thread.join()
+        if qualification_directory:
+            qualification_directory.cleanup()
 
 
 if __name__ == "__main__":

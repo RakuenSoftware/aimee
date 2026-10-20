@@ -1,5 +1,6 @@
 #include "server_session_log.h"
 #include "server_session_control.h"
+#include "server_session_question.h"
 #include "server_session_capture.h"
 #include "agent_config.h"
 #include "server_learning_outcome.h"
@@ -36,6 +37,55 @@ int agent_get_durable_job_id(void)
 int agent_request_cancelled(void)
 {
    return 0;
+}
+const char *agent_get_request_vault_principal(void)
+{
+   return credentials.vault_principal;
+}
+const char *session_id(void)
+{
+   return credentials.session_id;
+}
+static void *answer_child_question(void *arg)
+{
+   const char *child = arg;
+   for (int tries = 0; tries < 500; ++tries)
+   {
+      char request[192] = "";
+      pthread_mutex_lock(&lock);
+      for (int n = 0; n < count; ++n)
+         if (!strcmp(rows[n].id, child))
+         {
+            const cJSON *event;
+            cJSON_ArrayForEach(event, rows[n].events)
+            {
+               const char *kind =
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "kind"));
+               const char *control =
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "control_kind"));
+               if (kind && control && !strcmp(kind, "control_request") &&
+                   !strcmp(control, "question"))
+                  snprintf(
+                      request, sizeof request, "%s",
+                      cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "request_id")));
+            }
+         }
+      pthread_mutex_unlock(&lock);
+      if (request[0])
+      {
+         cJSON *reply = cJSON_Parse(
+             "{\"decision\":\"allow\",\"answers\":{\"answer\":[\"actual child answer\"]}}");
+         assert(server_control_reply("parent", request, "alice", reply) == 1);
+         assert(server_control_reply(child, request, "mallory", reply) < 0);
+         assert(!server_control_reply(child, request, "alice", reply));
+         cJSON_Delete(reply);
+         return NULL;
+      }
+      const struct timespec tick = {.tv_nsec = 10000000};
+      nanosleep(&tick, NULL);
+   }
+   assert(!"child canonical question was not durably published");
+   return NULL;
 }
 static struct row *find(const char *id)
 {
@@ -227,6 +277,18 @@ int db1_session_ir_append(const char *session, const char *id, const char *turn,
    pthread_mutex_unlock(&lock);
    return 0;
 }
+int db1_session_native_source_append(const char *session, const char *event_id, const char *turn,
+                                     const char *actor, const char *payload, char sequence[32])
+{
+   (void)session;
+   (void)event_id;
+   (void)turn;
+   (void)actor;
+   (void)payload;
+   (void)sequence;
+   assert(0 && "ordinary session log cannot write protected native source");
+   return -1;
+}
 int db1_session_ir_history_load(const char *session, const char *scope, const char *actor,
                                 const char *active_turn, char **out)
 {
@@ -253,6 +315,23 @@ int db1_session_ir_history_load(const char *session, const char *scope, const ch
    }
    pthread_mutex_unlock(&lock);
    return *out ? 0 : 1;
+}
+int server_native_history_load(const char *session, const char *actor, const char *active,
+                               int running, cJSON **messages, cJSON **receipts)
+{
+   assert(!running);
+   char *wire = NULL;
+   int rc = db1_session_ir_history_load(session, "primary", actor, active, &wire);
+   *messages = !rc && wire ? cJSON_Parse(wire) : NULL;
+   *receipts = cJSON_CreateArray();
+   free(wire);
+   if (rc || !*messages || aimee_ir_history_admit(*messages))
+   {
+      cJSON_Delete(*messages);
+      *messages = NULL;
+      return -1;
+   }
+   return 0;
 }
 int db1_session_ir_history_save(const char *session, const char *checkpoint, const char *scope,
                                 const char *actor, const char *wire)
@@ -563,11 +642,51 @@ int main(void)
    assert(!server_session_log_identity(native_scope, sizeof native_scope, native_principal,
                                        sizeof native_principal));
    assert(!strcmp(native_scope, rows[1].id) && !strcmp(native_principal, "alice"));
+   pthread_t answer_worker;
+   assert(!pthread_create(&answer_worker, NULL, answer_child_question, native_scope));
+   char *answer = server_session_question("Child needs input", 5);
+   assert(answer && !strcmp(answer, "actual child answer"));
+   free(answer);
+   assert(!pthread_join(answer_worker, NULL));
+   server_control_scope_t *child_controls = NULL;
+   assert(!server_control_scope_capture("parent", "alice", &child_controls) && child_controls);
+   cJSON *control_request =
+       cJSON_Parse("{\"tool\":\"write_file\",\"input\":{\"path\":\"child.txt\"}}");
+   assert(!server_control_reserve(child_controls, "private-permission", "permission",
+                                  control_request));
+   aimee_session_event_t control = {.kind = AIMEE_SESSION_CONTROL_REQUEST,
+                                    .request_id = "private-permission",
+                                    .control_kind = "permission",
+                                    .control = control_request};
+   assert(!aimee_ir_session_emit(&control));
+   const char *child_turn = server_session_capture_turn(server_session_capture_current());
+   char qualified[192];
+   snprintf(qualified, sizeof qualified, "%s:private-permission", child_turn);
+   cJSON *deny = cJSON_Parse("{\"decision\":\"deny\"}");
+   assert(server_control_reply("parent", qualified, "alice", deny) == 1);
+   assert(server_control_reply(native_scope, qualified, "mallory", deny) < 0);
+   assert(!server_control_reply(native_scope, qualified, "alice", deny));
+   char *control_id = NULL, *control_kind = NULL;
+   cJSON *original_control = NULL, *decision = NULL;
+   assert(server_control_take(child_controls, "private-permission", &control_id, &control_kind,
+                              &original_control, &decision) == 1);
+   control.kind = AIMEE_SESSION_CONTROL_RESPONSE;
+   control.control = decision;
+   assert(!aimee_ir_session_emit(&control));
+   free(control_id);
+   free(control_kind);
+   cJSON_Delete(original_control);
+   cJSON_Delete(decision);
    assert(server_session_log_identity(native_scope, 2, native_principal, sizeof native_principal) <
           0);
    model_reply();
    native_tool_identity();
    assert(server_session_log_finish(scope, 1, NULL) == 0);
+   assert(server_control_reply(native_scope, qualified, "alice", deny) == 1);
+   assert(server_control_scope_failed(child_controls) == 0);
+   server_control_scope_release(child_controls);
+   cJSON_Delete(control_request);
+   cJSON_Delete(deny);
    aimee_session_event_t finished = {.kind = AIMEE_SESSION_EXECUTION,
                                      .execution_status = "completed"};
    assert(aimee_ir_session_emit(&finished) == 0 && parent_events == 1);

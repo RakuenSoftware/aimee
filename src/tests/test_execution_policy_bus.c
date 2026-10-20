@@ -204,6 +204,24 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    return test_freshness ? 1 : 0;
 }
 
+static int gate_calls, gate_stage, gate_clears;
+static int source_gate_probe(const char *tool, const char *args, const char *attempt,
+                             uint32_t categories, int stage, char *reason, size_t cap)
+{
+   (void)categories;
+   (void)reason;
+   (void)cap;
+   if (stage == 2)
+   {
+      gate_clears++;
+      return 0;
+   }
+   assert(!strcmp(tool, "write_file") && !strcmp(args, "{\"path\":\"/workspace/target\"}") &&
+          !strcmp(attempt, "host-attempt"));
+   gate_calls++;
+   gate_stage = stage;
+   return 0;
+}
 int main(void)
 {
    char reason[256];
@@ -318,6 +336,21 @@ int main(void)
    assert(policy_check_session_tool("session", "bash", "{\"command\":\"rg foo\"}", "hook-detached",
                                     reason, sizeof(reason)) == 0);
    assert(check_session_calls == 3);
+   policy_set_unknown_effect_gate(source_gate_probe);
+   g_reply = "{\"allowed\":true,\"reason\":\"baseline allows\"}";
+   assert(!policy_check_tool_attempt("write_file", "filesystem", "{\"path\":\"/workspace/target\"}",
+                                     "host-attempt", reason, sizeof reason));
+   assert(gate_calls == 1 && gate_stage == 0 && gate_clears > 0);
+   assert(!policy_recheck_action_tool_attempt("write_file", "filesystem",
+                                              "{\"path\":\"/workspace/target\"}", "host-attempt", 0,
+                                              reason, sizeof reason));
+   assert(gate_calls == 2 && gate_stage == 1);
+   g_reply = "{\"allowed\":false,\"reason\":\"baseline refuses\"}";
+   assert(policy_recheck_action_tool_attempt("write_file", "filesystem",
+                                             "{\"path\":\"/workspace/target\"}", "host-attempt", 0,
+                                             reason, sizeof reason) < 0);
+   assert(gate_calls == 2);
+   policy_set_unknown_effect_gate(NULL);
    puts("test_execution_policy_bus: OK");
    return 0;
 }

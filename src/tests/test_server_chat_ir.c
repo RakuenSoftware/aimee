@@ -394,9 +394,74 @@ static void retained_worker_failure_refuses_completion(void)
    }
 }
 
+static void *refuse_json_allocation(size_t size)
+{
+   (void)size;
+   return NULL;
+}
+
+static void failed_steering_admission_is_observation_only(void)
+{
+   compute_ctx_t reset = context();
+   cJSON *request = cJSON_Parse("{\"message\":\"old action\"}");
+   assert(request);
+   cJSON_Hooks hooks = {.malloc_fn = refuse_json_allocation, .free_fn = free};
+   cJSON_InitHooks(&hooks);
+   assert(server_chat_ir_replace_steer(request, "new action") < 0);
+   cJSON_InitHooks(NULL);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request, "message")), "old action"));
+   assert(server_chat_ir_replace_steer(NULL, "new action") < 0);
+   cJSON *missing = cJSON_CreateObject();
+   assert(server_chat_ir_replace_steer(missing, "new action") < 0);
+   cJSON_Delete(missing);
+   assert(!server_chat_ir_replace_steer(request, "new action"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request, "message")), "new action"));
+   cJSON_Delete(request);
+
+   assert(server_chat_ir_reject_steer("session-one", "mallory", "old action") < 0);
+   assert(!cJSON_GetArraySize(log_entries));
+   const char *message = "new action \"quoted\"\nnot executed";
+   assert(!server_chat_ir_reject_steer("session-one", "alice", message));
+   assert(cJSON_GetArraySize(log_entries) == 2);
+   for (int i = 0; i < 2; i++)
+      assert(!strcmp(
+          cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(log_entries, i), "kind")),
+          "execution"));
+   const cJSON *terminal = cJSON_GetObjectItem(cJSON_GetArrayItem(log_entries, 1), "payload");
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(terminal, "status")), "failed"));
+   const char *error = cJSON_GetStringValue(cJSON_GetObjectItem(terminal, "error"));
+   cJSON *diagnostic = cJSON_Parse(error);
+   assert(diagnostic && cJSON_IsFalse(cJSON_GetObjectItem(diagnostic, "dispatched")));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(diagnostic, "submitted_input_preview")),
+                  message));
+   assert(strlen(cJSON_GetStringValue(cJSON_GetObjectItem(diagnostic, "submitted_input_sha256"))) ==
+          64);
+   assert(cJSON_IsFalse(cJSON_GetObjectItem(diagnostic, "submitted_input_truncated")));
+   cJSON_Delete(diagnostic);
+   cleanup(&reset);
+   char long_input[4096];
+   memset(long_input, 'x', sizeof long_input - 1);
+   memcpy(long_input + 1535, "雪", 3);
+   long_input[sizeof long_input - 1] = 0;
+   assert(!server_chat_ir_reject_steer("session-one", "alice", long_input));
+   terminal = cJSON_GetObjectItem(cJSON_GetArrayItem(log_entries, 1), "payload");
+   diagnostic = cJSON_Parse(cJSON_GetStringValue(cJSON_GetObjectItem(terminal, "error")));
+   assert(diagnostic && cJSON_IsTrue(cJSON_GetObjectItem(diagnostic, "submitted_input_truncated")));
+   assert(strlen(cJSON_GetStringValue(
+              cJSON_GetObjectItem(diagnostic, "submitted_input_preview"))) == 1535);
+   assert(cJSON_GetObjectItem(diagnostic, "submitted_input_bytes")->valuedouble == 4095);
+   cJSON_Delete(diagnostic);
+   cleanup(&reset);
+   fail_store = 1;
+   assert(server_chat_ir_reject_steer("session-one", "alice", message) < 0);
+   assert(!cJSON_GetArraySize(log_entries));
+   cleanup(&reset);
+}
+
 int main(void)
 {
    log_entries = cJSON_CreateArray();
+   failed_steering_admission_is_observation_only();
    worker_capture_failure_is_sticky();
    retained_worker_failure_refuses_completion();
    retained_worker_progress_uses_durable_pages();
@@ -477,4 +542,18 @@ int main(void)
    cJSON_Delete(log_entries);
    puts("server canonical capture tests passed");
    return 0;
+}
+
+/* This ordinary fixture has no registered native resource producer. */
+int db1_session_native_source_append(const char *session, const char *id, const char *turn,
+                                     const char *actor, const char *payload, char sequence[32])
+{
+   (void)session;
+   (void)id;
+   (void)turn;
+   (void)actor;
+   (void)payload;
+   (void)sequence;
+   assert(!"unexpected native owner in ordinary capture fixture");
+   return -1;
 }

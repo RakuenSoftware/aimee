@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -8,6 +9,63 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestChatControlReplyRefusesAmbiguousFramesBeforeRuntime(t *testing.T) {
+	calls := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/chat/control-reply", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok","queued":true}`))
+	})
+	s := &server{cfg: startFakeV1(t, mux)}
+	base := `{"session_id":"child","request_id":"child-turn:question","reply":{"decision":"deny"}}`
+	cases := []string{
+		`{"session_id":"parent","session_id":"child","request_id":"child-turn:question","reply":{"decision":"deny"}}`,
+		`{"session_id":"child","request_id":"wrong","request_\u0069d":"child-turn:question","reply":{"decision":"deny"}}`,
+		`{"session_id":"child","request_id":"child-turn:question","reply":{"decision":"allow","decision":"deny"}}`,
+		base + `{}`,
+		`{"session_id":"child\u0000foreign","request_id":"child-turn:question","reply":{"decision":"deny"}}`,
+		`{"session_id":"child","request_id":"child-turn:question","reply":{"decision":"allow","answers":{"answer":["a\u0000b"]}}}`,
+		`{"session_id":"child","request_id":"child-turn:question","reply":{"decision":"allow","answers":{"answer":["\ud800"]}}}`,
+		strings.Replace(base, "child", "\xff", 1),
+		base + strings.Repeat(" ", 128<<10),
+	}
+	for index, raw := range cases {
+		request := withUser(httptest.NewRequest(http.MethodPost, "/api/chat/control-reply", strings.NewReader(raw)), "alice")
+		request.Header.Set("Origin", "http://example.com")
+		response := httptest.NewRecorder()
+		s.handleChatControlReply(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("case %d: status %d want400", index, response.Code)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("ambiguous frames reached runtime: %d", calls)
+	}
+}
+
+func TestChatControlReplyPreservesValidatedOriginalBytesAndChildBinding(t *testing.T) {
+	raw := []byte(" {\"session_id\":\"child\", \"request_id\":\"child-turn:form\", \"reply\":{\"decision\":\"allow\",\"content\":{\"count\":9007199254740993,\"ratio\":1e-07,\"name\":\"火\"}}}\n")
+	calls := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/chat/control-reply", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		body, err := io.ReadAll(r.Body)
+		if err != nil || !bytes.Equal(body, raw) || r.Header.Get("X-Aimee-Webuser") != "alice" || r.Header.Get("Authorization") != "" {
+			t.Errorf("validated frame/authority changed: %s err=%v", body, err)
+		}
+		w.Write([]byte(`{"status":"ok","queued":true}`))
+	})
+	s := &server{cfg: startFakeV1(t, mux)}
+	request := withUser(httptest.NewRequest(http.MethodPost, "/api/chat/control-reply", bytes.NewReader(raw)), "alice")
+	request.Header.Set("Origin", "http://example.com")
+	response := httptest.NewRecorder()
+	s.handleChatControlReply(response, request)
+	if response.Code != http.StatusOK || calls != 1 {
+		t.Fatalf("valid child reply failed: status=%d calls=%d body=%s", response.Code, calls, response.Body.String())
+	}
+}
 
 func TestChatControlReplyForwardsOnlyVerifiedBrowserActor(t *testing.T) {
 	calls := 0

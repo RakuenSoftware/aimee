@@ -946,7 +946,11 @@ $(TESTPREFIX)/unit-test-cli-transcript-archive: $(OBJDIR)/tests/test_cli_transcr
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS)
 
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-execution
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-unknown-effect-action $(TESTPREFIX)/unit-test-server-native-history $(TESTPREFIX)/unit-test-server-unknown-effect-policy
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-cache-lease
+ifeq ($(UNAME_S),Linux)
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-containment
+endif
 $(TESTPREFIX)/unit-test-server-native-execution: $(OBJDIR)/tests/test_server_native_execution.o \
     $(OBJDIR)/server/server_native_execution.o $(OBJDIR)/server/server_native_cache_lease.o $(OBJDIR)/platform_random.o $(OBJDIR)/server/server_native_launch.o $(OBJDIR)/server/cli_claude_native.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/server/cli_session.o \
     $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/modules/ir/session_event.o \
@@ -958,7 +962,7 @@ $(TESTPREFIX)/unit-test-server-native-execution: $(OBJDIR)/tests/test_server_nat
 $(TESTPREFIX)/unit-test-server-native-runtime: $(OBJDIR)/tests/test_server_native_runtime.o \
     $(OBJDIR)/tests/support/log_stub.o \
     $(OBJDIR)/server/agent_tools.o $(OBJDIR)/posix/agent_source_authority.o $(OBJDIR)/modules/ir/aimee_ir.o \
-    $(OBJDIR)/server/server_native_runtime.o $(OBJDIR)/server/server_native_tool_admission.o $(OBJDIR)/server/server_session_question.o $(OBJDIR)/server/server_native_tool_source.o $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cli_proxy.o \
+    $(OBJDIR)/server/server_native_runtime.o $(OBJDIR)/server/server_native_history.o $(OBJDIR)/server/server_native_tool_admission.o $(OBJDIR)/server/server_session_question.o $(OBJDIR)/server/server_native_tool_source.o $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cli_proxy.o \
     $(OBJDIR)/modules/translation/wire_codec.o \
     $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
     $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
@@ -5685,7 +5689,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o $(OBJDIR
                            $(TEST_CORE_OBJS) \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
                            $(OBJDIR)/core/event_bus/module_client.o $(OBJDIR)/core/event_bus/module_protocol.o $(OBJDIR)/core/event_bus/bus_client.o $(OBJDIR)/core/event_bus/bus_route.o \
-                           $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/jti_replay_consume.o $(OBJDIR)/remote_client_claim.o $(OBJDIR)/secrets.o $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o \
+                           $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/jti_replay_consume.o $(OBJDIR)/remote_client_claim.o $(OBJDIR)/secrets.o $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o $(OBJDIR)/server/osv_check.o $(OBJDIR)/server/http_retry.o $(OBJDIR)/server/failover.o \
                           $(BUS_MEM_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -7130,6 +7134,7 @@ $(TESTPREFIX)/unit-test-server-session-control: $(OBJDIR)/tests/test_server_sess
 
 $(TESTPREFIX)/unit-test-server-session-log: $(OBJDIR)/tests/test_server_session_log.o \
     $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_session_log.o $(OBJDIR)/server/server_learning_outcome.o $(OBJDIR)/server/server_session_control.o \
+    $(OBJDIR)/server/server_session_question.o $(OBJDIR)/platform_random.o $(OBJDIR)/posix/platform_random.o \
     $(OBJDIR)/tests/support/learning_outcome_stub.o $(OBJDIR)/tests/support/log_stub.o \
     $(OBJDIR)/interaction_event_names.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
     $(OBJDIR)/aimee_sha256.o $(OBJDIR)/util.o $(OBJDIR)/cJSON.o
@@ -7158,7 +7163,7 @@ $(TESTPREFIX)/unit-test-server-responses-stream: $(OBJDIR)/tests/test_server_res
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-native-cache: $(OBJDIR)/tests/test_server_native_cache.o \
-    $(OBJDIR)/server/server_native_cache.o $(OBJDIR)/modules/ir/session_event.o \
+    $(OBJDIR)/server/server_native_cache.o $(OBJDIR)/server/server_native_history.o $(OBJDIR)/modules/ir/session_event.o \
     $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o \
     $(OBJDIR)/platform_random.o $(filter %/platform_random.o,$(PLATFORM_BASIC_OBJS))
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto
@@ -7194,3 +7199,25 @@ $(TESTPREFIX)/unit-test-server-learning-recovery: $(OBJDIR)/tests/test_server_le
 $(TESTPREFIX)/unit-test-server-native-cache-lease: $(OBJDIR)/tests/test_server_native_cache_lease.o \
     $(OBJDIR)/server/server_native_cache_lease.o $(OBJDIR)/cJSON.o $(OBJDIR)/platform_random.o $(OBJDIR)/posix/platform_random.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+ifeq ($(UNAME_S),Linux)
+$(TESTPREFIX)/unit-test-server-native-containment: $(OBJDIR)/tests/test_server_native_containment.o \
+    $(OBJDIR)/server/server_native_containment.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o \
+    $(OBJDIR)/platform_random.o $(OBJDIR)/posix/platform_random.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto -lpthread
+endif
+
+$(TESTPREFIX)/unit-test-server-native-history: $(OBJDIR)/tests/test_server_native_history.o \
+    $(OBJDIR)/server/server_native_history.o $(OBJDIR)/modules/ir/session_event.o \
+    $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto
+$(TESTPREFIX)/unit-test-server-unknown-effect-policy: $(OBJDIR)/tests/test_server_unknown_effect_policy.o \
+    $(OBJDIR)/server/server_unknown_effect_policy.o $(OBJDIR)/server/server_session_control.o \
+    $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto -lpthread
+
+$(OBJDIR)/tests/test_server_unknown_effect_action.o: tests/test_server_governed_action.c
+$(TESTPREFIX)/unit-test-server-unknown-effect-action: $(OBJDIR)/tests/test_server_unknown_effect_action.o \
+    $(OBJDIR)/server/server_unknown_effect_policy.o $(OBJDIR)/server/server_governed_action.o $(OBJDIR)/server/server_session_control.o \
+    $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto -lpthread

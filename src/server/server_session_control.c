@@ -19,9 +19,9 @@ struct pending_control
 };
 struct server_control_scope
 {
-   char session[128], turn[128], principal[VAULT_PRINCIPAL_MAX];
+   char session[128], execution_session[128], turn[128], principal[VAULT_PRINCIPAL_MAX];
    unsigned count, references;
-   atomic_int closed, failed;
+   atomic_int closed, failed, unknown_effect_denied;
    pthread_mutex_t mutex;
    struct pending_control *pending;
    struct server_control_scope *next;
@@ -43,8 +43,15 @@ server_control_scope_t *server_control_scope_bind(server_control_scope_t *scope)
 server_control_scope_t *server_control_scope_open(const char *session, const char *turn,
                                                   const char *principal)
 {
+   return server_control_scope_open_execution(session, turn, principal, session);
+}
+server_control_scope_t *server_control_scope_open_execution(const char *session, const char *turn,
+                                                            const char *principal,
+                                                            const char *execution_session)
+{
    if (!session || !turn || !principal || !session[0] || !turn[0] || !principal[0] ||
-       strlen(session) >= 128 || strlen(turn) >= 128 || strlen(principal) >= VAULT_PRINCIPAL_MAX)
+       strlen(session) >= 128 || strlen(turn) >= 128 || strlen(principal) >= VAULT_PRINCIPAL_MAX ||
+       !execution_session || !execution_session[0] || strlen(execution_session) >= 128)
       return NULL;
    server_control_scope_t *scope = calloc(1, sizeof *scope);
    if (!scope)
@@ -56,7 +63,9 @@ server_control_scope_t *server_control_scope_open(const char *session, const cha
    }
    atomic_init(&scope->closed, 0);
    atomic_init(&scope->failed, 0);
+   atomic_init(&scope->unknown_effect_denied, 0);
    snprintf(scope->session, sizeof scope->session, "%s", session);
+   snprintf(scope->execution_session, sizeof scope->execution_session, "%s", execution_session);
    snprintf(scope->turn, sizeof scope->turn, "%s", turn);
    snprintf(scope->principal, sizeof scope->principal, "%s", principal);
    pthread_mutex_lock(&registry_lock);
@@ -104,6 +113,15 @@ int server_control_scope_failed(const server_control_scope_t *scope)
 {
    return scope && atomic_load(&scope->failed);
 }
+int server_control_unknown_effect_denied(const server_control_scope_t *scope)
+{
+   return !scope || atomic_load(&scope->unknown_effect_denied);
+}
+void server_control_deny_unknown_effects(server_control_scope_t *scope)
+{
+   if (scope)
+      atomic_store(&scope->unknown_effect_denied, 1);
+}
 int server_control_scope_capture(const char *session, const char *principal,
                                  server_control_scope_t **out)
 {
@@ -115,7 +133,8 @@ int server_control_scope_capture(const char *session, const char *principal,
    if (current)
    {
       if (atomic_load(&current->closed) || atomic_load(&current->failed) || !session ||
-          strcmp(current->session, session) || !principal || strcmp(current->principal, principal))
+          (strcmp(current->session, session) && strcmp(current->execution_session, session)) ||
+          !principal || strcmp(current->principal, principal))
          result = -1;
       else
       {

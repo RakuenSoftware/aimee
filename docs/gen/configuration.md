@@ -287,7 +287,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 302 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 303 `AIMEE_*` environment variables (scanned from native accessors in `src/` and `os.Getenv`/`os.LookupEnv` in Go services, excluding test files and fixtures, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -498,6 +498,7 @@ The binaries read 302 `AIMEE_*` environment variables (scanned from native acces
 | `AIMEE_DOCKER_WORKDIR` | Docker delegate-backend working directory. |
 | `AIMEE_FORWARDER_PORT` | Loopback port the in-sandbox aimee-forwarder listens on (default 3129); set by aimee when it starts the forwarder in a proxy-mode delegate container. |
 | `AIMEE_FORWARDER_SOCK` | UNIX socket the in-sandbox aimee-forwarder bridges to (default /run/aimee/aimee-http.sock, the bound aimee UDS). |
+| `AIMEE_NATIVE_CONTAINMENT_ROOT` | Optional delegated Linux cgroup-v2 root for native Codex/Claude subprocess custody and crash recovery. Qualified launches require exact kernel-boundary admission and quiescence; an absent root does not qualify whole-tree recovery. See [native containment](../NATIVE_CACHE_CONTAINMENT.md). |
 | `AIMEE_PARENT_DELEGATION_ID` | Parent delegation id (threading). |
 | `AIMEE_SANDBOX_HOST_MOUNTS` | Operator allowlist of host mounts available to the sandbox backend. |
 | `AIMEE_SSH_BIN` | SSH delegate-backend binary. |

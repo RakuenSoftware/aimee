@@ -405,6 +405,8 @@ typedef struct
 } aimee_ir_response_builder_t;
 int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
                                     const aimee_delta_t *delta);
+/* Number of immutable closed blocks in the contiguous response prefix. */
+int aimee_ir_response_builder_closed_prefix(const aimee_ir_response_builder_t *builder);
 void aimee_ir_response_builder_free(aimee_ir_response_builder_t *builder);
 
 /* ---- lifecycle ---- */

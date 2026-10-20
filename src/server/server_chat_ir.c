@@ -6,6 +6,7 @@
 #include "db1_client/primary_sessions.h"
 #include "cJSON.h"
 #include <openssl/rand.h>
+#include <openssl/evp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -237,6 +238,82 @@ static int chat_ir_sink(const aimee_session_event_t *event, void *context)
       server_session_capture_fail(c->ir_capture);
    }
    return rc;
+}
+
+/* Preparing a continuation is atomic from the dispatcher's perspective: failure
+ * leaves the old request alone, and the caller must never dispatch it. */
+int server_chat_ir_replace_steer(cJSON *request, const char *message)
+{
+   if (!cJSON_IsObject(request) || !message || !message[0])
+      return -1;
+   cJSON *replacement = cJSON_CreateString(message);
+   if (!replacement)
+      return -1;
+   if (!cJSON_ReplaceItemInObjectCaseSensitive(request, "message", replacement))
+   {
+      cJSON_Delete(replacement);
+      return -1;
+   }
+   return 0;
+}
+
+/* Execution diagnostics never become user-message history. Retain a bounded,
+ * escaped observation of the rejected input without authorizing its execution. */
+int server_chat_ir_reject_steer(const char *session, const char *actor, const char *message)
+{
+   static const char reason[] = "Steering continuation was not dispatched; no model or tool "
+                                "executed. Send it again explicitly.";
+   db1_server_session_t registered;
+   if (!session || !session[0] || !actor || !actor[0] || !message || !message[0] ||
+       db1_server_session_get(session, &registered) || strcmp(registered.principal, actor))
+      return -1;
+   size_t length = strlen(message), preview_length = length < 1536 ? length : 1536;
+   while (preview_length && ((unsigned char)message[preview_length] & 0xc0) == 0x80)
+      --preview_length;
+   char preview[1537], digest[65];
+   memcpy(preview, message, preview_length);
+   preview[preview_length] = 0;
+   unsigned char hash[EVP_MAX_MD_SIZE];
+   unsigned int hash_length = 0;
+   if (!EVP_Digest(message, length, hash, &hash_length, EVP_sha256(), NULL) || hash_length != 32)
+      return -1;
+   for (size_t i = 0; i < 32; i++)
+      snprintf(digest + 2 * i, 3, "%02x", hash[i]);
+   cJSON *diagnostic = cJSON_CreateObject();
+   char *failure = NULL;
+   if (diagnostic && cJSON_AddStringToObject(diagnostic, "reason", reason) &&
+       cJSON_AddBoolToObject(diagnostic, "dispatched", 0) &&
+       cJSON_AddStringToObject(diagnostic, "submitted_input_sha256", digest) &&
+       cJSON_AddNumberToObject(diagnostic, "submitted_input_bytes", (double)length) &&
+       cJSON_AddStringToObject(diagnostic, "submitted_input_preview", preview) &&
+       cJSON_AddBoolToObject(diagnostic, "submitted_input_truncated", preview_length < length))
+      failure = cJSON_PrintUnformatted(diagnostic);
+   cJSON_Delete(diagnostic);
+   if (!failure)
+      return -1;
+   unsigned char random[16];
+   char turn[33];
+   if (RAND_bytes(random, sizeof random) != 1)
+   {
+      free(failure);
+      return -1;
+   }
+   for (size_t i = 0; i < sizeof random; i++)
+      snprintf(turn + 2 * i, 3, "%02x", random[i]);
+   server_session_capture_t *capture = server_session_capture_open(session, turn, actor, session);
+   if (!capture)
+   {
+      free(failure);
+      return -1;
+   }
+   aimee_session_event_t running = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
+   aimee_session_event_t failed = {
+       .kind = AIMEE_SESSION_EXECUTION, .execution_status = "failed", .execution_error = failure};
+   int result = server_session_capture_append(capture, &running, NULL, NULL);
+   int terminal = server_session_capture_append(capture, &failed, NULL, NULL);
+   server_session_capture_close(capture);
+   free(failure);
+   return result || terminal ? -1 : 0;
 }
 
 int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text)

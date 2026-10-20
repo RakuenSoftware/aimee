@@ -814,7 +814,7 @@ int session_compact(cJSON *messages, const session_compact_config_t *cfg,
    compact_history_t history = {0};
    cJSON *working = NULL;
    int rc = -1;
-   if (aimee_ir_history_admit(messages) || history_load(messages, &history))
+   if (aimee_ir_history_admit_host(messages) || history_load(messages, &history))
       goto done;
    int n = history.count;
    result.messages_before = result.messages_after = n;
@@ -835,7 +835,7 @@ int session_compact(cJSON *messages, const session_compact_config_t *cfg,
          start++;
    if (end > start && compact_canonical(working, &history, start, end, cfg, &result))
       goto done;
-   if (aimee_ir_history_admit(working))
+   if (aimee_ir_history_admit_host(working))
       goto done;
    result.messages_after = cJSON_GetArraySize(working);
    while (messages->child)

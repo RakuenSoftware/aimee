@@ -578,7 +578,7 @@ if(NOT WIN32)
   endif()
   add_executable(test_server_native_runtime test_server_native_runtime.c support/log_stub.c
     ../server/agent_tools.c ../posix/agent_source_authority.c ../modules/ir/aimee_ir.c
-    ../server/server_native_runtime.c ../server/server_native_tool_admission.c ../server/server_session_question.c ../server/server_native_tool_source.c ../server/server_session_capture.c ../server/server_session_control.c
+    ../server/server_native_runtime.c ../server/server_native_history.c ../server/server_native_tool_admission.c ../server/server_session_question.c ../server/server_native_tool_source.c ../server/server_session_capture.c ../server/server_session_control.c
     ../modules/ir/session_event.c ../cli_proxy.c ../server/request_context.c
     ../modules/translation/wire_codec.c
     ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c
@@ -688,6 +688,7 @@ if(NOT WIN32)
   target_link_libraries(test_server_session_control PRIVATE Threads::Threads)
   aimee_add_test(test_server_session_log test_server_session_log.c
     ../server/server_session_log.c ../server/server_session_capture.c ../server/server_session_control.c
+    ../server/server_session_question.c ../platform_random.c ../posix/platform_random.c
     ../server/server_learning_outcome.c support/learning_outcome_stub.c support/log_stub.c
     ../interaction_event_names.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
     ../aimee_sha256.c)
@@ -718,7 +719,7 @@ aimee_add_test(test_server_responses_stream test_server_responses_stream.c
 
 if(NOT WIN32)
   aimee_add_test(test_server_native_cache test_server_native_cache.c
-      ../server/server_native_cache.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
+      ../server/server_native_cache.c ../server/server_native_history.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
       ../aimee_sha256.c ../platform_random.c ../posix/platform_random.c)
   target_include_directories(test_server_native_cache PRIVATE ${AIMEE_SRC_DIR}/modules/kb/c)
   target_link_libraries(test_server_native_cache PRIVATE OpenSSL::Crypto)
@@ -732,4 +733,29 @@ if(NOT WIN32)
     ../modules/ir/response_codec.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
     ../modules/ir/aimee_ir_metrics.c ../aimee_sha256.c)
   target_link_libraries(test_agent_result_cache PRIVATE OpenSSL::Crypto)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  aimee_add_test(test_server_native_containment test_server_native_containment.c
+    ../server/server_native_containment.c ../aimee_sha256.c
+    ../platform_random.c ../posix/platform_random.c)
+  target_link_libraries(test_server_native_containment PRIVATE OpenSSL::Crypto Threads::Threads)
+endif()
+
+if(NOT WIN32)
+  aimee_add_test(test_server_native_history test_server_native_history.c
+    ../server/server_native_history.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c)
+  target_include_directories(test_server_native_history PRIVATE ${AIMEE_SRC_DIR}/db1_client)
+  target_link_libraries(test_server_native_history PRIVATE OpenSSL::Crypto)
+  aimee_add_test(test_server_unknown_effect_policy test_server_unknown_effect_policy.c
+    ../server/server_unknown_effect_policy.c ../server/server_session_control.c
+    ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c)
+  target_link_libraries(test_server_unknown_effect_policy PRIVATE OpenSSL::Crypto Threads::Threads)
+endif()
+
+if(NOT WIN32)
+  aimee_add_test(test_server_unknown_effect_action test_server_unknown_effect_action.c
+    ../server/server_unknown_effect_policy.c ../server/server_governed_action.c ../server/server_session_control.c
+    ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c)
+  target_link_libraries(test_server_unknown_effect_action PRIVATE OpenSSL::Crypto Threads::Threads)
 endif()

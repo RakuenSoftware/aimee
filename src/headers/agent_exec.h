@@ -7,6 +7,12 @@
 
 struct cJSON; /* forward declaration for gemini_prompt_cache_attach */
 
+/* Host startup installs the additional source-owned unknown-effect gate.
+ * This callback cannot override a denial by the ordinary policy owners. */
+typedef int (*policy_unknown_effect_gate_fn)(const char *, const char *, const char *, uint32_t,
+                                             int, char *, size_t);
+void policy_set_unknown_effect_gate(policy_unknown_effect_gate_fn gate);
+void policy_unknown_effect_clear(void);
 /* Execution */
 void agent_reject_degenerate_plain_response(agent_result_t *out, const char *agent_name);
 int agent_execute_with_tools(const agent_t *agent, const agent_network_t *network,
@@ -292,6 +298,9 @@ char *policy_annotate_indexed(const char *tool, const char *arguments, const cha
 int policy_load(void);
 void policy_action_attempt(const char *attempt);
 int policy_action_inherit(const char *session);
+int policy_recheck_action_tool_attempt(const char *tool, const char *effect, const char *arguments,
+                                       const char *attempt, uint32_t resource_categories,
+                                       char *reason, size_t reason_len);
 int policy_recheck_action_tool(const char *tool, const char *effect, const char *arguments,
                                char *reason, size_t reason_len);
 int policy_action_begin(const char *name, struct cJSON **args, const char *cwd, const char *sid,

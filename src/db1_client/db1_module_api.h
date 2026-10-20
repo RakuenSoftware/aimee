@@ -278,6 +278,11 @@
 #define AIMEE_DB1_OP_SESSION_NATIVE_EPOCH                   42u
 #define AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_LOOKUP      43u
 #define AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_FINISH      44u
+#define AIMEE_DB1_OP_SESSION_NATIVE_HISTORY                 45u
+#define AIMEE_DB1_OP_SESSION_NATIVE_SOURCE_APPEND           47u
+#define AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_GET             48u
+#define AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_SET             49u
+#define AIMEE_DB1_OP_SESSION_NATIVE_ACTIVE_OWNED            46u
 
 /* Family 7: machine-local runtime state: caches, this box's operator and
  * clones, the model catalogue it fetched, and the snapshots it took. */

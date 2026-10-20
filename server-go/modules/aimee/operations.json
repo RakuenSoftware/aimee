@@ -28938,12 +28938,13 @@
       "family": "sessions",
       "id": 44,
       "name": "session_native_reservation_finish",
-      "c_name": "db1_session_native_reservation_finish",
+      "c_name": "db1_session_native_reservation_finish_checked",
       "c_params": [
         "principal",
         "request_json",
         "out_sequence",
-        "out_epoch"
+        "out_epoch",
+        "out_absent"
       ],
       "wire_format": "db1-fields-v2",
       "scope": "global",
@@ -28979,8 +28980,268 @@
           {
             "name": "epoch",
             "type": "text"
+          },
+          {
+            "name": "disposition",
+            "type": "text"
           }
         ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 46,
+      "name": "session_native_active_owned",
+      "c_name": "db1_session_native_active_owned",
+      "c_params": [
+        "principal",
+        "session_id",
+        "out_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "owners_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 524288
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 45,
+      "name": "session_native_history",
+      "c_name": "db1_session_native_history_load",
+      "c_params": [
+        "principal",
+        "session_id",
+        "mode",
+        "active_turn",
+        "out_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "mode",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "active_turn",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 16777216
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 47,
+      "name": "session_native_source_append",
+      "c_name": "db1_session_native_source_append",
+      "c_params": [
+        "session_id",
+        "event_id",
+        "turn",
+        "actor",
+        "payload",
+        "out_sequence"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "event_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "turn",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "payload",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "sequence",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 48,
+      "name": "server_session_primary_get",
+      "c_name": "db1_server_session_primary_get",
+      "c_params": [
+        "principal",
+        "session_id",
+        "out",
+        "cap"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "agent",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 49,
+      "name": "server_session_primary_set",
+      "c_name": "db1_server_session_primary_set",
+      "c_params": [
+        "principal",
+        "session_id",
+        "agent"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "agent",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
         "max_bytes": 32768
       }
     }

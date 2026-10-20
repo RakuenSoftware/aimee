@@ -974,13 +974,18 @@ var Sessions = store.Family{
 		opSessionIRAppend:                   {Name: "session_ir_append", Args: 5, Tx: true, Run: sessionIRAppend},
 		opSessionIRAppendVerified:           {Name: "session_ir_append_verified", Args: 5, Tx: true, HostOnly: true, Run: sessionIRAppendVerified},
 		opSessionIRSearch:                   {Name: "session_ir_search", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionIRSearch},
-		opSessionNativeReservationFinish:    {Name: "session_native_reservation_finish", Args: 2, Cells: 2, Tx: true, HostOnly: true, Run: sessionNativeReservationFinish},
+		opSessionNativeSourceAppend:         {Name: "session_native_source_append", Args: 5, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeSourceAppend},
+		opSessionNativeActiveOwned:          {Name: "session_native_active_owned", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeActiveOwned},
+		opSessionNativeHistory:              {Name: "session_native_history", Args: 4, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeHistory},
+		opSessionNativeReservationFinish:    {Name: "session_native_reservation_finish", Args: 2, Cells: 3, Tx: true, HostOnly: true, Run: sessionNativeReservationFinish},
 		opSessionNativeReserve:              {Name: "session_native_reserve", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeReserve},
 		opSessionNativeReservationReconcile: {Name: "session_native_reservation_reconcile", Args: 2, Cells: 2, Tx: true, HostOnly: true, Run: sessionNativeReservationReconcile},
 		opSessionNativeEpoch:                {Name: "session_native_epoch", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeEpoch},
 		opSessionNativeReservationLookup:    {Name: "session_native_reservation_lookup", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeReservationLookup},
 		opSessionNativeOwnerClaim:           {Name: "session_native_owner_claim", Args: 2, Tx: true, HostOnly: true, Run: sessionNativeOwnerClaim},
 		opSessionNativeReconcile:            {Name: "session_native_reconcile", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeReconcile},
+		opServerSessionPrimaryGet:           {Name: "server_session_primary_get", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionPrimaryGet},
+		opServerSessionPrimarySet:           {Name: "server_session_primary_set", Args: 3, Tx: true, HostOnly: true, Run: sessionPrimarySet},
 		opSessionIRPage:                     {Name: "session_ir_page", Args: 4, Run: sessionIRPage},
 		opSessionIRHistorySave:              {Name: "session_ir_history_save", Args: 5, Tx: true, Run: sessionIRHistorySave},
 		opSessionIRHistoryLoad:              {Name: "session_ir_history_load", Args: 4, Run: sessionIRHistoryLoad},
@@ -1056,6 +1061,9 @@ func sessionIRProofBindings(encoded []byte, session, turn, actor string, allowPr
 	return true
 }
 func sessionIRAppendInternal(ctx context.Context, q store.Queryer, f []string, allowProof bool) (uint32, []string, error) {
+	return sessionIRAppendAuthorized(ctx, q, f, allowProof, false, false)
+}
+func sessionIRAppendAuthorized(ctx context.Context, q store.Queryer, f []string, allowProof, allowInterruption, allowNativeOwner bool) (uint32, []string, error) {
 	if len(f) != 5 {
 		return store.StatusInvalid, nil, nil
 	}
@@ -1065,6 +1073,25 @@ func sessionIRAppendInternal(ctx context.Context, q store.Queryer, f []string, a
 		}
 	}
 	if !validSessionIREvent([]byte(f[4])) || !sessionIRProofBindings([]byte(f[4]), f[0], f[2], f[3], allowProof) {
+		return store.StatusInvalid, nil, nil
+	}
+	var eventKind struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal([]byte(f[4]), &eventKind) != nil {
+		return store.StatusInvalid, nil, nil
+	}
+	var top map[string]json.RawMessage
+	if json.Unmarshal([]byte(f[4]), &top) != nil {
+		return store.StatusInvalid, nil, nil
+	}
+	if _, present := top["native_owner"]; present && !allowNativeOwner {
+		return store.StatusInvalid, nil, nil
+	}
+	if _, present := top["partial"]; present && !allowNativeOwner {
+		return store.StatusInvalid, nil, nil
+	}
+	if eventKind.Kind == "tool_interruption" && !allowInterruption {
 		return store.StatusInvalid, nil, nil
 	}
 	var locked string

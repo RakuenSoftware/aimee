@@ -78,14 +78,15 @@ export const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: strin
   );
 });
 
-export const ToolBlock = memo(function ToolBlock({ name, args, result }: { name: string; args: string; result?: string }) {
-  const pending = result === undefined;
+export const ToolBlock = memo(function ToolBlock({ name, args, result, unknownOutcome }: { name: string; args: string; result?: string; unknownOutcome?: string }) {
+  const pending = result === undefined && !unknownOutcome;
   return (
-    <details style={{ margin: '4px 0', padding: '8px 10px', background: tokens.surfaceAlt, borderLeft: `3px solid ${tokens.primary}`, borderRadius: '4px', fontSize: '12px', color: tokens.textSecondary, alignSelf: 'flex-start', maxWidth: '80%' }}>
+    <details style={{ margin: '4px 0', padding: '8px 10px', background: unknownOutcome ? 'var(--sg-warning-bg)' : tokens.surfaceAlt, borderLeft: `3px solid ${unknownOutcome ? 'var(--sg-warning-border)' : tokens.primary}`, borderRadius: '4px', fontSize: '12px', color: tokens.textSecondary, alignSelf: 'flex-start', maxWidth: '80%' }}>
       <summary style={{ cursor: 'pointer', color: tokens.text, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-        {pending ? <span style={{ color: tokens.textSecondary, fontStyle: 'italic' }}>Running: {name}</span> : <span>Tool: {name}</span>}
+        {pending ? <span style={{ color: tokens.textSecondary, fontStyle: 'italic' }}>Running: {name}</span> : <span>Tool: {name}{unknownOutcome ? ' — outcome unknown' : ''}</span>}
       </summary>
       {args && <pre style={{ marginTop: '6px', fontSize: '11px', color: tokens.text, maxHeight: '150px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{args}</pre>}
+      {unknownOutcome && <p role="note" aria-live="off" style={{ marginTop: '6px', color: tokens.text }}>{unknownOutcome}</p>}
       {result && (
         <details style={{ marginTop: '4px' }}>
           <summary style={{ cursor: 'pointer', fontSize: '11px', color: tokens.textSecondary }}>Output</summary>

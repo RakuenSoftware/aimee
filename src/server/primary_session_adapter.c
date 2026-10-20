@@ -66,6 +66,32 @@ typedef struct primary_session_state
 static pthread_mutex_t g_primary_sessions_lock = PTHREAD_MUTEX_INITIALIZER;
 static primary_session_state_t *g_primary_sessions;
 static unsigned long g_primary_session_seq;
+static primary_session_native_reconcile_fn g_primary_native_reconcile;
+static primary_session_native_history_load_fn g_primary_native_history_load;
+void primary_session_adapter_set_native_history_load(primary_session_native_history_load_fn fn)
+{
+   pthread_mutex_lock(&g_primary_sessions_lock);
+   g_primary_native_history_load = fn;
+   pthread_mutex_unlock(&g_primary_sessions_lock);
+}
+void primary_session_adapter_set_native_reconcile(primary_session_native_reconcile_fn fn)
+{
+   pthread_mutex_lock(&g_primary_sessions_lock);
+   g_primary_native_reconcile = fn;
+   pthread_mutex_unlock(&g_primary_sessions_lock);
+}
+static int primary_native_owners_empty(const char *session, const char *actor)
+{
+   char *wire = NULL;
+   int rc = db1_session_native_active_owned(actor, session, &wire);
+   cJSON *owners = !rc && wire && strlen(wire) <= 512 * 1024
+                       ? aimee_ir_json_parse_frame(wire, strlen(wire))
+                       : NULL;
+   int empty = cJSON_IsArray(owners) && cJSON_GetArraySize(owners) == 0;
+   free(wire);
+   cJSON_Delete(owners);
+   return empty ? 0 : -1;
+}
 
 static void primary_session_generate_id(char *out, size_t out_len)
 {
@@ -197,6 +223,21 @@ static int primary_session_load_messages_locked(primary_session_state_t *state,
       LOG_WARN("primary.session", "canonical history owner mismatch");
       return -1;
    }
+   /* Keep this state alive/busy, but do not hold every primary session behind
+    * an old native process boundary's bounded quiescence wait. */
+   char recovery_error[512];
+   state->busy = 1;
+   primary_session_native_reconcile_fn reconcile = g_primary_native_reconcile;
+   pthread_mutex_unlock(&g_primary_sessions_lock);
+   int recovered = reconcile ? reconcile(state->scope_id, principal, active_turn, recovery_error)
+                             : primary_native_owners_empty(state->scope_id, principal);
+   pthread_mutex_lock(&g_primary_sessions_lock);
+   state->busy = 0;
+   if (recovered)
+   {
+      LOG_WARN("primary.session", "canonical history ownership recovery refused");
+      return -1;
+   }
    char *json = NULL;
    int rc = db1_session_ir_history_load(state->scope_id, "primary", principal, active_turn, &json);
    if (rc < 0)
@@ -206,9 +247,24 @@ static int primary_session_load_messages_locked(primary_session_state_t *state,
    }
    if (rc == 0)
    {
-      cJSON *history = primary_history_import(json, state->provider);
+      cJSON *history = NULL, *receipts = NULL;
+      int admitted;
+      if (g_primary_native_history_load)
+      {
+         /*28 preserves the definitive Missing/import distinction. Protected
+          * diagnostics come exclusively from the authenticated45 projection. */
+         admitted = !g_primary_native_history_load(state->scope_id, principal, active_turn, 0,
+                                                   &history, &receipts) &&
+                    cJSON_IsArray(history) && cJSON_IsArray(receipts);
+      }
+      else
+      {
+         history = json ? aimee_ir_json_parse_frame(json, strlen(json)) : NULL;
+         admitted = history && !aimee_ir_history_admit(history);
+      }
+      cJSON_Delete(receipts);
       free(json);
-      if (!history || aimee_ir_history_admit(history))
+      if (!admitted)
       {
          cJSON_Delete(history);
          return -1;

@@ -217,6 +217,13 @@ extern "C"
    /* Retain turn arbitration and workspace leases when a browser detaches. */
    int presence_turn_host_own(const char *session_id, const char *turn_id);
 
+   /* Authenticated no-attachment chat admission. Creates and detaches a temporary
+    * attachment while retaining the actual host-owned turn. Caller releases the
+    * returned turn on every dispatch failure and after worker completion. */
+   presence_turn_result_t presence_turn_acquire_host(const char *session_id, const char *owner,
+                                                     char *turn_id, size_t turn_n, char *inflight,
+                                                     size_t inflight_n);
+
    int presence_turn_release(const char *session_id, const char *turn_id);
 
    /* True (1) if turn_id is the live in-flight turn for session_id. Lets a

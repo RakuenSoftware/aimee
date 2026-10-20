@@ -1,6 +1,7 @@
 /* Native children hold only a lifetime-scoped local capability. Existing HTTP
  * owners admit model/tool requests under the captured actor and registration. */
 #include "server_native_runtime.h"
+#include "log.h"
 #include "server_native_tool_admission.h"
 #include "agent_exec.h"
 #include "agent_coord.h"
@@ -14,6 +15,7 @@
 #include "modules/workspace/workspace_turn.h"
 #include "util.h"
 #include "server_native_replay.h"
+#include "server_native_history.h"
 #include <aimee/translation/aimee_frontend.h>
 #include <aimee/translation/aimee_backend.h>
 #include "cli_proxy.h"
@@ -43,6 +45,8 @@ struct server_native_runtime
    server_native_replay_t *replay;
    server_native_tool_source_t *tool_source;
    cJSON *source_history;
+   cJSON *native_owner;
+   cJSON *interruption_receipts;
    aimee_request_t request_profile;
    aimee_response_t last_response;
    long usage[5]; /* Successful committed model completions in this execution. */
@@ -83,7 +87,11 @@ static int native_owned_guard(aimee_request_t *request, void *context)
    {
       cJSON *snapshot = aimee_ir_request_json(request);
       const cJSON *messages = cJSON_GetObjectItemCaseSensitive(snapshot, "messages");
-      int invalid = !snapshot || aimee_ir_history_admit(messages);
+      int invalid =
+          !snapshot || server_native_history_admit_source(
+                           server_session_capture_session(owner->runtime->capture),
+                           owner->runtime->owner.vault_principal,
+                           server_session_capture_turn(owner->runtime->capture), 1, messages);
       cJSON_Delete(snapshot);
       if (invalid)
       {
@@ -196,7 +204,7 @@ static int native_record_source(native_model_capture_t *capture, const aimee_ses
       blocks = event->message->blocks;
       count = event->message->n_blocks;
    }
-   else if (event->delta->type == AIMEE_DELTA_BLOCK_STOP)
+   else if (event->delta->type == AIMEE_DELTA_BLOCK_STOP && !capture->runtime->native_owner)
    {
       blocks = capture->builder.response.content;
       first = event->delta->block_id;
@@ -284,6 +292,8 @@ static int native_model_capture(const aimee_session_event_t *event, void *contex
    if (runtime->capture)
    {
       aimee_session_event_t qualified = *event;
+      if (event->kind == AIMEE_SESSION_MESSAGE)
+         qualified.native_owner = runtime->native_owner;
       char *message_id = NULL;
       if (event->message_id)
       {
@@ -299,10 +309,42 @@ static int native_model_capture(const aimee_session_event_t *event, void *contex
       char *envelope = NULL;
       int rc = server_session_capture_append(runtime->capture, &qualified,
                                              runtime->owns_request ? &envelope : NULL, NULL);
-      free(message_id);
       if (!rc)
          rc = native_record_source(capture, event, envelope);
       free(envelope);
+      /* Closed original calls must exist in the durable owned message before
+       * their BLOCK_STOP can reach the SDK and enable an effect callback. */
+      if (!rc && runtime->native_owner && event->kind == AIMEE_SESSION_DELTA &&
+          event->delta->type == AIMEE_DELTA_BLOCK_STOP)
+      {
+         int count = aimee_ir_response_builder_closed_prefix(&capture->builder);
+         if (count > 0)
+         {
+            aimee_message_t prefix = {.role = "assistant",
+                                      .blocks = capture->builder.response.content,
+                                      .n_blocks = count};
+            aimee_request_t view = {.messages = &prefix, .n_messages = 1, .mutated = 1},
+                            owned = {0};
+            rc = aimee_ir_request_clone(&view, &owned);
+            if (!rc)
+            {
+               aimee_ir_classify_context(&owned);
+               aimee_session_event_t partial = {.kind = AIMEE_SESSION_MESSAGE,
+                                                .message_id = message_id,
+                                                .role = "assistant",
+                                                .message = &owned.messages[0],
+                                                .native_owner = runtime->native_owner,
+                                                .message_partial = 1};
+               char *snapshot = NULL;
+               rc = server_session_capture_append(runtime->capture, &partial, &snapshot, NULL);
+               if (!rc)
+                  rc = native_record_source(capture, &partial, snapshot);
+               free(snapshot);
+            }
+            aimee_request_free(&owned);
+         }
+      }
+      free(message_id);
       if (rc)
       {
          server_session_capture_fail(runtime->capture);
@@ -342,7 +384,10 @@ static int native_owned_request(aimee_request_t *request, void *context)
       if (aimee_ir_request_clone(&runtime->request_profile, &owner->request) ||
           server_session_capture_history(runtime->capture, &history))
          goto failed;
-      if (owner->require_complete && aimee_ir_history_admit(history))
+      if (owner->require_complete &&
+          server_native_history_admit_source(
+              server_session_capture_session(runtime->capture), runtime->owner.vault_principal,
+              server_session_capture_turn(runtime->capture), 1, history))
       {
          cJSON_Delete(history);
          goto failed; /* A missing result is not permission to invent an outcome. */
@@ -560,8 +605,10 @@ static int native_execute_claimed(server_native_runtime_t *runtime, native_tool_
    char message_id[96];
    snprintf(message_id, sizeof message_id, "native-tool:%s:%d", claim.sequence, claim.block_index);
    aimee_message_t message = {.role = "tool", .blocks = &result, .n_blocks = 1};
-   aimee_session_event_t event = {
-       .kind = AIMEE_SESSION_MESSAGE, .message_id = message_id, .message = &message};
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_MESSAGE,
+                                  .message_id = message_id,
+                                  .message = &message,
+                                  .native_owner = runtime->native_owner};
    if (aimee_ir_session_emit(&event))
       goto done;
    aimee_block_free_contents(work->result);
@@ -1138,14 +1185,25 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
        owner->vault_transport <= ATTEST_TCP_BEARER || owner->vault_transport > ATTEST_MTLS_CLIENT ||
        !(owner->capabilities & CAP_CHAT) || !session_id || !session_id[0] ||
        strlen(session_id) >= 128)
+   {
+      LOG_WARN("native.runtime", "constructor refused at request_owner");
       return NULL;
+   }
    db1_server_session_t session;
    if (db1_server_session_get(session_id, &session) ||
        strcmp(session.principal, owner->vault_principal))
+   {
+      LOG_WARN("native.runtime", "constructor refused at session_owner");
       return NULL;
+   }
    server_native_runtime_t *runtime = calloc(1, sizeof *runtime);
    if (!runtime)
+   {
+      LOG_WARN("native.runtime", "constructor refused at allocation");
       return NULL;
+   }
+   const char *stage = "tools_scope";
+   int binding_index = -1;
    runtime->producer = pthread_self();
    runtime->selected = *selected;
    runtime->owner = *owner;
@@ -1165,20 +1223,30 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
    agent_codex_credentials_t credentials = {0};
    agent_api_credentials_t api_credentials = {0};
    agent_claude_credentials_t claude_credentials = {0};
-   if (agent_tools_scope_capture_owned(&runtime->tools) ||
-       agent_source_authority_tls_capture_checked(&runtime->source) ||
-       server_control_scope_capture(session_id, owner->vault_principal, &runtime->controls) ||
-       server_session_capture_retain_current(session_id, owner->vault_principal, &runtime->capture))
+   if (agent_tools_scope_capture_owned(&runtime->tools))
       goto failed;
+   stage = "source_authority_scope";
+   if (agent_source_authority_tls_capture_checked(&runtime->source))
+      goto failed;
+   stage = "control_scope";
+   if (server_control_scope_capture(session_id, owner->vault_principal, &runtime->controls))
+      goto failed;
+   stage = "capture_scope";
+   if (server_session_capture_retain_current(session_id, owner->vault_principal, &runtime->capture))
+      goto failed;
+   stage = "canonical_running_history";
    if (runtime->capture &&
        server_session_capture_history(runtime->capture, &runtime->source_history))
       goto failed;
    if (profile)
    {
+      stage = "profile_admission";
       if (!runtime->capture || !profile->model || strcmp(profile->model, selected->model) ||
           profile->raw_bytes || profile->raw_length || !profile->mutated ||
-          !aimee_backend_host_profile_valid(profile) ||
-          aimee_ir_request_clone(profile, &runtime->request_profile))
+          !aimee_backend_host_profile_valid(profile))
+         goto failed;
+      stage = "profile_copy";
+      if (aimee_ir_request_clone(profile, &runtime->request_profile))
          goto failed;
       /* Conversation content comes only from the running durable log. */
       for (int i = 0; i < runtime->request_profile.n_messages; i++)
@@ -1186,6 +1254,7 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
       free(runtime->request_profile.messages);
       runtime->request_profile.messages = NULL;
       runtime->request_profile.n_messages = 0;
+      stage = "tool_source";
       runtime->tool_source = server_native_tool_source_open(runtime->capture, runtime->session,
                                                             runtime->owner.vault_principal);
       if (!runtime->tool_source)
@@ -1194,9 +1263,11 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
    }
    if (bound_registry)
    {
+      stage = "binding_input";
       if (!profile || binding_count < 0 || binding_count > AIMEE_IR_MAX_BLOCKS ||
           (binding_count && !bindings))
          goto failed;
+      stage = "binding_allocation";
       runtime->bound_registry = 1;
       runtime->bindings =
           binding_count ? calloc((size_t)binding_count, sizeof *runtime->bindings) : NULL;
@@ -1204,12 +1275,15 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
          goto failed;
       for (int i = 0; i < binding_count; i++)
       {
+         binding_index = i;
+         stage = "binding_catalog";
          const server_native_tool_binding_t *binding = bindings + i;
          if (!binding->name || !binding->name[0] || !binding->registry_name ||
              !binding->registry_name[0] || (binding->space && !binding->space[0]) ||
              (binding->mcp_name && !binding->mcp_name[0]) ||
              !aimee_ir_find_function(profile, binding->space, binding->name))
             goto failed;
+         stage = "binding_duplicate";
          for (int j = 0; j < i; j++)
             if ((!strcmp(bindings[j].name, binding->name) &&
                  ((!bindings[j].space && !binding->space) ||
@@ -1218,6 +1292,7 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
                 (binding->mcp_name && bindings[j].mcp_name &&
                  !strcmp(binding->mcp_name, bindings[j].mcp_name)))
                goto failed;
+         stage = "binding_registry_definition";
          aimee_tool_t registered = {0};
          int found = agent_tools_execution_definition(binding->registry_name, &registered);
          int valid = !found && registered.kind == AIMEE_TOOL_FUNCTION && registered.name &&
@@ -1225,6 +1300,7 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
          aimee_tool_free(&registered);
          if (!valid)
             goto failed;
+         stage = "binding_copy";
          server_native_tool_binding_t *owned = runtime->bindings + runtime->n_bindings++;
          owned->name = strdup(binding->name);
          owned->registry_name = strdup(binding->registry_name);
@@ -1235,6 +1311,8 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
             goto failed;
       }
    }
+   binding_index = -1;
+   stage = "workspace_mirror";
    /* An ordinary primary has no delegate source overlay. Make that absence
     * explicit rather than falling back to a concurrent delegate's global env. */
    if (!runtime->source.active)
@@ -1269,12 +1347,14 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
       request_context_snapshot_clear(&previous_request);
       if (codex)
       {
+         stage = "codex_source_lineage";
          if (rc || !native_digest_valid(credentials.source_digest))
             goto failed;
          snprintf(runtime->lineage, sizeof runtime->lineage, "%s", credentials.source_digest);
       }
       else if (claude)
       {
+         stage = "claude_source_lineage";
          if (rc || !native_digest_valid(claude_credentials.source_digest))
             goto failed;
          runtime->claude_source = 1;
@@ -1283,6 +1363,7 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
       }
       else if (!rc)
       {
+         stage = "api_source_lineage";
          if (!native_digest_valid(api_credentials.source_digest))
             goto failed;
          runtime->api_key_source = 1;
@@ -1291,6 +1372,7 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
       /* Unsupported/unconfigured sources retain MCP-only operation. They cannot
        * forward model traffic or acquire a replay/cache scope without lineage. */
    }
+   stage = "binding_digest";
    const char *parts[] = {owner->vault_principal, selected->registration, selected->name,
                           selected->provider,     selected->model,        selected->endpoint,
                           credentials.account_id, runtime->lineage};
@@ -1310,6 +1392,7 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
       /* The verified transport session can be a private execution's parent.
        * Proofs and projection reports belong to the retained destination history,
        * never to the parent merely because it owns the SDK transport. */
+      stage = "replay_source";
       const char *destination = server_session_capture_session(runtime->capture);
       runtime->replay = server_native_replay_open(destination ? destination : runtime->session,
                                                   runtime->owner.vault_principal, runtime->binding,
@@ -1317,6 +1400,7 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
       if (!runtime->replay)
          goto failed;
    }
+   stage = "capability_random";
    unsigned char random[32];
    if (platform_random_bytes(random, sizeof random))
       goto failed;
@@ -1324,6 +1408,7 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
       snprintf(runtime->token + 2 * i, 3, "%02x", random[i]);
    OPENSSL_cleanse(random, sizeof random);
    unsigned port = 0;
+   stage = "private_listener";
    runtime->listener = cli_proxy_start_scoped(0, runtime->token, session_id, &port, native_route,
                                               native_forward, runtime);
    if (!runtime->listener)
@@ -1334,6 +1419,7 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
    OPENSSL_cleanse(&credentials, sizeof credentials);
    return runtime;
 failed:
+   LOG_WARN("native.runtime", "constructor refused at %s (binding_index=%d)", stage, binding_index);
    OPENSSL_cleanse(&claude_credentials, sizeof claude_credentials);
    OPENSSL_cleanse(&api_credentials, sizeof api_credentials);
    OPENSSL_cleanse(&credentials, sizeof credentials);
@@ -1387,6 +1473,51 @@ const char *server_native_runtime_binding(const server_native_runtime_t *runtime
 {
    return runtime ? runtime->binding : "";
 }
+int server_native_runtime_set_native_owner(server_native_runtime_t *runtime,
+                                           const cJSON *reservation)
+{
+   if (!runtime || !runtime->capture || runtime->native_owner ||
+       !pthread_equal(runtime->producer, pthread_self()) || atomic_load(&runtime->launch_attested))
+      return -1;
+   const char *session =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reservation, "session_id"));
+   const char *turn =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reservation, "turn_id"));
+   const char *actor = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reservation, "actor"));
+   const char *binding =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reservation, "binding_sha256"));
+   if (!session || strcmp(session, server_session_capture_session(runtime->capture)) || !turn ||
+       strcmp(turn, server_session_capture_turn(runtime->capture)) ||
+       (actor && strcmp(actor, runtime->owner.vault_principal)) || !binding ||
+       strcmp(binding, runtime->binding))
+      return -1;
+   cJSON *owner = cJSON_CreateObject();
+   const char *keys[] = {"harness", "owner_id", "binding_sha256", "epoch", "containment_sha256"};
+   if (!owner || !cJSON_AddNumberToObject(owner, "version", 1))
+      goto failed;
+   for (unsigned i = 0; i < sizeof keys / sizeof keys[0]; i++)
+   {
+      const char *v = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reservation, keys[i]));
+      if (!v || !cJSON_AddStringToObject(owner, keys[i], v))
+         goto failed;
+   }
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "host owner structural admission"};
+   aimee_message_t message = {.role = "assistant", .blocks = &block, .n_blocks = 1};
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_MESSAGE,
+                                  .message_id = "owner-validation",
+                                  .message = &message,
+                                  .native_owner = owner};
+   cJSON *test = aimee_ir_session_event_json(&event);
+   if (!test)
+      goto failed;
+   cJSON_Delete(test);
+   runtime->native_owner = owner;
+   return 0;
+failed:
+   cJSON_Delete(owner);
+   return -1;
+}
+
 static int native_name_order(const void *left, const void *right)
 {
    return strcmp(*(const char *const *)left, *(const char *const *)right);
@@ -1580,6 +1711,11 @@ const cJSON *server_native_runtime_source_history(const server_native_runtime_t 
    return runtime ? runtime->source_history : NULL;
 }
 
+void server_native_runtime_deactivate_hold_port(server_native_runtime_t *runtime)
+{
+   if (runtime)
+      cli_proxy_deactivate_hold_port(runtime->listener);
+}
 void server_native_runtime_quiesce(server_native_runtime_t *runtime)
 {
    if (!runtime)
@@ -1619,6 +1755,8 @@ void server_native_runtime_close(server_native_runtime_t *runtime)
    server_native_replay_close(runtime->replay);
    server_native_tool_source_close(runtime->tool_source);
    cJSON_Delete(runtime->source_history);
+   cJSON_Delete(runtime->native_owner);
+   cJSON_Delete(runtime->interruption_receipts);
    aimee_request_free(&runtime->request_profile);
    server_control_scope_release(runtime->controls);
    server_session_capture_release(runtime->capture);

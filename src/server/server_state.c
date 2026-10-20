@@ -862,7 +862,8 @@ int handle_primary_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (agent_registry_find(agent, &agbuf) != 0)
       return server_send_error(conn, "no such agent", NULL);
 
-   session_primary_set(sid, agent);
+   if (session_primary_set(sid, agent) != 0)
+      return server_send_error(conn, "session primary selection unavailable", NULL);
    cJSON *resp = jo_ok();
    jo_add_str(resp, "agent", agent);
    return send_and_free(conn, resp);
@@ -877,7 +878,8 @@ int handle_primary_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "missing session_id", NULL);
 
    char agent[MAX_AGENT_NAME] = "";
-   session_primary_get(sid, agent, sizeof(agent));
+   if (session_primary_get(sid, agent, sizeof(agent)) < 0)
+      return server_send_error(conn, "session primary selection unavailable", NULL);
    cJSON *resp = jo_ok();
    jo_add_str(resp, "agent", agent);
    return send_and_free(conn, resp);
@@ -891,7 +893,8 @@ int handle_primary_clear(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (jo_need_str(req, "session_id", &sid) < 0)
       return server_send_error(conn, "missing session_id", NULL);
 
-   session_primary_clear(sid);
+   if (session_primary_clear(sid) != 0)
+      return server_send_error(conn, "session primary selection unavailable", NULL);
    cJSON *resp = jo_ok();
    jo_add_str(resp, "agent", "");
    return send_and_free(conn, resp);

@@ -67,11 +67,11 @@ func sessionIRHistorySave(ctx context.Context, q store.Queryer, f []string) (uin
 	return store.StatusOK, nil, nil
 }
 
-const sessionIRHistorySQL = `SELECT turn_id, payload FROM session_ir_events
+const sessionIRHistorySQL = `SELECT sequence::text,turn_id,actor,event_id,payload FROM session_ir_events
  WHERE session_id=$1 AND EXISTS(SELECT 1 FROM server_sessions WHERE id=$1 AND principal=$2)
- ORDER BY sequence`
+ ORDER BY session_ir_events.sequence`
 
-const sessionIRRunningHistorySQL = `SELECT sequence::text, turn_id, actor, payload FROM session_ir_events
+const sessionIRRunningHistorySQL = `SELECT sequence::text,turn_id,actor,event_id,payload FROM session_ir_events
  WHERE session_id=$1 AND EXISTS(SELECT 1 FROM server_sessions WHERE id=$1 AND principal=$2)
  ORDER BY session_ir_events.sequence`
 
@@ -124,39 +124,54 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 	pendingOrder := map[string][]uint64{}
 	firstObserved := map[string]map[string]uint64{}
 	var rowOrder uint64
+	pendingRefs := map[string][]canonical.ToolInterruptionSource{}
+	historyRefs := map[string]nativeHistorySource{}
+	protected := map[string]map[string]nativeOwnedMessage{}
+	protectedRefs := map[string]map[string]map[string]nativeHistorySource{}
+	firstCalls := map[string]map[string]map[int]bool{}
+	var interruptions []struct {
+		ID      string
+		Receipt canonical.ToolInterruption
+	}
+	terminals := map[string]string{}
+	appendPending := func(turn string) {
+		indices := make([]int, len(pending[turn]))
+		for i := range indices {
+			indices[i] = i
+		}
+		sort.SliceStable(indices, func(i, j int) bool { return pendingOrder[turn][indices[i]] < pendingOrder[turn][indices[j]] })
+		for _, index := range indices {
+			ref := pendingRefs[turn][index]
+			historyRefs[ref.Sequence] = nativeHistorySource{Index: len(history), Source: ref}
+			for sequence, ownedRef := range protectedRefs[turn][ref.MessageID] {
+				ownedRef.Index = len(history)
+				historyRefs[sequence] = ownedRef
+			}
+			history = append(history, pending[turn][index])
+		}
+	}
 	found := false
 	open := map[string]bool{}
 	var previous uint64
 	for rows.Next() {
 		rowOrder++
-		var turn, payload string
-		if running {
-			var sequence, actor string
-			err = rows.Scan(&sequence, &turn, &actor, &payload)
-			if err == nil {
-				n, parseErr := strconv.ParseUint(sequence, 10, 64)
-				if parseErr != nil || n == 0 || strconv.FormatUint(n, 10) != sequence || n != previous+1 {
-					return 0, nil, fmt.Errorf("invalid running canonical history sequence %q after %d", sequence, previous)
-				}
-				if actor != f[2] {
-					return 0, nil, fmt.Errorf("invalid running canonical history actor")
-				}
-				if !validSessionIREvent([]byte(payload)) {
-					return 0, nil, fmt.Errorf("invalid running canonical history event at sequence %s", sequence)
-				}
-				previous = n
-			}
-		} else {
-			err = rows.Scan(&turn, &payload)
-		}
+		var turn, payload, sequence, actor, eventID string
+		err = rows.Scan(&sequence, &turn, &actor, &eventID, &payload)
 		if err != nil {
 			return 0, nil, err
 		}
+		n, parseErr := strconv.ParseUint(sequence, 10, 64)
+		if parseErr != nil || n == 0 || strconv.FormatUint(n, 10) != sequence || n != previous+1 || actor != f[2] || eventID == "" || !validSessionIREvent([]byte(payload)) {
+			return 0, nil, fmt.Errorf("invalid canonical history source at sequence %s", sequence)
+		}
+		previous = n
 		var event struct {
-			Kind      string          `json:"kind"`
-			MessageID string          `json:"message_id"`
-			Role      string          `json:"role"`
-			Payload   json.RawMessage `json:"payload"`
+			Kind      string                          `json:"kind"`
+			MessageID string                          `json:"message_id"`
+			Role      string                          `json:"role"`
+			Payload   json.RawMessage                 `json:"payload"`
+			Owner     *canonical.NativeExecutionOwner `json:"native_owner,omitempty"`
+			Partial   json.RawMessage                 `json:"partial,omitempty"`
 		}
 		if err = json.Unmarshal([]byte(payload), &event); err != nil {
 			return 0, nil, err
@@ -187,11 +202,28 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 				// All prior observations are incorporated by this host projection. A later
 				// execution-stop must not append the same observed conversation again.
 				pending = map[string][]json.RawMessage{}
+				pendingRefs = map[string][]canonical.ToolInterruptionSource{}
+				for sequence, ref := range historyRefs {
+					ref.Index = -1
+					historyRefs[sequence] = ref
+				}
+				protected = map[string]map[string]nativeOwnedMessage{}
+				protectedRefs = map[string]map[string]map[string]nativeHistorySource{}
+				firstCalls = map[string]map[string]map[int]bool{}
 				positions = map[string]map[string]int{}
 				pendingOrder = map[string][]uint64{}
 				firstObserved = map[string]map[string]uint64{}
 				found = true
 			}
+		case "tool_interruption":
+			var receipt canonical.ToolInterruption
+			if !canonical.Decode(event.Payload, &receipt) || receipt.Source.Session != f[0] || receipt.Source.Turn != turn || receipt.Source.Actor != actor {
+				return 0, nil, fmt.Errorf("foreign interrupted call source")
+			}
+			interruptions = append(interruptions, struct {
+				ID      string
+				Receipt canonical.ToolInterruption
+			}{eventID, receipt})
 		case "delta":
 			if f[1] != "primary" || event.Role != "assistant" || event.MessageID == "" ||
 				(!running && !validSessionIREvent([]byte(payload))) {
@@ -223,11 +255,43 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 			if positions[turn] == nil {
 				positions[turn] = map[string]int{}
 			}
+			ref := canonical.ToolInterruptionSource{Session: f[0], Turn: turn, Sequence: sequence, EventID: eventID, Actor: actor, MessageID: event.MessageID}
+			var snapshot nativeOwnedMessage
+			if json.Unmarshal([]byte(payload), &snapshot) != nil {
+				return 0, nil, fmt.Errorf("invalid protected message")
+			}
+			if old, exists := protected[turn][event.MessageID]; exists && !nativeSnapshotExtends(old, snapshot) {
+				return 0, nil, fmt.Errorf("protected native snapshot replaced")
+			}
+			if snapshot.Owner != nil {
+				if protected[turn] == nil {
+					protected[turn] = map[string]nativeOwnedMessage{}
+					protectedRefs[turn] = map[string]map[string]nativeHistorySource{}
+					firstCalls[turn] = map[string]map[int]bool{}
+				}
+				protected[turn][event.MessageID] = snapshot
+				if protectedRefs[turn][event.MessageID] == nil {
+					protectedRefs[turn][event.MessageID] = map[string]nativeHistorySource{}
+					firstCalls[turn][event.MessageID] = map[int]bool{}
+				}
+				allowed := map[int]bool{}
+				calls := map[int]canonical.Block{}
+				for i, b := range snapshot.Payload.Blocks {
+					if b.Type == "tool_use" && !firstCalls[turn][event.MessageID][i] {
+						allowed[i] = true
+						calls[i] = b
+						firstCalls[turn][event.MessageID][i] = true
+					}
+				}
+				protectedRefs[turn][event.MessageID][sequence] = nativeHistorySource{Source: ref, Owner: snapshot.Owner, Blocks: allowed, Calls: calls}
+			}
 			if index, ok := positions[turn][event.MessageID]; ok {
+				pendingRefs[turn][index] = ref
 				pending[turn][index] = event.Payload
 			} else {
 				positions[turn][event.MessageID] = len(pending[turn])
 				pending[turn] = append(pending[turn], event.Payload)
+				pendingRefs[turn] = append(pendingRefs[turn], ref)
 				order := rowOrder
 				var message struct {
 					Role string `json:"role"`
@@ -254,12 +318,14 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 				open[turn] = true
 			}
 			if execution.Status == "completed" || execution.Status == "failed" || execution.Status == "cancelled" {
+				terminals[turn] = sequence
 				delete(open, turn)
 				if len(pending[turn]) > 0 {
-					history = append(history, orderedIRPending(pending[turn], pendingOrder[turn])...)
+					appendPending(turn)
 					found = true
 				}
 				delete(pending, turn)
+				delete(pendingRefs, turn)
 				delete(positions, turn)
 				delete(pendingOrder, turn)
 				delete(firstObserved, turn)
@@ -286,8 +352,15 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 				return 0, nil, fmt.Errorf("unfinished canonical observations require reconciliation")
 			}
 		}
-		history = append(history, orderedIRPending(pending[f[3]], pendingOrder[f[3]])...)
+		appendPending(f[3])
 		found = true
+	}
+	if len(interruptions) > 0 {
+		var err error
+		history, err = projectNativeInterruptions(history, historyRefs, terminals, interruptions)
+		if err != nil {
+			return 0, nil, err
+		}
 	}
 	if !found {
 		return store.StatusMissing, nil, nil

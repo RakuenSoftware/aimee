@@ -16,7 +16,7 @@ import (
 func runningHistoryRows(events ...[2]string) [][]any {
 	rows := make([][]any, len(events))
 	for i, event := range events {
-		rows[i] = []any{fmt.Sprint(i + 1), event[0], "owner", event[1]}
+		rows[i] = []any{fmt.Sprint(i + 1), event[0], "owner", fmt.Sprintf("event-%d", i+1), event[1]}
 	}
 	return rows
 }
@@ -53,7 +53,7 @@ func TestSessionIRRunningHistoryIncludesOnlyOwnedCommittedConversation(t *testin
 	// permitted by the active ID but excluded from the returned conversation.
 	legacy := newSessDB()
 	for _, row := range db.rows {
-		legacy.rows = append(legacy.rows, []any{row[1], row[3]})
+		legacy.rows = append(legacy.rows, row)
 	}
 	status, cells, err = sessionIRHistoryLoad(context.Background(), legacy, []string{"s", "primary", "owner", "active"})
 	if err != nil || status != store.StatusOK || len(cells) != 1 {
@@ -89,9 +89,6 @@ func TestSessionIRHistoryOrdersStreamSnapshotBeforeEarlyToolResult(t *testing.T)
 			if running {
 				status, cells, err = sessionIRRunningHistoryLoad(context.Background(), db, []string{"s", "owner", "active"})
 			} else {
-				for i, row := range db.rows {
-					db.rows[i] = []any{row[1], row[3]}
-				}
 				status, cells, err = sessionIRHistoryLoad(context.Background(), db, []string{"s", "primary", "owner", ""})
 			}
 			if err != nil || status != store.StatusOK || len(cells) != 1 {
@@ -151,12 +148,12 @@ func TestSessionIRRunningHistoryRefusesCorruptAndUnreconciledSource(t *testing.T
 		"foreign row actor":     func() [][]any { r := base(); r[1][2] = "other"; return r },
 		"invalid event": func() [][]any {
 			r := base()
-			r[1][3] = `{"kind":"message","message_id":"x","payload":{"role":"operator","blocks":[]}}`
+			r[1][4] = `{"kind":"message","message_id":"x","payload":{"role":"operator","blocks":[]}}`
 			return r
 		},
 		"duplicate fields": func() [][]any {
 			r := base()
-			r[1][3] = `{"kind":"message","kind":"execution","payload":{"status":"running"}}`
+			r[1][4] = `{"kind":"message","kind":"execution","payload":{"status":"running"}}`
 			return r
 		},
 		"other open turn": func() [][]any {

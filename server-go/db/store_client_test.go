@@ -496,3 +496,92 @@ func mustByte(t *testing.T, r *frameReader) uint8 {
 	}
 	return v
 }
+
+// Rollback alone receives an independent cleanup window after operation
+// cancellation. The same transaction handle, operation tag and owner values
+// must cross the existing store wire.
+type cleanupCaller struct {
+	t          *testing.T
+	ownerKey   any
+	ownerValue any
+	err        error
+	calls      int
+}
+
+func (c *cleanupCaller) Call(ctx context.Context, kind, stage uint32, _ uint64,
+	deadline time.Duration, request []byte) ([]byte, error) {
+	c.calls++
+	op := binary.LittleEndian.Uint32(request)
+	if op == opStoreBegin {
+		return ok().u64(77).b, nil
+	}
+	if op != opStoreRollback || kind != EventPostgresSQL || stage != StagePostgresSQL {
+		c.t.Fatal("cleanup changed operation/route", op, kind, stage)
+	}
+	if ctx.Err() != nil || ctx.Value(c.ownerKey) != c.ownerValue {
+		c.t.Fatal("cleanup cancelled or lost owner values", ctx.Err())
+	}
+	limit, present := ctx.Deadline()
+	if !present || time.Until(limit) <= 0 || time.Until(limit) > StoreDeadline || deadline <= 0 || deadline > StoreDeadline {
+		c.t.Fatal("cleanup reply window unbounded or expired", present, deadline)
+	}
+	r := frameReader{buf: request}
+	mustU32(c.t, &r)
+	if got := mustStr(c.t, &r); got != "rollback" {
+		c.t.Fatal("cleanup operation tag changed", got)
+	}
+	if got := mustU64(c.t, &r); got != 77 {
+		c.t.Fatal("cleanup changed transaction handle", got)
+	}
+	return ok().b, c.err
+}
+
+func TestRollbackAfterCancellationRetainsBoundedOwnerContext(t *testing.T) {
+	type ownerKey struct{}
+	key := ownerKey{}
+	caller := &cleanupCaller{t: t, ownerKey: key, ownerValue: "original actor"}
+	store, err := NewStore(caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := store.(*storeDB).WithStatementID("cancelled_operation").Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.WithValue(t.Context(), key, "original actor"))
+	cancel()
+	if err = tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() != context.Canceled {
+		t.Fatal("cleanup changed original cancellation", ctx.Err())
+	}
+	if caller.calls != 2 {
+		t.Fatal("operation or cleanup retried", caller.calls)
+	}
+}
+
+func TestRollbackLostAcknowledgmentIsFailureWithoutAutomaticRetry(t *testing.T) {
+	type ownerKey struct{}
+	key := ownerKey{}
+	caller := &cleanupCaller{t: t, ownerKey: key, ownerValue: "original actor", err: context.DeadlineExceeded}
+	store, err := NewStore(caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := store.(*storeDB).WithStatementID("cancelled_operation").Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.WithValue(t.Context(), key, "original actor"))
+	cancel()
+	if err = tx.Rollback(ctx); !errors.Is(err, ErrStoreUnavailable) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("missing rollback acknowledgment claimed cleanup", err)
+	}
+	if err = tx.Rollback(ctx); !errors.Is(err, ErrTxClosed) {
+		t.Fatal("ambiguous handle reused", err)
+	}
+	if caller.calls != 2 {
+		t.Fatal("rollback automatically retried", caller.calls)
+	}
+}

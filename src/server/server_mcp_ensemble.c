@@ -339,7 +339,8 @@ cJSON *server_mcp_set_primary_agent(const char *session_id, cJSON *args)
    cJSON *jclear = args ? cJSON_GetObjectItemCaseSensitive(args, "clear") : NULL;
    if (cJSON_IsTrue(jclear))
    {
-      session_primary_clear(session_id);
+      if (session_primary_clear(session_id) != 0)
+         return ensemble_text_content("error: session primary selection unavailable");
       return ensemble_text_content(
           "primary agent cleared; this session reverts to the default provider");
    }
@@ -358,7 +359,8 @@ cJSON *server_mcp_set_primary_agent(const char *session_id, cJSON *args)
       return ensemble_text_content(out);
    }
 
-   session_primary_set(session_id, name);
+   if (session_primary_set(session_id, name) != 0)
+      return ensemble_text_content("error: session primary selection unavailable");
    char out[256];
    snprintf(out, sizeof(out), "primary agent set to '%s' for this session", name);
    return ensemble_text_content(out);

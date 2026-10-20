@@ -50,6 +50,10 @@ server_native_runtime_open_bound_request(const agent_t *selected, const request_
 /* Creator-only release after independently verifying this actual native launch.
  * Bound runtimes hold model forwarding until release; SDK bytes cannot release
  * it. Digest is non-secret launch configuration identity, not a credential. */
+/* Install host-owned reserve40 identity before SDK/cache access. Does not
+ * grant effects: source47 independently validates the registered pending claim. */
+int server_native_runtime_set_native_owner(server_native_runtime_t *runtime,
+                                           const struct cJSON *reservation);
 int server_native_runtime_attest_launch(server_native_runtime_t *runtime, const char *digest);
 /* Host-only original-call admission. Revalidates the committed source prefix
  * and claims once for this turn; it does not execute or authorize any effect.
@@ -96,6 +100,9 @@ int server_native_runtime_cache_scope(const server_native_runtime_t *runtime,
 /* After the child is reaped, join its transport callbacks before consuming the
  * original canonical terminal content and cumulative usage from this execution's
  * committed model completions. No SDK-normalized result is imported. */
+/* Deactivate every bridge effect while retaining the bound port until the
+ * independently owned native process boundary is confirmed empty. */
+void server_native_runtime_deactivate_hold_port(server_native_runtime_t *runtime);
 void server_native_runtime_quiesce(server_native_runtime_t *runtime);
 int server_native_runtime_result(const server_native_runtime_t *runtime, aimee_response_t *out);
 void server_native_runtime_close(server_native_runtime_t *runtime);

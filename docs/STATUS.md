@@ -26,20 +26,25 @@ and supervised tool owners. The Server supplies original model context, tool cal
 SDK conversation observations cannot replace them. Codex npm registrations resolve the matching
 native package without running the launcher script.
 
-Actual-SDK integration qualifies API-key and Vault OAuth forwarding, rotation, compaction, resume
-and seeded runs. The browser-operator question/reconnect journeys and UI replay repairs passed
-the published CI checkpoint. New result-ownership and cache changes require fresh CI.
-HTTP and host-owned native executors now retain complete owned responses through selection and
-repair. Optional pure-text result reuse stores canonical snapshots, binds the exact native request
-and authenticated owner, and excludes user history capture and opaque credential lineage.
-Native hooks acquire the approved workspace before memory interception or filesystem probes;
-unknown Git worktree state cannot authorize cached verification.
-Compatibility Codex/ACP final outputs now retain typed observations, including ACP reasoning/media
-and native stop reasons. The generic flat-output executor fallback is retired; fresh CI must
-qualify this additional cutover. ACP's direct filesystem/control handler remains to be migrated.
-Remaining typed consumers, independently graded local learning/reuse, broader native platforms,
-live subscription acceptance and reviewed production promotion remain unfinished. Production stays
-KB-free. See the [migration boundaries](proposals/pending/canonical-ir-session-stream.md).
+Actual-SDK integration covers API-key and Vault OAuth forwarding, rotation,
+compaction, resume and seeded runs. The current continuation also passes actual
+Codex/Claude daemon-crash and interrupted-question recovery, source-bound unknown
+outcomes, one-use operator denial and replay without renewed effects or prompts.
+Session-selected models persist in owner-checked metadata across restarts.
+Private delegate histories now own canonical question/permission scopes; browser
+replies target the child session after replay readiness. The web transport rejects
+ambiguous reply frames before forwarding validated bytes unchanged.
+
+HTTP and host-owned native executors retain complete owned responses through
+selection and repair. Cache claims require durable terminal state and actual tree
+quiescence when the optional Linux containment boundary is configured. KB-free
+independent grading, delegate observations and source-checked next-run reuse are
+implemented and have actual-store integration coverage. Legacy-import fidelity
+reporting and final combined CI qualification remain in progress in #3052.
+Production remains KB-free and unpromoted; live subscription and independently
+reviewed promotion are separate qualification gates. Existing macOS/Windows
+thin-client support does not imply native server execution on those platforms.
+See the [current handoff](IR_MIGRATION_HANDOFF.md).
 
 ## Runtime
 
@@ -116,7 +121,7 @@ KB-free. See the [migration boundaries](proposals/pending/canonical-ir-session-s
 | External witness and anchor | Gated | Needed for evidence against a compromised host. |
 | Org budgets and rate limits | Done | Catalog, admission, spend, and quota surfaces. |
 | Browser workspace | Done | Top session tabs open chat with a session-owned project and history. Chat forwards the authenticated actor and displays tool lifecycle activity, including direct primary models. The left panel opens projects, agents, workflows, graph, logs, settings, and VS Code. |
-| Canonical IR migration | In progress | Durable primary history, model switching and compaction; original-source native Codex/Claude execution with supervised tools and closed credential-free SDK homes; typed seeded results and cumulative usage. Sixteen actual-SDK API/OAuth journeys pass locally. Live browser operator CI, remaining consumers, independent local learning/reuse, broader platforms and live subscription/production qualification remain open. |
+| Canonical IR migration | In progress | Canonical primary/delegate history, persistent model selection, source-owned Linux native execution, durable interruption recovery and child browser replies are implemented. Legacy-import fidelity and final CI remain in progress; production promotion requires separate review. |
 | Managed container deploy | Done | Browser manages Server model containers through the mounted Docker socket. A KB is deployed and enrolled separately. |
 | Split deploy | Done | Server and KB can run without Docker-socket delegation. |
 | Native thin clients | Done | Linux, macOS, and Windows; no database linkage. |

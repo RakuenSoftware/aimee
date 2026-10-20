@@ -6,6 +6,46 @@ import ControlCard from './ControlCard';
 afterEach(cleanup);
 const permission = { kind: 'permission', request: { title: 'Run command', input: { command: 'make test' } }, requestedBy: 'alice', turn: 't' };
 describe('canonical browser controls', () => {
+  it('presents the real unknown-effect action without exposing custody metadata or changing its reply binding', async () => {
+    const onReply = vi.fn().mockResolvedValue(undefined);
+    const id = 'host-turn:unknown-effect:' + 'f'.repeat(64);
+    const control = { ...permission, request: { tool: 'write_file', description: 'Earlier effects are unknown; authorize only this new action.', input: {
+      session_id: 'private-session', turn_id: 'private-turn', actor: 'private-actor', request_id: 'private-request', attempt_id: 'private-attempt',
+      tool: 'write_file', arguments: { path: 'new.txt', content: '<script>Preserve all requested content</script>', options: { overwrite: false } },
+      unknown_receipts: { sha256: 'b'.repeat(64), count: 9, displayed: 1, sources: [{
+        event_id: 'private-receipt', session_id: 'private-session', turn_id: 'private-old-turn', sequence: '9', tool_id: 'private-call', name: 'old_tool',
+      }] },
+    } } };
+    const before = JSON.stringify(control);
+    const view = render(<ControlCard id={id} control={control} onReply={onReply} />);
+    expect(screen.getByText('9 earlier tool outcomes remain unknown.')).toBeTruthy();
+    expect(screen.getByText('write_file', { exact: true })).toBeTruthy();
+    expect(view.container.querySelector('pre')?.textContent).toBe(JSON.stringify(control.request.input.arguments, null, 2));
+    expect(view.container.querySelector('script')).toBeNull();
+    for (const hidden of ['private-session', 'private-actor', 'private-turn', 'private-request', 'private-attempt', 'private-receipt', 'private-call', 'b'.repeat(64), 'unknown_receipts', 'sha256'])
+      expect(view.container.textContent).not.toContain(hidden);
+    expect(onReply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
+    await waitFor(() => expect(onReply).toHaveBeenCalledWith(id, { decision: 'deny' }));
+    expect(JSON.stringify(control)).toBe(before);
+    view.rerender(<ControlCard id={id} control={{ ...control, response: { decision: 'deny' } }} onReply={onReply} />);
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(onReply).toHaveBeenCalledTimes(1);
+  });
+  it('shows unknown-effect permission explanation beside the exact new action without sending on replay', () => {
+    const onReply = vi.fn();
+    const description = "An earlier tool's effects are unknown. Allow this requested action once?";
+    const control = { ...permission, request: { tool: 'write_file', description,
+      input: { tool: 'write_file', arguments: { path: 'new.txt', content: 'new action' }, unknown_receipts: [{ outcome: 'unknown' }] } } };
+    const view = render(<ControlCard id="t:unknown" control={control} onReply={onReply} />);
+    expect(screen.getByText(description)).toBeTruthy();
+    expect(screen.getByText(/new.txt/)).toBeTruthy();
+    expect(onReply).not.toHaveBeenCalled();
+    view.rerender(<ControlCard id="t:unknown" control={{ ...control, response: { decision: 'deny' } }} onReply={onReply} />);
+    expect(screen.getByText(description)).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(onReply).not.toHaveBeenCalled();
+  });
   it('sends a single correlated decision and waits for the native response', async () => {
     const onReply = vi.fn().mockResolvedValue(undefined);
     render(<ControlCard id="t:p" control={permission} onReply={onReply} />);

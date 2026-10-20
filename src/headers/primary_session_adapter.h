@@ -41,6 +41,19 @@ extern "C"
                                                      session_compact_result_t *result_out,
                                                      char *error_out, size_t error_len);
    void primary_session_adapter_reset(void);
+   /* Host startup installs its authenticated session recovery owner. Standalone
+    * adapters can only admit a complete empty native owner list. No weak fallback. */
+   typedef int (*primary_session_native_reconcile_fn)(const char *session, const char *actor,
+                                                      const char *active_turn, char error[512]);
+   void primary_session_adapter_set_native_reconcile(primary_session_native_reconcile_fn fn);
+   /* Only the authenticated host loader may return histories containing protected
+    * interruption diagnostics. Both output arrays transfer to the adapter. */
+   typedef int (*primary_session_native_history_load_fn)(const char *session, const char *actor,
+                                                         const char *active_turn,
+                                                         int include_running,
+                                                         struct cJSON **messages,
+                                                         struct cJSON **receipts);
+   void primary_session_adapter_set_native_history_load(primary_session_native_history_load_fn fn);
 
 #ifdef __cplusplus
 }

@@ -71,7 +71,7 @@ RULES = {
 # These consumers have completed their history/algorithm cutover. Provider
 # adapters are intentionally outside this set; newly migrated consumers join it.
 CANONICAL_FILES = {
-    "src/posix/agent_runtime.c", "src/server/session_compact.c",
+    "src/posix/agent_runtime.c", "src/posix/server_compute.c", "src/server/session_compact.c",
     "src/server/router_advise.c",
     "src/server/script_tool_execution.c",
     "src/server/agent_request_build.c",
@@ -142,7 +142,9 @@ def findings(root: Path) -> list[dict]:
         history_spans = (profile_function_spans(source, {"message_history_repair"})
                          if relative == "src/server/agent_bridge.c" else [])
         for rule, pattern in RULES.items():
-            if rule == "legacy-transcript-write" and relative != "src/server/server_auth.c":
+            if rule == "legacy-transcript-write" and relative not in {
+                    "src/server/server_auth.c", "src/posix/server_compute.c",
+                    "src/windows/server_compute.c"}:
                 continue
             if rule == "legacy-session-search" and relative not in {
                     "src/server/session_search_tool.c",

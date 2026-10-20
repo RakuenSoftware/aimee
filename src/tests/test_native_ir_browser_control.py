@@ -10,6 +10,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 
 
 def assert_completed_parent(records):
@@ -135,3 +136,124 @@ def run_browser_control(api, home, workspace, marker):
     finally:
         operator(f"/v1/sessions/{sid}/detach", {"attach_id": attachment})
     print(f"native integration: {marker} live browser question, scoped operator reply and durable completion pass", flush=True)
+
+
+def run_browser_delegate_control(api, home, workspace, marker, release):
+    """A real asynchronous child asks after its native parent has finished."""
+    prefix = [] if os.geteuid() == 0 else ["sudo", "-n"]
+    user, actor = "ir-browser-delegate", "webuser:ir-browser-delegate"
+    requests, stream_errors, child_records = queue.Queue(), [], []
+    processes = []
+
+    def operator(path, body=None, receive=None, replay=False):
+        program = ROOT_HTTP
+        if replay:
+            program = program.replace("    sys.stdout.flush()\nconnection.close()",
+                '    sys.stdout.flush()\n    if line.startswith(b"event: replay_complete"):\n'
+                '        sys.stdout.write(response.readline().decode())\n        break\nconnection.close()')
+        elif "/events?" in path:
+            program = program.replace("    sys.stdout.flush()\nconnection.close()",
+                '    sys.stdout.flush()\n    if line.startswith(b"data: "):\n'
+                '        event = json.loads(line[6:]).get("event", {})\n'
+                '        if event.get("kind") == "execution" and event["payload"]["status"] in ("completed", "failed", "cancelled"):\n'
+                '            break\nconnection.close()')
+        process = subprocess.Popen(prefix + [sys.executable, "-u", "-c", program,
+            str(Path(home) / "aimee-http.sock"), user], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        processes.append(process)
+        process.stdin.write(json.dumps(dict(path=path, body=body)))
+        process.stdin.close()
+        first = process.stdout.readline()
+        assert first, process.stderr.read()
+        status = json.loads(first)["status"]
+        lines = []
+        try:
+            for line in process.stdout:
+                lines.append(line)
+                if receive:
+                    receive(line)
+            rc = process.wait(timeout=100)
+            text = "".join(lines)
+            assert not rc and status == 200, (path, status, rc, text, process.stderr.read())
+            return text if receive or replay else json.loads(text)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
+
+    api("/v1/vault/capability", dict(action="grant", principal=actor))
+    sid = operator("/v1/sessions/create", dict(client_type="native-browser-child-control"))["session_id"]
+    attachment = operator(f"/v1/sessions/{sid}/attach", dict(surface="webchat", owner=actor))["attach_id"]
+    operator(f"/v1/sessions/{sid}/primary", dict(agent=marker))
+    release.clear()
+    try:
+        raw = operator("/v1/chat/stream", dict(attach_id=attachment, aimee_session_id=sid,
+            message=marker + "_FIRST", cwd=str(workspace), ir_version=1), receive=lambda _line: None)
+        parent = [json.loads(line) for line in raw.splitlines() if line.strip()]
+        assert_completed_parent(parent)
+        # A child may publish its running reference just after the parent stream
+        # closes. Read only its real durable parent log; never infer a child ID.
+        deadline = time.monotonic() + 30
+        while True:
+            replay = operator(f"/v1/sessions/{sid}/events?format=ir&cursor=0", replay=True)
+            parent_history = [json.loads(line[6:]) for line in replay.splitlines() if line.startswith("data: ")]
+            children = [r["event"]["payload"] for r in parent_history if r.get("event", {}).get("kind") == "child_execution" and r["event"]["payload"]["status"] == "running"]
+            if children:
+                break
+            assert time.monotonic() < deadline, parent_history
+            time.sleep(0.05)
+        assert len(children) == 1, children
+        child = children[0]
+        assert child["session_id"] != sid
+
+        def receive(line):
+            if line.startswith("data: "):
+                record = json.loads(line[6:])
+                if "event" not in record:
+                    return
+                assert record["session_id"] == child["session_id"] and record["actor"] == actor, record
+                child_records.append(record)
+                if record["event"]["kind"] == "control_request":
+                    requests.put(record)
+
+        def stream():
+            try:
+                operator(f"/v1/sessions/{child['session_id']}/events?format=ir&cursor=0", receive=receive)
+            except Exception as error:
+                stream_errors.append(repr(error))
+                requests.put(dict(error=repr(error)))
+
+        worker = threading.Thread(target=stream, daemon=True)
+        worker.start()
+        release.set()
+        pending = requests.get(timeout=60)
+        assert "error" not in pending and pending["event"]["control_kind"] == "question", pending
+        assert "DELEGATE_BROWSER_QUESTION" in json.dumps(pending), pending
+        reply = dict(session_id=child["session_id"], request_id=pending["event"]["request_id"],
+                     reply=dict(decision="allow", answers={"answer": ["DELEGATE_BROWSER_REPLY"]}))
+        api("/v1/chat/control-reply", reply, expected=403)
+        # Correct actor with wrong durable destination must also refuse.
+        refused = {**reply, "session_id": sid}
+        command = prefix + [sys.executable, "-u", "-c", ROOT_HTTP, str(Path(home) / "aimee-http.sock"), user]
+        result = subprocess.run(command, input=json.dumps(dict(path="/v1/chat/control-reply", body=refused)), capture_output=True, text=True, timeout=100)
+        assert not result.returncode and json.loads(result.stdout.splitlines()[0])["status"] == 409, result.stdout
+        operator("/v1/chat/control-reply", reply)
+        worker.join(timeout=95)
+        assert not worker.is_alive() and not stream_errors, stream_errors
+        assert_completed_parent(child_records)
+        assert any(r["event"]["kind"] == "control_response" and r["event"]["request_id"] == reply["request_id"] for r in child_records), child_records
+        assert "CHILD_BROWSER_QUESTION_OK" in json.dumps(child_records), child_records
+        replay = operator(f"/v1/sessions/{child['session_id']}/events?format=ir&cursor=0", replay=True)
+        durable = [json.loads(line[6:]) for line in replay.splitlines() if line.startswith("data: ") and '"event"' in line]
+        assert sum(r["event"]["kind"] == "control_request" for r in durable) == 1, durable
+        assert sum(r["event"]["kind"] == "control_response" for r in durable) == 1, durable
+        late = subprocess.run(command, input=json.dumps(dict(path="/v1/chat/control-reply", body=reply)), capture_output=True, text=True, timeout=100)
+        assert not late.returncode and json.loads(late.stdout.splitlines()[0])["status"] == 409, late.stdout
+        print(f"native integration: {marker} completed native parent, private child question, exact child operator reply, durable replay and late reply refusal pass", flush=True)
+    finally:
+        release.set()
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
+        operator(f"/v1/sessions/{sid}/detach", dict(attach_id=attachment))

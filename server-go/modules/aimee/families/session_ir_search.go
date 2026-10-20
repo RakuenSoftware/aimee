@@ -23,7 +23,7 @@ const sessionSearchExternalCommitSQL = `SELECT sequence::text,turn_id,event_id,p
  AND payload::jsonb->>'kind'='history'
  AND payload::jsonb->'payload'->>'scope'='external-sdk:claude-code'
  AND payload::jsonb->'payload'->>'phase'='commit'
- ORDER BY sequence DESC LIMIT 1`
+ ORDER BY session_ir_events.sequence DESC LIMIT 1`
 
 // Search displays the canonical current-history reducer by default, including
 // imported checkpoint chunks. A separately named observations view exposes
@@ -77,7 +77,7 @@ const sessionSearchMessagesSQL = `WITH ordered AS (
  FROM session_ir_events e JOIN server_sessions s ON s.id=e.session_id
  WHERE s.principal=$1 AND e.actor=$1 AND e.session_id=$2 AND e.payload::jsonb->>'kind' IN ('message','delta')),
  observed AS (SELECT *,row_number() OVER (PARTITION BY turn_id,payload::jsonb->>'message_id' ORDER BY sequence DESC) AS latest FROM ordered WHERE payload::jsonb->>'kind'='message')
- SELECT sequence::text,turn_id,payload FROM observed WHERE latest=1 ORDER BY first_seen,sequence`
+ SELECT sequence::text,turn_id,payload FROM observed WHERE latest=1 ORDER BY observed.first_seen,observed.sequence`
 
 type sessionSearchRequest struct {
 	Query     string   `json:"query"`

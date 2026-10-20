@@ -13,6 +13,7 @@
 #include "modules/workspace/workspace_provider.h"
 #include "util.h"
 #include <limits.h>
+#include <stdatomic.h>
 #include <unistd.h>
 #include "agent_tasks.h"
 #include "db1_client/session_state.h"
@@ -21,6 +22,26 @@
 #include <string.h>
 
 #define EXECUTION_POLICY_TIMEOUT_MS 5000
+
+static _Atomic(policy_unknown_effect_gate_fn) unknown_effect_gate;
+void policy_set_unknown_effect_gate(policy_unknown_effect_gate_fn gate)
+{
+   atomic_store(&unknown_effect_gate, gate);
+}
+static int policy_unknown_effect_check(const char *tool, const char *args, const char *attempt,
+                                       uint32_t categories, int final_stage, char *reason,
+                                       size_t length)
+{
+   policy_unknown_effect_gate_fn gate = atomic_load(&unknown_effect_gate);
+   return gate ? gate(tool, args, attempt, categories, final_stage, reason, length) : 0;
+}
+
+void policy_unknown_effect_clear(void)
+{
+   policy_unknown_effect_gate_fn gate = atomic_load(&unknown_effect_gate);
+   if (gate)
+      (void)gate(NULL, NULL, NULL, 0, 2, NULL, 0);
+}
 
 int policy_load(void)
 {
@@ -220,24 +241,37 @@ static int policy_check_exploration(const char *tool, const char *effect, const 
    return valid ? (permit ? 0 : -1) : 1;
 }
 
+int policy_recheck_action_tool_attempt(const char *tool, const char *effect, const char *arguments,
+                                       const char *attempt, uint32_t resource_categories,
+                                       char *reason, size_t reason_len)
+{
+   int discovery = 0;
+   if (policy_baseline(tool, effect, arguments, 0, reason, reason_len, &discovery))
+   {
+      policy_unknown_effect_clear();
+      return -1;
+   }
+   return policy_unknown_effect_check(tool, arguments, attempt, resource_categories, 1, reason,
+                                      reason_len);
+}
 int policy_recheck_action_tool(const char *tool, const char *effect, const char *arguments,
                                char *reason, size_t reason_len)
 {
-   int discovery = 0;
-   return policy_baseline(tool, effect, arguments, 0, reason, reason_len, &discovery);
+   return policy_recheck_action_tool_attempt(tool, effect, arguments, NULL, 0, reason, reason_len);
 }
 
 static int policy_check_attempt(const char *tool, const char *effect, const char *args,
                                 const char *attempt, uint32_t categories, char *reason,
                                 size_t reason_len)
 {
+   policy_unknown_effect_clear();
    policy_action_attempt(attempt);
    /* Baseline authorization always runs, including computer-use restrictions. */
    int discovery = 0;
    if (policy_baseline(tool, effect, args, categories, reason, reason_len, &discovery) != 0)
       return -1;
    if (!discovery)
-      return 0;
+      return policy_unknown_effect_check(tool, args, attempt, categories, 0, reason, reason_len);
    int decision =
        policy_check_exploration(tool, effect, args, attempt, categories, reason, reason_len);
    if (decision == 1 && discovery == 2)
@@ -246,7 +280,9 @@ static int policy_check_attempt(const char *tool, const char *effect, const char
                  "operator exploration accounting requires an authenticated session");
       return -1;
    }
-   return decision == 1 ? 0 : decision;
+   if (decision != 0 && decision != 1)
+      return decision;
+   return policy_unknown_effect_check(tool, args, attempt, categories, 0, reason, reason_len);
 }
 
 int policy_check_tool_attempt(const char *tool, const char *effect, const char *args,
@@ -442,12 +478,13 @@ int policy_prepare_exploration(const cJSON *offer, const char *session, const ch
 int policy_check_session_tool(const char *session, const char *tool, const char *arguments,
                               const char *attempt, char *reason, size_t reason_len)
 {
+   policy_unknown_effect_clear();
    policy_action_attempt(attempt);
    int discovery = 0;
    if (policy_baseline(tool, "filesystem", arguments, 0, reason, reason_len, &discovery) != 0)
       return -1;
    if (!discovery)
-      return 0;
+      return policy_unknown_effect_check(tool, arguments, attempt, 0, 0, reason, reason_len);
    const request_context_t *ctx = request_context_get();
    if (!ctx || !ctx->principal[0] || !session || !session[0] || !attempt || !attempt[0])
    {
@@ -457,7 +494,7 @@ int policy_check_session_tool(const char *session, const char *tool, const char 
                     "operator exploration accounting requires an authenticated session");
          return -1;
       }
-      return 0;
+      return policy_unknown_effect_check(tool, arguments, attempt, 0, 0, reason, reason_len);
    }
    cJSON *request = cJSON_CreateObject();
    cJSON_AddStringToObject(request, "operation", "check_session");
@@ -490,12 +527,14 @@ int policy_check_session_tool(const char *session, const char *tool, const char 
    free(wire);
    cJSON_Delete(request);
    cJSON_Delete(result);
-   return denied ? -1 : 0;
+   return denied ? -1
+                 : policy_unknown_effect_check(tool, arguments, attempt, 0, 0, reason, reason_len);
 }
 
 int policy_check_tool(const char *tool, const char *effect, const char *args, char *reason,
                       size_t reason_len)
 {
+   policy_unknown_effect_clear();
    int discovery = 0;
    int rc = policy_baseline(tool, effect, args, 0, reason, reason_len, &discovery);
    if (rc == 0 && discovery == 2)
@@ -504,7 +543,7 @@ int policy_check_tool(const char *tool, const char *effect, const char *args, ch
                  "operator exploration accounting requires a task-bound dispatch");
       return -1;
    }
-   return rc;
+   return rc ? rc : policy_unknown_effect_check(tool, args, NULL, 0, 0, reason, reason_len);
 }
 
 static char *policy_session_operation(cJSON *request)

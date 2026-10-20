@@ -1,12 +1,14 @@
 #ifndef AIMEE_CLI_CLAUDE_NATIVE_H
 #define AIMEE_CLI_CLAUDE_NATIVE_H
 #include "provider_cli_adapter.h"
+#include "cli_native_spawn_guard.h"
 typedef struct cli_claude_host_launch
 {
    int executable_fd, cwd_fd;
    const char *home, *cwd, *mcp_config, *gateway_url, *gateway_token, *expected_profile;
    char *const *environment;
    const aimee_request_t *catalog;
+   const cli_native_spawn_guard_t *spawn_guard;
    int (*init)(const struct cJSON *frame, void *context);
    void *context;
    int (*progress)(void *context);

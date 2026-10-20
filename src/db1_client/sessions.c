@@ -940,16 +940,125 @@ char *db1_session_native_reservation_lookup(const char *principal, const char *r
                                                                                           : result;
 }
 
-int db1_session_native_reservation_finish(const char *principal, const char *request_json,
-                                          char out_sequence[32], char out_epoch[33])
+int db1_session_native_reservation_finish_checked(const char *principal, const char *request_json,
+                                                  char out_sequence[32], char out_epoch[33],
+                                                  int *out_absent)
 {
-   if (!out_sequence || !out_epoch)
+   if (!out_sequence || !out_epoch || !out_absent)
       return -1;
    out_sequence[0] = 0;
    out_epoch[0] = 0;
+   *out_absent = 0;
    const char *fields[] = {principal ? principal : "", request_json ? request_json : ""};
-   char *const values[] = {out_sequence, out_epoch};
-   const size_t caps[] = {32u, 33u};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_FINISH, fields, 2,
-                                values, caps, 2, NULL));
+   char disposition[16] = "";
+   char *const values[] = {out_sequence, out_epoch, disposition};
+   const size_t caps[] = {32u, 33u, sizeof disposition};
+   int rc = write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_FINISH, fields,
+                                  2, values, caps, 3, NULL));
+   if (rc || (strcmp(disposition, "finished") && strcmp(disposition, "absent")))
+   {
+      out_sequence[0] = 0;
+      out_epoch[0] = 0;
+      return -1;
+   }
+   *out_absent = !strcmp(disposition, "absent");
+   return 0;
+}
+int db1_session_native_reservation_finish(const char *principal, const char *request_json,
+                                          char out_sequence[32], char out_epoch[33])
+{
+   int absent = 0;
+   int rc = db1_session_native_reservation_finish_checked(principal, request_json, out_sequence,
+                                                          out_epoch, &absent);
+   if (absent)
+   {
+      out_sequence[0] = 0;
+      out_epoch[0] = 0;
+      return -1;
+   }
+   return rc;
+}
+
+int db1_session_native_active_owned(const char *principal, const char *session_id, char **out_json)
+{
+   if (!out_json)
+      return -1;
+   *out_json = NULL;
+   const char *fields[] = {principal ? principal : "", session_id ? session_id : ""};
+   char **cells = NULL;
+   uint32_t count = 0;
+   int status = primary_read(AIMEE_DB1_OP_SESSION_NATIVE_ACTIVE_OWNED, fields, 2, &cells, &count);
+   int rc = -1;
+   if (status == AIMEE_DB1_STATUS_OK && count == 1 && cells[0] && cells[0][0])
+   {
+      *out_json = cells[0];
+      cells[0] = NULL;
+      rc = 0;
+   }
+   primary_cells_free(cells, count);
+   return rc;
+}
+
+int db1_session_native_history_load(const char *principal, const char *session_id, const char *mode,
+                                    const char *active_turn, char **out_json)
+{
+   if (!out_json)
+      return -1;
+   *out_json = NULL;
+   const char *fields[] = {principal ? principal : "", session_id ? session_id : "",
+                           mode ? mode : "", active_turn ? active_turn : ""};
+   char **cells = NULL;
+   uint32_t count = 0;
+   int status = primary_read(AIMEE_DB1_OP_SESSION_NATIVE_HISTORY, fields, 4, &cells, &count);
+   int rc = -1;
+   if (status == AIMEE_DB1_STATUS_OK && count == 1 && cells[0] && cells[0][0])
+   {
+      *out_json = cells[0];
+      cells[0] = NULL;
+      rc = 0;
+   }
+   primary_cells_free(cells, count);
+   return rc;
+}
+
+int db1_session_native_source_append(const char *session_id, const char *event_id, const char *turn,
+                                     const char *actor, const char *payload, char out_sequence[32])
+{
+   if (!out_sequence)
+      return -1;
+   out_sequence[0] = 0;
+   const char *fields[] = {session_id ? session_id : "", event_id ? event_id : "", turn ? turn : "",
+                           actor ? actor : "", payload ? payload : ""};
+   char *const values[] = {out_sequence};
+   const size_t caps[] = {32u};
+   return write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_NATIVE_SOURCE_APPEND, fields, 5,
+                                values, caps, 1, NULL));
+}
+
+int db1_server_session_primary_get(const char *principal, const char *session_id, char *out,
+                                   size_t cap)
+{
+   if (!out || !cap)
+      return -1;
+   out[0] = 0;
+   const char *fields[] = {principal ? principal : "", session_id ? session_id : ""};
+   char **cells = NULL;
+   uint32_t count = 0;
+   int status = primary_read(AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_GET, fields, 2, &cells, &count);
+   int rc = -1;
+   if (status == AIMEE_DB1_STATUS_OK && count == 1 && cells[0] && strlen(cells[0]) < cap)
+   {
+      memcpy(out, cells[0], strlen(cells[0]) + 1);
+      rc = 0;
+   }
+   primary_cells_free(cells, count);
+   return rc;
+}
+
+int db1_server_session_primary_set(const char *principal, const char *session_id, const char *agent)
+{
+   const char *fields[] = {principal ? principal : "", session_id ? session_id : "",
+                           agent ? agent : ""};
+   return write_result(
+       db1_call(&family, AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_SET, fields, 3, NULL, NULL, 0, NULL));
 }

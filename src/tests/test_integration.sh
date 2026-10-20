@@ -14,9 +14,27 @@
 
 set -e
 
+# Explicit local diagnostic profile; the default CI qualification is unchanged.
+NATIVE_RECOVERY_ONLY="${AIMEE_TEST_NATIVE_RECOVERY_ONLY:-0}"
+case "$NATIVE_RECOVERY_ONLY" in 0|1) ;; *) echo "invalid native recovery mode"; exit 2 ;; esac
+if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
+    if [ "${AIMEE_TEST_NATIVE_REQUIRE_CONTAINMENT:-0}" != 1 ] ||
+       [ -z "${AIMEE_NATIVE_CONTAINMENT_ROOT:-}" ] ||
+       [ -z "${AIMEE_TEST_NATIVE_CODEX:-}" ] || [ -z "${AIMEE_TEST_NATIVE_CLAUDE:-}" ] ||
+       [ -z "${AIMEE_STORE_URL:-}" ]; then
+        echo "focused native recovery requires the real store, both pinned SDKs and required containment"
+        exit 2
+    fi
+    echo "FOCUSED native recovery qualification: general integration and eight-profile SDK matrix are not run"
+fi
+
 # Resolve paths relative to repo root
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+if [ -n "${AIMEE_TEST_NATIVE_ARTIFACT_DIR:-}" ]; then
+    python3 "$REPO_ROOT/scripts/preserve_native_recovery_logs.py" --check "$AIMEE_TEST_NATIVE_ARTIFACT_DIR"
+fi
 
 AIMEE="$REPO_ROOT/aimee"
 AIMEE_SERVER="$REPO_ROOT/aimee-server"
@@ -930,13 +948,14 @@ start_server() {
     AIMEE_SESSION_WORKTREE_BASE=current "$AIMEE_SERVER" --foreground >"$log" 2>&1 &
     SERVER_PID=$!
     local config_started=0
+    local deadline=$((SECONDS + 30))
     local i
     for i in $(seq 1 300); do
+        [ "$SECONDS" -lt "$deadline" ] || break
         if [ "$config_started" -eq 0 ] && [ -S "$MODULE_BUS_SOCK" ]; then
             start_config_module
             start_providers_module
             start_delegates_module
-            if [ "$MEMORY_MODULE_ENABLED" -eq 1 ]; then start_memory_module; fi
             start_policy_module
             start_tools_module
             start_git_module
@@ -945,7 +964,39 @@ start_server() {
             start_routing_module
             config_started=1
         fi
-        [ -S "$HTTP_SOCK" ] && { start_db1_module; return 0; }
+        # HTTP may appear just after the bus check above. It cannot bypass the
+        # owned module launches in that publication window.
+        if [ "$config_started" -eq 1 ] && [ -S "$HTTP_SOCK" ]; then
+            if [ "$MEMORY_MODULE_ENABLED" -eq 0 ]; then
+                start_db1_module
+                return 0
+            fi
+            # Forking config is not SERVING. Memory performs a startup config
+            # read and exits on absence, so acknowledge the real read before
+            # launching it. Only this read retries, within the original budget.
+            local remaining=$((deadline - SECONDS))
+            [ "$remaining" -gt 0 ] || break
+            [ "$remaining" -le 10 ] || remaining=10
+            local configuration=""
+            configuration=$(AIMEE_TEST_HTTP_TIMEOUT="$remaining" http_rpc \
+                '{"method":"config.get","key":"server_api_http_port"}') || configuration=""
+            if printf '%s' "$configuration" | python3 -c '
+import json,sys
+try:
+    value=json.load(sys.stdin)
+    ready=(value.get("status")=="ok" and value.get("key")=="server_api_http_port" and
+           value.get("secret") is False and type(value.get("value")) is int)
+except (ValueError,TypeError,AttributeError):
+    ready=False
+sys.exit(0 if ready else 1)
+' >/dev/null 2>&1; then
+                # Memory's erasure replay also requires the existing real store
+                # and PostgreSQL owner; DB1's readiness establishes both.
+                start_db1_module || return 1
+                start_memory_module
+                return 0
+            fi
+        fi
         # A dead process will never bind; fail fast rather than waiting out the
         # full window for a server that has already exited.
         kill -0 "$SERVER_PID" 2>/dev/null || break
@@ -1012,6 +1063,14 @@ cleanup() {
         kill "$SERVER_PID" 2>/dev/null
         wait "$SERVER_PID" 2>/dev/null || true
     fi
+    # Preserve only bounded, redacted fixture logs before disposable HOME goes.
+    # The supplied destination must already be an owned private directory.
+    if [ -n "${AIMEE_TEST_NATIVE_ARTIFACT_DIR:-}" ] &&
+       { [ "$rc" -ne 0 ] || [ "$FAIL" -ne 0 ] || [ "$REACHED_SUMMARY" -ne 1 ]; }; then
+        python3 "$REPO_ROOT/scripts/preserve_native_recovery_logs.py" \
+            "$AIMEE_TEST_NATIVE_ARTIFACT_DIR" "$HOME" "$SERVER_LOG" ||
+            echo "integration: failed to preserve requested native diagnostics" >&2
+    fi
     # Same rule as the TCP teardown: removing a temp dir must never change the
     # verdict. This one already waits for its server, which is why it never bit.
     rm -rf "$HOME" || true
@@ -1027,6 +1086,23 @@ trap cleanup EXIT
 # ============================================================
 # 1. No server reachable
 # ============================================================
+
+if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
+    # The general profile enables this owner after its intentional outage
+    # checks. Focused native execution starts the same real owner immediately.
+    MEMORY_MODULE_ENABLED=1
+    start_server && SERVER_STARTED=1 || SERVER_STARTED=0
+    check "focused recovery owned server started" test "$SERVER_STARTED" = 1
+    if [ "$SERVER_STARTED" != 1 ]; then exit 1; fi
+    MEMORY_READY=0
+    for attempt in $(seq 1 100); do
+        RESP=$(srv_auth_req '{"method":"memory.get","store":"user"}') || true
+        case "$RESP" in *'"kind":"invalid_argument"'*) MEMORY_READY=1; break ;; esac
+        sleep 0.1
+    done
+    check "focused recovery real memory owner ready" test "$MEMORY_READY" = 1
+    if [ "$MEMORY_READY" != 1 ]; then exit 1; fi
+else
 # This used to be "auto-start", and asserted that a command failed *because
 # autostart was disabled*. There is no autostart now: the client starts no
 # server, ever, so an unreachable server is simply an outage.
@@ -2323,6 +2399,8 @@ stop_workflow_module
 
 fi  # WORKFLOW_MODULE_READY
 
+fi  # ordinary integration checks; focused mode shares setup and lifecycle below
+
 # Native provider output must cross the same durable IR contract used by
 # browser live delivery and replay, including after model switches.
 # This journey owns a server-local checkout. The earlier mirror journey's
@@ -2343,6 +2421,7 @@ PYREQ
 )
 RESP=$(http_rpc "$PRIMARY_WORKSPACE_REQ") || true
 check_output "canonical delegate server workspace registered" '"status":"ok"' echo "$RESP"
+if [ "$NATIVE_RECOVERY_ONLY" = 0 ]; then
 PRIMARY_IR_LOG="$HOME/primary-ir-live.log"
 if AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$REPO_ROOT/src/tests/test_primary_ir_live.py" >"$PRIMARY_IR_LOG" 2>&1; then
     PASS=$((PASS + 1))
@@ -2377,6 +2456,8 @@ else
     dump_server_log
     FAIL=$((FAIL + 1))
 fi
+fi  # primary/general grade-source journeys are outside the focused profile
+
 # This lifecycle hook belongs to the parent shell, which retains every owned
 # PID across restart. The fixture may request only these two fixed actions via
 # private files; no PID, socket path or executable is accepted from the request.
@@ -2394,16 +2475,18 @@ stop_execution_grade_fixture() {
     fi
 }
 run_execution_grade_fixture() {
+    local fixture="${1:-$REPO_ROOT/src/tests/test_execution_grade_live.py}"
+    local fixture_log="${2:-$EXECUTION_GRADE_LOG}"
     local request="$AIMEE_HOME/execution-grade-recovery.request"
     local acknowledgement="$AIMEE_HOME/execution-grade-recovery.ack"
     local action="" previous="" stage="running" workflow_was_running=0
     local deadline=$((SECONDS + 1200))
     rm -f "$request" "$acknowledgement"
-    AIMEE_TEST_GRADE_LIFECYCLE=1 python3 "$REPO_ROOT/src/tests/test_execution_grade_live.py" >"$EXECUTION_GRADE_LOG" 2>&1 &
+    AIMEE_TEST_GRADE_LIFECYCLE=1 AIMEE_TEST_NATIVE_LIFECYCLE=1 AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$fixture" >"$fixture_log" 2>&1 &
     GRADE_FIXTURE_PID=$!
     while kill -0 "$GRADE_FIXTURE_PID" 2>/dev/null; do
         if [ "$SECONDS" -ge "$deadline" ]; then
-            echo "integration: execution-grade fixture exceeded its owned lifecycle deadline" >>"$EXECUTION_GRADE_LOG"
+            echo "integration: execution-grade fixture exceeded its owned lifecycle deadline" >>"$fixture_log"
             kill "$GRADE_FIXTURE_PID" 2>/dev/null || true
             wait "$GRADE_FIXTURE_PID" 2>/dev/null || true
             GRADE_FIXTURE_PID=""
@@ -2417,7 +2500,7 @@ run_execution_grade_fixture() {
             action=$(cat "$request")
             if [ "$action" != "$previous" ]; then
                 case "$action:$stage" in
-                    pause-owned-server:running)
+                    pause-owned-server:running|pause-owned-server:restarted)
                         if ! kill -STOP "$SERVER_PID"; then stop_execution_grade_fixture; return 1; fi
                         GRADE_SERVER_PAUSED=1
                         local stopped=0
@@ -2428,11 +2511,23 @@ run_execution_grade_fixture() {
                         if [ "$stopped" -ne 1 ]; then stop_execution_grade_fixture; return 1; fi
                         stage="paused"
                         ;;
-                    restart-owned-server:paused)
-                        [ -n "$WFE_MODULE_PID" ] && workflow_was_running=1
+                    kill-owned-server:paused)
+                        # Test-only fixed action: reap precisely our daemon, but
+                        # leave the real SDK tree and modules untouched for the
+                        # fixture's post-death boundary observation.
                         kill -KILL "$SERVER_PID" 2>/dev/null || true
                         wait "$SERVER_PID" 2>/dev/null || true
                         SERVER_PID=""
+                        GRADE_SERVER_PAUSED=0
+                        stage="killed"
+                        ;;
+                    restart-owned-server:paused|restart-owned-server:killed)
+                        [ -n "$WFE_MODULE_PID" ] && workflow_was_running=1
+                        if [ -n "$SERVER_PID" ]; then
+                            kill -KILL "$SERVER_PID" 2>/dev/null || true
+                            wait "$SERVER_PID" 2>/dev/null || true
+                            SERVER_PID=""
+                        fi
                         GRADE_SERVER_PAUSED=0
                         stop_workflow_module
                         stop_db1_module
@@ -2486,6 +2581,7 @@ run_execution_grade_fixture() {
     fi
     return "$status"
 }
+if [ "$NATIVE_RECOVERY_ONLY" = 0 ]; then
 EXECUTION_GRADE_LOG="$HOME/execution-grade-live.log"
 if run_execution_grade_fixture; then
     GRADE_SKIPS=$(grep -c '^SKIP:' "$EXECUTION_GRADE_LOG" || true)
@@ -2501,16 +2597,36 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+fi  # independent Docker grading belongs to the ordinary integration profile
+
 # Extended native qualification uses explicitly supplied executable descriptors.
 # Baseline service runs do not discover or install an ambient provider SDK.
-if [ -n "${AIMEE_TEST_NATIVE_CODEX:-}" ] && [ -n "${AIMEE_TEST_NATIVE_CLAUDE:-}" ]; then
+if [ "$NATIVE_RECOVERY_ONLY" = 0 ] && [ -n "${AIMEE_TEST_NATIVE_CODEX:-}" ] && [ -n "${AIMEE_TEST_NATIVE_CLAUDE:-}" ]; then
     NATIVE_IR_LOG="$HOME/native-ir-live.log"
     if AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$REPO_ROOT/src/tests/test_native_ir_live.py" >"$NATIVE_IR_LOG" 2>&1; then
         PASS=$((PASS + 1))
-        grep -E '^(native integration:|native execution fence:)' "$NATIVE_IR_LOG" || true
+        grep -E '^(native integration:|native containment qualification:|native execution fence:)' "$NATIVE_IR_LOG" || true
     else
         echo "FAIL: actual native SDK canonical execution"
         tail -c 16000 "$NATIVE_IR_LOG"
+        dump_server_log
+        FAIL=$((FAIL + 1))
+    fi
+fi
+
+# This optional profile must qualify real SDK custody, not silently fall back.
+# Ordinary integration and its mandatory private-Docker checks are unchanged.
+if [ "${AIMEE_TEST_NATIVE_REQUIRE_CONTAINMENT:-0}" = 1 ]; then
+    NATIVE_CRASH_LOG="$HOME/native-ir-crash-live.log"
+    if [ -z "${AIMEE_TEST_NATIVE_CODEX:-}" ] || [ -z "${AIMEE_TEST_NATIVE_CLAUDE:-}" ]; then
+        echo "FAIL: required native crash qualification needs both pinned SDK descriptors"
+        FAIL=$((FAIL + 1))
+    elif run_execution_grade_fixture "$REPO_ROOT/src/tests/test_native_ir_crash_live.py" "$NATIVE_CRASH_LOG"; then
+        PASS=$((PASS + 1))
+        grep -E '^native (crash|interruption) recovery:' "$NATIVE_CRASH_LOG" || true
+    else
+        echo "FAIL: actual contained native SDK daemon crash/restart recovery"
+        tail -c 16000 "$NATIVE_CRASH_LOG"
         dump_server_log
         FAIL=$((FAIL + 1))
     fi
@@ -2520,11 +2636,20 @@ fi
 # 11. Server shutdown
 # ============================================================
 
-kill "$SERVER_PID" 2>/dev/null
-wait "$SERVER_PID" 2>/dev/null || true
-SERVER_PID=""
-
-check "socket removed after shutdown" test ! -S "$HTTP_SOCK"
+if [ -n "$SERVER_PID" ]; then
+    if ! kill "$SERVER_PID" 2>/dev/null; then
+        echo "FAIL: owned server exited before controlled shutdown"
+        FAIL=$((FAIL + 1))
+    fi
+    wait "$SERVER_PID" 2>/dev/null || true
+    SERVER_PID=""
+    check "socket removed after shutdown" test ! -S "$HTTP_SOCK"
+else
+    # A failed lifecycle fixture may have already reaped our daemon. Retain its
+    # recorded FAIL and reach the summary; never signal an empty/guessed PID or
+    # pretend a killed daemon performed graceful socket cleanup.
+    echo "integration: owned daemon already reaped by lifecycle fixture"
+fi
 
 # ============================================================
 # Results
@@ -2533,7 +2658,12 @@ check "socket removed after shutdown" test ! -S "$HTTP_SOCK"
 REACHED_SUMMARY=1
 TOTAL=$((PASS + FAIL)) || true
 echo ""
-echo "integration: $PASS/$TOTAL passed"
+if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
+    echo "focused native recovery qualification: $PASS/$TOTAL setup/recovery/shutdown checks passed"
+    echo "General integration and eight-profile SDK qualification were not run in this invocation."
+else
+    echo "integration: $PASS/$TOTAL passed"
+fi
 if [ "$SKIP" -gt 0 ]; then
     echo "SKIPPED ($SKIP checks whose service is not configured here; covered by full-stack E2E)"
 fi
@@ -2541,4 +2671,8 @@ if [ "$FAIL" -gt 0 ]; then
     echo "FAILED ($FAIL failures)"
     exit 1
 fi
-echo "All integration tests passed."
+if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
+    echo "Focused native crash/interruption recovery qualification passed."
+else
+    echo "All integration tests passed."
+fi

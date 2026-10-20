@@ -4,8 +4,23 @@ import './ControlCard.css';
 import type { Control } from './session';
 import ElicitationForm, { type FormContent } from './ElicitationForm';
 export type ControlReply = { decision: 'allow' | 'deny' | 'cancel'; answers?: Record<string, string[]>; content?: FormContent };
-export type ReplyControl = (requestId: string, reply: ControlReply) => Promise<void>;
+export type ReplyControl = (requestId: string, reply: ControlReply, sessionId?: string) => Promise<void>;
 type Question = { id: string; question: string; multiple: boolean; options: { label: string; description?: string }[] };
+function unknownEffectAction(id: string, control: Control): { tool: string; arguments: Record<string, unknown>; count: number } | undefined {
+  if (control.kind !== 'permission' || !/(?:^|:)unknown-effect:[a-f0-9]{64}$/.test(id)) return undefined;
+  const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+  const input = control.request.input;
+  if (!object(input) || Object.keys(input).length !== 8 ||
+      !['session_id', 'turn_id', 'actor', 'request_id', 'attempt_id', 'tool'].every(key => typeof input[key] === 'string' && !!input[key]) ||
+      input.tool !== control.request.tool || !object(input.arguments) || !object(input.unknown_receipts)) return undefined;
+  const summary = input.unknown_receipts;
+  if (Object.keys(summary).length !== 4 || typeof summary.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(summary.sha256) ||
+      typeof summary.count !== 'number' || !Number.isInteger(summary.count) || summary.count < 1 || summary.count > 4096 ||
+      !Array.isArray(summary.sources) || summary.sources.length > 4 || summary.sources.length > summary.count || summary.displayed !== summary.sources.length ||
+      !summary.sources.every(source => object(source) && Object.keys(source).length === 6 &&
+        ['event_id', 'session_id', 'turn_id', 'sequence', 'tool_id', 'name'].every(key => typeof source[key] === 'string' && !!source[key]))) return undefined;
+  return { tool: input.tool as string, arguments: input.arguments, count: summary.count };
+}
 function questions(request: Record<string, unknown>): Question[] {
   if (!Array.isArray(request.questions)) return [];
   return request.questions.filter((q): q is Question => !!q && typeof q === 'object' &&
@@ -28,6 +43,7 @@ function elicitationURL(request: Record<string, unknown>): { href: string; host:
   } catch { return undefined; }
 }
 export default function ControlCard({ id, control, onReply, replyPending = false }: { id: string; control: Control; onReply?: ReplyControl; replyPending?: boolean }) {
+  const unknownAction = unknownEffectAction(id, control);
   const external = control.kind === 'elicitation' ? elicitationURL(control.request) : undefined;
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
@@ -49,7 +65,12 @@ export default function ControlCard({ id, control, onReply, replyPending = false
   return <details className="ir-control" data-closed={closed} open={!closed} aria-busy={pending && !closed}>
     <summary>{control.kind}: {control.response ? 'Resolved' : control.closed ? 'Closed' : pending ? 'Reply sent' : 'Awaiting your reply'}</summary>
     {typeof control.request.title === 'string' && <p>{control.request.title}</p>}
-    {control.kind !== 'question' && control.kind !== 'elicitation' && <pre>{stringifyJSON(control.request.input ?? control.request, 2)}</pre>}
+    {typeof control.request.description === 'string' && control.request.description !== control.request.title && <p>{control.request.description}</p>}
+    {unknownAction ? <>
+      <p>{unknownAction.count} earlier tool {unknownAction.count === 1 ? 'outcome remains' : 'outcomes remain'} unknown.</p>
+      <p>Requested action: <strong>{unknownAction.tool}</strong></p>
+      <pre>{stringifyJSON(unknownAction.arguments, 2)}</pre>
+    </> : control.kind !== 'question' && control.kind !== 'elicitation' && <pre>{stringifyJSON(control.request.input ?? control.request, 2)}</pre>}
     {external && <div>
       <p>{external.server}: {external.message}</p>
       <p>Destination: {external.host}</p>

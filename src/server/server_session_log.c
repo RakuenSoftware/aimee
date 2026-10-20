@@ -1,3 +1,4 @@
+#include "server_native_history.h"
 #include "server_session_log.h"
 #include "server_session_capture.h"
 #include "server_session_control.h"
@@ -29,7 +30,7 @@ struct server_session_log
    server_session_capture_t *capture, *previous_capture;
    aimee_ir_session_sink_fn previous_sink;
    void *previous_context;
-   server_control_scope_t *previous_controls;
+   server_control_scope_t *controls, *previous_controls;
    struct server_session_log *previous;
 };
 static _Thread_local server_session_log_t *current;
@@ -202,12 +203,17 @@ int server_session_log_begin_selected(const char *role, const char *prompt, cons
        (role && (ensure_owner(scope->parent, "native", scope->principal) ||
                  ensure_owner(scope->session, "delegate", scope->principal))))
       goto fail;
-   scope->previous_controls = server_control_scope_bind(NULL);
+   scope->controls = server_control_scope_open_execution(scope->session, scope->turn,
+                                                         scope->principal, attestation.session_id);
+   if (!scope->controls)
+      goto fail;
+   scope->previous_controls = server_control_scope_bind(scope->controls);
    scope->capture = server_session_capture_open(scope->session, scope->turn, scope->principal,
                                                 attestation.session_id);
    if (!scope->capture)
    {
       server_control_scope_bind(scope->previous_controls);
+      server_control_scope_close(scope->controls);
       goto fail;
    }
    scope->previous_capture = server_session_capture_bind(scope->capture);
@@ -215,7 +221,7 @@ int server_session_log_begin_selected(const char *role, const char *prompt, cons
    scope->previous_context = previous_context;
    scope->previous = current;
    current = scope;
-   /* Child model conversations never use their parent's subscriber or controls. */
+   /* Child conversations own private controls and never borrow the parent's. */
    aimee_ir_session_set_sink(log_event, scope);
    *out = scope;
    aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
@@ -250,13 +256,10 @@ int server_session_log_history_load(cJSON **out)
                                         current->turn, &json);
    if (rc == 0)
    {
-      *out = cJSON_Parse(json);
-      if (!cJSON_IsArray(*out) || aimee_ir_history_admit(*out))
-      {
-         cJSON_Delete(*out);
-         *out = NULL;
-         rc = -1;
-      }
+      cJSON *receipts = NULL;
+      rc = server_native_history_load(current->session, current->principal, current->turn, 0, out,
+                                      &receipts);
+      cJSON_Delete(receipts);
    }
    free(json);
    return rc;
@@ -293,6 +296,10 @@ int server_session_log_finish(server_session_log_t *scope, int success, const ch
    }
    if (aimee_ir_session_capture_failed() || server_session_capture_failed(scope->capture))
       success = 0;
+   /* No new browser reply may be queued once this execution is finishing.
+    * Existing callback leases retain the sealed scope until they stop. */
+   server_control_scope_close(scope->controls);
+   scope->controls = NULL;
    aimee_session_event_t finished = {.kind = AIMEE_SESSION_EXECUTION,
                                      .execution_status = agent_request_cancelled() ? "cancelled"
                                                          : success                 ? "completed"

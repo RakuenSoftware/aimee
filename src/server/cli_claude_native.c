@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
 static const char *field(const cJSON *value, const char *key)
 {
    return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, key));
@@ -251,6 +253,8 @@ int cli_claude_native_spawn(const provider_cli_cfg_t *cfg, int *input, int *outp
    if (!host || !input || !output || !pid || host->executable_fd < 0 || host->cwd_fd < 0 ||
        !host->environment || !host->catalog || !host->mcp_config || !cfg->agent)
       return -1;
+   if (host->spawn_guard && (!host->spawn_guard->child || !host->spawn_guard->parent))
+      return -1;
    char proof[65];
    if (!host->expected_profile || cli_claude_native_launch_digest(cfg, proof) ||
        strcmp(proof, host->expected_profile))
@@ -280,10 +284,21 @@ int cli_claude_native_spawn(const provider_cli_cfg_t *cfg, int *input, int *outp
       for (int fd = 3; fd < limit; fd++)
          if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0 && errno != EBADF)
             _exit(126);
+      if (host->spawn_guard &&
+          host->spawn_guard->child(host->spawn_guard->context, host->executable_fd, host->cwd_fd))
+         _exit(126);
 #if defined(__linux__)
       fexecve(host->executable_fd, args, host->environment);
 #endif
       _exit(127);
+   }
+   if (host->spawn_guard && host->spawn_guard->parent(host->spawn_guard->context, child))
+   {
+      (void)kill(child, SIGKILL);
+      while (waitpid(child, NULL, 0) < 0 && errno == EINTR)
+      {
+      }
+      goto failure;
    }
    free(args);
    close(in[0]);

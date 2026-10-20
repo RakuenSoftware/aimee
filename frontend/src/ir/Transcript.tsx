@@ -1,23 +1,47 @@
 import { parseJSON, stringifyJSON } from './json';
+import { toolInterruptionText } from './interruption';
 import { useEffect, useRef, useState } from 'react';
 import { Message, ThinkingBlock, ToolBlock } from '../pages/chat/ChatPrimitives';
 import { emptySession, reduceSession, toolResults, toolBlockKey } from './session';
 import type { ChildExecution, Envelope, SessionState } from './session';
 import ControlCard, { type ReplyControl } from './ControlCard';
 const pretty = (value: unknown) => typeof value === 'string' ? value : stringifyJSON(value, 2) ?? '';
+function ExecutionError({ error }: { error: string }) {
+  try {
+    const value = parseJSON(error) as Record<string, unknown>;
+    const keys = ['reason', 'dispatched', 'submitted_input_sha256', 'submitted_input_bytes', 'submitted_input_preview', 'submitted_input_truncated'];
+    if (value && typeof value === 'object' && Object.keys(value).length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(value, key)) &&
+        value.reason === 'Steering continuation was not dispatched; no model or tool executed. Send it again explicitly.' && value.dispatched === false &&
+        typeof value.submitted_input_sha256 === 'string' && /^[a-f0-9]{64}$/.test(value.submitted_input_sha256) &&
+        typeof value.submitted_input_bytes === 'number' && Number.isSafeInteger(value.submitted_input_bytes) && value.submitted_input_bytes > 0 &&
+        typeof value.submitted_input_preview === 'string' && new TextEncoder().encode(value.submitted_input_preview).length <= 1536 &&
+        typeof value.submitted_input_truncated === 'boolean' &&
+        (value.submitted_input_truncated ? new TextEncoder().encode(value.submitted_input_preview).length < value.submitted_input_bytes :
+          new TextEncoder().encode(value.submitted_input_preview).length === value.submitted_input_bytes)) {
+      return <><p>{value.reason}</p><p>{value.submitted_input_truncated ? 'Submitted text (shortened):' : 'Submitted text:'}</p>
+        <blockquote style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{value.submitted_input_preview}</blockquote></>;
+    }
+  } catch { /* Ordinary or malformed diagnostics retain their exact fallback. */ }
+  return <>{error}</>;
+}
 function mediaURL(ref: string | undefined): string | undefined {
   if (ref && (/^https?:\/\//i.test(ref) || /^data:image\/(png|jpeg|webp|gif);base64,/i.test(ref) || ref.startsWith('/api/artifacts/'))) return ref;
   return undefined;
 }
-function ChildExecutionView({ reference, ancestors }: { reference: ChildExecution; ancestors: string[] }) {
+function ChildExecutionView({ reference, ancestors, onReply, pendingRepliesBySession }: {
+  reference: ChildExecution; ancestors: string[]; onReply?: ReplyControl;
+  pendingRepliesBySession?: Readonly<Record<string, ReadonlySet<string>>>;
+}) {
   const [expanded, setExpanded] = useState(false);
   const current = useRef(emptySession(reference.session_id));
   const [state, setState] = useState(current.current);
   const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
   const cyclic = ancestors.includes(reference.session_id);
   useEffect(() => {
     if (!expanded || cyclic) return;
     setError('');
+    setReady(false);
     let disposed = false;
     const stream = new EventSource(`/api/chat/session-events?format=ir&sid=${encodeURIComponent(reference.session_id)}&cursor=${current.current.sequence}`);
     stream.addEventListener('ir', (message) => {
@@ -27,10 +51,26 @@ function ChildExecutionView({ reference, ancestors }: { reference: ChildExecutio
         const next = reduceSession(current.current, envelope);
         current.current = next;
         setState(next);
-        const status = next.executions[reference.turn_id];
-        if (status && status !== 'running') { disposed = true; stream.close(); }
+        // Post-terminal lifecycle metadata can follow the execution terminal.
+        // The expanded view owns this read-only stream until collapse/unmount.
       } catch {
         disposed = true;
+        setReady(false);
+        setError('Delegate history could not be read. Close and reopen to retry.');
+        stream.close();
+      }
+    });
+    stream.addEventListener('replay_complete', (message) => {
+      if (disposed) return;
+      try {
+        const boundary = parseJSON((message as MessageEvent).data) as { session_id?: string; cursor?: string };
+        if (boundary.session_id !== reference.session_id || typeof boundary.cursor !== 'string' ||
+            !/^(0|[1-9][0-9]*)$/.test(boundary.cursor) || BigInt(boundary.cursor) > BigInt(current.current.sequence))
+          throw new Error('Invalid delegate replay boundary');
+        setReady(true);
+      } catch {
+        disposed = true;
+        setReady(false);
         setError('Delegate history could not be read. Close and reopen to retry.');
         stream.close();
       }
@@ -38,6 +78,7 @@ function ChildExecutionView({ reference, ancestors }: { reference: ChildExecutio
     stream.onerror = () => {
       if (disposed) return;
       disposed = true;
+      setReady(false);
       setError('Delegate history is unavailable. Close and reopen to retry.');
       stream.close();
     };
@@ -47,14 +88,17 @@ function ChildExecutionView({ reference, ancestors }: { reference: ChildExecutio
     <summary>Delegate: {reference.role} — {reference.status}</summary>
     {expanded && (cyclic ? <p role="alert">This execution reference forms a cycle.</p> : <>
       {!state.messages.length && !error && <p role="status">Loading delegate history…</p>}
-      <IRTranscript state={state} ancestors={ancestors} />
+      <IRTranscript state={state} ancestors={ancestors} controlsReady={ready}
+        onReply={onReply ? (id, reply, session) => onReply(id, reply, session ?? reference.session_id) : undefined}
+        pendingReplies={pendingRepliesBySession?.[reference.session_id]} pendingRepliesBySession={pendingRepliesBySession} />
       {error && <p role="alert">{error}</p>}
     </>)}
   </details>;
 }
 
-export default function IRTranscript({ state, onReply, ancestors = [], controlsReady = true, messageLimit, pendingReplies }: {
+export default function IRTranscript({ state, onReply, ancestors = [], controlsReady = true, messageLimit, pendingReplies, pendingRepliesBySession }: {
   state: SessionState; onReply?: ReplyControl; ancestors?: string[]; controlsReady?: boolean; messageLimit?: number; pendingReplies?: ReadonlySet<string>;
+  pendingRepliesBySession?: Readonly<Record<string, ReadonlySet<string>>>;
 }) {
   const { byCall, matched } = toolResults(state);
   const messages = messageLimit === undefined ? state.messages : state.messages.slice(-messageLimit);
@@ -76,8 +120,10 @@ export default function IRTranscript({ state, onReply, ancestors = [], controlsR
         case 'thinking': return <ThinkingBlock key={key} text={b.text || ''} />;
         case 'tool_use': {
           const output = byCall.get(key);
+          const interruption = state.toolInterruptions[key];
           return <ToolBlock key={key} name={b.namespace ? `${b.namespace}/${b.name}` : b.name || 'Tool'} args={pretty(b.input ?? m.argumentFragments[index] ?? '')}
-            result={output ? output.map(r => `${r.is_error ? 'Error: ' : ''}${pretty(r.content)}`).join('\n') :
+            unknownOutcome={interruption ? toolInterruptionText : undefined}
+            result={interruption ? undefined : output ? output.map(r => `${r.is_error ? 'Error: ' : ''}${pretty(r.content)}`).join('\n') :
               state.executions[m.turn] === 'cancelled' ? 'Turn cancelled' :
               state.executions[m.turn] === 'failed' ? 'Turn failed before a result was recorded' :
               state.executions[m.turn] === 'completed' ? 'No result reported by the harness' : m.error} />;
@@ -99,7 +145,8 @@ export default function IRTranscript({ state, onReply, ancestors = [], controlsR
       {resolvedControls.map(([id, control]) => <ControlCard key={`${state.session}:${id}`} id={id} control={control} />)}
     </details>}
     {Object.values(state.children ?? {}).map(child => <ChildExecutionView
-      key={`${child.session_id}:${child.turn_id}`} reference={child} ancestors={[...ancestors, state.session]} />)}
+      key={`${child.session_id}:${child.turn_id}`} reference={child} ancestors={[...ancestors, state.session]}
+      onReply={onReply} pendingRepliesBySession={pendingRepliesBySession} />)}
     {(state.projections ?? []).map(report => <p role="status" key={report.id}>
       {report.omitted_reasoning_blocks > 0 && <>
         {report.omitted_reasoning_blocks} reasoning {report.omitted_reasoning_blocks === 1 ? 'block remains' : 'blocks remain'} in history and
@@ -108,6 +155,6 @@ export default function IRTranscript({ state, onReply, ancestors = [], controlsR
       </>}
       {(report.omitted_cache_controls ?? 0) > 0 && <> {report.omitted_cache_controls} requested cache {report.omitted_cache_controls === 1 ? 'setting was' : 'settings were'} not applied for {report.model}.</>}
     </p>)}
-    {state.errors.map((error, i) => <div role="alert" key={`error:${i}`}>{error}</div>)}
+    {state.errors.map((error, i) => <div role="alert" key={`error:${i}`}><ExecutionError error={error} /></div>)}
   </>;
 }

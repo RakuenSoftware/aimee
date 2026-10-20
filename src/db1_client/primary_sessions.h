@@ -33,8 +33,18 @@ extern "C"
    char *db1_session_ir_search(const char *principal, const char *request_json);
    /* Host custody primitives; reconciliation requires independent qualified
     * whole-tree quiescence. These functions do not observe process liveness. */
+   /* Explicit absence acknowledgment is not a persisted reservation receipt. */
+   int db1_session_native_reservation_finish_checked(const char *principal,
+                                                     const char *request_json,
+                                                     char out_sequence[32], char out_epoch[33],
+                                                     int *out_absent);
    int db1_session_native_reservation_finish(const char *principal, const char *request_json,
                                              char out_sequence[32], char out_epoch[33]);
+   int db1_session_native_history_load(const char *principal, const char *session_id,
+                                       const char *mode, const char *active_turn, char **out_json);
+   int db1_session_native_source_append(const char *session_id, const char *event_id,
+                                        const char *turn, const char *actor, const char *payload,
+                                        char out_sequence[32]);
    int db1_session_native_reserve(const char *principal, const char *request_json,
                                   char out_epoch[33]);
    int db1_session_native_reservation_reconcile(const char *principal, const char *request_json,
@@ -44,6 +54,9 @@ extern "C"
    /* Checked lookup: 0 found (heap JSON), 1 definitively missing, -1 unavailable/refused. */
    int db1_session_native_reservation_lookup_checked(const char *principal,
                                                      const char *request_json, char **out_json);
+   /* Complete bounded session owner list, including other native models/SDKs. */
+   int db1_session_native_active_owned(const char *principal, const char *session_id,
+                                       char **out_json);
    char *db1_session_native_reservation_lookup(const char *principal, const char *request_json);
    int db1_session_native_owner_claim(const char *principal, const char *request_json);
    int db1_session_native_reconcile(const char *principal, const char *request_json,

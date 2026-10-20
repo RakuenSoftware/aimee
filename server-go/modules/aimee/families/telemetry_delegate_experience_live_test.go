@@ -113,11 +113,22 @@ func TestDelegateExperiencePostgresNextRunReplayAndSourceFences(t *testing.T) {
 	parent := executionGradeSource{Kind: "canonical_session_log", Session: "parent", Turn: "turn", Sequence: appendEvent("parent", "child-running", parentRaw, true), Event: "child-running", Actor: "operator"}
 	actionRaw := `{"kind":"message","message_id":"call","payload":{"role":"assistant","blocks":[{"type":"tool_use","tool_id":"call-1","name":"git_verify","input":{"action":"run"}}]}}`
 	appendEvent("delegate-78fd1d63652c1015a4c0273c7a7385f20d967b1cfdca0699cde6a010c820444c", "action", actionRaw, false)
+	// Cross a decimal boundary within this exact child turn. The wire source
+	// locator is text, but observed action order must remain numeric.
+	for n := 2; n <= 8; n++ {
+		appendEvent("delegate-78fd1d63652c1015a4c0273c7a7385f20d967b1cfdca0699cde6a010c820444c", fmt.Sprintf("filler-%d", n), fmt.Sprintf(`{"kind":"message","message_id":"filler-%d","payload":{"role":"user","blocks":[{"type":"text","text":"observation"}]}}`, n), false)
+	}
+	for _, n := range []int{9, 10} {
+		body := fmt.Sprintf(`{"kind":"message","message_id":"call-%d","payload":{"role":"assistant","blocks":[{"type":"tool_use","tool_id":"call-%d","name":"git_verify","input":{"action":"run"}}]}}`, n, n)
+		if seq := appendEvent("delegate-78fd1d63652c1015a4c0273c7a7385f20d967b1cfdca0699cde6a010c820444c", fmt.Sprintf("action-%d", n), body, false); seq != fmt.Sprint(n) {
+			t.Fatal("decimal boundary setup", seq, n)
+		}
+	}
 	// Exact recovery must not depend on a bounded replay scan. These are
 	// unrelated earlier turns, not evidence for this attempt's projection.
 	exec(`INSERT INTO session_ir_events(session_id,sequence,event_id,turn_id,actor,payload)
           SELECT $1,n,'older-'||n,'older-turn','operator','{"kind":"execution","payload":{"status":"completed"}}'
-          FROM generate_series(2,17001) n`, "delegate-78fd1d63652c1015a4c0273c7a7385f20d967b1cfdca0699cde6a010c820444c")
+          FROM generate_series(11,17001) n`, "delegate-78fd1d63652c1015a4c0273c7a7385f20d967b1cfdca0699cde6a010c820444c")
 	proof := sessionIRVerificationFixture()
 	proof.Session = "delegate-78fd1d63652c1015a4c0273c7a7385f20d967b1cfdca0699cde6a010c820444c"
 	proof.Turn = "turn"
@@ -198,6 +209,14 @@ func TestDelegateExperiencePostgresNextRunReplayAndSourceFences(t *testing.T) {
 		}
 	}
 	counts()
+	var experienceJSON string
+	if err = pool.QueryRow(ctx, `SELECT payload FROM interaction_events WHERE event_type='delegate_experience'`).Scan(&experienceJSON); err != nil {
+		t.Fatal(err)
+	}
+	var ordered delegateExperience
+	if !canonical.Decode([]byte(experienceJSON), &ordered) || len(ordered.Actions) != 3 || ordered.Actions[0].Sequence != "1" || ordered.Actions[1].Sequence != "9" || ordered.Actions[2].Sequence != "10" {
+		t.Fatal("canonical action sequence must remain numeric across 9 to 10", experienceJSON)
+	}
 	// Simulate the lost post-terminal grade projection. Parent replay must
 	// recover that authoritative terminal's grade before publishing experience.
 	exec(`DELETE FROM interaction_events WHERE event_type='task_outcome'`)

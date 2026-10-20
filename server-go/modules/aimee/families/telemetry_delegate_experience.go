@@ -135,7 +135,7 @@ func loadDelegateExecutionSource(ctx context.Context, q store.Queryer, f []strin
 	if jobRole != child.Role || jobAgent != child.LearningBinding.Agent {
 		return delegateExecutionSource{}, store.StatusInvalid, nil
 	}
-	rows, err := q.Query(ctx, `SELECT sequence::text,event_id,payload FROM session_ir_events WHERE session_id=$1 AND turn_id=$2 AND actor=$3 AND payload::jsonb->>'kind'='execution' AND payload::jsonb->'payload'->>'status'<>'running' ORDER BY sequence LIMIT 2`, child.Session, child.Turn, f[0])
+	rows, err := q.Query(ctx, `SELECT sequence::text,event_id,payload FROM session_ir_events WHERE session_id=$1 AND turn_id=$2 AND actor=$3 AND payload::jsonb->>'kind'='execution' AND payload::jsonb->'payload'->>'status'<>'running' ORDER BY session_ir_events.sequence LIMIT 2`, child.Session, child.Turn, f[0])
 	if err != nil {
 		return delegateExecutionSource{}, store.StatusFailed, err
 	}
@@ -234,7 +234,7 @@ func delegateExecutionExperienceRecord(ctx context.Context, q store.Queryer, f [
 	if len(grades) != len(event.Payload.VerificationProofs) {
 		return store.StatusMissing, nil, nil
 	}
-	rows, err := q.Query(ctx, `SELECT sequence::text,event_id,payload FROM session_ir_events WHERE session_id=$1 AND turn_id=$2 AND actor=$3 AND sequence<$4::bigint AND payload::jsonb->>'kind'='message' ORDER BY sequence LIMIT 65`, source.Session, source.Turn, f[0], source.Sequence)
+	rows, err := q.Query(ctx, `SELECT sequence::text,event_id,payload FROM session_ir_events WHERE session_id=$1 AND turn_id=$2 AND actor=$3 AND sequence<$4::bigint AND payload::jsonb->>'kind'='message' ORDER BY session_ir_events.sequence LIMIT 65`, source.Session, source.Turn, f[0], source.Sequence)
 	if err != nil {
 		return store.StatusFailed, nil, err
 	}

@@ -7,6 +7,7 @@
 #include "server_native_runtime.h"
 #include "server_native_cache.h"
 #include "server_native_cache_lease.h"
+#include "server_native_containment.h"
 #include "server_session_capture.h"
 #include "request_context.h"
 #include "agent_exec.h"
@@ -25,6 +26,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <stdatomic.h>
 
 struct server_native_runtime
 {
@@ -50,6 +52,224 @@ static char parent_role[64], private_home[4096], host_workspace[4096];
 static int child_executable, child_directory;
 static const char *active_sdk = "codex";
 static const char digest[] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+struct server_native_containment
+{
+   int old;
+};
+static struct server_native_containment boundary;
+static int qualified_mode, reserved, quiesced, published_claim;
+static atomic_int finished_reservation, disposed;
+static int recovered, lookup_failure, preclaim_drop;
+static atomic_int quiescence_failure, runtime_closed;
+static atomic_int finish_failure;
+static char observed_epoch[33] = "0";
+static cJSON *durable_reservation;
+static const char *active_override;
+static int lookup_changed, lookup_missing, old_completed;
+int db1_session_native_active_owned(const char *actor, const char *session, char **out)
+{
+   *out = NULL;
+   if (strcmp(actor, "actor") || strcmp(session, "destination"))
+      return -1;
+   if (active_override)
+   {
+      *out = strdup(active_override);
+      return 0;
+   }
+   cJSON *records = cJSON_CreateArray();
+   if (durable_reservation)
+      cJSON_AddItemToArray(records, cJSON_Duplicate(durable_reservation, 1));
+   *out = cJSON_PrintUnformatted(records);
+   cJSON_Delete(records);
+   return *out ? 0 : -1;
+}
+int db1_session_native_epoch(const char *actor, const char *wire, char out[33])
+{
+   assert(!strcmp(actor, "actor"));
+   cJSON *v = cJSON_Parse(wire);
+   assert(v);
+   cJSON_Delete(v);
+   snprintf(out, 33, "%s", observed_epoch);
+   return 0;
+}
+int db1_session_native_reservation_lookup_checked(const char *actor, const char *wire, char **out)
+{
+   assert(!strcmp(actor, "actor") && wire);
+   *out = NULL;
+   if (lookup_failure)
+      return -1;
+   if (lookup_missing)
+      return 1;
+   if (durable_reservation)
+   {
+      cJSON *copy = cJSON_Duplicate(durable_reservation, 1);
+      if (lookup_changed)
+         cJSON_ReplaceItemInObjectCaseSensitive(
+             copy, "epoch", cJSON_CreateString("99999999999999999999999999999999"));
+      *out = cJSON_PrintUnformatted(copy);
+      cJSON_Delete(copy);
+      return 0;
+   }
+   return 1;
+}
+int db1_session_native_reserve(const char *actor, const char *wire, char out[33])
+{
+   assert(!strcmp(actor, "actor") && !private_home[0] && !sdk_calls);
+   assert(!durable_reservation);
+   durable_reservation = cJSON_Parse(wire);
+   assert(durable_reservation);
+   cJSON_AddStringToObject(durable_reservation, "actor", actor);
+   cJSON_AddStringToObject(durable_reservation, "state", "active");
+   /* Real Go omitempty omits preclaim expected_token and claim_id. */
+   reserved++;
+   snprintf(out, 33, "%s", observed_epoch);
+   return 0;
+}
+int db1_session_native_reservation_finish(const char *actor, const char *wire, char sequence[32],
+                                          char epoch[33])
+{
+   if (preclaim_drop && !terminal_committed)
+      return -1;
+   assert(!strcmp(actor, "actor") && terminal_committed && quiesced && (completed || aborted));
+   assert(durable_reservation && wire);
+   if (finish_failure)
+      return -1;
+   finished_reservation++;
+   snprintf(sequence, 32, "17");
+   snprintf(epoch, 33, "0");
+   cJSON_Delete(durable_reservation);
+   durable_reservation = NULL;
+   return 0;
+}
+int db1_session_native_reservation_finish_checked(const char *actor, const char *wire,
+                                                  char sequence[32], char epoch[33], int *absent)
+{
+   *absent = 0;
+   if (old_completed)
+   {
+      assert(quiesced && durable_reservation && !sdk_calls && !private_home[0]);
+      cJSON *v = cJSON_Parse(wire);
+      assert(v);
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(v, "expected_token")),
+                     "complete:fixture:old-turn"));
+      cJSON_Delete(v);
+      cJSON_Delete(durable_reservation);
+      durable_reservation = NULL;
+      finished_reservation++;
+      snprintf(sequence, 32, "17");
+      snprintf(epoch, 33, "%s", observed_epoch);
+      return 0;
+   }
+   return db1_session_native_reservation_finish(actor, wire, sequence, epoch);
+}
+int db1_session_native_reservation_reconcile(const char *actor, const char *wire, char sequence[32],
+                                             char epoch[33])
+{
+   assert(!strcmp(actor, "actor") && wire && quiesced && !sdk_calls && !private_home[0]);
+   cJSON *v = cJSON_Parse(wire);
+   assert(v);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(v, "turn_id")),
+                  preclaim_drop ? "turn" : "old-turn"));
+   assert(!cJSON_GetObjectItem(v, "containment_json"));
+   cJSON_Delete(v);
+   cJSON_Delete(durable_reservation);
+   durable_reservation = NULL;
+   recovered++;
+   snprintf(sequence, 32, "18");
+   snprintf(epoch, 33, "11111111111111111111111111111111");
+   snprintf(observed_epoch, sizeof observed_epoch, "%s", epoch);
+   return 0;
+}
+int server_native_containment_probe(const char *root, const uint16_t *ports, size_t n,
+                                    char error[512])
+{
+   assert(root && n == 1 && ports[0] == 45678 && !sdk_calls && !private_home[0]);
+   (void)error;
+   return qualified_mode ? 0 : -1;
+}
+server_native_containment_t *server_native_containment_open(const char *root, const uint16_t *ports,
+                                                            size_t n, char error[512])
+{
+   assert(root && ports && n == 1 && !reserved);
+   (void)error;
+   return &boundary;
+}
+const cJSON *server_native_containment_manifest(const server_native_containment_t *owner)
+{
+   assert(owner == &boundary);
+   static cJSON *v;
+   if (!v)
+      v = cJSON_Parse("{\"fixture\":\"owned-boundary\"}");
+   return v;
+}
+int server_native_containment_sha256(const server_native_containment_t *owner, char out[65])
+{
+   assert(owner == &boundary);
+   snprintf(out, 65, "%s", digest);
+   return 0;
+}
+const cli_native_spawn_guard_t *server_native_containment_guard(server_native_containment_t *owner)
+{
+   static cli_native_spawn_guard_t g;
+   assert(!owner || owner == &boundary);
+   return owner ? &g : NULL;
+}
+server_native_containment_t *server_native_containment_reopen(const cJSON *manifest,
+                                                              char error[512])
+{
+   (void)error;
+   assert(cJSON_IsObject(manifest) && durable_reservation);
+   return &boundary;
+}
+int server_native_containment_quiesce(server_native_containment_t *owner, int timeout)
+{
+   assert(owner == &boundary && (timeout == 10000 || timeout == 1000));
+   quiesced++;
+   return quiescence_failure ? -1 : 0;
+}
+void server_native_containment_close(server_native_containment_t *owner, int remove_empty)
+{
+   if (owner)
+   {
+      assert(owner == &boundary);
+      if (remove_empty)
+         assert(finished_reservation || recovered);
+      if (remove_empty && (finished_reservation || recovered))
+         atomic_store(&disposed, 1);
+   }
+}
+int server_native_cache_epoch_binding(const char *binding, const char *epoch, char out[65])
+{
+   assert(!strcmp(epoch, "0") || !strcmp(epoch, "11111111111111111111111111111111"));
+   snprintf(out, 65, "%s",
+            !strcmp(epoch, "0")
+                ? binding
+                : "1111111111111111111111111111111111111111111111111111111111111111");
+   return 0;
+}
+cJSON *server_native_cache_claim_json(const server_native_cache_t *cache)
+{
+   assert(cache);
+   return cJSON_Parse("{\"expected_token\":\"complete:fixture:turn\"}");
+}
+server_native_cache_t *server_native_cache_begin_epoch(const char *session, const char *actor,
+                                                       const char *turn, const char *harness,
+                                                       const char *scope,
+                                                       const aimee_request_t *request,
+                                                       const char *epoch,
+                                                       const server_native_cache_owner_t *owner)
+{
+   assert(!strcmp(epoch, observed_epoch));
+   if (owner)
+   {
+      assert(reserved && (!quiesced || recovered) && owner->publish && owner->owner);
+      cJSON *claim = cJSON_Parse("{\"expected_token\":\"pending:fixture:turn\"}");
+      assert(!owner->publish(claim, owner->context));
+      cJSON_Delete(claim);
+      published_claim++;
+   }
+   return server_native_cache_begin(session, actor, turn, harness, scope, request);
+}
 const request_context_t *request_context_get(void)
 {
    return &owner;
@@ -98,7 +318,7 @@ int server_session_capture_history(server_session_capture_t *held, cJSON **out)
 int server_session_capture_after_terminal(server_session_capture_t *held,
                                           server_session_terminal_action_fn action, void *resource)
 {
-   assert(held == &capture && joined && child_closed && !terminal);
+   assert(held == &capture && joined && (child_closed || !sdk_calls) && !terminal);
    if (rejected_terminal)
       return -1;
    terminal = action;
@@ -186,6 +406,8 @@ int db1_session_ir_history_load(const char *session, const char *kind, const cha
 {
    assert(!strcmp(session, "destination") && !strcmp(kind, "primary"));
    assert(!strcmp(actor, "actor") && !strcmp(active, "turn"));
+   if (durable_reservation)
+      assert(reserved);
    *out = mode == 1 ? NULL
                     : strdup(mode == 10 ? "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\","
                                           "\"text\":\"prior task\"}]},"
@@ -194,14 +416,39 @@ int db1_session_ir_history_load(const char *session, const char *kind, const cha
                                         : "[]");
    return mode == 1 ? -1 : 0;
 }
+int server_native_history_load(const char *session, const char *actor, const char *active,
+                               int running, cJSON **messages, cJSON **receipts)
+{
+   assert(!running);
+   char *wire = NULL;
+   int rc = db1_session_ir_history_load(session, "primary", actor, active, &wire);
+   *messages = !rc && wire ? cJSON_Parse(wire) : NULL;
+   *receipts = cJSON_CreateArray();
+   free(wire);
+   return rc || !*messages || aimee_ir_history_admit(*messages) ? -1 : 0;
+}
+int server_native_history_admit_source(const char *session, const char *actor, const char *active,
+                                       int running, const cJSON *messages)
+{
+   assert(!strcmp(session, "destination") && !strcmp(actor, "actor") && !strcmp(active, "turn") &&
+          running);
+   return aimee_ir_history_admit(messages);
+}
+int server_native_runtime_set_native_owner(server_native_runtime_t *value, const cJSON *reservation)
+{
+   assert(value == &runtime && reserved && durable_reservation && !private_home[0] && !sdk_calls);
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reservation, "owner_id")));
+   assert(!cJSON_GetObjectItemCaseSensitive(reservation, "containment_json"));
+   return 0;
+}
 server_native_runtime_t *server_native_runtime_open_bound_request(
     const agent_t *selected, const request_context_t *request_owner, const char *source,
     const aimee_request_t *profile, const server_native_tool_binding_t *bindings, int count)
 {
    assert(request_owner == &owner && !strcmp(source, "transport"));
-   assert(!strcmp(selected->model, "selected-model") &&
-          profile->n_messages == (mode == 10 ? 2 : 0));
+   assert(!strcmp(selected->model, "selected-model") && profile->n_messages == 0);
    assert(!strcmp(selected->provider, "chatgpt"));
+   assert(!durable_reservation); /* Session recovery precedes current profile. */
    assert(profile->n_tools == 1 && profile->tools[0].kind == AIMEE_TOOL_FUNCTION);
    const char *logical = !strcmp(active_sdk, "claude") ? "mcp__aimee__read_file" : "read_file";
    assert(!strcmp(profile->tools[0].name, logical));
@@ -247,6 +494,14 @@ int server_native_runtime_cache_scope(const server_native_runtime_t *r,
    snprintf(scope, 65, "%s", digest);
    return 0;
 }
+void server_native_runtime_deactivate_hold_port(server_native_runtime_t *r)
+{
+   if (r)
+   {
+      assert(r == &runtime);
+      joined = 1;
+   }
+}
 void server_native_runtime_quiesce(server_native_runtime_t *r)
 {
    assert(r == &runtime && child_closed);
@@ -257,6 +512,7 @@ void server_native_runtime_close(server_native_runtime_t *r)
    if (r)
    {
       assert(r == &runtime);
+      runtime_closed++;
       assert(!sdk_calls || child_closed);
       joined = 1;
    }
@@ -315,12 +571,22 @@ int server_native_cache_complete(server_native_cache_t *c, const char *id)
    assert(c == &cache && terminal_committed && joined && child_closed);
    assert(!strcmp(id, "native-result"));
    completed++;
+   if (durable_reservation && !cJSON_GetObjectItem(durable_reservation, "expected_token"))
+      cJSON_AddStringToObject(durable_reservation, "expected_token", "");
+   if (durable_reservation)
+      cJSON_ReplaceItemInObjectCaseSensitive(durable_reservation, "expected_token",
+                                             cJSON_CreateString("complete:fixture:turn"));
    return mode == 7 ? -1 : 0;
 }
 int server_native_cache_abort(server_native_cache_t *c)
 {
    assert(c == &cache && joined && child_closed);
    aborted++;
+   if (durable_reservation && !cJSON_GetObjectItem(durable_reservation, "expected_token"))
+      cJSON_AddStringToObject(durable_reservation, "expected_token", "");
+   if (durable_reservation)
+      cJSON_ReplaceItemInObjectCaseSensitive(durable_reservation, "expected_token",
+                                             cJSON_CreateString("invalid:fixture:turn"));
    return 0;
 }
 void server_native_cache_close(server_native_cache_t *c)
@@ -331,6 +597,7 @@ void server_native_cache_close(server_native_cache_t *c)
 static int sdk_peer(const cli_codex_host_launch_t *launch)
 {
    assert(launch && launch->ready && launch->executable_fd >= 0 && launch->cwd_fd >= 0);
+   assert((launch->spawn_guard != NULL) == (reserved != 0));
    assert(strcmp(launch->cwd, host_workspace));
    snprintf(private_home, sizeof private_home, "%s", launch->home);
    child_executable = launch->executable_fd;
@@ -456,10 +723,34 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    return 0;
 }
 
+static void seed_abandoned(const char *actor)
+{
+   assert(!durable_reservation);
+   durable_reservation = cJSON_CreateObject();
+   cJSON_AddNumberToObject(durable_reservation, "version", 1);
+   cJSON_AddStringToObject(durable_reservation, "session_id", "destination");
+   cJSON_AddStringToObject(durable_reservation, "turn_id", "old-turn");
+   cJSON_AddStringToObject(durable_reservation, "harness", "codex");
+   cJSON_AddStringToObject(durable_reservation, "binding_sha256", digest);
+   cJSON_AddStringToObject(durable_reservation, "owner_id", "22222222222222222222222222222222");
+   cJSON_AddStringToObject(durable_reservation, "containment_sha256", digest);
+   cJSON_AddStringToObject(durable_reservation, "containment_json",
+                           "{\"fixture\":\"owned-boundary\"}");
+   cJSON_AddStringToObject(durable_reservation, "epoch", "0");
+   cJSON_AddStringToObject(durable_reservation, "state", "active");
+   cJSON_AddStringToObject(durable_reservation, "actor", actor);
+}
 static void reset(int next)
 {
    assert(!terminal && !retained);
    mode = next;
+   reserved = quiesced = finished_reservation = published_claim = 0;
+   disposed = 0;
+   runtime_closed = 0;
+   active_override = NULL;
+   lookup_changed = lookup_missing = old_completed = 0;
+   recovered = lookup_failure = quiescence_failure = finish_failure = preclaim_drop = 0;
+   snprintf(observed_epoch, sizeof observed_epoch, "0");
    opened = joined = child_closed = began = completed = aborted = closed = 0;
    terminal_committed = sdk_calls = restored = ready_calls = rejected_terminal = 0;
    child_executable = child_directory = -1;
@@ -533,6 +824,165 @@ int main(void)
       }
       agent_result_clear_response(&out);
    }
+   /* DB40 acknowledgement can precede the marker at a crash: recover by
+    * authenticated directory lookup, never by adopting a marker into DB40. */
+   reset(0);
+   seed_abandoned("actor");
+   agent_result_t recovered_result = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &recovered_result));
+   assert(recovered == 1 && quiesced == 1 && !reserved && !durable_reservation);
+   assert(!strcmp(observed_epoch, "11111111111111111111111111111111"));
+   finish(1);
+   agent_result_clear_response(&recovered_result);
+   /* Failed lookup and foreign authority refuse before HOME, SDK or kill. */
+   reset(0);
+   lookup_failure = 1;
+   assert(provider_cli_adapter_host_execute(&cfg, &recovered_result) < 0);
+   assert(!sdk_calls && !private_home[0] && !quiesced && !terminal);
+   agent_result_clear_response(&recovered_result);
+   reset(0);
+   seed_abandoned("foreign-actor");
+   assert(provider_cli_adapter_host_execute(&cfg, &recovered_result) < 0);
+   assert(!sdk_calls && !private_home[0] && !quiesced && !terminal);
+   agent_result_clear_response(&recovered_result);
+   cJSON_Delete(durable_reservation);
+   durable_reservation = NULL;
+   reset(0);
+   seed_abandoned("actor");
+   cJSON_ReplaceItemInObjectCaseSensitive(
+       durable_reservation, "containment_sha256",
+       cJSON_CreateString("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"));
+   assert(provider_cli_adapter_host_execute(&cfg, &recovered_result) < 0);
+   assert(!sdk_calls && !private_home[0] && !quiesced && !terminal);
+   agent_result_clear_response(&recovered_result);
+   cJSON_Delete(durable_reservation);
+   durable_reservation = NULL;
+   reset(0);
+   seed_abandoned("actor");
+   quiescence_failure = 1;
+   assert(provider_cli_adapter_host_execute(&cfg, &recovered_result) < 0);
+   assert(!sdk_calls && !private_home[0] && quiesced == 1 && !recovered && durable_reservation);
+   agent_result_clear_response(&recovered_result);
+   cJSON_Delete(durable_reservation);
+   durable_reservation = NULL;
+   /* A new Codex model/account binding can recover an old Claude directory;
+    * discovery and exact43 custody are independent of the current registry. */
+   reset(0);
+   seed_abandoned("actor");
+   cJSON_ReplaceItemInObjectCaseSensitive(durable_reservation, "harness",
+                                          cJSON_CreateString("claude"));
+   cJSON_ReplaceItemInObjectCaseSensitive(
+       durable_reservation, "binding_sha256",
+       cJSON_CreateString("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"));
+   assert(!provider_cli_adapter_host_execute(&cfg, &recovered_result));
+   assert(recovered == 1 && !durable_reservation && opened == 1);
+   finish(1);
+   agent_result_clear_response(&recovered_result);
+   /* Changed DB revision, live lease and current-turn ownership cannot be
+    * converted into authority by the session discovery response. */
+   char recovery_error[512];
+   reset(0);
+   seed_abandoned("actor");
+   lookup_changed = 1;
+   assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0);
+   assert(!quiesced && !recovered && durable_reservation);
+   lookup_changed = 0;
+   lookup_missing = 1;
+   assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0);
+   assert(!quiesced && !recovered && durable_reservation);
+   lookup_missing = 0;
+   server_native_cache_lease_t *live = server_native_cache_lease_open(
+       getenv("AIMEE_HOME"), "codex", "destination", digest, "actor", "old-turn", recovery_error);
+   assert(live);
+   assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0);
+   assert(!quiesced && !recovered);
+   assert(!server_native_cache_lease_close(live, 1));
+   cJSON_ReplaceItemInObjectCaseSensitive(durable_reservation, "turn_id",
+                                          cJSON_CreateString("turn"));
+   assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0);
+   assert(!quiesced && !recovered);
+   cJSON_Delete(durable_reservation);
+   durable_reservation = NULL;
+   reset(0);
+   assert(server_native_session_reconcile("destination", "foreign-actor", "turn", recovery_error) <
+          0);
+   assert(server_native_session_reconcile("foreign-session", "actor", "turn", recovery_error) < 0);
+   active_override = "[{}]";
+   assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0 &&
+          !quiesced);
+   active_override = NULL;
+   cJSON *overflow = cJSON_CreateArray();
+   for (int i = 0; i < 33; i++)
+      cJSON_AddItemToArray(overflow, cJSON_CreateObject());
+   char *overflow_wire = cJSON_PrintUnformatted(overflow);
+   cJSON_Delete(overflow);
+   active_override = overflow_wire;
+   assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0 &&
+          !quiesced);
+   free(overflow_wire);
+   active_override = NULL;
+   /* A completed cache with only a missing custody receipt uses44 and retains
+    * its epoch. DB1 PG tests qualify the actual terminal/token requirements. */
+   reset(0);
+   seed_abandoned("actor");
+   old_completed = 1;
+   cJSON_AddStringToObject(durable_reservation, "claim_id", "33333333333333333333333333333333");
+   cJSON_AddStringToObject(durable_reservation, "expected_token", "complete:fixture:old-turn");
+   assert(!server_native_session_reconcile("destination", "actor", "turn", recovery_error));
+   assert(finished_reservation == 1 && !recovered && !strcmp(observed_epoch, "0"));
+   old_completed = 0;
+   /* The optional qualified path must reserve before HOME and finish only
+    * after the real canonical terminal and exact boundary quiescence. */
+   reset(0);
+   qualified_mode = 1;
+   setenv("AIMEE_NATIVE_CONTAINMENT_ROOT", "/fixture-owned-root", 1);
+   agent_result_t qualified = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &qualified));
+   assert(reserved == 1 && published_claim == 1 && !finished_reservation);
+   finish(1);
+   assert(quiesced >= 1 && finished_reservation == 1 && !durable_reservation);
+   agent_result_clear_response(&qualified);
+   reset(2);
+   agent_result_t failed_child = {0};
+   assert(provider_cli_adapter_host_execute(&cfg, &failed_child) < 0);
+   assert(terminal && reserved && !finished_reservation && !closed);
+   finish(0);
+   assert(quiesced && aborted && finished_reservation && !durable_reservation);
+   agent_result_clear_response(&failed_child);
+   reset(0);
+   quiescence_failure = 1;
+   agent_result_t retained_boundary = {0};
+   assert(provider_cli_adapter_host_execute(&cfg, &retained_boundary) < 0);
+   assert(terminal && reserved && !runtime_closed);
+   finish(0);
+   assert(!runtime_closed && !completed && !aborted && !finished_reservation);
+   atomic_store(&quiescence_failure, 0);
+   for (int retry = 0; retry < 700 && !atomic_load(&disposed); retry++)
+      usleep(10000);
+   assert(atomic_load(&disposed) && runtime_closed == 1 && aborted == 1 &&
+          finished_reservation == 1);
+   agent_result_clear_response(&retained_boundary);
+   /* A preclaim source whose terminal callback is dropped must use the exact
+    * authoritative owner reconciliation, not retry finish forever. The DB1
+    * contract fixture covers the actual cancellation/source-fence transaction. */
+   reset(1);
+   preclaim_drop = 1;
+   rejected_terminal = 1;
+   agent_result_t dropped_capture = {0};
+   assert(provider_cli_adapter_host_execute(&cfg, &dropped_capture) < 0);
+   for (int retry = 0; retry < 700 && !atomic_load(&disposed); retry++)
+      usleep(10000);
+   assert(atomic_load(&disposed) && recovered == 1 && !sdk_calls && !began && !terminal);
+   assert(!private_home[0] && !completed && !aborted && !durable_reservation);
+   agent_result_clear_response(&dropped_capture);
+   /* An unsupported optional policy preserves the established direct path. */
+   reset(0);
+   qualified_mode = 0;
+   assert(!provider_cli_adapter_host_execute(&cfg, &qualified));
+   finish(1);
+   assert(!reserved && !quiesced && !finished_reservation);
+   agent_result_clear_response(&qualified);
+   unsetenv("AIMEE_NATIVE_CONTAINMENT_ROOT");
    reset(0);
    snprintf(selected.provider, sizeof selected.provider, "codex-cli");
    snprintf(selected.auth_type, sizeof selected.auth_type, "codex-oauth");
@@ -587,6 +1037,28 @@ int main(void)
    assert(completed == 1 && closed == 1);
    active_sdk = "codex";
    reset(0);
+   snprintf(selected.cli_kind, sizeof selected.cli_kind, "codex");
+   qualified_mode = 1;
+   setenv("AIMEE_NATIVE_CONTAINMENT_ROOT", "/fixture-owned-root", 1);
+   agent_result_t uncertain_ack = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &uncertain_ack));
+   finish_failure = 1;
+   finish(1);
+   assert(completed == 1 && !finished_reservation && durable_reservation);
+   char retained_error[512];
+   assert(!server_native_cache_lease_open(getenv("AIMEE_HOME"), active_sdk, "destination", digest,
+                                          "actor", "after-uncertain-ack", retained_error));
+   assert(strstr(retained_error, "unresolved") || strstr(retained_error, "busy"));
+   agent_result_clear_response(&uncertain_ack);
+   atomic_store(&finish_failure, 0);
+   for (int retry = 0; retry < 700 && !atomic_load(&disposed); retry++)
+      usleep(10000);
+   assert(atomic_load(&disposed) && finished_reservation == 1 && !durable_reservation);
+   assert(completed == 1 && !aborted); /* Retry never invalidates completed cache. */
+   unsetenv("AIMEE_NATIVE_CONTAINMENT_ROOT");
+   qualified_mode = 0;
+   active_sdk = "codex";
+   reset(0);
    snprintf(selected.cli_kind, sizeof selected.cli_kind, "%s", "acp");
    agent_result_t unsupported = {0};
    assert(provider_cli_adapter_host_execute(&cfg, &unsupported) == AGENT_RC_CONTEXT_REFUSED);
@@ -595,6 +1067,23 @@ int main(void)
    agent_result_clear_response(&unsupported);
    cfg.agent = NULL;
    assert(provider_cli_adapter_host_execute(&cfg, &denied) == 1);
+   /* Shutdown joins retries and parks late reserved terminal ownership without
+    * issuing any new DB/cache effects or dropping its physical lease. */
+   reset(0);
+   active_sdk = "codex";
+   qualified_mode = 1;
+   cfg.agent = &selected;
+   snprintf(selected.cli_kind, sizeof selected.cli_kind, "codex");
+   setenv("AIMEE_NATIVE_CONTAINMENT_ROOT", "/fixture-owned-root", 1);
+   agent_result_t late = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &late));
+   assert(reserved == 1 && terminal && !completed && !closed);
+   server_native_execution_shutdown();
+   finish(1);
+   assert(!completed && !aborted && !closed && !finished_reservation && durable_reservation);
+   agent_result_clear_response(&late);
+   unsetenv("AIMEE_NATIVE_CONTAINMENT_ROOT");
+
 #else
    reset(0);
    agent_result_t refused = {0};
@@ -602,6 +1091,7 @@ int main(void)
    assert(!sdk_calls && !retained && restored == 1 && !terminal);
    agent_result_clear_response(&refused);
 #endif
+   server_native_execution_shutdown();
    run_cmd_set_cwd(NULL);
    cli_session_t cleanup = {.iso_home = strdup(temporary)};
    cli_session_destroy(&cleanup);

@@ -69,6 +69,19 @@ class IRBypassTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "legacy-transcript-write"):
             checker.check(self.root)
 
+    def test_chat_workers_cannot_restore_provider_transcript_writer(self):
+        for relative in ("src/posix/server_compute.c", "src/windows/server_compute.c"):
+            with self.subTest(relative=relative):
+                path = self.source(relative, "db1_primary_session_save(session, agent, provider, json);")
+                with self.assertRaisesRegex(ValueError, "legacy-transcript-write"):
+                    checker.check(self.root)
+                path.unlink()
+
+    def test_chat_worker_cannot_rebuild_native_wire_history(self):
+        self.source("src/posix/server_compute.c", 'read(history, "tool_calls");')
+        with self.assertRaisesRegex(ValueError, "native-history-field"):
+            checker.check(self.root)
+
     def test_retired_api_and_driver_calls_in_c_and_go(self):
         for relative, source in [
             ("src/server/rogue.c", "anthropic_stream_feed_openai(s, p);"),

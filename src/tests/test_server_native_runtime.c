@@ -1064,6 +1064,25 @@ int db1_session_ir_append_verified(const char *session, const char *event, const
    assert(!"unexpected verifier proof in ordinary capture fixture");
    return -1;
 }
+int db1_session_native_source_append(const char *session, const char *id, const char *turn,
+                                     const char *actor, const char *payload, char sequence[32])
+{
+   cJSON *event = aimee_ir_json_parse_frame(payload, strlen(payload));
+   assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(event, "native_owner")));
+   cJSON_Delete(event);
+   return db1_session_ir_append(session, id, turn, actor, payload, sequence);
+}
+int db1_session_native_history_load(const char *actor, const char *session, const char *mode,
+                                    const char *turn, char **out)
+{
+   (void)actor;
+   (void)session;
+   (void)mode;
+   (void)turn;
+   *out = NULL;
+   assert(!"unexpected source sidecar lookup in ordinary runtime fixture");
+   return -1;
+}
 char *db1_session_ir_page(const char *session, const char *after, int limit, const char *actor)
 {
    assert(!strcmp(session, server_session_capture_session(atomic_load(&expected_capture))) &&
@@ -1322,6 +1341,24 @@ static void test_native_original_catalog(const agent_t *selected, const request_
       assert(capture && !server_session_capture_bind(capture));
       server_native_runtime_t *runtime =
           server_native_runtime_open_request(selected, owner, "session-a", &profile);
+      if (mode == 3)
+      {
+         cJSON *reservation = cJSON_CreateObject();
+         cJSON_AddStringToObject(reservation, "session_id", "private-child");
+         cJSON_AddStringToObject(reservation, "turn_id", "native-turn");
+         cJSON_AddStringToObject(reservation, "actor", "webuser:alice");
+         cJSON_AddStringToObject(reservation, "harness", "codex");
+         cJSON_AddStringToObject(reservation, "binding_sha256",
+                                 server_native_runtime_binding(runtime));
+         cJSON_AddStringToObject(reservation, "owner_id", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+         cJSON_AddStringToObject(reservation, "epoch", "0");
+         cJSON_AddStringToObject(
+             reservation, "containment_sha256",
+             "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+         assert(!server_native_runtime_set_native_owner(runtime, reservation));
+         assert(server_native_runtime_set_native_owner(runtime, reservation));
+         cJSON_Delete(reservation);
+      }
       assert(runtime && server_session_capture_bind(NULL) == capture);
       atomic_store(&expected_capture, capture);
       captured_rows = cJSON_CreateArray();
@@ -1344,7 +1381,7 @@ static void test_native_original_catalog(const agent_t *selected, const request_
       /* A refused complete call is never committed or released to the SDK.
        * Earlier stream fragments remain as observed, without an invented stop. */
       int expected_rows = mode >= 9                ? 0
-                          : mode == 3              ? 7
+                          : mode == 3              ? 8
                           : mode == 8              ? 2
                           : mode == 7              ? 3
                           : mode >= 4 && mode != 5 ? 4

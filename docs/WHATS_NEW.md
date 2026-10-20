@@ -24,10 +24,13 @@ workspace scope and cumulative usage. Codex npm commands resolve their matching 
 Twenty actual-SDK journeys pass locally across API-key and Vault OAuth paths, including credential
 rotation, tool execution, compaction, replay, resume and seeded execution. Browser operators reply
 through authenticated, session/turn-bound control requests; actual root-UDS operator question,
-replay and reconnect journeys pass in the published qualification checkpoint. Existing text-only history
-retains explicit legacy fidelity. Remaining consumers, independently graded local learning/reuse,
-broader platform coverage, live subscription acceptance and reviewed production promotion remain
-unfinished. No KB service is enabled for production `.100`.
+replay and reconnect journeys pass in the published qualification checkpoint. Session-selected models now survive daemon restarts. Actual Codex/Claude crash and
+interrupted-question journeys verify source-bound unknown outcomes, explicit new-action permission,
+denial suppression and replay without repeated effects. Delegates own private canonical controls;
+expanded browser transcripts send replies to the exact child. Strict web reply validation preserves
+original JSON bytes. KB-free independently graded learning and delegate reuse are implemented with
+actual-store coverage. Explicit legacy-import fidelity, final CI, live subscription acceptance and
+reviewed production promotion remain in progress. No KB service is enabled for production `.100`.
 
 CLI index discovery now registers a missing canonical repository through the existing bounded
 client ingest path before querying it. Main checkouts and linked worktrees retain the caller's

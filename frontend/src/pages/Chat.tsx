@@ -1642,23 +1642,23 @@ export default function Chat() {
     ? Math.max(0, canonicalState.messages.length - visibleCount) : hiddenLegacyCount;
   const submittedControls = useRef(new Set<string>());
   const [pendingReplies, setPendingReplies] = useState<Record<string, ReadonlySet<string>>>({});
-  const replyControl = useCallback(async (requestId: string, reply: ControlReply) => {
-    const key = `${activeAimeeSid}\0${requestId}`;
+  const replyControl = useCallback(async (requestId: string, reply: ControlReply, sessionId = activeAimeeSid) => {
+    const key = `${sessionId}\0${requestId}`;
     if (submittedControls.current.has(key)) return;
     submittedControls.current.add(key);
-    setPendingReplies(prev => ({ ...prev, [activeAimeeSid]: new Set([...(prev[activeAimeeSid] ?? []), requestId]) }));
+    setPendingReplies(prev => ({ ...prev, [sessionId]: new Set([...(prev[sessionId] ?? []), requestId]) }));
     try {
       const response = await fetch('/api/chat/control-reply', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: stringifyJSON({ session_id: activeAimeeSid, request_id: requestId, reply }),
+        body: stringifyJSON({ session_id: sessionId, request_id: requestId, reply }),
       });
       const body = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) throw new Error(body.error || 'Could not send the reply');
     } catch (error) {
       submittedControls.current.delete(key);
       setPendingReplies(prev => {
-        const remaining = new Set(prev[activeAimeeSid]); remaining.delete(requestId);
-        return { ...prev, [activeAimeeSid]: remaining };
+        const remaining = new Set(prev[sessionId]); remaining.delete(requestId);
+        return { ...prev, [sessionId]: remaining };
       });
       throw error;
     }
@@ -2748,7 +2748,7 @@ export default function Chat() {
           </Button>
         )}
         {canonicalState && (canonicalState.messages.length > 0 || Object.keys(canonicalState.children ?? {}).length > 0 || Object.keys(canonicalState.controls).length > 0) ? <>
-          <IRTranscript state={canonicalState} onReply={replyControl} controlsReady={!!irReady[activeAimeeSid]} messageLimit={visibleCount} pendingReplies={pendingReplies[activeAimeeSid]} /></> :
+          <IRTranscript state={canonicalState} onReply={replyControl} controlsReady={!!irReady[activeAimeeSid]} messageLimit={visibleCount} pendingReplies={pendingReplies[activeAimeeSid]} pendingRepliesBySession={pendingReplies} /></> :
           <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />}
         {irTransportErrors[activeAimeeSid] ? <div role="alert">
           {irTransportErrors[activeAimeeSid]}{' '}

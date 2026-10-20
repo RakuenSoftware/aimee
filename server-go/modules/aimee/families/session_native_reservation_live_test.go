@@ -121,6 +121,67 @@ func TestSessionNativeLivePreexecReservationAndSharedEpoch(t *testing.T) {
 		appendRunning(r)
 		return r
 	}
+	t.Run("active session owners cross model and SDK boundaries", func(t *testing.T) {
+		active := func(actor, session string) (uint32, []nativeReservation, error) {
+			tx, err := pool.Begin(ctx)
+			if err != nil {
+				return 0, nil, err
+			}
+			defer tx.Rollback(ctx)
+			status, cells, err := sessionNativeActiveOwned(ctx, sessionIRLiveTx{tx}, []string{actor, session})
+			var owners []nativeReservation
+			if err == nil && status == store.StatusOK {
+				if len(cells) != 1 {
+					return 0, nil, fmt.Errorf("missing whole owner list")
+				}
+				err = json.Unmarshal([]byte(cells[0]), &owners)
+			}
+			return status, owners, err
+		}
+		first := makeRequest("active-native-model-switch")
+		status, owners, err := active("actor", first.Session)
+		if err != nil || status != store.StatusOK || len(owners) != 0 {
+			t.Fatal(status, owners, err)
+		}
+		if status, _, err := run(opSessionNativeReserve, first); err != nil || status != store.StatusOK {
+			t.Fatal(status, err)
+		}
+		second := first
+		second.Harness, second.Binding, second.Owner, second.Turn = "claude", strings.Repeat("a", 64), strings.Repeat("1", 32), "other-sdk-turn"
+		appendRunning(second)
+		if status, _, err := run(opSessionNativeReserve, second); err != nil || status != store.StatusOK {
+			t.Fatal(status, err)
+		}
+		status, owners, err = active("actor", first.Session)
+		if err != nil || status != store.StatusOK || len(owners) != 2 || owners[0].Owner != first.Owner || owners[1].Owner != second.Owner || owners[0].Descriptor != first.Descriptor {
+			t.Fatal(status, owners, err)
+		}
+		if status, owners, err = active("foreign", first.Session); err != nil || status == store.StatusOK || len(owners) != 0 {
+			t.Fatal("foreign owner disclosure", status, owners, err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE session_native_reservations SET actor='foreign' WHERE session_id=$1 AND owner_id=$2`, first.Session, second.Owner); err != nil {
+			t.Fatal(err)
+		}
+		if status, owners, err = active("actor", first.Session); err != nil || status == store.StatusOK || len(owners) != 0 {
+			t.Fatal("partial list concealed corrupt owner", status, owners, err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE session_native_reservations SET actor='actor' WHERE session_id=$1`, first.Session); err != nil {
+			t.Fatal(err)
+		}
+		first.Epoch, first.Descriptor = "0", ""
+		if status, _, err := run(opSessionNativeReservationReconcile, first); err != nil || status != store.StatusOK {
+			t.Fatal(status, err)
+		}
+		if status, owners, err = active("actor", first.Session); err != nil || status != store.StatusOK || len(owners) != 1 || owners[0].Owner != second.Owner {
+			t.Fatal("reconciled owner remained active", status, owners, err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO session_native_reservations(session_id,harness,binding_sha256,owner_id,turn_id,actor,epoch,containment_sha256,containment_json) SELECT session_id,'codex',lpad(i::text,64,'b'),lpad(i::text,32,'c'),turn_id,actor,epoch,containment_sha256,containment_json FROM session_native_reservations CROSS JOIN generate_series(1,32) i WHERE session_id=$1 AND owner_id=$2`, second.Session, second.Owner); err != nil {
+			t.Fatal(err)
+		}
+		if status, owners, err = active("actor", first.Session); err != nil || status != store.StatusInvalid || len(owners) != 0 {
+			t.Fatal("oversized list silently truncated", status, owners, err)
+		}
+	})
 	r := makeRequest("preexec-only")
 	status, initial, err := run(opSessionNativeEpoch, minimal(r))
 	if err != nil || status != store.StatusOK || len(initial) != 1 || initial[0] != "0" {
@@ -326,11 +387,11 @@ func TestSessionNativeLivePreexecReservationAndSharedEpoch(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, finished, err := run(opSessionNativeReservationFinish, finish)
-	if err != nil || status != store.StatusOK || finished[1] != "0" {
+	if err != nil || status != store.StatusOK || len(finished) != 3 || finished[1] != "0" || finished[2] != "finished" {
 		t.Fatal("normal finish rotated existing cache namespace", status, finished, err)
 	}
 	status, finishedRetry, err := run(opSessionNativeReservationReconcile, finish)
-	if err != nil || status != store.StatusOK || fmt.Sprint(finishedRetry) != fmt.Sprint(finished) {
+	if err != nil || status != store.StatusOK || fmt.Sprint(finishedRetry) != fmt.Sprint(finished[:2]) {
 		t.Fatal("restart after normal finish did not preserve cache", status, finishedRetry, err)
 	}
 	if count(`SELECT count(*) FROM session_native_recovery_fences WHERE session_id=$1`, clean.Session) != 0 {
@@ -355,6 +416,122 @@ func TestSessionNativeLivePreexecReservationAndSharedEpoch(t *testing.T) {
 	status, _, err = run(opSessionNativeReservationLookup, minimal(missingSource))
 	if err == nil {
 		t.Fatal("directory lookup returned erased source authority", status)
+	}
+	// The lost-ack preclaim path may acknowledge definitive absence only after a
+	// real terminal permanently prevents delayed reserve admission. No fake owner
+	// row or terminal is created by this cleanup acknowledgment.
+	absent := makeRequest("never-reserved")
+	absent.Epoch = "0"
+	finishAbsent := absent
+	finishAbsent.Descriptor = ""
+	status, _, err = run(opSessionNativeReservationFinish, finishAbsent)
+	if err != nil || status != store.StatusInvalid {
+		t.Fatal("running source acknowledged absent", status, err)
+	}
+	terminalTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer terminalTx.Rollback(context.Background())
+	status, _, err = sessionIRAppend(ctx, sessionIRLiveTx{terminalTx}, []string{absent.Session, "actual-failed-terminal", absent.Turn, "actor", `{"kind":"execution","payload":{"status":"failed"}}`})
+	if err != nil || status != store.StatusOK {
+		t.Fatal(status, err)
+	}
+	type delayedResult struct {
+		status uint32
+		err    error
+	}
+	delayed := make(chan delayedResult, 1)
+	pidReady := make(chan uint32, 1)
+	go func() {
+		tx, e := pool.Begin(ctx)
+		if e != nil {
+			delayed <- delayedResult{0, e}
+			return
+		}
+		defer tx.Rollback(ctx)
+		pidReady <- tx.Conn().PgConn().PID()
+		raw, _ := json.Marshal(absent)
+		st, _, e := sessionNativeReserve(ctx, sessionIRLiveTx{tx}, []string{"actor", string(raw)})
+		if e == nil && st == store.StatusOK {
+			e = tx.Commit(ctx)
+		}
+		delayed <- delayedResult{st, e}
+	}()
+	pid := <-pidReady
+	deadline := time.Now().Add(time.Second)
+	blocked := false
+	for time.Now().Before(deadline) {
+		if e := pool.QueryRow(ctx, `SELECT coalesce(wait_event_type='Lock',false) FROM pg_stat_activity WHERE pid=$1`, pid).Scan(&blocked); e != nil {
+			t.Fatal(e)
+		}
+		if blocked {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !blocked {
+		t.Fatal("delayed reserve did not reach the actual source lock")
+	}
+	raw, _ := json.Marshal(finishAbsent)
+	status, absence, err := sessionNativeReservationFinish(ctx, sessionIRLiveTx{terminalTx}, []string{"actor", string(raw)})
+	if err != nil || status != store.StatusOK || len(absence) != 3 || absence[2] != "absent" || absence[1] != "0" {
+		t.Fatal("absence cleanup lost explicit disposition", status, absence, err)
+	}
+	if err := terminalTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	late := <-delayed
+	if late.err != nil || late.status != store.StatusInvalid {
+		t.Fatal("delayed reserve reopened terminal source", late)
+	}
+	if count(`SELECT count(*) FROM session_native_reservations WHERE session_id=$1`, absent.Session) != 0 || count(`SELECT count(*) FROM session_native_cache_owners WHERE session_id=$1`, absent.Session) != 0 || count(`SELECT count(*) FROM session_ir_events WHERE session_id=$1`, absent.Session) != 2 {
+		t.Fatal("absence cleanup invented durable execution/owner evidence")
+	}
+	status, retryAbsence, err := run(opSessionNativeReservationFinish, finishAbsent)
+	if err != nil || status != store.StatusOK || fmt.Sprint(retryAbsence) != fmt.Sprint(absence) {
+		t.Fatal("absence ack restart changed", status, retryAbsence, err)
+	}
+	changedAbsent := finishAbsent
+	changedAbsent.Epoch = strings.Repeat("e", 32)
+	status, _, err = run(opSessionNativeReservationFinish, changedAbsent)
+	if err != nil || status != store.StatusMissing {
+		t.Fatal("stale absence epoch acknowledged", status, err)
+	}
+	changedAbsent = finishAbsent
+	changedAbsent.Expected = "pending:not-a-claim"
+	status, _, err = run(opSessionNativeReservationFinish, changedAbsent)
+	if err != nil || status != store.StatusInvalid {
+		t.Fatal("absence ack accepted claimed phase", status, err)
+	}
+	// Rollback of an unpublished cleanup transaction cannot fence the still
+	// running source or fabricate any committed absence receipt.
+	rolled := makeRequest("absence-rollback")
+	rolled.Epoch = "0"
+	rb, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, _, err = sessionIRAppend(ctx, sessionIRLiveTx{rb}, []string{rolled.Session, "rolled-terminal", rolled.Turn, "actor", `{"kind":"execution","payload":{"status":"failed"}}`})
+	if err != nil || status != store.StatusOK {
+		t.Fatal(status, err)
+	}
+	rolledFinish := rolled
+	rolledFinish.Descriptor = ""
+	raw, _ = json.Marshal(rolledFinish)
+	status, _, err = sessionNativeReservationFinish(ctx, sessionIRLiveTx{rb}, []string{"actor", string(raw)})
+	if err != nil || status != store.StatusOK {
+		t.Fatal(status, err)
+	}
+	if err := rb.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if count(`SELECT count(*) FROM session_ir_events WHERE session_id=$1`, rolled.Session) != 1 || count(`SELECT count(*) FROM session_native_reservations WHERE session_id=$1`, rolled.Session) != 0 {
+		t.Fatal("rollback retained cleanup evidence")
+	}
+	status, _, err = run(opSessionNativeReserve, rolled)
+	if err != nil || status != store.StatusOK {
+		t.Fatal("uncommitted absence acknowledged externally", status, err)
 	}
 	// A forged persisted descriptor is never returned as a valid owner receipt.
 	corrupt := makeRequest("corrupt-descriptor")

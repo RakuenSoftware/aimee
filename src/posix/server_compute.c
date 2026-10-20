@@ -2,8 +2,7 @@
 #include "aimee.h"
 #include "aimee_home.h"
 #include "agent_adapter.h"
-#include "ingress_preinject.h"    /* S2 binding: publish primary session id per turn */
-#include "primary_cli_ingestor.h" /* S2 binding: enforce-before-send on the tmux CLI TUI turn */
+#include "ingress_preinject.h" /* S2 binding: publish primary session id per turn */
 #include "agent_config.h"
 #include "agent_exec.h"
 #include <aimee/tools/agent_tools.h> /* agent_tools_set_tool_event_cb — stream tool events */
@@ -430,43 +429,6 @@ static void chat_session_register(const char *aimee_sid, const char *client_type
                                    principal ? principal : "");
 }
 
-/* Append one user/assistant turn to the durable `primary_sessions` transcript so
- * chats served by the agent (tmux CLI) worker — which otherwise persists nothing
- * to DB1 — are logged and survive a crash. The direct primary-session adapter
- * already writes its own full provider-formatted transcript, so this is only
- * needed for the agent path. Best-effort; keyed by the aimee session id so
- * db1_primary_session_get_latest can recover it. */
-static void chat_log_turn_transcript(const char *aimee_sid, const char *agent_name,
-                                     const char *provider, const char *user_msg,
-                                     const char *assistant_reply)
-{
-   if (!aimee_sid || !aimee_sid[0] || !assistant_reply || !assistant_reply[0])
-      return;
-   char *existing = db1_primary_session_load(aimee_sid, agent_name, provider);
-   cJSON *messages = existing ? cJSON_Parse(existing) : NULL;
-   free(existing);
-   if (!messages || !cJSON_IsArray(messages))
-   {
-      cJSON_Delete(messages);
-      messages = cJSON_CreateArray();
-   }
-   if (!messages)
-      return;
-   cJSON *um = cJSON_CreateObject();
-   cJSON_AddStringToObject(um, "role", "user");
-   cJSON_AddStringToObject(um, "content", user_msg ? user_msg : "");
-   cJSON_AddItemToArray(messages, um);
-   cJSON *am = cJSON_CreateObject();
-   cJSON_AddStringToObject(am, "role", "assistant");
-   cJSON_AddStringToObject(am, "content", assistant_reply);
-   cJSON_AddItemToArray(messages, am);
-   char *json = cJSON_PrintUnformatted(messages);
-   cJSON_Delete(messages);
-   if (json)
-      (void)db1_primary_session_save(aimee_sid, agent_name, provider, json);
-   free(json);
-}
-
 static void chat_agent_add_builtin_provider(agent_config_t *acfg, const char *provider);
 static int chat_agent_select_provider(agent_config_t *acfg, const char *provider, char *selected,
                                       size_t selected_len);
@@ -829,17 +791,6 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    if (drift)
       stream_event(cctx, "text", "content", drift);
    agent_tools_set_tool_event_cb(chat_tool_event_cb, cctx);
-   /* Primary-as-manager S2 (primary-CLI-ingestor): the Claude primary runs as a
-    * per-session tmux CLI TUI whose model call reaches the gateway OUT-OF-BAND, so
-    * the router never binds it. Enforce HERE -- on the worker thread, where the
-    * aimee session id is in scope and agent_run_with_tools dispatches the tmux turn
-    * synchronously -- BEFORE the turn is sent to the pane, so S1 route + S2
-    * bind/guard are preventive for the turn. Behind the ingestor opt-in flag AND
-    * the enforce dial (both default-off), so the hot path is untouched by default.
-    * A missing sid is a no-op (never a silent pretend-enforced). */
-   if (!cctx->ir_enabled && primary_cli_ingestor_enabled() && aimee_sid && aimee_sid[0])
-      primary_cli_ingestor_enforce_preturn(aimee_sid, message, use_cwd);
-
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    /* This is the PRIMARY turn: the provider-named agent must be routable for
@@ -901,12 +852,6 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       compute_ctx_free(cctx);
       return;
    }
-
-   /* Log this turn to the durable DB1 transcript. The agent (tmux CLI) worker is
-    * the one chat path that otherwise persists nothing, so a session started here
-    * (e.g. over inbound ACP/MCP) was previously unrecoverable after a crash. */
-   if (!cctx->ir_enabled)
-      chat_log_turn_transcript(aimee_sid, selected, provider, message, result.response);
 
    /* If the reply already streamed incrementally, don't re-emit it whole. */
    if (!cctx->ir_native_owned && result.response && result.response[0])
@@ -1176,17 +1121,14 @@ void chat_stream_worker(void *arg)
    cctx->ir_delivery = cJSON_IsNumber(ir_version) && ir_version->valueint == 1;
    /* Capture ownership follows the admitted host turn, independently of the
     * subscriber's transport version. Legacy consumers retain their projection. */
-   if (cctx->ir_delivery || (cctx->presence_locked && cctx->vault_principal[0] && aimee_sid[0]))
+   if (server_chat_ir_begin(cctx, aimee_sid, compact ? NULL : message) != 0)
    {
-      if (server_chat_ir_begin(cctx, aimee_sid, compact ? NULL : message) != 0)
-      {
-         compute_error(cctx, "cannot initialize canonical session");
-         compute_ctx_free(cctx);
-         return;
-      }
-      /* Native handles are resolved by the selected harness, never the client. */
-      provider_sid = "";
+      compute_error(cctx, "cannot initialize canonical session");
+      compute_ctx_free(cctx);
+      return;
    }
+   /* Native handles are resolved by the selected harness, never the client. */
+   provider_sid = "";
 
    /* Register the session in DB1 up front so it is locatable in `server_sessions`
     * regardless of which provider path serves the turn below (codex / primary-
@@ -1209,11 +1151,20 @@ void chat_stream_worker(void *arg)
    const char *provider = provider_buf[0] ? provider_buf : "claude";
    /* A session-pinned primary agent (set via POST /v1/sessions/<id>/primary)
     * overrides the global default provider for this session, so the active
-    * primary can be switched at runtime without touching durable config. */
+    * primary can be switched at runtime using durable owner-bound session metadata. */
    char primary_buf[MAX_AGENT_NAME];
-   if (aimee_sid && aimee_sid[0] &&
-       session_primary_get(aimee_sid, primary_buf, sizeof(primary_buf)) && primary_buf[0])
-      provider = primary_buf;
+   if (aimee_sid && aimee_sid[0])
+   {
+      int selected = session_primary_get(aimee_sid, primary_buf, sizeof(primary_buf));
+      if (selected < 0)
+      {
+         compute_error(cctx, "session primary selection unavailable");
+         compute_ctx_free(cctx);
+         return;
+      }
+      if (selected > 0)
+         provider = primary_buf;
+   }
    if (cJSON_GetObjectItemCaseSensitive(req, "clean_retry") &&
        (compact || !chat_provider_uses_primary_session(provider)))
    {

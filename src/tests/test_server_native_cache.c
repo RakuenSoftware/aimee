@@ -562,3 +562,15 @@ int main(void)
         "passed");
    return 0;
 }
+
+int db1_session_native_history_load(const char *actor, const char *session, const char *mode,
+                                    const char *turn, char **out)
+{
+   (void)actor;
+   (void)session;
+   (void)mode;
+   (void)turn;
+   *out = NULL;
+   assert(!"unexpected interruption sidecar in ordinary cache fixture");
+   return -1;
+}

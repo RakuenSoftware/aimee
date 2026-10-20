@@ -93,7 +93,7 @@ func nativeOwnerLifecycle(ctx context.Context, q store.Queryer, actor string, r 
 	if foreign {
 		return "", "", "", fmt.Errorf("native recovery source actor mismatch")
 	}
-	rows, err := q.Query(ctx, `SELECT sequence::text,event_id,actor,payload FROM session_ir_events WHERE session_id=$1 AND turn_id=$2 AND payload::jsonb->>'kind'='execution' ORDER BY sequence LIMIT 3`, r.Session, r.Turn)
+	rows, err := q.Query(ctx, `SELECT sequence::text,event_id,actor,payload FROM session_ir_events WHERE session_id=$1 AND turn_id=$2 AND payload::jsonb->>'kind'='execution' ORDER BY session_ir_events.sequence LIMIT 3`, r.Session, r.Turn)
 	if err != nil {
 		return "", "", "", err
 	}

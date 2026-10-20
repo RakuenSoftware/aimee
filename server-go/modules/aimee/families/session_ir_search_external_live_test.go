@@ -65,6 +65,7 @@ func TestSessionIRLiveExternalSDKArchiveView(t *testing.T) {
 		return status
 	}
 	expectRevisionError := false
+	expectedSourceError := ""
 	lookup := func(actor string, request map[string]any) (uint32, map[string]any) {
 		t.Helper()
 		request["_principal"] = actor
@@ -76,10 +77,16 @@ func TestSessionIRLiveExternalSDKArchiveView(t *testing.T) {
 		defer tx.Rollback(ctx)
 		status, cells, err := sessionIRSearch(ctx, sessionIRLiveTx{tx}, []string{actor, string(body)})
 		if err != nil {
+			if expectedSourceError != "" && err.Error() == expectedSourceError {
+				return store.StatusInvalid, nil
+			}
 			if expectRevisionError && strings.Contains(err.Error(), "source revision changed") {
 				return store.StatusInvalid, nil
 			}
 			t.Fatal(err)
+		}
+		if expectedSourceError != "" {
+			t.Fatal("expected exact source-continuity refusal")
 		}
 		if expectRevisionError {
 			t.Fatal("expected exact source-revision refusal")
@@ -145,18 +152,6 @@ func TestSessionIRLiveExternalSDKArchiveView(t *testing.T) {
 	if save("sdk", "alice", "same-text-distinct-sdk-source", externalSDKHistoryScope, archive) != store.StatusOK || save("sdk", "alice", "newer-host-watermark", "primary", `[{"role":"user","blocks":[{"type":"text","text":"host current"}]}]`) != store.StatusOK {
 		t.Fatal("independent equal-text source")
 	}
-	_, sameText := lookup("alice", map[string]any{"view": "external_sdk", "query": "SDK evidence"})
-	sameTextRevision := sameText["sessions"].([]any)[0].(map[string]any)["source_revision"].(string)
-	if _, err = pool.Exec(ctx, `DELETE FROM session_ir_events WHERE session_id='sdk' AND turn_id='same-text-distinct-sdk-source'`); err != nil {
-		t.Fatal(err)
-	}
-	// Display bytes and the unrelated global host watermark are unchanged;
-	// loss of the selected external commit must still revoke its revision.
-	expectRevisionError = true
-	if status, _ = lookup("alice", map[string]any{"view": "external_sdk", "session_id": "sdk", "around_message_id": 0, "source_revision": sameTextRevision}); status == store.StatusOK {
-		t.Fatal("equal-text erased external source retained revision")
-	}
-	expectRevisionError = false
 	if save("sdk", "alice", "sdk-source-2", externalSDKHistoryScope, `[{"role":"user","blocks":[{"type":"text","text":"new SDK snapshot"}]}]`) != store.StatusOK {
 		t.Fatal("new archive")
 	}
@@ -169,18 +164,6 @@ func TestSessionIRLiveExternalSDKArchiveView(t *testing.T) {
 	if result["count"] != float64(0) {
 		t.Fatal("old snapshot merged", result)
 	}
-	// Erase the complete derived archive while retaining independent host history.
-	if _, err = pool.Exec(ctx, `DELETE FROM session_ir_events WHERE session_id='sdk' AND payload::jsonb->'payload'->>'scope'=$1`, externalSDKHistoryScope); err != nil {
-		t.Fatal(err)
-	}
-	_, result = lookup("alice", map[string]any{"view": "external_sdk", "query": "new SDK snapshot"})
-	if result["count"] != float64(0) {
-		t.Fatal("erased source retained", result)
-	}
-	_, result = lookup("alice", map[string]any{"view": "current", "query": "host current"})
-	if result["count"] != float64(1) {
-		t.Fatal("archive touched host primary", result)
-	}
 	if _, err = pool.Exec(ctx, `UPDATE server_sessions SET principal='bob' WHERE id='sdk'`); err != nil {
 		t.Fatal(err)
 	}
@@ -188,4 +171,58 @@ func TestSessionIRLiveExternalSDKArchiveView(t *testing.T) {
 	if result["count"] != float64(0) {
 		t.Fatal("changed owner retained access", result)
 	}
+	// Source erasure is corruption, not permission to guess a new history.
+	// Keep the successful snapshot/owner journey above ungapped; this distinct
+	// session tests equal-text commit erasure and persistent fail-closed reads.
+	if _, err = pool.Exec(ctx, `INSERT INTO server_sessions(id,principal,client_type) VALUES('gapped','alice','claude-code')`); err != nil {
+		t.Fatal(err)
+	}
+	if save("gapped", "alice", "original", externalSDKHistoryScope, archive) != store.StatusOK ||
+		save("gapped", "alice", "equal-text", externalSDKHistoryScope, archive) != store.StatusOK ||
+		save("gapped", "alice", "host-after", "primary", `[{"role":"user","blocks":[{"type":"text","text":"host survives only with intact source"}]}]`) != store.StatusOK {
+		t.Fatal("gapped source setup")
+	}
+	_, sameText := lookup("alice", map[string]any{"view": "external_sdk", "session_id": "gapped", "query": "SDK evidence"})
+	sameTextRevision := sameText["sessions"].([]any)[0].(map[string]any)["source_revision"].(string)
+	if _, err = pool.Exec(ctx, `DELETE FROM session_ir_events WHERE session_id='gapped' AND turn_id='equal-text'`); err != nil {
+		t.Fatal(err)
+	}
+	var firstAfterGap string
+	if err = pool.QueryRow(ctx, `SELECT sequence::text FROM (SELECT sequence,lag(sequence,1,0::bigint) OVER (ORDER BY sequence) previous FROM session_ir_events WHERE session_id='gapped') source WHERE sequence<>previous+1 ORDER BY sequence LIMIT 1`).Scan(&firstAfterGap); err != nil {
+		t.Fatal(err)
+	}
+	expectedSourceError = "invalid canonical history source at sequence " + firstAfterGap
+	for _, view := range []string{"external_sdk", "current"} {
+		if status, _ = lookup("alice", map[string]any{"view": view, "session_id": "gapped"}); status == store.StatusOK {
+			t.Fatal("gapped source admitted", view)
+		}
+	}
+	if status, _ = lookup("alice", map[string]any{"view": "external_sdk", "session_id": "gapped", "around_message_id": 0, "source_revision": sameTextRevision}); status == store.StatusOK {
+		t.Fatal("erased equal-text source retained revision")
+	}
+	if save("gapped", "alice", "later-snapshot", externalSDKHistoryScope, `[{"role":"user","blocks":[{"type":"text","text":"new bytes do not repair erased source"}]}]`) != store.StatusOK {
+		t.Fatal("append after erased source")
+	}
+	if status, _ = lookup("alice", map[string]any{"view": "external_sdk", "session_id": "gapped"}); status == store.StatusOK {
+		t.Fatal("later snapshot laundered source erasure")
+	}
+
+	// Removing every external archive row leaves no external search result,
+	// but cannot silently repair the remaining primary source's sequence gap.
+	if _, err = pool.Exec(ctx, `DELETE FROM session_ir_events WHERE session_id='gapped' AND payload::jsonb->'payload'->>'scope'=$1`, externalSDKHistoryScope); err != nil {
+		t.Fatal(err)
+	}
+	expectedSourceError = ""
+	_, result = lookup("alice", map[string]any{"view": "external_sdk", "session_id": "gapped"})
+	if result["count"] != float64(0) {
+		t.Fatal("erased external archive retained", result)
+	}
+	if err = pool.QueryRow(ctx, `SELECT sequence::text FROM session_ir_events WHERE session_id='gapped' ORDER BY sequence LIMIT 1`).Scan(&firstAfterGap); err != nil {
+		t.Fatal(err)
+	}
+	expectedSourceError = "invalid canonical history source at sequence " + firstAfterGap
+	if status, _ = lookup("alice", map[string]any{"view": "current", "session_id": "gapped"}); status == store.StatusOK {
+		t.Fatal("archive erasure laundered primary sequence gap")
+	}
+
 }

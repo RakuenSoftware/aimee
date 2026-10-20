@@ -1441,6 +1441,16 @@ struct aimee_ir_builder_storage
    struct aimee_ir_builder_buffer args, text, signature;
    unsigned char stopped;
 };
+int aimee_ir_response_builder_closed_prefix(const aimee_ir_response_builder_t *builder)
+{
+   if (!builder || !builder->storage)
+      return 0;
+   int count = 0;
+   while (count < builder->response.n_content && builder->storage[count].stopped)
+      count++;
+   return count;
+}
+
 void aimee_ir_response_builder_free(aimee_ir_response_builder_t *builder)
 {
    if (!builder)

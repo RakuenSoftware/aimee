@@ -63,11 +63,24 @@ func ValidSessionEvent(encoded []byte) bool {
 		RequestID   string          `json:"request_id,omitempty"`
 		ControlKind string          `json:"control_kind,omitempty"`
 		Payload     json.RawMessage `json:"payload"`
+		NativeOwner json.RawMessage `json:"native_owner,omitempty"`
+		Partial     json.RawMessage `json:"partial,omitempty"`
 	}
 	if !Decode(encoded, &e) {
 		return false
 	}
+	if e.NativeOwner != nil && (e.Kind != "message" || !ValidNativeExecutionOwner(e.NativeOwner)) {
+		return false
+	}
+	if e.Partial != nil {
+		var partial bool
+		if e.NativeOwner == nil || !Decode(e.Partial, &partial) || !partial {
+			return false
+		}
+	}
 	switch e.Kind {
+	case "tool_interruption":
+		return ValidToolInterruption(e.Payload)
 	case "history":
 		return ValidHistoryEvent(e.Payload)
 	case "message":
@@ -76,6 +89,9 @@ func ValidSessionEvent(encoded []byte) bool {
 			Blocks []json.RawMessage `json:"blocks"`
 		}
 		if e.MessageID == "" || !Decode(e.Payload, &m) || m.Role == "" || m.Blocks == nil || len(m.Blocks) > 4096 {
+			return false
+		}
+		if e.NativeOwner != nil && ((m.Role != "assistant" && m.Role != "tool") || (e.Role != "" && e.Role != m.Role) || (e.Partial != nil && (m.Role != "assistant" || len(m.Blocks) == 0))) {
 			return false
 		}
 		for _, b := range m.Blocks {

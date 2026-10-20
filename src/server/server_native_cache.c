@@ -1,6 +1,7 @@
 /* Native conversation files are a derived cache. The session log is the source;
  * the existing native-handle owner supplies a versioned exclusive claim. */
 #include "server_native_cache.h"
+#include "server_native_history.h"
 #include "agent_config.h"
 #include "db1_client/primary_sessions.h"
 #include "aimee_sha256.h"
@@ -116,7 +117,7 @@ static cJSON *source_history(server_native_cache_t *cache, const char *active_tu
          goto failed;
       }
    }
-   if (aimee_ir_history_admit(normalized))
+   if (server_native_history_admit_source(cache->session, cache->actor, active_turn, 0, normalized))
       goto failed;
    cJSON_Delete(source);
    return normalized;

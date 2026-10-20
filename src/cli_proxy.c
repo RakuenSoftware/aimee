@@ -456,7 +456,7 @@ cli_proxy_t *cli_proxy_start_bound(unsigned port, const char *local_token, const
                                  host_context);
 }
 
-void cli_proxy_stop(cli_proxy_t *proxy)
+void cli_proxy_deactivate_hold_port(cli_proxy_t *proxy)
 {
    if (!proxy)
       return;
@@ -470,6 +470,7 @@ void cli_proxy_stop(cli_proxy_t *proxy)
       pthread_join(proxy->monitor, NULL);
 #endif
    }
+   proxy->monitor_started = 0;
    mutex_lock(&proxy->mutex);
    for (int i = 0; i < proxy->started; i++)
    {
@@ -486,6 +487,17 @@ void cli_proxy_stop(cli_proxy_t *proxy)
       pthread_join(proxy->workers[i].thread, NULL);
 #endif
    }
+   proxy->started = 0;
+   proxy->forward = NULL;
+   proxy->route = NULL;
+   proxy->forward_context = NULL;
+   memset(proxy->token, 0, sizeof proxy->token);
+}
+void cli_proxy_stop(cli_proxy_t *proxy)
+{
+   if (!proxy)
+      return;
+   cli_proxy_deactivate_hold_port(proxy);
    aimee_core_socket_close(proxy->listener);
    mutex_destroy(&proxy->mutex);
    memset(proxy->token, 0, sizeof(proxy->token));

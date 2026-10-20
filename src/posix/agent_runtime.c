@@ -694,7 +694,7 @@ static int agent_execute_with_tools_impl(const agent_t *agent, const agent_netwo
          }
          if (seed &&
              (!owned_native || !server_session_log_active() || !server_session_capture_current() ||
-              aimee_ir_history_admit(initial_messages) ||
+              aimee_ir_history_admit_host(initial_messages) ||
               server_session_log_history_save(initial_messages)))
          {
             snprintf(out->error, sizeof out->error,
@@ -705,7 +705,7 @@ static int agent_execute_with_tools_impl(const agent_t *agent, const agent_netwo
                                                  user_prompt, seed, canonical_out, out);
          if (!rc && seed && updated_messages &&
              (server_session_capture_history(server_session_capture_current(), updated_messages) ||
-              aimee_ir_history_admit(*updated_messages)))
+              aimee_ir_history_admit_host(*updated_messages)))
          {
             out->success = 0;
             snprintf(out->error, sizeof out->error, "canonical native run result is unavailable");
@@ -1112,7 +1112,7 @@ native_provider_http:
       }
 
       /* Execution cannot invent missing receipts or silently discard effects. */
-      if (aimee_ir_history_admit(messages))
+      if (aimee_ir_history_admit_host(messages))
       {
          snprintf(out->error, sizeof out->error, "canonical history is incomplete or invalid");
          break;

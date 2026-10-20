@@ -288,6 +288,9 @@ static void cli_codex_exit_status_desc(const cli_codex_t *c, char *out, size_t o
 static int cli_codex_spawn(cli_codex_t *c, const char *cli_cmd, const char *cwd,
                            const char *sandbox_config)
 {
+   if (c->host_launch && c->host_launch->spawn_guard &&
+       (!c->host_launch->spawn_guard->child || !c->host_launch->spawn_guard->parent))
+      return -1;
    char aimee_root[4096] = "";
    if (c->home && c->home[0])
       snprintf(aimee_root, sizeof(aimee_root), "%s", aimee_home());
@@ -353,6 +356,9 @@ static int cli_codex_spawn(cli_codex_t *c, const char *cli_cmd, const char *cwd,
          for (int fd = 3; fd < limit; fd++)
             if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0 && errno != EBADF)
                _exit(126);
+         if (host->spawn_guard && host->spawn_guard->child(host->spawn_guard->context,
+                                                           host->executable_fd, host->cwd_fd))
+            _exit(126);
          char *const arguments[] = {"codex", "app-server", NULL};
 #if defined(__linux__)
          fexecve(host->executable_fd, arguments, host->environment);
@@ -398,7 +404,22 @@ static int cli_codex_spawn(cli_codex_t *c, const char *cli_cmd, const char *cwd,
              (char *)NULL);
       _exit(127);
    }
-   /* Parent */
+   /* Parent: the optional owner attaches this exact child before SDK exec. */
+   if (c->host_launch && c->host_launch->spawn_guard &&
+       c->host_launch->spawn_guard->parent(c->host_launch->spawn_guard->context, pid))
+   {
+      (void)kill(pid, SIGKILL);
+      while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
+      {
+      }
+      close(in_pipe[0]);
+      close(in_pipe[1]);
+      close(out_pipe[0]);
+      close(out_pipe[1]);
+      close(err_pipe[0]);
+      close(err_pipe[1]);
+      return -1;
+   }
    close(in_pipe[0]);
    close(out_pipe[1]);
    close(err_pipe[1]);

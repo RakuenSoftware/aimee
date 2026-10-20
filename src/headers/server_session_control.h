@@ -7,6 +7,12 @@
 typedef struct server_control_scope server_control_scope_t;
 server_control_scope_t *server_control_scope_open(const char *session, const char *turn,
                                                   const char *principal);
+/* A private canonical child has its own reply destination, while host callbacks
+ * retain the parent's attested execution session. This immutable alias grants
+ * only a lease on the already-bound thread scope; HTTP reply lookup never uses it. */
+server_control_scope_t *server_control_scope_open_execution(const char *session, const char *turn,
+                                                            const char *principal,
+                                                            const char *execution_session);
 /* Capture a lease from this thread under its attested session and principal. A missing
  * scope is a successful NULL capture. A closed/wrong-owner scope refuses.
  * Bind only while the owning execution or a captured lease remains alive. */
@@ -34,6 +40,10 @@ int server_control_register_recorded(server_control_scope_t *scope, const char *
                                      const char *kind, const cJSON *request,
                                      server_control_record_fn record);
 int server_control_abandon(server_control_scope_t *scope, const char *native_id);
+/* Denial/cancellation of an unknown-effect retry blocks further mutations in
+ * this host turn, without reopening the same prompt or changing old outcomes. */
+int server_control_unknown_effect_denied(const server_control_scope_t *scope);
+void server_control_deny_unknown_effects(server_control_scope_t *scope);
 int server_control_scope_failed(const server_control_scope_t *scope);
 /* 0 accepted; 1 stale/absent; -1 invalid or wrong owner. */
 int server_control_reply(const char *session, const char *qualified_id, const char *principal,

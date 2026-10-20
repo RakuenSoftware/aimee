@@ -13,6 +13,20 @@
 
 static char *stored, *canonical_stored;
 static int fail_checkpoint, compact_enabled;
+static int fail_recovery, recovered_before_history, recovery_reset;
+static int standalone_active, standalone_unavailable;
+static int host_history_calls, host_history_failure;
+static int mock_native_history_load(const char *session, const char *actor, const char *active,
+                                    int running, cJSON **messages, cJSON **receipts)
+{
+   assert(!strcmp(session, "stable") && !strcmp(actor, "alice") && !running);
+   (void)active;
+   host_history_calls++;
+   *messages = cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\","
+                           "\"text\":\"authenticated host projection\"}]}]");
+   *receipts = cJSON_CreateArray();
+   return host_history_failure ? -1 : 0;
+}
 static const char *owner = "alice";
 const char *agent_get_request_vault_principal(void)
 {
@@ -33,10 +47,38 @@ int db1_server_session_create(const char *id, const char *client, const char *pr
    assert(0);
    return -1;
 }
+static int mock_native_reconcile(const char *session, const char *actor, const char *active,
+                                 char error[512])
+{
+   assert(!strcmp(session, "stable") && !strcmp(actor, "alice"));
+   (void)active;
+   if (fail_recovery)
+   {
+      snprintf(error, 512, "owned native source unresolved");
+      return -1;
+   }
+   if (recovery_reset)
+      primary_session_adapter_reset(); /* Must not deadlock/free busy state. */
+   recovered_before_history = 1;
+   return 0;
+}
+int db1_session_native_active_owned(const char *actor, const char *session, char **out)
+{
+   assert(!strcmp(actor, "alice") && !strcmp(session, "stable"));
+   *out = NULL;
+   if (standalone_unavailable)
+      return -1;
+   *out = strdup(standalone_active ? "[{}]" : "[]");
+   if (!standalone_active)
+      recovered_before_history = 1;
+   return 0;
+}
 int db1_session_ir_history_load(const char *id, const char *scope, const char *actor,
                                 const char *active_turn, char **out)
 {
    assert(!strcmp(id, "stable") && !strcmp(scope, "primary") && !strcmp(actor, "alice"));
+   assert(recovered_before_history);
+   recovered_before_history = 0;
    *out = canonical_stored ? strdup(canonical_stored) : NULL;
    return *out ? 0 : 1;
 }
@@ -211,21 +253,56 @@ static void test_native_compaction_owns_canonical_session(void)
    primary_session_adapter_reset();
 }
 
+static void test_authenticated_history_loader(void)
+{
+   primary_session_adapter_reset();
+   free(canonical_stored);
+   canonical_stored = strdup("invalid old projection must not be imported");
+   primary_session_adapter_set_native_history_load(mock_native_history_load);
+   agent_t agent = {0};
+   strcpy(agent.name, "codex");
+   strcpy(agent.provider, "chatgpt");
+   turn(&agent, 1, 1);
+   assert(host_history_calls == 1 && strstr(canonical_stored, "authenticated host projection"));
+   host_history_failure = 1;
+   turn(&agent, 0, 0); /* A failed host source read never falls back to old28. */
+   assert(host_history_calls == 2);
+   host_history_failure = 0;
+   primary_session_adapter_set_native_history_load(NULL);
+   primary_session_adapter_reset();
+   free(canonical_stored);
+   canonical_stored = NULL;
+}
 int main(void)
 {
+   test_authenticated_history_loader();
    test_native_compaction_owns_canonical_session();
    free(canonical_stored);
    canonical_stored = NULL;
+   primary_session_adapter_set_native_reconcile(mock_native_reconcile);
    agent_t a = {0}, b = {0};
    strcpy(a.name, "codex");
    strcpy(a.provider, "chatgpt");
    strcpy(b.name, "mistral");
    strcpy(b.provider, "mistral");
+   recovery_reset = 1;
    turn(&a, 0, 1);
+   recovery_reset = 0;
+   primary_session_adapter_set_native_reconcile(NULL);
+   standalone_active = 1;
+   turn(&a, 0, 0);
+   standalone_active = 0;
+   standalone_unavailable = 1;
+   turn(&a, 0, 0);
+   standalone_unavailable = 0;
+   primary_session_adapter_set_native_reconcile(mock_native_reconcile);
    turn(&b, 1, 1);
    turn(&a, 2, 1); /* Returning to A must include B, not A's stale cache. */
    primary_session_adapter_reset();
    turn(&b, 3, 1); /* Restart reload is canonical even for a different provider. */
+   fail_recovery = 1;
+   turn(&a, 0, 0); /* Unresolved native ownership blocks an API model before history/provider. */
+   fail_recovery = 0;
    free(canonical_stored);
    canonical_stored = strdup("[{\"role\":\"user\",\"blocks\":[{\"type\":\"bogus\"}]}]");
    turn(&a, 0, 0); /* A broken durable transcript cannot start an empty turn. */

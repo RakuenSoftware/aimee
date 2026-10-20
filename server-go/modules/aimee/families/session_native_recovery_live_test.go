@@ -358,3 +358,66 @@ func TestSessionNativeLiveAtomicRecoveryAndWriterFence(t *testing.T) {
 		t.Fatal("erasure retained recovery metadata")
 	}
 }
+
+// Decimal wire strings must never select or order durable numeric cursors.
+// These SQL fixtures reproduce a real resumed Claude turn's 3 -> 12 lifecycle;
+// they establish store ordering, not that an SDK or configured tests executed.
+func TestSessionNativeLiveNumericSourceOrder(t *testing.T) {
+	root := livePool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	schema := fmt.Sprintf("native_numeric_order_%d", time.Now().UnixNano())
+	if _, err := root.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer root.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	cfg, err := pgxpool.ParseConfig(os.Getenv("AIMEE_TEST_PG_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql"} {
+		sql, err := schemaFS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = pool.Exec(ctx, string(sql)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO server_sessions(id,principal) VALUES ('lifecycle','actor'),('external','actor')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []struct {
+		session       string
+		sequence      int
+		turn, payload string
+	}{
+		{"lifecycle", 3, "turn", `{"kind":"execution","payload":{"status":"running"}}`},
+		{"lifecycle", 12, "turn", `{"kind":"execution","payload":{"status":"completed"}}`},
+		{"external", 9, "old", `{"kind":"history","payload":{"phase":"commit","scope":"external-sdk:claude-code"}}`},
+		{"external", 10, "new", `{"kind":"history","payload":{"phase":"commit","scope":"external-sdk:claude-code"}}`},
+	} {
+		if _, err = pool.Exec(ctx, `INSERT INTO session_ir_events(session_id,sequence,event_id,turn_id,actor,payload) VALUES ($1,$2,$3,$4,'actor',$5)`, r.session, r.sequence, fmt.Sprintf("event-%d", r.sequence), r.turn, r.payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	state, sequence, _, err := nativeOwnerLifecycle(ctx, sessionIRLiveTx{tx}, "actor", nativeOwnerRequest{Session: "lifecycle", Turn: "turn"})
+	if err != nil || state != "completed" || sequence != "12" {
+		t.Fatal("3 must precede 12", state, sequence, err)
+	}
+	var turn, event, payload string
+	if err = tx.QueryRow(ctx, sessionSearchExternalCommitSQL, "external", "actor").Scan(&sequence, &turn, &event, &payload); err != nil || sequence != "10" || turn != "new" {
+		t.Fatal("latest is numeric 10, not lexical 9", sequence, turn, err)
+	}
+}

@@ -8,6 +8,7 @@
 
 #include "aimee.h"
 #include "agent_types.h"
+#include "cli_native_spawn_guard.h"
 #include <aimee/ir/aimee_ir.h>
 
 #ifdef __cplusplus
@@ -48,6 +49,7 @@ extern "C"
       const char *home, *cwd, *build_digest, *gateway_url, *gateway_token;
       char *const *environment;
       const struct cJSON *expected_config;
+      const cli_native_spawn_guard_t *spawn_guard;
       int (*ready)(const char *launch_digest, cli_codex_host_replay_t *replay, void *context);
       void *context;
    } cli_codex_host_launch_t;

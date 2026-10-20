@@ -145,8 +145,13 @@ def main():
         sequence = 0
         for index, name in enumerate(["ir-live-a", "ir-live-b", "ir-live-a", "ir-live-b"]):
             api(f"/v1/sessions/{sid}/primary", {"agent": name})
-            raw = api("/v1/chat/stream", {"attach_id": attachment, "message": f"IR_TURN_{index} say PRIMARY_OK",
-                                        "aimee_session_id": sid, "cwd": str(home), "ir_version": 1})
+            request = {"message": f"IR_TURN_{index} say PRIMARY_OK", "aimee_session_id": sid,
+                       "cwd": str(home), "ir_version": 1}
+            # An authenticated API caller needs no browser attachment to obtain
+            # the same durable canonical producer and cross-model history.
+            if index != 1:
+                request["attach_id"] = attachment
+            raw = api("/v1/chat/stream", request)
             records = [json.loads(line) for line in raw.splitlines() if line.strip()]
             assert records and all(record.get("version") == 1 for record in records), raw
             assert records[-1]["event"] == {"kind": "execution", "payload": {"status": "completed"}}, raw
@@ -162,6 +167,14 @@ def main():
             if index == 3:
                 assert "fixture-signature" in json.dumps(observed[-1]), observed[-1]
             assert any(record["event"].get("payload", {}).get("raw_stop_reason") in ("stop", "end_turn") for record in records), records
+
+        before_invalid = len(observed)
+        for invalid_attachment in ("unknown-attachment", "", 42):
+            refused = api("/v1/chat/stream", {"attach_id": invalid_attachment,
+                          "message": "IR_INVALID_ATTACHMENT", "aimee_session_id": sid,
+                          "cwd": str(home)})
+            assert "invalid chat attachment" in refused, refused
+            assert len(observed) == before_invalid, "invalid attachment reached model"
 
         # Verify the actual standalone observer and its persisted source binding
         # before any later fixture task adds more terminal events to this session.
@@ -535,6 +548,19 @@ def main():
             assert status["job_status"] == "failed" and "could not be given a sandboxed container" in status["result"], status
             assert len(observed) == before, "missing sandbox must not reach the model"
             print("delegate mirror: registered reconstruction and dedicated child reach mandatory sandbox refusal")
+
+        # The old subscriber wire has the same canonical producer, including
+        # authenticated callers without a persistent browser attachment.
+        legacy_sid = api("/v1/sessions/create", {"client_type": "ir-legacy-subscriber"})["session_id"]
+        api(f"/v1/sessions/{legacy_sid}/primary", {"agent": "ir-live-a"})
+        legacy = api("/v1/chat/stream", {"message": "IR_LEGACY_SUBSCRIBER say PRIMARY_OK",
+                     "session_id": legacy_sid, "cwd": str(home)})
+        assert "PRIMARY_OK" in legacy and '"error"' not in legacy, legacy
+        legacy_export = api("/v1/trajectory/export", {"session_id": legacy_sid, "compress": False})["trajectory"]
+        assert legacy_export["source"] == "canonical_session_log", legacy_export
+        assert len(legacy_export["messages"]) == 2, legacy_export
+        assert "IR_LEGACY_SUBSCRIBER" in json.dumps(legacy_export), legacy_export
+        print("chat admission: no-attachment API, legacy subscriber canonical durability and invalid attachment refusal pass")
 
 
 

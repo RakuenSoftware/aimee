@@ -1,4 +1,5 @@
-import { parseJSON } from './json';
+import { ExactJSONNumber, parseJSON } from './json';
+import { validNativeOwner, validToolInterruption, type NativeOwner, type ToolInterruption } from './interruption';
 import { validVerificationProof, type VerificationProof } from './verification';
 /** Canonical session projection. No native provider/harness protocol is accepted
  * here. Live delivery and durable replay use exactly the same reducer. */
@@ -57,13 +58,14 @@ export type DelegateLearningBinding = {
 };
 export type ChildExecution = { session_id: string; turn_id: string; role: string; status: ExecutionStatus; learning_binding?: DelegateLearningBinding };
 export type SessionEvent =
+  | { kind: 'tool_interruption'; payload: ToolInterruption }
   | { kind: 'native_compaction'; payload: { harness: 'codex' | 'claude' } }
   | { kind: 'native_checkpoint'; payload: { scope: string; context_digest: string; prefix_digest: string; harness: 'codex' | 'claude'; native_id: string; claim: string; message_count: number } }
   | { kind: 'replay_proof'; payload: { scope: string; block_digest: string; wire: 'anthropic' | 'responses'; thinking_binding?: string } }
   | { kind: 'child_execution'; payload: ChildExecution }
   | { kind: 'projection'; payload: ProjectionReport }
   | { kind: 'history'; payload: { scope: string; phase: 'message' | 'commit'; index?: number; count?: number; message?: Message } }
-  | { kind: 'message'; message_id: string; payload: Message }
+  | { kind: 'message'; message_id: string; payload: Message; native_owner?: NativeOwner; partial?: true }
   | { kind: 'delta'; message_id: string; role: string; payload: Delta }
   | { kind: 'execution'; payload: { status: 'running' | 'completed' | 'failed' | 'cancelled'; error?: string; verification_proofs?: VerificationProof[] } }
   | { kind: 'control_request' | 'control_response'; request_id: string;
@@ -77,6 +79,10 @@ export type ProjectedMessage = Message & {
   argumentFragments: Record<number, string>;
   stoppedBlocks: number[];
   error?: string;
+  nativeOwner?: NativeOwner;
+  ownedBlockCount?: number;
+  partial?: boolean;
+  awaitingStop?: boolean;
   cancelled?: boolean;
   stopReason?: string;
   nativeStopReason?: string;
@@ -92,9 +98,12 @@ export type SessionState = {
   projections: (ProjectionReport & { id: string; turn: string })[];
   children: Record<string, ChildExecution>;
   executions: Record<string, 'running' | 'completed' | 'failed' | 'cancelled'>;
+  toolSources: Record<string, { sequence: string; event_id: string; turn: string; actor: string; owner: NativeOwner }>;
+  terminalSources: Record<string, { sequence: string; actor: string }>;
+  toolInterruptions: Record<string, ToolInterruption & { id: string }>;
 };
 export function emptySession(session: string): SessionState {
-  return { session, sequence: '0', messages: [], controls: {}, activeTurns: [], errors: [], projections: [], executions: {}, children: {} };
+  return { session, sequence: '0', messages: [], controls: {}, activeTurns: [], errors: [], projections: [], executions: {}, children: {}, toolSources: {}, terminalSources: {}, toolInterruptions: {} };
 }
 function sequence(value: string): bigint {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) throw new Error('Invalid session sequence');
@@ -116,6 +125,30 @@ function validDelegateLearningBinding(value: unknown): value is DelegateLearning
     return typeof field === 'string' && field.length > 0 && !field.includes('\0') &&
       new TextEncoder().encode(field).length <= [256, 63, 127, 255][index];
   });
+}
+/** Compare canonical JSON values without rounding opaque decimals or treating
+ * object member order as content. Undefined projection-only fields are omitted
+ * just as they are on the canonical wire. */
+function sameJSON(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (left instanceof ExactJSONNumber || right instanceof ExactJSONNumber)
+    return left instanceof ExactJSONNumber && right instanceof ExactJSONNumber && left.token === right.token;
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+  if (Array.isArray(left) || Array.isArray(right))
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every((value, index) => sameJSON(value, right[index]));
+  const a = left as Record<string, unknown>, b = right as Record<string, unknown>;
+  const keys = Object.keys(a).filter(key => a[key] !== undefined);
+  return keys.length === Object.keys(b).filter(key => b[key] !== undefined).length &&
+    keys.every(key => Object.prototype.hasOwnProperty.call(b, key) && sameJSON(a[key], b[key]));
+}
+function sameClosedBlock(previous: Block | undefined, current: Block): boolean {
+  if (!previous || previous.type !== current.type) return false;
+  if (previous.type === 'tool_use')
+    return (['tool_id', 'name', 'namespace', 'input'] as const).every(key => sameJSON(previous[key], current[key]));
+  // Final host classification/replay may add context or a reasoning binding.
+  // Original text, signature and opaque reasoning state remain immutable.
+  return Object.entries(previous).every(([key, value]) => key === 'context' || key === 'thinking_binding' ||
+    value === undefined || sameJSON(value, current[key as keyof Block]));
 }
 function validateBlock(block: Block): void {
   if (block?.message_group !== undefined && (!Number.isInteger(block.message_group) || block.message_group < 1 || block.message_group > 4096))
@@ -153,6 +186,32 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       (event.kind === 'message' || event.kind === 'delta' || event.kind === 'control_request'))
     throw new Error('Content follows execution completion');
   switch (event.kind) {
+    case 'tool_interruption': {
+      const receipt = event.payload;
+      if (Object.keys(event).length !== 2 || !validToolInterruption(receipt))
+        throw new Error('Invalid tool interruption');
+      const source = receipt.source;
+      const key = toolBlockKey({ id: source.message_id }, source.block_index);
+      const recorded = state.toolSources[key];
+      const terminal = state.terminalSources[source.turn_id];
+      const message = state.messages.find(message => message.id === source.message_id);
+      const block = message?.blocks[source.block_index];
+      if (source.session_id !== envelope.session_id || source.turn_id !== envelope.turn_id || source.actor !== envelope.actor ||
+          !recorded || recorded.sequence !== source.sequence || recorded.event_id !== source.event_id ||
+          recorded.turn !== source.turn_id || recorded.actor !== source.actor ||
+          !(['owner_id', 'binding_sha256', 'epoch', 'containment_sha256'] as const).every(field => recorded.owner[field] === receipt.owner[field]) ||
+          !terminal || terminal.sequence !== receipt.terminal_sequence || terminal.actor !== source.actor ||
+          sequence(source.sequence) >= sequence(receipt.terminal_sequence) || sequence(receipt.terminal_sequence) >= nextSequence ||
+          message?.role !== 'assistant' || message.turn !== source.turn_id || block?.type !== 'tool_use' ||
+          block.tool_id !== source.tool_id || block.name !== source.name)
+        throw new Error('Tool interruption has no matching source and terminal');
+      if (state.toolInterruptions[key] || toolResults(state).byCall.has(key))
+        throw new Error('Tool interruption already has a completion observation');
+      // Preserve the original call, execution status and closed controls. This
+      // receipt adds only an unknown-outcome annotation, never a tool result.
+      next.toolInterruptions = { ...state.toolInterruptions, [key]: { ...receipt, id: envelope.event_id } };
+      return next;
+    }
     case 'native_compaction': {
       if (Object.keys(event.payload).length !== 1 || !['codex', 'claude'].includes(event.payload.harness))
         throw new Error('Invalid native compaction observation');
@@ -224,17 +283,47 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         throw new Error('Invalid canonical message');
       if (event.payload.content_scalar !== undefined && typeof event.payload.content_scalar !== 'boolean') throw new Error('Invalid content form');
       event.payload.blocks.forEach(validateBlock);
+      if (Object.prototype.hasOwnProperty.call(event, 'native_owner') && !validNativeOwner(event.native_owner) ||
+          Object.prototype.hasOwnProperty.call(event, 'partial') && (event.partial !== true || !event.native_owner))
+        throw new Error('Invalid native snapshot owner');
+      const owner = event.native_owner;
+      const previous = state.messages.find(message => message.id === event.message_id);
+      if (previous?.nativeOwner && (!owner || !sameJSON(owner, previous.nativeOwner)))
+        throw new Error('Native snapshot owner changed');
+      if (owner) {
+        if (!Object.keys(event).every(key => ['kind', 'message_id', 'payload', 'native_owner', 'partial'].includes(key)))
+          throw new Error('Invalid native snapshot owner');
+        if (event.payload.role !== 'assistant') throw new Error('Native snapshot requires an assistant message');
+        const protectedCount = previous?.ownedBlockCount ?? 0;
+        if (event.payload.blocks.length < protectedCount || previous && event.payload.blocks.some((block, index) =>
+          (index < protectedCount || previous.stoppedBlocks.includes(index)) && !sameClosedBlock(previous.blocks[index], block)))
+          throw new Error('Native snapshot changed a closed block');
+        next.toolSources = { ...state.toolSources };
+        event.payload.blocks.forEach((block, index) => {
+          if (block.type !== 'tool_use') return;
+          const key = toolBlockKey({ id: event.message_id }, index);
+          if (!next.toolSources[key]) next.toolSources[key] = { sequence: envelope.sequence, event_id: envelope.event_id,
+            turn: envelope.turn_id, actor: envelope.actor, owner: { ...owner } };
+        });
+      }
       const message: ProjectedMessage = { ...event.payload, id: event.message_id,
-        turn: envelope.turn_id, complete: true, argumentFragments: {}, stoppedBlocks: event.payload.blocks.map((_, index) => index) };
+        turn: envelope.turn_id, complete: !event.partial, awaitingStop: false, argumentFragments: {}, stoppedBlocks: event.payload.blocks.map((_, index) => index),
+        ...(owner ? { nativeOwner: { ...owner }, ownedBlockCount: event.payload.blocks.length, partial: !!event.partial } : {}) };
       const index = state.messages.findIndex(m => m.id === event.message_id);
       if (index >= 0) {
         if (state.messages[index].role !== message.role || state.messages[index].turn !== message.turn)
           throw new Error('Message identity changed');
         const previous = state.messages[index];
+        if (event.partial) {
+          message.blocks = [...event.payload.blocks, ...previous.blocks.slice(event.payload.blocks.length)];
+          message.argumentFragments = { ...previous.argumentFragments };
+          message.stoppedBlocks = [...new Set([...previous.stoppedBlocks, ...message.stoppedBlocks])];
+        }
         // A complete block snapshot inside a started model turn still awaits
         // TURN_STOP, which owns stop reason and usage. Standalone messages and
         // snapshots after TURN_STOP are already complete.
-        message.complete = previous.complete;
+        message.awaitingStop = previous.awaitingStop;
+        message.complete = event.partial ? previous.complete : !previous.awaitingStop;
         message.usage = previous.usage;
         message.stopReason = previous.stopReason;
         message.nativeStopReason = previous.nativeStopReason;
@@ -260,14 +349,14 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
           const message = state.messages[index];
           if (message.role !== event.role || message.turn !== envelope.turn_id)
             throw new Error('Delta changed message identity');
-          next.messages = state.messages.map((m, i) => i === index ? { ...m, complete: true, error } : m);
+          next.messages = state.messages.map((m, i) => i === index ? { ...m, complete: true, awaitingStop: false, error } : m);
         }
         return next;
       }
       if (d.type === 'TURN_START') {
         if (index >= 0) throw new Error('Duplicate message start');
         if (index < 0) next.messages = [...state.messages, { id: event.message_id,
-          turn: envelope.turn_id, role: event.role, blocks: [], complete: false,
+          turn: envelope.turn_id, role: event.role, blocks: [], complete: false, awaitingStop: true,
           argumentFragments: {}, stoppedBlocks: [] }];
         return next;
       }
@@ -293,6 +382,7 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         message.stopReason = d.stop_reason;
         message.nativeStopReason = d.raw_stop_reason;
         message.complete = true;
+        message.awaitingStop = false;
         return next;
       }
       const blockID = d.block_id;
@@ -372,10 +462,11 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         state.activeTurns.filter(turn => turn !== envelope.turn_id);
       if (event.payload.error) next.errors = [...state.errors, event.payload.error];
       if (status !== 'running') {
+        next.terminalSources = { ...state.terminalSources, [envelope.turn_id]: { sequence: envelope.sequence, actor: envelope.actor } };
         const open = state.messages.filter(m => m.turn === envelope.turn_id && !m.complete);
         if (status === 'completed' && open.length) throw new Error('Execution completed with open messages');
         next.messages = state.messages.map(m => m.turn === envelope.turn_id && !m.complete ?
-          { ...m, complete: true, cancelled: status === 'cancelled',
+          { ...m, complete: true, awaitingStop: false, cancelled: status === 'cancelled',
             error: status === 'failed' ? (event.payload.error || 'Execution failed') : undefined } : m);
         next.controls = Object.fromEntries(Object.entries(state.controls).map(([id, control]) =>
           [id, control.turn === envelope.turn_id && !control.response ? { ...control, closed: true } : control]));

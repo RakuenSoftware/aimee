@@ -35,6 +35,9 @@ typedef struct
    const char *message_id;
    const aimee_delta_t *delta;
    const aimee_message_t *message;
+   /* Host source provenance; never part of model payload/checkpoint content. */
+   const struct cJSON *native_owner;
+   int message_partial;
    /* Harness controls are not model content. request_id is opaque and must
     * match a pending server-owned request before any response is delivered. */
    const char *request_id;
@@ -82,6 +85,11 @@ int aimee_ir_message_parse(const struct cJSON *json, aimee_message_t *out);
 int aimee_ir_history_repair(struct cJSON *messages);
 /* Read-only admission of authoritative model history. Reject incomplete/orphan
  * cycles and synthetic unresolved-result diagnostics; no effect is authorized. */
+/* Explicit host-consumer seam. Generic admission always refuses reserved
+ * lifecycle diagnostics. Installed host callback must verify durable custody. */
+typedef int (*aimee_ir_host_history_admission_fn)(const struct cJSON *messages);
+void aimee_ir_history_set_host_admission(aimee_ir_host_history_admission_fn admit);
+int aimee_ir_history_admit_host(const struct cJSON *messages);
 int aimee_ir_history_admit(const struct cJSON *messages);
 struct cJSON *aimee_ir_delta_json(const aimee_delta_t *delta);
 struct cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event);

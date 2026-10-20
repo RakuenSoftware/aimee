@@ -2,6 +2,7 @@
 #include "cJSON.h"
 
 #include <errno.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -292,6 +293,17 @@ fail:
    return -1;
 }
 
+static _Atomic(aimee_ir_host_history_admission_fn) host_history_admission;
+void aimee_ir_history_set_host_admission(aimee_ir_host_history_admission_fn admit)
+{
+   atomic_store(&host_history_admission, admit);
+}
+int aimee_ir_history_admit_host(const cJSON *messages)
+{
+   aimee_ir_host_history_admission_fn admit = atomic_load(&host_history_admission);
+   return admit ? admit(messages) : aimee_ir_history_admit(messages);
+}
+
 int aimee_ir_history_admit(const cJSON *messages)
 {
    if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) > 4096)
@@ -307,10 +319,11 @@ int aimee_ir_history_admit(const cJSON *messages)
       {
          const aimee_block_t *block = &message.blocks[i];
          unresolved |= block->type == AIMEE_BLK_TOOL_RESULT &&
-                       block->context.origin == AIMEE_CTX_ORIGIN_PLATFORM &&
-                       block->context.authority == AIMEE_CTX_AUTH_DIAGNOSTIC &&
-                       !strcmp(block->context.revision_domain, "history-repair") &&
-                       !strcmp(block->context.revision_scope, "unresolved-tool-result");
+                       ((!strcmp(block->context.revision_domain, "native-interruption")) ||
+                        (block->context.origin == AIMEE_CTX_ORIGIN_PLATFORM &&
+                         block->context.authority == AIMEE_CTX_AUTH_DIAGNOSTIC &&
+                         !strcmp(block->context.revision_domain, "history-repair") &&
+                         !strcmp(block->context.revision_scope, "unresolved-tool-result")));
       }
       aimee_message_free(&message);
       if (unresolved)
@@ -901,9 +914,39 @@ int aimee_ir_verification_proof_valid(const cJSON *proof)
    return bounded;
 }
 
+static int native_owner_valid(const cJSON *owner)
+{
+   if (!cJSON_IsObject(owner) || cJSON_GetArraySize(owner) != 6)
+      return 0;
+   const cJSON *version = cJSON_GetObjectItemCaseSensitive(owner, "version");
+   const char *h = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(owner, "harness"));
+   const char *keys[] = {"owner_id", "binding_sha256", "containment_sha256", "epoch"};
+   const int sizes[] = {32, 64, 64, 32};
+   if (!cJSON_IsNumber(version) || version->valuedouble != 1 || !h ||
+       (strcmp(h, "codex") && strcmp(h, "claude")))
+      return 0;
+   for (int i = 0; i < 4; i++)
+   {
+      const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(owner, keys[i]));
+      if (!value)
+         return 0;
+      if (i == 3 && !strcmp(value, "0"))
+         continue;
+      if (strlen(value) != (size_t)sizes[i] ||
+          strspn(value, "0123456789abcdef") != (size_t)sizes[i])
+         return 0;
+   }
+   return 1;
+}
+
 cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
 {
-   if (!event)
+   if (!event ||
+       (event->native_owner &&
+        (event->kind != AIMEE_SESSION_MESSAGE || !native_owner_valid(event->native_owner))) ||
+       (event->message_partial &&
+        (!event->native_owner || !event->message || !event->message->role ||
+         strcmp(event->message->role, "assistant") || event->message->n_blocks < 1)))
       return NULL;
    cJSON *out = cJSON_CreateObject(), *payload = NULL;
    const char *kind = NULL;
@@ -1062,6 +1105,17 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
        !add_string(out, "message_id", event->message_id) || !add_string(out, "role", event->role) ||
        !add_string(out, "request_id", event->request_id) ||
        !add_string(out, "control_kind", event->control_kind))
+      goto fail;
+   if (event->native_owner)
+   {
+      cJSON *owner = cJSON_Duplicate(event->native_owner, 1);
+      if (!owner || !cJSON_AddItemToObject(out, "native_owner", owner))
+      {
+         cJSON_Delete(owner);
+         goto fail;
+      }
+   }
+   if (event->message_partial && !cJSON_AddTrueToObject(out, "partial"))
       goto fail;
    if (!cJSON_AddItemToObject(out, "payload", payload))
       goto fail;
