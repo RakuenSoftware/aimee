@@ -45,6 +45,16 @@
     {
       "release_text": "    {\"delegate\", mcph_delegate_native, \"primary\"},\n    {\"delegate_status\", mcph_delegate_native, \"primary\"},\n",
       "frozen_text": ""
+    },
+    {
+      "release_text": "static cJSON *mcph_git_verify(struct mcp_call *c)\n{\n   cJSON *args = cJSON_Duplicate(c->jargs, 1);\n   if (!args)\n      return text_content(\"error: cannot retain verification arguments\");\n   const char *cwd = run_cmd_get_cwd();\n   if (!cJSON_GetObjectItemCaseSensitive(args, \"path\") &&\n       !cJSON_GetObjectItemCaseSensitive(args, \"cwd\") && cwd && cwd[0])\n      cJSON_AddStringToObject(args, \"path\", cwd);\n   cJSON *result = mcp_git_run_tool(\"git_verify\", args, c->sid);\n   cJSON_Delete(args);\n   return result;\n}\n",
+      "frozen_text": "",
+      "review": "PR #3052: exact native configured Git verification wrapper and core catalog entry over the existing scoped Git dispatcher. Removing only these two additions reproduces c5661a2b4 byte-for-byte; no LSP implementation, schema, golden assertion or probe input changes. Keep the complete frozen source comparison and reject modified, removed or duplicate blocks."
+    },
+    {
+      "release_text": "    {\"git_verify\", mcph_git_verify, \"core\"},\n",
+      "frozen_text": "",
+      "review": "PR #3052: exact native configured Git verification wrapper and core catalog entry over the existing scoped Git dispatcher. Removing only these two additions reproduces c5661a2b4 byte-for-byte; no LSP implementation, schema, golden assertion or probe input changes. Keep the complete frozen source comparison and reject modified, removed or duplicate blocks."
     }
   ]
 }

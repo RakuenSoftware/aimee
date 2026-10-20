@@ -429,6 +429,29 @@ class LiveSemanticContextS1Test(unittest.TestCase):
                     self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
         self.assertFalse(validator.reviewed_host_equivalent("src/tests/test_lsp.c", "same", "same"))
 
+    def test_release_validator_rejects_native_verification_dispatch_drift(self) -> None:
+        validator = load_release_validator()
+        path = "src/server/server_mcp_call_table.c"
+        frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
+        current = (ROOT / path).read_text()
+        self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+        wrapper = next(block["release_text"] for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
+                       if block["release_text"].startswith("static cJSON *mcph_git_verify("))
+        row = '    {"git_verify", mcph_git_verify, "core"},\n'
+        for drift in (
+            current.replace('mcp_git_run_tool("git_verify", args, c->sid)',
+                            'mcp_git_run_tool("git_status", args, c->sid)', 1),
+            current.replace("const char *cwd = run_cmd_get_cwd();",
+                            'const char *cwd = "/unreviewed";', 1),
+            current.replace(wrapper, "", 1),
+            current + wrapper,
+            current.replace(row, "", 1),
+            current + row,
+            current.replace(row, row.replace('"core"', 'NULL'), 1),
+        ):
+            self.assertNotEqual(current, drift)
+            self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
     def test_release_validator_only_allows_exact_reviewed_build_additions(self) -> None:
         validator = load_release_validator()
         for path, integrations in validator.REVIEWED_BUILD_INTEGRATIONS.items():
