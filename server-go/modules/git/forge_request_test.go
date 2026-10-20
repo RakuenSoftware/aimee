@@ -579,3 +579,23 @@ func TestAttributionDenialNeverSendsMergeForAnyMethod(t *testing.T) {
 		}
 	}
 }
+
+func TestCancelledAdmissionCannotReachEgress(t *testing.T) {
+	stub := &forgeStub{reply: `{"merged":true}`, admitMerge: true}
+	stub.start(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tc := range []struct {
+		ctx context.Context
+		inv bus.ModuleInvocation
+	}{
+		{ctx, bus.ModuleInvocation{}},
+		{context.Background(), bus.ModuleInvocation{DeadlineNS: 1}},
+	} {
+		executor := forgeInvocationExecutor{allowEgress, tc.inv}
+		out := PerformForge(tc.ctx, 0, executor, ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Number: 3, Credential: forgeCredential("t")})
+		if out.Merged || out.Error == "" || stub.method != "" {
+			t.Fatalf("cancelled admission reached network: %+v", out)
+		}
+	}
+}

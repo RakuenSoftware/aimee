@@ -429,6 +429,25 @@ func PerformForge(ctx context.Context, traceID uint64, executor egress.Executor,
 	return ForgeResponse{Error: "forge: unsupported operation " + strings.TrimSpace(request.Op)}
 }
 
+// forgeInvocationExecutor checks cancellation before every evidence read and write.
+type forgeInvocationExecutor struct {
+	egress.Executor
+	invocation bus.ModuleInvocation
+}
+
+func (e forgeInvocationExecutor) Do(ctx context.Context, traceID uint64, request egress.HTTPRequest) (egress.HTTPResponse, error) {
+	if e.invocation.Cancelled() {
+		return egress.HTTPResponse{}, fmt.Errorf("forge invocation cancelled")
+	}
+	if err := ctx.Err(); err != nil {
+		return egress.HTTPResponse{}, err
+	}
+	if e.Executor == nil {
+		return egress.HTTPResponse{}, fmt.Errorf("egress transport is not configured")
+	}
+	return e.Executor.Do(ctx, traceID, request)
+}
+
 // handleForgeRequest serves git-forge-request (stage 4).
 func handleForgeRequest(executor egress.Executor, invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	var decoded ForgeRequest
@@ -440,9 +459,13 @@ func handleForgeRequest(executor egress.Executor, invocation bus.ModuleInvocatio
 	}
 	// Evidence traversal must stop at the caller's deadline. Otherwise a timed-out
 	// admission could keep running and submit a merge after reporting failure.
-	ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(25*time.Second))
+	limit := 25 * time.Second
+	if decoded.Op == OpPRMerge {
+		limit = 55 * time.Second // leave time to return before the 60s C RPC/envelope expiry
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(limit))
 	defer cancel()
-	encoded, err := json.Marshal(PerformForge(ctx, invocation.TraceID, executor, decoded))
+	encoded, err := json.Marshal(PerformForge(ctx, invocation.TraceID, forgeInvocationExecutor{executor, invocation}, decoded))
 	if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
 		return nil, bus.ModuleStatusInternal
 	}
