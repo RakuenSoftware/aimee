@@ -171,6 +171,26 @@ func TestMovedHeadAndBaseAreRejected(t *testing.T) {
 	}
 }
 
+func TestPRTextIsRecheckedAfterProvenanceTraversal(t *testing.T) {
+	c := checker(t, fixture())
+	get := c.Get
+	reads := 0
+	c.Get = func(ctx context.Context, path string) ([]byte, error) {
+		if path == "issues/3054" {
+			reads++
+			if reads == 2 {
+				changed := issue(3054, nil)
+				changed["body"] = "Co-authored-by: A <a@a>"
+				return encoded(changed), nil
+			}
+		}
+		return get(ctx, path)
+	}
+	if _, err := c.CheckPull(context.Background(), 3054, head); err == nil || !strings.Contains(err.Error(), "title/body") {
+		t.Fatalf("late attribution edit passed: %v", err)
+	}
+}
+
 func TestIncomingCommitPaginationCannotHideLastTrailer(t *testing.T) {
 	data := fixture()
 	entries := []any{}

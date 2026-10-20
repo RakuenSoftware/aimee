@@ -418,5 +418,11 @@ func (c *Checker) CheckPull(ctx context.Context, number int, expected string) (s
 	if latestBase != base || latestHead != head {
 		return "", fmt.Errorf("PR base/head moved during attribution verification")
 	}
+	// Title/body can be edited while the history traversal is running. Do not
+	// reuse the admission-start snapshot for the final merge decision.
+	delete(c.checked, number)
+	if err := c.issue(ctx, number); err != nil {
+		return "", err
+	}
 	return head, nil
 }
