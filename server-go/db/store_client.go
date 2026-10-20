@@ -153,7 +153,7 @@ func (t *storeTx) Rollback(ctx context.Context) error {
 	return t.finish(cleanup, opStoreRollback, "rollback")
 }
 
-// finish ends the transaction exactly once. The refusal path in Family.run
+// finish fences the requested finalization exactly once. The refusal path in Family.run
 // rolls back and the caller may roll back again through a defer, so a second
 // call reports ErrTxClosed rather than asking the store to end a transaction it
 // has already forgotten. done fences a finish attempt, not its acknowledgment:
@@ -168,6 +168,15 @@ func (t *storeTx) finish(ctx context.Context, op uint32, name string) error {
 	t.done = true
 	t.mu.Unlock()
 	_, err := t.db.call(ctx, op, name, t.handle, "", nil)
+	if op == opStoreCommit && err != nil && !errors.Is(err, ErrTxClosed) {
+		// Cancellation before dispatch and a lost acknowledgment both leave the
+		// caller unable to know whether commit ran. Never retry commit. Release
+		// only this existing handle, preserving its owner and the original error;
+		// rollback failure cannot turn the unknown commit outcome into success.
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), StoreDeadline)
+		defer cancel()
+		_, _ = t.db.call(cleanup, opStoreRollback, "rollback", t.handle, "", nil)
+	}
 	return err
 }
 

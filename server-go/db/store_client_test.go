@@ -497,7 +497,7 @@ func mustByte(t *testing.T, r *frameReader) uint8 {
 	return v
 }
 
-// Rollback alone receives an independent cleanup window after operation
+// Rollback receives an independent cleanup window after operation
 // cancellation. The same transaction handle, operation tag and owner values
 // must cross the existing store wire.
 type cleanupCaller struct {
@@ -583,5 +583,106 @@ func TestRollbackLostAcknowledgmentIsFailureWithoutAutomaticRetry(t *testing.T) 
 	}
 	if caller.calls != 2 {
 		t.Fatal("rollback automatically retried", caller.calls)
+	}
+}
+
+type commitOutcomeCaller struct {
+	t                         *testing.T
+	key                       any
+	commitErr, rollbackErr    error
+	knownClosed, lostAck      bool
+	calls, commits, rollbacks int
+}
+
+func (c *commitOutcomeCaller) Call(ctx context.Context, kind, stage uint32, _ uint64, deadline time.Duration, request []byte) ([]byte, error) {
+	c.calls++
+	r := frameReader{buf: request}
+	op := mustU32(c.t, &r)
+	if kind != EventPostgresSQL || stage != StagePostgresSQL {
+		c.t.Fatal("commit cleanup changed owner route")
+	}
+	if op == opStoreBegin {
+		return ok().u64(77).b, nil
+	}
+	tag := mustStr(c.t, &r)
+	handle := mustU64(c.t, &r)
+	if handle != 77 || ctx.Value(c.key) != "original actor" {
+		c.t.Fatal("commit cleanup changed owner/handle", handle)
+	}
+	switch op {
+	case opStoreCommit:
+		c.commits++
+		if tag != "commit" {
+			c.t.Fatal(tag)
+		}
+		if c.knownClosed {
+			return refusal(sqlStateNoActiveTransaction, "closed"), nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, c.commitErr
+	case opStoreRollback:
+		c.rollbacks++
+		if tag != "rollback" || ctx.Err() != nil {
+			c.t.Fatal("rollback missing fresh window", tag, ctx.Err())
+		}
+		until, present := ctx.Deadline()
+		if !present || time.Until(until) <= 0 || time.Until(until) > StoreDeadline || deadline <= 0 || deadline > StoreDeadline {
+			c.t.Fatal("rollback window not bounded", deadline)
+		}
+		if c.lostAck {
+			return refusal(sqlStateNoActiveTransaction, "commit may already have closed handle"), nil
+		}
+		return ok().b, c.rollbackErr
+	default:
+		c.t.Fatal("commit cleanup invented operation", op)
+	}
+	return nil, nil
+}
+
+func TestFirstFailedCommitCleansSameHandleWithoutRetryOrOutcomeClaim(t *testing.T) {
+	for _, scenario := range []string{"cancel-before-dispatch", "commit-lost-ack", "rollback-lost-ack", "known-closed"} {
+		t.Run(scenario, func(t *testing.T) {
+			type ownerKey struct{}
+			key := ownerKey{}
+			commitFailure := errors.New("commit acknowledgment unavailable")
+			caller := &commitOutcomeCaller{t: t, key: key, commitErr: commitFailure, lostAck: scenario == "commit-lost-ack", knownClosed: scenario == "known-closed"}
+			if scenario == "rollback-lost-ack" {
+				caller.rollbackErr = errors.New("rollback acknowledgment unavailable")
+			}
+			store, err := NewStore(caller)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.WithValue(t.Context(), key, "original actor"))
+			defer cancel()
+			tx, err := store.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected := commitFailure
+			if scenario == "cancel-before-dispatch" {
+				cancel()
+				expected = context.Canceled
+			}
+			if scenario == "known-closed" {
+				expected = ErrTxClosed
+			}
+			if err = tx.Commit(ctx); !errors.Is(err, expected) {
+				t.Fatal("original unknown commit outcome lost", err, expected)
+			}
+			cleanupCalls := 1
+			if scenario == "known-closed" {
+				cleanupCalls = 0
+			}
+			if caller.commits != 1 || caller.rollbacks != cleanupCalls {
+				t.Fatal("first finalization count", caller.commits, caller.rollbacks)
+			}
+			before := caller.calls
+			if !errors.Is(tx.Commit(ctx), ErrTxClosed) || !errors.Is(tx.Rollback(ctx), ErrTxClosed) || caller.calls != before {
+				t.Fatal("duplicate finalization retried commit or cleanup")
+			}
+		})
 	}
 }

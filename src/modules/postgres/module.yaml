@@ -40,6 +40,7 @@
     "server-go/modules/postgres/shared_migrations_test.go",
     "server-go/modules/postgres/shared_workflow_test.go",
     "server-go/modules/postgres/sql_security_test.go",
+    "server-go/modules/postgres/transaction_handles_test.go",
     "server-go/modules/postgres/storage/migration_linux_test.go",
     "server-go/modules/postgres/storage/plain_linux_test.go",
     "server-go/modules/postgres/storage/storage_linux_test.go",

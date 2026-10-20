@@ -28,9 +28,11 @@ replay and reconnect journeys pass in the published qualification checkpoint. Se
 interrupted-question journeys verify source-bound unknown outcomes, explicit new-action permission,
 denial suppression and replay without repeated effects. Delegates own private canonical controls;
 expanded browser transcripts send replies to the exact child. Strict web reply validation preserves
-original JSON bytes. KB-free independently graded learning and delegate reuse are implemented with
-actual-store coverage. Explicit legacy-import fidelity, final CI, live subscription acceptance and
-reviewed production promotion remain in progress. No KB service is enabled for production `.100`.
+original JSON bytes. KB-free configured-test grading and source-bound delegate observations/reuse
+are implemented with actual-store coverage. Legacy import records exact/normalized fidelity,
+explicit refusal or a passive archive; large messages and retained sources use bounded chunks.
+Final exact-head CI, live subscription acceptance and reviewed production promotion remain
+pending. No KB service is enabled for production `.100`.
 
 CLI index discovery now registers a missing canonical repository through the existing bounded
 client ingest path before querying it. Main checkouts and linked worktrees retain the caller's

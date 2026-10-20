@@ -61,6 +61,8 @@ static uint64_t sessions_call_timeout_ms(uint32_t op)
 {
    switch (op)
    {
+   case AIMEE_DB1_OP_PRIMARY_SESSION_LOAD:
+   case AIMEE_DB1_OP_PRIMARY_SESSION_GET_LATEST:
    case AIMEE_DB1_OP_SESSION_IR_HISTORY_LOAD:
    case AIMEE_DB1_OP_SESSION_IR_RUNNING_HISTORY_LOAD:
    case AIMEE_DB1_OP_SESSION_NATIVE_HISTORY:

@@ -98,8 +98,23 @@ pre-limit historical rows to reach migration 50. Both known histories replay, an
 unknown checksums still refuse. Whole replies retain their existing frame budget,
 including metadata overhead; oversized replies fail instead of truncating source.
 
-Their final combined tests, exact-tree regression, fresh CI and configured
-deployment jobs remain pending. Earlier passes do not qualify those later edits.
+A final combined PostgreSQL race run exposed cancellation between the last query
+and commit dispatch. Commit errors now trigger one bounded, owner-preserving
+rollback attempt without retrying commit or changing its original unknown outcome.
+Provider transaction handles use cryptographic per-instance seeds and never wrap;
+this removes deterministic handle reuse after restart without changing the wire,
+open-transaction ceiling or idle TTL. Entropy failure refuses new leases. Actual
+SQL-wire tests cover cancellation, lost commit acknowledgment and stale cleanup
+arriving after a replacement provider has opened a new transaction. The legacy
+source getters share the bounded 30-second history budget, with caller deadlines
+still enforced. Required CI replay now includes all SessionIR, primary-model and
+native-live regression fixtures.
+
+The final combined Go race suite now passes against a fresh actual PostgreSQL
+database, including the complete Aimee-family, shared DB and PostgreSQL provider
+packages. Affected native fixtures also pass normal and ASan/UBSan/leak runs.
+The final actual-daemon integration, lint rerun, fresh exact-head CI and configured
+deployment jobs remain pending. Earlier passes do not qualify later edits.
 Do not label the migration or production promotion 100% complete while those
 checks or the recorded independent review remain outstanding.
 

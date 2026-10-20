@@ -38,9 +38,11 @@ ambiguous reply frames before forwarding validated bytes unchanged.
 HTTP and host-owned native executors retain complete owned responses through
 selection and repair. Cache claims require durable terminal state and actual tree
 quiescence when the optional Linux containment boundary is configured. KB-free
-independent grading, delegate observations and source-checked next-run reuse are
-implemented and have actual-store integration coverage. Legacy-import fidelity
-reporting and final combined CI qualification remain in progress in #3052.
+configured-test grading, delegate observations and source-checked next-run reuse
+are implemented and have actual-store integration coverage. Legacy import records
+exact/normalized fidelity, explicit refusal or a passive text archive, with large
+messages and retained sources handled in bounded chunks. Final exact-head CI
+qualification remains in progress in #3052.
 Production remains KB-free and unpromoted; live subscription and independently
 reviewed promotion are separate qualification gates. Existing macOS/Windows
 thin-client support does not imply native server execution on those platforms.
