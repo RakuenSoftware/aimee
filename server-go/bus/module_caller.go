@@ -40,6 +40,12 @@ var (
 	// ErrModuleCallRejected reports that the host refused the request, e.g.
 	// because the caller's grant does not cover the kind.
 	ErrModuleCallRejected = errors.New("module call rejected by host")
+	// ErrModuleCallCapabilityDenied reports the host's CAPABILITY_DENIED: the
+	// caller's grant does not cover the kind. It is a rejection, so
+	// errors.Is(err, ErrModuleCallRejected) also holds. Before it was matched
+	// the denial read as someone else's traffic and the call waited out its
+	// deadline, as an absent capability once did.
+	ErrModuleCallCapabilityDenied = fmt.Errorf("module call capability denied: %w", ErrModuleCallRejected)
 )
 
 // ModuleCallStatusError names the module's own outcome, so a caller can tell an
@@ -192,6 +198,8 @@ func (m *ModuleCaller) awaitReply(ctx context.Context, eventKind uint32, correla
 			switch event.Frame.EventKind {
 			case KindCapabilityAbsent:
 				return nil, ErrModuleCallCapabilityAbsent
+			case KindCapabilityDenied:
+				return nil, ErrModuleCallCapabilityDenied
 			case KindError:
 				return nil, ErrModuleCallRejected
 			}

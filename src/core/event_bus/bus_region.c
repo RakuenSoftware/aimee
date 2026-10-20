@@ -48,6 +48,11 @@ void bus_region_unmap(bus_region_t *r)
 
 size_t bus_control_bytes(void)
 {
+   return sizeof(bus_control_t) + (size_t)BUS_LEASE_VIEW_SLOTS * sizeof(bus_lease_view_t);
+}
+
+size_t bus_control_header_bytes(void)
+{
    return sizeof(bus_control_t);
 }
 
@@ -78,8 +83,53 @@ bus_region_result_t bus_control_attach(const bus_region_t *r, bus_control_t **ou
       return BUS_REGION_ERR_GEOMETRY;
    if (bus_qpair_bytes(slot, qcap) == 0)
       return BUS_REGION_ERR_GEOMETRY;
+   /* An advertised lease view must be the one this build reads: right after the
+    * header, one entry per lease-table slot. */
+   if ((atomic_load_explicit(&c->flags, memory_order_acquire) & BUS_CONTROL_F_LEASE_VIEW) &&
+       (atomic_load_explicit(&c->lease_view_slots, memory_order_acquire) != BUS_LEASE_VIEW_SLOTS ||
+        atomic_load_explicit(&c->lease_view_off, memory_order_acquire) != sizeof(bus_control_t)))
+      return BUS_REGION_ERR_GEOMETRY;
 
    *out = c;
+   return BUS_REGION_OK;
+}
+
+bus_region_result_t bus_control_lease_view(const bus_region_t *r, const bus_control_t *c,
+                                           const bus_lease_view_t **out)
+{
+   if (!r || !r->base || !c || !out)
+      return BUS_REGION_ERR_ARG;
+   if (!(atomic_load_explicit(&c->flags, memory_order_acquire) & BUS_CONTROL_F_LEASE_VIEW))
+      return BUS_REGION_ERR_VERSION;
+   if (r->size < bus_control_bytes())
+      return BUS_REGION_ERR_SIZE;
+   *out = (const bus_lease_view_t *)((const uint8_t *)r->base + sizeof(bus_control_t));
+   return BUS_REGION_OK;
+}
+
+bus_region_result_t bus_lease_view_resolve(const bus_lease_view_t *view, uint32_t lease_id,
+                                           uint32_t generation, uint32_t payload_len,
+                                           uint64_t arena_size, uint64_t *offset)
+{
+   if (!view || !offset || generation == 0 || payload_len == 0)
+      return BUS_REGION_ERR_ARG;
+   if (lease_id >= BUS_LEASE_VIEW_SLOTS)
+      return BUS_REGION_ERR_GEOMETRY;
+   const bus_lease_view_t *e = &view[lease_id];
+   /* Acquire pairs with the host's release store of generation, which it makes
+    * after offset and len; the frame naming this lease was published after that. */
+   if (atomic_load_explicit(&e->generation, memory_order_acquire) != generation)
+      return BUS_REGION_ERR_GEOMETRY;
+   /* Seqlock read (writer: view_publish). Acquire on the span pairs with its
+    * release stores, so a span written for a later lease makes the re-read
+    * below see that lease's generation, or 0, and fail. */
+   uint64_t off = atomic_load_explicit(&e->offset, memory_order_acquire);
+   uint32_t len = atomic_load_explicit(&e->len, memory_order_acquire);
+   if (atomic_load_explicit(&e->generation, memory_order_relaxed) != generation)
+      return BUS_REGION_ERR_GEOMETRY;
+   if (payload_len > len || off > arena_size || arena_size - off < payload_len)
+      return BUS_REGION_ERR_GEOMETRY;
+   *offset = off;
    return BUS_REGION_OK;
 }
 

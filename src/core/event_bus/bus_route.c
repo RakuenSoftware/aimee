@@ -210,7 +210,8 @@ static int put(bus_host_t *h, bus_slot_t *d, const bus_frame_t *f, const uint8_t
       return 0;
    if ((out.hdr_flags & BUS_F_INLINE) && out.payload_len > 0)
    {
-      if ((uint64_t)out.payload_ref + out.payload_len > h->cfg.slot_size)
+      if (out.payload_ref < BUS_WIRE_HDR_LEN || out.payload_ref > h->cfg.slot_size ||
+          out.payload_len > h->cfg.slot_size - out.payload_ref)
          return 0;
       memcpy(slot + out.payload_ref, inline_src, out.payload_len);
    }
@@ -454,7 +455,12 @@ typedef enum
 static arena_dest_t arena_deliver_one(bus_host_t *h, bus_frame_t *f, uint32_t lease,
                                       uint32_t generation, uint32_t s, bus_kind_policy_t policy)
 {
-   if (!h->slots[s].in_use)
+   /* The target set was captured when the frame was first seen. A blocked
+    * delivery retried after that slot was reaped and re-admitted would hand the
+    * newcomer a frame it holds no reference for, and with the lease view it
+    * could resolve and read a span nothing keeps alive for it. The reference,
+    * not slot occupancy, is what entitles delivery. */
+   if (!h->slots[s].in_use || !bus_arena_holds(&h->arena, lease, generation, s))
       return ARENA_DEST_GONE;
    bus_slot_t *d = &h->slots[s];
    if (has_room(d, 0) && put(h, d, f, NULL))
@@ -670,7 +676,7 @@ static int route_fresh(bus_host_t *h, uint32_t src, bus_frame_t *f, const uint8_
       /* A cancel carries no meaningful payload; an arena cancel is malformed use.
        * Reclaim the lease so it cannot leak and drop it (the correlation is simply
        * not cancelled) rather than forward a reference to a reclaimed span. */
-      bus_arena_publish(&h->arena, (uint32_t)f->payload_ref, NULL, 0);
+      (void)bus_arena_cancel_by(&h->arena, (uint32_t)f->payload_ref, f->generation, src);
       h->slots[src].dropped++;
       return 1;
    }
@@ -755,6 +761,38 @@ static int route_fresh(bus_host_t *h, uint32_t src, bus_frame_t *f, const uint8_
    return 1;
 }
 
+/* D12: a consumer in another process returns its arena ref. The release is
+ * host-consumed (never routed) and not subject to output grants, because the
+ * ref it returns was given by the host, not requested. It is still seq-stamped
+ * and offered to the tap, so the stream the tap records stays total. A malformed
+ * release, or one for a lease the sender does not hold, is counted as dropped:
+ * bus_arena_release checks the generation and the holder, so a client can only
+ * ever return its own ref. */
+static uint32_t le32_at(const uint8_t *p)
+{
+   return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static void lease_release(bus_host_t *h, uint32_t src, bus_frame_t *f, const uint8_t *ring_slot)
+{
+   /* A release is inline by definition. One sent arena-placed is malformed, but
+    * it still names a lease its sender produced: reclaim it, as the arena-cancel
+    * path does, so it cannot stay held until the producer is reaped. */
+   if (f->hdr_flags & BUS_F_ARENA)
+      (void)bus_arena_cancel_by(&h->arena, (uint32_t)f->payload_ref, f->generation, src);
+   const uint8_t *p = NULL;
+   /* Placement was checked at ingress (bus_wire_decode_checked). */
+   if ((f->hdr_flags & BUS_F_NOTIFICATION) && (f->hdr_flags & BUS_F_INLINE) &&
+       f->payload_len == BUS_LEASE_RELEASE_LEN)
+      p = ring_slot + f->payload_ref;
+   f->seq = ++h->seq;
+   if (h->tap)
+      h->tap(h->tap_ctx, f, p, p ? f->payload_len : 0);
+   if (!p || bus_arena_release(&h->arena, le32_at(p + BUS_LEASE_RELEASE_OFF_LEASE),
+                               le32_at(p + BUS_LEASE_RELEASE_OFF_GENERATION), src) != BUS_ARENA_OK)
+      h->slots[src].dropped++;
+}
+
 uint32_t bus_host_pump(bus_host_t *h)
 {
    if (!h || !h->slots)
@@ -773,8 +811,12 @@ uint32_t bus_host_pump(bus_host_t *h)
          if (!ring_slot)
             break;
 
+         /* Decoded AND bounds-checked: a client-written payload_ref is a claim,
+          * and an unchecked one wraps the inline bound below (payload_ref near
+          * 2^64) into a read or write outside the slot. */
          bus_frame_t f;
-         if (bus_wire_decode(ring_slot, h->cfg.slot_size, &f) != BUS_WIRE_OK)
+         if (bus_wire_decode_checked(ring_slot, h->cfg.slot_size, h->cfg.slot_size,
+                                     h->cfg.arena_size, &f) != BUS_WIRE_OK)
          {
             slot->dropped++;
             bus_ring_consume_commit(&slot->qpair.outbound);
@@ -786,6 +828,13 @@ uint32_t bus_host_pump(bus_host_t *h)
           * reaches the governance tap or any observer. */
          f.src_handle = s;
          f.principal_ref = slot->principal_ref;
+         if (f.event_kind == BUS_KIND_LEASE_RELEASE && !slot->blocked)
+         {
+            lease_release(h, s, &f, ring_slot);
+            bus_ring_consume_commit(&slot->qpair.outbound);
+            routed++;
+            continue;
+         }
          if (!slot_allows_fresh(slot, &f))
          {
             slot->dropped++;

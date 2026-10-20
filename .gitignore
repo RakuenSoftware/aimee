@@ -266,3 +266,6 @@ benchmarks/compaction-quality/.cache-ab/
 
 /aimee-memory-transfer
 /aimee-memory-transfer.exe
+
+# Rust workspace build output
+rust/target/

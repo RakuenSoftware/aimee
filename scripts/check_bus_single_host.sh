@@ -68,11 +68,44 @@ if [ -d server-go/bus ]; then
    fi
 fi
 
+# 5-7. The Rust reference client (rust/aimee-bus) is held to the same rules,
+#      plus independence: it may not link the C implementation, so it has no
+#      build script, no #[link] attribute, and no dependency but libc.
+rust_crate=rust/aimee-bus
+if [ -d "$rust_crate" ]; then
+   # 5. client only: no region creation, no listening or accepting.
+   for forbidden in 'memfd_create' 'libc::bind' 'libc::listen' 'libc::accept'; do
+      if grep -rn --include='*.rs' "$forbidden" "$rust_crate/src" >/dev/null 2>&1; then
+         note "FAIL: $rust_crate uses '$forbidden' — a client does not host"
+         grep -rn --include='*.rs' "$forbidden" "$rust_crate/src" >&2
+         fail=1
+      fi
+   done
+
+   # 6. no link edge with the C reference.
+   if [ -e "$rust_crate/build.rs" ] || grep -rn --include='*.rs' '#\[link' "$rust_crate" >/dev/null 2>&1; then
+      note "FAIL: $rust_crate has a build script or #[link] attribute — the Rust client must not link the C bus"
+      fail=1
+   fi
+   deps=$(awk '/^\[/{in_deps = ($0 == "[dependencies]"); next} in_deps && /^[A-Za-z0-9_-]+[[:space:]]*=/ {print $1}' \
+      "$rust_crate/Cargo.toml" | sort -u | tr '\n' ' ')
+   if [ "$deps" != "libc " ]; then
+      note "FAIL: $rust_crate/Cargo.toml [dependencies] must be exactly libc, found: ${deps:-none}"
+      fail=1
+   fi
+
+   # 7. no Rust file writes the committed vector table.
+   if grep -rn 'wire_vectors\.tsv' "$rust_crate" 2>/dev/null | grep -E 'File::create|OpenOptions|fs::write|\.write\(' >/dev/null; then
+      note "FAIL: a Rust file writes wire_vectors.tsv — the vectors are the single authority"
+      fail=1
+   fi
+fi
+
 if [ "$fail" -ne 0 ]; then
    note ""
-   note "D8: exactly one host, and the Go side is a client only. See"
+   note "D8: exactly one host, and the Go and Rust sides are clients only. See"
    note "docs/dev/EVENT_BUS_DECISIONS.md."
    exit 1
 fi
 
-echo "check_bus_single_host: ok — one host_create, memfd only in the host, Go is client-only"
+echo "check_bus_single_host: ok — one host_create, memfd only in the host, Go and Rust are client-only"

@@ -394,6 +394,74 @@ static void test_arena_region(void)
    printf("  arena: base and size validated, header corruption refused\n");
 }
 
+/* D12: the lease view after the control header. A host region advertises it;
+ * a header-only mapping (an older host, or a client that mapped too little)
+ * has none; a corrupt advertisement is refused; resolve checks every claim. */
+static void test_lease_view(void)
+{
+   bus_region_t create;
+   must(bus_control_bytes() == bus_control_header_bytes() + BUS_LEASE_VIEW_SLOTS * 16u,
+        "control region = header + one 16-byte entry per lease");
+   must_result(bus_region_create("ctl-view", bus_control_bytes(), &create), BUS_REGION_OK,
+               "create");
+   bus_region_t host;
+   must_result(bus_region_map(create.fd, create.size, 1, &host), BUS_REGION_OK, "map");
+   must_result(bus_control_init(&host, 256, 192, 16, 4096), BUS_REGION_OK, "init");
+   bus_control_t *c = NULL;
+   must_result(bus_control_attach(&host, &c), BUS_REGION_OK, "attach");
+   must(atomic_load(&c->flags) & BUS_CONTROL_F_LEASE_VIEW, "the view is advertised");
+   must(atomic_load(&c->lease_view_slots) == BUS_LEASE_VIEW_SLOTS, "slot count");
+   must(atomic_load(&c->lease_view_off) == bus_control_header_bytes(), "after the header");
+
+   bus_lease_view_t *w = bus_control_lease_view_host(&host);
+   must(w != NULL, "the host has a writable view");
+   const bus_lease_view_t *v = NULL;
+   must_result(bus_control_lease_view(&host, c, &v), BUS_REGION_OK, "a client view");
+   must(v == w, "one table");
+
+   /* A header-only mapping sees no view. */
+   bus_region_t hdr;
+   must_result(bus_region_map(create.fd, bus_control_header_bytes(), 0, &hdr), BUS_REGION_OK,
+               "header-only map");
+   bus_control_t *hc = NULL;
+   must_result(bus_control_attach(&hdr, &hc), BUS_REGION_OK, "header-only attach still works");
+   must_result(bus_control_lease_view(&hdr, hc, &v), BUS_REGION_ERR_SIZE, "but has no view");
+   bus_region_unmap(&hdr);
+
+   /* Resolve. Entry 5 holds generation 3 at offset 128, len 256, in a 4096 arena. */
+   uint64_t off = 0;
+   atomic_store(&w[5].offset, 128);
+   atomic_store(&w[5].len, 256);
+   atomic_store(&w[5].generation, 3);
+   must_result(bus_lease_view_resolve(w, 5, 3, 200, 4096, &off), BUS_REGION_OK, "live lease");
+   must(off == 128, "offset");
+   must_result(bus_lease_view_resolve(w, 5, 2, 200, 4096, &off), BUS_REGION_ERR_GEOMETRY,
+               "stale generation refused");
+   must_result(bus_lease_view_resolve(w, 5, 3, 257, 4096, &off), BUS_REGION_ERR_GEOMETRY,
+               "payload longer than the span refused");
+   must_result(bus_lease_view_resolve(w, 5, 3, 200, 300, &off), BUS_REGION_ERR_GEOMETRY,
+               "span past the arena refused");
+   must_result(bus_lease_view_resolve(w, BUS_LEASE_VIEW_SLOTS, 3, 1, 4096, &off),
+               BUS_REGION_ERR_GEOMETRY, "lease id past the table refused");
+   must_result(bus_lease_view_resolve(w, 5, 0, 1, 4096, &off), BUS_REGION_ERR_ARG,
+               "generation 0 (no lease) refused");
+   atomic_store(&w[5].generation, 0);
+   must_result(bus_lease_view_resolve(w, 5, 3, 200, 4096, &off), BUS_REGION_ERR_GEOMETRY,
+               "a retired entry refused");
+
+   /* A corrupt advertisement is refused at attach. */
+   atomic_store(&c->lease_view_slots, BUS_LEASE_VIEW_SLOTS + 1);
+   must_result(bus_control_attach(&host, &hc), BUS_REGION_ERR_GEOMETRY, "wrong slot count");
+   atomic_store(&c->lease_view_slots, BUS_LEASE_VIEW_SLOTS);
+   atomic_store(&c->lease_view_off, 64);
+   must_result(bus_control_attach(&host, &hc), BUS_REGION_ERR_GEOMETRY, "wrong offset");
+   atomic_store(&c->lease_view_off, bus_control_header_bytes());
+
+   bus_region_unmap(&host);
+   close(create.fd);
+   printf("  lease view: advertised, mapped, resolved, and validated (D12)\n");
+}
+
 int main(void)
 {
    printf("test_bus_region:\n");
@@ -403,6 +471,7 @@ int main(void)
    test_short_backing();
    test_qpair_roundtrip();
    test_arena_region();
+   test_lease_view();
    printf("test_bus_region: OK\n");
    return 0;
 }

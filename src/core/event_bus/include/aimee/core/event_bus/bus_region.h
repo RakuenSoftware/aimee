@@ -47,6 +47,15 @@
 #define BUS_SPEC_VERSION   1
 #define BUS_LAYOUT_VERSION 1
 
+/* Control-region feature flags (bus_control_t.flags). A flag advertises an
+ * addition made in reserved space, which older readers ignore; layout_version
+ * is unchanged (D12). */
+#define BUS_CONTROL_F_LEASE_VIEW 0x00000001u
+
+/* Entries in the lease view that follows the control header (D12). Equal to
+ * the host's lease-table size; bus_arena.c asserts it. */
+#define BUS_LEASE_VIEW_SLOTS 4096u
+
 /* The reserved control-class credit pool (D6): a client saturated with data
  * events still has room to be told it lost some. Provisional, re-tuned in
  * slice 12 alongside the D4 parameters. */
@@ -88,15 +97,34 @@ typedef struct
    _Atomic uint32_t flags;
    _Atomic uint32_t slot_size;
    _Atomic uint32_t inline_budget;
-   _Atomic uint32_t queue_capacity; /* ring capacity a queue-pair region uses */
-   _Atomic uint32_t reserved0;
+   _Atomic uint32_t queue_capacity;   /* ring capacity a queue-pair region uses */
+   _Atomic uint32_t lease_view_slots; /* D12; was reserved0. Valid iff F_LEASE_VIEW */
    _Atomic uint64_t arena_size;
    _Atomic uint64_t host_epoch;
    _Atomic uint64_t host_heartbeat;
-   _Atomic uint64_t reserved1[5];
+   _Atomic uint64_t lease_view_off; /* D12; was reserved1[0]. Valid iff F_LEASE_VIEW */
+   _Atomic uint64_t reserved1[4];
 } bus_control_t;
 
 _Static_assert(sizeof(bus_control_t) == 96, "control header size is frozen by layout_version");
+_Static_assert(offsetof(bus_control_t, lease_view_slots) == 28, "D12 uses reserved0");
+_Static_assert(offsetof(bus_control_t, lease_view_off) == 56, "D12 uses reserved1[0]");
+
+/* One lease-view entry (D12): where a published arena lease's bytes are, so a
+ * consumer in another process can read the payload a frame references by lease
+ * id. The host writes an entry when it allocates the lease, before any frame
+ * can name it, storing generation last with release order; it stores
+ * generation 0 when the lease is reclaimed. The view lives in the control
+ * region, so it is read-only to every client: a client can read where a lease
+ * is, never move it. The lease table that decides lifetimes stays host-private. */
+typedef struct
+{
+   _Atomic uint32_t generation; /* 0 = no live lease in this entry */
+   _Atomic uint32_t len;        /* span length (>= any frame's payload_len) */
+   _Atomic uint64_t offset;     /* into the arena's usable bytes */
+} bus_lease_view_t;
+
+_Static_assert(sizeof(bus_lease_view_t) == 16, "lease view entry size is part of D12");
 
 /* The queue-pair region header, followed by the inbound and outbound rings.
  * inbound is host->client, outbound is client->host. The credit and control_lost
@@ -138,9 +166,28 @@ void bus_region_unmap(bus_region_t *r);
 
 /* ---- control region ---- */
 
+/* The control region the host creates: the header followed by the lease view. */
 size_t bus_control_bytes(void);
+/* The header alone. A client maps at least this; it maps bus_control_bytes() when
+ * the region is that large (a host that predates D12 creates only the header). */
+size_t bus_control_header_bytes(void);
 /* Validate a mapped control region and return a pointer to its header. */
 bus_region_result_t bus_control_attach(const bus_region_t *r, bus_control_t **out);
+
+/* The lease view, if the host advertises it and the mapping covers it.
+ * ERR_VERSION if the host does not advertise BUS_CONTROL_F_LEASE_VIEW, ERR_SIZE
+ * if the mapping is only the header. */
+bus_region_result_t bus_control_lease_view(const bus_region_t *r, const bus_control_t *c,
+                                           const bus_lease_view_t **out);
+
+/* Resolve an arena frame's (lease_id, generation, payload_len) to an offset into
+ * the arena's usable bytes. Every value is a claim and is checked: the entry
+ * must be live with the frame's generation, the payload must fit the span, and
+ * the span must lie inside the arena. ERR_GEOMETRY otherwise. Valid while the
+ * caller holds a consumer ref, which the host gave it by delivering the frame. */
+bus_region_result_t bus_lease_view_resolve(const bus_lease_view_t *view, uint32_t lease_id,
+                                           uint32_t generation, uint32_t payload_len,
+                                           uint64_t arena_size, uint64_t *offset);
 
 /* Liveness. A client caches the epoch it attached at; a change means the host
  * restarted and every handle and mapping is stale. */

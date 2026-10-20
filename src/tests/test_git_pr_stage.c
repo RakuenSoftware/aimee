@@ -14,11 +14,13 @@
  */
 #include "modules/git/git_pr_api.h"
 #include "support/module_bus_stub.h"
+#include "cJSON.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* --- stubs -------------------------------------------------------------- */
 
@@ -126,6 +128,14 @@ int main(void)
    assert(strstr(module_bus_stub_last_request(), "\"credential\"") != NULL);
    assert(strstr(module_bus_stub_last_request(), "\"token\"") == NULL);
    assert(strstr(module_bus_stub_last_request(), "test-token") == NULL);
+   uint64_t merge_deadline = module_bus_stub_last_deadline();
+   cJSON *merge_request = cJSON_Parse(module_bus_stub_last_request());
+   cJSON *merge_credential = cJSON_GetObjectItemCaseSensitive(merge_request, "credential");
+   cJSON *merge_expiry = cJSON_GetObjectItemCaseSensitive(merge_credential, "expires_at");
+   assert(cJSON_IsNumber(merge_expiry));
+   assert(merge_expiry->valuedouble >= (double)time(NULL) + 58);
+   assert(merge_expiry->valuedouble <= (double)time(NULL) + 60);
+   cJSON_Delete(merge_request);
 
    /* Already merged is NOT an error: a caller that retried would open a second
     * merge of work already on the base. */
@@ -190,6 +200,15 @@ int main(void)
    assert(strcmp(urlbuf, "https://github.com/acme/widgets/pull/42") == 0);
    /* The body was put through the attribution strip on the way to the stage. */
    assert(g_strip_calls == 1);
+   uint64_t create_deadline = module_bus_stub_last_deadline();
+   assert(merge_deadline > create_deadline + 30000000000ULL);
+   cJSON *create_request = cJSON_Parse(module_bus_stub_last_request());
+   cJSON *create_credential = cJSON_GetObjectItemCaseSensitive(create_request, "credential");
+   cJSON *create_expiry = cJSON_GetObjectItemCaseSensitive(create_credential, "expires_at");
+   assert(cJSON_IsNumber(create_expiry));
+   assert(create_expiry->valuedouble >= (double)time(NULL) + 28);
+   assert(create_expiry->valuedouble <= (double)time(NULL) + 30);
+   cJSON_Delete(create_request);
 
    /* A refusal must arrive as the forge's OWN words: "A pull request already
     * exists" sends an operator somewhere useful, "HTTP 422" does not. */

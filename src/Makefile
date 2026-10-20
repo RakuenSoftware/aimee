@@ -1064,6 +1064,13 @@ go-unit-tests:
 	@cd .. && bash scripts/test_bus_conformance.sh
 	@echo "go-unit-tests: ok"
 
+# The Rust reference bus client (rust/aimee-bus): vectors, units, lint, and its
+# interop legs against the C host and the C module-runtime caller. Needs the
+# toolchain pinned in rust/rust-toolchain.toml.
+.PHONY: rust-bus-tests
+rust-bus-tests:
+	@cd .. && bash scripts/test_bus_rust_conformance.sh
+
 go-vulncheck:
 	@test -n "$(GOVULNCHECK)" || { echo "go-vulncheck: ERROR govulncheck is required"; exit 1; }
 	@test -n "$(strip $(GO_MODULE_DIRS))" || { echo "go-vulncheck: ERROR no Go modules found"; exit 1; }
@@ -1110,7 +1117,8 @@ verify-local: all
 	@$(MAKE) lint
 	@$(MAKE) TEST_RUN_JOBS=$(AIMEE_VERIFY_TEST_JOBS) unit-tests
 	@$(MAKE) go-unit-tests
-	@echo "verify-local: ok (lint, unit, go-unit, linking)"
+	@$(MAKE) rust-bus-tests
+	@echo "verify-local: ok (lint, unit, go-unit, rust-bus, linking)"
 	@echo "verify-local: NOT run here -- build-integrity, integration-tests;" \
 	      "use 'make verify-ci' before pushing a change to the shipped surface"
 

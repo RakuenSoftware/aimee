@@ -131,6 +131,44 @@ static int free_take(bus_arena_t *a, uint64_t len, uint64_t *off)
    return 0;
 }
 
+_Static_assert(BUS_ARENA_MAX_LEASES == BUS_LEASE_VIEW_SLOTS,
+               "the lease view has one entry per lease-table slot (D12)");
+
+/* ---- lease view (D12) ---- */
+
+static void view_publish(bus_arena_t *a, uint32_t id, const bus_lease_t *l)
+{
+   if (!a->view)
+      return;
+   bus_lease_view_t *e = &a->view[id];
+   /* A seqlock write without fences (TSan models no fences): generation 0
+    * first (already 0 after reclaim, stored again so this stands alone), then
+    * the span with release stores, so a reader whose acquire load sees the new
+    * offset or len also sees generation 0 or later; then the live generation
+    * with release. A reader re-checks generation after reading the span
+    * (bus_lease_view_resolve), so it never pairs a generation with another
+    * lease's span. */
+   atomic_store_explicit(&e->generation, 0, memory_order_relaxed);
+   atomic_store_explicit(&e->offset, l->offset, memory_order_release);
+   atomic_store_explicit(&e->len, l->len, memory_order_release);
+   atomic_store_explicit(&e->generation, l->generation, memory_order_release);
+}
+
+static void view_retire(bus_arena_t *a, uint32_t id)
+{
+   if (a->view)
+      atomic_store_explicit(&a->view[id].generation, 0, memory_order_release);
+}
+
+void bus_arena_set_view(bus_arena_t *a, bus_lease_view_t *view)
+{
+   if (!a)
+      return;
+   arena_lock(a);
+   a->view = view;
+   arena_unlock(a);
+}
+
 /* ---- init ---- */
 
 bus_arena_result_t bus_arena_init(bus_arena_t *a, uint8_t *base, uint64_t size, uint32_t max_slots,
@@ -182,6 +220,7 @@ static void lease_reclaim(bus_arena_t *a, bus_lease_t *l)
    a->bytes_in_use -= l->len;
    if (a->live_per_slot[l->owner_slot] > 0)
       a->live_per_slot[l->owner_slot]--;
+   view_retire(a, (uint32_t)(l - a->leases));
    uint32_t gen = l->generation;
    memset(l, 0, sizeof *l);
    l->generation = gen; /* preserved: a stale reader must still mismatch */
@@ -239,6 +278,10 @@ static bus_arena_result_t bus_arena_alloc_locked(bus_arena_t *a, uint32_t owner_
    l->generation = gen;
    l->offset = off;
    l->len = (uint32_t)need;
+   /* Generation 0 means "no live lease" in the view; skip it on wrap. */
+   if (l->generation == 0)
+      l->generation = 1;
+   view_publish(a, id, l);
 
    if (id >= a->lease_count)
       a->lease_count = id + 1;
@@ -549,6 +592,35 @@ uint32_t bus_arena_refcount(const bus_arena_t *a, uint32_t lease_id)
                     : 0;
    arena_unlock(a);
    return n;
+}
+
+int bus_arena_holds(const bus_arena_t *a, uint32_t lease_id, uint32_t generation, uint32_t slot)
+{
+   if (!a || slot >= a->max_slots)
+      return 0;
+   arena_lock(a);
+   const bus_lease_t *l = lease_id < a->lease_count ? &a->leases[lease_id] : NULL;
+   int held = l && l->active && l->generation == generation && bits_test(l->consumer_bits, slot);
+   arena_unlock(a);
+   return held;
+}
+
+bus_arena_result_t bus_arena_cancel_by(bus_arena_t *a, uint32_t lease_id, uint32_t generation,
+                                       uint32_t owner_slot)
+{
+   if (!a)
+      return BUS_ARENA_ERR_ARG;
+   arena_lock(a);
+   bus_lease_t *l = lease_at(a, lease_id);
+   bus_arena_result_t r = BUS_ARENA_ERR_STATE;
+   if (!l || l->generation != generation)
+      r = BUS_ARENA_ERR_STALE;
+   else if (l->owner_slot != owner_slot)
+      r = BUS_ARENA_ERR_NOTHOLDER;
+   else
+      r = bus_arena_cancel_locked(a, lease_id);
+   arena_unlock(a);
+   return r;
 }
 
 const char *bus_arena_result_name(bus_arena_result_t r)

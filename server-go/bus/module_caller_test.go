@@ -370,6 +370,7 @@ func TestModuleCallerSurfacesCapabilityAbsent(t *testing.T) {
 		want error
 	}{
 		{"capability absent", KindCapabilityAbsent, ErrModuleCallCapabilityAbsent},
+		{"capability denied", KindCapabilityDenied, ErrModuleCallCapabilityDenied},
 		{"host error", KindError, ErrModuleCallRejected},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -391,5 +392,59 @@ func TestModuleCallerSurfacesCapabilityAbsent(t *testing.T) {
 				t.Fatalf("returned after %v: the caller waited out its deadline", elapsed)
 			}
 		})
+	}
+}
+
+// The host refuses a kind outside the caller's grant with CAPABILITY_DENIED on
+// the call's correlation. Both callers must end the call on it, as a
+// rejection, instead of waiting out the deadline; the C core caller already
+// did (AIMEE_MODULE_CALL_CAPABILITY_DENIED).
+func TestModuleCallersSurfaceCapabilityDenied(t *testing.T) {
+	deny := func(f *fakeCallerBus, _ uint32, correlation uint64, _ []byte) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.pending = append(f.pending, Event{Frame: Frame{HdrFlags: FNotification | FControl,
+			EventKind: KindCapabilityDenied, CorrelationID: correlation}})
+	}
+	check := func(t *testing.T, err error, start time.Time) {
+		t.Helper()
+		if !errors.Is(err, ErrModuleCallCapabilityDenied) || !errors.Is(err, ErrModuleCallRejected) {
+			t.Fatalf("err = %v, want capability denied (a rejection)", err)
+		}
+		if elapsed := time.Since(start); elapsed > 5*time.Second {
+			t.Fatalf("returned after %v: the caller waited out its deadline", elapsed)
+		}
+	}
+	t.Run("serial", func(t *testing.T) {
+		start := time.Now()
+		_, err := newModuleCaller(&fakeCallerBus{budget: 256, replyTo: deny}).Call(
+			context.Background(), KindModuleBase, 1, 0, 30*time.Second, []byte("{}"))
+		check(t, err, start)
+	})
+	t.Run("concurrent", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		caller := newConcurrentModuleCaller(ctx, &fakeCallerBus{budget: 256, replyTo: deny})
+		defer caller.CloseAndWait()
+		start := time.Now()
+		_, err := caller.Call(ctx, KindModuleBase, 1, 0, 30*time.Second, []byte("{}"))
+		check(t, err, start)
+	})
+}
+
+func TestConcurrentModuleCallerSurfacesCapabilityAbsent(t *testing.T) {
+	fake := &fakeCallerBus{budget: 256,
+		replyTo: func(f *fakeCallerBus, _ uint32, correlation uint64, _ []byte) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			f.pending = append(f.pending, Event{Frame: Frame{HdrFlags: FNotification | FControl,
+				EventKind: KindCapabilityAbsent, CorrelationID: correlation}})
+		}}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	caller := newConcurrentModuleCaller(ctx, fake)
+	defer caller.CloseAndWait()
+	if _, err := caller.Call(ctx, KindModuleBase, 1, 0, 30*time.Second, []byte("{}")); !errors.Is(err, ErrModuleCallCapabilityAbsent) {
+		t.Fatalf("err = %v, want capability absent", err)
 	}
 }

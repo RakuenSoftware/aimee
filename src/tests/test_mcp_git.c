@@ -1363,113 +1363,20 @@ static void test_git_pr_wait_is_rejected_without_running_gh(void)
    system(cmd);
 }
 
-static void test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge(void)
+static void test_git_pr_auto_merge_cannot_bypass_attribution(void)
 {
-   char tmpdir[256];
-   snprintf(tmpdir, sizeof tmpdir, "%s/aimee-test-gh-auto-XXXXXX", platform_tmpdir());
-   assert(mkdtemp(tmpdir) != NULL);
-
-   char gh_path[512];
-   snprintf(gh_path, sizeof(gh_path), "%s/gh", tmpdir);
-   FILE *fp = fopen(gh_path, "w");
-   assert(fp != NULL);
-   /* Only `gh pr merge --auto` is faked now. The CI gate no longer shells out --
-    * it reads the Checks API in-process -- so a faked `gh pr checks` would never
-    * be consulted; the verdict comes from the stub below instead. */
-   fputs("#!/bin/sh\n"
-         "if [ \"$1\" = pr ] && [ \"$2\" = merge ]; then exit 0; fi\n"
-         "exit 2\n",
-         fp);
-   fclose(fp);
-   assert(chmod(gh_path, 0700) == 0);
-
-   const char *old_path = getenv("PATH");
-   char saved_path[4096] = "";
-   if (old_path)
-      snprintf(saved_path, sizeof(saved_path), "%s", old_path);
-   char new_path[8192];
-   snprintf(new_path, sizeof(new_path), "%s%s%s", tmpdir, old_path ? ":" : "",
-            old_path ? old_path : "");
-   assert(setenv("PATH", new_path, 1) == 0);
-
-   /* This test owns its checkout. It used to run in whatever directory the
-    * previous test left behind, which meant it only passed where that happened
-    * to be a clone whose origin is a github.com URL -- true in a developer's
-    * working copy, false in a checkout cloned from a bundle or a mirror. The
-    * merge path resolves the origin slug BEFORE it reaches auto-merge, so the
-    * ambient case returned "cannot resolve a github.com origin" and the --auto
-    * assertion below failed for a reason that had nothing to do with the
-    * behaviour under test. A test must carry its own preconditions. */
-   char repo[320];
-   snprintf(repo, sizeof(repo), "%s/repo", tmpdir);
-   char setup[1024];
-   snprintf(setup, sizeof(setup),
-            "mkdir -p '%s' && cd '%s' && git init -q && git config user.email test@test && "
-            "git config user.name test && echo x > f.txt && git add f.txt && "
-            "git commit -q -m init && "
-            "git remote add origin https://github.com/example/repo.git",
-            repo, repo);
-   assert(system(setup) == 0);
-   char saved_cwd[4096];
-   assert(getcwd(saved_cwd, sizeof(saved_cwd)) != NULL);
-   assert(chdir(repo) == 0);
-
-   /* Pending CI is the whole point of auto-merge: branch protection holds the PR
-    * until green, so the gate must NOT refuse it here. Without this exemption an
-    * auto-merge into a protected branch would refuse itself. */
-   git_pr_api_stub_set_ci(GIT_PR_CI_PENDING);
-
    cJSON *args = cJSON_CreateObject();
    cJSON_AddStringToObject(args, "action", "merge");
    cJSON_AddNumberToObject(args, "number", 123);
    cJSON_AddBoolToObject(args, "auto", 1);
    cJSON *resp = handle_git_pr(args);
-   char *text = get_mcp_text(resp);
-   assert(text != NULL);
-   assert(strstr(text, "--auto") != NULL);
-   assert(strstr(text, "\"auto_merge_enabled\":true") != NULL);
-   assert(strstr(text, "\"merged\":false") != NULL);
-   cJSON_Delete(resp);
-   cJSON_Delete(args);
-
-   /* The exemption is for PENDING alone. An unreadable forge is not "pending", and
-    * "unknown" is never "pass" -- auto or not, that must still refuse. */
-   git_pr_api_stub_set_ci(GIT_PR_CI_ERROR);
-   args = cJSON_CreateObject();
-   cJSON_AddStringToObject(args, "action", "merge");
-   cJSON_AddNumberToObject(args, "number", 123);
-   cJSON_AddBoolToObject(args, "auto", 1);
-   resp = handle_git_pr(args);
-   text = get_mcp_text(resp);
+   const char *text = get_mcp_text(resp);
    assert(text != NULL);
    assert(strstr(text, "merge blocked") != NULL);
-   assert(strstr(text, "--auto") == NULL);
+   assert(strstr(text, "attribution at merge time") != NULL);
+   assert(strstr(text, "auto_merge_enabled") == NULL);
    cJSON_Delete(resp);
    cJSON_Delete(args);
-
-   /* A failed check refuses even with auto, for the same reason. */
-   git_pr_api_stub_set_ci(GIT_PR_CI_FAILURE);
-   args = cJSON_CreateObject();
-   cJSON_AddStringToObject(args, "action", "merge");
-   cJSON_AddNumberToObject(args, "number", 123);
-   cJSON_AddBoolToObject(args, "auto", 1);
-   resp = handle_git_pr(args);
-   text = get_mcp_text(resp);
-   assert(text != NULL);
-   assert(strstr(text, "merge blocked") != NULL);
-   cJSON_Delete(resp);
-   cJSON_Delete(args);
-
-   assert(chdir(saved_cwd) == 0);
-   git_pr_api_stub_set_ci(GIT_PR_CI_ERROR); /* leave the fail-closed default in place */
-
-   if (saved_path[0])
-      assert(setenv("PATH", saved_path, 1) == 0);
-   else
-      unsetenv("PATH");
-   char cmd[640];
-   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
-   system(cmd);
 }
 
 /* --- Test handle_git_issue --- */
@@ -4232,7 +4139,7 @@ int main(void)
    test_git_pr_checks_missing_number();
    test_git_pr_wait_missing_number();
    test_git_pr_wait_is_rejected_without_running_gh();
-   test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge();
+   test_git_pr_auto_merge_cannot_bypass_attribution();
    assert(check_branch_has_merged_pr_for(NULL) == 0);
    assert(check_branch_has_merged_pr_for("") == 0);
    test_git_issue_list_defaults();

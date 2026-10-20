@@ -102,7 +102,7 @@ INFRASTRUCTURE = {
     # program another script drives rather than a test that runs itself. The
     # script that drives it is named, so "who runs this" has an answer that can
     # be checked instead of assumed.
-    "bus-conformance-host": "the C half; test_bus_conformance.sh, run by make go-unit-tests",
+    "bus-conformance-host": "the C half; test_bus_conformance.sh (make go-unit-tests) and test_bus_rust_conformance.sh (make rust-bus-tests)",
     "bus-bench": "a measurement; scripts/check_bus_perf_gate.sh drives it",
     "kb-store-test-template": "builds the Postgres test template; unit-tests-pg drives it",
     "aimee-witness-boot-tpm-harness": "needs swtpm; scripts/run-p7-witness-boot-tpm.sh drives it",

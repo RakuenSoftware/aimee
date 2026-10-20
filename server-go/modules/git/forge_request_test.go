@@ -54,12 +54,19 @@ func forgeCredential(secret string) *egress.CredentialEnvelope {
 type forgeStub struct {
 	method, path, auth, accept, body string
 	status                           int
+	admitMerge                       bool
 	reply                            string
 }
 
 func (s *forgeStub) start(t *testing.T) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.admitMerge && r.Method == "GET" {
+			if reply := cleanAdmissionReply(r); reply != "" {
+				_, _ = w.Write([]byte(reply))
+				return
+			}
+		}
 		s.method, s.path = r.Method, r.URL.RequestURI()
 		s.auth, s.accept = r.Header.Get("Authorization"), r.Header.Get("Accept")
 		buf := make([]byte, r.ContentLength)
@@ -76,6 +83,27 @@ func (s *forgeStub) start(t *testing.T) {
 	previous := forgeBaseURL
 	forgeBaseURL = server.URL
 	t.Cleanup(func() { forgeBaseURL = previous; server.Close() })
+}
+
+// Clean evidence is served only by merge fixtures.
+func cleanAdmissionReply(r *http.Request) string {
+	base, head := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	path := strings.TrimPrefix(r.URL.Path, "/repos/o/r/")
+	switch {
+	case strings.HasPrefix(path, "pulls/") && !strings.HasSuffix(path, "/commits"):
+		n := strings.TrimPrefix(path, "pulls/")
+		return `{"number":` + n + `,"base":{"sha":"` + base + `"},"head":{"sha":"` + head + `"}}`
+	case strings.HasPrefix(path, "issues/"):
+		n := strings.TrimPrefix(path, "issues/")
+		return `{"number":` + n + `,"title":"Change","body":null,"performed_via_github_app":null}`
+	case strings.HasPrefix(path, "compare/"):
+		return `{"total_commits":1,"commits":[{"sha":"` + head + `","commit":{"message":"Change","author":{"name":"Operator","email":"op@example.com"},"committer":{"name":"Operator","email":"op@example.com"}}}]}`
+	case strings.HasSuffix(path, "/pulls"), path == "issues":
+		return `[]`
+	case strings.HasSuffix(path, "/check-runs"):
+		return `{"total_count":0,"check_runs":[]}`
+	}
+	return ""
 }
 
 func TestForgeRelaysOnlyAnOpaqueCredentialEnvelope(t *testing.T) {
@@ -177,7 +205,7 @@ func TestTransportFailureIsNotAForgeRefusal(t *testing.T) {
 }
 
 func TestPRMergeReportsWhatTheForgeSaid(t *testing.T) {
-	stub := &forgeStub{reply: `{"merged":true}`}
+	stub := &forgeStub{reply: `{"merged":true}`, admitMerge: true}
 	stub.start(t)
 	out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 7})
 	if stub.method != http.MethodPut || stub.path != "/repos/o/r/pulls/7/merge" {
@@ -188,7 +216,7 @@ func TestPRMergeReportsWhatTheForgeSaid(t *testing.T) {
 	}
 
 	// 409 is the forge refusing on conflict; it must not read as merged.
-	stub2 := &forgeStub{status: 409, reply: `{"message":"Merge conflict"}`}
+	stub2 := &forgeStub{status: 409, reply: `{"message":"Merge conflict"}`, admitMerge: true}
 	stub2.start(t)
 	out = PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 7})
 	if out.Merged || out.Status != 409 || !strings.Contains(out.Error, "Merge conflict") {
@@ -460,7 +488,7 @@ func TestMergeSeparatesTerminalConflictFromLostRace(t *testing.T) {
 		{"already merged", 405, `{"message":"Pull Request is already merged"}`, false, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			stub := &forgeStub{status: tc.status, reply: tc.reply}
+			stub := &forgeStub{status: tc.status, reply: tc.reply, admitMerge: true}
 			stub.start(t)
 			out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{
 				Op: OpPRMerge, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 3,
@@ -479,11 +507,11 @@ func TestMergeSeparatesTerminalConflictFromLostRace(t *testing.T) {
 }
 
 func TestMergeCarriesMethodDriftGuardAndReturnsTheSHA(t *testing.T) {
-	stub := &forgeStub{reply: `{"merged":true,"sha":"abc123"}`}
+	stub := &forgeStub{reply: `{"merged":true,"sha":"abc123"}`, admitMerge: true}
 	stub.start(t)
 	out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{
 		Op: OpPRMerge, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 3,
-		MergeMethod: "squash", ExpectedHeadSHA: "deadbeef",
+		MergeMethod: "squash", ExpectedHeadSHA: strings.Repeat("b", 40),
 	})
 	if !out.Merged || out.MergeSHA != "abc123" {
 		t.Fatalf("out = %+v", out)
@@ -495,12 +523,12 @@ func TestMergeCarriesMethodDriftGuardAndReturnsTheSHA(t *testing.T) {
 		t.Fatalf("squash body = %s", stub.body)
 	}
 	// Drift safety: the forge refuses if the head moved since it was read.
-	if !strings.Contains(stub.body, `"sha":"deadbeef"`) {
+	if !strings.Contains(stub.body, `"sha":"`+strings.Repeat("b", 40)+`"`) {
 		t.Fatalf("body missing the expected head sha: %s", stub.body)
 	}
 
 	// A plain merge has nothing to synthesise, so no commit_message is sent.
-	stub2 := &forgeStub{reply: `{"merged":true,"sha":"x"}`}
+	stub2 := &forgeStub{reply: `{"merged":true,"sha":"x"}`, admitMerge: true}
 	stub2.start(t)
 	PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 3})
 	if strings.Contains(stub2.body, "commit_message") {
@@ -508,5 +536,66 @@ func TestMergeCarriesMethodDriftGuardAndReturnsTheSHA(t *testing.T) {
 	}
 	if !strings.Contains(stub2.body, `"merge_method":"merge"`) {
 		t.Fatalf("default method = %s", stub2.body)
+	}
+}
+
+func TestAttributionDenialNeverSendsMergeForAnyMethod(t *testing.T) {
+	for _, method := range []string{"merge", "squash", "rebase"} {
+		for _, denial := range []string{"opening app", "closed original", "ancestor failure", "unavailable evidence", "malformed evidence"} {
+			t.Run(method+"/"+denial, func(t *testing.T) {
+				puts := 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method != "GET" {
+						puts++
+						_, _ = w.Write([]byte(`{"merged":true}`))
+						return
+					}
+					switch {
+					case denial == "opening app" && r.URL.Path == "/repos/o/r/issues/3":
+						_, _ = w.Write([]byte(`{"number":3,"title":"Change","body":null,"performed_via_github_app":{"id":1236702,"slug":"claude"}}`))
+					case denial == "closed original" && r.URL.Path == "/repos/o/r/issues":
+						_, _ = w.Write([]byte(`[{"number":3051,"title":"Old","body":null,"pull_request":{},"performed_via_github_app":{"id":1236702,"slug":"claude"}}]`))
+					case denial == "closed original" && r.URL.Path == "/repos/o/r/pulls/3051":
+						_, _ = w.Write([]byte(`{"number":3051,"commits":1,"merge_commit_sha":null,"base":{"sha":"cccccccccccccccccccccccccccccccccccccccc"},"head":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}`))
+
+					case strings.HasSuffix(r.URL.Path, "/check-runs") && denial == "ancestor failure":
+						_, _ = w.Write([]byte(`{"total_count":1,"check_runs":[{"id":17,"name":"no-coauthor-trailers","status":"completed","conclusion":"failure"}]}`))
+					case denial == "unavailable evidence":
+						w.WriteHeader(403)
+					case denial == "malformed evidence":
+						_, _ = w.Write([]byte(`{}`))
+					default:
+						_, _ = w.Write([]byte(cleanAdmissionReply(r)))
+					}
+				}))
+				previous := forgeBaseURL
+				forgeBaseURL = server.URL
+				t.Cleanup(func() { forgeBaseURL = previous; server.Close() })
+				out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 3, MergeMethod: method})
+				if puts != 0 || out.Merged || !strings.Contains(out.Error, "attribution denied") {
+					t.Fatalf("puts=%d, response=%+v", puts, out)
+				}
+			})
+		}
+	}
+}
+
+func TestCancelledAdmissionCannotReachEgress(t *testing.T) {
+	stub := &forgeStub{reply: `{"merged":true}`, admitMerge: true}
+	stub.start(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tc := range []struct {
+		ctx context.Context
+		inv bus.ModuleInvocation
+	}{
+		{ctx, bus.ModuleInvocation{}},
+		{context.Background(), bus.ModuleInvocation{DeadlineNS: 1}},
+	} {
+		executor := forgeInvocationExecutor{allowEgress, tc.inv}
+		out := PerformForge(tc.ctx, 0, executor, ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Number: 3, Credential: forgeCredential("t")})
+		if out.Merged || out.Error == "" || stub.method != "" {
+			t.Fatalf("cancelled admission reached network: %+v", out)
+		}
 	}
 }

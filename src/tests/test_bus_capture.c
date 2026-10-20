@@ -329,23 +329,23 @@ static void test_arena_captured_and_replayed(void)
         "publish");
    must(bus_host_pump(&h) == 1, "host routes the arena event");
 
-   /* Routing still works alongside capture: the subscriber reads and releases. */
+   /* Routing still works alongside capture: the subscriber reads the payload in
+    * place and its next poll returns the ref (D12), which the tap records too. */
    bus_event_t ev;
    must(bus_client_poll(&sub, &ev) == BUS_CLIENT_OK && (ev.frame.hdr_flags & BUS_F_ARENA),
         "arena event delivered");
-   const uint8_t *rp = NULL;
-   must(bus_arena_read_ptr(&h.arena, lease, ev.frame.generation, sub.reply.handle_id, &rp) ==
-            BUS_ARENA_OK,
+   must(ev.payload && ev.payload_len == len && ev.payload[len - 1] == (uint8_t)((len - 1) * 7 + 1),
         "consumer reads in place");
-   must(bus_arena_release(&h.arena, lease, ev.frame.generation, sub.reply.handle_id) ==
-            BUS_ARENA_OK,
-        "consumer releases");
+   must(bus_client_poll(&sub, &ev) == BUS_CLIENT_EMPTY, "next poll returns the ref");
+   must(bus_host_pump(&h) == 1, "host consumes the release");
+   must(bus_arena_bytes_in_use(&h.arena) == 0, "the lease drained");
+   must(h.slots[sub.reply.handle_id].dropped == 0, "the release was accepted");
 
    /* The capture materialized the arena bytes; replay returns them byte-exact. */
    g_arena_materialized = 0;
    g_arena_seen_len = 0;
    bus_capture_report_t rep = bus_capture_read(cap.buf, cap.len, arena_collect, NULL);
-   must(rep.status == BUS_CAPTURE_OPEN && rep.records == 1, "arena event captured");
+   must(rep.status == BUS_CAPTURE_OPEN && rep.records == 2, "arena event and its release captured");
    must(g_arena_materialized && g_arena_seen_len == len,
         "arena payload materialized in the record");
    int ok = 1;

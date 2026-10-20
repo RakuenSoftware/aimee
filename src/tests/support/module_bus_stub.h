@@ -35,6 +35,7 @@ void module_bus_stub_fail(aimee_module_call_result_t result);
 int module_bus_stub_calls(void);
 uint32_t module_bus_stub_last_event(void);
 uint32_t module_bus_stub_last_stage(void);
+uint64_t module_bus_stub_last_deadline(void);
 const char *module_bus_stub_last_request(void);
 
 #endif /* AIMEE_TEST_MODULE_BUS_STUB_H */

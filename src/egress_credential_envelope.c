@@ -19,6 +19,7 @@
 #define CREDENTIAL_TAG_LEN       16u
 #define CREDENTIAL_TOKEN_MAX     4096u
 #define CREDENTIAL_LIFETIME_SECS 30
+#define MERGE_CREDENTIAL_SECS    60
 
 static const unsigned char kdf_domain[] = "aimee.egress.x25519.v1";
 static const unsigned char aad_domain[] = "aimee.egress.credential.v1";
@@ -247,7 +248,12 @@ cJSON *aimee_egress_wrap_forge_credential(const char *token, const char *operati
    cJSON *envelope = NULL;
    size_t aad_len = 0;
    time_t now = time(NULL);
-   int64_t expires_at = now < 0 ? 0 : (int64_t)now + CREDENTIAL_LIFETIME_SECS;
+   /* Full attribution provenance needs several paginated reads. Keep this
+    * operation within egress's existing 60-second maximum; all other envelopes
+    * retain their shorter lifetime. Repository/operation binding is unchanged. */
+   int lifetime =
+       strcmp(operation, "pr_merge") == 0 ? MERGE_CREDENTIAL_SECS : CREDENTIAL_LIFETIME_SECS;
+   int64_t expires_at = now < 0 ? 0 : (int64_t)now + lifetime;
    memset(receiver_public, 0, sizeof(receiver_public));
    memset(sender_public, 0, sizeof(sender_public));
    memset(key, 0, sizeof(key));

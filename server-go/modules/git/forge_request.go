@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/JBailes/aimee/server-go/modules/git/attribution"
 )
 
 // Forge operations. Named rather than numbered on the wire for the same reason
@@ -367,6 +369,24 @@ func PerformForge(ctx context.Context, traceID uint64, executor egress.Executor,
 		if method == "" {
 			method = "merge"
 		}
+		if method != "merge" && method != "squash" && method != "rebase" {
+			return ForgeResponse{Error: "pr merge: unsupported merge method"}
+		}
+		checker := attribution.Checker{Get: func(ctx context.Context, path string) ([]byte, error) {
+			status, payload, err := forgeCall(ctx, traceID, executor, methodGet,
+				repo+"/"+path, request.Op, resource, request.Credential, nil)
+			if err != nil {
+				return nil, err
+			}
+			if status != 200 {
+				return nil, fmt.Errorf("attribution API returned HTTP %d", status)
+			}
+			return payload, nil
+		}}
+		head, err := checker.CheckPull(ctx, request.Number, request.ExpectedHeadSHA)
+		if err != nil {
+			return ForgeResponse{Error: "pr merge: attribution denied: " + err.Error()}
+		}
 		body := map[string]any{"merge_method": method}
 		// Only a squash synthesises a body from the child commits, which is where
 		// the attribution trailers protected branches reject come back in. A merge
@@ -374,9 +394,8 @@ func PerformForge(ctx context.Context, traceID uint64, executor egress.Executor,
 		if method == "squash" {
 			body["commit_message"] = ""
 		}
-		if request.ExpectedHeadSHA != "" {
-			body["sha"] = request.ExpectedHeadSHA
-		}
+		// Pin the head we actually verified, including when the caller omitted sha.
+		body["sha"] = head
 		status, payload, err := forgeCall(ctx, traceID, executor, methodPut,
 			fmt.Sprintf("%s/pulls/%d/merge", repo, request.Number), request.Op, resource, request.Credential, body)
 		if err != nil {
@@ -410,6 +429,25 @@ func PerformForge(ctx context.Context, traceID uint64, executor egress.Executor,
 	return ForgeResponse{Error: "forge: unsupported operation " + strings.TrimSpace(request.Op)}
 }
 
+// forgeInvocationExecutor checks cancellation before every evidence read and write.
+type forgeInvocationExecutor struct {
+	egress.Executor
+	invocation bus.ModuleInvocation
+}
+
+func (e forgeInvocationExecutor) Do(ctx context.Context, traceID uint64, request egress.HTTPRequest) (egress.HTTPResponse, error) {
+	if e.invocation.Cancelled() {
+		return egress.HTTPResponse{}, fmt.Errorf("forge invocation cancelled")
+	}
+	if err := ctx.Err(); err != nil {
+		return egress.HTTPResponse{}, err
+	}
+	if e.Executor == nil {
+		return egress.HTTPResponse{}, fmt.Errorf("egress transport is not configured")
+	}
+	return e.Executor.Do(ctx, traceID, request)
+}
+
 // handleForgeRequest serves git-forge-request (stage 4).
 func handleForgeRequest(executor egress.Executor, invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	var decoded ForgeRequest
@@ -419,7 +457,15 @@ func handleForgeRequest(executor egress.Executor, invocation bus.ModuleInvocatio
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
-	encoded, err := json.Marshal(PerformForge(context.Background(), invocation.TraceID, executor, decoded))
+	// Evidence traversal must stop at the caller's deadline. Otherwise a timed-out
+	// admission could keep running and submit a merge after reporting failure.
+	limit := 25 * time.Second
+	if decoded.Op == OpPRMerge {
+		limit = 55 * time.Second // leave time to return before the 60s C RPC/envelope expiry
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(limit))
+	defer cancel()
+	encoded, err := json.Marshal(PerformForge(ctx, invocation.TraceID, forgeInvocationExecutor{executor, invocation}, decoded))
 	if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
 		return nil, bus.ModuleStatusInternal
 	}

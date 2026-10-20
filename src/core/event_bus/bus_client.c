@@ -1,5 +1,6 @@
 /* bus_client.c: the C reference bus client. See bus_client.h. */
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <aimee/core/event_bus/bus_client.h>
@@ -27,9 +28,9 @@ bus_client_result_t bus_client_attach_as(int sock, bus_client_t *c, uint32_t pri
    if (bus_fd_send(sock, &req, sizeof req, NULL, 0) != 0)
       return BUS_CLIENT_ERR_OS;
 
-   int fds[3];
+   int fds[BUS_ATTACH_FDS];
    int nfd = 0;
-   long n = bus_fd_recv(sock, &c->reply, sizeof c->reply, fds, 3, &nfd);
+   long n = bus_fd_recv(sock, &c->reply, sizeof c->reply, fds, BUS_ATTACH_FDS, &nfd);
    if (n != (long)sizeof c->reply || c->reply.magic != BUS_ATTACH_REPLY_MAGIC)
    {
       for (int i = 0; i < nfd; i++)
@@ -44,7 +45,7 @@ bus_client_result_t bus_client_attach_as(int sock, bus_client_t *c, uint32_t pri
          close(fds[i]);
       return BUS_CLIENT_DENIED;
    }
-   if (nfd != 3)
+   if (nfd != BUS_ATTACH_FDS)
    {
       for (int i = 0; i < nfd; i++)
          close(fds[i]);
@@ -53,25 +54,38 @@ bus_client_result_t bus_client_attach_as(int sock, bus_client_t *c, uint32_t pri
 
    /* control (read-only), arena (rw), own queue pair (rw). */
    bus_client_result_t rc = BUS_CLIENT_ERR_OS;
-   if (bus_region_map(fds[0], bus_control_bytes(), 0, &c->control) != BUS_REGION_OK)
+   /* A D12 host's control region carries the lease view after the header; an
+    * older host's is the header alone. Map what is there. */
+   struct stat cst;
+   if (fstat(fds[BUS_ATTACH_FD_CONTROL], &cst) != 0)
       goto done;
-   if (bus_region_map(fds[1], bus_arena_region_bytes(c->reply.arena_size), 1, &c->arena) !=
-       BUS_REGION_OK)
+   size_t ctl_bytes = (cst.st_size >= 0 && (size_t)cst.st_size >= bus_control_bytes())
+                          ? bus_control_bytes()
+                          : bus_control_header_bytes();
+   if (bus_region_map(fds[BUS_ATTACH_FD_CONTROL], ctl_bytes, 0, &c->control) != BUS_REGION_OK)
       goto done;
-   if (bus_region_map(fds[2], bus_qpair_bytes(c->reply.slot_size, c->reply.queue_capacity), 1,
+   if (bus_region_map(fds[BUS_ATTACH_FD_ARENA], bus_arena_region_bytes(c->reply.arena_size), 1,
+                      &c->arena) != BUS_REGION_OK)
+      goto done;
+   if (bus_region_map(fds[BUS_ATTACH_FD_QPAIR],
+                      bus_qpair_bytes(c->reply.slot_size, c->reply.queue_capacity), 1,
                       &c->qpair) != BUS_REGION_OK)
       goto done;
    if (bus_control_attach(&c->control, &c->ctl) != BUS_REGION_OK)
       goto done;
    if (bus_qpair_attach(&c->qpair, &c->qp) != BUS_REGION_OK)
       goto done;
+   if (bus_arena_region_attach(&c->arena, &c->arena_base, &c->arena_size) != BUS_REGION_OK)
+      goto done;
+   if (bus_control_lease_view(&c->control, c->ctl, &c->lease_view) != BUS_REGION_OK)
+      c->lease_view = NULL; /* an older host: arena payloads stay unreadable */
 
    c->attached_epoch = c->reply.host_epoch;
    rc = BUS_CLIENT_OK;
 
 done:
    /* The mappings hold their own references; the descriptors can be closed. */
-   for (int i = 0; i < 3; i++)
+   for (int i = 0; i < BUS_ATTACH_FDS; i++)
       close(fds[i]);
    if (rc != BUS_CLIENT_OK)
       bus_client_detach(c);
@@ -213,6 +227,41 @@ bus_client_result_t bus_client_cancel(bus_client_t *c, uint32_t kind, uint64_t c
    return emit(c, BUS_F_CANCEL, kind, correlation, NULL, 0);
 }
 
+int bus_client_arena_readable(const bus_client_t *c)
+{
+   return c && c->lease_view != NULL;
+}
+
+static bus_client_result_t send_release(bus_client_t *c, bus_client_lease_t l)
+{
+   uint8_t p[BUS_LEASE_RELEASE_LEN];
+   for (unsigned i = 0; i < 4; i++)
+   {
+      p[BUS_LEASE_RELEASE_OFF_LEASE + i] = (uint8_t)(l.lease_id >> (8u * i));
+      p[BUS_LEASE_RELEASE_OFF_GENERATION + i] = (uint8_t)(l.generation >> (8u * i));
+   }
+   return emit(c, BUS_F_NOTIFICATION | BUS_F_CONTROL, BUS_KIND_LEASE_RELEASE, 0, p, sizeof p);
+}
+
+bus_client_result_t bus_client_flush_releases(bus_client_t *c)
+{
+   if (!c || c->ctl == NULL)
+      return BUS_CLIENT_ERR_ARG;
+   uint32_t sent = 0;
+   while (sent < c->release_count)
+   {
+      bus_client_result_t r = send_release(c, c->releases[sent]);
+      if (r == BUS_CLIENT_WOULD_BLOCK)
+         break;
+      if (r == BUS_CLIENT_EPOCH)
+         return r; /* the host restarted: every ref died with it */
+      sent++;      /* sent, or unsendable: either way not retried */
+   }
+   memmove(c->releases, c->releases + sent, (c->release_count - sent) * sizeof c->releases[0]);
+   c->release_count -= sent;
+   return c->release_count ? BUS_CLIENT_WOULD_BLOCK : BUS_CLIENT_OK;
+}
+
 bus_client_result_t bus_client_poll(bus_client_t *c, bus_event_t *out)
 {
    if (!c || !out || c->ctl == NULL)
@@ -231,24 +280,52 @@ bus_client_result_t bus_client_poll(bus_client_t *c, bus_event_t *out)
       bus_ring_consume_commit(&c->qp.inbound);
       c->have_pending_read = 0;
    }
+   /* The arena span handed out by the previous poll is no longer the caller's
+    * to read: return its ref (D12). */
+   if (c->have_pending_lease)
+   {
+      c->releases[c->release_count++] = c->pending_lease;
+      c->have_pending_lease = 0;
+   }
+   if (c->release_count && bus_client_flush_releases(c) == BUS_CLIENT_EPOCH)
+      return BUS_CLIENT_EPOCH;
 
    const uint8_t *slot = bus_ring_consume_begin(&c->qp.inbound);
    if (!slot)
       return BUS_CLIENT_EMPTY;
 
    memset(out, 0, sizeof *out);
-   if (bus_wire_decode(slot, c->reply.slot_size, &out->frame) != BUS_WIRE_OK)
+   if (bus_wire_decode_checked(slot, c->reply.slot_size, c->reply.slot_size, c->arena_size,
+                               &out->frame) != BUS_WIRE_OK)
    {
       /* A malformed inbound frame should never happen — the host encodes it —
        * but if it does, drop it rather than hand back garbage. */
       bus_ring_consume_commit(&c->qp.inbound);
       return BUS_CLIENT_EMPTY;
    }
-   if ((out->frame.hdr_flags & BUS_F_INLINE) && out->frame.payload_len > 0 &&
-       (uint64_t)out->frame.payload_ref + out->frame.payload_len <= c->reply.slot_size)
+   if ((out->frame.hdr_flags & BUS_F_INLINE) && out->frame.payload_len > 0)
    {
       out->payload = slot + out->frame.payload_ref;
       out->payload_len = out->frame.payload_len;
+   }
+   else if ((out->frame.hdr_flags & BUS_F_ARENA) && c->lease_view)
+   {
+      /* Delivering an arena frame gave this client a consumer ref, which it owes
+       * back whether or not the payload resolves. With the release backlog
+       * full, leave the frame unread until the outbound ring drains. */
+      if (c->release_count >= BUS_CLIENT_MAX_PENDING_RELEASES)
+         return BUS_CLIENT_EMPTY;
+      uint64_t off = 0;
+      if (bus_lease_view_resolve(c->lease_view, (uint32_t)out->frame.payload_ref,
+                                 out->frame.generation, out->frame.payload_len, c->arena_size,
+                                 &off) == BUS_REGION_OK)
+      {
+         out->payload = c->arena_base + off;
+         out->payload_len = out->frame.payload_len;
+      }
+      c->pending_lease.lease_id = (uint32_t)out->frame.payload_ref;
+      c->pending_lease.generation = out->frame.generation;
+      c->have_pending_lease = 1;
    }
    c->have_pending_read = 1;
    return BUS_CLIENT_OK;
