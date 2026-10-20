@@ -537,11 +537,11 @@ def inside(output):
             for backend in ('tmux-cli', 'provider-cli'):
                 external = json.loads(native_roster)
                 # Reach the execution fence, not the primary-only/client-only
-                # routing or workspace-admission guards. Native Claude runs
-                # require the actual isolated cwd. Use ACP for the distinct
-                # unsupported external adapter path.
+                # routing or workspace-admission guards. Codex/Claude now use
+                # observable host gateways; ACP remains an unsupported external
+                # transport under both legacy and current backend spellings.
                 external['models'][0].update(backend=backend,
-                    cli_kind='claude' if backend == 'tmux-cli' else 'acp',
+                    cli_kind='acp',
                     cli_cmd='/bin/false', primary_only=False, is_server_hosted=True)
                 roster.write_text(json.dumps(external))
                 before = len(captures)

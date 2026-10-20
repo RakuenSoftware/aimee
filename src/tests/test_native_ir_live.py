@@ -25,6 +25,8 @@ class Local(http.client.HTTPConnection):
 
 
 def api(path, body=None, expected=200, limits=None):
+    if limits is None:
+        limits = {"schema_version": 1, "max_request_bytes": 262144}
     connection = Local("localhost")
     try:
         connection.request("GET" if body is None else "POST", path,
@@ -328,12 +330,29 @@ def main():
                 run_browser_control(api, home, workspace, marker)
                 assert count == 2 and not errors, (active, count, errors)
             browser_question = False
+        # Qualified SDKs must still stop at the actual host wire boundary when
+        # the inherited cap admits no bytes. A live SDK is not a budget bypass.
+        for kind, wire in (("codex", "chatgpt"), ("claude", "anthropic")):
+            marker = case_name(kind, wire, "api_key")
+            before = len(observed)
+            run = api("/v1/runs", dict(model=marker, input="QUALIFIED_ZERO_BUDGET", cwd=str(workspace)),
+                      limits=dict(schema_version=1, max_request_bytes=0))
+            deadline = time.monotonic() + 45
+            while True:
+                finished = api(f"/v1/runs/{run['id']}")
+                if finished["status"] in ("completed", "incomplete", "failed", "cancelled"):
+                    break
+                assert time.monotonic() < deadline, finished
+                time.sleep(0.05)
+            assert finished["status"] == "failed" and finished.get("canonical_session_id"), finished
+            assert len(observed) == before, (kind, observed[before:])
+            print("native execution fence:", kind, "qualified SDK retains inherited zero-byte refusal without provider send", flush=True)
         # The deployment fence must reach a real queued worker with the native
         # cwd contract satisfied, then refuse before any unobservable send.
         native_roster = models_path.read_bytes()
         try:
             marker = case_name("claude", "anthropic", "api_key")
-            for backend, cli_kind in (("tmux-cli", "claude"), ("provider-cli", "acp")):
+            for backend, cli_kind in (("tmux-cli", "acp"), ("provider-cli", "acp")):
                 roster = json.loads(native_roster)
                 selected = next(model for model in roster["models"] if model["name"] == marker)
                 selected.update(backend=backend, cli_kind=cli_kind, cli_cmd="/bin/false",

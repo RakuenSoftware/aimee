@@ -665,13 +665,19 @@ static int agent_execute_with_tools_impl(const agent_t *agent, const agent_netwo
       }
       if (adapter)
       {
-         if (wire_fence_external_backend() != 0)
+         int owned_native =
+             !strcmp(adapter->cli_kind, "codex") || !strcmp(adapter->cli_kind, "claude");
+         /* The server-owned SDK pipeline sends model traffic only through its
+          * attested canonical gateway, where Go admits the actual rendered
+          * bytes. It is not an unobservable external transport. Launch/source
+          * qualification still belongs to the host executor, without fallback. */
+         int canonical_host =
+             owned_native && server_session_log_active() && server_session_capture_current();
+         if (!canonical_host && wire_fence_external_backend() != 0)
          {
             snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
             return -1;
          }
-         int owned_native =
-             !strcmp(adapter->cli_kind, "codex") || !strcmp(adapter->cli_kind, "claude");
          if (seed &&
              (!owned_native || !server_session_log_active() || !server_session_capture_current() ||
               aimee_ir_history_admit(initial_messages) ||

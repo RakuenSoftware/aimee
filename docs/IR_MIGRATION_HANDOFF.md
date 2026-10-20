@@ -3838,3 +3838,33 @@ assertion, deployment tier or platform gate is exempted. Fresh deployment CI
 must qualify the complete T3/T2 sequences after publication.
 
 All 76 lint gates also pass for the deployment fixture repair.
+
+
+## Governed native seeded runs under inherited byte limits: 20 October 2026
+
+The actual accounting-owner probe first confirmed that missing Go accounting
+correctly refuses bounded traffic. With the real economizer process attached,
+browser SDK execution succeeds, but a seeded /v1/runs was still rejected as
+request_budget_unavailable before launch. The agent loop had classified every
+provider CLI as an unobservable external transport, including the qualified
+host-owned Codex/Claude pipeline.
+
+Only Codex/Claude with the current durable log and retained canonical capture
+now proceed to their existing host executor under a byte limit. That executor
+still owns launch/source/Vault qualification and has no attested-session fallback.
+The final canonical model gateway uses Go to admit the actual rendered bytes.
+Standalone and unsupported adapters retain the external transport fence. The
+unsupported deployment probes now use ACP under both legacy/current backend
+spellings; qualified Codex/Claude have their own real zero-byte refusal cases.
+
+The integration harness installs, grants, starts and stops the actual Go
+accounting owner. All successful native API/OAuth/browser/seeded requests carry
+a 262144-byte caller limit. Eighteen actual SDK journeys pass, including both
+live root-UDS questions, and four negative cases prove zero provider sends for
+qualified SDK zero-byte caps and unsupported external adapters. Full PostgreSQL
+integration passes 168/168 with 26 unavailable local-service checks. The full
+660-binary native suite, CMake agent library build and Cppcheck without increased
+diagnostics pass. This is source qualification, not production promotion or
+independent learning completion. Queued mirror-source work remains stashed.
+
+All 76 lint gates also pass for governed native seeded runs.

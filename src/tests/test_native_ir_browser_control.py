@@ -22,7 +22,8 @@ connection.sock.connect(sys.argv[1])
 body = request.get("body")
 connection.request("GET" if body is None else "POST", request["path"],
     None if body is None else json.dumps(body),
-    {"Content-Type": "application/json", "X-Aimee-Webuser": sys.argv[2]})
+    {"Content-Type": "application/json", "X-Aimee-Webuser": sys.argv[2],
+     "X-Aimee-Context-Limits": json.dumps({"schema_version": 1, "max_request_bytes": 262144})})
 response = connection.getresponse()
 print(json.dumps({"status": response.status}), flush=True)
 while True:

@@ -156,6 +156,28 @@ stop_providers_module() {
     fi
 }
 
+# Use the actual Go final-request accounting owner for bounded native probes.
+ECONOMIZER_MODULE="$AIMEE_HOME/aimee-module-economizer"
+ECONOMIZER_MODULE_PID=""
+install_economizer_module() {
+    cp "$DB1_MODULE_BUILT" "$ECONOMIZER_MODULE"
+    chmod 0755 "$ECONOMIZER_MODULE"
+    install_generated_grant economizer "$ECONOMIZER_MODULE"
+    install_generated_grant economizer-db1 "$ECONOMIZER_MODULE"
+}
+start_economizer_module() {
+    stop_economizer_module
+    "$ECONOMIZER_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-economizer.log" 2>&1 &
+    ECONOMIZER_MODULE_PID=$!
+}
+stop_economizer_module() {
+    if [ -n "$ECONOMIZER_MODULE_PID" ]; then
+        kill "$ECONOMIZER_MODULE_PID" 2>/dev/null || true
+        wait "$ECONOMIZER_MODULE_PID" 2>/dev/null || true
+        ECONOMIZER_MODULE_PID=""
+    fi
+}
+
 # Batch/private execution tests use the real role policy, including the
 # cache-eligible summarize role. An absent policy owner would make the cache
 # regression vacuous because the safe fallback disables all role caching.
@@ -538,6 +560,7 @@ install_memory_module
 install_policy_module
 install_tools_module
 install_learning_module
+install_economizer_module
 # Grants are read by the daemon at startup, so this has to happen BEFORE the
 # server is started even though the module itself is not launched until the
 # workflow section. Installing it later produced a module that ran, attached to
@@ -870,6 +893,7 @@ start_server() {
             start_policy_module
             start_tools_module
             start_learning_module
+            start_economizer_module
             config_started=1
         fi
         [ -S "$HTTP_SOCK" ] && { start_db1_module; return 0; }
@@ -915,6 +939,7 @@ cleanup() {
     stop_policy_module
     stop_tools_module
     stop_learning_module
+    stop_economizer_module
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
         echo ""
         echo "integration: ABORTED after $((PASS + FAIL)) checks (exit $rc)."
@@ -2283,7 +2308,7 @@ if [ -n "${AIMEE_TEST_NATIVE_CODEX:-}" ] && [ -n "${AIMEE_TEST_NATIVE_CLAUDE:-}"
     NATIVE_IR_LOG="$HOME/native-ir-live.log"
     if AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$REPO_ROOT/src/tests/test_native_ir_live.py" >"$NATIVE_IR_LOG" 2>&1; then
         PASS=$((PASS + 1))
-        grep '^native integration:' "$NATIVE_IR_LOG" || true
+        grep -E '^(native integration:|native execution fence:)' "$NATIVE_IR_LOG" || true
     else
         echo "FAIL: actual native SDK canonical execution"
         tail -c 16000 "$NATIVE_IR_LOG"
