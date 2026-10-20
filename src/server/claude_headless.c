@@ -230,11 +230,28 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
          }
          buffer[used] = '\0';
          char *line = buffer, *end = NULL;
-         while ((end = strchr(line, '\n')) || (eof && *line))
+         while ((end = memchr(line, '\n', used - (size_t)(line - buffer))) ||
+                (eof && (size_t)(line - buffer) < used))
          {
-            if (end)
-               *end = '\0';
-            cJSON *frame = cJSON_Parse(line);
+            size_t frame_length = end ? (size_t)(end - line) : used - (size_t)(line - buffer);
+            /* Claude also writes diagnostic lines to stdout. They never enter
+             * history. An object frame, however, must pass exact admission;
+             * neither C-string truncation nor a partial parse can accept it. */
+            const char *first = line;
+            while (first < line + frame_length && strchr(" \t\r", *first))
+               first++;
+            if (first == line + frame_length || *first != '{')
+            {
+               line = end ? end + 1 : buffer + used;
+               continue;
+            }
+            cJSON *frame = aimee_ir_json_parse_frame(line, frame_length);
+            if (!cJSON_IsObject(frame))
+            {
+               cJSON_Delete(frame);
+               snprintf(out->error, sizeof out->error, "invalid Claude JSON frame");
+               goto capture_stop;
+            }
             if (cJSON_IsObject(frame))
             {
                const cJSON *frame_type = cJSON_GetObjectItemCaseSensitive(frame, "type");
@@ -284,7 +301,7 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
             cJSON_Delete(frame);
             if (!end)
             {
-               line += strlen(line);
+               line = buffer + used;
                break;
             }
             line = end + 1;

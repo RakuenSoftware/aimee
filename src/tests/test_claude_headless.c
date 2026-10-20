@@ -121,6 +121,77 @@ static void script(const char *path, const char *body)
    assert(!fclose(f));
    assert(!chmod(path, 0700));
 }
+/* Emit exact bytes, including NUL/invalid UTF-8, without shell quoting or
+ * C-string truncation in the fixture itself. The child consumes the real stdin. */
+static void binary_script(const char *path, const unsigned char *bytes, size_t size, int split)
+{
+   FILE *f = fopen(path, "w");
+   assert(f);
+   fputs("#!/usr/bin/python3\nimport sys,os\nassert "
+         "sys.stdin.buffer.read()==b'hello'\npayload=bytes.fromhex('",
+         f);
+   for (size_t i = 0; i < size; i++)
+      fprintf(f, "%02x", bytes[i]);
+   fputs("')\n", f);
+   fputs(split ? "for b in payload: os.write(1,bytes([b]))\n" : "os.write(1,payload)\n", f);
+   assert(!fclose(f) && !chmod(path, 0700));
+}
+static void strict_frames(const char *path, const provider_cli_cfg_t *cfg)
+{
+   static const char nul[] = "{\"type\":\"result\",\"is_error\":false}\0{}\n";
+   static const char escaped[] =
+       "{\"type\":\"system\",\"session_id\":\"native-one\\u0000hidden\"}\n";
+   static const char duplicate[] = "{\"type\":\"result\",\"type\":\"system\"}\n";
+   static const char trailing[] = "{\"type\":\"result\",\"is_error\":false} {}\n";
+   static const char utf8[] = "{\"type\":\"system\",\"session_id\":\"bad\xff\"}\n";
+   static const char eof_nul[] = "{\"type\":\"result\",\"is_error\":false}\0{}";
+   const struct
+   {
+      const char *bytes;
+      size_t length;
+   } cases[] = {{nul, sizeof nul - 1},
+                {escaped, sizeof escaped - 1},
+                {duplicate, sizeof duplicate - 1},
+                {trailing, sizeof trailing - 1},
+                {utf8, sizeof utf8 - 1},
+                {eof_nul, sizeof eof_nul - 1}};
+   for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++)
+   {
+      events = binds = 0;
+      aimee_ir_session_set_sink(capture, NULL);
+      binary_script(path, (const unsigned char *)cases[i].bytes, cases[i].length, i % 2);
+      agent_result_t out;
+      assert(claude_headless_run(cfg, bind_session, &binds, &out) == AGENT_RC_CAPTURE_FAILED);
+      assert(!out.success && !out.response && !events && !binds);
+      assert(!strcmp(out.error, "invalid Claude JSON frame"));
+      assert(waitpid(child, NULL, WNOHANG) == -1 && errno == ECHILD);
+   }
+   /* A completed result cannot hide a malformed unterminated tail. */
+   const char *first = strchr(success_frames, '{');
+   const char *stop = strstr(first, "FRAMES\n");
+   assert(first && stop && stop > first);
+   size_t prefix = (size_t)(stop - first), extra = sizeof eof_nul - 1;
+   unsigned char *payload = malloc(prefix + extra);
+   assert(payload);
+   memcpy(payload, first, prefix);
+   memcpy(payload + prefix, eof_nul, extra);
+   events = binds = 0;
+   aimee_ir_session_set_sink(capture, NULL);
+   binary_script(path, payload, prefix + extra, 0);
+   agent_result_t out;
+   assert(claude_headless_run(cfg, bind_session, &binds, &out) == AGENT_RC_CAPTURE_FAILED);
+   assert(!out.success && !out.response && events == 6 && binds == 1);
+   assert(!strcmp(out.error, "invalid Claude JSON frame"));
+   /* Exact valid EOF framing remains accepted, with arbitrary read fragmentation. */
+   events = binds = 0;
+   aimee_ir_session_set_sink(capture, NULL);
+   assert(prefix && payload[prefix - 1] == '\n');
+   binary_script(path, payload, prefix - 1, 1);
+   assert(!claude_headless_run(cfg, bind_session, &binds, &out) && out.success);
+   assert(events == 6 && binds == 1 && out.response && !strcmp(out.response, "reply"));
+   free(out.response);
+   free(payload);
+}
 static void interactive_script(const char *path)
 {
    FILE *f = fopen(path, "w");
@@ -244,7 +315,9 @@ int main(void)
           "printf '%s\\n' '{\"type\":\"result\",\"is_error\":false,\"result\":\"unobserved\"}'\n");
    assert(claude_headless_run(&cfg, NULL, NULL, &out) == AGENT_RC_CAPTURE_FAILED);
    assert(!out.success && !out.response);
+   strict_frames(path, &cfg);
+   aimee_ir_session_set_sink(NULL, NULL);
    unlink(path);
-   puts("Claude headless lifecycle tests passed");
+   puts("Claude headless lifecycle and strict byte-frame tests passed");
    return 0;
 }

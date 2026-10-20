@@ -3396,3 +3396,35 @@ tests. Cppcheck retains the three existing agent-bridge diagnostics with no new
 ones or baseline changes. The normal server build, all 657 native suite entries
 and all 76 lint gates pass.
 Native SDK launch activation and the other unfinished work above remain required.
+
+
+## Claude exact byte frames and actual MCP identity qualification
+
+Claude's headless reader now finds frame boundaries with `memchr` over the
+actual received length and admits object frames with the shared strict parser.
+It cannot hide a suffix behind NUL or accept a duplicate field/partial JSON
+parse. Existing non-JSON diagnostic stdout lines remain outside conversation
+capture. EOF without a final newline and fragmented valid frames still work.
+Six malformed initial frames and a malformed unterminated tail after a successful
+result refuse capture, retain earlier real observations and never report a
+successful turn. The focused lifecycle, ASan/UBSan and CMake fixtures pass;
+Cppcheck reports zero diagnostics. The normal server build, all 657 native
+suite entries and all 76 lint gates pass.
+
+An offline run of the actual installed Claude Code 2.1.227 binary completed two
+local Anthropic requests and one local MCP tool call using a fresh credential-free
+HOME, `--bare`, empty setting sources, strict explicit MCP config and no built-in
+tools. The MCP call includes the original provider ID in
+`params._meta["claudecode/toolUseId"]` (observed `toolu_original_fixture`). This is
+a verified SDK boundary field, not a guessed metadata name. The probe script and
+small local outputs are under `/var/tmp/aimee-ir-claude-mcp-probe.py` and
+`/var/tmp/aimee-ir-claude-probe-*`; they contain only synthetic local data.
+
+The same actual SDK probe confirms an argument-fidelity gap: original numeric
+`0.123456789012345678901234567890` reaches MCP as `0.12345678901234568`. Original
+host-captured arguments must remain the execution source. Do not weaken the
+existing exact proposed-call claim API or call normalized MCP JSON canonical.
+A Claude bridge still needs an explicit host-owned tool-identity binding and
+original-ID lookup/proof before dispatching original arguments; metadata alone
+grants no tool/effect authority. This run qualifies SDK protocol/correlation only,
+not live subscription custody, production activation or native history adoption.
