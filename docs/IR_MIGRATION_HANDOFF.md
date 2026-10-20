@@ -113,8 +113,14 @@ native-live regression fixtures.
 The final combined Go race suite now passes against a fresh actual PostgreSQL
 database, including the complete Aimee-family, shared DB and PostgreSQL provider
 packages. Affected native fixtures also pass normal and ASan/UBSan/leak runs.
-The final actual-daemon integration, lint rerun, fresh exact-head CI and configured
-deployment jobs remain pending. Earlier passes do not qualify later edits.
+The final rebuilt-server integration also passes 170/170 checks, including all
+eight pinned SDK configurations and both Codex/Claude crash/interruption journeys.
+Its 27 unconfigured-service checks remain explicit skips; Docker-dependent paths
+are qualified in CI. All 76 lint gates pass on the integrated repair tree.
+Published baseline `bd835cbad` passed all 59 checks, including complete script
+regressions and all four deployment tiers. Fresh exact-head CI remains pending
+for the final transaction cleanup and deadline repairs. Earlier green commits do
+not substitute for that final run.
 Do not label the migration or production promotion 100% complete while those
 checks or the recorded independent review remain outstanding.
 
@@ -122,12 +128,12 @@ checks or the recorded independent review remain outstanding.
 
 | Requirement | Implemented behavior and evidence | Remaining action |
 | --- | --- | --- |
-| Canonical primary/delegate/browser execution | Durable canonical history, persisted owner-bound model selection, native request/tool/result paths, separate child history, canonical controls and recovery are implemented. Both pinned Linux SDKs pass actual crash/interruption journeys. | Qualify the exact integrated tree in local gates and fresh CI. |
-| Honest legacy history on opening | Owner-bound browse preflight, atomic fidelity report/checkpoint or passive archive, and verified chronological imported-base display are implemented. Focused native, PostgreSQL lock-race, 399 frontend tests and actual Chromium pass. | Run the final combined actual-daemon integration after the follow-up and boundary repairs. |
-| Browser controls and usability | Exact primary/child reply ownership, replay readiness, no duplicate/reconnect resend, denial suppression, readable tool output and responsive composer/preferences are implemented and tested. | Complete automated exact-tree checks. The browser is ready for manual validation; a later manual pass is not a reason to stop finishing automated work. |
-| KB-free project and learning | Approved held repository identity resolves without a KB index. Canonical terminal/outbox owners publish source-bound configured-test grades and observational delegate learning; next-context reuse is actor/project/source fenced. Actual Docker/restart journeys pass. | Qualify the final tree, then verify real `.100` capture/reuse after authorized promotion. Leave KB mode/endpoint unset; add no fabricated learning rows. |
+| Canonical primary/delegate/browser execution | Durable canonical history, persisted owner-bound model selection, native request/tool/result paths, separate child history, canonical controls and recovery are implemented. Both pinned Linux SDKs pass actual crash/interruption journeys. | Local integrated gates pass; finish fresh exact-head CI. |
+| Honest legacy history on opening | Owner-bound browse preflight, atomic fidelity report/checkpoint or passive archive, and verified chronological imported-base display are implemented. Focused native, PostgreSQL lock-race, 399 frontend tests and actual Chromium pass. | Final rebuilt-server integration passes 170/170; finish fresh exact-head CI. |
+| Browser controls and usability | Exact primary/child reply ownership, replay readiness, no duplicate/reconnect resend, denial suppression, readable tool output and responsive composer/preferences are implemented and tested. | Local automated checks pass; finish fresh exact-head CI. The browser is ready for manual validation; a later manual pass is not a reason to stop finishing automated work. |
+| KB-free project and learning | Approved held repository identity resolves without a KB index. Canonical terminal/outbox owners publish source-bound configured-test grades and observational delegate learning; next-context reuse is actor/project/source fenced. Actual Docker/restart journeys pass. | Finish fresh exact-head CI, then verify real `.100` capture/reuse after authorized promotion. Leave KB mode/endpoint unset; add no fabricated learning rows. |
 | Meaning of learned evidence | Observational tool sequences, configured-test results and ungraded outcomes keep distinct labels. No automatic causal/procedure promotion or semantic task-success claim is inferred. | Preserve those labels during production verification. Synthesis is not a prerequisite for the KB-free capture/reuse path. |
-| Linux native coverage | Qualified descriptor-based pinned Codex/Claude model/tool/resume and optional cgroup/Landlock crash recovery have actual SDK and kernel-backed evidence. Unqualified ordinary launches remain fail-closed for uncertain crash recovery. | Finish exact-tree qualification. Live upstream/vendor subscription acceptance remains separately unqualified. |
+| Linux native coverage | Qualified descriptor-based pinned Codex/Claude model/tool/resume and optional cgroup/Landlock crash recovery have actual SDK and kernel-backed evidence. Unqualified ordinary launches remain fail-closed for uncertain crash recovery. | Local integrated qualification passes; finish fresh exact-head CI. Live upstream/vendor subscription acceptance remains separately unqualified. |
 | macOS, Windows and unsupported profiles | macOS/Windows thin clients are supported server-access build/test targets. They are not native server-execution coverage. Arbitrary daemon ACP profiles and non-Linux native tool runtimes remain explicitly unsupported/refused. | Report these boundaries honestly; do not convert thin-client passes into native-server claims. |
 | Production review and promotion | `.100` is KB-free and no promotion is claimed. `OWNERS.md` requires Governance to assign/record a second qualified GitHub identity in the live ruleset; the approving reviewer must differ from the author. Agent reviews do not satisfy it. | Obtain the recorded independent review for the final head, retain live-control evidence, deploy through the supported path and verify `.100` without adding a KB. |
 
