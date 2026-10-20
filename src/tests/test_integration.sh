@@ -978,6 +978,14 @@ stop_pg_module() {
 
 cleanup() {
     local rc=$?
+    if [ -n "${GRADE_FIXTURE_PID:-}" ]; then
+        kill "$GRADE_FIXTURE_PID" 2>/dev/null || true
+        wait "$GRADE_FIXTURE_PID" 2>/dev/null || true
+        GRADE_FIXTURE_PID=""
+    fi
+    if [ "${GRADE_SERVER_PAUSED:-0}" -eq 1 ] && [ -n "$SERVER_PID" ]; then
+        kill -CONT "$SERVER_PID" 2>/dev/null || true
+    fi
     stop_workflow_module
     stop_db1_module
     stop_pg_module
@@ -2369,8 +2377,117 @@ else
     dump_server_log
     FAIL=$((FAIL + 1))
 fi
+# This lifecycle hook belongs to the parent shell, which retains every owned
+# PID across restart. The fixture may request only these two fixed actions via
+# private files; no PID, socket path or executable is accepted from the request.
+GRADE_FIXTURE_PID=""
+GRADE_SERVER_PAUSED=0
+stop_execution_grade_fixture() {
+    if [ "$GRADE_SERVER_PAUSED" -eq 1 ] && [ -n "$SERVER_PID" ]; then
+        kill -CONT "$SERVER_PID" 2>/dev/null || true
+        GRADE_SERVER_PAUSED=0
+    fi
+    if [ -n "$GRADE_FIXTURE_PID" ]; then
+        kill "$GRADE_FIXTURE_PID" 2>/dev/null || true
+        wait "$GRADE_FIXTURE_PID" 2>/dev/null || true
+        GRADE_FIXTURE_PID=""
+    fi
+}
+run_execution_grade_fixture() {
+    local request="$AIMEE_HOME/execution-grade-recovery.request"
+    local acknowledgement="$AIMEE_HOME/execution-grade-recovery.ack"
+    local action="" previous="" stage="running" workflow_was_running=0
+    local deadline=$((SECONDS + 1200))
+    rm -f "$request" "$acknowledgement"
+    AIMEE_TEST_GRADE_LIFECYCLE=1 python3 "$REPO_ROOT/src/tests/test_execution_grade_live.py" >"$EXECUTION_GRADE_LOG" 2>&1 &
+    GRADE_FIXTURE_PID=$!
+    while kill -0 "$GRADE_FIXTURE_PID" 2>/dev/null; do
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "integration: execution-grade fixture exceeded its owned lifecycle deadline" >>"$EXECUTION_GRADE_LOG"
+            kill "$GRADE_FIXTURE_PID" 2>/dev/null || true
+            wait "$GRADE_FIXTURE_PID" 2>/dev/null || true
+            GRADE_FIXTURE_PID=""
+            if [ "$GRADE_SERVER_PAUSED" -eq 1 ]; then
+                kill -CONT "$SERVER_PID" 2>/dev/null || true
+                GRADE_SERVER_PAUSED=0
+            fi
+            return 1
+        fi
+        if [ -f "$request" ]; then
+            action=$(cat "$request")
+            if [ "$action" != "$previous" ]; then
+                case "$action:$stage" in
+                    pause-owned-server:running)
+                        if ! kill -STOP "$SERVER_PID"; then stop_execution_grade_fixture; return 1; fi
+                        GRADE_SERVER_PAUSED=1
+                        local stopped=0
+                        for attempt in $(seq 1 100); do
+                            if ps -o stat= -p "$SERVER_PID" | grep -q '^[Tt]'; then stopped=1; break; fi
+                            sleep 0.02
+                        done
+                        if [ "$stopped" -ne 1 ]; then stop_execution_grade_fixture; return 1; fi
+                        stage="paused"
+                        ;;
+                    restart-owned-server:paused)
+                        [ -n "$WFE_MODULE_PID" ] && workflow_was_running=1
+                        kill -KILL "$SERVER_PID" 2>/dev/null || true
+                        wait "$SERVER_PID" 2>/dev/null || true
+                        SERVER_PID=""
+                        GRADE_SERVER_PAUSED=0
+                        stop_workflow_module
+                        stop_db1_module
+                        stop_pg_module
+                        stop_config_module
+                        stop_providers_module
+                        stop_delegates_module
+                        stop_memory_module
+                        stop_policy_module
+                        stop_tools_module
+                        stop_git_module
+                        stop_learning_module
+                        stop_economizer_module
+                        stop_routing_module
+                        # Only known sockets of the now-reaped disposable daemon.
+                        # A stale file must not trick start_server's ready probes.
+                        rm -f "$HTTP_SOCK" "$MODULE_BUS_SOCK"
+                        cp "$SERVER_LOG" "$SERVER_LOG.before-grade-restart" 2>/dev/null || true
+                        if ! start_server; then
+                            printf '%s:error\n' "$action" >"$acknowledgement"
+                            stop_execution_grade_fixture
+                            return 1
+                        fi
+                        if [ "$workflow_was_running" -eq 1 ] && ! start_workflow_module; then
+                            printf '%s:error\n' "$action" >"$acknowledgement"
+                            stop_execution_grade_fixture
+                            return 1
+                        fi
+                        stage="restarted"
+                        ;;
+                    *)
+                        printf '%s:error\n' "$action" >"$acknowledgement"
+                        stop_execution_grade_fixture
+                        return 1
+                        ;;
+                esac
+                previous="$action"
+                printf '%s:ok\n' "$action" >"$acknowledgement.tmp"
+                mv "$acknowledgement.tmp" "$acknowledgement"
+            fi
+        fi
+        sleep 0.05
+    done
+    local status=0
+    wait "$GRADE_FIXTURE_PID" || status=$?
+    GRADE_FIXTURE_PID=""
+    if [ "$GRADE_SERVER_PAUSED" -eq 1 ]; then
+        kill -CONT "$SERVER_PID" 2>/dev/null || true
+        GRADE_SERVER_PAUSED=0
+        return 1
+    fi
+    return "$status"
+}
 EXECUTION_GRADE_LOG="$HOME/execution-grade-live.log"
-if python3 "$REPO_ROOT/src/tests/test_execution_grade_live.py" >"$EXECUTION_GRADE_LOG" 2>&1; then
+if run_execution_grade_fixture; then
     GRADE_SKIPS=$(grep -c '^SKIP:' "$EXECUTION_GRADE_LOG" || true)
     if [ "$GRADE_SKIPS" -eq 0 ]; then
         PASS=$((PASS + 1))

@@ -6,6 +6,8 @@
 #include "claude_headless.h"
 #include "server_native_runtime.h"
 #include "server_native_cache.h"
+#include "server_native_cache_lease.h"
+#include "aimee_home.h"
 #include "server_session_capture.h"
 #include "request_context.h"
 #include "agent_exec.h"
@@ -37,6 +39,7 @@
 typedef struct
 {
    server_native_cache_t *cache;
+   server_native_cache_lease_t *lease;
    char native_id[128];
 } native_terminal_cache_t;
 typedef struct
@@ -45,6 +48,7 @@ typedef struct
    agent_t selected;
    server_native_runtime_t *runtime;
    server_native_cache_t *cache;
+   server_native_cache_lease_t *lease;
    aimee_request_t profile, adoption;
    cli_session_t home_cleanup;
    cli_codex_host_launch_t launch;
@@ -65,12 +69,16 @@ typedef struct
 static void native_cache_terminal(int success, void *context)
 {
    native_terminal_cache_t *resource = context;
-   if (!success || server_native_cache_complete(resource->cache, resource->native_id))
+   int resolved = success && !server_native_cache_complete(resource->cache, resource->native_id);
+   if (!resolved)
    {
-      if (server_native_cache_abort(resource->cache))
+      resolved = !server_native_cache_abort(resource->cache);
+      if (!resolved)
          aimee_log(LOG_WARN, "native-cache", "quiescent cache claim remains unresolved");
    }
    server_native_cache_close(resource->cache);
+   if (server_native_cache_lease_close(resource->lease, resolved))
+      aimee_log(LOG_WARN, "native-cache", "native cache owner marker remains unresolved");
    free(resource);
 }
 static void native_execution_close(native_execution_t *execution)
@@ -78,11 +86,14 @@ static void native_execution_close(native_execution_t *execution)
    if (!execution)
       return;
    server_native_runtime_close(execution->runtime);
+   int resolved = 1;
    if (execution->cache)
    {
-      (void)server_native_cache_abort(execution->cache);
+      resolved = !server_native_cache_abort(execution->cache);
       server_native_cache_close(execution->cache);
    }
+   if (server_native_cache_lease_close(execution->lease, resolved))
+      aimee_log(LOG_WARN, "native-cache", "native cache owner marker remains unresolved");
    if (execution->executable_fd >= 0)
       close(execution->executable_fd);
    if (execution->scheduler_fd >= 0)
@@ -477,7 +488,11 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    if (!prepared || native_registry_open(execution, owner))
       goto refused;
    const char *sdk = execution->selected.cli_kind;
-   if (!native_ambient_config_absent(sdk) ||
+   execution->lease = server_native_cache_lease_open(
+       aimee_home(), sdk, server_session_capture_session(execution->capture),
+       server_native_runtime_binding(execution->runtime), execution->actor,
+       server_session_capture_turn(execution->capture), error);
+   if (!execution->lease || !native_ambient_config_absent(sdk) ||
        cli_session_native_home(sdk, cwd, server_session_capture_session(execution->capture),
                                server_native_runtime_binding(execution->runtime), execution->home,
                                sizeof execution->home, &execution->home_cleanup) ||
@@ -530,6 +545,7 @@ static int native_execution_result(native_execution_t *execution, agent_result_t
       return -1;
    }
    resource->cache = execution->cache;
+   resource->lease = execution->lease;
    snprintf(resource->native_id, sizeof resource->native_id, "%s", execution->native_id);
    if (server_session_capture_after_terminal(execution->capture, native_cache_terminal, resource))
    {
@@ -539,6 +555,7 @@ static int native_execution_result(native_execution_t *execution, agent_result_t
       return -1;
    }
    execution->cache = NULL;
+   execution->lease = NULL;
    agent_result_clear_response(out);
    out->response = text;
    out->prompt_tokens = (int)original.usage_in;

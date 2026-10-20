@@ -141,6 +141,47 @@ names. Verification, protected delegate binding and delegate recall share it;
 local repository scope retains the existing `local:UUID` spelling. General index
 name resolution is unchanged. Focused normal/sanitizer and actual Docker CI
 qualification must follow this repair; no production promotion is claimed.
+Published `ea7ed891b` removes the KB prerequisite, but its next Docker run
+still declined admission. A production-reader reproduction traced this to the
+fixture's persisted UUID file: default `0644` was rejected by the existing
+owner-only permission contract. Published `4396de22d` creates it exclusively as
+`0600` and logs bounded admission reasons. The same production reader accepts
+both direct and held-descriptor paths after that correction. A negative-only
+local daemon probe now passes identity admission; it has no real Docker and does
+not qualify a grade. Its fresh CI then passed private proof/grade publication
+but failed later fresh-session reuse: ordinary primary turns only assembled
+local history when explicit code-evidence obligations were present. Published
+`d734db8e6` adds a local-grade-only assembly path for ordinary turns, retaining
+actor/project scope, integrity, and provider-send source freshness without KB
+reads. Normal/sanitizer regression reproduces the old failure and passes the
+repair. Actual-daemon CI is rerunning.
+
+The unpublished integrated continuation adds mobile footer controls, authenticated
+source-bound historical approach reads, canonical session search, and append-atomic
+learning delivery tickets with a daemon-owned recovery worker. Search explicitly
+separates current reduced history from retained observations, binds scroll selectors
+to actor/session/view/source revision, searches joined visible blocks and bounds
+whole-session result pages. It refuses classified/tool-input leakage and stale
+selectors; unfinished sessions cannot poison discovery. Combined real PostgreSQL
+race checks pass for search, protected proofs, delegate recovery and outbox fencing.
+Normal/sanitizer/CMake recovery fixtures pass. Full native checks and mandatory
+actual-Docker daemon-restart qualification are still being completed. Migration 47
+records an explicit automatic-delivery cutover; earlier missing projections require
+explicit replay, and intentional retention is not silently undone.
+
+An integrated pre-spawn native cache lease now covers the exact persistent SDK
+directory before HOME/configuration/spawn, and remains owned through durable
+terminal publication. Crash markers block unsafe restart even if an escaped
+descendant has closed every lease descriptor. Normal, sanitizer, and CMake
+fixtures pass. This deliberately does not clear abandoned claims; qualified
+whole-tree containment and atomic abandoned-turn reconciliation remain in work.
+See `docs/NATIVE_CACHE_OWNERSHIP.md`.
+
+Three parallel workers continue independent integration/review, native cache custody
+and remaining ingress retirement. The original active-project bug also has a working
+repair for valid local identity with an empty index. None of this is a claim of
+complete migration, live vendor qualification or production promotion.
+
 Fresh CI, remaining live-vendor/native-profile qualification and independently reviewed production
 promotion remain required. The Windows native tool-runtime stub and arbitrary daemon ACP profiles
 remain explicit unsupported profiles; thin-client CI does not qualify them as native servers.

@@ -2453,6 +2453,8 @@ int main(void)
       /* Memory read family (P1): memory.* reads -> CAP_MEMORY_READ. */
       assert(server_http_route_caps("POST", "/v1/memory/search") ==
              server_capability_for_method("memory.search"));
+      assert(server_http_route_caps("POST", "/v1/learning/approaches") == CAP_MEMORY_READ);
+      assert(server_capability_for_method("learning.approaches") == CAP_MEMORY_READ);
       assert(server_http_route_caps("POST", "/v1/memory/search") == CAP_MEMORY_READ);
       assert(server_http_route_caps("POST", "/v1/memory/list") == CAP_MEMORY_READ);
       assert(server_http_route_caps("GET", "/v1/memory/stats") == CAP_MEMORY_READ);

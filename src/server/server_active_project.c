@@ -115,11 +115,10 @@ int server_active_project_from_cwd(const char *cwd, char *out, size_t outlen)
          return 0;
       }
    }
-   else if (have_identity && count < 0)
+   else if (have_identity && count <= 0)
    {
-      /* The project list is unavailable, so the identity cannot be checked.
-       * Returning it unverified preserves the previous behaviour for a
-       * co-located caller rather than failing a lookup that used to work. */
+      /* An empty or unavailable index has no alternate indexed label. The
+       * repository still has an active identity before its first index scan. */
       snprintf(out, outlen, "%s", identity);
       return 0;
    }

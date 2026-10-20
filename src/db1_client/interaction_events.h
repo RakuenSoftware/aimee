@@ -44,6 +44,8 @@ extern "C"
                                                 const char *parent_source_json);
    int db1_delegate_execution_experience_record(const char *principal,
                                                 const char *parent_source_json);
+   char *db1_learning_projection_claim(void);
+   int db1_learning_projection_ack(const char *lease, const char *result);
    int db1_execution_test_grade_record(const char *principal, const char *grade_json);
    /* Caller frees the complete bounded JSON; NULL means unavailable. */
    char *db1_execution_test_grade_recall(const char *principal, const char *project,

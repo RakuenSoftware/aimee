@@ -6,6 +6,7 @@
 #include "claude_headless.h"
 #include "server_native_runtime.h"
 #include "server_native_cache.h"
+#include "server_native_cache_lease.h"
 #include "server_session_capture.h"
 #include "request_context.h"
 #include "agent_exec.h"
@@ -485,6 +486,7 @@ int main(void)
    snprintf(host_workspace, sizeof host_workspace, "%s", temporary);
    run_cmd_set_cwd(host_workspace);
    setenv("AIMEE_OAUTH_RUNTIME_DIR", temporary, 1);
+   setenv("AIMEE_HOME", temporary, 1);
    setenv("PARENT_SECRET", "do-not-inherit", 1);
    agent_t selected = {0};
    snprintf(selected.cli_kind, sizeof selected.cli_kind, "codex");
@@ -516,6 +518,10 @@ int main(void)
          assert(out.prompt_tokens == 73 && out.completion_tokens == 29);
          assert(out.cache_read_tokens == 11 && out.cache_write_tokens == 7);
          assert(terminal && !completed && !aborted && !closed);
+         char lease_error[512];
+         assert(!server_native_cache_lease_open(getenv("AIMEE_HOME"), active_sdk, "destination",
+                                                digest, "actor", "concurrent-turn", lease_error));
+         assert(strstr(lease_error, "busy"));
          finish(scenario != 6);
          assert(completed == (scenario == 6 ? 0 : 1));
          assert(aborted == ((scenario == 6 || scenario == 7) ? 1 : 0) && closed == 1);

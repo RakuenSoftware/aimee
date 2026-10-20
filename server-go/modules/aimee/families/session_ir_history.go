@@ -3,6 +3,7 @@ package families
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	"sort"
@@ -10,6 +11,8 @@ import (
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
+
+var errSessionIRUnfinishedExecution = errors.New("unfinished canonical execution requires reconciliation")
 
 // Checkpoints are host projections of admitted/executed IR, not model output.
 // Observation events remain immutable, including calls removed by governance.
@@ -271,7 +274,7 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 	}
 	for turn := range open {
 		if turn != f[3] {
-			return 0, nil, fmt.Errorf("unfinished canonical execution requires reconciliation")
+			return 0, nil, errSessionIRUnfinishedExecution
 		}
 	}
 	if running {

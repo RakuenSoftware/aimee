@@ -307,15 +307,10 @@ int agent_ingress_accounting_enabled(void)
    return 1;
 }
 
-/* Pre-injection stubs. query_from_messages returns a non-NULL query when a turn
- * is present so pre-injection proceeds; build returns the per-test
- * envelope (default NULL = no-op, so the passthrough/shape tests are unaffected).
+/* Pre-injection build returns the per-test envelope
+ * (default NULL = no-op, so the passthrough/shape tests are unaffected).
  * The injection-coverage test sets g_stub_preinject_env. */
 static char *g_stub_preinject_env = NULL;
-char *ingress_preinject_query_from_messages(const cJSON *messages)
-{
-   return messages ? strdup("q") : NULL;
-}
 char *ingress_preinject_build(const char *query, int request_disabled)
 {
    (void)query;

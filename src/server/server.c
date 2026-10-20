@@ -30,6 +30,7 @@
 #include "modules/workspace/workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
 #include "modules/workspace/workspace_turn.h" /* the ONE workspace bound, shared with the delegate turn */
 #include "server_delegate_monitor.h"
+#include "server_learning_outcome.h"
 #include "server_coord_dispatcher.h"
 #include "server_skill.h"
 #include "server_compute_impl.h"
@@ -2187,6 +2188,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
 }
 int server_run(server_ctx_t *ctx)
 {
+   server_learning_recovery_init();
    /* enforce-delegate-only: register the delegate-availability provider so the
     * gateway strips provider-native sub-agent tools whenever usable delegates
     * exist (CORE gateway_policy can't read agent state itself). */
@@ -2241,6 +2243,7 @@ int server_run(server_ctx_t *ctx)
 }
 void server_shutdown(server_ctx_t *ctx)
 {
+   server_learning_recovery_shutdown();
    /* Stop trigger scheduler before draining compute pool */
    trigger_scheduler_shutdown();
    server_delegate_monitor_shutdown();

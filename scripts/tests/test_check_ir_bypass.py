@@ -31,6 +31,36 @@ class IRBypassTests(unittest.TestCase):
     def test_production_tree(self):
         checker.check(checker.ROOT)
 
+    def test_session_search_cannot_restore_unscoped_legacy_transcript_reads(self):
+        self.source("src/db1_client/sessions.c", "db1_primary_session_alloc_search(query, rows, 4);")
+        checker.check(self.root)  # Existing administrative compatibility is separate.
+        for relative, text in [
+            ("src/server/session_search_tool.c", "db1_primary_session_alloc_search(query, rows, 4);"),
+            ("src/server/session_search_tool.c", "db1_primary_session_get_latest(id, row);"),
+            ("server-go/modules/aimee/families/session_ir_search.go", 'const sql = `SELECT messages_json FROM primary_sessions`'),
+        ]:
+            with self.subTest(relative=relative, text=text):
+                path = self.source(relative, text)
+                with self.assertRaisesRegex(ValueError, "legacy-session-search"):
+                    checker.check(self.root)
+                path.unlink()
+
+    def test_raw_router_and_ingress_history_readers_cannot_return(self):
+        self.source("src/server/router_advise.c", "void router_advise_ir(const aimee_request_t *request); ")
+        checker.check(self.root)
+        for symbol in ("gw_stage_router", "ingress_preinject_query_from_messages",
+                       "ingress_preinject_last_assistant_from_messages"):
+            for relative in ("src/server/new.c", "src/headers/new.h",
+                             "server-go/modules/rogue/rogue.go"):
+                with self.subTest(symbol=symbol, relative=relative):
+                    path = self.source(relative, symbol + "(request);")
+                    with self.assertRaisesRegex(ValueError, "retired-api"):
+                        checker.check(self.root)
+                    path.unlink()
+        self.source("src/server/router_advise.c", 'read(request, "tool_calls");')
+        with self.assertRaisesRegex(ValueError, "native-history-field"):
+            checker.check(self.root)
+
     def test_retired_api_and_driver_calls_in_c_and_go(self):
         for relative, source in [
             ("src/server/rogue.c", "anthropic_stream_feed_openai(s, p);"),
@@ -70,15 +100,18 @@ class IRBypassTests(unittest.TestCase):
     def test_unscoped_approaches_cannot_enter_automatic_delegate_context(self):
         self.source("src/approach_store.c", "char *approach_store_retry_context(const char *goal) { return 0; }")
         self.source("src/headers/approach_store.h", "char *approach_store_retry_context(const char *goal);")
-        self.source("src/server_eval.c", "approach_store_recall(goal, results, 5); approach_store_render(results, 5, out, 1024);")
+        self.source("src/admin/legacy_approach_inspect.c", "approach_store_recall(goal, results, 5); approach_store_render(results, 5, out, 1024);")
         self.source("src/server/server_compute.c", "db1_execution_test_grade_recall(owner, project, NULL);")
         checker.check(self.root)
-        for call in ("approach_store_retry_context(goal)", "approach_store_recall(goal, out, 5)",
-                     "approach_store_render(out, 5, prompt, 1024)"):
-            with self.subTest(call=call):
-                self.source("src/server/server_compute.c", call + ";")
-                with self.assertRaisesRegex(ValueError, "unscoped-approach-prompt"):
-                    checker.check(self.root)
+        for relative in ("src/server/server_compute.c", "src/server_eval.c",
+                         "src/server/server_learning_approaches.c"):
+            for call in ("approach_store_retry_context(goal)", "approach_store_recall(goal, out, 5)",
+                         "approach_store_render(out, 5, prompt, 1024)"):
+                with self.subTest(relative=relative, call=call):
+                    path = self.source(relative, call + ";")
+                    with self.assertRaisesRegex(ValueError, "unscoped-approach-prompt"):
+                        checker.check(self.root)
+                    path.unlink()
         self.source("src/server/server_compute.c", "db1_execution_test_grade_recall(owner, project, NULL);")
         self.source("src/server/new.c", "approach_store_retry_context(goal);")
         with self.assertRaisesRegex(ValueError, "unscoped-approach-prompt"):

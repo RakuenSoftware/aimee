@@ -933,7 +933,10 @@ done:
 
 static cJSON *mcph_session_search(struct mcp_call *c)
 {
-   cJSON *result = session_search_tool_result_for_uid(c->jargs, (unsigned)c->conn->peer_uid);
+   cJSON *result =
+       c->conn->vault_principal[0]
+           ? session_search_tool_result_for_principal(c->jargs, c->conn->vault_principal)
+           : session_search_tool_result_for_uid(c->jargs, (unsigned)c->conn->peer_uid);
    *c->structured = cJSON_Duplicate(result, 1);
    return json_result_content(result);
 }

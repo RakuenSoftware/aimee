@@ -37,7 +37,7 @@
 #include "model_registry.h"
 #include "db1_client/db1.h"
 #include "eval_synthesis_store.h" /* synthesised regression candidates (S1) */
-#include "approach_store.h"
+#include "server_learning_approaches.h"
 #include "kb_client.h"
 #include <aimee/learning/attribution.h>
 #include <aimee/learning/policy_arms.h>
@@ -210,7 +210,7 @@ static cJSON *server_eval_candidate_json(const db1_eval_candidate_t *c)
    return obj;
 }
 
-/* --- Approach-level negative knowledge (recursive self-improvement S3) --- */
+/* --- Source-bound historical approach evidence, without causal claims --- */
 
 int handle_learning_approaches(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -220,36 +220,8 @@ int handle_learning_approaches(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    if (!goal[0])
       return server_send_error(conn, "learning.approaches requires goal", request_id);
 
-   learning_approach_hit_t hits[APPROACH_MEM_MAX_RECALL];
-   int n = approach_store_recall(goal, hits, APPROACH_MEM_MAX_RECALL);
-   if (n < 0)
-      return server_send_error(conn, "learning.approaches: could not recall", request_id);
-
-   cJSON *resp = cJSON_CreateObject();
-   cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "goal", goal);
-   cJSON *arr = cJSON_AddArrayToObject(resp, "approaches");
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *o = cJSON_CreateObject();
-      cJSON_AddStringToObject(o, "approach", hits[i].approach_text);
-      cJSON_AddStringToObject(o, "failure_mode", hits[i].failure_mode);
-      cJSON_AddStringToObject(o, "goal", hits[i].goal_text);
-      cJSON_AddStringToObject(o, "source_ref", hits[i].source_ref);
-      cJSON_AddNumberToObject(o, "occurrences", (double)hits[i].occurrences);
-      cJSON_AddNumberToObject(o, "similarity", hits[i].similarity);
-      cJSON_AddItemToArray(arr, o);
-   }
-   /* The rendered advisory block, so a caller assembling a plan-time prompt
-    * does not have to re-derive the wording (and cannot turn it into an
-    * instruction by accident). */
-   char rendered[2048];
-   char arm[LEARNING_POLICY_ARM_LEN] = "";
-   (void)approach_store_render(goal, rendered, sizeof(rendered), arm, sizeof(arm));
-   cJSON_AddStringToObject(resp, "advisory", rendered);
-   /* Which arm produced it: a caller measuring whether the block earns its
-    * tokens needs to know which variant it is measuring. */
-   cJSON_AddStringToObject(resp, "advisory_arm", arm);
+   cJSON *resp = server_learning_approaches_local(request_context_get(),
+                                                  server_eval_json_str(req, "cwd"), goal);
    if (request_id[0])
       cJSON_AddStringToObject(resp, "request_id", request_id);
    int rc = server_send_response(conn, resp);

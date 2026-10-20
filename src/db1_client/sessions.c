@@ -841,3 +841,19 @@ int db1_session_harness_compare_swap(const char *session_id, const char *harness
        db1_call(&family, AIMEE_DB1_OP_SESSION_HARNESS_COMPARE_SWAP, fields, 5, NULL, NULL, 0, NULL);
    return status == AIMEE_DB1_STATUS_OK ? 0 : status == AIMEE_DB1_STATUS_MISSING ? 1 : -1;
 }
+
+char *db1_session_ir_search(const char *principal, const char *request_json)
+{
+   const char *fields[] = {principal ? principal : "", request_json ? request_json : ""};
+   char **cells = NULL;
+   uint32_t count = 0;
+   char *result = NULL;
+   int status = primary_read(AIMEE_DB1_OP_SESSION_IR_SEARCH, fields, 2, &cells, &count);
+   if (status == AIMEE_DB1_STATUS_OK && count == 1)
+   {
+      result = cells[0];
+      cells[0] = NULL;
+   }
+   primary_cells_free(cells, count);
+   return result;
+}

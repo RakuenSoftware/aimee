@@ -86,6 +86,8 @@ const (
 	opExecutionTestGradeRecall          = 62
 	opDelegateExecutionExperienceRecord = 63
 	opDelegateExecutionTerminalLookup   = 64
+	opLearningProjectionClaim           = 65
+	opLearningProjectionAck             = 66
 )
 
 // Telemetry is the family, ready to be bound to kind 11783.
@@ -94,6 +96,8 @@ var Telemetry = store.Family{
 	Event: EventTelemetry,
 	Stage: StageTelemetry,
 	Ops: map[uint32]store.Op{
+		opLearningProjectionClaim:           {Name: "learning_projection_claim", Args: 0, Cells: 1, Tx: true, HostOnly: true, Run: learningProjectionClaim},
+		opLearningProjectionAck:             {Name: "learning_projection_ack", Args: 2, Tx: true, HostOnly: true, Run: learningProjectionAck},
 		opDelegateExecutionTerminalLookup:   {Name: "delegate_execution_terminal_lookup", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: delegateExecutionTerminalLookup},
 		opDelegateExecutionExperienceRecord: {Name: "delegate_execution_experience_record", Args: 2, Tx: true, HostOnly: true, Run: delegateExecutionExperienceRecord},
 		opExecutionTestGradeRecall:          {Name: "execution_test_grade_recall", Args: 3, Cells: 1, HostOnly: true, Run: executionTestGradeRecall},

@@ -22,8 +22,7 @@
 #include "agent_exec.h"
 #include "agent_types.h"
 #include "cJSON.h"
-#include <aimee/gateway/gateway_pipeline.h> /* gw_request_t — the shared gateway seam */
-#include "ingress_preinject.h"              /* query-from-messages + per-turn id */
+#include "ingress_preinject.h" /* Canonical ingress turn/session identity. */
 #include "db1_client/interaction_events.h"
 #include "wfe_autonomous_route.h" /* S4: clamp/floor policy */
 #include "wfe_bind_ingress.h"
@@ -149,37 +148,6 @@ static wfe_prefilter_outcome_t router_advise_log(const char *corr_id, const char
       }
    }
    return pf;
-}
-
-/* Gateway pipeline stage: THE unified seam. Every inbound provider request
- * (primary CLI via /v1/messages, delegates via /v1/chat/completions) runs this,
- * co-located with gw_stage_tool_policing. We extract THIS turn's user query the
- * same way the memory stage does (NULL on a tool-result continuation -> fires once
- * per user turn) and run the advisory decision keyed on the ingress turn id. The
- * sampled LLM classifier is deliberately NOT run here: it calls agent_run, which
- * would re-enter this very seam -> recursion/cost. Never mutates the request. */
-int gw_stage_router(gw_request_t *r, void *ud)
-{
-   (void)ud;
-   if (!r || !r->raw)
-      return 0;
-   char *query =
-       ingress_preinject_query_from_messages(cJSON_GetObjectItemCaseSensitive(r->raw, "messages"));
-   if (!query)
-      return 0;
-   const char *tid = ingress_preinject_turn_id();
-   router_advise_log((tid && tid[0]) ? tid : "ingress", query);
-
-   /* S2 binding seam: if this turn carries an aimee session id (recovered at HTTP
-    * ingress from the primary provider's "aimee-sess-<sid>" auth token) and the
-    * router picks an enforced workflow, create + bind a work-item so the dispatch
-    * guard + advance driver can fire. Idempotent per session; default-OFF via the
-    * dial. Non-primary turns (delegates) carry no aimee-session token -> no-op. */
-   const char *bsid = ingress_preinject_session_id();
-   if (bsid && bsid[0])
-      wfe_bind_interactive(bsid, query, NULL);
-   free(query);
-   return 0;
 }
 
 void router_advise_ir(const aimee_request_t *request)

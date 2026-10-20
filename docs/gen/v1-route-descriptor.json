@@ -1782,7 +1782,7 @@
       "suffix": null,
       "match": "exact",
       "op": "learning.approaches",
-      "caps": "0",
+      "caps": "CAP_MEMORY_READ",
       "handler": "rh_dispatch_op"
     },
     {

@@ -80,6 +80,7 @@ const { chromium } = require('../frontend/node_modules/playwright');
     ];
     const bindings = [];
     let controlReplies = 0;
+    let lookupAgent = '', lookupPersona = 'engineer';
     await page.route(`${origin}/**`, async route => {
       const request = route.request();
       const url = new URL(request.url());
@@ -87,6 +88,8 @@ const { chromium } = require('../frontend/node_modules/playwright');
       if (p === '/api/chat/send' || p === '/api/chat/session-events') return route.continue();
       if (!p.startsWith('/api/')) return route.fulfill({ contentType: 'text/html', body: html });
       if (p === '/api/chat/control-reply') controlReplies++;
+      if ((p === '/api/chat/primary' || p === '/api/chat/persona') && request.method() === 'POST')
+        return route.fulfill({contentType:'application/json',body:JSON.stringify(request.postDataJSON())});
       if (p === '/api/chat/session' && request.method() === 'POST') {
         const change = request.postDataJSON();
         bindings.push(change);
@@ -100,18 +103,40 @@ const { chromium } = require('../frontend/node_modules/playwright');
         '/api/config': { config: { provider: 'test', embedder_model: 'bekko-a25m' } },
         '/api/git/projects': { root: '/work', projects: ['org/one', 'org/two'], details: [] },
         '/api/chat/bootstrap-status': { has_rules: true },
+        '/api/models': { default_agent: 'primary-model-with-a-long-name-for-responsive-layout', models: [{name:'primary-model-with-a-long-name-for-responsive-layout'}] },
+        '/api/chat/personas': { personas: [{name:'engineer'},{name:'reviewer'}] },
         '/api/chat/attach': { attach_id: 'attachment' },
-        '/api/chat/primary': { agent: '' }, '/api/chat/persona': { name: 'engineer' },
+        '/api/chat/primary': { agent: lookupAgent }, '/api/chat/persona': { name: lookupPersona },
         '/api/git/credentials': { hosts: ['github.com'] },
         '/api/vault/credentials': { credentials: [{ agent: 'git', cred: 'author_name' }, { agent: 'git', cred: 'author_email' }] },
       };
       await route.fulfill({ status: p.startsWith('/api/sessions/workflows') ? 404 : 200,
         contentType: 'application/json', body: JSON.stringify(fixtures[p] || {}) });
     });
+    async function assertPreferenceLayout(mobile) {
+      const footer = page.getByRole('group', {name:'Session preferences',exact:true});
+      const viewport = page.viewportSize();
+      const fields = [];
+      for (const name of ['Agent','Persona']) {
+        const field = footer.getByRole('combobox',{name,exact:true});
+        await field.waitFor();
+        const box = await field.boundingBox();
+        const label = await footer.getByText(`${name}:`,{exact:true}).boundingBox();
+        assert.ok(box.width >= 70 && box.x >= 0 && box.x + box.width <= viewport.width - 8,
+          `${name} preference must remain visible inside the ${viewport.width}px viewport: ${JSON.stringify(box)}`);
+        assert.ok(Math.abs(label.y + label.height / 2 - box.y - box.height / 2) <= 3,
+          `${name} label must stay with its selector`);
+        fields.push(box);
+      }
+      const tabs = await Promise.all(['Minimal','Standard','Extended'].map(name => footer.getByRole('tab',{name,exact:true}).boundingBox()));
+      assert.ok(tabs.every(box => Math.abs(box.y - tabs[0].y) <= 1), 'Prompt tabs must stay horizontal');
+      if (mobile) assert.ok(fields[1].y >= fields[0].y, 'Mobile preference groups must wrap in order');
+      else assert.ok(fields.every(box => Math.abs(box.y - tabs[0].y) <= 3), 'Desktop preferences must fit one row');
+    }
     await page.goto(`${origin}/chat`);
     await page.getByText('First conversation', { exact: true }).waitFor();
     assert.equal(await page.locator('nav').getByRole('link', { name: /Chat/ }).count(), 0);
-    assert.equal(await page.getByRole('combobox').inputValue(), '/work/org/one');
+    assert.equal(await page.locator('select:not([aria-label])').inputValue(), '/work/org/one');
     assert.equal(bindings.length, 0, 'Loading the project picker must not write a binding');
 
     await page.getByPlaceholder('Type a message… (Shift+Enter for newline)').fill('Please answer once');
@@ -151,16 +176,27 @@ const { chromium } = require('../frontend/node_modules/playwright');
     await page.getByText('Reply from project one.', { exact: true }).waitFor();
 
     await page.locator('nav').getByRole('link', { name: /Graph/ }).click();
-    await page.getByRole('combobox').selectOption('/work/org/two');
+    await page.locator('select:not([aria-label])').selectOption('/work/org/two');
     await page.locator('header').getByText('One', { exact: false }).click();
     await page.getByText('Reply from project one.', { exact: true }).waitFor();
-    assert.equal(await page.getByRole('combobox').inputValue(), '/work/org/two');
+    assert.equal(await page.locator('select:not([aria-label])').inputValue(), '/work/org/two');
     assert.equal(bindings.at(-1).cwd, '/work/org/two');
     await page.reload();
     await page.getByText('Reply from project one.', { exact: true }).waitFor();
-    assert.equal(await page.getByRole('combobox').inputValue(), '/work/org/two');
+    assert.equal(await page.locator('select:not([aria-label])').inputValue(), '/work/org/two');
     assert.deepEqual(errors, []);
+    await page.setViewportSize({ width:1280,height:900 });
+    await assertPreferenceLayout(false);
+    await page.setViewportSize({width:320,height:844});
+    await assertPreferenceLayout(true);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), '320px preferences must not overflow horizontally');
+    const personaWrite = page.waitForRequest(request => new URL(request.url()).pathname === '/api/chat/persona' && request.method() === 'POST');
+    await page.getByRole('combobox',{name:'Persona',exact:true}).selectOption('reviewer');
+    assert.equal((await personaWrite).postDataJSON().name,'reviewer');
+    await page.waitForFunction(() => document.querySelector('select[aria-label="Persona"]')?.getAttribute('aria-busy') === 'false');
+
     await page.setViewportSize({ width: 390, height: 844 });
+    await assertPreferenceLayout(true);
     const conversation = await page.getByRole('log', { name: 'Conversation' }).boundingBox();
     const composer = await page.getByPlaceholder('Type a message… (Shift+Enter for newline)').boundingBox();
     assert.ok(conversation.width >= 350, `Mobile conversation was squeezed to ${conversation.width}px`);
@@ -215,11 +251,29 @@ const { chromium } = require('../frontend/node_modules/playwright');
     await answer.click();
     await page.getByText('question: Reply sent', { exact: false }).waitFor();
     assert.equal(controlReplies, 1);
+    const pendingReconnect = page.waitForRequest(request => new URL(request.url()).pathname === '/api/chat/session-events');
+    for (const response of subscribers.get('web-one') || []) response.end();
+    await pendingReconnect;
+    await page.getByText('question: Reply sent', { exact: false }).waitFor();
+    assert.equal(await answer.isDisabled(), true, 'Pending reply must stay disabled through reconnect');
+    assert.equal(controlReplies, 1, 'Reconnect must not resubmit a question reply');
     event({ kind: 'control_response', request_id: 'browser-question', control_kind: 'question', payload: { decision: 'allow', answers: { scope: ['Current project'] } } });
     await page.getByText('Resolved requests (1)', { exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Send answers', exact: true }).count(), 0);
+    lookupAgent = 'saved-agent-outside-the-current-catalog';
+    lookupPersona = 'saved-persona-outside-the-current-catalog';
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.waitForFunction(() => document.querySelector('select[aria-label="Agent"]')?.value === 'saved-agent-outside-the-current-catalog' &&
+      document.querySelector('select[aria-label="Persona"]')?.value === 'saved-persona-outside-the-current-catalog');
+    for (const name of ['Agent', 'Persona']) assert.match(await page.getByRole('combobox', {name,exact:true}).locator('option:checked').textContent(), /not in current catalog/);
+    await assertPreferenceLayout(true);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Saved out-of-catalog preferences must fit mobile viewport');
+    lookupPersona = '';
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.waitForFunction(() => document.querySelector('select[aria-label="Persona"]')?.value === '');
+    assert.equal(await page.getByRole('combobox', {name:'Persona',exact:true}).locator('option:checked').textContent(), 'Session default');
     assert.deepEqual(errors, []);
-    console.log('Webchat browser regressions passed: canonical POST/SSE overlap and reconnect stay unique; history survives refresh, reordering, navigation and reload; projects stay bound; tool output remains readable; mobile conversation and composer remain usable.');
+    console.log('Webchat browser regressions passed: canonical POST/SSE overlap and reconnect stay unique; history survives refresh, reordering, navigation and reload; projects stay bound; tool output remains readable; mobile conversation/composer and wrapped session preferences remain usable.');
   } finally {
     if (browser) await browser.close();
     server.closeAllConnections();

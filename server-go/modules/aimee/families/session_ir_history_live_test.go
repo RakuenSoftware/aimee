@@ -32,7 +32,7 @@ func TestSessionIRLiveHistoryCheckpointOwnershipIsolationAndAtomicReload(t *test
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql"} {
+	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql", "schema_learning_projection_outbox.sql"} {
 		sql, err := schemaFS.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)

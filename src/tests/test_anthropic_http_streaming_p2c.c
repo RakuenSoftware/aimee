@@ -363,10 +363,6 @@ const char *guardrails_canonical_tool_name(const char *n)
 /* Pre-injection stubs (the real ones depend on KB clients + config; this
  * test is minimal-link). Mirrors test_anthropic_http_p2c.c. */
 static char *g_stub_preinject_env = NULL;
-char *ingress_preinject_query_from_messages(const cJSON *messages)
-{
-   return messages ? strdup("q") : NULL;
-}
 char *ingress_preinject_build(const char *query, int request_disabled)
 {
    (void)query;

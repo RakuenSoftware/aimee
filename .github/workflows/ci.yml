@@ -1000,7 +1000,7 @@ jobs:
         working-directory: server-go
         env:
           AIMEE_TEST_PG_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_postgres_ci
-        run: go test -race -count=1 ./modules/aimee/families -run '^TestSessionIR(LiveConcurrentReplayAndDeletion|VerifiedTerminalProofPostgresAtomicReload)$'
+        run: go test -race -count=1 ./modules/aimee/families -run '^Test(SessionIR(LiveConcurrentReplayAndDeletion|VerifiedTerminalProofPostgresAtomicReload|LiveSearchCanonicalOnlyAndOwnerScoped)|LearningProjectionPostgres.*)$'
       - name: Replay memory ownership and PostgreSQL sessions
         if: matrix.part == 'native'
         run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 postgres-knowledge-replay

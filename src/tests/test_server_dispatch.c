@@ -112,6 +112,22 @@ const char *workspace_turn_active_cwd(void)
 {
    return g_hook_bound && g_hook_remote == 2 ? "/server/approved/repo" : NULL;
 }
+/* This dispatcher fixture has no approved filesystem custody. Scoped learning
+ * must decline; its real ownership/receipt behavior has a dedicated fixture. */
+int workspace_turn_resource_identity(const char *cwd, int *fd, char digest[65])
+{
+   (void)cwd;
+   *fd = -1;
+   digest[0] = '\0';
+   return -1;
+}
+int server_learning_project_from_cwd(const char *cwd, char *out, size_t cap)
+{
+   (void)cwd;
+   if (cap)
+      out[0] = '\0';
+   return -1;
+}
 int workspace_turn_workspace_authorized(const char *cwd, char *out, size_t cap)
 {
    if (!cwd || !g_hook_bound || g_hook_remote != 2 || strcmp(cwd, "/server/approved/repo"))

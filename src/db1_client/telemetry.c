@@ -1994,3 +1994,25 @@ char *db1_delegate_execution_terminal_lookup(const char *principal, const char *
    }
    return record;
 }
+
+char *db1_learning_projection_claim(void)
+{
+   char *batch = malloc(2097152u);
+   if (!batch)
+      return NULL;
+   char *const values[] = {batch};
+   const size_t caps[] = {2097152u};
+   if (db1_call(&family, AIMEE_DB1_OP_LEARNING_PROJECTION_CLAIM, NULL, 0, values, caps, 1, NULL) !=
+       AIMEE_DB1_STATUS_OK)
+   {
+      free(batch);
+      return NULL;
+   }
+   return batch;
+}
+int db1_learning_projection_ack(const char *lease, const char *result)
+{
+   const char *fields[] = {lease ? lease : "", result ? result : ""};
+   return write_result(
+       db1_call(&family, AIMEE_DB1_OP_LEARNING_PROJECTION_ACK, fields, 2, NULL, NULL, 0, NULL));
+}

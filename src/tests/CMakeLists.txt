@@ -466,6 +466,19 @@ set_tests_properties(test_session_compact_focused PROPERTIES
 
 # Native harness conversion and the POSIX print-mode lifecycle.
 if(NOT WIN32)
+  add_executable(test_server_learning_approaches test_server_learning_approaches.c
+    ../server/server_learning_approaches.c ../vendor/cJSON.c)
+  target_include_directories(test_server_learning_approaches PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR}/modules/kb/c)
+  aimee_enable_test_asserts(test_server_learning_approaches)
+  add_test(NAME test_server_learning_approaches COMMAND test_server_learning_approaches)
+  add_executable(test_server_learning_recovery test_server_learning_recovery.c
+    ../server/server_learning_recovery.c ../server/server_learning_outcome.c
+    support/log_stub.c ../interaction_event_names.c ../vendor/cJSON.c)
+  target_include_directories(test_server_learning_recovery PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS})
+  target_link_libraries(test_server_learning_recovery PRIVATE Threads::Threads)
+  aimee_enable_test_asserts(test_server_learning_recovery)
+  add_test(NAME test_server_learning_recovery COMMAND test_server_learning_recovery)
   add_executable(test_server_learning_application test_server_learning_application.c
     ../server/server_learning_application.c ../vendor/cJSON.c)
   target_include_directories(test_server_learning_application PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
@@ -518,7 +531,7 @@ if(NOT WIN32)
   aimee_enable_test_asserts(test_server_native_launch)
   add_test(NAME test_server_native_launch COMMAND test_server_native_launch)
   add_executable(test_server_native_execution test_server_native_execution.c
-    ../server/server_native_execution.c ../server/server_native_launch.c ../server/cli_claude_native.c ../server/agent_request_build.c ../server/cli_session.c ../server/agent_adapter.c
+    ../server/server_native_execution.c ../server/server_native_cache_lease.c ../platform_random.c ../server/server_native_launch.c ../server/cli_claude_native.c ../server/agent_request_build.c ../server/cli_session.c ../server/agent_adapter.c
     ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c
     ../posix/workspace_provider.c ../util.c ../text.c ../aimee_home.c ../log.c
     ../vendor/cJSON.c ${PLATFORM_CORE_SRCS})
@@ -691,6 +704,8 @@ if(NOT WIN32)
       ../aimee_sha256.c ../platform_random.c ../posix/platform_random.c)
   target_include_directories(test_server_native_cache PRIVATE ${AIMEE_SRC_DIR}/modules/kb/c)
   target_link_libraries(test_server_native_cache PRIVATE OpenSSL::Crypto)
+  aimee_add_test(test_server_native_cache_lease test_server_native_cache_lease.c
+      ../server/server_native_cache_lease.c ../platform_random.c ../posix/platform_random.c)
 endif()
 
 if(NOT WIN32)

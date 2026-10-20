@@ -154,6 +154,37 @@ describe('canonical browser chat', () => {
     expect(screen.getByRole('alert').textContent).toContain('Current selection is unavailable');
   });
 
+  it.each(['Agent', 'Persona'])('preserves the saved %s when the catalog no longer lists it', async kind => {
+    const ordinaryFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/models') return Promise.resolve(new Response(JSON.stringify({ models: [{ name: 'available-model' }], default_agent: 'available-model' })));
+      if (url === '/api/chat/personas') return Promise.resolve(new Response(JSON.stringify({ personas: [{ name: 'available-persona' }] })));
+      if (url.startsWith('/api/chat/primary?')) return Promise.resolve(new Response(JSON.stringify({ agent: 'saved-model' })));
+      if (url.startsWith('/api/chat/persona?')) return Promise.resolve(new Response(JSON.stringify({ name: 'saved-persona' })));
+      return ordinaryFetch(url, init);
+    });
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const selector = screen.getByRole('combobox', { name: kind }) as HTMLSelectElement;
+    expect(selector.value).toBe(kind === 'Agent' ? 'saved-model' : 'saved-persona');
+    expect(selector.selectedOptions[0].textContent).toContain('not in current catalog');
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST' && /saved-/.test(String(init.body)))).toBe(false);
+  });
+
+  it('shows an explicit empty persona as the session default instead of the first named persona', async () => {
+    const ordinaryFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/chat/personas') return Promise.resolve(new Response(JSON.stringify({ personas: [{ name: 'engineer' }] })));
+      if (url.startsWith('/api/chat/persona?')) return Promise.resolve(new Response(JSON.stringify({ name: '' })));
+      return ordinaryFetch(url, init);
+    });
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const selector = screen.getByRole('combobox', { name: 'Persona' }) as HTMLSelectElement;
+    expect(selector.value).toBe('');
+    expect(selector.selectedOptions[0].textContent).toBe('Session default');
+  });
+
   it('derives idle, running and terminal composer state from the canonical execution log', async () => {
     render(<StrictMode><Chat /></StrictMode>);
     await act(async () => {});

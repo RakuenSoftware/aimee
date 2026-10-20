@@ -973,6 +973,7 @@ var Sessions = store.Family{
 		opServerSessionErasureReceipt: {Name: "server_session_erasure_receipt", Args: 2, Run: serverSessionErasureReceipt},
 		opSessionIRAppend:             {Name: "session_ir_append", Args: 5, Tx: true, Run: sessionIRAppend},
 		opSessionIRAppendVerified:     {Name: "session_ir_append_verified", Args: 5, Tx: true, HostOnly: true, Run: sessionIRAppendVerified},
+		opSessionIRSearch:             {Name: "session_ir_search", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionIRSearch},
 		opSessionIRPage:               {Name: "session_ir_page", Args: 4, Run: sessionIRPage},
 		opSessionIRHistorySave:        {Name: "session_ir_history_save", Args: 5, Tx: true, Run: sessionIRHistorySave},
 		opSessionIRHistoryLoad:        {Name: "session_ir_history_load", Args: 4, Run: sessionIRHistoryLoad},
@@ -1083,6 +1084,9 @@ func sessionIRAppendInternal(ctx context.Context, q store.Queryer, f []string, a
 	}
 	if err = q.QueryRow(ctx, sessionIRInsertSQL, f[0], f[1], f[2], f[3], f[4]).Scan(&sequence); err != nil {
 		return 0, nil, err
+	}
+	if err = enqueueLearningProjection(ctx, q, f, sequence); err != nil {
+		return store.StatusFailed, nil, err
 	}
 	return store.StatusOK, []string{strconv.FormatInt(sequence, 10)}, nil
 }

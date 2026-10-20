@@ -41,17 +41,6 @@ int ingress_preinject_observe_attempt(const char *attempt, int http_status, cons
 int ingress_preinject_observe_commitment(const char *attempt, int http_status, const char *digest,
                                          size_t response_len, const char *representation);
 
-/* Extract the recall seed query from a parsed chat `messages` array: the text
- * of the last user-role message. Returns a malloc'd string (caller frees) or
- * NULL when there is no usable user text. Pure (no kb). */
-char *ingress_preinject_query_from_messages(const cJSON *messages);
-
-/* Extract the PRIOR turn's answer: the text of the last assistant-role message
- * in `messages` (the current turn's answer does not exist yet). Returns a
- * malloc'd string (caller frees) or NULL. Pure (no kb). Used by the
- * retrieval-outcome bridge for per-document overlap attribution. */
-char *ingress_preinject_last_assistant_from_messages(const cJSON *messages);
-
 /* Build the envelope for a turn seeded by `query`. Honors
  * `ingress_preinject_enabled` (config) and `request_disabled` (per-request
  * override): returns NULL when disabled, when query is blank, or when recall

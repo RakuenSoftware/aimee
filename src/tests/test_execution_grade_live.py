@@ -3,7 +3,8 @@
 
 This extends test_integration.sh's disposable server/PostgreSQL journey. The
 provider is deterministic; tool dispatch, snapshots, Docker, grading, publication
-and subsequent model request assembly are the production owners.
+and subsequent model request assembly are the production owners. Literal restart
+is controlled by test_integration.sh, which retains its owned process/module PIDs.
 """
 import hashlib
 import json
@@ -61,6 +62,21 @@ func main() {
    WHERE d.event_type='delegate_experience' AND d.actor='system' AND d.payload::jsonb->'parent_source'->>'session_id'=$1 ORDER BY d.id`,os.Args[1],os.Args[2]);if err!=nil{panic(err)};defer rows.Close()
   out:=[]json.RawMessage{};for rows.Next(){var raw string;if err=rows.Scan(&raw);err!=nil{panic(err)};out=append(out,json.RawMessage(raw))};if err=rows.Err();err!=nil{panic(err)}
   if err=json.NewEncoder(os.Stdout).Encode(out);err!=nil{panic(err)};return
+ }
+ if len(os.Args)==4 && os.Args[3]=="delivery-status" {
+  rows,err:=conn.Query(ctx,`SELECT event_id,state FROM learning_projection_outbox o JOIN server_sessions s ON s.id=o.session_id AND s.principal=$2 WHERE o.session_id=$1 AND o.actor=$2 ORDER BY sequence`,os.Args[1],os.Args[2]);if err!=nil{panic(err)};defer rows.Close()
+  out:=[]map[string]string{};for rows.Next(){var event,state string;if err=rows.Scan(&event,&state);err!=nil{panic(err)};out=append(out,map[string]string{"event_id":event,"state":state})};if err=rows.Err();err!=nil{panic(err)}
+  if err=json.NewEncoder(os.Stdout).Encode(out);err!=nil{panic(err)};return
+ }
+ if len(os.Args)==5 && os.Args[3]=="fault-undelivered" {
+  tx,err:=conn.Begin(ctx);if err!=nil{panic(err)};defer tx.Rollback(ctx)
+  _,err=tx.Exec(ctx,`DELETE FROM delegate_learnings l USING server_sessions s WHERE l.session_id=$1 AND s.id=l.session_id AND s.principal=$2`,os.Args[1],os.Args[2]);if err!=nil{panic(err)}
+  removed,err:=tx.Exec(ctx,`DELETE FROM interaction_events i USING server_sessions s WHERE i.session_id=$1 AND s.id=i.session_id AND s.principal=$2 AND i.event_type IN ('delegate_experience','task_outcome')`,os.Args[1],os.Args[2]);if err!=nil{panic(err)}
+  queued,err:=tx.Exec(ctx,`UPDATE learning_projection_outbox o SET state='pending',lease_token='',lease_until=NULL,next_attempt=now() FROM server_sessions s,session_ir_events e
+   WHERE s.id=o.session_id AND s.principal=$2 AND o.actor=$2 AND e.session_id=o.session_id AND e.sequence=o.sequence AND e.actor=$2
+   AND (o.session_id=$1 OR (o.session_id=$3 AND e.payload::jsonb->>'kind'='child_execution' AND e.payload::jsonb->'payload'->>'status'='running' AND e.payload::jsonb->'payload'->>'session_id'=$1))`,os.Args[1],os.Args[2],os.Args[4]);if err!=nil{panic(err)}
+  if err=tx.Commit(ctx);err!=nil{panic(err)}
+  if err=json.NewEncoder(os.Stdout).Encode(map[string]int64{"removed":removed.RowsAffected(),"queued":queued.RowsAffected()});err!=nil{panic(err)};return
  }
  rows,err:=conn.Query(ctx,`SELECT i.payload,e.payload FROM interaction_events i
  JOIN server_sessions s ON s.id=i.session_id AND s.principal=$2
@@ -121,6 +137,28 @@ def assert_delegate_experience(row, parent, actor, project, model, job, qualifie
     else:
         assert experience["qualification"] == "ungraded" and not experience.get("verdict") and not experience.get("verification_ref"), experience
     return experience
+
+
+
+def request_owned_lifecycle(home, action):
+    """Private disposable-harness handshake; never accepts a PID or command."""
+    assert os.environ.get("AIMEE_TEST_GRADE_LIFECYCLE") == "1", "literal restart requires the integration harness lifecycle owner"
+    assert action in ("pause-owned-server", "restart-owned-server"), action
+    request = home / "execution-grade-recovery.request"
+    acknowledgement = home / "execution-grade-recovery.ack"
+    acknowledgement.unlink(missing_ok=True)
+    temporary = home / "execution-grade-recovery.request.tmp"
+    temporary.write_text(action + "\n")
+    temporary.replace(request)
+    deadline = time.monotonic() + 90
+    while True:
+        if acknowledgement.exists():
+            result = acknowledgement.read_text().strip()
+            assert result == action + ":ok", result
+            request.unlink(missing_ok=True)
+            return
+        assert time.monotonic() < deadline, ("owned daemon lifecycle timed out", action)
+        time.sleep(0.05)
 
 
 def main():
@@ -239,6 +277,7 @@ def main():
     previous = models_path.read_bytes() if models_path.exists() else None
     attachments, sessions, configurations = [], [], []
     probe = None
+    lifecycle_paused = False
     try:
         roots = []
         for name in ("execution-grade-owner", "execution-grade-foreign"):
@@ -301,6 +340,20 @@ def main():
             built = subprocess.run([os.environ.get("GO", "go"), "-C", str(repository / "server-go"), "build", "-o", str(probe), str(source)],
                                    capture_output=True, text=True, timeout=120)
             assert built.returncode == 0, built.stdout + built.stderr
+            def probe_json(probe_sid, mode=None):
+                read = subprocess.run([str(probe), probe_sid, actor, *([mode] if mode else [])],
+                                      capture_output=True, text=True, timeout=20)
+                assert read.returncode == 0, read.stderr
+                return json.loads(read.stdout)
+
+            def wait_delivery(probe_sid):
+                deadline = time.monotonic() + 45
+                while True:
+                    delivery = probe_json(probe_sid, "delivery-status")
+                    if delivery and all(item["state"] == "delivered" for item in delivery):
+                        return delivery
+                    assert time.monotonic() < deadline, ("unattended source delivery did not acknowledge", probe_sid, delivery)
+                    time.sleep(0.1)
             deadline = time.monotonic() + 30
             while True:
                 read = subprocess.run([str(probe), sid, actor], capture_output=True, text=True, timeout=20)
@@ -328,6 +381,7 @@ def main():
             # Fault only the derived projection, keeping the actual immutable
             # terminal and its complete private execution proof. A fresh browser
             # replay must reconstruct the same grade through the production owner.
+            wait_delivery(sid)
             removed = subprocess.run([str(probe), sid, actor, "drop-projection"],
                                      capture_output=True, text=True, timeout=20)
             assert removed.returncode == 0 and json.loads(removed.stdout) == {"removed": 1}, removed.stderr
@@ -367,12 +421,6 @@ def main():
             phase = "foreign_project"
             foreign_sid, foreign_attach = session()
             turn(foreign_sid, foreign_attach, roots[1], "Summarize the available configured-test evidence.")
-
-            def probe_json(probe_sid, mode=None):
-                read = subprocess.run([str(probe), probe_sid, actor, *([mode] if mode else [])],
-                                      capture_output=True, text=True, timeout=20)
-                assert read.returncode == 0, read.stderr
-                return json.loads(read.stdout)
 
             def delegate_attempt(qualified):
                 nonlocal phase
@@ -417,8 +465,25 @@ def main():
             reference = experience["verification_ref"]
             expected_delegate_job = experience["child"]["learning_binding"]["job_id"]
             child_sid = experience["source"]["session_id"]
+            def read_approaches(cwd):
+                result = api("/v1/learning/approaches", dict(goal="Inspect observed approaches",
+                    cwd=str(cwd), principal="forged-reader", project=proof["scope_id"]))
+                assert result["status"] == "ok" and result["goal_match"] == "not_inferred", result
+                assert result["coverage"] == "recent_bounded_project_history", result
+                return result
+
+            approaches = read_approaches(roots[0])
+            eligible = [entry for entry in approaches["approaches"] if entry["source_ref"] == reference]
+            assert len(eligible) == 1 and eligible[0]["receipt"]["delegate_experience"] == experience, approaches
+            assert eligible[0]["qualification"] == "configured_tests_only" and eligible[0]["verdict"] == "passed", eligible
+            assert "similarity" not in eligible[0] and "failure_mode" not in eligible[0], eligible
+            assert read_approaches(roots[1])["approaches"] == [], "request project override escaped host workspace scope"
+            wait_delivery(delegate_sid)
+            wait_delivery(child_sid)
             assert probe_json(child_sid, "drop-delegate-projection") == {"removed": 2}
             assert probe_json(child_sid) == [] and probe_json(delegate_sid, "experiences") == []
+
+            assert read_approaches(roots[0])["approaches"] == [], "deleted derived evidence survived reader"
 
             def replay_parent_binding():
                 connection = Local("localhost")
@@ -443,6 +508,27 @@ def main():
                 replay_parent_binding()
                 assert probe_json(child_sid) == child_grades, "parent-only replay did not restore exactly one original grade"
                 assert probe_json(delegate_sid, "experiences") == original_experiences, "parent-only replay changed or duplicated experience/pending evidence"
+            restored_approaches = read_approaches(roots[0])
+            assert restored_approaches == approaches, "reader changed or duplicated replay-restored evidence"
+            # Recreate the durable state after source commit but before
+            # projection delivery/ack. Only derived rows and existing queue
+            # scheduling change; canonical evidence and actual jobs stay intact.
+            before_requests = len(observed)
+            lifecycle_paused = True
+            request_owned_lifecycle(home, "pause-owned-server")
+            fault = subprocess.run([str(probe), child_sid, actor, "fault-undelivered", delegate_sid],
+                                   capture_output=True, text=True, timeout=20)
+            assert fault.returncode == 0, fault.stderr
+            assert json.loads(fault.stdout) == {"removed": 3, "queued": 2}, fault.stdout
+            request_owned_lifecycle(home, "restart-owned-server")
+            lifecycle_paused = False
+            # No events/history request, user turn, or verifier rerun follows:
+            # the restarted daemon's owned startup/timer must repair this untouched session.
+            wait_delivery(child_sid)
+            wait_delivery(delegate_sid)
+            assert probe_json(child_sid) == child_grades, "unattended delivery changed or duplicated the original grade"
+            assert probe_json(delegate_sid, "experiences") == original_experiences, "unattended delivery changed or duplicated source-bound experience/pending evidence"
+            assert len(observed) == before_requests, "projection recovery reran a model/tool execution"
             phase = "reuse"
             reuse_sid, reuse_attach = session()
             turn(reuse_sid, reuse_attach, roots[0], "Summarize the available delegate configured-test evidence.")
@@ -452,9 +538,14 @@ def main():
             delegate_attempt(False)
         assert subprocess.check_output(["git", "-C", str(roots[0]), "status", "--porcelain"], text=True) == ""
         assert not errors, errors
-        print("execution grade: actual daemon primary/delegate -> private Docker tests -> canonical proof -> grade/experience/pending -> parent-only recovery -> fresh-session scoped reuse; no-verifier delegate remains ungraded")
+        print("execution grade: actual daemon primary/delegate -> private Docker tests -> canonical proof -> grade/experience/pending -> parent-only recovery -> fresh-session scoped reuse; literal owned-daemon restart restores untouched-session crash-window projections; no-verifier delegate remains ungraded")
     finally:
         cleanup_errors = []
+        if lifecycle_paused:
+            try:
+                request_owned_lifecycle(home, "restart-owned-server")
+            except Exception as error:
+                cleanup_errors.append("owned daemon restart after fault failure: " + repr(error))
         for sid, attach in zip(sessions, attachments):
             try:
                 api(f"/v1/sessions/{sid}/detach", {"attach_id": attach})

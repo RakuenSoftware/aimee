@@ -66,3 +66,11 @@ int db1_execution_test_grade_record(const char *principal, const char *grade_jso
    assert(!"unexpected test grade in ungraded learning fixture");
    return -1;
 }
+
+cJSON *aimee_module_command_call_context_timeout(uint32_t kind, uint32_t stage, const char *verb,
+                                                 const cJSON *record, const cJSON *caller,
+                                                 int timeout_ms)
+{
+   assert(timeout_ms == 1000);
+   return aimee_module_command_call_context(kind, stage, verb, record, caller);
+}

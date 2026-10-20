@@ -194,6 +194,11 @@ int main(void)
       g_listed_count = -1;
       assert(server_active_project_from_cwd("/srv/settle", out, sizeof(out)) == 0);
       assert(strcmp(out, "settle") == 0);
+
+      /* An existing local project remains selected before its first scan. */
+      g_listed_count = 0;
+      assert(server_active_project_from_cwd("/srv/settle", out, sizeof(out)) == 0);
+      assert(strcmp(out, "settle") == 0);
    }
 
    /* Learning uses the approved repository's durable identity even when the

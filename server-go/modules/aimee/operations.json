@@ -28553,6 +28553,118 @@
         ],
         "max_bytes": 2097152
       }
+    },
+    {
+      "family": "sessions",
+      "id": 37,
+      "name": "session_ir_search",
+      "c_name": "db1_session_ir_search",
+      "c_params": [
+        "principal",
+        "request_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "request_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "result_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 2097152
+      },
+      "host_only": true
+    },
+    {
+      "family": "telemetry",
+      "id": 65,
+      "name": "learning_projection_claim",
+      "c_name": "db1_learning_projection_claim",
+      "c_params": [],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": []
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "batch",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 2097152
+      }
+    },
+    {
+      "family": "telemetry",
+      "id": 66,
+      "name": "learning_projection_ack",
+      "c_name": "db1_learning_projection_ack",
+      "c_params": [
+        "lease",
+        "result"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "lease",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "result",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 0
+      }
     }
   ]
 }

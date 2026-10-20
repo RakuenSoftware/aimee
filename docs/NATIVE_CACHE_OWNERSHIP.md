@@ -1,0 +1,47 @@
+# Native cache ownership
+
+The canonical session log remains the history source. Native Codex and Claude
+conversation files are a derived cache and cannot establish a completed turn,
+tool effect, permission, or test grade.
+
+The host acquires an exclusive cache-directory lease before creating a native
+HOME, linking SDK conversation files, writing launch configuration, or spawning
+the SDK. Its key is the actual `browser-{sdk}/{session}/{binding}` directory;
+context/catalog variants sharing that directory share the same lease. Account,
+model and actor lineage remain part of the existing binding. The lock is retained
+through child shutdown and the durable terminal cache completion/abort callback.
+No SDK receives the lock descriptor or credentials from this mechanism.
+
+A bounded, credential-free owner marker records the session, actor, source turn,
+SDK, binding and a random owner nonce. It is synced before SDK access. Normal
+completion/abort removes only that exact marker after the existing synchronous
+direct-child/process-group shutdown and cache-owner transition. That existing
+shutdown contract is not a new proof that escaped descendants are quiescent. A replaced marker cannot be removed by a
+stale owner. The lock file remains in place to avoid inode-replacement races.
+Existing SDK conversation files and unrelated committed checkpoints are retained.
+
+A daemon crash leaves the marker unresolved. Restart refuses before native HOME
+creation even when the old flock is available and the daemon PID is gone. The
+real subprocess fixture demonstrates that an escaped `setsid` descendant can
+continue writing cache data after the owner dies; neither flock release nor
+individual process death is sufficient authority to clear the marker.
+
+This increment establishes pre-spawn custody and fail-closed restart behavior;
+it does **not** implement automatic stale-claim recovery. In particular:
+
+- An absent legacy marker does not prove a legacy pending/finishing claim safe.
+  Existing DB1 cache checks still refuse it; no legacy claim is cleared here.
+- Recovery still needs positively attested whole-process-tree containment, a
+  durable exact old claim/profile/source binding and a terminal source lifecycle.
+  Running abandoned turns need a separate idempotent cancellation contract.
+- A qualified optional cgroup-v2/supervisor boundary may supply that proof in a
+  later increment. Cgroup availability is not a new launch prerequisite.
+- Missing, corrupt or foreign markers never authorize recovery. There is no
+  PID-based cleanup, cache-tree wipe, native-handle promotion, or automatic
+  deletion of unresolved markers.
+
+The lifecycle fixture covers ordinary Codex/Claude success and refusal paths,
+lease transfer through the terminal callback, concurrent owner refusal and
+cache-preserving canonical adoption. The lease fixture covers real owner
+SIGKILL, a still-writing escaped descendant, stale/foreign marker refusal and
+symlinked lock refusal. These tests do not qualify full automatic crash recovery.

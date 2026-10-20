@@ -118,6 +118,7 @@ var schemaHistory = []struct {
 	{44, "schema_session_ir_events.sql"},
 	{45, "schema_session_harness.sql"},
 	{46, "schema_local_procedure_events.sql"},
+	{47, "schema_learning_projection_outbox.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

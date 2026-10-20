@@ -270,6 +270,7 @@
 #define AIMEE_DB1_OP_SESSION_HARNESS_COMPARE_SWAP           34u
 #define AIMEE_DB1_OP_SESSION_IR_RUNNING_HISTORY_LOAD        35u
 #define AIMEE_DB1_OP_SESSION_IR_APPEND_VERIFIED             36u
+#define AIMEE_DB1_OP_SESSION_IR_SEARCH                      37u
 
 /* Family 7: machine-local runtime state: caches, this box's operator and
  * clones, the model catalogue it fetched, and the snapshots it took. */
@@ -715,5 +716,8 @@ static inline uint32_t aimee_db1_get_u32(const uint8_t *p)
 #define AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECALL          62u
 #define AIMEE_DB1_OP_DELEGATE_EXECUTION_EXPERIENCE_RECORD 63u
 #define AIMEE_DB1_OP_DELEGATE_EXECUTION_TERMINAL_LOOKUP   64u
+
+#define AIMEE_DB1_OP_LEARNING_PROJECTION_CLAIM 65u
+#define AIMEE_DB1_OP_LEARNING_PROJECTION_ACK   66u
 
 #endif /* AIMEE_DB1_MODULE_API_H */

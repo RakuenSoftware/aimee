@@ -77,6 +77,7 @@ const method_policy_t method_registry[] = {
     {"entities.merge", CAP_MEMORY_WRITE, "merge two entities"},
     {"entities.unmerge", CAP_MEMORY_WRITE, "reverse an entity merge"},
     {"memory.user_capture", CAP_MEMORY_WRITE, "capture per-user memory"},
+    {"learning.approaches", CAP_MEMORY_READ, "read scoped canonical approach observations"},
     {"learning.task_cost", CAP_MEMORY_READ, "report declared task costs without policy promotion"},
     {"action.receipt", CAP_TOOL_EXECUTE, "inspect and reconcile owned action receipts"},
     {"learning.application", CAP_MEMORY_WRITE, "record receipt-bound user procedure feedback"},

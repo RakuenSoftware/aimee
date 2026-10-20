@@ -156,13 +156,6 @@ __attribute__((weak)) const char *server_http_identity_principal(void)
    return "";
 }
 
-__attribute__((weak)) int gw_stage_router(void *r, void *ud)
-{
-   (void)r;
-   (void)ud;
-   return 0;
-}
-
 __attribute__((weak)) void aimee_ir_shadow_observe_request(const void *req, int frontend)
 {
    (void)req;

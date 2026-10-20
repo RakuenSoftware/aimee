@@ -729,35 +729,6 @@ static void test_unavailable_task_context_retries_after_recovery(void)
    printf("unavailable_task_context_retries_after_recovery OK\n");
 }
 
-static void test_query_from_messages(void)
-{
-   /* String content; last user message wins over an earlier one. */
-   cJSON *m = cJSON_Parse("[{\"role\":\"user\",\"content\":\"first\"},"
-                          "{\"role\":\"assistant\",\"content\":\"mid\"},"
-                          "{\"role\":\"user\",\"content\":\"second ask\"}]");
-   char *q = ingress_preinject_query_from_messages(m);
-   assert(q && strcmp(q, "second ask") == 0);
-   free(q);
-   cJSON_Delete(m);
-
-   /* Array-of-parts content. */
-   cJSON *m2 =
-       cJSON_Parse("[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"hello \"},"
-                   "{\"type\":\"input_text\",\"text\":\"world\"}]}]");
-   char *q2 = ingress_preinject_query_from_messages(m2);
-   assert(q2 && strcmp(q2, "hello world") == 0);
-   free(q2);
-   cJSON_Delete(m2);
-
-   /* No user message -> NULL. */
-   cJSON *m3 = cJSON_Parse("[{\"role\":\"assistant\",\"content\":\"hi\"}]");
-   assert(ingress_preinject_query_from_messages(m3) == NULL);
-   cJSON_Delete(m3);
-
-   assert(ingress_preinject_query_from_messages(NULL) == NULL);
-   printf("query_from_messages OK\n");
-}
-
 static void test_apply(void)
 {
    /* NULL/blank envelope -> copy of instructions (or NULL). */
@@ -1879,7 +1850,6 @@ int main(void)
    test_task_context_mode_and_first_turn_gate();
    test_unavailable_task_context_retries_after_recovery();
    test_recall_unavailable_is_counted_apart_from_empty();
-   test_query_from_messages();
    test_apply();
    test_append();
    test_budgeted_build_uses_memory_previews();

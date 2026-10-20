@@ -2820,42 +2820,44 @@ export default function Chat() {
       )}
 
       {/* Prompt tier selector */}
-      <div style={{
+      <div role="group" aria-label="Session preferences" style={{
         padding: '4px 16px', background: tokens.surfaceAlt,
         borderTop: `1px solid ${tokens.borderLight}`,
-        display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0,
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 12px', flexShrink: 0,
       }}>
         {/* The project is set in ONE place — the session ProjectPicker at the top
             of the chat (bound to the active session). No per-prompt project
             selector here. */}
-        <span
-          style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}
-          title="How much context Aimee assembles for this turn: Minimal is fastest and cheapest, Extended packs in the most background."
-        >
-          Prompt:
-        </span>
-        <Tabs
-          size="sm"
-          ariaLabel="Prompt tier"
-          value={promptTier}
-          onChange={(v) => changePromptTier(v as 'MINIMAL' | 'STANDARD' | 'EXTENDED')}
-          options={(['MINIMAL', 'STANDARD', 'EXTENDED'] as const).map(tier => ({
-            value: tier,
-            label: tier.charAt(0) + tier.slice(1).toLowerCase(),
-          }))}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+          <span
+            style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}
+            title="How much context Aimee assembles for this turn: Minimal is fastest and cheapest, Extended packs in the most background."
+          >
+            Prompt:
+          </span>
+          <Tabs
+            size="sm"
+            ariaLabel="Prompt tier"
+            value={promptTier}
+            onChange={(v) => changePromptTier(v as 'MINIMAL' | 'STANDARD' | 'EXTENDED')}
+            options={(['MINIMAL', 'STANDARD', 'EXTENDED'] as const).map(tier => ({
+              value: tier,
+              label: tier.charAt(0) + tier.slice(1).toLowerCase(),
+            }))}
+          />
+        </div>
         {availableSkills.length > 0 && (
-          <>
-            <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
-            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, maxWidth: '100%' }}>
+            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui', flexShrink: 0 }}>
               Skill:
             </span>
             <select
+              aria-label="Skill"
               value={activeSkill}
               onChange={e => changeSkill(e.target.value)}
               title="Load a packaged skill for this session — its instructions steer how Aimee handles the turn. None runs the default behaviour."
               style={{
-                fontSize: '11px', fontFamily: 'system-ui',
+                fontSize: '11px', fontFamily: 'system-ui', minWidth: 0, maxWidth: '100%',
                 background: activeSkill ? tokens.primary : tokens.surface,
                 color: activeSkill ? tokens.surface : tokens.textFaint,
                 border: `1px solid ${activeSkill ? tokens.primary : tokens.borderLight}`,
@@ -2868,12 +2870,11 @@ export default function Chat() {
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
-          </>
+          </div>
         )}
         {agents.length > 0 && (
-          <>
-            <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
-            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, maxWidth: '100%' }}>
+            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui', flexShrink: 0 }}>
               Agent:
             </span>
             <select
@@ -2884,7 +2885,7 @@ export default function Chat() {
                 ? 'The agent serving this tab (pinned for this session)'
                 : `Following the configured primary${defaultAgent ? ` (${defaultAgent})` : ''} — pick one to pin it for this session`}
               style={{
-                fontSize: '11px', fontFamily: 'system-ui',
+                fontSize: '11px', fontFamily: 'system-ui', minWidth: 0, maxWidth: '100%',
                 // Unpinned (following the default) reads as the muted state, the
                 // same way an unset persona does.
                 background: activeAgent ? tokens.primary : tokens.surface,
@@ -2895,18 +2896,19 @@ export default function Chat() {
               }}
             >
               {!primary.known && <option value="" disabled>{primary.error ? 'Agent unavailable' : 'Loading agent…'}</option>}
+              {primary.known && !agents.some(a => a.name === (activeAgent || defaultAgent)) &&
+                <option value={activeAgent || defaultAgent} disabled>{activeAgent || defaultAgent ? `${activeAgent || defaultAgent} (not in current catalog)` : 'Configured primary'}</option>}
               {agents.map(a => (
                 <option key={a.name} value={a.name}>
                   {a.name}{a.name === defaultAgent ? ' (primary)' : ''}
                 </option>
               ))}
             </select>
-          </>
+          </div>
         )}
         {availablePersonas.length > 0 && (
-          <>
-            <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
-            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, maxWidth: '100%' }}>
+            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui', flexShrink: 0 }}>
               Persona:
             </span>
             <select
@@ -2915,7 +2917,7 @@ export default function Chat() {
               aria-label="Persona" aria-busy={persona.pending}
               title="Steers Aimee's role and delegate policy for this session"
               style={{
-                fontSize: '11px', fontFamily: 'system-ui',
+                fontSize: '11px', fontFamily: 'system-ui', minWidth: 0, maxWidth: '100%',
                 background: activePersona ? tokens.primary : tokens.surface,
                 color: activePersona ? tokens.surface : tokens.textFaint,
                 border: `1px solid ${activePersona ? tokens.primary : tokens.borderLight}`,
@@ -2924,11 +2926,13 @@ export default function Chat() {
               }}
             >
               {!persona.known && <option value="" disabled>{persona.error ? 'Persona unavailable' : 'Loading persona…'}</option>}
+              {persona.known && !availablePersonas.some(p => p.name === activePersona) &&
+                <option value={activePersona} disabled>{activePersona ? `${activePersona} (not in current catalog)` : 'Session default'}</option>}
               {availablePersonas.map(p => (
                 <option key={p.name} value={p.name} title={p.description}>{p.name}</option>
               ))}
             </select>
-          </>
+          </div>
         )}
       </div>
       {(primary.error || persona.error) && <p role="alert">{primary.error || persona.error}</p>}

@@ -159,3 +159,13 @@ be frozen as an ungraded result. A completed child without verifier evidence rem
 ungraded. Observations have zero inferred confidence and automatic application disabled; child
 completion does not establish final job completion, semantic correctness or causal procedure success.
 Approved workspace custody and repository identity provide project scope without a KB/index service.
+
+
+`learning.approaches` requires `CAP_MEMORY_READ` and an authenticated actor in an approved
+registered project workspace. Its existing goal and approaches response fields now expose bounded
+canonical delegate tool-call sequences with whole configured-test receipts. The goal is echoed;
+task similarity, task correctness and causal procedure success are not inferred. Legacy goal-only
+failed-approach rows are excluded. A targeted second receipt read refuses changed or erased sources.
+The CLI supplies its workspace cwd and labels both passing and failing configured-test observations.
+This read-only surface does not grant provider-send authority; automatic context still uses canonical
+memory assembly and its source-release fence. Empty eligible history remains an empty successful result.

@@ -29,6 +29,9 @@ extern "C"
       char *messages_json;
    } db1_primary_session_row_t;
 
+   /* Complete bounded, actor-scoped canonical text search. Caller frees JSON. */
+   char *db1_session_ir_search(const char *principal, const char *request_json);
+
    /* Canonical ordered session log. Append returns an exact decimal sequence
     * into out_sequence[32]; retrying an event ID is idempotent only when every
     * immutable field matches. Page returns owned canonical envelope-array JSON. */

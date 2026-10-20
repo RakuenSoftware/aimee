@@ -913,7 +913,9 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-cli-proxy-bound
 $(TESTPREFIX)/unit-test-cli-proxy-bound: $(OBJDIR)/tests/test_cli_proxy_bound.o $(OBJDIR)/cli_proxy.o $(CORE_CONNECTION_LIB)
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-learning-approaches
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-learning-application
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-learning-recovery
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-replay
 $(TESTPREFIX)/unit-test-server-native-replay: $(OBJDIR)/tests/test_server_native_replay.o \
     $(OBJDIR)/server/server_native_replay.o $(OBJDIR)/modules/ir/session_event.o \
@@ -936,7 +938,7 @@ $(TESTPREFIX)/unit-test-server-session-identity: $(OBJDIR)/tests/test_server_ses
 
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-execution
 $(TESTPREFIX)/unit-test-server-native-execution: $(OBJDIR)/tests/test_server_native_execution.o \
-    $(OBJDIR)/server/server_native_execution.o $(OBJDIR)/server/server_native_launch.o $(OBJDIR)/server/cli_claude_native.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/server/cli_session.o \
+    $(OBJDIR)/server/server_native_execution.o $(OBJDIR)/server/server_native_cache_lease.o $(OBJDIR)/platform_random.o $(OBJDIR)/server/server_native_launch.o $(OBJDIR)/server/cli_claude_native.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/server/cli_session.o \
     $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/modules/ir/session_event.o \
     $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o \
     $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
@@ -2002,8 +2004,8 @@ $(TESTPREFIX)/unit-test-vault-provider-credential: $(OBJDIR)/tests/test_vault_pr
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 
-$(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/modules/translation/hook_ir.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o
-$(TESTPREFIX)/unit-test-server-http $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/server/server_learning_outcome.o $(OBJDIR)/module_commands.o
+$(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/server/request_context.o $(OBJDIR)/modules/translation/hook_ir.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o
+$(TESTPREFIX)/unit-test-server-http $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/server/server_learning_approaches.o $(OBJDIR)/server/server_learning_outcome.o $(OBJDIR)/server/server_learning_recovery.o $(OBJDIR)/module_commands.o
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/server/server_compute_owner.o
 
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/tests/support/module_bus_stub.o $(filter-out $(OBJDIR)/db1_client/sessions.o $(OBJDIR)/db1_client/conversation.o,$(DB1_CLIENT_OBJS)) $(OBJDIR)/server/server.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server/provider_settable.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
@@ -7170,3 +7172,16 @@ $(OBJDIR)/tests/test_server_verification.o: server/server_verification.c
 $(TESTPREFIX)/unit-test-server-verification: $(OBJDIR)/tests/test_server_verification.o \
     $(OBJDIR)/aimee_sha256.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-server-learning-approaches: $(OBJDIR)/tests/test_server_learning_approaches.o \
+    $(OBJDIR)/server/server_learning_approaches.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+$(TESTPREFIX)/unit-test-server-learning-recovery: $(OBJDIR)/tests/test_server_learning_recovery.o \
+    $(OBJDIR)/server/server_learning_recovery.o $(OBJDIR)/server/server_learning_outcome.o \
+    $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/interaction_event_names.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
+
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-cache-lease
+$(TESTPREFIX)/unit-test-server-native-cache-lease: $(OBJDIR)/tests/test_server_native_cache_lease.o \
+    $(OBJDIR)/server/server_native_cache_lease.o $(OBJDIR)/cJSON.o $(OBJDIR)/platform_random.o $(OBJDIR)/posix/platform_random.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
