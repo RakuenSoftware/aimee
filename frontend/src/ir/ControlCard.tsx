@@ -76,7 +76,7 @@ export default function ControlCard({ id, control, onReply, replyPending = false
         onChange={event => setCustom(old => ({ ...old, [q.id]: event.target.value }))} /></label>
     </fieldset>)}
     {!closed && onReply && <div className="ir-control-actions">
-      {(control.kind === 'permission' || control.kind === 'question') && <button type="button" disabled={pending || !canAnswer} onClick={() => void submit('allow')}>{control.kind === 'question' ? 'Send answers' : 'Allow once'}</button>}
+      {(control.kind === 'permission' || control.kind === 'question') && <button className="ir-control-submit" type="button" disabled={pending || !canAnswer} onClick={() => void submit('allow')}>{control.kind === 'question' ? 'Send answers' : 'Allow once'}</button>}
       <button type="button" disabled={pending} onClick={() => void submit('deny')}>Decline</button>
       <button type="button" disabled={pending} onClick={() => void submit('cancel')}>Cancel</button>
     </div>}

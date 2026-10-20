@@ -4097,3 +4097,10 @@ SDK integration qualification.
 All 76 repository lint gates also pass. Fresh CI is required for the browser-fix snapshot. The migration, independent
 learning qualification, broader platform/live checks and reviewed production
 promotion remain unfinished. Production stays KB-free and unpromoted.
+
+Final visual inspection also caught the generic Spinner's 24px padding inside
+Steer: it expanded the busy button and squeezed the mobile input. The composer
+now uses a compact decorative spinner with reduced-motion support; the browser
+regression requires a busy button at most 48px high and a mobile input at least
+250px wide. Selecting a channel closes the rail, and only affirmative control
+actions receive primary styling.

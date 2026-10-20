@@ -28,8 +28,8 @@
   border: 1px solid var(--sg-border-medium); background: var(--sg-surface);
   color: var(--sg-text); font: inherit; cursor: pointer;
 }
-.ir-control-actions > button:first-child { background: var(--sg-primary); color: #10202a; border-color: var(--sg-primary); font-weight: 600; }
-.ir-control button:disabled { opacity: .6; cursor: wait; }
+.ir-control-actions > .ir-control-submit { background: var(--sg-primary); color: #10202a; border-color: var(--sg-primary); font-weight: 600; }
+.ir-control button:disabled { opacity: .6; cursor: not-allowed; }
 .ir-control-response { margin-top: 10px; font-size: 12px; }
 .ir-control :focus-visible { outline: 2px solid var(--sg-primary); outline-offset: 3px; }
 .ir-resolved-controls { color: var(--sg-text-secondary); font-size: 12px; }

@@ -15,3 +15,7 @@
   .chat-messages { padding: 12px !important; }
   .chat-workflow { margin: 4px 12px 0; }
 }
+
+.chat-send-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: chat-send-spin .8s linear infinite; }
+@keyframes chat-send-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .chat-send-spinner { animation: none; border-right-color: currentColor; } }

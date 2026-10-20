@@ -2,7 +2,7 @@ import { parseJSON, stringifyJSON } from '../ir/json';
 import './chat.css';
 import { mergeChannelMessages, type ChannelMessage } from './chat/channelMessages';
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
-import { AutoGrowTextarea, Button, Drawer, Spinner, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
+import { AutoGrowTextarea, Button, Drawer, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
 import { renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
@@ -1915,6 +1915,7 @@ export default function Chat() {
   function selectChannel(name: string): void {
     abortActiveSends();
     setActiveChannel(name);
+    setChannelsOpen(false);
     setUnreadCounts(prev => ({ ...prev, [name]: 0 }));
     /* Ensure channel exists in message map */
     setChannelMsgs(prev => prev[name] ? prev : { ...prev, [name]: [] });
@@ -2984,7 +2985,7 @@ export default function Chat() {
           onKeyDown={handleKeyDown}
           maxHeight={200}
           placeholder={(working || remoteTurnActive)
-            ? 'Steer the running turn — Enter interrupts and continues'
+            ? 'Steer the running turn…'
             : 'Type a message… (Shift+Enter for newline)'}
           style={{ flex: 1, minHeight: '44px' }}
           onFocus={e => (e.target.style.borderColor = tokens.primary)}
@@ -3005,14 +3006,14 @@ export default function Chat() {
               onClick={sendMessage}
               title={steering ? 'Interrupt the running turn and continue with this message' : 'Send'}
               style={{
-                padding: '10px 20px', background: tokens.primary,
+                padding: '10px 12px', minHeight: 44, alignSelf: 'flex-end', flexShrink: 0, background: tokens.primary,
                 color: tokens.surface, border: 'none', borderRadius: '6px',
                 cursor: 'pointer', fontSize: '14px', whiteSpace: 'nowrap',
               }}
             >
               {busy ? (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                  <Spinner loading text="" />
+                  <span className="chat-send-spinner" aria-hidden="true" />
                   {label}
                 </span>
               ) : label}
