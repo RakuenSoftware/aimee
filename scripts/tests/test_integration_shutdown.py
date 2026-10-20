@@ -42,6 +42,7 @@ stop_providers_module() {{ :; }}
 stop_delegates_module() {{ :; }}
 stop_policy_module() {{ :; }}
 stop_tools_module() {{ :; }}
+stop_git_module() {{ :; }}
 stop_learning_module() {{ :; }}
 FAIL=0
 REACHED_SUMMARY=1

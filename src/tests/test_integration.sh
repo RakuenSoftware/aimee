@@ -265,6 +265,30 @@ stop_tools_module() {
     fi
 }
 
+# Verification hashes and private snapshots belong to the migrated Git owner.
+# A daemon without this process treats clean source as unknown and can only
+# execute ordinary, ungraded verification. Install its real generated grants.
+GIT_MODULE="$AIMEE_HOME/aimee-module-git"
+GIT_MODULE_PID=""
+install_git_module() {
+    cp "$DB1_MODULE_BUILT" "$GIT_MODULE"
+    chmod 0755 "$GIT_MODULE"
+    install_generated_grant git "$GIT_MODULE"
+    install_generated_grant git-egress "$GIT_MODULE"
+}
+start_git_module() {
+    stop_git_module
+    "$GIT_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-git.log" 2>&1 &
+    GIT_MODULE_PID=$!
+}
+stop_git_module() {
+    if [ -n "$GIT_MODULE_PID" ]; then
+        kill "$GIT_MODULE_PID" 2>/dev/null || true
+        wait "$GIT_MODULE_PID" 2>/dev/null || true
+        GIT_MODULE_PID=""
+    fi
+}
+
 # Standalone observations must use the actual Learning owner, without a KB.
 LEARNING_MODULE="$AIMEE_HOME/aimee-module-learning"
 LEARNING_MODULE_PID=""
@@ -580,6 +604,7 @@ install_delegates_module
 install_memory_module
 install_policy_module
 install_tools_module
+install_git_module
 install_learning_module
 install_economizer_module
 install_routing_module
@@ -914,6 +939,7 @@ start_server() {
             if [ "$MEMORY_MODULE_ENABLED" -eq 1 ]; then start_memory_module; fi
             start_policy_module
             start_tools_module
+            start_git_module
             start_learning_module
             start_economizer_module
             start_routing_module
@@ -961,6 +987,7 @@ cleanup() {
     stop_memory_module
     stop_policy_module
     stop_tools_module
+    stop_git_module
     stop_learning_module
     stop_economizer_module
     stop_routing_module
@@ -2332,6 +2359,16 @@ fi
 # Independently graded reuse needs the real daemon/model dispatch as well as
 # the helper's Docker contract. CI requires Docker; local development reports
 # exactly this unavailable journey as a skip, without pretending it ran.
+GIT_OWNER_LOG="$HOME/git-verification-owner-live.log"
+if python3 "$REPO_ROOT/src/tests/test_git_verification_owner_live.py" >"$GIT_OWNER_LOG" 2>&1; then
+    PASS=$((PASS + 1))
+    cat "$GIT_OWNER_LOG"
+else
+    echo "FAIL: actual Git verification source owner"
+    tail -c 12000 "$GIT_OWNER_LOG"
+    dump_server_log
+    FAIL=$((FAIL + 1))
+fi
 EXECUTION_GRADE_LOG="$HOME/execution-grade-live.log"
 if python3 "$REPO_ROOT/src/tests/test_execution_grade_live.py" >"$EXECUTION_GRADE_LOG" 2>&1; then
     GRADE_SKIPS=$(grep -c '^SKIP:' "$EXECUTION_GRADE_LOG" || true)

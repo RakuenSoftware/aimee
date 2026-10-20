@@ -123,6 +123,15 @@ existed but the canonical catalog exposes the multiplexed `git` schema. The work
 projects a fixed named command only from an actually advertised enum entry and preserves the
 remaining schema and cached catalog. The source-bound delegate increment and this catalog
 repair are not yet CI-qualified or promoted.
+Published `1ec815d36` fixes that advert and publishes source-bound delegate
+observations. Its actual-daemon CI journey then exposed a separate harness
+omission: the migrated Git process was never installed or started, leaving
+verification hashes and snapshots unavailable. The continuation installs its
+real generated serving/outbound grants and manages it with the other module
+children. A Docker-independent actual-daemon check now verifies configured
+commands and both clean/dirty source observations, so local Docker absence
+cannot hide a missing Git owner. This grants no private-execution grade;
+the separate mandatory actual-Docker journey still qualifies that boundary.
 Fresh CI, remaining live-vendor/native-profile qualification and independently reviewed production
 promotion remain required. The Windows native tool-runtime stub and arbitrary daemon ACP profiles
 remain explicit unsupported profiles; thin-client CI does not qualify them as native servers.
