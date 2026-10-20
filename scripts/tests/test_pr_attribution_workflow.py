@@ -29,8 +29,8 @@ class AttributionWorkflowTests(unittest.TestCase):
         self.assertEqual(data['permissions'], {'contents': 'read'})
         self.assertEqual(job['permissions'], {'contents': 'read', 'issues': 'read', 'pull-requests': 'read', 'checks': 'read'})
         steps = job['steps']
-        live = next(step for step in steps if 'aimee-attribution-check' in step.get('run', ''))
-        self.assertEqual(live['run'], 'go run ./cmd/aimee-attribution-check')
+        live = next(step for step in steps if 'check-pr-attribution.go' in step.get('run', ''))
+        self.assertEqual(live['run'], 'go run ../scripts/check-pr-attribution.go')
         self.assertEqual(live['env']['GH_TOKEN'], '${{ github.token }}')
         self.assertNotIn('ATTRIBUTION_RE', (ROOT / '.github/workflows/pr-attribution.yml').read_text())
         self.assertEqual(steps[0]['with']['persist-credentials'], 'false')

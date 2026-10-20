@@ -50,4 +50,4 @@ jobs:
         working-directory: server-go
         env:
           GH_TOKEN: ${{ github.token }}
-        run: go run ./cmd/aimee-attribution-check
+        run: go run ../scripts/check-pr-attribution.go

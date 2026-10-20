@@ -28,7 +28,7 @@ or GitHub-app opening attribution. There are no SHA, branch, PR, promotion, or h
 exceptions. Ordinary explanatory prose and documentation links are allowed.
 
 The `no-coauthor-trailers` check and Aimee's merge executor share the policy in
-`server-go/internal/attribution`. Both verify every incoming commit's raw author/committer and
+`server-go/modules/git/attribution`. Both verify every incoming commit's raw author/committer and
 message, live PR title/body and `performed_via_github_app`, associated PRs, prior attribution
 rejections, and the complete PR issue catalog including closed originals. GitHub's commit-to-PR
 endpoint alone is insufficient: after an indirect merge it can omit the rejected original.

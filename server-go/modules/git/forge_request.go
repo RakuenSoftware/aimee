@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
-	"github.com/JBailes/aimee/server-go/internal/attribution"
 	"github.com/JBailes/aimee/server-go/modules/egress"
+	"github.com/JBailes/aimee/server-go/modules/git/attribution"
 )
 
 // Forge operations. Named rather than numbered on the wire for the same reason

@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/internal/attribution"
+	"github.com/JBailes/aimee/server-go/modules/git/attribution"
 )
 
 func check(ctx context.Context) error {
