@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/internal/attribution"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
@@ -367,6 +369,24 @@ func PerformForge(ctx context.Context, traceID uint64, executor egress.Executor,
 		if method == "" {
 			method = "merge"
 		}
+		if method != "merge" && method != "squash" && method != "rebase" {
+			return ForgeResponse{Error: "pr merge: unsupported merge method"}
+		}
+		checker := attribution.Checker{Get: func(ctx context.Context, path string) ([]byte, error) {
+			status, payload, err := forgeCall(ctx, traceID, executor, methodGet,
+				repo+"/"+path, request.Op, resource, request.Credential, nil)
+			if err != nil {
+				return nil, err
+			}
+			if status != 200 {
+				return nil, fmt.Errorf("attribution API returned HTTP %d", status)
+			}
+			return payload, nil
+		}}
+		head, err := checker.CheckPull(ctx, request.Number, request.ExpectedHeadSHA)
+		if err != nil {
+			return ForgeResponse{Error: "pr merge: attribution denied: " + err.Error()}
+		}
 		body := map[string]any{"merge_method": method}
 		// Only a squash synthesises a body from the child commits, which is where
 		// the attribution trailers protected branches reject come back in. A merge
@@ -374,9 +394,8 @@ func PerformForge(ctx context.Context, traceID uint64, executor egress.Executor,
 		if method == "squash" {
 			body["commit_message"] = ""
 		}
-		if request.ExpectedHeadSHA != "" {
-			body["sha"] = request.ExpectedHeadSHA
-		}
+		// Pin the head we actually verified, including when the caller omitted sha.
+		body["sha"] = head
 		status, payload, err := forgeCall(ctx, traceID, executor, methodPut,
 			fmt.Sprintf("%s/pulls/%d/merge", repo, request.Number), request.Op, resource, request.Credential, body)
 		if err != nil {
@@ -419,7 +438,11 @@ func handleForgeRequest(executor egress.Executor, invocation bus.ModuleInvocatio
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
-	encoded, err := json.Marshal(PerformForge(context.Background(), invocation.TraceID, executor, decoded))
+	// Evidence traversal must stop at the caller's deadline. Otherwise a timed-out
+	// admission could keep running and submit a merge after reporting failure.
+	ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(25*time.Second))
+	defer cancel()
+	encoded, err := json.Marshal(PerformForge(ctx, invocation.TraceID, executor, decoded))
 	if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
 		return nil, bus.ModuleStatusInternal
 	}

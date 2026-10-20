@@ -70,7 +70,6 @@
     "src/tests/test_synthesis_mtls_client.c": 1,
     "src/tests/test_token_audit_load.c": 1,
     "src/tests/test_tool_validation.c": 6,
-    "src/tests/test_trajectory_batch.c": 2,
     "src/tests/test_trigger.c": 11,
     "src/tests/test_vault_audit.c": 1,
     "src/tests/test_vault_bootstrap.c": 1,

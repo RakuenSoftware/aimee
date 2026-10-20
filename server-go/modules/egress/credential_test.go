@@ -179,3 +179,23 @@ func TestForgeCredentialScopeMatchesOnlyItsExactOperationAndRepository(t *testin
 		}
 	}
 }
+
+func TestMergeCredentialCanReadOnlyRepositoryAttributionEvidence(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	for _, path := range []string{"issues", "issues/3", "pulls/3", "commits/" + sha + "/pulls", "commits/" + sha + "/check-runs", "compare/" + sha + "..." + sha} {
+		if !forgeCredentialTargetAllowed("pr_merge", "acme/widgets", "GET", "/repos/acme/widgets/"+path) {
+			t.Fatalf("denied evidence %s", path)
+		}
+		if forgeCredentialTargetAllowed("pr_merge", "acme/widgets", "POST", "/repos/acme/widgets/"+path) {
+			t.Fatalf("granted write %s", path)
+		}
+		if forgeCredentialTargetAllowed("pr_merge", "acme/other", "GET", "/repos/acme/widgets/"+path) {
+			t.Fatalf("granted other repository %s", path)
+		}
+	}
+	for _, path := range []string{"pulls/3/commits", "actions/secrets", "issues/3/comments", "pulls/3/merge", "commits/main/pulls", "compare/main...testing", "pulls/-3", "pulls/3/files"} {
+		if forgeCredentialTargetAllowed("pr_merge", "acme/widgets", "GET", "/repos/acme/widgets/"+path) {
+			t.Fatalf("granted unrelated read %s", path)
+		}
+	}
+}

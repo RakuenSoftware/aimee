@@ -985,7 +985,10 @@ cJSON *handle_git_pr(cJSON *args)
 
       cJSON *jmethod = cJSON_GetObjectItemCaseSensitive(args, "merge_method");
       cJSON *jauto = cJSON_GetObjectItemCaseSensitive(args, "auto");
-      int auto_merge = jauto && cJSON_IsTrue(jauto);
+      if (jauto && cJSON_IsTrue(jauto))
+         return mcp_text(
+             "error: merge blocked — auto-merge cannot enforce attribution at merge time; "
+             "use an immediate, fully verified merge");
       const char *mflag = "--merge";
       if (cJSON_IsString(jmethod))
       {
@@ -994,7 +997,6 @@ cJSON *handle_git_pr(cJSON *args)
          else if (strcmp(jmethod->valuestring, "rebase") == 0)
             mflag = "--rebase";
       }
-      char match[160] = {0};
       char expected_head[72] = {0};
       cJSON *jhead = cJSON_GetObjectItemCaseSensitive(args, "expected_head_sha");
       if (cJSON_IsString(jhead) && jhead->valuestring[0])
@@ -1012,7 +1014,6 @@ cJSON *handle_git_pr(cJSON *args)
             }
          if (ok && h[0] && strlen(h) < sizeof(expected_head))
          {
-            snprintf(match, sizeof(match), " --match-head-commit %s", h);
             snprintf(expected_head, sizeof(expected_head), "%s", h);
          }
       }
@@ -1028,7 +1029,7 @@ cJSON *handle_git_pr(cJSON *args)
        *
        *   gh exit 0  (all passed)          -> SUCCESS  merges
        *   "no checks reported"             -> NONE     merges: nothing to fail
-       *   gh exit 8  (pending)             -> PENDING  refuses, unless auto_merge
+       *   gh exit 8  (pending)             -> PENDING  refuses
        *   gh exit 1  (a check failed)      -> FAILURE  refuses
        *   anything unclassifiable         -> ERROR    refuses
        *
@@ -1047,9 +1048,7 @@ cJSON *handle_git_pr(cJSON *args)
          cerr[0] = '\0';
          git_pr_ci_t ci = git_pr_ci_via_api_slug(principal, merge_slug, pr_num, cerr, sizeof(cerr));
          const char *why = NULL;
-         if (ci == GIT_PR_CI_PENDING && auto_merge)
-            why = NULL; /* branch protection keeps an auto-merge pending until green */
-         else if (!git_pr_ci_permits_merge(ci))
+         if (!git_pr_ci_permits_merge(ci))
             why = ci == GIT_PR_CI_PENDING   ? "CI has not finished; re-try once checks settle"
                   : ci == GIT_PR_CI_FAILURE ? "CI is not green (at least one check failed)"
                                             : "could not read CI status";
@@ -1069,28 +1068,6 @@ cJSON *handle_git_pr(cJSON *args)
       cJSON *res = cJSON_CreateObject();
       cJSON_AddStringToObject(res, "executor", "git_pr");
 
-      if (auto_merge)
-      {
-         /* Auto-merge stays on `gh` for now. Enabling it is a GraphQL mutation
-          * (enablePullRequestAutoMerge) and this module speaks only REST, so moving
-          * it means new transport rather than a swapped call. Keeping it here is not
-          * a regression -- it is how auto-merge already worked -- but it inherits the
-          * `gh` credential problem: no GH_TOKEN reaches the child (FD mode), so this
-          * branch only works from a DETACHED workspace where the client holds its own
-          * creds. Direct merges below no longer have that limitation. */
-         char cmd[512];
-         snprintf(cmd, sizeof(cmd), "gh pr merge %d %s%s --auto 2>&1", pr_num, mflag, match);
-         int rc = 0;
-         char *out = mcp_git_run(cmd, &rc);
-         cJSON_AddStringToObject(res, "command", cmd);
-         cJSON_AddNumberToObject(res, "exit_code", rc);
-         cJSON_AddStringToObject(res, "output", out ? out : "");
-         free(out);
-         /* Accepted is not merged. Do not manufacture merge evidence for a queued PR. */
-         cJSON_AddBoolToObject(res, "auto_merge_enabled", rc == 0 ? 1 : 0);
-         cJSON_AddBoolToObject(res, "merged", 0);
-      }
-      else
       {
          const char *method = strcmp(mflag, "--squash") == 0   ? "squash"
                               : strcmp(mflag, "--rebase") == 0 ? "rebase"
