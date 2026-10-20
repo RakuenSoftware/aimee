@@ -1635,6 +1635,13 @@ const char *worktree_for_cwd(const session_state_t *state, const char *cwd)
    return NULL;
 }
 
+int pre_tool_check_registered_tool(const char *tool_name, const char *tool_input,
+                                   session_state_t *state, const char *mode, const char *cwd,
+                                   char *message, size_t size)
+{
+   return pre_tool_check(tool_name, tool_input, state, mode, cwd, message, size);
+}
+
 int pre_tool_check(const char *tool_name, const char *tool_input, session_state_t *state,
                    const char *guardrail_mode, const char *cwd, char *msg, size_t msg_len)
 {
@@ -2414,6 +2421,21 @@ static void test_hooks_pre_remote_workspace_scope(void)
             cJSON_Delete(req);
          }
    assert(g_hook_probe_calls == 30);
+   g_hook_remote = -1; /* A registered mirror failed reconstruction. */
+   g_pre_tool_seen_state = 0;
+   g_session_state_save_calls = 0;
+   run_cmd_set_cwd("/previous/request");
+   const char *failed = "{\"method\":\"hooks.pre\",\"session_id\":\"remote-hook-test\","
+                        "\"cwd\":\"/client/only/repo\",\"tool_name\":\"Read\","
+                        "\"tool_input\":{},\"request_id\":\"failed-mirror\"}";
+   cJSON *refused = dispatch_json(ctx, conn, failed, strlen(failed));
+   assert(cJSON_GetObjectItem(refused, "exit_code")->valueint == 2);
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(refused, "request_id")), "failed-mirror"));
+   assert(!g_pre_tool_seen_state && !g_session_state_save_calls && !g_hook_bound);
+   assert(g_hook_probe_calls == 30);
+   assert(!strcmp(run_cmd_get_cwd(), "/previous/request"));
+   cJSON_Delete(refused);
    g_hook_remote = g_hook_guard_result = 0;
    assert(config_client_set_value("require_aimee_git",
                                   saved_git_policy ? saved_git_policy : cJSON_CreateTrue()) == 0);

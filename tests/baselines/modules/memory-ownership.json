@@ -1952,8 +1952,8 @@
       "symbols": [
         "kb_client_memory_check_drift"
       ],
-      "sha256": "3ada731999bf07db57b4a3067f6c539b784ab5408c13935e33500af2a04fb339",
-      "boundary_review": "2026-10-20 PR #3052: reviewed only linked-worktree directory detection and checked path-prefix rewriting. Reversing these two changes exactly reproduces the previously pinned source. The memory drift adapter, its inputs and Go-owned policy remain unchanged."
+      "sha256": "203ee58a50d5b8b0a1020ea63bcb99fa262a4e50dc2e1cb916ac5a9ca9df3d06",
+      "boundary_review": "2026-10-20 PR #3052: reviewed registered Aimee-tool origin discrimination in the subagent name heuristic and its shared guardrail wrapper argument. Reversing only this diff reproduces the previously pinned source exactly. The memory drift adapter, its inputs and Go-owned policy remain unchanged."
     },
     "src/modules/kb_client/kb_client.h": {
       "disposition": "kb-client",
@@ -2095,8 +2095,9 @@
       "symbols": [
         "kb_client_memory_scope_context_apply"
       ],
-      "sha256": "efe3420e783bbc2dd9aa57e3b63409c4c20ef1b42948b929e6c29820f0706c6f",
-      "boundary_change": "The dispatcher now returns its existing execution/receipt owner failure classification alongside the owned text result. Canonical consumers use this flag for is_error, evidence and liveness instead of guessing from text. Receipt completion can mark an unconfirmed outcome as failed before effect completion/audit. The kb_client_memory_scope_context_apply host-context seam and its arguments are unchanged; no memory eligibility, recall or scope policy moves into tools. This records the source change, not independent reviewer approval. Native exec-envelope outcome classification is relocated into the existing tools effect-contract source to keep the dispatcher below the file limit; its signals and policy ownership are unchanged. Role/toolset/deny-list, shell and knowledge command admission are extracted into a typed tools API shared with isolated served MCP callbacks. Existing memory scope application and policy ownership are unchanged. This records boundary analysis, not independent approval. Canonical callers now transfer their exact admitted argument object through the same dispatcher; only legacy ingress uses cached-schema coercion. Classifier registration moves to the existing effect-contract owner. The memory scope application seam, its arguments, host identity and Go-owned memory policy are unchanged. This is source boundary analysis, not independent reviewer approval."
+      "sha256": "d3f3a8a9d033f8119c7ebe3e2c25ca2cb754a8f74e3c066298414c045e68fb25",
+      "boundary_change": "The dispatcher now returns its existing execution/receipt owner failure classification alongside the owned text result. Canonical consumers use this flag for is_error, evidence and liveness instead of guessing from text. Receipt completion can mark an unconfirmed outcome as failed before effect completion/audit. The kb_client_memory_scope_context_apply host-context seam and its arguments are unchanged; no memory eligibility, recall or scope policy moves into tools. This records the source change, not independent reviewer approval. Native exec-envelope outcome classification is relocated into the existing tools effect-contract source to keep the dispatcher below the file limit; its signals and policy ownership are unchanged. Role/toolset/deny-list, shell and knowledge command admission are extracted into a typed tools API shared with isolated served MCP callbacks. Existing memory scope application and policy ownership are unchanged. This records boundary analysis, not independent approval. Canonical callers now transfer their exact admitted argument object through the same dispatcher; only legacy ingress uses cached-schema coercion. Classifier registration moves to the existing effect-contract owner. The memory scope application seam, its arguments, host identity and Go-owned memory policy are unchanged. This is source boundary analysis, not independent reviewer approval.",
+      "boundary_review": "2026-10-20 PR #3052: reviewed only selection of the registered-tool guardrail entry after actual MCP registry resolution. Reversing that call-site change reproduces the previously pinned source exactly. All memory transport, source admission and result handling remain unchanged."
     },
     "src/rel_types.c": {
       "disposition": "storage-protocol",
@@ -2161,8 +2162,8 @@
         "kb_client_memory_scope_context_clear",
         "server_module_memory_data"
       ],
-      "sha256": "1e68d0b9c77aeb305c6c9cfcda5534224a5878a380b42d59595acd6f8f8a7fd7",
-      "boundary_review": "IR #3036: native pre/post hook payloads stop at the translation-owned canonical intent adapter. Existing authenticated harness identity, session policy, registered workspace binding and Go memory interception authority remain unchanged; no raw hook payload is published as model history. This records source-boundary reasoning, not independent production approval."
+      "sha256": "278734f423022d7ef54845a638ea9852dff769e2ec4beeac033404dde7d16743",
+      "boundary_review": "2026-10-20 PR #3052: Reviewed only fail-closed lifecycle-hook cleanup after workspace acquisition failure. Memory scope clearing and the memory data transport are unchanged. Reversing this diff reproduces the previously pinned source exactly."
     },
     "src/server/server_api.c": {
       "disposition": "host-transport",
@@ -2235,7 +2236,8 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "cac2e802edaae65107480ead11944c54c57bf87b9963dc3389e84781e29f037f"
+      "sha256": "a4bcc5be95bd5e6e7841b8215681bf901cc9d255f01eea738da3de37cf5bfb45",
+      "boundary_review": "2026-10-20 PR #3052: Reviewed only native delegate/status wrappers, registration and documentation. Existing memory handlers, scope application and recall transport are unchanged. Reversing this diff reproduces the previously pinned source exactly."
     },
     "src/server/server_memory.c": {
       "disposition": "host-transport",
@@ -2526,8 +2528,8 @@
         "memory_stats",
         "server_module_memory_data"
       ],
-      "sha256": "25a20fd6f2dd06e78ceef0338fa75fe24ce81f790f33c853598b2261a57e8ab2",
-      "boundary_review": "IR #3036 fixture: canonical native hooks retain authenticated harness/session policy and opaque attempt identity; foreign namespaces refuse before state mutation. Existing memory stage stubs and memory authority are unchanged."
+      "sha256": "c87c20e0a21b119d24af8a7921590beee5b8e27a3aa93391acef417ff593c855",
+      "boundary_review": "2026-10-20 PR #3052: Reviewed only the registered-tool peer stub and failed mirror-hook regression. The memory data and scope peer fixtures are unchanged. Reversing this diff reproduces the previously pinned source exactly."
     },
     "src/tests/test_server_facts_transport.c": {
       "disposition": "host-fixture",

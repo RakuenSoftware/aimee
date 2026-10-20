@@ -1684,6 +1684,29 @@ static void test_known_subagent_tools_blocked(void)
    guardrails_close_test_sqlite();
 }
 
+static void test_registered_aimee_delegation(void)
+{
+   guardrails_open_test_sqlite();
+   session_state_t state = {0};
+   strcpy(state.session_mode, MODE_IMPLEMENT);
+   char message[512];
+   const char *arguments = "{\"role\":\"diagnose\",\"prompt\":\"Inspect the source\"}";
+   int rc =
+       pre_tool_check("delegate", arguments, &state, MODE_APPROVE, "/tmp", message, sizeof message);
+   assert(rc == 2 && strstr(message, "aimee delegate"));
+   rc = pre_tool_check_registered_tool("delegate", arguments, &state, MODE_APPROVE, "/tmp", message,
+                                       sizeof message);
+   assert(rc == 0);
+   const char *external[] = {"Task", "Agent", "spawn_agent", "launch_remote_agent"};
+   for (size_t i = 0; i < sizeof external / sizeof external[0]; i++)
+   {
+      rc = pre_tool_check_registered_tool(external[i], arguments, &state, MODE_APPROVE, "/tmp",
+                                          message, sizeof message);
+      assert(rc == 2 && strstr(message, "aimee delegate"));
+   }
+   guardrails_close_test_sqlite();
+}
+
 static void test_unknown_subagent_surface_blocked(void)
 {
    guardrails_open_test_sqlite();
@@ -4069,6 +4092,7 @@ int main(void)
    test_anti_pattern_no_match_no_warning();
    test_known_subagent_tools_blocked();
    test_unknown_subagent_surface_blocked();
+   test_registered_aimee_delegation();
    test_hook_call_count_increments();
    test_unknown_workspace_blocks_writes();
    test_container_delegate_exempt_from_worktree_guard();

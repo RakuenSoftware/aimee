@@ -178,6 +178,27 @@ stop_economizer_module() {
     fi
 }
 
+# Paid/native delegation uses the actual Go cost-admission owner.
+ROUTING_MODULE="$AIMEE_HOME/aimee-module-routing"
+ROUTING_MODULE_PID=""
+install_routing_module() {
+    cp "$DB1_MODULE_BUILT" "$ROUTING_MODULE"
+    chmod 0755 "$ROUTING_MODULE"
+    install_generated_grant routing "$ROUTING_MODULE"
+}
+start_routing_module() {
+    stop_routing_module
+    "$ROUTING_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-routing.log" 2>&1 &
+    ROUTING_MODULE_PID=$!
+}
+stop_routing_module() {
+    if [ -n "$ROUTING_MODULE_PID" ]; then
+        kill "$ROUTING_MODULE_PID" 2>/dev/null || true
+        wait "$ROUTING_MODULE_PID" 2>/dev/null || true
+        ROUTING_MODULE_PID=""
+    fi
+}
+
 # Batch/private execution tests use the real role policy, including the
 # cache-eligible summarize role. An absent policy owner would make the cache
 # regression vacuous because the safe fallback disables all role caching.
@@ -561,6 +582,7 @@ install_policy_module
 install_tools_module
 install_learning_module
 install_economizer_module
+install_routing_module
 # Grants are read by the daemon at startup, so this has to happen BEFORE the
 # server is started even though the module itself is not launched until the
 # workflow section. Installing it later produced a module that ran, attached to
@@ -894,6 +916,7 @@ start_server() {
             start_tools_module
             start_learning_module
             start_economizer_module
+            start_routing_module
             config_started=1
         fi
         [ -S "$HTTP_SOCK" ] && { start_db1_module; return 0; }
@@ -940,6 +963,7 @@ cleanup() {
     stop_tools_module
     stop_learning_module
     stop_economizer_module
+    stop_routing_module
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
         echo ""
         echo "integration: ABORTED after $((PASS + FAIL)) checks (exit $rc)."

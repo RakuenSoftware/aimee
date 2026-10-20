@@ -1,15 +1,58 @@
 #include "server_mcp_delegate.h"
 #include "aimee.h"
 #include "modules/git/mcp_git.h"
+#include "request_context.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
 
 static char cwd[MAX_PATH_LEN], override[128], caller_cwd[MAX_PATH_LEN], caller_session[128];
 static int worktree, caller_worktree, resolver_result, resolver_error;
 static int resolved, launched, errors, check_context = 1;
 static const char *resolver_session;
+static int owned_workspace, identity_fd;
+static request_context_t native_owner;
+static int native_dispatches;
+static int native_status = 200;
+const request_context_t *request_context_get(void)
+{
+   return native_owner.model_execution ? &native_owner : NULL;
+}
+int loopback_rpc(const char *wire, int length, char *response, int capacity, uint32_t capabilities)
+{
+   assert(length == (int)strlen(wire) && capabilities == CAP_DELEGATE);
+   cJSON *request = cJSON_Parse(wire);
+   assert(request);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request, "method")), "mcp.call"));
+   assert(
+       !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request, "session_id")), "host-session"));
+   const char *tool = cJSON_GetStringValue(cJSON_GetObjectItem(request, "tool"));
+   assert(!strcmp(tool, "delegate") || !strcmp(tool, "delegate_status"));
+   cJSON *arguments = cJSON_GetObjectItem(request, "arguments");
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(arguments, "session_id")),
+                  "forged-session"));
+   assert(!cJSON_GetObjectItem(request, "capabilities"));
+   native_dispatches++;
+   snprintf(response, capacity, "{\"status\":\"ok\",\"job_id\":17}");
+   cJSON_Delete(request);
+   return native_status;
+}
+int workspace_turn_resource_identity(const char *path, int *fd, char digest[65])
+{
+   assert(!strcmp(path, cwd));
+   *fd = -1;
+   if (!owned_workspace)
+      return -1;
+   *fd = identity_fd = open("/dev/null", O_RDONLY);
+   assert(*fd >= 0);
+   memset(digest, 'a', 64);
+   digest[64] = 0;
+   return 0;
+}
 static cJSON *forwarded;
 static char verdict[32], reason[32], error_text[256];
 uint32_t server_capability_for_method(const char *method)
@@ -97,6 +140,8 @@ static void reset(void)
    cJSON_Delete(forwarded);
    forwarded = NULL;
    resolved = launched = errors = resolver_error = 0;
+   owned_workspace = 0;
+   identity_fd = -1;
    resolver_result = 1;
    check_context = 1;
    verdict[0] = reason[0] = error_text[0] = 0;
@@ -150,6 +195,18 @@ static void test_routing(void)
 }
 static void test_resolution(void)
 {
+   reset();
+   owned_workspace = 1;
+   cJSON *owned_args = arguments();
+   server_conn_t owned_conn = {.capabilities = CAP_CHAT};
+   int owned_result = handle_mcp_delegate_call(NULL, &owned_conn, owned_args, "transport-session");
+   assert(owned_result == 17 && launched == 1 && !resolved && !errors);
+   assert_string("cwd", caller_cwd);
+   assert_string("session_id", "transport-session");
+   errno = 0;
+   assert(fcntl(identity_fd, F_GETFD) == -1 && errno == EBADF);
+   assert_caller_context();
+   cJSON_Delete(owned_args);
    for (int active = 0; active < 3; active++)
    {
       reset();
@@ -222,8 +279,38 @@ static void test_refusal(void)
    assert_caller_context();
    cJSON_Delete(args);
 }
+static void test_native_dispatch(void)
+{
+   cJSON *args = arguments();
+   cJSON_AddStringToObject(args, "session_id", "forged-session");
+   assert(!server_mcp_delegate_native("delegate", args, "host-session"));
+   native_owner.model_execution = 1;
+   native_owner.capabilities = CAP_DELEGATE;
+   assert(!server_mcp_delegate_native("delegate", args, "host-session"));
+   native_owner.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+   assert(!server_mcp_delegate_native("git_push", args, "host-session"));
+   assert(!server_mcp_delegate_native("delegate", args, NULL));
+   assert(!native_dispatches);
+   const char *tools[] = {"delegate", "delegate_status"};
+   for (size_t i = 0; i < 2; i++)
+   {
+      char *response = server_mcp_delegate_native(tools[i], args, "host-session");
+      assert(response && strstr(response, "\"job_id\":17"));
+      free(response);
+   }
+   assert(native_dispatches == 2);
+   native_status = 503;
+   char *failed = server_mcp_delegate_native("delegate", args, "host-session");
+   assert(failed && !strncmp(failed, "error: ", 7));
+   free(failed);
+   native_status = 200;
+   memset(&native_owner, 0, sizeof native_owner);
+   cJSON_Delete(args);
+}
 int main(int argc, char **argv)
 {
+   if (argc == 1 || !strcmp(argv[1], "native"))
+      test_native_dispatch();
    if (argc == 1 || !strcmp(argv[1], "routing"))
       test_routing();
    if (argc == 1 || !strcmp(argv[1], "scope"))

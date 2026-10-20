@@ -57,6 +57,25 @@ static void test_full_stack_resolves_union(void)
    printf("  code_roles_resolve_edit_file: ok\n");
 }
 
+static void test_primary_orchestration(void)
+{
+   toolset_register_native_tool("delegate", "primary");
+   toolset_register_native_tool("delegate_status", "primary");
+   toolset_registry_t registry;
+   toolset_registry_init(&registry);
+   char tools[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX], error[TOOLSET_ERROR_MAX] = "";
+   int count = toolset_resolve(&registry, "primary", tools, TOOLSET_MAX_TOOLS, error, sizeof error);
+   assert(count > 0 && has_tool(tools, count, "delegate"));
+   assert(has_tool(tools, count, "delegate_status") && has_tool(tools, count, "read_file"));
+   const char *roles[] = {"code", "full_stack", "review", "review_indexed", "readonly"};
+   for (size_t i = 0; i < sizeof roles / sizeof roles[0]; i++)
+   {
+      count = toolset_resolve(&registry, roles[i], tools, TOOLSET_MAX_TOOLS, error, sizeof error);
+      assert(count > 0 && !has_tool(tools, count, "delegate"));
+      assert(!has_tool(tools, count, "delegate_status"));
+   }
+}
+
 /* A coding delegate must resolve the git WRITE tools, and a reviewer must not.
  *
  * Registering a tool is not the same as a role being able to call it:
@@ -307,6 +326,7 @@ int main(void)
 {
    printf("test_toolset:\n");
    test_full_stack_resolves_union();
+   test_primary_orchestration();
    test_git_write_tools_reach_coding_roles_only();
    test_find_callers_reaches_reviewers_and_coders();
    test_review_indexed_read_tools_gated_no_write();

@@ -2,15 +2,65 @@
 #include "server_mcp_delegate.h"
 #include "aimee.h"
 #include "modules/git/mcp_git.h"
+#include "modules/workspace/workspace_turn.h"
+#include "server_http_internal.h"
+#include "request_context.h"
 
 #include <stdlib.h>
+#include <unistd.h>
 
 int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+
+char *server_mcp_delegate_native(const char *tool, const cJSON *args, const char *sid)
+{
+   const request_context_t *owner = request_context_get();
+   if (!owner || !owner->model_execution || owner->vault_transport == ATTEST_NONE || !sid ||
+       !sid[0] || !tool || (strcmp(tool, "delegate") && strcmp(tool, "delegate_status")))
+      return NULL;
+   cJSON *request = cJSON_CreateObject();
+   cJSON *arguments = cJSON_Duplicate(args, 1);
+   if (!request || !arguments || !cJSON_AddStringToObject(request, "method", "mcp.call") ||
+       !cJSON_AddStringToObject(request, "tool", tool) ||
+       !cJSON_AddStringToObject(request, "session_id", sid) ||
+       !cJSON_AddItemToObject(request, "arguments", arguments))
+   {
+      cJSON_Delete(arguments);
+      cJSON_Delete(request);
+      return NULL;
+   }
+   char *wire = cJSON_PrintUnformatted(request);
+   cJSON_Delete(request);
+   char *response = wire ? malloc(SERVER_MAX_MSG_SIZE + 8) : NULL;
+   if (response)
+   {
+      /* Imports the current attested identity, retaining the model's capability
+       * ceiling rather than borrowing an operator connection. */
+      int status =
+          loopback_rpc(wire, (int)strlen(wire), response, SERVER_MAX_MSG_SIZE, owner->capabilities);
+      if (status < 200 || status >= 300)
+      {
+         memmove(response + 7, response, strlen(response) + 1);
+         memcpy(response, "error: ", 7);
+      }
+   }
+   free(wire);
+   return response;
+}
 
 static int add_resolved_delegate_cwd(cJSON *dreq, cJSON *args, const char *sid, char **error)
 {
    char previous_cwd[MAX_PATH_LEN], previous_session[128] = "";
    const char *cwd = run_cmd_get_cwd();
+   /* Native callbacks already hold their approved checkout. Re-resolving Git
+    * can collapse a linked mirror into its bare common directory. */
+   int directory_fd = -1;
+   char identity[65];
+   if (cwd && workspace_turn_resource_identity(cwd, &directory_fd, identity) == 0)
+   {
+      if (directory_fd >= 0)
+         close(directory_fd);
+      return cJSON_AddStringToObject(dreq, "cwd", cwd) ? 0 : -1;
+   }
    snprintf(previous_cwd, sizeof previous_cwd, "%s", cwd ? cwd : "");
    int previous_override = session_id_override_active();
    if (previous_override)

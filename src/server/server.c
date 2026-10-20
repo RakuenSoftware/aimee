@@ -955,6 +955,13 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
        hook_identity == 1 &&
        cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "client_non_git_workspace"));
    int bound = workspace_turn_bind_active(target_cwd);
+   if (bound < 0)
+   {
+      workspace_turn_unbind_active();
+      free(ti_heap);
+      aimee_hook_ir_free(&hook);
+      return hook_send_blocked(conn, "Cannot acquire the registered workspace source.", request_id);
+   }
    const workspace_provider_t *provider = workspace_provider_active();
    int detached = bound && provider->kind == WS_PROVIDER_DETACHED;
    if (detached)

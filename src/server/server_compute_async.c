@@ -253,7 +253,10 @@ static void tool_execute_worker(void *arg)
    session_state_load(&state, sid);
 
    char msg[1024] = "";
-   int rc = pre_tool_check(tool, args, &state, config_guardrail_mode(), cwd, msg, sizeof(msg));
+   int rc = agent_tools_is_mcp_derived(tool)
+                ? pre_tool_check_registered_tool(tool, args, &state, config_guardrail_mode(), cwd,
+                                                 msg, sizeof msg)
+                : pre_tool_check(tool, args, &state, config_guardrail_mode(), cwd, msg, sizeof msg);
    session_state_save(&state, sid);
 
    /* 1 and 3 are ALLOW-with-rewrite verdicts, not refusals: 1 carries a rewritten
@@ -358,6 +361,8 @@ static void tool_execute_worker_pooled(void *arg)
 {
    aimee_ir_session_begin_task();
    int async_slot = ((compute_ctx_t *)arg)->async_slot;
+   const workspace_turn_mirror_lease_t *previous =
+       workspace_turn_mirror_bind(((compute_ctx_t *)arg)->source_mirror);
    compute_ctx_bind_request_context(arg);
    /* The same authenticated session must reach both the pre-check and native
     * dispatch. A worker's process-derived session is not this request's owner. */
@@ -367,6 +372,7 @@ static void tool_execute_worker_pooled(void *arg)
    agent_set_request_codex_creds(NULL, NULL);
    tool_execute_worker(arg);
    compute_ctx_clear_request_context();
+   workspace_turn_mirror_bind(previous);
    session_id_clear_override();
    async_slot_release(async_slot);
    tool_thread_release();
@@ -626,9 +632,11 @@ static void chat_stream_worker_pooled(void *arg)
     * turn's value; (2) we clear it after the worker. chat_stream_worker is a plain
     * call with no longjmp/pthread_exit/cancellation in its tree, so the post-call
     * clear always runs on return; together the two make the guard robust. */
+   const workspace_turn_mirror_lease_t *previous = workspace_turn_mirror_bind(cctx->source_mirror);
    compute_ctx_bind_request_context(cctx);
    chat_stream_worker(arg);
    compute_ctx_clear_request_context();
+   workspace_turn_mirror_bind(previous);
    agent_set_request_cancel(NULL);
    if (locked)
       presence_turn_release(lock_session, lock_turn);

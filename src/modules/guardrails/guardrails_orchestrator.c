@@ -1189,7 +1189,8 @@ static int is_write_intent(const char *tool_name, cJSON *root)
 
 static int pre_tool_check_impl(const char *tool_name, const char *input_json,
                                session_state_t *state, const char *guardrail_mode, const char *cwd,
-                               char *msg_buf, size_t msg_len, int client_non_git_workspace)
+                               char *msg_buf, size_t msg_len, int client_non_git_workspace,
+                               int registered_aimee_tool)
 {
    if (!tool_name || !input_json || !state)
       return 0;
@@ -1225,8 +1226,10 @@ static int pre_tool_check_impl(const char *tool_name, const char *input_json,
 
    int script_tool = is_script_tool(tool_name);
    tool_name = guardrails_canonical_tool_name(tool_name);
-   if (!is_subagent_tool(tool_name) && looks_like_subagent_tool_name(tool_name) &&
-       input_looks_like_subagent_request(root))
+   int owned_delegate = registered_aimee_tool &&
+                        (!strcmp(tool_name, "delegate") || !strcmp(tool_name, "delegate_status"));
+   if (!owned_delegate && !is_subagent_tool(tool_name) &&
+       looks_like_subagent_tool_name(tool_name) && input_looks_like_subagent_request(root))
       tool_name = "Subagent";
 
    /* Extract common fields */
@@ -2042,7 +2045,7 @@ static char *guardrails_workspace_exec(void *ctx, const char *cmd, int *exit_cod
 
 int pre_tool_check_inner(const char *tool_name, const char *input_json, session_state_t *state,
                          const char *guardrail_mode, const char *cwd, char *msg_buf, size_t msg_len,
-                         int client_non_git_workspace)
+                         int client_non_git_workspace, int registered_aimee_tool)
 {
    /* Worktree/branch/verify helpers predate workspace providers and use run_cmd.
     * Keep every probe on the same filesystem as the tool being checked, for
@@ -2056,7 +2059,7 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
       previous = run_cmd_exchange_executor(
           (run_cmd_executor_t){guardrails_workspace_exec, (void *)provider});
    int rc = pre_tool_check_impl(tool_name, input_json, state, guardrail_mode, cwd, msg_buf, msg_len,
-                                client_non_git_workspace);
+                                client_non_git_workspace, registered_aimee_tool);
    if (detached)
       run_cmd_exchange_executor(previous);
    return rc;

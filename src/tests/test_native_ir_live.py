@@ -11,6 +11,8 @@ import json
 import os
 from pathlib import Path
 import socket
+import shutil
+import subprocess
 import threading
 import time
 import traceback
@@ -65,6 +67,9 @@ def main():
     active = None
     async_case = False
     browser_question = False
+    delegation_case = False
+    delegation_released = threading.Event()
+    child_requests = []
     observed = []
     errors = []
     count = 0
@@ -77,6 +82,24 @@ def main():
             nonlocal count
             try:
                 request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                if request.get("model") == "native-delegate-child":
+                    assert delegation_released.wait(60), "parent native owner did not finish"
+                    child_requests.append(request)
+                    assert self.headers.get("Authorization") == "Bearer native-child-fixture-only"
+                    names = {tool.get("name", tool.get("function", {}).get("name")) for tool in request.get("tools", [])}
+                    assert "delegate" not in names and "delegate_status" not in names, names
+                    results = [message for message in request.get("messages", []) if message.get("role") == "tool"]
+                    message = dict(role="assistant", content="CHILD_MIRROR_OK")
+                    if not results:
+                        message = dict(role="assistant", tool_calls=[dict(id="native-child-read", type="function",
+                            function=dict(name="read_file", arguments=json.dumps(dict(path="README.md"))))])
+                    else:
+                        assert "canonical delegate fixture" in json.dumps(results), results
+                        assert "CLIENT_CWD_MUST_NOT_BE_READ" not in json.dumps(results), results
+                    self.send_payload(dict(id="native-child-response", model="native-delegate-child",
+                        choices=[dict(index=0, message=message, finish_reason="stop" if results else "tool_calls")],
+                        usage=dict(prompt_tokens=100, completion_tokens=10)))
+                    return
                 assert active is not None
                 kind, wire, marker, call_id = active
                 observed.append(request)
@@ -106,35 +129,45 @@ def main():
                 if auth == "claude-oauth":
                     assert self.headers.get("x-api-key") is None
                     assert "oauth" in self.headers.get("anthropic-beta", "")
-                tool_name = "request_input" if browser_question else "read_file"
+                tool_call = count == 1 or (delegation_case and count == 2)
+                if delegation_case and count == 2:
+                    call_id += "_status"
+                tool_name = ("delegate_status" if count > 1 else "delegate") if delegation_case else "request_input" if browser_question else "read_file"
                 logical = "mcp__aimee__" + tool_name if kind == "claude" else tool_name
                 tools = request.get("tools", [])
                 names = {tool.get("name", tool.get("function", {}).get("name")) for tool in tools}
                 assert logical in names, (logical, names)
                 if count > 1:
-                    assert call_id in encoded and ("BROWSER_REPLY" if browser_question else "canonical delegate fixture") in encoded, json.dumps(request.get("input", request.get("messages", [])), ensure_ascii=False)[-4000:]
-                if count == 3:
+                    previous_call_id = active[3] + ("_status" if delegation_case and count == 3 else "")
+                    assert previous_call_id in encoded and ("job_id" if delegation_case else "BROWSER_REPLY" if browser_question else "canonical delegate fixture") in encoded, json.dumps(request.get("input", request.get("messages", [])), ensure_ascii=False)[-4000:]
+                if count == 3 and not delegation_case:
                     assert marker + "_FOLLOWUP" in encoded
-                text = marker + ("_FINAL" if count == 2 else "_RESUMED")
-                arguments = json.dumps({"question": "BROWSER_QUESTION"} if browser_question else {"path": "README.md"})
+                text = marker + ("_FINAL" if count == (3 if delegation_case else 2) else "_RESUMED")
+                arguments = json.dumps(dict(role="diagnose", persona="engineer", via="native-delegate-child", tools=True,
+                    prompt="Read README.md and report the committed source") if delegation_case else
+                    {"question": "BROWSER_QUESTION"} if browser_question else {"path": "README.md"})
+                if delegation_case and count == 2:
+                    jobs = set(job_ids(request))
+                    assert len(jobs) == 1, "native status call needs the returned job"
+                    arguments = json.dumps(dict(job_id=jobs.pop(), full_result=True))
                 if wire == "anthropic":
                     assert self.path.endswith("/messages"), self.path
                     content = [{"type": "tool_use", "id": call_id, "name": logical,
-                                "input": json.loads(arguments)}] if count == 1 else [{"type": "text", "text": text}]
+                                "input": json.loads(arguments)}] if tool_call else [{"type": "text", "text": text}]
                     payload = {"id": "msg_" + marker + str(count), "type": "message", "role": "assistant",
                                "model": marker, "content": content,
-                               "stop_reason": "tool_use" if count == 1 else "end_turn",
+                               "stop_reason": "tool_use" if tool_call else "end_turn",
                                "stop_sequence": None, "usage": {"input_tokens": 100, "output_tokens": 10}}
                     frames = [("message_start", {"type": "message_start", "message": {
                         **payload, "content": [], "stop_reason": None}})]
                     block = dict(content[0])
-                    if count == 1:
+                    if tool_call:
                         block["input"] = {}
                     else:
                         block["text"] = ""
                     frames += [("content_block_start", {"type": "content_block_start", "index": 0, "content_block": block}),
                                ("content_block_delta", {"type": "content_block_delta", "index": 0,
-                                "delta": {"type": "input_json_delta", "partial_json": arguments} if count == 1 else
+                                "delta": {"type": "input_json_delta", "partial_json": arguments} if tool_call else
                                          {"type": "text_delta", "text": text}}),
                                ("content_block_stop", {"type": "content_block_stop", "index": 0}),
                                ("message_delta", {"type": "message_delta", "delta": {
@@ -143,16 +176,16 @@ def main():
                 elif wire == "chatgpt":
                     assert self.path.endswith("/responses"), self.path
                     item = {"type": "function_call", "id": "fc_" + marker, "call_id": call_id,
-                            "name": logical, "arguments": arguments, "status": "completed"} if count == 1 else {
+                            "name": logical, "arguments": arguments, "status": "completed"} if tool_call else {
                             "type": "message", "id": "msg_" + marker + str(count), "role": "assistant",
                             "status": "completed", "content": [{"type": "output_text", "text": text, "annotations": []}]}
                     payload = {"id": "resp_" + marker + str(count), "object": "response", "status": "completed",
                                "model": marker, "output": [item], "usage": {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110}}
                     frames = [("response.created", {"type": "response.created", "response": {**payload, "status": "in_progress", "output": []}}),
                               ("response.output_item.added", {"type": "response.output_item.added", "output_index": 0,
-                               "item": {**item, "status": "in_progress", **({"arguments": ""} if count == 1 else {"content": []})}})]
+                               "item": {**item, "status": "in_progress", **({"arguments": ""} if tool_call else {"content": []})}})]
                     frames += [("response.function_call_arguments.delta", {"type": "response.function_call_arguments.delta",
-                               "output_index": 0, "item_id": item["id"], "delta": arguments})] if count == 1 else [
+                               "output_index": 0, "item_id": item["id"], "delta": arguments})] if tool_call else [
                               ("response.output_text.delta", {"type": "response.output_text.delta", "output_index": 0,
                                "content_index": 0, "item_id": item["id"], "delta": text})]
                     frames += [("response.output_item.done", {"type": "response.output_item.done", "output_index": 0, "item": item}),
@@ -160,11 +193,11 @@ def main():
                 else:
                     assert self.path.endswith("/chat/completions"), self.path
                     delta = {"tool_calls": [{"index": 0, "id": call_id, "type": "function",
-                              "function": {"name": logical, "arguments": arguments}}]} if count == 1 else {"content": text}
+                              "function": {"name": logical, "arguments": arguments}}]} if tool_call else {"content": text}
                     payload = {"id": "chat_" + marker + str(count), "object": "chat.completion.chunk", "model": marker,
                                "choices": [{"index": 0, "delta": delta, "finish_reason": None}]}
                     frames = [(None, payload), (None, {**payload, "choices": [{"index": 0, "delta": {},
-                        "finish_reason": "tool_calls" if count == 1 else "stop"}],
+                        "finish_reason": "tool_calls" if tool_call else "stop"}],
                         "usage": {"prompt_tokens": 100, "completion_tokens": 10}})]
                 if request.get("stream"):
                     data = "".join(("event: " + name + "\n" if name else "") + "data: " + json.dumps(value) + "\n\n"
@@ -177,11 +210,11 @@ def main():
                 elif wire != "openai":
                     self.send_payload(payload)
                 else:
-                    message = {"role": "assistant", "content": text if count != 1 else None}
-                    if count == 1:
+                    message = {"role": "assistant", "content": text if not tool_call else None}
+                    if tool_call:
                         message["tool_calls"] = [{"id": call_id, "type": "function", "function": {"name": logical, "arguments": arguments}}]
                     self.send_payload({"id": "chat_" + marker + str(count), "object": "chat.completion", "model": marker,
-                        "choices": [{"message": message, "finish_reason": "tool_calls" if count == 1 else "stop"}],
+                        "choices": [{"message": message, "finish_reason": "tool_calls" if tool_call else "stop"}],
                         "usage": {"prompt_tokens": 100, "completion_tokens": 10}})
             except Exception as error:
                 errors.append(repr(error))
@@ -227,6 +260,12 @@ def main():
             forbidden_credentials.add(token)
             api("/v1/vault/set_server", {"agent": name, "cred": "oauth" if document else "api_key",
                                         "secret": json.dumps(document) if document else token})
+        models.append(dict(name="native-delegate-child", model="native-delegate-child", provider="openai",
+            auth_type="api_key", endpoint=f"http://127.0.0.1:{server.server_port}/v1", backend="http",
+            roles=["all"], enabled=True, tools_enabled=True, max_tokens=4096, timeout_ms=75000,
+            context_window=131072, max_parallel=1, max_turns=3))
+        forbidden_credentials.add("native-child-fixture-only")
+        api("/v1/vault/set_server", dict(agent="native-delegate-child", cred="api_key", secret="native-child-fixture-only"))
         models_path.write_text(json.dumps(dict(default_agent=models[0]["name"], default_delegate=models[0]["name"],
                                                fallback_chain=[], models=models)))
         for kind, wire, auth in cases:
@@ -319,6 +358,69 @@ def main():
             assert "canonical delegate fixture" in encoded and "iVBORw0KGgo" in encoded
             assert "Continue the server-owned canonical turn." not in encoded
             print("native integration:", kind, wire, auth, "typed seeded run, real tool, original response and durable source pass", flush=True)
+        # The model calls the real orchestration tool without supplying cwd.
+        # The child must retain the approved mirror after its parent SDK closes.
+        delegation_case = True
+        async_case = False
+        docker = shutil.which("docker")
+        sandbox_ready = docker and subprocess.run([docker, "version"], stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, timeout=15).returncode == 0
+        def job_ids(value):
+            if isinstance(value, dict):
+                if isinstance(value.get("job_id"), int):
+                    yield value["job_id"]
+                for item in value.values():
+                    yield from job_ids(item)
+            elif isinstance(value, list):
+                for item in value:
+                    yield from job_ids(item)
+            elif isinstance(value, str):
+                try:
+                    parsed = json.loads(value)
+                except (ValueError, TypeError):
+                    return
+                if not isinstance(parsed, str):
+                    yield from job_ids(parsed)
+        for kind, wire in (("codex", "chatgpt"), ("claude", "anthropic")):
+            marker = case_name(kind, wire, "api_key")
+            active = (kind, wire, marker, "toolu_delegate_" + kind)
+            count = 0
+            before = len(observed)
+            child_before = len(child_requests)
+            delegation_released.clear()
+            sid = api("/v1/sessions/create", dict(client_type="native-delegation-integration"))["session_id"]
+            attachment = api(f"/v1/sessions/{sid}/attach", dict(surface="webchat", owner=actor))["attach_id"]
+            api(f"/v1/sessions/{sid}/primary", dict(agent=marker))
+            try:
+                raw = api("/v1/chat/stream", dict(attach_id=attachment, message=marker + "_FIRST",
+                    aimee_session_id=sid, cwd=str(workspace), ir_version=1))
+                records = [json.loads(line) for line in raw.splitlines() if line.strip()]
+                assert records[-1]["event"] == dict(kind="execution", payload=dict(status="completed")), raw[-8000:]
+                assert count == 3 and not errors, (count, errors)
+            finally:
+                api(f"/v1/sessions/{sid}/detach", dict(attach_id=attachment))
+            jobs = set(job_ids(observed[before:]))
+            assert len(jobs) == 1, observed[before:]
+            delegation_released.set()
+            job = jobs.pop()
+            deadline = time.monotonic() + 90
+            while True:
+                child = api("/v1/delegate/status", dict(job_id=job, full_result=True))
+                if child.get("job_status") in ("done", "failed", "partial", "cancelled"):
+                    break
+                assert time.monotonic() < deadline, child
+                time.sleep(0.05)
+            assert not errors, errors
+            if sandbox_ready:
+                assert child["job_status"] == "done" and "CHILD_MIRROR_OK" in child["result"], child
+                assert len(child_requests) == child_before + 2, child_requests[child_before:]
+            else:
+                assert child["job_status"] == "failed" and "could not be given a sandboxed container" in child["result"], child
+                assert len(child_requests) == child_before, child_requests[child_before:]
+            saved = api("/v1/trajectory/export", dict(session_id=sid, compress=False))["trajectory"]
+            assert active[3] in json.dumps(saved) and active[3] + "_status" in json.dumps(saved) and "job_id" in json.dumps(saved), saved
+            print("native integration:", kind, "original delegation, inherited mirror and queued child ownership pass", flush=True)
+        delegation_case = False
         if os.environ.get("AIMEE_TEST_NATIVE_BROWSER_OPERATOR") == "1":
             from test_native_ir_browser_control import run_browser_control
             browser_question = True
@@ -379,6 +481,7 @@ def main():
             models_path.unlink(missing_ok=True)
         else:
             models_path.write_bytes(previous)
+        delegation_released.set()
         server.shutdown()
         server.server_close()
         thread.join()

@@ -44,6 +44,9 @@ typedef struct compute_ctx
    attested_transport_t attested_transport;
    char vault_principal[VAULT_PRINCIPAL_MAX];
    request_context_snapshot_t request_context;
+   /* Owned directory capability captured from the producer's actual workspace,
+    * never from request-body path claims. Released after worker callbacks join. */
+   struct workspace_turn_mirror_lease *source_mirror;
    cJSON *req; /* owned by this context */
    int ir_enabled, ir_delivery, ir_failed, ir_completed, ir_native_owned;
    /* Set only after the canonical compaction owner commits its checkpoint. */

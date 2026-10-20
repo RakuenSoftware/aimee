@@ -15,6 +15,8 @@ typedef struct
 } builtin_toolset_t;
 
 static const builtin_toolset_t BUILTINS[] = {
+    /* Orchestration is available to primaries; delegate role sets never inherit it. */
+    {"primary", {"code", NULL}, {NULL}},
     /* The code-intelligence tools (index_find_callers, index_blast_radius, ...) are
      * NOT listed here: they are declared native in the server's MCP table and land in
      * `core` and `review_indexed` by registration. One declaration, one schema, one
@@ -74,6 +76,8 @@ static const builtin_toolset_t BUILTINS[] = {
 };
 
 static const char *const KNOWN_TOOLS[] = {
+    "delegate",
+    "delegate_status",
     "bash",
     "execute_script",
     "read_file",

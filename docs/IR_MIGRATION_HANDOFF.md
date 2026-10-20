@@ -3912,3 +3912,44 @@ unchanged. A real Git bare-mirror regression covers successful discovery, broken
 backlinks and unrelated common directories. Hosted Docker must qualify the actual
 execution after publication. Native-primary orchestration and queued callback
 capability transfer remain stashed separately; they are not part of this CI fix.
+
+
+## Native primary delegation and queued capabilities: 20 October 2026
+
+Primaries now advertise delegate and delegate_status from the existing MCP
+catalog. Delegate role toolsets do not inherit orchestration. Calls re-enter the
+normal authenticated dispatch with the current model owner's capability ceiling;
+body session claims cannot replace the host session. Default delegation preserves
+an already-approved checkout instead of resolving a linked mirror to its bare
+common directory. Compute contexts duplicate the producer's held directory lease,
+bind it on each worker and restore the prior thread binding after cleanup.
+
+The live journey exposed the generic provider-spawn heuristic also banning the
+registered Aimee delegate tool. The host registry dispatcher now supplies a distinct
+entry classification for that exact tool; other guardrail and audit checks still
+see the original arguments. External hooks cannot request this classification.
+Raw external delegate, Task, Agent, spawn_agent and unknown spawn-like tools remain
+blocked. A failed mirror acquisition also stops lifecycle hooks before filesystem
+probes; successful mirror-hook resource semantics and other ingress paths still
+require their remaining audit.
+
+The actual Go routing owner is installed and attached in integration, alongside
+Go accounting. Both real SDK primaries call delegate and delegate_status, preserve
+both original call IDs in durable history and finish before the fixture releases
+the child's first provider response. The child must read committed mirror content in Docker and cannot
+inherit orchestration tools. Locally it reaches the mandatory sandbox refusal;
+hosted Docker completion remains required. There is no new CI skip.
+
+The 660 native binaries, PostgreSQL integration 168/168 (26 unavailable local-service
+checks), all twenty root-namespace actual-SDK journeys and four budget refusals pass.
+Four focused ASan/UBSan fixtures, two TSan fixtures, CMake agent/two fixtures and
+Cppcheck without increased diagnostics also pass. The guardrail ownership pin was
+reviewed against an exact reverse-to-previous-source proof; its memory adapter and
+Go policy inputs are unchanged. Fresh CI is required for this source snapshot.
+
+The earlier Docker bare-mirror repair b33f4d3fc passes hosted integration 168/168,
+including the real sandboxed mirror read and delegate learning/readback. At the
+last complete enumeration it has 55 passing checks and two existing platform
+skips, including all deployment tiers. The migration, independently graded local learning/reuse, remaining IR
+consumers, native platforms/live subscription and reviewed production promotion
+remain unfinished. Production remains KB-free.

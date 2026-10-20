@@ -379,6 +379,10 @@ void compute_ctx_free(compute_ctx_t *cctx)
       close(cctx->conn_fd);
 #endif
    request_context_snapshot_clear(&cctx->request_context);
+   const workspace_turn_mirror_lease_t *bound = workspace_turn_mirror_bind(NULL);
+   if (bound != cctx->source_mirror)
+      workspace_turn_mirror_bind(bound);
+   workspace_turn_mirror_release(cctx->source_mirror);
    free(cctx);
 }
 
@@ -1972,9 +1976,12 @@ delegate_fail:
 
 void delegate_worker(void *arg)
 {
+   const workspace_turn_mirror_lease_t *previous =
+       workspace_turn_mirror_bind(((compute_ctx_t *)arg)->source_mirror);
    compute_ctx_bind_request_context(arg);
    delegate_worker_run(arg);
    compute_ctx_clear_request_context();
+   workspace_turn_mirror_bind(previous);
 }
 
 int handle_delegate_launch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -2043,6 +2050,12 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
    /* Create per-context write mutex */
    cctx->write_mutex = malloc(sizeof(pthread_mutex_t));
    pthread_mutex_init(cctx->write_mutex, NULL);
+
+   if (workspace_turn_mirror_capture(run_cmd_get_cwd(), &cctx->source_mirror))
+   {
+      compute_ctx_free(cctx);
+      return NULL;
+   }
 
    return cctx;
 }

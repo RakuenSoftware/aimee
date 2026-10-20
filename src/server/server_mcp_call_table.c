@@ -77,6 +77,14 @@ static cJSON *mcph_get_help(struct mcp_call *c)
 {
    return tool_get_help(c->jargs);
 }
+static cJSON *mcph_delegate_native(struct mcp_call *c)
+{
+   char *response = server_mcp_delegate_native(c->tool, c->jargs, c->sid);
+   cJSON *content =
+       text_content(response ? response : "error: native orchestration owner unavailable");
+   free(response);
+   return content;
+}
 static cJSON *mcph_ast_grep_search(struct mcp_call *c)
 {
    return tool_ast_grep_search(c->jargs);
@@ -2118,7 +2126,9 @@ static cJSON *mcph_peer_inbox(struct mcp_call *c)
  * query away. Both shipped green.
  *
  * Marking a tool native asserts it works with NO client session behind it: a native
- * call passes ctx=NULL and conn=NULL. Today no handler touches ctx and only
+ * call passes ctx=NULL and conn=NULL. Orchestration wrappers use the existing
+ * dispatch seam under the attested model owner rather than a client connection.
+ * Today no handler touches ctx and only
  * session_search / workflow_run touch conn — keep those two external-only (they are
  * about an external client's own session anyway, and are EXEMPT in
  * check-native-tool-parity.py for that reason).
@@ -2146,6 +2156,8 @@ static const struct
    mcp_tool_handler_fn fn;
    const char *native;
 } mcp_tool_table[] = {
+    {"delegate", mcph_delegate_native, "primary"},
+    {"delegate_status", mcph_delegate_native, "primary"},
     {"get_help", mcph_get_help, NULL},
     {"ast_grep_search", mcph_ast_grep_search, "core,review_indexed"},
     {"search_memory", mcph_search_memory, NULL},

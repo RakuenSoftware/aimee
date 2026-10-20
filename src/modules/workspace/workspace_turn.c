@@ -431,6 +431,8 @@ int workspace_turn_resolve_detached_mirror_cwd(const char *cwd, char *out, size_
    return 0;
 }
 
+static int active_mirror_lease(const char *real);
+
 static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, int *bound,
                             int *mirror_fd, char resolved[MAX_PATH_LEN], char drift[256],
                             int background)
@@ -441,6 +443,21 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, i
    drift[0] = '\0';
    if (!cwd || !cwd[0])
       return 0;
+   if (background)
+   {
+      char actual[MAX_PATH_LEN];
+      int source = realpath(cwd, actual) ? active_mirror_lease(actual) : -1;
+      if (source >= 0)
+      {
+         *mirror_fd = fcntl(source, F_DUPFD_CLOEXEC, 3);
+         if (*mirror_fd < 0)
+            return -1;
+         snprintf(resolved, MAX_PATH_LEN, "%s", actual);
+         *bound = 1;
+         workspace_provider_set_active(workspace_provider_shared());
+         return 1;
+      }
+   }
    for (int i = 0; i < config_workspace_count(); i++)
    {
       if (!cwd_in_workspace(cwd, config_workspaces(i)))
