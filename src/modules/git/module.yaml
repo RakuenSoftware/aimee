@@ -45,6 +45,8 @@
     "src/modules/git/module_adapter.c"
   ],
   "go_sources": [
+    "server-go/cmd/aimee-attribution-check/main.go",
+    "server-go/internal/attribution/check.go",
     "server-go/modules/git/ci_grade.go",
     "server-go/modules/git/cred_resolve.go",
     "server-go/modules/git/forge_request.go",
@@ -52,6 +54,7 @@
     "server-go/modules/git/verify_state.go"
   ],
   "go_tests": [
+    "server-go/internal/attribution/check_test.go",
     "server-go/modules/git/ci_grade_test.go",
     "server-go/modules/git/cred_resolve_test.go",
     "server-go/modules/git/forge_request_test.go",
@@ -91,6 +94,7 @@
     "src/tests/test_git_ops.c",
     "src/tests/test_git_org_repos.c",
     "src/tests/test_git_pr_ci_grade.c",
+    "src/tests/test_git_pr_stage.c",
     "src/tests/test_git_project.c",
     "src/tests/test_git_ssh_agent.c",
     "src/tests/test_git_verify_contract.c",
