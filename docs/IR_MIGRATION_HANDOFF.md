@@ -3369,3 +3369,30 @@ passes 167/167 (26 service-dependent checks unavailable locally); all 76 lint
 gates pass. The previously published `2d49add9b` also completed every CI job.
 Native SDK activation, cache lifecycle ownership and live Claude custody remain
 unfinished; do not substitute these protocol results for that work.
+
+
+## Canonical core repair and unresolved native-cache refusal
+
+The final provider-format branches of `message_history_repair` are retired. All
+confirmed production callers in the delegate loop and both gateway retry seams
+already supply canonical arrays. The core validates every canonical message
+before applying the ordered IR repair; native, mixed and malformed histories
+refuse without mutation. Explicit historical import stays in translation. The
+unused native argument-normalization/sanitization module and its Make/CMake
+linkages are removed. Invalid native arguments can no longer be silently changed
+to `{}`; the MiniMax regression verifies strict entry refusal and exact valid
+30-digit argument emission through typed egress.
+
+Native-cache source loading now also applies authoritative history admission:
+missing results and platform unknown-outcome diagnostics refuse before any cache
+claim. Actual known tool errors remain replayable. Reused call IDs are checked
+causally, preserving earlier receipts and signed reasoning. The bypass gate now
+checks the migrated core repair function while retaining explicit compatibility
+output boundaries; plants cover native readers and both retired sanitizer APIs.
+
+The focused core/cache/strict-provider fixtures pass, as do four ASan/UBSan
+fixtures, both native cache/runtime CMake fixtures, and all fourteen bypass-gate
+tests. Cppcheck retains the three existing agent-bridge diagnostics with no new
+ones or baseline changes. The normal server build, all 657 native suite entries
+and all 76 lint gates pass.
+Native SDK launch activation and the other unfinished work above remain required.

@@ -115,6 +115,8 @@ static cJSON *source_history(server_native_cache_t *cache, const char *active_tu
          goto failed;
       }
    }
+   if (aimee_ir_history_admit(normalized))
+      goto failed;
    cJSON_Delete(source);
    return normalized;
 failed:

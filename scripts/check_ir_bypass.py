@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
     "tool_side_effect", "tool_validate",
+    "tool_call_normalize_assistant_arguments", "tool_call_sanitize_assistant_arguments",
     "agent_execute_cli_shell_driver", "agent_shell_driver_get", "agent_shell_driver_register",
     "agent_shell_driver_t", "SHELL_EVENT_TEXT_DELTA", "SHELL_EVENT_TOOL_START",
     "SHELL_EVENT_TOOL_COMPLETE", "SHELL_EVENT_SESSION_ID", "SHELL_EVENT_TURN_COMPLETE",
@@ -86,11 +87,11 @@ def without_comments(source: str) -> str:
         if match[0].startswith(("/*", "//")) else match[0], source)
 
 
-def profile_function_spans(source: str) -> list[tuple[int, int]]:
+def profile_function_spans(source: str, names=None) -> list[tuple[int, int]]:
     # Ignore literal/comment braces when finding the already migrated function
     # bodies. Compatibility output APIs elsewhere in this file remain boundaries.
     code = LEXEMES.sub(lambda match: re.sub(r"[^\n]", " ", match[0]), source)
-    pattern = re.compile(r"\b(?:" + "|".join(sorted(CANONICAL_PROFILE_FUNCTIONS)) +
+    pattern = re.compile(r"\b(?:" + "|".join(sorted(CANONICAL_PROFILE_FUNCTIONS if names is None else names)) +
                          r")\s*\([^)]*\)\s*\{")
     spans = []
     for match in pattern.finditer(code):
@@ -122,6 +123,8 @@ def findings(root: Path) -> list[dict]:
         source = without_comments(original)
         canonical = relative in CANONICAL_FILES or relative.startswith(CANONICAL_TREES)
         profile_spans = profile_function_spans(source) if relative == "src/server/agent_bridge.c" else []
+        history_spans = (profile_function_spans(source, {"message_history_repair"})
+                         if relative == "src/server/agent_bridge.c" else [])
         for rule, pattern in RULES.items():
             if rule == "post-render-profile" and relative != "src/server/agent_request_build.c":
                 continue
@@ -131,11 +134,14 @@ def findings(root: Path) -> list[dict]:
                 continue
             if rule == "native-hook-field" and relative not in CANONICAL_HOOK_FILES:
                 continue
-            if rule == "native-history-field" and not canonical:
+            if rule == "native-history-field" and not canonical and not history_spans:
                 continue
             if rule == "unclassified-tool-dispatch" and relative not in CLASSIFIED_DISPATCH_FILES:
                 continue
             for match in pattern.finditer(source):
+                if rule == "native-history-field" and not canonical and not any(
+                        start <= match.start() < end for start, end in history_spans):
+                    continue
                 if rule == "native-profile-rebuild" and not any(
                         start <= match.start() < end for start, end in profile_spans):
                     continue

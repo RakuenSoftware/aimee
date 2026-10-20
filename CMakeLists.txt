@@ -671,7 +671,6 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/agent_fallback.c
     ${AIMEE_SRC_DIR}/server/agent_context_budget.c
     ${AIMEE_SRC_DIR}/server/agent_bridge.c
-    ${AIMEE_SRC_DIR}/server/tool_call_args.c
     ${AIMEE_SRC_DIR}/server/agent_request_shaping.c
     ${AIMEE_SRC_DIR}/server/model_sampling.c
     ${AIMEE_SRC_DIR}/server/agent_adapter.c

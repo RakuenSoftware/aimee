@@ -1,97 +1,55 @@
-/* test_minimax_tool_call_args.c: regression for MiniMax-strict tool_call
- * arguments sanitization.
- *
- * MiniMax-M2.7's /v1/chat/completions returns HTTP 400 "invalid params,
- * invalid function arguments json string" whenever any assistant
- * tool_calls[].function.arguments is missing, an object, or an unparseable
- * string. message_history_repair must coerce every persisted assistant
- * tool_call to a valid JSON-encoded string before the request leaves Aimee. */
-#include "aimee.h"
+/* MiniMax's strict arguments contract is satisfied by typed egress, never by
+ * rewriting malformed persisted native arguments to an invented empty object. */
 #include "agent_protocol.h"
+#include <aimee/translation/aimee_frontend.h>
+#include <aimee/translation/aimee_backend.h>
 #include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-
-static cJSON *make_tool_call(const char *id, const char *name)
-{
-   cJSON *tc = cJSON_CreateObject();
-   cJSON_AddStringToObject(tc, "id", id);
-   cJSON_AddStringToObject(tc, "type", "function");
-   cJSON *fn = cJSON_AddObjectToObject(tc, "function");
-   cJSON_AddStringToObject(fn, "name", name);
-   return tc;
-}
-
-static cJSON *make_tool_result(const char *id, const char *content)
-{
-   cJSON *m = cJSON_CreateObject();
-   cJSON_AddStringToObject(m, "role", "tool");
-   cJSON_AddStringToObject(m, "tool_call_id", id);
-   cJSON_AddStringToObject(m, "content", content);
-   return m;
-}
-
-static void test_repair_sanitizes_minimax_tool_call_arguments(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-
-   cJSON *user = cJSON_CreateObject();
-   cJSON_AddStringToObject(user, "role", "user");
-   cJSON_AddStringToObject(user, "content", "weather");
-   cJSON_AddItemToArray(arr, user);
-
-   cJSON *asst = cJSON_CreateObject();
-   cJSON_AddStringToObject(asst, "role", "assistant");
-   cJSON_AddNullToObject(asst, "content");
-   cJSON *tcs = cJSON_AddArrayToObject(asst, "tool_calls");
-
-   /* call_a: arguments missing entirely */
-   cJSON *tc_a = make_tool_call("call_a", "get_weather");
-   cJSON_AddItemToArray(tcs, tc_a);
-
-   /* call_b: arguments as a JSON object (not a string) */
-   cJSON *tc_b = make_tool_call("call_b", "get_weather");
-   cJSON *args_obj = cJSON_AddObjectToObject(cJSON_GetObjectItem(tc_b, "function"), "arguments");
-   cJSON_AddStringToObject(args_obj, "city", "Paris");
-   cJSON_AddItemToArray(tcs, tc_b);
-
-   /* call_c: arguments as a truncated, unparseable JSON string */
-   cJSON *tc_c = make_tool_call("call_c", "get_weather");
-   cJSON_AddStringToObject(cJSON_GetObjectItem(tc_c, "function"), "arguments",
-                           "{\"city\": \"Paris\"");
-   cJSON_AddItemToArray(tcs, tc_c);
-
-   cJSON_AddItemToArray(arr, asst);
-   cJSON_AddItemToArray(arr, make_tool_result("call_a", "ok"));
-   cJSON_AddItemToArray(arr, make_tool_result("call_b", "ok"));
-   cJSON_AddItemToArray(arr, make_tool_result("call_c", "ok"));
-
-   (void)message_history_repair(arr);
-
-   cJSON *fixed = cJSON_GetArrayItem(arr, 1);
-   cJSON *fixed_tcs = cJSON_GetObjectItemCaseSensitive(fixed, "tool_calls");
-   assert(cJSON_IsArray(fixed_tcs));
-   assert(cJSON_GetArraySize(fixed_tcs) == 3);
-
-   for (int i = 0; i < 3; i++)
-   {
-      cJSON *tc = cJSON_GetArrayItem(fixed_tcs, i);
-      cJSON *fn = cJSON_GetObjectItemCaseSensitive(tc, "function");
-      cJSON *args = cJSON_GetObjectItemCaseSensitive(fn, "arguments");
-      assert(args != NULL);
-      assert(cJSON_IsString(args));
-      cJSON *check = cJSON_Parse(args->valuestring);
-      assert(check != NULL);
-      cJSON_Delete(check);
-   }
-
-   cJSON_Delete(arr);
-}
 
 int main(void)
 {
-   test_repair_sanitizes_minimax_tool_call_arguments();
-   printf("test_minimax_tool_call_args: ok\n");
+   const char *arguments[] = {NULL, "{}", "\"{\\\"city\\\":\\\"Paris\\\"\"", "\"{} {}\""};
+   for (size_t i = 0; i < sizeof arguments / sizeof arguments[0]; i++)
+   {
+      cJSON *request = cJSON_Parse(
+          "{\"model\":\"MiniMax-M2.7\",\"messages\":[{\"role\":\"assistant\",\"tool_calls\":[{"
+          "\"id\":\"call\",\"type\":\"function\",\"function\":{\"name\":\"weather\"}}]}]}");
+      cJSON *messages = cJSON_GetObjectItemCaseSensitive(request, "messages");
+      cJSON *function = cJSON_GetObjectItemCaseSensitive(
+          cJSON_GetArrayItem(
+              cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(messages, 0), "tool_calls"), 0),
+          "function");
+      if (arguments[i])
+         assert(cJSON_AddItemToObject(function, "arguments", cJSON_Parse(arguments[i])));
+      cJSON *before = cJSON_Duplicate(request, 1);
+      aimee_request_t ir = {0};
+      char error[256];
+      assert(openai_frontend_parse(request, &ir, error, sizeof error) < 0);
+      assert(message_history_repair(messages) < 0);
+      assert(cJSON_Compare(request, before, 1));
+      aimee_request_free(&ir);
+      cJSON_Delete(before);
+      cJSON_Delete(request);
+   }
+   const char *exact = "{\"city\":\"Paris\",\"marker\":0.123456789012345678901234567890}";
+   cJSON *input = cJSON_Parse(exact);
+   aimee_block_t call = {
+       .type = AIMEE_BLK_TOOL_USE, .tool_id = "call", .tool_name = "weather", .tool_input = input};
+   aimee_message_t message = {.role = "assistant", .blocks = &call, .n_blocks = 1};
+   aimee_request_t request = {.model = "MiniMax-M2.7", .messages = &message, .n_messages = 1};
+   cJSON *wire = openai_backend_build(&request);
+   assert(wire);
+   cJSON *messages = cJSON_GetObjectItemCaseSensitive(wire, "messages");
+   cJSON *calls = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(messages, 0), "tool_calls");
+   cJSON *function = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(calls, 0), "function");
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(function, "arguments")),
+                  exact));
+   cJSON_Delete(wire);
+   cJSON_Delete(input);
+   puts("minimax_tool_call_args: malformed native history refuses; typed egress retains exact "
+        "arguments");
    return 0;
 }

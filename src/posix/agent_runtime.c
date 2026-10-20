@@ -10,7 +10,6 @@
 #include <aimee/translation/aimee_frontend.h>
 #include <aimee/translation/aimee_backend.h> /* anthropic_backend_parse / openai_backend_parse */
 #include <aimee/ir/aimee_ir.h>               /* aimee_response_t + block accessors */
-#include "tool_call_args.h"                  /* assistant_message arg normalize/sanitize */
 #include "tool_args_coerce.h"                /* tool_args_canonicalize_json */
 #include "agent_exec.h"
 #include "agent_protocol.h"

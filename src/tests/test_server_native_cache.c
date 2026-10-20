@@ -181,8 +181,66 @@ static void seeded(aimee_request_t *req, const char *native_id)
    assert(!server_native_cache_complete(cache, native_id));
    server_native_cache_close(cache);
 }
+/* A native checkpoint cannot turn an unresolved effect into replayable history,
+ * including a compatibility diagnostic that syntactically pairs its call. */
+static void unresolved_source_refuses(void)
+{
+   for (int repaired = 0; repaired < 2; repaired++)
+   {
+      reset();
+      cJSON *arguments = cJSON_CreateObject();
+      aimee_block_t call = {.type = AIMEE_BLK_TOOL_USE,
+                            .tool_id = "pending",
+                            .tool_name = "bash",
+                            .tool_input = arguments};
+      aimee_message_t message = {.role = "assistant", .blocks = &call, .n_blocks = 1};
+      aimee_request_t req = request();
+      req.messages = &message;
+      req.n_messages = 1;
+      source(&req);
+      if (repaired)
+         assert(aimee_ir_history_repair(history) == 1);
+      int count = cJSON_GetArraySize(history);
+      aimee_message_t *owned = calloc((size_t)count, sizeof *owned);
+      assert(owned);
+      for (int i = 0; i < count; i++)
+         assert(!aimee_ir_message_parse(cJSON_GetArrayItem(history, i), &owned[i]));
+      req.messages = owned;
+      req.n_messages = count;
+      lifecycle("unresolved", "running");
+      assert(!begin(&req, "unresolved") && cas_calls == 0);
+      for (int i = 0; i < count; i++)
+         aimee_message_free(&owned[i]);
+      free(owned);
+      cJSON_Delete(arguments);
+   }
+   /* An actual error result is a known outcome and remains replayable. */
+   reset();
+   cJSON *arguments = cJSON_CreateObject(), *output = cJSON_CreateString("actual error");
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TOOL_USE,
+                              .tool_id = "known",
+                              .tool_name = "bash",
+                              .tool_input = arguments},
+                             {.type = AIMEE_BLK_TOOL_RESULT,
+                              .tool_id = "known",
+                              .tool_result = output,
+                              .tool_is_error = 1}};
+   aimee_message_t known[] = {{.role = "assistant", .blocks = blocks, .n_blocks = 1},
+                              {.role = "tool", .blocks = blocks + 1, .n_blocks = 1}};
+   aimee_request_t req = request();
+   req.messages = known;
+   req.n_messages = 2;
+   source(&req);
+   lifecycle("known", "running");
+   server_native_cache_t *cache = begin(&req, "known");
+   assert(cache && !server_native_cache_abort(cache));
+   server_native_cache_close(cache);
+   cJSON_Delete(arguments);
+   cJSON_Delete(output);
+}
 int main(void)
 {
+   unresolved_source_refuses();
    aimee_request_t req;
    seeded(&req, "opaque:native-id");
    lifecycle("second", "running");
