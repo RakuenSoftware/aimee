@@ -55,6 +55,9 @@ extern "C"
    typedef struct
    {
       const agent_t *agent;
+      const agent_network_t *network;
+      const char *role;
+      const char *reasoning_effort;
       const char *cwd;
       const char *system_prompt;
       const char *user_prompt;
@@ -68,11 +71,12 @@ extern "C"
       const aimee_request_t *tool_catalog;
       int (*tool_call)(const aimee_block_t *call, aimee_block_t *result, void *context);
       void *tool_context;
-      int control_channel;    /* bidirectional structured input for browser-owned controls */
-      int primary;            /* server-owned primary uses its authorized autonomous mode */
-      const char *resume_id;  /* structured primary conversation, optional */
-      const char *home;       /* parent-materialized runtime credential HOME */
-      const char *session_id; /* host-owned Aimee identity for MCP/hooks */
+      int control_channel;   /* bidirectional structured input for browser-owned controls */
+      int primary;           /* server-owned primary uses its authorized autonomous mode */
+      const char *resume_id; /* structured primary conversation, optional */
+      const char *home;      /* parent-materialized runtime credential HOME */
+      const struct cli_codex_host_launch *codex_host; /* host-owned native resources */
+      const char *session_id;                         /* host-owned Aimee identity for MCP/hooks */
       int (*bind_session)(const char *native_id, void *context);
       void *bind_context;
    } provider_cli_cfg_t;
@@ -115,6 +119,9 @@ extern "C"
    } provider_cli_adapter_t;
 
    const provider_cli_adapter_t *provider_cli_adapter_get(const char *cli_kind);
+   /* Linked by the server's canonical scheduler owner. 1 means no host native
+    * implementation; an admitted host execution never falls back after refusal. */
+   int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg, agent_result_t *out);
    int provider_cli_adapter_prepare_native_agent(const provider_cli_adapter_t *adapter,
                                                  const agent_t *agent, agent_t *native_agent,
                                                  char *errbuf, size_t errbuf_len);

@@ -24,6 +24,15 @@
  * context env from the forking thread's TLS (race-free). */
 void delegate_child_export_context_env(void);
 
+/* Non-server adapters/fixtures have no host capture or Vault authority. */
+__attribute__((weak)) int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg,
+                                                            agent_result_t *out)
+{
+   (void)cfg;
+   (void)out;
+   return 1;
+}
+
 #define PROVIDER_CLI_MAX_ARGS 48
 #define PROVIDER_CLI_POLL_MS  250
 

@@ -18,15 +18,17 @@ Automatic review and the strict attribution gate remain enabled.
 The existing browser GUI now has canonical primary loading/model switching,
 durable-log history and standard controls. Request/response streaming, delegate
 history, tool catalogs/role admission and all three tool-enabled host request
-profiles use IR. Native cache claims/recovery, execution-profile scope and
-compaction refusal are implemented but are **not activated at production SDK
-spawn sites**. Real replay qualification covers unchanged-prefix plus unseen-tail
-adoption; native command observation still has a confirmed identity/argument/result
-fidelity gap.
+profiles use IR. The Codex browser/delegate launch sites now use the host-owned
+canonical scheduler for qualified Linux executable-descriptor launches; this code
+has not been promoted to production. Its host model source, original tool calls,
+result projection, scoped cache claims and durable-terminal checkpointing replace
+SDK conversation observations. Other native launchers remain unfinished. Real
+replay qualification covers unchanged-prefix plus unseen-tail adoption. Claude
+still has a confirmed normalized argument/result fidelity gap.
 
-The remaining work includes actual credential-free SDK activation with attested
-launch/workspace resources, complete host tool effects/receipts and human controls,
-live Claude subscription qualification and other unsupported credential custody, remaining ingress/consumer retirement and
+The remaining work includes Claude credential-free SDK activation with attested
+launch/workspace resources, full native launch/platform coverage, complete host
+tool effects/receipts and human controls, live Claude subscription qualification and other unsupported credential custody, remaining ingress/consumer retirement and
 independently graded server-local learning with next-run reuse. Production `.100`
 must remain KB-free. Explicit receipt-bound feedback/ungraded observations are not
 independent task grades or synthesis. Production promotion requires the recorded
@@ -3428,3 +3430,66 @@ A Claude bridge still needs an explicit host-owned tool-identity binding and
 original-ID lookup/proof before dispatching original arguments; metadata alone
 grants no tool/effect authority. This run qualifies SDK protocol/correlation only,
 not live subscription custody, production activation or native history adoption.
+
+
+## Codex host-owned launch and durable-terminal cache cutover
+
+The browser Codex worker and canonical delegate path now call the server native
+execution owner before any legacy credential HOME is materialized. Refusal cannot
+fall back to the old credentialed scheduler. The server retains the selected Vault
+lineage and post-policy request. The scheduler receives a private HOME/cwd, closed
+environment, local model capability and explicit namespaced host catalog. SDK
+model/tool/message observations are suppressed; original provider capture owns
+conversation and exact arguments. Final response and usage are cloned from the
+original completed canonical response after transport callbacks join. Owned
+runtimes also refuse private `/responses/compact`, which cannot replace canonical
+history.
+
+On Linux, launch holds and hashes the actual executable descriptor and executes
+that descriptor with the owned cwd descriptor. Effective SDK settings and their
+contributing layers are read back before cache acquisition or thread start/resume.
+Built-ins, plugins, hooks, project MCP/config, keychain auth stores and ambient
+credentials are disabled/refused. This launcher currently supports an explicitly
+registered native ELF executable; arbitrary scripts/npm dispatchers and other
+platform descriptor launchers remain unsupported rather than silently trusted.
+CI resolves the actual executable from its pinned npm platform package. The
+workspace owner supplies held inode identity for shared/mirror leases and fresh
+resource acquisition epochs for detached/container leases; provider pointers do
+not establish cache identity.
+
+Completed canonical history supplies adoption. A cache claim supplies only its
+verified unseen tail and scoped resume handle. After child exit and callback join,
+only derived cache metadata transfers to the retained capture owner. The capture
+seals on the durable terminal write; its action runs outside the writer lock,
+exactly once. Only a healthy completed terminal publishes a native checkpoint.
+Cancellation, failure, lost completion and close invalidate the quiescent claim.
+Private session IDs no longer write the legacy harness key from this launch path.
+
+Older browser delivery projects the same committed canonical tail, including
+retained worker events and disconnected presence-ring delivery. Exact per-block
+rendered prefixes prevent final snapshots from duplicating streamed text; a
+conflicting snapshot refuses capture. SDK-normalized text and private IDs do not
+become this view's source. IR-v1 delivery retains its canonical envelopes.
+
+Validation covers a factory lifecycle fixture with actual HOME/config/descriptor
+resources and explicit peer mocks, including original-result projection, canonical
+unseen-tail adoption, identity refusal, pending-history refusal, SDK failure,
+terminal failure/cancellation and cleanup. This fixture is not live subscription
+or whole-server native execution evidence. Actual Codex 0.160.1 and pinned
+0.153.4 pass all four offline protocol modes, including descriptor launch,
+effective-config proof, disabled project MCP, exact decimal host arguments,
+fresh-HOME resume and unseen-tail adoption, and suppression of SDK observations.
+Both SDK versions also refuse mismatched model/config and notification settings
+before any thread, model traffic or host-ready/cache callback. Typed catalog and
+launch-profile proof helpers now live in `cli_codex_profile.c`, keeping the
+process adapter within the unchanged source-size limit.
+
+The server build and all 658 native suite entries pass, including a full rerun
+after the helper extraction. Seven focused ASan/UBSan fixtures and four TSan
+lifecycle/resource fixtures pass; CMake runtime/factory fixtures and Cppcheck
+with zero new diagnostics pass. PostgreSQL integration passes 167/167, with the
+same 26 service-dependent local checks unavailable. All 76 lint gates pass.
+Qualification logs use `/var/tmp/aimee-ir-native-factory-*`. This qualification
+is not live subscription or production deployment evidence. Fresh CI remains
+required for the published commit; production promotion and the overall
+migration remain unfinished.

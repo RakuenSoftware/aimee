@@ -41,6 +41,8 @@ struct server_native_runtime
    server_native_tool_source_t *tool_source;
    cJSON *source_history;
    aimee_request_t request_profile;
+   aimee_response_t last_response;
+   int last_complete;
    int owns_request;
    agent_t selected;
    request_context_t owner;
@@ -202,6 +204,52 @@ done:
    return rc;
 }
 
+static int native_original_result(native_model_capture_t *capture,
+                                  const aimee_session_event_t *event)
+{
+   server_native_runtime_t *runtime = capture->runtime;
+   if (!runtime->owns_request || !event->message_id)
+      return 0;
+   if (event->kind == AIMEE_SESSION_DELTA && event->delta->type == AIMEE_DELTA_TURN_START)
+   {
+      runtime->last_complete = 0;
+      return 0;
+   }
+   int stop = event->kind == AIMEE_SESSION_DELTA && event->delta->type == AIMEE_DELTA_TURN_STOP;
+   if (event->kind != AIMEE_SESSION_MESSAGE && !stop)
+      return 0;
+   size_t length = strlen(capture->request_id) + strlen(event->message_id) + 2;
+   char *identity = malloc(length);
+   if (!identity)
+      return -1;
+   snprintf(identity, length, "%s:%s", capture->request_id, event->message_id);
+   aimee_response_t view = capture->builder.response;
+   if (event->kind == AIMEE_SESSION_MESSAGE)
+   {
+      view.role = event->message->role;
+      view.content = event->message->blocks;
+      view.n_content = event->message->n_blocks;
+   }
+   else if (!view.n_content && runtime->last_response.id &&
+            !strcmp(runtime->last_response.id, identity))
+      view = runtime->last_response; /* buffered snapshot precedes its TURN_STOP */
+   view.id = identity;
+   if (stop)
+   {
+      view.stop_reason = event->delta->stop_reason;
+      view.raw_stop_reason = (char *)event->delta->raw_stop_reason;
+      view.usage_in = event->delta->usage_in;
+      view.usage_out = event->delta->usage_out;
+      view.usage_cache_read = event->delta->usage_cache_read;
+      view.usage_cache_write = event->delta->usage_cache_write;
+      view.usage_reasoning = event->delta->usage_reasoning;
+   }
+   int rc = aimee_ir_response_clone(&view, &runtime->last_response);
+   free(identity);
+   if (!rc)
+      runtime->last_complete = stop || capture->builder.complete;
+   return rc;
+}
 static int native_model_capture(const aimee_session_event_t *event, void *context)
 {
    native_model_capture_t *capture = context;
@@ -244,7 +292,12 @@ static int native_model_capture(const aimee_session_event_t *event, void *contex
       if (event->kind == AIMEE_SESSION_PROJECTION)
          return 0;
    }
-   return server_native_replay_capture(event, runtime->replay);
+   int rc = server_native_replay_capture(event, runtime->replay);
+   if (!rc)
+      rc = native_original_result(capture, event);
+   if (rc)
+      server_session_capture_fail(runtime->capture);
+   return rc;
 }
 
 static int native_digest_valid(const char *digest)
@@ -334,7 +387,8 @@ static int native_route(const char *method, const char *path, void *context)
       return 0;
    /* The canonical host callback is the sole tool ingress for owned profiles.
     * A child must not bypass original-source claims through legacy MCP routes. */
-   if (runtime->owns_request && !strncmp(path, "/v1/mcp/", 8))
+   if (runtime->owns_request &&
+       (!strncmp(path, "/v1/mcp/", 8) || !strcmp(path, "/v1/responses/compact")))
       return 0;
    int admitted = !strcmp(method, "GET") &&
                   (!strcmp(path, "/v1/models") || !strcmp(path, "/v1/cli/manifest") ||
@@ -1053,11 +1107,28 @@ const cJSON *server_native_runtime_source_history(const server_native_runtime_t 
    return runtime ? runtime->source_history : NULL;
 }
 
+void server_native_runtime_quiesce(server_native_runtime_t *runtime)
+{
+   if (!runtime)
+      return;
+   cli_proxy_t *listener = runtime->listener;
+   runtime->listener = NULL;
+   cli_proxy_stop(listener);
+}
+int server_native_runtime_result(const server_native_runtime_t *runtime, aimee_response_t *out)
+{
+   if (!runtime || runtime->listener || !runtime->owns_request || !runtime->last_complete ||
+       !pthread_equal(runtime->producer, pthread_self()) ||
+       server_session_capture_failed(runtime->capture))
+      return -1;
+   return aimee_ir_response_clone(&runtime->last_response, out);
+}
 void server_native_runtime_close(server_native_runtime_t *runtime)
 {
    if (!runtime)
       return;
-   cli_proxy_stop(runtime->listener);
+   server_native_runtime_quiesce(runtime);
+   aimee_response_free(&runtime->last_response);
    server_native_replay_close(runtime->replay);
    server_native_tool_source_close(runtime->tool_source);
    cJSON_Delete(runtime->source_history);

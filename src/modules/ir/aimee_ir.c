@@ -576,6 +576,30 @@ static int clone_blocks(aimee_block_t **out, int *count, const aimee_block_t *so
    }
    return 0;
 }
+static int response_valid(const aimee_response_t *response);
+int aimee_ir_response_clone(const aimee_response_t *source, aimee_response_t *out)
+{
+   if (!out || response_valid(source))
+      return -1;
+   aimee_response_t copy = *source;
+   copy.id = copy.model = copy.role = copy.error_message = copy.raw_stop_reason = NULL;
+   copy.content = NULL;
+   copy.n_content = 0;
+   copy.raw = NULL;
+   if (clone_string(&copy.id, source->id) || clone_string(&copy.model, source->model) ||
+       clone_string(&copy.role, source->role) ||
+       clone_string(&copy.error_message, source->error_message) ||
+       clone_string(&copy.raw_stop_reason, source->raw_stop_reason) ||
+       clone_json(&copy.raw, source->raw) ||
+       clone_blocks(&copy.content, &copy.n_content, source->content, source->n_content))
+   {
+      aimee_response_free(&copy);
+      return -1;
+   }
+   aimee_response_free(out);
+   *out = copy;
+   return 0;
+}
 static int clone_tool(aimee_tool_t *out, const aimee_tool_t *source)
 {
    *out = (aimee_tool_t){.kind = source->kind,
@@ -1246,7 +1270,7 @@ void aimee_ir_run_transforms(aimee_request_t *ir, const aimee_ir_transform_t *st
    }
 }
 
-int aimee_ir_response_admit(aimee_response_t *response)
+static int response_valid(const aimee_response_t *response)
 {
    if (!response || response->n_content < 0 || response->n_content > AIMEE_IR_MAX_BLOCKS ||
        (response->n_content && !response->content))
@@ -1269,6 +1293,12 @@ int aimee_ir_response_admit(aimee_response_t *response)
                 !strcmp(block->tool_id, response->content[j].tool_id))
                return -1;
    }
+   return 0;
+}
+int aimee_ir_response_admit(aimee_response_t *response)
+{
+   if (response_valid(response))
+      return -1;
    aimee_message_t message = {.role = response->role ? response->role : "assistant",
                               .blocks = response->content,
                               .n_blocks = response->n_content};

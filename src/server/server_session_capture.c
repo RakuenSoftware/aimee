@@ -25,6 +25,8 @@ struct server_session_capture
    server_control_scope_t *controls;
    server_session_capture_counts_t counts;
    char committed_sequence[32];
+   server_session_terminal_action_fn terminal_action;
+   void *terminal_resource;
    unsigned long long model_generation, model_active;
    source_claim_t *source_claims;
    int n_claims, claims_capacity;
@@ -118,6 +120,25 @@ int server_session_capture_retain_current(const char *execution_session, const c
    *out = current;
    return 0;
 }
+const char *server_session_capture_turn(const server_session_capture_t *owner)
+{
+   return owner ? owner->turn : NULL;
+}
+int server_session_capture_after_terminal(server_session_capture_t *owner,
+                                          server_session_terminal_action_fn action, void *resource)
+{
+   if (!owner || !action)
+      return -1;
+   pthread_mutex_lock(&owner->lock);
+   int refused = !server_session_capture_accepting(owner) || owner->terminal_action != NULL;
+   if (!refused)
+   {
+      owner->terminal_action = action;
+      owner->terminal_resource = resource;
+   }
+   pthread_mutex_unlock(&owner->lock);
+   return refused ? -1 : 0;
+}
 void server_session_capture_release(server_session_capture_t *owner)
 {
    if (owner && atomic_fetch_sub(&owner->references, 1) == 1)
@@ -129,6 +150,8 @@ void server_session_capture_release(server_session_capture_t *owner)
       if (*entry)
          *entry = owner->next;
       pthread_mutex_unlock(&owners_lock);
+      if (owner->terminal_action)
+         owner->terminal_action(0, owner->terminal_resource);
       server_control_scope_release(owner->controls);
       pthread_mutex_destroy(&owner->lock);
       free(owner->source_claims);
@@ -141,7 +164,13 @@ void server_session_capture_close(server_session_capture_t *owner)
       return;
    pthread_mutex_lock(&owner->lock);
    atomic_store(&owner->closed, 1);
+   server_session_terminal_action_fn action = owner->terminal_action;
+   void *resource = owner->terminal_resource;
+   owner->terminal_action = NULL;
+   owner->terminal_resource = NULL;
    pthread_mutex_unlock(&owner->lock);
+   if (action)
+      action(0, resource);
    if (current == owner)
       current = NULL;
    server_session_capture_release(owner);
@@ -330,6 +359,9 @@ int server_session_capture_append(server_session_capture_t *owner,
       sequence[0] = 0;
    if (!owner || !event)
       return -1;
+   server_session_terminal_action_fn action = NULL;
+   void *resource = NULL;
+   int terminal_success = 0;
    pthread_mutex_lock(&owner->lock);
    int failure_terminal = event->kind == AIMEE_SESSION_EXECUTION && event->execution_status &&
                           (!strcmp(event->execution_status, "failed") ||
@@ -358,6 +390,17 @@ int server_session_capture_append(server_session_capture_t *owner,
    if (result)
       goto finish;
    snprintf(owner->committed_sequence, sizeof owner->committed_sequence, "%s", committed);
+   /* Seal on the durable write, even if a later subscriber-envelope allocation
+    * fails. A second terminal must never follow an already committed terminal. */
+   if (event->kind == AIMEE_SESSION_EXECUTION && strcmp(event->execution_status, "running"))
+   {
+      atomic_store(&owner->closed, 1);
+      action = owner->terminal_action;
+      resource = owner->terminal_resource;
+      owner->terminal_action = NULL;
+      owner->terminal_resource = NULL;
+      terminal_success = !strcmp(event->execution_status, "completed");
+   }
    if (event->kind == AIMEE_SESSION_EXECUTION && strcmp(event->execution_status, "running"))
       server_learning_observe_terminal(owner->session, owner->turn, committed, event_id,
                                        owner->principal, payload);
@@ -372,8 +415,6 @@ int server_session_capture_append(server_session_capture_t *owner,
    }
    if (sequence)
       snprintf(sequence, 32, "%s", committed);
-   if (event->kind == AIMEE_SESSION_EXECUTION && strcmp(event->execution_status, "running"))
-      atomic_store(&owner->closed, 1);
    const char *role =
        event->kind == AIMEE_SESSION_MESSAGE && event->message ? event->message->role : event->role;
    if (role && !strcmp(role, "assistant"))
@@ -389,6 +430,8 @@ finish:
       server_session_capture_fail(owner);
    cJSON_Delete(payload);
    pthread_mutex_unlock(&owner->lock);
+   if (action)
+      action(!result && terminal_success && !server_session_capture_failed(owner), resource);
    return result;
 }
 int server_session_capture_sink(const aimee_session_event_t *event, void *owner)

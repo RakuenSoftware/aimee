@@ -325,6 +325,8 @@ static int aimee_codex_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
    if (!strcmp(method, "thread/compacted"))
       return native_compaction("codex");
    const cJSON *params = cJSON_GetObjectItemCaseSensitive(f, "params");
+   if (s->host_model_capture && !strcmp(method, "item/agentMessage/delta"))
+      return 0;
    if (!strcmp(method, "item/agentMessage/delta"))
    {
       const char *id = str(params, "itemId"), *text = str(params, "delta");
@@ -427,6 +429,12 @@ static int aimee_codex_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
    if (!id[0] || !type[0])
       return -1;
    int complete = !strcmp(method, "item/completed");
+   if (s->host_model_capture &&
+       (!strcmp(type, "agentMessage") || !strcmp(type, "userMessage") ||
+        !strcmp(type, "reasoning") || !strcmp(type, "plan") || !strcmp(type, "commandExecution") ||
+        !strcmp(type, "mcpToolCall") || !strcmp(type, "dynamicToolCall") ||
+        !strcmp(type, "fileChange") || !strcmp(type, "webSearch") || !strcmp(type, "imageView")))
+      return 0;
    if (!strcmp(type, "agentMessage") || !strcmp(type, "userMessage") ||
        !strcmp(type, "reasoning") || !strcmp(type, "plan"))
    {

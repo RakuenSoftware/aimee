@@ -168,6 +168,67 @@ static void response(void)
    assert(!strcmp(uid, "opaque:one"));
    assert(!strcmp(uid, cJSON_GetStringValue(cJSON_GetObjectItem(r, "tool_id"))));
 }
+static char legacy_text[4096], legacy_thinking[4096];
+static int legacy_calls;
+static int legacy_project(compute_ctx_t *c, const char *event, const char *key, const char *value)
+{
+   assert(c->ir_native_owned && cJSON_GetArraySize(log_entries) > 2);
+   if (!strcmp(event, "text") || !strcmp(event, "thinking"))
+   {
+      assert(key && !strcmp(key, "content") && value);
+      char *output = !strcmp(event, "text") ? legacy_text : legacy_thinking;
+      assert(strlen(output) + strlen(value) < sizeof legacy_text);
+      strcat(output, value);
+      legacy_calls++;
+   }
+   return c->conn_alive ? 0 : -1;
+}
+static void legacy_uses_committed_originals(void)
+{
+   compute_ctx_t c = context();
+   c.ir_delivery = 0;
+   assert(!server_chat_ir_begin(&c, "session-one", "canonical compatibility"));
+   c.ir_native_owned = 1;
+   c.ir_legacy_emit = legacy_project;
+   legacy_text[0] = legacy_thinking[0] = 0;
+   legacy_calls = 0;
+   server_session_capture_t *worker = NULL;
+   assert(!server_session_capture_retain_current("session-one", "alice", &worker) && worker);
+   aimee_delta_t delta = {.type = AIMEE_DELTA_BLOCK_DELTA,
+                          .kind = AIMEE_BLK_TEXT,
+                          .block_id = 0,
+                          .text_delta = "Original "};
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_DELTA,
+                                  .role = "assistant",
+                                  .message_id = "native:original",
+                                  .delta = &delta};
+   assert(!server_session_capture_sink(&event, worker));
+   assert(!legacy_calls && !server_chat_ir_progress(&c));
+   assert(legacy_calls == 1 && !strcmp(legacy_text, "Original "));
+   /* A disconnected subscriber must not stop canonical ring/poll projection. */
+   c.conn_alive = 0;
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TEXT, .text = "Original source"},
+                             {.type = AIMEE_BLK_THINKING, .text = "Original reasoning"}};
+   aimee_message_t message = {.role = "assistant", .blocks = blocks, .n_blocks = 2};
+   event = (aimee_session_event_t){
+       .kind = AIMEE_SESSION_MESSAGE, .message_id = "native:original", .message = &message};
+   assert(!server_session_capture_sink(&event, worker));
+   assert(!server_chat_ir_progress(&c));
+   assert(!strcmp(legacy_text, "Original source"));
+   assert(!strcmp(legacy_thinking, "Original reasoning") && legacy_calls == 3);
+   /* A repeated final snapshot never duplicates already rendered source. */
+   assert(!server_session_capture_sink(&event, worker));
+   assert(!server_chat_ir_progress(&c) && legacy_calls == 3);
+   assert(!server_chat_ir_progress(&c) && legacy_calls == 3);
+   /* A source inconsistency is observable and sticky, never a silent rewrite. */
+   blocks[0].text = "conflicting SDK rewrite";
+   assert(!server_session_capture_sink(&event, worker));
+   assert(server_chat_ir_progress(&c) < 0 && c.ir_failed);
+   assert(!strcmp(legacy_text, "Original source"));
+   server_session_capture_release(worker);
+   cleanup(&c);
+}
+
 static void exact_tool_identity(void)
 {
    compute_ctx_t c = context();
@@ -308,6 +369,7 @@ int main(void)
    worker_capture_failure_is_sticky();
    retained_worker_failure_refuses_completion();
    retained_worker_progress_uses_durable_pages();
+   legacy_uses_committed_originals();
    exact_tool_identity();
    compute_ctx_t legacy = context();
    legacy.ir_delivery = 0;

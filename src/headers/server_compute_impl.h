@@ -16,7 +16,7 @@
 #define CLAUDE_LINE_MAX (256 * 1024)
 
 /* Context for async compute work */
-typedef struct
+typedef struct compute_ctx
 {
    server_ctx_t *server;
    int conn_fd;
@@ -45,7 +45,12 @@ typedef struct
    char vault_principal[VAULT_PRINCIPAL_MAX];
    request_context_snapshot_t request_context;
    cJSON *req; /* owned by this context */
-   int ir_enabled, ir_delivery, ir_failed, ir_completed;
+   int ir_enabled, ir_delivery, ir_failed, ir_completed, ir_native_owned;
+   /* Producer-only compatibility rendering of the committed canonical source. */
+   int (*ir_legacy_emit)(struct compute_ctx *context, const char *event, const char *key,
+                         const char *value);
+   cJSON *ir_legacy_blocks;
+   size_t ir_legacy_bytes;
    server_session_capture_t *ir_capture, *ir_previous_capture;
    char ir_session[128], ir_turn[128];
    char ir_sequence[32];

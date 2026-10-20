@@ -19,6 +19,15 @@ server_session_capture_t *server_session_capture_current(void);
 /* Immutable destination history identity, valid for the held owner lease.
  * It may differ from the verified transport/source session. NULL without owner. */
 const char *server_session_capture_session(const server_session_capture_t *owner);
+const char *server_session_capture_turn(const server_session_capture_t *owner);
+/* Transfer one already-quiescent derived resource to this host turn. The action
+ * runs once, outside the writer lock, after a durable terminal. Success is true
+ * only for a completed, healthy capture. Close without that proof calls it false.
+ * Registration failure leaves ownership with the caller. This is no child-exit
+ * proof: the registering owner must already have joined its child/callbacks. */
+typedef void (*server_session_terminal_action_fn)(int success, void *resource);
+int server_session_capture_after_terminal(server_session_capture_t *owner,
+                                          server_session_terminal_action_fn action, void *resource);
 /* A missing current owner is a successful NULL lease. Bind only inside a creator
  * or retained lease; release after unbinding and joining its callbacks. */
 int server_session_capture_retain_current(const char *execution_session, const char *principal,

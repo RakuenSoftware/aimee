@@ -1188,6 +1188,8 @@ static void test_native_original_catalog(const agent_t *selected, const request_
       int before = atomic_load(&calls);
       request(runtime, "/v1/mcp/call", server_native_runtime_token(runtime), response);
       assert(strstr(response, "404") && atomic_load(&calls) == before);
+      request(runtime, "/v1/responses/compact", server_native_runtime_token(runtime), response);
+      assert(strstr(response, "404") && atomic_load(&calls) == before);
       request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
       int refuses = mode != 3 && mode != 8;
       assert(server_session_capture_failed(capture) == refuses);
@@ -1207,6 +1209,23 @@ static void test_native_original_catalog(const agent_t *selected, const request_
          free(wire);
          test_source_claim(runtime, mode == 8 ? "postpolicy_read" : "read_file", mode == 3);
       }
+      aimee_response_t original = {0};
+      assert(server_native_runtime_result(runtime, &original) < 0); /* callbacks still live */
+      server_native_runtime_quiesce(runtime);
+      int result_status = server_native_runtime_result(runtime, &original);
+      if (mode == 3)
+      {
+         assert(!result_status && original.n_content == 1 &&
+                original.stop_reason == AIMEE_STOP_TOOL_USE);
+         assert(!strcmp(original.content[0].tool_id, "wire-call:original") &&
+                !strcmp(original.content[0].tool_namespace, "aimee"));
+         char *exact = cJSON_PrintUnformatted(original.content[0].tool_input);
+         assert(exact && strstr(exact, "123.123456789012345678901234567890"));
+         free(exact);
+      }
+      else
+         assert(result_status < 0); /* malformed or no original TURN_STOP */
+      aimee_response_free(&original);
       server_native_runtime_close(runtime);
       server_session_capture_close(capture);
       atomic_store(&expected_capture, NULL);

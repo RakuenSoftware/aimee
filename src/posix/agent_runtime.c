@@ -468,10 +468,13 @@ static int native_harness_bind(const char *native_id, void *context)
 }
 
 static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
-                                          const agent_t *agent, const char *system_prompt,
+                                          const agent_t *agent, const agent_network_t *network,
+                                          const char *role, const char *system_prompt,
                                           const char *user_prompt, agent_result_t *out)
 {
    provider_cli_cfg_t cfg = {.agent = agent,
+                             .network = network,
+                             .role = role,
                              .cwd = run_cmd_get_cwd(),
                              .system_prompt = system_prompt,
                              .user_prompt = user_prompt};
@@ -493,6 +496,9 @@ static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
       return provider_cli_adapter_execute_cfg(adapter, &cfg, out);
    if (identity < 0 || !binding.principal[0])
       goto refused;
+   int host = provider_cli_adapter_host_execute(&cfg, out);
+   if (host != 1)
+      return host;
    char home[4096] = "", resume[1025] = "", cwd[MAX_PATH_LEN] = "";
    cli_session_t cleanup = {0};
    cli_session_resolve_cwd(cfg.cwd, cwd, sizeof cwd);
@@ -711,7 +717,8 @@ static int agent_execute_with_tools_impl(const agent_t *agent, const agent_netwo
                      "native harness cannot adopt the complete run history");
             return AGENT_RC_CONTEXT_REFUSED;
          }
-         return agent_execute_provider_session(adapter, agent, system_prompt, user_prompt, out);
+         return agent_execute_provider_session(adapter, agent, network, role, system_prompt,
+                                               user_prompt, out);
       }
       snprintf(out->error, sizeof(out->error),
                "provider-cli: unknown cli_kind '%s' (expected: codex, claude, mistral, "

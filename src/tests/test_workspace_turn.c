@@ -14,6 +14,8 @@
 #include "util.h"
 #include <aimee/workspace/module_api.h>
 #include <stdint.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static const char test_shared_workspace[] = "/tmp/ws-shared";
 static const char test_detached_workspace[] = "/tmp/ws-detached";
@@ -151,6 +153,28 @@ int main(void)
    assert(ws_runner_registry_register_configured(NULL) == 0);
 
    const workspace_provider_t *shared = workspace_provider_shared();
+   /* Shared identities survive a new turn but change when the actual directory
+    * is replaced. The held descriptor continues to pin the measured resource. */
+   {
+      char path[768], old[768], before[65], same[65], replaced[65];
+      snprintf(path, sizeof path, "%s/identity-workspace", tmpdir);
+      snprintf(old, sizeof old, "%s/identity-old", tmpdir);
+      assert(!mkdir(path, 0700));
+      assert(!config_workspace_add(path, "shared", NULL, NULL));
+      int first = -1, second = -1;
+      assert(!workspace_turn_resource_identity(path, &first, before) && first >= 0);
+      assert(!workspace_turn_resource_identity(path, &second, same) && !strcmp(before, same));
+      close(second);
+      assert(!rename(path, old) && !mkdir(path, 0700));
+      assert(!workspace_turn_resource_identity(path, &second, replaced) &&
+             strcmp(before, replaced));
+      struct stat pinned, changed;
+      assert(!fstat(first, &pinned) && !fstat(second, &changed) && pinned.st_ino != changed.st_ino);
+      close(first);
+      close(second);
+      assert(!rmdir(path) && !rmdir(old));
+      assert(!config_workspace_remove(path));
+   }
 
    /* cwd inside the detached workspace -> binds a detached provider active */
    {
@@ -173,6 +197,15 @@ int main(void)
    {
       assert(workspace_turn_bind_active(test_detached_workspace) == 1);
       assert(workspace_provider_active()->kind == WS_PROVIDER_DETACHED);
+      char first[65], repeated[65], reacquired[65];
+      int fd = -1;
+      assert(!workspace_turn_resource_identity(test_detached_workspace, &fd, first) && fd == -1);
+      assert(!workspace_turn_resource_identity(test_detached_workspace, &fd, repeated) &&
+             !strcmp(first, repeated));
+      workspace_turn_unbind_active();
+      assert(workspace_turn_bind_active(test_detached_workspace) == 1);
+      assert(!workspace_turn_resource_identity(test_detached_workspace, &fd, reacquired) &&
+             strcmp(first, reacquired));
       workspace_turn_unbind_active();
    }
 
@@ -268,6 +301,10 @@ int main(void)
          /* The container-bound predicate the shell-git gate keys off: true while
           * bound, false once released. */
          assert(workspace_turn_container_bound() == 1);
+         char lease[65], same[65], remote[65];
+         int identity_fd = -1;
+         assert(!workspace_turn_resource_identity(test_shared_workspace, &identity_fd, lease) &&
+                identity_fd == -1);
 
          /* A nested shared lookup and detached Git operation cannot steal the
           * container lease or overwrite its provider storage. */
@@ -279,6 +316,8 @@ int main(void)
          assert(scoped == 1 && inner && workspace_provider_active() != p);
          const workspace_provider_t *nested = workspace_provider_active();
          assert(nested->kind == WS_PROVIDER_DETACHED && p->kind == WS_PROVIDER_CONTAINER);
+         assert(!workspace_turn_resource_identity(test_detached_workspace, &identity_fd, remote) &&
+                strcmp(lease, remote));
          assert(!workspace_turn_container_bound() && !g_releases);
          int closed = workspace_turn_scope_end(outer);
          assert(closed < 0 && workspace_provider_active() == nested && !g_releases);
@@ -287,6 +326,8 @@ int main(void)
          assert(workspace_turn_container_bound() && !g_releases);
          closed = workspace_turn_scope_end(outer);
          assert(!closed && workspace_provider_active() == p && !g_releases);
+         assert(!workspace_turn_resource_identity(test_shared_workspace, &identity_fd, same) &&
+                !strcmp(lease, same));
 
          /* Unbind must RELEASE the container, not just drop the pointer: a leaked
           * container outlives its turn and pins its workspace. And the active
@@ -296,6 +337,14 @@ int main(void)
          assert(g_releases == 1);
          assert(workspace_provider_active() == shared);
          assert(workspace_turn_container_bound() == 0); /* cleared on unbind */
+         /* Even the fixture's recycled backend state address cannot reuse a
+          * released acquisition's identity. */
+         assert(workspace_turn_bind_container("deleg-reacquired", NULL, test_shared_workspace, 0) ==
+                1);
+         assert(!workspace_turn_resource_identity(test_shared_workspace, &identity_fd, same) &&
+                strcmp(lease, same));
+         workspace_turn_unbind_active();
+         assert(g_releases == 2);
       }
 
       /* The complete tree reaches the backend. */

@@ -13,6 +13,9 @@ typedef struct
    int claude_open;
    const char *admitted_prompt;
    int user_echo_seen;
+   /* Original gateway capture owns model/tool observations. Native controls and
+    * compaction remain observable; SDK-normalized copies never become history. */
+   int host_model_capture;
    int acp_open;
    aimee_block_type_t acp_kind;
    const char *acp_role;

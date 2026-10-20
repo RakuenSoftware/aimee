@@ -26,6 +26,12 @@ int workspace_turn_bind_active(const char *cwd);
 typedef struct workspace_turn_scope workspace_turn_scope_t;
 int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out);
 int workspace_turn_scope_end(workspace_turn_scope_t *scope);
+/* Identity-only attestation of the currently held tool resource. Shared/mirror
+ * directories return an owned fd pinning the measured inode; container/detached
+ * identities include this owner's live acquisition epoch, never a pointer.
+ * The caller retains its turn lease and closes any returned fd. No access grant
+ * or path/provider fallback is created. Failure leaves fd=-1 and digest empty. */
+int workspace_turn_resource_identity(const char *cwd, int *directory_fd, char digest[65]);
 
 /* Select the client-side repository location that a git MCP call names.
  * `path` is authoritative for every operation except clone, where it is the

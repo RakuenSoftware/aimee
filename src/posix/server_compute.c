@@ -9,6 +9,7 @@
 #include <aimee/tools/agent_tools.h> /* agent_tools_set_tool_event_cb — stream tool events */
 #include "router_advise.h"           /* S1 advisory request->workflow router hook */
 #include "cli_codex.h"
+#include "server_native_execution.h"
 #include "claude_headless.h"
 #include "provider_cli_adapter.h"
 #include "platform_path.h"
@@ -215,7 +216,8 @@ static int stream_event(compute_ctx_t *cctx, const char *event, const char *key,
 {
    if (cctx->ir_enabled)
    {
-      if (event && !strcmp(event, "session") && value && value[0] && cctx->ir_harness[0] &&
+      if (!cctx->ir_native_owned && event && !strcmp(event, "session") && value && value[0] &&
+          cctx->ir_harness[0] &&
           db1_session_harness_bind(cctx->ir_session, cctx->ir_harness, value,
                                    cctx->vault_principal) != 0)
       {
@@ -409,7 +411,7 @@ static int codex_stream_event_cb(const char *event, const char *value, void *use
    compute_ctx_t *cctx = (compute_ctx_t *)userdata;
    if (server_chat_ir_progress(cctx))
       return -1;
-   if (!event)
+   if (cctx->ir_native_owned || !event)
       return 0;
    if (strcmp(event, "text") == 0 || strcmp(event, "thinking") == 0)
       return stream_event(cctx, event, "content", value ? value : "");
@@ -487,7 +489,10 @@ static int chat_codex_effort_allowed(const char *effort)
                      strcmp(effort, "high") == 0 || strcmp(effort, "xhigh") == 0);
 }
 
-static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
+static void chat_agent_add_builtin_provider(agent_config_t *acfg, const char *provider);
+static int chat_agent_select_provider(agent_config_t *acfg, const char *provider, char *selected,
+                                      size_t selected_len);
+static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message, const char *provider,
                                      const char *thread_id, const char *cwd, const char *model,
                                      const char *effort)
 {
@@ -535,28 +540,56 @@ static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
     * chat worker against its own nested tool call. */
    compute_ctx_release_budget(cctx);
 
-   char home[4096] = "", resume[1025] = "";
-   cli_session_t cleanup = {0};
+   cli_codex_chat_result_t result = {0};
+   int rc = -1;
    if (cctx->ir_enabled)
    {
-      snprintf(cctx->ir_harness, sizeof(cctx->ir_harness), "codex");
-      if (db1_session_harness_get(cctx->ir_session, "codex", resume, sizeof(resume),
-                                  cctx->vault_principal) < 0 ||
-          cli_session_harness_home("codex", cwd, cctx->ir_session, home, sizeof(home), &cleanup) !=
-              0)
+      agent_config_t *agents = calloc(1, sizeof *agents);
+      if (!agents || agent_load_config(agents))
+         snprintf(result.error, sizeof result.error, "could not load selected native connection");
+      else
       {
-         free(system_prompt);
-         compute_error(cctx, "could not prepare Vault-backed Codex runtime");
-         compute_ctx_free(cctx);
-         return;
+         const char *lookup = provider;
+         if (!agent_find(agents, provider) &&
+             (!strcmp(provider, "codex") || !strcmp(provider, "codex-cli") ||
+              !strcmp(provider, "codex-oauth")))
+         {
+            chat_agent_add_builtin_provider(agents, "codex-oauth");
+            lookup = "codex-oauth";
+         }
+         char selected[MAX_AGENT_NAME];
+         if (chat_agent_select_provider(agents, lookup, selected, sizeof selected))
+            snprintf(result.error, sizeof result.error,
+                     "selected native connection is unavailable");
+         else
+         {
+            agent_t *agent = agent_find(agents, selected);
+            if (!agent)
+               snprintf(result.error, sizeof result.error,
+                        "selected native connection is unavailable");
+            else
+            {
+               if (!chat_model_passthrough_allowed(model) && agent->model[0])
+                  snprintf(codex_model_buf, sizeof codex_model_buf, "%s", agent->model);
+               if (codex_model_buf[0])
+                  snprintf(agent->model, sizeof agent->model, "%s", codex_model_buf);
+               creq.model = agent->model;
+               creq.session_id = cctx->ir_session;
+               snprintf(cctx->ir_harness, sizeof cctx->ir_harness, "codex");
+               cctx->ir_native_owned = 1;
+               if (!cctx->ir_delivery)
+                  cctx->ir_legacy_emit = stream_event;
+               rc = server_native_codex_chat_stream(agent, &creq, codex_stream_event_cb, cctx,
+                                                    &result);
+               if (server_chat_ir_progress(cctx))
+                  rc = -1;
+            }
+         }
       }
-      creq.thread_id = resume[0] ? resume : NULL;
-      creq.home = home;
-      creq.session_id = cctx->ir_session;
+      free(agents);
    }
-   cli_codex_chat_result_t result;
-   int rc = cli_codex_chat_stream(&creq, codex_stream_event_cb, cctx, &result);
-   cli_session_destroy(&cleanup);
+   else
+      rc = cli_codex_chat_stream(&creq, codex_stream_event_cb, cctx, &result);
    free(system_prompt);
 
    if (rc != 0)
@@ -566,7 +599,7 @@ static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
       return;
    }
 
-   if (result.thread_id[0])
+   if (!cctx->ir_native_owned && result.thread_id[0])
       stream_event(cctx, "session", "id", result.thread_id);
    stream_event(cctx, "done", NULL, NULL);
    compute_ok(cctx);
@@ -638,6 +671,17 @@ static void chat_agent_add_builtin_provider_cli(agent_config_t *acfg, const char
    snprintf(ag->name, sizeof(ag->name), "%s", name);
    snprintf(ag->auth_type, sizeof(ag->auth_type), "bearer");
    snprintf(ag->provider, sizeof(ag->provider), "%s", name);
+   if (!strcmp(cli_kind, "codex"))
+   {
+      const agent_adapter_t *adapter = agent_adapter_for_name("codex");
+      if (adapter)
+      {
+         snprintf(ag->provider, sizeof ag->provider, "%s", adapter->provider);
+         snprintf(ag->endpoint, sizeof ag->endpoint, "%s", adapter->default_endpoint);
+         snprintf(ag->auth_type, sizeof ag->auth_type, "%s", adapter->auth_type);
+         snprintf(ag->registration, sizeof ag->registration, "%s", "codex");
+      }
+   }
    snprintf(ag->backend, sizeof(ag->backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
    snprintf(ag->cli_kind, sizeof(ag->cli_kind), "%s", cli_kind);
    snprintf(ag->cli_cmd, sizeof(ag->cli_cmd), "%s", cli_cmd);
@@ -1350,7 +1394,7 @@ void chat_stream_worker(void *arg)
       if (compact)
          chat_stream_worker_codex_compact(cctx, provider_sid, cwd);
       else
-         chat_stream_worker_codex(cctx, message, provider_sid, cwd, model_override,
+         chat_stream_worker_codex(cctx, message, provider, provider_sid, cwd, model_override,
                                   effort_override);
       return;
    }

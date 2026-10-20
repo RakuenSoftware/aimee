@@ -34,12 +34,31 @@ extern "C"
 
    typedef int (*cli_codex_chat_event_cb)(const char *event, const char *value, void *userdata);
 
+   /* Host-owned resources for the canonical native scheduler. Descriptor and
+    * environment custody outlive the synchronous child. The adapter verifies
+    * the actual effective SDK config before ready can consume a cache claim. */
    typedef struct
    {
-      const char *thread_id;     /* optional: resume this Codex thread */
-      const char *home;          /* host-materialized Vault credential HOME */
-      const char *session_id;    /* host-owned Aimee session for MCP */
-      const char *cwd;           /* optional: child process working directory */
+      const aimee_request_t *history;
+      const char *resume_id;
+   } cli_codex_host_replay_t;
+   typedef struct cli_codex_host_launch
+   {
+      int executable_fd, cwd_fd;
+      const char *home, *cwd, *build_digest, *gateway_url, *gateway_token;
+      char *const *environment;
+      const struct cJSON *expected_config;
+      int (*ready)(const char *launch_digest, cli_codex_host_replay_t *replay, void *context);
+      void *context;
+   } cli_codex_host_launch_t;
+
+   typedef struct
+   {
+      const char *thread_id;                      /* optional: resume this Codex thread */
+      const char *home;                           /* host-materialized Vault credential HOME */
+      const cli_codex_host_launch_t *host_launch; /* scoped canonical scheduler */
+      const char *session_id;                     /* host-owned Aimee session for MCP */
+      const char *cwd;                            /* optional: child process working directory */
       const char *system_prompt; /* optional: developerInstructions on new threads */
       const char *user_prompt;
       /* Canonical items preceding this turn; resume callers supply only unseen tail.

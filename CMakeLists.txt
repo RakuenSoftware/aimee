@@ -706,6 +706,7 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/cli_session.c
     ${AIMEE_SRC_DIR}/server/cli_session_pty.c
     ${AIMEE_SRC_DIR}/server/cli_codex.c
+    ${AIMEE_SRC_DIR}/server/cli_codex_profile.c
     ${AIMEE_SRC_DIR}/server/cli_claude.c
     ${AIMEE_SRC_DIR}/server/claude_headless.c
     ${AIMEE_SRC_DIR}/server/server_session_control.c
@@ -990,6 +991,7 @@ list(APPEND SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_http_op_runs.c
     ${AIMEE_SRC_DIR}/server/server_compute_owner.c
     ${AIMEE_SRC_DIR}/server/server_native_runtime.c
+    ${AIMEE_SRC_DIR}/server/server_native_execution.c
     ${AIMEE_SRC_DIR}/server/server_native_tool_admission.c
     ${AIMEE_SRC_DIR}/server/server_native_replay.c
     ${AIMEE_SRC_DIR}/server/server_learning_outcome.c

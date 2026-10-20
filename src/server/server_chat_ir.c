@@ -10,10 +10,124 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* This is a disposable subscriber view, never a source of model context. Keep
+ * exact rendered prefixes by canonical message/block so a final snapshot emits
+ * only text not already streamed. Conflicting source observations refuse. */
+static const char *chat_ir_string(const cJSON *value, const char *key)
+{
+   return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, key));
+}
+static int chat_ir_legacy_text(compute_ctx_t *c, const char *id, int block, const char *kind,
+                               const char *text, int delta)
+{
+   if (!id || !text || !text[0])
+      return 0;
+   if (!c->ir_legacy_blocks)
+      c->ir_legacy_blocks = cJSON_CreateArray();
+   if (!c->ir_legacy_blocks)
+      return -1;
+   cJSON *entry = NULL, *candidate;
+   cJSON_ArrayForEach(candidate, c->ir_legacy_blocks)
+   {
+      if (!strcmp(chat_ir_string(candidate, "message"), id) &&
+          cJSON_GetObjectItemCaseSensitive(candidate, "block")->valueint == block)
+      {
+         entry = candidate;
+         break;
+      }
+   }
+   if (!entry)
+   {
+      if (cJSON_GetArraySize(c->ir_legacy_blocks) >= AIMEE_IR_MAX_BLOCKS)
+         return -1;
+      entry = cJSON_CreateObject();
+      if (!entry || !cJSON_AddStringToObject(entry, "message", id) ||
+          !cJSON_AddNumberToObject(entry, "block", block) ||
+          !cJSON_AddStringToObject(entry, "kind", kind) ||
+          !cJSON_AddStringToObject(entry, "text", "") ||
+          !cJSON_AddItemToArray(c->ir_legacy_blocks, entry))
+      {
+         cJSON_Delete(entry);
+         return -1;
+      }
+   }
+   if (strcmp(chat_ir_string(entry, "kind"), kind))
+      return -1;
+   const char *previous = chat_ir_string(entry, "text");
+   size_t before = strlen(previous), length = strlen(text);
+   if (!delta && (length < before || memcmp(text, previous, before)))
+      return -1;
+   const char *tail = delta ? text : text + before;
+   size_t added = delta ? length : length - before;
+   if (!added)
+      return 0;
+   if (added > 16 * 1024 * 1024 - c->ir_legacy_bytes)
+      return -1;
+   char *joined = malloc(before + added + 1);
+   if (!joined)
+      return -1;
+   memcpy(joined, previous, before);
+   memcpy(joined + before, tail, added + 1);
+   cJSON *updated = cJSON_CreateString(joined);
+   free(joined);
+   if (!updated || !cJSON_ReplaceItemInObjectCaseSensitive(entry, "text", updated))
+   {
+      cJSON_Delete(updated);
+      return -1;
+   }
+   c->ir_legacy_bytes += added;
+   /* A disconnected browser remains a lost subscriber; the presence ring is
+    * still updated by this producer's existing delivery callback. */
+   (void)c->ir_legacy_emit(c, kind, "content", tail);
+   return 0;
+}
+static int chat_ir_legacy_envelope(compute_ctx_t *c, const char *json)
+{
+   cJSON *envelope = json ? aimee_ir_json_parse_frame(json, strlen(json)) : NULL;
+   const cJSON *event = cJSON_GetObjectItemCaseSensitive(envelope, "event");
+   const cJSON *payload = cJSON_GetObjectItemCaseSensitive(event, "payload");
+   const char *kind = chat_ir_string(event, "kind");
+   const char *id = chat_ir_string(event, "message_id");
+   int rc = !kind || !payload ? -1 : 0;
+   if (kind && !strcmp(kind, "delta"))
+   {
+      const char *type = chat_ir_string(payload, "type");
+      const char *block_kind = chat_ir_string(payload, "kind");
+      const char *text = chat_ir_string(payload, "text_delta");
+      const cJSON *block = cJSON_GetObjectItemCaseSensitive(payload, "block_id");
+      if (type && (!strcmp(type, "TURN_START") || !strcmp(type, "TURN_STOP")))
+         (void)c->ir_legacy_emit(c, !strcmp(type, "TURN_START") ? "turn_start" : "turn_end", NULL,
+                                 NULL);
+      else if (type && !strcmp(type, "ERROR"))
+         (void)c->ir_legacy_emit(c, "error", "message", chat_ir_string(payload, "error_message"));
+      else if (type && (!strcmp(type, "BLOCK_START") || !strcmp(type, "BLOCK_DELTA")) &&
+               block_kind && (!strcmp(block_kind, "text") || !strcmp(block_kind, "thinking")))
+         rc = !cJSON_IsNumber(block)
+                  ? -1
+                  : chat_ir_legacy_text(c, id, block->valueint, block_kind, text, 1);
+   }
+   else if (kind && !strcmp(kind, "message") && chat_ir_string(payload, "role") &&
+            !strcmp(chat_ir_string(payload, "role"), "assistant"))
+   {
+      aimee_message_t message = {0};
+      rc = aimee_ir_message_parse(payload, &message);
+      for (int i = 0; !rc && i < message.n_blocks; i++)
+      {
+         const aimee_block_t *block = &message.blocks[i];
+         if (block->type == AIMEE_BLK_TEXT || block->type == AIMEE_BLK_THINKING)
+            rc = chat_ir_legacy_text(c, id, i, block->type == AIMEE_BLK_TEXT ? "text" : "thinking",
+                                     block->text, 0);
+      }
+      aimee_message_free(&message);
+   }
+   cJSON_Delete(envelope);
+   return rc;
+}
+
 static int chat_ir_write_envelope(compute_ctx_t *c, const char *json)
 {
    if (!c->ir_delivery)
-      return 0;
+      return c->ir_legacy_emit ? chat_ir_legacy_envelope(c, json) : 0;
    pthread_mutex_lock(c->write_mutex);
    if (c->conn_alive &&
        (write_all(c->conn_fd, json, strlen(json)) != 0 || write_all(c->conn_fd, "\n", 1) != 0))
@@ -32,7 +146,7 @@ static int chat_ir_deliver(compute_ctx_t *c, const char *json, const char *seque
     * duplicate it or rewind the live cursor when its producer catches up. */
    if (c->ir_sequence[0] && target <= strtoull(c->ir_sequence, NULL, 10))
       return 0;
-   if (c->ir_delivery && c->conn_alive && c->ir_sequence[0] &&
+   if (((c->ir_delivery && c->conn_alive) || c->ir_legacy_emit) && c->ir_sequence[0] &&
        (!json || target > strtoull(c->ir_sequence, NULL, 10) + 1))
    {
       while (strtoull(c->ir_sequence, NULL, 10) < target)
@@ -62,15 +176,21 @@ static int chat_ir_deliver(compute_ctx_t *c, const char *json, const char *seque
                cJSON_Delete(events);
                return -1;
             }
-            chat_ir_write_envelope(c, wire);
+            int delivered = chat_ir_write_envelope(c, wire);
             free(wire);
+            if (delivered)
+            {
+               cJSON_Delete(events);
+               return -1;
+            }
             snprintf(c->ir_sequence, sizeof c->ir_sequence, "%s", next);
          }
          cJSON_Delete(events);
       }
       return 0;
    }
-   chat_ir_write_envelope(c, json);
+   if (chat_ir_write_envelope(c, json))
+      return -1;
    snprintf(c->ir_sequence, sizeof c->ir_sequence, "%s", sequence);
    return 0;
 }
@@ -79,7 +199,7 @@ static int chat_ir_deliver(compute_ctx_t *c, const char *json, const char *seque
  * browser connection; delivery reads their committed tail from the same log. */
 int server_chat_ir_progress(compute_ctx_t *c)
 {
-   if (!c || !c->ir_enabled || !c->ir_delivery || !c->conn_alive)
+   if (!c || !c->ir_enabled || (!c->ir_legacy_emit && (!c->ir_delivery || !c->conn_alive)))
       return 0;
    char sequence[32];
    if (!c->ir_sequence[0] || server_session_capture_cursor(c->ir_capture, sequence) ||
@@ -198,5 +318,9 @@ void server_chat_ir_close(compute_ctx_t *c)
    server_control_scope_close(c->ir_controls);
    c->ir_capture = NULL;
    c->ir_controls = NULL;
+   cJSON_Delete(c->ir_legacy_blocks);
+   c->ir_legacy_blocks = NULL;
+   c->ir_legacy_emit = NULL;
+   c->ir_legacy_bytes = 0;
    c->ir_enabled = 0;
 }

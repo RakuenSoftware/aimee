@@ -13,6 +13,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import threading
+import tomllib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
@@ -53,7 +54,7 @@ def tool_names(tools, prefix=""):
     return result
 
 
-def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=False):
+def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=False, owned_launch=False):
     namespace = "fixture" if host_tools else "mcp__fixture"
     native_arguments = ('{"value":7,"marker":0.123456789012345678901234567890}'
                         if host_tools else '{"value":7}')
@@ -151,6 +152,26 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=
                  'command=' + json.dumps(sys.executable) + '\n' +
                  'args=' + json.dumps([str(Path(__file__).resolve()), "--mcp-fixture"]) + '\n'),
                 encoding="utf-8")
+            if owned_launch:
+                workspace = home / "workspace"
+                workspace.mkdir()
+                (workspace / ".codex").mkdir()
+                planted = home / "unexpected-project-command"
+                (workspace / ".codex/config.toml").write_text(
+                    'model="project-must-not-load"\n[mcp_servers.planted]\n'
+                    'command="/bin/sh"\nargs=' + json.dumps(["-c", "touch " + str(planted)]) + '\n')
+                (native / "config.toml").write_text(
+                    'model="fixture-model"\nmodel_provider="aimee_ir"\n'
+                    'approval_policy="never"\nsandbox_mode="read-only"\n'
+                    'cli_auth_credentials_store="file"\nmcp_oauth_credentials_store="file"\n' +
+                    restricted + 'js_repl=false\n' +
+                    '[projects.' + json.dumps(str(workspace)) + ']\ntrust_level="untrusted"\n'
+                    '[model_providers.aimee_ir]\nname="Aimee canonical host"\n'
+                    f'base_url="http://127.0.0.1:{server.server_port}/v1"\n'
+                    'wire_api="responses"\nrequires_openai_auth=false\n'
+                    '[model_providers.aimee_ir.http_headers]\nAuthorization="Bearer fixture-token"\n')
+                expected_file = home / "expected-launch.json"
+                expected_file.write_text(json.dumps(tomllib.loads((native / "config.toml").read_text())))
             executable_dir = home / "bin"
             executable_dir.mkdir()
             (executable_dir / "codex").symlink_to(codex_binary)
@@ -161,6 +182,11 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=
                 "HTTP_PROXY": "http://127.0.0.1:9", "HTTPS_PROXY": "http://127.0.0.1:9",
                 "ALL_PROXY": "http://127.0.0.1:9", "NO_PROXY": "127.0.0.1,localhost",
             }
+
+            if owned_launch:
+                environment.update(AIMEE_TEST_OWNED_CODEX_CONFIG=str(expected_file),
+                    AIMEE_TEST_OWNED_CODEX_BINARY=str(codex_binary),
+                    AIMEE_TEST_OWNED_CODEX_URL=f"http://127.0.0.1:{server.server_port}")
 
             def run(resume=None, history=None):
                 command = [str(adapter_binary), "--native-history-probe"]
@@ -178,6 +204,34 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=
                 assert report["thread_id"], report
                 return report
 
+            if owned_launch:
+                # Configuration proof must fail before thread creation, model
+                # traffic or the host-ready/cache callback. No credentials or
+                # arbitrary project commands are involved in these refusals.
+                original_expected = expected_file.read_text()
+                original_config = (native / "config.toml").read_text()
+                for mismatch in ("model", "notify"):
+                    refused = json.loads(original_expected)
+                    if mismatch == "model":
+                        refused["model"] = "unattested-model"
+                    else:
+                        refused["notify"] = ["/bin/false"]
+                        (native / "config.toml").write_text(
+                            'notify=["/bin/false"]\n' + original_config)
+                    expected_file.write_text(json.dumps(refused))
+                    process = subprocess.run(
+                        [str(adapter_binary), "--native-history-probe", "--host-tools"],
+                        env=environment, cwd=root, text=True, capture_output=True,
+                        timeout=45, check=False)
+                    assert process.returncode != 0, (mismatch, process.stdout, process.stderr)
+                    rejection = json.loads(process.stdout)
+                    assert rejection["error"] and not rejection["thread_id"], rejection
+                    assert not rejection["host_launch_digest"], rejection
+                    assert not rejection["events"] and not rejection["host_calls"], rejection
+                    assert not requests and not planted.exists(), (requests, rejection)
+                    (native / "config.toml").write_text(original_config)
+                    expected_file.write_text(original_expected)
+
             first = run()
             assert first["text"] == "<S>fixture final 2<E>", first
             if host_tools:
@@ -186,8 +240,24 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=
                 assert observed["call_id"] == "call_native_fixture", observed
                 assert observed["namespace"] == namespace and observed["name"] == "fail", observed
                 assert "0.123456789012345678901234567890" in observed["arguments_json"], observed
-            # A second adapter invocation starts a new SDK process. Resume must
-            # retain the adopted items plus the completed turn without reinjection.
+            # A second adapter invocation starts a new SDK process. An owned
+            # scheduler also loses its ephemeral HOME/indexes: only its scoped
+            # native conversation files survive, as in the production owner.
+            if owned_launch:
+                next_home = home / "next-private-home"
+                next_native = next_home / ".codex"
+                next_workspace = next_home / "workspace"
+                next_native.mkdir(parents=True)
+                next_workspace.mkdir()
+                (next_native / "sessions").symlink_to(native / "sessions", target_is_directory=True)
+                next_config = (native / "config.toml").read_text().replace(
+                    json.dumps(str(workspace)), json.dumps(str(next_workspace)))
+                (next_native / "config.toml").write_text(next_config)
+                next_expected = next_home / "expected-launch.json"
+                next_expected.write_text(json.dumps(tomllib.loads(next_config)))
+                environment.update(HOME=str(next_home), CODEX_HOME=str(next_native),
+                    TMPDIR=str(next_home), AIMEE_TEST_OWNED_CODEX_CONFIG=str(next_expected))
+            # Retain the adopted items plus the completed turn without reinjection.
             second = run(first["thread_id"])
             assert second["thread_id"] == first["thread_id"], second
             assert second["text"] == "<S>fixture final 3<E>", second
@@ -215,6 +285,28 @@ def qualify(adapter_binary, codex_binary, bounded_sdk_catalog=False, host_tools=
                 assert "current user" in encoded
                 if number == 2:
                     assert "fixture final 2" in encoded and "after restart" in encoded
+            if owned_launch:
+                assert not first["events"] and not second["events"], (first, second)
+                assert len(first["host_launch_digest"]) == 64
+                assert first["host_launch_digest"] == second["host_launch_digest"]
+                assert not planted.exists(), "disabled project MCP command executed"
+                unseen = home / "owned-tail.json"
+                unseen.write_text(json.dumps([
+                    {"role": "user", "blocks": [{"type": "text", "text": "owned unseen user"}]},
+                    {"role": "assistant", "blocks": [{"type": "text", "text": "owned unseen assistant"}]},
+                ]))
+                third = run(first["thread_id"], unseen)
+                assert third["thread_id"] == first["thread_id"] and not third["events"]
+                assert third["host_launch_digest"] == first["host_launch_digest"]
+                assert not errors and len(requests) == 4, errors
+                tail = json.dumps(requests[-1]["input"])
+                assert tail.count("owned unseen user") == tail.count("owned unseen assistant") == 1
+                assert tail.count("call_canonical_fixture") == 2, tail
+                assert not planted.exists()
+                print("PASS: descriptor-launched real SDK verifies effective config before replay; "
+                      "project MCP disabled, exact host arguments, stable launch digest, "
+                      "resume/unseen tail and SDK-observation suppression")
+                return
             tool_blocks = [block for event in first["events"]
                 for block in event.get("payload", {}).get("blocks", [])
                 if block.get("type") in ("tool_use", "tool_result")]
@@ -289,7 +381,8 @@ if __name__ == "__main__":
     parser.add_argument("--adapter-binary", required=True, type=Path)
     parser.add_argument("--codex-binary", required=True, type=Path)
     arguments = parser.parse_args()
-    for bounded_sdk_catalog, host_tools in ((False, False), (True, False), (True, True)):
+    for bounded_sdk_catalog, host_tools, owned_launch in (
+            (False, False, False), (True, False, False), (True, True, False), (True, True, True)):
         qualify(arguments.adapter_binary.resolve(strict=True),
                 arguments.codex_binary.resolve(strict=True), bounded_sdk_catalog=bounded_sdk_catalog,
-                host_tools=host_tools)
+                host_tools=host_tools, owned_launch=owned_launch)

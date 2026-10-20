@@ -187,8 +187,52 @@ static void test_opaque_delta_metadata(void)
    aimee_ir_response_builder_free(&builder);
 }
 
+static void test_response_snapshot(void)
+{
+   cJSON *arguments = cJSON_Parse("{\"marker\":0.123456789012345678901234567890}");
+   cJSON *raw = cJSON_Parse("{\"opaque\":\"vendor data\"}");
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_THINKING,
+                              .text = "reason",
+                              .thinking_signature = "signed",
+                              .thinking_encrypted_content = "opaque"},
+                             {.type = AIMEE_BLK_TOOL_USE,
+                              .tool_id = "exact-id",
+                              .tool_namespace = "aimee",
+                              .tool_name = "read_file",
+                              .tool_input = arguments}};
+   aimee_response_t source = {.id = "source",
+                              .model = "selected",
+                              .role = "assistant",
+                              .content = blocks,
+                              .n_content = 2,
+                              .stop_reason = AIMEE_STOP_TOOL_USE,
+                              .raw_stop_reason = "tool_use",
+                              .usage_in = 90,
+                              .usage_out = 7,
+                              .usage_cache_read = 80,
+                              .usage_cache_write = 5,
+                              .usage_reasoning = 3,
+                              .raw = raw};
+   aimee_response_t copy = {0};
+   assert(!aimee_ir_response_clone(&source, &copy));
+   assert(copy.content != blocks && copy.raw != raw && copy.content[1].tool_input != arguments);
+   assert(copy.usage_cache_read == 80 && copy.usage_cache_write == 5 && copy.usage_reasoning == 3);
+   assert(!strcmp(copy.content[0].thinking_signature, "signed") &&
+          !strcmp(copy.content[0].thinking_encrypted_content, "opaque"));
+   cJSON_ReplaceItemInObjectCaseSensitive(arguments, "marker", cJSON_CreateNumber(4));
+   cJSON_Delete(arguments);
+   cJSON_Delete(raw);
+   char *exact = cJSON_PrintUnformatted(copy.content[1].tool_input);
+   assert(exact && strstr(exact, "0.123456789012345678901234567890"));
+   free(exact);
+   assert(!aimee_ir_response_clone(&copy, &copy));
+   aimee_response_t invalid = {.n_content = -1};
+   assert(aimee_ir_response_clone(&invalid, &copy) < 0 && !strcmp(copy.id, "source"));
+   aimee_response_free(&copy);
+}
 int main(void)
 {
+   test_response_snapshot();
    test_owned_delta_assembly();
    test_opaque_delta_metadata();
    test_argument_frame_admission();

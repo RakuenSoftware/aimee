@@ -3,6 +3,8 @@
  * the detached provider + its runner queue (registry), via the thread-local
  * active-provider seam the file/exec tools resolve through. */
 #include "workspace_turn.h"
+#include "aimee_sha256.h"
+#include "platform_random.h"
 #include "aimee_home.h" /* aimee_home — authorize aimee's own managed worktrees */
 #include "config.h"
 #include "modules/git/forge_credentials.h"
@@ -17,6 +19,9 @@
 #include "workspace_runner_registry.h"
 
 #include <errno.h>
+#include <fcntl.h>
+#include <inttypes.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,6 +34,7 @@ extern char **environ;
  * duration (the active-provider pointer aliases &t_turn_detached.base). */
 static __thread ws_detached_provider_t t_turn_detached;
 static __thread int t_turn_bound;
+static __thread char t_turn_detached_epoch[65], t_turn_container_epoch[65];
 /* Same, for a delegate turn bound to its own container. Held separately from
  * t_turn_detached because this one owns a CONTAINER: unbinding has to release it,
  * not just drop the pointer, or every delegate turn leaks a container. */
@@ -47,6 +53,7 @@ struct workspace_turn_scope
 {
    ws_detached_provider_t detached;
    int bound;
+   char epoch[65];
    char cwd[MAX_PATH_LEN], drift[256];
    const workspace_provider_t *previous_provider;
    struct workspace_turn_scope *previous;
@@ -455,7 +462,16 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, i
 
 int workspace_turn_bind_active(const char *cwd)
 {
-   return bind_active_into(cwd, &t_turn_detached, &t_turn_bound, t_turn_cwd, t_turn_drift);
+   int result = bind_active_into(cwd, &t_turn_detached, &t_turn_bound, t_turn_cwd, t_turn_drift);
+   t_turn_detached_epoch[0] = 0;
+   if (result > 0 && workspace_provider_active() == &t_turn_detached.base &&
+       platform_random_hex(t_turn_detached_epoch, 64))
+   {
+      workspace_provider_clear_active();
+      t_turn_bound = 0;
+      return -1;
+   }
+   return result;
 }
 int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out)
 {
@@ -470,6 +486,13 @@ int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out)
    scope->previous_provider = workspace_provider_active();
    scope->previous = t_nested_scope;
    int result = bind_active_into(cwd, &scope->detached, &scope->bound, scope->cwd, scope->drift);
+   if (result > 0 && workspace_provider_active() == &scope->detached.base &&
+       platform_random_hex(scope->epoch, 64))
+   {
+      workspace_provider_set_active(scope->previous_provider);
+      free(scope);
+      return -1;
+   }
    t_nested_scope = scope;
    *out = scope;
    return result;
@@ -641,6 +664,11 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
       b->release(b, state, 0);
       return -1;
    }
+   if (platform_random_hex(t_turn_container_epoch, 64))
+   {
+      b->release(b, state, 0);
+      return -1;
+   }
    workspace_provider_set_active(&t_turn_container.base);
    t_turn_container_backend = b;
    t_turn_container_state = state;
@@ -692,7 +720,9 @@ void workspace_turn_unbind_active(void)
       t_turn_container_backend = NULL;
       t_turn_container_state = NULL;
       t_turn_container_hibernate = 0;
+      t_turn_container_epoch[0] = 0;
    }
+   t_turn_detached_epoch[0] = 0;
    t_turn_cwd[0] = '\0';
    t_turn_drift[0] = '\0';
 }
@@ -726,4 +756,65 @@ int workspace_turn_reject_foreign_cwd(int detached_bound, int trusted_local, con
    /* Remote peer + raw foreign absolute path + no detached workspace: the
     * server must not open it on its own filesystem. Reject. */
    return 1;
+}
+
+/* Stable identity is measured by the resource owner; it grants no filesystem or
+ * execution authority. Remote/container acquisition epochs cannot be forged by
+ * an SDK or by a recycled provider address. */
+int workspace_turn_resource_identity(const char *cwd, int *directory_fd, char digest[65])
+{
+   if (directory_fd)
+      *directory_fd = -1;
+   if (digest)
+      digest[0] = 0;
+   if (!cwd || !cwd[0] || !directory_fd || !digest)
+      return -1;
+   const workspace_provider_t *provider = workspace_provider_active();
+   if (!provider)
+      return -1;
+   const char *epoch = "";
+   int fd = -1;
+   struct stat status = {0};
+   if (provider->kind == WS_PROVIDER_CONTAINER)
+   {
+      if (provider != &t_turn_container.base || !t_turn_container_backend ||
+          !t_turn_container_state || !t_turn_container_epoch[0])
+         return -1;
+      epoch = t_turn_container_epoch;
+   }
+   else if (provider->kind == WS_PROVIDER_DETACHED)
+   {
+      if (t_nested_scope && provider == &t_nested_scope->detached.base && t_nested_scope->bound)
+         epoch = t_nested_scope->epoch;
+      else if (provider == &t_turn_detached.base && t_turn_bound)
+         epoch = t_turn_detached_epoch;
+      if (!epoch[0])
+         return -1;
+   }
+   else if (provider->kind == WS_PROVIDER_SHARED || provider->kind == WS_PROVIDER_MIRROR)
+   {
+      char actual[MAX_PATH_LEN];
+      if (!workspace_turn_workspace_authorized(cwd, actual, sizeof actual) ||
+          (fd = open(actual, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)) < 0 ||
+          fstat(fd, &status))
+      {
+         if (fd >= 0)
+            close(fd);
+         return -1;
+      }
+   }
+   else
+      return -1;
+   char identity[MAX_PATH_LEN + 256];
+   int length = snprintf(identity, sizeof identity, "%d:%ju:%ju:%s:%s", provider->kind,
+                         (uintmax_t)status.st_dev, (uintmax_t)status.st_ino, epoch, cwd);
+   if (length < 0 || (size_t)length >= sizeof identity ||
+       aimee_sha256_hex(identity, (size_t)length, digest))
+   {
+      if (fd >= 0)
+         close(fd);
+      return -1;
+   }
+   *directory_fd = fd;
+   return 0;
 }

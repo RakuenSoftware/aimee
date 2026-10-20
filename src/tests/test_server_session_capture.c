@@ -420,6 +420,82 @@ static void test_one_live_writer_per_turn(void)
    server_session_capture_close(winner);
 }
 
+typedef struct
+{
+   server_session_capture_t *owner;
+   int calls, expected_success, expected_rows, registered;
+} terminal_resource_t;
+static void terminal_resource(int success, void *context)
+{
+   terminal_resource_t *resource = context;
+   assert(!resource->calls++ && success == resource->expected_success);
+   /* Reentrant reads prove the writer lock is released. Durability precedes
+    * this callback; an uncommitted success can never publish derived state. */
+   server_session_capture_counts_t counts;
+   assert(!server_session_capture_counts(resource->owner, &counts));
+   assert(!server_session_capture_accepting(resource->owner));
+   assert(cJSON_GetArraySize(rows) == resource->expected_rows);
+}
+static void *register_terminal(void *context)
+{
+   terminal_resource_t *resource = context;
+   resource->registered =
+       server_session_capture_after_terminal(resource->owner, terminal_resource, resource) == 0;
+   return NULL;
+}
+static void test_quiescent_terminal_resource(void)
+{
+   for (int mode = 0; mode < 4; mode++)
+   {
+      reset();
+      server_session_capture_t *owner =
+          server_session_capture_open("private-child", "terminal", "alice", "parent");
+      assert(owner && !strcmp(server_session_capture_turn(owner), "terminal"));
+      terminal_resource_t resource = {
+          .owner = owner, .expected_success = mode == 0, .expected_rows = mode < 2 ? 1 : 0};
+      assert(!server_session_capture_after_terminal(owner, terminal_resource, &resource));
+      assert(server_session_capture_after_terminal(owner, terminal_resource, &resource) < 0);
+      assert(!resource.calls);
+      if (mode < 3)
+      {
+         aimee_session_event_t event = {.kind = AIMEE_SESSION_EXECUTION,
+                                        .execution_status = mode == 1 ? "cancelled" : "completed"};
+         reject_append = mode == 2;
+         int rc = server_session_capture_sink(&event, owner);
+         assert(mode == 2 ? rc < 0 && !resource.calls : !rc && resource.calls == 1);
+         if (mode != 2)
+         {
+            assert(server_session_capture_sink(&event, owner) < 0);
+            assert(server_session_capture_after_terminal(owner, terminal_resource, &resource) < 0);
+         }
+      }
+      server_session_capture_close(owner);
+      assert(resource.calls == 1);
+   }
+   reset();
+   server_session_capture_t *owner =
+       server_session_capture_open("private-child", "terminal", "alice", "parent");
+   terminal_resource_t resources[8];
+   pthread_t workers[8];
+   for (int i = 0; i < 8; i++)
+   {
+      resources[i] =
+          (terminal_resource_t){.owner = owner, .expected_success = 1, .expected_rows = 1};
+      assert(!pthread_create(&workers[i], NULL, register_terminal, &resources[i]));
+   }
+   int winners = 0;
+   for (int i = 0; i < 8; i++)
+   {
+      assert(!pthread_join(workers[i], NULL));
+      winners += resources[i].registered;
+   }
+   assert(winners == 1);
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "completed"};
+   assert(!server_session_capture_sink(&event, owner));
+   server_session_capture_close(owner);
+   for (int i = 0; i < 8; i++)
+      assert(resources[i].calls == resources[i].registered);
+}
 int main(void)
 {
    server_session_capture_t *absent = NULL;
@@ -431,6 +507,7 @@ int main(void)
    test_close_before_callback();
    test_failure_refuses_success();
    test_running_history_source();
+   test_quiescent_terminal_resource();
    cJSON_Delete(rows);
    puts("retained capture: copied identity, concurrent counters, exact IR, sealed turns and sticky "
         "failure passed");

@@ -3,6 +3,7 @@
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "aimee_home.h"
+#include "cli_codex_profile.h"
 /* cli_codex.c: see cli_codex.h. Spawns `codex app-server`, drives the
  * JSON-RPC handshake (initialize → thread/start → turn/start), reads
  * notifications until turn/completed, and assembles the final
@@ -84,6 +85,7 @@ typedef struct
    cli_codex_read_status_t last_read_status;
    aimee_harness_ir_t ir;
    const char *home;
+   const cli_codex_host_launch_t *host_launch;
    const char *session_id;
    const aimee_request_t *tool_catalog;
    int (*tool_call)(const aimee_block_t *, aimee_block_t *, void *);
@@ -324,16 +326,41 @@ static int cli_codex_spawn(cli_codex_t *c, const char *cli_cmd, const char *cwd,
        * codex node wrapper AND the inner codex binary it execs. Without
        * this, signaling the wrapper PID alone leaves the inner binary
        * reparented to PID 1, leaking processes on every stalled abort. */
-      setsid();
-      dup2(in_pipe[0], STDIN_FILENO);
-      dup2(out_pipe[1], STDOUT_FILENO);
-      dup2(err_pipe[1], STDERR_FILENO);
+      if (setsid() < 0 && c->host_launch)
+         _exit(126);
+      if (dup2(in_pipe[0], STDIN_FILENO) < 0 || dup2(out_pipe[1], STDOUT_FILENO) < 0 ||
+          dup2(err_pipe[1], STDERR_FILENO) < 0)
+         _exit(126);
       close(in_pipe[0]);
       close(in_pipe[1]);
       close(out_pipe[0]);
       close(out_pipe[1]);
       close(err_pipe[0]);
       close(err_pipe[1]);
+      if (c->host_launch)
+      {
+         const cli_codex_host_launch_t *host = c->host_launch;
+         if (host->executable_fd < 0 || host->cwd_fd < 0 || !host->environment ||
+             fchdir(host->cwd_fd))
+            _exit(126);
+         /* The child inherits only its pipes and explicitly owned launch
+          * resources. Never leak server/Vault sockets through SDK descendants. */
+         long limit = sysconf(_SC_OPEN_MAX);
+         if (limit < 0)
+            _exit(126);
+         for (int fd = 3; fd < limit; fd++)
+            if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0 && errno != EBADF)
+               _exit(126);
+         char *const arguments[] = {"codex", "app-server", NULL};
+#if defined(__linux__)
+         fexecve(host->executable_fd, arguments, host->environment);
+#else
+         /* This owner needs an executable-descriptor launch implementation on
+          * other hosts before claiming custody; no ambient executable fallback. */
+         (void)arguments;
+#endif
+         _exit(127);
+      }
       if (cwd && cwd[0] && chdir(cwd) != 0)
       {
          dprintf(STDERR_FILENO, "aimee: chdir(%s) failed: %s\n", cwd, strerror(errno));
@@ -1266,140 +1293,6 @@ static const char *codex_string(const cJSON *object, const char *key)
 {
    return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(object, key));
 }
-static cJSON *codex_dynamic_definition(const aimee_tool_t *tool)
-{
-   if (!aimee_ir_tool_valid(tool) || tool->kind == AIMEE_TOOL_HOSTED || tool->cache_control ||
-       tool->cache_ttl || tool->strict == AIMEE_STRICT_TRUE || tool->strict == AIMEE_STRICT_NULL)
-      return NULL;
-   cJSON *out = cJSON_CreateObject();
-   const char *kind = tool->kind == AIMEE_TOOL_NAMESPACE ? "namespace" : "function";
-   if (!out || !cJSON_AddStringToObject(out, "type", kind) ||
-       !cJSON_AddStringToObject(out, "name", tool->name) ||
-       !cJSON_AddStringToObject(out, "description", tool->description ? tool->description : ""))
-      goto fail;
-   if (tool->kind == AIMEE_TOOL_NAMESPACE)
-   {
-      cJSON *children = cJSON_AddArrayToObject(out, "tools");
-      if (!children)
-         goto fail;
-      for (int i = 0; i < tool->n_children; i++)
-      {
-         cJSON *child = codex_dynamic_definition(tool->children + i);
-         if (!child || !cJSON_AddItemToArray(children, child))
-         {
-            cJSON_Delete(child);
-            goto fail;
-         }
-      }
-   }
-   else
-   {
-      cJSON *schema = cJSON_Duplicate(tool->schema, 1);
-      if (!schema || !cJSON_AddItemToObject(out, "inputSchema", schema))
-      {
-         cJSON_Delete(schema);
-         goto fail;
-      }
-      if (tool->has_defer_loading &&
-          !cJSON_AddBoolToObject(out, "deferLoading", tool->defer_loading))
-         goto fail;
-   }
-   return out;
-fail:
-   cJSON_Delete(out);
-   return NULL;
-}
-cJSON *cli_codex_dynamic_tools(const aimee_request_t *catalog)
-{
-   if (!catalog || aimee_ir_request_admit(catalog))
-      return NULL;
-   cJSON *out = cJSON_CreateArray();
-   if (!out)
-      return NULL;
-   for (int i = 0; i < catalog->n_tools; i++)
-   {
-      cJSON *entry = codex_dynamic_definition(catalog->tools + i);
-      if (!entry || !cJSON_AddItemToArray(out, entry))
-      {
-         cJSON_Delete(entry);
-         cJSON_Delete(out);
-         return NULL;
-      }
-   }
-   return out;
-}
-int cli_codex_dynamic_call(const cJSON *params, const aimee_request_t *catalog, aimee_block_t *out)
-{
-   if (!out)
-      return -1;
-   memset(out, 0, sizeof *out);
-   if (!catalog || !cJSON_IsObject(params) || !aimee_ir_json_unique(params) ||
-       aimee_ir_request_admit(catalog))
-      return -1;
-   const char *name = codex_string(params, "tool"), *id = codex_string(params, "callId");
-   const cJSON *ns = cJSON_GetObjectItemCaseSensitive(params, "namespace");
-   const char *space = cJSON_GetStringValue(ns);
-   const cJSON *arguments = cJSON_GetObjectItemCaseSensitive(params, "arguments");
-   if (!name || !name[0] || !id || !id[0] || !cJSON_IsObject(arguments) ||
-       (ns && !cJSON_IsNull(ns) && (!space || !space[0])))
-      return -1;
-   int matches = 0;
-   for (int i = 0; i < catalog->n_tools; i++)
-   {
-      const aimee_tool_t *tool = catalog->tools + i;
-      if (!space && tool->kind == AIMEE_TOOL_FUNCTION && !strcmp(tool->name, name))
-         matches++;
-      if (space && tool->kind == AIMEE_TOOL_NAMESPACE && !strcmp(tool->name, space))
-         for (int j = 0; j < tool->n_children; j++)
-            if (tool->children[j].kind == AIMEE_TOOL_FUNCTION &&
-                !strcmp(tool->children[j].name, name))
-               matches++;
-   }
-   if (matches != 1)
-      return -1;
-   *out = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
-                          .tool_id = strdup(id),
-                          .tool_name = strdup(name),
-                          .tool_namespace = space ? strdup(space) : NULL,
-                          .tool_input = cJSON_Duplicate(arguments, 1)};
-   aimee_message_t message = {.role = "assistant", .blocks = out, .n_blocks = 1};
-   aimee_request_t request = {.messages = &message, .n_messages = 1};
-   if (!out->tool_id || !out->tool_name || (space && !out->tool_namespace) || !out->tool_input ||
-       aimee_ir_request_admit(&request))
-   {
-      aimee_block_free_contents(out);
-      memset(out, 0, sizeof *out);
-      return -1;
-   }
-   return 0;
-}
-cJSON *cli_codex_dynamic_result(const aimee_block_t *result)
-{
-   if (!result || result->type != AIMEE_BLK_TOOL_RESULT || !cJSON_IsString(result->tool_result))
-      return NULL;
-   aimee_message_t message = {.role = "user", .blocks = (aimee_block_t *)result, .n_blocks = 1};
-   aimee_request_t request = {.messages = &message, .n_messages = 1};
-   if (aimee_ir_request_admit(&request))
-      return NULL;
-   cJSON *out = cJSON_CreateObject();
-   cJSON *items = out ? cJSON_AddArrayToObject(out, "contentItems") : NULL;
-   cJSON *text = items ? cJSON_CreateObject() : NULL;
-   if (!text || !cJSON_AddItemToArray(items, text))
-   {
-      cJSON_Delete(text);
-      cJSON_Delete(out);
-      return NULL;
-   }
-   if (!cJSON_AddStringToObject(text, "type", "inputText") ||
-       !cJSON_AddStringToObject(text, "text", result->tool_result->valuestring) ||
-       !cJSON_AddBoolToObject(out, "success", !result->tool_is_error))
-   {
-      cJSON_Delete(out);
-      return NULL;
-   }
-   return out;
-}
-
 static int codex_bind_dynamic_tools(cli_codex_t *c, const aimee_request_t *catalog,
                                     int (*call)(const aimee_block_t *, aimee_block_t *, void *),
                                     void *context)
@@ -1579,6 +1472,12 @@ static int cli_codex_agent_idle_timeout_ms(const agent_t *agent)
 static cJSON *cli_codex_request(cli_codex_t *c, const char *method, cJSON *params, int id,
                                 long long *deadline_ms, int idle_timeout_ms)
 {
+   if (c->host_launch && (!strcmp(method, "thread/start") || !strcmp(method, "thread/resume")) &&
+       !cJSON_AddStringToObject(params, "cwd", c->host_launch->cwd))
+   {
+      cJSON_Delete(params);
+      return NULL;
+   }
    if (c->dynamic_tools)
    {
       if (!strcmp(method, "initialize"))
@@ -1764,6 +1663,30 @@ static int cli_codex_adopt_history(cli_codex_t *c, const char *thread_id,
    return accepted ? 0 : -1;
 }
 
+static int cli_codex_host_ready(cli_codex_t *c, cli_codex_host_replay_t *replay, int *next_id,
+                                long long *deadline_ms, int idle_timeout_ms)
+{
+   const cli_codex_host_launch_t *host = c->host_launch;
+   if (!host)
+      return 0;
+   if (!host->home || !host->cwd || !host->build_digest || strlen(host->build_digest) != 64 ||
+       !host->gateway_url || !host->gateway_token || !host->expected_config || !host->ready)
+      return -1;
+   cJSON *params = cJSON_CreateObject();
+   if (!params || !cJSON_AddStringToObject(params, "cwd", host->cwd) ||
+       !cJSON_AddTrueToObject(params, "includeLayers"))
+   {
+      cJSON_Delete(params);
+      return -1;
+   }
+   cJSON *reply =
+       cli_codex_request(c, "config/read", params, (*next_id)++, deadline_ms, idle_timeout_ms);
+   char digest[65];
+   int rc = cli_codex_profile_verify(host, reply, digest);
+   cJSON_Delete(reply);
+   return rc ? -1 : host->ready(digest, replay, host->context);
+}
+
 int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_event_cb cb,
                           void *userdata, cli_codex_chat_result_t *out)
 {
@@ -1787,6 +1710,8 @@ int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_ev
    c.err_log_fd = -1;
    c.autonomous = req->autonomous;
    c.home = req->home;
+   c.host_launch = req->host_launch;
+   c.ir.host_model_capture = c.host_launch != NULL;
    c.session_id = req->session_id;
    c.ir.admitted_prompt = req->user_prompt;
    if (codex_bind_dynamic_tools(&c, req->tool_catalog, req->tool_call, req->tool_context))
@@ -1827,11 +1752,20 @@ int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_ev
       cJSON_Delete(resp);
    }
 
+   cli_codex_host_replay_t replay = {.history = req->history, .resume_id = req->thread_id};
+   if (cli_codex_host_ready(&c, &replay, &next_id, &deadline_ms, idle_timeout_ms))
+   {
+      if (out)
+         snprintf(out->error, sizeof out->error, "native SDK configuration could not be verified");
+      aimee_ir_session_fail_capture();
+      cli_codex_close(&c);
+      return -1;
+   }
    char thread_id[128] = {0};
-   if (req->thread_id && req->thread_id[0])
+   if (replay.resume_id && replay.resume_id[0])
    {
       cJSON *params = cJSON_CreateObject();
-      cJSON_AddStringToObject(params, "threadId", req->thread_id);
+      cJSON_AddStringToObject(params, "threadId", replay.resume_id);
       cJSON *resp =
           cli_codex_request(&c, "thread/resume", params, next_id++, &deadline_ms, idle_timeout_ms);
       if (!resp || !cJSON_GetObjectItemCaseSensitive(resp, "result"))
@@ -1844,7 +1778,7 @@ int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_ev
          return -1;
       }
       if (!cli_codex_response_thread_id(resp, thread_id, sizeof(thread_id)))
-         snprintf(thread_id, sizeof(thread_id), "%s", req->thread_id);
+         snprintf(thread_id, sizeof(thread_id), "%s", replay.resume_id);
       cJSON_Delete(resp);
    }
    else
@@ -1873,7 +1807,7 @@ int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_ev
       }
    }
 
-   if (cli_codex_adopt_history(&c, thread_id, req->history, &next_id, &deadline_ms,
+   if (cli_codex_adopt_history(&c, thread_id, replay.history, &next_id, &deadline_ms,
                                idle_timeout_ms) != 0)
    {
       if (out)
@@ -2263,6 +2197,8 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
    c.err_log_fd = -1;
    c.autonomous = agent->autonomous;
    c.home = cfg->home;
+   c.host_launch = cfg->codex_host;
+   c.ir.host_model_capture = c.host_launch != NULL;
    c.session_id = cfg->session_id;
    c.ir.admitted_prompt = user_prompt;
    if (codex_bind_dynamic_tools(&c, cfg->tool_catalog, cfg->tool_call, cfg->tool_context))
@@ -2302,13 +2238,21 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
       cJSON_Delete(resp);
    }
 
+   cli_codex_host_replay_t replay = {.history = cfg->history, .resume_id = cfg->resume_id};
+   if (cli_codex_host_ready(&c, &replay, &next_id, &deadline_ms, idle_timeout_ms))
+   {
+      snprintf(out->error, sizeof out->error, "native SDK configuration could not be verified");
+      aimee_ir_session_fail_capture();
+      cli_codex_close(&c);
+      return AGENT_RC_CAPTURE_FAILED;
+   }
    /* Resolve the native handle within this canonical execution scope. */
    char thread_id[128] = {0};
    {
-      int resume = cfg->resume_id && cfg->resume_id[0];
+      int resume = replay.resume_id && replay.resume_id[0];
       cJSON *params = cJSON_CreateObject();
       if (resume)
-         cJSON_AddStringToObject(params, "threadId", cfg->resume_id);
+         cJSON_AddStringToObject(params, "threadId", replay.resume_id);
       else if (system_prompt && system_prompt[0])
          cli_codex_add_utf8_string(params, "developerInstructions", system_prompt);
       cJSON *resp = cli_codex_request(&c, resume ? "thread/resume" : "thread/start", params,
@@ -2316,7 +2260,7 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
       int got_id = resp && cli_codex_response_thread_id(resp, thread_id, sizeof thread_id);
       if (!got_id && resume && resp && cJSON_GetObjectItemCaseSensitive(resp, "result"))
       {
-         snprintf(thread_id, sizeof thread_id, "%s", cfg->resume_id);
+         snprintf(thread_id, sizeof thread_id, "%s", replay.resume_id);
          got_id = 1;
       }
       cJSON_Delete(resp);
@@ -2329,7 +2273,7 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
       }
    }
 
-   if (cli_codex_adopt_history(&c, thread_id, cfg->history, &next_id, &deadline_ms,
+   if (cli_codex_adopt_history(&c, thread_id, replay.history, &next_id, &deadline_ms,
                                idle_timeout_ms) != 0)
    {
       snprintf(out->error, sizeof(out->error), "codex canonical history adoption failed");

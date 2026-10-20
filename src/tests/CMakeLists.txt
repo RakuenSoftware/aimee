@@ -499,6 +499,23 @@ if(NOT WIN32)
     ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
   aimee_enable_test_asserts(test_server_native_tool_admission)
   add_test(NAME test_server_native_tool_admission COMMAND test_server_native_tool_admission)
+  add_executable(test_server_native_execution test_server_native_execution.c
+    ../server/server_native_execution.c ../server/cli_session.c ../server/agent_adapter.c
+    ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c
+    ../posix/workspace_provider.c ../util.c ../text.c ../aimee_home.c ../log.c
+    ../vendor/cJSON.c ${PLATFORM_CORE_SRCS})
+  target_include_directories(test_server_native_execution PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
+  target_compile_options(test_server_native_execution PRIVATE -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(test_server_native_execution PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(test_server_native_execution PRIVATE -Wl,--gc-sections)
+  endif()
+  target_link_libraries(test_server_native_execution PRIVATE
+    aimee-core-connection Threads::Threads OpenSSL::Crypto)
+  aimee_enable_test_asserts(test_server_native_execution)
+  add_test(NAME test_server_native_execution COMMAND test_server_native_execution)
   add_executable(test_server_native_runtime test_server_native_runtime.c
     ../server/agent_tools.c ../posix/agent_source_authority.c ../modules/ir/aimee_ir.c
     ../server/server_native_runtime.c ../server/server_native_tool_admission.c ../server/server_session_question.c ../server/server_native_tool_source.c ../server/server_session_capture.c ../server/server_session_control.c

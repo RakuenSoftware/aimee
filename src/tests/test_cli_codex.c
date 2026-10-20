@@ -1,5 +1,8 @@
 /* Codex JSON-RPC parsing and child protocol boundary fixtures. */
 #include <assert.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include "aimee_sha256.h"
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1213,6 +1216,14 @@ static int native_probe_host_tool(const aimee_block_t *call, aimee_block_t *resu
    return 0;
 }
 
+static char probe_launch_digest[65];
+static int native_probe_ready(const char *digest, cli_codex_host_replay_t *replay, void *context)
+{
+   (void)replay;
+   assert(context == probe_launch_digest && !probe_launch_digest[0] && strlen(digest) == 64);
+   snprintf(probe_launch_digest, sizeof probe_launch_digest, "%s", digest);
+   return 0;
+}
 static int native_history_probe(const char *resume, const char *history_file, int host_tools)
 {
    cJSON *arguments = cJSON_Parse("{\"path\":\"fixture.txt\"}");
@@ -1271,6 +1282,56 @@ static int native_history_probe(const char *resume, const char *history_file, in
    req.tool_catalog = host_tools ? &catalog : NULL;
    req.tool_call = host_tools ? native_probe_host_tool : NULL;
    req.tool_context = host_calls;
+   cli_codex_host_launch_t launch = {0};
+   cJSON *expected = NULL;
+   char home[4200], codex[4200], temporary[4200], directory[4200], build[65];
+   char *environment[] = {home,
+                          codex,
+                          temporary,
+                          "PATH=/usr/bin:/bin",
+                          "LANG=C.UTF-8",
+                          "OTEL_SDK_DISABLED=true",
+                          "HTTP_PROXY=http://127.0.0.1:1",
+                          "HTTPS_PROXY=http://127.0.0.1:1",
+                          "NO_PROXY=127.0.0.1,localhost",
+                          NULL};
+   const char *configuration = getenv("AIMEE_TEST_OWNED_CODEX_CONFIG");
+   if (configuration)
+   {
+      FILE *file = fopen(configuration, "r");
+      assert(file);
+      char bytes[65536];
+      size_t length = fread(bytes, 1, sizeof bytes, file);
+      assert(!ferror(file) && feof(file) && !fclose(file));
+      expected = aimee_ir_json_parse_frame(bytes, length);
+      assert(expected && host_tools);
+      const char *root = getenv("HOME"), *binary = getenv("AIMEE_TEST_OWNED_CODEX_BINARY");
+      assert(root && binary);
+      assert(snprintf(home, sizeof home, "HOME=%s", root) < (int)sizeof home);
+      assert(snprintf(codex, sizeof codex, "CODEX_HOME=%s/.codex", root) < (int)sizeof codex);
+      assert(snprintf(temporary, sizeof temporary, "TMPDIR=%s", root) < (int)sizeof temporary);
+      assert(snprintf(directory, sizeof directory, "%s/workspace", root) < (int)sizeof directory);
+      launch =
+          (cli_codex_host_launch_t){.executable_fd = open(binary, O_RDONLY | O_CLOEXEC),
+                                    .cwd_fd = open(directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC),
+                                    .home = root,
+                                    .cwd = directory,
+                                    .build_digest = build,
+                                    .gateway_url = getenv("AIMEE_TEST_OWNED_CODEX_URL"),
+                                    .gateway_token = "fixture-token",
+                                    .environment = environment,
+                                    .expected_config = expected,
+                                    .ready = native_probe_ready,
+                                    .context = probe_launch_digest};
+      assert(launch.executable_fd >= 0 && launch.cwd_fd >= 0 && launch.gateway_url);
+      struct stat binary_status;
+      assert(!fstat(launch.executable_fd, &binary_status) && binary_status.st_size > 0);
+      void *image = mmap(NULL, (size_t)binary_status.st_size, PROT_READ, MAP_PRIVATE,
+                         launch.executable_fd, 0);
+      assert(image != MAP_FAILED && !aimee_sha256_hex(image, (size_t)binary_status.st_size, build));
+      assert(!munmap(image, (size_t)binary_status.st_size));
+      req.host_launch = &launch;
+   }
    cli_codex_chat_result_t out;
    codex_stream_capture_t captured = {0};
    cJSON *events = cJSON_CreateArray();
@@ -1278,6 +1339,7 @@ static int native_history_probe(const char *resume, const char *history_file, in
    int rc = cli_codex_chat_stream(&req, codex_capture_cb, &captured, &out);
    aimee_ir_session_set_sink(NULL, NULL);
    cJSON *report = cJSON_CreateObject();
+   cJSON_AddStringToObject(report, "host_launch_digest", probe_launch_digest);
    cJSON_AddItemToObject(report, "events", events);
    cJSON_AddItemToObject(report, "host_calls", host_calls);
    cJSON *persisted = cJSON_CreateArray(), *event;
@@ -1302,6 +1364,12 @@ static int native_history_probe(const char *resume, const char *history_file, in
    cJSON_Delete(arguments);
    cJSON_Delete(result);
    aimee_request_free(&adopted);
+   if (configuration)
+   {
+      close(launch.executable_fd);
+      close(launch.cwd_fd);
+      cJSON_Delete(expected);
+   }
    return rc ? 1 : 0;
 }
 

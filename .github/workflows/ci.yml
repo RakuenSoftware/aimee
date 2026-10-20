@@ -582,12 +582,16 @@ jobs:
         env:
           AIMEE_TEST_REQUIRE_CODEX: '1'
         run: python3 scripts/tests/test_thin_client_proxy.py -v
-      - name: Native Codex canonical adoption and process restart
+      - name: Native Codex canonical adoption, isolated launch and restart
         run: |
           make -C src -j2 build/obj/tests/unit-test-cli-codex
+          # The descriptor launcher attests the actual pinned executable, not
+          # npm's JavaScript dispatcher. Resolve the same platform package used
+          # by the installed Codex entry point before running all four modes.
+          codex_native=$(node -e 'const p=require("node:path"); const pkg=require.resolve("@openai/codex-linux-x64/package.json",{paths:[process.argv[1]]}); process.stdout.write(p.join(p.dirname(pkg),"vendor","x86_64-unknown-linux-musl","bin","codex"))' "$(npm root -g)/@openai/codex")
           python3 src/tests/test_codex_native_adoption.py \
             --adapter-binary src/build/obj/tests/unit-test-cli-codex \
-            --codex-binary "$(command -v codex)"
+            --codex-binary "$codex_native"
 
   build-integrity:
     needs: change-scope
