@@ -147,14 +147,14 @@ remain provider-gated without splitting the user-learning contract into a second
 
 Delegate exits retain process completion separately from task correctness. A successful exit
 cannot establish writes, validate a prompt pattern or provide an independent grade. Missing effect
-receipts remain unknown. Pending exit observations are retained with automatic application disabled.
+receipts remain unknown. Exit observations await review with automatic application disabled.
 The legacy role-only prompt-injection operation is a wire tombstone and never reads storage; the
 canonical memory owner supplies scoped reviewed procedure context.
 
 Source-bound delegate experience uses a protected canonical parent reference carrying the actual
 selected registration, durable job and locally resolved project. Host-only telemetry operations 63/64
 resolve the exact owned child terminal and existing admitted grades; replay can recover missing grades
-from inline proofs before projecting pending observations. A retained proof with a missing grade cannot
+from inline proofs before projecting observations for review. A retained proof with a missing grade cannot
 be frozen as an ungraded result. A completed child without verifier evidence remains explicitly
 ungraded. Observations have zero inferred confidence and automatic application disabled; child
 completion does not establish final job completion, semantic correctness or causal procedure success.

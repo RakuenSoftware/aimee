@@ -9,7 +9,7 @@
 #include "util.h"
 #include <unistd.h>
 
-int server_active_project_from_cwd(const char *cwd, char *out, size_t capacity);
+int server_learning_project_from_cwd(const char *cwd, char *out, size_t capacity);
 #include "aimee_sha256.h"
 #include "db1_client/primary_sessions.h"
 #include "db1_client/server_sessions.h"
@@ -131,7 +131,7 @@ static cJSON *delegate_binding(const char *role, const char *agent, const char *
    int fd = -1;
    if (!cwd || workspace_turn_resource_identity(cwd, &fd, identity))
       return NULL; /* No process-CWD or unapproved workspace fallback. */
-   int resolved = server_active_project_from_cwd(cwd, project, sizeof project);
+   int resolved = server_learning_project_from_cwd(cwd, project, sizeof project);
    if (fd >= 0)
       close(fd);
    if (resolved || !project[0])

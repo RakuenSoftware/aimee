@@ -317,7 +317,7 @@ def main():
             assert proof["snapshot_tree"] == proof["final_tree"] and proof["configuration_sha256"] == proof["final_configuration_sha256"], proof
             assert proof["isolation"] == "private_source_snapshot" and proof["scope_kind"] == "project", proof
             assert proof in terminal["payload"].get("verification_proofs", []), ("proof not retained with canonical terminal", terminal)
-            assert proof["scope_id"] == (roots[0] / ".git" / "aimee-project-id").read_text().strip(), proof
+            assert proof["scope_id"] == "local:" + (roots[0] / ".git" / "aimee-project-id").read_text().strip(), proof
             assert len(proof["steps"]) == 1 and proof["steps"][0]["name"] == "private-source-proof", proof
             assert proof["steps"][0]["ran"] and proof["steps"][0]["skipped"] is False and proof["steps"][0]["exit_code"] == "0", proof
             reference = grade["verification_ref"]

@@ -519,7 +519,7 @@ static int begin(const char *root, const char *session, const verify_config_t *c
        server_session_capture_retain_current(session, owner->vault_principal, &v->capture) ||
        !v->capture || workspace_turn_resource_identity(root, &v->source_fd, identity) ||
        v->source_fd < 0 || workspace_turn_mirror_capture(root, &v->mirror) ||
-       server_active_project_from_cwd(root, v->project, sizeof v->project) || !v->project[0] ||
+       server_learning_project_from_cwd(root, v->project, sizeof v->project) || !v->project[0] ||
        configuration_digest(cfg, v->config))
       goto unavailable;
    if (delegate_sandbox_resolve_image(root, v->image, sizeof v->image) || !v->image[0])

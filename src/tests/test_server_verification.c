@@ -91,7 +91,7 @@ void workspace_turn_mirror_release(workspace_turn_mirror_lease_t *resource)
       mirror_refs--;
    }
 }
-int server_active_project_from_cwd(const char *root, char *out, size_t cap)
+int server_learning_project_from_cwd(const char *root, char *out, size_t cap)
 {
    assert(!strcmp(root, source_root));
    snprintf(out, cap, "project-one");

@@ -48,6 +48,7 @@ header without declaring it now fails CI on `rule=ownership-complete`.
 - `audit`: records repository reads, mutations, provenance, policy decisions, and outcomes.
 - `config`: supplies verification, forge, credential, identity, and repository-operation settings.
 - `execution-policy`: authorizes repository, network, credential, hook, and subprocess effects.
+- `ir`: validates typed canonical verification requests and source-bound snapshot observations.
 - `memory`: exclusively owns code-intelligence persistence and accepts redacted repository records.
 - `module-runtime`: supplies required lifecycle and readiness contracts for repository capability.
 - `vault`: supplies principal-scoped forge tokens, SSH keys, and credential references.

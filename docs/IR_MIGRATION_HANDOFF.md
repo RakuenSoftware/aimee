@@ -132,6 +132,15 @@ children. A Docker-independent actual-daemon check now verifies configured
 commands and both clean/dirty source observations, so local Docker absence
 cannot hide a missing Git owner. This grants no private-execution grade;
 the separate mandatory actual-Docker journey still qualifies that boundary.
+Published `b1c3820ab` passes the new clean/dirty check, but its Docker grade journey
+still declines private admission. Learning's project producer was incorrectly
+using the index-name resolver, which refuses a valid repository when the KB
+index is empty. A dedicated learning resolver now obtains approved held workspace
+custody and the repository's canonical identity without consulting KB/index
+names. Verification, protected delegate binding and delegate recall share it;
+local repository scope retains the existing `local:UUID` spelling. General index
+name resolution is unchanged. Focused normal/sanitizer and actual Docker CI
+qualification must follow this repair; no production promotion is claimed.
 Fresh CI, remaining live-vendor/native-profile qualification and independently reviewed production
 promotion remain required. The Windows native tool-runtime stub and arbitrary daemon ACP profiles
 remain explicit unsupported profiles; thin-client CI does not qualify them as native servers.

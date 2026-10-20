@@ -707,6 +707,8 @@ void server_mcp_served_outcome(const char *verdict, const char *reason);
  * callers must then emit the typed `scope_required` error. See
  * server_active_project.c. */
 int server_active_project_from_cwd(const char *cwd, char *out, size_t outlen);
+/* Approved local repository identity for learning; independent of KB/index names. */
+int server_learning_project_from_cwd(const char *cwd, char *out, size_t outlen);
 /* The root-matching half, split out so it is unit-testable without a live
  * knowledge service. */
 int server_active_project_match(const char *cwd, const project_info_t *projects, int count,

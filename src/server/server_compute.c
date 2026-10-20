@@ -1473,7 +1473,7 @@ static void delegate_worker_run(void *arg)
    char history_project[512] = "";
    if (history_owner && history_owner->vault_transport != ATTEST_NONE &&
        history_owner->vault_principal[0] && cwd && cwd[0] &&
-       server_active_project_from_cwd(cwd, history_project, sizeof(history_project)) == 0)
+       server_learning_project_from_cwd(cwd, history_project, sizeof(history_project)) == 0)
    {
       char *history =
           db1_execution_test_grade_recall(history_owner->vault_principal, history_project, NULL);

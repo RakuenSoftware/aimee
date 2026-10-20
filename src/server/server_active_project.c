@@ -19,9 +19,11 @@
 #include "index.h"
 #include "kb_client.h"
 #include <aimee/workspace/workspace.h>
+#include "modules/workspace/workspace_turn.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 /* A root prefixes cwd only on a path-component boundary: root /a/foo covers
  * /a/foo and /a/foo/bar, but never /a/foobar. */
@@ -126,4 +128,38 @@ int server_active_project_from_cwd(const char *cwd, char *out, size_t outlen)
    if (count <= 0)
       return -1;
    return server_active_project_match(cwd, projects, count, out, outlen);
+}
+
+/* Learning scopes name the approved repository, independently of whether an
+ * index service has indexed it under that identity or another display label.
+ * Resolve through the held resource; a raw client path grants no authority. */
+int server_learning_project_from_cwd(const char *cwd, char *out, size_t outlen)
+{
+   if (out && outlen)
+      out[0] = '\0';
+   if (!cwd || !cwd[0] || !out || !outlen)
+      return -1;
+   int fd = -1;
+   char identity[65];
+   if (workspace_turn_resource_identity(cwd, &fd, identity) || fd < 0)
+   {
+      if (fd >= 0)
+         close(fd);
+      return -1;
+   }
+#ifdef __linux__
+   char held[128];
+   snprintf(held, sizeof held, "/proc/%ld/fd/%d", (long)getpid(), fd);
+   const char *source = held;
+#else
+   const char *source = cwd;
+#endif
+   int rc = workspace_repo_identity(source, out, outlen, NULL, 0);
+   close(fd);
+   if (rc || !out[0])
+   {
+      out[0] = '\0';
+      return -1;
+   }
+   return 0;
 }

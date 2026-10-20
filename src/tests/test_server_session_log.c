@@ -114,7 +114,7 @@ int workspace_turn_resource_identity(const char *cwd, int *fd, char digest[65])
    snprintf(digest, 65, "%064d", 1);
    return workspace_held ? 0 : -1;
 }
-int server_active_project_from_cwd(const char *cwd, char *out, size_t capacity)
+int server_learning_project_from_cwd(const char *cwd, char *out, size_t capacity)
 {
    assert(cwd && cwd[0]);
    snprintf(out, capacity, "registered-project");
