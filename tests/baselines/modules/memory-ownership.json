@@ -2128,8 +2128,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "984367338618ade96e00a1b7b04a0aaf5bcc1f02b23180cc6b2b189881de3a5f",
-      "boundary_review": "2026-10-20 PR #3052: Host-attested actor/registered project load bounded server-local configured-test receipts via DB1. Existing Go source-release plan/result fence revalidates accepted receipts; canonical memory/KB owners, budgets and refusal paths remain intact. PostgreSQL and real Go ingress/fence fixtures cover revocation. This records source-boundary review, not independent production-promotion approval."
+      "sha256": "ecacee6f5552efc3855f3ed33c5e9734fcc0d396f84aafcda6ba9f0670667d8d",
+      "boundary_review": "2026-10-20 PR #3052: Host-attested actor/registered project load bounded server-local configured-test receipts via DB1. Existing Go source-release plan/result fence revalidates accepted receipts; canonical memory/KB owners, budgets and refusal paths remain intact. PostgreSQL and real Go ingress/fence fixtures cover revocation. This records source-boundary review, not independent production-promotion approval. 2026-10-20 PR #3052: Default primary turns now assemble available actor/project-bound local configured-test receipts without explicit code obligations or KB calls. Existing Go assembly, integrity and source-release freshness fences remain authoritative. Focused production-assembler normal/sanitizer regression covers empty/unavailable history, actor/project gating and erasure. No independent production approval is claimed."
     },
     "src/server/memory_audit_bridge.h": {
       "disposition": "host-transport",
@@ -2379,8 +2379,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "ce51955756889cef8b49b29e0e4d748b07b9af86b27d314447ce6655fb309975",
-      "boundary_review": "2026-10-20 PR #3052: Adds explicit DB1 historical-receipt fixture and real Go assembly/source-revalidation checks. Retains existing memory assertions; no production authority is implemented by the stub. This records source-boundary review, not independent production-promotion approval."
+      "sha256": "6616ab1e5c13bf2a22fda61622198635770cefcd03f2f266beddb730c9db92c0",
+      "boundary_review": "2026-10-20 PR #3052: Adds explicit DB1 historical-receipt fixture and real Go assembly/source-revalidation checks. Retains existing memory assertions; no production authority is implemented by the stub. This records source-boundary review, not independent production-promotion approval. 2026-10-20 PR #3052: Default primary turns now assemble available actor/project-bound local configured-test receipts without explicit code obligations or KB calls. Existing Go assembly, integrity and source-release freshness fences remain authoritative. Focused production-assembler normal/sanitizer regression covers empty/unavailable history, actor/project gating and erasure. No independent production approval is claimed."
     },
     "src/tests/test_ir_module_plan.c": {
       "disposition": "host-fixture",

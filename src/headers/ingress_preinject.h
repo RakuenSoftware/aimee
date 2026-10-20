@@ -113,7 +113,7 @@ void ingress_preinject_set_session_id(const char *session_id);
 /* Host native-turn adapter forwards task obligations from the user request.
  * Bounded copy; NULL clears. Validation and coverage remain Go-owned. */
 void ingress_preinject_set_task_requirements(const cJSON *request);
-/* Assemble explicitly requested task evidence for a native primary turn.
+/* Assemble explicit task evidence or available local configured-test history for a host turn.
  * NULL means no replacement; caller retains instructions. Owned allocation. */
 char *ingress_preinject_task_instructions(const char *instructions, const char *query);
 const char *ingress_preinject_session_id(void);

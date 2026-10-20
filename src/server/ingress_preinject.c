@@ -753,11 +753,78 @@ const char *ingress_preinject_session_id(void)
    return ctx && ctx->trusted && ctx->principal[0] ? ctx->session_key : "";
 }
 
+/* Ordinary host turns have no explicit code-evidence obligations. Retain
+ * independently graded local history without activating optional KB retrieval. */
+static char *ingress_local_grade_envelope(void)
+{
+   const request_context_t *owner = request_context_get();
+   char workspace[512] = "", project[512] = "";
+   if (g_request_disabled || !owner || owner->vault_transport == ATTEST_NONE ||
+       !owner->vault_principal[0] ||
+       ingress_preinject_resolve_active_scope(workspace, sizeof workspace, project, sizeof project))
+      return NULL;
+   char *wire = db1_execution_test_grade_recall(owner->vault_principal, project, NULL);
+   cJSON *projection = wire ? cJSON_ParseWithOpts(wire, NULL, 1) : NULL;
+   free(wire);
+   const cJSON *items = cJSON_GetObjectItemCaseSensitive(projection, "items");
+   if (!cJSON_IsArray(items) || !cJSON_GetArraySize(items))
+   {
+      cJSON_Delete(projection);
+      return NULL;
+   }
+   cJSON *assembly = cJSON_CreateObject();
+   cJSON_AddStringToObject(assembly, "operation", "ingress-assemble");
+   cJSON_AddStringToObject(assembly, "project", project);
+   cJSON_AddStringToObject(assembly, "workspace", workspace);
+   int budget = config_ingress_preinject_assembly_budget();
+   cJSON_AddNumberToObject(assembly, "budget", budget > 0 ? budget : 6144);
+   cJSON_AddItemToObject(assembly, "execution_test_grades", projection);
+   cJSON_AddBoolToObject(assembly, "prepare_source_release", 1);
+   ingress_release_context(assembly, owner);
+   cJSON *response = ingress_command(assembly, 1);
+   const char *envelope =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "envelope"));
+   const char *ticket =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "source_release_ticket"));
+   char *result = NULL;
+   if (!envelope)
+      (void)request_context_refuse_assembly("unavailable");
+   else if (envelope[0])
+   {
+      integrity_result_t gate;
+      if (integrity_ingress_decide(envelope, INTEGRITY_SOURCE_DOCUMENT, "retrieval", 1, &gate))
+         LOG_WARN("integrity", "configured-test history parked (%s): %s",
+                  integrity_verdict_name(gate.verdict), gate.match_category);
+      else
+      {
+         result = strdup(envelope);
+         if (!result || request_context_set_source_release(ticket))
+         {
+            (void)request_context_refuse_assembly("unavailable");
+            free(result);
+            result = NULL;
+         }
+         else
+            (void)request_context_require_memory_receipt();
+      }
+   }
+   if (!result && ticket && ticket[0] && strcmp(ticket, owner->memory_source_release))
+   {
+      cJSON *discard = cJSON_CreateObject();
+      ingress_release_context(discard, owner);
+      cJSON_ReplaceItemInObjectCaseSensitive(discard, "source_release_ticket",
+                                             cJSON_CreateString(ticket));
+      cJSON_AddStringToObject(discard, "operation", "source-release-discard");
+      cJSON_Delete(ingress_command(discard, 0));
+   }
+   cJSON_Delete(response);
+   return result;
+}
+
 char *ingress_preinject_task_instructions(const char *instructions, const char *query)
 {
-   if (!g_task_requirements[0])
-      return NULL;
-   char *envelope = ingress_preinject_build(query, 0);
+   char *envelope =
+       g_task_requirements[0] ? ingress_preinject_build(query, 0) : ingress_local_grade_envelope();
    if (!envelope)
       return NULL;
    char *result = ingress_preinject_apply(instructions, envelope);

@@ -21,7 +21,8 @@
 #include "support/module_runtime_fixture.h"
 
 static int g_runtime_failure;
-static int g_grade_history_mode, g_grade_history_checks;
+static int g_grade_history_mode, g_grade_history_checks, g_grade_history_reads;
+static int g_scope_resolve_failure;
 char *db1_execution_test_grade_recall(const char *principal, const char *project,
                                       const char *sources_json)
 {
@@ -39,6 +40,11 @@ char *db1_execution_test_grade_recall(const char *principal, const char *project
       cJSON_Delete(reply);
       return raw;
    }
+   g_grade_history_reads++;
+   if (g_grade_history_mode == 3)
+      return strdup(
+          "{\"schema_version\":1,\"principal\":\"grade-actor\",\"scope_kind\":\"project\",\"scope_"
+          "id\":\"active-project\",\"coverage\":\"recent_bounded\",\"items\":[]}");
    return strdup(
        "{\"schema_version\":1,\"principal\":\"grade-actor\",\"scope_kind\":\"project\",\"scope_"
        "id\":\"active-project\",\"coverage\":\"recent_bounded\",\"items\":[{\"schema_version\":1,"
@@ -351,6 +357,8 @@ char *kb_client_memory_assemble_typed_context_requirements_json(
 int ingress_preinject_resolve_active_scope(char *workspace, size_t workspace_len, char *project,
                                            size_t project_len)
 {
+   if (g_scope_resolve_failure)
+      return -1;
    snprintf(workspace, workspace_len, "active-workspace");
    snprintf(project, project_len, "active-project");
    return 0;
@@ -1337,6 +1345,64 @@ static void test_configured_test_history_at_provider_fence(void)
    puts("configured-test source history is scoped and rechecked at provider fence");
 }
 
+/* Ordinary browser/primary tasks do not set evidence_requirements. Grade
+ * history must still use the real Go assembler and provider freshness fence,
+ * without accidentally enabling optional KB preview/typed/fact retrieval. */
+static void test_default_primary_grade_only_context(void)
+{
+   ingress_preinject_set_session_id("primary-without-requirements");
+   request_context_t context = {0};
+   strcpy(context.request_id, "default-primary-grade-request");
+   strcpy(context.principal, "grade-caller");
+   strcpy(context.vault_principal, "grade-actor");
+   context.vault_transport = ATTEST_UDS_PEERCRED;
+   request_context_set(&context);
+   int code = g_code_count, typed = g_typed_count, facts = g_fact_count;
+   int previews = g_preview_count, task = g_context_calls;
+   g_grade_history_mode = 1;
+   int checks = g_grade_history_checks;
+   char *instructions =
+       ingress_preinject_task_instructions("CURRENT_PRIMARY_SYSTEM", "deployment matrix");
+   assert(instructions && strstr(instructions, "CURRENT_PRIMARY_SYSTEM") &&
+          strstr(instructions, "configured-test-history"));
+   assert(strlen(request_context_get()->memory_source_release) == 32);
+   assert(ingress_preinject_revalidate_sources() == 0 && g_grade_history_checks > checks);
+   g_grade_history_mode = 2;
+   assert(ingress_preinject_revalidate_sources() == -1);
+   assert(request_context_get()->context_refused);
+   free(instructions);
+   ingress_preinject_finish_sources();
+
+   /* Empty and unavailable history preserve the ordinary instructions path. */
+   for (int mode = 0; mode <= 3; mode += 3)
+   {
+      request_context_set(&context);
+      g_grade_history_mode = mode;
+      assert(!ingress_preinject_task_instructions("UNCHANGED_SYSTEM", "no available history"));
+      assert(!request_context_get()->context_refused &&
+             !request_context_get()->memory_source_release[0]);
+   }
+   g_grade_history_mode = 1;
+   int reads = g_grade_history_reads;
+   context.vault_transport = ATTEST_NONE;
+   request_context_set(&context);
+   assert(!ingress_preinject_task_instructions("UNCHANGED_SYSTEM", "unattested actor"));
+   assert(g_grade_history_reads == reads);
+   context.vault_transport = ATTEST_UDS_PEERCRED;
+   request_context_set(&context);
+   g_scope_resolve_failure = 1;
+   assert(!ingress_preinject_task_instructions("UNCHANGED_SYSTEM", "unresolved project"));
+   assert(g_grade_history_reads == reads);
+   g_scope_resolve_failure = 0;
+   assert(g_code_count == code && g_typed_count == typed && g_fact_count == facts &&
+          g_preview_count == previews && g_context_calls == task && !g_scope_active);
+   g_grade_history_mode = 0;
+   request_context_clear();
+   ingress_preinject_set_session_id("");
+   puts("default primary grade-only context: no requirements, no KB, exact source freshness and "
+        "empty noop passed");
+}
+
 static void test_source_revalidation_at_provider_fence(void)
 {
    request_context_t context = {0};
@@ -1797,6 +1863,7 @@ int main(void)
    test_durable_provider_attempt();
    test_unversioned_provider_body_receipt();
    test_configured_test_history_at_provider_fence();
+   test_default_primary_grade_only_context();
    test_source_revalidation_at_provider_fence();
    test_preview_sources_at_provider_fence();
    test_required_assembly_refusal_reaches_dispatch();
