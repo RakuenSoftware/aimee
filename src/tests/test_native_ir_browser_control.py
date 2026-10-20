@@ -36,9 +36,9 @@ connection.close()
 '''
 
 
-def prepare_browser_workspace(api, home, source):
+def prepare_browser_workspace(api, home, source, client_name="native-browser-client"):
     """Register an explicit mirror, preserving the browser foreign-path guard."""
-    client = Path(home).parent / "native-browser-client"
+    client = Path(home).parent / client_name
     subprocess.run(["git", "clone", "--quiet", "--shared", str(source), str(client)], check=True)
     head = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
     registered = api("/v1/workspaces", {"root": str(client), "provider": "mirror",

@@ -61,7 +61,8 @@ struct workspace_turn_scope
 {
    ws_detached_provider_t detached;
    int bound;
-   int mirror_fd;
+   int mirror_fd, created_fd;
+   char created_cwd[MAX_PATH_LEN];
    char epoch[65];
    char cwd[MAX_PATH_LEN], drift[256];
    const workspace_provider_t *previous_provider;
@@ -431,7 +432,8 @@ int workspace_turn_resolve_detached_mirror_cwd(const char *cwd, char *out, size_
 }
 
 static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, int *bound,
-                            int *mirror_fd, char resolved[MAX_PATH_LEN], char drift[256])
+                            int *mirror_fd, char resolved[MAX_PATH_LEN], char drift[256],
+                            int background)
 {
    *bound = 0;
    *mirror_fd = -1;
@@ -449,7 +451,7 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, i
       ws_provider_kind_t kind = config_workspace_providers(i)[0]
                                     ? ws_provider_kind_from_string(config_workspace_providers(i))
                                     : WS_PROVIDER_SHARED;
-      if (kind == WS_PROVIDER_DETACHED)
+      if (kind == WS_PROVIDER_DETACHED && !background)
       {
          /* The runner queue is keyed by the workspace root — the same id the
           * client's `aimee workspace serve <root>` polls. */
@@ -466,7 +468,7 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, i
             return 1;
          }
       }
-      else if (kind == WS_PROVIDER_MIRROR)
+      else if (kind == WS_PROVIDER_MIRROR || (background && kind == WS_PROVIDER_DETACHED))
       {
          /* Drive the server-side mirror lifecycle from the registry's vcs
           * coordinates, then act on the reconstructed local tree (shared fs). */
@@ -485,7 +487,7 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, i
          }
          if (*bound)
             workspace_provider_set_active(workspace_provider_shared());
-         return *bound;
+         return *bound ? 1 : -1;
       }
       return 0; /* matched, but shared (or no queue) — stay on shared */
    }
@@ -497,7 +499,7 @@ int workspace_turn_bind_active(const char *cwd)
    if (t_turn_mirror_fd >= 0)
       close(t_turn_mirror_fd);
    int result = bind_active_into(cwd, &t_turn_detached, &t_turn_bound, &t_turn_mirror_fd,
-                                 t_turn_cwd, t_turn_drift);
+                                 t_turn_cwd, t_turn_drift, 0);
    t_turn_detached_epoch[0] = 0;
    if (result > 0 && workspace_provider_active() == &t_turn_detached.base &&
        platform_random_hex(t_turn_detached_epoch, 64))
@@ -508,7 +510,7 @@ int workspace_turn_bind_active(const char *cwd)
    }
    return result;
 }
-int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out)
+static int scope_begin(const char *cwd, workspace_turn_scope_t **out, int background)
 {
    if (!out)
       return -1;
@@ -518,10 +520,19 @@ int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out)
    workspace_turn_scope_t *scope = calloc(1, sizeof *scope);
    if (!scope)
       return -1;
+   scope->created_fd = -1;
    scope->previous_provider = workspace_provider_active();
    scope->previous = t_nested_scope;
    int result = bind_active_into(cwd, &scope->detached, &scope->bound, &scope->mirror_fd,
-                                 scope->cwd, scope->drift);
+                                 scope->cwd, scope->drift, background);
+   if (result < 0)
+   {
+      workspace_provider_set_active(scope->previous_provider);
+      if (scope->mirror_fd >= 0)
+         close(scope->mirror_fd);
+      free(scope);
+      return -1;
+   }
    if (result > 0 && workspace_provider_active() == &scope->detached.base &&
        platform_random_hex(scope->epoch, 64))
    {
@@ -533,6 +544,14 @@ int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out)
    *out = scope;
    return result;
 }
+int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out)
+{
+   return scope_begin(cwd, out, 0);
+}
+int workspace_turn_scope_begin_background(const char *cwd, workspace_turn_scope_t **out)
+{
+   return scope_begin(cwd, out, 1);
+}
 int workspace_turn_scope_end(workspace_turn_scope_t *scope)
 {
    if (!scope)
@@ -543,6 +562,8 @@ int workspace_turn_scope_end(workspace_turn_scope_t *scope)
    t_nested_scope = scope->previous;
    if (scope->mirror_fd >= 0)
       close(scope->mirror_fd);
+   if (scope->created_fd >= 0)
+      close(scope->created_fd);
    free(scope);
    return 0;
 }
@@ -570,9 +591,73 @@ static int active_mirror_lease(const char *real)
        mirror_lease_matches(real, t_callback_mirror->cwd, t_callback_mirror->fd))
       return t_callback_mirror->fd;
    for (workspace_turn_scope_t *scope = t_nested_scope; scope; scope = scope->previous)
+   {
+      if (mirror_lease_matches(real, scope->created_cwd, scope->created_fd))
+         return scope->created_fd;
       if (mirror_lease_matches(real, scope->cwd, scope->mirror_fd))
          return scope->mirror_fd;
+   }
    return mirror_lease_matches(real, t_turn_cwd, t_turn_mirror_fd) ? t_turn_mirror_fd : -1;
+}
+
+/* Git's common directory binds a linked checkout to the held source repository.
+ * Inherited GIT_DIR/GIT_WORK_TREE/config cannot supply that identity. */
+static int mirror_repository(const char *cwd, char out[MAX_PATH_LEN])
+{
+   const char *path = getenv("PATH");
+   if (!path)
+      path = "/usr/bin:/bin";
+   size_t size = strlen(path) + 6;
+   char *path_env = malloc(size);
+   if (!path_env)
+      return 0;
+   snprintf(path_env, size, "PATH=%s", path);
+   char *environment[] = {path_env,
+                          "GIT_CONFIG_NOSYSTEM=1",
+                          "GIT_CONFIG_GLOBAL=/dev/null",
+                          "GIT_OPTIONAL_LOCKS=0",
+                          "GIT_TERMINAL_PROMPT=0",
+                          NULL};
+   const char *argv[] = {
+       "git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir", NULL};
+   char *result = NULL;
+   int rc =
+       safe_exec_capture_cwd_env_timeout(argv, NULL, environment, &result, MAX_PATH_LEN + 1, 5000);
+   if (result)
+      result[strcspn(result, "\r\n")] = 0;
+   int valid = !rc && result && result[0] && realpath(result, out) && strcmp(out, "/");
+   free(result);
+   free(path_env);
+   return valid;
+}
+
+int workspace_turn_scope_hold_created_worktree(workspace_turn_scope_t *scope, const char *cwd)
+{
+   if (!scope || scope != t_nested_scope)
+      return -1;
+   if (scope->mirror_fd < 0)
+      return 0; /* Ordinary registered shared trees retain their existing authority. */
+   char actual[MAX_PATH_LEN], repository[MAX_PATH_LEN], child_repository[MAX_PATH_LEN];
+   struct stat before, held;
+   if (scope->created_fd >= 0 || !cwd || !realpath(cwd, actual) ||
+       !mirror_lease_matches(scope->cwd, scope->cwd, scope->mirror_fd) ||
+       !strcmp(actual, scope->cwd) || lstat(cwd, &before) || !S_ISDIR(before.st_mode) ||
+       !mirror_repository(scope->cwd, repository) || !mirror_repository(actual, child_repository) ||
+       strcmp(repository, child_repository))
+      return -1;
+   int fd = open(cwd, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+   if (fd < 0)
+      return -1;
+   if (fstat(fd, &held) || before.st_dev != held.st_dev || before.st_ino != held.st_ino ||
+       !mirror_lease_matches(actual, cwd, fd) ||
+       !mirror_lease_matches(scope->cwd, scope->cwd, scope->mirror_fd))
+   {
+      close(fd);
+      return -1;
+   }
+   scope->created_fd = fd;
+   snprintf(scope->created_cwd, sizeof scope->created_cwd, "%s", actual);
+   return 0;
 }
 
 int workspace_turn_mirror_capture(const char *cwd, workspace_turn_mirror_lease_t **out)
@@ -678,6 +763,13 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
    }
    for (int i = 0; i < config_workspace_count(); i++)
    {
+      const char *provider = config_workspace_providers(i);
+      ws_provider_kind_t kind =
+          provider[0] ? ws_provider_kind_from_string(provider) : WS_PROVIDER_SHARED;
+      /* These roots belong to the client. Only a held server reconstruction
+       * above can authorize their filesystem replacement. */
+      if (kind == WS_PROVIDER_MIRROR || kind == WS_PROVIDER_DETACHED)
+         continue;
       char root_real[MAX_PATH_LEN];
       if (!realpath(config_workspaces(i), root_real))
          continue;

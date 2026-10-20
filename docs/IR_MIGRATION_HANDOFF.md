@@ -3868,3 +3868,29 @@ diagnostics pass. This is source qualification, not production promotion or
 independent learning completion. Queued mirror-source work remains stashed.
 
 All 76 lint gates also pass for governed native seeded runs.
+
+
+## Queued registered mirror delegation: 20 October 2026
+
+Background delegates now acquire the registered source before file references,
+Git isolation or prompts can open it. Mirror and detached registrations reconstruct
+their recorded source/head locally; failed reconstruction refuses. Raw client
+roots no longer authorize server sandbox mounts, even when that path happens to
+exist on the server. Foreground mirror acquisition also reports failure explicitly.
+
+The trusted worktree creation result retains its own directory descriptor. Its
+Git common directory must match the held source under a sanitized Git environment;
+ambient GIT_DIR cannot forge that relationship. Exact child authority survives a
+producer ending through a retained callback lease, and rejects replacement paths.
+There is no blanket mirror-directory grant.
+
+The real queued integration journey deliberately dirties the client checkout and
+requires the committed reconstruction. Locally it reaches the mandatory sandbox
+refusal without model traffic; hosted Docker must complete the actual read. The
+660 native binaries, PostgreSQL integration 168/168 (26 unavailable local-service
+checks), 30 thin-client proxy tests, workspace ASan/UBSan and TSan, CMake agent
+build and Cppcheck without increased diagnostics pass. Fresh CI must qualify the
+Docker completion. Native-primary orchestration exposure and queued transfer of
+an already-held callback capability remain unfinished, alongside independent
+local grading/reuse, remaining consumers/platforms and reviewed production
+promotion. Production remains KB-free.

@@ -159,11 +159,72 @@ static void *mirror_callback_worker(void *opaque)
    assert(!accepted);
    return NULL;
 }
+static void test_background_source_scope(const char *client, const char *source, const char *head,
+                                         const char *kind, const char *temporary)
+{
+   int rc = config_workspace_add(client, kind, source, head);
+   assert(!rc);
+   workspace_turn_scope_t *scope = NULL;
+   rc = workspace_turn_scope_begin_background(client, &scope);
+   assert(rc == 1 && scope && workspace_turn_active_cwd());
+   char actual[MAX_PATH_LEN], child[MAX_PATH_LEN + 64], allowed[MAX_PATH_LEN], command[16384];
+   snprintf(actual, sizeof actual, "%s", workspace_turn_active_cwd());
+   assert(strcmp(actual, client) && workspace_provider_active() == workspace_provider_shared());
+   snprintf(command, sizeof command, "git -C '%s' rev-parse --git-common-dir", actual);
+   char *repository = run_cmd(command, &rc);
+   assert(!rc && repository);
+   repository[strcspn(repository, "\r\n")] = 0;
+   snprintf(child, sizeof child, "%s/.aimee/worktrees/background/main", repository);
+   free(repository);
+   snprintf(command, sizeof command, "git -C '%s' worktree add --quiet --detach '%s' HEAD", actual,
+            child);
+   rc = system(command);
+   assert(!rc);
+   int authorized = workspace_turn_workspace_authorized(child, allowed, sizeof allowed);
+   assert(!authorized);
+   const char *ambient = getenv("GIT_DIR");
+   char *saved_git_dir = ambient ? strdup(ambient) : NULL;
+   char spoof[MAX_PATH_LEN];
+   snprintf(spoof, sizeof spoof, "%s/.git", source);
+   rc = platform_setenv("GIT_DIR", spoof);
+   assert(!rc);
+   rc = workspace_turn_scope_hold_created_worktree(scope, temporary);
+   assert(rc < 0); /* A host creation receipt cannot grant a different source. */
+   rc = workspace_turn_scope_hold_created_worktree(scope, child);
+   assert(!rc); /* The owned Git relationship ignores ambient redirection. */
+   if (saved_git_dir)
+      platform_setenv("GIT_DIR", saved_git_dir);
+   else
+      platform_unsetenv("GIT_DIR");
+   free(saved_git_dir);
+   authorized = workspace_turn_workspace_authorized(child, allowed, sizeof allowed);
+   assert(authorized);
+   workspace_turn_mirror_lease_t *lease = NULL;
+   rc = workspace_turn_mirror_capture(child, &lease);
+   assert(!rc && lease);
+   rc = workspace_turn_scope_end(scope);
+   assert(!rc && !workspace_turn_active_cwd());
+   struct mirror_callback_fixture fixture = {lease, child};
+   pthread_t worker;
+   rc = pthread_create(&worker, NULL, mirror_callback_worker, &fixture);
+   assert(!rc);
+   rc = pthread_join(worker, NULL);
+   assert(!rc);
+   workspace_turn_mirror_release(lease);
+   snprintf(command, sizeof command, "git -C '%s' worktree remove --force '%s'", actual, child);
+   rc = system(command);
+   assert(!rc);
+   rc = config_workspace_remove(client);
+   assert(!rc);
+}
+
 static void test_owned_mirror_callback_lease(const char *temporary)
 {
-   char source[1024], client[1024], command[8192], actual[MAX_PATH_LEN];
+   char source[1024], client[1024], command[8192], actual[MAX_PATH_LEN], recorded_head[65];
    snprintf(source, sizeof source, "%s/lease-source", temporary);
    snprintf(client, sizeof client, "%s/foreign-client", temporary);
+   int made_client = mkdir(client, 0700);
+   assert(!made_client);
    snprintf(command, sizeof command,
             "git init -q '%s' && git -C '%s' config user.email t@t && "
             "git -C '%s' config user.name t && echo source > '%s/README.md' && "
@@ -175,9 +236,13 @@ static void test_owned_mirror_callback_lease(const char *temporary)
    char *head = run_cmd(command, &rc);
    assert(!rc && head);
    head[strcspn(head, "\r\n")] = 0;
+   snprintf(recorded_head, sizeof recorded_head, "%s", head);
    rc = config_workspace_add(client, "mirror", source, head);
    free(head);
    assert(!rc);
+   char denied[MAX_PATH_LEN];
+   int raw_authorized = workspace_turn_workspace_authorized(client, denied, sizeof denied);
+   assert(!raw_authorized); /* Registered foreign input is not a local mount grant. */
    rc = workspace_turn_bind_active(client);
    assert(rc == 1 && workspace_turn_active_cwd());
    snprintf(actual, sizeof actual, "%s", workspace_turn_active_cwd());
@@ -216,6 +281,15 @@ static void test_owned_mirror_callback_lease(const char *temporary)
    valid = workspace_turn_mirror_valid(lease, actual);
    assert(valid);
    workspace_turn_mirror_release(lease);
+   rc = config_workspace_remove(client);
+   assert(!rc);
+   test_background_source_scope(client, source, recorded_head, "mirror", temporary);
+   test_background_source_scope(client, source, recorded_head, "detached", temporary);
+   rc = config_workspace_add(client, "detached", NULL, NULL);
+   assert(!rc);
+   workspace_turn_scope_t *scope = NULL;
+   rc = workspace_turn_scope_begin_background(client, &scope);
+   assert(rc < 0 && !scope && !workspace_turn_active_cwd());
    rc = config_workspace_remove(client);
    assert(!rc);
    puts("  owned mirror callbacks: cross-thread/nested restore and replaced-inode refusal pass");
@@ -558,6 +632,10 @@ int main(void)
 
             assert(rc == 0); /* behaviour unchanged: still refuses to resolve */
             assert(!out[0]); /* and still clears the output */
+            workspace_turn_scope_t *failed = NULL;
+            int bound = workspace_turn_scope_begin("/tmp/ws-mirror-unresolvable/src", &failed);
+            assert(bound < 0 && !failed);
+            assert(workspace_turn_reject_foreign_cwd(bound, 1, "/tmp/ws-mirror-unresolvable/src"));
 
             FILE *f = fopen(capture, "r");
             assert(f);

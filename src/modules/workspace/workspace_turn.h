@@ -14,8 +14,9 @@
  * For a `shared` (co-located) workspace, or an unregistered cwd, the turn stays
  * on the shared provider and nothing changes. */
 
-/* Returns 1 if a non-shared provider was bound for this thread (the caller must
- * pair it with workspace_turn_unbind_active after the turn), 0 otherwise. */
+/* Returns 1 if a registered provider or mirror was bound for this thread,
+ * 0 for shared/unregistered cwd, or -1 when reconstruction fails. A negative
+ * result must refuse the turn. Pair binding with workspace_turn_unbind_active. */
 int workspace_turn_bind_active(const char *cwd);
 
 /* Nested operations own separate provider storage and leave the enclosing turn's
@@ -25,6 +26,14 @@ int workspace_turn_bind_active(const char *cwd);
  * borrowing a nested provider before ending its scope. */
 typedef struct workspace_turn_scope workspace_turn_scope_t;
 int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out);
+/* A background worker cannot depend on a client runner. Explicit mirror and
+ * detached registrations use their recorded source/head under an owned local
+ * scope; failed reconstruction refuses without exposing the foreign cwd. */
+int workspace_turn_scope_begin_background(const char *cwd, workspace_turn_scope_t **out);
+/* Host creation result only: call immediately after the worktree owner creates
+ * this turn's dedicated child. Retains that exact directory under the held
+ * reconstruction, never a prefix grant or a model-supplied mount path. */
+int workspace_turn_scope_hold_created_worktree(workspace_turn_scope_t *scope, const char *cwd);
 int workspace_turn_scope_end(workspace_turn_scope_t *scope);
 
 /* An owned mirror directory capability for retained callbacks. Capture duplicates

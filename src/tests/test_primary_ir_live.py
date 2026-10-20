@@ -81,6 +81,17 @@ def main():
                 if "IR_RUN_TRUNCATED" in sent:
                     payload["content"] = [dict(type="text", text="RUN_PARTIAL")]
                     payload["stop_reason"] = "max_tokens"
+            if request.get("model") == "ir-model-a" and "IR_MIRROR_DELEGATE_READ" in json.dumps(request):
+                results = [message for message in request.get("messages", []) if message.get("role") == "tool"]
+                if not results:
+                    payload["choices"][0]["message"] = dict(role="assistant", tool_calls=[dict(
+                        id="mirror-delegate-read", type="function", function=dict(
+                            name="read_file", arguments=json.dumps(dict(path="README.md"))))])
+                    payload["choices"][0]["finish_reason"] = "tool_calls"
+                else:
+                    assert "canonical delegate fixture" in json.dumps(results), results
+                    assert "CLIENT_CWD_MUST_NOT_BE_READ" not in json.dumps(results), results
+                    payload["choices"][0]["message"]["content"] = "MIRROR_DELEGATE_OK"
             data = json.dumps(payload).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -435,6 +446,30 @@ def main():
                 assert len(observed) > before, status
                 assert (lesson in json.dumps(observed[before])) == (run == 1), observed[before]
             print("delegate learning: terminal completion precedes durable learning readback into the next actual execution")
+
+        from test_native_ir_browser_control import prepare_browser_workspace
+        mirror = prepare_browser_workspace(api, home, workspace, "queued-delegate-client")
+        before = len(observed)
+        launched = api("/v1/delegate/run", dict(role="diagnose", persona="engineer", via="ir-live-a", tools=True,
+            prompt="IR_MIRROR_DELEGATE_READ read README.md and report its committed source", session_id=sid,
+            cwd=str(mirror), max_turns=3))
+        assert launched.get("job_id", 0) > 0, launched
+        deadline = time.monotonic() + 120
+        while True:
+            status = api("/v1/delegate/status", dict(job_id=launched["job_id"], full_result=True))
+            if status.get("job_status") in ("done", "failed", "partial", "cancelled"):
+                break
+            assert time.monotonic() < deadline, status
+            time.sleep(0.05)
+        if sandbox_ready:
+            assert status["job_status"] == "done" and "MIRROR_DELEGATE_OK" in status["result"], status
+            assert len(observed) == before + 2, observed[before:]
+            print("delegate mirror: approved committed reconstruction, dedicated sandbox and real read pass")
+        else:
+            assert status["job_status"] == "failed" and "could not be given a sandboxed container" in status["result"], status
+            assert len(observed) == before, "missing sandbox must not reach the model"
+            print("delegate mirror: registered reconstruction and dedicated child reach mandatory sandbox refusal")
+
 
 
     finally:

@@ -731,6 +731,7 @@ static void delegate_worker_run(void *arg)
     * every `goto delegate_fail`, so no jump can skip its initialiser. Empty means
     * the turn runs in the caller's own cwd. See "ONE ROOT PER DELEGATE TURN". */
    char turn_root[MAX_PATH_LEN] = "";
+   workspace_turn_scope_t *source_workspace = NULL;
    cJSON *req = cctx->req;
    bind_request_session_creds(req);
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
@@ -1184,42 +1185,27 @@ static void delegate_worker_run(void *arg)
       }
    }
 
-   /* ONE ROOT PER DELEGATE TURN.
-    *
-    * Everything below derives from `cwd`: the worktree the file tools write to
-    * (delegate_resolve_worktree), the working directory the shell runs in
-    * (run_cmd_set_cwd), the absolute paths rewritten in the prompt, the tree the
-    * no-op detector diffs, the parent-write guard. Resolving the turn's root
-    * HERE -- once, before any of them -- is what stops them disagreeing.
-    *
-    * They used to. A background delegate on a DETACHED (client-served) workspace
-    * had its shell redirected into a server-side tree hundreds of lines below
-    * this point, after the worktree had already been resolved against the
-    * client's path. One delegate, two roots: it wrote through a path that existed
-    * only on the client and ran `pwd` somewhere else entirely. So it could edit
-    * code and could not build, test, or diff the edit -- and nothing told it so.
-    * Measured: asked to add one comment line to a 2157-line file, such a delegate
-    * truncated it to 5 lines and reported success.
-    *
-    * A no-op for every other turn. The resolver returns 0 unless this is a
-    * background job on a detached workspace that has recorded a remote and head
-    * via `aimee workspace mirror-sync`; a detached workspace with nothing
-    * recorded is handled further down, where having no usable tree at all is a
-    * refusal rather than a redirect. */
-   if (cwd[0] && cctx->background_job_id > 0 &&
-       workspace_turn_resolve_detached_mirror_cwd(cwd, turn_root, sizeof(turn_root)) &&
-       turn_root[0])
+   /* Resolve the registered source before references, Git isolation or prompts
+    * can open it. A background detached registration uses its recorded mirror;
+    * an explicit mirror must never fall through to the client's local path. */
+   if (cwd[0])
    {
-      aimee_log(LOG_WARN, "delegate",
-                "delegate %s: detached workspace '%s' has no client to serve this background job; "
-                "binding the whole turn -- shell and file tools alike -- to the server-side "
-                "reconstruction at %s. That tree is the last state synced by `aimee workspace "
-                "mirror-sync` and may be behind the client",
-                deleg_id, cwd, turn_root);
-      cwd = turn_root;
+      int bound = workspace_turn_scope_begin_background(cwd, &source_workspace);
+      if (bound < 0)
+      {
+         delegation_compute_error(cctx,
+                                  "workspace: cannot acquire the registered background source");
+         goto delegate_fail;
+      }
+      const char *resolved = workspace_turn_active_cwd();
+      if (resolved && resolved[0])
+      {
+         snprintf(turn_root, sizeof turn_root, "%s", resolved);
+         aimee_log(LOG_INFO, "delegate", "delegate %s: using registered server reconstruction %s",
+                   deleg_id, turn_root);
+         cwd = turn_root;
+      }
    }
-   else
-      turn_root[0] = '\0'; /* a partial write from a failed resolve is not a root */
 
    /* Resolve @path/to/file references in the delegate prompt */
    if (strchr(prompt, '@'))
@@ -1294,6 +1280,13 @@ static void delegate_worker_run(void *arg)
                "could not create a dedicated delegate worktree",
                cwd[0] ? cwd : delegate_git_root);
       delegation_compute_error(cctx, errmsg);
+      goto delegate_fail;
+   }
+
+   if (source_workspace && delegate_worktree_path[0] &&
+       workspace_turn_scope_hold_created_worktree(source_workspace, delegate_worktree_path))
+   {
+      delegation_compute_error(cctx, "workspace: cannot retain the dedicated delegate worktree");
       goto delegate_fail;
    }
 
@@ -1953,8 +1946,9 @@ static void delegate_worker_run(void *arg)
       leased_principal[0] = '\0';
    }
 
-   /* Clear thread-local CWD */
+   /* Clear thread-local CWD and release the source after all child work. */
    run_cmd_set_cwd(NULL);
+   (void)workspace_turn_scope_end(source_workspace);
 
    compute_ctx_free(cctx);
    return;
@@ -1972,6 +1966,7 @@ delegate_fail:
       delegate_credentials_release(leased_principal, target_agent->name, leased_cred_name);
    if (delegate_worktree_path[0] && delegate_git_root[0])
       worktree_cleanup(delegate_git_root, deleg_id, delegate_work_name);
+   (void)workspace_turn_scope_end(source_workspace);
    compute_ctx_free(cctx);
 }
 
