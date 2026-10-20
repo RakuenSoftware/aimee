@@ -1,5 +1,7 @@
 /* provider_cli_adapter.c: shared provider-CLI delegate adapter registry. */
 #include "provider_cli_adapter.h"
+#include "agent_exec.h"
+#include <aimee/ir/session_event.h>
 
 #include "aimee.h"
 #include "cJSON.h"
@@ -11,13 +13,9 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <poll.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
 
 /* Defined in server_compute.c; called post-fork to seed the child's delegate
@@ -34,36 +32,6 @@ __attribute__((weak)) int provider_cli_adapter_host_execute(const provider_cli_c
 }
 
 #define PROVIDER_CLI_MAX_ARGS 48
-#define PROVIDER_CLI_POLL_MS  250
-
-typedef struct
-{
-   char *text;
-   size_t len;
-   size_t cap;
-} provider_cli_buf_t;
-
-static int provider_cli_buf_append(provider_cli_buf_t *buf, const char *text)
-{
-   if (!buf || !text || !text[0])
-      return 0;
-   size_t n = strlen(text);
-   if (buf->len + n + 1 > buf->cap)
-   {
-      size_t next = buf->cap ? buf->cap : 4096;
-      while (next < buf->len + n + 1)
-         next *= 2;
-      char *grown = realloc(buf->text, next);
-      if (!grown)
-         return -1;
-      buf->text = grown;
-      buf->cap = next;
-   }
-   memcpy(buf->text + buf->len, text, n);
-   buf->len += n;
-   buf->text[buf->len] = '\0';
-   return 0;
-}
 
 void provider_cli_free_tokens(char **tokens, int count)
 {
@@ -285,62 +253,6 @@ int provider_cli_check_available(const char *cli_cmd, const char *cli_kind)
    return available;
 }
 
-static void provider_cli_close_fd(int *fd)
-{
-   if (fd && *fd >= 0)
-   {
-      close(*fd);
-      *fd = -1;
-   }
-}
-
-static int provider_cli_set_nonblock(int fd)
-{
-   int flags = fcntl(fd, F_GETFL, 0);
-   if (flags < 0)
-      return -1;
-   return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-}
-
-static void provider_cli_terminate_child(pid_t pid)
-{
-   if (pid <= 0)
-      return;
-   kill(-pid, SIGTERM);
-   kill(pid, SIGTERM);
-   for (int i = 0; i < 20; i++)
-   {
-      int status = 0;
-      pid_t r = waitpid(pid, &status, WNOHANG);
-      if (r == pid || (r < 0 && errno == ECHILD))
-         return;
-      struct timespec ts = {0, 50 * 1000000L};
-      nanosleep(&ts, NULL);
-   }
-   kill(-pid, SIGKILL);
-   kill(pid, SIGKILL);
-   (void)waitpid(pid, NULL, 0);
-}
-
-/* Remove the git/forge credentials a delegate child would otherwise inherit, so the
- * no-git rule does not rest on the classifier alone: wfe_shell_invokes_git() is a
- * string match over a shell line and a determined agent can evade it, whereas a
- * credential that is not in the environment cannot be talked around. git/forge work
- * belongs to aimee's git_* tools, which run in aimee-server where the token is
- * resolved per call and lives only in process memory.
- *
- * This is defence in depth, NOT a credential boundary. It removes what we know how
- * to name; it cannot prove the child has no other path to a token (a key on disk, a
- * helper we do not enumerate, a credential minted later). Treat it as raising the
- * cost, not as a guarantee.
- *
- * Called post-fork. `flag` is resolved by the PARENT because legacy_config_read reads files
- * and allocates, and running that between fork and exec in a threaded process risks
- * a malloc-lock deadlock. setenv/unsetenv may themselves allocate, so this is not
- * strictly async-signal-safe either -- it matches the risk the adjacent
- * unsetenv()/platform_setenv() calls already take here rather than adding a new one.
- * The clean fix, if this ever bites, is to build the sanitized envp in the parent
- * and execve() it. */
 static void delegate_child_strip_forge_creds(int flag)
 {
    if (!flag)
@@ -675,296 +587,6 @@ int provider_cli_parse_json_line_common(const char *line, cli_event_t *event_out
    return matched;
 }
 
-static int provider_cli_collect_child(const provider_cli_adapter_t *adapter, int stdin_fd,
-                                      int stdout_fd, pid_t pid, const char *prompt, int timeout_ms,
-                                      provider_cli_buf_t *output, agent_result_t *out)
-{
-   if (provider_cli_set_nonblock(stdin_fd) != 0 || provider_cli_set_nonblock(stdout_fd) != 0)
-   {
-      provider_cli_close_fd(&stdin_fd);
-      provider_cli_close_fd(&stdout_fd);
-      provider_cli_terminate_child(pid);
-      snprintf(out->error, sizeof(out->error), "failed to configure pipes for %s",
-               adapter->display_name);
-      return -1;
-   }
-
-   struct sigaction old_pipe;
-   struct sigaction ignore_pipe;
-   memset(&ignore_pipe, 0, sizeof(ignore_pipe));
-   ignore_pipe.sa_handler = SIG_IGN;
-   sigemptyset(&ignore_pipe.sa_mask);
-   int restore_pipe = sigaction(SIGPIPE, &ignore_pipe, &old_pipe) == 0;
-
-   size_t prompt_len = strlen(prompt);
-   size_t prompt_off = 0;
-   int input_closed = 0;
-   int output_closed = 0;
-   int child_reaped = 0;
-   int write_rc = 0;
-   int status = 0;
-   long long deadline = timeout_ms > 0 ? util_now_ms() + timeout_ms : 0;
-
-   for (;;)
-   {
-      while (!output_closed)
-      {
-         char chunk[4096 + 1];
-         ssize_t r = read(stdout_fd, chunk, sizeof(chunk) - 1);
-         if (r > 0)
-         {
-            chunk[r] = '\0';
-            if (provider_cli_buf_append(output, chunk) != 0)
-            {
-               snprintf(out->error, sizeof(out->error), "out of memory collecting %s output",
-                        adapter->display_name);
-               output_closed = 1;
-               break;
-            }
-            continue;
-         }
-         if (r == 0)
-         {
-            output_closed = 1;
-            provider_cli_close_fd(&stdout_fd);
-            break;
-         }
-         if (r < 0 && errno == EINTR)
-            continue;
-         if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-            break;
-         snprintf(out->error, sizeof(out->error), "failed to read output from %s",
-                  adapter->display_name);
-         output_closed = 1;
-         provider_cli_close_fd(&stdout_fd);
-         break;
-      }
-
-      while (!input_closed && write_rc == 0 && prompt_off < prompt_len)
-      {
-         ssize_t n = write(stdin_fd, prompt + prompt_off, prompt_len - prompt_off);
-         if (n > 0)
-         {
-            prompt_off += (size_t)n;
-            continue;
-         }
-         if (n < 0 && errno == EINTR)
-            continue;
-         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-            break;
-         write_rc = -1;
-         break;
-      }
-      if (!input_closed && (prompt_off >= prompt_len || write_rc != 0))
-      {
-         provider_cli_close_fd(&stdin_fd);
-         input_closed = 1;
-      }
-
-      if (!child_reaped)
-      {
-         pid_t wr = waitpid(pid, &status, WNOHANG);
-         if (wr == pid)
-            child_reaped = 1;
-         else if (wr < 0 && errno == ECHILD)
-            child_reaped = 1;
-      }
-      if (output_closed && child_reaped)
-         break;
-
-      int wait_ms = PROVIDER_CLI_POLL_MS;
-      if (deadline > 0)
-      {
-         long long now = util_now_ms();
-         if (now >= deadline)
-         {
-            provider_cli_close_fd(&stdin_fd);
-            provider_cli_close_fd(&stdout_fd);
-            provider_cli_terminate_child(pid);
-            if (restore_pipe)
-               sigaction(SIGPIPE, &old_pipe, NULL);
-            snprintf(out->error, sizeof(out->error), "%s timed out after %d ms",
-                     adapter->display_name, timeout_ms);
-            return -1;
-         }
-         long long remaining = deadline - now;
-         if (remaining < PROVIDER_CLI_POLL_MS)
-            wait_ms = (int)remaining;
-      }
-
-      struct pollfd pfds[2];
-      nfds_t nfds = 0;
-      if (!output_closed)
-      {
-         pfds[nfds].fd = stdout_fd;
-         pfds[nfds].events = POLLIN | POLLHUP | POLLERR;
-         pfds[nfds].revents = 0;
-         nfds++;
-      }
-      if (!input_closed && write_rc == 0)
-      {
-         pfds[nfds].fd = stdin_fd;
-         pfds[nfds].events = POLLOUT | POLLHUP | POLLERR;
-         pfds[nfds].revents = 0;
-         nfds++;
-      }
-      if (nfds == 0)
-      {
-         struct timespec ts = {0, (long)wait_ms * 1000000L};
-         nanosleep(&ts, NULL);
-         continue;
-      }
-      while (poll(pfds, nfds, wait_ms) < 0 && errno == EINTR)
-         ;
-   }
-
-   if (restore_pipe)
-      sigaction(SIGPIPE, &old_pipe, NULL);
-   provider_cli_close_fd(&stdin_fd);
-   provider_cli_close_fd(&stdout_fd);
-
-   if (out->error[0])
-      return -1;
-   if (write_rc != 0 || prompt_off < prompt_len)
-   {
-      snprintf(out->error, sizeof(out->error), "failed to send prompt to %s",
-               adapter->display_name);
-      return -1;
-   }
-   if (WIFSIGNALED(status))
-   {
-      snprintf(out->error, sizeof(out->error), "%s terminated by signal %d", adapter->display_name,
-               WTERMSIG(status));
-      return -1;
-   }
-   if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
-   {
-      if (output->text && output->text[0])
-         snprintf(out->error, sizeof(out->error), "%s exited with status %d: %.320s",
-                  adapter->display_name, WEXITSTATUS(status), output->text);
-      else
-         snprintf(out->error, sizeof(out->error), "%s exited with status %d", adapter->display_name,
-                  WEXITSTATUS(status));
-      return -1;
-   }
-   return 0;
-}
-
-static int provider_cli_parse_output(const provider_cli_adapter_t *adapter, char *output,
-                                     agent_result_t *out)
-{
-   provider_cli_buf_t parsed = {0};
-   provider_cli_buf_t raw = {0};
-   char event_error[sizeof(out->error)] = {0};
-   int parsed_events = 0;
-   int turns = 0;
-
-   char *cursor = output;
-   while (cursor && *cursor)
-   {
-      char *line = cursor;
-      char *nl = strchr(cursor, '\n');
-      if (nl)
-      {
-         *nl = '\0';
-         cursor = nl + 1;
-      }
-      else
-         cursor = NULL;
-
-      if (!line[0])
-         continue;
-
-      cli_event_t event;
-      memset(&event, 0, sizeof(event));
-      int matched = adapter->parse_line ? adapter->parse_line(line, &event) : 0;
-      if (!matched)
-      {
-         if (provider_cli_buf_append(&raw, line) != 0 ||
-             provider_cli_buf_append(&raw, nl ? "\n" : "") != 0)
-         {
-            free(parsed.text);
-            free(raw.text);
-            snprintf(out->error, sizeof(out->error), "out of memory parsing %s output",
-                     adapter->display_name);
-            return -1;
-         }
-         continue;
-      }
-
-      parsed_events++;
-      if (event.prompt_tokens > 0)
-         out->prompt_tokens = event.prompt_tokens;
-      if (event.completion_tokens > 0)
-         out->completion_tokens = event.completion_tokens;
-      if (event.cache_write_tokens > 0)
-         out->cache_write_tokens = event.cache_write_tokens;
-      if (event.cache_read_tokens > 0)
-         out->cache_read_tokens = event.cache_read_tokens;
-      if (event.latency_ms > 0)
-         out->latency_ms = event.latency_ms;
-
-      if (event.type == CLI_EVENT_TEXT_DELTA)
-      {
-         if (provider_cli_buf_append(&parsed, event.text) != 0)
-         {
-            free(parsed.text);
-            free(raw.text);
-            snprintf(out->error, sizeof(out->error), "out of memory parsing %s output",
-                     adapter->display_name);
-            return -1;
-         }
-      }
-      else if (event.type == CLI_EVENT_TOOL_START)
-      {
-         out->tool_calls++;
-         if (adapter->is_write_event && adapter->is_write_event(&event))
-            event.write_event = 1;
-      }
-      else if (event.type == CLI_EVENT_TURN_COMPLETE)
-      {
-         if (parsed.len == 0 && event.text[0] && provider_cli_buf_append(&parsed, event.text) != 0)
-         {
-            free(parsed.text);
-            free(raw.text);
-            snprintf(out->error, sizeof(out->error), "out of memory parsing %s output",
-                     adapter->display_name);
-            return -1;
-         }
-         turns++;
-      }
-      else if (event.type == CLI_EVENT_ERROR && !event_error[0])
-         snprintf(event_error, sizeof(event_error), "%s", event.text);
-   }
-
-   if (parsed.len > 0)
-   {
-      out->response = parsed.text;
-      if (raw.text)
-         free(raw.text);
-      out->success = 1;
-      out->turns = turns > 0 ? turns : 1;
-      return 0;
-   }
-   free(parsed.text);
-
-   if (parsed_events == 0 && raw.len > 0)
-   {
-      out->response = raw.text;
-      out->success = 1;
-      out->turns = 1;
-      return 0;
-   }
-   free(raw.text);
-
-   if (event_error[0])
-      snprintf(out->error, sizeof(out->error), "%s", event_error);
-   else
-      snprintf(out->error, sizeof(out->error), "%s returned no assistant text",
-               adapter->display_name);
-   return -1;
-}
-
 extern const provider_cli_adapter_t acp_provider_cli_adapter;
 
 const provider_cli_adapter_t *provider_cli_adapter_get(const char *cli_kind)
@@ -1006,7 +628,6 @@ int provider_cli_adapter_execute_cfg(const provider_cli_adapter_t *adapter,
       return -1;
    provider_cli_cfg_t cfg = *config;
    const agent_t *agent = cfg.agent;
-   const char *system_prompt = cfg.system_prompt;
    const char *user_prompt = cfg.user_prompt;
    if (!out)
       return -1;
@@ -1029,68 +650,24 @@ int provider_cli_adapter_execute_cfg(const provider_cli_adapter_t *adapter,
       return -1;
    }
 
-   if (adapter->execute)
-      return adapter->execute(&cfg, out);
-
-   size_t prompt_cap = (system_prompt ? strlen(system_prompt) : 0) + strlen(user_prompt) + 256;
-   char *prompt = malloc(prompt_cap);
-   if (!prompt)
+   if (!adapter->execute)
    {
-      snprintf(out->error, sizeof(out->error), "out of memory");
-      return -1;
-   }
-   int prompt_rc = adapter->build_prompt
-                       ? adapter->build_prompt(&cfg, system_prompt, user_prompt, prompt, prompt_cap)
-                       : provider_cli_default_build_prompt(&cfg, system_prompt, user_prompt, prompt,
-                                                           prompt_cap);
-   if (prompt_rc != 0)
-   {
-      free(prompt);
-      snprintf(out->error, sizeof(out->error), "failed to build prompt for %s",
+      snprintf(out->error, sizeof out->error, "provider-cli: %s has no canonical executor",
                adapter->display_name);
-      return -1;
+      return AGENT_RC_CONTEXT_REFUSED;
    }
-
-   int stdin_fd = -1;
-   int stdout_fd = -1;
-   pid_t pid = -1;
-   if (!adapter->spawn || adapter->spawn(&cfg, prompt, &stdin_fd, &stdout_fd, &pid) != 0)
+   int rc = adapter->execute(&cfg, out);
+   /* A host scheduler is only an intermediate stage: its factory validates and
+    * installs the original response after joining native callbacks. Every
+    * standalone completed executor must already own admitted model output. */
+   if (!rc && out->success && !cfg.codex_host && !cfg.claude_host &&
+       (!out->canonical_response.n_content || aimee_ir_response_admit(&out->canonical_response)))
    {
-      free(prompt);
-      snprintf(out->error, sizeof(out->error), "failed to start %s", adapter->display_name);
-      return -1;
+      out->success = 0;
+      snprintf(out->error, sizeof out->error,
+               "provider-cli: canonical output is missing or invalid");
+      aimee_ir_session_fail_capture();
+      return AGENT_RC_CAPTURE_FAILED;
    }
-
-   struct timespec start, end;
-   clock_gettime(CLOCK_MONOTONIC, &start);
-
-   provider_cli_buf_t output = {0};
-   int timeout_ms = (agent && agent->cli_idle_timeout_ms > 0)
-                        ? agent->cli_idle_timeout_ms
-                        : ((agent && agent->timeout_ms > 0) ? agent->timeout_ms : -1);
-   if (agent)
-      timeout_ms = agent_timeout_cap_ms(timeout_ms, agent->tool_loop_timeout_ms_cap);
-   int rc = provider_cli_collect_child(adapter, stdin_fd, stdout_fd, pid, prompt, timeout_ms,
-                                       &output, out);
-   free(prompt);
-
-   clock_gettime(CLOCK_MONOTONIC, &end);
-   out->latency_ms =
-       (int)((end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000);
-
-   if (rc != 0)
-   {
-      free(output.text);
-      return -1;
-   }
-   if (!output.text || !output.text[0])
-   {
-      free(output.text);
-      snprintf(out->error, sizeof(out->error), "empty response from %s", adapter->display_name);
-      return -1;
-   }
-
-   rc = provider_cli_parse_output(adapter, output.text, out);
-   free(output.text);
    return rc;
 }

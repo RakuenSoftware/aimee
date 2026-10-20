@@ -59,8 +59,7 @@ int agent_execute_with_tools(const agent_t *agent, const agent_network_t *networ
 
    memset(out, 0, sizeof(*out));
    snprintf(out->agent_name, sizeof(out->agent_name), "%s", agent->name);
-   out->response = strdup("native ok");
-   assert(out->response != NULL);
+   assert(!agent_result_from_host_text(out, "native ok"));
    out->success = 1;
    out->turns = 1;
    return 0;
@@ -355,8 +354,56 @@ static void test_tool_result_format(void)
    assert(strstr(buf, "\"ok\":true") != NULL);
 }
 
+static int forbidden_legacy_spawn(const provider_cli_cfg_t *cfg, const char *prompt, int *input,
+                                  int *output, pid_t *pid)
+{
+   (void)cfg;
+   (void)prompt;
+   (void)input;
+   (void)output;
+   (void)pid;
+   assert(!"an adapter without a canonical executor must never spawn");
+   return -1;
+}
+static int flat_executor(const provider_cli_cfg_t *cfg, agent_result_t *result)
+{
+   (void)cfg;
+   result->response = strdup("unqualified native text");
+   assert(result->response);
+   result->success = 1;
+   return 0;
+}
+static int passive_capture(const aimee_session_event_t *event, void *context)
+{
+   (void)event;
+   (void)context;
+   return 0;
+}
+static void test_no_flat_child_fallback(void)
+{
+   provider_cli_adapter_t legacy = {.display_name = "legacy", .spawn = forbidden_legacy_spawn};
+   provider_cli_cfg_t cfg = {.user_prompt = "task"};
+   agent_result_t result = {0};
+   assert(provider_cli_adapter_execute_cfg(&legacy, &cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
+   assert(!result.response && !result.canonical_response.content && !result.success);
+   legacy.execute = flat_executor;
+   assert(provider_cli_adapter_execute_cfg(&legacy, &cfg, &result) == AGENT_RC_CAPTURE_FAILED);
+   assert(!result.success);
+   agent_result_clear_response(&result);
+   aimee_ir_session_set_sink(passive_capture, NULL);
+   assert(provider_cli_adapter_execute_cfg(&legacy, &cfg, &result) == AGENT_RC_CAPTURE_FAILED);
+   assert(!result.success && aimee_ir_session_capture_failed());
+   agent_result_clear_response(&result);
+   aimee_ir_session_set_sink(NULL, NULL); /* Independent negative fixture ends here. */
+
+   for (const char **kind = (const char *[]){"codex", "claude", "mistral", "acp", NULL}; *kind;
+        kind++)
+      assert(provider_cli_adapter_get(*kind)->execute);
+}
+
 int main(void)
 {
+   test_no_flat_child_fallback();
    test_registry_and_caps();
    test_common_json_parse_text_tool_and_error();
    test_claude_parse_stream_json();

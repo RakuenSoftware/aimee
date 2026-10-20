@@ -1,4 +1,5 @@
 #include <aimee/translation/harness_ir.h>
+#include "agent_exec.h"
 /* cli_acp.c: outbound ACP delegate transport.
  *
  * Implements provider_cli_adapter_t for ACP-capable external agents
@@ -788,11 +789,11 @@ static int acp_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *ou
       }
    }
 
-   aimee_harness_ir_free(&ir);
    if (capture_failed)
    {
       acp_proc_close(&p);
       free(st.text);
+      aimee_harness_ir_free(&ir);
       snprintf(out->error, sizeof(out->error), "ACP canonical capture failed");
       return -1;
    }
@@ -804,12 +805,34 @@ static int acp_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *ou
 
    if (!st.done)
    {
+      aimee_harness_ir_free(&ir);
       snprintf(out->error, sizeof(out->error), "acp adapter: no response (timeout or EOF)");
       free(st.text);
       return -1;
    }
 
-   out->response = st.text; /* caller/agent framework frees */
+   free(st.text);
+   aimee_response_t response = {0};
+   int retained = aimee_harness_ir_response(&ir, &response);
+   aimee_harness_ir_free(&ir);
+   if (retained || agent_result_adopt_response(out, &response))
+   {
+      aimee_response_free(&response);
+      snprintf(out->error, sizeof out->error, "ACP completed without canonical output");
+      aimee_ir_session_fail_capture();
+      return AGENT_RC_CAPTURE_FAILED;
+   }
+   if (out->canonical_response.stop_reason == AIMEE_STOP_ERROR)
+   {
+      snprintf(out->error, sizeof out->error, "ACP execution %s",
+               out->canonical_response.raw_stop_reason ? out->canonical_response.raw_stop_reason
+                                                       : "failed");
+      return -1;
+   }
+   snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
+            out->canonical_response.raw_stop_reason
+                ? out->canonical_response.raw_stop_reason
+                : aimee_stop_reason_name(out->canonical_response.stop_reason));
    out->success = 1;
    out->confidence = 80;
    return 0;

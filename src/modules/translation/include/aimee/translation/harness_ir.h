@@ -5,6 +5,7 @@
 typedef struct
 {
    anthropic_backend_stream_state_t anthropic;
+   struct aimee_harness_output *output;
    char message_id[256];
    unsigned long counter;
    struct cJSON *started;
@@ -38,5 +39,9 @@ struct cJSON *aimee_codex_control_reply(const char *method, const struct cJSON *
  * It resolves the pending adapter id, so native serialization emits no duplicate. */
 int aimee_harness_control_decision_ir(aimee_harness_ir_t *state, const char *native_id,
                                       const struct cJSON *decision);
+/* Final model output since the last user/tool-result boundary. Ordered native
+ * message groups remain typed; no text-to-IR fallback or history authority.
+ * Requires complete admitted observations and leaves out unchanged on refusal. */
+int aimee_harness_ir_response(const aimee_harness_ir_t *state, aimee_response_t *out);
 void aimee_harness_ir_free(aimee_harness_ir_t *state);
 #endif

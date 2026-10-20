@@ -17,6 +17,13 @@ static int capture(const aimee_session_event_t *event, void *unused)
    cJSON_AddItemToArray(events, json);
    return 0;
 }
+/* Each fixture is an independent execution; a failing fixture cannot poison
+ * another, while a nested owner within the same execution must keep the latch. */
+static void next_execution(void)
+{
+   aimee_ir_session_set_sink(NULL, NULL);
+   aimee_ir_session_set_sink(capture, NULL);
+}
 static int frame(const char *json, aimee_harness_ir_t *s, int codex)
 {
    cJSON *f = cJSON_Parse(json);
@@ -415,8 +422,80 @@ static void native_compactions(void)
    int rc = frame(frames[0], &state, 1);
    assert(rc < 0 && aimee_ir_session_capture_failed());
    reject = 0;
-   aimee_ir_session_set_sink(capture, NULL);
+   next_execution();
    aimee_harness_ir_free(&state);
+}
+
+static void owned_results(void)
+{
+   next_execution();
+   aimee_harness_ir_t state = {0};
+   aimee_response_t result = {0};
+   assert(frame("{\"method\":\"session/"
+                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_thought_chunk\","
+                "\"content\":{\"type\":\"text\",\"text\":\"Reason\"}}}}",
+                &state, 2) == 0);
+   assert(aimee_harness_ir_response(&state, &result) < 0 && !result.content);
+   assert(frame("{\"method\":\"session/"
+                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\","
+                "\"content\":{\"type\":\"text\",\"text\":\"Answer\"}}}}",
+                &state, 2) == 0);
+   assert(frame("{\"method\":\"session/"
+                "update\",\"params\":{\"update\":{\"sessionUpdate\":\"agent_message_chunk\","
+                "\"content\":{\"type\":\"image\",\"mimeType\":\"image/png\",\"data\":\"AA==\"}}}}",
+                &state, 2) == 0);
+   assert(frame("{\"id\":3,\"result\":{\"stopReason\":\"end_turn\"}}", &state, 2) == 0);
+   assert(!aimee_harness_ir_response(&state, &result));
+   assert(result.n_content == 3);
+   assert(result.content[0].type == AIMEE_BLK_THINKING &&
+          !strcmp(result.content[0].text, "Reason"));
+   assert(result.content[1].type == AIMEE_BLK_TEXT && !strcmp(result.content[1].text, "Answer"));
+   assert(result.content[2].type == AIMEE_BLK_IMAGE &&
+          !strcmp(result.content[2].media_ref, "data:image/png;base64,AA=="));
+   assert(result.content[0].message_group != result.content[1].message_group);
+   aimee_harness_ir_free(&state);
+   assert(!strcmp(result.content[0].text, "Reason")); /* Not borrowed from the frame/state. */
+   aimee_response_free(&result);
+
+   next_execution();
+   assert(frame("{\"id\":3,\"result\":{\"content\":\"legacy native "
+                "text\",\"stopReason\":\"max_tokens\"}}",
+                &state, 2) == 0);
+   assert(!aimee_harness_ir_response(&state, &result));
+   aimee_harness_ir_free(&state);
+   assert(result.n_content == 1 && !strcmp(result.content[0].text, "legacy native text"));
+   assert(result.stop_reason == AIMEE_STOP_MAX_TOKENS);
+   assert(!strcmp(result.raw_stop_reason, "max_tokens"));
+   aimee_response_free(&result);
+
+   next_execution();
+   assert(frame("{\"method\":\"item/agentMessage/"
+                "delta\",\"params\":{\"itemId\":\"native-id\",\"delta\":\"prefix\"}}",
+                &state, 1) == 0);
+   assert(aimee_harness_ir_response(&state, &result) < 0);
+   assert(frame("{\"method\":\"item/"
+                "completed\",\"params\":{\"item\":{\"id\":\"native-id\",\"type\":\"agentMessage\","
+                "\"text\":\"prefix completed\"}}}",
+                &state, 1) == 0);
+   assert(!aimee_harness_ir_response(&state, &result));
+   assert(result.n_content == 1 && !strcmp(result.content[0].text, "prefix completed"));
+   assert(!strcmp(result.id, "native-id"));
+   /* Repeated immutable snapshots cannot duplicate the display/result. */
+   assert(frame("{\"method\":\"item/"
+                "completed\",\"params\":{\"item\":{\"id\":\"native-id\",\"type\":\"agentMessage\","
+                "\"text\":\"prefix completed\"}}}",
+                &state, 1) == 0);
+   assert(!aimee_harness_ir_response(&state, &result) && result.n_content == 1);
+   aimee_block_t *retained = result.content;
+   assert(frame("{\"method\":\"item/"
+                "completed\",\"params\":{\"item\":{\"id\":\"native-id\",\"type\":\"agentMessage\","
+                "\"text\":\"contradictory\"}}}",
+                &state, 1) < 0);
+   assert(aimee_ir_session_capture_failed());
+   assert(aimee_harness_ir_response(&state, &result) < 0 && result.content == retained);
+   aimee_harness_ir_free(&state);
+   aimee_response_free(&result);
+   next_execution();
 }
 
 int main(void)
@@ -424,6 +503,9 @@ int main(void)
    control_outputs();
    events = cJSON_CreateArray();
    aimee_ir_session_set_sink(capture, NULL);
+   owned_results();
+   cJSON_Delete(events);
+   events = cJSON_CreateArray();
    native_compactions();
    url_elicitation();
    aimee_harness_ir_t form_state = {0};
@@ -443,9 +525,13 @@ int main(void)
    aimee_harness_ir_free(&form_state);
    cJSON_DeleteItemFromArray(events, 0);
    claude();
+   next_execution();
    claude_block_snapshots();
+   next_execution();
    codex();
+   next_execution();
    codex_tool_results();
+   next_execution();
    acp();
    aimee_ir_session_set_sink(NULL, NULL);
    cJSON_Delete(events);

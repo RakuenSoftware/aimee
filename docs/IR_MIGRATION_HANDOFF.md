@@ -57,9 +57,28 @@ Published `135897989` passed the full native suite, focused ASan/UBSan, Go race 
 actual PostgreSQL/SDK/browser integration (168 configured checks), 30 proxy tests, CMake cache
 fixture, all 76 lint gates and the full-history secret scan. Fresh Windows CI then exposed a
 thin-client CMake link defect: the codec target was declared only inside the full-runtime guard.
-The follow-up moves that existing portable target into common configuration. Fresh local thin
-build/selfcheck and the full-runtime CMake cache fixture qualify the fix; native-platform CI
-must still pass. Other pending CI is not reported as passed.
+Published `5fd04df5a` moves that existing portable target into common configuration. Fresh local
+thin build/selfcheck and the full-runtime CMake cache fixture pass. That commit subsequently
+completed all 59 CI checks, including Windows, macOS, strict attribution and every deployment
+tier (T1, T2, T2-luks, T3), with no platform skip or attribution exemption.
+
+## Active continuation: compatibility native results and fallback retirement
+
+Codex and ACP compatibility executors now retain admitted typed model observations rather than
+reconstructing output from joined text. ACP thought/text/media groups survive ownership transfer;
+Codex stream prefixes reconcile with immutable complete snapshots without duplication. Incomplete,
+contradictory or unidentified observations fail capture, including without a session sink. Nested
+capture restores its parent's failure latch. Successful standalone adapters must return admitted
+canonical output; the host scheduler remains an intermediate stage until its factory installs the
+original response. ACP terminal stop reasons and supported legacy terminal content are decoded at
+the native translation boundary.
+
+All four registered adapters already have explicit execution owners. The unused generic child
+collector/text-parser fallback is retired; an adapter without a canonical executor refuses before
+spawn. The bypass gate rejects reintroduction of those APIs. This continuation still needs fresh
+qualification/publication after the additional retirement. ACP's direct filesystem/permission
+handler, independent local task grading/reuse and the remaining deployment qualification are not
+claimed complete. Continue those after publication rather than ending the task.
 
 ## Active continuation: owned results, exact-request cache and workspace hooks
 

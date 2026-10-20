@@ -379,7 +379,7 @@ static void test_agent_execute_cli_codex_uses_requested_cwd(void)
          "       printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{}}'\n"
          "       printf '%s\\n' "
          "'{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"item\":"
-         "{\"type\":\"agentMessage\",\"text\":\"ok from fake codex\"}}}'\n"
+         "{\"type\":\"agentMessage\",\"id\":\"cwd-answer\",\"text\":\"ok from fake codex\"}}}'\n"
          "       printf '%s\\n' "
          "'{\"jsonrpc\":\"2.0\",\"method\":\"turn/completed\",\"params\":{\"turn\":"
          "{\"status\":\"completed\"}}}'\n"
@@ -402,6 +402,8 @@ static void test_agent_execute_cli_codex_uses_requested_cwd(void)
    assert(agent_execute_cli_codex_at_cwd(&agent, workdir, "system", "user prompt", &out) == 0);
    assert(out.response != NULL);
    assert(strcmp(out.response, "ok from fake codex") == 0);
+   assert(out.canonical_response.n_content == 1);
+   assert(!strcmp(out.canonical_response.content[0].text, "ok from fake codex"));
    agent_result_clear_response(&out);
 
    char seen[512];
@@ -551,7 +553,7 @@ static void test_chat_stream_splits_distinct_agent_message_items(void)
    rmdir(root);
 }
 
-static void test_chat_stream_splits_completed_delta_items_without_ids(void)
+static void test_chat_stream_rejects_completed_items_without_ids(void)
 {
    char root[256];
    snprintf(root, sizeof root, "%s/aimee-codex-stream-noids-XXXXXX", platform_tmpdir());
@@ -607,8 +609,10 @@ static void test_chat_stream_splits_completed_delta_items_without_ids(void)
 
    cli_codex_chat_result_t out;
    codex_stream_capture_t cap = {0};
-   assert(cli_codex_chat_stream(&req, codex_capture_cb, &cap, &out) == 0);
-   assert(strcmp(cap.buf, "<S>First.<S>Second.<E>") == 0);
+   assert(cli_codex_chat_stream(&req, codex_capture_cb, &cap, &out) != 0);
+   assert(aimee_ir_session_capture_failed());
+   assert(!strstr(cap.buf, "<E>"));
+   aimee_ir_session_set_sink(NULL, NULL); /* End this failed independent fixture. */
 
    if (old_path_env)
       assert(setenv("PATH", old_path, 1) == 0);
@@ -642,7 +646,7 @@ static void test_chat_stream_replaces_invalid_utf8_prompt_bytes(void)
          "       printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{}}'\n"
          "       printf '%s\\n' "
          "'{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"item\":"
-         "{\"type\":\"agentMessage\",\"text\":\"ok\"}}}'\n"
+         "{\"type\":\"agentMessage\",\"id\":\"utf8-answer\",\"text\":\"ok\"}}}'\n"
          "       printf '%s\\n' "
          "'{\"jsonrpc\":\"2.0\",\"method\":\"turn/completed\",\"params\":{\"turn\":"
          "{\"status\":\"completed\"}}}'\n"
@@ -1538,8 +1542,8 @@ int main(int argc, char **argv)
    test_chat_stream_splits_distinct_agent_message_items();
    printf("OK\n");
 
-   printf("test_chat_stream_splits_completed_delta_items_without_ids... ");
-   test_chat_stream_splits_completed_delta_items_without_ids();
+   printf("test_chat_stream_rejects_completed_items_without_ids... ");
+   test_chat_stream_rejects_completed_items_without_ids();
    printf("OK\n");
 
    printf("test_chat_stream_replaces_invalid_utf8_prompt_bytes... ");

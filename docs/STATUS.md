@@ -34,6 +34,9 @@ repair. Optional pure-text result reuse stores canonical snapshots, binds the ex
 and authenticated owner, and excludes user history capture and opaque credential lineage.
 Native hooks acquire the approved workspace before memory interception or filesystem probes;
 unknown Git worktree state cannot authorize cached verification.
+Compatibility Codex/ACP final outputs now retain typed observations, including ACP reasoning/media
+and native stop reasons. The generic flat-output executor fallback is retired; fresh CI must
+qualify this additional cutover. ACP's direct filesystem/control handler remains to be migrated.
 Remaining typed consumers, independently graded local learning/reuse, broader native platforms,
 live subscription acceptance and reviewed production promotion remain unfinished. Production stays
 KB-free. See the [migration boundaries](proposals/pending/canonical-ir-session-stream.md).

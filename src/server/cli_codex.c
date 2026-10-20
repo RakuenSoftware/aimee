@@ -688,7 +688,7 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
          size_t consumed = length + 1;
          memmove(c->buf, c->buf + consumed, c->buf_len - consumed);
          c->buf_len -= consumed;
-         int rc = aimee_ir_session_get_sink(NULL) ? aimee_codex_frame_ir(frame, &c->ir) : 0;
+         int rc = aimee_codex_frame_ir(frame, &c->ir);
          cJSON_Delete(frame);
          if (rc)
          {
@@ -2176,8 +2176,6 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
 
    /* 4. Drain notifications until turn/completed. Collect the final
     * agentMessage text and the latest tokenUsage along the way. */
-   char *response_buf = NULL;
-   size_t response_len = 0;
    for (;;)
    {
       /* The quiet poll keeps stderr drained while Codex is silent. Any
@@ -2187,7 +2185,6 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
       char *line = cli_codex_read_line_until_deadline(&c, deadline_ms, &rstatus);
       if (!line)
       {
-         free(response_buf);
          cli_codex_set_stall_error(&c, rstatus, out->error, sizeof(out->error));
          cli_codex_close(&c);
          return -1;
@@ -2200,13 +2197,6 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
          continue;
       if (cli_codex_parse_tool_action(line))
          out->tool_calls++;
-      char *msg_text = NULL;
-      if (cli_codex_parse_agent_message(line, &msg_text))
-      {
-         (void)cli_codex_append_message_text(&response_buf, &response_len, msg_text);
-         free(msg_text);
-         continue;
-      }
 
       int p = 0, cmpl = 0;
       if (cli_codex_parse_token_usage(line, &p, &cmpl))
@@ -2230,22 +2220,27 @@ static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
          break;
    }
 
+   /* The host factory validates its original response separately. Compatibility
+    * execution must retain the admitted observations, never reparse joined text. */
+   if (!c.host_launch)
+   {
+      aimee_response_t response = {0};
+      if (aimee_harness_ir_response(&c.ir, &response) ||
+          agent_result_adopt_response(out, &response))
+      {
+         aimee_response_free(&response);
+         cli_codex_close(&c);
+         snprintf(out->error, sizeof out->error, "Codex completed without canonical output");
+         aimee_ir_session_fail_capture();
+         return AGENT_RC_CAPTURE_FAILED;
+      }
+      out->canonical_response.usage_in = out->prompt_tokens;
+      out->canonical_response.usage_out = out->completion_tokens;
+   }
    cli_codex_close(&c);
    out->latency_ms = (int)(util_now_ms() - start_ms);
-   out->turns = 1; /* one delegate-side turn; codex internally may have done many */
-   if (response_buf && response_len > 0)
-   {
-      out->response = response_buf;
-      out->success = 1;
-   }
-   else
-   {
-      free(response_buf);
-      out->success = 0;
-      if (!out->error[0])
-         snprintf(out->error, sizeof(out->error), "codex returned no agentMessage");
-      return -1;
-   }
+   out->turns = 1;
+   out->success = 1;
    return 0;
 }
 
