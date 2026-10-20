@@ -249,7 +249,10 @@ def main():
                 subprocess.run(["git", "-C", str(root), *arguments], check=True, capture_output=True)
             # This persisted repository identity is outside tracked source, as on
             # ordinary local repositories without a forge remote.
-            (root / ".git" / "aimee-project-id").write_text(str(uuid.uuid4()) + "\n")
+            identity_path = root / ".git" / "aimee-project-id"
+            with os.fdopen(os.open(identity_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as identity_file:
+                identity_file.write(str(uuid.uuid4()) + "\n")
+            assert identity_path.stat().st_mode & 0o777 == 0o600
             (root / ".gitignore").write_text(".aimee/\n")
             (root / "receipt.txt").write_text("CANONICAL_SOURCE\n")
             subprocess.run(["git", "-C", str(root), "add", ".gitignore", "receipt.txt"], check=True)

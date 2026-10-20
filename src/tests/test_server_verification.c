@@ -39,6 +39,10 @@ static const char tree_id[] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 static const char lease_id[] = "cccccccccccccccccccccccccccccccc";
 static const char cursor_id[] = "9007199254740993";
 static server_session_capture_t *capture = (server_session_capture_t *)&context;
+server_session_capture_t *server_session_capture_current(void)
+{
+   return capture;
+}
 
 const char *aimee_home(void)
 {

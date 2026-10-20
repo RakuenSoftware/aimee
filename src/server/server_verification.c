@@ -497,31 +497,53 @@ static void finish(void *resource)
       return;
    verification_free(v);
 }
+static int admission_declined(const char *reason)
+{
+   if (server_session_capture_current())
+      fprintf(stderr, "aimee: private verification admission declined: %s\n", reason);
+   return 0;
+}
 static int begin(const char *root, const char *session, const verify_config_t *cfg,
                  verify_execution_t *out)
 {
    const request_context_t *owner = request_context_get();
    struct stat socket;
    if (!root || !session || !owner || !owner->vault_principal[0] ||
-       owner->vault_transport == ATTEST_NONE || !cfg || cfg->incomplete || cfg->incremental ||
-       cfg->count < 1 || cfg->count > MAX_VERIFY_STEPS || stat("/var/run/docker.sock", &socket) ||
-       !S_ISSOCK(socket.st_mode))
-      return 0;
+       owner->vault_transport == ATTEST_NONE)
+      return admission_declined("attested_execution_owner_required");
+   if (!cfg || cfg->incomplete || cfg->incremental || cfg->count < 1 ||
+       cfg->count > MAX_VERIFY_STEPS)
+      return admission_declined("complete_nonincremental_configuration_required");
+   if (stat("/var/run/docker.sock", &socket) || !S_ISSOCK(socket.st_mode))
+      return admission_declined("docker_socket_unavailable");
    for (int i = 0; i < cfg->count; ++i)
       if (cfg->steps[i].scope_changed)
-         return 0;
+         return admission_declined("full_source_steps_required");
    verification_t *v = calloc(1, sizeof *v);
    if (!v)
       return 0;
    v->source_fd = -1;
    char identity[65];
-   if (strlen(root) >= sizeof v->root || strlen(session) >= sizeof v->session ||
-       server_session_capture_retain_current(session, owner->vault_principal, &v->capture) ||
-       !v->capture || workspace_turn_resource_identity(root, &v->source_fd, identity) ||
-       v->source_fd < 0 || workspace_turn_mirror_capture(root, &v->mirror) ||
-       server_learning_project_from_cwd(root, v->project, sizeof v->project) || !v->project[0] ||
-       configuration_digest(cfg, v->config))
+   const char *reason = "execution_identity_bound_exceeded";
+   if (strlen(root) >= sizeof v->root || strlen(session) >= sizeof v->session)
       goto unavailable;
+   reason = "canonical_capture_required";
+   if (server_session_capture_retain_current(session, owner->vault_principal, &v->capture) ||
+       !v->capture)
+      goto unavailable;
+   reason = "approved_local_source_required";
+   if (workspace_turn_resource_identity(root, &v->source_fd, identity) || v->source_fd < 0)
+      goto unavailable;
+   reason = "mirror_custody_unavailable";
+   if (workspace_turn_mirror_capture(root, &v->mirror))
+      goto unavailable;
+   reason = "repository_identity_unavailable";
+   if (server_learning_project_from_cwd(root, v->project, sizeof v->project) || !v->project[0])
+      goto unavailable;
+   reason = "configuration_digest_unavailable";
+   if (configuration_digest(cfg, v->config))
+      goto unavailable;
+   reason = "worker_image_and_prerequisites_required";
    if (delegate_sandbox_resolve_image(root, v->image, sizeof v->image) || !v->image[0])
    {
       if (!cfg->env_count)
@@ -530,6 +552,7 @@ static int begin(const char *root, const char *session, const verify_config_t *c
    }
    const char *destination = server_session_capture_session(v->capture);
    const char *turn = server_session_capture_turn(v->capture);
+   reason = "canonical_destination_required";
    if (!destination || !turn || strlen(destination) >= sizeof v->session ||
        strlen(turn) >= sizeof v->turn)
       goto unavailable;
@@ -538,6 +561,7 @@ static int begin(const char *root, const char *session, const verify_config_t *c
    snprintf(v->session, sizeof v->session, "%s", destination);
    snprintf(v->turn, sizeof v->turn, "%s", turn);
    struct stat source;
+   reason = "source_resource_unavailable";
    if (fstat(v->source_fd, &source))
       goto unavailable;
    snprintf(v->device, sizeof v->device, "%llu", (unsigned long long)source.st_dev);
@@ -556,13 +580,17 @@ static int begin(const char *root, const char *session, const verify_config_t *c
    }
    free(commit);
    free(tree);
-   if (!valid || !source_current(v))
+   reason = "source_revision_unavailable";
+   if (!valid)
+      goto unavailable;
+   reason = "clean_source_and_unchanged_configuration_required";
+   if (!source_current(v))
       goto unavailable;
    *out = (verify_execution_t){.resource = v, .run = run, .finish = finish};
    return 1;
 unavailable:
    verification_free(v);
-   return 0;
+   return admission_declined(reason);
 }
 void server_verification_register(void)
 {
