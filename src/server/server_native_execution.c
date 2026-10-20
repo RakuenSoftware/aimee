@@ -639,10 +639,15 @@ int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg, agent_resul
 {
    if (!out)
       return -1;
-   if (!cfg || !cfg->agent ||
-       (strcmp(cfg->agent->cli_kind, "codex") && strcmp(cfg->agent->cli_kind, "claude")))
+   if (!cfg || !cfg->agent)
       return 1;
    memset(out, 0, sizeof *out);
+   if (strcmp(cfg->agent->cli_kind, "codex") && strcmp(cfg->agent->cli_kind, "claude"))
+   {
+      snprintf(out->error, sizeof out->error,
+               "canonical native execution owner unavailable for configured adapter");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
    native_execution_t *execution = native_execution_open(cfg, out->error);
    if (!execution)
       goto refused;

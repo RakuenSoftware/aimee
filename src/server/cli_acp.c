@@ -1,5 +1,6 @@
 #include <aimee/translation/harness_ir.h>
 #include "agent_exec.h"
+#include "server_session_control.h"
 /* cli_acp.c: outbound ACP delegate transport.
  *
  * Implements provider_cli_adapter_t for ACP-capable external agents
@@ -11,8 +12,8 @@
  *   3. session/new {cwd, mcpServers:[]}  id 2  -> capture result.sessionId
  *   4. session/prompt {sessionId, prompt:[{type:text,text}]}  id 3
  *   5. read session/update notifications (accumulate agent_message_chunk text,
- *      count tool_call), serve agent fs/permission requests against the
- *      worktree, until the session/prompt response (id 3, {stopReason}) lands
+ *      count tool_call), admit client resource/control requests to their owners,
+ *      until the session/prompt response (id 3, {stopReason}) lands
  *   6. populate agent_result_t and return
  *
  * acp_turn_consume still recognizes the legacy id-2 terminal + text/delta so a
@@ -41,8 +42,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#define ACP_FS_READ_CAP (16 * 1024 * 1024) /* max bytes served from a single fs/read */
-
 #define ACP_DEFAULT_TIMEOUT_MS 300000
 #define ACP_LINE_MAX           (256 * 1024)
 #define ACP_ARG_MAX            64
@@ -55,6 +54,9 @@ typedef struct
    char *buf;
    size_t buf_len;
    size_t buf_cap;
+   int (*progress)(void *context);
+   void *progress_context;
+   int source_failed;
 } acp_proc_t;
 
 static void acp_proc_close(acp_proc_t *p)
@@ -101,14 +103,22 @@ static int acp_spawn(acp_proc_t *p, const provider_cli_cfg_t *cfg, const char *c
    int stdin_fd = -1, stdout_fd = -1;
    if (provider_cli_spawn_argv(cfg, (char *const *)tokens, &stdin_fd, &stdout_fd, &p->pid) != 0)
    {
-      provider_cli_free_tokens(tokens, count);
       LOG_ERROR("cli_acp", "failed to spawn '%s'", tokens[0]);
+      provider_cli_free_tokens(tokens, count);
       return -1;
    }
    provider_cli_free_tokens(tokens, count);
 
    p->in_fd = stdin_fd;
    p->out_fd = stdout_fd;
+   int flags = fcntl(p->in_fd, F_GETFL, 0);
+   if (flags < 0 || fcntl(p->in_fd, F_SETFL, flags | O_NONBLOCK))
+   {
+      acp_proc_close(p);
+      return -1;
+   }
+   p->progress = cfg ? cfg->native_progress : NULL;
+   p->progress_context = cfg ? cfg->native_progress_context : NULL;
 
    p->buf_cap = 65536;
    p->buf = malloc(p->buf_cap);
@@ -121,29 +131,50 @@ static int acp_spawn(acp_proc_t *p, const provider_cli_cfg_t *cfg, const char *c
    return 0;
 }
 
-static int acp_write_line(acp_proc_t *p, const char *msg)
+static int acp_io_allowed(acp_proc_t *p, long long deadline_ms)
 {
-   size_t len = strlen(msg);
-   size_t written = 0;
-   while (written < len)
+   if (agent_request_cancelled() || aimee_ir_session_capture_failed())
+      return 0;
+   if (p->progress && p->progress(p->progress_context))
    {
-      ssize_t n = write(p->in_fd, msg + written, len - written);
-      if (n < 0)
-      {
-         if (errno == EINTR || errno == EAGAIN)
-            continue;
-         return -1;
-      }
-      written += (size_t)n;
+      p->source_failed = 1;
+      return 0;
    }
-   /* Append newline */
-   char nl = '\n';
-   ssize_t n;
-   do
+   return util_now_ms() < deadline_ms;
+}
+static int acp_write_line(acp_proc_t *p, const char *msg, long long deadline_ms)
+{
+   size_t length = strlen(msg), written = 0;
+   while (written <= length)
    {
-      n = write(p->in_fd, &nl, 1);
-   } while (n < 0 && errno == EINTR);
-   return (n > 0) ? 0 : -1;
+      if (!acp_io_allowed(p, deadline_ms))
+         return -1;
+      const char *bytes = written < length ? msg + written : "\n";
+      size_t count = written < length ? length - written : 1;
+      ssize_t n = write(p->in_fd, bytes, count);
+      if (n > 0)
+      {
+         written += (size_t)n;
+         continue;
+      }
+      if (n < 0 && errno == EINTR)
+         continue;
+      if (n >= 0 || (errno != EAGAIN && errno != EWOULDBLOCK))
+         return -1;
+      long long remaining = deadline_ms - util_now_ms();
+      if (remaining <= 0)
+         return -1;
+      if (remaining > 100)
+         remaining = 100;
+      fd_set writable;
+      FD_ZERO(&writable);
+      FD_SET(p->in_fd, &writable);
+      struct timeval wait = {.tv_sec = remaining / 1000, .tv_usec = (remaining % 1000) * 1000};
+      int ready = select(p->in_fd + 1, NULL, &writable, NULL, &wait);
+      if (ready < 0 && errno != EINTR)
+         return -1;
+   }
+   return 0;
 }
 
 /* Read one newline-terminated line. Returns malloc'd string (caller frees) or NULL on
@@ -152,7 +183,7 @@ static char *acp_read_line(acp_proc_t *p, long long deadline_ms)
 {
    for (;;)
    {
-      if (agent_request_cancelled())
+      if (!acp_io_allowed(p, deadline_ms))
          return NULL;
       /* Check buffer for complete line */
       char *nl = memchr(p->buf, '\n', p->buf_len);
@@ -189,7 +220,7 @@ static char *acp_read_line(acp_proc_t *p, long long deadline_ms)
          return NULL;
 
       long long remain_ms = deadline_ms - now;
-      if (remain_ms > 100 && aimee_ir_session_get_sink(NULL))
+      if (remain_ms > 100)
          remain_ms = 100;
       struct timeval tv = {
           .tv_sec = (time_t)(remain_ms / 1000),
@@ -200,7 +231,7 @@ static char *acp_read_line(acp_proc_t *p, long long deadline_ms)
       FD_ZERO(&rfds);
       FD_SET(p->out_fd, &rfds);
       int sel = select(p->out_fd + 1, &rfds, NULL, NULL, &tv);
-      if (sel == 0 && aimee_ir_session_get_sink(NULL))
+      if (!sel || (sel < 0 && errno == EINTR))
          continue;
       if (sel <= 0)
          return NULL; /* timeout or error */
@@ -212,57 +243,46 @@ static char *acp_read_line(acp_proc_t *p, long long deadline_ms)
    }
 }
 
-/* Drain and discard the subprocess response for a given JSON-RPC id. */
-static void acp_drain_response(acp_proc_t *p, int msg_id, long long deadline_ms)
+/* Host-owned native lifecycle messages are built dynamically: opaque session
+ * IDs and valid task prompts are never silently shortened into another call. */
+static cJSON *acp_request(const char *method, int id, cJSON **params)
 {
-   for (int i = 0; i < 10; i++)
+   cJSON *out = cJSON_CreateObject();
+   *params = out ? cJSON_AddObjectToObject(out, "params") : NULL;
+   if (!*params || !cJSON_AddStringToObject(out, "jsonrpc", "2.0") ||
+       !cJSON_AddStringToObject(out, "method", method) || !cJSON_AddNumberToObject(out, "id", id))
    {
-      char *line = acp_read_line(p, deadline_ms);
-      if (!line)
-         break;
-      cJSON *obj = cJSON_Parse(line);
-      free(line);
-      if (!obj)
-         continue;
-      cJSON *id_j = cJSON_GetObjectItem(obj, "id");
-      int matched = id_j && cJSON_IsNumber(id_j) && (int)id_j->valuedouble == msg_id;
-      cJSON_Delete(obj);
-      if (matched)
-         break;
+      cJSON_Delete(out);
+      *params = NULL;
+      return NULL;
    }
+   return out;
 }
-
-/* Read lines until the response for `msg_id` arrives, extracting
- * result.sessionId into sid. Returns 0 if a session id was captured, -1
- * otherwise (timeout/EOF/missing). */
-static int acp_read_session_id(acp_proc_t *p, int msg_id, char *sid, size_t sid_n,
-                               long long deadline_ms)
+static int acp_send_request(acp_proc_t *p, cJSON *owned, long long deadline_ms)
 {
-   if (sid && sid_n)
-      sid[0] = '\0';
-   for (int i = 0; i < 20; i++)
+   char *wire = owned ? cJSON_PrintUnformatted(owned) : NULL;
+   cJSON_Delete(owned);
+   if (!wire)
+      return -1;
+   int rc = acp_write_line(p, wire, deadline_ms);
+   free(wire);
+   return rc;
+}
+static cJSON *acp_read_response(acp_proc_t *p, int id, long long deadline_ms)
+{
+   while (acp_io_allowed(p, deadline_ms))
    {
       char *line = acp_read_line(p, deadline_ms);
-      if (!line)
-         break;
-      cJSON *obj = cJSON_Parse(line);
+      cJSON *frame = line ? aimee_ir_json_parse_frame(line, strlen(line)) : NULL;
       free(line);
-      if (!obj)
-         continue;
-      cJSON *id_j = cJSON_GetObjectItem(obj, "id");
-      int matched = id_j && cJSON_IsNumber(id_j) && (int)id_j->valuedouble == msg_id;
-      if (matched)
-      {
-         cJSON *result = cJSON_GetObjectItem(obj, "result");
-         cJSON *sj = result ? cJSON_GetObjectItem(result, "sessionId") : NULL;
-         if (sj && cJSON_IsString(sj) && sid && sid_n)
-            snprintf(sid, sid_n, "%s", sj->valuestring);
-         cJSON_Delete(obj);
-         return (sid && sid[0]) ? 0 : -1;
-      }
-      cJSON_Delete(obj);
+      if (!frame)
+         return NULL;
+      const cJSON *native_id = cJSON_GetObjectItemCaseSensitive(frame, "id");
+      if (cJSON_IsNumber(native_id) && native_id->valuedouble == (double)id)
+         return frame;
+      cJSON_Delete(frame);
    }
-   return -1;
+   return NULL;
 }
 
 /* Append delta text to a growing heap buffer. Returns 0 on success, -1 on OOM. */
@@ -384,450 +404,339 @@ int acp_turn_consume(const char *line, acp_turn_state_t *st)
 }
 
 /* True if any '/'-separated component of `p` is exactly "..". */
-static int acp_path_has_dotdot(const char *p)
+/* Native requests have already crossed translation and canonical capture. The
+ * resource callback owns scope, source verification and exact byte/range
+ * semantics; this transport never reads or writes the host filesystem. */
+static int acp_resource_available(const provider_cli_cfg_t *cfg, const char *name)
 {
-   const char *s = p;
-   while (*s)
-   {
-      const char *seg = s;
-      while (*s && *s != '/')
-         s++;
-      if ((size_t)(s - seg) == 2 && seg[0] == '.' && seg[1] == '.')
-         return 1;
-      while (*s == '/')
-         s++;
-   }
-   return 0;
+   return cfg && cfg->tool_call && cfg->tool_catalog &&
+          !aimee_ir_request_admit(cfg->tool_catalog) &&
+          aimee_ir_find_function(cfg->tool_catalog, "acp", name);
 }
-
-/* Resolve an ACP-supplied `path` to a location confined to `workdir`. Relative
- * paths join workdir; absolute paths must already sit under workdir. Any ".."
- * component is rejected outright. Returns 0 (out filled) on success, -1 on a
- * missing/escaping path. */
-static int acp_resolve_in_workdir(const char *workdir, const char *path, char *out, size_t outsz)
+int acp_dispatch_client_request(const cJSON *frame, const provider_cli_cfg_t *cfg,
+                                aimee_harness_ir_t *ir, const cJSON *decision, cJSON **reply)
 {
-   if (!workdir || !workdir[0] || !path || !path[0])
+   if (!reply || !ir || !cJSON_IsObject(frame))
       return -1;
-   if (acp_path_has_dotdot(path))
+   *reply = NULL;
+   const cJSON *id = cJSON_GetObjectItemCaseSensitive(frame, "id");
+   const char *method = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(frame, "method"));
+   if (!id || !method)
+      return 0;
+   if (!strcmp(method, "fs/read_text_file") || !strcmp(method, "fs/write_text_file"))
+   {
+      aimee_block_t call = {0}, result = {0};
+      int valid = !aimee_acp_take_client_tool(ir, &call);
+      if (!valid || agent_request_cancelled() || aimee_ir_session_capture_failed() ||
+          (cfg && cfg->native_progress && cfg->native_progress(cfg->native_progress_context)))
+         goto refused;
+      if (!acp_resource_available(cfg, call.tool_name))
+      {
+         result = (aimee_block_t){
+             .type = AIMEE_BLK_TOOL_RESULT,
+             .tool_is_error = 1,
+             .tool_id = strdup(call.tool_id),
+             .tool_result = cJSON_CreateString("ACP client resource has no admitted host owner")};
+         aimee_ir_block_set_context(&result, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_DIAGNOSTIC,
+                                    AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL,
+                                    NULL, 0);
+      }
+      else if (cfg->tool_call(&call, &result, cfg->tool_context))
+         goto refused;
+      *reply = aimee_acp_client_tool_reply(frame, &result);
+      if (!*reply || !result.tool_id || strcmp(result.tool_id, call.tool_id) ||
+          aimee_acp_client_tool_result_ir(ir, &result))
+         goto refused;
+      aimee_block_free_contents(&call);
+      aimee_block_free_contents(&result);
+      return 1;
+   refused:
+      cJSON_Delete(*reply);
+      *reply = NULL;
+      aimee_block_free_contents(&call);
+      aimee_block_free_contents(&result);
+      aimee_ir_session_fail_capture();
       return -1;
-   if (path[0] == '/')
-   {
-      size_t wl = strlen(workdir);
-      while (wl > 0 && workdir[wl - 1] == '/')
-         wl--; /* ignore trailing slash on workdir */
-      if (strncmp(path, workdir, wl) != 0 || (path[wl] != '/' && path[wl] != '\0'))
-         return -1;
-      if ((size_t)snprintf(out, outsz, "%s", path) >= outsz)
-         return -1;
    }
-   else if ((size_t)snprintf(out, outsz, "%s/%s", workdir, path) >= outsz)
-      return -1;
-   return 0;
+   if (!strcmp(method, "session/request_permission"))
+   {
+      cJSON *request = cJSON_CreateObject();
+      const cJSON *params = cJSON_GetObjectItemCaseSensitive(frame, "params");
+      char *key = cJSON_PrintUnformatted(id);
+      if (!request || !key || !decision ||
+          !cJSON_AddItemReferenceToObject(request, "input", (cJSON *)params) ||
+          !(*reply = aimee_acp_control_reply(id, request, decision)) ||
+          aimee_harness_control_decision_ir(ir, key, decision))
+      {
+         cJSON_Delete(*reply);
+         *reply = NULL;
+         aimee_ir_session_fail_capture();
+      }
+      free(key);
+      cJSON_Delete(request);
+      return *reply ? 1 : -1;
+   }
+   *reply = aimee_acp_error_reply(id, -32601, "method has no ACP client owner");
+   return *reply ? 1 : -1;
 }
 
-/* Read up to ACP_FS_READ_CAP bytes of a file into a heap buffer (caller frees).
- * Returns NULL on error; sets *too_big when the file exceeds the cap. */
-static char *acp_read_file_bounded(const char *path, int *too_big)
+static cJSON *acp_permission_decision(const provider_cli_cfg_t *cfg, const cJSON *frame,
+                                      long long deadline_ms)
 {
-   if (too_big)
-      *too_big = 0;
-   FILE *f = fopen(path, "rb");
-   if (!f)
-      return NULL;
-   if (fseek(f, 0, SEEK_END) != 0)
+   server_control_scope_t *scope = server_control_scope_current();
+   cJSON *reply = NULL;
+   if (!scope)
    {
-      fclose(f);
-      return NULL;
-   }
-   long sz = ftell(f);
-   if (sz < 0 || (unsigned long)sz > ACP_FS_READ_CAP)
-   {
-      if (sz >= 0 && too_big)
-         *too_big = 1;
-      fclose(f);
-      return NULL;
-   }
-   rewind(f);
-   char *buf = malloc((size_t)sz + 1);
-   if (!buf)
-   {
-      fclose(f);
-      return NULL;
-   }
-   size_t n = fread(buf, 1, (size_t)sz, f);
-   fclose(f);
-   buf[n] = '\0';
-   return buf;
-}
-
-/* mkdir -p the parent directory of `path` (components already confined to the
- * workdir by acp_resolve_in_workdir, so this only creates dirs under it). */
-static void acp_mkdir_parents(const char *path)
-{
-   char tmp[PATH_MAX * 2];
-   if ((size_t)snprintf(tmp, sizeof(tmp), "%s", path) >= sizeof(tmp))
-      return;
-   char *last = strrchr(tmp, '/');
-   if (!last || last == tmp)
-      return;
-   *last = '\0';
-   for (char *p = tmp + 1; *p; p++)
-   {
-      if (*p == '/')
+      reply = cJSON_CreateObject();
+      if (reply && !cJSON_AddStringToObject(
+                       reply, "decision", cfg->agent && cfg->agent->autonomous ? "allow" : "deny"))
       {
-         *p = '\0';
-         mkdir(tmp, 0755);
-         *p = '/';
+         cJSON_Delete(reply);
+         return NULL;
       }
+      return reply;
    }
-   mkdir(tmp, 0755);
-}
-
-static cJSON *acp_response_envelope(cJSON *id)
-{
-   cJSON *resp = cJSON_CreateObject();
-   cJSON_AddStringToObject(resp, "jsonrpc", "2.0");
-   cJSON_AddItemToObject(resp, "id", id ? cJSON_Duplicate(id, 1) : cJSON_CreateNull());
-   return resp;
-}
-
-static char *acp_error_response(cJSON *id, int code, const char *message)
-{
-   cJSON *resp = acp_response_envelope(id);
-   cJSON *err = cJSON_AddObjectToObject(resp, "error");
-   cJSON_AddNumberToObject(err, "code", code);
-   cJSON_AddStringToObject(err, "message", message ? message : "error");
-   char *s = cJSON_PrintUnformatted(resp);
-   cJSON_Delete(resp);
-   return s;
-}
-
-/* Serve a client-side ACP request issued by the agent during a turn. The agent
- * acts on aimee's worktree (workdir) through these requests; we sandbox every
- * path to it. Recognized methods: fs/read_text_file, fs/write_text_file,
- * session/request_permission (auto-approved). Any other method+id request gets
- * a JSON-RPC method-not-found so the agent does not hang.
- *
- * Returns 1 when `line` was an agent request and *resp_out holds the heap
- * JSON-RPC response to write back (caller frees); 0 when `line` is not a
- * request (no id, or a response) and should be handled as turn content. */
-int acp_serve_client_request(const char *line, const char *workdir, char **resp_out)
-{
-   if (resp_out)
-      *resp_out = NULL;
-   if (!line || !resp_out)
-      return 0;
-   cJSON *obj = cJSON_Parse(line);
-   if (!obj)
-      return 0;
-   cJSON *method_j = cJSON_GetObjectItem(obj, "method");
-   cJSON *id_j = cJSON_GetObjectItem(obj, "id");
-   const char *method = (method_j && cJSON_IsString(method_j)) ? method_j->valuestring : NULL;
-   /* A request has both a method and an id. (method+no-id = notification;
-    * id+no-method = response — both belong to acp_turn_consume.) */
-   if (!method || !id_j)
+   char *key = cJSON_PrintUnformatted(cJSON_GetObjectItemCaseSensitive(frame, "id"));
+   char *native_id = NULL, *kind = NULL;
+   cJSON *request = NULL;
+   int taken = 0;
+   while (key && util_now_ms() < deadline_ms && !agent_request_cancelled() &&
+          !aimee_ir_session_capture_failed())
    {
-      cJSON_Delete(obj);
-      return 0;
+      if (cfg->native_progress && cfg->native_progress(cfg->native_progress_context))
+         break;
+      taken = server_control_take(scope, key, &native_id, &kind, &request, &reply);
+      if (taken)
+         break;
+      struct timespec pause = {.tv_nsec = 100000000L};
+      nanosleep(&pause, NULL);
    }
-   cJSON *params = cJSON_GetObjectItem(obj, "params");
-
-   if (strcmp(method, "fs/read_text_file") == 0)
+   if (taken == 1)
    {
-      cJSON *pj = params ? cJSON_GetObjectItem(params, "path") : NULL;
-      char full[PATH_MAX * 2];
-      if (!pj || !cJSON_IsString(pj) ||
-          acp_resolve_in_workdir(workdir, pj->valuestring, full, sizeof(full)) != 0)
-         *resp_out = acp_error_response(id_j, -32602, "invalid or out-of-workdir path");
-      else
+      const cJSON *input = cJSON_GetObjectItemCaseSensitive(request, "input");
+      const cJSON *original = cJSON_GetObjectItemCaseSensitive(frame, "params");
+      if (!native_id || strcmp(native_id, key) || !kind || strcmp(kind, "permission") ||
+          !cJSON_Compare(input, original, 1))
       {
-         int too_big = 0;
-         char *content = acp_read_file_bounded(full, &too_big);
-         if (!content)
-            *resp_out =
-                acp_error_response(id_j, -32603, too_big ? "file too large" : "cannot read file");
-         else
-         {
-            cJSON *resp = acp_response_envelope(id_j);
-            cJSON *result = cJSON_AddObjectToObject(resp, "result");
-            cJSON_AddStringToObject(result, "content", content);
-            free(content);
-            *resp_out = cJSON_PrintUnformatted(resp);
-            cJSON_Delete(resp);
-         }
+         cJSON_Delete(reply);
+         reply = NULL;
+         aimee_ir_session_fail_capture();
       }
-   }
-   else if (strcmp(method, "fs/write_text_file") == 0)
-   {
-      cJSON *pj = params ? cJSON_GetObjectItem(params, "path") : NULL;
-      cJSON *cj = params ? cJSON_GetObjectItem(params, "content") : NULL;
-      char full[PATH_MAX * 2];
-      if (!pj || !cJSON_IsString(pj) || !cj || !cJSON_IsString(cj) ||
-          acp_resolve_in_workdir(workdir, pj->valuestring, full, sizeof(full)) != 0)
-         *resp_out = acp_error_response(id_j, -32602, "invalid or out-of-workdir path");
-      else
-      {
-         acp_mkdir_parents(full);
-         FILE *f = fopen(full, "wb");
-         int ok = 0;
-         if (f)
-         {
-            const char *data = cj->valuestring;
-            size_t len = strlen(data);
-            ok = (fwrite(data, 1, len, f) == len);
-            if (fclose(f) != 0)
-               ok = 0;
-         }
-         if (!ok)
-            *resp_out = acp_error_response(id_j, -32603, "cannot write file");
-         else
-         {
-            cJSON *resp = acp_response_envelope(id_j);
-            cJSON_AddNullToObject(resp, "result");
-            *resp_out = cJSON_PrintUnformatted(resp);
-            cJSON_Delete(resp);
-         }
-      }
-   }
-   else if (strcmp(method, "session/request_permission") == 0)
-   {
-      /* Auto-approve: the delegate already runs in an isolated worktree and the
-       * operator opted in via --acp. Select the first "allow" option, else the
-       * first option, else cancel. */
-      const char *opt_id = NULL;
-      cJSON *options = params ? cJSON_GetObjectItem(params, "options") : NULL;
-      if (options && cJSON_IsArray(options))
-      {
-         cJSON *first = NULL, *o = NULL;
-         cJSON_ArrayForEach(o, options)
-         {
-            cJSON *oid = cJSON_GetObjectItem(o, "optionId");
-            cJSON *kind = cJSON_GetObjectItem(o, "kind");
-            if (!oid || !cJSON_IsString(oid))
-               continue;
-            if (!first)
-               first = oid;
-            if (kind && cJSON_IsString(kind) && strncmp(kind->valuestring, "allow", 5) == 0)
-            {
-               opt_id = oid->valuestring;
-               break;
-            }
-         }
-         if (!opt_id && first)
-            opt_id = first->valuestring;
-      }
-      cJSON *resp = acp_response_envelope(id_j);
-      cJSON *result = cJSON_AddObjectToObject(resp, "result");
-      cJSON *outcome = cJSON_AddObjectToObject(result, "outcome");
-      if (opt_id)
-      {
-         cJSON_AddStringToObject(outcome, "outcome", "selected");
-         cJSON_AddStringToObject(outcome, "optionId", opt_id);
-      }
-      else
-         cJSON_AddStringToObject(outcome, "outcome", "cancelled");
-      *resp_out = cJSON_PrintUnformatted(resp);
-      cJSON_Delete(resp);
    }
    else
    {
-      /* Unknown agent request: reply method-not-found so the agent proceeds. */
-      *resp_out = acp_error_response(id_j, -32601, "method not supported by aimee ACP client");
+      if (key)
+         server_control_abandon(scope, key);
+      cJSON_Delete(reply);
+      reply = cJSON_CreateObject();
+      if (reply)
+         cJSON_AddStringToObject(reply, "decision", "cancel");
    }
+   free(key);
+   free(native_id);
+   free(kind);
+   cJSON_Delete(request);
+   return reply;
+}
 
-   cJSON_Delete(obj);
-   return 1;
+static int acp_finish_failure(acp_proc_t *process, agent_result_t *out, long long deadline_ms)
+{
+   int rc = -1;
+   if (process->source_failed || aimee_ir_session_capture_failed())
+      rc = AGENT_RC_CAPTURE_FAILED;
+   else if (agent_request_cancelled() || util_now_ms() >= deadline_ms)
+   {
+      rc = AGENT_RC_CONTEXT_REFUSED;
+      snprintf(out->error, sizeof out->error, "%s",
+               agent_request_cancelled() ? "ACP execution cancelled"
+                                         : "ACP execution budget exhausted");
+   }
+   acp_proc_close(process);
+   return rc;
 }
 
 static int acp_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
 {
-   memset(out, 0, sizeof(*out));
-
-   if (!cfg || !cfg->agent)
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof *out);
+   if (!cfg || !cfg->agent || !cfg->user_prompt || !cfg->user_prompt[0])
    {
-      snprintf(out->error, sizeof(out->error), "acp adapter: missing agent config");
+      snprintf(out->error, sizeof out->error, "acp adapter: missing agent config or prompt");
       return -1;
    }
-   if (!cfg->user_prompt || !cfg->user_prompt[0])
+   snprintf(out->agent_name, sizeof out->agent_name, "%s", cfg->agent->name);
+   if (cfg->history || cfg->canonical_request || (cfg->resume_id && cfg->resume_id[0]))
    {
-      snprintf(out->error, sizeof(out->error), "acp adapter: empty prompt");
-      return -1;
+      snprintf(out->error, sizeof out->error, "ACP canonical replay owner is unavailable");
+      return AGENT_RC_CONTEXT_REFUSED;
    }
-
-   snprintf(out->agent_name, sizeof(out->agent_name), "%s", cfg->agent->name);
-
-   long long start_ms = util_now_ms();
-   int timeout_ms = (cfg->agent->cli_idle_timeout_ms > 0) ? cfg->agent->cli_idle_timeout_ms
-                                                          : ACP_DEFAULT_TIMEOUT_MS;
-   long long deadline_ms = start_ms + timeout_ms;
-
-   acp_proc_t p = {.in_fd = -1, .out_fd = -1, .pid = 0};
-   const char *cli_cmd = cfg->agent->cli_cmd[0] ? cfg->agent->cli_cmd : "acp";
-   if (acp_spawn(&p, cfg, cli_cmd) != 0)
+   if (aimee_ir_session_capture_failed())
+      return AGENT_RC_CAPTURE_FAILED;
+   if (agent_request_cancelled() ||
+       (cfg->native_progress && cfg->native_progress(cfg->native_progress_context)))
    {
-      snprintf(out->error, sizeof(out->error), "acp adapter: failed to spawn '%s'", cli_cmd);
-      return -1;
+      snprintf(out->error, sizeof out->error, "ACP execution source refused before launch");
+      return AGENT_RC_CONTEXT_REFUSED;
    }
-
-   /* Standard Agent Client Protocol handshake: initialize -> session/new ->
-    * session/prompt. (The read side already understands the session/update
-    * notifications + fs/permission client requests these agents emit.) */
-
-   /* 1. initialize: advertise the client capabilities aimee serves (fs r/w). */
-   {
-      const char *msg = "{\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"params\":{"
-                        "\"protocolVersion\":1,\"clientCapabilities\":{"
-                        "\"fs\":{\"readTextFile\":true,\"writeTextFile\":true}}},\"id\":1}";
-      if (acp_write_line(&p, msg) != 0)
-      {
-         snprintf(out->error, sizeof(out->error), "acp adapter: write initialize failed");
-         acp_proc_close(&p);
-         return -1;
-      }
-      /* drain the response without strict check — capabilities vary by agent */
-      acp_drain_response(&p, 1, util_now_ms() + 5000);
-   }
-
-   /* 2. session/new: create a session rooted at the delegate worktree; capture
-    * the agent-assigned sessionId. */
-   char acp_session[256] = "";
-   {
-      char *cwd_esc = cJSON_PrintUnformatted(cJSON_CreateString(cfg->cwd ? cfg->cwd : "."));
-      char msg[1024];
-      snprintf(msg, sizeof(msg),
-               "{\"jsonrpc\":\"2.0\",\"method\":\"session/new\","
-               "\"params\":{\"cwd\":%s,\"mcpServers\":[]},\"id\":2}",
-               cwd_esc ? cwd_esc : "\".\"");
-      free(cwd_esc);
-      if (acp_write_line(&p, msg) != 0)
-      {
-         snprintf(out->error, sizeof(out->error), "acp adapter: write session/new failed");
-         acp_proc_close(&p);
-         return -1;
-      }
-      /* A sessionId is preferred but not fatal if absent (some agents are
-       * single-session and ignore it); proceed either way. */
-      acp_read_session_id(&p, 2, acp_session, sizeof(acp_session), util_now_ms() + 10000);
-   }
-
-   /* 3. session/prompt: the prompt is an array of typed content blocks. */
-   {
-      char *text_esc = cJSON_PrintUnformatted(cJSON_CreateString(cfg->user_prompt));
-      if (!text_esc)
-      {
-         snprintf(out->error, sizeof(out->error), "acp adapter: prompt escape failed");
-         acp_proc_close(&p);
-         return -1;
-      }
-      char *sid_esc = cJSON_PrintUnformatted(cJSON_CreateString(acp_session));
-      char msg[65536];
-      snprintf(msg, sizeof(msg),
-               "{\"jsonrpc\":\"2.0\",\"method\":\"session/prompt\",\"params\":{"
-               "\"sessionId\":%s,\"prompt\":[{\"type\":\"text\",\"text\":%s}]},\"id\":3}",
-               sid_esc ? sid_esc : "\"\"", text_esc);
-      free(text_esc);
-      free(sid_esc);
-      if (acp_write_line(&p, msg) != 0)
-      {
-         snprintf(out->error, sizeof(out->error), "acp adapter: write session/prompt failed");
-         acp_proc_close(&p);
-         return -1;
-      }
-   }
-
-   /* 4. read events until turn complete (parsing is in pure acp_turn_consume).
-    * The turn ends with the response to the session/prompt request (id 3). */
-   acp_turn_state_t st = {.prompt_id = 3};
+   long long started = util_now_ms();
+   int timeout = cfg->agent->cli_idle_timeout_ms > 0 ? cfg->agent->cli_idle_timeout_ms
+                 : cfg->agent->timeout_ms > 0        ? cfg->agent->timeout_ms
+                                                     : ACP_DEFAULT_TIMEOUT_MS;
+   timeout = agent_timeout_cap_ms(timeout, cfg->agent->tool_loop_timeout_ms_cap);
+   long long deadline = started + timeout;
+   acp_proc_t process = {.in_fd = -1, .out_fd = -1};
    aimee_harness_ir_t ir = {0};
-   int capture_failed = 0;
-   while (!st.done && util_now_ms() < deadline_ms)
+   acp_turn_state_t turn = {.prompt_id = 3};
+   char *session = NULL;
+   int rc = -1, prompt_sent = 0;
+   const char *command = cfg->agent->cli_cmd[0] ? cfg->agent->cli_cmd : "acp";
+   if (acp_spawn(&process, cfg, command))
    {
-      char *line = acp_read_line(&p, deadline_ms);
-      if (!line)
-         break;
-      cJSON *native = cJSON_Parse(line);
-      int capture = cJSON_IsObject(native) ? aimee_acp_frame_ir(native, &ir) : 0;
-      cJSON_Delete(native);
-      if (capture != 0)
+      snprintf(out->error, sizeof out->error, "ACP launch failed");
+      goto failed;
+   }
+   cJSON *params = NULL, *request = acp_request("initialize", 1, &params);
+   cJSON *capabilities = params ? cJSON_AddObjectToObject(params, "clientCapabilities") : NULL;
+   cJSON *fs = capabilities ? cJSON_AddObjectToObject(capabilities, "fs") : NULL;
+   if (!fs || !cJSON_AddNumberToObject(params, "protocolVersion", 1) ||
+       !cJSON_AddBoolToObject(fs, "readTextFile", acp_resource_available(cfg, "read_text_file")) ||
+       !cJSON_AddBoolToObject(fs, "writeTextFile", acp_resource_available(cfg, "write_text_file")))
+   {
+      cJSON_Delete(request);
+      snprintf(out->error, sizeof out->error, "ACP initialization allocation failed");
+      goto failed;
+   }
+   if (acp_send_request(&process, request, deadline))
+   {
+      snprintf(out->error, sizeof out->error, "ACP initialization write failed");
+      goto failed;
+   }
+   cJSON *response = acp_read_response(&process, 1, deadline);
+   const cJSON *result = cJSON_GetObjectItemCaseSensitive(response, "result");
+   const cJSON *version = cJSON_GetObjectItemCaseSensitive(result, "protocolVersion");
+   int initialized = cJSON_IsObject(result) &&
+                     (!version || (cJSON_IsNumber(version) && version->valuedouble == 1));
+   cJSON_Delete(response);
+   if (!initialized)
+   {
+      snprintf(out->error, sizeof out->error, "ACP initialization refused or timed out");
+      goto failed;
+   }
+   request = acp_request("session/new", 2, &params);
+   if (!params || !cJSON_AddStringToObject(params, "cwd", cfg->cwd ? cfg->cwd : ".") ||
+       !cJSON_AddArrayToObject(params, "mcpServers"))
+   {
+      cJSON_Delete(request);
+      snprintf(out->error, sizeof out->error, "ACP session allocation failed");
+      goto failed;
+   }
+   if (acp_send_request(&process, request, deadline))
+   {
+      snprintf(out->error, sizeof out->error, "ACP session write failed");
+      goto failed;
+   }
+   response = acp_read_response(&process, 2, deadline);
+   result = cJSON_GetObjectItemCaseSensitive(response, "result");
+   const cJSON *native = cJSON_GetObjectItemCaseSensitive(result, "sessionId");
+   if (cJSON_IsObject(result) && (!native || cJSON_IsString(native)))
+      session =
+          strdup(native ? native->valuestring : ""); /* Legacy single-session peers omit it. */
+   cJSON_Delete(response);
+   if (!session || (cfg->bind_session && cfg->bind_session(session, cfg->bind_context)))
+   {
+      snprintf(out->error, sizeof out->error, "ACP session identity unavailable");
+      goto failed;
+   }
+   ir.acp_session_id = session;
+   request = acp_request("session/prompt", 3, &params);
+   cJSON *prompt = params ? cJSON_AddArrayToObject(params, "prompt") : NULL;
+   cJSON *text = prompt ? cJSON_CreateObject() : NULL;
+   if (!text || !cJSON_AddItemToArray(prompt, text))
+   {
+      cJSON_Delete(text);
+      cJSON_Delete(request);
+      snprintf(out->error, sizeof out->error, "ACP prompt allocation failed");
+      goto failed;
+   }
+   if (!cJSON_AddStringToObject(params, "sessionId", session) ||
+       !cJSON_AddStringToObject(text, "type", "text") ||
+       !cJSON_AddStringToObject(text, "text", cfg->user_prompt))
+   {
+      cJSON_Delete(request);
+      snprintf(out->error, sizeof out->error, "ACP prompt allocation failed");
+      goto failed;
+   }
+   /* A failed write may already have delivered a complete prompt. Do not retry
+    * opaque execution merely because its final byte/acknowledgement was lost. */
+   prompt_sent = 1;
+   if (acp_send_request(&process, request, deadline))
+   {
+      snprintf(out->error, sizeof out->error, "ACP prompt write failed");
+      goto failed;
+   }
+   while (!turn.done && acp_io_allowed(&process, deadline))
+   {
+      char *line = acp_read_line(&process, deadline);
+      cJSON *frame = line ? aimee_ir_json_parse_frame(line, strlen(line)) : NULL;
+      if (!frame || aimee_acp_frame_ir(frame, &ir))
       {
-         capture_failed = 1;
          free(line);
-         break;
+         cJSON_Delete(frame);
+         snprintf(out->error, sizeof out->error, "ACP canonical frame/capture failed");
+         aimee_ir_session_fail_capture();
+         goto failed;
       }
-      /* Agent-issued client requests (fs read/write, permission) act on aimee's
-       * worktree and must be answered before the turn can complete. */
-      char *client_resp = NULL;
-      if (acp_serve_client_request(line, cfg->cwd, &client_resp))
+      const char *method = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(frame, "method"));
+      cJSON *decision = method && !strcmp(method, "session/request_permission")
+                            ? acp_permission_decision(cfg, frame, deadline)
+                            : NULL;
+      cJSON *reply = NULL;
+      int handled = acp_dispatch_client_request(frame, cfg, &ir, decision, &reply);
+      cJSON_Delete(decision);
+      cJSON_Delete(frame);
+      if (handled)
       {
-         if (client_resp)
-         {
-            cJSON *reply = cJSON_Parse(client_resp);
-            int capture = aimee_codex_reply_ir(reply, &ir);
-            cJSON_Delete(reply);
-            if (capture != 0)
-            {
-               capture_failed = 1;
-               free(client_resp);
-               free(line);
-               break;
-            }
-            acp_write_line(&p, client_resp);
-            free(client_resp);
-         }
          free(line);
+         if (handled < 0 || acp_send_request(&process, reply, deadline))
+         {
+            if (handled < 0)
+               cJSON_Delete(reply);
+            snprintf(out->error, sizeof out->error, "ACP host request source or delivery failed");
+            aimee_ir_session_fail_capture();
+            goto failed;
+         }
          continue;
       }
-      int rc = acp_turn_consume(line, &st);
+      int consumed = acp_turn_consume(line, &turn);
       free(line);
-      if (rc < 0)
+      if (consumed < 0)
       {
-         snprintf(out->error, sizeof(out->error), "%s", st.error);
-         acp_proc_close(&p);
-         free(st.text);
-         aimee_harness_ir_free(&ir);
-         return -1;
+         snprintf(out->error, sizeof out->error, "%s", turn.error);
+         goto failed;
       }
    }
-
-   if (capture_failed)
+   if (!turn.done)
    {
-      acp_proc_close(&p);
-      free(st.text);
-      aimee_harness_ir_free(&ir);
-      snprintf(out->error, sizeof(out->error), "ACP canonical capture failed");
-      return -1;
+      snprintf(out->error, sizeof out->error, "ACP completed without a prompt response");
+      goto failed;
    }
-   acp_proc_close(&p);
-
-   out->latency_ms = (int)(util_now_ms() - start_ms);
-   out->turns = 1;
-   out->tool_calls += st.tool_calls;
-
-   if (!st.done)
+   aimee_response_t final = {0};
+   if (aimee_harness_ir_response(&ir, &final) || agent_result_adopt_response(out, &final))
    {
-      aimee_harness_ir_free(&ir);
-      snprintf(out->error, sizeof(out->error), "acp adapter: no response (timeout or EOF)");
-      free(st.text);
-      return -1;
-   }
-
-   free(st.text);
-   aimee_response_t response = {0};
-   int retained = aimee_harness_ir_response(&ir, &response);
-   aimee_harness_ir_free(&ir);
-   if (retained || agent_result_adopt_response(out, &response))
-   {
-      aimee_response_free(&response);
+      aimee_response_free(&final);
       snprintf(out->error, sizeof out->error, "ACP completed without canonical output");
       aimee_ir_session_fail_capture();
-      return AGENT_RC_CAPTURE_FAILED;
+      rc = AGENT_RC_CAPTURE_FAILED;
+      goto done;
    }
    if (out->canonical_response.stop_reason == AIMEE_STOP_ERROR)
    {
       snprintf(out->error, sizeof out->error, "ACP execution %s",
                out->canonical_response.raw_stop_reason ? out->canonical_response.raw_stop_reason
                                                        : "failed");
-      return -1;
+      rc = AGENT_RC_CONTEXT_REFUSED;
+      goto done;
    }
    snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
             out->canonical_response.raw_stop_reason
@@ -835,7 +744,26 @@ static int acp_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *ou
                 : aimee_stop_reason_name(out->canonical_response.stop_reason));
    out->success = 1;
    out->confidence = 80;
-   return 0;
+   rc = 0;
+   goto done;
+failed:
+   rc = acp_finish_failure(&process, out, deadline);
+   if (prompt_sent && rc == -1)
+   {
+      /* Opaque native execution may already have performed an approved effect.
+       * A missing/failed terminal cannot authorize a fresh route retry. */
+      aimee_ir_session_fail_capture();
+      rc = AGENT_RC_CAPTURE_FAILED;
+   }
+done:
+   out->latency_ms = (int)(util_now_ms() - started);
+   out->turns = 1;
+   out->tool_calls = turn.tool_calls;
+   acp_proc_close(&process);
+   aimee_harness_ir_free(&ir);
+   free(session);
+   free(turn.text);
+   return rc;
 }
 
 const provider_cli_adapter_t acp_provider_cli_adapter = {

@@ -465,8 +465,6 @@ static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
                              .user_prompt = user_prompt,
                              .canonical_request = seed,
                              .canonical_response = canonical};
-   if (strcmp(adapter->cli_kind, "claude") && strcmp(adapter->cli_kind, "codex"))
-      return provider_cli_adapter_execute_cfg(adapter, &cfg, out);
    int host = provider_cli_adapter_host_execute(&cfg, out);
    if (host != 1)
       return host;
@@ -474,7 +472,12 @@ static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
     * cannot fall back to an SDK credential HOME or private native history. */
    agent_request_creds_t attestation;
    agent_request_creds_snapshot(&attestation);
-   int standalone = !seed && !attestation.session_id[0] && !server_session_log_active();
+   int standalone = !seed && !server_session_log_active() && !attestation.session_id[0] &&
+                    !attestation.vault_principal[0] && !attestation.codex_token[0] &&
+                    !attestation.codex_account_id[0] && !attestation.codex_registration[0] &&
+                    !attestation.claude_token[0] && !attestation.claude_registration[0] &&
+                    !attestation.claude_target[0] && !attestation.api_key[0] &&
+                    !attestation.api_key_registration[0] && !attestation.api_key_target[0];
    OPENSSL_cleanse(&attestation, sizeof attestation);
    if (standalone)
       return provider_cli_adapter_execute_cfg(adapter, &cfg, out);

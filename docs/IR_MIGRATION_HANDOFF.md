@@ -75,10 +75,28 @@ the native translation boundary.
 
 All four registered adapters already have explicit execution owners. The unused generic child
 collector/text-parser fallback is retired; an adapter without a canonical executor refuses before
-spawn. The bypass gate rejects reintroduction of those APIs. This continuation still needs fresh
-qualification/publication after the additional retirement. ACP's direct filesystem/permission
-handler, independent local task grading/reuse and the remaining deployment qualification are not
-claimed complete. Continue those after publication rather than ending the task.
+spawn. The bypass gate rejects reintroduction of those APIs. Published `7f288afff` completed all 59 fresh CI checks, including both thin-client platforms,
+strict attribution and all deployment tiers. Its full native regression, focused sanitizers,
+CMake targets, actual PostgreSQL/SDK integration and all 76 lint gates passed.
+
+ACP client requests now enter canonical translation before any resource or control action. The
+transport performs no filesystem I/O: exact namespaced native resource arguments go to an explicitly
+configured resource owner, and its typed result is captured before the RPC reply. Missing owners,
+foreign native sessions, duplicate request IDs and failed capture refuse effects. Permission replies
+consume the authenticated control owner and can select only a one-time grant. Initialize advertises
+only resources actually owned. Dynamic framing preserves opaque session IDs and complete prompts;
+nonblocking pipe writes and reads honor cancellation, source liveness and execution budgets.
+
+The daemon always consults the canonical native execution owner. Unsupported native profiles refuse
+instead of launching an SDK with ambient credentials/history. A weak standalone seam is eligible only
+without canonical history, capture, authenticated principal or request credentials. Private fresh ACP
+protocol execution remains available to explicitly configured standalone resource owners; arbitrary
+ACP daemon model/credential profiles are not qualified by that compatibility path.
+
+Live subprocess fixtures exercise authenticated permission selection, rejection of another actor,
+resource intents/results, a 2 KiB opaque session ID, a 200 KiB prompt and bounded blocked stdin.
+Independent local task grading/reuse and remaining deployment qualification still require completion.
+Continue those after publication rather than ending the task.
 
 ## Active continuation: owned results, exact-request cache and workspace hooks
 

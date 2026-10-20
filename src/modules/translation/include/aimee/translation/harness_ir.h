@@ -21,6 +21,9 @@ typedef struct
    aimee_block_type_t acp_kind;
    const char *acp_role;
    struct cJSON *acp_tools;
+   struct cJSON *acp_client_requests;
+   aimee_block_t acp_client_call;
+   const char *acp_session_id; /* Borrowed held native session, never the Aimee actor. */
 } aimee_harness_ir_t;
 /* Native frames end here. Returned events borrow into frame only during the
  * synchronous sink call. State owns only its lookup tables, not provider data. */
@@ -43,5 +46,14 @@ int aimee_harness_control_decision_ir(aimee_harness_ir_t *state, const char *nat
  * message groups remain typed; no text-to-IR fallback or history authority.
  * Requires complete admitted observations and leaves out unchanged on refusal. */
 int aimee_harness_ir_response(const aimee_harness_ir_t *state, aimee_response_t *out);
+/* Exact native client-resource intents use the acp namespace and native
+ * read_text_file/write_text_file names and arguments. They grant no I/O. */
+int aimee_acp_client_tool(const struct cJSON *frame, aimee_block_t *out);
+int aimee_acp_take_client_tool(aimee_harness_ir_t *state, aimee_block_t *out);
+int aimee_acp_client_tool_result_ir(aimee_harness_ir_t *state, const aimee_block_t *result);
+struct cJSON *aimee_acp_error_reply(const struct cJSON *id, int code, const char *message);
+struct cJSON *aimee_acp_client_tool_reply(const struct cJSON *frame, const aimee_block_t *result);
+struct cJSON *aimee_acp_control_reply(const struct cJSON *id, const struct cJSON *request,
+                                      const struct cJSON *decision);
 void aimee_harness_ir_free(aimee_harness_ir_t *state);
 #endif

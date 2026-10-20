@@ -580,6 +580,13 @@ int main(void)
    finish(1);
    assert(completed == 1 && closed == 1);
    active_sdk = "codex";
+   reset(0);
+   snprintf(selected.cli_kind, sizeof selected.cli_kind, "%s", "acp");
+   agent_result_t unsupported = {0};
+   assert(provider_cli_adapter_host_execute(&cfg, &unsupported) == AGENT_RC_CONTEXT_REFUSED);
+   assert(!unsupported.success && unsupported.error[0]);
+   assert(!opened && !sdk_calls && !retained && !restored);
+   agent_result_clear_response(&unsupported);
    cfg.agent = NULL;
    assert(provider_cli_adapter_host_execute(&cfg, &denied) == 1);
 #else

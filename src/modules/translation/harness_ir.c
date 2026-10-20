@@ -3,6 +3,7 @@
 #include <aimee/translation/aimee_frontend.h>
 #include "cJSON.h"
 #include <stdio.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -251,6 +252,186 @@ static const char *str(const cJSON *o, const char *key)
    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, key);
    return cJSON_IsString(v) ? v->valuestring : "";
 }
+/* ACP client resources are distinct from model-visible read_file/write_file:
+ * their byte/range fidelity is the resource owner's contract, without model
+ * output truncation or inferred filesystem authority. */
+static char *acp_rpc_key(const cJSON *id)
+{
+   if (cJSON_IsString(id))
+   {
+      if (!id->valuestring[0] || strlen(id->valuestring) > 4096)
+         return NULL;
+   }
+   else if (!cJSON_IsNumber(id) || !isfinite(id->valuedouble) ||
+            id->valuedouble < -9007199254740991.0 || id->valuedouble > 9007199254740991.0 ||
+            (double)(int64_t)id->valuedouble != id->valuedouble)
+      return NULL;
+   return cJSON_PrintUnformatted(id);
+}
+static int acp_request_once(aimee_harness_ir_t *state, const char *key)
+{
+   if (!state->acp_client_requests)
+      state->acp_client_requests = cJSON_CreateObject();
+   return !key || !state->acp_client_requests ||
+                  cJSON_GetArraySize(state->acp_client_requests) >= AIMEE_IR_MAX_BLOCKS ||
+                  cJSON_GetObjectItemCaseSensitive(state->acp_client_requests, key) ||
+                  !cJSON_AddTrueToObject(state->acp_client_requests, key)
+              ? -1
+              : 0;
+}
+int aimee_acp_client_tool(const cJSON *frame, aimee_block_t *out)
+{
+   if (!out || !cJSON_IsObject(frame) || !aimee_ir_json_unique(frame))
+      return -1;
+   const char *method = str(frame, "method");
+   const char *name = !strcmp(method, "fs/read_text_file")    ? "read_text_file"
+                      : !strcmp(method, "fs/write_text_file") ? "write_text_file"
+                                                              : NULL;
+   if (!name)
+      return 0;
+   const cJSON *params = cJSON_GetObjectItemCaseSensitive(frame, "params");
+   const cJSON *path = cJSON_GetObjectItemCaseSensitive(params, "path");
+   const cJSON *content = cJSON_GetObjectItemCaseSensitive(params, "content");
+   char *key = acp_rpc_key(cJSON_GetObjectItemCaseSensitive(frame, "id"));
+   if (!key || !cJSON_IsObject(params) || !cJSON_IsString(path) || !path->valuestring[0] ||
+       (!strcmp(name, "write_text_file") && !cJSON_IsString(content)))
+   {
+      free(key);
+      return -1;
+   }
+   aimee_block_t call = {.type = AIMEE_BLK_TOOL_USE,
+                         .tool_namespace = strdup("acp"),
+                         .tool_name = strdup(name),
+                         .tool_input = cJSON_Duplicate(params, 1)};
+   size_t size = strlen(key) + sizeof "acp-rpc:";
+   call.tool_id = malloc(size);
+   if (call.tool_id)
+      snprintf(call.tool_id, size, "acp-rpc:%s", key);
+   free(key);
+   aimee_response_t view = {.role = "assistant", .content = &call, .n_content = 1};
+   if (!call.tool_id || !call.tool_namespace || !call.tool_name || !call.tool_input ||
+       aimee_ir_response_admit(&view))
+   {
+      aimee_block_free_contents(&call);
+      return -1;
+   }
+   aimee_block_free_contents(out);
+   *out = call;
+   return 1;
+}
+int aimee_acp_take_client_tool(aimee_harness_ir_t *state, aimee_block_t *out)
+{
+   if (!state || !out || !state->acp_client_call.tool_id)
+      return -1;
+   aimee_block_free_contents(out);
+   *out = state->acp_client_call;
+   state->acp_client_call = (aimee_block_t){0};
+   return 0;
+}
+int aimee_acp_client_tool_result_ir(aimee_harness_ir_t *state, const aimee_block_t *result)
+{
+   if (!state || !result || result->type != AIMEE_BLK_TOOL_RESULT || !aimee_ir_block_valid(result))
+      return -1;
+   aimee_message_t message = {.role = "tool", .blocks = (aimee_block_t *)result, .n_blocks = 1};
+   aimee_session_event_t event = {
+       .kind = AIMEE_SESSION_MESSAGE, .message_id = result->tool_id, .message = &message};
+   harness_output_capture_t capture = {.output = state->output};
+   capture.parent = aimee_ir_session_get_sink(&capture.parent_context);
+   int rc = state->host_model_capture ? aimee_ir_session_emit(&event)
+            : !capture.output         ? -1
+                                      : harness_output_observe(&event, &capture);
+   if (rc)
+   {
+      if (state->output)
+         state->output->failed = 1;
+      aimee_ir_session_fail_capture();
+   }
+   return rc;
+}
+static cJSON *acp_rpc_envelope(const cJSON *id)
+{
+   char *key = acp_rpc_key(id);
+   if (!key)
+      return NULL;
+   free(key);
+   cJSON *out = cJSON_CreateObject(), *copy = cJSON_Duplicate(id, 1);
+   if (!out || !copy || !cJSON_AddStringToObject(out, "jsonrpc", "2.0") ||
+       !cJSON_AddItemToObject(out, "id", copy))
+   {
+      cJSON_Delete(copy);
+      cJSON_Delete(out);
+      return NULL;
+   }
+   return out;
+}
+cJSON *aimee_acp_error_reply(const cJSON *id, int code, const char *message)
+{
+   cJSON *out = acp_rpc_envelope(id);
+   cJSON *error = out ? cJSON_AddObjectToObject(out, "error") : NULL;
+   if (!error || !cJSON_AddNumberToObject(error, "code", code) ||
+       !cJSON_AddStringToObject(error, "message", message ? message : "request refused"))
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
+   return out;
+}
+cJSON *aimee_acp_client_tool_reply(const cJSON *frame, const aimee_block_t *result)
+{
+   const cJSON *id = cJSON_GetObjectItemCaseSensitive(frame, "id");
+   aimee_block_t call = {0};
+   int admitted = aimee_acp_client_tool(frame, &call);
+   int valid = admitted == 1 && result && result->type == AIMEE_BLK_TOOL_RESULT &&
+               result->tool_id && !strcmp(result->tool_id, call.tool_id) &&
+               cJSON_IsString(result->tool_result) && aimee_ir_block_valid(result);
+   aimee_block_free_contents(&call);
+   if (!valid)
+      return NULL;
+   if (result->tool_is_error)
+      return aimee_acp_error_reply(id, -32603, result->tool_result->valuestring);
+   cJSON *out = acp_rpc_envelope(id);
+   cJSON *body = out ? cJSON_AddObjectToObject(out, "result") : NULL;
+   if (!body || (!strcmp(str(frame, "method"), "fs/read_text_file") &&
+                 !cJSON_AddStringToObject(body, "content", result->tool_result->valuestring)))
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
+   return out;
+}
+cJSON *aimee_acp_control_reply(const cJSON *id, const cJSON *request, const cJSON *decision)
+{
+   if (!aimee_ir_control_reply_valid("permission", request, decision))
+      return NULL;
+   const char *choice = str(decision, "decision"), *selected = NULL;
+   const cJSON *input = cJSON_GetObjectItemCaseSensitive(request, "input");
+   const cJSON *options = cJSON_GetObjectItemCaseSensitive(input, "options"), *option;
+   cJSON_ArrayForEach(option, options)
+   {
+      const char *kind = str(option, "kind"), *key = str(option, "optionId");
+      if (key[0] && ((!strcmp(choice, "allow") && !strcmp(kind, "allow_once")) ||
+                     (!strcmp(choice, "deny") && !strcmp(kind, "reject_once"))))
+      {
+         selected = key;
+         break;
+      }
+   }
+   /* A one-operation approval never expands into a remembered grant. */
+   if (!strcmp(choice, "allow") && !selected)
+      return NULL;
+   cJSON *out = acp_rpc_envelope(id);
+   cJSON *body = out ? cJSON_AddObjectToObject(out, "result") : NULL;
+   cJSON *outcome = body ? cJSON_AddObjectToObject(body, "outcome") : NULL;
+   if (!outcome ||
+       !cJSON_AddStringToObject(outcome, "outcome", selected ? "selected" : "cancelled") ||
+       (selected && !cJSON_AddStringToObject(outcome, "optionId", selected)))
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
+   return out;
+}
+
 /* Public controls use one question schema; provider-specific request fields
  * remain opaque tool input and are interpreted only by the native renderer. */
 static cJSON *control_payload(const char *tool, const cJSON *input, const cJSON *questions)
@@ -311,6 +492,8 @@ void aimee_harness_ir_free(aimee_harness_ir_t *s)
    cJSON_Delete(s->pending);
    cJSON_Delete(s->claude_message);
    cJSON_Delete(s->acp_tools);
+   cJSON_Delete(s->acp_client_requests);
+   aimee_block_free_contents(&s->acp_client_call);
    memset(s, 0, sizeof(*s));
 }
 static int claude_snapshot(const cJSON *m, const char *id)
@@ -930,13 +1113,35 @@ static int aimee_acp_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
    const char *method = str(f, "method");
    const cJSON *p = cJSON_GetObjectItemCaseSensitive(f, "params");
    const cJSON *rpcid = cJSON_GetObjectItemCaseSensitive(f, "id");
+   if (rpcid && (!strcmp(method, "fs/read_text_file") || !strcmp(method, "fs/write_text_file")))
+   {
+      if (s->acp_client_call.tool_id || acp_close(s))
+         return -1;
+      const char *session = str(p, "sessionId");
+      if (session[0] && (!s->acp_session_id || strcmp(session, s->acp_session_id)))
+         return -1;
+      aimee_block_t call = {0};
+      if (aimee_acp_client_tool(f, &call) != 1)
+         return -1;
+      if (acp_request_once(s, call.tool_id + sizeof "acp-rpc:" - 1) ||
+          message(call.tool_id, "assistant", &call, 1))
+      {
+         aimee_block_free_contents(&call);
+         return -1;
+      }
+      s->acp_client_call = call;
+      return 0;
+   }
    if (!strcmp(method, "session/request_permission") && rpcid)
    {
       if (acp_close(s))
          return -1;
-      char *id = cJSON_PrintUnformatted(rpcid);
-      if (!id)
+      char *id = acp_rpc_key(rpcid);
+      if (!id || acp_request_once(s, id))
+      {
+         free(id);
          return -1;
+      }
       if (!s->pending)
          s->pending = cJSON_CreateObject();
       if (!s->pending)
@@ -944,12 +1149,23 @@ static int aimee_acp_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
          free(id);
          return -1;
       }
-      cJSON_AddStringToObject(s->pending, id, "permission");
+      const char *session = str(p, "sessionId");
+      cJSON *payload =
+          control_payload(str(cJSON_GetObjectItemCaseSensitive(p, "toolCall"), "title"), p, NULL);
+      if (!payload || (session[0] && (!s->acp_session_id || strcmp(session, s->acp_session_id))) ||
+          cJSON_GetObjectItemCaseSensitive(s->pending, id) ||
+          !cJSON_AddStringToObject(s->pending, id, "permission"))
+      {
+         cJSON_Delete(payload);
+         free(id);
+         return -1;
+      }
       aimee_session_event_t e = {.kind = AIMEE_SESSION_CONTROL_REQUEST,
                                  .request_id = id,
                                  .control_kind = "permission",
-                                 .control = p};
+                                 .control = payload};
       int rc = aimee_ir_session_emit(&e);
+      cJSON_Delete(payload);
       free(id);
       return rc;
    }
