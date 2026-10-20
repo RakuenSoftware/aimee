@@ -131,6 +131,8 @@ DB1_ONLY_TABLES = {
     # Host-only cache custody and recovered-source writer fences; never KB data.
     "session_native_cache_owners",
     "session_native_recovery_fences",
+    "session_native_cache_epochs",
+    "session_native_reservations",
     # Cross-store subject-erasure retry journal. It retains only an irreversible
     # subject digest and the committed DB1 deletion count.
     "db1_subject_erasure_request",

@@ -876,3 +876,80 @@ int db1_session_native_reconcile(const char *principal, const char *request_json
    return write_result(
        db1_call(&family, AIMEE_DB1_OP_SESSION_NATIVE_RECONCILE, fields, 2, values, caps, 1, NULL));
 }
+
+static int native_epoch_call(uint32_t op, const char *principal, const char *request_json,
+                             char out_epoch[33])
+{
+   if (!out_epoch)
+      return -1;
+   out_epoch[0] = 0;
+   const char *fields[] = {principal ? principal : "", request_json ? request_json : ""};
+   char *const values[] = {out_epoch};
+   const size_t caps[] = {33u};
+   return write_result(db1_call(&family, op, fields, 2, values, caps, 1, NULL));
+}
+int db1_session_native_reserve(const char *principal, const char *request_json, char out_epoch[33])
+{
+   return native_epoch_call(AIMEE_DB1_OP_SESSION_NATIVE_RESERVE, principal, request_json,
+                            out_epoch);
+}
+int db1_session_native_epoch(const char *principal, const char *request_json, char out_epoch[33])
+{
+   return native_epoch_call(AIMEE_DB1_OP_SESSION_NATIVE_EPOCH, principal, request_json, out_epoch);
+}
+int db1_session_native_reservation_reconcile(const char *principal, const char *request_json,
+                                             char out_sequence[32], char out_epoch[33])
+{
+   if (!out_sequence || !out_epoch)
+      return -1;
+   out_sequence[0] = 0;
+   out_epoch[0] = 0;
+   const char *fields[] = {principal ? principal : "", request_json ? request_json : ""};
+   char *const values[] = {out_sequence, out_epoch};
+   const size_t caps[] = {32u, 33u};
+   return write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_RECONCILE, fields,
+                                2, values, caps, 2, NULL));
+}
+int db1_session_native_reservation_lookup_checked(const char *principal, const char *request_json,
+                                                  char **out_json)
+{
+   if (!out_json)
+      return -1;
+   *out_json = NULL;
+   const char *fields[] = {principal ? principal : "", request_json ? request_json : ""};
+   char **cells = NULL;
+   uint32_t count = 0;
+   int status =
+       primary_read(AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_LOOKUP, fields, 2, &cells, &count);
+   int rc = -1;
+   if (status == AIMEE_DB1_STATUS_OK && count == 1 && cells[0] && cells[0][0])
+   {
+      *out_json = cells[0];
+      cells[0] = NULL;
+      rc = 0;
+   }
+   else if (status == AIMEE_DB1_STATUS_MISSING && !count)
+      rc = 1;
+   primary_cells_free(cells, count);
+   return rc;
+}
+char *db1_session_native_reservation_lookup(const char *principal, const char *request_json)
+{
+   char *result = NULL;
+   return db1_session_native_reservation_lookup_checked(principal, request_json, &result) ? NULL
+                                                                                          : result;
+}
+
+int db1_session_native_reservation_finish(const char *principal, const char *request_json,
+                                          char out_sequence[32], char out_epoch[33])
+{
+   if (!out_sequence || !out_epoch)
+      return -1;
+   out_sequence[0] = 0;
+   out_epoch[0] = 0;
+   const char *fields[] = {principal ? principal : "", request_json ? request_json : ""};
+   char *const values[] = {out_sequence, out_epoch};
+   const size_t caps[] = {32u, 33u};
+   return write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_FINISH, fields, 2,
+                                values, caps, 2, NULL));
+}

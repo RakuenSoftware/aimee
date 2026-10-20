@@ -6,6 +6,37 @@ stop/handoff request below is superseded.
 
 ## Current continuation status: PR #3052; migration still unfinished
 
+Latest qualification checkpoint: published `99aba1e65` (including `5780aa09a`)
+passes all 76 local lint gates, the full native suite, focused ASan/UBSan and
+CMake fixtures, 327 frontend tests and both frontend builds. The full benchmark
+regression now passes 789 tests. Its full-history scan found no leaks. Fresh CI,
+including mandatory actual-Docker delegate and restart/outbox recovery, exposed
+two failures. `2353731e8` repairs invalid descriptor documentation entries; all
+47 descriptor regressions pass. The actual delegate now completes, but its
+container-bound workspace identity supplies no local source FD, so verification
+and learning binding decline. A retained approved-source repair is in progress.
+These local results do not substitute for that integration qualification.
+The latest delegate repair makes native `git_verify` available to its actual
+`current_code` role while retaining ordinary `core` membership and permission
+ceilings. Canonical external SDK transcript import is a bounded unverified
+observation boundary; the old raw ingress/router consumers are retired.
+
+The current continuation adds migration 49, HostOnly reservation
+operations 40–44, shared cache epochs, checked owner lookup and DB-first unpublished
+lease acquisition. Actual PostgreSQL race and native cache/lease fixtures pass.
+These primitives are not yet automatic recovery: isolated workers are integrating
+qualified containment and production owner cleanup. A separate reproduced gap is
+cancelled history containing an unanswered tool call: native replay correctly
+refuses it. A truthful source-bound unknown-effect lifecycle and explicit retry
+authorization remain under design; synthetic tool success or deleting source is
+not acceptable. Qualified containment must also protect the physical lease inode
+from replacement and restrict access to host process-launch services.
+
+Production `.100` remains KB-free and unpromoted. Live vendor subscription,
+unsupported native profiles/platforms, the remaining handoff consumer audit and
+recorded independent production review remain outstanding. Keep working in
+#3052; do not interpret this checkpoint as completion or an instruction to stop.
+
 The user confirmed #3038 and its follow-up #3047 merged and requested the remaining
 migration and standalone learning work. #3050 was subsequently merged at
 `4e0ca19c2` (merge `7e17d58be`). Continuation commits remain on

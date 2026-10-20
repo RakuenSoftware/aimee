@@ -54,6 +54,55 @@ int main(void)
    wait_exit(child);
    assert(!server_native_cache_lease_close(lease, 1));
    assert(access(marker, F_OK) && !access(lock, F_OK));
+   cJSON *unpublished_prior = NULL;
+   lease = server_native_cache_lease_acquire_unpublished(home, "codex", "session", binding, "actor",
+                                                         "before-db", &unpublished_prior, error);
+   assert(lease && !unpublished_prior && access(marker, F_OK));
+   assert(server_native_cache_lease_owner(lease));
+   assert(!server_native_cache_lease_close(lease, 0));
+   // A crash before DB registration publishes no claim marker or SDK effects.
+   lease = server_native_cache_lease_acquire_unpublished(home, "codex", "session", binding, "actor",
+                                                         "after-db", &unpublished_prior, error);
+   assert(lease && !unpublished_prior && access(marker, F_OK));
+   cJSON *registered = cJSON_Duplicate(server_native_cache_lease_manifest(lease), 1);
+   assert(cJSON_AddStringToObject(registered, "epoch", "0"));
+   assert(!server_native_cache_lease_update(lease, registered));
+   assert(!access(marker, F_OK));
+   cJSON_Delete(registered);
+   assert(!server_native_cache_lease_close(lease, 1));
+   lease = open_lease("durable-update", error);
+   assert(lease);
+   char first_owner[33];
+   snprintf(first_owner, sizeof first_owner, "%s", server_native_cache_lease_owner(lease));
+   cJSON *updated = cJSON_Duplicate(server_native_cache_lease_manifest(lease), 1);
+   assert(cJSON_AddStringToObject(updated, "containment_json", "{\"exact\":\"saved-boundary\"}"));
+   assert(!server_native_cache_lease_update(lease, updated));
+   assert(!server_native_cache_lease_close(lease, 0));
+   cJSON *prior = NULL;
+   lease = server_native_cache_lease_acquire(home, "codex", "session", binding, "actor", "next",
+                                             &prior, error);
+   assert(lease && prior && cJSON_Compare(updated, prior, 1));
+   assert(!strcmp(first_owner, server_native_cache_lease_owner(lease)));
+   cJSON_ReplaceItemInObjectCaseSensitive(updated, "actor", cJSON_CreateString("foreign"));
+   assert(server_native_cache_lease_update(lease, updated));
+   cJSON_Delete(updated);
+   cJSON_Delete(prior);
+   assert(!server_native_cache_lease_rotate(lease, "after-reconcile", error));
+   assert(strcmp(first_owner, server_native_cache_lease_owner(lease)));
+   assert(!cJSON_GetObjectItemCaseSensitive(server_native_cache_lease_manifest(lease),
+                                            "containment_json"));
+   assert(!server_native_cache_lease_rotate_unpublished(lease, "before-new-reservation", error));
+   assert(access(marker, F_OK));
+   // A crash between reconciled-marker retirement and fresh DB40 leaves no
+   // unauthoritative new marker; the physical lock remains held until close.
+   assert(!open_lease("parallel-after-retirement", error) && strstr(error, "busy"));
+   assert(!server_native_cache_lease_close(lease, 0));
+   unpublished_prior = NULL;
+   lease = server_native_cache_lease_acquire_unpublished(home, "codex", "session", binding, "actor",
+                                                         "restart-after-retirement",
+                                                         &unpublished_prior, error);
+   assert(lease && !unpublished_prior && access(marker, F_OK));
+   assert(!server_native_cache_lease_close(lease, 1));
    int file = open(cache, O_WRONLY | O_CREAT | O_EXCL, 0600);
    assert(file >= 0 && write(file, "COMMITTED\n", 10) == 10);
    close(file);

@@ -2,6 +2,8 @@ package families
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	wire "github.com/JBailes/aimee/server-go/aimee"
 	"github.com/JBailes/aimee/server-go/bus"
@@ -18,9 +20,36 @@ func nativeRecoveryFields(r nativeOwnerRequest) []string {
 	return []string{"actor", string(encoded)}
 }
 func TestSessionNativeRecoveryRequiresHostAndExactInput(t *testing.T) {
-	for _, op := range []uint32{opSessionNativeOwnerClaim, opSessionNativeReconcile} {
+	for _, op := range []uint32{opSessionNativeOwnerClaim, opSessionNativeReconcile, opSessionNativeReserve, opSessionNativeReservationReconcile, opSessionNativeEpoch, opSessionNativeReservationLookup, opSessionNativeReservationFinish} {
 		db := newSessDB()
-		frame, err := wire.EncodeFields(op, nativeRecoveryFields(nativeRecoveryFixture()))
+		if !Sessions.Ops[op].HostOnly {
+			t.Fatal("private resource operation lost host authority gate", op)
+		}
+		body := any(nativeRecoveryFixture())
+		if op == opSessionNativeReconcile {
+			r := nativeRecoveryFixture()
+			r.Expected = r.token("pending")
+			body = r
+		}
+		if op >= opSessionNativeReserve {
+			r := nativeReservationRequest{Version: 1, Session: "session", Harness: "codex", Binding: strings.Repeat("a", 64)}
+			if op != opSessionNativeEpoch {
+				r.Owner = strings.Repeat("b", 32)
+			}
+			if op == opSessionNativeReserve || op == opSessionNativeReservationReconcile || op == opSessionNativeReservationFinish {
+				r.Turn = "turn"
+				r.Epoch = "0"
+				descriptor := `{"version":1}`
+				sum := sha256.Sum256([]byte(descriptor))
+				r.Containment = hex.EncodeToString(sum[:])
+				if op == opSessionNativeReserve {
+					r.Descriptor = descriptor
+				}
+			}
+			body = r
+		}
+		raw, _ := json.Marshal(body)
+		frame, err := wire.EncodeFields(op, []string{"actor", string(raw)})
 		if err != nil {
 			t.Fatal(err)
 		}

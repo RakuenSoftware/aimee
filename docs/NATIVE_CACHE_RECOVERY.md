@@ -99,3 +99,62 @@ failure. Store fixtures cover atomic owner registration/reconciliation, existing
 terminal preservation, real concurrent append serialization, durable writer
 fences, rollback, stale owner refusal and erasure. They deliberately do not
 represent independent SDK execution or qualify the optional containment layer.
+
+
+## Pre-exec reservation and shared cache epochs
+
+HostOnly operations 40–44 extend the initial custody contract. They are store
+primitives; only a qualified host containment owner can supply actual empty-tree
+evidence. A JSON descriptor or successful DB call alone proves no quiescence.
+
+* `session_native_reserve` (40) stores an exact pre-exec owner, running source,
+  complete containment JSON string and its SHA256 before SDK configuration/cache
+  access. It creates no pending native cache claim.
+* `session_native_reservation_reconcile` (41) cancels an unfinished source or
+  preserves its actual terminal, fences the abandoned writer and rotates the
+  entire physical cache directory's epoch in one transaction. A registered
+  pending/finishing claim is invalidated only by its exact actual token. A
+  preclaim owner is reconciled without inventing a pending claim. Same-owner
+  retries after commit return the same terminal and epoch.
+* `session_native_epoch` (42) returns the current owner-checked directory epoch.
+  Initial `0` preserves existing native handles. Every production launch must
+  read it before selecting SDK HOME or cache scope, including ordinary launches.
+* `session_native_reservation_lookup` (43) returns the exact durable owner and
+  full descriptor for authenticated recovery. Local marker metadata is not a
+  substitute for source ownership or kernel containment qualification.
+* `session_native_reservation_finish` (44) records ordinary terminal cleanup
+  after actual quiescence and an exact complete/invalid claim. It neither
+  rotates the epoch nor adds a recovery writer fence. A crash after finish but
+  before marker unlink can be retried without invalidating valid checkpoints.
+
+Qualified operation38 requests include `epoch` and must match an active exact
+reservation; their recovery uses41 instead of legacy39. Epoch-aware native HOME
+and canonical checkpoint scope use the shared domain-separated hash
+`SHA256("aimee-native-cache-epoch-v1:" + epoch + ":" + original_binding_or_scope)`.
+Epoch0 leaves both unchanged. The physical lease remains on the original
+binding, serializing all derived contexts. Epoch changes preserve old files and
+checkpoints while preventing uncertain shared native handles from being resumed
+by a different context.
+
+Real PostgreSQL fixtures cover preclaim cancellation without fake claims,
+shared epoch isolation, actual qualified pending/finishing registration,
+transaction rollback at both epoch and receipt writes, normal finish without
+cache invalidation, commit-before-unlink retry, corrupt descriptors, source
+ownership and whole-session erasure. These fixtures deliberately use metadata
+surrogates and do not assert SDK or kernel execution qualification. The final
+production launch/recovery ordering is owned by the native execution adapter;
+missing reservations, legacy or unqualified markers remain fail-closed unless
+an independently qualified host pre-exec protocol proves the exact boundary.
+
+
+Qualified launch ordering is DB-first: acquire the original physical directory
+flock with an unpublished in-memory owner nonce; create a qualified boundary;
+commit40 with the exact full descriptor before publishing a local marker or
+accessing SDK HOME/config. Then atomically publish the marker and launch through
+the retained pre-exec barrier. A local marker is SDK-writable and must never be
+promoted into authority by creating a missing DB reservation. Before any fresh
+admission, lookup43 without owner_id checks the directory's exact active durable
+reservation even when no marker exists. That closes commit40-before-marker
+crashes. Before40 no SDK can execute; an empty boundary alone conveys no cache
+claim. Lookup43 also supplies the actual registered cache token, validated
+against its exact owner, rather than trusting the marker's pre-registration token.

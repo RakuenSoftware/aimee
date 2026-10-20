@@ -18,6 +18,7 @@ struct server_native_cache
    char session[129], actor[129], turn[129], harness[8];
    char scope[65], context[65], before[65], key[96], metadata[112];
    char claim[33], token[192], native_id[1025];
+   char epoch[33], binding[65], owner[33], containment[65];
    int before_count, offset, phase;
 };
 
@@ -254,11 +255,66 @@ failed:
    return -1;
 }
 
+int server_native_cache_epoch_binding(const char *binding, const char *epoch, char out[65])
+{
+   if (!out || !hex(binding, 64) || !epoch || (strcmp(epoch, "0") && !hex(epoch, 32)))
+      return -1;
+   if (!strcmp(epoch, "0"))
+   {
+      snprintf(out, 65, "%s", binding);
+      return 0;
+   }
+   char lineage[160];
+   int length =
+       snprintf(lineage, sizeof lineage, "aimee-native-cache-epoch-v1:%s:%s", epoch, binding);
+   return length < 0 || (size_t)length >= sizeof lineage
+              ? -1
+              : aimee_sha256_hex(lineage, (size_t)length, out);
+}
+cJSON *server_native_cache_claim_json(const server_native_cache_t *cache)
+{
+   if (!cache || !cache->owner[0] || !cache->claim[0])
+      return NULL;
+   cJSON *value = cJSON_CreateObject();
+   if (!value || !cJSON_AddNumberToObject(value, "version", 1) ||
+       !cJSON_AddStringToObject(value, "session_id", cache->session) ||
+       !cJSON_AddStringToObject(value, "turn_id", cache->turn) ||
+       !cJSON_AddStringToObject(value, "harness", cache->harness) ||
+       !cJSON_AddStringToObject(value, "scope_sha256", cache->scope) ||
+       !cJSON_AddStringToObject(value, "context_sha256", cache->context) ||
+       !cJSON_AddStringToObject(value, "binding_sha256", cache->binding) ||
+       !cJSON_AddStringToObject(value, "owner_id", cache->owner) ||
+       !cJSON_AddStringToObject(value, "claim_id", cache->claim) ||
+       !cJSON_AddStringToObject(value, "containment_sha256", cache->containment) ||
+       !cJSON_AddStringToObject(value, "epoch", cache->epoch) ||
+       !cJSON_AddStringToObject(value, "expected_token", cache->token))
+   {
+      cJSON_Delete(value);
+      return NULL;
+   }
+   return value;
+}
+const char *server_native_cache_metadata_key(const server_native_cache_t *cache)
+{
+   return cache ? cache->metadata : NULL;
+}
 server_native_cache_t *server_native_cache_begin(const char *session, const char *actor,
                                                  const char *turn, const char *harness,
                                                  const char *scope, const aimee_request_t *request)
 {
-   if (!identity(session) || !identity(actor) || !identity(turn) || !harness ||
+   return server_native_cache_begin_epoch(session, actor, turn, harness, scope, request, "0", NULL);
+}
+server_native_cache_t *server_native_cache_begin_epoch(const char *session, const char *actor,
+                                                       const char *turn, const char *harness,
+                                                       const char *scope,
+                                                       const aimee_request_t *request,
+                                                       const char *epoch,
+                                                       const server_native_cache_owner_t *owner)
+{
+   if (!epoch || (strcmp(epoch, "0") && !hex(epoch, 32)) ||
+       (owner && (!hex(owner->binding, 64) || !hex(owner->owner, 32) ||
+                  !hex(owner->containment, 64) || !owner->publish)) ||
+       !identity(session) || !identity(actor) || !identity(turn) || !harness ||
        (strcmp(harness, "codex") && strcmp(harness, "claude")) || !hex(scope, 64) || !request ||
        agent_request_cancelled())
       return NULL;
@@ -270,6 +326,18 @@ server_native_cache_t *server_native_cache_begin(const char *session, const char
    snprintf(cache->turn, sizeof cache->turn, "%s", turn);
    snprintf(cache->harness, sizeof cache->harness, "%s", harness);
    snprintf(cache->scope, sizeof cache->scope, "%s", scope);
+   snprintf(cache->epoch, sizeof cache->epoch, "%s", epoch);
+   if (server_native_cache_epoch_binding(scope, epoch, cache->scope))
+   {
+      free(cache);
+      return NULL;
+   }
+   if (owner)
+   {
+      snprintf(cache->binding, sizeof cache->binding, "%s", owner->binding);
+      snprintf(cache->owner, sizeof cache->owner, "%s", owner->owner);
+      snprintf(cache->containment, sizeof cache->containment, "%s", owner->containment);
+   }
    cJSON *canonical = aimee_ir_request_json(request);
    cJSON *messages =
        canonical ? cJSON_DetachItemFromObjectCaseSensitive(canonical, "messages") : NULL;
@@ -305,7 +373,7 @@ server_native_cache_t *server_native_cache_begin(const char *session, const char
    if (completed)
    {
       int got = db1_session_harness_get(session, cache->key, native, sizeof native, actor);
-      if (got || !proof || strcmp(field(proof, "scope"), scope) ||
+      if (got || !proof || strcmp(field(proof, "scope"), cache->scope) ||
           strcmp(field(proof, "context_digest"), cache->context) ||
           strcmp(field(proof, "harness"), harness) || strcmp(field(proof, "native_id"), native))
       {
@@ -325,9 +393,24 @@ server_native_cache_t *server_native_cache_begin(const char *session, const char
    if (platform_random_hex(cache->claim, 32))
       goto refused;
    snprintf(cache->token, sizeof cache->token, "pending:%s:%s", cache->claim, cache->turn);
-   if (agent_request_cancelled() ||
-       db1_session_harness_compare_swap(session, cache->metadata, found == 1 ? "" : prior,
-                                        cache->token, actor))
+   if (agent_request_cancelled())
+      goto refused;
+   if (owner)
+   {
+      cJSON *claim = server_native_cache_claim_json(cache);
+      if (claim)
+         cJSON_ReplaceItemInObjectCaseSensitive(claim, "expected_token",
+                                                cJSON_CreateString(found == 1 ? "" : prior));
+      char *wire = claim ? cJSON_PrintUnformatted(claim) : NULL;
+      int failed = !wire || owner->publish(claim, owner->context) ||
+                   db1_session_native_owner_claim(actor, wire);
+      free(wire);
+      cJSON_Delete(claim);
+      if (failed)
+         goto refused;
+   }
+   else if (db1_session_harness_compare_swap(session, cache->metadata, found == 1 ? "" : prior,
+                                             cache->token, actor))
       goto refused;
    cache->phase = 1;
    cJSON_Delete(messages);
@@ -355,6 +438,7 @@ int server_native_cache_abort(server_native_cache_t *cache)
    if (db1_session_harness_compare_swap(cache->session, cache->metadata, cache->token, invalid,
                                         cache->actor))
       return -1;
+   snprintf(cache->token, sizeof cache->token, "%s", invalid);
    cache->phase = 3;
    return 0;
 }
@@ -414,6 +498,7 @@ int server_native_cache_complete(server_native_cache_t *cache, const char *nativ
    if (db1_session_harness_compare_swap(cache->session, cache->metadata, cache->token, completed,
                                         cache->actor))
       return -1;
+   snprintf(cache->token, sizeof cache->token, "%s", completed);
    cache->phase = 3;
    return 0;
 }

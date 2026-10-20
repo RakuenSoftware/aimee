@@ -28,6 +28,7 @@ type nativeOwnerRequest struct {
 	Owner       string `json:"owner_id"`
 	Claim       string `json:"claim_id"`
 	Containment string `json:"containment_sha256"`
+	Epoch       string `json:"epoch,omitempty"`
 	Expected    string `json:"expected_token"`
 }
 
@@ -47,7 +48,7 @@ func nativeOwnerInput(f []string) (nativeOwnerRequest, bool) {
 	if len(f) != 2 || f[0] == "" || len(f[0]) > 128 || len(f[1]) > 4096 || !canonical.Decode([]byte(f[1]), &r) {
 		return r, false
 	}
-	valid := r.Version == 1 && r.Session != "" && len(r.Session) <= 128 && r.Turn != "" && len(r.Turn) <= 128 && (r.Harness == "codex" || r.Harness == "claude") && nativeHex(r.Scope, 64) && nativeHex(r.Context, 64) && nativeHex(r.Binding, 64) && nativeHex(r.Owner, 32) && nativeHex(r.Claim, 32) && nativeHex(r.Containment, 64)
+	valid := r.Version == 1 && r.Session != "" && len(r.Session) <= 128 && r.Turn != "" && len(r.Turn) <= 128 && (r.Harness == "codex" || r.Harness == "claude") && nativeHex(r.Scope, 64) && nativeHex(r.Context, 64) && nativeHex(r.Binding, 64) && nativeHex(r.Owner, 32) && nativeHex(r.Claim, 32) && nativeHex(r.Containment, 64) && (r.Epoch == "" || nativeEpochValid(r.Epoch))
 	return r, valid
 }
 func (r nativeOwnerRequest) key() string {
@@ -129,12 +130,12 @@ func nativeOwnerLifecycle(ctx context.Context, q store.Queryer, actor string, r 
 	return state, sequence, eventID, nil
 }
 
-const nativeOwnerReadSQL = `SELECT actor,turn_id,harness,scope_sha256,context_sha256,binding_sha256,owner_id,claim_id,containment_sha256,recovered_from,coalesce(terminal_sequence,0)::text FROM session_native_cache_owners WHERE session_id=$1 AND cache_key=$2`
+const nativeOwnerReadSQL = `SELECT actor,turn_id,harness,scope_sha256,context_sha256,binding_sha256,owner_id,claim_id,containment_sha256,recovered_from,coalesce(terminal_sequence,0)::text,cache_epoch FROM session_native_cache_owners WHERE session_id=$1 AND cache_key=$2`
 
 func nativeOwnerRead(ctx context.Context, q store.Queryer, r nativeOwnerRequest) (nativeOwnerRequest, string, string, string, error) {
 	var actual nativeOwnerRequest
 	var actor, recovered, terminal string
-	err := q.QueryRow(ctx, nativeOwnerReadSQL, r.Session, r.key()).Scan(&actor, &actual.Turn, &actual.Harness, &actual.Scope, &actual.Context, &actual.Binding, &actual.Owner, &actual.Claim, &actual.Containment, &recovered, &terminal)
+	err := q.QueryRow(ctx, nativeOwnerReadSQL, r.Session, r.key()).Scan(&actor, &actual.Turn, &actual.Harness, &actual.Scope, &actual.Context, &actual.Binding, &actual.Owner, &actual.Claim, &actual.Containment, &recovered, &terminal, &actual.Epoch)
 	actual.Version = 1
 	actual.Session = r.Session
 	return actual, actor, recovered, terminal, err
@@ -177,6 +178,11 @@ func sessionNativeOwnerClaim(ctx context.Context, q store.Queryer, f []string) (
 	if state != "running" {
 		return store.StatusInvalid, nil, nil
 	}
+	if r.Epoch != "" {
+		if err := nativeReservationClaimCheck(ctx, q, r, f[0]); err != nil {
+			return 0, nil, err
+		}
+	}
 	actual, err := nativeOwnerCacheToken(ctx, q, r, f[0])
 	if err != nil {
 		return 0, nil, err
@@ -197,12 +203,18 @@ func sessionNativeOwnerClaim(ctx context.Context, q store.Queryer, f []string) (
 	if _, err := q.Exec(ctx, sessionHarnessBindSQL, r.Session, r.key(), r.token("pending")); err != nil {
 		return 0, nil, err
 	}
-	_, err = q.Exec(ctx, `INSERT INTO session_native_cache_owners(session_id,cache_key,actor,turn_id,harness,scope_sha256,context_sha256,binding_sha256,owner_id,claim_id,containment_sha256) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(session_id,cache_key) DO UPDATE SET actor=excluded.actor,turn_id=excluded.turn_id,harness=excluded.harness,scope_sha256=excluded.scope_sha256,context_sha256=excluded.context_sha256,binding_sha256=excluded.binding_sha256,owner_id=excluded.owner_id,claim_id=excluded.claim_id,containment_sha256=excluded.containment_sha256,recovered_from='',terminal_sequence=NULL`, r.Session, r.key(), f[0], r.Turn, r.Harness, r.Scope, r.Context, r.Binding, r.Owner, r.Claim, r.Containment)
+	_, err = q.Exec(ctx, `INSERT INTO session_native_cache_owners(session_id,cache_key,actor,turn_id,harness,scope_sha256,context_sha256,binding_sha256,owner_id,claim_id,containment_sha256,cache_epoch) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(session_id,cache_key) DO UPDATE SET actor=excluded.actor,turn_id=excluded.turn_id,harness=excluded.harness,scope_sha256=excluded.scope_sha256,context_sha256=excluded.context_sha256,binding_sha256=excluded.binding_sha256,owner_id=excluded.owner_id,claim_id=excluded.claim_id,containment_sha256=excluded.containment_sha256,recovered_from='',terminal_sequence=NULL,cache_epoch=excluded.cache_epoch`, r.Session, r.key(), f[0], r.Turn, r.Harness, r.Scope, r.Context, r.Binding, r.Owner, r.Claim, r.Containment, r.Epoch)
+	if err == nil && r.Epoch != "" {
+		err = nativeReservationBindClaim(ctx, q, r)
+	}
 	return store.StatusOK, nil, err
 }
 func sessionNativeReconcile(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	r, valid := nativeOwnerInput(f)
 	phase, claim, turn, tokenValid := nativeToken(r.Expected)
+	if r.Epoch != "" {
+		return store.StatusInvalid, nil, nil
+	} // Qualified owners reconcile their shared epoch through operation41.
 	if !valid || !tokenValid || (phase != "pending" && phase != "finishing") || claim != r.Claim || turn != r.Turn {
 		return store.StatusInvalid, nil, nil
 	}

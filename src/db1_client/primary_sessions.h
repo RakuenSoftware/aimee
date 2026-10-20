@@ -33,6 +33,18 @@ extern "C"
    char *db1_session_ir_search(const char *principal, const char *request_json);
    /* Host custody primitives; reconciliation requires independent qualified
     * whole-tree quiescence. These functions do not observe process liveness. */
+   int db1_session_native_reservation_finish(const char *principal, const char *request_json,
+                                             char out_sequence[32], char out_epoch[33]);
+   int db1_session_native_reserve(const char *principal, const char *request_json,
+                                  char out_epoch[33]);
+   int db1_session_native_reservation_reconcile(const char *principal, const char *request_json,
+                                                char out_sequence[32], char out_epoch[33]);
+   int db1_session_native_epoch(const char *principal, const char *request_json,
+                                char out_epoch[33]);
+   /* Checked lookup: 0 found (heap JSON), 1 definitively missing, -1 unavailable/refused. */
+   int db1_session_native_reservation_lookup_checked(const char *principal,
+                                                     const char *request_json, char **out_json);
+   char *db1_session_native_reservation_lookup(const char *principal, const char *request_json);
    int db1_session_native_owner_claim(const char *principal, const char *request_json);
    int db1_session_native_reconcile(const char *principal, const char *request_json,
                                     char out_sequence[32]);
