@@ -1,6 +1,7 @@
 /* Credential-free SDK scheduler resources. The durable capture and existing
  * native-cache owner, not SDK files or process exit, own conversation truth. */
 #include "server_native_execution.h"
+#include "server_native_launch.h"
 #include "cli_claude_native.h"
 #include "claude_headless.h"
 #include "server_native_runtime.h"
@@ -19,9 +20,6 @@
 #include "aimee_sha256.h"
 #include "log.h"
 #include "cJSON.h"
-#if defined(__linux__)
-#include <elf.h>
-#endif
 #include <openssl/crypto.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -31,7 +29,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -141,57 +138,6 @@ static int native_ambient_config_absent(const char *sdk)
          return 0;
    }
    return 1;
-}
-static int native_executable_open(const char *command, char digest[65])
-{
-#if !defined(__linux__)
-   (void)command;
-   (void)digest;
-   return -1;
-#else
-   int fd = -1;
-   if (command && command[0] == '/')
-      fd = open(command, O_RDONLY | O_CLOEXEC);
-   else if (!command || !strchr(command, '/'))
-   {
-      const char *search = getenv("PATH");
-      char *paths = strdup(search ? search : "/usr/bin:/bin"), *save = NULL;
-      if (!paths)
-         return -1;
-      for (char *directory = strtok_r(paths, ":", &save); directory && fd < 0;
-           directory = strtok_r(NULL, ":", &save))
-      {
-         if (directory[0] != '/')
-            continue;
-         char candidate[4096];
-         if (snprintf(candidate, sizeof candidate, "%s/%s", directory,
-                      command && command[0] ? command : "codex") < (int)sizeof candidate)
-            fd = open(candidate, O_RDONLY | O_CLOEXEC);
-      }
-      free(paths);
-   }
-   struct stat before, after;
-   if (fd < 0 || fstat(fd, &before) || !S_ISREG(before.st_mode) || !(before.st_mode & 0111) ||
-       (before.st_mode & 0022) || (before.st_uid != getuid() && before.st_uid != 0) ||
-       before.st_size < SELFMAG || before.st_size > 512 * 1024 * 1024)
-      goto refused;
-   void *bytes = mmap(NULL, (size_t)before.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-   if (bytes == MAP_FAILED)
-      goto refused;
-   int valid =
-       !memcmp(bytes, ELFMAG, SELFMAG) && !aimee_sha256_hex(bytes, (size_t)before.st_size, digest);
-   munmap(bytes, (size_t)before.st_size);
-   if (!valid || fstat(fd, &after) || before.st_dev != after.st_dev ||
-       before.st_ino != after.st_ino || before.st_size != after.st_size ||
-       before.st_mtim.tv_sec != after.st_mtim.tv_sec ||
-       before.st_mtim.tv_nsec != after.st_mtim.tv_nsec)
-      goto refused;
-   return fd;
-refused:
-   if (fd >= 0)
-      close(fd);
-   return -1;
-#endif
 }
 static int native_environment(native_execution_t *execution)
 {
@@ -535,8 +481,9 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
        cli_session_native_home(sdk, cwd, server_session_capture_session(execution->capture),
                                server_native_runtime_binding(execution->runtime), execution->home,
                                sizeof execution->home, &execution->home_cleanup) ||
-       (execution->executable_fd = native_executable_open(
-            cfg->agent->cli_cmd[0] ? cfg->agent->cli_cmd : sdk, execution->build)) < 0 ||
+       (execution->executable_fd =
+            server_native_launch_open(sdk, cfg->agent->cli_cmd[0] ? cfg->agent->cli_cmd : sdk,
+                                      execution->build, error)) < 0 ||
        (!strcmp(sdk, "codex")
             ? native_write_config(execution, selected)
             : native_prepare_directory(execution) || native_environment(execution)))

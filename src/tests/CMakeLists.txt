@@ -499,8 +499,14 @@ if(NOT WIN32)
     ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
   aimee_enable_test_asserts(test_server_native_tool_admission)
   add_test(NAME test_server_native_tool_admission COMMAND test_server_native_tool_admission)
+  add_executable(test_server_native_launch test_server_native_launch.c
+    ../server/server_native_launch.c ../modules/ir/aimee_ir.c ../aimee_sha256.c ../vendor/cJSON.c)
+  target_include_directories(test_server_native_launch PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS})
+  target_link_libraries(test_server_native_launch PRIVATE OpenSSL::Crypto)
+  aimee_enable_test_asserts(test_server_native_launch)
+  add_test(NAME test_server_native_launch COMMAND test_server_native_launch)
   add_executable(test_server_native_execution test_server_native_execution.c
-    ../server/server_native_execution.c ../server/cli_claude_native.c ../server/agent_request_build.c ../server/cli_session.c ../server/agent_adapter.c
+    ../server/server_native_execution.c ../server/server_native_launch.c ../server/cli_claude_native.c ../server/agent_request_build.c ../server/cli_session.c ../server/agent_adapter.c
     ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c
     ../posix/workspace_provider.c ../util.c ../text.c ../aimee_home.c ../log.c
     ../vendor/cJSON.c ${PLATFORM_CORE_SRCS})

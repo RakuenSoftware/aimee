@@ -3599,3 +3599,29 @@ cases. All 76 lint gates passed, including reviewed source/generated OpenAPI
 ownership pins. Publication checks follow. Continue in PR #3052 with the
 remaining launcher/platform qualification, IR-consumer audit and independently
 graded server-local learning/reuse. Production is still KB-free and unpromoted.
+
+
+## Registered Codex npm launcher continuation: 20 October 2026
+
+The native execution owner now resolves the registered Codex npm command to its
+matching platform-package executable without running JavaScript. Both nested and
+hoisted npm layouts are supported on Linux x64/arm64; direct native ELF commands
+remain supported. Resolution validates the root package, declared optional alias,
+platform package name/version, trusted file permissions and actual held executable
+digest. An invalid nested package refuses instead of silently selecting a hoisted
+SDK. Arbitrary scripts remain unsupported. CI now exercises the registered npm
+command in the twelve actual-server browser/seeded native journeys.
+
+The focused filesystem fixture covers held executable identity, PATH and symlink
+registrations, both npm layouts, unsafe permissions, mismatched metadata and
+missing binaries. A planted wrapper effect proves the script is never executed.
+The preceding published head 8740d9d31 finished with 55 passing CI checks and two
+existing platform skips. The seeded-run commit is ca19c574d; its only publication
+scan match is the reviewed public OpenAPI SHA-256 input pin, recorded by exact
+historical fingerprint. Launcher qualification passed: the full native suite and
+new registration fixture, two ASan/UBSan fixtures, two CMake fixtures, Cppcheck
+without increased diagnostics, all 76 lint gates and full pinned-SDK PostgreSQL
+integration (168/168; 26 unavailable local services). All twelve native journeys
+passed using the registered npm command. Fresh publication/CI follow.
+This does not qualify macOS/Windows native descriptor execution, independent
+learning grades/reuse or production promotion.

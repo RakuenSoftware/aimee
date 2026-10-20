@@ -1672,7 +1672,7 @@ jobs:
         run: |
           native_prefix="$RUNNER_TEMP/aimee-native-sdks"
           npm install --prefix "$native_prefix" @openai/codex@0.153.4 @anthropic-ai/claude-code@2.1.227
-          codex_native=$(node -e 'const p=require("node:path"); const pkg=require.resolve("@openai/codex-linux-x64/package.json",{paths:[process.argv[1]]}); process.stdout.write(p.join(p.dirname(pkg),"vendor","x86_64-unknown-linux-musl","bin","codex"))' "$native_prefix")
+          codex_native="$native_prefix/node_modules/.bin/codex"
           claude_native=$(node -e 'const p=require("node:path"); const pkg=require.resolve("@anthropic-ai/claude-code-linux-x64/package.json",{paths:[process.argv[1]]}); process.stdout.write(p.join(p.dirname(pkg),"claude"))' "$native_prefix")
           test -x "$codex_native"
           test -x "$claude_native"

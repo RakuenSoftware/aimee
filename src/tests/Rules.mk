@@ -922,9 +922,15 @@ $(TESTPREFIX)/unit-test-server-native-replay: $(OBJDIR)/tests/test_server_native
 
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-tool-admission
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-runtime
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-launch
+$(TESTPREFIX)/unit-test-server-native-launch: $(OBJDIR)/tests/test_server_native_launch.o \
+    $(OBJDIR)/server/server_native_launch.o $(OBJDIR)/modules/ir/aimee_ir.o \
+    $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto
+
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-execution
 $(TESTPREFIX)/unit-test-server-native-execution: $(OBJDIR)/tests/test_server_native_execution.o \
-    $(OBJDIR)/server/server_native_execution.o $(OBJDIR)/server/cli_claude_native.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/server/cli_session.o \
+    $(OBJDIR)/server/server_native_execution.o $(OBJDIR)/server/server_native_launch.o $(OBJDIR)/server/cli_claude_native.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/server/cli_session.o \
     $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/modules/ir/session_event.o \
     $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o \
     $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/util.o $(OBJDIR)/text.o \

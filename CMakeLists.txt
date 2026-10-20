@@ -993,6 +993,7 @@ list(APPEND SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_compute_owner.c
     ${AIMEE_SRC_DIR}/server/server_native_runtime.c
     ${AIMEE_SRC_DIR}/server/server_native_execution.c
+    ${AIMEE_SRC_DIR}/server/server_native_launch.c
     ${AIMEE_SRC_DIR}/server/server_native_tool_admission.c
     ${AIMEE_SRC_DIR}/server/server_native_replay.c
     ${AIMEE_SRC_DIR}/server/server_learning_outcome.c

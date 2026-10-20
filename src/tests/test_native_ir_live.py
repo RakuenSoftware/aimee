@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Actual native SDKs against a disposable server, Vault and durable session log.
 
-Invoked by test_integration.sh when both explicit native executable paths are set.
+Invoked by test_integration.sh when both explicit registered SDK command paths are set.
 Local synthetic providers exercise all model wires; no subscription or KB is used.
 """
 import http.client
@@ -41,9 +41,10 @@ def main():
     workspace = Path(os.environ["AIMEE_IR_DELEGATE_WORKSPACE"])
     binaries = {kind: str(Path(os.environ["AIMEE_TEST_NATIVE_" + kind.upper()]).resolve(strict=True))
                 for kind in ("codex", "claude")}
-    for executable in binaries.values():
+    for kind, executable in binaries.items():
         with open(executable, "rb") as stream:
-            assert stream.read(4) == b"\x7fELF", executable
+            native = stream.read(4) == b"\x7fELF"
+        assert native or (kind == "codex" and executable.endswith("/bin/codex.js")), executable
     cases = [("codex", "chatgpt"), ("codex", "anthropic"), ("codex", "openai"),
              ("claude", "anthropic"), ("claude", "chatgpt"), ("claude", "openai")]
     active = None
