@@ -1133,9 +1133,16 @@ else()
     find_package(OpenSSL REQUIRED)
 endif()
 
+# The thin client also consumes the portable codec. Declare its real CMake
+# target outside the full-runtime dependency guard on every native platform.
+add_library(aimee-core-codec STATIC ${AIMEE_SRC_DIR}/core/codec/base64.c)
+target_compile_features(aimee-core-codec PUBLIC c_std_11)
+target_include_directories(aimee-core-codec PUBLIC ${AIMEE_SRC_DIR}/core/codec/include)
+
 # --- Full-build static libraries + their native dependencies ----------------
 # The thin `aimee` CLI target (defined below) links none of these; it needs
-# only Threads (+ OpenSSL for https). Skipping them under -DAIMEE_THIN_CLIENT=ON
+# only the shared codec, connection transport, Threads and OpenSSL. Skipping
+# full-runtime dependencies under -DAIMEE_THIN_CLIENT=ON
 # means a packaging box needs no SQLite/libpq/zstd/PAM/libsecret toolchain.
 if(NOT AIMEE_THIN_CLIENT)
 
@@ -1169,10 +1176,6 @@ set_property(SOURCE
     "${AIMEE_SRC_DIR}/modules/kb/c/fact_identity.c"
     "${AIMEE_SRC_DIR}/modules/kb/c/fact_mutation.c"
     APPEND PROPERTY INCLUDE_DIRECTORIES "${AIMEE_SRC_DIR}/modules/kb/include")
-
-add_library(aimee-core-codec STATIC ${AIMEE_SRC_DIR}/core/codec/base64.c)
-target_compile_features(aimee-core-codec PUBLIC c_std_11)
-target_include_directories(aimee-core-codec PUBLIC ${AIMEE_SRC_DIR}/core/codec/include)
 
 add_library(aimee-core STATIC
     ${CORE_SRCS}

@@ -53,6 +53,14 @@ Installed CLI probes correctly resolve `aimee` and `wol-lore` from their own
 workspaces without an explicit project override; newer native callback cwd binding
 is separately pending promotion. The overall migration remains unfinished.
 
+Published `135897989` passed the full native suite, focused ASan/UBSan, Go race tests,
+actual PostgreSQL/SDK/browser integration (168 configured checks), 30 proxy tests, CMake cache
+fixture, all 76 lint gates and the full-history secret scan. Fresh Windows CI then exposed a
+thin-client CMake link defect: the codec target was declared only inside the full-runtime guard.
+The follow-up moves that existing portable target into common configuration. Fresh local thin
+build/selfcheck and the full-runtime CMake cache fixture qualify the fix; native-platform CI
+must still pass. Other pending CI is not reported as passed.
+
 ## Active continuation: owned results, exact-request cache and workspace hooks
 
 The current implementation retains full owned canonical responses in internal agent results.
