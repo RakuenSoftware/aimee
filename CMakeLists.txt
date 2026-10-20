@@ -109,6 +109,10 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/runtime-web/include"
     "${AIMEE_SRC_DIR}/modules/control-web/include"
     "${AIMEE_SRC_DIR}/modules/postgres/include"
+    "${AIMEE_SRC_DIR}/modules/providers/include"
+    "${AIMEE_SRC_DIR}/modules/sandbox/include"
+    "${AIMEE_SRC_DIR}/core/types/include"
+    "${AIMEE_SRC_DIR}/core/turn_integrity/include"
     # MODULES THAT KEEP THEIR HEADERS FLAT, beside their sources, rather than
     # under an include/ subdir. src/Makefile has carried -I for every one of
     # these all along; CMake had only the include/-style modules, so the
@@ -518,6 +522,7 @@ set(KB_STORE_HOST_ADAPTER_SRCS
 
 set(IR_BASE_SRCS
     ${AIMEE_SRC_DIR}/modules/ir/aimee_ir.c
+    ${AIMEE_SRC_DIR}/modules/ir/session_event.c
 )
 set(HOOK_IR_SRCS
     ${AIMEE_SRC_DIR}/modules/translation/hook_ir.c
@@ -838,7 +843,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
     ${AIMEE_SRC_DIR}/modules/translation/harness_ir.c
     ${AIMEE_SRC_DIR}/modules/translation/history_ir.c
-    ${AIMEE_SRC_DIR}/modules/ir/session_event.c
     ${AIMEE_SRC_DIR}/modules/ir/aimee_ir_module_plan.c
     ${AIMEE_SRC_DIR}/server/ir_host_bindings.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_memory_transport.c

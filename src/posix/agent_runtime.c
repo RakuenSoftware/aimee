@@ -405,7 +405,6 @@ static void maybe_compact_before_request(const agent_t *agent, cJSON *messages,
                 sc_result.repairs);
    else
    {
-      message_history_repair(messages);
       messages_compact_consecutive(messages);
    }
 }
@@ -1056,8 +1055,7 @@ native_provider_http:
             }
             else
             {
-               /* Fallback: basic repair + consecutive merge */
-               message_history_repair(messages);
+               /* A failed compaction leaves the admitted source unchanged. */
                messages_compact_consecutive(messages);
             }
             /* fall through: continue with the compacted history */
@@ -1098,10 +1096,10 @@ native_provider_http:
          }
       }
 
-      /* Repair inconsistent history (orphaned tool calls/results) then compact */
-      if (message_history_repair(messages) < 0)
+      /* Execution cannot invent missing receipts or silently discard effects. */
+      if (aimee_ir_history_admit(messages))
       {
-         snprintf(out->error, sizeof out->error, "canonical history repair failed");
+         snprintf(out->error, sizeof out->error, "canonical history is incomplete or invalid");
          break;
       }
       messages_compact_consecutive(messages);

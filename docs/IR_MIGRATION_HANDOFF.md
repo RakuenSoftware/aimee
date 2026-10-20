@@ -3625,3 +3625,29 @@ integration (168/168; 26 unavailable local services). All twelve native journeys
 passed using the registered npm command. Fresh publication/CI follow.
 This does not qualify macOS/Windows native descriptor execution, independent
 learning grades/reuse or production promotion.
+
+## Execution history repair retirement: 20 October 2026
+
+The direct tool loop now uses strict canonical causal admission before another
+model request. Its pressure/middleware fallbacks no longer create missing-result
+diagnostics. The compactor admits both the original and staged replacement;
+incomplete/orphaned cycles refuse even below the compaction threshold. Failure
+leaves source bytes untouched and clears any staged success report. Ordered
+call/result receipts and opaque retained content remain authoritative.
+
+The economizer restores its exact original provider payload on retry; it no
+longer sends that wire array through the canonical-history repair helper. No
+production caller of message_history_repair remains. Its compatibility diagnostic
+view and explicit IR repair tests are not execution admission paths.
+
+Qualification passed the full native suite, two ASan/UBSan fixtures, two CMake
+fixtures, Cppcheck without increased diagnostics, pinned-SDK PostgreSQL integration
+168/168 (26 unavailable local services), all twelve native browser/seeded journeys,
+and all 76 lint gates. Allocation-failure coverage now measures the successful
+path and injects every JSON allocation failure rather than stopping at a fixed
+ceiling. CMake aggregate libraries now expose the missing Make-equivalent public
+include paths and build shared session-event code in the IR base, fixing the
+actual focused compaction link. Fresh CI on the preceding published 72599fe5f
+has 45 passes, two existing platform skips and nine pending checks, with no failures
+at the last completed enumeration. Overall migration/learning qualification remains
+unfinished; production remains KB-free and unpromoted.

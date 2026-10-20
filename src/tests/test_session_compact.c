@@ -488,8 +488,24 @@ static void *fail_one_allocation(size_t size)
 
 static void test_allocation_refusal_is_atomic(void)
 {
+   /* Measure the successful path so added admission allocations are covered
+    * without a brittle fixed fault-injection ceiling. */
+   cJSON *baseline = make_long_conversation(20);
+   cJSON_AddItemToArray(baseline,
+                        make_msg("assistant", "error reading src/failure.c; using guarded retry"));
+   allocation_count = 0;
+   allocation_faulted = 0;
+   fault_at = (size_t)-1;
+   cJSON_Hooks baseline_hooks = {.malloc_fn = fail_one_allocation, .free_fn = free};
+   cJSON_InitHooks(&baseline_hooks);
+   session_compact_result_t baseline_report;
+   int baseline_rc = session_compact(baseline, NULL, &baseline_report);
+   cJSON_InitHooks(NULL);
+   size_t limit = allocation_count + 1;
+   assert(!baseline_rc && baseline_report.compacted && !allocation_faulted);
+   cJSON_Delete(baseline);
    int reached_success = 0;
-   for (fault_at = 1; fault_at < 2000; fault_at++)
+   for (fault_at = 1; fault_at <= limit; fault_at++)
    {
       cJSON *messages = make_long_conversation(20);
       cJSON_AddItemToArray(
@@ -545,8 +561,34 @@ static void test_summary_utf8_boundaries(void)
    PASS("bounded summaries and caller buffers retain complete Unicode code points");
 }
 
+static void test_incomplete_cycles_refuse_without_repair(void)
+{
+   const char *cases[] = {"[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":"
+                          "\"pending\",\"name\":\"read_file\",\"arguments\":{}}]}]",
+                          "[{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":"
+                          "\"orphan\",\"content\":\"actual effect receipt\"}]}]"};
+   for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++)
+      for (int long_history = 0; long_history < 2; long_history++)
+      {
+         cJSON *history = cJSON_Parse(cases[i]);
+         assert(history);
+         if (long_history)
+            for (int j = 0; j < 20; j++)
+               cJSON_AddItemToArray(history, make_msg("user", "continue"));
+         cJSON *before = cJSON_Duplicate(history, 1);
+         assert(before);
+         session_compact_result_t report;
+         int rc = session_compact(history, NULL, &report);
+         assert(rc < 0 && !report.compacted && !report.repairs);
+         assert(cJSON_Compare(history, before, 1));
+         cJSON_Delete(before);
+         cJSON_Delete(history);
+      }
+   PASS("unresolved and orphaned cycles refuse atomically even below compaction threshold");
+}
 int main(void)
 {
+   test_incomplete_cycles_refuse_without_repair();
    test_pressure_unknown_window();
    test_pressure_ok();
    test_pressure_warn();
