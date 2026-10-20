@@ -518,6 +518,14 @@ def main():
             # Recreate the durable state after source commit but before
             # projection delivery/ack. Only derived rows and existing queue
             # scheduling change; canonical evidence and actual jobs stay intact.
+            # Attachment IDs belong to a live daemon, not durable sessions.
+            # Release them strictly before deliberately replacing that owner;
+            # restart recovery below must still use only canonical evidence.
+            assert len(sessions) == len(attachments)
+            while sessions:
+                api(f"/v1/sessions/{sessions[0]}/detach", {"attach_id": attachments[0]})
+                sessions.pop(0)
+                attachments.pop(0)
             before_requests = len(observed)
             lifecycle_paused = True
             request_owned_lifecycle(home, "pause-owned-server")
