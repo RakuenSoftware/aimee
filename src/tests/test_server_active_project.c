@@ -8,11 +8,15 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
 
 int server_active_project_match(const char *cwd, const project_info_t *projects, int count,
                                 char *out, size_t outlen);
 
 int server_active_project_from_cwd(const char *cwd, char *out, size_t outlen);
+int server_learning_project_from_cwd(const char *cwd, char *out, size_t outlen);
 
 /* server_active_project.c's other half calls into the workspace and knowledge
  * modules, which are not in aimee-core. Drive both from here so the resolution
@@ -21,11 +25,34 @@ int server_active_project_from_cwd(const char *cwd, char *out, size_t outlen);
 static const char *g_identity;         /* NULL => the working tree cannot answer */
 static const project_info_t *g_listed; /* what kb_client_index_list reports */
 static int g_listed_count;             /* negative => the list is unavailable */
+static int g_list_calls, g_approved, g_held_identity, g_resource_fd = -1;
+
+int workspace_turn_source_identity(const char *cwd, int *fd, char digest[65])
+{
+   *fd = -1;
+   if (!g_approved || strcmp(cwd, "/approved/repo"))
+      return -1;
+   *fd = open("/", O_RDONLY);
+   g_resource_fd = *fd;
+   memset(digest, 'a', 64);
+   digest[64] = 0;
+   return *fd < 0 ? -1 : 0;
+}
 
 int workspace_repo_identity(const char *cwd, char *project_out, size_t project_len,
                             char *workspace_out, size_t workspace_len)
 {
-   (void)cwd;
+   if (g_held_identity)
+   {
+#ifdef __linux__
+      char expected[128];
+      snprintf(expected, sizeof expected, "/proc/%ld/fd/%d", (long)getpid(), g_resource_fd);
+      assert(!strcmp(cwd, expected));
+#else
+      assert(!strcmp(cwd, "/approved/repo"));
+#endif
+      assert(fcntl(g_resource_fd, F_GETFD) >= 0);
+   }
    (void)workspace_out;
    (void)workspace_len;
    if (project_out && project_len)
@@ -38,6 +65,7 @@ int workspace_repo_identity(const char *cwd, char *project_out, size_t project_l
 
 int kb_client_index_list(project_info_t *out, int max)
 {
+   g_list_calls++;
    if (g_listed_count <= 0)
       return g_listed_count;
    int n = g_listed_count < max ? g_listed_count : max;
@@ -166,7 +194,35 @@ int main(void)
       g_listed_count = -1;
       assert(server_active_project_from_cwd("/srv/settle", out, sizeof(out)) == 0);
       assert(strcmp(out, "settle") == 0);
+
+      /* An existing local project remains selected before its first scan. */
+      g_listed_count = 0;
+      assert(server_active_project_from_cwd("/srv/settle", out, sizeof(out)) == 0);
+      assert(strcmp(out, "settle") == 0);
    }
+
+   /* Learning uses the approved repository's durable identity even when the
+    * separate index is empty, unavailable, or uses a different project label. */
+   g_identity = "local:3014e417-337b-444f-9aaf-432838cdcf82";
+   g_approved = g_held_identity = 1;
+   for (int count = -1; count <= 1; ++count)
+   {
+      g_listed_count = count;
+      int calls = g_list_calls;
+      assert(!server_learning_project_from_cwd("/approved/repo", out, sizeof out));
+      assert(!strcmp(out, g_identity) && g_list_calls == calls);
+      errno = 0;
+      assert(fcntl(g_resource_fd, F_GETFD) == -1 && errno == EBADF);
+   }
+   g_approved = 0;
+   assert(server_learning_project_from_cwd("/approved/repo", out, sizeof out) == -1);
+   assert(!out[0]);
+   g_approved = 1;
+   assert(server_learning_project_from_cwd("/foreign/repo", out, sizeof out) == -1);
+   assert(!out[0]);
+   g_identity = NULL;
+   assert(server_learning_project_from_cwd("/approved/repo", out, sizeof out) == -1);
+   assert(!out[0] && fcntl(g_resource_fd, F_GETFD) == -1);
 
    printf("test_server_active_project: all assertions passed\n");
    return 0;

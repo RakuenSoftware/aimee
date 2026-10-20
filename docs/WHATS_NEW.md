@@ -13,18 +13,46 @@ observation events. Transcript reads no longer have a separate 1 MiB buffer ceil
 Untouched native Anthropic requests preserve client cache breakpoints and TTLs; typed edits
 force rebuilding instead of replaying stale content.
 
-Claude primary and delegate turns use `claude -p` with structured streaming instead of tmux capture. Historical `tmux-cli` agent records are migrated to native provider adapters; the router no longer lets that spelling mask HTTP peers. Claude,
-Codex app-server and ACP frames are converted at their native entry adapters. Claude and Codex
-resume handles are stored separately for each Aimee session; their runtime homes receive
-credentials from the Vault. Existing text-only history remains explicitly marked as legacy.
-Browser operators can answer permission and question requests. Replies are bound to the
-authenticated user, session and pending turn, and are recorded before native delivery. Admitted
-legacy subscribers also capture canonical events while retaining their transport projection.
-Remaining consumer cutovers and live subscription qualification remain migration work.
+Qualified Linux Codex and Claude primary/delegate turns now use the Server-owned canonical
+execution path. The SDK receives an opaque scheduler trigger and a local capability in a private
+launch home. The Server retains Vault credentials, supplies complete original model context and
+executes original tool calls through the supervised registry. Original typed responses supply
+streaming, durable history and final results. SDK-normalized arguments cannot become effect input.
+Native compaction uses the canonical session owner; asynchronous seeded runs preserve full context,
+workspace scope and cumulative usage. Codex npm commands resolve their matching held native binary.
+
+Twenty actual-SDK journeys pass locally across API-key and Vault OAuth paths, including credential
+rotation, tool execution, compaction, replay, resume and seeded execution. Browser operators reply
+through authenticated, session/turn-bound control requests; actual root-UDS operator question,
+replay and reconnect journeys pass in the published qualification checkpoint. Session-selected models now survive daemon restarts. Actual Codex/Claude crash and
+interrupted-question journeys verify source-bound unknown outcomes, explicit new-action permission,
+denial suppression and replay without repeated effects. Delegates own private canonical controls;
+expanded browser transcripts send replies to the exact child. Strict web reply validation preserves
+original JSON bytes. KB-free configured-test grading and source-bound delegate observations/reuse
+are implemented with actual-store coverage. Legacy import records exact/normalized fidelity,
+explicit refusal or a passive archive; large messages and retained sources use bounded chunks.
+Final exact-head CI, live subscription acceptance and reviewed production promotion remain
+pending. No KB service is enabled for production `.100`.
 
 CLI index discovery now registers a missing canonical repository through the existing bounded
 client ingest path before querying it. Main checkouts and linked worktrees retain the caller's
 project scope; an unavailable registry does not trigger an upload.
+
+## Canonical result ownership and workspace probes
+
+Internal HTTP and host-owned native execution retain complete canonical output, including signed
+reasoning, tool identities, usage and opaque adapter sidecars. Selection and repair transfer that
+owned output; display annotations preserve the original observation. Optional pure-text result
+reuse now stores canonical snapshots under the exact admitted request and authenticated owner.
+Credential-backed calls and captured user turns execute through their existing owners.
+
+Native hooks preserve their enclosing workspace lease and use the approved server resource for
+memory interception and filesystem policy probes. Verification requires an explicit clean-tree
+reply; a missing module or malformed state cannot reuse an earlier successful check. Windows and
+macOS thin-client checks now run for executable changes targeting testing as well as main.
+
+Process completion no longer manufactures a KB `fixes` relationship. Independent local task grades
+and next-run learning reuse remain unfinished; these changes do not claim a completed migration.
 
 ## Browser chat repairs
 

@@ -30,6 +30,36 @@
 #include "mcp_git.h"
 #include "platform_path.h"
 
+static verify_execution_begin_fn execution_begin;
+
+void verify_register_execution_owner(verify_execution_begin_fn begin)
+{
+   execution_begin = begin;
+}
+
+static int verify_execute_owned(verify_execution_t *execution, const verify_config_t *cfg,
+                                verify_thread_ctx_t *contexts, volatile int *cancel)
+{
+   int results[MAX_VERIFY_STEPS];
+   char *outputs[MAX_VERIFY_STEPS] = {0};
+   for (int i = 0; i < cfg->count; ++i)
+      results[i] = -1;
+   int handled = execution->run(execution->resource, cfg, results, outputs, cancel);
+   execution->finish(execution->resource);
+   memset(execution, 0, sizeof(*execution));
+   for (int i = 0; i < cfg->count; ++i)
+   {
+      if (handled)
+      {
+         contexts[i].rc = results[i];
+         contexts[i].output = outputs[i];
+      }
+      else
+         free(outputs[i]);
+   }
+   return handled;
+}
+
 /* --- Helpers --- */
 
 static cJSON *mcp_text(const char *text)
@@ -585,6 +615,8 @@ int verify_load_config(const char *project_root, verify_config_t *cfg)
    {
       /* Strip trailing newline/cr */
       size_t len = strlen(line);
+      if (len == sizeof(line) - 1 && line[len - 1] != '\n')
+         cfg->incomplete = 1;
       while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
          line[--len] = '\0';
 
@@ -653,11 +685,19 @@ int verify_load_config(const char *project_root, verify_config_t *cfg)
          {
             if (strncmp(trimmed, "- name:", 7) == 0)
             {
+               if (pending_name)
+                  cfg->incomplete = 1;
                if (cfg->count >= MAX_VERIFY_STEPS)
+               {
+                  cfg->incomplete = 1;
                   break;
+               }
                char *val = trimmed + 7;
                while (*val == ' ')
                   val++;
+               if (strlen(val) >= MAX_STEP_NAME || val[0] == '\'' || val[0] == '"' ||
+                   val[0] == '|' || val[0] == '>')
+                  cfg->incomplete = 1;
                snprintf(cfg->steps[cfg->count].name, MAX_STEP_NAME, "%s", val);
                pending_name = 1;
             }
@@ -666,6 +706,9 @@ int verify_load_config(const char *project_root, verify_config_t *cfg)
                char *val = trimmed + 4;
                while (*val == ' ')
                   val++;
+               if (strlen(val) >= MAX_STEP_CMD || val[0] == '\'' || val[0] == '"' ||
+                   val[0] == '|' || val[0] == '>')
+                  cfg->incomplete = 1;
                snprintf(cfg->steps[cfg->count].run, MAX_STEP_CMD, "%s", val);
                cfg->count++;
                pending_name = 0;
@@ -675,6 +718,8 @@ int verify_load_config(const char *project_root, verify_config_t *cfg)
                char *val = trimmed + 6;
                while (*val == ' ')
                   val++;
+               if (strlen(val) >= MAX_STEP_NAME)
+                  cfg->incomplete = 1;
                snprintf(cfg->steps[cfg->count - 1].after, MAX_STEP_NAME, "%s", val);
             }
             else if (strncmp(trimmed, "paths:", 6) == 0 && cfg->count > 0)
@@ -682,6 +727,8 @@ int verify_load_config(const char *project_root, verify_config_t *cfg)
                char *val = trimmed + 6;
                while (*val == ' ')
                   val++;
+               if (strlen(val) >= sizeof(cfg->steps[0].paths))
+                  cfg->incomplete = 1;
                snprintf(cfg->steps[cfg->count - 1].paths, sizeof(cfg->steps[0].paths), "%s", val);
             }
             else if (strncmp(trimmed, "scope:", 6) == 0 && cfg->count > 0)
@@ -696,8 +743,12 @@ int verify_load_config(const char *project_root, verify_config_t *cfg)
                char *val = trimmed + 5;
                while (*val == ' ')
                   val++;
+               if (strlen(val) >= MAX_STEP_NAME)
+                  cfg->incomplete = 1;
                snprintf(cfg->steps[cfg->count - 1].tier, MAX_STEP_NAME, "%s", val);
             }
+            else if (trimmed[0] && trimmed[0] != '#')
+               cfg->incomplete = 1;
          }
       }
       else if (in_env)
@@ -710,13 +761,19 @@ int verify_load_config(const char *project_root, verify_config_t *cfg)
                char *val = trimmed + 2;
                while (*val == ' ')
                   val++;
+               if (strlen(val) >= MAX_STEP_NAME)
+                  cfg->incomplete = 1;
                snprintf(cfg->env_checks[cfg->env_count], MAX_STEP_NAME, "%s", val);
                cfg->env_count++;
             }
+            else
+               cfg->incomplete = 1;
          }
       }
    }
 
+   if (pending_name || ferror(f))
+      cfg->incomplete = 1;
    fclose(f);
    verify_normalize_step_order(cfg);
    verify_config_prefer_verify_local(project_root, cfg);
@@ -1120,6 +1177,7 @@ typedef struct
    pthread_mutex_t mutex;
    pthread_cond_t cond;
    int done; /* set by finalize for sync path */
+   verify_execution_t execution;
 } verify_coord_state_t;
 
 typedef struct
@@ -1266,6 +1324,23 @@ static void verify_coordinator_fn(void *arg)
       state->global_lock_fd = fd;
    }
 
+   if (state->execution.resource)
+   {
+      if (verify_execute_owned(&state->execution, &state->cfg, state->contexts,
+                               state->job ? &state->job->cancel_requested : NULL))
+      {
+         state->remaining = 0;
+         compute_pool_clear_job();
+         verify_coord_finalize(state);
+         return;
+      }
+      /* No configured command began, and private cleanup is acknowledged.
+       * Continue the ordinary runner without granting learning or a cache hit. */
+      free(state->file_hash);
+      state->file_hash = verify_compute_file_hash(state->project_root);
+      state->has_changes = verify_worktree_has_changes(state->project_root);
+   }
+
    pthread_mutex_lock(&state->mutex);
 
    int any_running = 0;
@@ -1380,6 +1455,11 @@ static void verify_coordinator_fn(void *arg)
 
 static void verify_coord_finalize(verify_coord_state_t *state)
 {
+   if (state->execution.resource)
+   {
+      state->execution.finish(state->execution.resource);
+      memset(&state->execution, 0, sizeof state->execution);
+   }
    const char *bg_root = state->project_root[0] ? state->project_root : NULL;
 
    verify_global_lock_release(state->global_lock_fd);
@@ -1875,8 +1955,12 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
       coord->has_changes = verify_worktree_has_changes(verify_root);
       coord->file_hash = verify_compute_file_hash(verify_root);
 
+      if (execution_begin)
+         execution_begin(verify_root, session_id, &cfg, &coord->execution);
+
       /* Apply per-step result cache before submitting */
-      if (!coord->has_changes && coord->file_hash && coord->file_hash[0] && cfg.count > 0)
+      if (!coord->execution.resource && !coord->has_changes && coord->file_hash &&
+          coord->file_hash[0] && cfg.count > 0)
       {
          verify_state_entry_t ents[VERIFY_STATE_MAX];
          int nent = read_verify_entries(verify_root, ents, VERIFY_STATE_MAX);
@@ -1898,8 +1982,9 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
             }
          }
       }
-      verify_incremental_apply(verify_root, &coord->cfg, coord->contexts, coord->step_state,
-                               &coord->remaining);
+      if (!coord->execution.resource)
+         verify_incremental_apply(verify_root, &coord->cfg, coord->contexts, coord->step_state,
+                                  &coord->remaining);
 
       pthread_mutex_init(&coord->mutex, NULL);
       pthread_cond_init(&coord->cond, NULL);
@@ -1911,6 +1996,8 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
       }
       else if (compute_pool_submit(verify_pool, verify_coordinator_fn, coord) != 0)
       {
+         if (coord->execution.resource)
+            coord->execution.finish(coord->execution.resource);
          free(coord->file_hash);
          pthread_mutex_destroy(&coord->mutex);
          pthread_cond_destroy(&coord->cond);
@@ -1966,7 +2053,28 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
    }
 
    char *file_hash = verify_compute_file_hash(verify_root);
-   verify_run_waves_on_pool(NULL, &cfg, contexts, has_changes ? NULL : file_hash);
+   verify_execution_t execution = {0};
+   if (execution_begin)
+      execution_begin(verify_root, session_id, &cfg, &execution);
+   if (execution.resource)
+   {
+      int lock = verify_global_lock_acquire(&sync_cancel_requested);
+      int handled = 1;
+      if (lock >= 0)
+         handled = verify_execute_owned(&execution, &cfg, contexts, &sync_cancel_requested);
+      else
+         execution.finish(execution.resource);
+      verify_global_lock_release(lock);
+      if (!handled)
+      {
+         free(file_hash);
+         file_hash = verify_compute_file_hash(verify_root);
+         has_changes = verify_worktree_has_changes(verify_root);
+         verify_run_waves_on_pool(NULL, &cfg, contexts, NULL);
+      }
+   }
+   else
+      verify_run_waves_on_pool(NULL, &cfg, contexts, has_changes ? NULL : file_hash);
    if (sync_cancel_registered)
       verify_unregister_session_cancel(&sync_cancel_requested);
 

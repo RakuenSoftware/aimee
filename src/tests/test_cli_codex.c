@@ -1,5 +1,8 @@
 /* Codex JSON-RPC parsing and child protocol boundary fixtures. */
 #include <assert.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include "aimee_sha256.h"
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,7 +24,7 @@ int agent_request_cancelled(void)
 
 static void test_execute_rejects_missing_inputs(void)
 {
-   agent_result_t out;
+   agent_result_t out = {0};
    agent_t agent = {0};
    assert(agent_execute_cli_codex_at_cwd(&agent, NULL, NULL, "prompt", NULL) == -1);
    assert(agent_execute_cli_codex_at_cwd(NULL, NULL, NULL, "prompt", &out) == -1);
@@ -286,7 +289,7 @@ static void test_spawn_failure_captures_stderr_and_exit_status(void)
    snprintf(agent.cli_cmd, sizeof(agent.cli_cmd), "%s", path);
    agent.autonomous = 1;
 
-   agent_result_t out;
+   agent_result_t out = {0};
    int rc = agent_execute_cli_codex(&agent, NULL, "hello", &out);
    assert(rc == -1);
    assert(strstr(out.error, "status 42") != NULL);
@@ -376,7 +379,7 @@ static void test_agent_execute_cli_codex_uses_requested_cwd(void)
          "       printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{}}'\n"
          "       printf '%s\\n' "
          "'{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"item\":"
-         "{\"type\":\"agentMessage\",\"text\":\"ok from fake codex\"}}}'\n"
+         "{\"type\":\"agentMessage\",\"id\":\"cwd-answer\",\"text\":\"ok from fake codex\"}}}'\n"
          "       printf '%s\\n' "
          "'{\"jsonrpc\":\"2.0\",\"method\":\"turn/completed\",\"params\":{\"turn\":"
          "{\"status\":\"completed\"}}}'\n"
@@ -395,11 +398,13 @@ static void test_agent_execute_cli_codex_uses_requested_cwd(void)
    snprintf(agent.cli_cmd, sizeof(agent.cli_cmd), "%s", script);
    agent.cli_idle_timeout_ms = 5000;
 
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(agent_execute_cli_codex_at_cwd(&agent, workdir, "system", "user prompt", &out) == 0);
    assert(out.response != NULL);
    assert(strcmp(out.response, "ok from fake codex") == 0);
-   free(out.response);
+   assert(out.canonical_response.n_content == 1);
+   assert(!strcmp(out.canonical_response.content[0].text, "ok from fake codex"));
+   agent_result_clear_response(&out);
 
    char seen[512];
    fp = fopen(marker, "r");
@@ -433,7 +438,7 @@ static void test_agent_execute_cli_codex_uses_requested_cwd(void)
                              .bind_context = &bound};
    assert(!codex_provider_cli_adapter.execute(&cfg, &out));
    assert(out.success && bound == 1);
-   free(out.response);
+   agent_result_clear_response(&out);
    fp = fopen(resume_marker, "r");
    assert(fp && fgets(seen, sizeof seen, fp));
    seen[strcspn(seen, "\r\n")] = 0;
@@ -548,7 +553,7 @@ static void test_chat_stream_splits_distinct_agent_message_items(void)
    rmdir(root);
 }
 
-static void test_chat_stream_splits_completed_delta_items_without_ids(void)
+static void test_chat_stream_rejects_completed_items_without_ids(void)
 {
    char root[256];
    snprintf(root, sizeof root, "%s/aimee-codex-stream-noids-XXXXXX", platform_tmpdir());
@@ -604,8 +609,10 @@ static void test_chat_stream_splits_completed_delta_items_without_ids(void)
 
    cli_codex_chat_result_t out;
    codex_stream_capture_t cap = {0};
-   assert(cli_codex_chat_stream(&req, codex_capture_cb, &cap, &out) == 0);
-   assert(strcmp(cap.buf, "<S>First.<S>Second.<E>") == 0);
+   assert(cli_codex_chat_stream(&req, codex_capture_cb, &cap, &out) != 0);
+   assert(aimee_ir_session_capture_failed());
+   assert(!strstr(cap.buf, "<E>"));
+   aimee_ir_session_set_sink(NULL, NULL); /* End this failed independent fixture. */
 
    if (old_path_env)
       assert(setenv("PATH", old_path, 1) == 0);
@@ -639,7 +646,7 @@ static void test_chat_stream_replaces_invalid_utf8_prompt_bytes(void)
          "       printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{}}'\n"
          "       printf '%s\\n' "
          "'{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{\"item\":"
-         "{\"type\":\"agentMessage\",\"text\":\"ok\"}}}'\n"
+         "{\"type\":\"agentMessage\",\"id\":\"utf8-answer\",\"text\":\"ok\"}}}'\n"
          "       printf '%s\\n' "
          "'{\"jsonrpc\":\"2.0\",\"method\":\"turn/completed\",\"params\":{\"turn\":"
          "{\"status\":\"completed\"}}}'\n"
@@ -878,13 +885,13 @@ static void test_canonical_history_adoption(void)
                                          .history = &history,
                                          .user_prompt = "current user",
                                          .resume_id = resume ? "t-history" : NULL};
-               agent_result_t out;
+               agent_result_t out = {0};
                rc = codex_provider_cli_adapter.execute(&cfg, &out);
                if (!refuse)
                   assert(out.success && out.response && !strcmp(out.response, "history adopted"));
                else
                   assert(strstr(out.error, "canonical history adoption failed"));
-               free(out.response);
+               agent_result_clear_response(&out);
             }
             else
             {
@@ -939,7 +946,293 @@ static int native_probe_capture(const aimee_session_event_t *event, void *contex
    return json && cJSON_AddItemToArray(context, json) ? 0 : -1;
 }
 
-static int native_history_probe(const char *resume, const char *history_file)
+static void test_dynamic_tool_boundaries(void)
+{
+   cJSON *schema =
+       cJSON_Parse("{\"type\":\"object\",\"properties\":{\"marker\":{\"type\":\"number\"}}}");
+   aimee_tool_t child = {.name = "exec_command", .description = "host only", .schema = schema};
+   aimee_tool_t space = {.kind = AIMEE_TOOL_NAMESPACE,
+                         .name = "aimee",
+                         .description = "host",
+                         .children = &child,
+                         .n_children = 1};
+   aimee_request_t catalog = {.tools = &space, .n_tools = 1};
+   cJSON *tools = cli_codex_dynamic_tools(&catalog);
+   assert(tools && cJSON_GetArraySize(tools) == 1);
+   cJSON *definition =
+       cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(tools, 0), "tools"), 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(definition, "name")), "exec_command"));
+   assert(cJSON_Compare(cJSON_GetObjectItem(definition, "inputSchema"), schema, 1));
+   cJSON_Delete(tools);
+   /* No raw sidecar can replace the typed name/schema or grant a hosted tool. */
+   child.raw = cJSON_Parse("{\"name\":\"forged\",\"inputSchema\":false}");
+   tools = cli_codex_dynamic_tools(&catalog);
+   assert(tools);
+   definition = cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(tools, 0), "tools"), 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(definition, "name")), "exec_command"));
+   assert(cJSON_Compare(cJSON_GetObjectItem(definition, "inputSchema"), schema, 1));
+   cJSON_Delete(tools);
+   child.strict = AIMEE_STRICT_TRUE;
+   assert(!cli_codex_dynamic_tools(&catalog));
+   child.strict = AIMEE_STRICT_UNSET;
+   child.cache_control = "ephemeral";
+   assert(!cli_codex_dynamic_tools(&catalog));
+   child.cache_control = NULL;
+   child.kind = AIMEE_TOOL_HOSTED;
+   assert(!cli_codex_dynamic_tools(&catalog));
+   child.kind = AIMEE_TOOL_FUNCTION;
+   cJSON *params =
+       cJSON_Parse("{\"threadId\":\"thread\",\"turnId\":\"turn\",\"callId\":\"call:original\","
+                   "\"namespace\":\"aimee\",\"tool\":\"exec_command\","
+                   "\"arguments\":{\"marker\":0.123456789012345678901234567890}}");
+   aimee_block_t call = {0};
+   assert(cli_codex_dynamic_call(params, &catalog, &call) == 0);
+   assert(!strcmp(call.tool_name, "exec_command") && !strcmp(call.tool_namespace, "aimee"));
+   assert(!strcmp(call.tool_id, "call:original"));
+   char *exact = cJSON_PrintUnformatted(call.tool_input);
+   assert(exact && strstr(exact, "0.123456789012345678901234567890"));
+   free(exact);
+   aimee_block_free_contents(&call);
+   cJSON_ReplaceItemInObject(params, "namespace", cJSON_CreateString("other"));
+   assert(cli_codex_dynamic_call(params, &catalog, &call) != 0 && !call.tool_id);
+   cJSON_ReplaceItemInObject(params, "namespace", cJSON_CreateString("aimee"));
+   cJSON_ReplaceItemInObject(params, "tool", cJSON_CreateString("other"));
+   assert(cli_codex_dynamic_call(params, &catalog, &call) != 0);
+   cJSON_ReplaceItemInObject(params, "tool", cJSON_CreateString("exec_command"));
+   cJSON_AddStringToObject(params, "tool", "exec_command");
+   assert(cli_codex_dynamic_call(params, &catalog, &call) != 0);
+   cJSON_Delete(params);
+   cJSON *content = cJSON_CreateString("host result\nwith stderr");
+   aimee_block_t result = {
+       .type = AIMEE_BLK_TOOL_RESULT, .tool_id = "call:original", .tool_result = content};
+   for (int error = 0; error < 2; error++)
+   {
+      result.tool_is_error = error;
+      cJSON *reply = cli_codex_dynamic_result(&result);
+      assert(reply && cJSON_IsTrue(cJSON_GetObjectItem(reply, "success")) == !error);
+      const cJSON *text = cJSON_GetArrayItem(cJSON_GetObjectItem(reply, "contentItems"), 0);
+      assert(
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(text, "text")), content->valuestring));
+      cJSON_Delete(reply);
+   }
+   result.tool_id = NULL;
+   assert(!cli_codex_dynamic_result(&result));
+   cJSON_Delete(content);
+   cJSON_Delete(child.raw);
+   cJSON_Delete(schema);
+}
+
+typedef struct
+{
+   int variant;
+   int calls, dispatches;
+} dynamic_host_fixture_t;
+static int dynamic_host_fixture(const aimee_block_t *call, aimee_block_t *result, void *context)
+{
+   dynamic_host_fixture_t *state = context;
+   state->calls++;
+   assert(!strcmp(call->tool_id, "call:original"));
+   assert(!strcmp(call->tool_name, "exec_command") && !strcmp(call->tool_namespace, "aimee"));
+   char *arguments = cJSON_PrintUnformatted(call->tool_input);
+   assert(arguments && strstr(arguments, "0.123456789012345678901234567890"));
+   free(arguments);
+   if (state->variant == 6 || (state->variant == 5 && state->calls > 1))
+      return -1; /* The host source owner, not the SDK call ID, refuses a repeat. */
+   state->dispatches++;
+   *result = (aimee_block_t){.type = AIMEE_BLK_TOOL_RESULT,
+                             .tool_id = strdup(state->variant == 7 ? "wrong-call" : call->tool_id),
+                             .tool_result = cJSON_CreateString("host refused\nexact stderr"),
+                             .tool_is_error = 1};
+   return 0;
+}
+static void test_dynamic_host_execution(void)
+{
+   char root[512], script[1024], marker[1024];
+   snprintf(root, sizeof root, "%s/aimee-codex-dynamic-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(root));
+   snprintf(script, sizeof script, "%s/codex", root);
+   snprintf(marker, sizeof marker, "%s/reply", root);
+   FILE *file = fopen(script, "w");
+   assert(file);
+   fputs("#!/usr/bin/env python3\nimport "
+         "json,os,sys\nmode=int(os.environ['AIMEE_TEST_DYNAMIC_VARIANT'])\ndef send(v): "
+         "print(json.dumps(v),flush=True)\nfor line in sys.stdin:\n f=json.loads(line); "
+         "m=f.get('method'); p=f.get('params',{})\n if m=='initialize':\n  assert "
+         "p['capabilities']['experimentalApi'] is True\n  send({'id':f['id'],'result':{}})\n elif "
+         "m=='thread/start':\n  t=p['dynamicTools']; assert len(t)==1 and t[0]['name']=='aimee'\n  "
+         "assert t[0]['tools'][0]['name']=='exec_command'\n  "
+         "send({'id':f['id'],'result':{'thread':{'id':'thread-owned'}}})\n elif m=='turn/start':\n "
+         " assert p['threadId']=='thread-owned'\n  "
+         "send({'id':f['id'],'result':{'turn':{'id':'turn-owned'}}})\n  "
+         "call='{\"id\":700,\"method\":\"item/tool/"
+         "call\",\"params\":{\"threadId\":\"thread-owned\",\"turnId\":\"turn-owned\",\"callId\":"
+         "\"call:original\",\"namespace\":\"aimee\",\"tool\":\"exec_command\",\"arguments\":{"
+         "\"marker\":0.123456789012345678901234567890}}}'\n  if mode==1: "
+         "call=call.replace('\"aimee\"','\"forged\"')\n  if mode==2: "
+         "call=call.replace('\"exec_command\"','\"forged\"')\n  if mode==3: "
+         "call=call.replace('\"thread-owned\"','\"other-thread\"')\n  if mode==4: "
+         "call=call.replace('\"turn-owned\"','\"other-turn\"')\n  if mode==8: "
+         "call=call.replace('\"tool\":\"exec_command\"','\"tool\":\"exec_command\",\"tool\":\"exec_"
+         "command\"')\n  if mode==13: call+='\\x00{}'.encode().decode('unicode_escape')\n  if "
+         "mode==14: call=call.replace('\"aimee\"','\"aimee\\u0000forged\"')\n  if mode==15: "
+         "call+=' {}'\n  if mode==17: call=call.replace('\"id\":700','\"id\":700,\"id\":701')\n  "
+         "if mode in (8,13,14,15,16,17):\n   with open(os.environ['AIMEE_TEST_DYNAMIC_REPLY'],'w') "
+         "as log: log.write('invalid-frame')\n   raw=call.encode()\n   if mode==16: "
+         "raw=raw.replace(b'aimee',b'aimee\\xff'.decode('unicode_escape').encode('latin1'))\n   "
+         "sys.stdout.buffer.write(raw+b'\\n'.decode('unicode_escape').encode()); "
+         "sys.stdout.buffer.flush()\n   sys.stdin.readline()\n   break\n  print(call,flush=True)\n "
+         " reply=json.loads(sys.stdin.readline())\n  if mode in (5,9,10,11,12):\n   assert "
+         "reply['result']['success'] is False\n   if mode in (5,9): "
+         "second=call.replace('\"id\":700','\"id\":701')\n   elif mode==12: "
+         "second=call.replace('\"id\":700','\"id\":\"700\"')\n   else: "
+         "second=call.replace('\"call:original\"','\"different-call\"')\n   if mode==11: "
+         "second=second.replace('\"id\":700','\"id\":7e2')\n   print(second,flush=True)\n   "
+         "reply=json.loads(sys.stdin.readline())\n   if mode==12: assert reply['id']=='700'\n   "
+         "elif mode in (5,9): assert reply['id']==701\n  with "
+         "open(os.environ['AIMEE_TEST_DYNAMIC_REPLY'],'w') as log: log.write(json.dumps(reply))\n  "
+         "if mode in (0,9,12):\n   assert "
+         "reply['result']=={'contentItems':[{'type':'inputText','text':'host refused\\nexact "
+         "stderr'.encode().decode('unicode_escape')}],'success':False}\n   "
+         "send({'method':'item/"
+         "completed','params':{'item':{'type':'agentMessage','id':'answer','text':'host "
+         "complete'}}})\n   "
+         "send({'method':'turn/completed','params':{'turn':{'status':'completed'}}})\n  else: "
+         "assert reply['error']['code']==-32602\n else: raise AssertionError(m)\n",
+         file);
+   assert(fclose(file) == 0 && chmod(script, 0700) == 0);
+   char *old_path = getenv("PATH") ? strdup(getenv("PATH")) : NULL;
+   char path[16384];
+   snprintf(path, sizeof path, "%s:%s", root, old_path ? old_path : "");
+   assert(!setenv("PATH", path, 1));
+   assert(!setenv("AIMEE_TEST_DYNAMIC_REPLY", marker, 1));
+   cJSON *schema =
+       cJSON_Parse("{\"type\":\"object\",\"properties\":{\"marker\":{\"type\":\"number\"}}}");
+   aimee_tool_t child = {.name = "exec_command", .description = "host", .schema = schema};
+   aimee_tool_t space = {.name = "aimee",
+                         .description = "host",
+                         .kind = AIMEE_TOOL_NAMESPACE,
+                         .children = &child,
+                         .n_children = 1};
+   aimee_request_t catalog = {.tools = &space, .n_tools = 1};
+   agent_t agent = {0};
+   snprintf(agent.name, sizeof agent.name, "dynamic-fixture");
+   snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s", script);
+   agent.cli_idle_timeout_ms = 5000;
+   for (int provider = 0; provider < 2; provider++)
+      for (int variant = 0; variant < 18; variant++)
+      {
+         unlink(marker);
+         char mode[16];
+         snprintf(mode, sizeof mode, "%d", variant);
+         assert(!setenv("AIMEE_TEST_DYNAMIC_VARIANT", mode, 1));
+         aimee_ir_session_restore_sink(NULL, NULL, 0);
+         dynamic_host_fixture_t state = {.variant = variant};
+         int success = variant == 0 || variant == 9 || variant == 12;
+         int invalid_frame = variant == 8 || variant >= 13;
+         int rc;
+         if (provider)
+         {
+            provider_cli_cfg_t cfg = {.agent = &agent,
+                                      .cwd = root,
+                                      .user_prompt = "current",
+                                      .tool_catalog = &catalog,
+                                      .tool_call = dynamic_host_fixture,
+                                      .tool_context = &state};
+            agent_result_t out = {0};
+            rc = codex_provider_cli_adapter.execute(&cfg, &out);
+            if (invalid_frame)
+               assert(strstr(out.error, "invalid-json-rpc-frame"));
+            if (success)
+               assert(out.success && out.response && !strcmp(out.response, "host complete"));
+            agent_result_clear_response(&out);
+         }
+         else
+         {
+            cli_codex_chat_request_t req = {.cwd = root,
+                                            .user_prompt = "current",
+                                            .timeout_ms = 5000,
+                                            .tool_catalog = &catalog,
+                                            .tool_call = dynamic_host_fixture,
+                                            .tool_context = &state};
+            cli_codex_chat_result_t out;
+            codex_stream_capture_t captured = {0};
+            rc = cli_codex_chat_stream(&req, codex_capture_cb, &captured, &out);
+            if (invalid_frame)
+               assert(strstr(out.error, "invalid-json-rpc-frame"));
+            if (success && rc)
+               fprintf(stderr, "dynamic host error: %s\n", out.error);
+            if (success)
+               assert(strstr(captured.buf, "host complete"));
+         }
+         assert(success ? rc == 0 : rc != 0);
+         int calls_expected =
+             variant == 5 || variant == 9 || variant == 12                                    ? 2
+             : variant == 0 || variant == 6 || variant == 7 || variant == 10 || variant == 11 ? 1
+                                                                                              : 0;
+         int dispatches_expected =
+             variant == 9 || variant == 12                                                    ? 2
+             : variant == 0 || variant == 5 || variant == 7 || variant == 10 || variant == 11 ? 1
+                                                                                              : 0;
+         assert(state.calls == calls_expected && state.dispatches == dispatches_expected);
+         file = fopen(marker, "r");
+         assert(file);
+         char reply[4096] = {0};
+         assert(fread(reply, 1, sizeof reply - 1, file) && !ferror(file));
+         fclose(file);
+         if (success)
+            assert(strstr(reply, "host refused") && strstr(reply, "false"));
+         else if (invalid_frame)
+            assert(!strcmp(reply, "invalid-frame") && !state.calls && !state.dispatches);
+         else
+            assert(strstr(reply, "error") && strstr(reply, "-32602"));
+      }
+   aimee_ir_session_restore_sink(NULL, NULL, 0);
+   cJSON_Delete(schema);
+   if (old_path)
+      setenv("PATH", old_path, 1);
+   else
+      unsetenv("PATH");
+   free(old_path);
+   unsetenv("AIMEE_TEST_DYNAMIC_VARIANT");
+   unsetenv("AIMEE_TEST_DYNAMIC_REPLY");
+   unlink(marker);
+   unlink(script);
+   rmdir(root);
+}
+
+static int native_probe_host_tool(const aimee_block_t *call, aimee_block_t *result, void *context)
+{
+   assert(!strcmp(call->tool_id, "call_native_fixture"));
+   assert(!strcmp(call->tool_name, "fail"));
+   int flat = getenv("AIMEE_TEST_FLAT_HOST_TOOLS") != NULL;
+   assert(flat ? !call->tool_namespace
+               : call->tool_namespace && !strcmp(call->tool_namespace, "fixture"));
+   char *arguments = cJSON_PrintUnformatted(call->tool_input);
+   assert(arguments && strstr(arguments, "0.123456789012345678901234567890"));
+   cJSON *entry = cJSON_CreateObject();
+   assert(entry && cJSON_AddStringToObject(entry, "call_id", call->tool_id) &&
+          cJSON_AddStringToObject(entry, "name", call->tool_name) &&
+          (call->tool_namespace ? cJSON_AddStringToObject(entry, "namespace", call->tool_namespace)
+                                : cJSON_AddNullToObject(entry, "namespace")) &&
+          cJSON_AddStringToObject(entry, "arguments_json", arguments) &&
+          cJSON_AddItemToArray(context, entry));
+   free(arguments);
+   *result = (aimee_block_t){.type = AIMEE_BLK_TOOL_RESULT,
+                             .tool_id = strdup(call->tool_id),
+                             .tool_result = cJSON_CreateString("refused by host fixture"),
+                             .tool_is_error = 1};
+   return 0;
+}
+
+static char probe_launch_digest[65];
+static int native_probe_ready(const char *digest, cli_codex_host_replay_t *replay, void *context)
+{
+   (void)replay;
+   assert(context == probe_launch_digest && !probe_launch_digest[0] && strlen(digest) == 64);
+   snprintf(probe_launch_digest, sizeof probe_launch_digest, "%s", digest);
+   return 0;
+}
+static int native_history_probe(const char *resume, const char *history_file, int host_tools)
 {
    cJSON *arguments = cJSON_Parse("{\"path\":\"fixture.txt\"}");
    cJSON *result = cJSON_CreateString("prior tool result");
@@ -975,6 +1268,18 @@ static int native_history_probe(const char *resume, const char *history_file)
          assert(aimee_ir_message_parse(cJSON_GetArrayItem(json, i), adopted.messages + i) == 0);
       cJSON_Delete(json);
    }
+   cJSON *host_calls = cJSON_CreateArray();
+   cJSON *schema = cJSON_Parse(
+       "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"integer\"},\"marker\":{\"type\":"
+       "\"number\"}},\"required\":[\"value\",\"marker\"],\"additionalProperties\":false}");
+   aimee_tool_t child = {.name = "fail", .description = "Local failure fixture", .schema = schema};
+   aimee_tool_t space = {.name = "fixture",
+                         .description = "Host fixture tools",
+                         .kind = AIMEE_TOOL_NAMESPACE,
+                         .children = &child,
+                         .n_children = 1};
+   aimee_request_t catalog = {.tools = getenv("AIMEE_TEST_FLAT_HOST_TOOLS") ? &child : &space,
+                              .n_tools = 1};
    cli_codex_chat_request_t req = {.thread_id = resume,
                                    .history = history_file ? &adopted
                                               : resume     ? NULL
@@ -983,6 +1288,59 @@ static int native_history_probe(const char *resume, const char *history_file)
                                    .model = "fixture-model",
                                    .system_prompt = "Local native protocol fixture.",
                                    .timeout_ms = 15000};
+   req.tool_catalog = host_tools ? &catalog : NULL;
+   req.tool_call = host_tools ? native_probe_host_tool : NULL;
+   req.tool_context = host_calls;
+   cli_codex_host_launch_t launch = {0};
+   cJSON *expected = NULL;
+   char home[4200], codex[4200], temporary[4200], directory[4200], build[65];
+   char *environment[] = {home,
+                          codex,
+                          temporary,
+                          "PATH=/usr/bin:/bin",
+                          "LANG=C.UTF-8",
+                          "OTEL_SDK_DISABLED=true",
+                          "HTTP_PROXY=http://127.0.0.1:1",
+                          "HTTPS_PROXY=http://127.0.0.1:1",
+                          "NO_PROXY=127.0.0.1,localhost",
+                          NULL};
+   const char *configuration = getenv("AIMEE_TEST_OWNED_CODEX_CONFIG");
+   if (configuration)
+   {
+      FILE *file = fopen(configuration, "r");
+      assert(file);
+      char bytes[65536];
+      size_t length = fread(bytes, 1, sizeof bytes, file);
+      assert(!ferror(file) && feof(file) && !fclose(file));
+      expected = aimee_ir_json_parse_frame(bytes, length);
+      assert(expected && host_tools);
+      const char *root = getenv("HOME"), *binary = getenv("AIMEE_TEST_OWNED_CODEX_BINARY");
+      assert(root && binary);
+      assert(snprintf(home, sizeof home, "HOME=%s", root) < (int)sizeof home);
+      assert(snprintf(codex, sizeof codex, "CODEX_HOME=%s/.codex", root) < (int)sizeof codex);
+      assert(snprintf(temporary, sizeof temporary, "TMPDIR=%s", root) < (int)sizeof temporary);
+      assert(snprintf(directory, sizeof directory, "%s/workspace", root) < (int)sizeof directory);
+      launch =
+          (cli_codex_host_launch_t){.executable_fd = open(binary, O_RDONLY | O_CLOEXEC),
+                                    .cwd_fd = open(directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC),
+                                    .home = root,
+                                    .cwd = directory,
+                                    .build_digest = build,
+                                    .gateway_url = getenv("AIMEE_TEST_OWNED_CODEX_URL"),
+                                    .gateway_token = "fixture-token",
+                                    .environment = environment,
+                                    .expected_config = expected,
+                                    .ready = native_probe_ready,
+                                    .context = probe_launch_digest};
+      assert(launch.executable_fd >= 0 && launch.cwd_fd >= 0 && launch.gateway_url);
+      struct stat binary_status;
+      assert(!fstat(launch.executable_fd, &binary_status) && binary_status.st_size > 0);
+      void *image = mmap(NULL, (size_t)binary_status.st_size, PROT_READ, MAP_PRIVATE,
+                         launch.executable_fd, 0);
+      assert(image != MAP_FAILED && !aimee_sha256_hex(image, (size_t)binary_status.st_size, build));
+      assert(!munmap(image, (size_t)binary_status.st_size));
+      req.host_launch = &launch;
+   }
    cli_codex_chat_result_t out;
    codex_stream_capture_t captured = {0};
    cJSON *events = cJSON_CreateArray();
@@ -990,7 +1348,20 @@ static int native_history_probe(const char *resume, const char *history_file)
    int rc = cli_codex_chat_stream(&req, codex_capture_cb, &captured, &out);
    aimee_ir_session_set_sink(NULL, NULL);
    cJSON *report = cJSON_CreateObject();
+   cJSON_AddStringToObject(report, "host_launch_digest", probe_launch_digest);
    cJSON_AddItemToObject(report, "events", events);
+   cJSON_AddItemToObject(report, "host_calls", host_calls);
+   cJSON *persisted = cJSON_CreateArray(), *event;
+   cJSON_ArrayForEach(
+       event,
+       events) if (!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(event, "kind")), "message"))
+       assert(cJSON_AddItemToArray(persisted,
+                                   cJSON_Duplicate(cJSON_GetObjectItem(event, "payload"), 1)));
+   char *history_json = cJSON_PrintUnformatted(persisted);
+   assert(history_json && cJSON_AddStringToObject(report, "history_json", history_json));
+   free(history_json);
+   cJSON_Delete(persisted);
+   cJSON_Delete(schema);
    cJSON_AddStringToObject(report, "thread_id", out.thread_id);
    cJSON_AddStringToObject(report, "text", captured.buf);
    cJSON_AddStringToObject(report, "error", out.error);
@@ -1002,12 +1373,18 @@ static int native_history_probe(const char *resume, const char *history_file)
    cJSON_Delete(arguments);
    cJSON_Delete(result);
    aimee_request_free(&adopted);
+   if (configuration)
+   {
+      close(launch.executable_fd);
+      close(launch.cwd_fd);
+      cJSON_Delete(expected);
+   }
    return rc ? 1 : 0;
 }
 
 static void test_execute_refuses_missing_configuration(void)
 {
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(agent_execute_cli_codex(NULL, "system", "user", &out) == -1);
    assert(strcmp(out.error, "missing agent") == 0);
    assert(agent_execute_cli_codex(NULL, "system", "user", NULL) == -1);
@@ -1021,17 +1398,22 @@ int main(int argc, char **argv)
    if (argc >= 2 && !strcmp(argv[1], "--native-history-probe"))
    {
       const char *resume = NULL, *history = NULL;
+      int host_tools = 0;
       for (int i = 2; i < argc; i++)
       {
-         if (!strcmp(argv[i], "--import") && !history && i + 1 < argc)
+         if (!strcmp(argv[i], "--host-tools"))
+            host_tools = 1;
+         else if (!strcmp(argv[i], "--import") && !history && i + 1 < argc)
             history = argv[++i];
          else if (argv[i][0] != '-' && !resume)
             resume = argv[i];
          else
             return 2;
       }
-      return native_history_probe(resume, history);
+      return native_history_probe(resume, history, host_tools);
    }
+   test_dynamic_tool_boundaries();
+   test_dynamic_host_execution();
    test_canonical_history_adoption();
    puts("canonical history: typed adoption, resume protocol and refusal before model turn "
         "passed");
@@ -1160,8 +1542,8 @@ int main(int argc, char **argv)
    test_chat_stream_splits_distinct_agent_message_items();
    printf("OK\n");
 
-   printf("test_chat_stream_splits_completed_delta_items_without_ids... ");
-   test_chat_stream_splits_completed_delta_items_without_ids();
+   printf("test_chat_stream_rejects_completed_items_without_ids... ");
+   test_chat_stream_rejects_completed_items_without_ids();
    printf("OK\n");
 
    printf("test_chat_stream_replaces_invalid_utf8_prompt_bytes... ");

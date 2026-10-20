@@ -15,7 +15,6 @@
 #include "model_sampling.h"
 #include "model_registry.h"
 #include "agent_config.h" /* agent_catalog_provider */
-#include "tool_call_args.h"
 #include "cJSON.h"
 #include <string.h>
 /* From agent_http.c */
@@ -549,14 +548,47 @@ static int agent_anthropic_profile_ir(const agent_t *agent, const cJSON *tools,
 
 /* Host profiles start in IR; compatibility catalogs enter their typed parser.
  * Policy and translation own the complete output and dispatch catalog. */
-cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
-                              const char *system_prompt, int max_tokens, double temperature,
-                              aimee_wire_t wire, int is_delegate, aimee_request_t *dispatch_catalog)
+/* Execution entry controls belong with canonical request profiles. The loop's
+ * economizer must not own provider cache configuration. */
+int agent_request_with_tools_supported(const aimee_request_t *request)
 {
-   if (!agent || !cJSON_IsArray(messages))
-      return NULL;
+   if (!request || request->n_messages < 1 || request->n_messages > AIMEE_IR_MAX_BLOCKS ||
+       !request->messages)
+      return 0;
+   int content = 0;
+   for (int i = 0; i < request->n_messages; i++)
+   {
+      if (request->messages[i].n_blocks < 0 ||
+          request->messages[i].n_blocks > AIMEE_IR_MAX_BLOCKS ||
+          (request->messages[i].n_blocks && !request->messages[i].blocks))
+         return 0;
+      for (int j = 0; j < request->messages[i].n_blocks; j++)
+      {
+         const aimee_block_t *block = &request->messages[i].blocks[j];
+         if (block->type != AIMEE_BLK_TEXT || (block->text && block->text[0]))
+            content = 1;
+      }
+   }
+   return content &&
+          !(request->n_tools ||
+            (request->tool_choice != AIMEE_TOOL_CHOICE_UNSET &&
+             request->tool_choice != AIMEE_TOOL_CHOICE_AUTO) ||
+            request->n_system > 1 ||
+            (request->n_system && request->system[0].type != AIMEE_BLK_TEXT) || request->thinking ||
+            request->metadata || request->service_tier || request->prompt_cache_key ||
+            request->prompt_cache_retention || request->prompt_cache_options || request->n_stop ||
+            request->has_top_p || request->has_top_k || request->has_parallel_tool_calls ||
+            request->reasoning_summary || request->reasoning_effort ||
+            request->output_format.kind > AIMEE_OUTPUT_TEXT);
+}
+
+int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
+                             const char *system_prompt, int max_tokens, double temperature,
+                             aimee_wire_t wire, int is_delegate, aimee_request_t *out)
+{
+   if (!agent || !out || !cJSON_IsArray(messages))
+      return -1;
    aimee_request_t ir = {0};
-   cJSON *rendered = NULL;
    if (wire == AIMEE_WIRE_RESPONSES)
    {
       if (agent_responses_profile_ir(agent, tools, system_prompt, &ir))
@@ -591,10 +623,30 @@ cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON
    if (policy_changes < 0)
       goto fail;
    ir.mutated = 1;
+   if (aimee_ir_request_admit(&ir))
+      goto fail;
+   aimee_request_free(out);
+   *out = ir;
+   return 0;
+fail:
+   aimee_request_free(&ir);
+   return -1;
+}
+
+cJSON *agent_build_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
+                              const char *system_prompt, int max_tokens, double temperature,
+                              aimee_wire_t wire, int is_delegate, aimee_request_t *dispatch_catalog)
+{
+   aimee_request_t ir = {0};
+   cJSON *rendered = NULL;
+   if (agent_prepare_request_ir(agent, messages, tools, system_prompt, max_tokens, temperature,
+                                wire, is_delegate, &ir))
+      return NULL;
    aimee_wire_projection_report_t projection;
    aimee_backend_projection_report(&ir, wire, &projection);
-   if (aimee_ir_session_emit_projection(ir.model, projection.omitted_reasoning_blocks,
-                                        projection.omitted_opaque_state_blocks, "request"))
+   if (aimee_ir_session_emit_projection_controls(ir.model, projection.omitted_reasoning_blocks,
+                                                 projection.omitted_opaque_state_blocks,
+                                                 projection.omitted_cache_controls, "request"))
       goto fail;
    if (projection.omitted_reasoning_blocks)
       LOG_INFO("translation.projection",
@@ -630,555 +682,23 @@ cJSON *agent_responses_sse_response_object(const char *body)
 
 /* --- Message utilities --- */
 
-/* Merge consecutive same-role messages in a cJSON messages array.
- * Returns the number of merges performed. Idempotent. */
-int messages_compact_consecutive(cJSON *messages)
-{
-   if (!messages || !cJSON_IsArray(messages))
-      return 0;
-
-   int merged = 0;
-   cJSON *cur = messages->child;
-
-   while (cur && cur->next)
-   {
-      cJSON *next = cur->next;
-      const char *cur_role = cJSON_GetStringValue(cJSON_GetObjectItem(cur, "role"));
-      const char *next_role = cJSON_GetStringValue(cJSON_GetObjectItem(next, "role"));
-
-      if (!cur_role || !next_role || strcmp(cur_role, next_role) != 0)
-      {
-         cur = next;
-         continue;
-      }
-
-      /* Tool results are semantically keyed by tool_call_id. Merging two
-       * consecutive tool messages would drop an ID and make the provider see
-       * fewer tool responses than assistant tool calls. */
-      if (strcmp(cur_role, "tool") == 0 || cJSON_GetObjectItem(cur, "tool_call_id") ||
-          cJSON_GetObjectItem(next, "tool_call_id") || cJSON_GetObjectItem(cur, "tool_calls") ||
-          cJSON_GetObjectItem(next, "tool_calls"))
-      {
-         cur = next;
-         continue;
-      }
-
-      /* Same role — merge next's content into cur */
-      cJSON *cur_content = cJSON_GetObjectItem(cur, "content");
-      cJSON *next_content = cJSON_GetObjectItem(next, "content");
-
-      const char *cur_text = cJSON_GetStringValue(cur_content);
-      const char *next_text = cJSON_GetStringValue(next_content);
-
-      /* Only merge string content; skip messages with structured content (tool_calls, etc.) */
-      if (!cur_text || !next_text)
-      {
-         cur = next;
-         continue;
-      }
-
-      size_t new_len = strlen(cur_text) + 2 + strlen(next_text) + 1;
-      char *merged_text = malloc(new_len);
-      if (!merged_text)
-      {
-         cur = next;
-         continue;
-      }
-      snprintf(merged_text, new_len, "%s\n\n%s", cur_text, next_text);
-
-      cJSON_ReplaceItemInObject(cur, "content", cJSON_CreateString(merged_text));
-      free(merged_text);
-
-      /* Remove next from the array and free it */
-      cJSON_DetachItemViaPointer(messages, next);
-      cJSON_Delete(next);
-
-      merged++;
-      /* Don't advance cur — check if the next one also matches */
-   }
-
-   return merged;
-}
-
-/* --- Message history repair ---
- *
- * Scan message history for inconsistencies and repair them:
- * 1. Orphaned tool calls: assistant requested tool_use but no matching result exists.
- *    -> Insert synthetic cancellation result.
- * 2. Orphaned tool results: a tool result exists with no matching tool call.
- *    -> Remove the orphan.
- * 3. Trailing tool calls: conversation ends with unanswered tool calls.
- *    -> Fill with cancellation results.
- *
- * Handles OpenAI (tool_calls/tool_call_id), Anthropic (tool_use/tool_result),
- * and Responses API (function_call/function_call_output) message formats.
- *
- * Idempotent: running twice produces the same result.
- */
-static const char *CANCEL_MSG = "[Tool call was cancelled or timed out]";
-
-/* Collect all tool call IDs from a message array.
- * Returns a cJSON object used as a set: keys are IDs, values are true. */
-static cJSON *collect_tool_call_ids(cJSON *messages)
-{
-   cJSON *ids = cJSON_CreateObject();
-   cJSON *msg;
-
-   cJSON_ArrayForEach(msg, messages)
-   {
-      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-
-      /* OpenAI: assistant message with tool_calls array */
-      if (role && strcmp(role, "assistant") == 0)
-      {
-         cJSON *tcs = cJSON_GetObjectItem(msg, "tool_calls");
-         if (tcs && cJSON_IsArray(tcs))
-         {
-            cJSON *tc;
-            cJSON_ArrayForEach(tc, tcs)
-            {
-               const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(tc, "id"));
-               if (id)
-                  cJSON_AddBoolToObject(ids, id, 1);
-            }
-         }
-
-         /* Anthropic: assistant message with content array containing tool_use blocks */
-         cJSON *content = cJSON_GetObjectItem(msg, "content");
-         if (content && cJSON_IsArray(content))
-         {
-            cJSON *block;
-            cJSON_ArrayForEach(block, content)
-            {
-               const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
-               if (type && strcmp(type, "tool_use") == 0)
-               {
-                  const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(block, "id"));
-                  if (id)
-                     cJSON_AddBoolToObject(ids, id, 1);
-               }
-            }
-         }
-      }
-
-      /* Responses API: top-level function_call items */
-      const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "type"));
-      if (type && strcmp(type, "function_call") == 0)
-      {
-         const char *cid = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "call_id"));
-         if (cid)
-            cJSON_AddBoolToObject(ids, cid, 1);
-      }
-   }
-
-   return ids;
-}
-
-/* Collect all tool result IDs from a message array. */
-static cJSON *collect_tool_result_ids(cJSON *messages)
-{
-   cJSON *ids = cJSON_CreateObject();
-   cJSON *msg;
-
-   cJSON_ArrayForEach(msg, messages)
-   {
-      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-
-      /* OpenAI: role=tool with tool_call_id */
-      if (role && strcmp(role, "tool") == 0)
-      {
-         const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "tool_call_id"));
-         if (id)
-            cJSON_AddBoolToObject(ids, id, 1);
-      }
-
-      /* Anthropic: user message with content array containing tool_result blocks */
-      if (role && strcmp(role, "user") == 0)
-      {
-         cJSON *content = cJSON_GetObjectItem(msg, "content");
-         if (content && cJSON_IsArray(content))
-         {
-            cJSON *block;
-            cJSON_ArrayForEach(block, content)
-            {
-               const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
-               if (type && strcmp(type, "tool_result") == 0)
-               {
-                  const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(block, "tool_use_id"));
-                  if (id)
-                     cJSON_AddBoolToObject(ids, id, 1);
-               }
-            }
-         }
-      }
-
-      /* Responses API: function_call_output with call_id */
-      const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "type"));
-      if (type && strcmp(type, "function_call_output") == 0)
-      {
-         const char *cid = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "call_id"));
-         if (cid)
-            cJSON_AddBoolToObject(ids, cid, 1);
-      }
-   }
-
-   return ids;
-}
-
-/* Detect the message format: 0=OpenAI, 1=Anthropic, 2=Responses API */
-static int detect_format(cJSON *messages)
-{
-   cJSON *msg;
-   cJSON_ArrayForEach(msg, messages)
-   {
-      /* Responses API: top-level type=function_call or function_call_output */
-      const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "type"));
-      if (type && (strcmp(type, "function_call") == 0 || strcmp(type, "function_call_output") == 0))
-         return 2;
-
-      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-      if (!role)
-         continue;
-
-      /* Anthropic: assistant with content array containing tool_use blocks */
-      if (strcmp(role, "assistant") == 0)
-      {
-         cJSON *content = cJSON_GetObjectItem(msg, "content");
-         if (content && cJSON_IsArray(content))
-         {
-            cJSON *block;
-            cJSON_ArrayForEach(block, content)
-            {
-               const char *btype = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
-               if (btype && strcmp(btype, "tool_use") == 0)
-                  return 1;
-            }
-         }
-      }
-
-      /* OpenAI: role=tool messages */
-      if (strcmp(role, "tool") == 0)
-         return 0;
-   }
-
-   return 0; /* default to OpenAI */
-}
-
-/* Insert synthetic cancellation results for orphaned tool calls (OpenAI format) */
-static int repair_orphans_openai(cJSON *messages, cJSON *call_ids, cJSON *result_ids)
-{
-   int repairs = 0;
-
-   /* Find orphaned calls (call exists but no result) and insert cancellation */
-   cJSON *id_item;
-   cJSON_ArrayForEach(id_item, call_ids)
-   {
-      if (cJSON_GetObjectItem(result_ids, id_item->string))
-         continue; /* has a matching result */
-
-      /* Insert a synthetic tool result after the assistant message that made the call */
-      /* Find the assistant message containing this call */
-      cJSON *msg;
-      cJSON *insert_after = NULL;
-      cJSON_ArrayForEach(msg, messages)
-      {
-         const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-         if (!role || strcmp(role, "assistant") != 0)
-            continue;
-         cJSON *tcs = cJSON_GetObjectItem(msg, "tool_calls");
-         if (!tcs || !cJSON_IsArray(tcs))
-            continue;
-         cJSON *tc;
-         cJSON_ArrayForEach(tc, tcs)
-         {
-            const char *tc_id = cJSON_GetStringValue(cJSON_GetObjectItem(tc, "id"));
-            if (tc_id && strcmp(tc_id, id_item->string) == 0)
-            {
-               insert_after = msg;
-               break;
-            }
-         }
-         if (insert_after)
-            break;
-      }
-
-      /* Create synthetic result */
-      cJSON *tool_msg = cJSON_CreateObject();
-      cJSON_AddStringToObject(tool_msg, "role", "tool");
-      cJSON_AddStringToObject(tool_msg, "tool_call_id", id_item->string);
-      cJSON_AddStringToObject(tool_msg, "content", CANCEL_MSG);
-
-      if (insert_after)
-      {
-         /* Insert right after the assistant message (or after existing tool results) */
-         cJSON *pos = insert_after->next;
-         while (pos)
-         {
-            const char *r = cJSON_GetStringValue(cJSON_GetObjectItem(pos, "role"));
-            if (!r || strcmp(r, "tool") != 0)
-               break;
-            pos = pos->next;
-         }
-         if (pos)
-         {
-            /* Insert before pos */
-            tool_msg->next = pos;
-            tool_msg->prev = pos->prev;
-            if (pos->prev)
-               pos->prev->next = tool_msg;
-            pos->prev = tool_msg;
-         }
-         else
-         {
-            cJSON_AddItemToArray(messages, tool_msg);
-         }
-      }
-      else
-      {
-         cJSON_AddItemToArray(messages, tool_msg);
-      }
-      repairs++;
-   }
-
-   /* Remove orphaned results (result exists but no matching call) */
-   cJSON *msg = messages->child;
-   while (msg)
-   {
-      cJSON *next = msg->next;
-      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-      if (role && strcmp(role, "tool") == 0)
-      {
-         const char *tcid = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "tool_call_id"));
-         if (tcid && !cJSON_GetObjectItem(call_ids, tcid))
-         {
-            cJSON_DetachItemViaPointer(messages, msg);
-            cJSON_Delete(msg);
-            repairs++;
-         }
-      }
-      msg = next;
-   }
-
-   return repairs;
-}
-
-/* Insert synthetic cancellation results for orphaned tool calls (Anthropic format) */
-static int repair_orphans_anthropic(cJSON *messages, cJSON *call_ids, cJSON *result_ids)
-{
-   int repairs = 0;
-
-   /* For each orphaned call, find the user message that should contain its result
-    * and add a tool_result block, or create a new user message */
-   cJSON *id_item;
-   cJSON_ArrayForEach(id_item, call_ids)
-   {
-      if (cJSON_GetObjectItem(result_ids, id_item->string))
-         continue;
-
-      /* Find the assistant message with this tool_use, then look for the next user msg */
-      int found_call = 0;
-      cJSON *target_user = NULL;
-      cJSON *msg;
-      cJSON_ArrayForEach(msg, messages)
-      {
-         if (!found_call)
-         {
-            const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-            if (!role || strcmp(role, "assistant") != 0)
-               continue;
-            cJSON *content = cJSON_GetObjectItem(msg, "content");
-            if (!content || !cJSON_IsArray(content))
-               continue;
-            cJSON *block;
-            cJSON_ArrayForEach(block, content)
-            {
-               const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
-               const char *bid = cJSON_GetStringValue(cJSON_GetObjectItem(block, "id"));
-               if (type && strcmp(type, "tool_use") == 0 && bid &&
-                   strcmp(bid, id_item->string) == 0)
-               {
-                  found_call = 1;
-                  break;
-               }
-            }
-         }
-         else
-         {
-            /* Look for the next user message */
-            const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-            if (role && strcmp(role, "user") == 0)
-            {
-               cJSON *content = cJSON_GetObjectItem(msg, "content");
-               if (content && cJSON_IsArray(content))
-               {
-                  target_user = msg;
-                  break;
-               }
-            }
-         }
-      }
-
-      /* Create the tool_result block */
-      cJSON *tr = cJSON_CreateObject();
-      cJSON_AddStringToObject(tr, "type", "tool_result");
-      cJSON_AddStringToObject(tr, "tool_use_id", id_item->string);
-      cJSON_AddStringToObject(tr, "content", CANCEL_MSG);
-
-      if (target_user)
-      {
-         /* Append to existing user message's content array */
-         cJSON *content = cJSON_GetObjectItem(target_user, "content");
-         cJSON_AddItemToArray(content, tr);
-      }
-      else
-      {
-         /* Create a new user message */
-         cJSON *user_msg = cJSON_CreateObject();
-         cJSON_AddStringToObject(user_msg, "role", "user");
-         cJSON *content = cJSON_AddArrayToObject(user_msg, "content");
-         cJSON_AddItemToArray(content, tr);
-         cJSON_AddItemToArray(messages, user_msg);
-      }
-      repairs++;
-   }
-
-   /* Remove orphaned tool_result blocks */
-   cJSON *msg = messages->child;
-   while (msg)
-   {
-      cJSON *next_msg = msg->next;
-      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-      if (role && strcmp(role, "user") == 0)
-      {
-         cJSON *content = cJSON_GetObjectItem(msg, "content");
-         if (content && cJSON_IsArray(content))
-         {
-            cJSON *block = content->child;
-            while (block)
-            {
-               cJSON *next_block = block->next;
-               const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
-               if (type && strcmp(type, "tool_result") == 0)
-               {
-                  const char *tuid =
-                      cJSON_GetStringValue(cJSON_GetObjectItem(block, "tool_use_id"));
-                  if (tuid && !cJSON_GetObjectItem(call_ids, tuid))
-                  {
-                     cJSON_DetachItemViaPointer(content, block);
-                     cJSON_Delete(block);
-                     repairs++;
-                  }
-               }
-               block = next_block;
-            }
-            /* If the user message is now empty, remove it */
-            if (cJSON_GetArraySize(content) == 0)
-            {
-               cJSON_DetachItemViaPointer(messages, msg);
-               cJSON_Delete(msg);
-            }
-         }
-      }
-      msg = next_msg;
-   }
-
-   return repairs;
-}
-
-/* Insert synthetic cancellation results for orphaned calls (Responses API format) */
-static int repair_orphans_responses(cJSON *messages, cJSON *call_ids, cJSON *result_ids)
-{
-   int repairs = 0;
-
-   /* Add function_call_output for orphaned function_calls */
-   cJSON *id_item;
-   cJSON_ArrayForEach(id_item, call_ids)
-   {
-      if (cJSON_GetObjectItem(result_ids, id_item->string))
-         continue;
-
-      cJSON *out_item = cJSON_CreateObject();
-      cJSON_AddStringToObject(out_item, "type", "function_call_output");
-      cJSON_AddStringToObject(out_item, "call_id", id_item->string);
-      cJSON_AddStringToObject(out_item, "output", CANCEL_MSG);
-      cJSON_AddItemToArray(messages, out_item);
-      repairs++;
-   }
-
-   /* Remove orphaned function_call_output items */
-   cJSON *msg = messages->child;
-   while (msg)
-   {
-      cJSON *next = msg->next;
-      const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "type"));
-      if (type && strcmp(type, "function_call_output") == 0)
-      {
-         const char *cid = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "call_id"));
-         if (cid && !cJSON_GetObjectItem(call_ids, cid))
-         {
-            cJSON_DetachItemViaPointer(messages, msg);
-            cJSON_Delete(msg);
-            repairs++;
-         }
-      }
-      msg = next;
-   }
-
-   return repairs;
-}
+/* Core history is canonical. Legacy provider formats are admitted only by
+ * their explicit translation/import boundary, never detected inside execution. */
 int message_history_repair(cJSON *messages)
 {
-   if (cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(messages, 0), "blocks"))
-      return aimee_ir_history_repair(messages);
-   if (!messages || !cJSON_IsArray(messages))
+   if (!messages)
       return 0;
-
-   if (cJSON_GetArraySize(messages) == 0)
-      return 0;
-
-   /* Ensure every persisted assistant tool_call has a valid JSON-string
-    * arguments field. Strict providers (e.g. MiniMax) reject the whole
-    * request otherwise. Cheap idempotent walk; runs every turn. */
+   if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) > AIMEE_IR_MAX_BLOCKS)
+      return -1;
+   const cJSON *item;
+   cJSON_ArrayForEach(item, messages)
    {
-      cJSON *msg;
-      cJSON_ArrayForEach(msg, messages)
-      {
-         const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-         if (role && strcmp(role, "assistant") == 0)
-            tool_call_sanitize_assistant_arguments(msg);
-      }
+      aimee_message_t message = {0};
+      if (aimee_ir_message_parse(item, &message))
+         return -1;
+      aimee_message_free(&message);
    }
-
-   cJSON *call_ids = collect_tool_call_ids(messages);
-   cJSON *result_ids = collect_tool_result_ids(messages);
-
-   /* If there are no tool calls at all, nothing to repair */
-   if (!call_ids->child && !result_ids->child)
-   {
-      cJSON_Delete(call_ids);
-      cJSON_Delete(result_ids);
-      return 0;
-   }
-
-   int fmt = detect_format(messages);
-   int repairs;
-
-   switch (fmt)
-   {
-   case 1:
-      repairs = repair_orphans_anthropic(messages, call_ids, result_ids);
-      break;
-   case 2:
-      repairs = repair_orphans_responses(messages, call_ids, result_ids);
-      break;
-   default:
-      repairs = repair_orphans_openai(messages, call_ids, result_ids);
-      break;
-   }
-
-   cJSON_Delete(call_ids);
-   cJSON_Delete(result_ids);
-   return repairs;
+   return aimee_ir_history_repair(messages);
 }
 
 /* ================================================================

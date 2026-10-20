@@ -29,11 +29,49 @@ extern "C"
       char *messages_json;
    } db1_primary_session_row_t;
 
+   /* Complete bounded, actor-scoped canonical text search. Caller frees JSON. */
+   char *db1_session_ir_search(const char *principal, const char *request_json);
+   /* Host custody primitives; reconciliation requires independent qualified
+    * whole-tree quiescence. These functions do not observe process liveness. */
+   /* Explicit absence acknowledgment is not a persisted reservation receipt. */
+   int db1_session_native_reservation_finish_checked(const char *principal,
+                                                     const char *request_json,
+                                                     char out_sequence[32], char out_epoch[33],
+                                                     int *out_absent);
+   int db1_session_native_reservation_finish(const char *principal, const char *request_json,
+                                             char out_sequence[32], char out_epoch[33]);
+   int db1_session_native_history_load(const char *principal, const char *session_id,
+                                       const char *mode, const char *active_turn, char **out_json);
+   int db1_session_native_source_append(const char *session_id, const char *event_id,
+                                        const char *turn, const char *actor, const char *payload,
+                                        char out_sequence[32]);
+   int db1_session_native_reserve(const char *principal, const char *request_json,
+                                  char out_epoch[33]);
+   int db1_session_native_reservation_reconcile(const char *principal, const char *request_json,
+                                                char out_sequence[32], char out_epoch[33]);
+   int db1_session_native_epoch(const char *principal, const char *request_json,
+                                char out_epoch[33]);
+   /* Checked lookup: 0 found (heap JSON), 1 definitively missing, -1 unavailable/refused. */
+   int db1_session_native_reservation_lookup_checked(const char *principal,
+                                                     const char *request_json, char **out_json);
+   /* Complete bounded session owner list, including other native models/SDKs. */
+   int db1_session_native_active_owned(const char *principal, const char *session_id,
+                                       char **out_json);
+   char *db1_session_native_reservation_lookup(const char *principal, const char *request_json);
+   int db1_session_native_owner_claim(const char *principal, const char *request_json);
+   int db1_session_native_reconcile(const char *principal, const char *request_json,
+                                    char out_sequence[32]);
+
    /* Canonical ordered session log. Append returns an exact decimal sequence
     * into out_sequence[32]; retrying an event ID is idempotent only when every
     * immutable field matches. Page returns owned canonical envelope-array JSON. */
    int db1_session_ir_append(const char *session_id, const char *event_id, const char *turn_id,
                              const char *actor, const char *payload, char out_sequence[32]);
+   /* Private host append for a completed terminal carrying source-bound
+    * verification proofs. Ordinary append rejects proof-bearing events. */
+   int db1_session_ir_append_verified(const char *session_id, const char *event_id,
+                                      const char *turn_id, const char *actor, const char *payload,
+                                      char out_sequence[32]);
    char *db1_session_ir_page(const char *session_id, const char *after, int limit,
                              const char *principal);
 
@@ -41,10 +79,24 @@ extern "C"
     * Save appends an atomic checkpoint; load replays the latest checkpoint and
     * subsequent completed harness observations. scope keeps child prompts private.
     * Load returns 0 found, 1 missing, -1 failure; caller frees *out. */
+   int db1_session_ir_history_import(const char *session_id, const char *scope, const char *actor,
+                                     const char *source_session, const char *source_agent,
+                                     const char *source_sha256, const char *messages_json,
+                                     const char *report_json);
+   /* Browse returns0 imported,1 skipped for an already-authoritative primary, -1 refusal.
+    * Never grants model admission from the skipped disposition. */
+   int db1_session_ir_history_import_browse(const char *session_id, const char *actor,
+                                            const char *source_agent, const char *source_sha256,
+                                            const char *messages_json, const char *report_json);
    int db1_session_ir_history_save(const char *session_id, const char *checkpoint,
                                    const char *scope, const char *actor, const char *messages_json);
    int db1_session_ir_history_load(const char *session_id, const char *scope, const char *actor,
                                    const char *active_turn, char **out);
+   /* Owner-checked primary conversation including this running turn's committed
+    * observations. Missing/non-running returns 1; corruption/outage returns -1.
+    * Existing completed-history loading above keeps excluding pending content. */
+   int db1_session_ir_running_history_load(const char *session_id, const char *actor,
+                                           const char *active_turn, char **out);
 
    /* Native resume metadata; get returns 0 found, 1 missing, -1 failure. */
    int db1_session_harness_get(const char *session_id, const char *harness, char *out_native_id,

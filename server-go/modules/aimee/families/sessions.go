@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
 
@@ -51,6 +52,8 @@ const (
 	opSessionIRHistorySave        uint32 = 32
 	opSessionIRHistoryLoad        uint32 = 33
 	opSessionHarnessCompareSwap   uint32 = 34
+	opSessionIRRunningHistoryLoad uint32 = 35
+	opSessionIRAppendVerified     uint32 = 36
 )
 
 // Persona delivery states. The claim is an UPDATE guarded on unclaimed, so of
@@ -327,9 +330,6 @@ const (
 	                         DO UPDATE SET messages_json = EXCLUDED.messages_json,
 	                                       updated_at = now()`
 
-	primarySessionLoadSQL = `SELECT messages_json FROM primary_sessions
-	                          WHERE session_id = $1 AND agent_name = $2 AND provider = $3`
-
 	primarySessionDeleteSQL = `DELETE FROM primary_sessions
 	                            WHERE session_id = $1 AND agent_name = $2 AND provider = $3`
 
@@ -354,11 +354,11 @@ const (
 	                          ORDER BY updated_at DESC, session_id
 	                          LIMIT $2`
 
-	primaryGetLatestSQL = `SELECT ` + primarySessionColumns + `
-	                         FROM primary_sessions
-	                        WHERE session_id = $1
-	                        ORDER BY updated_at DESC, agent_name, provider
-	                        LIMIT 1`
+	primaryGetLatestSQL = `SELECT session_id,agent_name,provider,
+ to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+ to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+ FROM primary_sessions WHERE session_id=$1
+ ORDER BY updated_at DESC,agent_name,provider LIMIT 1 FOR SHARE`
 
 	// seq is allocated from the current maximum so the caller does not track a
 	// per-session counter. The primary key makes a duplicate impossible.
@@ -751,10 +751,12 @@ func primarySessionLoad(ctx context.Context, q store.Queryer, f []string) (uint3
 	if f[0] == "" || f[1] == "" || f[2] == "" {
 		return store.StatusInvalid, nil, nil
 	}
-	var messages string
-	switch err := q.QueryRow(ctx, primarySessionLoadSQL, f[0], f[1], f[2]).Scan(&messages); {
+	messages, err := legacyPrimaryTextBounded(ctx, q, f[0], f[1], f[2], legacyPrimaryReplyCapacity())
+	switch {
 	case store.IsNoRows(err):
 		return store.StatusMissing, nil, nil
+	case err == errLegacyPrimaryReplyTooLong:
+		return store.StatusTooLong, nil, nil
 	case err != nil:
 		return 0, nil, err
 	}
@@ -795,13 +797,22 @@ func primarySessionGetLatest(ctx context.Context, q store.Queryer, f []string) (
 	if f[0] == "" {
 		return store.StatusInvalid, nil, nil
 	}
-	cells, err := primarySessionRow(q.QueryRow(ctx, primaryGetLatestSQL, f[0]).Scan)
+	var session, agent, provider, created, updated string
+	err := q.QueryRow(ctx, primaryGetLatestSQL, f[0]).Scan(&session, &agent, &provider, &created, &updated)
 	switch {
 	case store.IsNoRows(err):
 		return store.StatusMissing, nil, nil
 	case err != nil:
 		return 0, nil, err
 	}
+	messages, err := legacyPrimaryTextBounded(ctx, q, session, agent, provider, legacyPrimaryReplyCapacity(session, agent, provider, created, updated))
+	if err == errLegacyPrimaryReplyTooLong {
+		return store.StatusTooLong, nil, nil
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	cells := []string{session, agent, provider, messages, created, updated}
 	return store.StatusOK, cells, nil
 }
 
@@ -941,40 +952,56 @@ var Sessions = store.Family{
 	Event: EventSessions,
 	Stage: StageSessions,
 	Ops: map[uint32]store.Op{
-		opServerSessionCreate:         {Name: "server_session_create", Args: 3, Tx: true, Run: serverSessionCreate},
-		opServerSessionGet:            {Name: "server_session_get", Cells: 10, Args: 1, Run: serverSessionGet},
-		opServerSessionSetOutcome:     {Name: "server_session_set_outcome", Args: 2, Tx: true, Run: serverSessionSetOutcome},
-		opServerSessionDelete:         {Name: "server_session_delete", Args: 1, Tx: true, Run: serverSessionDelete},
-		opServerSessionListRecent:     {Name: "server_session_list_recent", Cells: 10, Args: 1, Run: serverSessionListRecent},
-		opServerSessionSearchByTitle:  {Name: "server_session_search_by_title", Cells: 10, Args: 2, Run: serverSessionSearchByTitle},
-		opServerSessionCount:          {Name: "server_session_count", Args: 1, Run: serverSessionCount},
-		opServerSessionListExpired:    {Name: "server_session_list_expired", Cells: 1, Args: 2, Run: serverSessionListExpired},
-		opServerSessionDeleteExpired:  {Name: "server_session_delete_expired", Args: 1, Tx: true, Run: serverSessionDeleteExpired},
-		opPrimarySessionSave:          {Name: "primary_session_save", Args: 4, Tx: true, Run: primarySessionSave},
-		opPrimarySessionLoad:          {Name: "primary_session_load", Args: 3, Run: primarySessionLoad},
-		opPrimarySessionDelete:        {Name: "primary_session_delete", Args: 3, Tx: true, Run: primarySessionDelete},
-		opPrimarySessionAllocRecent:   {Name: "primary_session_alloc_recent", Cells: 6, Args: 1, Run: primarySessionAllocRecent},
-		opPrimarySessionAllocSearch:   {Name: "primary_session_alloc_search", Cells: 6, Args: 2, Run: primarySessionAllocSearch},
-		opPrimarySessionGetLatest:     {Name: "primary_session_get_latest", Cells: 6, Args: 1, Run: primarySessionGetLatest},
-		opSessionWritePathRecord:      {Name: "session_write_path_record", Args: 2, Tx: true, Run: sessionWritePathRecord},
-		opSessionStaleReads:           {Name: "session_stale_reads", Cells: 1, Args: 3, Run: sessionStaleReads},
-		opWebchatClaudeSessionGet:     {Name: "webchat_claude_session_get", Cells: 2, Args: 2, Run: webchatClaudeSessionGet},
-		opWebchatClaudeOwnedByOther:   {Name: "webchat_claude_session_owned_by_other", Args: 3, Run: webchatOwnedByOther},
-		opWebchatClaudeSessionBind:    {Name: "webchat_claude_session_bind", Args: 3, Tx: true, Run: webchatClaudeSessionBind},
-		opWebchatLiveSet:              {Name: "webchat_live_set", Args: 4, Tx: true, Run: webchatLiveSet},
-		opWebchatLiveGet:              {Name: "webchat_live_get", Cells: 4, Args: 2, Run: webchatLiveGet},
-		opPersonaDeliveryClaim:        {Name: "server_session_persona_delivery_claim", Args: 1, Tx: true, Run: personaDeliveryClaim},
-		opPersonaDeliveryFinish:       {Name: "server_session_persona_delivery_finish", Args: 2, Tx: true, Run: personaDeliveryFinish},
-		opServerSessionListBySubject:  {Name: "server_session_list_by_subject", Cells: 1, Args: 2, Run: serverSessionListBySubject},
-		opServerSessionEraseSubject:   {Name: "server_session_erase_subject", Args: 2, Tx: true, Run: serverSessionEraseSubject},
-		opServerSessionErasureReceipt: {Name: "server_session_erasure_receipt", Args: 2, Run: serverSessionErasureReceipt},
-		opSessionIRAppend:             {Name: "session_ir_append", Args: 5, Tx: true, Run: sessionIRAppend},
-		opSessionIRPage:               {Name: "session_ir_page", Args: 4, Run: sessionIRPage},
-		opSessionIRHistorySave:        {Name: "session_ir_history_save", Args: 5, Tx: true, Run: sessionIRHistorySave},
-		opSessionIRHistoryLoad:        {Name: "session_ir_history_load", Args: 4, Run: sessionIRHistoryLoad},
-		opSessionHarnessGet:           {Name: "session_harness_get", Args: 3, Cells: 1, Run: sessionHarnessGet},
-		opSessionHarnessBind:          {Name: "session_harness_bind", Args: 4, Tx: true, Run: sessionHarnessBind},
-		opSessionHarnessCompareSwap:   {Name: "session_harness_compare_swap", Args: 5, Tx: true, Run: sessionHarnessCompareSwap},
+		opServerSessionCreate:               {Name: "server_session_create", Args: 3, Tx: true, Run: serverSessionCreate},
+		opServerSessionGet:                  {Name: "server_session_get", Cells: 10, Args: 1, Run: serverSessionGet},
+		opServerSessionSetOutcome:           {Name: "server_session_set_outcome", Args: 2, Tx: true, Run: serverSessionSetOutcome},
+		opServerSessionDelete:               {Name: "server_session_delete", Args: 1, Tx: true, Run: serverSessionDelete},
+		opServerSessionListRecent:           {Name: "server_session_list_recent", Cells: 10, Args: 1, Run: serverSessionListRecent},
+		opServerSessionSearchByTitle:        {Name: "server_session_search_by_title", Cells: 10, Args: 2, Run: serverSessionSearchByTitle},
+		opServerSessionCount:                {Name: "server_session_count", Args: 1, Run: serverSessionCount},
+		opServerSessionListExpired:          {Name: "server_session_list_expired", Cells: 1, Args: 2, Run: serverSessionListExpired},
+		opServerSessionDeleteExpired:        {Name: "server_session_delete_expired", Args: 1, Tx: true, Run: serverSessionDeleteExpired},
+		opPrimarySessionSave:                {Name: "primary_session_save", Args: 4, Tx: true, Run: primarySessionSave},
+		opPrimarySessionLoad:                {Name: "primary_session_load", Timeout: store.CanonicalHistoryTimeout, Args: 3, Tx: true, Run: primarySessionLoad},
+		opPrimarySessionDelete:              {Name: "primary_session_delete", Args: 3, Tx: true, Run: primarySessionDelete},
+		opPrimarySessionAllocRecent:         {Name: "primary_session_alloc_recent", Cells: 6, Args: 1, Run: primarySessionAllocRecent},
+		opPrimarySessionAllocSearch:         {Name: "primary_session_alloc_search", Cells: 6, Args: 2, Run: primarySessionAllocSearch},
+		opPrimarySessionGetLatest:           {Name: "primary_session_get_latest", Timeout: store.CanonicalHistoryTimeout, Cells: 6, Args: 1, Tx: true, Run: primarySessionGetLatest},
+		opSessionWritePathRecord:            {Name: "session_write_path_record", Args: 2, Tx: true, Run: sessionWritePathRecord},
+		opSessionStaleReads:                 {Name: "session_stale_reads", Cells: 1, Args: 3, Run: sessionStaleReads},
+		opWebchatClaudeSessionGet:           {Name: "webchat_claude_session_get", Cells: 2, Args: 2, Run: webchatClaudeSessionGet},
+		opWebchatClaudeOwnedByOther:         {Name: "webchat_claude_session_owned_by_other", Args: 3, Run: webchatOwnedByOther},
+		opWebchatClaudeSessionBind:          {Name: "webchat_claude_session_bind", Args: 3, Tx: true, Run: webchatClaudeSessionBind},
+		opWebchatLiveSet:                    {Name: "webchat_live_set", Args: 4, Tx: true, Run: webchatLiveSet},
+		opWebchatLiveGet:                    {Name: "webchat_live_get", Cells: 4, Args: 2, Run: webchatLiveGet},
+		opPersonaDeliveryClaim:              {Name: "server_session_persona_delivery_claim", Args: 1, Tx: true, Run: personaDeliveryClaim},
+		opPersonaDeliveryFinish:             {Name: "server_session_persona_delivery_finish", Args: 2, Tx: true, Run: personaDeliveryFinish},
+		opServerSessionListBySubject:        {Name: "server_session_list_by_subject", Cells: 1, Args: 2, Run: serverSessionListBySubject},
+		opServerSessionEraseSubject:         {Name: "server_session_erase_subject", Args: 2, Tx: true, Run: serverSessionEraseSubject},
+		opServerSessionErasureReceipt:       {Name: "server_session_erasure_receipt", Args: 2, Run: serverSessionErasureReceipt},
+		opSessionIRAppend:                   {Name: "session_ir_append", Args: 5, Tx: true, Run: sessionIRAppend},
+		opSessionIRAppendVerified:           {Name: "session_ir_append_verified", Args: 5, Tx: true, HostOnly: true, Run: sessionIRAppendVerified},
+		opSessionIRSearch:                   {Name: "session_ir_search", Timeout: store.CanonicalHistoryTimeout, Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionIRSearch},
+		opSessionNativeSourceAppend:         {Name: "session_native_source_append", Args: 5, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeSourceAppend},
+		opSessionNativeActiveOwned:          {Name: "session_native_active_owned", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeActiveOwned},
+		opSessionNativeHistory:              {Name: "session_native_history", Timeout: store.CanonicalHistoryTimeout, Args: 4, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeHistory},
+		opSessionNativeReservationFinish:    {Name: "session_native_reservation_finish", Timeout: store.CanonicalHistoryTimeout, Args: 2, Cells: 3, Tx: true, HostOnly: true, Run: sessionNativeReservationFinish},
+		opSessionNativeReserve:              {Name: "session_native_reserve", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeReserve},
+		opSessionNativeReservationReconcile: {Name: "session_native_reservation_reconcile", Timeout: store.CanonicalHistoryTimeout, Args: 2, Cells: 2, Tx: true, HostOnly: true, Run: sessionNativeReservationReconcile},
+		opSessionNativeEpoch:                {Name: "session_native_epoch", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeEpoch},
+		opSessionNativeReservationLookup:    {Name: "session_native_reservation_lookup", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeReservationLookup},
+		opSessionNativeOwnerClaim:           {Name: "session_native_owner_claim", Args: 2, Tx: true, HostOnly: true, Run: sessionNativeOwnerClaim},
+		opSessionNativeReconcile:            {Name: "session_native_reconcile", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeReconcile},
+		opSessionIRHistoryImport:            {Name: "session_ir_history_import", Timeout: store.CanonicalHistoryTimeout, Cells: 1, Args: 9, Tx: true, HostOnly: true, Run: sessionIRHistoryImport},
+		opServerSessionPrimaryGet:           {Name: "server_session_primary_get", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionPrimaryGet},
+		opServerSessionPrimarySet:           {Name: "server_session_primary_set", Args: 3, Tx: true, HostOnly: true, Run: sessionPrimarySet},
+		opSessionIRPage:                     {Name: "session_ir_page", Args: 4, Run: sessionIRPage},
+		opSessionIRHistorySave:              {Name: "session_ir_history_save", Args: 5, Tx: true, Run: sessionIRHistorySave},
+		opSessionIRHistoryLoad:              {Name: "session_ir_history_load", Timeout: store.CanonicalHistoryTimeout, Tx: true, Args: 4, Run: sessionIRHistoryLoad},
+		opSessionIRRunningHistoryLoad:       {Name: "session_ir_running_history_load", Timeout: store.CanonicalHistoryTimeout, Tx: true, Args: 3, Run: sessionIRRunningHistoryLoad},
+		opSessionHarnessGet:                 {Name: "session_harness_get", Args: 3, Cells: 1, Run: sessionHarnessGet},
+		opSessionHarnessBind:                {Name: "session_harness_bind", Args: 4, Tx: true, Run: sessionHarnessBind},
+		opSessionHarnessCompareSwap:         {Name: "session_harness_compare_swap", Args: 5, Tx: true, Run: sessionHarnessCompareSwap},
 	},
 }
 
@@ -988,19 +1015,117 @@ const sessionIRInsertSQL = `INSERT INTO session_ir_events
  (session_id, sequence, event_id, turn_id, actor, payload)
  VALUES ($1, (SELECT coalesce(max(sequence), 0) + 1 FROM session_ir_events WHERE session_id = $1),
  $2, $3, $4, $5) RETURNING sequence`
-const sessionIRPageSQL = `SELECT sequence, event_id, turn_id, actor, payload
- FROM session_ir_events WHERE session_id = $1 AND sequence > $2
- AND EXISTS(SELECT 1 FROM server_sessions WHERE id=$1 AND principal=$4)
- ORDER BY sequence LIMIT $3`
 
+// Bound the store reply before the presentation reducer applies its smaller
+// page budget. Continuation always uses the last emitted immutable sequence.
+const sessionIRPageSQL = `WITH candidates AS MATERIALIZED (
+ SELECT sequence,event_id,turn_id,actor,payload FROM session_ir_events
+ WHERE session_id=$1 AND sequence>$2
+ AND EXISTS(SELECT 1 FROM server_sessions WHERE id=$1 AND principal=$4)
+ ORDER BY session_ir_events.sequence LIMIT $3
+), budgeted AS (
+ SELECT *,sum(octet_length(turn_id)+octet_length(actor)+octet_length(event_id)+octet_length(payload)+64)
+ OVER (ORDER BY candidates.sequence) AS wire_bytes FROM candidates
+) SELECT sequence,event_id,turn_id,actor,payload FROM budgeted
+ WHERE wire_bytes<=8388608 ORDER BY budgeted.sequence`
+
+// The ordinary append cannot carry verification authority. Only the private
+// host operation may persist a proof, and every proof binds the same immutable
+// session/turn/actor as its terminal envelope. Schema validity alone never
+// establishes actual execution custody or a grade.
 func sessionIRAppend(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	return sessionIRAppendInternal(ctx, q, f, false)
+}
+func sessionIRAppendVerified(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	return sessionIRAppendInternal(ctx, q, f, true)
+}
+func sessionIRProofBindings(encoded []byte, session, turn, actor string, allowProof bool) bool {
+	var event struct {
+		Kind    string          `json:"kind"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if json.Unmarshal(encoded, &event) != nil {
+		return false
+	}
+	if event.Kind == "child_execution" {
+		var child canonical.ChildExecutionPayload
+		if !canonical.Decode(event.Payload, &child) {
+			return false
+		}
+		if child.LearningBinding == nil {
+			return !allowProof
+		}
+		return allowProof && child.Turn == turn && child.Session != session && canonical.ValidDelegateLearningBinding(child.LearningBinding) && validDelegateChildIdentity(session, child)
+	}
+	if event.Kind != "execution" {
+		return !allowProof
+	}
+	var payload canonical.ExecutionPayload
+	if !canonical.Decode(event.Payload, &payload) {
+		return false
+	}
+	if len(payload.VerificationProofs) == 0 {
+		return !allowProof
+	}
+	if !allowProof || payload.Status != "completed" || len(payload.VerificationProofs) > 8 {
+		return false
+	}
+	// The canonical event validator has admitted every exact proof schema.
+	for _, proof := range payload.VerificationProofs {
+		if proof.Session != session || proof.Turn != turn || proof.Actor != actor {
+			return false
+		}
+	}
+	return true
+}
+func sessionIRAppendInternal(ctx context.Context, q store.Queryer, f []string, allowProof bool) (uint32, []string, error) {
+	return sessionIRAppendAuthorized(ctx, q, f, allowProof, false, false)
+}
+func sessionIRAppendAuthorized(ctx context.Context, q store.Queryer, f []string, allowProof, allowInterruption, allowNativeOwner bool) (uint32, []string, error) {
+	return sessionIRAppendImportAuthorized(ctx, q, f, allowProof, allowInterruption, allowNativeOwner, false)
+}
+func sessionIRAppendImportAuthorized(ctx context.Context, q store.Queryer, f []string, allowProof, allowInterruption, allowNativeOwner, allowImport bool) (uint32, []string, error) {
+	if len(f) != 5 {
+		return store.StatusInvalid, nil, nil
+	}
 	for _, identity := range f[:4] {
 		if identity == "" || len(identity) > 1024 {
 			return store.StatusInvalid, nil, nil
 		}
 	}
-	if !validSessionIREvent([]byte(f[4])) {
+	if !validSessionIREvent([]byte(f[4])) || !sessionIRProofBindings([]byte(f[4]), f[0], f[2], f[3], allowProof) {
 		return store.StatusInvalid, nil, nil
+	}
+	var eventKind struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal([]byte(f[4]), &eventKind) != nil {
+		return store.StatusInvalid, nil, nil
+	}
+	var top map[string]json.RawMessage
+	if json.Unmarshal([]byte(f[4]), &top) != nil {
+		return store.StatusInvalid, nil, nil
+	}
+	if _, present := top["native_owner"]; present && !allowNativeOwner {
+		return store.StatusInvalid, nil, nil
+	}
+	if _, present := top["partial"]; present && !allowNativeOwner {
+		return store.StatusInvalid, nil, nil
+	}
+	if eventKind.Kind == "tool_interruption" && !allowInterruption {
+		return store.StatusInvalid, nil, nil
+	}
+	if eventKind.Kind == "history" && !allowImport {
+		var e struct {
+			Kind    string                 `json:"kind"`
+			Payload canonical.HistoryEvent `json:"payload"`
+		}
+		if json.Unmarshal([]byte(f[4]), &e) != nil {
+			return store.StatusInvalid, nil, nil
+		}
+		if e.Payload.Phase == "import_report" || e.Payload.Phase == "archive" || e.Payload.Phase == "message_fragment" {
+			return store.StatusInvalid, nil, nil
+		}
 	}
 	var locked string
 	if err := q.QueryRow(ctx, sessionIRLockSQL, f[0]).Scan(&locked); err != nil {
@@ -1024,8 +1149,18 @@ func sessionIRAppend(ctx context.Context, q store.Queryer, f []string) (uint32, 
 	if !store.IsNoRows(err) {
 		return 0, nil, err
 	}
+	fenced, fenceErr := nativeRecoveryFenced(ctx, q, f[0], f[2])
+	if fenceErr != nil {
+		return 0, nil, fenceErr
+	}
+	if fenced {
+		return store.StatusInvalid, nil, nil
+	}
 	if err = q.QueryRow(ctx, sessionIRInsertSQL, f[0], f[1], f[2], f[3], f[4]).Scan(&sequence); err != nil {
 		return 0, nil, err
+	}
+	if err = enqueueLearningProjection(ctx, q, f, sequence); err != nil {
+		return store.StatusFailed, nil, err
 	}
 	return store.StatusOK, []string{strconv.FormatInt(sequence, 10)}, nil
 }

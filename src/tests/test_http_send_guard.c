@@ -18,6 +18,7 @@ typedef struct
    atomic_int released;
    int guarded, refuse, acquired, release_count, write_status, delay_acquire;
    size_t received;
+   int binary_response, chunked_response;
    const char *nested_url;
 } peer_t;
 
@@ -50,8 +51,19 @@ static void *serve(void *opaque)
       for (int i = 0; p->guarded && !atomic_load(&p->released) && i < 5000; ++i)
          usleep(1000);
       assert(!p->guarded || atomic_load(&p->released));
-      const char response[] = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
-      assert(send(fd, response, sizeof(response) - 1, 0) == sizeof(response) - 1);
+      const char *response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+      size_t response_length = strlen(response);
+      if (p->binary_response)
+      {
+         static const char fixed[] =
+             "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n{}\0{}";
+         static const char chunked[] =
+             "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+             "5\r\n{}\0{}\r\n0\r\n\r\n";
+         response = p->chunked_response ? chunked : fixed;
+         response_length = p->chunked_response ? sizeof(chunked) - 1 : sizeof(fixed) - 1;
+      }
+      assert(send(fd, response, response_length, 0) == (ssize_t)response_length);
    }
    close(fd);
    return NULL;
@@ -149,6 +161,29 @@ int main(void)
             finish(&nested);
             assert(nested.received > 0);
          }
+      }
+   /* Buffered JSON cannot represent an embedded NUL. Exact-length streaming
+    * still delivers all bytes, including binary provider event streams. */
+   for (int stream = 0; stream < 2; ++stream)
+      for (int chunked = 0; chunked < 2; ++chunked)
+      {
+         peer_t provider = {.guarded = 1, .binary_response = 1, .chunked_response = chunked};
+         start(&provider);
+         agent_http_send_guard_t guard = {
+             .context = &provider, .acquire = acquire, .release = release};
+         char *response = NULL;
+         size_t received = 0;
+         int status =
+             stream ? agent_http_post_stream_guarded_bytes(provider.url, NULL, "{}", 2, consume,
+                                                           &received, 3000, NULL, &guard)
+                    : agent_http_post_guarded_bytes(provider.url, NULL, "{}", 2, &response, 3000,
+                                                    NULL, &guard);
+         assert(status == (stream ? 200 : -1));
+         assert(stream ? received == 5 : response == NULL);
+         assert(provider.acquired == 1 && provider.release_count == 1 &&
+                provider.write_status == 0);
+         free(response);
+         finish(&provider);
       }
    agent_http_cleanup();
    puts("http_send_guard: buffered/streaming refusal, release-before-response and nested calls "

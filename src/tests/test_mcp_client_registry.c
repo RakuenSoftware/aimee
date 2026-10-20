@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include "cJSON.h"
+#include "session_search_tool.h"
 #include "config.h"
 #include "config_client.h"
 #include "db1_client/mcp_osv_cache.h"
@@ -13,6 +14,53 @@
 #include "aimee/protocols/mcp/mcp_tools.h"
 #include "agent_code_capabilities.h"
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
+
+static int g_session_search_calls;
+char *db1_session_ir_search(const char *principal, const char *wire)
+{
+   cJSON *request = cJSON_Parse(wire);
+   assert(request && principal && principal[0]);
+   int count = 0;
+   const cJSON *field;
+   cJSON_ArrayForEach(field, request) if (field->string && !strcmp(field->string, "_principal"))
+   {
+      assert(cJSON_IsString(field) && !strcmp(field->valuestring, principal));
+      count++;
+   }
+   assert(count == 1);
+   assert(!strcmp(principal, "authenticated-actor") || !strcmp(principal, "uid:42"));
+   cJSON_Delete(request);
+   g_session_search_calls++;
+   return strdup("{\"mode\":\"browse\",\"count\":0,\"sessions\":[]}");
+}
+static void test_session_search_uses_authenticated_actor(void)
+{
+   cJSON *args =
+       cJSON_Parse("{\"_principal\":\"foreign\",\"_principal\":\"another-foreign\",\"limit\":3}");
+   char *before = cJSON_PrintUnformatted(args);
+   cJSON *result = session_search_tool_result_for_principal(args, "authenticated-actor");
+   assert(result && cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(result, "sessions")));
+   char *after = cJSON_PrintUnformatted(args);
+   assert(g_session_search_calls == 1 && !strcmp(after, before));
+   free(after);
+   cJSON_Delete(result);
+   result = session_search_tool_result_for_uid(args, 42);
+   assert(result && g_session_search_calls == 2);
+   cJSON_Delete(result);
+   result = session_search_tool_result_for_principal(args, "");
+   assert(result && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(result, "error")) &&
+          g_session_search_calls == 2);
+   cJSON_Delete(result);
+   free(before);
+   cJSON_Delete(args);
+   cJSON *tool = session_search_mcp_tool();
+   cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
+   cJSON *properties = cJSON_GetObjectItemCaseSensitive(schema, "properties");
+   cJSON *view = cJSON_GetObjectItemCaseSensitive(properties, "view");
+   assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(view, "enum")));
+   assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(properties, "source_revision")));
+   cJSON_Delete(tool);
+}
 
 static const char *g_http_response;
 static int g_http_status = -1;
@@ -628,7 +676,10 @@ static void test_osv_offline_cache_miss_allows(void)
    "search_docs {cwd,max_results,project,query,scope} req:query\n"                                 \
    "search_memory {cwd,filter,project,query,scope,store,workspace} req:query\n"                    \
    "send_message {target,text} req:target,text\n"                                                  \
-   "session {around_message_id,chain_id,command,include_sources,limit,query,session_id,window} "   \
+   "session "                                                                                      \
+   "{around_message_id,chain_id,command,include_sources,limit,offset,query,session_id,source_"     \
+   "revision,"                                                                                     \
+   "view,window} "                                                                                 \
    "req:command\n"                                                                                 \
    "skill_manage "                                                                                 \
    "{absorbed_into,action,content,cwd,file_path,name,new_string,old_string,replace_all} "          \
@@ -1318,6 +1369,83 @@ static void test_flat_list_keeps_family_members(void)
    printf("  PASS: flat_list_keeps_family_members\n");
 }
 
+static cJSON *catalog_entry(cJSON *list, const char *name)
+{
+   cJSON *item;
+   cJSON_ArrayForEach(item, list)
+   {
+      const char *entry_name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "name"));
+      if (entry_name && !strcmp(entry_name, name))
+         return item;
+   }
+   return NULL;
+}
+
+static void test_native_git_advert_projects_canonical_catalog(void)
+{
+   cJSON *flat = mcp_build_tools_list_flat();
+   cJSON *original = cJSON_Duplicate(flat, 1);
+   cJSON *git = catalog_entry(flat, "git");
+   assert(git && !catalog_entry(flat, "git_verify"));
+   cJSON *advert = mcp_tool_advert_from_list(flat, "git_verify");
+   assert(advert && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(advert, "name")),
+                            "git_verify"));
+   const char *description =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(advert, "description"));
+   assert(description && strstr(description, "'verify'") && strstr(description, "fixed"));
+   cJSON *schema = cJSON_GetObjectItemCaseSensitive(advert, "inputSchema");
+   cJSON *properties = cJSON_GetObjectItemCaseSensitive(schema, "properties");
+   assert(!cJSON_GetObjectItemCaseSensitive(properties, "command"));
+   assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(properties, "path")));
+   cJSON *expected = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(git, "inputSchema"), 1);
+   cJSON_DeleteItemFromObjectCaseSensitive(cJSON_GetObjectItemCaseSensitive(expected, "properties"),
+                                           "command");
+   cJSON *required = cJSON_GetObjectItemCaseSensitive(expected, "required");
+   for (int i = cJSON_GetArraySize(required) - 1; i >= 0; --i)
+      if (!strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(required, i)), "command"))
+         cJSON_DeleteItemFromArray(required, i);
+   assert(cJSON_Compare(expected, schema, 1));
+   assert(cJSON_Compare(flat, original, 1)); /* process-lifetime cache is untouched */
+   cJSON_Delete(expected);
+   cJSON_Delete(advert);
+
+   cJSON *ordinary = catalog_entry(flat, "ast_grep_search");
+   advert = mcp_tool_advert_from_list(flat, "ast_grep_search");
+   assert(ordinary && advert && advert != ordinary && cJSON_Compare(ordinary, advert, 1));
+   cJSON_Delete(advert);
+   assert(!mcp_tool_advert_from_list(flat, "git_not_declared"));
+   assert(!mcp_tool_advert_from_list(flat, "git_"));
+   assert(!mcp_tool_advert_from_list(flat, "not_advertised"));
+
+   /* All non-discriminator schema requirements and extensions survive. */
+   cJSON *git_schema = cJSON_GetObjectItemCaseSensitive(git, "inputSchema");
+   cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(git_schema, "required"),
+                        cJSON_CreateString("path"));
+   cJSON_AddBoolToObject(git_schema, "additionalProperties", 0);
+   advert = mcp_tool_advert_from_list(flat, "git_verify");
+   schema = cJSON_GetObjectItemCaseSensitive(advert, "inputSchema");
+   required = cJSON_GetObjectItemCaseSensitive(schema, "required");
+   assert(cJSON_GetArraySize(required) == 1 &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(required, 0)), "path"));
+   assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(schema, "additionalProperties")));
+   cJSON_Delete(advert);
+   cJSON *command = cJSON_GetObjectItemCaseSensitive(
+       cJSON_GetObjectItemCaseSensitive(git_schema, "properties"), "command");
+   cJSON *values = cJSON_GetObjectItemCaseSensitive(command, "enum");
+   for (int i = cJSON_GetArraySize(values) - 1; i >= 0; --i)
+      if (!strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(values, i)), "verify"))
+         cJSON_DeleteItemFromArray(values, i);
+   assert(!mcp_tool_advert_from_list(flat, "git_verify"));
+   cJSON_DeleteItemFromObjectCaseSensitive(command, "enum");
+   assert(!mcp_tool_advert_from_list(flat, "git_status"));
+   cJSON *empty = cJSON_CreateArray();
+   assert(!mcp_tool_advert_from_list(empty, "git_verify"));
+   cJSON_Delete(empty);
+   cJSON_Delete(original);
+   cJSON_Delete(flat);
+   puts("  PASS: native_git_advert_projects_canonical_catalog");
+}
+
 /* Trimming prose must cost tokens and nothing else.
  *
  * tools/list is re-sent as context on every turn, and 59% of its 20 KB is guidance
@@ -1412,6 +1540,8 @@ int main(void)
    test_delegates_disabled_withholds_delegate_tools();
    test_agent_code_intelligence_contracts();
    test_flat_list_keeps_family_members();
+   test_native_git_advert_projects_canonical_catalog();
+   test_session_search_uses_authenticated_actor();
    test_boot_and_lazy_tools();
    test_install_target_filtering();
    test_namespaced_tools_and_dispatch();

@@ -9,13 +9,14 @@
 #include "cJSON.h"
 #include <aimee/ir/session_event.h>
 #include "server_session_control.h"
+#include "server_session_capture.h"
 #include "request_context.h"
 #include <pthread.h>
 
 #define CLAUDE_LINE_MAX (256 * 1024)
 
 /* Context for async compute work */
-typedef struct
+typedef struct compute_ctx
 {
    server_ctx_t *server;
    int conn_fd;
@@ -43,10 +44,19 @@ typedef struct
    attested_transport_t attested_transport;
    char vault_principal[VAULT_PRINCIPAL_MAX];
    request_context_snapshot_t request_context;
+   /* Owned directory capability captured from the producer's actual workspace,
+    * never from request-body path claims. Released after worker callbacks join. */
+   struct workspace_turn_mirror_lease *source_mirror;
    cJSON *req; /* owned by this context */
-   int ir_enabled, ir_delivery, ir_failed, ir_completed;
-   unsigned long long ir_counter;
-   unsigned long long ir_model_events;
+   int ir_enabled, ir_delivery, ir_failed, ir_completed, ir_native_owned;
+   /* Set only after the canonical compaction owner commits its checkpoint. */
+   int ir_history_checkpointed;
+   /* Producer-only compatibility rendering of the committed canonical source. */
+   int (*ir_legacy_emit)(struct compute_ctx *context, const char *event, const char *key,
+                         const char *value);
+   cJSON *ir_legacy_blocks;
+   size_t ir_legacy_bytes;
+   server_session_capture_t *ir_capture, *ir_previous_capture;
    char ir_session[128], ir_turn[128];
    char ir_sequence[32];
    server_control_scope_t *ir_controls, *ir_previous_controls;
@@ -105,8 +115,13 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
  * (enforce-delegate-only). Call once at server startup. */
 void server_install_gateway_delegate_policy(void);
 void compute_respond(compute_ctx_t *cctx, cJSON *resp);
+/* Failed continuation admission is an execution diagnostic, never model history. */
+int server_chat_ir_replace_steer(cJSON *request, const char *message);
+int server_chat_ir_reject_steer(const char *session, const char *actor, const char *message);
 int server_chat_ir_begin(compute_ctx_t *cctx, const char *session, const char *message);
+int server_chat_ir_progress(compute_ctx_t *cctx);
 int server_chat_ir_finish(compute_ctx_t *cctx, const char *error);
+void server_chat_ir_close(compute_ctx_t *cctx);
 void compute_error(compute_ctx_t *cctx, const char *message);
 void compute_ok(compute_ctx_t *cctx);
 void compute_ctx_release_budget(compute_ctx_t *cctx);

@@ -26,6 +26,13 @@ typedef struct
 aimee_frontend_state_scope_t aimee_frontend_bind_state_guard(aimee_frontend_state_guard_fn guard,
                                                              void *context);
 
+/* An authenticated host execution may replace an SDK's proposed request with
+ * its owned canonical context at ENTRY only, before replay-proof restoration.
+ * This callback never runs at egress, so approved downstream transforms remain
+ * effective. Scope/context are borrowed until explicitly restored. */
+aimee_frontend_state_scope_t aimee_frontend_bind_request_owner(aimee_frontend_state_guard_fn owner,
+                                                               void *context);
+
 /* Recheck after host history restoration/transforms, immediately before the
  * actual provider renderer. Failure releases/zeros the owned request. */
 int aimee_frontend_guard_state(aimee_request_t *request, char *error, size_t capacity);
@@ -75,6 +82,18 @@ int openai_family_tool_choice_parse(const struct cJSON *tool_choice,
  * NULL on malformed/mixed shapes. Lifted legacy system blocks are excluded:
  * the runtime supplies its current authoritative system separately. */
 struct cJSON *aimee_frontend_history_import(const struct cJSON *messages, aimee_wire_t legacy_wire);
+/* Caller owns history and report. A NULL history with a report explicitly
+ * refuses model admission; tmux text is archival only, never inferred roles. */
+struct cJSON *aimee_frontend_history_import_report(const char *raw, const char *provider,
+                                                   const char *source_session,
+                                                   const char *source_agent,
+                                                   struct cJSON **out_report);
+
+/* External Claude Code JSONL envelopes, already parsed into an array. Returns
+ * canonical observations only: never host history, controls, effects or proofs.
+ * Entire input must be supported, unique-keyed and bound to session_id. */
+struct cJSON *aimee_frontend_claude_transcript_import(const struct cJSON *records,
+                                                      const char *session_id);
 
 /* Render an IR response as a buffered client response, built PURELY from the IR
  * (ruling Q3: semantic correctness, NOT provider byte-parity). Returns a new cJSON
@@ -93,6 +112,11 @@ struct cJSON *responses_frontend_render(const aimee_response_t *resp);
 int anthropic_ir_parse_tool(const struct cJSON *native, aimee_tool_t *tool);
 int openai_ir_parse_tool(const struct cJSON *native, aimee_tool_t *tool, int nested);
 struct cJSON *openai_ir_render_tool(const aimee_tool_t *tool, int responses_shape);
+
+/* Shared OpenAI-family cache controls, parsed once into owned canonical fields.
+ * Null uses the provider default; malformed types/ambiguous options refuse. */
+int openai_family_prompt_cache_parse(const struct cJSON *native, aimee_request_t *out, char *error,
+                                     size_t capacity);
 
 /* Native client output boundaries. The response is borrowed canonical IR;
  * rendering never mutates or consumes it. Responses tail excludes the caller's

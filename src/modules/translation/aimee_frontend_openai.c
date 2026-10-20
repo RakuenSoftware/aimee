@@ -16,6 +16,34 @@ static char *dupstr(const char *s)
    return s ? strdup(s) : NULL;
 }
 
+int openai_family_prompt_cache_parse(const cJSON *native, aimee_request_t *out, char *error,
+                                     size_t capacity)
+{
+   if (!out || !cJSON_IsObject(native) || !aimee_ir_json_unique(native))
+      return -1;
+   static const char *const names[] = {"prompt_cache_key", "prompt_cache_retention"};
+   char **values[] = {&out->prompt_cache_key, &out->prompt_cache_retention};
+   for (int i = 0; i < 2; i++)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(native, names[i]);
+      if (!value || cJSON_IsNull(value))
+         continue;
+      if (!cJSON_IsString(value) || !(*values[i] = strdup(value->valuestring)))
+         goto fail;
+   }
+   const cJSON *options = cJSON_GetObjectItemCaseSensitive(native, "prompt_cache_options");
+   if (options && !cJSON_IsNull(options))
+   {
+      if (!cJSON_IsObject(options) || !(out->prompt_cache_options = cJSON_Duplicate(options, 1)))
+         goto fail;
+   }
+   return 0;
+fail:
+   if (error && capacity)
+      snprintf(error, capacity, "invalid OpenAI prompt cache configuration");
+   return -1;
+}
+
 static const char *ostr(const cJSON *o, const char *k)
 {
    const cJSON *it = cJSON_GetObjectItemCaseSensitive((cJSON *)o, k);
@@ -415,6 +443,11 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
       out->top_k = top_k->valueint;
       out->has_top_k = 1;
    }
+   if (openai_family_prompt_cache_parse(req, out, err, errn))
+   {
+      aimee_request_free(out);
+      return -1;
+   }
    const cJSON *meta = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "metadata");
    if (meta && !cJSON_IsNull(meta))
       out->metadata = cJSON_Duplicate(meta, 1);
@@ -526,8 +559,8 @@ int openai_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, siz
                const cJSON *fn = cJSON_GetObjectItemCaseSensitive((cJSON *)call, "function");
                b->tool_name = dupstr(fn ? ostr(fn, "name") : NULL);
                const char *args = fn ? ostr(fn, "arguments") : NULL;
-               b->tool_input =
-                   args ? cJSON_ParseWithOpts(args, NULL, 1) : NULL; /* derived-once parse */
+               b->tool_input = args ? aimee_ir_json_parse_frame(args, strlen(args))
+                                    : NULL; /* derived-once parse */
                if (!cJSON_IsObject(b->tool_input))
                {
                   if (err && errn)
@@ -621,13 +654,8 @@ int aimee_frontend_parse_text_completion(const char *body, size_t length, aimee_
    if (!out)
       return -1;
    memset(out, 0, sizeof *out);
-   const char *end = NULL;
-   cJSON *root = body && length && length != SIZE_MAX
-                     ? cJSON_ParseWithLengthOpts(body, length, &end, 0)
-                     : NULL;
-   if (root && end)
-      while (end < body + length && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n'))
-         end++;
+   cJSON *root =
+       body && length && length != SIZE_MAX ? aimee_ir_json_parse_frame(body, length) : NULL;
    const char *prompt = ostr(root, "prompt");
    const cJSON *model = cJSON_GetObjectItemCaseSensitive(root, "model");
    const cJSON *stream = cJSON_GetObjectItemCaseSensitive(root, "stream");
@@ -648,8 +676,8 @@ int aimee_frontend_parse_text_completion(const char *body, size_t length, aimee_
       top_p = NULL;
    if (cJSON_IsNull(top_k))
       top_k = NULL;
-   if (!cJSON_IsObject(root) || end != body + length || !prompt || !prompt[0] ||
-       (model && !cJSON_IsString(model)) || (stream && !cJSON_IsBool(stream)) ||
+   if (!cJSON_IsObject(root) || !prompt || !prompt[0] || (model && !cJSON_IsString(model)) ||
+       (stream && !cJSON_IsBool(stream)) ||
        (maximum &&
         (!cJSON_IsNumber(maximum) || !isfinite(maximum->valuedouble) || maximum->valuedouble < 1 ||
          maximum->valuedouble > INT_MAX || maximum->valuedouble != floor(maximum->valuedouble))) ||

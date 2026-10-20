@@ -63,11 +63,24 @@ func ValidSessionEvent(encoded []byte) bool {
 		RequestID   string          `json:"request_id,omitempty"`
 		ControlKind string          `json:"control_kind,omitempty"`
 		Payload     json.RawMessage `json:"payload"`
+		NativeOwner json.RawMessage `json:"native_owner,omitempty"`
+		Partial     json.RawMessage `json:"partial,omitempty"`
 	}
 	if !Decode(encoded, &e) {
 		return false
 	}
+	if e.NativeOwner != nil && (e.Kind != "message" || !ValidNativeExecutionOwner(e.NativeOwner)) {
+		return false
+	}
+	if e.Partial != nil {
+		var partial bool
+		if e.NativeOwner == nil || !Decode(e.Partial, &partial) || !partial {
+			return false
+		}
+	}
 	switch e.Kind {
+	case "tool_interruption":
+		return ValidToolInterruption(e.Payload)
 	case "history":
 		return ValidHistoryEvent(e.Payload)
 	case "message":
@@ -76,6 +89,9 @@ func ValidSessionEvent(encoded []byte) bool {
 			Blocks []json.RawMessage `json:"blocks"`
 		}
 		if e.MessageID == "" || !Decode(e.Payload, &m) || m.Role == "" || m.Blocks == nil || len(m.Blocks) > 4096 {
+			return false
+		}
+		if e.NativeOwner != nil && ((m.Role != "assistant" && m.Role != "tool") || (e.Role != "" && e.Role != m.Role) || (e.Partial != nil && (m.Role != "assistant" || len(m.Blocks) == 0))) {
 			return false
 		}
 		for _, b := range m.Blocks {
@@ -216,33 +232,50 @@ func ValidSessionEvent(encoded []byte) bool {
 			strings.Trim(value[4:68]+value[69:133]+value[134:], "0123456789abcdef") == ""
 	case "projection":
 		var projection struct {
-			Model     string `json:"model"`
-			Boundary  string `json:"boundary"`
-			Reasoning *int64 `json:"omitted_reasoning_blocks"`
-			Opaque    *int64 `json:"omitted_opaque_state_blocks"`
+			Model         string `json:"model"`
+			Boundary      string `json:"boundary"`
+			Reasoning     *int64 `json:"omitted_reasoning_blocks"`
+			Opaque        *int64 `json:"omitted_opaque_state_blocks"`
+			CacheControls int64  `json:"omitted_cache_controls,omitempty"`
 		}
 		return Decode(e.Payload, &projection) && projection.Model != "" &&
 			(projection.Boundary == "request" || projection.Boundary == "response") &&
 			projection.Reasoning != nil && projection.Opaque != nil &&
-			*projection.Reasoning > 0 && *projection.Reasoning <= 9007199254740991 &&
+			*projection.Reasoning >= 0 && *projection.Reasoning <= 9007199254740991 &&
+			projection.CacheControls >= 0 && projection.CacheControls <= 9007199254740991 &&
+			(*projection.Reasoning > 0 || projection.CacheControls > 0) &&
 			*projection.Opaque >= 0 && *projection.Opaque <= *projection.Reasoning
 	case "child_execution":
-		var child struct {
-			Session string `json:"session_id"`
-			Turn    string `json:"turn_id"`
-			Role    string `json:"role"`
-			Status  string `json:"status"`
+		var child ChildExecutionPayload
+		var fields map[string]json.RawMessage
+		if !Decode(e.Payload, &fields) {
+			return false
 		}
-		return Decode(e.Payload, &child) && child.Session != "" && len(child.Session) <= 127 &&
+		if binding, present := fields["learning_binding"]; present && bytes.Equal(bytes.TrimSpace(binding), []byte("null")) {
+			return false
+		}
+		return Decode(e.Payload, &child) && ValidDelegateLearningBinding(child.LearningBinding) && child.Session != "" && len(child.Session) <= 127 &&
 			child.Turn != "" && len(child.Turn) <= 127 && child.Role != "" && len(child.Role) <= 127 &&
 			(child.Status == "running" || child.Status == "completed" || child.Status == "failed" || child.Status == "cancelled")
 	case "execution":
 		var x struct {
-			Status string `json:"status"`
-			Error  string `json:"error,omitempty"`
+			Status             string          `json:"status"`
+			Error              string          `json:"error,omitempty"`
+			VerificationProofs json.RawMessage `json:"verification_proofs,omitempty"`
 		}
 		if !Decode(e.Payload, &x) {
 			return false
+		}
+		if x.VerificationProofs != nil {
+			var proofs []json.RawMessage
+			if x.Status != "completed" || !Decode(x.VerificationProofs, &proofs) || len(proofs) < 1 || len(proofs) > 8 {
+				return false
+			}
+			for _, proof := range proofs {
+				if !ValidVerificationProof(proof) {
+					return false
+				}
+			}
 		}
 		return x.Status == "running" || x.Status == "completed" || x.Status == "failed" || x.Status == "cancelled"
 	default:
@@ -302,12 +335,83 @@ func ValidBlock(encoded []byte) bool {
 	}
 }
 
+// HistoryImportReport is host migration metadata, never model content/effect evidence.
+type HistoryImportReport struct {
+	Version                 int    `json:"version"`
+	SourceFormat            string `json:"source_format"`
+	Outcome                 string `json:"outcome"`
+	SourceSHA256            string `json:"source_sha256"`
+	SourceSession           string `json:"source_session"`
+	SourceAgent             string `json:"source_agent"`
+	SourceProvider          string `json:"source_provider"`
+	SourceMessages          int    `json:"source_messages"`
+	ImportedMessages        int    `json:"imported_messages"`
+	RemovedThinkingBindings int    `json:"removed_thinking_bindings"`
+	ToolStructure           string `json:"tool_structure"`
+	ArchiveChunks           int    `json:"archive_chunks"`
+}
+
+func ValidHistoryImportReport(r *HistoryImportReport) bool {
+	if r == nil || r.Version != 1 || len(r.SourceSHA256) != 64 || strings.Trim(r.SourceSHA256, "0123456789abcdef") != "" || r.SourceSession == "" || len(r.SourceSession) >= 128 || len(r.SourceAgent) >= 64 || len(r.SourceProvider) >= 64 || r.SourceMessages < 0 || r.SourceMessages > 16777216 || r.ImportedMessages < 0 || r.ImportedMessages > 16777216 || r.RemovedThinkingBindings < 0 || r.RemovedThinkingBindings > 16777216 || r.ArchiveChunks < 0 || r.ArchiveChunks > 4096 {
+		return false
+	}
+	for _, v := range []string{r.SourceSession, r.SourceAgent, r.SourceProvider} {
+		if strings.ContainsRune(v, 0) || !utf8.ValidString(v) {
+			return false
+		}
+	}
+	switch r.SourceFormat {
+	case "canonical", "anthropic", "openai_chat", "responses", "tmux_text", "unknown":
+	default:
+		return false
+	}
+	switch r.Outcome {
+	case "exact":
+		return r.SourceFormat == "canonical" && r.SourceMessages == r.ImportedMessages && r.RemovedThinkingBindings == 0 && r.ToolStructure == "preserved" && r.ArchiveChunks == 0
+	case "normalized":
+		return r.SourceFormat != "tmux_text" && r.SourceFormat != "unknown" && r.ToolStructure == "preserved" && r.ArchiveChunks == 0
+	case "archived":
+		return r.SourceFormat == "tmux_text" && r.SourceMessages == 0 && r.ImportedMessages == 0 && r.RemovedThinkingBindings == 0 && r.ToolStructure == "unrecoverable" && r.ArchiveChunks > 0
+	case "refused":
+		return r.ImportedMessages == 0 && r.ToolStructure == "unrecoverable" && r.ArchiveChunks == 0
+	}
+	return false
+}
+
+func DecodeHistoryImportReport(raw json.RawMessage, r *HistoryImportReport) bool {
+	var fields map[string]json.RawMessage
+	if !Decode(raw, &fields) || len(fields) != 12 {
+		return false
+	}
+	for _, v := range fields {
+		if bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+			return false
+		}
+	}
+	return Decode(raw, r) && ValidHistoryImportReport(r)
+}
+
+type HistoryMessageFragment struct {
+	MessageIndex  int    `json:"message_index"`
+	PartIndex     int    `json:"part_index"`
+	PartCount     int    `json:"part_count"`
+	MessageSHA256 string `json:"message_sha256"`
+	Text          string `json:"text"`
+}
+
+func ValidHistoryMessageFragment(f *HistoryMessageFragment) bool {
+	return f != nil && f.MessageIndex >= 0 && f.MessageIndex < 16777216 && f.PartIndex >= 0 && f.PartIndex < 4096 && f.PartCount > 0 && f.PartCount <= 4096 && f.PartIndex < f.PartCount && len(f.MessageSHA256) == 64 && strings.Trim(f.MessageSHA256, "0123456789abcdef") == "" && len(f.Text) > 0 && len(f.Text) <= 65536 && utf8.ValidString(f.Text)
+}
+
 type HistoryEvent struct {
-	Scope   string          `json:"scope"`
-	Phase   string          `json:"phase"`
-	Index   int             `json:"index,omitempty"`
-	Count   int             `json:"count,omitempty"`
-	Message json.RawMessage `json:"message,omitempty"`
+	Fragment     *HistoryMessageFragment `json:"fragment,omitempty"`
+	ImportReport *HistoryImportReport    `json:"import_report,omitempty"`
+	ArchiveText  *string                 `json:"archive_text,omitempty"`
+	Scope        string                  `json:"scope"`
+	Phase        string                  `json:"phase"`
+	Index        int                     `json:"index,omitempty"`
+	Count        int                     `json:"count,omitempty"`
+	Message      json.RawMessage         `json:"message,omitempty"`
 }
 
 func ValidMessage(raw json.RawMessage) bool {
@@ -330,10 +434,38 @@ func ValidMessage(raw json.RawMessage) bool {
 
 func ValidHistoryEvent(raw json.RawMessage) bool {
 	var event HistoryEvent
-	if !Decode(raw, &event) || event.Scope == "" || len(event.Scope) > 128 {
+	if !Decode(raw, &event) || event.Scope == "" || len(event.Scope) > 128 || (event.Phase != "import_report" && event.ImportReport != nil) || (event.Phase != "archive" && event.ArchiveText != nil) || (event.Phase != "message_fragment" && event.Fragment != nil) {
 		return false
 	}
 	switch event.Phase {
+	case "message_fragment":
+		if event.Index != 0 || event.Count != 0 || event.Message != nil || event.ImportReport != nil || event.ArchiveText != nil || !ValidHistoryMessageFragment(event.Fragment) {
+			return false
+		}
+		var outer map[string]json.RawMessage
+		var fields map[string]json.RawMessage
+		if !Decode(raw, &outer) || len(outer) != 3 || !Decode(outer["fragment"], &fields) || len(fields) != 5 {
+			return false
+		}
+		for _, v := range fields {
+			if bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+				return false
+			}
+		}
+		return fields["message_index"] != nil && fields["part_index"] != nil && fields["part_count"] != nil && fields["message_sha256"] != nil && fields["text"] != nil
+	case "import_report":
+		var fields map[string]json.RawMessage
+		var report HistoryImportReport
+		if !Decode(raw, &fields) || len(fields) != 3 || !DecodeHistoryImportReport(fields["import_report"], &report) {
+			return false
+		}
+		return event.Index == 0 && event.Count == 0 && event.Message == nil && event.ArchiveText == nil && ValidHistoryImportReport(event.ImportReport) && (event.ImportReport.Outcome != "archived" || event.Scope == "legacy-archive")
+	case "archive":
+		var fields map[string]json.RawMessage
+		if !Decode(raw, &fields) || len(fields) != 4 || fields["index"] == nil || bytes.Equal(bytes.TrimSpace(fields["index"]), []byte("null")) {
+			return false
+		}
+		return event.Scope == "legacy-archive" && event.Index >= 0 && event.Index < 4096 && event.Count == 0 && event.Message == nil && event.ImportReport == nil && event.ArchiveText != nil && len(*event.ArchiveText) > 0 && len(*event.ArchiveText) <= 65536 && utf8.ValidString(*event.ArchiveText)
 	case "message":
 		return event.Index >= 0 && event.Count == 0 && ValidMessage(event.Message)
 	case "commit":

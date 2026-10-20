@@ -1,14 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	canonical "github.com/JBailes/aimee/server-go/ir"
 )
 
 // pathWithin reports whether child is parent or a descendant of it (both cleaned).
@@ -402,7 +406,7 @@ func (s *server) handleChatInterrupt(w http.ResponseWriter, r *http.Request) {
 // GET /api/chat/sessions (handleChatSessionsList), not here.
 func (s *server) handleChatThreads(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"threads":[],"active_id":0}`)
+	fmt.Fprintf(w, `{"threads":[],"active_id":0,"capabilities":{"branching":false}}`)
 }
 
 // notImplementedMutation answers a chat mutation that is not built yet.
@@ -497,22 +501,25 @@ func (s *server) handleChatControlReply(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
 	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 128<<10))
+	if err != nil || !canonical.ValidJSON(body) {
+		http.Error(w, "invalid control reply frame", http.StatusBadRequest)
+		return
+	}
 	var req struct {
 		SessionID string          `json:"session_id"`
 		RequestID string          `json:"request_id"`
 		Reply     json.RawMessage `json:"reply"`
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10))
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil || req.SessionID == "" || req.RequestID == "" || len(req.Reply) == 0 {
 		http.Error(w, "session_id, request_id and reply required", http.StatusBadRequest)
 		return
 	}
-	body, err := json.Marshal(req)
-	if err != nil {
-		http.Error(w, "invalid control reply", http.StatusBadRequest)
-		return
-	}
+	// Preserve the validated frame, including opaque answer numbers and Unicode.
+	// The canonical runtime owner validates its pending control schema; this
+	// transport must not collapse duplicate keys or discard trailing documents.
 	status, data, err := s.v1RequestWebuser(r.Context(), currentUser(r), http.MethodPost, "/v1/chat/control-reply", body)
 	if err != nil {
 		http.Error(w, "control reply service unavailable", http.StatusBadGateway)

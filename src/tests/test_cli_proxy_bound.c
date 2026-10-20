@@ -145,6 +145,17 @@ int main(void)
    read_response(send_request(a_port, "runtime-token", "/v1/mcp/call?scope=other"), response,
                  sizeof response);
    assert(strstr(response, "404") && atomic_load(&runtime.calls) == 1);
+   /* Deactivation erases every effect owner but retains the actual port lease.
+    * A stale native descendant cannot reach a newly rebound host service. */
+   cli_proxy_deactivate_hold_port(runtime_listener);
+   cli_proxy_deactivate_hold_port(runtime_listener);
+   int parked = send_request(a_port, "runtime-token", "/v1/mcp/call");
+   aimee_core_socket_set_timeouts(parked, 100, 100);
+   assert(aimee_core_socket_read(parked, response, sizeof response) <= 0);
+   aimee_core_socket_close(parked);
+   unsigned forbidden = 0;
+   assert(!cli_proxy_start_bound(a_port, "other-token", "other-session", &forbidden, forward, &a));
+   assert(atomic_load(&runtime.calls) == 1);
    cli_proxy_stop(runtime_listener);
    puts("bound model listener: owner/session isolation, framing and cancellation passed");
    return 0;

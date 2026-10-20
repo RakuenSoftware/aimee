@@ -26,6 +26,8 @@
 
 
 static db1_family_t family = {"db1.telemetry", "telemetry", AIMEE_DB1_EVENT_TELEMETRY, AIMEE_DB1_STAGE_TELEMETRY, 2000, 0};
+/* Exact canonical child evidence can span bounded SQL source pages. */
+static db1_family_t source_family = {"db1.telemetry", "telemetry", AIMEE_DB1_EVENT_TELEMETRY, AIMEE_DB1_STAGE_TELEMETRY, 30000, 0};
 
 
 /* A write answers 0 or -1; the store either took it or it did not. */
@@ -1937,4 +1939,82 @@ int db1_procedure_event_append(const char *principal, const char *procedure_json
           : !strcmp(result, "duplicate") ? 1
           : !strcmp(result, "retry")     ? 2
                                          : -1;
+}
+
+/* Private publication keeps test grades out of the generic event writer. */
+int db1_execution_test_grade_record(const char *principal, const char *grade_json)
+{
+   const char *fields[] = {principal ? principal : "", grade_json ? grade_json : ""};
+   return write_result(
+       db1_call(&family, AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECORD, fields, 2, NULL, NULL, 0, NULL));
+}
+
+/* Complete bounded source-owned projection, never the legacy 4096-byte row. */
+char *db1_execution_test_grade_recall(const char *principal, const char *project,
+                                      const char *sources_json)
+{
+   const char *fields[] = {principal ? principal : "", project ? project : "",
+                           sources_json ? sources_json : ""};
+   char *snapshot = malloc(65536u);
+   if (!snapshot)
+      return NULL;
+   char *const values[] = {snapshot};
+   const size_t caps[] = {65536u};
+   if (db1_call(&family, AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECALL, fields, 3, values, caps, 1,
+                NULL) != AIMEE_DB1_STATUS_OK)
+   {
+      free(snapshot);
+      return NULL;
+   }
+   return snapshot;
+}
+
+/* Host-only canonical child experience projection; ordinary events cannot publish it. */
+int db1_delegate_execution_experience_record(const char *principal, const char *parent_source_json)
+{
+   const char *fields[] = {principal ? principal : "",
+                           parent_source_json ? parent_source_json : ""};
+   return write_result(db1_call(&source_family, AIMEE_DB1_OP_DELEGATE_EXECUTION_EXPERIENCE_RECORD,
+                                fields, 2, NULL, NULL, 0, NULL));
+}
+
+/* Exact owner-checked terminal, including full retained proof metadata. */
+char *db1_delegate_execution_terminal_lookup(const char *principal, const char *parent_source_json)
+{
+   const char *fields[] = {principal ? principal : "",
+                           parent_source_json ? parent_source_json : ""};
+   char *record = malloc(2097152u);
+   if (!record)
+      return NULL;
+   char *const values[] = {record};
+   const size_t caps[] = {2097152u};
+   if (db1_call(&family, AIMEE_DB1_OP_DELEGATE_EXECUTION_TERMINAL_LOOKUP, fields, 2, values, caps,
+                1, NULL) != AIMEE_DB1_STATUS_OK)
+   {
+      free(record);
+      return NULL;
+   }
+   return record;
+}
+
+char *db1_learning_projection_claim(void)
+{
+   char *batch = malloc(2097152u);
+   if (!batch)
+      return NULL;
+   char *const values[] = {batch};
+   const size_t caps[] = {2097152u};
+   if (db1_call(&family, AIMEE_DB1_OP_LEARNING_PROJECTION_CLAIM, NULL, 0, values, caps, 1, NULL) !=
+       AIMEE_DB1_STATUS_OK)
+   {
+      free(batch);
+      return NULL;
+   }
+   return batch;
+}
+int db1_learning_projection_ack(const char *lease, const char *result)
+{
+   const char *fields[] = {lease ? lease : "", result ? result : ""};
+   return write_result(
+       db1_call(&family, AIMEE_DB1_OP_LEARNING_PROJECTION_ACK, fields, 2, NULL, NULL, 0, NULL));
 }

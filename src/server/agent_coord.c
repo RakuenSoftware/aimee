@@ -439,12 +439,12 @@ int agent_coordinate(agent_config_t *cfg, const char *task, agent_result_t *out)
             "Task: %s\n\nRespond ONLY with a JSON array, no other text.",
             task);
 
-   agent_result_t planner_result;
+   agent_result_t planner_result = {0};
    int rc = agent_run(cfg, "execute", NULL, planner_prompt, 0, &planner_result);
    if (rc != 0 || !planner_result.response)
    {
       snprintf(out->error, sizeof(out->error), "planner failed: %s", planner_result.error);
-      free(planner_result.response);
+      agent_result_clear_response(&planner_result);
       return -1;
    }
 
@@ -456,7 +456,7 @@ int agent_coordinate(agent_config_t *cfg, const char *task, agent_result_t *out)
             "by your concerns.\n\nTask: %s\n\nPlan:\n%s",
             task, planner_result.response);
 
-   agent_result_t critic_result;
+   agent_result_t critic_result = {0};
    rc = agent_run(cfg, "execute", NULL, critic_prompt, 0, &critic_result);
 
    int approved = 1;
@@ -465,18 +465,18 @@ int agent_coordinate(agent_config_t *cfg, const char *task, agent_result_t *out)
       if (strstr(critic_result.response, "REJECTED") != NULL)
          approved = 0;
    }
-   free(critic_result.response);
+   agent_result_clear_response(&critic_result);
 
    if (!approved)
    {
       snprintf(out->error, sizeof(out->error), "plan rejected by critic");
-      out->response = planner_result.response;
+      agent_result_move_response(out, &planner_result);
       return -1;
    }
 
    /* Phase 3: Worker executes the plan */
    cJSON *plan_json = cJSON_Parse(planner_result.response);
-   free(planner_result.response);
+   agent_result_clear_response(&planner_result);
 
    if (!plan_json || !cJSON_IsArray(plan_json))
    {
@@ -515,8 +515,8 @@ int agent_coordinate(agent_config_t *cfg, const char *task, agent_result_t *out)
    size_t resp_len = 1024;
    for (int i = 0; i < plan.step_count; i++)
       resp_len += strlen(plan.steps[i].output) + 128;
-   out->response = malloc(resp_len);
-   if (out->response)
+   char *composed = malloc(resp_len);
+   if (composed)
    {
       size_t pos = 0;
       for (int i = 0; i < plan.step_count; i++)
@@ -526,9 +526,15 @@ int agent_coordinate(agent_config_t *cfg, const char *task, agent_result_t *out)
          const char *sn = (plan.steps[i].status >= 0 && plan.steps[i].status <= 4)
                               ? status_names[plan.steps[i].status]
                               : "unknown";
-         pos += (size_t)snprintf(out->response + pos, resp_len - pos, "Step %d [%s]: %s\n%s\n\n",
-                                 i + 1, sn, plan.steps[i].action, plan.steps[i].output);
+         pos += (size_t)snprintf(composed + pos, resp_len - pos, "Step %d [%s]: %s\n%s\n\n", i + 1,
+                                 sn, plan.steps[i].action, plan.steps[i].output);
       }
+   }
+   if (composed)
+   {
+      if (agent_result_from_host_text(out, composed))
+         rc = -1;
+      free(composed);
    }
    out->success = (rc == 0);
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", plan.agent_name);
@@ -562,6 +568,8 @@ int agent_vote(agent_config_t *cfg, const char *role, const char *prompt, int n_
    if (successes == 0)
    {
       snprintf(out->error, sizeof(out->error), "all voters failed");
+      for (int i = 0; i < n_voters; i++)
+         agent_result_clear_response(&results[i]);
       return -1;
    }
 
@@ -589,8 +597,7 @@ int agent_vote(agent_config_t *cfg, const char *role, const char *prompt, int n_
 
    if (best_idx >= 0)
    {
-      out->response = results[best_idx].response;
-      results[best_idx].response = NULL; /* don't free, transferred to out */
+      agent_result_move_response(out, &results[best_idx]); /* don't free, transferred to out */
       out->success = 1;
       snprintf(out->agent_name, MAX_AGENT_NAME, "%s", results[best_idx].agent_name);
       out->confidence = (best_count * 100) / n_voters;
@@ -598,7 +605,7 @@ int agent_vote(agent_config_t *cfg, const char *role, const char *prompt, int n_
 
    /* Free remaining results */
    for (int i = 0; i < n_voters; i++)
-      free(results[i].response);
+      agent_result_clear_response(&results[i]);
 
    return out->success ? 0 : -1;
 }

@@ -114,6 +114,11 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
    if (aimee_ir_request_admit(ir))
       return NULL;
    cJSON *out = cJSON_CreateObject();
+   if (!out || openai_family_add_prompt_cache(out, ir))
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
    if (ir->output_format.kind != AIMEE_OUTPUT_UNSET)
    {
       cJSON *format = openai_family_output_format_build(&ir->output_format, 1);
@@ -381,7 +386,7 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
             b->tool_name = dupstr(ostr(item, "name"));
             b->tool_namespace = dupstr(ostr(item, "namespace"));
             const char *args = ostr(item, "arguments");
-            b->tool_input = args ? cJSON_ParseWithOpts(args, NULL, 1) : NULL;
+            b->tool_input = args ? aimee_ir_json_parse_frame(args, strlen(args)) : NULL;
             if (!cJSON_IsObject(b->tool_input))
             {
                if (err && errn)
@@ -525,7 +530,7 @@ static int response_body_event(responses_body_t *state, const char *event, const
 {
    if (!data || !data[0] || !strcmp(data, "[DONE]"))
       return 0;
-   cJSON *frame = cJSON_ParseWithOpts(data, NULL, 1);
+   cJSON *frame = aimee_ir_json_parse_frame(data, strlen(data));
    if (!cJSON_IsObject(frame))
    {
       cJSON_Delete(frame);
@@ -770,7 +775,7 @@ cJSON *responses_backend_sse_object(const char *body)
    while (*first == ' ' || *first == '\t' || *first == '\r' || *first == '\n')
       first++;
    if (*first == '{')
-      return cJSON_ParseWithOpts(body, NULL, 1);
+      return aimee_ir_json_parse_frame(body, strlen(body));
    responses_body_t state = {.items = cJSON_CreateArray()};
    char event[128] = "", *data = NULL;
    if (!state.items)

@@ -109,6 +109,10 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/runtime-web/include"
     "${AIMEE_SRC_DIR}/modules/control-web/include"
     "${AIMEE_SRC_DIR}/modules/postgres/include"
+    "${AIMEE_SRC_DIR}/modules/providers/include"
+    "${AIMEE_SRC_DIR}/modules/sandbox/include"
+    "${AIMEE_SRC_DIR}/core/types/include"
+    "${AIMEE_SRC_DIR}/core/turn_integrity/include"
     # MODULES THAT KEEP THEIR HEADERS FLAT, beside their sources, rather than
     # under an include/ subdir. src/Makefile has carried -I for every one of
     # these all along; CMake had only the include/-style modules, so the
@@ -518,6 +522,8 @@ set(KB_STORE_HOST_ADAPTER_SRCS
 
 set(IR_BASE_SRCS
     ${AIMEE_SRC_DIR}/modules/ir/aimee_ir.c
+    ${AIMEE_SRC_DIR}/modules/ir/session_event.c
+    ${AIMEE_SRC_DIR}/modules/ir/response_codec.c
 )
 set(HOOK_IR_SRCS
     ${AIMEE_SRC_DIR}/modules/translation/hook_ir.c
@@ -666,12 +672,12 @@ set(DATA_SRCS
 
 set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/agent_runtime.c
+    ${AIMEE_SRC_DIR}/server/agent_result_cache.c
     ${AIMEE_SRC_DIR}/server/agent_parallel.c
     ${AIMEE_SRC_DIR}/server/agent_runtime_liveness.c
     ${AIMEE_SRC_DIR}/server/agent_fallback.c
     ${AIMEE_SRC_DIR}/server/agent_context_budget.c
     ${AIMEE_SRC_DIR}/server/agent_bridge.c
-    ${AIMEE_SRC_DIR}/server/tool_call_args.c
     ${AIMEE_SRC_DIR}/server/agent_request_shaping.c
     ${AIMEE_SRC_DIR}/server/model_sampling.c
     ${AIMEE_SRC_DIR}/server/agent_adapter.c
@@ -693,6 +699,7 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/tool_schema_sanitizer.c
     ${AIMEE_SRC_DIR}/server/script_runner.c
     ${AIMEE_SRC_DIR}/server/script_rpc.c
+    ${AIMEE_SRC_DIR}/server/script_tool_execution.c
     ${AIMEE_SRC_DIR}/server/osv_check.c
     ${AIMEE_SRC_DIR}/server/failover.c
     ${AIMEE_SRC_DIR}/server/http_retry.c
@@ -706,9 +713,13 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/cli_session.c
     ${AIMEE_SRC_DIR}/server/cli_session_pty.c
     ${AIMEE_SRC_DIR}/server/cli_codex.c
+    ${AIMEE_SRC_DIR}/server/cli_codex_profile.c
     ${AIMEE_SRC_DIR}/server/cli_claude.c
+    ${AIMEE_SRC_DIR}/server/cli_claude_native.c
     ${AIMEE_SRC_DIR}/server/claude_headless.c
     ${AIMEE_SRC_DIR}/server/server_session_control.c
+    ${AIMEE_SRC_DIR}/server/server_session_capture.c
+    ${AIMEE_SRC_DIR}/server/server_session_question.c
     ${AIMEE_SRC_DIR}/server/server_session_log.c
     ${AIMEE_SRC_DIR}/server/agent_response_projection.c
 
@@ -834,7 +845,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
     ${AIMEE_SRC_DIR}/modules/translation/harness_ir.c
     ${AIMEE_SRC_DIR}/modules/translation/history_ir.c
-    ${AIMEE_SRC_DIR}/modules/ir/session_event.c
     ${AIMEE_SRC_DIR}/modules/ir/aimee_ir_module_plan.c
     ${AIMEE_SRC_DIR}/server/ir_host_bindings.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_memory_transport.c
@@ -987,11 +997,20 @@ list(APPEND SERVER_DATA_SRCS ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orch
 list(APPEND SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_http_op_runs.c
     ${AIMEE_SRC_DIR}/server/server_compute_owner.c
+    ${AIMEE_SRC_DIR}/server/server_native_history.c
+    ${AIMEE_SRC_DIR}/server/server_unknown_effect_policy.c
     ${AIMEE_SRC_DIR}/server/server_native_runtime.c
+    ${AIMEE_SRC_DIR}/server/server_native_execution.c
+    ${AIMEE_SRC_DIR}/server/server_native_cache_lease.c
+    ${AIMEE_SRC_DIR}/server/server_native_containment.c
+    ${AIMEE_SRC_DIR}/server/server_native_launch.c
     ${AIMEE_SRC_DIR}/server/server_native_tool_admission.c
     ${AIMEE_SRC_DIR}/server/server_native_replay.c
     ${AIMEE_SRC_DIR}/server/server_learning_outcome.c
+    ${AIMEE_SRC_DIR}/server/server_learning_recovery.c
+    ${AIMEE_SRC_DIR}/server/server_verification.c
     ${AIMEE_SRC_DIR}/server/server_learning_application.c
+    ${AIMEE_SRC_DIR}/server/server_learning_approaches.c
 )
 
 set(SERVER_CORE_SRCS ${CORE_SRCS})
@@ -1121,9 +1140,16 @@ else()
     find_package(OpenSSL REQUIRED)
 endif()
 
+# The thin client also consumes the portable codec. Declare its real CMake
+# target outside the full-runtime dependency guard on every native platform.
+add_library(aimee-core-codec STATIC ${AIMEE_SRC_DIR}/core/codec/base64.c)
+target_compile_features(aimee-core-codec PUBLIC c_std_11)
+target_include_directories(aimee-core-codec PUBLIC ${AIMEE_SRC_DIR}/core/codec/include)
+
 # --- Full-build static libraries + their native dependencies ----------------
 # The thin `aimee` CLI target (defined below) links none of these; it needs
-# only Threads (+ OpenSSL for https). Skipping them under -DAIMEE_THIN_CLIENT=ON
+# only the shared codec, connection transport, Threads and OpenSSL. Skipping
+# full-runtime dependencies under -DAIMEE_THIN_CLIENT=ON
 # means a packaging box needs no SQLite/libpq/zstd/PAM/libsecret toolchain.
 if(NOT AIMEE_THIN_CLIENT)
 
@@ -1157,10 +1183,6 @@ set_property(SOURCE
     "${AIMEE_SRC_DIR}/modules/kb/c/fact_identity.c"
     "${AIMEE_SRC_DIR}/modules/kb/c/fact_mutation.c"
     APPEND PROPERTY INCLUDE_DIRECTORIES "${AIMEE_SRC_DIR}/modules/kb/include")
-
-add_library(aimee-core-codec STATIC ${AIMEE_SRC_DIR}/core/codec/base64.c)
-target_compile_features(aimee-core-codec PUBLIC c_std_11)
-target_include_directories(aimee-core-codec PUBLIC ${AIMEE_SRC_DIR}/core/codec/include)
 
 add_library(aimee-core STATIC
     ${CORE_SRCS}
@@ -1388,7 +1410,7 @@ target_include_directories(aimee PRIVATE
     ${AIMEE_SRC_DIR}/modules/kb/c)
 target_compile_definitions(aimee PRIVATE AIMEE_ARTIFACT_TRUST_NO_AUDIT=1)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
-target_link_libraries(aimee PRIVATE aimee-core-connection OpenSSL::Crypto)
+target_link_libraries(aimee PRIVATE aimee-core-connection aimee-core-codec OpenSSL::Crypto)
 find_package(ZLIB QUIET)
 if(ZLIB_FOUND)
     target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/http_content_encoding.c)

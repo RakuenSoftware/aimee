@@ -165,6 +165,9 @@ func TestNativeCheckpointIsNeverModelHistory(t *testing.T) {
 		{"t", `{"kind":"execution","payload":{"status":"completed"}}`},
 		{"t", checkpoint},
 	}
+	for i, row := range db.rows {
+		db.rows[i] = []any{fmt.Sprint(i + 1), row[0], "owner", fmt.Sprintf("event-%d", i+1), row[1]}
+	}
 	status, cells, err := sessionIRHistoryLoad(context.Background(), db, []string{"s", "primary", "owner", "next"})
 	if err != nil || status != store.StatusOK || len(cells) != 1 || strings.Contains(cells[0], "native") || !strings.Contains(cells[0], "canonical input") {
 		t.Fatal("checkpoint became model content", status, cells, err)

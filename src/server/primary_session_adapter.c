@@ -66,6 +66,32 @@ typedef struct primary_session_state
 static pthread_mutex_t g_primary_sessions_lock = PTHREAD_MUTEX_INITIALIZER;
 static primary_session_state_t *g_primary_sessions;
 static unsigned long g_primary_session_seq;
+static primary_session_native_reconcile_fn g_primary_native_reconcile;
+static primary_session_native_history_load_fn g_primary_native_history_load;
+void primary_session_adapter_set_native_history_load(primary_session_native_history_load_fn fn)
+{
+   pthread_mutex_lock(&g_primary_sessions_lock);
+   g_primary_native_history_load = fn;
+   pthread_mutex_unlock(&g_primary_sessions_lock);
+}
+void primary_session_adapter_set_native_reconcile(primary_session_native_reconcile_fn fn)
+{
+   pthread_mutex_lock(&g_primary_sessions_lock);
+   g_primary_native_reconcile = fn;
+   pthread_mutex_unlock(&g_primary_sessions_lock);
+}
+static int primary_native_owners_empty(const char *session, const char *actor)
+{
+   char *wire = NULL;
+   int rc = db1_session_native_active_owned(actor, session, &wire);
+   cJSON *owners = !rc && wire && strlen(wire) <= 512 * 1024
+                       ? aimee_ir_json_parse_frame(wire, strlen(wire))
+                       : NULL;
+   int empty = cJSON_IsArray(owners) && cJSON_GetArraySize(owners) == 0;
+   free(wire);
+   cJSON_Delete(owners);
+   return empty ? 0 : -1;
+}
 
 static void primary_session_generate_id(char *out, size_t out_len)
 {
@@ -122,38 +148,71 @@ static primary_session_state_t *primary_session_create_locked(const agent_t *age
    return primary_session_create_with_id_locked(agent, NULL);
 }
 
-/* Provider names describe legacy storage only. Once admitted, primary history is
- * canonical regardless of the model selected for the next turn. */
-static cJSON *primary_history_import(const char *json, const char *provider)
+/* A one-time import is acknowledged only after its exact legacy source and
+ * fidelity report/checkpoint have committed atomically under the durable owner. */
+static int primary_history_import_source(const char *target, const char *id, const char *actor,
+                                         cJSON **imported, int browse)
 {
-   cJSON *native = json ? cJSON_Parse(json) : NULL;
-   if (!native)
-      return NULL;
-   aimee_wire_t wire = provider && strcmp(provider, "anthropic") == 0 ? AIMEE_WIRE_ANTHROPIC
-                       : provider && strcmp(provider, "chatgpt") == 0 ? AIMEE_WIRE_RESPONSES
-                                                                      : AIMEE_WIRE_OPENAI_CHAT;
-   cJSON *messages = aimee_frontend_history_import(native, wire);
-   cJSON_Delete(native);
-   return messages;
+   *imported = NULL;
+   db1_primary_session_row_t row;
+   int status = db1_primary_session_get_latest(id, &row);
+   if (status != 0)
+      return status == 1 ? 1 : -1;
+   cJSON *report = NULL;
+   cJSON *messages = aimee_frontend_history_import_report(row.messages_json, row.provider, id,
+                                                          row.agent_name, &report);
+   char *metadata = report ? cJSON_PrintUnformatted(report) : NULL;
+   char *history = messages ? cJSON_PrintUnformatted(messages) : strdup("[]");
+   const char *digest =
+       report ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(report, "source_sha256"))
+              : NULL;
+   int acknowledged =
+       metadata && history && digest && actor && actor[0] &&
+       (browse ? db1_session_ir_history_import_browse(target, actor, row.agent_name, digest,
+                                                      history, metadata) >= 0
+               : !db1_session_ir_history_import(target, "primary", actor, id, row.agent_name,
+                                                digest, history, metadata));
+   free(metadata);
+   free(history);
+   cJSON_Delete(report);
+   db1_primary_session_row_clear(&row);
+   if (!acknowledged)
+   {
+      cJSON_Delete(messages);
+      LOG_WARN("primary.session", "legacy source has no acknowledged resumable canonical import");
+      return -1;
+   }
+   *imported = messages;
+   return 0;
+}
+
+int primary_session_history_open(const char *session, const char *actor)
+{
+   const char *attested = agent_get_request_vault_principal();
+   db1_server_session_t owner;
+   if (!session || !session[0] || !actor || !actor[0] || !attested || strcmp(actor, attested) ||
+       db1_server_session_get(session, &owner) || strcmp(owner.principal, actor))
+      return -1;
+   cJSON *messages = NULL;
+   int status = primary_history_import_source(session, session, actor, &messages, 1);
+   cJSON_Delete(messages);
+   /* Archived/refused sources are browseable metadata, never model admission.
+    * Host50 rechecks exact source/hash/owner under its atomic append locks. */
+   return status < 0 ? -1 : 0;
 }
 
 static int primary_session_adopt_latest_for_id(primary_session_state_t *state, const char *id)
 {
    if (!state || !id || !id[0])
       return 0;
-   db1_primary_session_row_t row;
-   int status = db1_primary_session_get_latest(id, &row);
-   if (status != 0)
+   cJSON *messages = NULL;
+   int status = primary_history_import_source(state->scope_id, id,
+                                              agent_get_request_vault_principal(), &messages, 0);
+   if (status == 1)
+      return 0;
+   if (status < 0 || !messages)
    {
-      if (status < 0)
-         LOG_WARN("primary.session", "legacy history read unavailable");
-      return status == 1 ? 0 : -1;
-   }
-   cJSON *messages = primary_history_import(row.messages_json, row.provider);
-   db1_primary_session_row_clear(&row);
-   if (!messages)
-   {
-      LOG_WARN("primary.session", "session %s history could not be imported; refusing turn", id);
+      cJSON_Delete(messages);
       return -1;
    }
    cJSON_Delete(state->messages);
@@ -197,6 +256,21 @@ static int primary_session_load_messages_locked(primary_session_state_t *state,
       LOG_WARN("primary.session", "canonical history owner mismatch");
       return -1;
    }
+   /* Keep this state alive/busy, but do not hold every primary session behind
+    * an old native process boundary's bounded quiescence wait. */
+   char recovery_error[512];
+   state->busy = 1;
+   primary_session_native_reconcile_fn reconcile = g_primary_native_reconcile;
+   pthread_mutex_unlock(&g_primary_sessions_lock);
+   int recovered = reconcile ? reconcile(state->scope_id, principal, active_turn, recovery_error)
+                             : primary_native_owners_empty(state->scope_id, principal);
+   pthread_mutex_lock(&g_primary_sessions_lock);
+   state->busy = 0;
+   if (recovered)
+   {
+      LOG_WARN("primary.session", "canonical history ownership recovery refused");
+      return -1;
+   }
    char *json = NULL;
    int rc = db1_session_ir_history_load(state->scope_id, "primary", principal, active_turn, &json);
    if (rc < 0)
@@ -206,9 +280,24 @@ static int primary_session_load_messages_locked(primary_session_state_t *state,
    }
    if (rc == 0)
    {
-      cJSON *history = primary_history_import(json, state->provider);
+      cJSON *history = NULL, *receipts = NULL;
+      int admitted;
+      if (g_primary_native_history_load)
+      {
+         /*28 preserves the definitive Missing/import distinction. Protected
+          * diagnostics come exclusively from the authenticated45 projection. */
+         admitted = !g_primary_native_history_load(state->scope_id, principal, active_turn, 0,
+                                                   &history, &receipts) &&
+                    cJSON_IsArray(history) && cJSON_IsArray(receipts);
+      }
+      else
+      {
+         history = json ? aimee_ir_json_parse_frame(json, strlen(json)) : NULL;
+         admitted = history && !aimee_ir_history_admit(history);
+      }
+      cJSON_Delete(receipts);
       free(json);
-      if (!history || aimee_ir_history_repair(history) != 0)
+      if (!admitted)
       {
          cJSON_Delete(history);
          return -1;
@@ -487,19 +576,13 @@ int primary_session_adapter_compact(const primary_session_request_t *req,
          snprintf(error_out, error_len, "invalid primary session compact request");
       return -1;
    }
-   if (!primary_session_adapter_can_handle(req->agent))
-   {
-      if (error_out && error_len > 0)
-         snprintf(error_out, error_len, "agent '%s' is not a direct primary session adapter",
-                  req->agent->name);
-      return -1;
-   }
-
+   /* Compaction belongs to canonical history; it does not launch the selected
+    * model or require a provider-specific primary execution adapter. */
    const char *requested_id = "";
-   if (req->provider_session_id && req->provider_session_id[0])
-      requested_id = req->provider_session_id;
-   else if (req->aimee_session_id && req->aimee_session_id[0])
+   if (req->aimee_session_id && req->aimee_session_id[0])
       requested_id = req->aimee_session_id;
+   else if (req->provider_session_id && req->provider_session_id[0])
+      requested_id = req->provider_session_id;
    if (!requested_id[0])
    {
       if (error_out && error_len > 0)

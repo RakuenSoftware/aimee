@@ -2,6 +2,15 @@
 
 State: implementation in progress. Authorized by the project owner on 2026-10-17.
 
+Implementation checkpoint, 2026-10-20: durable primary history/loading, model changes and canonical
+compaction are active in the migration branch. Qualified Linux Codex/Claude execution uses original
+host model/tool sources, supervised effects and closed credential-free SDK launch resources. Typed
+seeded runs preserve complete history, workspace scope, final content and cumulative usage.
+Sixteen actual-SDK API/OAuth journeys pass locally, including credential rotation and resume.
+Additional root-UDS browser operator journeys require fresh CI qualification. Remaining consumers,
+independent local learning/grading/reuse, broader native platforms, live subscription acceptance
+and reviewed production promotion remain open. Production `.100` remains KB-free.
+
 ## Invariant
 
 A native model/harness protocol ends at its entry adapter. After that boundary, conversation

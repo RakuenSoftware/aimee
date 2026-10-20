@@ -1,6 +1,7 @@
 #ifndef AIMEE_SERVER_NATIVE_CACHE_H
 #define AIMEE_SERVER_NATIVE_CACHE_H
 #include <aimee/ir/aimee_ir.h>
+#include "cJSON.h"
 
 typedef struct server_native_cache server_native_cache_t;
 /* The host must own a running canonical turn and one native child in that turn;
@@ -13,6 +14,24 @@ typedef struct server_native_cache server_native_cache_t;
 server_native_cache_t *server_native_cache_begin(const char *session, const char *actor,
                                                  const char *turn, const char *harness,
                                                  const char *scope, const aimee_request_t *request);
+/* Qualified ownership is host-supplied; publish durably records the exact
+ * intended claim before its atomic DB registration. epoch "0" preserves the
+ * original cache namespace; later epochs isolate every context in the directory. */
+typedef struct server_native_cache_owner
+{
+   const char *binding, *owner, *containment;
+   int (*publish)(const cJSON *claim, void *context);
+   void *context;
+} server_native_cache_owner_t;
+server_native_cache_t *server_native_cache_begin_epoch(const char *session, const char *actor,
+                                                       const char *turn, const char *harness,
+                                                       const char *scope,
+                                                       const aimee_request_t *request,
+                                                       const char *epoch,
+                                                       const server_native_cache_owner_t *owner);
+int server_native_cache_epoch_binding(const char *binding, const char *epoch, char out[65]);
+cJSON *server_native_cache_claim_json(const server_native_cache_t *cache);
+const char *server_native_cache_metadata_key(const server_native_cache_t *cache);
 const char *server_native_cache_resume(const server_native_cache_t *cache);
 int server_native_cache_history_offset(const server_native_cache_t *cache);
 /* Call after the child has exited and the source owner durably completed the

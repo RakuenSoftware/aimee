@@ -53,10 +53,16 @@ int send_and_free(server_conn_t *conn, cJSON *j)
    cJSON_Delete(j);
    return 0;
 }
-int policy_recheck_action_tool(const char *name, const char *effect, const char *args, char *reason,
-                               size_t cap)
+void policy_unknown_effect_clear(void)
+{
+}
+int policy_recheck_action_tool_attempt(const char *name, const char *effect, const char *args,
+                                       const char *attempt, uint32_t resource_categories,
+                                       char *reason, size_t cap)
 {
    (void)name;
+   (void)resource_categories;
+   assert(attempt && attempt[0]);
    (void)effect;
    (void)reason;
    (void)cap;

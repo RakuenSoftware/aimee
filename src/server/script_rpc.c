@@ -3,6 +3,9 @@
 #endif
 
 #include "script_rpc.h"
+#include "script_tool_execution.h"
+#include "server_session_control.h"
+#include <aimee/ir/aimee_ir.h>
 #include <aimee/tools/agent_tools.h>
 #include "aimee.h"
 #include "cJSON.h"
@@ -26,18 +29,24 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define SCRIPT_RPC_MAX_FRAME  (64 * 1024)
-#define SCRIPT_RPC_MAX_RESULT (64 * 1024)
+#define SCRIPT_RPC_MAX_FRAME (64 * 1024)
+/* A result can appear twice (result/error), and each byte may need six JSON
+ * escape bytes. Reserve envelope space even for that worst-case projection. */
+#define SCRIPT_RPC_PREVIEW_BYTES ((SCRIPT_RPC_MAX_FRAME - 1024) / 12)
 
 struct script_rpc_execution
 {
+   server_control_scope_t *controls;
    agent_tools_scope_snapshot_t tools;
    request_context_snapshot_t request;
    agent_source_authority_snapshot_t source;
    const workspace_provider_t *workspace;
    atomic_int *cancel;
+   agent_request_cancel_scope_t cancellation;
    char cwd[MAX_PATH_LEN], session[128], principal[VAULT_PRINCIPAL_MAX];
    int job;
+   char attempt_prefix[33];
+   unsigned long long attempts;
 };
 
 static int script_rpc_capture(script_rpc_server_t *srv, const char *cwd)
@@ -46,7 +55,8 @@ static int script_rpc_capture(script_rpc_server_t *srv, const char *cwd)
    srv->execution = scope;
    if (!scope || (cwd && strlen(cwd) >= sizeof scope->cwd) ||
        agent_tools_scope_capture_owned(&scope->tools) != 0 ||
-       agent_source_authority_tls_capture_checked(&scope->source) != 0)
+       agent_source_authority_tls_capture_checked(&scope->source) != 0 ||
+       platform_random_hex(scope->attempt_prefix, 32) != 0)
       return -1;
    /* An ordinary primary must not borrow a concurrent delegate's environment. */
    if (!scope->source.active)
@@ -61,8 +71,12 @@ static int script_rpc_capture(script_rpc_server_t *srv, const char *cwd)
    snprintf(scope->cwd, sizeof scope->cwd, "%s", cwd ? cwd : "");
    snprintf(scope->session, sizeof scope->session, "%s", session ? session : "");
    snprintf(scope->principal, sizeof scope->principal, "%s", principal ? principal : "");
+   if (server_control_scope_capture(scope->session, scope->principal, &scope->controls))
+      return -1;
    scope->workspace = workspace_provider_active();
    scope->cancel = agent_get_request_cancel();
+   scope->cancellation.flag = &srv->stop;
+   scope->cancellation.parent = agent_request_cancel_scope_current();
    scope->job = agent_get_durable_job_id();
    return 0;
 }
@@ -75,6 +89,7 @@ static void script_rpc_release(script_rpc_server_t *srv)
    agent_tools_scope_destroy_owned(&scope->tools);
    agent_source_authority_snapshot_destroy(&scope->source);
    request_context_snapshot_clear(&scope->request);
+   server_control_scope_release(scope->controls);
    free(scope);
    srv->execution = NULL;
 }
@@ -91,6 +106,35 @@ static int script_rpc_write_all(int fd, const void *buf, size_t len)
          return -1;
       p += n;
       len -= (size_t)n;
+   }
+   return 0;
+}
+
+/* A disconnected script must never deliver SIGPIPE to its host. */
+static int script_rpc_send_all(int fd, const void *buffer, size_t length)
+{
+#if !defined(MSG_NOSIGNAL) && defined(SO_NOSIGPIPE)
+   int enabled = 1;
+   if (setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof enabled) != 0)
+      return -1;
+#endif
+   const char *bytes = buffer;
+   while (length)
+   {
+      ssize_t sent = -1;
+#ifdef MSG_NOSIGNAL
+      sent = send(fd, bytes, length, MSG_NOSIGNAL);
+#elif defined(SO_NOSIGPIPE)
+      sent = send(fd, bytes, length, 0);
+#else
+      return -1;
+#endif
+      if (sent < 0 && errno == EINTR)
+         continue;
+      if (sent <= 0)
+         return -1;
+      bytes += sent;
+      length -= (size_t)sent;
    }
    return 0;
 }
@@ -118,8 +162,8 @@ static int script_rpc_send_json(int fd, cJSON *json)
       return -1;
    size_t len = strlen(text);
    uint32_t nlen = htonl((uint32_t)len);
-   int rc = len <= SCRIPT_RPC_MAX_FRAME && script_rpc_write_all(fd, &nlen, sizeof(nlen)) == 0 &&
-                    script_rpc_write_all(fd, text, len) == 0
+   int rc = len <= SCRIPT_RPC_MAX_FRAME && script_rpc_send_all(fd, &nlen, sizeof(nlen)) == 0 &&
+                    script_rpc_send_all(fd, text, len) == 0
                 ? 0
                 : -1;
    free(text);
@@ -168,50 +212,90 @@ static cJSON *script_rpc_dispatch(script_rpc_server_t *srv, cJSON *req)
    cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "id");
    cJSON *jtool = cJSON_GetObjectItemCaseSensitive(req, "tool");
    cJSON *jargs = cJSON_GetObjectItemCaseSensitive(req, "args");
+   cJSON *encoded = cJSON_GetObjectItemCaseSensitive(req, "args_json");
    int id = cJSON_IsNumber(jid) ? jid->valueint : 0;
+   if (encoded)
+   {
+      if (jargs || !cJSON_IsString(encoded))
+         return script_rpc_error(id, "bad_frame", "ambiguous script tool arguments");
+      cJSON *decoded =
+          aimee_ir_json_parse_frame(encoded->valuestring, strlen(encoded->valuestring));
+      if (!decoded)
+         return script_rpc_error(id, "bad_json", "invalid script tool arguments");
+      if (!cJSON_IsObject(decoded))
+      {
+         cJSON_Delete(decoded);
+         return script_rpc_error(id, "bad_frame", "script tool requires object arguments");
+      }
+      if (!cJSON_AddItemToObject(req, "args", decoded))
+      {
+         cJSON_Delete(decoded);
+         return script_rpc_error(id, "internal", "cannot admit script tool arguments");
+      }
+      cJSON_DeleteItemFromObjectCaseSensitive(req, "args_json");
+      jargs = decoded;
+   }
    if (!cJSON_IsNumber(jid) || !cJSON_IsString(jtool) || !cJSON_IsObject(jargs))
       return script_rpc_error(id, "bad_frame", "missing id, tool, or args");
 
    if (agent_request_cancelled())
       return script_rpc_error(id, "cancelled", "script tool execution cancelled");
 
-   char *args_json = cJSON_PrintUnformatted(jargs);
-   if (!args_json)
-      return script_rpc_error(id, "bad_frame", "failed to serialize args");
-
    if (!script_rpc_allowed_tool(jtool->valuestring))
    {
       srv->policy_denials++;
-      free(args_json);
       return script_rpc_error(id, "policy_denied", "tool is not allowed through script RPC");
    }
 
-   /* Reuse the foreground dispatch path so guardrails, role policy, request_input, and approval
-    * routing behave the same for nested script calls as for normal tool calls. */
+   char attempt[96];
+   snprintf(attempt, sizeof attempt, "script-rpc:%s:%llu", srv->execution->attempt_prefix,
+            ++srv->execution->attempts);
    int is_error = 1;
-   char *result = dispatch_tool_call_ctx_status(jtool->valuestring, args_json, 120000, &is_error);
+   char *result = server_script_tool_execute(req, attempt, &is_error);
    srv->tool_calls++;
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddNumberToObject(resp, "id", id);
    cJSON_AddBoolToObject(resp, "ok", !is_error);
    if (result)
    {
-      if (strlen(result) > SCRIPT_RPC_MAX_RESULT)
-         result[SCRIPT_RPC_MAX_RESULT] = '\0';
-      cJSON *parsed = cJSON_Parse(result);
-      if (parsed)
-         cJSON_AddItemToObject(resp, "result", parsed);
-      else
+      size_t bytes = strlen(result);
+      int projected = bytes > SCRIPT_RPC_MAX_FRAME;
+      if (!projected)
+      {
+         /* A valid prefix is not the result. Preserve ambiguous/non-JSON tool
+          * text verbatim rather than silently discarding trailing content. */
+         cJSON *parsed = aimee_ir_json_parse_frame(result, bytes);
+         if (parsed)
+            cJSON_AddItemToObject(resp, "result", parsed);
+         else
+            cJSON_AddStringToObject(resp, "result", result);
+         if (is_error)
+            cJSON_AddStringToObject(resp, "error", result);
+         char *encoded = cJSON_PrintUnformatted(resp);
+         projected = !encoded || strlen(encoded) > SCRIPT_RPC_MAX_FRAME;
+         free(encoded);
+      }
+      if (projected)
+      {
+         cJSON_DeleteItemFromObjectCaseSensitive(resp, "result");
+         cJSON_DeleteItemFromObjectCaseSensitive(resp, "error");
+         size_t prefix = bytes < SCRIPT_RPC_PREVIEW_BYTES ? bytes : SCRIPT_RPC_PREVIEW_BYTES;
+         /* Do not split a UTF-8 character in an otherwise valid text result. */
+         while (prefix && ((unsigned char)result[prefix] & 0xc0) == 0x80)
+            prefix--;
+         result[prefix] = 0;
          cJSON_AddStringToObject(resp, "result", result);
-      if (is_error)
-         cJSON_AddStringToObject(resp, "error", result);
+         if (is_error)
+            cJSON_AddStringToObject(resp, "error", result);
+         cJSON_AddBoolToObject(resp, "result_truncated", 1);
+         cJSON_AddNumberToObject(resp, "result_bytes", (double)bytes);
+      }
    }
    else
    {
       cJSON_AddStringToObject(resp, "error", "tool returned no result");
    }
    free(result);
-   free(args_json);
    return resp;
 }
 
@@ -249,7 +333,7 @@ static void *script_rpc_serve(void *arg)
             free(buf);
             continue;
          }
-         cJSON *req = cJSON_Parse(buf);
+         cJSON *req = aimee_ir_json_parse_frame(buf, len);
          cJSON *resp = req ? script_rpc_dispatch(srv, req)
                            : script_rpc_error(0, "bad_json", "invalid script RPC JSON");
          if (resp)
@@ -300,7 +384,7 @@ static void *script_rpc_serve(void *arg)
          close(fd);
          continue;
       }
-      cJSON *req = cJSON_Parse(buf);
+      cJSON *req = aimee_ir_json_parse_frame(buf, len);
       cJSON *resp = req ? script_rpc_dispatch(srv, req)
                         : script_rpc_error(0, "bad_json", "invalid script RPC JSON");
       if (resp)
@@ -319,6 +403,7 @@ static void *script_rpc_thread(void *arg)
 {
    script_rpc_server_t *srv = arg;
    struct script_rpc_execution *scope = srv->execution;
+   server_control_scope_t *previous_controls = server_control_scope_bind(scope->controls);
    agent_tools_scope_restore(&scope->tools);
    request_context_restore(&scope->request);
    agent_source_authority_tls_restore(&scope->source);
@@ -328,6 +413,7 @@ static void *script_rpc_thread(void *arg)
    agent_set_request_vault_principal(scope->principal);
    session_id_set_override(scope->session);
    agent_set_request_cancel(scope->cancel);
+   agent_request_cancel_scope_bind(&scope->cancellation);
    agent_set_durable_job(scope->job);
    script_rpc_serve(arg);
    /* The caller's resource lease still encloses this entire joined worker. */
@@ -341,8 +427,10 @@ static void *script_rpc_thread(void *arg)
    agent_set_request_session(NULL);
    agent_set_request_vault_principal(NULL);
    agent_set_request_cancel(NULL);
+   agent_request_cancel_scope_bind(NULL);
    agent_set_durable_job(0);
    request_context_clear();
+   server_control_scope_bind(previous_controls);
    return NULL;
 }
 
@@ -363,49 +451,58 @@ static int script_rpc_write_stubs(script_rpc_server_t *srv)
    snprintf(py, sizeof(py), "%s/aimee_tools.py", srv->stub_dir);
    snprintf(sh, sizeof(sh), "%s/aimee", srv->stub_dir);
 
-   const char *py_body =
-       "import json, os, struct\n"
-       "_seq = 0\n"
-       "def call(tool, args=None):\n"
-       "    global _seq\n"
-       "    _seq += 1\n"
-       "    args = args or {}\n"
-       "    args_json = json.dumps(args, separators=(',', ':'), sort_keys=False)\n"
-       "    frame = json.dumps({'id': _seq, 'tool': tool, 'args': args}, "
-       "separators=(',', ':')).encode()\n"
-       "    fd = os.dup(int(os.environ['AIMEE_RPC_FD']))\n"
-       "    os.write(fd, struct.pack('!I', len(frame)) + frame)\n"
-       "    hdr = os.read(fd, 4)\n"
-       "    if len(hdr) != 4:\n"
-       "        os.close(fd)\n"
-       "        raise RuntimeError('short RPC response')\n"
-       "    size = struct.unpack('!I', hdr)[0]\n"
-       "    data = b''\n"
-       "    while len(data) < size:\n"
-       "        chunk = os.read(fd, size - len(data))\n"
-       "        if not chunk:\n"
-       "            os.close(fd)\n"
-       "            raise RuntimeError('short RPC body')\n"
-       "        data += chunk\n"
-       "    os.close(fd)\n"
-       "    return json.loads(data.decode())\n";
+   const char *py_body = "import json, os, struct\n"
+                         "_seq = 0\n"
+                         "def _read_exact(fd, size):\n"
+                         "    data = b''\n"
+                         "    while len(data) < size:\n"
+                         "        chunk = os.read(fd, size - len(data))\n"
+                         "        if not chunk:\n"
+                         "            raise RuntimeError('short RPC response')\n"
+                         "        data += chunk\n"
+                         "    return data\n"
+                         "def _exchange(tool, args, encoded=False):\n"
+                         "    global _seq\n"
+                         "    _seq += 1\n"
+                         "    field = 'args_json' if encoded else 'args'\n"
+                         "    frame = json.dumps({'id': _seq, 'tool': tool, field: args}, "
+                         "separators=(',', ':'), sort_keys=False).encode()\n"
+                         "    if not frame or len(frame) > 65536:\n"
+                         "        raise ValueError('RPC frame exceeds limit')\n"
+                         "    fd = os.dup(int(os.environ['AIMEE_RPC_FD']))\n"
+                         "    try:\n"
+                         "        packet = memoryview(struct.pack('!I', len(frame)) + frame)\n"
+                         "        while packet:\n"
+                         "            sent = os.write(fd, packet)\n"
+                         "            if sent <= 0:\n"
+                         "                raise RuntimeError('short RPC write')\n"
+                         "            packet = packet[sent:]\n"
+                         "        size = struct.unpack('!I', _read_exact(fd, 4))[0]\n"
+                         "        if not 0 < size <= 65536:\n"
+                         "            raise RuntimeError('invalid RPC response size')\n"
+                         "        return _read_exact(fd, size)\n"
+                         "    finally:\n"
+                         "        os.close(fd)\n"
+                         "def call(tool, args=None):\n"
+                         "    args = {} if args is None else args\n"
+                         "    return json.loads(_exchange(tool, args).decode())\n";
    if (script_rpc_write_file(py, py_body, 0600) != 0)
       return -1;
 
-   const char *sh_body =
-       "#!/usr/bin/env bash\n"
-       "if [ \"$1\" != \"tool\" ] || [ -z \"$2\" ]; then\n"
-       "  echo 'usage: aimee tool <name> [json-args]' >&2; exit 2\n"
-       "fi\n"
-       "tool=\"$2\"; shift 2; args=\"${*:-{}}\"\n"
-       "printf '%s\\0%s' \"$tool\" \"$args\" | python3 -c '\n"
-       "import json, sys\n"
-       "import aimee_tools\n"
-       "tool_raw, args_raw = sys.stdin.buffer.read().split(b\"\\0\", 1)\n"
-       "tool = tool_raw.decode()\n"
-       "args = json.JSONDecoder().raw_decode(args_raw.decode().strip())[0]\n"
-       "print(json.dumps(aimee_tools.call(tool, args), separators=(\",\", \":\")))\n"
-       "'\n";
+   const char *sh_body = "#!/usr/bin/env bash\n"
+                         "if [ \"$1\" != \"tool\" ] || [ -z \"$2\" ]; then\n"
+                         "  echo 'usage: aimee tool <name> [json-args]' >&2; exit 2\n"
+                         "fi\n"
+                         "tool=\"$2\"; shift 2\n"
+                         "if [ \"$#\" -eq 0 ]; then args='{}'; else args=\"$*\"; fi\n"
+                         "printf '%s\\0%s' \"$tool\" \"$args\" | python3 -c '\n"
+                         "import sys\n"
+                         "import aimee_tools\n"
+                         "tool_raw, args_raw = sys.stdin.buffer.read().split(b\"\\0\", 1)\n"
+                         "tool = tool_raw.decode()\n"
+                         "sys.stdout.buffer.write(aimee_tools._exchange(tool, args_raw.decode(), "
+                         "encoded=True) + b\"\\n\")\n"
+                         "'\n";
    return script_rpc_write_file(sh, sh_body, 0700);
 }
 
@@ -461,7 +558,10 @@ void script_rpc_stop(script_rpc_server_t *srv)
       return;
    atomic_store(&srv->stop, 1);
    if (srv->thread_started)
+   {
+      shutdown(srv->listen_fd, SHUT_RDWR);
       pthread_join(srv->thread, NULL);
+   }
    srv->thread_started = 0;
 }
 

@@ -268,6 +268,22 @@
 #define AIMEE_DB1_OP_SESSION_IR_HISTORY_SAVE                32u
 #define AIMEE_DB1_OP_SESSION_IR_HISTORY_LOAD                33u
 #define AIMEE_DB1_OP_SESSION_HARNESS_COMPARE_SWAP           34u
+#define AIMEE_DB1_OP_SESSION_IR_RUNNING_HISTORY_LOAD        35u
+#define AIMEE_DB1_OP_SESSION_IR_APPEND_VERIFIED             36u
+#define AIMEE_DB1_OP_SESSION_IR_SEARCH                      37u
+#define AIMEE_DB1_OP_SESSION_NATIVE_OWNER_CLAIM             38u
+#define AIMEE_DB1_OP_SESSION_NATIVE_RECONCILE               39u
+#define AIMEE_DB1_OP_SESSION_NATIVE_RESERVE                 40u
+#define AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_RECONCILE   41u
+#define AIMEE_DB1_OP_SESSION_NATIVE_EPOCH                   42u
+#define AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_LOOKUP      43u
+#define AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_FINISH      44u
+#define AIMEE_DB1_OP_SESSION_NATIVE_HISTORY                 45u
+#define AIMEE_DB1_OP_SESSION_NATIVE_SOURCE_APPEND           47u
+#define AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_GET             48u
+#define AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_SET             49u
+#define AIMEE_DB1_OP_SESSION_IR_HISTORY_IMPORT              50u
+#define AIMEE_DB1_OP_SESSION_NATIVE_ACTIVE_OWNED            46u
 
 /* Family 7: machine-local runtime state: caches, this box's operator and
  * clones, the model catalogue it fetched, and the snapshots it took. */
@@ -707,7 +723,14 @@ static inline uint32_t aimee_db1_get_u32(const uint8_t *p)
 }
 
 /* Server-local immutable procedure experience (telemetry family). */
-#define AIMEE_DB1_OP_PROCEDURE_EVENT_LOAD   59u
-#define AIMEE_DB1_OP_PROCEDURE_EVENT_APPEND 60u
+#define AIMEE_DB1_OP_PROCEDURE_EVENT_LOAD                 59u
+#define AIMEE_DB1_OP_PROCEDURE_EVENT_APPEND               60u
+#define AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECORD          61u
+#define AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECALL          62u
+#define AIMEE_DB1_OP_DELEGATE_EXECUTION_EXPERIENCE_RECORD 63u
+#define AIMEE_DB1_OP_DELEGATE_EXECUTION_TERMINAL_LOOKUP   64u
+
+#define AIMEE_DB1_OP_LEARNING_PROJECTION_CLAIM 65u
+#define AIMEE_DB1_OP_LEARNING_PROJECTION_ACK   66u
 
 #endif /* AIMEE_DB1_MODULE_API_H */

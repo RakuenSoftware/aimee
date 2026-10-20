@@ -10,11 +10,12 @@
 #include <aimee/translation/aimee_frontend.h>
 #include <aimee/translation/aimee_backend.h> /* anthropic_backend_parse / openai_backend_parse */
 #include <aimee/ir/aimee_ir.h>               /* aimee_response_t + block accessors */
-#include "tool_call_args.h"                  /* assistant_message arg normalize/sanitize */
 #include "tool_args_coerce.h"                /* tool_args_canonicalize_json */
 #include "agent_exec.h"
 #include "agent_protocol.h"
 #include "server_session_log.h"
+#include "server_session_capture.h"
+#include <openssl/crypto.h>
 #include "server_session_control.h"
 #include "cli_session.h"
 #include "db1_client/primary_sessions.h"
@@ -117,7 +118,7 @@ static void finish_final_tool_violation(agent_result_t *out, const agent_t *agen
                                               partial_text, last_tool_name, last_tool_result,
                                               total_tool_calls, diag, sizeof(diag));
 
-   free(out->response);
+   agent_result_clear_response(out);
    out->response = safe_strdup(diag);
    out->success = 0;
    out->abstained = 1;
@@ -126,10 +127,6 @@ static void finish_final_tool_violation(agent_result_t *out, const agent_t *agen
    snprintf(out->error, sizeof(out->error), "model attempted %s on the forced final response turn",
             attempted_tool && attempted_tool[0] ? attempted_tool : "a tool call");
 }
-
-/* agent_store_feedback is defined in agent.c and shared across platforms */
-void agent_store_feedback(const agent_result_t *result, const char *role,
-                          const char *prompt_summary);
 
 /* db1 agent_jobs heartbeat — defined in src/db1/agent_jobs.c. Forward
  * declarations match db1/agent_jobs.h to avoid pulling the db1 umbrella
@@ -402,11 +399,6 @@ static void maybe_compact_before_request(const agent_t *agent, cJSON *messages,
                 "session compacted before request: %d→%d messages (%d removed, %d repairs)",
                 sc_result.messages_before, sc_result.messages_after, sc_result.messages_removed,
                 sc_result.repairs);
-   else
-   {
-      message_history_repair(messages);
-      messages_compact_consecutive(messages);
-   }
 }
 
 static void track_anthropic_payload_rewrite(const delegate_driver_t *driver, const agent_t *agent,
@@ -455,73 +447,40 @@ static const char *default_exec_instructions =
     "- If you encounter an error, try to diagnose and fix it.\n"
     "- Do not ask for confirmation. Execute the task directly.\n";
 
-typedef struct
-{
-   char session[128], principal[VAULT_PRINCIPAL_MAX];
-   const char *vendor;
-} native_harness_binding_t;
-
-static int native_harness_bind(const char *native_id, void *context)
-{
-   native_harness_binding_t *binding = context;
-   return db1_session_harness_bind(binding->session, binding->vendor, native_id,
-                                   binding->principal);
-}
-
 static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
-                                          const agent_t *agent, const char *system_prompt,
-                                          const char *user_prompt, agent_result_t *out)
+                                          const agent_t *agent, const agent_network_t *network,
+                                          const char *role, const char *system_prompt,
+                                          const char *user_prompt, const aimee_request_t *seed,
+                                          aimee_response_t *canonical, agent_result_t *out)
 {
    provider_cli_cfg_t cfg = {.agent = agent,
+                             .network = network,
+                             .role = role,
                              .cwd = run_cmd_get_cwd(),
                              .system_prompt = system_prompt,
-                             .user_prompt = user_prompt};
-   if (strcmp(adapter->cli_kind, "claude") && strcmp(adapter->cli_kind, "codex"))
+                             .user_prompt = user_prompt,
+                             .canonical_request = seed,
+                             .canonical_response = canonical};
+   int host = provider_cli_adapter_host_execute(&cfg, out);
+   if (host != 1)
+      return host;
+   /* Standalone adapter fixtures have no server capture. An attested session
+    * cannot fall back to an SDK credential HOME or private native history. */
+   agent_request_creds_t attestation;
+   agent_request_creds_snapshot(&attestation);
+   int standalone = !seed && !server_session_log_active() && !attestation.session_id[0] &&
+                    !attestation.vault_principal[0] && !attestation.codex_token[0] &&
+                    !attestation.codex_account_id[0] && !attestation.codex_registration[0] &&
+                    !attestation.claude_token[0] && !attestation.claude_registration[0] &&
+                    !attestation.claude_target[0] && !attestation.api_key[0] &&
+                    !attestation.api_key_registration[0] && !attestation.api_key_target[0];
+   OPENSSL_cleanse(&attestation, sizeof attestation);
+   if (standalone)
       return provider_cli_adapter_execute_cfg(adapter, &cfg, out);
-   native_harness_binding_t binding = {.vendor = adapter->cli_kind};
-   int identity = server_session_log_identity(binding.session, sizeof binding.session,
-                                              binding.principal, sizeof binding.principal);
-   if (identity > 0)
-   {
-      agent_request_creds_t attestation;
-      agent_request_creds_snapshot(&attestation);
-      snprintf(binding.session, sizeof binding.session, "%s", attestation.session_id);
-      snprintf(binding.principal, sizeof binding.principal, "%s", attestation.vault_principal);
-   }
-   /* Non-session internal fixtures/completions have no durable native handle.
-    * Every attested user execution uses Vault and the private canonical scope. */
-   if (identity > 0 && !binding.session[0])
-      return provider_cli_adapter_execute_cfg(adapter, &cfg, out);
-   if (identity < 0 || !binding.principal[0])
-      goto refused;
-   char home[4096] = "", resume[1025] = "", cwd[MAX_PATH_LEN] = "";
-   cli_session_t cleanup = {0};
-   cli_session_resolve_cwd(cfg.cwd, cwd, sizeof cwd);
-   cfg.cwd = cwd;
-   if (db1_session_harness_get(binding.session, binding.vendor, resume, sizeof resume,
-                               binding.principal) < 0 ||
-       cli_session_harness_home(binding.vendor, cfg.cwd, binding.session, home, sizeof home,
-                                &cleanup) != 0)
-      goto refused;
-   cfg.home = home;
-   cfg.resume_id = resume;
-   cfg.session_id = binding.session;
-   cfg.bind_session = native_harness_bind;
-   cfg.bind_context = &binding;
-   int rc = provider_cli_adapter_execute_cfg(adapter, &cfg, out);
-   cli_session_destroy(&cleanup);
-   if (aimee_ir_session_capture_failed())
-   {
-      out->success = 0;
-      snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
-      return AGENT_RC_CAPTURE_FAILED;
-   }
-   return rc;
-refused:
    memset(out, 0, sizeof *out);
-   snprintf(out->error, sizeof out->error, "could not prepare scoped Vault-backed %s runtime",
+   snprintf(out->error, sizeof out->error, "canonical %s execution owner unavailable",
             adapter->display_name);
-   return -1;
+   return AGENT_RC_CONTEXT_REFUSED;
 }
 
 static int agent_execute_with_tools_impl(const agent_t *agent, const agent_network_t *network,
@@ -541,9 +500,28 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
                                              aimee_response_t *canonical_out)
 {
    int previous = request_context_set_model_execution(1);
+   aimee_response_t final = {0};
    int rc = agent_execute_with_tools_impl(agent, network, role, system_prompt, user_prompt,
                                           max_tokens, temperature, initial_messages,
-                                          updated_messages, out, seed, canonical_out);
+                                          updated_messages, out, seed, &final);
+   if (!rc && out->success)
+   {
+      /* Native/nested owners may already retain their original response. */
+      if (final.role || final.n_content || final.error_message)
+      {
+         aimee_response_free(&out->canonical_response);
+         out->canonical_response = final;
+         final = (aimee_response_t){0};
+      }
+      if (canonical_out && aimee_ir_response_clone(&out->canonical_response, canonical_out))
+      {
+         out->success = 0;
+         snprintf(out->error, sizeof out->error, "cannot retain owned canonical execution output");
+         aimee_ir_session_fail_capture();
+         rc = AGENT_RC_CAPTURE_FAILED;
+      }
+   }
+   aimee_response_free(&final);
    if (previous >= 0)
       (void)request_context_set_model_execution(previous);
    return rc;
@@ -598,36 +576,6 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
    return agent_execute_with_tools_internal(agent, network, NULL, system_prompt, user_prompt,
                                             max_tokens, temperature, initial_messages,
                                             updated_messages, out, NULL, NULL);
-}
-
-int agent_request_with_tools_supported(const aimee_request_t *request)
-{
-   if (!request || request->n_messages < 1 || request->n_messages > AIMEE_IR_MAX_BLOCKS ||
-       !request->messages)
-      return 0;
-   int content = 0;
-   for (int i = 0; i < request->n_messages; i++)
-   {
-      if (request->messages[i].n_blocks < 0 ||
-          request->messages[i].n_blocks > AIMEE_IR_MAX_BLOCKS ||
-          (request->messages[i].n_blocks && !request->messages[i].blocks))
-         return 0;
-      for (int j = 0; j < request->messages[i].n_blocks; j++)
-      {
-         const aimee_block_t *block = &request->messages[i].blocks[j];
-         if (block->type != AIMEE_BLK_TEXT || (block->text && block->text[0]))
-            content = 1;
-      }
-   }
-   return content &&
-          !(request->n_tools ||
-            (request->tool_choice != AIMEE_TOOL_CHOICE_UNSET &&
-             request->tool_choice != AIMEE_TOOL_CHOICE_AUTO) ||
-            request->n_system > 1 ||
-            (request->n_system && request->system[0].type != AIMEE_BLK_TEXT) || request->thinking ||
-            request->metadata || request->service_tier || request->n_stop || request->has_top_p ||
-            request->has_top_k || request->has_parallel_tool_calls || request->reasoning_summary ||
-            request->reasoning_effort || request->output_format.kind > AIMEE_OUTPUT_TEXT);
 }
 
 int agent_execute_request_with_tools(const agent_t *agent, const agent_network_t *network,
@@ -731,18 +679,40 @@ static int agent_execute_with_tools_impl(const agent_t *agent, const agent_netwo
       }
       if (adapter)
       {
-         if (wire_fence_external_backend() != 0)
+         int owned_native =
+             !strcmp(adapter->cli_kind, "codex") || !strcmp(adapter->cli_kind, "claude");
+         /* The server-owned SDK pipeline sends model traffic only through its
+          * attested canonical gateway, where Go admits the actual rendered
+          * bytes. It is not an unobservable external transport. Launch/source
+          * qualification still belongs to the host executor, without fallback. */
+         int canonical_host =
+             owned_native && server_session_log_active() && server_session_capture_current();
+         if (!canonical_host && wire_fence_external_backend() != 0)
          {
             snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
             return -1;
          }
-         if (seed)
+         if (seed &&
+             (!owned_native || !server_session_log_active() || !server_session_capture_current() ||
+              aimee_ir_history_admit_host(initial_messages) ||
+              server_session_log_history_save(initial_messages)))
          {
             snprintf(out->error, sizeof out->error,
-                     "native harness cannot adopt the complete run history");
+                     "canonical seeded execution history is unavailable");
             return AGENT_RC_CONTEXT_REFUSED;
          }
-         return agent_execute_provider_session(adapter, agent, system_prompt, user_prompt, out);
+         int rc = agent_execute_provider_session(adapter, agent, network, role, system_prompt,
+                                                 user_prompt, seed, canonical_out, out);
+         if (!rc && seed && updated_messages &&
+             (server_session_capture_history(server_session_capture_current(), updated_messages) ||
+              aimee_ir_history_admit_host(*updated_messages)))
+         {
+            out->success = 0;
+            snprintf(out->error, sizeof out->error, "canonical native run result is unavailable");
+            aimee_ir_session_fail_capture();
+            rc = AGENT_RC_CAPTURE_FAILED;
+         }
+         return rc;
       }
       snprintf(out->error, sizeof(out->error),
                "provider-cli: unknown cli_kind '%s' (expected: codex, claude, mistral, "
@@ -1103,12 +1073,6 @@ native_provider_http:
                 * has just destroyed the messages they came from. */
                rtr_begin(&rtr, &sc_result);
             }
-            else
-            {
-               /* Fallback: basic repair + consecutive merge */
-               message_history_repair(messages);
-               messages_compact_consecutive(messages);
-            }
             /* fall through: continue with the compacted history */
          }
 
@@ -1147,13 +1111,12 @@ native_provider_http:
          }
       }
 
-      /* Repair inconsistent history (orphaned tool calls/results) then compact */
-      if (message_history_repair(messages) < 0)
+      /* Execution cannot invent missing receipts or silently discard effects. */
+      if (aimee_ir_history_admit_host(messages))
       {
-         snprintf(out->error, sizeof out->error, "canonical history repair failed");
+         snprintf(out->error, sizeof out->error, "canonical history is incomplete or invalid");
          break;
       }
-      messages_compact_consecutive(messages);
 
       maybe_compact_before_request(&fb_agent, messages, sys);
 
@@ -2418,9 +2381,6 @@ ir_capture_failed:
       snprintf(run_id, sizeof(run_id), "aimee-run-%d-%ld", (int)getpid(), (long)loop_start.tv_sec);
       agent_write_manifest(run_id, out, "");
    }
-
-   /* Store execution outcome as feedback for future context */
-   agent_store_feedback(out, "", user_prompt);
 
    return context_refused  ? AGENT_RC_CONTEXT_REFUSED
           : capture_failed ? AGENT_RC_CAPTURE_FAILED

@@ -3,6 +3,8 @@
  * the detached provider + its runner queue (registry), via the thread-local
  * active-provider seam the file/exec tools resolve through. */
 #include "workspace_turn.h"
+#include "aimee_sha256.h"
+#include "platform_random.h"
 #include "aimee_home.h" /* aimee_home — authorize aimee's own managed worktrees */
 #include "config.h"
 #include "modules/git/forge_credentials.h"
@@ -17,6 +19,9 @@
 #include "workspace_runner_registry.h"
 
 #include <errno.h>
+#include <fcntl.h>
+#include <inttypes.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,6 +34,8 @@ extern char **environ;
  * duration (the active-provider pointer aliases &t_turn_detached.base). */
 static __thread ws_detached_provider_t t_turn_detached;
 static __thread int t_turn_bound;
+static __thread int t_turn_mirror_fd = -1;
+static __thread char t_turn_detached_epoch[65], t_turn_container_epoch[65];
 /* Same, for a delegate turn bound to its own container. Held separately from
  * t_turn_detached because this one owns a CONTAINER: unbinding has to release it,
  * not just drop the pointer, or every delegate turn leaks a container. */
@@ -36,12 +43,35 @@ static __thread ws_container_provider_t t_turn_container;
 static __thread delegate_backend_t *t_turn_container_backend;
 static __thread void *t_turn_container_state;
 static __thread int t_turn_container_hibernate;
+/* Host source custody is separate from the container file/exec provider. */
+static __thread int t_turn_container_source_fd = -1;
+static __thread char t_turn_container_source_cwd[MAX_PATH_LEN];
 /* For a `mirror` workspace the turn acts directly on a server-side reconstructed
  * worktree (the `shared` provider), so instead of binding a provider we remap
  * the turn's cwd into that worktree and stash the drift line to surface. */
 static __thread char t_turn_cwd[MAX_PATH_LEN];
 static __thread char t_turn_drift[256];
 static __thread char t_test_default_workspace[MAX_PATH_LEN];
+
+struct workspace_turn_mirror_lease
+{
+   int fd;
+   char cwd[MAX_PATH_LEN];
+};
+static __thread const workspace_turn_mirror_lease_t *t_callback_mirror;
+
+struct workspace_turn_scope
+{
+   ws_detached_provider_t detached;
+   int bound;
+   int mirror_fd, created_fd;
+   char created_cwd[MAX_PATH_LEN];
+   char epoch[65];
+   char cwd[MAX_PATH_LEN], drift[256];
+   const workspace_provider_t *previous_provider;
+   struct workspace_turn_scope *previous;
+};
+static __thread workspace_turn_scope_t *t_nested_scope;
 
 /* Is `cwd` inside (or equal to) workspace root `ws`? */
 static int cwd_in_workspace(const char *cwd, const char *ws)
@@ -295,24 +325,37 @@ static int mirror_reconstruct_cwd(const char *cwd, const char *root, const char 
       out[0] = '\0';
       return 0;
    }
+   /* A repository symlink cannot turn a client suffix into host authority. */
+   char root_real[MAX_PATH_LEN], cwd_real[MAX_PATH_LEN];
+   if (!realpath(work_dir, root_real) || !realpath(out, cwd_real) ||
+       !cwd_in_workspace(cwd_real, root_real))
+   {
+      out[0] = 0;
+      return 0;
+   }
+   if (snprintf(out, out_cap, "%s", cwd_real) >= (int)out_cap)
+   {
+      out[0] = 0;
+      return 0;
+   }
    return 1;
 }
 
 /* Turn binder: drive the lifecycle and stash the remapped cwd + drift line for
  * the turn. Returns 1 when bound (caller must unbind), 0 to fall through. */
-static int bind_mirror(const char *cwd, const char *root, const char *remote, const char *head)
+static int bind_mirror(const char *cwd, const char *root, const char *remote, const char *head,
+                       char resolved[MAX_PATH_LEN], char notice[256])
 {
    ws_mirror_drift_t verdict = WS_MIRROR_DRIFT_UNKNOWN;
    char drift[256] = "";
-   if (!mirror_reconstruct_cwd(cwd, root, remote, head, t_turn_cwd, sizeof(t_turn_cwd), drift,
+   if (!mirror_reconstruct_cwd(cwd, root, remote, head, resolved, MAX_PATH_LEN, drift,
                                sizeof(drift), &verdict))
    {
-      t_turn_cwd[0] = '\0';
+      resolved[0] = '\0';
       return 0; /* fail closed: a remote turn's foreign cwd is rejected upstream */
    }
    if (verdict != WS_MIRROR_IN_SYNC && drift[0])
-      snprintf(t_turn_drift, sizeof(t_turn_drift), "%s", drift);
-   t_turn_bound = 1;
+      snprintf(notice, 256, "%s", drift);
    return 1;
 }
 
@@ -391,13 +434,34 @@ int workspace_turn_resolve_detached_mirror_cwd(const char *cwd, char *out, size_
    return 0;
 }
 
-int workspace_turn_bind_active(const char *cwd)
+static int active_mirror_lease(const char *real);
+
+static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, int *bound,
+                            int *mirror_fd, char resolved[MAX_PATH_LEN], char drift[256],
+                            int background)
 {
-   t_turn_bound = 0;
-   t_turn_cwd[0] = '\0';
-   t_turn_drift[0] = '\0';
+   *bound = 0;
+   *mirror_fd = -1;
+   resolved[0] = '\0';
+   drift[0] = '\0';
    if (!cwd || !cwd[0])
       return 0;
+   /* Nested foreground hooks/tools and background workers retain the same
+    * producer-held mirror capability. A pathname alone still grants nothing. */
+   {
+      char actual[MAX_PATH_LEN];
+      int source = realpath(cwd, actual) ? active_mirror_lease(actual) : -1;
+      if (source >= 0)
+      {
+         *mirror_fd = fcntl(source, F_DUPFD_CLOEXEC, 3);
+         if (*mirror_fd < 0)
+            return -1;
+         snprintf(resolved, MAX_PATH_LEN, "%s", actual);
+         *bound = 1;
+         workspace_provider_set_active(workspace_provider_shared());
+         return 1;
+      }
+   }
    for (int i = 0; i < config_workspace_count(); i++)
    {
       if (!cwd_in_workspace(cwd, config_workspaces(i)))
@@ -408,7 +472,7 @@ int workspace_turn_bind_active(const char *cwd)
       ws_provider_kind_t kind = config_workspace_providers(i)[0]
                                     ? ws_provider_kind_from_string(config_workspace_providers(i))
                                     : WS_PROVIDER_SHARED;
-      if (kind == WS_PROVIDER_DETACHED)
+      if (kind == WS_PROVIDER_DETACHED && !background)
       {
          /* The runner queue is keyed by the workspace root — the same id the
           * client's `aimee workspace serve <root>` polls. */
@@ -418,14 +482,14 @@ int workspace_turn_bind_active(const char *cwd)
             /* Bind both the unary and streaming transports off the same queue so
              * file/exec ops marshal as today AND a local-CLI agent (exec_stream)
              * can stream its output back from the client. */
-            ws_detached_provider_init_ex(&t_turn_detached, ws_runner_queue_transport,
+            ws_detached_provider_init_ex(detached, ws_runner_queue_transport,
                                          ws_runner_queue_transport_stream, q);
-            workspace_provider_set_active(&t_turn_detached.base);
-            t_turn_bound = 1;
+            workspace_provider_set_active(&detached->base);
+            *bound = 1;
             return 1;
          }
       }
-      else if (kind == WS_PROVIDER_MIRROR)
+      else if (kind == WS_PROVIDER_MIRROR || (background && kind == WS_PROVIDER_DETACHED))
       {
          /* Drive the server-side mirror lifecycle from the registry's vcs
           * coordinates, then act on the reconstructed local tree (shared fs). */
@@ -434,11 +498,95 @@ int workspace_turn_bind_active(const char *cwd)
          snprintf(root, sizeof(root), "%s", config_workspaces(i));
          snprintf(remote, sizeof(remote), "%s", config_workspace_vcs_remote(i));
          snprintf(head, sizeof(head), "%s", config_workspace_vcs_head(i));
-         return bind_mirror(cwd, root, remote, head);
+         *bound = bind_mirror(cwd, root, remote, head, resolved, drift);
+         if (*bound &&
+             (*mirror_fd = open(resolved, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)) < 0)
+         {
+            *bound = 0;
+            resolved[0] = 0;
+            return -1;
+         }
+         if (*bound)
+            workspace_provider_set_active(workspace_provider_shared());
+         return *bound ? 1 : -1;
       }
       return 0; /* matched, but shared (or no queue) — stay on shared */
    }
    return 0; /* cwd not in any registered workspace */
+}
+
+int workspace_turn_bind_active(const char *cwd)
+{
+   if (t_turn_mirror_fd >= 0)
+      close(t_turn_mirror_fd);
+   int result = bind_active_into(cwd, &t_turn_detached, &t_turn_bound, &t_turn_mirror_fd,
+                                 t_turn_cwd, t_turn_drift, 0);
+   t_turn_detached_epoch[0] = 0;
+   if (result > 0 && workspace_provider_active() == &t_turn_detached.base &&
+       platform_random_hex(t_turn_detached_epoch, 64))
+   {
+      workspace_provider_clear_active();
+      t_turn_bound = 0;
+      return -1;
+   }
+   return result;
+}
+static int scope_begin(const char *cwd, workspace_turn_scope_t **out, int background)
+{
+   if (!out)
+      return -1;
+   *out = NULL;
+   if (!cwd || !cwd[0])
+      return 0;
+   workspace_turn_scope_t *scope = calloc(1, sizeof *scope);
+   if (!scope)
+      return -1;
+   scope->created_fd = -1;
+   scope->previous_provider = workspace_provider_active();
+   scope->previous = t_nested_scope;
+   int result = bind_active_into(cwd, &scope->detached, &scope->bound, &scope->mirror_fd,
+                                 scope->cwd, scope->drift, background);
+   if (result < 0)
+   {
+      workspace_provider_set_active(scope->previous_provider);
+      if (scope->mirror_fd >= 0)
+         close(scope->mirror_fd);
+      free(scope);
+      return -1;
+   }
+   if (result > 0 && workspace_provider_active() == &scope->detached.base &&
+       platform_random_hex(scope->epoch, 64))
+   {
+      workspace_provider_set_active(scope->previous_provider);
+      free(scope);
+      return -1;
+   }
+   t_nested_scope = scope;
+   *out = scope;
+   return result;
+}
+int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out)
+{
+   return scope_begin(cwd, out, 0);
+}
+int workspace_turn_scope_begin_background(const char *cwd, workspace_turn_scope_t **out)
+{
+   return scope_begin(cwd, out, 1);
+}
+int workspace_turn_scope_end(workspace_turn_scope_t *scope)
+{
+   if (!scope)
+      return 0;
+   if (scope != t_nested_scope)
+      return -1;
+   workspace_provider_set_active(scope->previous_provider);
+   t_nested_scope = scope->previous;
+   if (scope->mirror_fd >= 0)
+      close(scope->mirror_fd);
+   if (scope->created_fd >= 0)
+      close(scope->created_fd);
+   free(scope);
+   return 0;
 }
 
 const char *workspace_turn_git_target(const char *tool, const char *path, const char *cwd)
@@ -446,6 +594,136 @@ const char *workspace_turn_git_target(const char *tool, const char *path, const 
    if ((!tool || strcmp(tool, "git_clone") != 0) && path && path[0])
       return path;
    return (cwd && cwd[0]) ? cwd : NULL;
+}
+
+/* Only the actively reconstructed directory is a mirror lease. A held inode
+ * prevents a replaced path/symlink from becoming a new filesystem grant. */
+static int mirror_lease_matches(const char *real, const char *path, int fd)
+{
+   char bound[MAX_PATH_LEN];
+   struct stat held, current;
+   return fd >= 0 && path[0] && realpath(path, bound) && strcmp(bound, "/") &&
+          !strcmp(real, bound) && !fstat(fd, &held) && !stat(bound, &current) &&
+          S_ISDIR(held.st_mode) && held.st_dev == current.st_dev && held.st_ino == current.st_ino;
+}
+static int active_mirror_lease(const char *real)
+{
+   if (t_callback_mirror &&
+       mirror_lease_matches(real, t_callback_mirror->cwd, t_callback_mirror->fd))
+      return t_callback_mirror->fd;
+   for (workspace_turn_scope_t *scope = t_nested_scope; scope; scope = scope->previous)
+   {
+      if (mirror_lease_matches(real, scope->created_cwd, scope->created_fd))
+         return scope->created_fd;
+      if (mirror_lease_matches(real, scope->cwd, scope->mirror_fd))
+         return scope->mirror_fd;
+   }
+   return mirror_lease_matches(real, t_turn_cwd, t_turn_mirror_fd) ? t_turn_mirror_fd : -1;
+}
+
+/* Git's common directory binds a linked checkout to the held source repository.
+ * Inherited GIT_DIR/GIT_WORK_TREE/config cannot supply that identity. */
+static int mirror_repository(const char *cwd, char out[MAX_PATH_LEN])
+{
+   const char *path = getenv("PATH");
+   if (!path)
+      path = "/usr/bin:/bin";
+   size_t size = strlen(path) + 6;
+   char *path_env = malloc(size);
+   if (!path_env)
+      return 0;
+   snprintf(path_env, size, "PATH=%s", path);
+   char *environment[] = {path_env,
+                          "GIT_CONFIG_NOSYSTEM=1",
+                          "GIT_CONFIG_GLOBAL=/dev/null",
+                          "GIT_OPTIONAL_LOCKS=0",
+                          "GIT_TERMINAL_PROMPT=0",
+                          NULL};
+   const char *argv[] = {
+       "git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir", NULL};
+   char *result = NULL;
+   int rc =
+       safe_exec_capture_cwd_env_timeout(argv, NULL, environment, &result, MAX_PATH_LEN + 1, 5000);
+   if (result)
+      result[strcspn(result, "\r\n")] = 0;
+   int valid = !rc && result && result[0] && realpath(result, out) && strcmp(out, "/");
+   free(result);
+   free(path_env);
+   return valid;
+}
+
+int workspace_turn_scope_hold_created_worktree(workspace_turn_scope_t *scope, const char *cwd)
+{
+   if (!scope || scope != t_nested_scope)
+      return -1;
+   if (scope->mirror_fd < 0)
+      return 0; /* Ordinary registered shared trees retain their existing authority. */
+   char actual[MAX_PATH_LEN], repository[MAX_PATH_LEN], child_repository[MAX_PATH_LEN];
+   struct stat before, held;
+   if (scope->created_fd >= 0 || !cwd || !realpath(cwd, actual) ||
+       !mirror_lease_matches(scope->cwd, scope->cwd, scope->mirror_fd) ||
+       !strcmp(actual, scope->cwd) || lstat(cwd, &before) || !S_ISDIR(before.st_mode) ||
+       !mirror_repository(scope->cwd, repository) || !mirror_repository(actual, child_repository) ||
+       strcmp(repository, child_repository))
+      return -1;
+   int fd = open(cwd, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+   if (fd < 0)
+      return -1;
+   if (fstat(fd, &held) || before.st_dev != held.st_dev || before.st_ino != held.st_ino ||
+       !mirror_lease_matches(actual, cwd, fd) ||
+       !mirror_lease_matches(scope->cwd, scope->cwd, scope->mirror_fd))
+   {
+      close(fd);
+      return -1;
+   }
+   scope->created_fd = fd;
+   snprintf(scope->created_cwd, sizeof scope->created_cwd, "%s", actual);
+   return 0;
+}
+
+int workspace_turn_mirror_capture(const char *cwd, workspace_turn_mirror_lease_t **out)
+{
+   if (!out)
+      return -1;
+   *out = NULL;
+   char actual[MAX_PATH_LEN];
+   if (!cwd || !cwd[0] || !realpath(cwd, actual))
+      return 0;
+   int source = active_mirror_lease(actual);
+   if (source < 0)
+      return 0;
+   workspace_turn_mirror_lease_t *lease = calloc(1, sizeof *lease);
+   if (!lease)
+      return -1;
+   lease->fd = fcntl(source, F_DUPFD_CLOEXEC, 3);
+   if (lease->fd < 0)
+   {
+      free(lease);
+      return -1;
+   }
+   snprintf(lease->cwd, sizeof lease->cwd, "%s", actual);
+   *out = lease;
+   return 0;
+}
+int workspace_turn_mirror_valid(const workspace_turn_mirror_lease_t *lease, const char *cwd)
+{
+   char actual[MAX_PATH_LEN];
+   return lease && cwd && realpath(cwd, actual) &&
+          mirror_lease_matches(actual, lease->cwd, lease->fd);
+}
+const workspace_turn_mirror_lease_t *
+workspace_turn_mirror_bind(const workspace_turn_mirror_lease_t *lease)
+{
+   const workspace_turn_mirror_lease_t *previous = t_callback_mirror;
+   t_callback_mirror = lease;
+   return previous;
+}
+void workspace_turn_mirror_release(workspace_turn_mirror_lease_t *lease)
+{
+   if (!lease)
+      return;
+   close(lease->fd);
+   free(lease);
 }
 
 /* Is `workspace` a tree aimee may hand a delegate? Canonicalizes into `out` and
@@ -472,6 +750,11 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
       LOG_ERROR("delegate-sandbox", "workspace '%s' does not resolve (%s)", workspace,
                 strerror(errno));
       return 0;
+   }
+   if (active_mirror_lease(real) >= 0)
+   {
+      snprintf(out, out_cap, "%s", real);
+      return 1;
    }
    /* Aimee's OWN managed worktrees — a WFE per-slice tree under
     * $AIMEE_HOME/wfe-worktrees, or a session worktree under $AIMEE_HOME/.aimee/
@@ -501,6 +784,13 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
    }
    for (int i = 0; i < config_workspace_count(); i++)
    {
+      const char *provider = config_workspace_providers(i);
+      ws_provider_kind_t kind =
+          provider[0] ? ws_provider_kind_from_string(provider) : WS_PROVIDER_SHARED;
+      /* These roots belong to the client. Only a held server reconstruction
+       * above can authorize their filesystem replacement. */
+      if (kind == WS_PROVIDER_MIRROR || kind == WS_PROVIDER_DETACHED)
+         continue;
       char root_real[MAX_PATH_LEN];
       if (!realpath(config_workspaces(i), root_real))
          continue;
@@ -532,6 +822,8 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
 {
    if (!task_id || !task_id[0])
       return 0;
+   if (t_turn_container_backend || t_turn_container_source_fd >= 0)
+      return -1; /* Never overwrite a live source/provider owner. */
    /* A delegate IS a sandboxed container. There is no second execution model to
     * fall back to, so every failure below refuses (-1) rather than returning 0.
     *
@@ -556,6 +848,14 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
       return -1;
    }
 
+   int source_fd = open(ws_real, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+   struct stat source_status;
+   if (source_fd < 0 || fstat(source_fd, &source_status))
+   {
+      if (source_fd >= 0)
+         close(source_fd);
+      return -1;
+   }
    delegate_backend_t *b = delegate_backend_lookup("docker");
    if (!b || !b->acquire)
    {
@@ -563,6 +863,7 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
                 "delegate '%s': the docker backend is unavailable — refusing to run. A delegate "
                 "runs in a container or not at all",
                 task_id);
+      close(source_fd);
       return -1;
    }
 
@@ -581,6 +882,7 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
       LOG_ERROR("delegate-sandbox",
                 "delegate '%s': refusing to run — the runtime did not provide network isolation",
                 task_id);
+      close(source_fd);
       return -1;
    }
    if (arc != 0 || !state)
@@ -588,14 +890,32 @@ int workspace_turn_bind_container(const char *task_id, const char *image, const 
       LOG_ERROR("delegate-sandbox",
                 "delegate '%s': could not acquire a container (image=%s) — refusing to run",
                 task_id, bcfg.image ? bcfg.image : "<default>");
+      close(source_fd);
       return -1;
    }
 
+   struct stat current;
+   if (stat(ws_real, &current) || current.st_dev != source_status.st_dev ||
+       current.st_ino != source_status.st_ino || !S_ISDIR(current.st_mode))
+   {
+      b->release(b, state, 0);
+      close(source_fd);
+      return -1;
+   }
    if (ws_container_provider_init(&t_turn_container, b, state) != 0)
    {
       b->release(b, state, 0);
+      close(source_fd);
       return -1;
    }
+   if (platform_random_hex(t_turn_container_epoch, 64))
+   {
+      b->release(b, state, 0);
+      close(source_fd);
+      return -1;
+   }
+   t_turn_container_source_fd = source_fd;
+   snprintf(t_turn_container_source_cwd, sizeof t_turn_container_source_cwd, "%s", ws_real);
    workspace_provider_set_active(&t_turn_container.base);
    t_turn_container_backend = b;
    t_turn_container_state = state;
@@ -626,7 +946,7 @@ int workspace_turn_container_bound(void)
 {
    if (s_container_bound_test_override >= 0)
       return s_container_bound_test_override;
-   return t_turn_container_backend != NULL;
+   return t_turn_container_backend != NULL && workspace_provider_active() == &t_turn_container.base;
 }
 
 void workspace_turn_unbind_active(void)
@@ -647,23 +967,36 @@ void workspace_turn_unbind_active(void)
       t_turn_container_backend = NULL;
       t_turn_container_state = NULL;
       t_turn_container_hibernate = 0;
+      t_turn_container_epoch[0] = 0;
    }
+   if (t_turn_container_source_fd >= 0)
+      close(t_turn_container_source_fd);
+   t_turn_container_source_fd = -1;
+   t_turn_container_source_cwd[0] = 0;
+   t_turn_detached_epoch[0] = 0;
+   if (t_turn_mirror_fd >= 0)
+      close(t_turn_mirror_fd);
+   t_turn_mirror_fd = -1;
    t_turn_cwd[0] = '\0';
    t_turn_drift[0] = '\0';
 }
 
 const char *workspace_turn_active_cwd(void)
 {
-   return t_turn_cwd[0] ? t_turn_cwd : NULL;
+   const char *cwd = t_nested_scope ? t_nested_scope->cwd : t_turn_cwd;
+   return cwd[0] ? cwd : NULL;
 }
 
 const char *workspace_turn_drift_notice(void)
 {
-   return t_turn_drift[0] ? t_turn_drift : NULL;
+   const char *drift = t_nested_scope ? t_nested_scope->drift : t_turn_drift;
+   return drift[0] ? drift : NULL;
 }
 
 int workspace_turn_reject_foreign_cwd(int detached_bound, int trusted_local, const char *cwd)
 {
+   if (detached_bound < 0)
+      return 1;
    /* No cwd, or not an absolute path → the turn runs in the server's own process
     * cwd; there is no foreign path to open, so nothing to reject. */
    if (!cwd || cwd[0] != '/')
@@ -679,4 +1012,118 @@ int workspace_turn_reject_foreign_cwd(int detached_bound, int trusted_local, con
    /* Remote peer + raw foreign absolute path + no detached workspace: the
     * server must not open it on its own filesystem. Reject. */
    return 1;
+}
+
+/* Stable identity is measured by the resource owner; it grants no filesystem or
+ * execution authority. Remote/container acquisition epochs cannot be forged by
+ * an SDK or by a recycled provider address. */
+int workspace_turn_resource_identity(const char *cwd, int *directory_fd, char digest[65])
+{
+   if (directory_fd)
+      *directory_fd = -1;
+   if (digest)
+      digest[0] = 0;
+   if (!cwd || !cwd[0] || !directory_fd || !digest)
+      return -1;
+   const workspace_provider_t *provider = workspace_provider_active();
+   if (!provider)
+      return -1;
+   const char *epoch = "";
+   int fd = -1;
+   struct stat status = {0};
+   if (provider->kind == WS_PROVIDER_CONTAINER)
+   {
+      if (provider != &t_turn_container.base || !t_turn_container_backend ||
+          !t_turn_container_state || !t_turn_container_epoch[0])
+         return -1;
+      epoch = t_turn_container_epoch;
+   }
+   else if (provider->kind == WS_PROVIDER_DETACHED)
+   {
+      if (t_nested_scope && provider == &t_nested_scope->detached.base && t_nested_scope->bound)
+         epoch = t_nested_scope->epoch;
+      else if (provider == &t_turn_detached.base && t_turn_bound)
+         epoch = t_turn_detached_epoch;
+      if (!epoch[0])
+         return -1;
+   }
+   else if (provider->kind == WS_PROVIDER_SHARED || provider->kind == WS_PROVIDER_MIRROR)
+   {
+      char actual[MAX_PATH_LEN];
+      int mirror = -1;
+      if (realpath(cwd, actual))
+         mirror = active_mirror_lease(actual);
+      if (mirror >= 0)
+         fd = fcntl(mirror, F_DUPFD_CLOEXEC, 3);
+      else if (workspace_turn_workspace_authorized(cwd, actual, sizeof actual))
+         fd = open(actual, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+      if (fd < 0 || fstat(fd, &status))
+      {
+         if (fd >= 0)
+            close(fd);
+         return -1;
+      }
+   }
+   else
+      return -1;
+   char identity[MAX_PATH_LEN + 256];
+   int length = snprintf(identity, sizeof identity, "%d:%ju:%ju:%s:%s", provider->kind,
+                         (uintmax_t)status.st_dev, (uintmax_t)status.st_ino, epoch, cwd);
+   if (length < 0 || (size_t)length >= sizeof identity ||
+       aimee_sha256_hex(identity, (size_t)length, digest))
+   {
+      if (fd >= 0)
+         close(fd);
+      return -1;
+   }
+   *directory_fd = fd;
+   return 0;
+}
+
+/* The mounted source is a host-owned capability, not the container execution
+ * namespace. Callers may inspect this exact source for scoped verification and
+ * project identity; no tool provider or execution grant changes here. */
+int workspace_turn_source_identity(const char *cwd, int *directory_fd, char digest[65])
+{
+   if (directory_fd)
+      *directory_fd = -1;
+   if (digest)
+      digest[0] = 0;
+   if (!cwd || !cwd[0] || !directory_fd || !digest)
+      return -1;
+   const workspace_provider_t *provider = workspace_provider_active();
+   if (!provider)
+      return -1;
+   if (provider->kind != WS_PROVIDER_CONTAINER)
+   {
+      if (workspace_turn_resource_identity(cwd, directory_fd, digest))
+         return -1;
+      if (*directory_fd >= 0)
+         return 0;
+      digest[0] = 0;
+      return -1; /* A detached execution identity is not a local source. */
+   }
+   char actual[MAX_PATH_LEN];
+   struct stat held, current;
+   if (provider != &t_turn_container.base || !t_turn_container_backend || !t_turn_container_state ||
+       t_turn_container_source_fd < 0 || !realpath(cwd, actual) ||
+       strcmp(actual, t_turn_container_source_cwd) || fstat(t_turn_container_source_fd, &held) ||
+       stat(actual, &current) || held.st_dev != current.st_dev || held.st_ino != current.st_ino ||
+       !S_ISDIR(held.st_mode))
+      return -1;
+   int fd = fcntl(t_turn_container_source_fd, F_DUPFD_CLOEXEC, 3);
+   if (fd < 0)
+      return -1;
+   char identity[MAX_PATH_LEN + 128];
+   int length = snprintf(identity, sizeof identity, "workspace-source-v1:%ju:%ju:%s",
+                         (uintmax_t)held.st_dev, (uintmax_t)held.st_ino, actual);
+   if (length < 0 || (size_t)length >= sizeof identity ||
+       aimee_sha256_hex(identity, (size_t)length, digest))
+   {
+      close(fd);
+      digest[0] = 0;
+      return -1;
+   }
+   *directory_fd = fd;
+   return 0;
 }

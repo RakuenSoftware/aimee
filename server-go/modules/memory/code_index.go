@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS user_code_stage (
  PRIMARY KEY(project,scan_id,path)
 )`
 
+// Request-local datastore copies share the initializer with the background
+// index worker. Copying a live mutex can strand a request permanently.
 type codeIndexState struct {
 	mu    sync.Mutex
 	ready bool
@@ -72,6 +74,9 @@ type CodeIndexRequest struct {
 }
 
 func (s *postgresDataStore) ensureCodeIndex(ctx context.Context) error {
+	if s.code == nil {
+		return errors.New("code index initialization owner unavailable")
+	}
 	s.code.mu.Lock()
 	defer s.code.mu.Unlock()
 	if s.code.ready {

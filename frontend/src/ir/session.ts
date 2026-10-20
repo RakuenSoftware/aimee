@@ -1,4 +1,7 @@
-import { parseJSON } from './json';
+import { ExactJSONNumber, parseJSON, stringifyJSON } from './json';
+import { validNativeOwner, validToolInterruption, type NativeOwner, type ToolInterruption } from './interruption';
+import { validVerificationProof, type VerificationProof } from './verification';
+import { validImportHistory, type ImportHistory, type ImportObservation } from './importReport';
 /** Canonical session projection. No native provider/harness protocol is accepted
  * here. Live delivery and durable replay use exactly the same reducer. */
 export type Block = {
@@ -47,19 +50,25 @@ export type Delta = {
   usage_reasoning?: number;
   error_message?: string;
 };
-export type ProjectionReport = { model: string; boundary: 'request' | 'response'; omitted_reasoning_blocks: number; omitted_opaque_state_blocks: number };
+export type ProjectionReport = { model: string; boundary: 'request' | 'response'; omitted_reasoning_blocks: number; omitted_opaque_state_blocks: number; omitted_cache_controls?: number };
 export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
-export type ChildExecution = { session_id: string; turn_id: string; role: string; status: ExecutionStatus };
+/** Host custody metadata. Browser schema admission grants no execution authority. */
+export type DelegateLearningBinding = {
+  version: 1; job_id: string; scope_kind: 'project'; scope_id: string;
+  agent: string; provider: string; model: string;
+};
+export type ChildExecution = { session_id: string; turn_id: string; role: string; status: ExecutionStatus; learning_binding?: DelegateLearningBinding };
 export type SessionEvent =
+  | { kind: 'tool_interruption'; payload: ToolInterruption }
   | { kind: 'native_compaction'; payload: { harness: 'codex' | 'claude' } }
   | { kind: 'native_checkpoint'; payload: { scope: string; context_digest: string; prefix_digest: string; harness: 'codex' | 'claude'; native_id: string; claim: string; message_count: number } }
   | { kind: 'replay_proof'; payload: { scope: string; block_digest: string; wire: 'anthropic' | 'responses'; thinking_binding?: string } }
   | { kind: 'child_execution'; payload: ChildExecution }
   | { kind: 'projection'; payload: ProjectionReport }
-  | { kind: 'history'; payload: { scope: string; phase: 'message' | 'commit'; index?: number; count?: number; message?: Message } }
-  | { kind: 'message'; message_id: string; payload: Message }
+  | { kind: 'history'; payload: ImportHistory | { scope: string; phase: 'message' | 'commit'; index?: number; count?: number; message?: Message } }
+  | { kind: 'message'; message_id: string; payload: Message; native_owner?: NativeOwner; partial?: true }
   | { kind: 'delta'; message_id: string; role: string; payload: Delta }
-  | { kind: 'execution'; payload: { status: 'running' | 'completed' | 'failed' | 'cancelled'; error?: string } }
+  | { kind: 'execution'; payload: { status: 'running' | 'completed' | 'failed' | 'cancelled'; error?: string; verification_proofs?: VerificationProof[] } }
   | { kind: 'control_request' | 'control_response'; request_id: string;
       control_kind: string; payload: Record<string, unknown> };
 export type Envelope = {
@@ -71,6 +80,10 @@ export type ProjectedMessage = Message & {
   argumentFragments: Record<number, string>;
   stoppedBlocks: number[];
   error?: string;
+  nativeOwner?: NativeOwner;
+  ownedBlockCount?: number;
+  partial?: boolean;
+  awaitingStop?: boolean;
   cancelled?: boolean;
   stopReason?: string;
   nativeStopReason?: string;
@@ -86,9 +99,14 @@ export type SessionState = {
   projections: (ProjectionReport & { id: string; turn: string })[];
   children: Record<string, ChildExecution>;
   executions: Record<string, 'running' | 'completed' | 'failed' | 'cancelled'>;
+  toolSources: Record<string, { sequence: string; event_id: string; turn: string; actor: string; owner: NativeOwner }>;
+  terminalSources: Record<string, { sequence: string; actor: string }>;
+  toolInterruptions: Record<string, ToolInterruption & { id: string }>;
+  importReports: ImportObservation[];
+  pendingArchives: Record<string, { actor: string; chunks: string[] }>;
 };
 export function emptySession(session: string): SessionState {
-  return { session, sequence: '0', messages: [], controls: {}, activeTurns: [], errors: [], projections: [], executions: {}, children: {} };
+  return { session, sequence: '0', messages: [], controls: {}, activeTurns: [], errors: [], projections: [], executions: {}, children: {}, toolSources: {}, terminalSources: {}, toolInterruptions: {}, importReports: [], pendingArchives: {} };
 }
 function sequence(value: string): bigint {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) throw new Error('Invalid session sequence');
@@ -97,6 +115,43 @@ function sequence(value: string): bigint {
 const kinds = new Set(['text', 'thinking', 'tool_use', 'tool_result', 'image', 'document']);
 function nonempty(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+function validDelegateLearningBinding(value: unknown): value is DelegateLearningBinding {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const binding = value as Record<string, unknown>;
+  const fields = ['version', 'job_id', 'scope_kind', 'scope_id', 'agent', 'provider', 'model'];
+  if (Object.keys(binding).length !== fields.length || !Object.keys(binding).every(key => fields.includes(key)) ||
+      binding.version !== 1 || binding.scope_kind !== 'project' || typeof binding.job_id !== 'string' ||
+      !/^[1-9][0-9]{0,9}$/.test(binding.job_id) || BigInt(binding.job_id) > 2147483647n) return false;
+  return (['scope_id', 'agent', 'provider', 'model'] as const).every((key, index) => {
+    const field = binding[key];
+    return typeof field === 'string' && field.length > 0 && !field.includes('\0') &&
+      new TextEncoder().encode(field).length <= [256, 63, 127, 255][index];
+  });
+}
+/** Compare canonical JSON values without rounding opaque decimals or treating
+ * object member order as content. Undefined projection-only fields are omitted
+ * just as they are on the canonical wire. */
+function sameJSON(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (left instanceof ExactJSONNumber || right instanceof ExactJSONNumber)
+    return left instanceof ExactJSONNumber && right instanceof ExactJSONNumber && left.token === right.token;
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+  if (Array.isArray(left) || Array.isArray(right))
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every((value, index) => sameJSON(value, right[index]));
+  const a = left as Record<string, unknown>, b = right as Record<string, unknown>;
+  const keys = Object.keys(a).filter(key => a[key] !== undefined);
+  return keys.length === Object.keys(b).filter(key => b[key] !== undefined).length &&
+    keys.every(key => Object.prototype.hasOwnProperty.call(b, key) && sameJSON(a[key], b[key]));
+}
+function sameClosedBlock(previous: Block | undefined, current: Block): boolean {
+  if (!previous || previous.type !== current.type) return false;
+  if (previous.type === 'tool_use')
+    return (['tool_id', 'name', 'namespace', 'input'] as const).every(key => sameJSON(previous[key], current[key]));
+  // Final host classification/replay may add context or a reasoning binding.
+  // Original text, signature and opaque reasoning state remain immutable.
+  return Object.entries(previous).every(([key, value]) => key === 'context' || key === 'thinking_binding' ||
+    value === undefined || sameJSON(value, current[key as keyof Block]));
 }
 function validateBlock(block: Block): void {
   if (block?.message_group !== undefined && (!Number.isInteger(block.message_group) || block.message_group < 1 || block.message_group > 4096))
@@ -120,6 +175,14 @@ function validateBlock(block: Block): void {
   if ((block.type === 'image' || block.type === 'document') &&
       (!nonempty(block.media_ref) || (block.media_type !== undefined && !nonempty(block.media_type)))) throw new Error('Invalid media reference');
 }
+export function validateHistoryMessage(value: unknown): asserts value is Message {
+  const message = value as Message;
+  if (!message || !['system', 'developer', 'user', 'assistant', 'tool'].includes(message.role) || !Array.isArray(message.blocks) ||
+      Object.keys(message).some(key => !['role', 'blocks', 'content_scalar'].includes(key)) ||
+      message.content_scalar !== undefined && typeof message.content_scalar !== 'boolean') throw new Error('Invalid imported canonical message');
+  stringifyJSON(message);
+  message.blocks.forEach(validateBlock);
+}
 export function reduceSession(state: SessionState, envelope: Envelope): SessionState {
   if (envelope.version !== 1 || envelope.session_id !== state.session || !nonempty(envelope.event_id) ||
       !nonempty(envelope.turn_id) || !nonempty(envelope.actor)) throw new Error('Invalid session envelope');
@@ -134,6 +197,32 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       (event.kind === 'message' || event.kind === 'delta' || event.kind === 'control_request'))
     throw new Error('Content follows execution completion');
   switch (event.kind) {
+    case 'tool_interruption': {
+      const receipt = event.payload;
+      if (Object.keys(event).length !== 2 || !validToolInterruption(receipt))
+        throw new Error('Invalid tool interruption');
+      const source = receipt.source;
+      const key = toolBlockKey({ id: source.message_id }, source.block_index);
+      const recorded = state.toolSources[key];
+      const terminal = state.terminalSources[source.turn_id];
+      const message = state.messages.find(message => message.id === source.message_id);
+      const block = message?.blocks[source.block_index];
+      if (source.session_id !== envelope.session_id || source.turn_id !== envelope.turn_id || source.actor !== envelope.actor ||
+          !recorded || recorded.sequence !== source.sequence || recorded.event_id !== source.event_id ||
+          recorded.turn !== source.turn_id || recorded.actor !== source.actor ||
+          !(['owner_id', 'binding_sha256', 'epoch', 'containment_sha256'] as const).every(field => recorded.owner[field] === receipt.owner[field]) ||
+          !terminal || terminal.sequence !== receipt.terminal_sequence || terminal.actor !== source.actor ||
+          sequence(source.sequence) >= sequence(receipt.terminal_sequence) || sequence(receipt.terminal_sequence) >= nextSequence ||
+          message?.role !== 'assistant' || message.turn !== source.turn_id || block?.type !== 'tool_use' ||
+          block.tool_id !== source.tool_id || block.name !== source.name)
+        throw new Error('Tool interruption has no matching source and terminal');
+      if (state.toolInterruptions[key] || toolResults(state).byCall.has(key))
+        throw new Error('Tool interruption already has a completion observation');
+      // Preserve the original call, execution status and closed controls. This
+      // receipt adds only an unknown-outcome annotation, never a tool result.
+      next.toolInterruptions = { ...state.toolInterruptions, [key]: { ...receipt, id: envelope.event_id } };
+      return next;
+    }
     case 'native_compaction': {
       if (Object.keys(event.payload).length !== 1 || !['codex', 'claude'].includes(event.payload.harness))
         throw new Error('Invalid native compaction observation');
@@ -162,7 +251,9 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
     }
     case 'child_execution': {
       const child = event.payload;
-      if (![child.session_id, child.turn_id, child.role].every(value => nonempty(value) && new TextEncoder().encode(value).length <= 127) ||
+      if (!Object.keys(child).every(key => ['session_id', 'turn_id', 'role', 'status', 'learning_binding'].includes(key)) ||
+          (Object.prototype.hasOwnProperty.call(child, 'learning_binding') && !validDelegateLearningBinding(child.learning_binding)) ||
+          ![child.session_id, child.turn_id, child.role].every(value => nonempty(value) && new TextEncoder().encode(value).length <= 127) ||
           child.session_id === state.session || !['running', 'completed', 'failed', 'cancelled'].includes(child.status))
         throw new Error('Invalid child execution reference');
       const key = `${child.session_id}:${child.turn_id}`;
@@ -174,7 +265,9 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
     }
     case 'projection': {
       const report = event.payload;
-      if (!nonempty(report.model) || (report.boundary !== 'request' && report.boundary !== 'response') || !Number.isSafeInteger(report.omitted_reasoning_blocks) || report.omitted_reasoning_blocks <= 0 ||
+      if (!nonempty(report.model) || (report.boundary !== 'request' && report.boundary !== 'response') || !Number.isSafeInteger(report.omitted_reasoning_blocks) || report.omitted_reasoning_blocks < 0 ||
+          !Number.isSafeInteger(report.omitted_cache_controls ?? 0) || (report.omitted_cache_controls ?? 0) < 0 ||
+          (report.omitted_reasoning_blocks === 0 && (report.omitted_cache_controls ?? 0) === 0) ||
           !Number.isSafeInteger(report.omitted_opaque_state_blocks) || report.omitted_opaque_state_blocks < 0 ||
           report.omitted_opaque_state_blocks > report.omitted_reasoning_blocks) throw new Error('Invalid projection report');
       next.projections = [...(state.projections ?? []), { ...report, id: envelope.event_id, turn: envelope.turn_id }];
@@ -182,6 +275,61 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
     }
     case 'history': {
       const history = event.payload;
+      const imported = state.importReports?.find(item => item.turn === envelope.turn_id && item.checkpoint);
+      if (imported && (history.phase === 'message' || history.phase === 'message_fragment' || history.phase === 'commit')) {
+        if (imported.actor !== envelope.actor || imported.scope !== history.scope || imported.checkpoint!.committed)
+          throw new Error('Imported checkpoint owner or scope mismatch');
+        const checkpoint = imported.checkpoint!;
+        const entries = [...checkpoint.entries];
+        const last = entries[entries.length - 1];
+        const partial = last && 'parts' in last && last.parts.length < last.count;
+        let bytes = checkpoint.bytes;
+        if (history.phase === 'message_fragment') {
+          if (!Object.keys(event).every(key => ['kind', 'payload'].includes(key)) || !validImportHistory(history)) throw new Error('Invalid imported fragment');
+          const fragment = history.fragment;
+          if (fragment.message_index !== entries.length - (partial ? 1 : 0) ||
+              (partial ? fragment.part_index !== last.parts.length || fragment.message_sha256 !== last.sha256 || fragment.part_count !== last.count : fragment.part_index !== 0))
+            throw new Error('Imported fragment order mismatch');
+          const entry = { parts: [...(partial ? last.parts : []), fragment.text], sha256: fragment.message_sha256, count: fragment.part_count };
+          if (partial) entries[entries.length - 1] = entry; else entries.push(entry);
+          bytes += new TextEncoder().encode(fragment.text).length;
+        } else if (history.phase === 'message') {
+          if (partial || (history.index ?? 0) !== entries.length || !history.message) throw new Error('Imported message order mismatch');
+          validateHistoryMessage(history.message);
+          entries.push({ message: history.message });
+          bytes += new TextEncoder().encode(stringifyJSON(history.message)).length;
+        } else if (partial || history.count !== entries.length || history.count !== imported.report.imported_messages)
+          throw new Error('Imported checkpoint count mismatch');
+        if (bytes > 16777216 || entries.length > imported.report.imported_messages) throw new Error('Imported checkpoint budget exceeded');
+        next.importReports = state.importReports.map(item => item === imported ? { ...item, checkpoint: { entries, bytes, committed: history.phase === 'commit' } } : item);
+        return next;
+      }
+      if (history.phase === 'message_fragment') {
+        if (!Object.keys(event).every(key => ['kind', 'payload'].includes(key)) || !validImportHistory(history))
+          throw new Error('Invalid history message fragment');
+        // Host-only checkpoint fragments are prompt metadata, never observations or controls.
+        return next;
+      }
+      if (history.phase === 'archive' || history.phase === 'import_report') {
+        if (!Object.keys(event).every(key => ['kind', 'payload'].includes(key)) || !validImportHistory(history))
+          throw new Error('Invalid history import metadata');
+        const pending = state.pendingArchives?.[envelope.turn_id];
+        if (history.phase === 'archive') {
+          if (history.index !== (pending?.chunks.length ?? 0) || pending && pending.actor !== envelope.actor ||
+              state.importReports?.some(report => report.turn === envelope.turn_id)) throw new Error('Invalid archive chunk order');
+          next.pendingArchives = { ...(state.pendingArchives ?? {}), [envelope.turn_id]: { actor: envelope.actor, chunks: [...(pending?.chunks ?? []), history.archive_text] } };
+        } else {
+          const report = history.import_report;
+          if (state.importReports?.some(report => report.turn === envelope.turn_id) ||
+              (report.outcome === 'archived' ? !pending || pending.actor !== envelope.actor || pending.chunks.length !== report.archive_chunks : !!pending))
+            throw new Error('Incomplete history archive');
+          next.importReports = [...(state.importReports ?? []), { id: envelope.event_id, turn: envelope.turn_id, actor: envelope.actor,
+            scope: history.scope, report: { ...report }, ...(['exact', 'normalized'].includes(report.outcome) ? { checkpoint: { entries: [], committed: false, bytes: 0 } } : {}), ...(pending ? { chunks: pending.chunks } : {}) }];
+          next.pendingArchives = { ...(state.pendingArchives ?? {}) };
+          delete next.pendingArchives[envelope.turn_id];
+        }
+        return next;
+      }
       if (!nonempty(history.scope) || (history.phase !== 'message' && history.phase !== 'commit'))
         throw new Error('Invalid history checkpoint');
       if (history.phase === 'message') {
@@ -201,17 +349,47 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         throw new Error('Invalid canonical message');
       if (event.payload.content_scalar !== undefined && typeof event.payload.content_scalar !== 'boolean') throw new Error('Invalid content form');
       event.payload.blocks.forEach(validateBlock);
+      if (Object.prototype.hasOwnProperty.call(event, 'native_owner') && !validNativeOwner(event.native_owner) ||
+          Object.prototype.hasOwnProperty.call(event, 'partial') && (event.partial !== true || !event.native_owner))
+        throw new Error('Invalid native snapshot owner');
+      const owner = event.native_owner;
+      const previous = state.messages.find(message => message.id === event.message_id);
+      if (previous?.nativeOwner && (!owner || !sameJSON(owner, previous.nativeOwner)))
+        throw new Error('Native snapshot owner changed');
+      if (owner) {
+        if (!Object.keys(event).every(key => ['kind', 'message_id', 'payload', 'native_owner', 'partial'].includes(key)))
+          throw new Error('Invalid native snapshot owner');
+        if (event.payload.role !== 'assistant') throw new Error('Native snapshot requires an assistant message');
+        const protectedCount = previous?.ownedBlockCount ?? 0;
+        if (event.payload.blocks.length < protectedCount || previous && event.payload.blocks.some((block, index) =>
+          (index < protectedCount || previous.stoppedBlocks.includes(index)) && !sameClosedBlock(previous.blocks[index], block)))
+          throw new Error('Native snapshot changed a closed block');
+        next.toolSources = { ...state.toolSources };
+        event.payload.blocks.forEach((block, index) => {
+          if (block.type !== 'tool_use') return;
+          const key = toolBlockKey({ id: event.message_id }, index);
+          if (!next.toolSources[key]) next.toolSources[key] = { sequence: envelope.sequence, event_id: envelope.event_id,
+            turn: envelope.turn_id, actor: envelope.actor, owner: { ...owner } };
+        });
+      }
       const message: ProjectedMessage = { ...event.payload, id: event.message_id,
-        turn: envelope.turn_id, complete: true, argumentFragments: {}, stoppedBlocks: event.payload.blocks.map((_, index) => index) };
+        turn: envelope.turn_id, complete: !event.partial, awaitingStop: false, argumentFragments: {}, stoppedBlocks: event.payload.blocks.map((_, index) => index),
+        ...(owner ? { nativeOwner: { ...owner }, ownedBlockCount: event.payload.blocks.length, partial: !!event.partial } : {}) };
       const index = state.messages.findIndex(m => m.id === event.message_id);
       if (index >= 0) {
         if (state.messages[index].role !== message.role || state.messages[index].turn !== message.turn)
           throw new Error('Message identity changed');
         const previous = state.messages[index];
+        if (event.partial) {
+          message.blocks = [...event.payload.blocks, ...previous.blocks.slice(event.payload.blocks.length)];
+          message.argumentFragments = { ...previous.argumentFragments };
+          message.stoppedBlocks = [...new Set([...previous.stoppedBlocks, ...message.stoppedBlocks])];
+        }
         // A complete block snapshot inside a started model turn still awaits
         // TURN_STOP, which owns stop reason and usage. Standalone messages and
         // snapshots after TURN_STOP are already complete.
-        message.complete = previous.complete;
+        message.awaitingStop = previous.awaitingStop;
+        message.complete = event.partial ? previous.complete : !previous.awaitingStop;
         message.usage = previous.usage;
         message.stopReason = previous.stopReason;
         message.nativeStopReason = previous.nativeStopReason;
@@ -237,14 +415,14 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
           const message = state.messages[index];
           if (message.role !== event.role || message.turn !== envelope.turn_id)
             throw new Error('Delta changed message identity');
-          next.messages = state.messages.map((m, i) => i === index ? { ...m, complete: true, error } : m);
+          next.messages = state.messages.map((m, i) => i === index ? { ...m, complete: true, awaitingStop: false, error } : m);
         }
         return next;
       }
       if (d.type === 'TURN_START') {
         if (index >= 0) throw new Error('Duplicate message start');
         if (index < 0) next.messages = [...state.messages, { id: event.message_id,
-          turn: envelope.turn_id, role: event.role, blocks: [], complete: false,
+          turn: envelope.turn_id, role: event.role, blocks: [], complete: false, awaitingStop: true,
           argumentFragments: {}, stoppedBlocks: [] }];
         return next;
       }
@@ -270,6 +448,7 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         message.stopReason = d.stop_reason;
         message.nativeStopReason = d.raw_stop_reason;
         message.complete = true;
+        message.awaitingStop = false;
         return next;
       }
       const blockID = d.block_id;
@@ -333,6 +512,13 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       const status = event.payload.status;
       if (!['running', 'completed', 'failed', 'cancelled'].includes(status))
         throw new Error('Invalid execution status');
+      if (event.payload.verification_proofs !== undefined) {
+        const proofs = event.payload.verification_proofs;
+        if (status !== 'completed' || !Array.isArray(proofs) || proofs.length < 1 || proofs.length > 8 ||
+            proofs.some(proof => !validVerificationProof(proof) || proof.session_id !== envelope.session_id ||
+              proof.turn_id !== envelope.turn_id || proof.actor !== envelope.actor))
+          throw new Error('Invalid execution verification proofs');
+      }
       const previous = state.executions[envelope.turn_id];
       if (previous && previous !== 'running') throw new Error('Execution is already terminal');
       if (!previous && status !== 'running') throw new Error('Execution has not started');
@@ -342,10 +528,11 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         state.activeTurns.filter(turn => turn !== envelope.turn_id);
       if (event.payload.error) next.errors = [...state.errors, event.payload.error];
       if (status !== 'running') {
+        next.terminalSources = { ...state.terminalSources, [envelope.turn_id]: { sequence: envelope.sequence, actor: envelope.actor } };
         const open = state.messages.filter(m => m.turn === envelope.turn_id && !m.complete);
         if (status === 'completed' && open.length) throw new Error('Execution completed with open messages');
         next.messages = state.messages.map(m => m.turn === envelope.turn_id && !m.complete ?
-          { ...m, complete: true, cancelled: status === 'cancelled',
+          { ...m, complete: true, awaitingStop: false, cancelled: status === 'cancelled',
             error: status === 'failed' ? (event.payload.error || 'Execution failed') : undefined } : m);
         next.controls = Object.fromEntries(Object.entries(state.controls).map(([id, control]) =>
           [id, control.turn === envelope.turn_id && !control.response ? { ...control, closed: true } : control]));

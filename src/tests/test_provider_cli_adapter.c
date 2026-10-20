@@ -59,8 +59,7 @@ int agent_execute_with_tools(const agent_t *agent, const agent_network_t *networ
 
    memset(out, 0, sizeof(*out));
    snprintf(out->agent_name, sizeof(out->agent_name), "%s", agent->name);
-   out->response = strdup("native ok");
-   assert(out->response != NULL);
+   assert(!agent_result_from_host_text(out, "native ok"));
    out->success = 1;
    out->turns = 1;
    return 0;
@@ -198,14 +197,14 @@ static void test_claude_stream_json_does_not_duplicate_final_result(void)
    snprintf(agent.cli_cmd, sizeof(agent.cli_cmd), "%s", path);
    agent.timeout_ms = 5000;
 
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(provider_cli_adapter_execute(provider_cli_adapter_get("claude"), &agent, ".", "sys",
                                        "user", &out) == 0);
    assert(out.success == 1);
    assert(out.response != NULL);
    assert(strcmp(out.response, "ok") == 0);
    assert(out.turns == 1);
-   free(out.response);
+   agent_result_clear_response(&out);
    unlink(path);
 }
 
@@ -240,12 +239,12 @@ static void test_provider_cli_captures_before_child_completion(void)
    agent.timeout_ms = 5000;
    int observed = 0;
    aimee_ir_session_set_sink(reject_live_capture, &observed);
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(provider_cli_adapter_execute(provider_cli_adapter_get("claude"), &agent, ".", "", "user",
                                        &out) == AGENT_RC_CAPTURE_FAILED);
    assert(observed == 1 && !out.success && access(marker, F_OK) != 0);
    aimee_ir_session_set_sink(NULL, NULL);
-   free(out.response);
+   agent_result_clear_response(&out);
    unlink(path);
 }
 
@@ -270,7 +269,7 @@ static void test_provider_cli_honors_workflow_tool_loop_cap(void)
    agent.timeout_ms = 5000;
    agent.tool_loop_timeout_ms_cap = 50;
 
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(provider_cli_adapter_execute(provider_cli_adapter_get("claude"), &agent, ".", "sys",
                                        "user", &out) != 0);
    assert(strstr(out.error, "timed out after 50 ms") != NULL);
@@ -296,7 +295,7 @@ static void test_mistral_native_adapter_execution(void)
 
    reset_seen_agent();
    assert(runtime_secret_store("MISTRAL_API_KEY", "unit-test-mistral-key") == 0);
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(provider_cli_adapter_execute(mistral, &agent, ".", "sys", "user", &out) == 0);
    assert(out.success == 1);
    assert(out.response != NULL);
@@ -313,7 +312,7 @@ static void test_mistral_native_adapter_execution(void)
    assert(g_seen_agent.tools_enabled == 1);
    assert(g_seen_agent.max_tokens == 1234);
    assert(g_seen_agent.timeout_ms == 4321);
-   free(out.response);
+   agent_result_clear_response(&out);
    runtime_secret_remove("MISTRAL_API_KEY");
 }
 
@@ -355,8 +354,56 @@ static void test_tool_result_format(void)
    assert(strstr(buf, "\"ok\":true") != NULL);
 }
 
+static int forbidden_legacy_spawn(const provider_cli_cfg_t *cfg, const char *prompt, int *input,
+                                  int *output, pid_t *pid)
+{
+   (void)cfg;
+   (void)prompt;
+   (void)input;
+   (void)output;
+   (void)pid;
+   assert(!"an adapter without a canonical executor must never spawn");
+   return -1;
+}
+static int flat_executor(const provider_cli_cfg_t *cfg, agent_result_t *result)
+{
+   (void)cfg;
+   result->response = strdup("unqualified native text");
+   assert(result->response);
+   result->success = 1;
+   return 0;
+}
+static int passive_capture(const aimee_session_event_t *event, void *context)
+{
+   (void)event;
+   (void)context;
+   return 0;
+}
+static void test_no_flat_child_fallback(void)
+{
+   provider_cli_adapter_t legacy = {.display_name = "legacy", .spawn = forbidden_legacy_spawn};
+   provider_cli_cfg_t cfg = {.user_prompt = "task"};
+   agent_result_t result = {0};
+   assert(provider_cli_adapter_execute_cfg(&legacy, &cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
+   assert(!result.response && !result.canonical_response.content && !result.success);
+   legacy.execute = flat_executor;
+   assert(provider_cli_adapter_execute_cfg(&legacy, &cfg, &result) == AGENT_RC_CAPTURE_FAILED);
+   assert(!result.success);
+   agent_result_clear_response(&result);
+   aimee_ir_session_set_sink(passive_capture, NULL);
+   assert(provider_cli_adapter_execute_cfg(&legacy, &cfg, &result) == AGENT_RC_CAPTURE_FAILED);
+   assert(!result.success && aimee_ir_session_capture_failed());
+   agent_result_clear_response(&result);
+   aimee_ir_session_set_sink(NULL, NULL); /* Independent negative fixture ends here. */
+
+   for (const char **kind = (const char *[]){"codex", "claude", "mistral", "acp", NULL}; *kind;
+        kind++)
+      assert(provider_cli_adapter_get(*kind)->execute);
+}
+
 int main(void)
 {
+   test_no_flat_child_fallback();
    test_registry_and_caps();
    test_common_json_parse_text_tool_and_error();
    test_claude_parse_stream_json();

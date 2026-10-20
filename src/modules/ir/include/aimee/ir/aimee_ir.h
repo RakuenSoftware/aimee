@@ -292,6 +292,13 @@ typedef struct
    struct cJSON *metadata;
    /* Anthropic `service_tier` ("auto"/"standard_only"/...); NULL if unset. Owned. */
    char *service_tier;
+   /* OpenAI-family cache routing and retention controls. Owned; NULL means
+    * provider default. Options remain opaque JSON with exact numeric tokens;
+    * retention and options express independent policies, never rewrite one
+    * into the other. Native raw sidecars are not their authority. */
+   char *prompt_cache_key;
+   char *prompt_cache_retention;
+   struct cJSON *prompt_cache_options;
    /* Anthropic extended-thinking CONFIG object ({type:"enabled",budget_tokens:N}) -- a
     * top-level request field, distinct from THINKING content blocks in messages.
     * Opaque, preserved verbatim. Owned. NULL when the client sent none. */
@@ -398,10 +405,19 @@ typedef struct
 } aimee_ir_response_builder_t;
 int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
                                     const aimee_delta_t *delta);
+/* Number of immutable closed blocks in the contiguous response prefix. */
+int aimee_ir_response_builder_closed_prefix(const aimee_ir_response_builder_t *builder);
 void aimee_ir_response_builder_free(aimee_ir_response_builder_t *builder);
 
 /* ---- lifecycle ---- */
 void aimee_message_free(aimee_message_t *message);
+/* Deep owned typed snapshot, including provenance and exact native sidecars.
+ * out must be zero-initialized or owned; success atomically replaces it and
+ * failure leaves it intact. source == out is supported. No wire translation. */
+int aimee_ir_request_clone(const aimee_request_t *source, aimee_request_t *out);
+/* Exact owned response snapshot. Source and existing output are unchanged on
+ * failure; context metadata and opaque numeric/reasoning values stay exact. */
+int aimee_ir_response_clone(const aimee_response_t *source, aimee_response_t *out);
 void aimee_request_free(aimee_request_t *r);
 void aimee_response_free(aimee_response_t *r);
 /* Stable comparison-only JSON view; opaque source values remain unchanged.

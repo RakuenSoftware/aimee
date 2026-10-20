@@ -8,6 +8,8 @@
 #include "aimee.h"
 
 #include "agent_protocol.h"
+#include "agent_types.h"
+#include "agent_result_cache.h"
 #include <aimee/ir/aimee_ir_metrics.h>
 #include "cJSON.h"
 #include "support/ir_response_fixture.h"
@@ -50,12 +52,75 @@ int main(void)
       char *text = aimee_ir_response_text_alloc(&response);
       assert(text && !strcmp(text, "beforeafter"));
       free(text);
+      cJSON_Delete(response.raw);
+      response.raw = cJSON_Parse("{\"native_extension\":\"opaque\"}");
+      cJSON_Delete(response.content[0].raw);
+      response.content[0].raw = cJSON_Parse("{\"native_signature_metadata\":true}");
+      cJSON *snapshot = aimee_ir_response_json(&response);
+      assert(snapshot);
+      aimee_response_t restored = {0};
+      assert(!aimee_ir_response_parse(snapshot, &restored));
+      assert(restored.n_content == 4 && restored.usage_cache_read == 9);
+      assert(!strcmp(restored.content[0].thinking_signature, "sig"));
+      assert(cJSON_Compare(restored.raw, response.raw, 1));
+      assert(cJSON_Compare(restored.content[0].raw, response.content[0].raw, 1));
+      assert(!strcmp(aimee_ir_response_tool(&restored, 0)->tool_id, id));
+      aimee_block_t *unchanged = restored.content;
+      cJSON *usage = cJSON_GetObjectItemCaseSensitive(snapshot, "usage");
+      cJSON_ReplaceItemInObjectCaseSensitive(usage, "input",
+                                             cJSON_CreateString("9223372036854775808"));
+      assert(aimee_ir_response_parse(snapshot, &restored) < 0 && restored.content == unchanged);
+      cJSON_ReplaceItemInObjectCaseSensitive(usage, "input", cJSON_CreateString("012"));
+      assert(aimee_ir_response_parse(snapshot, &restored) < 0 && restored.content == unchanged);
+      cJSON_Delete(snapshot);
+      aimee_response_free(&restored);
+      agent_result_t original = {0}, selected = {0};
+      original.turns = 7;
+      assert(agent_result_adopt_response(&original, &response) == 0);
+      assert(!response.n_content && !response.content);
+      assert(!strcmp(original.response, "beforeafter"));
+      assert(original.canonical_response.n_content == 4);
+      assert(!strcmp(original.canonical_response.content[0].thinking_signature, "sig"));
+      assert(!strcmp(aimee_ir_response_tool(&original.canonical_response, 0)->tool_id, id));
+      assert(aimee_ir_response_clone(&original.canonical_response, &response) == 0);
+      agent_result_move_response(&selected, &original);
+      assert(!original.response && !original.canonical_response.content && original.turns == 7);
+      assert(selected.canonical_response.usage_cache_read == 9);
+      char *projected = agent_result_take_text(&selected);
+      assert(projected && !strcmp(projected, "beforeafter"));
+      assert(!selected.response && !selected.canonical_response.content);
+      free(projected);
+      agent_result_clear_response(&original);
+      agent_result_clear_response(&selected);
       assert(aimee_ir_response_drop_tool(&response, 0) == 0);
       assert(response.n_content == 3 && response.content[0].type == AIMEE_BLK_THINKING);
       assert(!strcmp(response.content[2].text, "after") && response.raw == NULL);
       assert(aimee_ir_response_drop_tool(&response, 0) == -1);
       aimee_response_free(&response);
       puts("  PASS: execution retains complete owned IR and opaque IDs");
+   }
+
+   {
+      agent_t *agent = calloc(1, sizeof *agent);
+      assert(agent);
+      snprintf(agent->name, sizeof agent->name, "local-transform");
+      snprintf(agent->provider, sizeof agent->provider, "openai");
+      snprintf(agent->endpoint, sizeof agent->endpoint, "http://localhost:9000/v1");
+      snprintf(agent->model, sizeof agent->model, "model-a");
+      char original[65], changed[65];
+      assert(!agent_result_cache_key("alice", "format", agent, "exact admitted request", original));
+      assert(!agent_result_cache_key("bob", "format", agent, "exact admitted request", changed));
+      assert(strcmp(original, changed));
+      assert(!agent_result_cache_key("alice", "draft", agent, "exact admitted request", changed));
+      assert(strcmp(original, changed));
+      assert(!agent_result_cache_key("alice", "format", agent, "changed system/context", changed));
+      assert(strcmp(original, changed));
+      snprintf(agent->model, sizeof agent->model, "model-b");
+      assert(!agent_result_cache_key("alice", "format", agent, "exact admitted request", changed));
+      assert(strcmp(original, changed));
+      assert(agent_result_cache_key("", "format", agent, "exact admitted request", changed) < 0);
+      free(agent);
+      puts("  PASS: result cache binds owner, role, actual request and selected model");
    }
 
    for (int malformed = 0; malformed < 2; malformed++)

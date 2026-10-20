@@ -38,7 +38,7 @@ MODULE_API = CLIENT_DIR / "db1_module_api.h"
 
 # db1_call(family, op, fields, count, values, caps, slots, filled)
 CALL = re.compile(
-    r"db1_call\(\s*&family\s*,\s*AIMEE_DB1_OP_(?P<op>[A-Z0-9_]+)\s*,"
+    r"db1_call\(\s*&[A-Za-z_]\w*\s*,\s*AIMEE_DB1_OP_(?P<op>[A-Z0-9_]+)\s*,"
     r"\s*(?P<fields>[^,]+?)\s*,"
     r"\s*(?P<count>[^,]+?)\s*,"
     r"\s*(?P<values>[^,]+?)\s*,"

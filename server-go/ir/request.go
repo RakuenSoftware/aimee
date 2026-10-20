@@ -46,27 +46,30 @@ type ProviderConfig struct {
 	Thinking json.RawMessage `json:"thinking,omitempty"`
 }
 type Request struct {
-	Version           int             `json:"version"`
-	Model             string          `json:"model,omitempty"`
-	SourceWire        string          `json:"source_wire"`
-	CachePolicy       string          `json:"cache_policy"`
-	System            []Block         `json:"system"`
-	Messages          []Message       `json:"messages"`
-	Tools             []Tool          `json:"tools"`
-	ToolChoice        ToolChoice      `json:"tool_choice"`
-	ParallelToolCalls *bool           `json:"parallel_tool_calls,omitempty"`
-	MaxTokens         *int            `json:"max_tokens,omitempty"`
-	Temperature       *float64        `json:"temperature,omitempty"`
-	TopP              *float64        `json:"top_p,omitempty"`
-	TopK              *int            `json:"top_k,omitempty"`
-	Stream            bool            `json:"stream"`
-	Stops             []string        `json:"stop_sequences"`
-	Metadata          json.RawMessage `json:"metadata,omitempty"`
-	ServiceTier       string          `json:"service_tier,omitempty"`
-	ReasoningEffort   string          `json:"reasoning_effort,omitempty"`
-	ReasoningSummary  string          `json:"reasoning_summary,omitempty"`
-	ProviderConfig    *ProviderConfig `json:"provider_config,omitempty"`
-	OutputFormat      *OutputFormat   `json:"output_format,omitempty"`
+	Version              int             `json:"version"`
+	Model                string          `json:"model,omitempty"`
+	SourceWire           string          `json:"source_wire"`
+	CachePolicy          string          `json:"cache_policy"`
+	System               []Block         `json:"system"`
+	Messages             []Message       `json:"messages"`
+	Tools                []Tool          `json:"tools"`
+	ToolChoice           ToolChoice      `json:"tool_choice"`
+	ParallelToolCalls    *bool           `json:"parallel_tool_calls,omitempty"`
+	MaxTokens            *int            `json:"max_tokens,omitempty"`
+	Temperature          *float64        `json:"temperature,omitempty"`
+	TopP                 *float64        `json:"top_p,omitempty"`
+	TopK                 *int            `json:"top_k,omitempty"`
+	Stream               bool            `json:"stream"`
+	Stops                []string        `json:"stop_sequences"`
+	Metadata             json.RawMessage `json:"metadata,omitempty"`
+	ServiceTier          string          `json:"service_tier,omitempty"`
+	PromptCacheKey       *string         `json:"prompt_cache_key,omitempty"`
+	PromptCacheRetention *string         `json:"prompt_cache_retention,omitempty"`
+	PromptCacheOptions   json.RawMessage `json:"prompt_cache_options,omitempty"`
+	ReasoningEffort      string          `json:"reasoning_effort,omitempty"`
+	ReasoningSummary     string          `json:"reasoning_summary,omitempty"`
+	ProviderConfig       *ProviderConfig `json:"provider_config,omitempty"`
+	OutputFormat         *OutputFormat   `json:"output_format,omitempty"`
 }
 
 func validStrict(value string) bool {
@@ -168,6 +171,9 @@ func (r *Request) Valid() bool {
 	switch r.ReasoningSummary {
 	case "", "auto", "concise", "detailed":
 	default:
+		return false
+	}
+	if r.PromptCacheOptions != nil && !object(r.PromptCacheOptions) {
 		return false
 	}
 	if r.Metadata != nil && !json.Valid(r.Metadata) {

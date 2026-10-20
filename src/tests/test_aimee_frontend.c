@@ -155,6 +155,8 @@ int main(void)
    /* Responses render: output items (message + function_call) */
    cJSON *rresp = responses_frontend_render(&rr);
    assert(rresp);
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(
+              cJSON_GetObjectItemCaseSensitive(rresp, "usage"), "total_tokens")) == 15);
    assert(strcmp(cJSON_GetObjectItem(rresp, "object")->valuestring, "response") == 0);
    assert(strcmp(cJSON_GetObjectItem(rresp, "status")->valuestring, "completed") == 0);
    cJSON *rout = cJSON_GetObjectItem(rresp, "output");

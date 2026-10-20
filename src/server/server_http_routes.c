@@ -1297,7 +1297,9 @@ static int rh_chat_control_reply(const route_req_t *rq, char *resp, int cap)
    server_http_identity_apply(&identity);
    if (!server_http_identity_browser_operator() || !identity.vault_principal[0])
       return err_json(resp, cap, 403, "control replies require an authenticated browser user");
-   cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
+   cJSON *body = rq->body && rq->body_len > 0
+                     ? aimee_ir_json_parse_frame(rq->body, (size_t)rq->body_len)
+                     : NULL;
    const char *session = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "session_id"));
    const char *request = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "request_id"));
    const cJSON *reply = cJSON_GetObjectItemCaseSensitive(body, "reply");
@@ -1837,7 +1839,8 @@ const http_route_t g_v1_routes[] = {
     {"GET", "/v1/eval/candidates", NULL, RM_EXACT, "eval.candidates", 0, rh_dispatch_op},
     {"POST", "/v1/eval/candidates", NULL, RM_EXACT, "eval.candidates-update", 0, rh_dispatch_op},
     /* Learning surfaces: advisory recall, measured credit, bounded drain. */
-    {"POST", "/v1/learning/approaches", NULL, RM_EXACT, "learning.approaches", 0, rh_dispatch_op},
+    {"POST", "/v1/learning/approaches", NULL, RM_EXACT, "learning.approaches", CAP_MEMORY_READ,
+     rh_dispatch_op},
     {"GET", "/v1/learning/attribution", NULL, RM_EXACT, "learning.attribution", 0, rh_dispatch_op},
     {"POST", "/v1/learning/resolve", NULL, RM_EXACT, "learning.resolve", 0, rh_dispatch_op},
     {"POST", "/v1/learning/fate", NULL, RM_EXACT, "learning.fate", 0, rh_dispatch_op},

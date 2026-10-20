@@ -887,15 +887,10 @@ static int tool_metadata(const char *name, aimee_tool_metadata_t *metadata)
 
 static int tool_classify(const char *name, int *classification)
 {
-   uint8_t request[AIMEE_TOOLS_REQUEST_LEN], response[AIMEE_TOOLS_RESPONSE_LEN];
-   uint32_t response_len = 0;
-   aimee_tool_class_t result;
-   if (!classification || aimee_tools_request_encode(name, request, sizeof(request)) != 0 ||
-       call_module(AIMEE_TOOLS_EVENT_DISPATCH, AIMEE_TOOLS_STAGE_DISPATCH, request, sizeof(request),
-                   response, sizeof(response), &response_len) != 0 ||
-       aimee_tools_response_decode(response, response_len, &result) != 0)
+   aimee_tool_metadata_t metadata;
+   if (!classification || tool_metadata(name, &metadata) != 0)
       return -1;
-   *classification = (int)result;
+   *classification = (int)metadata.classification;
    return 0;
 }
 
@@ -1105,6 +1100,12 @@ static int response_key(const response_dedup_key_inputs_t *in, char *out, size_t
    return rc;
 }
 
+void server_module_tools_adapters_configure(void)
+{
+   agent_tools_register_classifier(tool_classify);
+   agent_tools_register_metadata(tool_metadata);
+}
+
 void server_module_stage_adapters_configure(void)
 {
    learning_router_register_signal_classifier(learning_classify);
@@ -1128,8 +1129,7 @@ void server_module_stage_adapters_configure(void)
    delegate_register_review_evidence_provider(delegate_review_evidence);
    delegate_register_drift_provider(delegate_drift);
    delegate_register_permissions_provider(delegate_permissions);
-   agent_tools_register_classifier(tool_classify);
-   agent_tools_register_metadata(tool_metadata);
+   server_module_tools_adapters_configure();
    agent_tools_register_action_owner(policy_action_begin, policy_action_finish);
    ws_scope_register_ref_validator(workspace_validate);
    /* Same decision, same owner: webuser's runtime dir names a single path

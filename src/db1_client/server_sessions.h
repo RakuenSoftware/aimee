@@ -48,6 +48,13 @@ extern "C"
    /* Load session by id. Returns 0 on hit, -1 on miss or error. */
    int db1_server_session_get(const char *id, db1_server_session_t *out);
 
+   /* Owner-bound durable primary agent. Empty selection means default.
+    * Returns 0 only on acknowledged owner-checked read/write; -1 on error. */
+   int db1_server_session_primary_get(const char *principal, const char *session_id, char *out,
+                                      size_t cap);
+   int db1_server_session_primary_set(const char *principal, const char *session_id,
+                                      const char *agent);
+
    /* UPDATE outcome. Returns 0 on success. */
    int db1_server_session_set_outcome(const char *id, const char *outcome);
 

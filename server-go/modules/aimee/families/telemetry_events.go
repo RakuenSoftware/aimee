@@ -190,11 +190,8 @@ func interactionExecutionRetry(ctx context.Context, q store.Queryer, f []string)
 		return store.StatusFailed, false, err
 	}
 	var event struct {
-		Kind    string `json:"kind"`
-		Payload struct {
-			Status string `json:"status"`
-			Error  string `json:"error"`
-		} `json:"payload"`
+		Kind    string                     `json:"kind"`
+		Payload canonical.ExecutionPayload `json:"payload"`
 	}
 	if json.Unmarshal([]byte(payload), &event) != nil || event.Kind != "execution" ||
 		(event.Payload.Status != "completed" && event.Payload.Status != "failed" && event.Payload.Status != "cancelled") ||
@@ -202,7 +199,7 @@ func interactionExecutionRetry(ctx context.Context, q store.Queryer, f []string)
 		return store.StatusInvalid, false, nil
 	}
 	var identical bool
-	err = q.QueryRow(ctx, `SELECT payload::jsonb=$3::jsonb FROM interaction_events WHERE session_id=$1 AND event_type='task_outcome' AND payload::jsonb->'source'->>'sequence'=$2 ORDER BY id LIMIT 1`,
+	err = q.QueryRow(ctx, `SELECT payload::jsonb=$3::jsonb FROM interaction_events WHERE session_id=$1 AND event_type='task_outcome' AND outcome='observed' AND payload::jsonb->'source'->>'sequence'=$2 ORDER BY id LIMIT 1`,
 		source.Session, source.Sequence, f[3]).Scan(&identical)
 	if store.IsNoRows(err) {
 		return store.StatusOK, false, nil
@@ -217,6 +214,9 @@ func interactionExecutionRetry(ctx context.Context, q store.Queryer, f []string)
 }
 
 func interactionEventRecord(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	if f[1] == "delegate_experience" {
+		return store.StatusInvalid, nil, nil
+	}
 	if f[1] == "task_outcome" {
 		status, duplicate, err := interactionExecutionRetry(ctx, q, f)
 		if err != nil || status != store.StatusOK {

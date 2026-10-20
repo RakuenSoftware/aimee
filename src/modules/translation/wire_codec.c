@@ -16,6 +16,27 @@ aimee_frontend_state_scope_t aimee_frontend_bind_state_guard(aimee_frontend_stat
    state_scope = (aimee_frontend_state_scope_t){guard, context};
    return previous;
 }
+static _Thread_local aimee_frontend_state_scope_t request_owner_scope;
+aimee_frontend_state_scope_t aimee_frontend_bind_request_owner(aimee_frontend_state_guard_fn owner,
+                                                               void *context)
+{
+   aimee_frontend_state_scope_t previous = request_owner_scope;
+   request_owner_scope = (aimee_frontend_state_scope_t){owner, context};
+   return previous;
+}
+static int admit_owned_request(aimee_request_t *request, char *error, size_t capacity)
+{
+   if (request_owner_scope.guard &&
+       (request_owner_scope.guard(request, request_owner_scope.context) ||
+        aimee_ir_request_admit(request)))
+   {
+      aimee_request_free(request);
+      if (error && capacity)
+         snprintf(error, capacity, "canonical host request context unavailable");
+      return -1;
+   }
+   return aimee_frontend_guard_state(request, error, capacity);
+}
 int aimee_frontend_guard_state(aimee_request_t *request, char *error, size_t capacity)
 {
    if (!request)
@@ -26,6 +47,49 @@ int aimee_frontend_guard_state(aimee_request_t *request, char *error, size_t cap
    if (error && capacity)
       snprintf(error, capacity, "native replay evidence unavailable");
    return -1;
+}
+
+/* Prepared profiles carry only translation-owned layout extensions. A native
+ * request sidecar must never reintroduce SDK conversations or output selectors. */
+int aimee_backend_host_profile_valid(const aimee_request_t *profile)
+{
+   if (!profile)
+      return 0;
+   static const char *const chat[] = {"model", "min_p",  "repeat_penalty", "chat_template_kwargs",
+                                      "route", "models", "reasoning_split"};
+   static const char *const anthropic[] = {"system"};
+   const char *const *keys = NULL;
+   size_t count = 0;
+   if (profile->frontend == AIMEE_WIRE_OPENAI_CHAT)
+   {
+      keys = chat;
+      count = sizeof chat / sizeof *chat;
+   }
+   else if (profile->frontend == AIMEE_WIRE_ANTHROPIC)
+   {
+      keys = anthropic;
+      count = sizeof anthropic / sizeof *anthropic;
+   }
+   else if (profile->frontend != AIMEE_WIRE_RESPONSES)
+      return 0;
+   if (!profile->raw)
+      return 1;
+   if (!cJSON_IsObject(profile->raw) || !aimee_ir_json_unique(profile->raw))
+      return 0;
+   const cJSON *entry;
+   cJSON_ArrayForEach(entry, profile->raw)
+   {
+      int allowed = 0;
+      for (size_t i = 0; entry->string && i < count; i++)
+         allowed |= !strcmp(entry->string, keys[i]);
+      if (!allowed)
+         return 0;
+   }
+   const cJSON *model = cJSON_GetObjectItemCaseSensitive(profile->raw, "model");
+   if (model &&
+       (!cJSON_IsString(model) || !profile->model || strcmp(model->valuestring, profile->model)))
+      return 0;
+   return 1;
 }
 
 static int parse_native_object(const cJSON *native, aimee_wire_t wire, aimee_request_t *out,
@@ -76,7 +140,7 @@ int aimee_frontend_parse_wire(const char *body, size_t length, aimee_wire_t wire
    int rc = parse_wire(body, length, wire, out, error, error_capacity);
    if (rc)
       return rc;
-   return aimee_frontend_guard_state(out, error, error_capacity);
+   return admit_owned_request(out, error, error_capacity);
 }
 char *aimee_backend_render_wire(const aimee_request_t *request, aimee_wire_t wire)
 {
@@ -190,7 +254,7 @@ int aimee_frontend_parse_native_frame(const cJSON *native, const char *frame, si
       original.raw_length = 0;
       aimee_request_free(&original);
    }
-   return aimee_frontend_guard_state(out, error, capacity);
+   return admit_owned_request(out, error, capacity);
 }
 
 int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire,
@@ -201,13 +265,13 @@ int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire
    memset(out, 0, sizeof *out);
    if (error && capacity)
       error[0] = 0;
-   if (!frame || !length || length == SIZE_MAX)
+   if (!frame || !length || length == SIZE_MAX || memchr(frame, 0, length))
+   {
+      if (error && capacity)
+         snprintf(error, capacity, "invalid native provider response frame");
       return -1;
-   const char *end = NULL;
-   cJSON *root = cJSON_ParseWithLengthOpts(frame, length, &end, 0);
-   if (root && end)
-      while (end < frame + length && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n'))
-         end++;
+   }
+   cJSON *root = aimee_ir_json_parse_frame(frame, length);
    if (!root && wire == AIMEE_WIRE_RESPONSES)
    {
       char *bounded = malloc(length + 1);
@@ -217,7 +281,6 @@ int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire
       bounded[length] = 0;
       root = responses_backend_sse_object(bounded);
       free(bounded);
-      end = root ? frame + length : NULL;
    }
    int shape = cJSON_IsObject(root);
    const cJSON *failure = cJSON_GetObjectItemCaseSensitive(root, "error");
@@ -250,7 +313,7 @@ int aimee_backend_parse_wire(const char *frame, size_t length, aimee_wire_t wire
       }
    }
    int rc = -1;
-   if (shape && end == frame + length && aimee_ir_json_unique(root))
+   if (shape && aimee_ir_json_unique(root))
       rc = wire == AIMEE_WIRE_ANTHROPIC     ? anthropic_backend_parse(root, out, error, capacity)
            : wire == AIMEE_WIRE_OPENAI_CHAT ? openai_backend_parse(root, out, error, capacity)
            : wire == AIMEE_WIRE_RESPONSES   ? responses_backend_parse(root, out, error, capacity)

@@ -35,6 +35,9 @@ typedef struct
    const char *message_id;
    const aimee_delta_t *delta;
    const aimee_message_t *message;
+   /* Host source provenance; never part of model payload/checkpoint content. */
+   const struct cJSON *native_owner;
+   int message_partial;
    /* Harness controls are not model content. request_id is opaque and must
     * match a pending server-owned request before any response is delivered. */
    const char *request_id;
@@ -43,11 +46,15 @@ typedef struct
    /* Host-task lifecycle is separate from each model response TURN_STOP. */
    const char *execution_status; /* running, completed, failed, cancelled */
    const char *execution_error;
+   /* Host-only joined verifier receipts committed atomically with a completed
+    * terminal. Exact bounded metadata, never model content or grade authority. */
+   const struct cJSON *verification_proofs;
    /* Private execution reference; its conversation remains in its own log. */
    const char *child_session, *child_turn, *child_role;
+   const struct cJSON *child_learning_binding; /* host-owned job/registration snapshot */
    /* Output-boundary fidelity report; never model content. */
    const char *projection_model, *projection_boundary;
-   int projection_reasoning, projection_opaque;
+   int projection_reasoning, projection_opaque, projection_cache_controls;
    /* Host-observed native state. Digests and the actual sent-prefix binding
     * contain no credential or duplicate transcript. Never model content. */
    const char *replay_scope, *replay_digest, *replay_wire, *replay_binding;
@@ -60,6 +67,11 @@ typedef struct
  * Raw provider sidecars are deliberately not serialized into session events. */
 struct cJSON *aimee_ir_block_json(const aimee_block_t *block);
 struct cJSON *aimee_ir_message_json(const aimee_message_t *message);
+/* Exact owned response-cache snapshots, separate from session-event payloads.
+ * Includes opaque adapter sidecars. Decode validates typed response content and
+ * atomically replaces out only on success; neither path authorizes execution. */
+struct cJSON *aimee_ir_response_json(const aimee_response_t *response);
+int aimee_ir_response_parse(const struct cJSON *json, aimee_response_t *out);
 /* Canonical request/catalog snapshot: no native replay bytes or raw sidecars. */
 struct cJSON *aimee_ir_request_json(const aimee_request_t *request);
 /* Bounded identity/query projection for request policy, never a model prompt. */
@@ -67,10 +79,22 @@ struct cJSON *aimee_ir_policy_view_json(const aimee_request_t *request);
 /* Decode canonical persisted content, never a provider protocol. On failure out
  * is empty; on success it owns its fields (aimee_message_free). */
 int aimee_ir_message_parse(const struct cJSON *json, aimee_message_t *out);
-/* Repair canonical tool cycles in order; -1 leaves the original untouched. */
+/* Repair a compatibility view's tool cycles in order; -1 leaves input untouched.
+ * Missing results become explicit platform diagnostics with unknown outcomes,
+ * never cancellation/effect receipts. Authoritative loaders reject any repair. */
 int aimee_ir_history_repair(struct cJSON *messages);
+/* Read-only admission of authoritative model history. Reject incomplete/orphan
+ * cycles and synthetic unresolved-result diagnostics; no effect is authorized. */
+/* Explicit host-consumer seam. Generic admission always refuses reserved
+ * lifecycle diagnostics. Installed host callback must verify durable custody. */
+typedef int (*aimee_ir_host_history_admission_fn)(const struct cJSON *messages);
+void aimee_ir_history_set_host_admission(aimee_ir_host_history_admission_fn admit);
+int aimee_ir_history_admit_host(const struct cJSON *messages);
+int aimee_ir_history_admit(const struct cJSON *messages);
 struct cJSON *aimee_ir_delta_json(const aimee_delta_t *delta);
 struct cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event);
+/* Structural metadata admission only; resource custody/grade policy is external. */
+int aimee_ir_verification_proof_valid(const struct cJSON *proof);
 
 /* Flat MCP form data and normalized operator replies. No transport or I/O. */
 int aimee_ir_form_validate(const struct cJSON *schema, const struct cJSON *content);
@@ -90,6 +114,8 @@ void aimee_ir_session_begin_task(void);
 void aimee_ir_session_restore_sink(aimee_ir_session_sink_fn sink, void *context, int failed);
 aimee_ir_session_sink_fn aimee_ir_session_get_sink(void **context);
 int aimee_ir_session_emit(const aimee_session_event_t *event);
+int aimee_ir_session_emit_projection_controls(const char *model, int reasoning, int opaque,
+                                              int cache_controls, const char *boundary);
 int aimee_ir_session_emit_projection(const char *model, int reasoning, int opaque,
                                      const char *boundary);
 /* Capture failure is sticky for the installed task sink, including adapter

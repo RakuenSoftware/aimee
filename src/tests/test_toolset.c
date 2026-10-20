@@ -39,6 +39,7 @@ static void test_full_stack_resolves_union(void)
    assert(has_tool(tools, n, "bash"));
    assert(has_tool(tools, n, "git_status"));
    assert(has_tool(tools, n, "read_file"));
+   assert(has_tool(tools, n, "request_input"));
    assert(has_tool(tools, n, "search_memory"));
    /* edit_file is a write-capable tool the code role must expose (delegates
     * need surgical edits, not just whole-file write_file). */
@@ -54,6 +55,25 @@ static void test_full_stack_resolves_union(void)
    n = toolset_resolve(&reg, "current_code", tools, TOOLSET_MAX_TOOLS, err, sizeof(err));
    assert(n > 0 && has_tool(tools, n, "edit_file"));
    printf("  code_roles_resolve_edit_file: ok\n");
+}
+
+static void test_primary_orchestration(void)
+{
+   toolset_register_native_tool("delegate", "primary");
+   toolset_register_native_tool("delegate_status", "primary");
+   toolset_registry_t registry;
+   toolset_registry_init(&registry);
+   char tools[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX], error[TOOLSET_ERROR_MAX] = "";
+   int count = toolset_resolve(&registry, "primary", tools, TOOLSET_MAX_TOOLS, error, sizeof error);
+   assert(count > 0 && has_tool(tools, count, "delegate"));
+   assert(has_tool(tools, count, "delegate_status") && has_tool(tools, count, "read_file"));
+   const char *roles[] = {"code", "full_stack", "review", "review_indexed", "readonly"};
+   for (size_t i = 0; i < sizeof roles / sizeof roles[0]; i++)
+   {
+      count = toolset_resolve(&registry, roles[i], tools, TOOLSET_MAX_TOOLS, error, sizeof error);
+      assert(count > 0 && !has_tool(tools, count, "delegate"));
+      assert(!has_tool(tools, count, "delegate_status"));
+   }
 }
 
 /* A coding delegate must resolve the git WRITE tools, and a reviewer must not.
@@ -306,6 +326,7 @@ int main(void)
 {
    printf("test_toolset:\n");
    test_full_stack_resolves_union();
+   test_primary_orchestration();
    test_git_write_tools_reach_coding_roles_only();
    test_find_callers_reaches_reviewers_and_coders();
    test_review_indexed_read_tools_gated_no_write();

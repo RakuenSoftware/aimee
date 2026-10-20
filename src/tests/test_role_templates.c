@@ -252,6 +252,62 @@ static void test_path_not_found(void)
    assert(found[0] == '\0');
 }
 
+static void test_path_names_cannot_escape(void)
+{
+   char *project = make_tmpdir();
+   char directory[256], outside[256], resolved[512];
+   snprintf(directory, sizeof directory, "%s/.aimee", project);
+   mkdir(directory, 0755);
+   snprintf(directory, sizeof directory, "%s/.aimee/role_templates", project);
+   mkdir(directory, 0755);
+   snprintf(outside, sizeof outside, "%s/outside.md", project);
+   write_file(outside, "---\npermissions: [tools]\n---\nOUTSIDE_ROLE {{TASK}}\n");
+   char inside[512];
+   snprintf(inside, sizeof inside, "%s/inside.md", directory);
+   write_file(inside, "SAFE_ROLE {{TASK}}\n");
+   int truncated = role_template_path(project, "inside.md-extra", resolved, strlen(inside) + 1);
+   assert(truncated < 0 && !resolved[0]);
+   int found = role_template_path(project, "../../outside", resolved, sizeof resolved);
+   assert(found < 0 && !resolved[0]);
+   char *raw = role_template_read_raw(project, "../../outside");
+   assert(!raw);
+   char *frontmatter = role_template_frontmatter(project, "../../outside");
+   assert(!frontmatter);
+   char *prompt = role_template_build(project, "../../outside", "task", NULL);
+   assert(!prompt);
+   char link[512];
+   snprintf(link, sizeof link, "%s/linked-safe.md", directory);
+   int linked = platform_test_symlink_file(inside, link);
+   assert(!linked);
+   raw = role_template_read_raw(project, "linked-safe");
+   assert(raw && strstr(raw, "SAFE_ROLE"));
+   free(raw);
+   unlink(link);
+   char *foreign = make_tmpdir();
+   snprintf(outside, sizeof outside, "%s/foreign.md", foreign);
+   write_file(outside, "---\npermissions: [tools]\n---\nESCAPED_ROLE {{TASK}}\n");
+   snprintf(link, sizeof link, "%s/linked-escape.md", directory);
+   linked = platform_test_symlink_file(outside, link);
+   assert(!linked);
+   found = role_template_path(project, "linked-escape", resolved, sizeof resolved);
+   assert(found < 0 && !resolved[0]);
+   raw = role_template_read_raw(project, "linked-escape");
+   assert(!raw);
+   frontmatter = role_template_frontmatter(project, "linked-escape");
+   assert(!frontmatter);
+   prompt = role_template_build(project, "linked-escape", "task", NULL);
+   assert(!prompt);
+   unlink(link);
+   rm_tmpdir(foreign);
+   free(foreign);
+   unlink(inside);
+   rmdir(directory);
+   snprintf(directory, sizeof directory, "%s/.aimee", project);
+   rmdir(directory);
+   rm_tmpdir(project);
+   free(project);
+}
+
 static void test_list_includes_builtins(void)
 {
    char names[ROLE_TEMPLATE_MAX_ROLES][ROLE_TEMPLATE_NAME_MAX];
@@ -443,6 +499,7 @@ int main(void)
    test_build_file_overrides_builtin();
    test_path_project_found();
    test_path_not_found();
+   test_path_names_cannot_escape();
    test_list_includes_builtins();
    test_list_no_duplicates();
    test_install_defaults();

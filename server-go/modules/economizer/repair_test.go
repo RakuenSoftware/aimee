@@ -28,8 +28,8 @@ func TestCanonicalRepairCycles(t *testing.T) {
 			if got := MessageHistoryRepair(messages); got != 0 {
 				t.Fatalf("not idempotent: %d", got)
 			}
-			if test.name == "missing" && !strings.Contains(PrintJSONUnformatted(messages), cancelMsg) {
-				t.Fatal("missing cancellation evidence")
+			if test.name == "missing" && !strings.Contains(PrintJSONUnformatted(messages), missingResultMsg) {
+				t.Fatal("missing unknown-outcome diagnostic")
 			}
 			if test.name == "mixed_result_text" && fixtureText(messages.At(0)) != "keep protected text" {
 				t.Fatal("protected text lost")
@@ -40,6 +40,29 @@ func TestCanonicalRepairCycles(t *testing.T) {
 		})
 	}
 }
+func TestMissingResultIsDiagnosticNotCancellation(t *testing.T) {
+	messages := ParseJSON(`[{"role":"assistant","blocks":[{"type":"tool_use","tool_id":"write","name":"write_file","input":{"ratio":0.12345678901234567890123456789}}]}]`)
+	original := PrintJSONUnformatted(messages.At(0))
+	if MessageHistoryRepair(messages) != 1 {
+		t.Fatal("missing diagnostic")
+	}
+	block := messages.At(1).Get("blocks").At(0)
+	text := block.GetString("content")
+	if !strings.Contains(text, "outcome is unknown") || strings.Contains(text, "cancelled") {
+		t.Fatal(text)
+	}
+	context := block.Get("context")
+	if context.Get("origin").Num != 1 || context.Get("authority").Num != 0 || context.GetString("revision_scope") != "unresolved-tool-result" {
+		t.Fatal("synthetic result lacks platform diagnostic provenance")
+	}
+	if PrintJSONUnformatted(messages.At(0)) != original {
+		t.Fatal("original call changed")
+	}
+	if !canonicalHistory(messages) {
+		t.Fatal("diagnostic violates canonical IR")
+	}
+}
+
 func TestCanonicalRepairRefusalPreservesInput(t *testing.T) {
 	for _, raw := range []string{
 		`[{"role":"assistant","tool_calls":[]}]`,

@@ -249,7 +249,9 @@
     "server-go/modules/memory/discord_alias_facts.go",
     "server-go/modules/memory/height_facts.go",
     "server-go/modules/memory/lifting_facts.go",
-    "server-go/modules/memory/spatial_facts.go"
+    "server-go/modules/memory/spatial_facts.go",
+    "server-go/modules/memory/execution_grade_context.go",
+    "server-go/modules/memory/execution_grade_release.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -279,6 +281,7 @@
     "server-go/modules/memory/retrieval_eval_test.go",
     "server-go/modules/memory/runtime_role_test.go",
     "server-go/modules/memory/code_index_test.go",
+    "server-go/modules/memory/code_index_owner_test.go",
     "server-go/modules/memory/client_test.go",
     "server-go/modules/memory/fact_write_test.go",
     "server-go/modules/memory/public_commands_test.go",
@@ -448,7 +451,9 @@
     "server-go/modules/memory/discord_alias_facts_test.go",
     "server-go/modules/memory/height_facts_test.go",
     "server-go/modules/memory/lifting_facts_test.go",
-    "server-go/modules/memory/spatial_facts_test.go"
+    "server-go/modules/memory/spatial_facts_test.go",
+    "server-go/modules/memory/execution_grade_context_test.go",
+    "server-go/modules/memory/execution_grade_release_test.go"
   ],
   "public_headers": [],
   "private_headers": [],

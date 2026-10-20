@@ -55,16 +55,41 @@ extern "C"
    typedef struct
    {
       const agent_t *agent;
+      const agent_network_t *network;
+      const char *role;
+      const char *reasoning_effort;
       const char *cwd;
       const char *system_prompt;
       const char *user_prompt;
       /* Canonical items to adopt before the current turn (unseen tail on resume). */
       const aimee_request_t *history;
-      int control_channel;    /* bidirectional structured input for browser-owned controls */
-      int primary;            /* server-owned primary uses its authorized autonomous mode */
-      const char *resume_id;  /* structured primary conversation, optional */
-      const char *home;       /* parent-materialized runtime credential HOME */
-      const char *session_id; /* host-owned Aimee identity for MCP/hooks */
+      /* Server-owned seeded execution. Conversation is already committed to
+       * the active canonical capture; only admitted request controls are used.
+       * canonical_response, when supplied, starts empty and receives owned
+       * original provider IR after the SDK and its callbacks have joined. */
+      const aimee_request_t *canonical_request;
+      aimee_response_t *canonical_response;
+      /* Optional typed host tool bridge. Both catalog and callback are required.
+       * Borrowed for this synchronous execution. The host callback must verify
+       * durable source identity and apply current policy/effect authorization;
+       * SDK parameters alone grant no execution authority. It returns an owned
+       * TOOL_RESULT with the same call ID and a string result, or fails closed.
+       * ACP client resources use the exact acp/read_text_file and
+       * acp/write_text_file namespace/name pairs with native arguments. Such an
+       * owner must honor the requested byte/range semantics completely or return
+       * a tool error; model-output truncation is not a filesystem response. */
+      const aimee_request_t *tool_catalog;
+      int (*tool_call)(const aimee_block_t *call, aimee_block_t *result, void *context);
+      void *tool_context;
+      int control_channel;   /* bidirectional structured input for browser-owned controls */
+      int primary;           /* server-owned primary uses its authorized autonomous mode */
+      const char *resume_id; /* structured primary conversation, optional */
+      const char *home;      /* parent-materialized runtime credential HOME */
+      int (*native_progress)(void *context);
+      void *native_progress_context;
+      const struct cli_claude_host_launch *claude_host;
+      const struct cli_codex_host_launch *codex_host; /* host-owned native resources */
+      const char *session_id;                         /* host-owned Aimee identity for MCP/hooks */
       int (*bind_session)(const char *native_id, void *context);
       void *bind_context;
    } provider_cli_cfg_t;
@@ -107,6 +132,10 @@ extern "C"
    } provider_cli_adapter_t;
 
    const provider_cli_adapter_t *provider_cli_adapter_get(const char *cli_kind);
+   /* Linked by the server's canonical scheduler owner. The weak standalone seam
+    * returns 1 when no host owner is linked. The daemon refuses unsupported
+    * profiles; an admitted host execution never falls back after refusal. */
+   int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg, agent_result_t *out);
    int provider_cli_adapter_prepare_native_agent(const provider_cli_adapter_t *adapter,
                                                  const agent_t *agent, agent_t *native_agent,
                                                  char *errbuf, size_t errbuf_len);

@@ -81,6 +81,17 @@ def main():
                 if "IR_RUN_TRUNCATED" in sent:
                     payload["content"] = [dict(type="text", text="RUN_PARTIAL")]
                     payload["stop_reason"] = "max_tokens"
+            if request.get("model") == "ir-model-a" and "IR_MIRROR_DELEGATE_READ" in json.dumps(request):
+                results = [message for message in request.get("messages", []) if message.get("role") == "tool"]
+                if not results:
+                    payload["choices"][0]["message"] = dict(role="assistant", tool_calls=[dict(
+                        id="mirror-delegate-read", type="function", function=dict(
+                            name="read_file", arguments=json.dumps(dict(path="README.md"))))])
+                    payload["choices"][0]["finish_reason"] = "tool_calls"
+                else:
+                    assert "canonical delegate fixture" in json.dumps(results), results
+                    assert "CLIENT_CWD_MUST_NOT_BE_READ" not in json.dumps(results), results
+                    payload["choices"][0]["message"]["content"] = "MIRROR_DELEGATE_OK"
             data = json.dumps(payload).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -134,8 +145,13 @@ def main():
         sequence = 0
         for index, name in enumerate(["ir-live-a", "ir-live-b", "ir-live-a", "ir-live-b"]):
             api(f"/v1/sessions/{sid}/primary", {"agent": name})
-            raw = api("/v1/chat/stream", {"attach_id": attachment, "message": f"IR_TURN_{index} say PRIMARY_OK",
-                                        "aimee_session_id": sid, "cwd": str(home), "ir_version": 1})
+            request = {"message": f"IR_TURN_{index} say PRIMARY_OK", "aimee_session_id": sid,
+                       "cwd": str(home), "ir_version": 1}
+            # An authenticated API caller needs no browser attachment to obtain
+            # the same durable canonical producer and cross-model history.
+            if index != 1:
+                request["attach_id"] = attachment
+            raw = api("/v1/chat/stream", request)
             records = [json.loads(line) for line in raw.splitlines() if line.strip()]
             assert records and all(record.get("version") == 1 for record in records), raw
             assert records[-1]["event"] == {"kind": "execution", "payload": {"status": "completed"}}, raw
@@ -151,6 +167,14 @@ def main():
             if index == 3:
                 assert "fixture-signature" in json.dumps(observed[-1]), observed[-1]
             assert any(record["event"].get("payload", {}).get("raw_stop_reason") in ("stop", "end_turn") for record in records), records
+
+        before_invalid = len(observed)
+        for invalid_attachment in ("unknown-attachment", "", 42):
+            refused = api("/v1/chat/stream", {"attach_id": invalid_attachment,
+                          "message": "IR_INVALID_ATTACHMENT", "aimee_session_id": sid,
+                          "cwd": str(home)})
+            assert "invalid chat attachment" in refused, refused
+            assert len(observed) == before_invalid, "invalid attachment reached model"
 
         # Verify the actual standalone observer and its persisted source binding
         # before any later fixture task adds more terminal events to this session.
@@ -199,6 +223,17 @@ def main():
                     if line.startswith(b"data: "):
                         replay.append(json.loads(line[6:]))
                 assert replay == [event for event in live if int(event["sequence"]) > cursor], (cursor, replay)
+                # Transport readiness must follow all historical controls and
+                # responses, without claiming a new durable IR sequence.
+                while True:
+                    line = response.readline()
+                    assert line, "Replay ended before readiness"
+                    if line.startswith(b"event: "):
+                        assert line.strip() == b"event: replay_complete", line
+                        boundary = response.readline()
+                        assert boundary.startswith(b"data: "), boundary
+                        assert json.loads(boundary[6:]) == {"session_id": sid, "cursor": str(sequence)}
+                        break
             finally:
                 if response:
                     response.close()
@@ -426,15 +461,107 @@ def main():
             print("delegate setup: registered workspace and dedicated worktree reach mandatory sandbox refusal")
             print("SKIP: delegate learning completion/readback (real Docker sandbox unavailable)")
         else:
-            # Completion must follow capture, not race its next-run prompt read.
-            lesson = "Delegate succeeded in role 'format'"
+            # Process completion is retained without becoming next-run authority.
+            lessons = ("Delegate succeeded in role 'format'", "Delegate process completed in role 'format'")
             for run in range(2):
                 before = len(observed)
                 status = learning_task(run)
                 assert status["job_status"] == "done" and "PRIMARY_OK" in status["result"], status
                 assert len(observed) > before, status
-                assert (lesson in json.dumps(observed[before])) == (run == 1), observed[before]
-            print("delegate learning: terminal completion precedes durable learning readback into the next actual execution")
+                assert not any(lesson in json.dumps(observed[before]) for lesson in lessons), observed[before]
+            verification = subprocess.run([os.environ.get("GO", "go"), "-C",
+                str(Path(__file__).resolve().parents[2] / "server-go"), "test", "./modules/learning",
+                "-run", "^TestDelegateExitLiveUngradedRetention$", "-count=1"],
+                env={**os.environ, "AIMEE_LEARNING_LIVE_SESSION": sid,
+                     "AIMEE_LEARNING_LIVE_ACTOR": f"uid:{os.getuid()}"},
+                capture_output=True, text=True, timeout=120)
+            assert verification.returncode == 0, verification.stdout + verification.stderr
+            print("delegate learning: actual exits persist without fabricated writes/grades or next-run prompt authority")
+
+        from test_native_ir_browser_control import prepare_browser_workspace
+        mirror = prepare_browser_workspace(api, home, workspace, "queued-delegate-client")
+        # Policy/persona discovery must use the approved reconstruction too.
+        # Dirty client frontmatter would reject this role if consulted first.
+        client_roles = mirror / ".aimee" / "role_templates"
+        client_roles.mkdir(parents=True, exist_ok=True)
+        (client_roles / "diagnose.md").write_text("---\npermissions: [client_only_invalid_permission]\n---\nCLIENT_ROLE_MUST_NOT_BE_READ\n")
+        client_personas = mirror / ".aimee" / "personas"
+        client_personas.mkdir(parents=True, exist_ok=True)
+        (client_personas / "ir-client-only.md").write_text("---\nname: ir-client-only\n---\n\n## Persona\nCLIENT_PERSONA_MUST_NOT_BE_READ\n")
+
+        def source_refusal(cwd, expected, persona="engineer", prompt="Read @README.md from the approved source"):
+            before = len(observed)
+            launched = api("/v1/delegate/run", dict(role="diagnose", persona=persona,
+                via="ir-live-a", tools=True, prompt=prompt, session_id=sid, cwd=str(cwd)))
+            assert launched.get("job_id", 0) > 0, launched
+            deadline = time.monotonic() + 60
+            while True:
+                status = api("/v1/delegate/status", dict(job_id=launched["job_id"], full_result=True))
+                if status.get("job_status") in ("done", "failed", "partial", "cancelled"):
+                    break
+                assert time.monotonic() < deadline, status
+                time.sleep(0.05)
+            assert status["job_status"] == "failed" and expected in status["result"], status
+            assert len(observed) == before, "source refusal must precede provider traffic"
+        source_refusal(mirror, "unknown persona", persona="ir-client-only")
+        unregistered = home / "unregistered-delegate-source"
+        subprocess.run(["git", "clone", "--quiet", str(workspace), str(unregistered)], check=True)
+        (unregistered / "README.md").write_text("UNREGISTERED_SOURCE_MUST_NOT_BE_READ\n")
+        source_refusal(unregistered, "no held or registered authority")
+        # A raw server mirror path cannot recreate the capability carried by a
+        # live native callback. This also matches recovery without that lease.
+        owned = next(path for path in (home / "workspaces").glob("*/work") if path.is_dir())
+        source_refusal(owned, "no held or registered authority")
+        print("delegate source: dirty client templates ignored; unregistered and unleased sources refuse before file references")
+        tracked_cwd = home / ("git-cwd-" + sid)
+        previous_cwd = tracked_cwd.read_bytes() if tracked_cwd.exists() else None
+        tracked_cwd.write_text(str(unregistered) + "\n")
+        try:
+            for key in ("path", "cwd"):
+                checked = api("/v1/mcp/call", dict(tool="git_status", session_id=sid,
+                    arguments={key: str(mirror), "no_session_redirect": False}))
+                text = "\n".join(part.get("text", "") for part in checked.get("content", []))
+                assert "clean working tree" in text and "README.md" not in text, checked
+        finally:
+            if previous_cwd is None:
+                tracked_cwd.unlink()
+            else:
+                tracked_cwd.write_bytes(previous_cwd)
+        print("Git mirror: held source wins over dirty client and stale session cwd for path/cwd requests")
+        before = len(observed)
+        launched = api("/v1/delegate/run", dict(role="diagnose", persona="engineer", via="ir-live-a", tools=True,
+            prompt="IR_MIRROR_DELEGATE_READ read README.md and report its committed source", session_id=sid,
+            cwd=str(mirror), max_turns=3))
+        assert launched.get("job_id", 0) > 0, launched
+        deadline = time.monotonic() + 120
+        while True:
+            status = api("/v1/delegate/status", dict(job_id=launched["job_id"], full_result=True))
+            if status.get("job_status") in ("done", "failed", "partial", "cancelled"):
+                break
+            assert time.monotonic() < deadline, status
+            time.sleep(0.05)
+        if sandbox_ready:
+            assert status["job_status"] == "done" and "MIRROR_DELEGATE_OK" in status["result"], status
+            assert len(observed) == before + 2, observed[before:]
+            print("delegate mirror: approved committed reconstruction, dedicated sandbox and real read pass")
+        else:
+            assert status["job_status"] == "failed" and "could not be given a sandboxed container" in status["result"], status
+            assert len(observed) == before, "missing sandbox must not reach the model"
+            print("delegate mirror: registered reconstruction and dedicated child reach mandatory sandbox refusal")
+
+        # The old subscriber wire has the same canonical producer, including
+        # authenticated callers without a persistent browser attachment.
+        legacy_sid = api("/v1/sessions/create", {"client_type": "ir-legacy-subscriber"})["session_id"]
+        api(f"/v1/sessions/{legacy_sid}/primary", {"agent": "ir-live-a"})
+        legacy = api("/v1/chat/stream", {"message": "IR_LEGACY_SUBSCRIBER say PRIMARY_OK",
+                     "session_id": legacy_sid, "cwd": str(home)})
+        assert "PRIMARY_OK" in legacy and '"error"' not in legacy, legacy
+        legacy_export = api("/v1/trajectory/export", {"session_id": legacy_sid, "compress": False})["trajectory"]
+        assert legacy_export["source"] == "canonical_session_log", legacy_export
+        assert len(legacy_export["messages"]) == 2, legacy_export
+        assert "IR_LEGACY_SUBSCRIBER" in json.dumps(legacy_export), legacy_export
+        print("chat admission: no-attachment API, legacy subscriber canonical durability and invalid attachment refusal pass")
+
 
 
     finally:

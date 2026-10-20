@@ -182,8 +182,12 @@ func (s *server) handleChatPersona(w http.ResponseWriter, r *http.Request) {
 			path = "/v1/sessions/" + sid + "/persona"
 		}
 		st, data, err := s.v1Request(ctx, http.MethodGet, path, nil)
-		if err != nil || st != http.StatusOK {
-			fmt.Fprintf(w, `{"name":""}`)
+		if err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "persona selection unavailable")
+			return
+		}
+		if st != http.StatusOK {
+			writeJSONError(w, st, "could not load persona selection")
 			return
 		}
 		w.Write(data)
@@ -242,8 +246,12 @@ func (s *server) handleChatPrimary(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		st, data, err := s.v1Request(ctx, http.MethodGet, "/v1/sessions/"+sid+"/primary", nil)
-		if err != nil || st != http.StatusOK {
-			fmt.Fprintf(w, `{"agent":""}`)
+		if err != nil {
+			writeJSONError(w, http.StatusServiceUnavailable, "primary agent selection unavailable")
+			return
+		}
+		if st != http.StatusOK {
+			writeJSONError(w, st, "could not load primary agent selection")
 			return
 		}
 		w.Write(data)

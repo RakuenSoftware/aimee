@@ -198,3 +198,36 @@ func TestNativeCompactionIsClosedHostMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestPromptCacheControlsRemainCanonical(t *testing.T) {
+	raw := `{"version":1,"source_wire":"responses","cache_policy":"native","system":[],"messages":[],"tools":[],"tool_choice":{"mode":"unset"},"stream":true,"stop_sequences":[],"prompt_cache_key":"","prompt_cache_retention":"24h","prompt_cache_options":{"mode":"explicit","ttl":"30m","opaque":0.123456789012345678901234567890}}`
+	request, err := DecodeRequest([]byte(raw))
+	if err != nil || request.PromptCacheKey == nil || *request.PromptCacheKey != "" || request.PromptCacheRetention == nil || *request.PromptCacheRetention != "24h" {
+		t.Fatalf("cache controls lost: %#v %v", request, err)
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil || !strings.Contains(string(encoded), `"prompt_cache_key":""`) || !strings.Contains(string(encoded), "0.123456789012345678901234567890") {
+		t.Fatalf("cache serialization changed: %s %v", encoded, err)
+	}
+	for _, bad := range []string{
+		strings.Replace(raw, `"prompt_cache_key":""`, `"prompt_cache_key":true`, 1),
+		strings.Replace(raw, `"prompt_cache_retention":"24h"`, `"prompt_cache_retention":17`, 1),
+		strings.Replace(raw, `"prompt_cache_options":{"mode":"explicit","ttl":"30m","opaque":0.123456789012345678901234567890}`, `"prompt_cache_options":[]`, 1),
+		strings.Replace(raw, `"mode":"explicit"`, `"mode":"explicit","mode":"implicit"`, 1),
+	} {
+		if _, err := DecodeRequest([]byte(bad)); err == nil {
+			t.Fatalf("accepted malformed cache controls %s", bad)
+		}
+	}
+}
+func TestCacheOnlyProjectionRequiresARealOmission(t *testing.T) {
+	raw := `{"kind":"projection","payload":{"model":"model-b","boundary":"request","omitted_reasoning_blocks":0,"omitted_opaque_state_blocks":0,"omitted_cache_controls":3}}`
+	if !ValidSessionEvent([]byte(raw)) {
+		t.Fatal("cache projection refused")
+	}
+	for _, value := range []string{"-1", "0", "0.5", "9007199254740992"} {
+		if ValidSessionEvent([]byte(strings.Replace(raw, `"omitted_cache_controls":3`, `"omitted_cache_controls":`+value, 1))) {
+			t.Fatalf("accepted cache omission %s", value)
+		}
+	}
+}

@@ -2,6 +2,8 @@
 #define DEC_CLI_ACP_H 1
 
 #include <stddef.h>
+#include "provider_cli_adapter.h"
+#include <aimee/translation/harness_ir.h>
 
 /* acp_turn_state_t: accumulator for one outbound ACP turn's streamed events. */
 typedef struct
@@ -24,12 +26,10 @@ typedef struct
  * error response (st->had_error and st->error populated). */
 int acp_turn_consume(const char *line, acp_turn_state_t *st);
 
-/* Serve a client-side ACP request the agent issues during a turn (fs read/write
- * against the worktree, permission prompts). `workdir` sandboxes every path.
- * Returns 1 when `line` was an agent request and *resp_out holds the heap
- * JSON-RPC response to send back (caller frees); 0 when `line` is not a request
- * (no id, or a response) and should be handled as turn content via
- * acp_turn_consume. */
-int acp_serve_client_request(const char *line, const char *workdir, char **resp_out);
+/* Dispatch an already-captured native client request through its exact admitted
+ * acp resource owner. No filesystem fallback. Permission decisions must come
+ * from the current control owner or explicit host autonomous policy. */
+int acp_dispatch_client_request(const cJSON *frame, const provider_cli_cfg_t *cfg,
+                                aimee_harness_ir_t *ir, const cJSON *decision, cJSON **reply);
 
 #endif /* DEC_CLI_ACP_H */

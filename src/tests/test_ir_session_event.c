@@ -117,6 +117,30 @@ static void test_owned_delta_assembly(void)
         "lifecycles");
 }
 
+static void test_argument_frame_admission(void)
+{
+   const char *arguments[] = {"{\"path\":\"before\\u0000after\"}", "{\"amount\":1,\"amount\":2}",
+                              "{} {}", "{\"path\":\"\xff\"}"};
+   for (unsigned i = 0; i < sizeof arguments / sizeof *arguments; i++)
+   {
+      aimee_ir_response_builder_t builder = {0};
+      aimee_delta_t delta = {.type = AIMEE_DELTA_TURN_START};
+      assert(!aimee_ir_response_builder_apply(&builder, &delta));
+      delta = (aimee_delta_t){.type = AIMEE_DELTA_BLOCK_START,
+                              .kind = AIMEE_BLK_TOOL_USE,
+                              .tool_id = "original",
+                              .tool_name = "read_file"};
+      assert(!aimee_ir_response_builder_apply(&builder, &delta));
+      delta = (aimee_delta_t){.type = AIMEE_DELTA_BLOCK_DELTA,
+                              .kind = AIMEE_BLK_TOOL_USE,
+                              .tool_args_delta = arguments[i]};
+      assert(!aimee_ir_response_builder_apply(&builder, &delta));
+      delta = (aimee_delta_t){.type = AIMEE_DELTA_BLOCK_STOP};
+      assert(aimee_ir_response_builder_apply(&builder, &delta) == -1);
+      aimee_ir_response_builder_free(&builder);
+   }
+}
+
 static void test_opaque_delta_metadata(void)
 {
    aimee_ir_response_builder_t builder = {0};
@@ -163,10 +187,133 @@ static void test_opaque_delta_metadata(void)
    aimee_ir_response_builder_free(&builder);
 }
 
+static void test_response_snapshot(void)
+{
+   cJSON *arguments = cJSON_Parse("{\"marker\":0.123456789012345678901234567890}");
+   cJSON *raw = cJSON_Parse("{\"opaque\":\"vendor data\"}");
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_THINKING,
+                              .text = "reason",
+                              .thinking_signature = "signed",
+                              .thinking_encrypted_content = "opaque"},
+                             {.type = AIMEE_BLK_TOOL_USE,
+                              .tool_id = "exact-id",
+                              .tool_namespace = "aimee",
+                              .tool_name = "read_file",
+                              .tool_input = arguments}};
+   aimee_response_t source = {.id = "source",
+                              .model = "selected",
+                              .role = "assistant",
+                              .content = blocks,
+                              .n_content = 2,
+                              .stop_reason = AIMEE_STOP_TOOL_USE,
+                              .raw_stop_reason = "tool_use",
+                              .usage_in = 90,
+                              .usage_out = 7,
+                              .usage_cache_read = 80,
+                              .usage_cache_write = 5,
+                              .usage_reasoning = 3,
+                              .raw = raw};
+   aimee_response_t copy = {0};
+   assert(!aimee_ir_response_clone(&source, &copy));
+   assert(copy.content != blocks && copy.raw != raw && copy.content[1].tool_input != arguments);
+   assert(copy.usage_cache_read == 80 && copy.usage_cache_write == 5 && copy.usage_reasoning == 3);
+   assert(!strcmp(copy.content[0].thinking_signature, "signed") &&
+          !strcmp(copy.content[0].thinking_encrypted_content, "opaque"));
+   cJSON_ReplaceItemInObjectCaseSensitive(arguments, "marker", cJSON_CreateNumber(4));
+   cJSON_Delete(arguments);
+   cJSON_Delete(raw);
+   char *exact = cJSON_PrintUnformatted(copy.content[1].tool_input);
+   assert(exact && strstr(exact, "0.123456789012345678901234567890"));
+   free(exact);
+   assert(!aimee_ir_response_clone(&copy, &copy));
+   aimee_response_t invalid = {.n_content = -1};
+   assert(aimee_ir_response_clone(&invalid, &copy) < 0 && !strcmp(copy.id, "source"));
+   aimee_response_free(&copy);
+}
+static cJSON *verification_fixture(void)
+{
+   cJSON *proof = cJSON_CreateObject();
+   char digest[65];
+   memset(digest, 'a', 64);
+   digest[64] = 0;
+   const char *fields[] = {"session_id", "turn_id", "actor", "scope_id"};
+   for (size_t i = 0; i < sizeof fields / sizeof *fields; ++i)
+      cJSON_AddStringToObject(proof, fields[i], "fixture");
+   cJSON_AddNumberToObject(proof, "version", 1);
+   cJSON_AddStringToObject(proof, "scope_kind", "project");
+   cJSON_AddStringToObject(proof, "isolation", "private_source_snapshot");
+   cJSON_AddStringToObject(proof, "observed_at", "2026-10-20T12:00:00Z");
+   cJSON_AddBoolToObject(proof, "completed", 1);
+   const char *hashes[] = {"snapshot_commit", "final_commit",         "snapshot_tree",
+                           "final_tree",      "configuration_sha256", "final_configuration_sha256",
+                           "profile_sha256"};
+   for (size_t i = 0; i < sizeof hashes / sizeof *hashes; ++i)
+      cJSON_AddStringToObject(proof, hashes[i], digest);
+   digest[32] = 0;
+   cJSON_AddStringToObject(proof, "snapshot_id", digest);
+   digest[32] = 'a';
+   cJSON *step = cJSON_CreateObject();
+   cJSON_AddStringToObject(step, "name", "unit");
+   cJSON_AddStringToObject(step, "command_sha256", digest);
+   cJSON_AddBoolToObject(step, "ran", 1);
+   cJSON_AddBoolToObject(step, "skipped", 0);
+   cJSON_AddStringToObject(step, "termination", "exited");
+   cJSON_AddStringToObject(step, "exit_code", "0");
+   cJSON_AddItemToArray(cJSON_AddArrayToObject(proof, "steps"), step);
+   return proof;
+}
+static void test_verification_proofs(void)
+{
+   cJSON *proof = verification_fixture();
+   assert(aimee_ir_verification_proof_valid(proof));
+   cJSON *proofs = cJSON_CreateArray();
+   cJSON_AddItemToArray(proofs, proof);
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_EXECUTION,
+                                  .execution_status = "completed",
+                                  .verification_proofs = proofs};
+   cJSON *json = aimee_ir_session_event_json(&event);
+   assert(json);
+   assert(
+       cJSON_Compare(proofs,
+                     cJSON_GetObjectItemCaseSensitive(
+                         cJSON_GetObjectItemCaseSensitive(json, "payload"), "verification_proofs"),
+                     1));
+   cJSON_Delete(json);
+   const char *statuses[] = {"running", "failed", "cancelled"};
+   for (size_t i = 0; i < sizeof statuses / sizeof *statuses; ++i)
+   {
+      event.execution_status = statuses[i];
+      assert(!aimee_ir_session_event_json(&event));
+   }
+   event.execution_status = "completed";
+   cJSON *step = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(proof, "steps"), 0);
+   cJSON_ReplaceItemInObjectCaseSensitive(step, "exit_code", cJSON_CreateString("00"));
+   assert(!aimee_ir_verification_proof_valid(proof));
+   assert(!aimee_ir_session_event_json(&event));
+   cJSON_ReplaceItemInObjectCaseSensitive(step, "exit_code", cJSON_CreateString("1"));
+   assert(aimee_ir_verification_proof_valid(proof));
+   cJSON_AddStringToObject(proof, "prompt", "not metadata");
+   assert(!aimee_ir_verification_proof_valid(proof));
+   cJSON_DeleteItemFromObjectCaseSensitive(proof, "prompt");
+   cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(proof, "steps"), cJSON_Duplicate(step, 1));
+   assert(!aimee_ir_verification_proof_valid(proof));
+   cJSON_Delete(proofs);
+   proofs = cJSON_CreateArray();
+   event.verification_proofs = proofs;
+   assert(!aimee_ir_session_event_json(&event));
+   for (int i = 0; i < 9; ++i)
+      cJSON_AddItemToArray(proofs, verification_fixture());
+   assert(!aimee_ir_session_event_json(&event));
+   cJSON_Delete(proofs);
+}
+
 int main(void)
 {
+   test_verification_proofs();
+   test_response_snapshot();
    test_owned_delta_assembly();
    test_opaque_delta_metadata();
+   test_argument_frame_admission();
    aimee_block_t blocks[] = {
        {.type = AIMEE_BLK_THINKING,
         .text = "reason",
@@ -343,6 +490,19 @@ int main(void)
    event.projection_opaque = -1;
    assert(!aimee_ir_session_event_json(&event));
 
+   event.projection_reasoning = 0;
+   event.projection_opaque = 0;
+   event.projection_cache_controls = 3;
+   json = aimee_ir_session_event_json(&event);
+   assert(json &&
+          cJSON_GetObjectItem(cJSON_GetObjectItem(json, "payload"), "omitted_cache_controls")
+                  ->valueint == 3);
+   cJSON_Delete(json);
+   event.projection_cache_controls = -1;
+   assert(!aimee_ir_session_event_json(&event));
+   event.projection_cache_controls = 0;
+   assert(!aimee_ir_session_event_json(&event));
+
    event = (aimee_session_event_t){.kind = AIMEE_SESSION_CHILD_EXECUTION,
                                    .child_session = "private-child",
                                    .child_turn = "child-run",
@@ -445,13 +605,40 @@ int main(void)
        "{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\",\"tool_id\":\"orphan\","
        "\"content\":\"bad\",\"is_error\":false}]}]");
    assert(history);
+   char *unresolved_before = cJSON_PrintUnformatted(history);
+   assert(unresolved_before && aimee_ir_history_admit(history) == -1);
+   char *unresolved_after = cJSON_PrintUnformatted(history);
+   assert(unresolved_after && !strcmp(unresolved_before, unresolved_after));
+   free(unresolved_before);
+   free(unresolved_after);
    assert(aimee_ir_history_repair(history) == 2);
    assert(cJSON_GetArraySize(history) == 5);
    cJSON *repaired =
        cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(history, 3), "blocks"), 0);
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(repaired, "tool_id")), "same"));
    assert(cJSON_IsTrue(cJSON_GetObjectItem(repaired, "is_error")));
+   const char *diagnostic = cJSON_GetStringValue(cJSON_GetObjectItem(repaired, "content"));
+   assert(diagnostic && strstr(diagnostic, "outcome is unknown") &&
+          !strstr(diagnostic, "cancelled"));
+   const cJSON *diagnostic_context = cJSON_GetObjectItem(repaired, "context");
+   assert(cJSON_GetObjectItem(diagnostic_context, "origin")->valueint == AIMEE_CTX_ORIGIN_PLATFORM);
+   assert(cJSON_GetObjectItem(diagnostic_context, "authority")->valueint ==
+          AIMEE_CTX_AUTH_DIAGNOSTIC);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(diagnostic_context, "revision_scope")),
+                  "unresolved-tool-result"));
+   assert(!strcmp(
+       cJSON_GetStringValue(cJSON_GetObjectItem(
+           cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(history, 1), "blocks"), 0),
+           "content")),
+       "ok"));
    assert(aimee_ir_history_repair(history) == 0);
+   assert(aimee_ir_history_admit(history) == -1); /* Diagnostics do not become receipts. */
+   cJSON *resolved = cJSON_Parse(
+       "[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"same\",\"name\":"
+       "\"write_file\",\"input\":{}}]},{\"role\":\"tool\",\"blocks\":[{\"type\":\"tool_result\","
+       "\"tool_id\":\"same\",\"content\":\"actual receipt\",\"is_error\":false}]}]");
+   assert(resolved && !aimee_ir_history_admit(resolved));
+   cJSON_Delete(resolved);
    assert(!strcmp(
        cJSON_GetStringValue(cJSON_GetObjectItem(
            cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(history, 0), "blocks"), 0),

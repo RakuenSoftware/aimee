@@ -415,7 +415,7 @@ void cmd_status(app_ctx_t *ctx, int argc, char **argv)
             continue;
          }
 
-         agent_result_t result;
+         agent_result_t result = {0};
          memset(&result, 0, sizeof(result));
          int rc = agent_execute(ag, NULL, "Respond with 'ok'.", 64, 0.0, &result);
 
@@ -430,7 +430,7 @@ void cmd_status(app_ctx_t *ctx, int argc, char **argv)
             else
                printf("Provider:  %s (error: %s)\n", ag->name, result.error);
          }
-         free(result.response);
+         agent_result_clear_response(&result);
       }
       agent_http_cleanup();
    }

@@ -155,7 +155,7 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
 
          peer->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
 
-         free(out->response);
+         agent_result_clear_response(out);
          out->response = NULL;
          out->error[0] = '\0';
 

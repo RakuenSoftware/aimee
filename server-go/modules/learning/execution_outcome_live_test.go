@@ -90,3 +90,28 @@ func TestExecutionObservationLiveCanonicalCapture(t *testing.T) {
 	}
 
 }
+
+// Invoked only after two real sandboxed delegates complete. This does not seed
+// learning rows or infer application from the next prompt's availability.
+func TestDelegateExitLiveUngradedRetention(t *testing.T) {
+	session := os.Getenv("AIMEE_LEARNING_LIVE_SESSION")
+	if session == "" {
+		t.Skip("disposable delegate integration session is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	conn, err := pgx.Connect(ctx, os.Getenv("AIMEE_STORE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	var actor string
+	if err = conn.QueryRow(ctx, `SELECT principal FROM server_sessions WHERE id=$1`, session).Scan(&actor); err != nil || actor != os.Getenv("AIMEE_LEARNING_LIVE_ACTOR") {
+		t.Fatal("delegate source owner mismatch", err)
+	}
+	var count, invalid int
+	err = conn.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE auto_applied<>0 OR review_status<>'pending' OR evidence_json::jsonb->>'verification' IS DISTINCT FROM 'ungraded' OR evidence_json::jsonb->'had_writes' IS DISTINCT FROM 'null'::jsonb) FROM delegate_learnings WHERE session_id=$1 AND role='format' AND failure_mode='success'`, session).Scan(&count, &invalid)
+	if err != nil || count != 2 || invalid != 0 {
+		t.Fatalf("actual delegate observations: count=%d invalid=%d error=%v", count, invalid, err)
+	}
+}

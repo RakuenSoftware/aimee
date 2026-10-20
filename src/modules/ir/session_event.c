@@ -2,6 +2,7 @@
 #include "cJSON.h"
 
 #include <errno.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -292,6 +293,50 @@ fail:
    return -1;
 }
 
+static _Atomic(aimee_ir_host_history_admission_fn) host_history_admission;
+void aimee_ir_history_set_host_admission(aimee_ir_host_history_admission_fn admit)
+{
+   atomic_store(&host_history_admission, admit);
+}
+int aimee_ir_history_admit_host(const cJSON *messages)
+{
+   aimee_ir_host_history_admission_fn admit = atomic_load(&host_history_admission);
+   return admit ? admit(messages) : aimee_ir_history_admit(messages);
+}
+
+int aimee_ir_history_admit(const cJSON *messages)
+{
+   if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) > 4096)
+      return -1;
+   const cJSON *value;
+   cJSON_ArrayForEach(value, messages)
+   {
+      aimee_message_t message = {0};
+      if (aimee_ir_message_parse(value, &message))
+         return -1;
+      int unresolved = 0;
+      for (int i = 0; i < message.n_blocks; i++)
+      {
+         const aimee_block_t *block = &message.blocks[i];
+         unresolved |= block->type == AIMEE_BLK_TOOL_RESULT &&
+                       ((!strcmp(block->context.revision_domain, "native-interruption")) ||
+                        (block->context.origin == AIMEE_CTX_ORIGIN_PLATFORM &&
+                         block->context.authority == AIMEE_CTX_AUTH_DIAGNOSTIC &&
+                         !strcmp(block->context.revision_domain, "history-repair") &&
+                         !strcmp(block->context.revision_scope, "unresolved-tool-result")));
+      }
+      aimee_message_free(&message);
+      if (unresolved)
+         return -1;
+   }
+   /* Reuse the ordered cycle contract on a private comparison view. Refusal
+    * never changes the source or presents a synthetic repair as actual output. */
+   cJSON *view = cJSON_Duplicate(messages, 1);
+   int repairs = view ? aimee_ir_history_repair(view) : -1;
+   cJSON_Delete(view);
+   return repairs == 0 ? 0 : -1;
+}
+
 static int flush_pending(cJSON *messages, const char **ids, int count)
 {
    int repaired = 0;
@@ -301,9 +346,15 @@ static int flush_pending(cJSON *messages, const char **ids, int count)
          continue;
       aimee_block_t block = {.type = AIMEE_BLK_TOOL_RESULT,
                              .tool_id = (char *)ids[i],
-                             .tool_result =
-                                 cJSON_CreateString("[Tool call was cancelled or timed out]"),
+                             .tool_result = cJSON_CreateString(
+                                 "[No tool result is available in this history. Execution outcome "
+                                 "is unknown; reconcile before retrying.]"),
                              .tool_is_error = 1};
+      /* Missing history proves neither execution nor cancellation. This is a
+       * platform diagnostic, never a tool owner's outcome/effect receipt. */
+      aimee_ir_block_set_context(&block, AIMEE_CTX_ORIGIN_PLATFORM, AIMEE_CTX_AUTH_DIAGNOSTIC,
+                                 AIMEE_CTX_TRUST_VERIFIED, AIMEE_CTX_SENS_INTERNAL, 1,
+                                 "history-repair", "unresolved-tool-result", 0);
       aimee_message_t message = {.role = "tool", .blocks = &block, .n_blocks = 1};
       aimee_request_t request = {.messages = &message, .n_messages = 1};
       aimee_ir_classify_context(&request);
@@ -539,7 +590,10 @@ cJSON *aimee_ir_request_json(const aimee_request_t *request)
        (request->has_top_k && !cJSON_AddNumberToObject(out, "top_k", request->top_k)) ||
        !cJSON_AddBoolToObject(out, "stream", request->stream) ||
        !add_copy(out, "metadata", request->metadata) ||
-       !add_string(out, "service_tier", request->service_tier))
+       !add_string(out, "service_tier", request->service_tier) ||
+       !add_string(out, "prompt_cache_key", request->prompt_cache_key) ||
+       !add_string(out, "prompt_cache_retention", request->prompt_cache_retention) ||
+       !add_copy(out, "prompt_cache_options", request->prompt_cache_options))
       goto fail;
    cJSON *stops = cJSON_AddArrayToObject(out, "stop_sequences");
    if (!stops || request->n_stop < 0 || request->n_stop > AIMEE_IR_MAX_BLOCKS ||
@@ -738,9 +792,161 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
    return out;
 }
 
+/* Exact member sets prevent this metadata carrier becoming an arbitrary JSON
+ * escape. Cross-field custody and outcome qualification remain owner policy. */
+static int verification_keys(const cJSON *object, const char *const *keys, size_t count)
+{
+   if (!cJSON_IsObject(object) || cJSON_GetArraySize(object) != (int)count)
+      return 0;
+   const cJSON *item;
+   cJSON_ArrayForEach(item, object)
+   {
+      size_t index = 0;
+      if (!item->string)
+         return 0;
+      for (; index < count && strcmp(item->string, keys[index]); ++index)
+      {
+      }
+      if (index == count)
+         return 0;
+      for (const cJSON *previous = object->child; previous != item; previous = previous->next)
+         if (!strcmp(previous->string, item->string))
+            return 0;
+   }
+   return 1;
+}
+static const char *verification_text(const cJSON *object, const char *key, size_t limit)
+{
+   const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(object, key));
+   return value && value[0] && strlen(value) <= limit ? value : NULL;
+}
+static int verification_hex(const cJSON *object, const char *key, size_t first, size_t second)
+{
+   const char *value = verification_text(object, key, second > first ? second : first);
+   if (!value)
+      return 0;
+   size_t length = strlen(value);
+   return (length == first || length == second) && strspn(value, "0123456789abcdef") == length;
+}
+static int child_learning_binding_valid(const cJSON *binding)
+{
+   static const char *const keys[] = {"version", "job_id",   "scope_kind", "scope_id",
+                                      "agent",   "provider", "model"};
+   const cJSON *version = cJSON_GetObjectItemCaseSensitive(binding, "version");
+   const char *job = verification_text(binding, "job_id", 10);
+   const char *scope = verification_text(binding, "scope_kind", 32);
+   if (!verification_keys(binding, keys, sizeof keys / sizeof *keys) || !cJSON_IsNumber(version) ||
+       version->valuedouble != 1 || !job || job[0] == '0' ||
+       strspn(job, "0123456789") != strlen(job) || strtoull(job, NULL, 10) > 2147483647ULL ||
+       !scope || strcmp(scope, "project") || !verification_text(binding, "scope_id", 256) ||
+       !verification_text(binding, "agent", 63) || !verification_text(binding, "provider", 127) ||
+       !verification_text(binding, "model", 255))
+      return 0;
+   return 1;
+}
+
+int aimee_ir_verification_proof_valid(const cJSON *proof)
+{
+   static const char *const keys[] = {"version",
+                                      "session_id",
+                                      "turn_id",
+                                      "actor",
+                                      "scope_kind",
+                                      "scope_id",
+                                      "isolation",
+                                      "snapshot_id",
+                                      "snapshot_commit",
+                                      "final_commit",
+                                      "snapshot_tree",
+                                      "final_tree",
+                                      "configuration_sha256",
+                                      "final_configuration_sha256",
+                                      "profile_sha256",
+                                      "completed",
+                                      "observed_at",
+                                      "steps"};
+   static const char *const step_keys[] = {"name",    "command_sha256", "ran",
+                                           "skipped", "termination",    "exit_code"};
+   if (!verification_keys(proof, keys, sizeof keys / sizeof *keys))
+      return 0;
+   const cJSON *version = cJSON_GetObjectItemCaseSensitive(proof, "version");
+   const char *scope = verification_text(proof, "scope_kind", 32);
+   const char *isolation = verification_text(proof, "isolation", 64);
+   const cJSON *steps = cJSON_GetObjectItemCaseSensitive(proof, "steps");
+   if (!cJSON_IsNumber(version) || version->valuedouble != 1 ||
+       !verification_text(proof, "session_id", 256) || !verification_text(proof, "turn_id", 256) ||
+       !verification_text(proof, "actor", 256) || !scope || strcmp(scope, "project") ||
+       !verification_text(proof, "scope_id", 256) || !isolation ||
+       strcmp(isolation, "private_source_snapshot") ||
+       !verification_hex(proof, "snapshot_id", 32, 32) ||
+       !verification_hex(proof, "snapshot_commit", 40, 64) ||
+       !verification_hex(proof, "final_commit", 40, 64) ||
+       !verification_hex(proof, "snapshot_tree", 40, 64) ||
+       !verification_hex(proof, "final_tree", 40, 64) ||
+       !verification_hex(proof, "configuration_sha256", 64, 64) ||
+       !verification_hex(proof, "final_configuration_sha256", 64, 64) ||
+       !verification_hex(proof, "profile_sha256", 64, 64) ||
+       !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(proof, "completed")) ||
+       !verification_text(proof, "observed_at", 64) || !cJSON_IsArray(steps) ||
+       cJSON_GetArraySize(steps) < 1 || cJSON_GetArraySize(steps) > 64)
+      return 0;
+   const cJSON *step;
+   cJSON_ArrayForEach(step, steps)
+   {
+      if (!verification_keys(step, step_keys, sizeof step_keys / sizeof *step_keys))
+         return 0;
+      const char *name = verification_text(step, "name", 128);
+      const char *termination = verification_text(step, "termination", 16);
+      const char *code = verification_text(step, "exit_code", 3);
+      if (!name || !verification_hex(step, "command_sha256", 64, 64) ||
+          !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(step, "ran")) ||
+          !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(step, "skipped")) || !termination ||
+          strcmp(termination, "exited") || !code || strspn(code, "0123456789") != strlen(code) ||
+          (code[0] == '0' && code[1]) || atoi(code) > 255)
+         return 0;
+      for (const cJSON *previous = steps->child; previous != step; previous = previous->next)
+         if (!strcmp(verification_text(previous, "name", 128), name))
+            return 0;
+   }
+   char *encoded = cJSON_PrintUnformatted(proof);
+   int bounded = encoded && strlen(encoded) <= 65536;
+   free(encoded);
+   return bounded;
+}
+
+static int native_owner_valid(const cJSON *owner)
+{
+   if (!cJSON_IsObject(owner) || cJSON_GetArraySize(owner) != 6)
+      return 0;
+   const cJSON *version = cJSON_GetObjectItemCaseSensitive(owner, "version");
+   const char *h = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(owner, "harness"));
+   const char *keys[] = {"owner_id", "binding_sha256", "containment_sha256", "epoch"};
+   const int sizes[] = {32, 64, 64, 32};
+   if (!cJSON_IsNumber(version) || version->valuedouble != 1 || !h ||
+       (strcmp(h, "codex") && strcmp(h, "claude")))
+      return 0;
+   for (int i = 0; i < 4; i++)
+   {
+      const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(owner, keys[i]));
+      if (!value)
+         return 0;
+      if (i == 3 && !strcmp(value, "0"))
+         continue;
+      if (strlen(value) != (size_t)sizes[i] ||
+          strspn(value, "0123456789abcdef") != (size_t)sizes[i])
+         return 0;
+   }
+   return 1;
+}
+
 cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
 {
-   if (!event)
+   if (!event ||
+       (event->native_owner &&
+        (event->kind != AIMEE_SESSION_MESSAGE || !native_owner_valid(event->native_owner))) ||
+       (event->message_partial &&
+        (!event->native_owner || !event->message || !event->message->role ||
+         strcmp(event->message->role, "assistant") || event->message->n_blocks < 1)))
       return NULL;
    cJSON *out = cJSON_CreateObject(), *payload = NULL;
    const char *kind = NULL;
@@ -823,8 +1029,10 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
       break;
    case AIMEE_SESSION_PROJECTION:
       if (!event->projection_model || !event->projection_model[0] ||
-          event->projection_reasoning <= 0 || event->projection_opaque < 0 ||
-          event->projection_opaque > event->projection_reasoning || !event->projection_boundary ||
+          event->projection_reasoning < 0 || event->projection_cache_controls < 0 ||
+          (!event->projection_reasoning && !event->projection_cache_controls) ||
+          event->projection_opaque < 0 || event->projection_opaque > event->projection_reasoning ||
+          !event->projection_boundary ||
           (strcmp(event->projection_boundary, "request") &&
            strcmp(event->projection_boundary, "response")))
          goto fail;
@@ -835,7 +1043,10 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
           !cJSON_AddNumberToObject(payload, "omitted_reasoning_blocks",
                                    event->projection_reasoning) ||
           !cJSON_AddNumberToObject(payload, "omitted_opaque_state_blocks",
-                                   event->projection_opaque))
+                                   event->projection_opaque) ||
+          (event->projection_cache_controls &&
+           !cJSON_AddNumberToObject(payload, "omitted_cache_controls",
+                                    event->projection_cache_controls)))
          goto fail;
       break;
    case AIMEE_SESSION_CHILD_EXECUTION:
@@ -853,7 +1064,10 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
       if (!payload || !add_string(payload, "session_id", event->child_session) ||
           !add_string(payload, "turn_id", event->child_turn) ||
           !add_string(payload, "role", event->child_role) ||
-          !add_string(payload, "status", event->execution_status))
+          !add_string(payload, "status", event->execution_status) ||
+          (event->child_learning_binding &&
+           (!child_learning_binding_valid(event->child_learning_binding) ||
+            !add_copy(payload, "learning_binding", event->child_learning_binding))))
          goto fail;
       break;
    case AIMEE_SESSION_EXECUTION:
@@ -867,6 +1081,22 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
       if (!payload || !add_string(payload, "status", event->execution_status) ||
           !add_string(payload, "error", event->execution_error))
          goto fail;
+      if (event->verification_proofs)
+      {
+         if (strcmp(event->execution_status, "completed") ||
+             !cJSON_IsArray(event->verification_proofs) ||
+             cJSON_GetArraySize(event->verification_proofs) < 1 ||
+             cJSON_GetArraySize(event->verification_proofs) > 8)
+            goto fail;
+         const cJSON *proof;
+         cJSON_ArrayForEach(proof, event->verification_proofs)
+         {
+            if (!aimee_ir_verification_proof_valid(proof))
+               goto fail;
+         }
+         if (!add_copy(payload, "verification_proofs", event->verification_proofs))
+            goto fail;
+      }
       break;
    default:
       goto fail;
@@ -875,6 +1105,17 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
        !add_string(out, "message_id", event->message_id) || !add_string(out, "role", event->role) ||
        !add_string(out, "request_id", event->request_id) ||
        !add_string(out, "control_kind", event->control_kind))
+      goto fail;
+   if (event->native_owner)
+   {
+      cJSON *owner = cJSON_Duplicate(event->native_owner, 1);
+      if (!owner || !cJSON_AddItemToObject(out, "native_owner", owner))
+      {
+         cJSON_Delete(owner);
+         goto fail;
+      }
+   }
+   if (event->message_partial && !cJSON_AddTrueToObject(out, "partial"))
       goto fail;
    if (!cJSON_AddItemToObject(out, "payload", payload))
       goto fail;
@@ -1191,12 +1432,18 @@ int aimee_ir_control_reply_valid(const char *kind, const cJSON *request, const c
 int aimee_ir_session_emit_projection(const char *model, int reasoning, int opaque,
                                      const char *boundary)
 {
-   if (!reasoning && !opaque)
+   return aimee_ir_session_emit_projection_controls(model, reasoning, opaque, 0, boundary);
+}
+int aimee_ir_session_emit_projection_controls(const char *model, int reasoning, int opaque,
+                                              int cache_controls, const char *boundary)
+{
+   if (!reasoning && !opaque && !cache_controls)
       return 0;
    aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
                                   .projection_model = model && model[0] ? model : "selected model",
                                   .projection_boundary = boundary,
                                   .projection_reasoning = reasoning,
-                                  .projection_opaque = opaque};
+                                  .projection_opaque = opaque,
+                                  .projection_cache_controls = cache_controls};
    return aimee_ir_session_emit(&event);
 }

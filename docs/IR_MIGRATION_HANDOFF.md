@@ -4,41 +4,403 @@ Prepared 17 October 2026, with subsequent continuation checkpoints. The current
 user instruction is to keep implementing the unfinished migration; the historical
 stop/handoff request below is superseded.
 
-## Current continuation status: PR #3050
+## Current continuation status: PR #3052; final qualification in progress
+
+Active work remains in [PR #3052](https://github.com/RakuenSoftware/aimee/pull/3052),
+targeting `testing`. Recovery baseline `a6bd31897` passed fresh CI, including
+all four configured deployment tiers. The continuation below includes later
+changes; the PR checks qualify its exact published head.
+Keep automatic review and the strict attribution gate enabled. No production
+promotion or final fresh-CI result is claimed.
+
+The supported browser/Linux cutovers are implemented: canonical primary loading
+and model switching, durable session-log history, request/response streaming,
+scoped native tools, delegate execution/history, persisted model selection and scoped persona controls,
+and canonical permission/question replies. Each child owns its controls; replies
+bind the actual durable child session, turn and actor. Replay readiness prevents
+historical controls from appearing before their saved replies. Reconnect and
+repeated delivery do not resend replies or reopen denied requests. Unsupported
+branching is hidden; mobile preferences wrap without clipping. Failed steering
+is a durable failed admission and never becomes later model instructions.
+
+Native Linux Codex/Claude launches retain canonical host calls/results and
+cache/replay custody. Optional qualified containment uses a delegated cgroup,
+pre-exec attachment, private namespaces, restricted filesystem/network access and
+an exact durable owner reservation. Recovery proves actual tree quiescence before
+fencing an abandoned turn and rotating the shared cache epoch; old SDK files are
+preserved. An interrupted tool effect remains unknown, with its first protected
+call source and terminal binding retained. A later mutation requires permission
+for its exact effective arguments; denial suppresses repeated attempts in that
+turn. Ordinary launches without the optional boundary keep their successful
+launch path but do not acquire a whole-tree crash-recovery proof.
+
+Legacy import now happens on browser opening, before SSE headers, as well as on
+model loading. HostOnly50 locks the actual session/agent/provider source, owner
+and raw-source hash. Its explicit browse mode returns `skipped` without appending
+when completed canonical primary history wins; model import remains strict.
+Pending turns and their reply paths remain live. Empty legacy agent selectors
+are preserved. Reports distinguish exact import, normalization, archive and
+refusal; source rows remain intact. Terminal text is a passive archive with no
+invented message roles or tools. Large canonical messages use bounded protected
+fragments instead of imposing a smaller pre-compaction history limit.
+
+The browser shows the acknowledged imported conversation in chronological
+position before newer observations, using its exact canonical roles and blocks.
+It exposes that base only after its report-bound checkpoint is complete; fragment
+hashes are verified before parsing/rendering. Archive count and raw UTF-8 digest
+also verify before explicit expansion. Ordinary recurring prompt checkpoints
+remain cursor-only, so browsing does not duplicate them. Historical browser rendering grants no execution, control, learning-grade or
+model-observation authority.
+
+KB-free learning uses canonical terminal evidence and a source-pointer outbox.
+Configured-test grades, pending delegate observations and same-project recall
+retain actor, project, parent/job/child and provider-send freshness fences.
+Unattended bounded recovery republishes unacknowledged projections after daemon
+restart, without reconstructing evicted delivered rows. Ungraded execution stays
+ungraded; exit success does not imply independent semantic correctness or causal
+procedure success. No KB instance, seeded facts/grades or fabricated successful
+outcomes are required. Production `.100` must remain KB-free.
+
+### Qualification recorded before the final boundary repairs
+
+The integrated source has passed the full native suite, all 76 lint gates, the
+full Go race suite against a fresh actual PostgreSQL database, nine focused CMake
+tests, focused ASan/UBSan/leak checks, all 77 script tests and both frontend builds.
+Frontend coverage increased from 396 to 399 tests with the initial-open/imported
+conversation follow-up. Actual Chromium checks cover desktop/mobile/dark,
+primary/child replies, source-bound unknown effects, passive archives, verified
+imported fragments, reconnect and duplicate delivery. The HTTP fixture checks
+that ownership/import completes before SSE headers, foreign owners are refused,
+and migration failure emits no successful stream or model/network work. The
+primary fixture exercises the real importer separately. Actual PostgreSQL race
+fixtures prove that a competing completed checkpoint wins under lock, browse
+skips without appending, and model import still refuses the stale replacement.
+
+The complete actual-server integration run passed 170/170 checks on the initial
+fidelity slice, before the browser-opening follow-up. It includes all eight
+pinned SDK wire/credential configurations, real model/tool/resume turns and both
+Codex/Claude daemon-crash/interruption journeys. Those journeys freeze the actual
+SDK tree, kill only the owned daemon, restart with the same durable store,
+recover/fence the old source, preserve old state, complete a fresh turn, load the
+unknown effect into later model context, deny a real mutation once and verify
+second-attempt suppression plus replay. This is actual pinned SDK execution
+against owned provider fixtures; it does not claim live upstream subscription
+or vendor acceptance.
+
+The confirmed boundary repairs are implemented: canonical history, browser replay,
+interruption sources and delegate-learning scans page before SQL transport framing.
+Only the affected source-complete operations select a bounded 30-second budget;
+caller deadlines still clamp it and unrelated operations retain two seconds. Legacy
+source reads use bounded UTF-8 chunks without changing global wire or cell limits.
+Migration 50 validates a 16 MiB retained-source constraint. The original migration
+20 file/checksum stays unchanged; one exact deferred-validation variant permits
+pre-limit historical rows to reach migration 50. Both known histories replay, and
+unknown checksums still refuse. Whole replies retain their existing frame budget,
+including metadata overhead; oversized replies fail instead of truncating source.
+
+A final combined PostgreSQL race run exposed cancellation between the last query
+and commit dispatch. Commit errors now trigger one bounded, owner-preserving
+rollback attempt without retrying commit or changing its original unknown outcome.
+Provider transaction handles use cryptographic per-instance seeds and never wrap;
+this removes deterministic handle reuse after restart without changing the wire,
+open-transaction ceiling or idle TTL. Entropy failure refuses new leases. Actual
+SQL-wire tests cover cancellation, lost commit acknowledgment and stale cleanup
+arriving after a replacement provider has opened a new transaction. The legacy
+source getters share the bounded 30-second history budget, with caller deadlines
+still enforced. Required CI replay now includes all SessionIR, primary-model and
+native-live regression fixtures.
+
+The final combined Go race suite now passes against a fresh actual PostgreSQL
+database, including the complete Aimee-family, shared DB and PostgreSQL provider
+packages. Affected native fixtures also pass normal and ASan/UBSan/leak runs.
+The final rebuilt-server integration also passes 170/170 checks, including all
+eight pinned SDK configurations and both Codex/Claude crash/interruption journeys.
+Its 27 unconfigured-service checks remain explicit skips; Docker-dependent paths
+are qualified in CI. All 76 lint gates pass on the integrated repair tree.
+Published baseline `bd835cbad` passed all 59 checks, including complete script
+regressions and all four deployment tiers. Fresh exact-head CI remains pending
+for the final transaction cleanup and deadline repairs. Earlier green commits do
+not substitute for that final run.
+Do not label the migration or production promotion 100% complete while those
+checks or the recorded independent review remain outstanding.
+
+### Current completion matrix
+
+| Requirement | Implemented behavior and evidence | Remaining action |
+| --- | --- | --- |
+| Canonical primary/delegate/browser execution | Durable canonical history, persisted owner-bound model selection, native request/tool/result paths, separate child history, canonical controls and recovery are implemented. Both pinned Linux SDKs pass actual crash/interruption journeys. | Local integrated gates pass; finish fresh exact-head CI. |
+| Honest legacy history on opening | Owner-bound browse preflight, atomic fidelity report/checkpoint or passive archive, and verified chronological imported-base display are implemented. Focused native, PostgreSQL lock-race, 399 frontend tests and actual Chromium pass. | Final rebuilt-server integration passes 170/170; finish fresh exact-head CI. |
+| Browser controls and usability | Exact primary/child reply ownership, replay readiness, no duplicate/reconnect resend, denial suppression, readable tool output and responsive composer/preferences are implemented and tested. | Local automated checks pass; finish fresh exact-head CI. The browser is ready for manual validation; a later manual pass is not a reason to stop finishing automated work. |
+| KB-free project and learning | Approved held repository identity resolves without a KB index. Canonical terminal/outbox owners publish source-bound configured-test grades and observational delegate learning; next-context reuse is actor/project/source fenced. Actual Docker/restart journeys pass. | Finish fresh exact-head CI, then verify real `.100` capture/reuse after authorized promotion. Leave KB mode/endpoint unset; add no fabricated learning rows. |
+| Meaning of learned evidence | Observational tool sequences, configured-test results and ungraded outcomes keep distinct labels. No automatic causal/procedure promotion or semantic task-success claim is inferred. | Preserve those labels during production verification. Synthesis is not a prerequisite for the KB-free capture/reuse path. |
+| Linux native coverage | Qualified descriptor-based pinned Codex/Claude model/tool/resume and optional cgroup/Landlock crash recovery have actual SDK and kernel-backed evidence. Unqualified ordinary launches remain fail-closed for uncertain crash recovery. | Local integrated qualification passes; finish fresh exact-head CI. Live upstream/vendor subscription acceptance remains separately unqualified. |
+| macOS, Windows and unsupported profiles | macOS/Windows thin clients are supported server-access build/test targets. They are not native server-execution coverage. Arbitrary daemon ACP profiles and non-Linux native tool runtimes remain explicitly unsupported/refused. | Report these boundaries honestly; do not convert thin-client passes into native-server claims. |
+| Production review and promotion | `.100` is KB-free and no promotion is claimed. `OWNERS.md` requires Governance to assign/record a second qualified GitHub identity in the live ruleset; the approving reviewer must differ from the author. Agent reviews do not satisfy it. | Obtain the recorded independent review for the final head, retain live-control evidence, deploy through the supported path and verify `.100` without adding a KB. |
+
+The sections below are chronological checkpoints. Their older statements that a
+path is missing describe that checkpoint, not an additional current defect when
+the matrix and current source establish the cutover. Dead compatibility APIs and
+unsupported profiles are not working-runtime coverage. The supported-path audit
+found no additional confirmed reachable raw-provider history/tool bypass. Fresh
+results must still qualify every later change.
 
 The user confirmed #3038 and its follow-up #3047 merged and requested the remaining
-migration and standalone learning work. Continue only the existing
-[#3050](https://github.com/RakuenSoftware/aimee/pull/3050), branch
-`fix/browser-ir-native-execution`, based on merged #3047 (`fedfa6728`). Do not reopen
-#3036, create another PR, or mix in WOL work. Automatic review and the strict
-attribution gate remain enabled.
+migration and standalone learning work. #3050 was subsequently merged at
+`4e0ca19c2` (merge `7e17d58be`). Continuation commits remain on
+`fix/browser-ir-native-execution`; its original base was merged #3047 (`fedfa6728`).
+The user authorized one follow-up PR after #3050 merged: active work is now
+[PR #3052](https://github.com/RakuenSoftware/aimee/pull/3052), targeting testing.
+Keep further migration work in #3052. Do not reopen #3036 or mix in WOL work.
+Automatic review and the strict attribution gate remain enabled.
 
 The existing browser GUI now has canonical primary loading/model switching,
 durable-log history and standard controls. Request/response streaming, delegate
 history, tool catalogs/role admission and all three tool-enabled host request
-profiles use IR. Native cache claims/recovery, execution-profile scope and
-compaction refusal are implemented but are **not activated at production SDK
-spawn sites**. Real replay qualification covers unchanged-prefix plus unseen-tail
-adoption; native command observation still has a confirmed identity/argument/result
-fidelity gap.
+profiles use IR. The Codex browser/delegate launch sites now use the host-owned
+canonical scheduler for qualified Linux executable-descriptor launches; this code
+has not been promoted to production. Its host model source, original tool calls,
+result projection, scoped cache claims and durable-terminal checkpointing replace
+SDK conversation observations. The next local continuation also activates Claude
+through a source-bound MCP bridge: original host calls, rather than SDK-normalized
+arguments, supply tool effects. Both Linux native SDKs pass actual-server model,
+tool, durable replay and resumed-turn journeys across all three provider wires.
+Its full local regression, sanitizer and pinned-SDK PostgreSQL integration
+qualification passed, together with all 76 lint gates. Fresh CI follows publication. Native
+launch/platform coverage beyond the qualified Linux executables remains unfinished.
 
-The remaining work includes actual credential-free SDK activation with attested
-launch/workspace resources, complete host tool effects/receipts and human controls,
-live Claude subscription qualification and other unsupported credential custody, remaining ingress/consumer retirement and
+The remaining work includes full native launch/platform coverage, broader real
+host-effect/human-control journeys, live Claude subscription qualification and
+other unsupported credential custody, remaining ingress/consumer retirement and
 independently graded server-local learning with next-run reuse. Production `.100`
 must remain KB-free. Explicit receipt-bound feedback/ungraded observations are not
 independent task grades or synthesis. Production promotion requires the recorded
 independent reviewer under `OWNERS.md`.
 
-Published `5aa1888d2` passed all 56 applicable CI checks, including every Docker
-tier, with two existing testing-branch platform skips (as did `1a8469ebf`). Published
-`46f6e1085` includes the subsequent plain-request consumer and obsolete shell-driver
-retirement. Its CI exposed an unchecked POSIX capture receiver, repaired below.
-Published `1511bd3e9` includes the selected Vault API-key increment and the CI repair.
-Its fresh CI has 55 passing checks and no failures; T2 is still pending at this checkpoint.
-Installed CLI probes now correctly resolve `aimee` and `wol-lore` from their own
+Published `c77cc0492` completed all 50 main CI jobs, including all Docker tiers
+and identity mint, with two unchanged testing-target platform skips. Export,
+audit, fuzz, release and strict attribution workflows also passed. Published
+`118f06bb2` adds host-turn generation/source claims and actual-catalog admission;
+it subsequently completed all 50 main CI jobs and every auxiliary workflow,
+with the same two platform skips. Original-call readback/claim is published
+as `a94bd79ea`; it completed all 50 main CI jobs and every auxiliary workflow,
+with the same two platform skips. Supervised original-call execution is published
+as `2d49add9b`; it completed all 50 main CI jobs and every auxiliary workflow,
+with the same two platform skips. These commits do not activate native SDK execution.
+
+Installed CLI probes correctly resolve `aimee` and `wol-lore` from their own
 workspaces without an explicit project override; newer native callback cwd binding
 is separately pending promotion. The overall migration remains unfinished.
+
+Published `135897989` passed the full native suite, focused ASan/UBSan, Go race tests,
+actual PostgreSQL/SDK/browser integration (168 configured checks), 30 proxy tests, CMake cache
+fixture, all 76 lint gates and the full-history secret scan. Fresh Windows CI then exposed a
+thin-client CMake link defect: the codec target was declared only inside the full-runtime guard.
+Published `5fd04df5a` moves that existing portable target into common configuration. Fresh local
+thin build/selfcheck and the full-runtime CMake cache fixture pass. That commit subsequently
+completed all 59 CI checks, including Windows, macOS, strict attribution and every deployment
+tier (T1, T2, T2-luks, T3), with no platform skip or attribution exemption.
+
+## Working continuation: browser replay and KB-free durable verification
+
+Published `c5661a2b4` completed all 59 CI checks, without platform skips or attribution
+exemptions. The current continuation remains in PR #3052 and is under fresh qualification.
+Three parallel agents handled browser races, scoped recall and the isolated executor while
+the primary integrated their production owners. No production promotion has occurred.
+
+Browser model/persona requests and failed-save rollback are now session-bound. Controls have
+session-specific state; malformed streams withdraw stale controls and offer durable-cursor
+reconnection. A reproduced Send/Steer race came from copied activity state; the composer now
+uses canonical activity directly. Repeated Chromium journeys, readable tool-result contrast,
+mobile layout, 324 frontend tests and production builds pass. Failed primary/persona lookups
+remain errors, focus/visibility refreshes retain confirmed selections and reject stale reads,
+and the UI hides unsupported branching instead of offering a silent 501 action.
+
+Configured Git verification now reaches the native host tool catalog through the same owned
+Git dispatcher. A qualified run uses a held independent Git snapshot and exact Docker Unix
+resource, actual image/profile and immutable exec IDs, machine-observed normal exits, and
+acknowledged joined cleanup. Before prerequisites, an actual worker exec must read the exact
+random lease marker from the independent snapshot; matching inspect paths alone cannot qualify
+source custody. The helper watches its actual server parent and joins cancellation/cleanup if
+that parent disappears. Persistent owner identity and per-worker locks let startup cleanup
+remove acknowledged same-owner orphan IDs while preserving live and foreign workers. Private
+workers stay outside the ordinary delegate prefix/age reaper. Prerequisites run in that worker. No parent-control socket,
+network, cached pass, skipped command or opaque process status grants a grade. A proven
+preflight refusal with zero configured attempts can continue ordinary verification ungraded;
+unknown/started execution cannot be replayed that way. Incomplete configuration cannot qualify.
+
+The capture owner prepares source-bound receipts immediately before completion. Host-only
+DB1 operation 36 commits them inside the same canonical terminal event; ordinary append
+cannot introduce privileged receipts. Learning validates the typed terminal and proof, and
+host-only operation 61 stores an immutable configured-test grade whose complete proof must
+match that durable source. Replay rebuilds lost derived grades from the terminal. Operation 62
+returns whole bounded receipts only for the authenticated actor and registered project;
+primary/delegate context revalidates them through the existing provider-send fence. They are
+historical configured-test evidence, not semantic task correctness or causal procedure claims.
+
+The next working increment binds actual selected delegate/job/project metadata to a protected
+canonical parent reference before child execution. Ordinary append cannot forge that binding.
+Host-only operations 63/64 resolve the exact owned child terminal and project source-bound
+pending delegate observations; proof-less exit remains ungraded, and retained proofs require
+all matching derived grades before projection. Parent-only replay recovers lost child grades
+and observations idempotently, using exact terminal lookup rather than scanning a bounded
+prefix. Recall rechecks parent, child, job and action sources through the same freshness fence.
+No observation is auto-applied or promoted to causal/procedure success. The project prerequisite
+is an approved held workspace and local repository identity, not a KB or code-index service.
+Production remains KB-free; no endpoint, seeded learning rows or synthetic successes are added.
+The separate legacy goal-only failed-approach injection into write delegates is retired: its
+query had no principal/project/source fence. The bypass gate protects this boundary; legacy
+rows are not guessed into scoped owners or promoted to trusted procedure learning.
+
+The actual-daemon integration journey now requires real Docker in CI and covers model-invoked
+verification, durable proof/grade publication, erased-projection replay recovery and later scoped
+model context. Local absence of Docker skips exactly that journey and is not positive evidence.
+Published `aee506721` adds the browser/durable verification slice; `9667034f5` records the
+exact native verifier integration in the frozen semantic-context gate. Smoke and Linux LSP pass
+on that repair. Actual Docker CI then caught a missing native `git_verify` advert: its dispatch
+existed but the canonical catalog exposes the multiplexed `git` schema. The working repair
+projects a fixed named command only from an actually advertised enum entry and preserves the
+remaining schema and cached catalog. The source-bound delegate increment and this catalog
+repair are not yet CI-qualified or promoted.
+Published `1ec815d36` fixes that advert and publishes source-bound delegate
+observations. Its actual-daemon CI journey then exposed a separate harness
+omission: the migrated Git process was never installed or started, leaving
+verification hashes and snapshots unavailable. The continuation installs its
+real generated serving/outbound grants and manages it with the other module
+children. A Docker-independent actual-daemon check now verifies configured
+commands and both clean/dirty source observations, so local Docker absence
+cannot hide a missing Git owner. This grants no private-execution grade;
+the separate mandatory actual-Docker journey still qualifies that boundary.
+Published `b1c3820ab` passes the new clean/dirty check, but its Docker grade journey
+still declines private admission. Learning's project producer was incorrectly
+using the index-name resolver, which refuses a valid repository when the KB
+index is empty. A dedicated learning resolver now obtains approved held workspace
+custody and the repository's canonical identity without consulting KB/index
+names. Verification, protected delegate binding and delegate recall share it;
+local repository scope retains the existing `local:UUID` spelling. General index
+name resolution is unchanged. Focused normal/sanitizer and actual Docker CI
+qualification must follow this repair; no production promotion is claimed.
+Published `ea7ed891b` removes the KB prerequisite, but its next Docker run
+still declined admission. A production-reader reproduction traced this to the
+fixture's persisted UUID file: default `0644` was rejected by the existing
+owner-only permission contract. Published `4396de22d` creates it exclusively as
+`0600` and logs bounded admission reasons. The same production reader accepts
+both direct and held-descriptor paths after that correction. A negative-only
+local daemon probe now passes identity admission; it has no real Docker and does
+not qualify a grade. Its fresh CI then passed private proof/grade publication
+but failed later fresh-session reuse: ordinary primary turns only assembled
+local history when explicit code-evidence obligations were present. Published
+`d734db8e6` adds a local-grade-only assembly path for ordinary turns, retaining
+actor/project scope, integrity, and provider-send source freshness without KB
+reads. Normal/sanitizer regression reproduces the old failure and passes the
+repair. Actual-daemon CI is rerunning.
+
+The unpublished integrated continuation adds mobile footer controls, authenticated
+source-bound historical approach reads, canonical session search, and append-atomic
+learning delivery tickets with a daemon-owned recovery worker. Search explicitly
+separates current reduced history from retained observations, binds scroll selectors
+to actor/session/view/source revision, searches joined visible blocks and bounds
+whole-session result pages. It refuses classified/tool-input leakage and stale
+selectors; unfinished sessions cannot poison discovery. Combined real PostgreSQL
+race checks pass for search, protected proofs, delegate recovery and outbox fencing.
+Normal/sanitizer/CMake recovery fixtures pass. Full native checks and mandatory
+actual-Docker daemon-restart qualification are still being completed. Migration 47
+records an explicit automatic-delivery cutover; earlier missing projections require
+explicit replay, and intentional retention is not silently undone.
+
+An integrated pre-spawn native cache lease now covers the exact persistent SDK
+directory before HOME/configuration/spawn, and remains owned through durable
+terminal publication. Crash markers block unsafe restart even if an escaped
+descendant has closed every lease descriptor. Normal, sanitizer, and CMake
+fixtures pass. This deliberately does not clear abandoned claims; qualified
+whole-tree containment and atomic abandoned-turn reconciliation remain in work.
+See `docs/NATIVE_CACHE_OWNERSHIP.md`.
+
+Three parallel workers continue independent integration/review, native cache custody
+and remaining ingress retirement. The original active-project bug also has a working
+repair for valid local identity with an empty index. None of this is a claim of
+complete migration, live vendor qualification or production promotion.
+
+Fresh CI, remaining live-vendor/native-profile qualification and independently reviewed production
+promotion remain required. The Windows native tool-runtime stub and arbitrary daemon ACP profiles
+remain explicit unsupported profiles; thin-client CI does not qualify them as native servers.
+
+Cron, all-failed voting and commit-message output now release owned canonical results. The unused
+native-format compactor and its canonical-runtime calls are retired; adjacent canonical source
+classifications remain distinct. Do not stop at publication or claim the complete migration is done.
+
+## Active continuation: compatibility native results and fallback retirement
+
+Codex and ACP compatibility executors now retain admitted typed model observations rather than
+reconstructing output from joined text. ACP thought/text/media groups survive ownership transfer;
+Codex stream prefixes reconcile with immutable complete snapshots without duplication. Incomplete,
+contradictory or unidentified observations fail capture, including without a session sink. Nested
+capture restores its parent's failure latch. Successful standalone adapters must return admitted
+canonical output; the host scheduler remains an intermediate stage until its factory installs the
+original response. ACP terminal stop reasons and supported legacy terminal content are decoded at
+the native translation boundary.
+
+All four registered adapters already have explicit execution owners. The unused generic child
+collector/text-parser fallback is retired; an adapter without a canonical executor refuses before
+spawn. The bypass gate rejects reintroduction of those APIs. Published `7f288afff` completed all 59 fresh CI checks, including both thin-client platforms,
+strict attribution and all deployment tiers. Its full native regression, focused sanitizers,
+CMake targets, actual PostgreSQL/SDK integration and all 76 lint gates passed.
+
+ACP client requests now enter canonical translation before any resource or control action. The
+transport performs no filesystem I/O: exact namespaced native resource arguments go to an explicitly
+configured resource owner, and its typed result is captured before the RPC reply. Missing owners,
+foreign native sessions, duplicate request IDs and failed capture refuse effects. Permission replies
+consume the authenticated control owner and can select only a one-time grant. Initialize advertises
+only resources actually owned. Dynamic framing preserves opaque session IDs and complete prompts;
+nonblocking pipe writes and reads honor cancellation, source liveness and execution budgets.
+
+The daemon always consults the canonical native execution owner. Unsupported native profiles refuse
+instead of launching an SDK with ambient credentials/history. A weak standalone seam is eligible only
+without canonical history, capture, authenticated principal or request credentials. Private fresh ACP
+protocol execution remains available to explicitly configured standalone resource owners; arbitrary
+ACP daemon model/credential profiles are not qualified by that compatibility path.
+
+Live subprocess fixtures exercise authenticated permission selection, rejection of another actor,
+resource intents/results, a 2 KiB opaque session ID, a 200 KiB prompt and bounded blocked stdin.
+Independent local task grading/reuse and remaining deployment qualification still require completion.
+Continue those after publication rather than ending the task.
+
+## Active continuation: local learning evidence and legacy injection retirement
+
+ACP owner cutover is published as `af0943cf2`. Its full native regression, focused ASan/UBSan,
+CMake targets, actual PostgreSQL/SDK integration (168 configured checks), static analysis, full-history
+secret scan and all 76 default-invocation lint gates passed. Fresh CI remains under observation.
+
+The current learning repair keeps delegate process completion distinct from correctness. Missing
+mutation receipts remain unknown; opaque failures no longer become successful or turn-budget
+classifications. Pending exit observations have automatic application disabled. The old role-only
+prompt injection operation is a wire tombstone and cannot read or inject other owners' unreviewed
+lessons. Canonical memory remains the path for scoped reviewed procedure context. The integration
+fixture now requires real retained delegate observations while checking both subsequent prompts
+exclude ungraded exit lessons. This is not independent task grading or qualified positive reuse.
+Those remain required before completion.
+
+## Active continuation: owned results, exact-request cache and workspace hooks
+
+The current implementation retains full owned canonical responses in internal agent results.
+HTTP and host-owned native producers transfer the admitted response; selection/repair preserve
+model and source identity. Explicit text extraction is an output boundary. Lifecycle consumers
+release typed storage together with its display projection, including error-only responses.
+The response snapshot codec preserves opaque sidecars separately from durable session JSON.
+Optional pure-text result caching binds authenticated owner, role, configured provider/model and
+exact admitted request. Captured/user sessions, opaque credentials and fallback lineage execute
+normally; legacy flat cache rows cannot hit. Reuse creates no fresh provider-health success or
+correctness evidence. Tests cover ownership separation, source invalidation and typed round trips.
+
+Native hook policy probes and memory interception now acquire the approved workspace resource,
+then restore the enclosing scope. Unknown/malformed Git worktree state forces verification rather
+than admitting old verification state. The Go wire explicitly emits `dirty:false` for a clean tree.
+Windows/macOS thin-client jobs no longer skip executable testing-target PRs; fresh CI must confirm
+those platforms. This does not qualify native server execution on those operating systems.
+
+The old process-success-to-KB-`fixes` feedback writer is retired. The canonical local terminal
+observer remains ungraded. Remaining compatibility native producers, independent local grading
+and next-run learning reuse, live subscription/platform qualification, and independent production
+promotion are still required. Do not stop continuation after publishing this checkpoint.
 
 ## Merged #3038 validation and replacement history: 18 October 2026
 
@@ -2168,3 +2530,1945 @@ Cppcheck has no diagnostics. All 653 native binaries, the proxy regressions and
 all 76 lint gates pass. Serial actual CMake runtime/cache checks pass 2/2. Script
 RPC canonical definition/policy admission and running-process cancellation remain
 the next work; production SDK activation and independent learning remain unfinished.
+
+
+## Script RPC admits canonical definitions through supervised policy
+
+Script callbacks now resolve a fresh owned execution definition, admit strict
+unique-field JSON, canonicalize and validate against that definition, then apply
+caller permissions, directives and supervised tools/policy metadata before typed
+IR dispatch. Host-generated attempt identities bind policy receipts to each call.
+Missing tools or execution-policy owners refuse; legacy schema caches and
+name-only dispatch no longer authorize this ingress.
+
+A real Go-owner fixture proves allowed aliased reads, path-policy refusal,
+permission/source/cwd propagation and refusal after either owner disappears. The
+production classifier uses the full-name metadata contract, including a 307-byte
+qualified tool name; the legacy wire ABI remains unchanged. Framing fixtures
+reject duplicate/trailing/NUL-bearing requests. Socket shutdown interrupts partial
+frames, and closed peers cannot terminate the host with SIGPIPE.
+
+Restricted-role PostgreSQL integration passes 167/167 with the 26 existing
+service-dependent skips and no KB. The fixture now creates an owned session
+through HTTP; reads must return file content rather than merely an HTTP success
+wrapper. Normal and ASan/UBSan agent/script fixtures pass, all 653 native binaries
+and proxy regressions pass, changed-source Cppcheck has no diagnostics, focused
+benchmark checks pass 21/21, and actual CMake runtime/cache checks pass 2/2.
+All 76 lint gates ran: 75 passed initially; the memory boundary review ledger
+then identified the added tools-only header declaration. Its unchanged memory
+contract is recorded with the exact source hash, and that gate passes on rerun.
+Published predecessor `4e0ca19c2` has all fresh workflows green. New-head CI must
+be checked separately after publication.
+
+Running-process cancellation, bounded RPC output fidelity, retained human
+controls, production native SDK activation, exact resumed native history and
+independently graded KB-free learning remain unfinished. This increment does not
+qualify production deployment or the two skipped platforms.
+
+
+## Running script cancellation and bounded result transport
+
+Host cancellation is now checked before launch and throughout script execution.
+The owner polls at most every 50 ms while waiting for output or child exit, so
+closing stdout/stderr no longer escapes the timeout. Cancellation/timeout kills
+the owned process group, including TERM-resistant processes, and the parent reaps
+the child. Results retain separate `cancelled` and `timed_out` fields. The tools
+owner maps cancellation to the existing error/cancelled outcome and timeout to
+its timeout outcome; neither becomes ordinary success from output text.
+
+The running-script regression first failed against the old loop. The fixed real
+host-flag fixture cancels after the child signals readiness, including a child
+that ignores SIGTERM. A separate fixture closes both output descriptors and
+still times out. The real provider-scope fixture now expects cancellation to
+terminate the waiting script, preserving its original actor/source/credential
+and single-read checks.
+
+A second reproduced defect silently cut results at 64 KiB and then exceeded the
+64 KiB encoded frame limit, sending no reply. RPC now measures the complete JSON
+frame. Complete fitting results remain intact; oversized results return a bounded
+UTF-8-safe text preview with `result_truncated:true` and the original `result_bytes`.
+The actual tool success/error status remains unchanged. JSON-looking results use
+strict unique-field full-frame parsing; invalid/trailing/duplicate-bearing text
+remains verbatim text. Tests cover escaped text, error duplication, multibyte
+boundaries, a complete 64,000-byte result and repeated callbacks after a projection.
+
+Cancellation qualification passes all 653 native binaries and proxy regressions.
+Final combined agent/script fixtures pass normally and under ASan/UBSan, and five
+changed-source Cppcheck inputs have no diagnostics. The actual CMake application
+and runtime/cache targets build; CTest passes 2/2. The restricted-role PostgreSQL
+integration run passes 167/167 with the 26 existing explicit service skips and no
+KB. Focused benchmark qualification passes 21/21. All 76 lint gates pass on the
+serial run, avoiding the negative plant racing a build.
+
+GitHub reports #3050 merged at `4e0ca19c2`, merge commit `7e17d58be`.
+The subsequent canonical script-admission commit `5cf885b4c` is pushed on the same
+branch but has no PR workflow run because that PR is closed. The handoff's
+existing-PR-only instruction is retained pending the user's follow-up PR decision;
+no replacement PR has been created. New commits are not claimed CI-qualified.
+Native activation, exact resumed command history, retained human controls and
+independently graded KB-free learning remain unfinished; no production promotion
+has occurred.
+
+
+## Matching host bash cancellation/deadline repair
+
+The production `bash` tool had the same EOF-then-blocking-wait defect as the
+script runner. Its cancellation predicate also consulted durable delegate/job
+state but omitted the host turn's atomic cancellation flag. A new real tool
+fixture reproduced a TERM-resistant command closing both output streams and
+returning successful exit after cancellation. The owning tool now checks that
+flag, refuses pre-cancelled execution, polls child exit without losing its
+deadline after EOF, and preserves separate cancellation/timeout fields for the
+tools owner's semantic outcome classification. Existing sandbox/provider routing
+and ordinary command/output behavior remain intact. Active remote/container
+provider cancellation is not newly qualified by this local-process repair.
+
+The fixture signals readiness before the host cancels, verifies cancellation
+through the real tool, proves a subsequent pre-cancelled command creates no file,
+and separately verifies timeout with both output descriptors closed. It passes
+normally and under ASan/UBSan. Changed-source Cppcheck has no diagnostics. All
+653 native binaries and proxy regressions pass; the actual CMake application
+build and runtime/cache checks pass 2/2. The rebuilt server passes restricted-role
+PostgreSQL integration 167/167, with the same 26 explicit service skips and no KB.
+All 76 serial lint gates pass.
+
+
+Historical script ingress/lifetime findings (fixed by the next increment): the generated Bash shim uses Python
+`raw_decode`, which accepts a JSON prefix and collapses duplicate fields before
+host admission. It must forward exact argument JSON to the strict host boundary.
+Also, RPC stop must propagate a local cancellation scope into an executing tool;
+a script-only timeout currently closes its peer but can still wait for a blocking
+nested call's original deadline. Keep the borrowed parent flag and host-owned
+local-stop scope distinct so a tool timeout never changes its parent turn flag.
+Neither finding is fixed by the already qualified host-flag repair.
+
+No registered Aimee command for manual workflow dispatch is available. The local
+personal `gh` has no authenticated host, and no browser is available. No new login
+or connector write was attempted. A follow-up PR decision remains pending; the
+new branch commits have no fresh PR CI qualification after #3050's merge.
+
+
+## Merged testing CI: Windows thin-client codec linkage
+
+The merged testing commit `7e17d58be` has a real Windows build failure in source
+CI run `39278223901`, job `118147618843`. The final MinGW link cannot resolve
+`aimee_codec_base64_capacity`, `aimee_codec_base64_encode` and
+`aimee_codec_base64_decode` from the thin client's shared `util.c`. The independent
+CLI target omitted the codec library even though the server/core target included
+it. Its CMake link now explicitly names the existing `aimee-core-codec` owner.
+No duplicate codec implementation or platform exemption is introduced.
+
+The actual local CMake CLI build succeeds, its generated link command contains
+the codec library, and the real core base64 vector fixture passes 1/1. This is
+local verification of the repair; a fresh Windows CI run is still required.
+The same merged-run macOS build and macOS real-LSP qualification passed. Linux
+integration and T2/T2-luks were still pending when the Windows failure was found;
+T1/T3 had passed. The merged PR's two platform skips never qualified Windows.
+
+
+## Exact script shim ingress and local cancellation leases
+
+New regressions reproduced the generated Bash shim accepting trailing JSON and
+collapsing duplicate fields before the host saw them. It now forwards exact
+argument JSON as encoded text and exact response bytes through the bounded
+transport. The host decodes that text independently, preventing trailing argument
+bytes from becoming envelope metadata. Legacy object frames and descriptor-only
+authentication remain supported; ambiguous dual argument forms refuse. The strict
+host codec remains the admission owner, including decimal-token fidelity. The
+shim's old default-argument expansion also appended a spare closing brace; that
+is corrected rather than relying on prefix decoding. Python calls preserve the
+explicit argument type: an empty array no longer silently becomes an object.
+Header/body reads and packet writes now handle partial socket I/O and always
+close the duplicated client descriptor.
+
+A real tools/policy owner fixture also reproduced a script-only timeout waiting
+for its nested `bash` tool. The host now has a typed chain of immutable, leased
+cancellation nodes. The RPC worker retains its parent's flag/scope and adds its
+own atomic stop flag. Stop reaches running cancellable tools without changing
+any parent flag. Every enclosing scope outlives its joined children. The real
+context fixture separately qualifies ordinary parent cancellation and inherited
+scope cancellation with the original identity/source/credential checks intact.
+
+Agent/script fixtures pass normally and under ASan/UBSan; all 653 native binaries
+and proxy regressions pass; five changed-source Cppcheck inputs have no diagnostics.
+The actual server builds and passes the 167-check restricted-role integration
+journey against PostgreSQL 18.6 extracted from the exact CI OCI manifest, with
+26 existing service-dependent skips and no KB. That diagnostic harness bounds
+memory teardown and preserves its owner log; no stop failure occurred. All 76 serial
+lint gates pass for the final encoded-argument and local-scope implementation.
+
+Merged CI integration run `39278223901` did time out after a private model-memory
+store failed and memory-owner TERM teardown hung. This remains an open CI defect,
+not a passing or superseded run. Clean local PostgreSQL 17 integration passed
+167/167; a two-thread Go scheduler with 25 extra model writes passed 192/192;
+the exact CI PostgreSQL 18.6 image also passed 167/167. The four merged Docker
+tiers and macOS passed; the separately pushed Windows codec repair still needs
+fresh Windows CI. Investigation is comparing the exact merged C source next.
+
+
+## CI memory teardown retains a failing verdict and owner evidence
+
+The integration harness now bounds its disposable memory child’s TERM shutdown
+at five seconds. A stuck owner records a real test failure, emits Go stacks with
+QUIT and is killed/reaped before the outage/restart checks continue. Assertions
+are retained. Cleanup captures the entry status and forces a nonzero exit for a
+shutdown failure, including a failure discovered after the printed summary.
+
+Three real-process fixtures pass: graceful reaping without a failure; a child
+ignoring TERM/QUIT that is killed and makes final cleanup exit 1; and preservation
+of an existing exit 7. The frozen benchmark checks pass 21/21 without changing any
+baseline or validator. The actual updated integration harness passes 167/167 on
+the exact CI PostgreSQL 18.6 image, with the existing 26 service skips and no KB.
+This fixes the harness’s unbounded wait and adds evidence for the unresolved
+model-memory write timeout; it does not claim that production owner defect fixed.
+
+A separate archive of the exact merged source, built with isolated objects,
+passed the private-memory assertions against that same PostgreSQL 18.6 image.
+That shortened diagnostic run is not full integration qualification: its archive
+had no Git metadata, so an earlier git_status check failed, and it intentionally
+stopped after private memory. The original CI model-write failure remains open.
+
+
+Final script-scope qualification also passes the rebuilt production server,
+actual CMake application/runtime/cache targets (CTest 2/2), and the updated original
+integration harness against the exact CI PostgreSQL 18.6 image: 167/167, with the
+26 existing explicit skips and no KB. The final raw-argument form cannot append
+extra envelope metadata; both argument forms together refuse. The descriptor-only
+legacy/HMAC-ignored control remains a positive test. All 653 native binaries,
+ASan/UBSan agent/script fixtures, five-source Cppcheck and all 76 lint gates pass.
+Fresh branch CI and the unresolved merged model-memory timeout remain separate.
+
+
+## Retained canonical control scopes for joined execution callbacks
+
+Script RPC workers and native MCP callbacks now capture an owned control-scope
+lease bound to the attested session and principal. The creator closes the scope
+immediately for new replies and requests; existing leases retain allocation
+until callback joins and release. A delayed worker cannot register against a
+replacement execution even when its session/turn identity is reused. Missing
+control scope stays a supported case; cross-session/principal capture refuses.
+Native model requests continue without a control binding. No HTTP compute
+context, model credentials or session-event sink crosses the script boundary.
+
+Browser replies reject duplicate JSON fields recursively before consuming a
+pending control, including ambiguous decisions, answers and form content. The
+existing positive permission, question/form validation and exactly-once reply
+contract are retained. Focused fixtures cover creator-before-worker teardown,
+owner/session capture, concurrent replies, real script context propagation and
+control confinement in the actual native listener. This establishes safe control
+leases; the host request_input durable publication bridge and native activation
+remain unfinished.
+
+Retained-control qualification passes all 653 native binaries and proxy
+regressions; four focused ASan/UBSan fixtures (controls, actual native listener,
+script runner and agent); six-source Cppcheck with zero diagnostics; the rebuilt
+production server; actual CMake application plus controls/runtime/cache CTest
+3/3; frozen benchmark assertions 21/21; and the original PostgreSQL 18.6
+integration harness 167/167 with 26 explicit service skips and no KB. The CMake
+control fixture now names its missing canonical IR source dependencies. Fresh
+branch CI and the original merged memory-owner timeout remain unqualified.
+All 76 repository lint gates also pass for this retained-control increment.
+
+## Canonical host questions and strict browser reply frames
+
+The server's existing request_input hook now publishes primary/browser and native
+MCP host questions as canonical durable control requests. Its worker retains the
+session/principal-bound control owner, carries no HTTP compute context or model
+sink, and publishes an empty-option free-text question through the existing UI.
+The existing always-on durable EventSource carries independently appended events.
+Request IDs are host-random and turn-qualified; independent control event IDs do
+not share a borrowed primary counter. DB1 remains the only history writer.
+
+Durable publication and consumption run under a per-scope mutex. The registry
+lock covers only membership and reference leases, so a blocked store for one turn
+does not stall another turn's controls. A request is recorded before becoming
+replyable, and a response is recorded before an answer reaches its waiting tool.
+The native harness wildcard consumer cannot take recorded host-question replies.
+Only their specific host ID selects them. A recording failure is shared with the
+parent primary owner and refuses further model capture or successful completion.
+
+Host cancellation and deadlines seal a pending question with a durable cancel
+response; late replies refuse. Declines/cancels return error text, never an effect
+grant. Invalid answers do not consume the request. The real server hook retains
+its old delegate-mailbox fallback when there is no browser control scope. Private
+execution logs still clear the parent's scope; their mailbox and question-routing
+cutover remains unfinished and is not claimed by this increment.
+
+The browser control route now parses the exact frame with the canonical JSON
+codec before selecting session/request/reply fields. Duplicate outer fields,
+trailing documents and embedded NULs refuse without consuming the pending
+request. Authenticated positive routing and these negative controls were run in
+an isolated user namespace, also under ASan/UBSan; untrusted transports retain
+their existing authorization rejection.
+
+Host-question qualification passes all 654 native binaries and proxy regressions;
+seven focused ASan/UBSan fixtures plus authenticated HTTP reply routing in an
+isolated user namespace; nine-source Cppcheck with zero diagnostics; actual
+CMake application and controls/question/runtime/cache CTest 4/4; rebuilt
+production server; and the original PostgreSQL 18.6 integration journey 167/167
+with 26 explicit service skips and no KB. The two fixture setup/assert cleanups
+were rebuilt and rerun normally and under ASan/UBSan. Frozen benchmark checks
+pass 21/21 with no baseline or validator changes. These local results do not
+replace fresh branch CI or explain the merged CI model-memory timeout.
+The exact HTTP-route diff was reviewed for its memory-ownership ledger pin:
+only control-frame decoding changed, with memory_stats and Go authority intact.
+The recorded hash/review was refreshed; no memory gate or inventory was exempted.
+All 76 repository lint checks pass for the final host-question increment.
+
+## Delegate mailbox wait preserves reply delivery and observes cancellation
+
+The remaining legacy parent-input wait now checks the active host cancellation
+scope at bounded intervals rather than waiting the entire configured input window (currently 60
+seconds). It retains parent reply delivery and consume-once behavior. The deadline
+uses monotonic time; Linux initializes the condition with that clock and Darwin
+uses its supported relative condition wait (see the [Apple pthread header](https://github.com/apple-oss-distributions/libpthread/blob/main/include/pthread/pthread.h)).
+Condition initialization failure unwinds the newly initialized mutex and leaves
+the slot inactive. This is a waiting/lifecycle repair, not the private question
+or delegate message-history cutover.
+
+The actual prior source was rebuilt against the new fixture: it fails the
+three-second cancellation handshake. Restoring the repair passes. The fixture
+uses the production mailbox allocator, wait, reply, release and real server
+request_input hook: normal parent delivery is retained, cancellation returns
+without a fake parent reply, pre-cancelled consumption refuses, and a real empty
+mailbox waits for its monotonic deadline. A queued reply remains available to
+its owning live wait and is consumed once. The rebuilt Linux production server,
+actual CMake application and focused CTest pass. Darwin is not newly qualified.
+
+The final mailbox-wait fixture also passes ASan/UBSan, two-source Cppcheck with
+zero diagnostics, normal native execution, CMake/CTest and all 76 lint gates.
+The preceding host-question commit `7230d5805` was pushed after one transient
+GitHub internal-server rejection; full HEAD secret scanning found no leaks
+across 6,198 commits. Fresh branch CI remains pending.
+
+## Delegate mailbox reply leases survive creator teardown
+
+The reply handler previously received a borrowed mailbox pointer from lookup;
+creator cleanup could destroy its mutex or reuse its slot before the reply was
+queued. Lookup now returns a retained lease. Creator release retires the mailbox,
+wakes waiters and drops only its reference. Waiters and the legacy input hook
+retain the mailbox while operating; synchronization objects and the slot are
+reclaimed only after the last lease ends. Closed mailboxes reject late replies.
+The sole production reply handler puts its lookup lease on both outcomes and
+reports a closure race as an error instead of success.
+
+Focused fixtures preserve normal parent delivery and cancellation, close the
+creator while the real input hook is active, and hold a reply lease past closure.
+A retired slot cannot be allocated to another delegate while that lease exists;
+a late reply refuses without reaching the new delegate. The slot is reusable
+after the lease is released, and a valid replacement reply is delivered once.
+This retains legacy delegate conversation semantics; private canonical question
+routing/history cutover remains unfinished. All 654 native binaries and proxy
+regressions, the focused ASan/UBSan fixture and three-source Cppcheck pass.
+The mailbox-lease increment additionally passes the actual CMake application
+and focused CTest, rebuilt Linux server and original PostgreSQL 18.6 integration
+harness (167/167, 26 existing service skips, no KB). No fresh Windows or Darwin
+qualification or production promotion is inferred from these Linux results.
+All 76 repository lint checks pass for the mailbox-lease increment.
+
+## MCP delegation preserves model routing and the caller's workspace scope
+
+The served delegate schema already advertises via, scope and handoff_json, and
+the server delegate handler reads them. The MCP wrapper dropped all three.
+It now forwards those fields with their declared types, including explicit
+false; absent options remain absent so server-owned defaults still decide.
+The transport-attested parent session remains authoritative.
+
+Default cwd resolution previously cleared the caller's cwd/session override,
+leaked resolver ownership state, and ignored inaccessible-worktree errors.
+The lookup now restores the caller's cwd, explicit session override (or its
+absence) and Git worktree flag on every outcome. It copies the resolved cwd
+into the new request and refuses negative results or a context mismatch before
+launching a delegate. A genuine unresolved optional cwd still reaches the server
+without a cwd field, with the caller's original context intact. No persona,
+capability or permission ceiling is widened.
+
+Three independent new fixture modes fail against the prior wrapper: dropped
+routing fields, leaked caller context and launching after failed worktree
+resolution. The repair passes, including true/false options, omitted defaults,
+transport-session binding, 127-byte caller sessions, explicit cwd, no override,
+resolver errors and the existing persona/capability refusals. The focused
+ASan/UBSan fixture and two-source Cppcheck pass. This also addresses a remaining
+source of default-project confusion; no production installation is asserted.
+
+The final MCP delegate increment passes all 655 native binaries and proxy
+regressions, the focused ASan/UBSan fixture, two-source Cppcheck, actual CMake
+application/CTest, rebuilt Linux server, original PostgreSQL 18.6 integration
+167/167 (26 existing service skips, no KB), and all 76 lint gates. The unchanged
+frontend suite also passes all 292 tests across 35 files. Production promotion,
+fresh branch CI, native SDK activation/cache fidelity and independent learning
+qualification are still outstanding.
+
+## Browser host-question round trip
+
+A frontend regression projects the durable empty-options question emitted by the
+host bridge, enters free text, verifies the qualified reply, then applies the
+canonical response and observes a resolved control. Control exchange creates no
+model messages. The full frontend suite now passes 293 tests across 35 files,
+and TypeScript project checking passes. Native/source qualification above is
+unchanged; this test does not constitute production browser deployment approval.
+
+## Retained canonical capture owner across joined callbacks
+
+Primary and private producers now share a retained durable writer containing
+copied session/turn/principal/source identities, append counters, a per-owner
+mutex and a shared failure flag. It holds no connection, subscriber, compute
+context or credential state. Delivery remains with the primary producer. Native
+callback workers retain the writer until listener shutdown and restore their
+previous binding on return; creator closure seals writes without freeing an
+outstanding callback lease. A committed terminal seals later event writes.
+
+Source identity and destination history remain distinct: a private child can
+retain its own writer using its verified parent execution session and actor.
+Message/control IDs are qualified once; original tool IDs, names, exact numeric
+arguments and results are preserved. Append failures and callback-only capture
+failures reach the producing execution even when the producer's TLS error flag
+is healthy. Successful completion then refuses; private failed-terminal
+recording remains available. Native replay still captures proofs only; this
+refactor does not activate SDK spawn sites or establish complete native history.
+
+Qualification: all 656 native binaries and proxy regressions, four focused
+ASan/UBSan fixtures, nine-source Cppcheck, actual CMake application plus five
+CTest fixtures, rebuilt Linux server, original PostgreSQL 18.6 integration
+167/167 (26 existing service skips, no KB), and 21 semantic-context benchmark
+checks pass. Fresh platform CI, full native wire capture/reconciliation, actual
+SDK activation/cache qualification and independent learning qualification remain
+outstanding. The frontend remains qualified at 293 tests plus TypeScript checks.
+
+All 76 repository lint gates pass for the retained capture-owner increment.
+
+## Private native replay metadata follows the retained destination
+
+The native runtime verified transport ownership against the parent execution
+session, then also used that session as the replay log destination. For a private
+execution this put replay proofs and projection reports in the parent history.
+The retained writer now exposes its immutable destination for the duration of
+an owned lease. Replay storage uses that destination; transport/session admission
+and callback context still use the verified source session. Runtime operation
+without a capture owner keeps its existing source-session destination.
+
+A listener regression fails on the previous source when a private child has a
+parent transport. It now checks both primary/private destinations, callback
+binding and failure/closure handling, while preserving the no-owner fallback.
+Copied destination identity is also verified after mutation of constructor input.
+Three native fixtures, their ASan/UBSan runs, four-source Cppcheck, actual CMake
+application and CTest 3/3 pass. This repairs proof/projection placement; it does
+not yet capture complete native model history or activate the SDK runtime.
+The preceding capture-owner commit also passed a full-HEAD Gitleaks scan
+(6,203 commits, no leaks). No production deployment or fresh platform CI claimed.
+
+All 76 repository lint gates pass for the private replay-destination repair.
+
+## Original gateway model responses reach the retained canonical writer
+
+Native model callbacks now send their admitted canonical response events through
+the retained writer before derived replay-proof capture. Tool IDs, names and
+exact JSON arguments are observed before SDK command normalization. Projection
+reports commit once through the writer rather than also through the proof log.
+No-owner runtime operation preserves the existing proof-only behavior.
+
+Each callback uses its host-generated request nonce to qualify message IDs.
+Gateway response helpers can generate the same thread-local ID on fresh callback
+threads; using only the host turn would let a later response replace an earlier
+one in canonical history. Only message identity is qualified; original tool IDs,
+arguments and content are unchanged. The callback-local sink context is restored
+before the forwarding stack returns; the runtime retains the durable owner.
+
+The previous source fails the new listener regression because it commits no
+model responses. The repaired fixture verifies original command name/ID and a
+30-digit fractional argument, distinct messages across two callbacks in one
+turn, single projection publication, primary/private destinations, durable append
+failure and proof failure. Either failure reaches the producer's shared flag
+while its separate TLS flag remains healthy. No host execution terminal or
+completed learning outcome is manufactured by the model callback.
+
+Five native fixtures and their ASan/UBSan runs, two-source Cppcheck, and the actual
+CMake application/listener CTest pass. This is gateway **response** capture, not
+complete native history: request-prefix/current-context reconciliation, actual
+tool-result/effect capture and SDK-observation duplicate suppression must land
+before activating SDK spawn sites or certifying native cache completion. Live
+subscription, independent learning, fresh platform CI and production promotion
+remain outstanding.
+
+All 76 repository lint gates pass for gateway response capture.
+
+## Shared Git dispatch retains the caller's project context
+
+The same lost-context pattern repaired in the delegate cwd resolver also existed
+in the shared Git dispatcher used by external MCP and native agent Git tools.
+Its inner cleanup cleared the caller's cwd/session override and leaked the Git
+worktree flag. An outer scope now bookmarks and restores those values across
+all existing success/refusal returns. It also owns an exact operation-session
+copy because the supplied session can borrow the TLS override changed by worktree
+resolution. Existing workspace, mismatch, mutation and Git verification decisions
+remain in the inner dispatcher.
+
+A new fixture links the actual production dispatcher with unrelated sections
+removed by the linker. The previous source fails its scope assertion. Forty-eight
+combinations cover success, both resolver errors, mutating mismatch refusal,
+permitted read-only mismatch, unresolved cwd, present/absent cwd and override,
+a 127-byte caller session and operation identity borrowed from TLS. The fixture,
+ASan/UBSan, two-source Cppcheck and actual CMake application/CTest pass. The memory
+ownership ledger records review of the exact Git-only source diff, with its
+existing memory symbols and owners retained; no exemption or approval is added.
+
+Nested workspace-provider ownership is a separate outstanding issue in this
+same dispatch path: its legacy bind/unbind helper can disturb an enclosing turn.
+The cwd/session/worktree repair does not claim to fix that resource lifetime.
+
+The shared Git context increment additionally passes all 656 selected native
+binaries, the separately run new Git scope fixture and proxy regressions, the rebuilt server, original PostgreSQL 18.6 integration
+167/167 (26 service-dependent skips, no KB), and 21 semantic-context benchmark
+checks. These Linux checks do not establish fresh platform CI or deployment.
+
+All 76 repository lint gates pass for shared Git caller-context restoration.
+
+## Nested Git workspace scopes retain the enclosing resource owner
+
+Shared Git dispatch now uses a scoped binding with its own detached-provider
+storage and mirror cwd/drift metadata. The scoped and ordinary turn binders use
+the same resolver. Scope close restores the previous provider and metadata in
+LIFO order; it never calls the enclosing turn's unbind or releases its container.
+Even a shared/unresolved nonempty cwd has a scope that must be closed. Allocation
+failure refuses before Git dispatch. Container-bound admission now also checks
+that the active provider is that owned container, so a temporary detached binding
+cannot inherit its shell exemption.
+
+Real workspace-owner fixtures retain an outer detached provider across nesting,
+and retain an outer container across shared and detached nested scopes. The
+container's storage stays valid, no release occurs until its original turn ends,
+and an out-of-order close refuses without changing the active provider. The real
+Git dispatcher fixture checks paired cleanup across all returns, including the
+zero/shared result. Its old unscoped path fails the new regression.
+
+The production resolver also allocates a diagnostic before its unauthorized-path
+-2 return. The dispatcher leaked that string. The expanded fixture reproduces
+eight leaks under ASan; freeing the diagnostic preserves the existing refusal.
+The fixture now covers 56 caller/outcome combinations. Both focused native
+fixtures pass ASan/UBSan and four-source Cppcheck reports no diagnostics. CMake's
+actual application and Git dispatcher fixture build; the workspace fixture is
+Make-owned and has no pre-existing CMake target. All 656 then-selected native
+binaries, the separately run Git fixture and proxy regressions, the rebuilt Linux
+server and original PostgreSQL 18.6 integration 167/167 pass (26 service-dependent skips, no KB). Lint qualification follows
+below; no deployment or fresh CI is claimed.
+
+## Unit-suite registration follows Make's actual selection point
+
+The new Git fixture's TEST_TARGETS addition initially appeared after Make's
+immediate UNIT_TEST_TARGETS snapshot. Focused normal/sanitizer/CMake runs included
+it, but the full runner still selected 656 binaries. The addition now sits before
+suite/shard selection. The reachability gate rejects later TEST_TARGETS changes
+instead of counting their names as coverage. Six regression cases, including
+actual GNU Make execution of the silent-omission case, run from the existing
+lint target. No test exemption is added. Final complete 657-binary qualification
+passes, with the new fixture present in the actual runner log. The earlier 657 full-run description is corrected above.
+
+The first nested-scope lint run also caught three added hardcoded fixture paths.
+The new cases now reuse the fixture's named registered roots; duplicate existing
+root literals share that same constant. Temporary-path debt falls without a
+baseline change. No production behavior changed after the successful integration
+run; final native/sanitizer/lint checks include the fixture and gate corrections.
+
+The final registered 657-binary suite and proxy regressions pass, as do both
+rebuilt focused ASan/UBSan fixtures and all 76 lint gates (including six runner
+selection regressions). No temporary-path or coverage baseline exemption added.
+
+## Bounded SDK catalog qualification with the actual MCP transport
+
+The existing real-SDK adoption fixture now runs its complete ordinary scenario
+and a bounded SDK configuration scenario. It preserves all prior namespaced
+call/result, error-result, process-restart, fresh-adoption and unseen-tail
+assertions, and checks every actual provider catalog in the additional scenario.
+Both installed Codex 0.160.1 and CI-pinned 0.153.4 pass both scenarios through the
+compiled Aimee adapter. This is a fixture configuration, not an activated server
+launch profile or evidence of live upstream cache billing.
+
+Independent loopback probes first checked the SDK without an MCP server, then
+the expanded fixture caught additional SDK resource helpers when MCP was enabled.
+The observed bounded catalog permits only the fixture's MCP tool, user input,
+and the three MCP resource helpers. It rejects local command/edit/image, agent,
+goal, web and other unexpected tools across fresh and resumed requests. SDK
+feature listings identify features.view_image as effective for these versions;
+tools.view_image=false alone still advertised view_image in the initial probes.
+The fixture keeps hooks, snapshots, memories, apps and optional SDK execution
+features disabled, without changing the ordinary scenario.
+
+MCP resource helpers are NOT qualified as admitted Aimee tool execution here.
+The existing CLI maps resource reads to direct read APIs, while the scoped native
+proxy admits model and MCP tool routes. That resource ingress still needs an
+owner-preserving cutover before native activation. Full native request-prefix /
+current-context reconciliation and SDK-observation duplicate suppression remain
+open, together with actual launch/build/workspace attestation, live subscription,
+independent learning and fresh CI/deployment qualification.
+
+Current official references: [configuration](https://learn.chatgpt.com/docs/config-file/config-reference)
+and [app-server](https://learn.chatgpt.com/docs/app-server). The feature/call/catalog
+observations above come from the two actual binaries, not from assuming that
+current documentation proves the behavior of a pinned older SDK. The previous
+workspace-source HEAD also passed Gitleaks (6,207 commits, no leaks).
+
+All 76 lint gates also pass for the expanded real-SDK catalog fixture. The
+unchanged native production code retains the preceding 657-test, sanitizer and
+167-check integration qualification. Fresh PR CI remains pending the follow-up
+PR decision; no new PR, attribution exemption or production deployment made.
+
+
+## Owner-checked snapshots of an active canonical turn
+
+The new sessions operation 35 loads primary history for an exact session, actor
+and running turn. It reads the durable log in one statement, validates contiguous
+sequence, event ownership and model-message admission, and includes the current
+turn's committed observations. The completed-history operation retains its old
+contract. Missing/closed turns, malformed history, unfinished checkpoints and
+unrelated open turns do not produce a partial snapshot. Exact JSON numeric
+lexemes and original tool identities survive projection.
+
+The retained capture owner reads this snapshot using its copied destination,
+principal and turn. Native runtime construction retains an immutable initial
+snapshot and refuses absent/corrupt history. Private callbacks also recheck their
+destination's ownership, in addition to the transport parent's; revocation fails
+the shared capture permanently. This does not implement native request-prefix
+reconciliation or activate SDK execution.
+
+Qualification: the registered 657-binary suite and proxy regressions pass; five
+focused ASan/UBSan fixtures, five CMake/CTest fixtures and the actual application
+build pass. Three Go packages pass race tests, and the new live PostgreSQL 18
+snapshot/ownership/checkpoint regression passes with race detection. Cppcheck on
+eight affected sources reports ten known diagnostics and no increase. The DB1
+client contract check passes. CMake's history-client fixture now links its
+existing transport dependency, as its Make target already did.
+
+The broader PostgreSQL integration run FAILED: 164/168 checks, with 26 existing
+service skips. It reproduced the outstanding CI private model-store timeout and
+blocked memory-owner shutdown; dependent model read/correction checks also fail.
+Its captured stack includes a code-index initialization mutex wait. This remains
+an active defect, not a flaky-test exemption. Full diagnostics are in
+/var/tmp/aimee-ir-script-scope-pg18-integration.log.
+
+The user authorized one follow-up PR after #3050 merged. PR #3052 targets testing
+and has started fresh CI; all further migration work stays in that PR. Automatic
+reviews and the attribution gate remain enabled. Production remains KB-free and
+has not been promoted.
+
+All 76 local lint gates and 21 semantic-context benchmark regressions pass for
+the running-history increment. Fresh #3052 CI found a formatter difference in
+the Git fixture: Ubuntu's clang-format 19.1.1 treats its generated stub group as
+an unfinished declaration before subsequent functions, while local 19.1.7 did
+not. Moving those unchanged generated stubs after the ordinary functions passes
+both exact formatter versions, without a format exemption or toolchain change.
+The attribution/no-coauthor gate has passed on #3052.
+
+
+## Reproduced private-memory initialization deadlock repaired
+
+The PostgreSQL integration failure above exposed a real datastore ownership bug.
+The personal code-index worker held codeIndexState.mu while request dispatch
+copied postgresDataStore by value. A request could inherit a locked independent
+mutex with no owner capable of unlocking it, blocking the module's handler and
+shutdown. Code initialization state is now one constructor-owned pointer shared
+by request-bound copies and the background worker. Schema validation, readiness
+publication and failed-migration retry keep the same initialization path. The
+existing restart fixture resets its initializer with a fresh owned state.
+
+A deterministic regression holds initialization while making the request copy.
+It fails on the old source (the copied mutex never unlocks) and passes 20 runs
+under the race detector after the fix. It also exercises the actual dispatcher
+and verifies completed initialization is not repeated by later request copies.
+The full memory and module-host packages pass race tests. PostgreSQL 18 full
+integration now passes 167/167, with the same 26 unavailable-service skips; the
+private model write, correction/readback and bounded owner shutdown all pass.
+The original failing verdict is retained above as evidence, not reclassified.
+
+The exact CI formatter version 19.1.1 now passes the full source-format target.
+The previous snapshot HEAD also passes Gitleaks (6,209 commits, no leaks). An
+additional exploratory whole-memory go vet still reports existing unkeyed
+fixture literals and a rankingCapture fixture's JSON marshal of a mutex value;
+this is not claimed as a clean whole-package vet result.
+
+Final qualification for the shared-initializer fix: all 76 lint gates pass with
+CI's exact clang-format 19.1.1; no baseline or gate exemptions were added.
+
+
+## Fresh CI export coverage repair
+
+Fresh #3052 export CI caught the new memory regression missing from the explicit
+module bundle source list. The descriptor now includes it, and the exported
+module's existing selected-test command runs that regression too. The running
+canonical-history regression is also included in the Aimee module descriptor.
+No source-parity assertions or existing test selections were removed. The full
+21-case export build/runtime suite passes (one existing unavailable compiler
+case skipped). All 76 lint gates pass for the memory export repair; focused
+module descriptor/inventory checks additionally cover the history fixture entry.
+
+
+## Typed Codex host-tool callback boundary (not native activation)
+
+Both Codex adapter entry points accept an explicit typed tool catalog and host
+callback together. Tool definitions render from canonical fields into the SDK's
+experimental dynamicTools protocol; unsupported hosted tools, strict true/null
+and cache metadata refuse rather than silently disappear. SDK calls enter as
+owned canonical TOOL_USE blocks with their original ID, namespace, name and
+opaque JSON arguments. The bridge checks current SDK thread/turn acknowledgments,
+exact catalog identity, unique JSON fields and duplicate call IDs before invoking
+the host callback. Host results must be canonical string TOOL_RESULT blocks with
+the same call ID; success/error uses the authoritative flag, not result text.
+Invalid source/results fail capture and stop further SDK work.
+
+The callback grants no effect permission itself: its host owner must still match
+the durable original call and apply fresh execution policy and receipt handling.
+Current production callers do not enable this new option. It does not establish
+an isolated launch profile, reconcile the model request prefix/current catalog,
+suppress SDK model observations, or activate server native execution/cache.
+Those integrations remain required before activation. On resume, the host must
+prove the persisted catalog's scope; the SDK resumes stored definitions and does
+not offer dynamicTools replacement on thread/resume in the tested protocol.
+
+Eighteen process fixtures exercise both adapter entry points: nominal host error
+results, unknown namespace/name, wrong thread/turn, repeated call, host failure,
+wrong result ID and duplicate fields. Pure boundary checks also cover unsupported
+definitions and raw-sidecar substitution. Original 30-digit argument fractions
+survive the callback codec. The existing real-SDK fixture retains its ordinary
+and bounded MCP scenarios and adds a bounded typed-host scenario with no MCP
+server. All three pass through the compiled C adapter on installed Codex 0.160.1
+and CI-pinned 0.153.4, including process restart, fresh canonical adoption and
+unseen-tail resume. The new scenario verifies original callback identity, host
+error results, the exact decimal token and a catalog limited to the host tool and
+SDK user-input helper.
+
+Canonical fixture persistence now uses the C codec's exact message JSON string;
+Python's binary float decoder must not rewrite admitted numeric arguments when
+constructing the re-adoption input. Initial exploratory decoding only appeared
+to show SDK rounding: raw callback frames from both actual binaries preserve all
+30 digits. Separate actual-SDK probes found a reserved flat exec_command name
+collision, while explicit aimee.exec_command namespace calls work. No source
+history or existing tool is silently renamed to work around that collision.
+
+Qualification so far: registered 657-binary native suite and proxy regressions
+pass; two focused ASan/UBSan fixtures pass, with the final strengthened codec
+assertion rebuilt separately. Cppcheck on both changed C files reports zero
+diagnostics; memory-ownership preflight passes. The normal server build and
+PostgreSQL 18 integration pass 167/167 with 26 existing service skips. CMake's
+thin-client application target also builds; that is not a server CMake claim.
+Fresh CI on published 945aceaff has passed lint and integration; remaining Docker
+tiers were still running at the last check. No production promotion performed.
+
+All 76 lint gates pass for the typed callback increment with CI clang-format
+19.1.1. Published 945aceaff CI subsequently reached 48 passing jobs, including
+integration and three Docker tiers; the complete script-regression job failed
+and T2 was still running. That script failure is being investigated next.
+
+
+## Recursive Make script-fixture repair from fresh CI
+
+The complete script-regression job on 945aceaff failed two suite-selection
+assertions. Its nested make -C invocation exports directory-printing state, so
+the miniature GNU Make fixture's stdout included Entering/Leaving banners as
+well as its actual test names. The failure reproduces locally with MAKELEVEL=1
+and MAKEFLAGS=w. The fixture now requests --no-print-directory explicitly and
+retains exact stdout/set comparisons. A seventh regression invokes actual Make
+with that recursive environment. All seven pass directly, under the reproduced
+environment, and through the actual tests-are-run-check Make gate. No coverage
+selection, assertion, baseline or CI job was removed or exempted. The full script
+suite and fresh CI rerun remain to qualify this repair.
+
+The complete local script suite now passes on 21dec06c0: 73 discovered test files;
+the thin-client proxy suite is run separately with the native suite and real SDK
+qualification. Full-HEAD Gitleaks passes (6,213 commits, no leaks). The native
+runner executes 657 target entries; the reachability gate counts 655 distinct
+names. Those counts describe different denominators, not 657 distinct binaries.
+No test registrations or exemptions changed in the recursive-Make repair.
+
+
+## Canonical OpenAI-family cache configuration and honest projection
+
+The IR now owns prompt_cache_key, prompt_cache_retention and the opaque
+prompt_cache_options object. Chat and Responses entry adapters admit them once;
+both output boundaries rebuild them from typed fields. Native cache-only edits
+invalidate original raw replay even without a mutation flag, including exact
+numeric changes beyond binary-float precision inside cache options. Canonical
+request JSON and Go request consumers retain those values; empty cache keys
+remain distinct from absent keys. No retention/TTL conversion or default policy
+change is introduced. Malformed types and duplicate option keys refuse.
+
+OpenAI-family cache controls cannot be applied by the Anthropic renderer. Their
+omission now has a canonical projection count, including a cache-only report
+with no reasoning loss. Go and frontend admission preserve the old no-op/negative
+report refusals, and the GUI displays cache loss independently of reasoning.
+Actual provider request builders commit fidelity before returning a sendable
+body; failed projection capture refuses the body. Cross-provider rendering keeps
+the canonical configuration rather than deleting it from history/context.
+
+Run-entry capability checks now live beside canonical request-profile ownership
+in agent_bridge.c. The same predicate and refusals are retained; the economizer
+loop does not inspect or mutate provider cache settings. Cache controls not yet
+owned by the external run entry refuse explicitly instead of silently disappearing.
+Six public-entry checks cover both existing external backends without launching
+them, while preserving the pre-existing accounting refusal without cache controls.
+No structural-gate exemption was added.
+
+CMake's frontend/backend/IR-serving fixtures were missing existing renderer,
+SHA-256, turn-integrity and disabled-memory seam dependencies present in Make.
+Their targets now link the actual sources, public core header path, Threads and
+OpenSSL Crypto; all four selected CMake/CTest IR fixtures pass. No crypto stub or
+platform skip was added. Two decoder calls in an older ingress fixture were moved
+out of assert expressions, retaining the assertions and ensuring the calls are
+not conditional on NDEBUG. Cppcheck uses CI's src working directory/include paths:
+13 affected production/bridge sources and six final owner/fixture sources pass
+the ratchet with three existing diagnostics and no increase. Ownership preflight
+also passes, without changing any baseline.
+
+Qualification so far: the complete 657-entry native run (655 distinct target
+names) and proxy regressions pass after the ownership repair; four focused
+ASan/UBSan fixtures pass; three Go packages pass race tests; all 294 frontend
+tests across 35 files and TypeScript checks pass. The normal server build and
+PostgreSQL 18 integration pass 167/167 with 26 existing unavailable-service skips.
+The final ingress assertion cleanup passes its normal and ASan/UBSan rebuilds;
+all 76 lint gates pass. No analyzer baseline or gate exemption changed.
+
+This preserves cache configuration, not evidence of live provider cache billing.
+Per-content prompt_cache_breakpoint ownership remains a separate unimplemented
+consumer; do not claim full explicit-breakpoint replay. Native activation still
+requires owned current request context, original durable-call claims/effect
+receipts, SDK-observation suppression, actual launch/build/workspace attestation
+and live subscription qualification. Production remains KB-free and unpromoted.
+
+Official schema/context: [Chat request cache controls](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)
+and [prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching).
+The controls have independent semantics; this change preserves supplied values
+rather than selecting a model-specific caching or retention policy.
+
+
+## Owned host request preparation before native activation
+
+`agent_prepare_request_ir` now returns the complete owned canonical host request
+before provider rendering: model/profile, ordered system blocks, canonical
+history, sampling/output controls and the post-policy tool catalog/choice. The
+existing egress builder uses this same preparation owner, retaining projection
+capture and provider rendering at egress. Preparation emits no projection and
+never imports an SDK request to recover host authority. Success replaces the
+previous owned output; failure leaves that output unchanged. Inputs are borrowed
+and can be freed immediately after success. Chat retains only its existing
+host-created extension sidecar, without whole native prompt bytes.
+
+The focused HTTP fixture covers all three profiles, released source inputs,
+replacement/refusal ownership and exact 30-digit tool input preservation; existing
+provider-profile parity and delegate/fallback catalog regressions also pass.
+ASan/UBSan passes; correctly configured Cppcheck reports three existing production
+diagnostics with no increase. The complete 657-entry native rerun (655 distinct
+target names) and all 76 lint gates pass after the transport-fixture repair.
+
+The broad native run exposed an independent transport-fixture defect: its mock
+captured at most 4095 request bytes, then closed an 8192-byte request with unread
+payload, allowing a TCP reset to invalidate the gzip response. It now drains the
+advertised body while retaining bounded header capture, checks header/body bounds
+and handles interrupted reads. The original gzip round-trip assertions remain;
+30 independent full thin-client fixture processes pass, and Cppcheck reports zero
+diagnostics for the fixture. Production transport behavior is unchanged.
+
+Additional CMake qualification of the existing `test_agent_http` target failed:
+its agent dependency lacks the providers public include path, and its target
+omits existing translation/profile/configuration owners and the Go provider
+fixture build/environment. An exploratory partial wiring repair was removed;
+this target is not qualified. This does not invalidate the four narrower CMake
+IR fixtures qualified in the preceding cache increment. Finish its complete
+owner/fixture wiring as a remaining build consumer; do not skip the target or
+replace the real provider fixture with fabricated successful responses.
+
+Native activation is still pending: this preparation API is a prerequisite,
+not an activated SDK execution path. Original durable-call claims and supervised
+effect receipts, current-context/history binding, observation suppression,
+launch/profile attestation and live Claude qualification remain required.
+
+
+## Live subscriber progress from retained canonical capture
+
+The retained capture owner exposes its last committed global sequence under the
+writer mutex, including after a terminal event. The primary producer can drain
+through that cursor from the existing owner-checked DB1 session pages. Callback
+workers retain only the durable writer and never a browser connection. The
+Codex primary's existing progress callback now performs that drain; ordinary
+same-thread capture remains an immediate no-op when already delivered.
+
+Delivery refuses page gaps and never rewinds or repeats an envelope already
+included by a page read beyond the sampled target. The fixture now honors the
+128-event page bound and covers 131 retained-worker events, a further commit
+during page retrieval, repeated progress and sealed-writer tail delivery. The
+original event payloads and order match persistence; no SDK observation is used
+to synthesize model content. Disconnect behavior remains subscriber-local.
+
+The two native fixtures and ASan/UBSan pass; the normal production server builds;
+both CMake/CTest owner fixtures pass. Correctly configured Cppcheck covers five
+changed production/fixture sources with one existing diagnostic and no increase.
+The complete 657-entry native suite (655 distinct target names), PostgreSQL 18
+integration (167/167, 26 existing unavailable-service skips), both ThreadSanitizer
+fixtures and all 76 lint gates pass.
+This does not activate the native broker or suppress SDK-normalized observations;
+those still require current-request ownership and durable tool/effect admission.
+
+
+## Owned current native request context (constructor, not SDK activation)
+
+`aimee_ir_request_clone` provides a deep typed snapshot without a native-wire
+round trip. It retains context provenance, ordered blocks, signatures/opaque
+state, media, nested/hosted tool owners, output/sampling/cache configuration and
+exact sidecars. In-place replacement is supported; failed admission/allocation
+leaves the previous owned output intact. The pure fixture releases the source,
+checks exact long decimal input and injects 64 successive JSON allocation failures.
+
+The translation entry boundary now has a separate scoped host-request owner.
+It runs before replay-proof restoration at native admission, and never runs at
+egress or inside pure renderer comparisons. The three-wire/six-entry fixture
+checks replacement, refusal/cleanup, scope restoration and retention of later
+approved transforms. Native SDK context never becomes authoritative by echo.
+
+`server_native_runtime_open_request` copies a complete host-prepared post-policy
+profile for the selected model. Original native request bytes and a missing
+retained capture refuse. Its conversation content comes only from a fresh
+running-log snapshot for each callback, held consistently across any native
+reparsing within that callback. The owned system/catalog/model/controls replace
+SDK context and side-channel selectors at entry. Original observed model output
+still commits through the existing writer before replay-proof capture. Profile
+identity participates in native cache scope, including the bounded host extension
+sidecar. Parallel model callbacks on one runtime refuse rather than fork its
+running snapshot. Existing constructor success paths remain unchanged.
+
+The scoped-listener fixture releases the input profile, updates durable source
+between callbacks, checks the original selected model/system/namespace/cache key,
+verifies post-entry changes survive proof checks, tests profile-dependent cache
+identity, and covers parallel refusal plus cancellation/join. It also refuses
+unselected models and native-byte profiles without poisoning a valid capture.
+The listener fixture stubs its HTTP/proof boundary but now links the real
+translation scope/codec owners in both Make and CMake; actual entry and consumer
+behavior are also tested separately. This is not claimed as a live SDK launch.
+
+Two live consumers depended on pre-ownership native fields: Chat admission now
+requires canonical messages rather than a raw-sidecar array, and Anthropic token
+counting resolves the admitted canonical model rather than the SDK selector.
+Focused regressions check raw-free host history and count forwarding from an
+owned model/history while refusing normal malformed input as before. Count bodies
+already rendered canonically; no raw-body proxy regression was introduced.
+
+Focused pure IR, cross-protocol, listener, Chat ingress and Anthropic HTTP tests
+pass. Initial clone ASan/UBSan and Cppcheck pass; final broad qualification is
+running. No production SDK spawn caller uses the new constructor yet. Actual
+credential-free launch/build/workspace attestation, original durable-call
+claims/effect receipts, SDK-observation suppression, live subscription and
+independently graded local learning remain required. Production remains KB-free.
+
+The prepared-profile sidecar validator belongs to translation. It allows only
+Chat's existing host routing/template extension keys and Anthropic's host system
+layout; Responses profiles carry no native selector fields. Whole SDK request
+sidecars, unrelated models and conversation selectors refuse before a listener
+can be handed to a child. Golden layout checks retain valid Chat and Anthropic
+cache forms. The listener fixture no longer reimplements translation TLS scopes;
+its real bindings are restored and checked after each joined callback.
+
+The final normal server build and 657-entry native suite pass, as do five
+ASan/UBSan fixtures, four CMake/CTest IR/listener fixtures plus the thin client,
+and correctly configured Cppcheck on ten source/fixture files (zero diagnostics).
+Two older Anthropic fixture calls were moved outside asserts without removing
+assertions. Final PostgreSQL 18 integration passes 167/167 with the same 26
+unavailable-service skips; the real-scope listener passes ThreadSanitizer and
+all 76 lint gates pass. No baseline or test exemption changed.
+
+Published checkpoint `9425078eb` is fully green in fresh main CI run
+`39328706353`: 50 main jobs passed, including T1, T2, T2-luks and T3. Its export,
+audit, fuzz, release and attribution workflows also pass. The two testing-target
+platform skips remain unchanged; Windows/macOS were not run on that head.
+This is a qualified checkpoint, not completion of the whole migration. The
+owned-context increment still needs its own published-head CI qualification.
+
+
+## Running history numeric ordering and early streaming tool outcomes
+
+The live streaming-history fixture reproduced a previously hidden running-query
+bug after sequence 9: selecting `sequence::text` and ordering by the unqualified
+output name sorted PostgreSQL rows as 1, 10, 11, ... 2. The reader correctly refused
+that apparent gap. The running loader now orders by the qualified underlying
+BIGINT column; sequence output remains a string for JavaScript precision. The
+completed-history query and paged replay select numeric sequences already and
+were independently checked for the same defect. They do not need a cast fix.
+No stored event is rewritten. Source diagnostics now distinguish sequence,
+actor and event failures without including payload content.
+
+A native SDK can finish an original tool call while its model stream remains
+open, before the final assistant message snapshot commits. The history projector
+now remembers valid assistant TURN_START positions and orders later snapshots by
+that first durable observation, retaining tool outcomes after their original
+calls. Duplicate snapshots replace the same slot; checkpoints and terminal turns
+reset observation indexes. Unmatched starts do not create messages, and their
+tracking is bounded by the canonical message limit. Non-assistant messages keep
+their observed position. This derives history only from the existing log.
+
+Focused running/completed tests cover early outcomes, repeated snapshots,
+unmatched starts, checkpoint reset and tracking bounds. The PostgreSQL 18 fixture
+commits real start/block/argument/stop events plus an outcome before the final
+snapshot, crosses sequence 10, and preserves exact 30-digit arguments. It also
+checks that each stored event remains canonically admitted. The three Go race
+packages pass, as does the normal server/module PostgreSQL integration run:
+167/167 with the same 26 unavailable-service skips. All 76 lint gates pass.
+
+Original tool-source verification still needs to use actual writer-committed IR
+when callbacks precede the final snapshot; an SDK-normalized command is not a
+source receipt. Effects remain with the existing governed-action owner, not a
+new receipt store. SDK launch sites are still unactivated.
+
+
+## Shared host-turn generation leases and original-source claims
+
+A retained capture is now the unique live writer for its (session, turn).
+Duplicate opens, including a different actor/source spelling, refuse until every
+retained lease joins/releases. Both production creator sites use fresh random
+turns; consumers already retain the owner. The live directory carries no
+connection or credential state and removes entries at final release.
+
+Model generation admission belongs to this host-turn owner rather than one SDK
+runtime's mutex. A returned generation token retains the writer; a stale/double
+leave cannot release a newer generation. Both runtimes sharing a capture refuse
+parallel model generations; read-only token counting need not take the generation
+lease. Closing a producer seals new admissions while an existing generation can
+still release its final retained reference safely.
+
+The same owner provides bounded once-only claims for independently verified
+committed source-sequence/block pairs. Noncanonical/future sequence values,
+invalid block indexes, sealed/failed owners and excess capacity refuse. A repeat
+reports already claimed. These are transient execution admissions, not source
+verification or a parallel durable receipt journal. Existing governed-action
+permits/outcomes remain authoritative. No production tool dispatch calls the
+claim API yet; original typed source matching and effect wiring remain pending.
+
+Focused tests cover eight racing writer opens, eight racing claims with exactly
+one winner, all 4096 legal source slots, refusal beyond the bound, stale generation
+leaves, closure with the generation holding the last reference, and competing
+native runtimes on one capture. The full 657-entry native suite and normal server
+build pass. Three ASan/UBSan fixtures, two ThreadSanitizer fixtures, three CMake
+owner fixtures and Cppcheck on four source/fixture files (zero diagnostics) pass.
+PostgreSQL 18 integration also passes 167/167 with the same 26
+unavailable-service skips. All 76 final lint gates pass.
+
+Published `115677b34` completed all 50 main CI jobs, including every Docker tier,
+with only the two unchanged testing-target platform skips; export, audit, fuzz,
+release and attribution workflows also passed. The later numeric/causal history
+repair `c77cc0492` also completed all 50 main CI jobs, including all Docker tiers
+and identity mint, with the same two platform skips. Its HEAD scan passes
+Gitleaks (6,218 commits, no leaks). The shared source-claim change is committed
+as `43b960287`; its HEAD scan found no leaks across 6,219 commits. No production
+promotion occurred.
+
+
+## Original model calls use the actual egress catalog
+
+Owned-profile native forwarding now retains an owned typed catalog from the
+translation replay guard, including the final post-policy pass. It does not
+retain another conversation snapshot. Original buffered tool calls must match
+that catalog's separate namespace and function identity. Original streamed
+calls are assembled with the existing bounded canonical response builder,
+including exact argument fragments, and checked before their BLOCK_STOP can
+commit or be released to the SDK. Changed message identities, overlapping
+response starts, malformed arguments and unadvertised tools fail the capture.
+Earlier committed fragments remain observations; no completed call is invented.
+
+Eight focused cases cover valid buffered and streamed calls, an unadvertised
+SDK tool, wrong namespace, malformed streamed arguments, changed stream identity,
+a removed post-policy tool, and its valid post-policy replacement. Exact
+30-digit arguments remain intact. The existing legacy forwarding success path
+is unchanged. This is original-source catalog admission, not callback source
+verification or effect authorization. Durable source lookup, once-only claims,
+governed dispatch and launch activation still need wiring. The normal server
+build and all 657 native suite entries pass. The focused runtime fixture also
+passes ASan/UBSan, ThreadSanitizer and CMake/CTest. Cppcheck reports zero
+diagnostics for the two changed C sources; all 76 lint gates pass.
+
+
+## Original-call readback and shared once-only admission
+
+Owned native model callbacks now retain only bounded derived call admissions:
+the original typed call, its actual advertised function, and an immutable hash
+commitment to the writer-committed response prefix through call completion. The
+comparison hash uses canonical JSON; original opaque arguments stay untouched.
+Full message snapshots repeat existing streamed call slots without resetting
+their source or claim. Message identities remain host-qualified.
+
+A host callback can resolve exactly one matching unclaimed original ID, namespace,
+name and argument object, read back the entire committed response prefix through
+its source sequence, recheck both session incarnation identities, and claim once
+through the shared retained capture. A missing/changed prefix, deleted/recreated
+session, ambiguous provider ID or duplicate claim refuses. Claims return owned
+original arguments and the exact advertised function. No SDK-proposed arguments
+become execution authority. The cache is bounded to 4096 calls and 16 MiB of
+canonical call/catalog content, with no alternate durable history or receipt store.
+
+Focused tests cover buffered and streamed sources, exact 30-digit arguments,
+earlier argument-fragment replacement while preserving the later BLOCK_STOP,
+source erasure, session recreation, wrong arguments/namespace, two ambiguous
+original responses, output preservation on refusal and eight racing claimants
+with exactly one winner. Owned-profile transports also refuse legacy MCP
+routes, preventing an alternate tool ingress around original-source claims;
+legacy authenticated forwarding retains its existing successful behavior.
+Source readback requests only through the committed completion sequence, avoiding
+unrelated later content. These tests execute no effects. The normal server build and all 657 native
+suite entries pass. The final runtime fixture passes ASan/UBSan, ThreadSanitizer
+and CMake/CTest; Cppcheck reports zero diagnostics across all three changed C
+sources. PostgreSQL 18 integration passes 167/167 with the same 26 service skips.
+All 76 final lint gates pass. Supervised dispatch, source/effect admission synchronization, credential-free
+attested launch and SDK observation suppression remain unfinished; a source
+readback/claim alone does not authorize an effect or attest a launch.
+
+
+## Verified native tool execution through existing supervised owners
+
+The synchronous host SDK callback now consumes a verified once-only original call,
+uses its exact advertised function/schema and original arguments, and invokes the
+existing permission, directive, metadata and execution-policy owners before the
+canonical dispatcher. Its logical attempt binds the committed source prefix,
+sequence/block, session and account/model binding; SDK idempotency fields confer
+no authority. Only the explicit `aimee` namespace binds to the host registry.
+The callback also requires the captured tool-execution capability.
+
+It reuses the runtime's authority setup/restore path, including fresh Vault lineage,
+actor/model/tools, source overlay, delegate scope, workspace, cwd and durable job.
+The producer's existing cancellation flag and immutable cancellation scopes are
+restored after the nested call. Protocol capture state stays untouched. The callback
+runs synchronously on its creator, with its held capture, sink and workspace still
+bound; workers cannot borrow the browser sink. Standard durable host questions
+use the retained control owner. The GUI's independent canonical EventSource keeps
+reading those requests while execution waits for a reply.
+
+Effect authorization is set only around the existing admitted dispatcher. Actual
+results retain the tool owner's status and are durably emitted with a source-bound
+message ID before return to the SDK. Ordinary permission/policy refusals become
+error results without dispatch. Cancellation or context revocation fails the
+capture. If a result cannot be retained after dispatch, execution fails without
+inventing a cancellation or retrying the effect; the governed-action owner remains
+the only durable permit/outcome store. The legacy MCP admission entry still uses
+its existing host-request nonce; its successful behavior is preserved.
+
+Focused cases cover exact 30-digit arguments, permission/policy denial, a real
+recorded host question/reply before dispatch, actual tool-error status, absent
+execution capability, cancellation and context revocation during policy, wrong
+producer thread, restored parent state, duplicate calls and capture/annotation
+failure after a dispatch. Three ASan/UBSan fixtures, the runtime ThreadSanitizer
+fixture, three CMake/CTest owners and Cppcheck on five C sources (zero diagnostics)
+pass. The normal server build and all 657 native suite entries pass.
+PostgreSQL 18 integration passes 167/167 with the same 26 service skips.
+All 76 final lint gates pass.
+
+This callback is not yet wired at SDK launch sites. Credential-free attested launch,
+SDK observation suppression, live Claude custody/source binding, unresolved-effect
+history reconciliation and remaining IR/learning consumers remain unfinished.
+The generic legacy history repair's cancelled/timed-out placeholder is not a
+source receipt for an effect whose result could not be recorded; resolve that
+consumer before native activation. No production promotion occurred.
+
+
+## Missing tool outcomes remain unknown; authoritative history refuses repair
+
+Canonical compatibility repair in C and Go now states that no result is available
+in this history and the execution outcome is unknown. Its synthetic block carries
+explicit platform diagnostic provenance, not a tool owner's outcome or a claim
+that cancellation prevented execution. Original calls/arguments and actual results
+stay unchanged. The remaining legacy native repair views use the same truthful
+warning while those consumers await retirement.
+
+The pure read-only canonical history admission helper rejects incomplete/orphan
+cycles and unresolved-result diagnostics, including a diagnostic that superficially
+pairs with a call. Primary and delegate authoritative loads use that admission;
+they do not checkpoint a repaired view as executed history. Native model generation
+checks the fresh source history at entry and the actual request again before
+egress, preventing a downstream transform from introducing a synthetic resolution.
+Read-only token counting does not need to authorize another model generation.
+
+Focused cases cover unchanged inputs, reused IDs, preserved exact arguments and
+actual results, diagnostic provenance, strict primary/delegate load refusal, and
+pending or newly synthesized post-policy native histories. The normal server build
+and all 657 native entries pass. Five ASan/UBSan fixtures, two ThreadSanitizer
+fixtures, two CMake/CTest owners and the economizer/IR Go race suites pass.
+Cppcheck reports the same three existing agent_bridge diagnostics across ten
+changed C source/fixture files, with no new diagnostics or baseline change.
+PostgreSQL 18 integration passes 167/167 with the same 26 service skips, and
+all 76 final lint gates pass.
+
+Reconciliation still belongs to actual governed-action receipts or an explicit
+host resolution. This change does not infer an effect result from missing data
+or invent a parallel receipt journal. SDK launch/cache activation, source-bound
+live Claude execution, remaining ingress/IR consumers and independent local
+learning qualification remain unfinished. Production remains KB-free and unchanged.
+
+
+## Strict SDK/provider frame admission before C-string conversion
+
+The Codex JSON-RPC reader admits the exact raw line before copying it into a
+C string. Embedded/escaped NUL, invalid UTF-8, duplicate fields and trailing JSON
+refuse capture with `invalid-json-rpc-frame`. Dynamic callback replay is keyed by
+canonical, type-sensitive RPC identity: repeated numeric IDs refuse, while a
+provider call ID reused by a later independently admitted original call can
+proceed. The durable source owner still claims each original call once.
+
+Nested completed tool arguments and buffered/streamed provider frames use the
+shared strict parser at translation boundaries. The buffered Responses SSE
+fallback cannot hide bytes behind a NUL. Buffered JSON HTTP POST now rejects
+embedded NUL using the actual received length before returning a C string;
+fixed-length and chunked socket regressions also verify that exact-length binary
+streaming remains intact and the send guard is released before response reads.
+Outbound immutable request bytes retain their existing contract.
+
+The focused SDK fixture covers 18 cases for each primary/delegate entry, including
+RPC numeric/string identity, distinct original calls with reused provider IDs,
+and malformed frames rejected before callback dispatch. Both real Codex pins
+(0.160.1 and 0.153.4) pass ordinary, bounded-catalog and typed-host-tool replay
+qualification. These are local protocol qualifications, not production factory or
+credential-custody evidence. Six ASan/UBSan fixtures and five CMake fixtures pass;
+Cppcheck reports zero diagnostics across the eleven changed production sources.
+The normal server build and all 657 native entries pass. PostgreSQL integration
+passes 167/167 (26 service-dependent checks unavailable locally); all 76 lint
+gates pass. The previously published `2d49add9b` also completed every CI job.
+Native SDK activation, cache lifecycle ownership and live Claude custody remain
+unfinished; do not substitute these protocol results for that work.
+
+
+## Canonical core repair and unresolved native-cache refusal
+
+The final provider-format branches of `message_history_repair` are retired. All
+confirmed production callers in the delegate loop and both gateway retry seams
+already supply canonical arrays. The core validates every canonical message
+before applying the ordered IR repair; native, mixed and malformed histories
+refuse without mutation. Explicit historical import stays in translation. The
+unused native argument-normalization/sanitization module and its Make/CMake
+linkages are removed. Invalid native arguments can no longer be silently changed
+to `{}`; the MiniMax regression verifies strict entry refusal and exact valid
+30-digit argument emission through typed egress.
+
+Native-cache source loading now also applies authoritative history admission:
+missing results and platform unknown-outcome diagnostics refuse before any cache
+claim. Actual known tool errors remain replayable. Reused call IDs are checked
+causally, preserving earlier receipts and signed reasoning. The bypass gate now
+checks the migrated core repair function while retaining explicit compatibility
+output boundaries; plants cover native readers and both retired sanitizer APIs.
+
+The focused core/cache/strict-provider fixtures pass, as do four ASan/UBSan
+fixtures, both native cache/runtime CMake fixtures, and all fourteen bypass-gate
+tests. Cppcheck retains the three existing agent-bridge diagnostics with no new
+ones or baseline changes. The normal server build, all 657 native suite entries
+and all 76 lint gates pass.
+Native SDK launch activation and the other unfinished work above remain required.
+
+
+## Claude exact byte frames and actual MCP identity qualification
+
+Claude's headless reader now finds frame boundaries with `memchr` over the
+actual received length and admits object frames with the shared strict parser.
+It cannot hide a suffix behind NUL or accept a duplicate field/partial JSON
+parse. Existing non-JSON diagnostic stdout lines remain outside conversation
+capture. EOF without a final newline and fragmented valid frames still work.
+Six malformed initial frames and a malformed unterminated tail after a successful
+result refuse capture, retain earlier real observations and never report a
+successful turn. The focused lifecycle, ASan/UBSan and CMake fixtures pass;
+Cppcheck reports zero diagnostics. The normal server build, all 657 native
+suite entries and all 76 lint gates pass.
+
+An offline run of the actual installed Claude Code 2.1.227 binary completed two
+local Anthropic requests and one local MCP tool call using a fresh credential-free
+HOME, `--bare`, empty setting sources, strict explicit MCP config and no built-in
+tools. The MCP call includes the original provider ID in
+`params._meta["claudecode/toolUseId"]` (observed `toolu_original_fixture`). This is
+a verified SDK boundary field, not a guessed metadata name. The probe script and
+small local outputs are under `/var/tmp/aimee-ir-claude-mcp-probe.py` and
+`/var/tmp/aimee-ir-claude-probe-*`; they contain only synthetic local data.
+
+The same actual SDK probe confirms an argument-fidelity gap: original numeric
+`0.123456789012345678901234567890` reaches MCP as `0.12345678901234568`. Original
+host-captured arguments must remain the execution source. Do not weaken the
+existing exact proposed-call claim API or call normalized MCP JSON canonical.
+A Claude bridge still needs an explicit host-owned tool-identity binding and
+original-ID lookup/proof before dispatching original arguments; metadata alone
+grants no tool/effect authority. This run qualifies SDK protocol/correlation only,
+not live subscription custody, production activation or native history adoption.
+
+
+## Codex host-owned launch and durable-terminal cache cutover
+
+The browser Codex worker and canonical delegate path now call the server native
+execution owner before any legacy credential HOME is materialized. Refusal cannot
+fall back to the old credentialed scheduler. The server retains the selected Vault
+lineage and post-policy request. The scheduler receives a private HOME/cwd, closed
+environment, local model capability and explicit namespaced host catalog. SDK
+model/tool/message observations are suppressed; original provider capture owns
+conversation and exact arguments. Final response and usage are cloned from the
+original completed canonical response after transport callbacks join. Owned
+runtimes also refuse private `/responses/compact`, which cannot replace canonical
+history.
+
+On Linux, launch holds and hashes the actual executable descriptor and executes
+that descriptor with the owned cwd descriptor. Effective SDK settings and their
+contributing layers are read back before cache acquisition or thread start/resume.
+Built-ins, plugins, hooks, project MCP/config, keychain auth stores and ambient
+credentials are disabled/refused. This launcher currently supports an explicitly
+registered native ELF executable; arbitrary scripts/npm dispatchers and other
+platform descriptor launchers remain unsupported rather than silently trusted.
+CI resolves the actual executable from its pinned npm platform package. The
+workspace owner supplies held inode identity for shared/mirror leases and fresh
+resource acquisition epochs for detached/container leases; provider pointers do
+not establish cache identity.
+
+Completed canonical history supplies adoption. A cache claim supplies only its
+verified unseen tail and scoped resume handle. After child exit and callback join,
+only derived cache metadata transfers to the retained capture owner. The capture
+seals on the durable terminal write; its action runs outside the writer lock,
+exactly once. Only a healthy completed terminal publishes a native checkpoint.
+Cancellation, failure, lost completion and close invalidate the quiescent claim.
+Private session IDs no longer write the legacy harness key from this launch path.
+
+Older browser delivery projects the same committed canonical tail, including
+retained worker events and disconnected presence-ring delivery. Exact per-block
+rendered prefixes prevent final snapshots from duplicating streamed text; a
+conflicting snapshot refuses capture. SDK-normalized text and private IDs do not
+become this view's source. IR-v1 delivery retains its canonical envelopes.
+
+Validation covers a factory lifecycle fixture with actual HOME/config/descriptor
+resources and explicit peer mocks, including original-result projection, canonical
+unseen-tail adoption, identity refusal, pending-history refusal, SDK failure,
+terminal failure/cancellation and cleanup. This fixture is not live subscription
+or whole-server native execution evidence. Actual Codex 0.160.1 and pinned
+0.153.4 pass all four offline protocol modes, including descriptor launch,
+effective-config proof, disabled project MCP, exact decimal host arguments,
+fresh-HOME resume and unseen-tail adoption, and suppression of SDK observations.
+Both SDK versions also refuse mismatched model/config and notification settings
+before any thread, model traffic or host-ready/cache callback. Typed catalog and
+launch-profile proof helpers now live in `cli_codex_profile.c`, keeping the
+process adapter within the unchanged source-size limit.
+
+The server build and all 658 native suite entries pass, including a full rerun
+after the helper extraction. Seven focused ASan/UBSan fixtures and four TSan
+lifecycle/resource fixtures pass; CMake runtime/factory fixtures and Cppcheck
+with zero new diagnostics pass. PostgreSQL integration passes 167/167, with the
+same 26 service-dependent local checks unavailable. All 76 lint gates pass.
+Qualification logs use `/var/tmp/aimee-ir-native-factory-*`. This qualification
+is not live subscription or production deployment evidence. Fresh CI remains
+required for the published commit; production promotion and the overall
+migration remain unfinished.
+
+
+## Claude original-call execution continuation: 20 October 2026
+
+The local continuation adds explicit logical-tool/registry bindings and a private
+Streamable HTTP MCP owner. Claude's `claudecode/toolUseId` selects a unique committed
+original call; SDK-rounded arguments never become effect input. The same source
+readback, once-only claim, current registry definition, supervised policy/effect
+and durable receipt owners apply to Codex and Claude. Missing or reused source IDs,
+unknown aliases and failed persistence refuse execution. Model forwarding waits
+for creator-side launch attestation. Actual Claude initialization must report the
+owned cwd, credential source, permission mode, exact tool catalog, connected MCP
+server and empty plugin set before that release.
+
+Both browser native SDKs now use the general agent worker's registered workspace
+and isolation owner. The SDK sees an opaque scheduler trigger; complete task,
+context, selected Vault authority and post-policy tools come from canonical host
+IR. Claude runs with held executable/cwd descriptors, a private credential-free
+HOME, closed environment, bare mode and strict MCP configuration. Configured Linux
+managed settings/MCP files refuse the supported launch profile. A real SDK probe
+confirmed `/v1/messages?beta=true`; only that exact query and its count-token
+counterpart normalize to existing native model routes. Other queries remain refused.
+
+Actual-server qualification exposed and repaired two Responses defects: admission
+looked for SDK raw input after canonical context replacement, and canonical output
+omitted the SDK-required `usage.total_tokens`. Focused persistent regressions cover
+both. Actual local Codex 0.160.1 and Claude 2.1.227 each pass three provider wires,
+real README tool effects/receipts, durable browser replay and a second resumed turn.
+CI now installs pinned Codex 0.153.4 and Claude 2.1.227 native platform packages and
+requires the same six cases in its PostgreSQL integration job; no credentials or
+production KB are needed. The separate Codex adoption probe now includes a fifth,
+flat host-tool catalog mode.
+
+Qualification completed locally: all 658 native binaries, seven focused
+ASan/UBSan fixtures, two TSan fixtures, four CMake fixtures, five real Codex
+adoption modes on both 0.153.4 and 0.160.1, Cppcheck without increased diagnostics,
+and full pinned-SDK PostgreSQL integration (168/168; 26 other checks require
+unavailable local services), plus all 76 lint gates. Fresh CI follows publication. Production has not been promoted; `.100`
+remains KB-free. This is a continuation checkpoint, not completion of the overall
+migration. Retire the remaining private SDK compaction/ingress paths and finish
+independently graded local learning/reuse after publishing this qualified slice
+in the existing PR #3052.
+
+
+## Canonical browser compaction continuation: 20 October 2026
+
+The next local slice removes the browser's private Codex compaction launcher and
+its unused public C helper. Native browser turns now use the same agent dispatcher.
+Canonical compaction accepts any configured model because it performs no model or
+SDK execution; the authenticated canonical session takes priority over an SDK
+handle. Existing checkpoint ownership, history admission and failed-write refusal
+remain in force. Successful host checkpoint operations have a separate completion
+condition from model turns. They emit neither an empty user message nor invented
+model output. A missing checkpoint still fails completion.
+
+The actual-SDK journey now compacts between its tool-bearing turn and resumed
+turn, supplies a foreign provider handle, verifies a canonical checkpoint, and
+requires zero extra model calls. It passes for both SDKs on all three model wires.
+The native adapter keeps all three existing reasoning-effort request spellings.
+CMake qualification also repaired the history fixtures' missing private legacy
+include path and Anthropic replay/sha dependencies to match their Make targets.
+
+Local qualification: all 658 native binaries, two ASan/UBSan fixtures, one
+TSan fixture, two CMake fixtures, Cppcheck without increased diagnostics and full
+pinned-SDK PostgreSQL integration (168/168; 26 local service-dependent checks
+unavailable). All six actual SDK/model cases include canonical compaction. All
+76 lint gates passed; publication checks follow.
+The overall migration remains unfinished: canonical seeded-run native execution,
+remaining ingress/consumers, independently graded local learning/reuse, broader
+native platform/launcher and live subscription coverage still need completion.
+
+
+## Canonical seeded native runs continuation: 20 October 2026
+
+The local slice now admits complete canonical seeded run history for Codex and
+Claude. The admitted request is committed through the active session-log owner
+before launch; model context comes only from that durable capture. Admitted output
+limits/temperature reach the selected model profile. Native execution returns owned
+original typed content, retaining opaque reasoning fields, while compatibility
+text remains a separate projection. The old attested-session credential-HOME and
+private-handle fallback in the generic execution path is removed. Standalone
+adapter fixtures remain explicitly unowned and cannot borrow a server session.
+
+Asynchronous `/v1/runs` now accepts an absolute `cwd` for native SDK execution and
+holds the same nested workspace scope, foreign-path check and session isolation
+used by browser tools until native callbacks join. The API contract documents
+this native requirement. Direct HTTP model runs retain their existing behavior.
+Actual SDK runs use a full 20,000-character message, preceding conversation,
+inline PNG, explicit instructions, real read-file effect/result and durable
+trajectory export. All six SDK/provider combinations pass. Host task usage now
+sums committed model completions instead of reporting only the final model call;
+original per-response observations remain intact in canonical history. Overflow
+refuses rather than wrapping a counter.
+
+Local qualification completed: all 658 native binaries, three ASan/UBSan fixtures,
+two TSan fixtures, two CMake fixtures, Cppcheck without increased diagnostics and
+full pinned-SDK PostgreSQL integration (168/168; 26 local service checks require
+unavailable services). The extended native journey covers twelve browser/seeded
+cases. All 76 lint gates passed, including reviewed source/generated OpenAPI
+ownership pins. Publication checks follow. Continue in PR #3052 with the
+remaining launcher/platform qualification, IR-consumer audit and independently
+graded server-local learning/reuse. Production is still KB-free and unpromoted.
+
+
+## Registered Codex npm launcher continuation: 20 October 2026
+
+The native execution owner now resolves the registered Codex npm command to its
+matching platform-package executable without running JavaScript. Both nested and
+hoisted npm layouts are supported on Linux x64/arm64; direct native ELF commands
+remain supported. Resolution validates the root package, declared optional alias,
+platform package name/version, trusted file permissions and actual held executable
+digest. An invalid nested package refuses instead of silently selecting a hoisted
+SDK. Arbitrary scripts remain unsupported. CI now exercises the registered npm
+command in the twelve actual-server browser/seeded native journeys.
+
+The focused filesystem fixture covers held executable identity, PATH and symlink
+registrations, both npm layouts, unsafe permissions, mismatched metadata and
+missing binaries. A planted wrapper effect proves the script is never executed.
+The preceding published head 8740d9d31 finished with 55 passing CI checks and two
+existing platform skips. The seeded-run commit is ca19c574d; its only publication
+scan match is the reviewed public OpenAPI SHA-256 input pin, recorded by exact
+historical fingerprint. Launcher qualification passed: the full native suite and
+new registration fixture, two ASan/UBSan fixtures, two CMake fixtures, Cppcheck
+without increased diagnostics, all 76 lint gates and full pinned-SDK PostgreSQL
+integration (168/168; 26 unavailable local services). All twelve native journeys
+passed using the registered npm command. Fresh publication/CI follow.
+This does not qualify macOS/Windows native descriptor execution, independent
+learning grades/reuse or production promotion.
+
+## Execution history repair retirement: 20 October 2026
+
+The direct tool loop now uses strict canonical causal admission before another
+model request. Its pressure/middleware fallbacks no longer create missing-result
+diagnostics. The compactor admits both the original and staged replacement;
+incomplete/orphaned cycles refuse even below the compaction threshold. Failure
+leaves source bytes untouched and clears any staged success report. Ordered
+call/result receipts and opaque retained content remain authoritative.
+
+The economizer restores its exact original provider payload on retry; it no
+longer sends that wire array through the canonical-history repair helper. No
+production caller of message_history_repair remains. Its compatibility diagnostic
+view and explicit IR repair tests are not execution admission paths.
+
+Qualification passed the full native suite, two ASan/UBSan fixtures, two CMake
+fixtures, Cppcheck without increased diagnostics, pinned-SDK PostgreSQL integration
+168/168 (26 unavailable local services), all twelve native browser/seeded journeys,
+and all 76 lint gates. Allocation-failure coverage now measures the successful
+path and injects every JSON allocation failure rather than stopping at a fixed
+ceiling. CMake aggregate libraries now expose the missing Make-equivalent public
+include paths and build shared session-event code in the IR base, fixing the
+actual focused compaction link. Fresh CI on the preceding published 72599fe5f
+has 45 passes, two existing platform skips and nine pending checks, with no failures
+at the last completed enumeration. Overall migration/learning qualification remains
+unfinished; production remains KB-free and unpromoted.
+
+
+## Native Vault OAuth integration qualification: 20 October 2026
+
+Actual pinned native Codex/Claude now also exercise the selected host's Vault-held
+OAuth credential path against synthetic local upstreams. The fixture checks the
+Codex account header and Claude OAuth/beta headers, rotates each OAuth source
+between browser turns, and requires the fresh token on subsequent model traffic.
+Neither old/new access tokens nor refresh material may appear in model content.
+The schedulers retain their closed credential-free launch environment.
+
+All sixteen browser/compaction/resume/seeded journeys pass, including both OAuth
+cases. Full PostgreSQL integration passes 168/168 with 26 unavailable local service
+checks; all 76 lint gates pass. These are real SDK executions with synthetic Vault
+credentials and upstreams. They do not claim live subscription acceptance or
+production promotion. The latter remain separate qualification requirements.
+
+
+## Required native browser operator integration: 20 October 2026
+
+The native CI job now requires two further actual-SDK journeys, one per SDK: a
+request_input question must appear on the live browser IR stream while execution
+is blocked. An ordinary authenticated UID reply must be refused. A fresh matching
+root-UDS browser operator then replies through /v1/chat/control-reply; the original
+model receives its answer and the stream must include the matching control
+response and successful durable terminal. Server authorization is unchanged.
+
+Python compilation and all 76 lint gates pass. The preceding sixteen API-key/OAuth
+journeys are locally qualified. This workstation cannot run the additional root
+operator journey because passwordless sudo is unavailable; it is mandatory in
+CI, with no new CI skip or server authorization exception. Its actual CI execution
+remains pending and must be checked before this journey is reported qualified.
+
+
+## Current documentation and CI queue continuation: 20 October 2026
+
+README, STATUS, WHATS_NEW and the pending canonical session proposal now distinguish
+qualified native original-source execution and closed homes from the earlier
+credential-bearing scheduler implementation. API/OAuth qualification is recorded
+as sixteen local journeys; actual root-UDS browser journeys still await CI.
+Independent learning/reuse, remaining consumers/platforms, live subscription and
+reviewed production qualification remain unfinished.
+
+The latest source run 39368457405 for 71b361ccf is pending behind the still-running
+OAuth run 39368084307. The following documentation push has no PR metadata edit,
+so its source synchronize event can supersede the stale run under the existing
+concurrency policy. No workflow gate, automatic review, attribution rule or
+production configuration is changed. Registered PR commands expose check/failure
+reads but no workflow cancellation. Personal gh is not authenticated and no
+browser is available; no connector mutation or new login was attempted.
+
+
+## Native browser mirror qualification repair: 20 October 2026
+
+CI run 39368971570 passed all sixteen API/OAuth native journeys and real Docker
+delegate learning/readback, then failed the new browser fixture on a noncanonical
+early frame. The fixture had supplied an unregistered raw browser workspace. Its
+stream diagnostics now retain the full rejected frame and it registers a mirror
+through the ordinary workspace owner. The client clone is deliberately dirtied;
+all model read effects must still see the approved committed mirror content.
+
+This exposed two production defects. Native workspace identity rejected the
+owner's reconstructed directory because its path differs from the client root.
+The owner now holds the exact directory inode through the turn, authorizes only
+that active reconstruction, rejects replaced paths and escaping repository
+symlinks, and duplicates that descriptor for native identity. Failed acquisitions
+never count as a truthy grant. Mirror binding also selects the shared filesystem
+provider explicitly, preserving enclosing scope restoration. No general allowance
+for paths under the mirror directory is added.
+
+The file guard had passed a file path to git's directory worktree probe, then
+used a different bare-repository prefix length to rewrite the path. It now probes
+the target directory and verifies the repository prefix before rewriting. The
+ordinary-checkout redirect remains covered, alongside the new arbitrary linked
+worktree read regression.
+
+Workspace/guardrail suites and both ASan/UBSan fixtures pass; Cppcheck has no new
+diagnostics. Sixteen actual native API/OAuth browser/seeded journeys pass through
+the explicit mirror with the dirty-client fallback detector. All 76 lint checks
+pass across the complete run and the final ownership-pin review rerun. Reversing
+just the guardrail path edits reproduces its previous pinned source exactly; the
+memory adapter is unchanged. Fresh CI must still qualify the root operator
+question journeys. Continue with owned mirror-lease capture/restore on retained
+native callback threads and native mirror delegation; the read/question fixtures
+do not establish that broader callback/delegate qualification. Independent local
+grading/reuse and production review/promotion remain unfinished and KB-free.
+
+
+## Attested session ownership repair: 20 October 2026
+
+CI run 39371398721 passed the sixteen real API/OAuth native journeys through
+registered mirrors and the Docker delegate learning/readback journey. The new
+root browser case still failed before execution with `cannot initialize canonical
+session`. The now-visible error led to session.create storing the socket peer UID
+as owner: root browser backends became uid:0 even though canonical execution
+correctly required their attested webuser principal.
+
+Session creation and the matching legacy import ownership check now use the
+ingress-attested principal. They preserve the existing UID fallback for legacy
+unattested local callers and ignore user-supplied principal fields. No ownership
+row is silently reassigned. A focused production-handler fixture covers two
+browser accounts sharing UID 0, long browser names, distinct certificate identities,
+ordinary UID callers and forged unattested/body principal fields. It passes Make,
+ASan/UBSan, CMake and Cppcheck with no increased diagnostics. All 76 lint gates pass.
+Fresh CI must qualify the root question journey beyond canonical initialization;
+stream termination diagnostics now retain final records when no question appears.
+The separate retained mirror callback/delegate lease continuation is prepared
+under /var/tmp, not applied to this qualified source snapshot.
+
+
+## Live browser question catalog and capture repair: 20 October 2026
+
+CI run 39372736936 passed the sixteen API/OAuth native journeys and real Docker
+learning/readback, then exposed the missing request_input model catalog entry.
+Its dispatcher and session question owner already existed, but the canonical
+built-in catalog did not advertise it. The catalog now supplies one schema to
+all three provider profiles, declares its internal control egress and includes
+it in the normal role toolsets.
+
+Actual local streaming then exposed direct DB1 question writes bypassing the
+canonical capture cursor and live delivery. Questions now reserve a host-only
+reply consumer, publish through the canonical sink and commit the response
+through that same sink before releasing an answer. Reservations admit exactly
+one matching publication; stale, changed and abandoned reservations refuse.
+Native harness drainers cannot steal the host reply. Cancellation and storage
+failure remain terminal, without borrowing a browser sink on callback workers.
+The Anthropic fixture's completed original input now matches its question delta;
+it had incorrectly retained the read-file arguments in the completed snapshot.
+
+An unprivileged user namespace provides a disposable server with a real root-UDS
+peer boundary, overcoming the unavailable passwordless sudo for local testing.
+All eighteen actual pinned-SDK journeys pass there: sixteen API/OAuth/history/run
+cases and both live browser questions, rejected UID impersonation, matching
+operator replies, canonical response and durable successful terminal. The full
+660-binary native suite, focused ASan/UBSan and TSan, two CMake fixtures and
+Cppcheck with no increased diagnostics pass. Fresh hosted CI remains required.
+The retained mirror callback lease work is stashed separately until this repair
+is published. The overall migration, independent local learning/reuse, broader
+native platforms and reviewed production promotion remain unfinished; production
+must remain KB-free.
+
+All 76 lint gates also pass on the final question repair.
+
+
+## Retained native mirror callback capability: 20 October 2026
+
+Native runtime owners now retain a duplicate of the exact approved mirror
+checkout descriptor. Every callback revalidates its path/inode, binds the held
+capability for its own thread and restores the previous binding; close releases
+it only after callback join. Nested scopes preserve the enclosing capability.
+No mirror-base prefix or request-body path claim becomes filesystem authority.
+The workspace fixture unbinds the original producer before a real callback thread
+uses its retained capability, tests nested restoration and refuses directory
+replacement with an escaping symlink. Native callback probes separately require
+the imported capability and prove it is cleared on teardown.
+
+The full 660-binary native suite, both ASan/UBSan and TSan fixtures, native runtime
+CMake fixture and Cppcheck without increased diagnostics pass. All eighteen actual
+pinned-SDK journeys pass again through the explicit mirror, including both live
+root-UDS browser questions and operator replies. Broader queued native delegation
+and durable workspace origin propagation still require their own producer/worker
+qualification. This is not completion of the migration or independent learning.
+
+All 76 lint gates also pass for the retained callback capability.
+
+
+## Deployment T3 native refusal fixture repair: 20 October 2026
+
+Published b55b174e0 passes real PostgreSQL integration 168/168, all eighteen actual
+native SDK journeys including both browser operator replies, and Docker delegate
+learning/readback. The T3 deployment job 118471635875 then fails in the separate
+memory-native-async fixture. Its retained native-async.json identifies the exact
+failed check: unobservable tmux-cli never queued a worker. The fixture had omitted
+the absolute cwd now required by canonical native /v1/runs admission; it therefore
+failed before reaching the accounting fence it intended to test.
+
+That fixture now supplies its already-created isolated checkout only for those
+external-backend cases. It still requires a queued asynchronous worker, the same
+request_budget_unavailable refusal and zero provider sends. The actual-server
+native fixture independently exercises both legacy tmux/Claude and unsupported
+provider/ACP negative cases with an approved mirror cwd and inherited zero byte
+cap. Both reach the intended worker refusal without a provider send, alongside
+all eighteen successful SDK journeys. No production admission, budget guard,
+assertion, deployment tier or platform gate is exempted. Fresh deployment CI
+must qualify the complete T3/T2 sequences after publication.
+
+All 76 lint gates also pass for the deployment fixture repair.
+
+
+## Governed native seeded runs under inherited byte limits: 20 October 2026
+
+The actual accounting-owner probe first confirmed that missing Go accounting
+correctly refuses bounded traffic. With the real economizer process attached,
+browser SDK execution succeeds, but a seeded /v1/runs was still rejected as
+request_budget_unavailable before launch. The agent loop had classified every
+provider CLI as an unobservable external transport, including the qualified
+host-owned Codex/Claude pipeline.
+
+Only Codex/Claude with the current durable log and retained canonical capture
+now proceed to their existing host executor under a byte limit. That executor
+still owns launch/source/Vault qualification and has no attested-session fallback.
+The final canonical model gateway uses Go to admit the actual rendered bytes.
+Standalone and unsupported adapters retain the external transport fence. The
+unsupported deployment probes now use ACP under both legacy/current backend
+spellings; qualified Codex/Claude have their own real zero-byte refusal cases.
+
+The integration harness installs, grants, starts and stops the actual Go
+accounting owner. All successful native API/OAuth/browser/seeded requests carry
+a 262144-byte caller limit. Eighteen actual SDK journeys pass, including both
+live root-UDS questions, and four negative cases prove zero provider sends for
+qualified SDK zero-byte caps and unsupported external adapters. Full PostgreSQL
+integration passes 168/168 with 26 unavailable local-service checks. The full
+660-binary native suite, CMake agent library build and Cppcheck without increased
+diagnostics pass. This is source qualification, not production promotion or
+independent learning completion. Queued mirror-source work remains stashed.
+
+All 76 lint gates also pass for governed native seeded runs.
+
+
+## Queued registered mirror delegation: 20 October 2026
+
+Background delegates now acquire the registered source before file references,
+Git isolation or prompts can open it. Mirror and detached registrations reconstruct
+their recorded source/head locally; failed reconstruction refuses. Raw client
+roots no longer authorize server sandbox mounts, even when that path happens to
+exist on the server. Foreground mirror acquisition also reports failure explicitly.
+
+The trusted worktree creation result retains its own directory descriptor. Its
+Git common directory must match the held source under a sanitized Git environment;
+ambient GIT_DIR cannot forge that relationship. Exact child authority survives a
+producer ending through a retained callback lease, and rejects replacement paths.
+There is no blanket mirror-directory grant.
+
+The real queued integration journey deliberately dirties the client checkout and
+requires the committed reconstruction. Locally it reaches the mandatory sandbox
+refusal without model traffic; hosted Docker must complete the actual read. The
+660 native binaries, PostgreSQL integration 168/168 (26 unavailable local-service
+checks), 30 thin-client proxy tests, workspace ASan/UBSan and TSan, CMake agent
+build and Cppcheck without increased diagnostics pass. Fresh CI must qualify the
+Docker completion. Native-primary orchestration exposure and queued transfer of
+an already-held callback capability remain unfinished, alongside independent
+local grading/reuse, remaining consumers/platforms and reviewed production
+promotion. Production remains KB-free.
+
+
+## Docker bare-mirror discovery CI repair: 20 October 2026
+
+Published 70a042fcd reaches the queued mirror source and creates its dedicated
+checkout, but CI integration job 118492993945 fails before the first delegate
+model request: Docker discovery assumes every linked admin directory contains
+<repo>/.git/. The actual registered mirror is bare and has <mirror>/worktrees.
+The eighteen native SDK journeys and both real browser controls still pass in
+that job; the new Docker mirror completion correctly remains a required failure.
+
+Discovery now accepts the bare repository's standard commondir relationship,
+requires its Git metadata and verifies the worktree backlink even when nested.
+Existing workspace authorization, isolated networking and mount ownership are
+unchanged. A real Git bare-mirror regression covers successful discovery, broken
+backlinks and unrelated common directories. Hosted Docker must qualify the actual
+execution after publication. Native-primary orchestration and queued callback
+capability transfer remain stashed separately; they are not part of this CI fix.
+
+
+## Native primary delegation and queued capabilities: 20 October 2026
+
+Primaries now advertise delegate and delegate_status from the existing MCP
+catalog. Delegate role toolsets do not inherit orchestration. Calls re-enter the
+normal authenticated dispatch with the current model owner's capability ceiling;
+body session claims cannot replace the host session. Default delegation preserves
+an already-approved checkout instead of resolving a linked mirror to its bare
+common directory. Compute contexts duplicate the producer's held directory lease,
+bind it on each worker and restore the prior thread binding after cleanup.
+
+The live journey exposed the generic provider-spawn heuristic also banning the
+registered Aimee delegate tool. The host registry dispatcher now supplies a distinct
+entry classification for that exact tool; other guardrail and audit checks still
+see the original arguments. External hooks cannot request this classification.
+Raw external delegate, Task, Agent, spawn_agent and unknown spawn-like tools remain
+blocked. A failed mirror acquisition also stops lifecycle hooks before filesystem
+probes; successful mirror-hook resource semantics and other ingress paths still
+require their remaining audit.
+
+The actual Go routing owner is installed and attached in integration, alongside
+Go accounting. Both real SDK primaries call delegate and delegate_status, preserve
+both original call IDs in durable history and finish before the fixture releases
+the child's first provider response. The child must read committed mirror content in Docker and cannot
+inherit orchestration tools. Locally it reaches the mandatory sandbox refusal;
+hosted Docker completion remains required. There is no new CI skip.
+
+The 660 native binaries, PostgreSQL integration 168/168 (26 unavailable local-service
+checks), all twenty root-namespace actual-SDK journeys and four budget refusals pass.
+Four focused ASan/UBSan fixtures, two TSan fixtures, CMake agent/two fixtures and
+Cppcheck without increased diagnostics also pass. The guardrail ownership pin was
+reviewed against an exact reverse-to-previous-source proof; its memory adapter and
+Go policy inputs are unchanged. Fresh CI is required for this source snapshot.
+
+The earlier Docker bare-mirror repair b33f4d3fc passes hosted integration 168/168,
+including the real sandboxed mirror read and delegate learning/readback. At the
+last complete enumeration it has 55 passing checks and two existing platform
+skips, including all deployment tiers. The migration, independently graded local learning/reuse, remaining IR
+consumers, native platforms/live subscription and reviewed production promotion
+remain unfinished. Production remains KB-free.
+
+
+## Native terminal and frozen LSP gate CI repairs: 20 October 2026
+
+Published d036a2326 completes its ordinary native unit shards and all deployment
+tiers, but hosted integration fails on the Claude delegation stream: its parent
+execution completes and then emits a native cache checkpoint. The fixture had
+incorrectly required the final frame itself to be the completion. Fixtures now
+require the exact parent execution outcomes running/completed, independently of
+cache metadata and child notices. Failed, cancelled, missing and duplicate parent
+terminals still refuse. Native cache persistence is unchanged.
+
+The real-provider LSP job separately rejects the new orchestration wrapper in
+the shared MCP table against its frozen source pin; the unit-tests aggregate
+therefore fails too. Both actual providers pass 20/20 cold starts, full reference
+recall and zero false positives. Three exact host-only deltas now reverse to the
+previous MCP table before the full frozen comparison. No LSP implementation,
+protected path, threshold or denominator is exempted. The original unmodified CI
+artifact passes the repaired release validator; deliberate containment-policy and
+catalog mutations still fail. All eighteen S1 contract tests and three terminal
+regressions pass.
+
+The rebuilt published runtime with the corrected fixtures passes PostgreSQL
+integration 168/168 (26 unavailable local-service checks), all twenty actual-SDK
+journeys including both browser operator replies, and four budget refusals in a
+root user namespace. Fresh CI must qualify the complete hosted execution again.
+The early queued-source acquisition and role/persona reader repairs continue
+below; the overall migration and independent learning are unfinished.
+Production remains KB-free and unpromoted.
+
+## Queued source admission and project templates: 20 October 2026
+
+Published 02dfe4eba now passes all 56 checks, with the two existing platform
+skips, including every deployment tier. PR #3052 remains open and mergeable.
+
+Queued delegates acquire their source before role/persona discovery, permission
+frontmatter, file references or provider selection. Shared sources require their
+registered authority; a raw mirror path cannot recreate a native callback's held
+capability. Early failures release the acquired scope through the common cleanup.
+The actual server fixture proves that dirty client role templates are ignored,
+a client-only persona is unavailable in the approved mirror, and unregistered or
+unleased sources refuse before provider traffic.
+
+Persona and role readers validate names and complete path lengths before opening
+files. Project files must resolve inside the project, including through symlinks;
+links within it and trusted user/builtin fallbacks retain their existing behavior.
+The platform containment query resolves actual POSIX paths or Windows handles;
+it reports a filesystem fact and does not replace the higher-level retained
+workspace capability or eliminate filesystem rename races.
+
+All 660 native binaries, 30 proxy tests, PostgreSQL integration 168/168 (26 locally
+unavailable service checks), twenty actual-SDK/browser journeys, four budget
+refusals, two focused ASan/UBSan fixtures, the CMake agent library, Cppcheck without
+increased diagnostics and all 76 lint gates pass. Full-history secret scanning
+finds no leaks. Fresh CI is required for this new source snapshot. Windows native
+execution is not qualified by these Linux checks.
+
+Successful mirror-hook resource handling, other ingress/IR consumers, independent
+local grading/reuse, broader platforms/live subscription and reviewed production
+promotion remain unfinished. Recovered queued work without its original held
+capability fails closed; this is not qualification of restart/resume. Production
+remains KB-free and unpromoted.
+
+## Minimal template fixture sanitizer linkage: 20 October 2026
+
+Published d6f350086 fails native unit shard 1/4 during the sanitizer link of
+delegate-role: role_templates now requires platform_path_is_beneath, but this
+minimal fixture did not link the platform path object. Both minimal consumers,
+delegate-role and cmd-delegate, now declare that dependency using the existing
+platform-selected object list. Both rebuilt fixtures pass ASan/UBSan. The
+containment check and sanitizer gate remain intact. Pending Git MCP source work
+is stashed separately while this CI repair is published.
+
+## Git mirror source retention: 20 October 2026
+
+The pending Git work was restored after publishing sanitizer-link repair
+38659f6a9. Git MCP now acquires its nested workspace scope using the original
+registered client identity before remapping the request. Failed acquisition
+cannot fall through to a server-local probe. Reconstructed cwd requests disable
+stale session redirection; explicit path requests retain their existing
+authoritative routing. Detached requests keep their runner and client path.
+Caller cwd/session/worktree state and the enclosing binding survive every exit.
+
+The real PostgreSQL/server journey deliberately points the session tracking file
+at another dirty checkout. Both path and cwd requests still observe the clean
+approved mirror rather than either dirty source. Full integration passes 168/168
+(26 locally unavailable service checks), including twenty actual-SDK/browser
+journeys and four budget refusals. The focused Git scope fixture passes normally
+and under ASan/UBSan; Cppcheck has no increased diagnostics and all 76 lint gates
+pass. Replacing only the changed Git-dispatch function with its previous body
+reproduces the pinned source exactly; the memory adapter/policy bytes are
+unchanged. This records boundary analysis, not independent release approval.
+
+Fresh CI remains required for this snapshot. The earlier pending migration,
+independent learning, platform/live and production qualifications remain open;
+production stays KB-free and unpromoted.
+
+## Browser usability and replay controls: 20 October 2026
+
+The published Git-source snapshot 5b62ff5f is green in fresh CI: 56 checks pass,
+with the two existing thin-client platform skips. The user's next manual browser
+pass takes priority over the remaining migration work.
+
+The browser now uses a horizontal tool navigation on narrow screens and hides the
+empty channel rail until requested. Workflow options start collapsed when no
+workflow is bound. Conversation text uses readable foreground colors; permission
+and question forms have consistent spacing, focus states and buttons. Question
+submission remains visible but disabled until every answer is valid. The canonical
+transcript obeys the existing history window and no longer adds a duplicate
+text-only copy. Resolved requests are collapsed; control-only turns retain their
+acknowledgments.
+
+The owner-checked canonical SSE subscriber sends a transport-only
+`replay_complete` frame containing `session_id` and the decimal `cursor` after
+initial durable catch-up. It does not allocate an IR sequence or write another
+history event. The browser validates that boundary against ingested history and
+withholds controls until it arrives, including after reconnect or returning to a
+tab. Disposed subscriptions cannot update the UI. Reply guards prevent duplicate
+submission during overlapping delivery, rapid clicks and tab changes; an HTTP
+failure releases the guard for retry. This prevents historical unanswered-looking
+requests from briefly becoming actionable before their saved replies replay.
+
+Channel history and live frames now include the SQLite message ID as a decimal
+string. SSE resumes with Last-Event-ID and reads ordered rows from the durable
+store; the broker only wakes it, with periodic catch-up for missed notifications.
+The initial history query returns the latest 200 rows in chronological order.
+The browser merges snapshots and live arrivals by ID, preserving distinct
+identical-text messages and ignoring late responses from disposed subscriptions.
+A successful reconnect refreshes the snapshot as well.
+
+Validation: 298 frontend tests, production web and console builds, Chromium setup
+recovery and canonical webchat regressions, runtime-web Go race tests, PostgreSQL
+integration 168/168 (26 unavailable local-service checks), twenty actual native
+SDK/browser journeys, four budget refusals, focused server HTTP/dispatch
+ASan/UBSan fixtures, and Cppcheck without increased diagnostics pass. The actual
+server replay fixture verifies readiness follows the last committed envelope for
+both full and resumed replay. Chromium checks POST/SSE overlap, reconnect,
+navigation/reload, a duplicate question and its reply, and the 390px layout.
+This browser fixture uses a deterministic backend; it is separate from the actual
+SDK integration qualification.
+
+All 76 repository lint gates also pass. Fresh CI is required for the browser-fix snapshot. The migration, independent
+learning qualification, broader platform/live checks and reviewed production
+promotion remain unfinished. Production stays KB-free and unpromoted.
+
+Final visual inspection also caught the generic Spinner's 24px padding inside
+Steer: it expanded the busy button and squeezed the mobile input. The composer
+now uses a compact decorative spinner with reduced-motion support; the browser
+regression requires a busy button at most 48px high and a mobile input at least
+250px wide. Selecting a channel closes the rail, and only affirmative control
+actions receive primary styling.
+
+### Retained large legacy sources
+
+Legacy load/latest and host50 source verification read the exact retained
+`primary_sessions` tuple through bounded UTF-8 chunks under its row lock.
+Individual PostgreSQL cells remain capped at 1MiB. Complete source bytes and
+SHA256 are preserved; tmux archives remain outside model history.
+
+Schema migration50 validates a 16MiB bound only for that retained source column.
+The original migration20 SQL/checksum stays immutable. Pending upgrades use one
+explicit alternate20 plan differing only by deferred validation of this source
+check; its actual SQL has its own recorded checksum. Replay accepts only the
+original or this exact alternate plan. Unknown plans still refuse before later
+DDL. Ordinary legacy writes retain their existing wire limit.
+
+The retained-source storage ceiling is inclusive 16MiB; a complete legacy getter
+reply must also fit its existing 16MiB module frame, including its header, field
+lengths and metadata. Load/latest return typed `too_long` without source bytes
+when that complete envelope would exceed the frame. The retained row is unchanged.

@@ -46,6 +46,7 @@ static const egress_entry_t TOOLS[] = {
     {"git_pr", TOOL_EGRESS_EXTERNAL, NULL},
 
     /* --- none: local, or traffic to a trusted internal service --- */
+    {"request_input", TOOL_EGRESS_NONE, NULL},
     {"read_file", TOOL_EGRESS_NONE, NULL},
     {"write_file", TOOL_EGRESS_NONE, NULL},
     {"edit_file", TOOL_EGRESS_NONE, NULL},

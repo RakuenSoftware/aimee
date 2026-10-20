@@ -3,6 +3,23 @@
 #include <assert.h>
 void ir_seam_test_memory(int enabled);
 int ir_seam_test_plan_calls(const char *phase);
+/* This fixture has no stored previous-response checkpoint. Owned profiles
+ * must not ask the legacy Responses continuation owner for SDK history. */
+const char *server_http_identity_principal(void)
+{
+   return "fixture-owner";
+}
+int db1_session_ir_history_load(const char *session, const char *scope, const char *actor,
+                                const char *turn, char **out)
+{
+   (void)session;
+   (void)scope;
+   (void)actor;
+   (void)turn;
+   (void)out;
+   assert(0 && "unexpected SDK history lookup");
+   return -1;
+}
 static char *captured_stream;
 static size_t captured_length;
 static int added_items, done_items, tool_deltas, terminal_events, chat_frames;
@@ -144,6 +161,38 @@ static void test_owned_http_response_boundaries(void)
    puts("OpenAI HTTP owned response rendering preserves ordered blocks and 17 full tool calls");
 }
 
+static int host_entry_profile(aimee_request_t *request, void *context)
+{
+   return aimee_ir_request_clone(context, request);
+}
+static void test_owned_chat_admission_uses_canonical_history(void)
+{
+   aimee_block_t text = {.type = AIMEE_BLK_TEXT, .text = "owned running history"};
+   aimee_message_t message = {.role = "user", .blocks = &text, .n_blocks = 1};
+   aimee_request_t profile = {
+       .model = "host-model", .messages = &message, .n_messages = 1, .mutated = 1};
+   aimee_frontend_state_scope_t previous =
+       aimee_frontend_bind_request_owner(host_entry_profile, &profile);
+   aimee_request_t admitted = {0};
+   char error[160];
+   int rc = openai_admit_completion(
+       "{\"model\":\"sdk-model\",\"messages\":[{\"role\":\"user\",\"content\":\"SDK history\"}]}",
+       1, &admitted, error, sizeof error);
+   assert(!rc && !admitted.raw && !admitted.raw_bytes && admitted.n_messages == 1);
+   assert(!strcmp(admitted.model, "host-model") &&
+          !strcmp(admitted.messages[0].blocks[0].text, "owned running history"));
+   aimee_request_free(&admitted);
+   rc = responses_admit_request("{\"model\":\"sdk-model\",\"input\":\"SDK history\"}", &admitted,
+                                error, sizeof error);
+   assert(!rc && !admitted.raw && !admitted.raw_bytes && admitted.n_messages == 1);
+   assert(!strcmp(admitted.model, "host-model") &&
+          !strcmp(admitted.messages[0].blocks[0].text, "owned running history"));
+   aimee_request_free(&admitted);
+   assert(responses_admit_request("{\"model\":\"sdk-model\",\"input\":42}", &admitted, error,
+                                  sizeof error));
+   aimee_frontend_bind_request_owner(previous.guard, previous.context);
+}
+
 static void test_tool_free_admission_and_text_entry(void)
 {
    char error[160];
@@ -175,7 +224,9 @@ static void test_tool_free_admission_and_text_entry(void)
    assert(native && strstr(native, "raw prompt") && strstr(native, "stop_sequences"));
    free(native);
    aimee_request_free(&request);
-   const char *invalid[] = {"{\"prompt\":\"x\"} trailing",
+   const char *invalid[] = {"{\"prompt\":\"before\\u0000after\"}",
+                            "{\"prompt\":\"first\",\"prompt\":\"second\"}",
+                            "{\"prompt\":\"x\"} trailing",
                             "{\"prompt\":[]}",
                             "{\"prompt\":\"x\",\"max_tokens\":1.5}",
                             "{\"prompt\":\"x\",\"temperature\":3}",
@@ -222,7 +273,8 @@ static void test_canonical_response_cache_round_trip(void)
    assert(encoded && !strstr(encoded, "native_sidecar_must_not_enter_cache"));
    aimee_response_t restored = {0};
    openai_ir_cache_t replay = {0};
-   assert(!openai_ir_cache_decode(encoded, &restored, &replay));
+   int cache_result = openai_ir_cache_decode(encoded, &restored, &replay);
+   assert(!cache_result);
    assert(!strcmp(replay.client_id, first.client_id) && replay.created == first.created);
    assert(restored.n_content == 3 &&
           !strcmp(restored.content[0].thinking_signature, "opaque-signature"));
@@ -239,7 +291,8 @@ static void test_canonical_response_cache_round_trip(void)
    assert(invalid);
    cJSON_ReplaceItemInObjectCaseSensitive(invalid, "usage_in", cJSON_CreateNumber(-1));
    char *bad = cJSON_PrintUnformatted(invalid);
-   assert(openai_ir_cache_decode(bad, &restored, &replay) && !restored.content);
+   cache_result = openai_ir_cache_decode(bad, &restored, &replay);
+   assert(cache_result && !restored.content);
    free(bad);
    cJSON_Delete(invalid);
    free(encoded);
@@ -321,11 +374,57 @@ static void test_restored_history_rechecks_native_provenance(void)
    aimee_frontend_bind_state_guard(previous.guard, previous.context);
 }
 
+static int cache_projection_capture(const aimee_session_event_t *event, void *context)
+{
+   int *state = context;
+   assert(event->kind == AIMEE_SESSION_PROJECTION && event->projection_cache_controls == 3 &&
+          event->projection_reasoning == 0 && event->projection_opaque == 0);
+   state[0]++;
+   return state[1];
+}
+static void test_cache_configuration_at_actual_ingress(void)
+{
+   const char *body =
+       "{\"model\":\"cache-fixture\",\"input\":\"question\",\"stream\":true,\"store\":false,"
+       "\"prompt_cache_key\":\"owner-scope\",\"prompt_cache_retention\":\"24h\","
+       "\"prompt_cache_options\":{\"mode\":\"explicit\",\"ttl\":\"30m\"}}";
+   aimee_request_t request = {0};
+   char error[128];
+   assert(!aimee_frontend_parse_wire(body, strlen(body), AIMEE_WIRE_RESPONSES, &request, error,
+                                     sizeof error));
+   void *previous_context = NULL;
+   aimee_ir_session_sink_fn previous = aimee_ir_session_get_sink(&previous_context);
+   int failed = aimee_ir_session_capture_failed(), state[2] = {0};
+   aimee_ir_session_set_sink(cache_projection_capture, state);
+   const aimee_wire_t wires[] = {AIMEE_WIRE_RESPONSES, AIMEE_WIRE_OPENAI_CHAT,
+                                 AIMEE_WIRE_ANTHROPIC};
+   for (int i = 0; i < 3; i++)
+   {
+      char *native = openai_build_ir_body(&request, wires[i]);
+      cJSON *out = native ? cJSON_Parse(native) : NULL;
+      assert(out);
+      if (i < 2)
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(out, "prompt_cache_key")),
+                        "owner-scope"));
+      else
+         assert(!cJSON_GetObjectItem(out, "prompt_cache_key") && state[0] == 1);
+      cJSON_Delete(out);
+      free(native);
+   }
+   state[1] = -1;
+   assert(!openai_build_ir_body(&request, AIMEE_WIRE_ANTHROPIC));
+   assert(state[0] == 2 && aimee_ir_session_capture_failed());
+   aimee_ir_session_restore_sink(previous, previous_context, failed);
+   aimee_request_free(&request);
+}
+
 int main(void)
 {
+   test_cache_configuration_at_actual_ingress();
    test_restored_history_rechecks_native_provenance();
    test_responses_run_input_controls();
    test_tool_free_admission_and_text_entry();
+   test_owned_chat_admission_uses_canonical_history();
    test_canonical_response_cache_round_trip();
    test_owned_http_response_boundaries();
    const char *body =

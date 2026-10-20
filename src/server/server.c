@@ -1,9 +1,11 @@
+#include "server_verification.h"
 /* server.c: aimee-server core -- event loop, connection handling, method dispatch */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
 #include "workspace_hook_scope.h"
 #include <aimee/translation/hook_ir.h>
+#include <aimee/ir/session_event.h>
 #include "server_internal.h"
 #include "aimee.h"
 #include "harness_memory_scope.h" /* hmem_scope_for_client */
@@ -29,9 +31,14 @@
 #include "modules/workspace/workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
 #include "modules/workspace/workspace_turn.h" /* the ONE workspace bound, shared with the delegate turn */
 #include "server_delegate_monitor.h"
+#include "server_learning_outcome.h"
 #include "server_coord_dispatcher.h"
 #include "server_skill.h"
 #include "server_compute_impl.h"
+#include "server_native_execution.h"
+#include "server_native_history.h"
+#include "server_unknown_effect_policy.h"
+#include "primary_session_adapter.h"
 #include "module_stage_adapters.h"
 #include "trigger_scheduler.h"
 #include "server_trigger.h"
@@ -890,7 +897,10 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                request_id);
    }
    const char *target_cwd = hook.tool_cwd && hook.tool_cwd[0] ? hook.tool_cwd : cwd;
-   int registered = workspace_hook_registered(target_cwd);
+   char authorized_cwd[MAX_PATH_LEN];
+   int registered =
+       workspace_hook_registered(target_cwd) ||
+       workspace_turn_workspace_authorized(target_cwd, authorized_cwd, sizeof authorized_cwd);
    if (!registered)
    {
       free(ti_heap);
@@ -918,19 +928,6 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    session_state_t state;
    session_state_load(&state, sid);
 
-   /* Memory interception: redirect an agent's local memory-file write into the
-    * central store BEFORE the generic guardrails see it (rc==2 -> client deny). */
-   {
-      char mr_msg[1024] = "";
-      if (trusted_client && server_memory_intercept(&hook.call, cwd, req, trusted_client, mr_msg,
-                                                    sizeof(mr_msg)) == 2)
-      {
-         free(ti_heap);
-         aimee_hook_ir_free(&hook);
-         return hook_send_blocked(conn, mr_msg, request_id);
-      }
-   }
-
    /* S2 native-tool externalization gate (tracks 2+3): sends the block on deny. */
    int s2rc = s2_native_gate_hook_pre(conn, sid, tool_name, tool_input, request_id);
    if (s2rc >= 0)
@@ -954,15 +951,40 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int client_non_git =
        hook_identity == 1 &&
        cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "client_non_git_workspace"));
-   int bound = workspace_turn_bind_active(target_cwd);
+   workspace_turn_scope_t *hook_scope = NULL;
+   int bound = workspace_turn_scope_begin(target_cwd, &hook_scope);
+   if (bound < 0)
+   {
+      free(ti_heap);
+      aimee_hook_ir_free(&hook);
+      return hook_send_blocked(conn, "Cannot acquire the registered workspace source.", request_id);
+   }
    const workspace_provider_t *provider = workspace_provider_active();
+   const char *held_cwd = workspace_turn_active_cwd();
+   const char *resource_cwd = held_cwd && held_cwd[0] ? held_cwd : target_cwd;
    int detached = bound && provider->kind == WS_PROVIDER_DETACHED;
-   if (detached)
-      run_cmd_set_cwd(target_cwd);
-   else if (!client_non_git)
-      hooks_ensure_cwd_worktree(&state, sid, target_cwd);
+   if (bound)
+      run_cmd_set_cwd(resource_cwd);
+   /* Memory interception: redirect an agent's local memory-file write into the
+    * central store BEFORE the generic guardrails see it (rc==2 -> client deny). */
+   {
+      char mr_msg[1024] = "";
+      if (trusted_client && server_memory_intercept(&hook.call, resource_cwd, req, trusted_client,
+                                                    mr_msg, sizeof(mr_msg)) == 2)
+      {
+         run_cmd_set_cwd(saved_cwd[0] ? saved_cwd : NULL);
+         if (workspace_turn_scope_end(hook_scope))
+            snprintf(mr_msg, sizeof mr_msg, "Cannot restore the enclosing workspace source.");
+         free(ti_heap);
+         aimee_hook_ir_free(&hook);
+         return hook_send_blocked(conn, mr_msg, request_id);
+      }
+   }
+
+   if (!detached && !client_non_git)
+      hooks_ensure_cwd_worktree(&state, sid, resource_cwd);
    int rc = pre_tool_check_client_workspace(tool_name, tool_input, &state, config_guardrail_mode(),
-                                            target_cwd, msg, sizeof(msg), client_non_git);
+                                            resource_cwd, msg, sizeof(msg), client_non_git);
    session_state_save(&state, sid);
 
    if (rc != 2 && hook_identity == 1)
@@ -974,7 +996,11 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          rc = 2;
    }
    run_cmd_set_cwd(saved_cwd[0] ? saved_cwd : NULL);
-   workspace_turn_unbind_active();
+   if (workspace_turn_scope_end(hook_scope))
+   {
+      rc = 2;
+      snprintf(msg, sizeof msg, "Cannot restore the enclosing workspace source.");
+   }
 
    /* Sub-agent interception (enforce-delegate-only): the primary agent must not
     * spawn its OWN sub-agents. pre_tool_check already blocks Task/Agent/spawn_agent
@@ -1919,6 +1945,14 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
       return -1;
    }
 
+   /* Install host custody/policy before any background worker starts. Detached
+    * delegates can outlive a bounded shutdown drain, so these fail-closed hooks
+    * remain installed for the process lifetime, including store teardown. */
+   primary_session_adapter_set_native_reconcile(server_native_session_reconcile);
+   primary_session_adapter_set_native_history_load(server_native_history_load);
+   aimee_ir_history_set_host_admission(server_native_history_admit_current);
+   policy_set_unknown_effect_gate(server_unknown_effect_policy_stage);
+
    /* The legacy NDJSON RPC listener was removed: aimee-server serves only the
     * /v1 HTTP surface (server_http.c binds its own UDS + optional TCP). No Unix
     * RPC socket is created here, so there is no stale-socket / symlink check and
@@ -2140,6 +2174,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * registrations. aimee's agents and an external MCP client now reach the SAME
     * handler, so the two surfaces cannot drift apart: the drift is what left review
     * panelists unable to ask "is this still called?" while Claude Code could. */
+   server_verification_register();
    mcp_tool_register_native_surface();
    /* Hand the native agent surface aimee's git-write tools. Without this the
     * builtin set is read-only git, so a delegate's ONLY way to land work is to
@@ -2166,6 +2201,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
 }
 int server_run(server_ctx_t *ctx)
 {
+   server_learning_recovery_init();
    /* enforce-delegate-only: register the delegate-availability provider so the
     * gateway strips provider-native sub-agent tools whenever usable delegates
     * exist (CORE gateway_policy can't read agent state itself). */
@@ -2220,6 +2256,7 @@ int server_run(server_ctx_t *ctx)
 }
 void server_shutdown(server_ctx_t *ctx)
 {
+   server_learning_recovery_shutdown();
    /* Stop trigger scheduler before draining compute pool */
    trigger_scheduler_shutdown();
    server_delegate_monitor_shutdown();
@@ -2253,6 +2290,7 @@ void server_shutdown(server_ctx_t *ctx)
    delegate_ondemand_drain(5000);
    /* Shut down compute pool (drain in-flight work) */
    compute_pool_shutdown(&ctx->pool);
+   server_native_execution_shutdown();
    pthread_cond_destroy(&ctx->compute_budget_cond);
    pthread_mutex_destroy(&ctx->compute_budget_mutex);
    pthread_mutex_destroy(&ctx->conns_mutex);

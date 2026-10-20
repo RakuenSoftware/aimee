@@ -133,10 +133,14 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
    if (!ctx || ctx->context_refused || !ctx->principal[0] || !ctx->request_id[0] || !sid ||
        !sid[0] || !action_attempt[0] || (!authorized && !(ctx->capabilities & CAP_TOOL_EXECUTE)) ||
        action_intent)
+   {
+      policy_unknown_effect_clear();
       return -1;
+   }
    if (policy_action_inherit(sid) != 0)
    {
       snprintf(action_refusal, sizeof(action_refusal), "action_lineage_unavailable");
+      policy_unknown_effect_clear();
       return -1;
    }
    int rc = -1;
@@ -166,7 +170,13 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
    char *wire = cJSON_PrintUnformatted(*arguments);
    char reason[256];
    snprintf(action_refusal, sizeof(action_refusal), "current_operator_policy_refused");
-   if (!wire || policy_recheck_action_tool(name, "filesystem", wire, reason, sizeof(reason)) != 0)
+   if (!wire || policy_recheck_action_tool_attempt(
+                    name, "filesystem", wire, action_attempt,
+                    (!strcmp(action_text(resource, "class"), "read_only") ||
+                     !strcmp(action_text(resource, "class"), "sensitive_read"))
+                        ? AIMEE_TOOL_POLICY_READ
+                        : 0,
+                    reason, sizeof(reason)) != 0)
    {
       free(wire);
       goto done;
@@ -248,6 +258,8 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
    rc = 0;
    action_refusal[0] = 0;
 done:
+   if (rc)
+      policy_unknown_effect_clear();
    ingress_preinject_release_send_guard(guard);
    cJSON_Delete(request);
    cJSON_Delete(resource);

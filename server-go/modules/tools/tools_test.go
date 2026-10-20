@@ -28,6 +28,7 @@ func TestToolClassificationParity(t *testing.T) {
 		"git_push":                ClassRemote,
 		"web_search":              ClassRemote,
 		"web_read":                ClassRemote,
+		"git_verify":              ClassExec,
 		"git_commit":              ClassWrite,
 		"context_contract_expand": ClassControl,
 		"request_input":           ClassControl,

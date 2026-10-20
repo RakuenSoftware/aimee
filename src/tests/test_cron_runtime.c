@@ -30,6 +30,7 @@ static int g_last_delivered;
 static int g_next_run_id = 1;
 static int g_delivery_count;
 static const char *g_agent_response = "ok";
+static int g_agent_rc;
 static char g_agent_prompt[16384];
 static pthread_mutex_t g_state_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -47,6 +48,7 @@ static void reset_state(void)
    g_last_delivered = 0;
    g_delivery_count = 0;
    g_agent_response = "ok";
+   g_agent_rc = 0;
 }
 
 int db1_cron_job_upsert(const cron_job_t *job)
@@ -149,9 +151,15 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
    (void)max_tokens;
    memset(out, 0, sizeof(*out));
    snprintf(g_agent_prompt, sizeof(g_agent_prompt), "%s", user_prompt ? user_prompt : "");
+   assert(aimee_ir_response_from_text(&out->canonical_response,
+                                      g_agent_response ? g_agent_response : "", "fixture") == 0);
+   out->canonical_response.raw = cJSON_Parse("{\"opaque\":\"retain-until-output-boundary\"}");
+   assert(out->canonical_response.raw);
    out->response = strdup(g_agent_response ? g_agent_response : "");
-   out->success = 1;
-   return 0;
+   out->success = !g_agent_rc;
+   if (g_agent_rc)
+      snprintf(out->error, sizeof out->error, "fixture provider failure");
+   return g_agent_rc;
 }
 
 int notify_deliver_target(const notify_target_t *target, const char *event_name,
@@ -258,6 +266,18 @@ static void test_llm_silent_response_records_no_delivery(void)
    assert(g_last_delivered == 0);
    assert(g_delivery_count == 0);
    assert(strcmp(g_last_output, "[SILENT]\n") == 0);
+   cJSON_Delete(resp);
+}
+
+static void test_llm_failure_releases_owned_error_response(void)
+{
+   reset_state();
+   cron_job_t job = base_job("llm");
+   g_agent_rc = -1;
+   cJSON *resp = NULL;
+   (void)cron_run_config_job(&job, &resp);
+   assert(strcmp(g_last_status, "failed") == 0);
+   assert(strstr(g_last_error, "fixture provider failure"));
    cJSON_Delete(resp);
 }
 
@@ -514,6 +534,7 @@ static void test_parallel_workdir_jobs_are_serialized(void)
 int main(void)
 {
    test_llm_silent_response_records_no_delivery();
+   test_llm_failure_releases_owned_error_response();
    test_llm_only_if_changed_dedupes_final_output();
    test_context_from_injects_prior_output();
    test_when_context_contains_skips_absent_substring();

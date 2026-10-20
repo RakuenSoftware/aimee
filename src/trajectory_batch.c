@@ -195,7 +195,7 @@ int trajectory_batch_run(agent_config_t *cfg, const trajectory_batch_opts_t *opt
 
       char safe[128];
       safe_name(tasks[i].name, safe, sizeof(safe));
-      agent_result_t ar;
+      agent_result_t ar = {0};
       int rc = agent_run(cfg, tasks[i].role[0] ? tasks[i].role : "execute", NULL, tasks[i].prompt,
                          0, &ar);
       int passed = task_passed(&tasks[i], &ar, rc);
@@ -205,7 +205,7 @@ int trajectory_batch_run(agent_config_t *cfg, const trajectory_batch_opts_t *opt
           !traj)
       {
          failures++;
-         free(ar.response);
+         agent_result_clear_response(&ar);
          free(traj);
          continue;
       }
@@ -230,7 +230,7 @@ int trajectory_batch_run(agent_config_t *cfg, const trajectory_batch_opts_t *opt
             cJSON_AddNumberToObject(counts, toolset ? toolset : "", 1);
       }
       free(traj);
-      free(ar.response);
+      agent_result_clear_response(&ar);
    }
 
    agent_tools_set_active_toolset(saved_buf);

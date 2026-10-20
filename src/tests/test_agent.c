@@ -118,7 +118,10 @@ void test_cancelled_durable_job_blocks_tool_dispatch(void);
 void test_native_mcp_permission_admission(void);
 void test_script_rpc_keeps_permission_scope(void);
 void test_script_rpc_keeps_host_context(void);
+int script_rpc_admission_fixture_main(void);
+void test_script_rpc_admission_process(const char *executable);
 void test_delegate_bash_cancel_kills_running_tool(void);
+void test_bash_host_cancellation_and_closed_output_deadline(void);
 void test_parent_write_guard_readonly_pipeline(void);
 void test_stale_parent_guard_blocks_other_worktree_then_clear_unblocks(void);
 void test_parent_write_guard_readonly_large_find(void);
@@ -714,6 +717,12 @@ static void test_tool_surface_single_source(void)
    assert(status == 0 && independent_count == count);
    cJSON *chat = build_tools_array();
    cJSON *resp = build_tools_array_responses();
+   assert(tools_has(chat, "request_input", 1) && tools_has(resp, "request_input", 0));
+   cJSON *question = tools_find(chat, "request_input", 1);
+   cJSON *parameters = cJSON_GetObjectItemCaseSensitive(question, "parameters");
+   cJSON *required = cJSON_GetObjectItemCaseSensitive(parameters, "required");
+   assert(cJSON_GetArraySize(required) == 1 &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(required, 0)), "question"));
 
    /* Chat tools nest {name,description,parameters} under "function"; Responses
     * tools carry them flat. Both tag type:function. */
@@ -1344,11 +1353,11 @@ static void test_legacy_tmux_executes_structured_headless(void)
    agent_request_creds_restore(&empty);
    int messages = 0;
    aimee_ir_session_set_sink(headless_legacy_capture, &messages);
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(!agent_execute_with_tools(&agent, NULL, "system", "user", 100, 0.1, &out));
    assert(out.success && out.response && !strcmp(out.response, "structured legacy runtime"));
    assert(messages == 1);
-   free(out.response);
+   agent_result_clear_response(&out);
    aimee_ir_session_set_sink(NULL, NULL);
    agent_request_creds_restore(&previous);
    unlink(path);
@@ -3818,175 +3827,6 @@ static void test_symlink_escape_rejected(void)
    rmdir(tmpdir);
 }
 
-/* --- messages_compact_consecutive tests --- */
-
-static cJSON *make_msg(const char *role, const char *content)
-{
-   cJSON *msg = cJSON_CreateObject();
-   cJSON_AddStringToObject(msg, "role", role);
-   cJSON_AddStringToObject(msg, "content", content);
-   return msg;
-}
-
-static void test_compact_empty(void)
-{
-   assert(messages_compact_consecutive(NULL) == 0);
-   cJSON *arr = cJSON_CreateArray();
-   assert(messages_compact_consecutive(arr) == 0);
-   assert(cJSON_GetArraySize(arr) == 0);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_single(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "hello"));
-   assert(messages_compact_consecutive(arr) == 0);
-   assert(cJSON_GetArraySize(arr) == 1);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_two_same_role(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "hello"));
-   cJSON_AddItemToArray(arr, make_msg("user", "world"));
-   assert(messages_compact_consecutive(arr) == 1);
-   assert(cJSON_GetArraySize(arr) == 1);
-   const char *content =
-       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 0), "content"));
-   assert(strcmp(content, "hello\n\nworld") == 0);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_five_same_role(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "a"));
-   cJSON_AddItemToArray(arr, make_msg("user", "b"));
-   cJSON_AddItemToArray(arr, make_msg("user", "c"));
-   cJSON_AddItemToArray(arr, make_msg("user", "d"));
-   cJSON_AddItemToArray(arr, make_msg("user", "e"));
-   assert(messages_compact_consecutive(arr) == 4);
-   assert(cJSON_GetArraySize(arr) == 1);
-   const char *content =
-       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 0), "content"));
-   assert(strcmp(content, "a\n\nb\n\nc\n\nd\n\ne") == 0);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_mixed_roles(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "u1"));
-   cJSON_AddItemToArray(arr, make_msg("user", "u2"));
-   cJSON_AddItemToArray(arr, make_msg("assistant", "a1"));
-   cJSON_AddItemToArray(arr, make_msg("user", "u3"));
-   cJSON_AddItemToArray(arr, make_msg("user", "u4"));
-   assert(messages_compact_consecutive(arr) == 2);
-   assert(cJSON_GetArraySize(arr) == 3);
-   const char *c0 =
-       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 0), "content"));
-   const char *r1 = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 1), "role"));
-   const char *c2 =
-       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 2), "content"));
-   assert(strcmp(c0, "u1\n\nu2") == 0);
-   assert(strcmp(r1, "assistant") == 0);
-   assert(strcmp(c2, "u3\n\nu4") == 0);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_no_consecutive(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "u1"));
-   cJSON_AddItemToArray(arr, make_msg("assistant", "a1"));
-   cJSON_AddItemToArray(arr, make_msg("user", "u2"));
-   assert(messages_compact_consecutive(arr) == 0);
-   assert(cJSON_GetArraySize(arr) == 3);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_idempotent(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "a"));
-   cJSON_AddItemToArray(arr, make_msg("user", "b"));
-   messages_compact_consecutive(arr);
-   assert(cJSON_GetArraySize(arr) == 1);
-   assert(messages_compact_consecutive(arr) == 0);
-   assert(cJSON_GetArraySize(arr) == 1);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_skips_structured_content(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON *msg1 = cJSON_CreateObject();
-   cJSON_AddStringToObject(msg1, "role", "assistant");
-   cJSON_AddNullToObject(msg1, "content");
-   cJSON_AddItemToArray(arr, msg1);
-   cJSON_AddItemToArray(arr, make_msg("assistant", "text response"));
-   assert(messages_compact_consecutive(arr) == 0);
-   assert(cJSON_GetArraySize(arr) == 2);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_skips_openai_tool_results(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "run two tools"));
-   cJSON *assistant = cJSON_CreateObject();
-   cJSON_AddStringToObject(assistant, "role", "assistant");
-   cJSON_AddNullToObject(assistant, "content");
-   cJSON *tool_calls = cJSON_AddArrayToObject(assistant, "tool_calls");
-   for (int i = 0; i < 2; i++)
-   {
-      char id[16];
-      snprintf(id, sizeof(id), "call_%d", i + 1);
-      cJSON *tc = cJSON_CreateObject();
-      cJSON_AddStringToObject(tc, "id", id);
-      cJSON_AddStringToObject(tc, "type", "function");
-      cJSON *fn = cJSON_AddObjectToObject(tc, "function");
-      cJSON_AddStringToObject(fn, "name", "bash");
-      cJSON_AddStringToObject(fn, "arguments", "{}");
-      cJSON_AddItemToArray(tool_calls, tc);
-   }
-   cJSON_AddItemToArray(arr, assistant);
-   for (int i = 0; i < 2; i++)
-   {
-      char id[16];
-      char content[16];
-      snprintf(id, sizeof(id), "call_%d", i + 1);
-      snprintf(content, sizeof(content), "result_%d", i + 1);
-      cJSON *tool = cJSON_CreateObject();
-      cJSON_AddStringToObject(tool, "role", "tool");
-      cJSON_AddStringToObject(tool, "tool_call_id", id);
-      cJSON_AddStringToObject(tool, "content", content);
-      cJSON_AddItemToArray(arr, tool);
-   }
-   assert(messages_compact_consecutive(arr) == 0);
-   assert(cJSON_GetArraySize(arr) == 4);
-   cJSON *tool1 = cJSON_GetArrayItem(arr, 2);
-   cJSON *tool2 = cJSON_GetArrayItem(arr, 3);
-   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(tool1, "tool_call_id")), "call_1") == 0);
-   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(tool2, "tool_call_id")), "call_2") == 0);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_system_role(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "rule1"));
-   cJSON_AddItemToArray(arr, make_msg("system", "rule2"));
-   assert(messages_compact_consecutive(arr) == 1);
-   assert(cJSON_GetArraySize(arr) == 1);
-   const char *content =
-       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 0), "content"));
-   assert(strcmp(content, "rule1\n\nrule2") == 0);
-   cJSON_Delete(arr);
-}
-
 static void test_delegation_error_guidance(void)
 {
    char buf[512];
@@ -4428,6 +4268,20 @@ static void test_canonical_external_run_preserves_budget_refusal(void)
       assert(!strcmp(result.error, "request_budget_unavailable"));
       assert(!response.n_content && !result.response);
       aimee_response_free(&response);
+      for (int control = 0; control < 3; control++)
+      {
+         request.prompt_cache_key = control == 0 ? "" : NULL;
+         request.prompt_cache_retention = control == 1 ? "24h" : NULL;
+         request.prompt_cache_options = control == 2 ? cJSON_CreateObject() : NULL;
+         assert(!agent_request_with_tools_supported(&request));
+         assert(agent_execute_request_with_tools(&agent, NULL, "execute", &request, &response,
+                                                 &result) == AGENT_RC_CONTEXT_REFUSED);
+         assert(!strcmp(result.error, "run request contains unsupported execution controls"));
+         assert(!response.n_content && !result.response);
+         cJSON_Delete(request.prompt_cache_options);
+         request.prompt_cache_key = request.prompt_cache_retention = NULL;
+         request.prompt_cache_options = NULL;
+      }
    }
    request_context_restore(&previous);
    request_context_snapshot_clear(&previous);
@@ -4509,8 +4363,13 @@ static void test_owned_tool_and_source_handoff(void)
         "isolation");
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+   if (argc == 2 && !strcmp(argv[1], "--script-rpc-admission"))
+      return script_rpc_admission_fixture_main();
+   char test_executable[MAX_PATH_LEN];
+   char *self = realpath(argv[0], test_executable);
+   assert(self);
    /* BEFORE ANYTHING ELSE, because the fixture configures the module runtime and
       starts the bus, and obs_bus refuses to be configured once it is running.
       Several tests below bring the bus up as a side effect, so a fixture started
@@ -4570,8 +4429,7 @@ int main(void)
    test_one_delegates_permissions_are_not_anothers();
    test_owned_tool_and_source_handoff();
    test_native_mcp_permission_admission();
-   test_script_rpc_keeps_permission_scope();
-   test_script_rpc_keeps_host_context();
+   test_script_rpc_admission_process(test_executable);
    test_provider_env_credentials_and_headers();
    test_dispatch_carries_owner_failure_status();
    test_codex_oauth_request_creds();
@@ -4666,20 +4524,11 @@ int main(void)
    test_path_traversal_rejected();
    test_sensitive_path_rejected();
    test_symlink_escape_rejected();
-   test_compact_empty();
-   test_compact_single();
-   test_compact_two_same_role();
-   test_compact_five_same_role();
-   test_compact_mixed_roles();
-   test_compact_no_consecutive();
-   test_compact_idempotent();
-   test_compact_skips_structured_content();
-   test_compact_skips_openai_tool_results();
-   test_compact_system_role();
    test_delegation_error_guidance();
    test_cancelled_durable_job_blocks_tool_dispatch();
    test_shell_worktree_rewrite_is_applied_not_refused();
    test_delegate_bash_cancel_kills_running_tool();
+   test_bash_host_cancellation_and_closed_output_deadline();
    test_parent_write_guard_readonly_large_find();
    test_agent_trace_log_uses_db1_execution_trace();
 

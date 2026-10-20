@@ -21,6 +21,7 @@
 #include "aimee.h" /* MAX_PATH_LEN via agent_types.h */
 #include <aimee/tools/agent_tools.h>
 #include "cJSON.h"
+#include "toolset.h"
 #include <aimee/ir/aimee_ir.h>
 #include <aimee/tools/module_api.h>
 #include "../modules/tools/agent_tools_internal.h"
@@ -243,6 +244,72 @@ static void test_classifier_failure_retains_unknown(void)
    assert(result == AIMEE_TOOL_CLASS_UNKNOWN);
 }
 
+static cJSON *verifier_advert(const char *tool)
+{
+   if (strcmp(tool, "git_verify"))
+      return fake_advert(tool);
+   return cJSON_Parse("{\"name\":\"git_verify\",\"description\":\"Configured "
+                      "verifier\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"action\":{"
+                      "\"type\":\"string\",\"enum\":[\"run\",\"check\",\"status\"]}}}}");
+}
+static int has_chat_tool(const cJSON *tools, const char *name)
+{
+   const cJSON *tool;
+   cJSON_ArrayForEach(tool,
+                      tools) if (!strcmp(name,
+                                         cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(
+                                             cJSON_GetObjectItemCaseSensitive(tool, "function"),
+                                             "name")))) return 1;
+   return 0;
+}
+static void test_diagnose_verifier_catalog_and_dispatch_agree(void)
+{
+   /* The actual daemon integration checks this membership against the real MCP
+    * registration table; this unit exercises its native admission and dispatch. */
+   agent_tools_set_mcp_provider(fake_call, verifier_advert);
+   agent_tools_register_mcp_tool("git_verify");
+   toolset_register_native_tool("git_verify", "core");
+   toolset_register_native_tool("git_verify", "current_code");
+   agent_tools_scope_snapshot_t previous;
+   agent_tools_scope_bookmark(&previous);
+   assert(!strcmp(toolset_for_delegate_role("diagnose"), "current_code"));
+   agent_tools_set_active_toolset(toolset_for_delegate_role("diagnose"));
+   agent_tools_knowledge_write_set(0);
+   agent_tools_shell_set(1);
+   agent_tools_set_dispatch_role("diagnose");
+   cJSON *tools = build_tools_array();
+   agent_tools_filter_for_role(tools, "diagnose");
+   assert(has_chat_tool(tools, "git_verify"));
+   const char *denied[] = {"git_commit",   "git_push",    "git_pr",
+                           "git_branch",   "find_symbol", "search_memory",
+                           "index_ingest", "kb_build",    "memory_store"};
+   for (size_t i = 0; i < sizeof denied / sizeof denied[0]; ++i)
+   {
+      assert(!has_chat_tool(tools, denied[i]));
+      assert(!agent_tools_tool_allowed_for_role("diagnose", denied[i]));
+   }
+   cJSON_Delete(tools);
+   aimee_tool_t admitted = {0};
+   assert(!agent_tools_execution_definition("git_verify", &admitted));
+   cJSON *args = cJSON_Parse("{\"action\":\"run\"}");
+   assert(agent_tools_permission_check(admitted.name, args) == AGENT_TOOL_PERMISSION_ALLOWED);
+   int before = g_call_count, is_error = 1;
+   char *out = dispatch_tool_call_ir_ctx_status(&admitted, "{\"action\":\"run\"}", 5000, &is_error);
+   assert(out && !is_error && g_call_count == before + 1 && !strcmp(g_last_tool, "git_verify"));
+   free(out);
+   agent_tools_shell_set(0);
+   assert(agent_tools_permission_check(admitted.name, args) == AGENT_TOOL_PERMISSION_SHELL);
+   out = dispatch_tool_call_ir_ctx_status(&admitted, "{\"action\":\"run\"}", 5000, &is_error);
+   assert(out && is_error && g_call_count == before + 1);
+   free(out);
+   cJSON_Delete(args);
+   aimee_tool_free(&admitted);
+   agent_tools_set_dispatch_role(NULL);
+   agent_tools_scope_restore(&previous);
+   puts("  PASS: diagnose verifier advert/filter/dispatch identity; shell, Git-write and KB "
+        "ceilings retained");
+}
+
 int main(void)
 {
    printf("test_mcp_native_dispatch:\n");
@@ -253,6 +320,7 @@ int main(void)
    test_no_provider_is_an_error_not_a_crash();
    test_kb_federated_tool_is_advertised();
    test_kb_federated_tool_dispatches_to_kb();
+   test_diagnose_verifier_catalog_and_dispatch_agree();
    printf("All mcp_native_dispatch tests passed.\n");
    return 0;
 }

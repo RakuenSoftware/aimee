@@ -17,12 +17,17 @@ import (
 	"syscall"
 	"time"
 
+	"encoding/json"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
+	"github.com/JBailes/aimee/server-go/modules/egress"
 	"github.com/JBailes/aimee/server-go/modules/sandbox"
 )
 
 func commandRunner(ctx context.Context, name string, args ...string) (string, error) {
-	output, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+	output, err := exec.CommandContext(ctx, name, args...).Output()
+	if failed, ok := err.(*exec.ExitError); ok && len(failed.Stderr) != 0 {
+		return string(failed.Stderr), err
+	}
 	return string(output), err
 }
 
@@ -125,16 +130,121 @@ func proxy(ctx context.Context, args []string) error {
 	return nil
 }
 
+// Verification custody ends with the server process that launched this helper.
+// An expected PID is required: a helper first scheduled after its server dies
+// must not adopt init (or a subreaper) as a new execution owner.
+func verifierParentContext(ctx context.Context, expected int) (context.Context, func(), error) {
+	if expected <= 0 || os.Getppid() != expected {
+		return nil, nil, errors.New("verification parent identity unavailable")
+	}
+	owned, cancel := context.WithCancel(ctx)
+	joined := make(chan struct{})
+	go func() {
+		defer close(joined)
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-owned.Done():
+				return
+			case <-ticker.C:
+				if os.Getppid() != expected {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return owned, func() { cancel(); <-joined }, nil
+}
+
+func verify(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("verify", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	socket := flags.String("engine-socket", "", "configured Docker Unix socket")
+	parent := flags.Int("parent-pid", 0, "required launching server process ID")
+	ownerState := flags.String("owner-state-dir", "", "required private resource owner state directory")
+	image := flags.String("image", "", "configured private test image")
+	directory := flags.String("workdir", "", "self-contained private Git snapshot")
+	user := flags.String("user", "", "numeric uid:gid")
+	mounts := flags.String("mount-table", "", "host mount translation facts")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("unexpected verifier positional arguments")
+	}
+	owned, joined, err := verifierParentContext(ctx, *parent)
+	if err != nil {
+		return err
+	}
+	defer joined()
+	ctx = owned
+	request, err := delegates.DecodePrivateTestRequest(os.Stdin)
+	if err != nil {
+		return err
+	}
+	openCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	engine, err := egress.OpenDockerEngine(openCtx, *socket)
+	cancel()
+	if err != nil {
+		return err
+	}
+	defer engine.Close()
+	lease, err := delegates.AcquirePrivateWorkerLease(*ownerState)
+	if err != nil {
+		return err
+	}
+	removed := false
+	defer func() { lease.Close(removed) }()
+	receipt := delegates.ExecutePrivateTests(ctx, request, delegates.PrivateTestFacts{Image: *image, WorkDir: *directory, User: *user, MountTable: *mounts, WorkerLabels: lease.Labels()}, engine)
+	removed = receipt.RemovalAcknowledged
+	// Execution failure is a receipt, not a transport exit-code verdict.
+	return json.NewEncoder(os.Stdout).Encode(receipt)
+}
+
+func reapVerifiers(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("reap-verifiers", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	directory := flags.String("owner-state-dir", "", "private resource owner state directory")
+	socket := flags.String("engine-socket", "", "configured Docker Unix socket")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("unexpected reaper positional arguments")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	engine, err := egress.OpenDockerEngine(ctx, *socket)
+	if err != nil {
+		return err
+	}
+	defer engine.Close()
+	count, err := delegates.ReapPrivateWorkers(ctx, *directory, engine)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(os.Stdout, count)
+	return err
+}
+
 func run(ctx context.Context, args []string) error {
 	if len(args) >= 2 && (args[1] == "version" || args[1] == "--version") {
 		fmt.Println("aimee-delegate-egress go-v1")
 		return nil
 	}
+	if len(args) >= 2 && args[1] == "reap-verifiers" {
+		return reapVerifiers(ctx, args[2:])
+	}
+	if len(args) >= 2 && args[1] == "verify" {
+		return verify(ctx, args[2:])
+	}
 	if len(args) >= 2 && args[1] == "proxy" {
 		return proxy(ctx, args[2:])
 	}
 	if len(args) < 2 || args[1] != "acquire" {
-		return fmt.Errorf("usage: aimee-delegate-egress acquire [flags] | proxy [flags] | version")
+		return fmt.Errorf("usage: aimee-delegate-egress acquire [flags] | verify [flags] | reap-verifiers [flags] | proxy [flags] | version")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()

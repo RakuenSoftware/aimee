@@ -46,6 +46,7 @@
   "get_identity": {"class": "read", "side_effect": "read", "categories": ["read"]},
   "git": {"class": "remote", "side_effect": "external", "categories": ["external", "network"]},
   "git_branch": {"class": "write", "side_effect": "write", "categories": ["write", "filesystem"]},
+  "git_verify": {"class": "exec", "side_effect": "write", "categories": ["write", "execution"]},
   "git_commit": {"class": "write", "side_effect": "write", "categories": ["write", "filesystem"]},
   "git_diff": {"class": "read", "side_effect": "read", "categories": ["read", "filesystem"]},
   "git_log": {"class": "read", "side_effect": "read", "categories": ["read", "filesystem"]},

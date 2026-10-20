@@ -270,6 +270,18 @@ static void test_history_entry_migration(void)
       assert(input);
       cJSON *history = aimee_frontend_history_import(input, wires[wire]);
       assert(history);
+      cJSON *report = NULL;
+      cJSON *reported = aimee_frontend_history_import_report(native[wire],
+                                                             wire == 0   ? "anthropic"
+                                                             : wire == 2 ? "chatgpt"
+                                                                         : "openai",
+                                                             "owned", "agent", &report);
+      assert(reported && report && cJSON_Compare(history, reported, 1));
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(report, "outcome")), "normalized"));
+      if (wire == 0)
+         assert(cJSON_GetObjectItem(report, "removed_thinking_bindings")->valueint > 0);
+      cJSON_Delete(reported);
+      cJSON_Delete(report);
       int calls = 0, results = 0, thinking = 0;
       const cJSON *item;
       cJSON_ArrayForEach(item, history)
@@ -299,6 +311,28 @@ static void test_history_entry_migration(void)
       cJSON_Delete(history);
       cJSON_Delete(input);
    }
+   cJSON *report = NULL;
+   const char *canonical =
+       "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"original\"}]}]";
+   cJSON *exact =
+       aimee_frontend_history_import_report(canonical, "anthropic", "owned", "agent", &report);
+   assert(exact && report &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(report, "outcome")), "exact"));
+   cJSON_Delete(exact);
+   cJSON_Delete(report);
+   report = NULL;
+   assert(!aimee_frontend_history_import_report("screen: tool call may have occurred\n", "tmux-cli",
+                                                "owned", "agent", &report));
+   assert(report &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(report, "outcome")), "archived"));
+   assert(cJSON_GetObjectItem(report, "imported_messages")->valueint == 0);
+   cJSON_Delete(report);
+   report = NULL;
+   assert(!aimee_frontend_history_import_report("", "tmux-cli", "owned", "agent", &report));
+   assert(report &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(report, "outcome")), "refused"));
+   assert(cJSON_GetObjectItem(report, "archive_chunks")->valueint == 0);
+   cJSON_Delete(report);
    printf("  native-history-entry-retains-reasoning-and-tool-pairs OK\n");
 }
 
@@ -1026,8 +1060,276 @@ static void test_host_state_guard_does_not_mutate_replay_reference(void)
    aimee_request_free(&request);
 }
 
+static void test_prompt_cache_controls(void)
+{
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_RESPONSES};
+   for (int source = 0; source < 2; source++)
+   {
+      const char *content = source ? "\"input\":[{\"role\":\"user\",\"content\":\"question\"}]"
+                                   : "\"messages\":[{\"role\":\"user\",\"content\":\"question\"}]";
+      char body[1024];
+      snprintf(body, sizeof body,
+               "{ \"model\":\"cache-fixture\",\"stream\":true,\"store\":false,%s,"
+               "\"prompt_cache_key\":\"tenant/user\",\"prompt_cache_retention\":\"24h\","
+               "\"prompt_cache_options\":{\"mode\":\"explicit\",\"ttl\":\"30m\","
+               "\"opaque\":0.123456789012345678901234567890} }",
+               content);
+      aimee_request_t request = {0};
+      char error[128];
+      assert(!aimee_frontend_parse_wire(body, strlen(body), wires[source], &request, error,
+                                        sizeof error));
+      char *native = aimee_backend_render_wire(&request, wires[source]);
+      assert(native && !strcmp(native, body));
+      free(native);
+      assert(!strcmp(request.prompt_cache_key, "tenant/user") &&
+             !strcmp(request.prompt_cache_retention, "24h"));
+      for (int target = 0; target < 2; target++)
+      {
+         native = aimee_backend_render_wire(&request, wires[target]);
+         cJSON *output = native ? cJSON_Parse(native) : NULL;
+         assert(output &&
+                !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(output, "prompt_cache_key")),
+                        "tenant/user"));
+         assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(output, "prompt_cache_retention")),
+                        "24h"));
+         assert(cJSON_Compare(cJSON_GetObjectItem(output, "prompt_cache_options"),
+                              request.prompt_cache_options, 1));
+         assert(strstr(native, "0.123456789012345678901234567890"));
+         cJSON_Delete(output);
+         free(native);
+      }
+      /* Cache-only mutations must invalidate raw replay even without a dirty flag. */
+      for (int change = 0; change < 3; change++)
+      {
+         aimee_request_free(&request);
+         assert(!aimee_frontend_parse_wire(body, strlen(body), wires[source], &request, error,
+                                           sizeof error));
+         const char *expected;
+         if (change == 0)
+         {
+            free(request.prompt_cache_key);
+            request.prompt_cache_key = strdup("new-owner-scope");
+            expected = "new-owner-scope";
+         }
+         else if (change == 1)
+         {
+            free(request.prompt_cache_retention);
+            request.prompt_cache_retention = strdup("in_memory");
+            expected = "in_memory";
+         }
+         else
+         {
+            cJSON_ReplaceItemInObject(request.prompt_cache_options, "opaque",
+                                      cJSON_Parse("0.123456789012345678901234567891"));
+            expected = "0.123456789012345678901234567891";
+         }
+         native = aimee_backend_render_wire(&request, wires[source]);
+         assert(native && strstr(native, expected));
+         free(native);
+      }
+      cJSON *canonical = aimee_ir_request_json(&request);
+      assert(canonical && cJSON_Compare(cJSON_GetObjectItem(canonical, "prompt_cache_options"),
+                                        request.prompt_cache_options, 1));
+      cJSON_Delete(canonical);
+      aimee_wire_projection_report_t report;
+      aimee_backend_projection_report(&request, AIMEE_WIRE_ANTHROPIC, &report);
+      assert(report.omitted_cache_controls == 3);
+      aimee_backend_projection_report(&request, wires[source], &report);
+      assert(!report.omitted_cache_controls);
+      aimee_request_free(&request);
+      for (int invalid = 0; invalid < 3; invalid++)
+      {
+         cJSON *json = cJSON_Parse(body);
+         const char *key = (const char *[]){"prompt_cache_key", "prompt_cache_retention",
+                                            "prompt_cache_options"}[invalid];
+         cJSON_ReplaceItemInObject(json, key, cJSON_CreateArray());
+         int rc = source ? responses_frontend_parse(json, &request, error, sizeof error)
+                         : openai_frontend_parse(json, &request, error, sizeof error);
+         assert(rc && !request.prompt_cache_key && !request.prompt_cache_options);
+         aimee_request_free(&request);
+         cJSON_Delete(json);
+      }
+   }
+}
+
+typedef struct
+{
+   aimee_request_t profile;
+   int owners, guards, refuse;
+} owned_entry_fixture_t;
+static int restore_owned_entry(aimee_request_t *request, void *context)
+{
+   owned_entry_fixture_t *fixture = context;
+   fixture->owners++;
+   return fixture->refuse ? -1 : aimee_ir_request_clone(&fixture->profile, request);
+}
+static int inspect_owned_entry(aimee_request_t *request, void *context)
+{
+   owned_entry_fixture_t *fixture = context;
+   fixture->guards++;
+   assert(!strcmp(request->model, "host-model"));
+   assert(request->n_messages == 1 &&
+          !strcmp(request->messages[0].blocks[0].text, "host canonical history"));
+   assert(!request->raw_bytes && !request->raw);
+   return 0;
+}
+static void test_host_profile_sidecars_exclude_native_selectors(void)
+{
+   aimee_request_t profile = {.model = "host-model", .frontend = AIMEE_WIRE_OPENAI_CHAT};
+   const char *layouts[] = {
+       "{\"model\":\"host-model\",\"chat_template_kwargs\":{\"enable_thinking\":false}}",
+       "{\"system\":[{\"type\":\"text\",\"text\":\"host system\","
+       "\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"}}]}"};
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_ANTHROPIC};
+   for (int i = 0; i < 2; i++)
+   {
+      profile.frontend = wires[i];
+      profile.raw = cJSON_Parse(layouts[i]);
+      assert(aimee_backend_host_profile_valid(&profile));
+      cJSON_AddStringToObject(profile.raw, "conversation", "SDK-side history");
+      assert(!aimee_backend_host_profile_valid(&profile));
+      cJSON_Delete(profile.raw);
+   }
+   profile.raw = cJSON_Parse("{\"model\":\"other-model\"}");
+   profile.frontend = AIMEE_WIRE_OPENAI_CHAT;
+   assert(!aimee_backend_host_profile_valid(&profile));
+   profile.frontend = AIMEE_WIRE_RESPONSES;
+   assert(!aimee_backend_host_profile_valid(&profile));
+   cJSON_Delete(profile.raw);
+   profile.raw = NULL;
+   assert(aimee_backend_host_profile_valid(&profile));
+   profile.frontend = AIMEE_WIRE_UNKNOWN;
+   assert(!aimee_backend_host_profile_valid(&profile));
+}
+
+static void test_host_request_owner_precedes_proof_guard(void)
+{
+   aimee_block_t text = {.type = AIMEE_BLK_TEXT, .text = "host canonical history"};
+   aimee_message_t message = {.role = "user", .blocks = &text, .n_blocks = 1};
+   owned_entry_fixture_t fixture = {.profile = {.model = "host-model",
+                                                .messages = &message,
+                                                .n_messages = 1,
+                                                .has_max_tokens = 1,
+                                                .max_tokens = 128,
+                                                .mutated = 1}};
+   const char *bodies[] = {
+       "{\"model\":\"sdk-model\",\"max_tokens\":128,\"system\":\"sdk context\","
+       "\"messages\":[{\"role\":\"user\",\"content\":\"sdk history\"}]}",
+       "{\"model\":\"sdk-model\",\"messages\":[{\"role\":\"system\",\"content\":\"sdk context\"},"
+       "{\"role\":\"user\",\"content\":\"sdk history\"}]}",
+       "{\"model\":\"sdk-model\",\"instructions\":\"sdk context\",\"input\":\"sdk history\"}"};
+   const aimee_wire_t wires[] = {AIMEE_WIRE_ANTHROPIC, AIMEE_WIRE_OPENAI_CHAT,
+                                 AIMEE_WIRE_RESPONSES};
+   aimee_frontend_state_scope_t previous_owner =
+       aimee_frontend_bind_request_owner(restore_owned_entry, &fixture);
+   aimee_frontend_state_scope_t previous_guard =
+       aimee_frontend_bind_state_guard(inspect_owned_entry, &fixture);
+   for (int i = 0; i < 3; i++)
+   {
+      for (int parsed_object = 0; parsed_object < 2; parsed_object++)
+      {
+         aimee_request_t request = {0};
+         char error[128];
+         cJSON *native = cJSON_Parse(bodies[i]);
+         int before = fixture.owners;
+         int rc = parsed_object
+                      ? aimee_frontend_parse_native_frame(native, bodies[i], strlen(bodies[i]),
+                                                          wires[i], &request, error, sizeof error)
+                      : aimee_frontend_parse_wire(bodies[i], strlen(bodies[i]), wires[i], &request,
+                                                  error, sizeof error);
+         cJSON_Delete(native);
+         assert(!rc && fixture.owners == before + 1);
+         request.max_tokens = 17; /* A later approved transform remains effective. */
+         rc = aimee_frontend_guard_state(&request, error, sizeof error);
+         assert(!rc && request.max_tokens == 17 && fixture.owners == before + 1);
+         char *rendered = aimee_backend_render_wire(&request, wires[i]);
+         assert(rendered && strstr(rendered, "host canonical history") &&
+                !strstr(rendered, "sdk history") && !strstr(rendered, "sdk context"));
+         assert(fixture.owners == before + 1); /* Pure comparisons never rebind authority. */
+         free(rendered);
+         aimee_request_free(&request);
+      }
+   }
+   assert(fixture.owners == 6 && fixture.guards == 12);
+   fixture.refuse = 1;
+   aimee_request_t refused = {0};
+   int rc = aimee_frontend_parse_wire(bodies[2], strlen(bodies[2]), AIMEE_WIRE_RESPONSES, &refused,
+                                      NULL, 0);
+   assert(rc < 0 && !refused.model && !refused.messages && !refused.raw_bytes &&
+          fixture.guards == 12);
+   aimee_frontend_bind_request_owner(previous_owner.guard, previous_owner.context);
+   aimee_frontend_bind_state_guard(previous_guard.guard, previous_guard.context);
+   rc = aimee_frontend_parse_wire(bodies[2], strlen(bodies[2]), AIMEE_WIRE_RESPONSES, &refused,
+                                  NULL, 0);
+   assert(!rc && !strcmp(refused.model, "sdk-model"));
+   aimee_request_free(&refused);
+   puts("owned native entry precedes replay proof, preserves later transforms and restores scope");
+}
+
+static void test_external_claude_observation_import(void)
+{
+   const char *source =
+       "[{\"type\":\"file-history-snapshot\"},"
+       "{\"type\":\"user\",\"sessionId\":\"session\",\"message\":{\"role\":\"user\",\"content\":"
+       "\"question\"}},"
+       "{\"type\":\"assistant\",\"sessionId\":\"session\",\"message\":{\"role\":\"assistant\","
+       "\"content\":["
+       "{\"type\":\"thinking\",\"thinking\":\"private reasoning\",\"signature\":\"opaque\"},"
+       "{\"type\":\"tool_use\",\"id\":\"external-call\",\"name\":\"Bash\",\"input\":{\"command\":"
+       "\"false\"}}]}}]";
+   cJSON *records = cJSON_Parse(source);
+   cJSON *result = aimee_frontend_claude_transcript_import(records, "session");
+   assert(result && cJSON_GetArraySize(result) == 2);
+   aimee_message_t message = {0};
+   assert(!aimee_ir_message_parse(cJSON_GetArrayItem(result, 1), &message));
+   assert(message.n_blocks == 2 && message.blocks[1].type == AIMEE_BLK_TOOL_USE);
+   assert(!strcmp(message.blocks[1].tool_id, "external-call"));
+   for (int i = 0; i < message.n_blocks; i++)
+   {
+      assert(message.blocks[i].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+      assert(message.blocks[i].context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+      assert(!strcmp(message.blocks[i].context.revision_domain, "external-sdk"));
+      assert(!message.blocks[i].thinking_binding);
+   }
+   aimee_message_free(&message);
+   cJSON_Delete(result);
+   assert(!aimee_frontend_claude_transcript_import(records, "foreign"));
+   cJSON_Delete(records);
+   const char *invalid[] = {
+       "[{\"role\":\"user\",\"content\":\"native not envelope\"}]",
+       "[{\"type\":\"user\",\"message\":{\"role\":\"assistant\",\"content\":\"mismatch\"}}]",
+       "[{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"x\"}},{\"type\":"
+       "\"execution\",\"payload\":{\"verification_proofs\":[]}}]",
+       "[{\"type\":\"user\",\"isSidechain\":true,\"message\":{\"role\":\"user\",\"content\":\"x\"}}"
+       "]",
+       "[{\"type\":\"user\",\"type\":\"assistant\",\"message\":{\"role\":\"user\",\"content\":"
+       "\"x\"}}]",
+       "[{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\","
+       "\"text\":\"x\",\"context\":{}}]}}]",
+       "[{\"type\":\"summary\",\"summary\":\"unknown reconciliation\"}]"};
+   for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+   {
+      records = cJSON_Parse(invalid[i]);
+      assert(records);
+      cJSON *record;
+      cJSON_ArrayForEach(record, records)
+      {
+         const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(record, "type"));
+         if (type && (!strcmp(type, "user") || !strcmp(type, "assistant")))
+            cJSON_AddStringToObject(record, "sessionId", "session");
+      }
+      assert(!aimee_frontend_claude_transcript_import(records, "session"));
+      cJSON_Delete(records);
+   }
+   puts("external SDK import: owned typed observations only, no repair/effect/proof authority");
+}
+
 int main(void)
 {
+   test_external_claude_observation_import();
+   test_host_request_owner_precedes_proof_guard();
+   test_host_profile_sidecars_exclude_native_selectors();
+   test_prompt_cache_controls();
    test_host_state_guard_does_not_mutate_replay_reference();
    test_json_comparison_view();
    test_native_thinking_replay_binding();

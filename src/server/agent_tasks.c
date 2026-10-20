@@ -95,15 +95,14 @@ int agent_plan_rollback_step(plan_t *plan, int step_idx, int timeout_ms)
    if (!s->rollback[0])
       return 0;
 
-   agent_result_t rr;
+   agent_result_t rr = {0};
    memset(&rr, 0, sizeof(rr));
    int rc = agent_run_tool_command(NULL, "rollback", s->rollback, timeout_ms, &rr);
 
    (void)db1_plan_step_set_status_output(s->id, (rc == 0) ? "rolled_back" : "failed",
                                          rr.response ? rr.response : rr.error);
 
-   if (rr.response)
-      free(rr.response);
+   agent_result_clear_response(&rr);
    s->status = (rc == 0) ? 4 : 3;
    return rc;
 }
@@ -124,7 +123,7 @@ int agent_plan_execute(plan_t *plan, const agent_t *agent, int timeout_ms)
       (void)db1_plan_step_set_status(s->id, "running");
       s->status = 1;
 
-      agent_result_t rr;
+      agent_result_t rr = {0};
       memset(&rr, 0, sizeof(rr));
       int rc = agent_run_tool_command(agent, "execute", s->action, timeout_ms, &rr);
 
@@ -151,12 +150,12 @@ int agent_plan_execute(plan_t *plan, const agent_t *agent, int timeout_ms)
       if (rr.response)
       {
          snprintf(s->output, sizeof(s->output), "%s", rr.response);
-         free(rr.response);
       }
       else if (rr.error[0])
       {
          snprintf(s->output, sizeof(s->output), "%s", rr.error);
       }
+      agent_result_clear_response(&rr);
 
       if (!success)
       {
@@ -302,7 +301,7 @@ int agent_execute_with_plan(const agent_t *agent, const agent_network_t *network
             "Respond ONLY with JSON.",
             user_prompt);
 
-   agent_result_t plan_res;
+   agent_result_t plan_res = {0};
    memset(&plan_res, 0, sizeof(plan_res));
    /* Composite (plan generation + step execution): sub-turns use the PRIMITIVE
     * agent_execute, not the slot-acquiring agent_dispatch_one (nested acquisition
@@ -311,8 +310,7 @@ int agent_execute_with_plan(const agent_t *agent, const agent_network_t *network
    if (rc != 0 || !plan_res.response)
    {
       snprintf(out->error, sizeof(out->error), "plan generation failed: %s", plan_res.error);
-      if (plan_res.response)
-         free(plan_res.response);
+      agent_result_clear_response(&plan_res);
       return -1;
    }
 
@@ -321,7 +319,7 @@ int agent_execute_with_plan(const agent_t *agent, const agent_network_t *network
    {
       cJSON_Delete(json);
       /* Fallback to direct execution */
-      free(plan_res.response);
+      agent_result_clear_response(&plan_res);
       return agent_execute(agent, system_prompt, user_prompt, max_tokens, temperature, out);
    }
 
@@ -329,7 +327,7 @@ int agent_execute_with_plan(const agent_t *agent, const agent_network_t *network
    int plan_id = steps_doc ? db1_execution_plan_create(agent->name, user_prompt, steps_doc) : -1;
    free(steps_doc);
    cJSON_Delete(json);
-   free(plan_res.response);
+   agent_result_clear_response(&plan_res);
    if (plan_id < 0)
    {
       return agent_execute(agent, system_prompt, user_prompt, max_tokens, temperature, out);
@@ -379,8 +377,9 @@ int agent_execute_with_plan(const agent_t *agent, const agent_network_t *network
       }
       strcat(buf, line);
    }
-   out->response = buf;
-   return 0;
+   int converted = agent_result_from_host_text(out, buf);
+   free(buf);
+   return converted;
 }
 
 /* agent_jobs.c: durable jobs, result cache, one-shot hints, durable job context */

@@ -559,10 +559,106 @@ static void test_host_turn_survives_detach(void)
    CHECK_EQ_INT(presence_turn_is_live(sid, next), 0);
 }
 
+typedef struct
+{
+   pthread_mutex_t lock;
+   pthread_cond_t ready;
+   int arrived;
+} host_rendezvous_t;
+
+static void host_rendezvous(host_rendezvous_t *gate)
+{
+   pthread_mutex_lock(&gate->lock);
+   if (++gate->arrived == 2)
+      pthread_cond_broadcast(&gate->ready);
+   while (gate->arrived < 2)
+      pthread_cond_wait(&gate->ready, &gate->lock);
+   pthread_mutex_unlock(&gate->lock);
+}
+
+typedef struct
+{
+   host_rendezvous_t *start;
+   host_rendezvous_t *admitted;
+   presence_turn_result_t result;
+   char turn[64];
+} host_contender_t;
+
+static void *host_contender(void *argument)
+{
+   host_contender_t *contender = argument;
+   host_rendezvous(contender->start);
+   contender->result = presence_turn_acquire_host("concurrent-host", "alice", contender->turn,
+                                                  sizeof contender->turn, NULL, 0);
+   /* Neither contender releases ownership before both admission calls finish. */
+   host_rendezvous(contender->admitted);
+   return NULL;
+}
+
+static void test_concurrent_no_attachment_admission(void)
+{
+   host_rendezvous_t start = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0};
+   host_rendezvous_t admitted = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0};
+   host_contender_t contenders[2] = {{.start = &start, .admitted = &admitted},
+                                     {.start = &start, .admitted = &admitted}};
+   pthread_t threads[2];
+   CHECK_EQ_INT(pthread_create(&threads[0], NULL, host_contender, &contenders[0]), 0);
+   CHECK_EQ_INT(pthread_create(&threads[1], NULL, host_contender, &contenders[1]), 0);
+   pthread_join(threads[0], NULL);
+   pthread_join(threads[1], NULL);
+   CHECK((contenders[0].result == PRESENCE_TURN_ACQUIRED &&
+          contenders[1].result == PRESENCE_TURN_BUSY) ||
+         (contenders[1].result == PRESENCE_TURN_ACQUIRED &&
+          contenders[0].result == PRESENCE_TURN_BUSY));
+   CHECK_EQ_INT(presence_attachment_count("concurrent-host"), 0);
+   int winner = contenders[0].result == PRESENCE_TURN_ACQUIRED ? 0 : 1;
+   CHECK_EQ_INT(presence_turn_release("concurrent-host", contenders[winner].turn), 1);
+   pthread_cond_destroy(&start.ready);
+   pthread_mutex_destroy(&start.lock);
+   pthread_cond_destroy(&admitted.ready);
+   pthread_mutex_destroy(&admitted.lock);
+}
+
+static void test_no_attachment_host_admission(void)
+{
+   const char *sid = "headless-host";
+   char turn[64], next[64], inflight[64], attachment[64];
+   CHECK_EQ_INT(presence_turn_acquire_host(sid, "", turn, sizeof turn, NULL, 0), PRESENCE_TURN_ERR);
+   CHECK_EQ_INT(presence_turn_acquire_host(sid, "alice", turn, sizeof turn, NULL, 0),
+                PRESENCE_TURN_ACQUIRED);
+   CHECK_EQ_INT(presence_attachment_count(sid), 0);
+   CHECK_EQ_INT(presence_turn_is_live(sid, turn), 1);
+   CHECK_EQ_INT(presence_turn_acquire_host(sid, "mallory", next, sizeof next, NULL, 0),
+                PRESENCE_TURN_ERR);
+   CHECK_EQ_INT(
+       presence_turn_acquire_host(sid, "alice", next, sizeof next, inflight, sizeof inflight),
+       PRESENCE_TURN_BUSY);
+   CHECK(!strcmp(inflight, turn));
+   CHECK_EQ_INT(presence_attachment_count(sid), 0);
+   CHECK_EQ_INT(presence_turn_is_live(sid, turn), 1);
+   /* Dispatch failure/cancellation release the same owned turn, without needing
+    * the temporary attachment to survive. A waiting caller can then enter. */
+   CHECK_EQ_INT(presence_turn_release(sid, turn), 1);
+   CHECK_EQ_INT(presence_turn_release(sid, turn), 0);
+   CHECK_EQ_INT(presence_turn_acquire_host(sid, "alice", next, sizeof next, NULL, 0),
+                PRESENCE_TURN_ACQUIRED);
+   CHECK_EQ_INT(presence_attach(sid, "alice", "webchat", NULL, 0, 0, attachment, sizeof attachment),
+                1);
+   CHECK_EQ_INT(presence_turn_acquire(sid, attachment, 0, turn, sizeof turn, NULL, 0, NULL),
+                PRESENCE_TURN_BUSY);
+   CHECK_EQ_INT(presence_turn_release(sid, next), 1);
+   CHECK_EQ_INT(presence_turn_acquire(sid, attachment, 0, turn, sizeof turn, NULL, 0, NULL),
+                PRESENCE_TURN_ACQUIRED);
+   CHECK_EQ_INT(presence_turn_release(sid, turn), 1);
+   CHECK_EQ_INT(presence_detach(sid, attachment), 1);
+}
+
 int main(void)
 {
    presence_init();
 
+   test_concurrent_no_attachment_admission();
+   test_no_attachment_host_admission();
    test_host_turn_survives_detach();
    test_cross_surface_concurrent();
    test_attach_owner_and_count();

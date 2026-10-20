@@ -2,7 +2,7 @@ package economizer
 
 import "github.com/JBailes/aimee/server-go/ir"
 
-const cancelMsg = "[Tool call was cancelled or timed out]"
+const missingResultMsg = "[No tool result is available in this history. Execution outcome is unknown; reconcile before retrying.]"
 
 // Repair canonical tool cycles without native protocol detection, argument
 // fabrication or flat call limits. Refusal leaves the original untouched.
@@ -34,8 +34,19 @@ func repairCanonicalHistory(messages *JSONValue) int {
 			block := NewObject()
 			block.Set("type", NewString("tool_result"))
 			block.Set("tool_id", NewString(id))
-			block.Set("content", NewString(cancelMsg))
+			block.Set("content", NewString(missingResultMsg))
 			block.Set("is_error", &JSONValue{Kind: JSONTrue, Bool: true})
+			// This describes an absent history result, not an actual tool outcome.
+			diagnostic := NewObject()
+			diagnostic.Set("origin", NewNumber(1))      // platform
+			diagnostic.Set("authority", NewNumber(0))   // diagnostic
+			diagnostic.Set("trust", NewNumber(4))       // verified absence in this view
+			diagnostic.Set("sensitivity", NewNumber(1)) // internal
+			diagnostic.Set("model_visible", &JSONValue{Kind: JSONTrue, Bool: true})
+			diagnostic.Set("revision_domain", NewString("history-repair"))
+			diagnostic.Set("revision_scope", NewString("unresolved-tool-result"))
+			diagnostic.Set("revision_epoch", NewString("0"))
+			block.Set("context", diagnostic)
 			blocks := NewArray()
 			blocks.Append(block)
 			message := NewObject()

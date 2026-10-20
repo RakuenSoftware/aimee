@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -96,6 +97,20 @@ func (d *sessDB) Exec(_ context.Context, sql string, args ...any) (store.Tag, er
 func (d *sessDB) Query(_ context.Context, sql string, args ...any) (store.Rows, error) {
 	d.executed = append(d.executed, sql)
 	d.args = append(d.args, args)
+	if sql == sessionIRHistorySQL {
+		after, _ := strconv.ParseUint(args[2].(string), 10, 64)
+		page := make([][]any, 0, sessionIRHistoryPageSize)
+		for _, row := range d.rows {
+			n, _ := strconv.ParseUint(row[0].(string), 10, 64)
+			if n > after {
+				page = append(page, row)
+				if len(page) == sessionIRHistoryPageSize {
+					break
+				}
+			}
+		}
+		return &sessRows{rows: page}, nil
+	}
 	return &sessRows{rows: d.rows}, nil
 }
 func (d *sessDB) QueryRow(_ context.Context, sql string, args ...any) store.Row {
@@ -740,6 +755,8 @@ func (d *irAppendFixture) QueryRow(ctx context.Context, sql string, args ...any)
 		return sessRow{db: &sessDB{scanErr: d.lockErr}, values: []any{"actor"}}
 	case sessionIRExistingSQL:
 		return sessRow{db: &sessDB{}, values: d.existing}
+	case nativeRecoveryFenceSQL:
+		return sessRow{db: &sessDB{scanErr: store.ErrNoRows}}
 	case sessionIRInsertSQL:
 		return sessRow{db: &sessDB{scanErr: d.insertErr}, values: []any{d.inserted}}
 	default:
@@ -754,7 +771,7 @@ func TestSessionIRAppendRetryAndFailure(t *testing.T) {
 	if err != nil || status != store.StatusOK || len(cells) != 1 || cells[0] != "42" {
 		t.Fatalf("append %d %v %v", status, cells, err)
 	}
-	if len(db.reads) != 3 || db.reads[0] != sessionIRLockSQL || db.reads[2] != sessionIRInsertSQL {
+	if len(db.reads) != 4 || db.reads[0] != sessionIRLockSQL || db.reads[2] != nativeRecoveryFenceSQL || db.reads[3] != sessionIRInsertSQL {
 		t.Fatal("append was not serialized under session lock")
 	}
 	db = &irAppendFixture{sessDB: &sessDB{}, existing: []any{int64(42), "turn-1", "actor", payload}}

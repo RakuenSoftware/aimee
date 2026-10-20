@@ -5,21 +5,16 @@
  * workflow, never enforces, and never affects the turn (S2 does the binding).
  * Fail-safe: any error is swallowed.
  *
- * The router lives at the UNIFIED gateway seam (gw_stage_router): every inbound
- * provider request -- the primary CLI over /v1/messages AND every delegate over
- * /v1/chat/completions -- passes through it, co-located with the tool-policing
- * stage. router_advise_turn is the legacy per-message entry (still carries the
- * sampled LLM classifier). */
+ * Provider ingress routes the admitted canonical request through router_advise_ir.
+ * router_advise_turn is the per-message entry with sampled classifier telemetry.
+ */
 #ifndef DEC_ROUTER_ADVISE_H
 #define DEC_ROUTER_ADVISE_H 1
 
-#include <aimee/gateway/gateway_pipeline.h> /* gw_request_t (anonymous typedef; can't fwd-declare) */
-
-/* Gateway pipeline stage. Extracts this turn's user query from the request and
- * records the advisory routing/enforce decision. Returns 0 (never mutates the
- * request); safe on every turn (no LLM, no recursion). */
-int gw_stage_router(gw_request_t *r, void *ud);
 #include <aimee/ir/aimee_ir.h>
+
+/* Consume canonical text blocks after ingress admission; no provider-wire
+ * history reader is available. Records routing and optional S2 binding. */
 void router_advise_ir(const aimee_request_t *request);
 
 /* Legacy per-message entry: classify `message` for `session_id`, record the

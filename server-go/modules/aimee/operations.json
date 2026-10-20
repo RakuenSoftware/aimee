@@ -9282,12 +9282,13 @@
       "c_returns": "text",
       "wire_format": "db1-fields-v2",
       "scope": "global",
-      "transaction": "none",
+      "transaction": "required",
       "idempotency": "safe",
       "results": [
         "ok",
         "missing",
         "invalid",
+        "too_long",
         "failed"
       ],
       "request": {
@@ -9316,7 +9317,7 @@
             "type": "text"
           }
         ],
-        "max_bytes": 1048576
+        "max_bytes": 16777216
       }
     },
     {
@@ -9509,12 +9510,13 @@
       ],
       "wire_format": "db1-fields-v2",
       "scope": "global",
-      "transaction": "none",
+      "transaction": "required",
       "idempotency": "safe",
       "results": [
         "ok",
         "missing",
         "invalid",
+        "too_long",
         "failed"
       ],
       "request": {
@@ -9553,10 +9555,10 @@
           {
             "name": "messages_json",
             "type": "text",
-            "alloc": 1048576
+            "alloc": 16777216
           }
         ],
-        "max_bytes": 1048576
+        "max_bytes": 16777216
       }
     },
     {
@@ -28112,7 +28114,7 @@
       ],
       "wire_format": "db1-fields-v2",
       "scope": "global",
-      "transaction": "none",
+      "transaction": "required",
       "idempotency": "safe",
       "results": [
         "ok",
@@ -28153,6 +28155,118 @@
         ],
         "max_bytes": 16777216
       }
+    },
+    {
+      "family": "sessions",
+      "id": 35,
+      "name": "session_ir_running_history_load",
+      "c_name": "db1_session_ir_running_history_load",
+      "c_params": [
+        "session_id",
+        "actor",
+        "active_turn"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "active_turn",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "messages_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 16777216
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 36,
+      "name": "session_ir_append_verified",
+      "c_name": "db1_session_ir_append_verified",
+      "c_params": [
+        "session_id",
+        "event_id",
+        "turn_id",
+        "actor",
+        "payload",
+        "out_sequence"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed",
+        "missing"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "event_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "turn_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "payload",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "sequence",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 4194304
+      },
+      "host_only": true
     },
     {
       "family": "telemetry",
@@ -28266,6 +28380,957 @@
           }
         ],
         "max_bytes": 64
+      }
+    },
+    {
+      "family": "telemetry",
+      "id": 61,
+      "name": "execution_test_grade_record",
+      "c_name": "db1_execution_test_grade_record",
+      "c_params": [
+        "principal",
+        "grade_json"
+      ],
+      "c_returns": "int",
+      "wire_format": "db1-fields-v2",
+      "scope": "principal",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "grade_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 0
+      }
+    },
+    {
+      "family": "telemetry",
+      "id": 62,
+      "name": "execution_test_grade_recall",
+      "c_name": "db1_execution_test_grade_recall",
+      "c_params": [
+        "principal",
+        "project",
+        "sources_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "principal",
+      "transaction": "none",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "project",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "sources_json",
+            "type": "text",
+            "required": false
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "snapshot",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 65536
+      }
+    },
+    {
+      "family": "telemetry",
+      "id": 63,
+      "name": "delegate_execution_experience_record",
+      "c_name": "db1_delegate_execution_experience_record",
+      "c_params": [
+        "principal",
+        "parent_source_json"
+      ],
+      "c_returns": "int",
+      "wire_format": "db1-fields-v2",
+      "scope": "principal",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "parent_source_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 0
+      }
+    },
+    {
+      "family": "telemetry",
+      "id": 64,
+      "name": "delegate_execution_terminal_lookup",
+      "c_name": "db1_delegate_execution_terminal_lookup",
+      "c_params": [
+        "principal",
+        "parent_source_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "principal",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "parent_source_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "record",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 2097152
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 37,
+      "name": "session_ir_search",
+      "c_name": "db1_session_ir_search",
+      "c_params": [
+        "principal",
+        "request_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "request_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "result_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 2097152
+      },
+      "host_only": true
+    },
+    {
+      "family": "telemetry",
+      "id": 65,
+      "name": "learning_projection_claim",
+      "c_name": "db1_learning_projection_claim",
+      "c_params": [],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": []
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "batch",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 2097152
+      }
+    },
+    {
+      "family": "telemetry",
+      "id": 66,
+      "name": "learning_projection_ack",
+      "c_name": "db1_learning_projection_ack",
+      "c_params": [
+        "lease",
+        "result"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "lease",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "result",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 0
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 38,
+      "name": "session_native_owner_claim",
+      "c_name": "db1_session_native_owner_claim",
+      "c_params": [
+        "principal",
+        "request_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "request_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 65536
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 39,
+      "name": "session_native_reconcile",
+      "c_name": "db1_session_native_reconcile",
+      "c_params": [
+        "principal",
+        "request_json",
+        "out_sequence"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "request_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "sequence",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 65536
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 40,
+      "name": "session_native_reserve",
+      "c_name": "db1_session_native_reserve",
+      "c_params": [
+        "principal",
+        "request_json",
+        "out_epoch"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "request_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "epoch",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 41,
+      "name": "session_native_reservation_reconcile",
+      "c_name": "db1_session_native_reservation_reconcile",
+      "c_params": [
+        "principal",
+        "request_json",
+        "out_sequence",
+        "out_epoch"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "request_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "sequence",
+            "type": "text"
+          },
+          {
+            "name": "epoch",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 42,
+      "name": "session_native_epoch",
+      "c_name": "db1_session_native_epoch",
+      "c_params": [
+        "principal",
+        "request_json",
+        "out_epoch"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "request_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "epoch",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 43,
+      "name": "session_native_reservation_lookup",
+      "c_name": "db1_session_native_reservation_lookup",
+      "c_params": [
+        "principal",
+        "request_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "request_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "reservation_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 44,
+      "name": "session_native_reservation_finish",
+      "c_name": "db1_session_native_reservation_finish_checked",
+      "c_params": [
+        "principal",
+        "request_json",
+        "out_sequence",
+        "out_epoch",
+        "out_absent"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "request_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "sequence",
+            "type": "text"
+          },
+          {
+            "name": "epoch",
+            "type": "text"
+          },
+          {
+            "name": "disposition",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 46,
+      "name": "session_native_active_owned",
+      "c_name": "db1_session_native_active_owned",
+      "c_params": [
+        "principal",
+        "session_id",
+        "out_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "owners_json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 524288
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 45,
+      "name": "session_native_history",
+      "c_name": "db1_session_native_history_load",
+      "c_params": [
+        "principal",
+        "session_id",
+        "mode",
+        "active_turn",
+        "out_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "mode",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "active_turn",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "json",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 16777216
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 47,
+      "name": "session_native_source_append",
+      "c_name": "db1_session_native_source_append",
+      "c_params": [
+        "session_id",
+        "event_id",
+        "turn",
+        "actor",
+        "payload",
+        "out_sequence"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "event_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "turn",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "payload",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "sequence",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 48,
+      "name": "server_session_primary_get",
+      "c_name": "db1_server_session_primary_get",
+      "c_params": [
+        "principal",
+        "session_id",
+        "out",
+        "cap"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "agent",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 49,
+      "name": "server_session_primary_set",
+      "c_name": "db1_server_session_primary_set",
+      "c_params": [
+        "principal",
+        "session_id",
+        "agent"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "agent",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 50,
+      "name": "session_ir_history_import",
+      "c_name": "db1_session_ir_history_import",
+      "c_params": [
+        "session_id",
+        "scope",
+        "actor",
+        "source_session",
+        "source_agent",
+        "source_sha256",
+        "messages_json",
+        "report_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "scope",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "source_session",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "source_agent",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "source_sha256",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "messages_json",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "report_json",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "mode",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "disposition",
+            "type": "text",
+            "required": true
+          }
+        ],
+        "max_bytes": 32768
       }
     }
   ]

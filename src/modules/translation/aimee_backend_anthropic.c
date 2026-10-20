@@ -485,12 +485,8 @@ int aimee_anthropic_replay_prepare(const void *frame, size_t length,
    memset(state, 0, sizeof *state);
    if (!bytes || !length || length == SIZE_MAX)
       return -1;
-   const char *end = NULL;
-   cJSON *native = bytes ? cJSON_ParseWithLengthOpts(bytes, length, &end, 0) : NULL;
-   if (end)
-      while (end < bytes + length && (*end == ' ' || *end == '\r' || *end == '\n' || *end == '\t'))
-         end++;
-   int rc = native && end == bytes + length ? binding_walk(native, NULL, state, 0, NULL, NULL) : -1;
+   cJSON *native = aimee_ir_json_parse_frame(bytes, length);
+   int rc = native ? binding_walk(native, NULL, state, 0, NULL, NULL) : -1;
    cJSON_Delete(native);
    return rc;
 }
@@ -1030,6 +1026,9 @@ void aimee_anthropic_projection_report(const aimee_request_t *request,
                                        aimee_wire_projection_report_t *report)
 {
    memset(report, 0, sizeof *report);
+   report->omitted_cache_controls = !!request->prompt_cache_key +
+                                    !!request->prompt_cache_retention +
+                                    !!request->prompt_cache_options;
    for (int i = 0; i < request->n_system; i++)
       if (request->system[i].type == AIMEE_BLK_THINKING)
       {

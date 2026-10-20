@@ -57,6 +57,37 @@ int db1_session_harness_compare_swap(const char *session, const char *key, const
    snprintf(handles[i].value, sizeof handles[i].value, "%s", replacement);
    return 0;
 }
+static cJSON *published_claim;
+static int owner_calls, publish_failure;
+static int publish_claim(const cJSON *claim, void *context)
+{
+   assert(context == &owner_calls);
+   cJSON_Delete(published_claim);
+   published_claim = cJSON_Duplicate(claim, 1);
+   return publish_failure;
+}
+int db1_session_native_owner_claim(const char *principal, const char *wire)
+{
+   assert(!strcmp(principal, "owner"));
+   cJSON *claim = cJSON_Parse(wire);
+   assert(claim && published_claim && cJSON_Compare(claim, published_claim, 1));
+   const char *expected =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(claim, "expected_token"));
+   const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(claim, "claim_id"));
+   const char *turn = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(claim, "turn_id"));
+   assert(expected && id && turn);
+   char token[192];
+   snprintf(token, sizeof token, "pending:%s:%s", id, turn);
+   int found = -1;
+   for (int i = 0; i < handle_count; i++)
+      if (strstr(handles[i].key, ":cache") && !strcmp(handles[i].value, expected))
+         found = i;
+   assert(found >= 0);
+   snprintf(handles[found].value, sizeof handles[found].value, "%s", token);
+   cJSON_Delete(claim);
+   owner_calls++;
+   return 0;
+}
 int db1_session_harness_bind(const char *session, const char *key, const char *value,
                              const char *actor)
 {
@@ -181,8 +212,112 @@ static void seeded(aimee_request_t *req, const char *native_id)
    assert(!server_native_cache_complete(cache, native_id));
    server_native_cache_close(cache);
 }
+/* A native checkpoint cannot turn an unresolved effect into replayable history,
+ * including a compatibility diagnostic that syntactically pairs its call. */
+static void unresolved_source_refuses(void)
+{
+   for (int repaired = 0; repaired < 2; repaired++)
+   {
+      reset();
+      cJSON *arguments = cJSON_CreateObject();
+      aimee_block_t call = {.type = AIMEE_BLK_TOOL_USE,
+                            .tool_id = "pending",
+                            .tool_name = "bash",
+                            .tool_input = arguments};
+      aimee_message_t message = {.role = "assistant", .blocks = &call, .n_blocks = 1};
+      aimee_request_t req = request();
+      req.messages = &message;
+      req.n_messages = 1;
+      source(&req);
+      if (repaired)
+         assert(aimee_ir_history_repair(history) == 1);
+      int count = cJSON_GetArraySize(history);
+      aimee_message_t *owned = calloc((size_t)count, sizeof *owned);
+      assert(owned);
+      for (int i = 0; i < count; i++)
+         assert(!aimee_ir_message_parse(cJSON_GetArrayItem(history, i), &owned[i]));
+      req.messages = owned;
+      req.n_messages = count;
+      lifecycle("unresolved", "running");
+      assert(!begin(&req, "unresolved") && cas_calls == 0);
+      for (int i = 0; i < count; i++)
+         aimee_message_free(&owned[i]);
+      free(owned);
+      cJSON_Delete(arguments);
+   }
+   /* An actual error result is a known outcome and remains replayable. */
+   reset();
+   cJSON *arguments = cJSON_CreateObject(), *output = cJSON_CreateString("actual error");
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_TOOL_USE,
+                              .tool_id = "known",
+                              .tool_name = "bash",
+                              .tool_input = arguments},
+                             {.type = AIMEE_BLK_TOOL_RESULT,
+                              .tool_id = "known",
+                              .tool_result = output,
+                              .tool_is_error = 1}};
+   aimee_message_t known[] = {{.role = "assistant", .blocks = blocks, .n_blocks = 1},
+                              {.role = "tool", .blocks = blocks + 1, .n_blocks = 1}};
+   aimee_request_t req = request();
+   req.messages = known;
+   req.n_messages = 2;
+   source(&req);
+   lifecycle("known", "running");
+   server_native_cache_t *cache = begin(&req, "known");
+   assert(cache && !server_native_cache_abort(cache));
+   server_native_cache_close(cache);
+   cJSON_Delete(arguments);
+   cJSON_Delete(output);
+}
+static void epoch_and_qualified_claim(void)
+{
+   aimee_request_t req;
+   seeded(&req, "epoch-zero-handle");
+   lifecycle("qualified", "running");
+   char epoch[33], effective[65], original[65];
+   memset(epoch, 'c', 32);
+   epoch[32] = 0;
+   assert(!server_native_cache_epoch_binding(scope, "0", original) && !strcmp(original, scope));
+   assert(!server_native_cache_epoch_binding(scope, epoch, effective) && strcmp(effective, scope));
+   assert(server_native_cache_epoch_binding(scope, "bad", effective));
+   server_native_cache_owner_t owner = {
+       .binding = scope,
+       .owner = "dddddddddddddddddddddddddddddddd",
+       .containment = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+       .publish = publish_claim,
+       .context = &owner_calls};
+   server_native_cache_t *cache = server_native_cache_begin_epoch(
+       "s", "owner", "qualified", "codex", scope, &req, epoch, &owner);
+   assert(cache && owner_calls == 1 && !server_native_cache_resume(cache));
+   assert(server_native_cache_metadata_key(cache));
+   cJSON *claim = server_native_cache_claim_json(cache);
+   assert(claim &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(claim, "epoch")), epoch));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(claim, "scope_sha256")),
+                  effective));
+   assert(!strncmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(claim, "expected_token")),
+                   "pending:", 8));
+   cJSON_Delete(claim);
+   assert(!server_native_cache_abort(cache));
+   claim = server_native_cache_claim_json(cache);
+   assert(!strncmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(claim, "expected_token")),
+                   "invalid:", 8));
+   cJSON_Delete(claim);
+   server_native_cache_close(cache);
+   lifecycle("qualified", "cancelled");
+   lifecycle("publish-failure", "running");
+   publish_failure = 1;
+   assert(!server_native_cache_begin_epoch("s", "owner", "publish-failure", "codex", scope, &req,
+                                           epoch, &owner));
+   assert(owner_calls == 1);
+   publish_failure = 0;
+   cJSON_Delete(published_claim);
+   published_claim = NULL;
+}
 int main(void)
 {
+   epoch_and_qualified_claim();
+   unresolved_source_refuses();
    aimee_request_t req;
    seeded(&req, "opaque:native-id");
    lifecycle("second", "running");
@@ -426,4 +561,16 @@ int main(void)
    puts("native cache: context/prefix/lineage, durable claims, completion and failure refusal "
         "passed");
    return 0;
+}
+
+int db1_session_native_history_load(const char *actor, const char *session, const char *mode,
+                                    const char *turn, char **out)
+{
+   (void)actor;
+   (void)session;
+   (void)mode;
+   (void)turn;
+   *out = NULL;
+   assert(!"unexpected interruption sidecar in ordinary cache fixture");
+   return -1;
 }

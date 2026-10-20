@@ -302,14 +302,11 @@ func TestAgeThresholdsAreBoundParametersNotSplicedText(t *testing.T) {
 		})
 	}
 
-	// The learning injection's LIMIT was spliced too.
+	// The old role-wide injection cannot return another owner's pending lessons.
 	db := newDelDB()
-	delCall(t, db, opDelegateLearningInjectPrompt, []string{"reviewer", "prompt", "5"})
-	if !strings.Contains(db.executed[0], "LIMIT $2") {
-		t.Fatalf("the top-N limit is spliced: %s", db.executed[0])
-	}
-	if db.args[0][1].(int) != 5 {
-		t.Fatalf("top-N bound as %v", db.args[0][1])
+	status, cells := delCall(t, db, opDelegateLearningInjectPrompt, []string{"reviewer", "prompt", "5"})
+	if status != store.StatusInvalid || len(cells) != 0 || len(db.executed) != 0 {
+		t.Fatalf("retired injection reached storage: status=%d cells=%v queries=%v", status, cells, db.executed)
 	}
 }
 
@@ -736,5 +733,25 @@ func TestJobCompletionPostgres(t *testing.T) {
 		if state != tc.state || result != tc.result || cursor != "3" || calls != 9 || fmt.Sprint(known) != tc.known || (tc.known == "1" && cost != .0025) {
 			t.Fatalf("terminal job lost its facts: %s %s %s %d %d %g", state, result, cursor, calls, known, cost)
 		}
+	}
+}
+
+func TestDelegateExitObservationIsNotAutomaticallyApplied(t *testing.T) {
+	db := newDelDB()
+	status, _ := delCall(t, db, opDelegateLearningRecord, []string{"session", "reviewer", "success", "process completed", `{"verification":"ungraded","had_writes":null}`, "0.6"})
+	if status != store.StatusOK {
+		t.Fatalf("observation refused: %d", status)
+	}
+	inserted := false
+	for _, query := range db.executed {
+		if strings.Contains(query, "INSERT INTO delegate_learnings") {
+			inserted = true
+			if !strings.Contains(query, "0, 'pending'") {
+				t.Fatal("ungraded exit became automatically applicable", query)
+			}
+		}
+	}
+	if !inserted {
+		t.Fatal("observation was not retained")
 	}
 }

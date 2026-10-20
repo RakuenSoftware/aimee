@@ -4,7 +4,20 @@
 #include <aimee/learning/module_api.h>
 #include "log.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
+
+static _Thread_local int delivery_timeout_ms;
+static _Thread_local int (*delivery_cancelled)(void);
+static cJSON *learning_command(uint32_t kind, uint32_t stage, const char *verb, const cJSON *args,
+                               const cJSON *context)
+{
+   if (delivery_cancelled && delivery_cancelled())
+      return NULL;
+   return delivery_timeout_ms ? aimee_module_command_call_context_timeout(
+                                    kind, stage, verb, args, context, delivery_timeout_ms)
+                              : aimee_module_command_call_context(kind, stage, verb, args, context);
+}
 
 static const char *text_field(const cJSON *object, const char *key)
 {
@@ -12,13 +25,62 @@ static const char *text_field(const cJSON *object, const char *key)
    return value ? value : "";
 }
 
-void server_learning_observe_terminal(const char *session, const char *turn, const char *sequence,
-                                      const char *event_id, const char *actor, const cJSON *event)
+/* Recovery is a projection of the proof atomically retained in the terminal,
+ * never a native claim, worktree reinspection or invented successful task. */
+static int observe_verification_grades(const cJSON *record, const cJSON *caller, const cJSON *event)
+{
+   const cJSON *payload = cJSON_GetObjectItemCaseSensitive(event, "payload");
+   const cJSON *proofs = cJSON_GetObjectItemCaseSensitive(payload, "verification_proofs");
+   if (strcmp(text_field(payload, "status"), "completed") || !cJSON_IsArray(proofs) ||
+       cJSON_GetArraySize(proofs) < 1 || cJSON_GetArraySize(proofs) > 8)
+      return 1;
+   int delivered = 1;
+   const cJSON *proof;
+   cJSON_ArrayForEach(proof, proofs)
+   {
+      if (delivery_cancelled && delivery_cancelled())
+         return 0;
+      cJSON *request = cJSON_CreateObject(), *context = cJSON_Duplicate(caller, 1);
+      cJSON *reply = NULL;
+      char *wire = NULL;
+      int accepted = 0;
+      if (!request || !context ||
+          !cJSON_AddItemToObject(request, "record", cJSON_Duplicate(record, 1)) ||
+          !cJSON_AddItemToObject(request, "proof", cJSON_Duplicate(proof, 1)) ||
+          !cJSON_ReplaceItemInObjectCaseSensitive(
+              context, "transport_identity",
+              cJSON_CreateString("host:isolated-project-verification")))
+         goto next;
+      reply = learning_command(AIMEE_LEARNING_EVENT_EXECUTION, AIMEE_LEARNING_STAGE_EXECUTION,
+                               "grade", request, context);
+      const cJSON *grade = cJSON_GetObjectItemCaseSensitive(reply, "grade");
+      if (strcmp(text_field(reply, "status"), "ok") || !cJSON_IsObject(grade))
+         goto next;
+      wire = cJSON_PrintUnformatted(grade);
+      accepted = wire && db1_execution_test_grade_record(text_field(record, "actor"), wire) >= 0;
+   next:
+      if (!accepted)
+      {
+         delivered = 0;
+         LOG_WARN(
+             "learning",
+             "canonical task %s/%s: configured-test grade unavailable; durable receipt retained",
+             text_field(record, "session_id"), text_field(record, "turn_id"));
+      }
+      free(wire);
+      cJSON_Delete(reply);
+      cJSON_Delete(context);
+      cJSON_Delete(request);
+   }
+   return delivered;
+}
+static int learning_deliver_terminal(const char *session, const char *turn, const char *sequence,
+                                     const char *event_id, const char *actor, const cJSON *event)
 {
    cJSON *record = cJSON_CreateObject(), *caller = cJSON_CreateObject();
    cJSON *result = NULL;
    char *wire = NULL;
-   int accepted = 0;
+   int accepted = 0, record_ready = 0, grades_delivered = 0;
    if (!record || !caller || !session || !turn || !sequence || !event_id || !actor || !actor[0] ||
        !cJSON_AddNumberToObject(record, "version", 1) ||
        !cJSON_AddStringToObject(record, "session_id", session) ||
@@ -31,8 +93,9 @@ void server_learning_observe_terminal(const char *session, const char *turn, con
        !cJSON_AddStringToObject(caller, "principal", actor) ||
        !cJSON_AddStringToObject(caller, "transport_identity", "host:canonical-execution"))
       goto done;
-   result = aimee_module_command_call_context(
-       AIMEE_LEARNING_EVENT_EXECUTION, AIMEE_LEARNING_STAGE_EXECUTION, "observe", record, caller);
+   record_ready = 1;
+   result = learning_command(AIMEE_LEARNING_EVENT_EXECUTION, AIMEE_LEARNING_STAGE_EXECUTION,
+                             "observe", record, caller);
    const cJSON *observation = cJSON_GetObjectItemCaseSensitive(result, "observation");
    const cJSON *source = cJSON_GetObjectItemCaseSensitive(observation, "source");
    if (strcmp(text_field(result, "status"), "ok") ||
@@ -48,6 +111,7 @@ void server_learning_observe_terminal(const char *session, const char *turn, con
    accepted = wire && db1_interaction_event_record(session, ie_event_type_name(IE_TASK_OUTCOME),
                                                    "system", wire, "observed") >= 0;
 done:
+   grades_delivered = record_ready && observe_verification_grades(record, caller, event);
    if (!accepted)
       LOG_WARN("learning",
                "canonical task %s/%s: local outcome observation unavailable; source retained",
@@ -56,4 +120,101 @@ done:
    cJSON_Delete(result);
    cJSON_Delete(caller);
    cJSON_Delete(record);
+   return accepted && grades_delivered;
+}
+
+void server_learning_observe_terminal(const char *session, const char *turn, const char *sequence,
+                                      const char *event_id, const char *actor, const cJSON *event)
+{
+   (void)learning_deliver_terminal(session, turn, sequence, event_id, actor, event);
+}
+
+/* A source reference never supplies child output or a verdict. Re-read the
+ * owner-checked child log so recovery uses the proof atomically stored there. */
+static int recover_child_terminal(const char *parent_source, const char *session, const char *turn,
+                                  const char *actor)
+{
+   char *wire = db1_delegate_execution_terminal_lookup(actor, parent_source);
+   cJSON *record = wire ? cJSON_Parse(wire) : NULL;
+   free(wire);
+   const cJSON *event = cJSON_GetObjectItemCaseSensitive(record, "event");
+   const cJSON *payload = cJSON_GetObjectItemCaseSensitive(event, "payload");
+   const char *status = text_field(payload, "status");
+   int matches =
+       !strcmp(text_field(record, "session_id"), session) &&
+       !strcmp(text_field(record, "turn_id"), turn) &&
+       !strcmp(text_field(record, "actor"), actor) && text_field(record, "sequence")[0] &&
+       text_field(record, "event_id")[0] && !strcmp(text_field(event, "kind"), "execution") &&
+       (!strcmp(status, "completed") || !strcmp(status, "failed") || !strcmp(status, "cancelled"));
+   if (matches)
+      matches = learning_deliver_terminal(session, turn, text_field(record, "sequence"),
+                                          text_field(record, "event_id"), actor, event);
+   cJSON_Delete(record);
+   return matches ? 0 : -1;
+}
+
+static int learning_deliver_child(const char *session, const char *turn, const char *sequence,
+                                  const char *event_id, const char *actor, const cJSON *event)
+{
+   const cJSON *payload = cJSON_GetObjectItemCaseSensitive(event, "payload");
+   const char *status = text_field(payload, "status");
+   if (!actor || !actor[0] || strcmp(text_field(event, "kind"), "child_execution") ||
+       !cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(payload, "learning_binding")) ||
+       strcmp(status, "running"))
+      return 0;
+   cJSON *source = cJSON_CreateObject();
+   char *wire = NULL;
+   int accepted = 0, terminal_found = 0;
+   if (!session || !turn || !sequence || !event_id || !source ||
+       !cJSON_AddStringToObject(source, "kind", "canonical_session_log") ||
+       !cJSON_AddStringToObject(source, "session_id", session) ||
+       !cJSON_AddStringToObject(source, "turn_id", turn) ||
+       !cJSON_AddStringToObject(source, "sequence", sequence) ||
+       !cJSON_AddStringToObject(source, "event_id", event_id) ||
+       !cJSON_AddStringToObject(source, "actor", actor))
+      goto done;
+   wire = cJSON_PrintUnformatted(source);
+   if (!wire || recover_child_terminal(wire, text_field(payload, "session_id"),
+                                       text_field(payload, "turn_id"), actor))
+      goto done;
+   terminal_found = 1;
+   accepted = db1_delegate_execution_experience_record(actor, wire) >= 0;
+done:
+   if (terminal_found && !accepted)
+      LOG_WARN("learning",
+               "delegate source %s/%s: experience unavailable; durable binding retained",
+               session ? session : "", turn ? turn : "");
+   free(wire);
+   cJSON_Delete(source);
+   return accepted;
+}
+
+void server_learning_observe_child(const char *session, const char *turn, const char *sequence,
+                                   const char *event_id, const char *actor, const cJSON *event)
+{
+   (void)learning_deliver_child(session, turn, sequence, event_id, actor, event);
+}
+
+int server_learning_deliver_record(const cJSON *record, int (*cancelled)(void))
+{
+   const cJSON *event = cJSON_GetObjectItemCaseSensitive(record, "event");
+   const char *kind = text_field(event, "kind");
+   if (strcmp(kind, "execution") && strcmp(kind, "child_execution"))
+      return 0;
+   int previous_timeout = delivery_timeout_ms;
+   int (*previous_cancelled)(void) = delivery_cancelled;
+   delivery_timeout_ms = 1000;
+   delivery_cancelled = cancelled;
+   int delivered =
+       !strcmp(kind, "execution")
+           ? learning_deliver_terminal(
+                 text_field(record, "session_id"), text_field(record, "turn_id"),
+                 text_field(record, "sequence"), text_field(record, "event_id"),
+                 text_field(record, "actor"), event)
+           : learning_deliver_child(text_field(record, "session_id"), text_field(record, "turn_id"),
+                                    text_field(record, "sequence"), text_field(record, "event_id"),
+                                    text_field(record, "actor"), event);
+   delivery_timeout_ms = previous_timeout;
+   delivery_cancelled = previous_cancelled;
+   return delivered;
 }

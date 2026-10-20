@@ -1,6 +1,7 @@
 /* cli_claude.c: legacy Claude provider-CLI adapter. */
 #include "provider_cli_adapter.h"
 #include "claude_headless.h"
+#include "cli_claude_native.h"
 
 #include <stddef.h>
 
@@ -136,6 +137,8 @@ static int claude_spawn(const provider_cli_cfg_t *cfg, const char *task_prompt, 
                         int *stdout_fd, pid_t *pid_out)
 {
    (void)task_prompt;
+   if (cfg && cfg->claude_host)
+      return cli_claude_native_spawn(cfg, stdin_fd, stdout_fd, pid_out);
    char *tokens[CLAUDE_ARG_MAX + 1] = {0};
    int split = 0;
    int argc = claude_build_argv(cfg, tokens, CLAUDE_ARG_MAX, &split);

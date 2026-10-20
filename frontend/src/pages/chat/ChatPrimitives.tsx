@@ -60,7 +60,7 @@ export const Message = memo(function Message({ role, text, streaming }: { role: 
     hyphens: 'none',
     alignSelf: role === 'user' ? 'flex-end' : 'flex-start',
     background: role === 'user' ? 'var(--sg-info-bg)' : tokens.surface,
-    color: role === 'user' ? 'var(--sg-info-border)' : tokens.text,
+    color: tokens.text,
     border: role === 'assistant' ? `1px solid ${tokens.border}` : 'none',
     borderBottomRightRadius: role === 'user' ? 2 : 10,
     borderBottomLeftRadius: role === 'assistant' ? 2 : 10,
@@ -71,25 +71,26 @@ export const Message = memo(function Message({ role, text, streaming }: { role: 
 
 export const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
   return (
-    <details style={{ margin: '4px 0', padding: '8px 10px', background: tokens.surfaceAlt, borderLeft: `3px solid ${tokens.borderMedium}`, borderRadius: '4px', fontSize: '12px', color: tokens.textFaint, alignSelf: 'flex-start', maxWidth: '80%' }}>
-      <summary style={{ cursor: 'pointer', color: tokens.textPale, fontStyle: 'italic' }}>Thinking…</summary>
-      <pre style={{ marginTop: '6px', fontSize: '11px', color: tokens.textHint, maxHeight: '200px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{text}</pre>
+    <details style={{ margin: '4px 0', padding: '8px 10px', background: tokens.surfaceAlt, borderLeft: `3px solid ${tokens.borderMedium}`, borderRadius: '4px', fontSize: '12px', color: tokens.textSecondary, alignSelf: 'flex-start', maxWidth: '80%' }}>
+      <summary style={{ cursor: 'pointer', color: tokens.text, fontStyle: 'italic' }}>Thinking…</summary>
+      <pre style={{ marginTop: '6px', fontSize: '11px', color: tokens.textSecondary, maxHeight: '200px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{text}</pre>
     </details>
   );
 });
 
-export const ToolBlock = memo(function ToolBlock({ name, args, result }: { name: string; args: string; result?: string }) {
-  const pending = result === undefined;
+export const ToolBlock = memo(function ToolBlock({ name, args, result, unknownOutcome }: { name: string; args: string; result?: string; unknownOutcome?: string }) {
+  const pending = result === undefined && !unknownOutcome;
   return (
-    <details style={{ margin: '4px 0', padding: '8px 10px', background: tokens.surfaceAlt, borderLeft: `3px solid ${tokens.primary}`, borderRadius: '4px', fontSize: '12px', color: tokens.textFaint, alignSelf: 'flex-start', maxWidth: '80%' }}>
-      <summary style={{ cursor: 'pointer', color: tokens.primary, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-        {pending ? <span style={{ color: tokens.textHint, fontStyle: 'italic' }}>Running: {name}</span> : <span>Tool: {name}</span>}
+    <details style={{ margin: '4px 0', padding: '8px 10px', background: unknownOutcome ? 'var(--sg-warning-bg)' : tokens.surfaceAlt, borderLeft: `3px solid ${unknownOutcome ? 'var(--sg-warning-border)' : tokens.primary}`, borderRadius: '4px', fontSize: '12px', color: tokens.textSecondary, alignSelf: 'flex-start', maxWidth: '80%' }}>
+      <summary style={{ cursor: 'pointer', color: tokens.text, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+        {pending ? <span style={{ color: tokens.textSecondary, fontStyle: 'italic' }}>Running: {name}</span> : <span>Tool: {name}{unknownOutcome ? ' — outcome unknown' : ''}</span>}
       </summary>
-      {args && <pre style={{ marginTop: '6px', fontSize: '11px', color: tokens.textPale, maxHeight: '150px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{args}</pre>}
+      {args && <pre style={{ marginTop: '6px', fontSize: '11px', color: tokens.text, maxHeight: '150px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{args}</pre>}
+      {unknownOutcome && <p role="note" aria-live="off" style={{ marginTop: '6px', color: tokens.text }}>{unknownOutcome}</p>}
       {result && (
         <details style={{ marginTop: '4px' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '11px', color: tokens.textHint }}>Output</summary>
-          <pre style={{ marginTop: '4px', fontSize: '11px', color: tokens.textPale, maxHeight: '200px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{result}</pre>
+          <summary style={{ cursor: 'pointer', fontSize: '11px', color: tokens.textSecondary }}>Output</summary>
+          <pre style={{ marginTop: '4px', fontSize: '11px', color: tokens.text, maxHeight: '200px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{result}</pre>
         </details>
       )}
     </details>

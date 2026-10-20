@@ -14,6 +14,7 @@
 #include "kb_identity_token.h"
 #include "server_write_tier.h"
 #include "server_write_tier_db1.h"
+#include "db1_client/server_sessions.h"
 #include "db1_client/db1.h" /* db1_store_probe — the mTLS ramp needs a live store */
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
@@ -70,7 +71,6 @@ static struct
 {
    char session_id[128];
    char persona[PERSONA_NAME_MAX];
-   char active_primary[MAX_AGENT_NAME];
 } g_sessions[SHTTP_MAX_SESSIONS];
 static int g_session_count = 0;
 static pthread_mutex_t g_session_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -118,66 +118,39 @@ int session_persona_get(const char *session_id, char *out, size_t n)
    return found;
 }
 
-void session_primary_set(const char *session_id, const char *agent)
+/* Selection belongs to the durable, authenticated session, not the connection cache. */
+static const char *session_primary_actor(void)
 {
-   if (!session_id || !session_id[0] || !agent || !agent[0])
-      return;
-   pthread_mutex_lock(&g_session_lock);
-   for (int i = 0; i < g_session_count; i++)
-   {
-      if (strcmp(g_sessions[i].session_id, session_id) == 0)
-      {
-         snprintf(g_sessions[i].active_primary, sizeof(g_sessions[i].active_primary), "%s", agent);
-         pthread_mutex_unlock(&g_session_lock);
-         return;
-      }
-   }
-   int slot = (g_session_count < SHTTP_MAX_SESSIONS)
-                  ? g_session_count++
-                  : (SHTTP_MAX_SESSIONS - 1); /* overwrite last */
-   snprintf(g_sessions[slot].session_id, sizeof(g_sessions[slot].session_id), "%s", session_id);
-   snprintf(g_sessions[slot].active_primary, sizeof(g_sessions[slot].active_primary), "%s", agent);
-   pthread_mutex_unlock(&g_session_lock);
+   const request_context_t *owner = request_context_get();
+   return owner && owner->vault_principal[0] ? owner->vault_principal : NULL;
+}
+
+int session_primary_set(const char *session_id, const char *agent)
+{
+   const char *actor = session_primary_actor();
+   if (!actor || !session_id || !session_id[0] || !agent || !agent[0] ||
+       strlen(agent) >= MAX_AGENT_NAME)
+      return -1;
+   return db1_server_session_primary_set(actor, session_id, agent);
 }
 
 int session_primary_get(const char *session_id, char *out, size_t n)
 {
    if (out && n)
-      out[0] = '\0';
-   if (!session_id || !session_id[0] || !out || !n)
-      return 0;
-   int found = 0;
-   pthread_mutex_lock(&g_session_lock);
-   for (int i = 0; i < g_session_count; i++)
-   {
-      if (strcmp(g_sessions[i].session_id, session_id) == 0)
-      {
-         if (g_sessions[i].active_primary[0])
-         {
-            snprintf(out, n, "%s", g_sessions[i].active_primary);
-            found = 1;
-         }
-         break;
-      }
-   }
-   pthread_mutex_unlock(&g_session_lock);
-   return found;
+      out[0] = 0;
+   const char *actor = session_primary_actor();
+   if (!actor || !session_id || !session_id[0] || !out || !n ||
+       db1_server_session_primary_get(actor, session_id, out, n) != 0)
+      return -1;
+   return out[0] ? 1 : 0;
 }
 
-void session_primary_clear(const char *session_id)
+int session_primary_clear(const char *session_id)
 {
-   if (!session_id || !session_id[0])
-      return;
-   pthread_mutex_lock(&g_session_lock);
-   for (int i = 0; i < g_session_count; i++)
-   {
-      if (strcmp(g_sessions[i].session_id, session_id) == 0)
-      {
-         g_sessions[i].active_primary[0] = '\0';
-         break;
-      }
-   }
-   pthread_mutex_unlock(&g_session_lock);
+   const char *actor = session_primary_actor();
+   if (!actor || !session_id || !session_id[0])
+      return -1;
+   return db1_server_session_primary_set(actor, session_id, "");
 }
 
 const char *server_http_delegate_block(const char *session_id, const char *role, const char *prompt,
@@ -396,7 +369,8 @@ int route_session_primary_get(const char *session_id, char *resp, int cap)
    if (!session_id || !session_id[0])
       return err_json(resp, cap, 400, "missing session id");
    char name[MAX_AGENT_NAME] = "";
-   session_primary_get(session_id, name, sizeof(name));
+   if (session_primary_get(session_id, name, sizeof(name)) < 0)
+      return err_json(resp, cap, 503, "session primary selection unavailable");
    cJSON *o = cJSON_CreateObject();
    cJSON_AddStringToObject(o, "agent", name);
    return emit(resp, cap, o);
@@ -413,6 +387,11 @@ int route_session_primary_set(const char *session_id, const char *body, char *re
       cJSON_Delete(req);
       return err_json(resp, cap, 400, "missing agent name");
    }
+   if (strlen(jn->valuestring) >= MAX_AGENT_NAME)
+   {
+      cJSON_Delete(req);
+      return err_json(resp, cap, 400, "agent name too long");
+   }
    char name[MAX_AGENT_NAME];
    snprintf(name, sizeof(name), "%s", jn->valuestring);
    cJSON_Delete(req);
@@ -422,7 +401,8 @@ int route_session_primary_set(const char *session_id, const char *body, char *re
    if (agent_registry_find(name, &agbuf) != 0)
       return err_json(resp, cap, 404, "no such agent");
 
-   session_primary_set(session_id, name);
+   if (session_primary_set(session_id, name) != 0)
+      return err_json(resp, cap, 503, "session primary selection unavailable");
    cJSON *o = cJSON_CreateObject();
    cJSON_AddStringToObject(o, "agent", name);
    return emit(resp, cap, o);
@@ -432,7 +412,8 @@ int route_session_primary_clear(const char *session_id, char *resp, int cap)
 {
    if (!session_id || !session_id[0])
       return err_json(resp, cap, 400, "missing session id");
-   session_primary_clear(session_id);
+   if (session_primary_clear(session_id) != 0)
+      return err_json(resp, cap, 503, "session primary selection unavailable");
    cJSON *o = cJSON_CreateObject();
    cJSON_AddStringToObject(o, "agent", "");
    return emit(resp, cap, o);

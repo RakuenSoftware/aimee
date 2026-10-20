@@ -652,7 +652,7 @@ static void test_review_evidence_guard_reports_a_contradiction(void)
    snprintf(cmd, sizeof(cmd), "git -C '%s' init -q", root);
    assert(system(cmd) == 0);
 
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    result.success = 1;
    result.response = strdup("No uncommitted diff exists.");
@@ -664,7 +664,7 @@ static void test_review_evidence_guard_reports_a_contradiction(void)
    delegate_apply_review_evidence_guard("review", root, &rc, &result, 0);
    assert(rc == -1);
    assert(strcmp(result.error, "delegate evidence drift: the wording the module chose") == 0);
-   free(result.response);
+   agent_result_clear_response(&result);
 
    /* An unguarded verdict leaves the review alone, whatever it said. */
    memset(&result, 0, sizeof(result));
@@ -677,7 +677,7 @@ static void test_review_evidence_guard_reports_a_contradiction(void)
    delegate_apply_review_evidence_guard("code", root, &rc, &result, 0);
    assert(rc == 0);
    assert(result.error[0] == '\0');
-   free(result.response);
+   agent_result_clear_response(&result);
 
    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);
    assert(system(cmd) == 0);
@@ -725,7 +725,7 @@ static void test_review_evidence_guard_runs_the_snippet_check_only_when_asked(vo
        "char *resp = kb_client_v1_post_json(\"/v1/internal/ingest/job/claim\", req, 1000, NULL);\n"
        "```\n";
 
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    result.success = 1;
    result.response = strdup(response);
@@ -737,7 +737,7 @@ static void test_review_evidence_guard_runs_the_snippet_check_only_when_asked(vo
    delegate_apply_review_evidence_guard("diagnose", root, &rc, &result, 0);
    assert(rc == 0);
    assert(result.error[0] == '\0');
-   free(result.response);
+   agent_result_clear_response(&result);
 
    memset(&result, 0, sizeof(result));
    result.success = 1;
@@ -749,7 +749,7 @@ static void test_review_evidence_guard_runs_the_snippet_check_only_when_asked(vo
    delegate_apply_review_evidence_guard("review", root, &rc, &result, 0);
    assert(rc == -1);
    assert(strstr(result.error, "delegate evidence drift") != NULL);
-   free(result.response);
+   agent_result_clear_response(&result);
 
    unlink(path);
    rmdir(srcdir);
@@ -769,7 +769,7 @@ static void test_review_evidence_guard_sends_the_facts_it_owns(void)
    snprintf(cmd, sizeof(cmd), "git -C '%s' init -q", root);
    assert(system(cmd) == 0);
 
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    result.success = 1;
    result.response = strdup("a report");
@@ -782,7 +782,7 @@ static void test_review_evidence_guard_sends_the_facts_it_owns(void)
    delegate_apply_review_evidence_guard("review", root, &rc, &result, 0);
    assert((g_review_flags_seen & AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY) == 0);
    assert((g_review_flags_seen & AIMEE_DELEGATES_REVIEW_TARGET_PROVIDED) == 0);
-   free(result.response);
+   agent_result_clear_response(&result);
 
    char path[512];
    snprintf(path, sizeof(path), "%s/pending.txt", root);
@@ -800,7 +800,7 @@ static void test_review_evidence_guard_sends_the_facts_it_owns(void)
    delegate_apply_review_evidence_guard("review", root, &rc, &result, 1);
    assert((g_review_flags_seen & AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY) != 0);
    assert((g_review_flags_seen & AIMEE_DELEGATES_REVIEW_TARGET_PROVIDED) != 0);
-   free(result.response);
+   agent_result_clear_response(&result);
 
    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);
    assert(system(cmd) == 0);

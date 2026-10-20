@@ -7,7 +7,6 @@
 
 #include <string.h>
 
-#include "agent_protocol.h" /* message_history_repair */
 #include "config.h"
 #include "gateway_mutate.h"
 #include <aimee/audit/obs_bus.h> /* obs_bus_module_available */
@@ -338,9 +337,6 @@ gw_post_action_t gw_buffered_after_status(cJSON *container, const char *key, int
       if (gw_replace_messages(container, key, ctx->original) == 0)
       {
          ctx->original = NULL; /* ownership moved back into the container */
-         cJSON *restored = cJSON_GetObjectItemCaseSensitive(container, key);
-         if (restored)
-            message_history_repair(restored);
       }
    }
    gw_provenance_clear(&ctx->st);

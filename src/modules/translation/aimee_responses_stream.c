@@ -174,7 +174,8 @@ static int reconcile(aimee_responses_stream_t *stream, aimee_ir_delta_sink_fn si
          }
          /* Argument whitespace/key order may differ in the final object. Compare
           * complete streamed JSON semantically; an unfinished prefix must match. */
-         cJSON *parsed = prefix && arguments ? cJSON_ParseWithOpts(prefix, NULL, 1) : NULL;
+         cJSON *parsed =
+             prefix && arguments ? aimee_ir_json_parse_frame(prefix, strlen(prefix)) : NULL;
          if (parsed && !aimee_ir_json_unique(parsed))
          {
             cJSON_Delete(parsed);
@@ -303,8 +304,8 @@ static int item_agrees(const cJSON *left, const cJSON *right)
       {
          if (strcmp(keys[i], "arguments") || !cJSON_IsString(a) || !cJSON_IsString(b))
             return 0;
-         cJSON *aa = cJSON_ParseWithOpts(a->valuestring, NULL, 1);
-         cJSON *bb = cJSON_ParseWithOpts(b->valuestring, NULL, 1);
+         cJSON *aa = aimee_ir_json_parse_frame(a->valuestring, strlen(a->valuestring));
+         cJSON *bb = aimee_ir_json_parse_frame(b->valuestring, strlen(b->valuestring));
          int equal = cJSON_IsObject(aa) && cJSON_IsObject(bb) && cJSON_Compare(aa, bb, 1);
          cJSON_Delete(aa);
          cJSON_Delete(bb);

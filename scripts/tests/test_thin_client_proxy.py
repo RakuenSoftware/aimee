@@ -357,7 +357,7 @@ class ThinClientProxyTest(unittest.TestCase):
             ("/v1/models", "Authorization: Bearer local-test-secret\r\nTransfer-Encoding: chunked\r\n", 400),
             ("/v1/models", "Authorization: Bearer local-test-secret\r\nContent-Length: 0\r\nContent-Length: 0\r\n", 400),
             ("/v1/models", "Authorization: Bearer local-test-secret\r\nContent-Length: 4194305\r\n", 413),
-            ("/v1/models", "Authorization: Bearer local-test-secret\r\nOrigin: https://example.com\r\n", 400),
+            ("/v1/models", "Authorization: Bearer local-test-secret\r\nOrigin: https://example.com\r\n", 403),
             ("/v1/models", "Authorization: Bearer local-test-secret\r\nsession_id: bad value\r\n", 400),
             ("/v1/models", "Authorization: Bearer local-test-secret\r\nAuthorization: Bearer local-test-secret\r\n", 401),
             ("/v1/models", "Authorization: Bearer local-test-secret\r\nContent-Length: -1\r\n", 400),

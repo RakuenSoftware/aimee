@@ -613,12 +613,16 @@ jobs:
         env:
           AIMEE_TEST_REQUIRE_CODEX: '1'
         run: python3 scripts/tests/test_thin_client_proxy.py -v
-      - name: Native Codex canonical adoption and process restart
+      - name: Native Codex canonical adoption, isolated launch and restart
         run: |
           make -C src -j2 build/obj/tests/unit-test-cli-codex
+          # The descriptor launcher attests the actual pinned executable, not
+          # npm's JavaScript dispatcher. Resolve the same platform package used
+          # by the installed Codex entry point before running all five modes.
+          codex_native=$(node -e 'const p=require("node:path"); const pkg=require.resolve("@openai/codex-linux-x64/package.json",{paths:[process.argv[1]]}); process.stdout.write(p.join(p.dirname(pkg),"vendor","x86_64-unknown-linux-musl","bin","codex"))' "$(npm root -g)/@openai/codex")
           python3 src/tests/test_codex_native_adoption.py \
             --adapter-binary src/build/obj/tests/unit-test-cli-codex \
-            --codex-binary "$(command -v codex)"
+            --codex-binary "$codex_native"
 
   build-integrity:
     needs: change-scope
@@ -1027,7 +1031,7 @@ jobs:
         working-directory: server-go
         env:
           AIMEE_TEST_PG_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_postgres_ci
-        run: go test -race -count=1 ./modules/aimee/families -run '^TestSessionIRLiveConcurrentReplayAndDeletion$'
+        run: go test -race -count=1 ./modules/aimee/families -run '^Test(SessionIR.*|LearningProjectionPostgres.*|SessionNativeLive.*|SessionPrimaryLive.*)$'
       - name: Replay memory ownership and PostgreSQL sessions
         if: matrix.part == 'native'
         run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 postgres-knowledge-replay
@@ -1697,7 +1701,22 @@ jobs:
           git fetch --no-tags --depth=1 origin "$base"
           git remote set-head origin "$base"
           git symbolic-ref refs/remotes/origin/HEAD
-      - name: Client/server integration harness
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Install pinned native SDKs for canonical server integration
+        run: |
+          native_prefix="$RUNNER_TEMP/aimee-native-sdks"
+          npm install --prefix "$native_prefix" @openai/codex@0.153.4 @anthropic-ai/claude-code@2.1.227
+          codex_native="$native_prefix/node_modules/.bin/codex"
+          claude_native=$(node -e 'const p=require("node:path"); const pkg=require.resolve("@anthropic-ai/claude-code-linux-x64/package.json",{paths:[process.argv[1]]}); process.stdout.write(p.join(p.dirname(pkg),"claude"))' "$native_prefix")
+          test -x "$codex_native"
+          test -x "$claude_native"
+          printf 'AIMEE_TEST_NATIVE_CODEX=%s\nAIMEE_TEST_NATIVE_CLAUDE=%s\n' "$codex_native" "$claude_native" >> "$GITHUB_ENV"
+          # Exercise the real root-UDS browser operator boundary, without changing server authorization.
+          sudo -n true
+          echo 'AIMEE_TEST_NATIVE_BROWSER_OPERATOR=1' >> "$GITHUB_ENV"
+      - name: Client/server integration harness with actual native SDKs
         run: cd src && make -j$(nproc) integration-tests
 
   init-migrate-service-test:
@@ -1762,10 +1781,9 @@ jobs:
   # forced by -DAIMEE_THIN_CLIENT=ON in CMakeLists.txt), so it was removed.
   windows-build:
     needs: change-scope
-    # Thin-client portability. Required on main, so it runs for pull requests
-    # into main, for every push (including each merge into testing) and in the
-    # merge queue; pull requests into testing do not wait on a windows-latest runner.
-    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') && (github.event_name != 'pull_request' || github.base_ref == 'main') }}
+    # Shared native headers/build contracts also change on testing-target PRs.
+    # Qualify thin-client portability before merge on every executable change.
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -1857,10 +1875,9 @@ jobs:
 
   macos-build:
     needs: change-scope
-    # Thin-client portability. Required on main, so it runs for pull requests
-    # into main, for every push (including each merge into testing) and in the
-    # merge queue; pull requests into testing do not wait on a macos-latest runner.
-    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') && (github.event_name != 'pull_request' || github.base_ref == 'main') }}
+    # Shared native headers/build contracts also change on testing-target PRs.
+    # Qualify thin-client portability before merge on every executable change.
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -2042,6 +2059,26 @@ jobs:
         run: echo "AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)" >> "$GITHUB_ENV"
       - name: Run the shipped deployment and regression gates
         run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} ${{ matrix.matrix_args }} --output /tmp/aimee-e2e-evidence
+      - name: Set up Go for private configured-test execution
+        if: matrix.topology == 'T3'
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
+          cache-dependency-path: server-go/go.sum
+      - name: Private configured tests use actual Docker custody and joined cleanup
+        if: matrix.topology == 'T3'
+        working-directory: server-go
+        env:
+          AIMEE_PRIVATE_TEST_REQUIRE_DOCKER: '1'
+          AIMEE_PRIVATE_TEST_DOCKER_SOCKET: /var/run/docker.sock
+          AIMEE_PRIVATE_TEST_DOCKER_IMAGE: ubuntu:22.04
+        run: |
+          for attempt in 1 2 3 4 5; do
+            docker pull "$AIMEE_PRIVATE_TEST_DOCKER_IMAGE" && break
+            test "$attempt" -lt 5 || exit 1
+            sleep $((attempt * 5))
+          done
+          go test -race -count=1 -v ./modules/delegates -run '^TestPrivateVerifierRealDocker$'
       - name: Installed Vault helper under hardened egress (both roles)
         if: matrix.topology == 'T3'
         run: python3 tests/e2e/egress-vault-e2e.py --output /tmp/aimee-e2e-evidence

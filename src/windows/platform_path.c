@@ -28,6 +28,51 @@ char platform_path_sep(void)
    return '\\';
 }
 
+static char *resolved_handle_path(const char *path, int directory)
+{
+   HANDLE handle = CreateFileA(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+   if (handle == INVALID_HANDLE_VALUE)
+      return NULL;
+   BY_HANDLE_FILE_INFORMATION info;
+   if (directory && (!GetFileInformationByHandle(handle, &info) ||
+                     !(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)))
+   {
+      CloseHandle(handle);
+      return NULL;
+   }
+   DWORD length = GetFinalPathNameByHandleA(handle, NULL, 0, VOLUME_NAME_NT);
+   char *resolved = length && length < 65536 ? malloc((size_t)length + 1) : NULL;
+   if (resolved)
+   {
+      DWORD written = GetFinalPathNameByHandleA(handle, resolved, length + 1, VOLUME_NAME_NT);
+      if (!written || written > length)
+      {
+         free(resolved);
+         resolved = NULL;
+      }
+   }
+   CloseHandle(handle);
+   return resolved;
+}
+
+int platform_path_is_beneath(const char *root, const char *path)
+{
+   if (!root || !root[0] || !path || !path[0])
+      return 0;
+   char *parent = resolved_handle_path(root, 1), *child = resolved_handle_path(path, 0);
+   int within = 0;
+   if (parent && child)
+   {
+      size_t length = strlen(parent);
+      within = !strncmp(parent, child, length) &&
+               (parent[length - 1] == '\\' || child[length] == '\\' || !child[length]);
+   }
+   free(parent);
+   free(child);
+   return within;
+}
+
 int platform_mkdir_p(const char *path, int mode)
 {
    (void)mode;

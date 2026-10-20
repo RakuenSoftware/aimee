@@ -420,10 +420,112 @@ class LiveSemanticContextS1Test(unittest.TestCase):
                     current + blocks[0]["release_text"],
                     current.replace(blocks[0]["release_text"], "", 1),
                     current.replace("git_push", "git_status", 1)
-                    if "test_mcp" in path else current.replace('"git_%s"', '"%s"', 1),
+                    if "test_mcp" in path else
+                    current.replace('{"lsp_context",', '{"lsp_context_drift",', 1)
+                    if path.endswith("server_mcp_call_table.c") else
+                    current.replace("if (!declared)", "if (0)", 1)
+                    if path.endswith("/mcp_tools.c") else
+                    current.replace('"git_%s"', '"%s"', 1),
                 ):
+                    self.assertNotEqual(current, drift)
                     self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
         self.assertFalse(validator.reviewed_host_equivalent("src/tests/test_lsp.c", "same", "same"))
+
+    def test_release_validator_rejects_native_verification_dispatch_drift(self) -> None:
+        validator = load_release_validator()
+        path = "src/server/server_mcp_call_table.c"
+        frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
+        current = (ROOT / path).read_text()
+        self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+        wrapper = next(block["release_text"] for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
+                       if block["release_text"].startswith("static cJSON *mcph_git_verify("))
+        row = '    {"git_verify", mcph_git_verify, "core,current_code"},\n'
+        for drift in (
+            current.replace('mcp_git_run_tool("git_verify", args, c->sid)',
+                            'mcp_git_run_tool("git_status", args, c->sid)', 1),
+            current.replace("const char *cwd = run_cmd_get_cwd();",
+                            'const char *cwd = "/unreviewed";', 1),
+            current.replace(wrapper, "", 1),
+            current + wrapper,
+            current.replace(row, "", 1),
+            current + row,
+            current.replace(row, row.replace('"core,current_code"', 'NULL'), 1),
+        ):
+            self.assertNotEqual(current, drift)
+            self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
+    def test_release_validator_rejects_verifier_role_membership_drift(self) -> None:
+        validator = load_release_validator()
+        path = "src/server/server_mcp_call_table.c"
+        current = (ROOT / path).read_text()
+        frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
+        blocks = [block for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
+                  if "canonical-git-role-membership:" in block.get("review", "")]
+        self.assertEqual(len(blocks), 1)
+        release, prior = blocks[0]["release_text"], blocks[0]["frozen_text"]
+        self.assertEqual(current.count(release), 1)
+        self.assertEqual(current.replace(release, prior, 1), subprocess.run(
+            ["git", "show", f"5780aa09a92d86e89412ecea0a714b8088efaaca:{path}"],
+            cwd=ROOT, check=True, capture_output=True, text=True).stdout)
+        self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+        for drift in (current.replace(release, "", 1), current + release,
+                      current.replace(release, prior, 1),
+                      current.replace(release, release.replace("core,current_code",
+                                                              "core,current_code,git_write"), 1)):
+            self.assertNotEqual(current, drift)
+            self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
+    def test_release_validator_rejects_canonical_session_search_drift(self) -> None:
+        validator = load_release_validator()
+        candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
+        baseline = "1ec815d36ae628a51d6a551264f9a1dc19ef13e9"
+        for path in ("src/server/server_mcp_call_table.c",
+                     "src/tests/test_mcp_client_registry.c"):
+            current = (ROOT / path).read_text()
+            frozen = validator.git_output("show", f"{candidate}:{path}")
+            blocks = [block for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
+                      if "canonical-session-search:" in block.get("review", "")]
+            self.assertEqual(len(blocks), 1 if "server_mcp" in path else 4)
+            # Prove these exact changes restore the reviewed host source before
+            # any pre-existing host or frozen memory normalization is applied.
+            original = current
+            # Normalize the separately reviewed later role membership first;
+            # the search-only reversal must still exactly restore its own base.
+            for block in validator.REVIEWED_HOST_INTEGRATIONS[path]:
+                if "canonical-git-role-membership:" in block.get("review", ""):
+                    self.assertEqual(original.count(block["release_text"]), 1)
+                    original = original.replace(block["release_text"], block["frozen_text"], 1)
+            for block in blocks:
+                self.assertEqual(original.count(block["release_text"]), 1)
+                original = original.replace(block["release_text"], block["frozen_text"], 1)
+            self.assertEqual(original, subprocess.run(
+                ["git", "show", f"{baseline}:{path}"], cwd=ROOT, check=True,
+                capture_output=True, text=True).stdout)
+            self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+            # In particular, the adapter cannot regress to UID-only authority,
+            # duplicate forged principals cannot pass, and the reviewed schema
+            # cannot silently lose its explicit canonical view selectors.
+            semantic_drift = (
+                current.replace("c->conn->vault_principal[0]", "0", 1),
+            ) if "server_mcp" in path else (
+                current.replace("assert(count == 1);", "assert(count >= 1);", 1),
+                current.replace("limit,offset,query", "limit,query", 1),
+                current.replace("authenticated-actor", "foreign-actor", 1),
+            )
+            for drift in semantic_drift:
+                self.assertNotEqual(current, drift)
+                self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+            for block in blocks:
+                release = block["release_text"]
+                for label, drift in (
+                    ("changed", current.replace(release, "/* unreviewed search change */\n" +
+                                                release[1:], 1)),
+                    ("removed", current.replace(release, "", 1)),
+                    ("duplicated", current + release),
+                ):
+                    with self.subTest(path=path, delta=release[:70], drift=label):
+                        self.assertNotEqual(current, drift)
+                        self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
 
     def test_release_validator_only_allows_exact_reviewed_build_additions(self) -> None:
         validator = load_release_validator()

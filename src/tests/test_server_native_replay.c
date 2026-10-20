@@ -234,3 +234,17 @@ int main(void)
         "failures passed");
    return 0;
 }
+
+/* This ordinary fixture has no registered native resource producer. */
+int db1_session_native_source_append(const char *session, const char *id, const char *turn,
+                                     const char *actor, const char *payload, char sequence[32])
+{
+   (void)session;
+   (void)id;
+   (void)turn;
+   (void)actor;
+   (void)payload;
+   (void)sequence;
+   assert(!"unexpected native owner in ordinary capture fixture");
+   return -1;
+}

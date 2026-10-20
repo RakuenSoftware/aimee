@@ -440,7 +440,7 @@ int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       char *prompt = build_area_prompt(root, (const char(*)[MAX_PATH_LEN])cc.paths, area, cc.n, a);
       if (!prompt)
          continue;
-      agent_result_t r;
+      agent_result_t r = {0};
       memset(&r, 0, sizeof(r));
       int prc = agent_run_named(&acfg, proposer, "review", NULL, prompt, 0, 0.2, &r);
       free(prompt);
@@ -456,7 +456,7 @@ int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
             score_candidate(cands, &cand[i], &scfg, settled, settled_n, &strong, &worth, &rejected,
                             &excluded, &fc);
       }
-      free(r.response);
+      agent_result_clear_response(&r);
    }
 
    cJSON_AddNumberToObject(resp, "areas_total", area_count);

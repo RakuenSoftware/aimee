@@ -18,6 +18,16 @@
 /* When set, the recall stubs return nothing so ingress_preinject_build → NULL
  * (the "pre-injection off / recall empty" path). */
 static int g_no_recall = 0;
+/* Independent configured-test receipts are qualified by their owner suites.
+ * This IR plan fixture has no authenticated historical execution source. */
+char *db1_execution_test_grade_recall(const char *principal, const char *project,
+                                      const char *sources_json)
+{
+   (void)principal;
+   (void)project;
+   (void)sources_json;
+   return NULL;
+}
 static int g_test_placement =
     0; /* drives ingress_cache_placement_enabled in legacy_config_read stub */
 

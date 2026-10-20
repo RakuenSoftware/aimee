@@ -814,7 +814,7 @@ int session_compact(cJSON *messages, const session_compact_config_t *cfg,
    compact_history_t history = {0};
    cJSON *working = NULL;
    int rc = -1;
-   if (history_load(messages, &history))
+   if (aimee_ir_history_admit_host(messages) || history_load(messages, &history))
       goto done;
    int n = history.count;
    result.messages_before = result.messages_after = n;
@@ -824,23 +824,18 @@ int session_compact(cJSON *messages, const session_compact_config_t *cfg,
       rc = 0;
       goto done;
    }
-   /* Repairs and summaries are staged together. Any refusal leaves the source
-    * byte-for-byte unchanged, including opaque values and cache metadata. */
+   /* Summaries are staged after strict causal admission. Any refusal leaves
+    * source bytes, opaque values and cache metadata unchanged. */
    working = cJSON_Duplicate(messages, 1);
    if (!working)
       goto done;
-   result.repairs = aimee_ir_history_repair(working);
-   if (result.repairs < 0)
-      goto done;
-   history_free(&history);
-   if (history_load(working, &history))
-      goto done;
-   n = history.count;
    int start = 1, end = canonical_pair_cut(&history, n - retain);
    if (msg_tool_count(&history.messages[0]))
       while (start < end && msg_is_tool_result(&history.messages[start]))
          start++;
    if (end > start && compact_canonical(working, &history, start, end, cfg, &result))
+      goto done;
+   if (aimee_ir_history_admit_host(working))
       goto done;
    result.messages_after = cJSON_GetArraySize(working);
    while (messages->child)
@@ -851,6 +846,8 @@ int session_compact(cJSON *messages, const session_compact_config_t *cfg,
 done:
    history_free(&history);
    cJSON_Delete(working);
+   if (rc)
+      memset(&result, 0, sizeof result);
    if (out)
       *out = result;
    return rc;

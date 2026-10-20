@@ -1,6 +1,7 @@
 /* Claude print-mode process lifecycle. Native frames terminate in translation;
  * callers own Vault materialization, resume metadata and durable IR delivery. */
 #include "claude_headless.h"
+#include "cli_claude_native.h"
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "server_session_control.h"
@@ -80,7 +81,8 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    int in = -1, output = -1, status = 0, rc = -1, saw_result = 0, interrupted = 0, eof = 0,
        capture_failed = 0;
    pid_t pid = -1;
-   aimee_harness_ir_t ir = {0};
+   aimee_harness_ir_t ir = {.host_model_capture = cfg->claude_host != NULL};
+   int profile_seen = 0;
    char *input_line = NULL;
    int initialized = !cfg->control_channel, prompt_sent = !cfg->control_channel;
    server_control_scope_t *controls = server_control_scope_current();
@@ -106,6 +108,9 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    uint64_t last = mono_ms(), started = last;
    while (!eof)
    {
+      if (cfg->claude_host && cfg->claude_host->progress &&
+          cfg->claude_host->progress(cfg->claude_host->progress_context))
+         goto capture_stop;
       if (agent_request_cancelled())
       {
          interrupted = 1;
@@ -230,11 +235,28 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
          }
          buffer[used] = '\0';
          char *line = buffer, *end = NULL;
-         while ((end = strchr(line, '\n')) || (eof && *line))
+         while ((end = memchr(line, '\n', used - (size_t)(line - buffer))) ||
+                (eof && (size_t)(line - buffer) < used))
          {
-            if (end)
-               *end = '\0';
-            cJSON *frame = cJSON_Parse(line);
+            size_t frame_length = end ? (size_t)(end - line) : used - (size_t)(line - buffer);
+            /* Claude also writes diagnostic lines to stdout. They never enter
+             * history. An object frame, however, must pass exact admission;
+             * neither C-string truncation nor a partial parse can accept it. */
+            const char *first = line;
+            while (first < line + frame_length && strchr(" \t\r", *first))
+               first++;
+            if (first == line + frame_length || *first != '{')
+            {
+               line = end ? end + 1 : buffer + used;
+               continue;
+            }
+            cJSON *frame = aimee_ir_json_parse_frame(line, frame_length);
+            if (!cJSON_IsObject(frame))
+            {
+               cJSON_Delete(frame);
+               snprintf(out->error, sizeof out->error, "invalid Claude JSON frame");
+               goto capture_stop;
+            }
             if (cJSON_IsObject(frame))
             {
                const cJSON *frame_type = cJSON_GetObjectItemCaseSensitive(frame, "type");
@@ -253,6 +275,33 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                      goto capture_stop;
                   }
                   initialized = 1;
+               }
+               if (cfg->claude_host && cJSON_IsString(frame_type))
+               {
+                  const char *subtype =
+                      cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(frame, "subtype"));
+                  if (!strcmp(frame_type->valuestring, "system") && subtype &&
+                      !strcmp(subtype, "init"))
+                  {
+                     if (profile_seen || cli_claude_native_verify(cfg->claude_host, frame) ||
+                         !cfg->claude_host->init ||
+                         cfg->claude_host->init(frame, cfg->claude_host->context))
+                     {
+                        cJSON_Delete(frame);
+                        snprintf(out->error, sizeof out->error,
+                                 "Claude native launch profile was refused");
+                        goto capture_stop;
+                     }
+                     profile_seen = 1;
+                  }
+                  else if (!profile_seen && (!strcmp(frame_type->valuestring, "assistant") ||
+                                             !strcmp(frame_type->valuestring, "user") ||
+                                             !strcmp(frame_type->valuestring, "stream_event") ||
+                                             !strcmp(frame_type->valuestring, "result")))
+                  {
+                     cJSON_Delete(frame);
+                     goto capture_stop;
+                  }
                }
                if (aimee_claude_frame_ir(frame, &ir) != 0)
                {
@@ -284,7 +333,7 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
             cJSON_Delete(frame);
             if (!end)
             {
-               line += strlen(line);
+               line = buffer + used;
                break;
             }
             line = end + 1;
@@ -334,8 +383,17 @@ stop:
       }
    }
    if (eof && initialized && prompt_sent && !capture_failed && !interrupted && saw_result == 1 &&
-       WIFEXITED(status) && WEXITSTATUS(status) == 0)
+       (!cfg->claude_host || profile_seen) && WIFEXITED(status) && WEXITSTATUS(status) == 0)
    {
+      if (cfg->claude_host)
+      {
+         /* Only scheduler completion. The server factory still requires the
+          * original canonical terminal response before reporting task success. */
+         out->success = 1;
+         out->turns = 1;
+         rc = 0;
+         goto finish;
+      }
       /* Compatibility callers receive a projection of the admitted native
        * snapshot. A terminal result alone cannot invent model history. */
       aimee_response_t response = {0};
@@ -354,7 +412,7 @@ stop:
       out->completion_tokens = (int)response.usage_out;
       out->cache_read_tokens = (int)response.usage_cache_read;
       out->cache_write_tokens = (int)response.usage_cache_write;
-      aimee_response_free(&response);
+      out->canonical_response = response;
       if (!out->response)
       {
          snprintf(out->error, sizeof out->error, "cannot allocate canonical Claude response");

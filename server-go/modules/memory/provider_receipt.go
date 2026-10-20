@@ -37,6 +37,7 @@ type providerReceiptBinding struct {
 	Retention            string          `json:"retention_mode"`
 	SourceCoverage       string          `json:"source_coverage"`
 	Sources              json.RawMessage `json:"sources"`
+	ConfiguredTests      json.RawMessage `json:"configured_test_receipts,omitempty"`
 	SourcesDigest        string          `json:"sources_digest"`
 	SourceCheckID        string          `json:"source_check_id"`
 	Route                string          `json:"route"`
@@ -117,6 +118,9 @@ func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseE
 		entry = &sourceReleaseEntry{sources: json.RawMessage(`[]`),
 			binding: releaseBinding(args), digest: releaseDigest([]typedProjectionRef{})}
 	}
+	if len(entry.executionGrades) > 0 {
+		coverage = "retained_inputs_with_configured_tests"
+	}
 	digest, count := args.stringOr("payload_sha256", ""), args.stringOr("payload_bytes", "")
 	route := args.stringOr("route", "")
 	requestID, provider, model := args.stringOr("request_id", ""), args.stringOr("provider", ""), args.stringOr("model", "")
@@ -141,7 +145,7 @@ func (s *sourceReleaseState) receiptPlan(args commandArgs, entry *sourceReleaseE
 	binding := providerReceiptBinding{SchemaVersion: 1, AttemptID: attempt, ProducerID: s.receiptProducer,
 		TurnID: turn, ProducerBuild: build, CallerLimitsDigest: callerLimits, OperatorLimitsDigest: operatorLimits,
 		RequestID: requestID, RequestBinding: entry.binding, Workspace: entry.workspace, Project: entry.project,
-		Retention: "commitment_only", SourceCoverage: coverage, Sources: entry.sources,
+		Retention: "commitment_only", SourceCoverage: coverage, Sources: entry.sources, ConfiguredTests: entry.executionGrades,
 		SourcesDigest: entry.digest, SourceCheckID: check, Route: route, Provider: provider, Model: model,
 		PayloadDigest: digest, PayloadBytes: count, CountProvenance: "host_final_provider_bytes"}
 	if owner := args.stringOr("dispatch_owner", ""); owner != "" {

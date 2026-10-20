@@ -267,7 +267,12 @@ agent_tool_permission_t agent_tools_permission_check(const char *name, const cJS
 {
    if (!name || !name[0])
       return AGENT_TOOL_PERMISSION_ROLE;
-   if ((strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0) &&
+   const char *verify_action =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "action"));
+   int verify_exec =
+       strcmp(name, "git_verify") == 0 &&
+       (!verify_action || (strcmp(verify_action, "check") && strcmp(verify_action, "status")));
+   if ((strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0 || verify_exec) &&
        !agent_tools_shell_allowed())
       return AGENT_TOOL_PERMISSION_SHELL;
    if (!agent_tools_tool_allowed_for_role(agent_tools_dispatch_role(), name))
@@ -2224,8 +2229,11 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       char *gr_input = guardrail_input_json(name, arguments_json);
 
       char msg[1024] = "";
-      int rc = pre_tool_check(name, gr_input, &state, config_guardrail_mode(), dispatch_cwd, msg,
-                              sizeof(msg));
+      int rc = agent_tools_is_mcp_derived(name)
+                   ? pre_tool_check_registered_tool(name, gr_input, &state, config_guardrail_mode(),
+                                                    dispatch_cwd, msg, sizeof msg)
+                   : pre_tool_check(name, gr_input, &state, config_guardrail_mode(), dispatch_cwd,
+                                    msg, sizeof msg);
 
       session_state_save(&state, dispatch_sid);
       free(gr_input);

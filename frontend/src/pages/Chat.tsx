@@ -1,6 +1,9 @@
 import { parseJSON, stringifyJSON } from '../ir/json';
+import './chat.css';
+import { mergeChannelMessages, type ChannelMessage } from './chat/channelMessages';
+import { useSessionPreference } from './chat/useSessionPreference';
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
-import { AutoGrowTextarea, Button, Drawer, Spinner, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
+import { AutoGrowTextarea, Button, Drawer, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
 import { renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
@@ -75,12 +78,6 @@ interface WorkflowSessionInfo {
 
 interface ChannelInfo {
   name: string;
-  created_at?: string;
-}
-
-interface ChannelMessage {
-  sender: string;
-  text: string;
   created_at?: string;
 }
 
@@ -1129,13 +1126,13 @@ function ChannelView({ channelName, messages, agents, onSend }: ChannelViewProps
           <div style={{ color: tokens.textPale, fontSize: '13px' }}>No messages yet.</div>
         )}
         {messages.map((m, i) => (
-          <div key={i} style={{ fontSize: '13px' }}>
+          <div key={m.id ?? i} style={{ fontSize: '13px' }}>
             <span style={{ fontWeight: 600, color: tokens.primary, marginRight: '6px' }}>
               {m.sender}
             </span>
             {m.created_at && (
               <span style={{ fontSize: '11px', color: tokens.textPale, marginRight: '8px' }}>
-                {new Date(m.created_at + 'Z').toLocaleTimeString()}
+                {new Date(/(?:Z|[+-]\d\d:\d\d)$/.test(m.created_at) ? m.created_at : m.created_at + 'Z').toLocaleTimeString()}
               </span>
             )}
             <span
@@ -1311,6 +1308,8 @@ export default function Chat() {
   const irFlush = useRef<number | null>(null);
   const [, setIRRevision] = useState(0);
   const [irTransportErrors, setIRTransportErrors] = useState<Record<string, string>>({});
+  const [irReady, setIRReady] = useState<Record<string, boolean>>({});
+  const [irReconnect, setIRReconnect] = useState(0);
   function ingestIR(owner: string, raw: Record<string, unknown>) {
     if (raw.status === 'error') throw new Error(String(raw.message || 'Session capture failed'));
     const envelope = raw as unknown as Envelope;
@@ -1345,13 +1344,6 @@ export default function Chat() {
   const working = !!activeWork && (activeWork.pending > 0 || activeWork.queued > 0);
   const iterCur = activeWork?.iterCur ?? 0;
   const iterMax = activeWork?.iterMax ?? 0;
-  // True while a turn is in flight on this tab's session driven by *another*
-  // surface (CLI/TUI, another tab). Fed by the presence-event stream; shown only
-  // when this tab isn't itself working (see render).
-  const [remoteTurnActive, setRemoteTurnActive] = useState(false);
-  // Live text of the other surface's in-flight turn, accumulated from
-  // turn_delta events (emitted by the server when >1 surface shares a session).
-  const [remoteTurnText, setRemoteTurnText] = useState('');
   const [inputText, setInputText] = useState('');
   const [banner, setBanner] = useState<{ stacks: BootstrapStack[] } | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -1428,13 +1420,11 @@ export default function Chat() {
   const [availableSkills, setAvailableSkills] = useState<string[]>([]);
   const [activeSkill, setActiveSkill] = useState<string>('');
   const [availablePersonas, setAvailablePersonas] = useState<PersonaInfo[]>([]);
-  const [activePersona, setActivePersona] = useState<string>('');
   /* The agent serving this tab's turns. `activeAgent` is the SESSION PIN (empty
    * = not pinned); `defaultAgent` is what an unpinned turn actually lands on,
    * reported by /api/models (server-side agent_default_primary). The selector
    * shows the pin when there is one, else the default, so it always names the
    * agent you are really talking to. */
-  const [activeAgent, setActiveAgent] = useState<string>('');
   const [defaultAgent, setDefaultAgent] = useState<string>('');
   const [lspDiag, setLspDiag] = useState<{ errors: number; warnings: number; active_servers: number } | null>(null);
   const [workflowInfo, setWorkflowInfo] = useState<WorkflowSessionInfo | null>(null);
@@ -1446,15 +1436,17 @@ export default function Chat() {
   const [pluginsLoading, setPluginsLoading] = useState(false);
   const [pluginsError, setPluginsError] = useState<string | null>(null);
   const [agents, setAgents] = useState<ModelInfo[]>([]);
+  const [branchingSupported, setBranchingSupported] = useState(false);
+  const [threadError, setThreadError] = useState('');
 
   /* Channel state */
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [activeChannel, setActiveChannel] = useState<string | null>(loadActiveChannel);
+  const [channelsOpen, setChannelsOpen] = useState(() => !!loadActiveChannel());
   const [channelMsgs, setChannelMsgs] = useState<Record<string, ChannelMessage[]>>({});
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const channelSseRef = useRef<EventSource | null>(null);
   const presenceSseRef = useRef<EventSource | null>(null);
-  const activeChannelRef = useRef<string | null>(activeChannel);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1483,9 +1475,6 @@ export default function Chat() {
   }
   const tabsRef = useRef<TabData[]>(tabs);
   const activeIdxRef = useRef(activeIdx);
-  // Live mirror of remoteTurnActive so sendMessage can synchronously tell whether
-  // a server/foreign turn (e.g. a steer auto-continue) is in flight for the tab.
-  const remoteTurnActiveRef = useRef(false);
   // Holds the aimeeSid we just sent a steer for (chat.interrupt). The next
   // turn_started on THAT session's events stream is the server-initiated
   // continuation — render it even though this surface may still look "working"
@@ -1518,6 +1507,10 @@ export default function Chat() {
   const renderedSidRef = useRef<string>('');
   const queueActive = working;
   const activePersonaSid = tabs[activeIdx]?.aimeeSid ?? '';
+  const persona = useSessionPreference(activePersonaSid, '/api/chat/persona', 'name');
+  const primary = useSessionPreference(activePersonaSid, '/api/chat/primary', 'agent');
+  const activePersona = persona.value;
+  const activeAgent = primary.value;
 
   /* Auto-scroll. Instant, not smooth: this runs ~10×/s during a stream, and a
    * smooth scrollIntoView restarts an animated scroll on every call — the
@@ -1541,8 +1534,8 @@ export default function Chat() {
   // tab opens windowed, not expanded from a previous one.
   const [visibleCount, setVisibleCount] = useState(TRANSCRIPT_WINDOW);
   useEffect(() => { setVisibleCount(TRANSCRIPT_WINDOW); }, [activePersonaSid]);
-  const hiddenCount = Math.max(0, streamMsgs.length - visibleCount);
-  const windowedMsgs = hiddenCount > 0 ? streamMsgs.slice(hiddenCount) : streamMsgs;
+  const hiddenLegacyCount = Math.max(0, streamMsgs.length - visibleCount);
+  const windowedMsgs = hiddenLegacyCount > 0 ? streamMsgs.slice(hiddenLegacyCount) : streamMsgs;
 
   useEffect(() => { scrollToBottom(); }, [streamMsgs, working, scrollToBottom]);
   useEffect(() => { streamMsgsRef.current = streamMsgs; }, [streamMsgs]);
@@ -1602,39 +1595,80 @@ export default function Chat() {
   const activeAimeeSid = tabs[activeIdx]?.aimeeSid ?? '';
   useEffect(() => {
     if (!activeAimeeSid) return;
+    let disposed = false;
+    setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
     const state = irSessions.current[activeAimeeSid] ?? emptySession(activeAimeeSid);
     const es = new EventSource(`/api/chat/session-events?format=ir&sid=${encodeURIComponent(activeAimeeSid)}&cursor=${state.sequence}`);
     presenceSseRef.current = es;
-    es.addEventListener('ir', (event: MessageEvent<string>) => {
+    es.addEventListener('error', () => {
+      if (!disposed) setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+    });
+    es.addEventListener('replay_complete', (event: MessageEvent<string>) => {
+      if (disposed) return;
       try {
-        ingestIR(activeAimeeSid, parseJSON(event.data) as Record<string, unknown>);
+        const ready = parseJSON(event.data) as { session_id?: string; cursor?: string };
+        const cursor = irSessions.current[activeAimeeSid]?.sequence ?? '0';
+        if (ready.session_id !== activeAimeeSid || typeof ready.cursor !== 'string' ||
+            !/^(0|[1-9][0-9]*)$/.test(ready.cursor) || BigInt(ready.cursor) > BigInt(cursor))
+          throw new Error('Invalid conversation replay boundary');
+        setIRReady(prev => prev[activeAimeeSid] ? prev : { ...prev, [activeAimeeSid]: true });
         setIRTransportErrors(prev => prev[activeAimeeSid] ? { ...prev, [activeAimeeSid]: '' } : prev);
       } catch (error) {
+        disposed = true;
+        setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
         setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: error instanceof Error ? error.message : 'Session replay failed' }));
         es.close();
       }
     });
-    return () => { es.close(); if (presenceSseRef.current === es) presenceSseRef.current = null; };
-  }, [activeAimeeSid]);
-  const canonicalState = irSessions.current[activeAimeeSid];
-  const replyControl = useCallback(async (requestId: string, reply: ControlReply) => {
-    const response = await fetch('/api/chat/control-reply', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: stringifyJSON({ session_id: activeAimeeSid, request_id: requestId, reply }),
+    es.addEventListener('ir', (event: MessageEvent<string>) => {
+      if (disposed) return;
+      try {
+        ingestIR(activeAimeeSid, parseJSON(event.data) as Record<string, unknown>);
+        setIRTransportErrors(prev => prev[activeAimeeSid] ? { ...prev, [activeAimeeSid]: '' } : prev);
+      } catch (error) {
+        disposed = true;
+        setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+        setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: error instanceof Error ? error.message : 'Session replay failed' }));
+        es.close();
+      }
     });
-    const body = await response.json().catch(() => ({})) as { error?: string };
-    if (!response.ok) throw new Error(body.error || 'Could not send the reply');
+    return () => { disposed = true; es.close(); if (presenceSseRef.current === es) presenceSseRef.current = null; };
+  }, [activeAimeeSid, irReconnect]);
+  const canonicalState = irSessions.current[activeAimeeSid];
+  // Execution activity is a canonical projection, not separately copied UI state.
+  // Keeping a second state/effect pair can lag a replayed running turn.
+  const remoteTurnActive = !!irReady[activeAimeeSid] && !!canonicalState?.activeTurns.length;
+  const hiddenCount = canonicalState?.messages.length
+    ? Math.max(0, canonicalState.messages.length - visibleCount) : hiddenLegacyCount;
+  const submittedControls = useRef(new Set<string>());
+  const [pendingReplies, setPendingReplies] = useState<Record<string, ReadonlySet<string>>>({});
+  const replyControl = useCallback(async (requestId: string, reply: ControlReply, sessionId = activeAimeeSid) => {
+    const key = `${sessionId}\0${requestId}`;
+    if (submittedControls.current.has(key)) return;
+    submittedControls.current.add(key);
+    setPendingReplies(prev => ({ ...prev, [sessionId]: new Set([...(prev[sessionId] ?? []), requestId]) }));
+    try {
+      const response = await fetch('/api/chat/control-reply', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: stringifyJSON({ session_id: sessionId, request_id: requestId, reply }),
+      });
+      const body = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(body.error || 'Could not send the reply');
+    } catch (error) {
+      submittedControls.current.delete(key);
+      setPendingReplies(prev => {
+        const remaining = new Set(prev[sessionId]); remaining.delete(requestId);
+        return { ...prev, [sessionId]: remaining };
+      });
+      throw error;
+    }
   }, [activeAimeeSid]);
 
   const usage = canonicalState?.messages.slice().reverse().find(m => m.usage)?.usage;
   const lastUsage = usage ? { in: usage.input, out: usage.output, cost: 0 } : null;
   useEffect(() => {
-    const running = !!canonicalState?.activeTurns.length;
-    remoteTurnActiveRef.current = running;
-    setRemoteTurnActive(running);
-    setRemoteTurnText('');
     scrollToBottom();
-  }, [canonicalState, scrollToBottom]);
+  }, [canonicalState, irReady, activeAimeeSid, scrollToBottom]);
   useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
 
   /* Rebuild per-sid pending/queued counts from the live send refs. Iteration
@@ -1759,20 +1793,6 @@ export default function Chat() {
       .catch(() => {});
   }, []);
 
-  /* Reflect the active tab's current persona (per-session, else durable default).
-     A tab that has not sent its first message yet has NO aimee session id — it
-     used to be left blank here, so the <select> fell back to whatever option
-     happened to be first rather than the persona the turn would actually use.
-     Ask without a sid in that case: the server answers with the durable default,
-     which is engineer unless the operator changed it. */
-  useEffect(() => {
-    const q = activePersonaSid ? `?sid=${encodeURIComponent(activePersonaSid)}` : '';
-    fetch(`/api/chat/persona${q}`)
-      .then(r => r.json())
-      .then((d: { name?: string }) => setActivePersona(d.name ?? ''))
-      .catch(() => {});
-  }, [activePersonaSid]);
-
   const refreshPlugins = useCallback(async () => {
     setPluginsLoading(true);
     try {
@@ -1804,6 +1824,16 @@ export default function Chat() {
     if (pluginsOpen) void refreshPlugins();
   }, [pluginsOpen, refreshPlugins]);
 
+  // Unsupported controls stay hidden until the backend advertises their capability.
+  useEffect(() => {
+    let disposed = false;
+    void fetch('/api/chat/threads').then(response => response.ok ? response.json() : {})
+      .then((body: { capabilities?: { branching?: boolean } }) => {
+        if (!disposed) setBranchingSupported(body.capabilities?.branching === true);
+      }).catch(() => {});
+    return () => { disposed = true; };
+  }, []);
+
   /* Fetch channel list on mount */
   useEffect(() => {
     fetch('/api/channels')
@@ -1822,15 +1852,6 @@ export default function Chat() {
       .catch(() => {});
   }, []);
 
-  /* Reflect this tab's pinned agent (empty = following the configured default) */
-  useEffect(() => {
-    if (!activePersonaSid) { setActiveAgent(''); return; }
-    fetch(`/api/chat/primary?sid=${encodeURIComponent(activePersonaSid)}`)
-      .then(r => r.json())
-      .then((d: { agent?: string }) => setActiveAgent(d.agent ?? ''))
-      .catch(() => {});
-  }, [activePersonaSid]);
-
   useEffect(() => {
     fetch('/api/metrics')
       .then(r => r.json())
@@ -1842,9 +1863,6 @@ export default function Chat() {
     setSessionUsage({ in: 0, out: 0, cost: 0, kind: 'realized' });
   }, [activeIdx]);
 
-  /* Keep activeChannelRef in sync for SSE handler closure */
-  useEffect(() => { activeChannelRef.current = activeChannel; }, [activeChannel]);
-
   /* Persist active channel to localStorage */
   useEffect(() => { saveActiveChannel(activeChannel); }, [activeChannel]);
 
@@ -1853,38 +1871,38 @@ export default function Chat() {
     if (channelSseRef.current) { channelSseRef.current.close(); channelSseRef.current = null; }
     if (!activeChannel) return;
 
-    /* Fetch existing messages first */
-    fetch(`/api/channels/${encodeURIComponent(activeChannel)}/messages`)
-      .then(r => r.json())
-      .then((d: { messages?: ChannelMessage[] }) => {
-        setChannelMsgs(prev => ({ ...prev, [activeChannel]: d.messages ?? [] }));
-        setUnreadCounts(prev => ({ ...prev, [activeChannel]: 0 }));
-      })
-      .catch(() => {});
-
+    let disposed = false;
+    const abort = new AbortController();
+    const refresh = () => {
+      void fetch(`/api/channels/${encodeURIComponent(activeChannel)}/messages`, { signal: abort.signal })
+        .then(r => { if (!r.ok) throw new Error('Channel history unavailable'); return r.json(); })
+        .then((d: { messages?: ChannelMessage[] }) => {
+          if (disposed) return;
+          setChannelMsgs(prev => ({ ...prev, [activeChannel]: mergeChannelMessages(d.messages ?? [], prev[activeChannel] ?? []) }));
+          setUnreadCounts(prev => ({ ...prev, [activeChannel]: 0 }));
+        }).catch(() => {});
+    };
     const es = new EventSource(`/api/channels/${encodeURIComponent(activeChannel)}/events`);
     channelSseRef.current = es;
-
+    // Refresh after every successful connection, including reconnects. Merge
+    // the snapshot with live arrivals instead of replacing the live timeline.
+    es.addEventListener('open', refresh);
+    refresh();
     es.addEventListener('message', (ev: MessageEvent<string>) => {
+      if (disposed) return;
       try {
         const msg = JSON.parse(ev.data) as ChannelMessage;
-        const ch = activeChannelRef.current;
-        setChannelMsgs(prev => ({
-          ...prev,
-          [activeChannel]: [...(prev[activeChannel] ?? []), msg],
-        }));
-        if (ch !== activeChannel) {
-          setUnreadCounts(prev => ({ ...prev, [activeChannel]: (prev[activeChannel] ?? 0) + 1 }));
-        }
-      } catch { /* ignore */ }
+        if (typeof msg.sender !== 'string' || typeof msg.text !== 'string') return;
+        setChannelMsgs(prev => ({ ...prev, [activeChannel]: mergeChannelMessages(prev[activeChannel] ?? [], [msg]) }));
+      } catch { /* ignore malformed frames */ }
     });
-
-    return () => { es.close(); channelSseRef.current = null; };
+    return () => { disposed = true; abort.abort(); es.close(); channelSseRef.current = null; };
   }, [activeChannel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function selectChannel(name: string): void {
     abortActiveSends();
     setActiveChannel(name);
+    setChannelsOpen(false);
     setUnreadCounts(prev => ({ ...prev, [name]: 0 }));
     /* Ensure channel exists in message map */
     setChannelMsgs(prev => prev[name] ? prev : { ...prev, [name]: [] });
@@ -1934,41 +1952,6 @@ export default function Chat() {
       });
       setActiveSkill(skill);
     } catch { /* ignore */ }
-  }
-
-  /* Set the active tab's persona server-side. It is sticky per session, so the
-     chat system prompt and delegate policy both follow it. */
-  async function changePersona(name: string) {
-    const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid;
-    if (!sid || !name) return;
-    const prev = activePersona;
-    setActivePersona(name);
-    try {
-      const resp = await fetch('/api/chat/persona', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-        body: JSON.stringify({ sid, name }),
-      });
-      if (!resp.ok) setActivePersona(prev);
-    } catch { setActivePersona(prev); }
-  }
-
-  /* Pin the agent that serves this tab's turns. Per session (like the persona),
-     so other tabs and the durable config are untouched; it takes effect on the
-     next turn (chat_stream_worker reads the pin before cfg.provider). */
-  async function changeAgent(name: string) {
-    const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid;
-    if (!sid || !name) return;
-    const prev = activeAgent;
-    setActiveAgent(name);
-    try {
-      const resp = await fetch('/api/chat/primary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-        body: JSON.stringify({ sid, agent: name }),
-      });
-      if (!resp.ok) setActiveAgent(prev);
-    } catch { setActiveAgent(prev); }
   }
 
   async function togglePlugin(name: string) {
@@ -2231,6 +2214,7 @@ export default function Chat() {
 
   /* Thread operations */
   async function branchThread() {
+    setThreadError('');
     try {
       const label = `branch-${(tabs[activeIdx]?.threads?.length ?? 0) + 1}`;
       const r = await fetch('/api/chat/branch', {
@@ -2238,11 +2222,12 @@ export default function Chat() {
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
         body: JSON.stringify({ label }),
       });
-      const d = await r.json() as { ok?: boolean; thread_id?: number };
+      const d = await r.json() as { ok?: boolean; thread_id?: number; error?: string };
+      if (!r.ok || !d.ok) throw new Error(d.error || 'Could not branch conversation');
       if (d.ok) {
         await refreshThreads();
       }
-    } catch { /* ignore */ }
+    } catch (error) { setThreadError(error instanceof Error ? error.message : 'Could not branch conversation'); }
   }
 
   async function switchThread(threadId: number) {
@@ -2332,7 +2317,7 @@ export default function Chat() {
   /* Send message */
   async function sendMessage() {
     const text = inputText.trim();
-    if (!text) return;
+    if (!text || primary.pending || persona.pending) return;
 
     setInputText('');
     // AutoGrowTextarea reflows its own height when inputText clears.
@@ -2344,7 +2329,7 @@ export default function Chat() {
     const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid ?? '';
     let clientInflight = false;
     activeSendAbortRefs.current.forEach(s => { if (s === sid) clientInflight = true; });
-    if (sid && (clientInflight || remoteTurnActiveRef.current)) {
+    if (sid && (clientInflight || (!!irReady[sid] && !!irSessions.current[sid]?.activeTurns.length))) {
       // Optimistically show the steer in the transcript and re-stick to bottom.
       atBottomRef.current = true;
       // The admitted user message arrives through the canonical session log.
@@ -2653,7 +2638,7 @@ export default function Chat() {
   }
 
   return (
-    <div style={{
+    <div className="chat-shell" style={{
       display: 'flex', flexDirection: 'column', height: '100%',
       overflow: 'hidden', background: tokens.surface,
     }}>
@@ -2662,7 +2647,7 @@ export default function Chat() {
           button resets this conversation (fresh provider session). */}
       {/* Reserve the tutorial launcher's top-right corner. Without this padding,
           its absolute "?" button sits directly over Clear and steals clicks. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 48, boxSizing: 'border-box' }}>
+      <div className="chat-session-toolbar" style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 48, boxSizing: 'border-box' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <ProjectPicker
             key={activeSessionId}
@@ -2674,6 +2659,8 @@ export default function Chat() {
             }}
           />
         </div>
+        <Button size="md" aria-expanded={channelsOpen} aria-controls="chat-channels"
+          onClick={() => setChannelsOpen(open => !open)}>Channels{channels.length ? ` (${channels.length})` : ''}</Button>
         <Button
           variant="default"
           size="md"
@@ -2686,16 +2673,18 @@ export default function Chat() {
       </div>
 
       {/* Thread bar (conversation branching) */}
-      <ThreadBar
+      {branchingSupported && <ThreadBar
         threads={tabs[activeIdx]?.threads ?? []}
         activeThreadId={tabs[activeIdx]?.activeThreadId ?? 0}
         onSwitch={switchThread}
         onBranch={branchThread}
-      />
+      />}
+      {threadError && <p role="alert">{threadError}</p>}
 
       {/* Main content area: channel sidebar + chat + optional rules panel */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
         {/* Channel sidebar */}
+        {channelsOpen && <aside id="chat-channels" className="chat-channels" aria-label="Channels">
         <ChannelSidebar
           channels={channels}
           activeChannel={activeChannel}
@@ -2703,10 +2692,10 @@ export default function Chat() {
           onSelect={selectChannel}
           onDeselect={() => setActiveChannel(null)}
           onCreateChannel={name => { void createChannel(name); }}
-        />
+        /></aside>}
 
         {/* Chat column — shows channel view when a channel is active */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="chat-column" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {activeChannel ? (
           <ChannelView
@@ -2717,6 +2706,8 @@ export default function Chat() {
           />
         ) : (<>
 
+      <details className="chat-workflow" open={workflowInfo ? true : undefined}>
+      <summary>{workflowInfo ? `Workflow · ${workflowInfo.status}` : 'Workflow options'}</summary>
       <WorkflowStatusCard
         channel={workflowChannel}
         session={workflowInfo}
@@ -2726,7 +2717,7 @@ export default function Chat() {
         onChannelChange={setCurrentWorkflowChannel}
         onRefresh={() => { void refreshWorkflow(); }}
         onPause={() => { void pauseWorkflow(); }}
-      />
+      /></details>
 
       {/* Bootstrap banner */}
       {banner && (
@@ -2739,6 +2730,7 @@ export default function Chat() {
 
       {/* Messages */}
       <div
+        className="chat-messages" role="log" aria-label="Conversation" aria-live="off"
         onScroll={handleMessagesScroll}
         style={{
           flex: 1, overflowY: 'auto', padding: '16px',
@@ -2755,13 +2747,17 @@ export default function Chat() {
             Show earlier messages ({hiddenCount})
           </Button>
         )}
-        {canonicalState && (canonicalState.messages.length > 0 || Object.keys(canonicalState.children ?? {}).length > 0) ? <>
-          {windowedMsgs.length > 0 && <details><summary>Earlier text-only history</summary>
-            <Transcript messages={windowedMsgs} working={false} activeSid={activeAimeeSid} />
-          </details>}
-          <IRTranscript state={canonicalState} onReply={replyControl} /></> :
+        {canonicalState && (canonicalState.messages.length > 0 || Object.keys(canonicalState.children ?? {}).length > 0 || Object.keys(canonicalState.controls).length > 0) ? <>
+          <IRTranscript state={canonicalState} onReply={replyControl} controlsReady={!!irReady[activeAimeeSid]} messageLimit={visibleCount} pendingReplies={pendingReplies[activeAimeeSid]} pendingRepliesBySession={pendingReplies} /></> :
           <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />}
-        {irTransportErrors[activeAimeeSid] && <div role="alert">{irTransportErrors[activeAimeeSid]}</div>}
+        {irTransportErrors[activeAimeeSid] ? <div role="alert">
+          {irTransportErrors[activeAimeeSid]}{' '}
+          <button type="button" onClick={() => {
+            irPending.current[activeAimeeSid] = new Map();
+            setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+            setIRReconnect(value => value + 1);
+          }}>Reconnect conversation</button>
+        </div> : !irReady[activeAimeeSid] && <p role="status">Synchronizing conversation…</p>}
         {working && <div style={{ alignSelf: 'flex-start' }}><TypingIndicator /></div>}
         {remoteTurnActive && !working && (
           <div style={{
@@ -2770,14 +2766,7 @@ export default function Chat() {
             borderRadius: '10px', color: tokens.textFaint, fontSize: '11px', fontFamily: 'system-ui',
           }}>
             <div>● aimee is active on another surface…</div>
-            {remoteTurnText && (
-              <div style={{
-                marginTop: '4px', color: tokens.textSecondary, whiteSpace: 'pre-wrap',
-                maxHeight: '8em', overflowY: 'auto', fontSize: '12px',
-              }}>
-                {remoteTurnText}
-              </div>
-            )}
+
           </div>
         )}
         {iterCur > 0 && (
@@ -2831,42 +2820,44 @@ export default function Chat() {
       )}
 
       {/* Prompt tier selector */}
-      <div style={{
+      <div role="group" aria-label="Session preferences" style={{
         padding: '4px 16px', background: tokens.surfaceAlt,
         borderTop: `1px solid ${tokens.borderLight}`,
-        display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0,
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 12px', flexShrink: 0,
       }}>
         {/* The project is set in ONE place — the session ProjectPicker at the top
             of the chat (bound to the active session). No per-prompt project
             selector here. */}
-        <span
-          style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}
-          title="How much context Aimee assembles for this turn: Minimal is fastest and cheapest, Extended packs in the most background."
-        >
-          Prompt:
-        </span>
-        <Tabs
-          size="sm"
-          ariaLabel="Prompt tier"
-          value={promptTier}
-          onChange={(v) => changePromptTier(v as 'MINIMAL' | 'STANDARD' | 'EXTENDED')}
-          options={(['MINIMAL', 'STANDARD', 'EXTENDED'] as const).map(tier => ({
-            value: tier,
-            label: tier.charAt(0) + tier.slice(1).toLowerCase(),
-          }))}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+          <span
+            style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}
+            title="How much context Aimee assembles for this turn: Minimal is fastest and cheapest, Extended packs in the most background."
+          >
+            Prompt:
+          </span>
+          <Tabs
+            size="sm"
+            ariaLabel="Prompt tier"
+            value={promptTier}
+            onChange={(v) => changePromptTier(v as 'MINIMAL' | 'STANDARD' | 'EXTENDED')}
+            options={(['MINIMAL', 'STANDARD', 'EXTENDED'] as const).map(tier => ({
+              value: tier,
+              label: tier.charAt(0) + tier.slice(1).toLowerCase(),
+            }))}
+          />
+        </div>
         {availableSkills.length > 0 && (
-          <>
-            <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
-            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, maxWidth: '100%' }}>
+            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui', flexShrink: 0 }}>
               Skill:
             </span>
             <select
+              aria-label="Skill"
               value={activeSkill}
               onChange={e => changeSkill(e.target.value)}
               title="Load a packaged skill for this session — its instructions steer how Aimee handles the turn. None runs the default behaviour."
               style={{
-                fontSize: '11px', fontFamily: 'system-ui',
+                fontSize: '11px', fontFamily: 'system-ui', minWidth: 0, maxWidth: '100%',
                 background: activeSkill ? tokens.primary : tokens.surface,
                 color: activeSkill ? tokens.surface : tokens.textFaint,
                 border: `1px solid ${activeSkill ? tokens.primary : tokens.borderLight}`,
@@ -2879,22 +2870,22 @@ export default function Chat() {
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
-          </>
+          </div>
         )}
         {agents.length > 0 && (
-          <>
-            <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
-            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, maxWidth: '100%' }}>
+            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui', flexShrink: 0 }}>
               Agent:
             </span>
             <select
-              value={activeAgent || defaultAgent}
-              onChange={e => changeAgent(e.target.value)}
+              value={primary.known ? activeAgent || defaultAgent : ''}
+              onChange={e => primary.change(e.target.value)}
+              aria-label="Agent" aria-busy={primary.pending}
               title={activeAgent
                 ? 'The agent serving this tab (pinned for this session)'
                 : `Following the configured primary${defaultAgent ? ` (${defaultAgent})` : ''} — pick one to pin it for this session`}
               style={{
-                fontSize: '11px', fontFamily: 'system-ui',
+                fontSize: '11px', fontFamily: 'system-ui', minWidth: 0, maxWidth: '100%',
                 // Unpinned (following the default) reads as the muted state, the
                 // same way an unset persona does.
                 background: activeAgent ? tokens.primary : tokens.surface,
@@ -2904,26 +2895,29 @@ export default function Chat() {
                 outline: 'none',
               }}
             >
+              {!primary.known && <option value="" disabled>{primary.error ? 'Agent unavailable' : 'Loading agent…'}</option>}
+              {primary.known && !agents.some(a => a.name === (activeAgent || defaultAgent)) &&
+                <option value={activeAgent || defaultAgent} disabled>{activeAgent || defaultAgent ? `${activeAgent || defaultAgent} (not in current catalog)` : 'Configured primary'}</option>}
               {agents.map(a => (
                 <option key={a.name} value={a.name}>
                   {a.name}{a.name === defaultAgent ? ' (primary)' : ''}
                 </option>
               ))}
             </select>
-          </>
+          </div>
         )}
         {availablePersonas.length > 0 && (
-          <>
-            <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
-            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, maxWidth: '100%' }}>
+            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui', flexShrink: 0 }}>
               Persona:
             </span>
             <select
-              value={activePersona}
-              onChange={e => changePersona(e.target.value)}
+              value={persona.known ? activePersona : ''}
+              onChange={e => persona.change(e.target.value)}
+              aria-label="Persona" aria-busy={persona.pending}
               title="Steers Aimee's role and delegate policy for this session"
               style={{
-                fontSize: '11px', fontFamily: 'system-ui',
+                fontSize: '11px', fontFamily: 'system-ui', minWidth: 0, maxWidth: '100%',
                 background: activePersona ? tokens.primary : tokens.surface,
                 color: activePersona ? tokens.surface : tokens.textFaint,
                 border: `1px solid ${activePersona ? tokens.primary : tokens.borderLight}`,
@@ -2931,13 +2925,18 @@ export default function Chat() {
                 outline: 'none',
               }}
             >
+              {!persona.known && <option value="" disabled>{persona.error ? 'Persona unavailable' : 'Loading persona…'}</option>}
+              {persona.known && !availablePersonas.some(p => p.name === activePersona) &&
+                <option value={activePersona} disabled>{activePersona ? `${activePersona} (not in current catalog)` : 'Session default'}</option>}
               {availablePersonas.map(p => (
                 <option key={p.name} value={p.name} title={p.description}>{p.name}</option>
               ))}
             </select>
-          </>
+          </div>
         )}
       </div>
+      {(primary.error || persona.error) && <p role="alert">{primary.error || persona.error}</p>}
+      {(primary.pending || persona.pending) && <p role="status">Saving session selection…</p>}
 
       {/* Input area */}
       <div style={{
@@ -2951,7 +2950,7 @@ export default function Chat() {
           onKeyDown={handleKeyDown}
           maxHeight={200}
           placeholder={(working || remoteTurnActive)
-            ? 'Steer the running turn — Enter interrupts and continues'
+            ? 'Steer the running turn…'
             : 'Type a message… (Shift+Enter for newline)'}
           style={{ flex: 1, minHeight: '44px' }}
           onFocus={e => (e.target.style.borderColor = tokens.primary)}
@@ -2969,17 +2968,18 @@ export default function Chat() {
             <Button
               variant="primary"
               busy={busy}
+              disabled={primary.pending || persona.pending}
               onClick={sendMessage}
               title={steering ? 'Interrupt the running turn and continue with this message' : 'Send'}
               style={{
-                padding: '10px 20px', background: tokens.primary,
+                padding: '10px 12px', minHeight: 44, alignSelf: 'flex-end', flexShrink: 0, background: tokens.primary,
                 color: tokens.surface, border: 'none', borderRadius: '6px',
                 cursor: 'pointer', fontSize: '14px', whiteSpace: 'nowrap',
               }}
             >
               {busy ? (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                  <Spinner loading text="" />
+                  <span className="chat-send-spinner" aria-hidden="true" />
                   {label}
                 </span>
               ) : label}

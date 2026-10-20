@@ -102,6 +102,11 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       out->top_p = top_p->valuedouble;
       out->has_top_p = 1;
    }
+   if (openai_family_prompt_cache_parse(req, out, err, errn))
+   {
+      aimee_request_free(out);
+      return -1;
+   }
    const cJSON *meta = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "metadata");
    if (meta && !cJSON_IsNull(meta))
       out->metadata = cJSON_Duplicate(meta, 1);
@@ -237,7 +242,7 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
              * name is bare in that case and only the pair identifies the tool. */
             b->tool_namespace = dupstr(ostr(item, "namespace"));
             const char *args = ostr(item, "arguments");
-            b->tool_input = args ? cJSON_ParseWithOpts(args, NULL, 1) : NULL;
+            b->tool_input = args ? aimee_ir_json_parse_frame(args, strlen(args)) : NULL;
             if (!cJSON_IsObject(b->tool_input))
             {
                if (err && errn)
@@ -466,6 +471,7 @@ cJSON *responses_frontend_render(const aimee_response_t *r)
    cJSON *usage = cJSON_AddObjectToObject(out, "usage");
    cJSON_AddNumberToObject(usage, "input_tokens", (double)r->usage_in);
    cJSON_AddNumberToObject(usage, "output_tokens", (double)r->usage_out);
+   cJSON_AddNumberToObject(usage, "total_tokens", (double)r->usage_in + (double)r->usage_out);
    cJSON *cached = cJSON_AddObjectToObject(usage, "input_tokens_details");
    cJSON_AddNumberToObject(cached, "cached_tokens", (double)r->usage_cache_read);
    cJSON *reasoning = cJSON_AddObjectToObject(usage, "output_tokens_details");

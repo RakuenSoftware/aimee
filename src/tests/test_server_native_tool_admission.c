@@ -127,6 +127,18 @@ int main(void)
    assert(!result);
    assert(!strcmp(attempt_seen, "native-mcp:host-callback-two"));
 
+   stages[0] = 0;
+   n_stages = 0;
+   result = server_native_tool_admit_attempt("git_push", arguments, "session-a",
+                                             "native-ir:verified-host-source", error, sizeof error);
+   assert(!result && !strcmp(stages, "RDMP"));
+   assert(!strcmp(attempt_seen, "native-ir:verified-host-source"));
+   stages[0] = 0;
+   n_stages = 0;
+   result = server_native_tool_admit_attempt("git_push", arguments, "session-a", "", error,
+                                             sizeof error);
+   assert(result && !strcmp(result, "identity") && !stages[0]);
+
    permission = AGENT_TOOL_PERMISSION_ROLE;
    expect_refusal("session-a", arguments, "role", "R");
    permission = AGENT_TOOL_PERMISSION_SHELL;

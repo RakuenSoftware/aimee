@@ -1,4 +1,4 @@
-/* test_delegate_exit_classify.c: delegate outcomes purchase reusable knowledge. */
+/* Delegate exit capture retains observations without inventing task evidence. */
 
 #include <assert.h>
 #include <stdio.h>
@@ -26,6 +26,12 @@ int db1_delegate_learning_record(const char *sid, const char *role, const char *
 {
    assert(!strcmp(sid, "receipt-session") && !strcmp(role, "execute"));
    assert(mode && lesson && evidence && confidence >= 0);
+   cJSON *observed = cJSON_Parse(evidence);
+   assert(cJSON_IsObject(observed));
+   assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(observed, "had_writes")));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(observed, "verification")),
+                  "ungraded"));
+   cJSON_Delete(observed);
    learning_calls++;
    return learning_rc;
 }
@@ -118,6 +124,28 @@ static void test_failure_evidence_preserves_escaped_errors(void)
    }
 }
 
+static void test_completion_does_not_fabricate_correctness_or_effects(void)
+{
+   dl_exit_metrics_t metrics = {
+       .role = "execute", .turns = 2, .tool_calls = 1, .success = 1, .had_writes = -1};
+   dl_classification_t result;
+   classify_delegate_exit(&metrics, &result);
+   assert(result.failure_mode == DL_MODE_SUCCESS);
+   assert(strstr(result.lesson, "ungraded") && !strstr(result.lesson, "reuse"));
+   cJSON *evidence = cJSON_Parse(result.evidence);
+   assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(evidence, "had_writes")));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(evidence, "verification")),
+                  "ungraded"));
+   cJSON_Delete(evidence);
+   metrics.success = 0;
+   metrics.error = "opaque native execution failed";
+   classify_delegate_exit(&metrics, &result);
+   assert(result.failure_mode == DL_MODE_UNKNOWN);
+   assert(dl_string_to_failure_mode(NULL) == DL_MODE_UNKNOWN);
+   assert(dl_string_to_failure_mode("unrecognized") == DL_MODE_UNKNOWN);
+   assert(!strcmp(dl_failure_mode_to_string(DL_MODE_UNKNOWN), "unknown"));
+}
+
 static void test_capture_reports_each_failed_durable_write(void)
 {
    agent_result_t result = {.turns = 2, .tool_calls = 1};
@@ -163,6 +191,7 @@ int main(void)
    test_no_progress_is_specific_and_round_trips();
    test_other_failures_keep_existing_classification();
    test_failure_evidence_preserves_escaped_errors();
+   test_completion_does_not_fabricate_correctness_or_effects();
    test_capture_reports_each_failed_durable_write();
    printf("ok\n");
    return 0;

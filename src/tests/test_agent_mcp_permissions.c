@@ -1,6 +1,8 @@
 /* Native admission checks preserve permission ceilings through bridge/family
  * resolution. Script handoff checks exercise the real joined RPC dispatcher. */
 #include <aimee/tools/agent_tools.h>
+#include "server_session_control.h"
+#include "../modules/tools/agent_tools_internal.h"
 #include <aimee/protocols/mcp/mcp_tools.h>
 #include <assert.h>
 #include <stdio.h>
@@ -17,6 +19,16 @@
 
 void test_native_mcp_permission_admission(void)
 {
+   const char *verdict = NULL, *reason = NULL;
+   assert(
+       agent_tools_effect_exec_failure("{\"exit_code\":-1,\"cancelled\":true}", &verdict, &reason));
+   assert(!strcmp(verdict, "error") && !strcmp(reason, "cancelled"));
+   assert(
+       agent_tools_effect_exec_failure("{\"exit_code\":-1,\"timed_out\":true}", &verdict, &reason));
+   assert(!strcmp(verdict, "timeout") && !strcmp(reason, "timeout"));
+   assert(!agent_tools_effect_exec_failure(
+       "{\"exit_code\":0,\"stdout\":\"cancelled timed_out\",\"cancelled\":false}", &verdict,
+       &reason));
    agent_tools_scope_snapshot_t previous, captured;
    agent_tools_scope_bookmark(&previous);
    static const char *const denied[] = {"git_push", "create_note", "vendor:mutate"};
@@ -53,6 +65,10 @@ void test_native_mcp_permission_admission(void)
    assert(agent_tools_permission_check("vendor:mutate", args) == AGENT_TOOL_PERMISSION_ROLE);
    assert(agent_tools_permission_check("bash", args) == AGENT_TOOL_PERMISSION_SHELL);
    assert(agent_tools_permission_check("execute_script", args) == AGENT_TOOL_PERMISSION_SHELL);
+   assert(agent_tools_permission_check("git_verify", args) == AGENT_TOOL_PERMISSION_SHELL);
+   cJSON_AddStringToObject(args, "action", "check");
+   assert(agent_tools_permission_check("git_verify", args) != AGENT_TOOL_PERMISSION_SHELL);
+   cJSON_DeleteItemFromObjectCaseSensitive(args, "action");
    assert(agent_tools_permission_check("read_file", args) == AGENT_TOOL_PERMISSION_ALLOWED);
    cJSON_Delete(args);
 
@@ -146,8 +162,9 @@ void test_script_rpc_keeps_permission_scope(void)
 typedef struct
 {
    const char *directory;
-   atomic_int cancel;
-   int seen, matches;
+   server_control_scope_t *controls;
+   atomic_int cancel, local_cancel;
+   int seen, matches, inherited_scope;
 } script_context_fixture_t;
 static script_context_fixture_t *script_context_fixture;
 
@@ -163,22 +180,23 @@ static int script_context_read(const workspace_provider_t *provider, const char 
    const char *cwd = run_cmd_get_cwd();
    fixture->seen++;
    fixture->matches =
-       !captured && source.active && source.authority == 1 && source.paths &&
-       !strcmp(source.paths, "evidence.txt") && !strcmp(source.root, fixture->directory) &&
-       request && !strcmp(request->principal, "script-context-fixture") &&
-       request->model_execution == 1 && request->capabilities == CAPS_AUTHENTICATED && cwd &&
-       !strcmp(cwd, fixture->directory) && !strcmp(session_id(), "script-context-session") &&
+       server_control_scope_current() == fixture->controls && !captured && source.active &&
+       source.authority == 1 && source.paths && !strcmp(source.paths, "evidence.txt") &&
+       !strcmp(source.root, fixture->directory) && request &&
+       !strcmp(request->principal, "script-context-fixture") && request->model_execution == 1 &&
+       request->capabilities == CAPS_AUTHENTICATED && cwd && !strcmp(cwd, fixture->directory) &&
+       !strcmp(session_id(), "script-context-session") &&
        !strcmp(credentials.vault_principal, "webuser:script-context-fixture") &&
        !credentials.codex_token[0] && !credentials.api_key[0] && !credentials.claude_token[0] &&
        workspace_provider_active() == provider && agent_get_request_cancel() == &fixture->cancel;
    agent_source_authority_snapshot_destroy(&source);
    const workspace_provider_t *shared = workspace_provider_shared();
    int result = shared->read_all(shared, path, out, length);
-   atomic_store(&fixture->cancel, 1); /* The next RPC call must observe the host's cancellation. */
+   atomic_store(fixture->inherited_scope ? &fixture->local_cancel : &fixture->cancel, 1);
    return result;
 }
 
-void test_script_rpc_keeps_host_context(void)
+static void script_rpc_host_context(int inherited_scope)
 {
    request_context_snapshot_t previous_request;
    request_context_snapshot(&previous_request);
@@ -189,6 +207,7 @@ void test_script_rpc_keeps_host_context(void)
    assert(!captured);
    const workspace_provider_t *previous_workspace = workspace_provider_active();
    atomic_int *previous_cancel = agent_get_request_cancel();
+   const agent_request_cancel_scope_t *previous_scope = agent_request_cancel_scope_current();
    char previous_session[128] = "";
    if (session_id_override_active())
       snprintf(previous_session, sizeof previous_session, "%s", session_id());
@@ -201,8 +220,12 @@ void test_script_rpc_keeps_host_context(void)
    assert(file);
    int written = fputs("SCRIPT_CONTEXT_EVIDENCE", file), closed = fclose(file);
    assert(written >= 0 && !closed);
-   script_context_fixture_t fixture = {.directory = directory};
+   script_context_fixture_t fixture = {.directory = directory, .inherited_scope = inherited_scope};
    atomic_init(&fixture.cancel, 0);
+   atomic_init(&fixture.local_cancel, 0);
+   agent_request_cancel_scope_t local = {.flag = &fixture.local_cancel, .parent = previous_scope};
+   if (inherited_scope)
+      agent_request_cancel_scope_bind(&local);
    script_context_fixture = &fixture;
    workspace_provider_t workspace = *workspace_provider_shared();
    workspace.read_all = script_context_read;
@@ -216,23 +239,34 @@ void test_script_rpc_keeps_host_context(void)
    session_id_set_override("script-context-session");
    agent_source_authority_tls_set(1, directory, "evidence.txt");
    agent_set_request_cancel(&fixture.cancel);
+   fixture.controls = server_control_scope_open("script-context-session", "script-turn",
+                                                "webuser:script-context-fixture");
+   assert(fixture.controls);
+   server_control_scope_t *previous_controls = server_control_scope_bind(fixture.controls);
    char *result =
        tool_execute_script("python",
                            "import json, aimee_tools\n"
                            "first = aimee_tools.call('read_file', {'path': 'evidence.txt'})\n"
                            "second = aimee_tools.call('read_file', {'path': 'evidence.txt'})\n"
-                           "print(json.dumps([first, second]))\n",
+                           "print(json.dumps([first, second]), flush=True)\n"
+                           "import time; time.sleep(2)\n",
                            5, directory, NULL);
    cJSON *reply = result ? cJSON_Parse(result) : NULL;
-   assert(reply && cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == 0);
-   const char *output = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(reply, "stdout"));
-   assert(output && strstr(output, "SCRIPT_CONTEXT_EVIDENCE") && strstr(output, "cancelled"));
-   assert(fixture.seen == 1 && fixture.matches && atomic_load(&fixture.cancel));
+   assert(reply && cJSON_GetObjectItemCaseSensitive(reply, "exit_code")->valueint == -1);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "cancelled")));
+   assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "timed_out")));
+   assert(fixture.seen == 1 && fixture.matches);
+   assert(server_control_scope_current() == fixture.controls);
+   server_control_scope_close(fixture.controls);
+   server_control_scope_bind(previous_controls);
+   assert(atomic_load(&fixture.cancel) == !inherited_scope);
+   assert(atomic_load(&fixture.local_cancel) == inherited_scope);
    const request_context_t *unchanged = request_context_get();
    assert(unchanged && !unchanged->model_execution && unchanged->capabilities == CAPS_ALL);
    cJSON_Delete(reply);
    free(result);
    agent_set_request_cancel(previous_cancel);
+   agent_request_cancel_scope_bind(previous_scope);
    workspace_provider_set_active(previous_workspace);
    script_context_fixture = NULL;
    request_context_restore(&previous_request);
@@ -247,4 +281,10 @@ void test_script_rpc_keeps_host_context(void)
    rmdir(directory);
    puts("  PASS: script RPC retains cwd/provider/identity/source/cancellation without model "
         "credentials");
+}
+
+void test_script_rpc_keeps_host_context(void)
+{
+   script_rpc_host_context(0);
+   script_rpc_host_context(1);
 }

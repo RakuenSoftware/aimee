@@ -228,7 +228,7 @@ int agent_loop_run(agent_config_t *cfg, const char *role, const char *system_pro
       LOG_INFO("agent_loop", "iteration %d/%d starting", iter, loop->max_iterations);
 
       /* Free previous response before overwriting */
-      free(out->response);
+      agent_result_clear_response(out);
       memset(out, 0, sizeof(*out));
 
       int rc = agent_run(cfg, role, system_prompt, iter_prompt, max_tokens, out);

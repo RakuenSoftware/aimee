@@ -8,6 +8,7 @@
 
 #include "aimee.h"
 #include "agent_types.h"
+#include "cli_native_spawn_guard.h"
 #include <aimee/ir/aimee_ir.h>
 
 #ifdef __cplusplus
@@ -34,17 +35,46 @@ extern "C"
 
    typedef int (*cli_codex_chat_event_cb)(const char *event, const char *value, void *userdata);
 
+   /* Host-owned resources for the canonical native scheduler. Descriptor and
+    * environment custody outlive the synchronous child. The adapter verifies
+    * the actual effective SDK config before ready can consume a cache claim. */
    typedef struct
    {
-      const char *thread_id;     /* optional: resume this Codex thread */
-      const char *home;          /* host-materialized Vault credential HOME */
-      const char *session_id;    /* host-owned Aimee session for MCP */
-      const char *cwd;           /* optional: child process working directory */
+      const aimee_request_t *history;
+      const char *resume_id;
+   } cli_codex_host_replay_t;
+   typedef struct cli_codex_host_launch
+   {
+      int executable_fd, cwd_fd;
+      const char *home, *cwd, *build_digest, *gateway_url, *gateway_token;
+      char *const *environment;
+      const struct cJSON *expected_config;
+      const cli_native_spawn_guard_t *spawn_guard;
+      int (*ready)(const char *launch_digest, cli_codex_host_replay_t *replay, void *context);
+      void *context;
+   } cli_codex_host_launch_t;
+
+   typedef struct
+   {
+      const agent_network_t *network; /* borrowed host environment for native execution */
+      const char *thread_id;          /* optional: resume this Codex thread */
+      const char *home;               /* host-materialized Vault credential HOME */
+      const cli_codex_host_launch_t *host_launch; /* scoped canonical scheduler */
+      const char *session_id;                     /* host-owned Aimee session for MCP */
+      const char *cwd;                            /* optional: child process working directory */
       const char *system_prompt; /* optional: developerInstructions on new threads */
       const char *user_prompt;
       /* Canonical items preceding this turn; resume callers supply only unseen tail.
        * Host owns scope/prefix proof. Never a flattened system/user transcript. */
       const aimee_request_t *history;
+      /* Optional typed host tool bridge. Both catalog and callback are required.
+       * Borrowed for this synchronous execution. The host callback must verify
+       * durable source identity and apply current policy/effect authorization;
+       * SDK parameters alone grant no execution authority. It returns an owned
+       * TOOL_RESULT with the same call ID and a string result, or fails closed. */
+      const aimee_request_t *tool_catalog;
+      int (*tool_call)(const aimee_block_t *call, aimee_block_t *result, void *context);
+      void *tool_context;
       const char *model;            /* optional: turn-level model override */
       const char *reasoning_effort; /* optional: low/medium/high/xhigh */
       int timeout_ms;               /* idle timeout; <0 disables while caller stays attached */
@@ -61,21 +91,6 @@ extern "C"
       char error[512];
    } cli_codex_chat_result_t;
 
-   typedef struct
-   {
-      const char *thread_id; /* required: Codex thread to compact */
-      const char *cwd;       /* optional: child process working directory */
-      int timeout_ms;        /* idle timeout; <0 disables while caller stays attached */
-      int autonomous;
-   } cli_codex_compact_request_t;
-
-   typedef struct
-   {
-      char thread_id[128];
-      int latency_ms;
-      char error[512];
-   } cli_codex_compact_result_t;
-
    /* Stream one primary chat turn through `codex app-server`. Starts a new
     * thread when req->thread_id is empty, otherwise resumes that thread, then
     * emits "turn_start", "text", and "turn_end" callbacks as Codex notifies.
@@ -83,8 +98,13 @@ extern "C"
    int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_event_cb cb,
                              void *userdata, cli_codex_chat_result_t *out);
 
-   int cli_codex_compact_thread(const cli_codex_compact_request_t *req,
-                                cli_codex_compact_result_t *out);
+   /* Explicit Codex SDK tool boundaries. Output JSON/blocks are owned by caller.
+    * Tool definitions come only from typed catalog fields. Calls require an
+    * exact catalog namespace/name match; these helpers do not authorize effects. */
+   struct cJSON *cli_codex_dynamic_tools(const aimee_request_t *catalog);
+   int cli_codex_dynamic_call(const struct cJSON *params, const aimee_request_t *catalog,
+                              aimee_block_t *out);
+   struct cJSON *cli_codex_dynamic_result(const aimee_block_t *result);
 
    /* --- Pure JSON-RPC parse helpers (testable without a subprocess) ---
     * These read one JSON-RPC frame line emitted by `codex app-server`

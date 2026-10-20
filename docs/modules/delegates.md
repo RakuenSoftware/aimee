@@ -105,6 +105,7 @@ is a dependency-design concern, not an exception to canonical include ownership.
 
 - `audit`: records delegate decisions, actions, evidence, and terminal outcomes.
 - `config`: supplies agents, roles, providers, limits, backends, and delegate policy inputs.
+- `egress`: owns private-worker Docker execution, resource observations, and joined cleanup.
 - `execution-policy`: authorizes delegation, tools, egress, credentials, and sandbox actions.
 - `ir`: supplies canonical turn, response, tool-call, usage, and streaming structures.
 - `module-runtime`: supplies required lifecycle and extension contracts for delegation.

@@ -11,6 +11,7 @@ typedef struct cJSON cJSON;
  * process module. Calls fail closed; readiness keeps the listener out of
  * rotation until all required modules have attached to the local bus. */
 void server_module_stage_adapters_configure(void);
+void server_module_tools_adapters_configure(void);
 
 /* The skills nudge has no reusable monolith service object, so its call site
  * invokes this adapter directly. Returns 0 on a valid module reply. */
@@ -36,6 +37,7 @@ cJSON *server_module_memory_data(const cJSON *request);
 /* Complete configured derived-memory cleanup before acknowledging erasure. */
 int server_module_memory_reset_derived(void);
 
-int server_module_memory_erase_subject(const char *request_id, const char *subject, const cJSON *sessions);
+int server_module_memory_erase_subject(const char *request_id, const char *subject,
+                                       const cJSON *sessions);
 
 #endif

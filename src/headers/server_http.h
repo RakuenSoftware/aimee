@@ -548,19 +548,20 @@ extern "C"
 
    /* --- Per-session active primary agent (set via POST
     *     /v1/sessions/<id>/primary, used as the chat fallback agent when a
-    *     request names no explicit provider). In-memory, bounded, thread-safe. */
+    *     request names no explicit provider). Durable and owner-bound; database failure refuses
+    * selection. */
 
    /* Record the active primary agent name for session_id (overwrites).
-    * No-op on NULL/empty args. */
-   void session_primary_set(const char *session_id, const char *agent);
+    * Returns 0 on durable acknowledgment, -1 on failure. */
+   int session_primary_set(const char *session_id, const char *agent);
 
    /* Look up the active primary agent for session_id. Writes it to out (n
-    * bytes) and returns 1 if set, 0 otherwise (out gets ""). */
+    * bytes) and returns 1 if set, 0 if unset, -1 on authority/store failure. */
    int session_primary_get(const char *session_id, char *out, size_t n);
 
    /* Clear any pinned primary for session_id (the session reverts to the
-    * default provider). No-op on NULL/empty/unknown session. */
-   void session_primary_clear(const char *session_id);
+    * default provider). Returns 0 on durable acknowledgment, -1 on failure. */
+   int session_primary_clear(const char *session_id);
 
    /* Delegation admission check: reject an empty/too-short prompt, then enforce
     * the active persona's delegate policy (session's persona, else the durable
