@@ -107,7 +107,7 @@ the existing branch protection still applies. Promotion from `testing` to `main`
 - Commands come from the command registry and CLI help data.
 - `/v1` routes come from the route descriptors and OpenAPI sources.
 - Configuration comes from the field descriptors.
-- Event-bus frames and kinds are versioned contracts shared by C and Go.
+- Event-bus frames and kinds are versioned contracts shared by C, Go and Rust.
 
 Regenerate documentation after changing one of those sources. Do not hand-edit files under
 `docs/gen/`.

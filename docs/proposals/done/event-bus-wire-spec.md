@@ -4,13 +4,20 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE. V0 promoted and archived 2026-08-04; third-language residual later rejected.
+- **State:** DONE. V0 promoted and archived 2026-08-04; third-language residual later rejected, then
+  delivered on owner direction as the Rust reference client (2026-10-19).
 
 > **Archived after partial delivery.** The C host, C and Go clients, frozen vectors, cross-process
 > conformance, arena routing, capture, performance gate, and shipping module-runtime integration are
 > on `testing`. The conformance section explicitly leaves its independent third-language client
 > unwritten. That proof was later
 > [rejected](../rejected/event-bus-third-language-conformance.md) under the Go-or-rejected policy.
+> On 2026-10-19 the owner directed a Rust reference client; `rust/aimee-bus` now provides it
+> ([D11](../../dev/EVENT_BUS_DECISIONS.md#d11-the-rust-reference-client-is-a-third-independent-client)).
+> Region, ring, attach and AMOD layouts, which this spec defers to code, are now frozen by a second
+> language-neutral table, `layout_vectors.tsv`, beside the wire vectors, and all three clients are
+> held to both. Cross-process arena reads were added as
+> [D12](../../dev/EVENT_BUS_DECISIONS.md#d12-cross-process-arena-reads-a-lease-view-and-a-release-message).
 
 The v0 substrate this spec describes was written and green on the
   `feat/event-bus` integration branch (2026-07-24), awaiting parent-suite acceptance and promotion to

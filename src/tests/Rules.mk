@@ -430,6 +430,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-kb-graph-analytics $(TESTPREFIX)/unit-test-lessons-cite-tracker $(TESTPREFIX)/unit-test-lessons-reflect $(TESTPREFIX)/unit-test-lessons-actuate $(TESTPREFIX)/unit-test-lessons-session-capture $(TESTPREFIX)/unit-test-kb-doc-hash \
                $(TESTPREFIX)/unit-test-prompt-sanitizer \
                $(TESTPREFIX)/unit-test-bus-wire \
+               $(TESTPREFIX)/unit-test-bus-layout \
                $(TESTPREFIX)/unit-test-module-protocol \
                $(TESTPREFIX)/unit-test-bus-ring \
                $(TESTPREFIX)/unit-test-bus-region \
@@ -2975,6 +2976,16 @@ $(TESTPREFIX)/unit-test-bus-wire: $(OBJDIR)/tests/test_bus_wire.o \
                                   $(OBJDIR)/core/event_bus/bus_wire.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
 
+# Event-bus layout vectors (D12 follow-up): region, ring, attach, lease-view and
+# AMOD layouts held to the implementation-independent table the C, Go and Rust
+# clients share.
+$(OBJDIR)/tests/test_bus_layout.o: C_FLAGS += -Icore/event_bus/include -DBUS_VECTOR_DIR=\"$(CURDIR)/tests/fixtures/bus\"
+$(TESTPREFIX)/unit-test-bus-layout: $(OBJDIR)/tests/test_bus_layout.o \
+                                    $(OBJDIR)/core/event_bus/bus_region.o \
+                                    $(OBJDIR)/core/event_bus/bus_ring.o \
+                                    $(OBJDIR)/core/event_bus/module_protocol.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
 $(OBJDIR)/tests/test_module_protocol.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-module-protocol: $(OBJDIR)/tests/test_module_protocol.o \
                                          $(OBJDIR)/core/event_bus/module_protocol.o
@@ -3000,7 +3011,9 @@ $(TESTPREFIX)/unit-test-bus-region: $(OBJDIR)/tests/test_bus_region.o \
 # memory of its own, no DB — it manages spans over a caller-supplied buffer.
 $(OBJDIR)/tests/test_bus_arena.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-bus-arena: $(OBJDIR)/tests/test_bus_arena.o \
-                                   $(OBJDIR)/core/event_bus/bus_arena.o
+                                   $(OBJDIR)/core/event_bus/bus_arena.o \
+                                   $(OBJDIR)/core/event_bus/bus_region.o \
+                                   $(OBJDIR)/core/event_bus/bus_ring.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
 
 # Event-bus host: admission, fd passing, reaping (feature tree slice 5). Uses
@@ -3704,6 +3717,10 @@ unit-test-bus-region: $(TESTPREFIX)/unit-test-bus-region
 unit-test-bus-ring: $(TESTPREFIX)/unit-test-bus-ring
 	$<
 
+.PHONY: unit-test-bus-layout
+unit-test-bus-layout: $(TESTPREFIX)/unit-test-bus-layout
+	$<
+
 .PHONY: unit-test-bus-wire
 unit-test-bus-wire: $(TESTPREFIX)/unit-test-bus-wire
 	$<
@@ -3735,7 +3752,8 @@ BUS_TEST_TARGETS := $(addprefix $(TESTPREFIX)/, \
    unit-test-bus-memory-audit unit-test-bus-shutdown-race unit-test-bus-capture \
    unit-test-bus-client unit-test-bus-flow unit-test-bus-route unit-test-bus-host \
    unit-test-execution-policy-bus \
-   unit-test-bus-arena unit-test-bus-region unit-test-bus-ring unit-test-bus-wire)
+   unit-test-bus-arena unit-test-bus-region unit-test-bus-ring unit-test-bus-wire \
+   unit-test-bus-layout)
 
 $(BUS_TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)
 

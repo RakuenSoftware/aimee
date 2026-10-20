@@ -133,6 +133,10 @@ func (c *ConcurrentModuleCaller) poll(ctx context.Context) {
 			c.deliver(id, callerReply{err: ErrModuleCallCapabilityAbsent})
 			continue
 		}
+		if event.Frame.EventKind == KindCapabilityDenied {
+			c.deliver(id, callerReply{err: ErrModuleCallCapabilityDenied})
+			continue
+		}
 		if event.Frame.EventKind == KindError {
 			c.deliver(id, callerReply{err: ErrModuleCallRejected})
 			continue

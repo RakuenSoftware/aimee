@@ -11,7 +11,18 @@
  *     (external -> host -> C client -> host -> external);
  *   - KIND_ECHO: the internal C client serves; the external client's request is
  *     echoed back as a reply (external <-> C client through the host);
- *   - a request for KIND_NOSERVER draws a synthesized capability_absent.
+ *   - a request for KIND_NOSERVER draws a synthesized capability_absent;
+ *   - KIND_ARENA_ASK: the internal C client, a co-located producer, leases an
+ *     arena span of the asked size, fills it with a known pattern, and publishes
+ *     it as a KIND_ARENA_DATA arena notification the external client observes.
+ *     The external client reads it across the process boundary through the
+ *     lease view and returns the ref (D12); KIND_ARENA_STATS reports how many
+ *     leases the producer still has live, so the release is observable;
+ *   - KIND_ARENA_SERVE_ASK: the C side sends the external client an arena-placed
+ *     REQUEST of KIND_ARENA_SERVE, which the external client serves; its inline
+ *     verdict on the bytes is forwarded as the ask's reply;
+ *   - KIND_ARENA_REPLY_ASK: the C side answers with an arena-placed REPLY. The
+ *     host routes all three arena patterns, so all three are proven here.
  *
  * Usage: bus_conformance_host <socket-path> [timeout-ms]
  * It listens, accepts exactly one external client, pumps and services until the
@@ -33,12 +44,64 @@
 
 #include <aimee/core/event_bus/bus_client.h>
 #include <aimee/core/event_bus/bus_host.h>
+#include <aimee/core/event_bus/bus_ring.h>
 
-#define KIND_NOTIFY     1000
-#define KIND_ACK        1001
-#define KIND_ECHO       1002
-#define KIND_NOSERVER   1003
-#define KIND_CANCEL_ACK 1004
+#define KIND_NOTIFY          1000
+#define KIND_ACK             1001
+#define KIND_ECHO            1002
+#define KIND_NOSERVER        1003
+#define KIND_CANCEL_ACK      1004
+#define KIND_ARENA_ASK       1005
+#define KIND_ARENA_DATA      1006
+#define KIND_ARENA_STATS     1007
+#define KIND_ARENA_SERVE_ASK 1008 /* external asks: the C side sends it an arena REQUEST */
+#define KIND_ARENA_SERVE     1009 /* served by the external client */
+#define KIND_ARENA_REPLY_ASK 1010 /* external asks: the C side answers with an arena REPLY */
+
+/* Lease and fill `len` arena bytes with the known pattern, as the internal
+ * co-located producer. Returns 0 on success. */
+static int lease_filled(bus_host_t *h, bus_client_t *cc, uint32_t len, uint32_t *lease,
+                        uint32_t *generation)
+{
+   uint8_t *fill = NULL;
+   bus_arena_ref_t ref;
+   if (len == 0 || bus_arena_alloc(&h->arena, cc->reply.handle_id, len, lease) != BUS_ARENA_OK ||
+       bus_arena_fill_ptr(&h->arena, *lease, &fill) != BUS_ARENA_OK ||
+       bus_arena_ref(&h->arena, *lease, &ref) != BUS_ARENA_OK)
+      return -1;
+   for (uint32_t i = 0; i < len; i++)
+      fill[i] = (uint8_t)(i * 7u + 3u);
+   *generation = ref.generation;
+   return 0;
+}
+
+/* Emit an arena-placed request or reply. The client library publishes arena
+ * notifications only (no shipping producer sends the others), so the internal
+ * producer writes the frame itself; the host routes it like any other. */
+static int send_arena_frame(bus_client_t *cc, uint16_t pattern, uint32_t kind, uint64_t corr,
+                            uint32_t lease, uint32_t generation, uint32_t len)
+{
+   bus_frame_t f;
+   memset(&f, 0, sizeof f);
+   f.hdr_flags = pattern | BUS_F_ARENA;
+   f.wire_version = BUS_WIRE_VERSION;
+   f.event_kind = kind;
+   f.correlation_id = corr;
+   f.src_handle = cc->reply.handle_id;
+   f.payload_ref = lease;
+   f.payload_len = len;
+   f.generation = generation;
+   uint8_t *slot = bus_ring_produce_begin(&cc->qp.outbound);
+   if (!slot || bus_wire_encode(&f, slot, cc->reply.slot_size) != BUS_WIRE_HDR_LEN)
+      return -1;
+   bus_ring_produce_commit(&cc->qp.outbound);
+   return 0;
+}
+
+static uint32_t le32(const uint8_t *p)
+{
+   return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
 
 static uint64_t now_ms(void)
 {
@@ -119,6 +182,12 @@ int main(int argc, char **argv)
    }
    bus_host_subscribe(&h, cc.reply.handle_id, KIND_NOTIFY);
    bus_host_serve_kind(&h, cc.reply.handle_id, KIND_ECHO);
+   bus_host_serve_kind(&h, cc.reply.handle_id, KIND_ARENA_ASK);
+   bus_host_serve_kind(&h, cc.reply.handle_id, KIND_ARENA_STATS);
+   bus_host_serve_kind(&h, cc.reply.handle_id, KIND_ARENA_SERVE_ASK);
+   bus_host_serve_kind(&h, cc.reply.handle_id, KIND_ARENA_REPLY_ASK);
+   uint64_t serve_ask_corr = 0;               /* the external ask awaiting the serve verdict */
+   uint64_t serve_req_corr = 0x5E00000000ULL; /* the C side's own request correlations */
 
    /* Listening socket. */
    unlink(path);
@@ -165,6 +234,8 @@ int main(int argc, char **argv)
        * observes: the ack for its notifications and the cancel-ack. */
       bus_host_subscribe(&h, (uint32_t)ext, KIND_ACK);
       bus_host_subscribe(&h, (uint32_t)ext, KIND_CANCEL_ACK);
+      bus_host_subscribe(&h, (uint32_t)ext, KIND_ARENA_DATA);
+      bus_host_serve_kind(&h, (uint32_t)ext, KIND_ARENA_SERVE);
 
       uint64_t cc_hb = 0;
       for (;;)
@@ -186,6 +257,69 @@ int main(int argc, char **argv)
             else if (ev.frame.event_kind == KIND_ECHO && (ev.frame.hdr_flags & BUS_F_REQUEST))
                bus_client_reply(&cc, KIND_ECHO, ev.frame.correlation_id, ev.payload,
                                 ev.payload_len);
+            else if (ev.frame.event_kind == KIND_ARENA_ASK &&
+                     (ev.frame.hdr_flags & BUS_F_REQUEST) && ev.payload_len == 4)
+            {
+               uint32_t len = le32(ev.payload);
+               uint32_t lease = 0;
+               uint8_t *fill = NULL;
+               bus_arena_ref_t ref;
+               uint8_t status = 1;
+               if (len > 0 &&
+                   bus_arena_alloc(&h.arena, cc.reply.handle_id, len, &lease) == BUS_ARENA_OK &&
+                   bus_arena_fill_ptr(&h.arena, lease, &fill) == BUS_ARENA_OK &&
+                   bus_arena_ref(&h.arena, lease, &ref) == BUS_ARENA_OK)
+               {
+                  for (uint32_t i = 0; i < len; i++)
+                     fill[i] = (uint8_t)(i * 7u + 3u);
+                  status = bus_client_publish_arena(&cc, KIND_ARENA_DATA, lease, ref.generation,
+                                                    len) == BUS_CLIENT_OK
+                               ? 0
+                               : 1;
+               }
+               bus_client_reply(&cc, KIND_ARENA_ASK, ev.frame.correlation_id, &status, 1);
+            }
+            else if (ev.frame.event_kind == KIND_ARENA_SERVE_ASK &&
+                     (ev.frame.hdr_flags & BUS_F_REQUEST) && ev.payload_len == 4)
+            {
+               /* Send the external client an arena-placed REQUEST; its verdict
+                * on the bytes comes back as the reply, forwarded below. */
+               uint32_t lease = 0, gen = 0, len = le32(ev.payload);
+               uint8_t refused = 0xFF;
+               if (lease_filled(&h, &cc, len, &lease, &gen) == 0 &&
+                   send_arena_frame(&cc, BUS_F_REQUEST, KIND_ARENA_SERVE, ++serve_req_corr, lease,
+                                    gen, len) == 0)
+                  serve_ask_corr = ev.frame.correlation_id;
+               else
+                  bus_client_reply(&cc, KIND_ARENA_SERVE_ASK, ev.frame.correlation_id, &refused, 1);
+            }
+            else if (ev.frame.event_kind == KIND_ARENA_SERVE &&
+                     (ev.frame.hdr_flags & BUS_F_REPLY) &&
+                     ev.frame.correlation_id == serve_req_corr && serve_ask_corr)
+            {
+               bus_client_reply(&cc, KIND_ARENA_SERVE_ASK, serve_ask_corr, ev.payload,
+                                ev.payload_len);
+               serve_ask_corr = 0;
+            }
+            else if (ev.frame.event_kind == KIND_ARENA_REPLY_ASK &&
+                     (ev.frame.hdr_flags & BUS_F_REQUEST) && ev.payload_len == 4)
+            {
+               /* Answer with an arena-placed REPLY. */
+               uint32_t lease = 0, gen = 0, len = le32(ev.payload);
+               uint8_t refused = 0xFF;
+               if (lease_filled(&h, &cc, len, &lease, &gen) != 0 ||
+                   send_arena_frame(&cc, BUS_F_REPLY, KIND_ARENA_REPLY_ASK, ev.frame.correlation_id,
+                                    lease, gen, len) != 0)
+                  bus_client_reply(&cc, KIND_ARENA_REPLY_ASK, ev.frame.correlation_id, &refused, 1);
+            }
+            else if (ev.frame.event_kind == KIND_ARENA_STATS &&
+                     (ev.frame.hdr_flags & BUS_F_REQUEST))
+            {
+               uint32_t live = bus_arena_live_leases(&h.arena, cc.reply.handle_id);
+               uint8_t out[4] = {(uint8_t)live, (uint8_t)(live >> 8), (uint8_t)(live >> 16),
+                                 (uint8_t)(live >> 24)};
+               bus_client_reply(&cc, KIND_ARENA_STATS, ev.frame.correlation_id, out, sizeof out);
+            }
             else if (ev.frame.hdr_flags & BUS_F_CANCEL)
                /* The internal server received the cancel: tell the external
                 * client, so cancel delivery is observable across the boundary. */

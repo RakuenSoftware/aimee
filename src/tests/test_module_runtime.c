@@ -52,7 +52,12 @@
 #define TEST_STAGE 1U
 #define MODULE_REF 7U
 #define CALLER_REF 90U
-#define LARGE_BODY (128U * 1024U + 37U)
+/* AIMEE_TEST_MODULE_CALLER: an external caller process (the Rust reference
+ * caller's conformance binary) admitted as this principal. It may request the
+ * served kind and EMPTY_KIND. DENIED_KIND is in no caller's grant. */
+#define EXTERNAL_CALLER_REF 91U
+#define DENIED_KIND         5891U
+#define LARGE_BODY          (128U * 1024U + 37U)
 /* The largest stage count any component declares in
  * src/modules/process-contracts.json. `aimee` has twenty-three. */
 #define PRODUCTION_STAGE_MAX 32U
@@ -1310,6 +1315,27 @@ int main(int argc, char **argv)
                                                          : (memory_process || provider_process)
                                                              ? 3
                                                              : 2};
+   /* An external caller, when one is named, joins the plain fixture under its
+    * own grant: the served kind and EMPTY_KIND, and nothing else. */
+   const char *external_caller_env = argc < 3 ? getenv("AIMEE_TEST_MODULE_CALLER") : NULL;
+   char external_caller[PATH_MAX] = "";
+   const uint32_t external_request[] = {TEST_KIND, EMPTY_KIND};
+   bus_runtime_grant_t external_grants[3];
+   if (external_caller_env && *external_caller_env)
+   {
+      assert(realpath(external_caller_env, external_caller) != NULL);
+      assert(runtime_config.grant_count == 2);
+      external_grants[0] = grants[0];
+      external_grants[1] = grants[1];
+      external_grants[2] = (bus_runtime_grant_t){.principal_class = 1,
+                                                 .principal_ref = EXTERNAL_CALLER_REF,
+                                                 .uid = BUS_RUNTIME_SELF_UID,
+                                                 .executable = external_caller,
+                                                 .request = external_request,
+                                                 .request_count = 2};
+      runtime_config.grants = external_grants;
+      runtime_config.grant_count = 3;
+   }
    bus_runtime_t *runtime = bus_runtime_start(&host, &host_lock, &runtime_config);
    assert(runtime != NULL);
 
@@ -1469,6 +1495,33 @@ int main(int argc, char **argv)
                                    NULL) == AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE);
    assert(body_len == 8);
 
+   /* A kind outside the caller's grant is refused by the host at once, as
+    * CAPABILITY_DENIED, not waited out to a deadline. */
+   struct timespec denied_now;
+   assert(clock_gettime(CLOCK_MONOTONIC, &denied_now) == 0);
+   uint64_t denied_deadline =
+       (uint64_t)denied_now.tv_sec * 1000000000ULL + (uint64_t)denied_now.tv_nsec + 20000000000ULL;
+   assert(aimee_module_client_call(&module_client, DENIED_KIND, 3, 1009, denied_deadline, "x", 1,
+                                   body, sizeof body, &body_len, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_CAPABILITY_DENIED);
+   assert(body_len == 0);
+
+   if (*external_caller)
+   {
+      /* The same outcomes, from an independent caller in another process.
+       * Run after the C caller so its stale correlations are already behind
+       * it; the external caller leaves its own for nobody, which the host's
+       * reap of its departed slot collects. */
+      pid_t caller_pid = spawn_module_child(external_caller, socket_path, NULL);
+      int caller_status = 0;
+      while (waitpid(caller_pid, &caller_status, 0) < 0)
+         assert(errno == EINTR);
+      if (!WIFEXITED(caller_status) || WEXITSTATUS(caller_status) != 0)
+         fprintf(stderr, "external module caller failed (status %d)\n", caller_status);
+      assert(WIFEXITED(caller_status) && WEXITSTATUS(caller_status) == 0);
+      puts("module runtime: external caller matched the C caller's outcomes");
+   }
+
 finish:
    aimee_module_client_destroy(&module_client);
    if (module_pid > 0)
@@ -1526,6 +1579,6 @@ finish:
    else
       printf(
           "module runtime (%s): dispatch, fragmented payloads, deadline, and cancellation passed\n",
-          argc == 2 ? "Go process" : "C process");
+          argc == 2 ? "external process" : "C process");
    return 0;
 }

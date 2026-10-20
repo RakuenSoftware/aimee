@@ -58,10 +58,17 @@ bus_region_result_t bus_control_init(bus_region_t *r, uint32_t slot_size, uint32
       return BUS_REGION_ERR_GEOMETRY;
 
    bus_control_t *c = (bus_control_t *)r->base;
-   memset(c, 0, sizeof *c);
+   /* Zero the whole region: the header and, when present, every lease-view
+    * entry (generation 0 = no live lease). */
+   memset(r->base, 0, r->size);
+   int with_view = r->size >= bus_control_bytes();
    atomic_store_explicit(&c->spec_version, BUS_SPEC_VERSION, memory_order_relaxed);
    atomic_store_explicit(&c->layout_version, BUS_LAYOUT_VERSION, memory_order_relaxed);
-   atomic_store_explicit(&c->flags, 0, memory_order_relaxed);
+   atomic_store_explicit(&c->flags, with_view ? BUS_CONTROL_F_LEASE_VIEW : 0, memory_order_relaxed);
+   atomic_store_explicit(&c->lease_view_slots, with_view ? BUS_LEASE_VIEW_SLOTS : 0,
+                         memory_order_relaxed);
+   atomic_store_explicit(&c->lease_view_off, with_view ? sizeof(bus_control_t) : 0,
+                         memory_order_relaxed);
    atomic_store_explicit(&c->slot_size, slot_size, memory_order_relaxed);
    atomic_store_explicit(&c->inline_budget, inline_budget, memory_order_relaxed);
    atomic_store_explicit(&c->queue_capacity, queue_capacity, memory_order_relaxed);
@@ -70,6 +77,13 @@ bus_region_result_t bus_control_init(bus_region_t *r, uint32_t slot_size, uint32
    atomic_store_explicit(&c->host_heartbeat, 0, memory_order_relaxed);
    atomic_store_explicit(&c->magic, BUS_CONTROL_MAGIC, memory_order_release);
    return BUS_REGION_OK;
+}
+
+bus_lease_view_t *bus_control_lease_view_host(bus_region_t *r)
+{
+   if (!r || !r->base || !r->writable || r->size < bus_control_bytes())
+      return NULL;
+   return (bus_lease_view_t *)((uint8_t *)r->base + sizeof(bus_control_t));
 }
 
 void bus_control_bump_epoch(bus_control_t *c)

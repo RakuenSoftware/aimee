@@ -1,0 +1,5 @@
+# Pinned so CI coverage cannot change with a runner image bump.
+[toolchain]
+channel = "1.97.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

@@ -97,6 +97,12 @@ bus_host_result_t bus_host_create(bus_host_t *h, const bus_host_config_t *cfg, b
     * bound, re-tuned in slice 12 with the other parameters. */
    if (bus_arena_init(&h->arena, abase, asize, cfg->max_slots, cfg->queue_capacity) != BUS_ARENA_OK)
       goto fail;
+   /* D12: publish lease placement to clients through the read-only control
+    * region, so a consumer in another process can read what it is sent. */
+   bus_lease_view_t *view = bus_control_lease_view_host(&h->control_region);
+   if (!view)
+      goto fail;
+   bus_arena_set_view(&h->arena, view);
 
    h->slots = calloc(cfg->max_slots, sizeof(bus_slot_t));
    if (!h->slots)
@@ -272,8 +278,11 @@ bus_host_result_t bus_host_serve_attach_ex(bus_host_t *h, int conn_fd, uint32_t 
       return deny(conn_fd, BUS_ATTACH_DENIED_NOSLOT);
    }
 
-   int gfds[3] = {control_ro, h->arena_fd, s->qpair_fd};
-   int rc = bus_fd_send(conn_fd, &reply, sizeof reply, gfds, 3);
+   int gfds[BUS_ATTACH_FDS];
+   gfds[BUS_ATTACH_FD_CONTROL] = control_ro;
+   gfds[BUS_ATTACH_FD_ARENA] = h->arena_fd;
+   gfds[BUS_ATTACH_FD_QPAIR] = s->qpair_fd;
+   int rc = bus_fd_send(conn_fd, &reply, sizeof reply, gfds, BUS_ATTACH_FDS);
    close(control_ro); /* the client holds its own dup now */
    if (rc != 0)
    {

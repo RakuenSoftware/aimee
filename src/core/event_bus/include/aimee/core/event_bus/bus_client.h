@@ -15,6 +15,11 @@
  * host. It writes outbound and reads inbound, and the host's routing thread does
  * the rest. A request therefore completes in two steps a caller pumps at its own
  * pace: send the request, then poll for the reply.
+ *
+ * Threading: a bus_client_t is used by one thread at a time. The outbound ring
+ * has a single producer, and poll is one of its writers: it returns arena refs
+ * there (D12). A caller that polls on one thread and sends on another must
+ * serialise every poll and send itself.
  */
 #ifndef AIMEE_BUS_CLIENT_H
 #define AIMEE_BUS_CLIENT_H 1
@@ -38,6 +43,17 @@ typedef enum
    BUS_CLIENT_ERR_PROTOCOL
 } bus_client_result_t;
 
+/* Arena refs owed back to the host but not yet sent because the outbound ring
+ * was full (D12). Bounded: a client this far behind stops taking arena frames
+ * until its outbound drains. */
+#define BUS_CLIENT_MAX_PENDING_RELEASES 64
+
+typedef struct
+{
+   uint32_t lease_id;
+   uint32_t generation;
+} bus_client_lease_t;
+
 typedef struct
 {
    bus_attach_reply_t reply;
@@ -47,10 +63,25 @@ typedef struct
    bus_qpair_t qp;
    uint64_t attached_epoch;
    int have_pending_read; /* an inbound slot handed out by poll, not yet released */
+
+   /* D12: arena reads across the process boundary. lease_view is NULL when the
+    * host predates it; arena frames then arrive with no payload, as before. */
+   const bus_lease_view_t *lease_view;
+   uint8_t *arena_base;
+   uint64_t arena_size;
+   int have_pending_lease; /* the event poll last returned held an arena ref */
+   bus_client_lease_t pending_lease;
+   uint32_t release_count;
+   bus_client_lease_t releases[BUS_CLIENT_MAX_PENDING_RELEASES];
 } bus_client_t;
 
-/* A received event. `payload` points into the shared inbound slot and is valid
- * until the next bus_client_poll call — zero-copy read in place. */
+/* A received event. `payload` points into the shared inbound slot, or for an
+ * arena-placed payload into the arena span its lease names (D12), and is valid
+ * until the next bus_client_poll call — zero-copy read in place. The next poll
+ * also returns the arena ref to the host, for every client, co-located or not:
+ * a consumer reads arena payloads through the event and never releases the
+ * lease itself (a second release is refused and counted as dropped). A consumer
+ * that needs the bytes past its next poll copies them. */
 typedef struct
 {
    bus_frame_t frame;
@@ -72,14 +103,23 @@ void bus_client_detach(bus_client_t *c);
 bus_client_result_t bus_client_publish(bus_client_t *c, uint32_t kind, const void *payload,
                                        uint32_t len);
 
+/* Whether this attachment can read arena-placed payloads (the host advertises
+ * the D12 lease view). */
+int bus_client_arena_readable(const bus_client_t *c);
+
+/* Return every owed arena ref the outbound ring has room for now. Poll does
+ * this itself; a consumer that stops polling can call it to drain. Returns
+ * BUS_CLIENT_WOULD_BLOCK while any remain. */
+bus_client_result_t bus_client_flush_releases(bus_client_t *c);
+
 /* Publish a one-way notification whose payload lives in the arena (D3), for a
  * payload too large for the inline budget. The caller must already hold the
  * lease: allocate it on the host arena (bus_arena_alloc), fill it
  * (bus_arena_fill_ptr), read its generation (bus_arena_ref), then call this to
  * emit the reference frame — no bytes are copied here. The host publishes the
- * lease to the kind's observers and forwards the reference; a co-located consumer
- * reads it in place via bus_arena_read_ptr and releases it. Once sent, the lease
- * belongs to the host: the producer must not touch it again. */
+ * lease to the kind's observers and forwards the reference; each consumer reads
+ * it through bus_client_poll and returns the ref on its next poll (D12). Once
+ * sent, the lease belongs to the host: the producer must not touch it again. */
 bus_client_result_t bus_client_publish_arena(bus_client_t *c, uint32_t kind, uint32_t lease_id,
                                              uint32_t generation, uint32_t len);
 
@@ -94,9 +134,8 @@ bus_client_result_t bus_client_request_fragment(bus_client_t *c, uint32_t kind,
 /* Reply to a request (a serving module). */
 bus_client_result_t bus_client_reply(bus_client_t *c, uint32_t kind, uint64_t correlation,
                                      const void *payload, uint32_t len);
-bus_client_result_t bus_client_reply_fragment(bus_client_t *c, uint32_t kind,
-                                              uint64_t correlation, const void *payload,
-                                              uint32_t len, int more);
+bus_client_result_t bus_client_reply_fragment(bus_client_t *c, uint32_t kind, uint64_t correlation,
+                                              const void *payload, uint32_t len, int more);
 
 /* Cancel an outstanding request. */
 bus_client_result_t bus_client_cancel(bus_client_t *c, uint32_t kind, uint64_t correlation);

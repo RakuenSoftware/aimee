@@ -11,7 +11,7 @@ be a different identity. Quarterly ruleset/access exports are retained under
 
 | Area | Owner | Paths | Review focus |
 | --- | --- | --- | --- |
-| event bus | runtime core | `src/core/event_bus/`, `server-go/bus/` | wire vectors, ordering, backpressure, leases, admission, shutdown |
+| event bus | runtime core | `src/core/event_bus/`, `server-go/bus/`, `rust/aimee-bus/` | wire vectors, ordering, backpressure, leases, admission, shutdown |
 | audit and governance | audit module | `src/modules/audit/` | completeness, PII bounds, WORM parity, witness behavior |
 | DB1 | `aimee` and `postgres` modules | `server-go/modules/aimee/`, `server-go/modules/postgres/`, `src/db1_client/` | domain schema, typed operations, pool and transaction ownership, local privacy |
 | Knowledge corpus | KB domains and Go memory placement | `src/modules/kb/c/`, `src/kb/`, `server-go/modules/memory/` | schema, scope, evidence, ingest, canonical memory and retrieval |

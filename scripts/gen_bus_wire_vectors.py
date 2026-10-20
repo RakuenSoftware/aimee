@@ -40,6 +40,7 @@ F_MORE = 0x0080
 # reserved event kinds
 K_CAPABILITY_ABSENT = 4
 K_OVERFLOW = 5
+K_LEASE_RELEASE = 9  # D12: client -> host, returns an arena consumer ref
 K_MODULE_BASE = 256
 
 FIELD_ORDER = [
@@ -117,6 +118,17 @@ VECTORS = [
     ("control.overflow",
      frame(flags=F_NOTIFICATION | F_CONTROL | F_INLINE, kind=K_OVERFLOW,
            plen=16, pref=INLINE_AT, seq=5000, dst=7)),
+
+    # D12: a consumer returns an arena ref with a control-class notification
+    # whose 8-byte inline payload is (lease_id, generation). Same frame shape
+    # as any other control event; the host consumes it instead of routing it.
+    ("control.lease_release",
+     frame(flags=F_NOTIFICATION | F_CONTROL | F_INLINE, kind=K_LEASE_RELEASE,
+           plen=8, pref=INLINE_AT)),
+
+    # An arena reply, as the host now routes it back to the requester.
+    ("reply.arena",
+     frame(flags=F_REPLY | F_ARENA, corr=CORR, plen=4096, pref=9, gen=2, seq=7, dst=7)),
 
     # D4's independence proof: identical frames but for the placement flag, at
     # the provisional 192-byte inline budget. Nothing in the frame encodes the

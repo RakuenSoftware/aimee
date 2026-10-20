@@ -45,6 +45,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <aimee/core/event_bus/bus_region.h>
+
 /* Compile-time ceilings. A slot is a client identity (0..max_slots-1); a lease
  * is an allocation. Both are bounded so the host-private tables are fixed-size
  * and a hostile count cannot ask for an unbounded allocation. */
@@ -118,12 +120,21 @@ typedef struct
     * negligible: arena is the rare oversized-payload path and each critical
     * section is bookkeeping only. */
    pthread_mutex_t lock;
+
+   /* The client-visible lease view in the control region (D12), or NULL. The
+    * allocator mirrors each lease's (offset, len, generation) into it at alloc
+    * and clears the generation at reclaim, under the lock. */
+   bus_lease_view_t *view;
 } bus_arena_t;
 
 /* Initialise over an arena region's usable bytes (from bus_arena_region_attach).
  * per_client_cap bounds live leases per slot; max_slots bounds valid slot ids. */
 bus_arena_result_t bus_arena_init(bus_arena_t *a, uint8_t *base, uint64_t size, uint32_t max_slots,
                                   uint32_t per_client_cap);
+
+/* Mirror lease placement into `view` (BUS_LEASE_VIEW_SLOTS entries) from now
+ * on, so consumers in other processes can resolve the frames they receive. */
+void bus_arena_set_view(bus_arena_t *a, bus_lease_view_t *view);
 
 /* Release the resources bus_arena_init acquired (the table lock). Call once when
  * the host tears the arena down; the arena must be quiescent (no thread inside a
@@ -188,6 +199,12 @@ void bus_arena_reap_consumer(bus_arena_t *a, uint32_t slot);
 uint32_t bus_arena_live_leases(const bus_arena_t *a, uint32_t slot);
 uint64_t bus_arena_bytes_in_use(const bus_arena_t *a);
 uint32_t bus_arena_refcount(const bus_arena_t *a, uint32_t lease_id);
+/* Whether `slot` holds a consumer reference to lease_id at this generation. */
+int bus_arena_holds(const bus_arena_t *a, uint32_t lease_id, uint32_t generation, uint32_t slot);
+/* bus_arena_cancel, only if the lease is at `generation` and owner_slot
+ * allocated it: what a frame from owner_slot may reclaim. */
+bus_arena_result_t bus_arena_cancel_by(bus_arena_t *a, uint32_t lease_id, uint32_t generation,
+                                       uint32_t owner_slot);
 
 const char *bus_arena_result_name(bus_arena_result_t r);
 

@@ -13,6 +13,20 @@ const (
 	ModuleMessageMaxBody   uint32 = 16 * 1024 * 1024
 )
 
+// AMOD field offsets, frozen by src/tests/fixtures/bus/layout_vectors.tsv.
+const (
+	amodOffMagic     = 0
+	amodOffVersion   = 4
+	amodOffHeaderLen = 6
+	amodOffOperation = 8
+	amodOffStatus    = 10
+	amodOffStageID   = 12
+	amodOffFlags     = 16
+	amodOffBodyLen   = 20
+	amodOffDeadline  = 24
+	amodOffTraceID   = 32
+)
+
 type ModuleOperation uint16
 
 const (
@@ -60,33 +74,33 @@ func (m ModuleMessage) Encode(out []byte) (int, error) {
 		return 0, ErrModuleMessage
 	}
 	clear(out[:ModuleMessageHeaderLen])
-	binary.LittleEndian.PutUint32(out[0:], ModuleMessageMagic)
-	binary.LittleEndian.PutUint16(out[4:], ModuleMessageVersion)
-	binary.LittleEndian.PutUint16(out[6:], ModuleMessageHeaderLen)
-	binary.LittleEndian.PutUint16(out[8:], uint16(m.Operation))
-	binary.LittleEndian.PutUint16(out[10:], uint16(m.Status))
-	binary.LittleEndian.PutUint32(out[12:], m.StageID)
-	binary.LittleEndian.PutUint32(out[16:], m.Flags)
-	binary.LittleEndian.PutUint32(out[20:], m.BodyLen)
-	binary.LittleEndian.PutUint64(out[24:], m.DeadlineNS)
-	binary.LittleEndian.PutUint64(out[32:], m.TraceID)
+	binary.LittleEndian.PutUint32(out[amodOffMagic:], ModuleMessageMagic)
+	binary.LittleEndian.PutUint16(out[amodOffVersion:], ModuleMessageVersion)
+	binary.LittleEndian.PutUint16(out[amodOffHeaderLen:], ModuleMessageHeaderLen)
+	binary.LittleEndian.PutUint16(out[amodOffOperation:], uint16(m.Operation))
+	binary.LittleEndian.PutUint16(out[amodOffStatus:], uint16(m.Status))
+	binary.LittleEndian.PutUint32(out[amodOffStageID:], m.StageID)
+	binary.LittleEndian.PutUint32(out[amodOffFlags:], m.Flags)
+	binary.LittleEndian.PutUint32(out[amodOffBodyLen:], m.BodyLen)
+	binary.LittleEndian.PutUint64(out[amodOffDeadline:], m.DeadlineNS)
+	binary.LittleEndian.PutUint64(out[amodOffTraceID:], m.TraceID)
 	return ModuleMessageHeaderLen, nil
 }
 
 func DecodeModuleMessage(in []byte) (ModuleMessage, error) {
-	if len(in) < ModuleMessageHeaderLen || binary.LittleEndian.Uint32(in[0:]) != ModuleMessageMagic ||
-		binary.LittleEndian.Uint16(in[4:]) != ModuleMessageVersion ||
-		binary.LittleEndian.Uint16(in[6:]) != ModuleMessageHeaderLen {
+	if len(in) < ModuleMessageHeaderLen || binary.LittleEndian.Uint32(in[amodOffMagic:]) != ModuleMessageMagic ||
+		binary.LittleEndian.Uint16(in[amodOffVersion:]) != ModuleMessageVersion ||
+		binary.LittleEndian.Uint16(in[amodOffHeaderLen:]) != ModuleMessageHeaderLen {
 		return ModuleMessage{}, ErrModuleMessage
 	}
 	m := ModuleMessage{
-		Operation:  ModuleOperation(binary.LittleEndian.Uint16(in[8:])),
-		Status:     ModuleStatus(binary.LittleEndian.Uint16(in[10:])),
-		StageID:    binary.LittleEndian.Uint32(in[12:]),
-		Flags:      binary.LittleEndian.Uint32(in[16:]),
-		BodyLen:    binary.LittleEndian.Uint32(in[20:]),
-		DeadlineNS: binary.LittleEndian.Uint64(in[24:]),
-		TraceID:    binary.LittleEndian.Uint64(in[32:]),
+		Operation:  ModuleOperation(binary.LittleEndian.Uint16(in[amodOffOperation:])),
+		Status:     ModuleStatus(binary.LittleEndian.Uint16(in[amodOffStatus:])),
+		StageID:    binary.LittleEndian.Uint32(in[amodOffStageID:]),
+		Flags:      binary.LittleEndian.Uint32(in[amodOffFlags:]),
+		BodyLen:    binary.LittleEndian.Uint32(in[amodOffBodyLen:]),
+		DeadlineNS: binary.LittleEndian.Uint64(in[amodOffDeadline:]),
+		TraceID:    binary.LittleEndian.Uint64(in[amodOffTraceID:]),
 	}
 	if !m.valid() || uint64(m.BodyLen) > uint64(len(in)-ModuleMessageHeaderLen) {
 		return ModuleMessage{}, ErrModuleMessage
