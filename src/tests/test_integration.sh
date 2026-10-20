@@ -2317,6 +2317,7 @@ if AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$REPO_ROOT/src/t
     grep '^standalone learning:' "$PRIMARY_IR_LOG" || true
     grep '^delegate setup:' "$PRIMARY_IR_LOG" || true
     grep '^delegate mirror:' "$PRIMARY_IR_LOG" || true
+    grep '^delegate source:' "$PRIMARY_IR_LOG" || true
     grep '^delegate learning:' "$PRIMARY_IR_LOG" || true
 else
     echo "FAIL: canonical primary switching and durable replay"

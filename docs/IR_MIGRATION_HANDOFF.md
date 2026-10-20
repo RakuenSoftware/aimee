@@ -3979,6 +3979,39 @@ The rebuilt published runtime with the corrected fixtures passes PostgreSQL
 integration 168/168 (26 unavailable local-service checks), all twenty actual-SDK
 journeys including both browser operator replies, and four budget refusals in a
 root user namespace. Fresh CI must qualify the complete hosted execution again.
-The early queued-source acquisition and role/persona reader repairs remain
-stashed separately; the overall migration and independent learning are unfinished.
+The early queued-source acquisition and role/persona reader repairs continue
+below; the overall migration and independent learning are unfinished.
 Production remains KB-free and unpromoted.
+
+## Queued source admission and project templates: 20 October 2026
+
+Published 02dfe4eba now passes all 56 checks, with the two existing platform
+skips, including every deployment tier. PR #3052 remains open and mergeable.
+
+Queued delegates acquire their source before role/persona discovery, permission
+frontmatter, file references or provider selection. Shared sources require their
+registered authority; a raw mirror path cannot recreate a native callback's held
+capability. Early failures release the acquired scope through the common cleanup.
+The actual server fixture proves that dirty client role templates are ignored,
+a client-only persona is unavailable in the approved mirror, and unregistered or
+unleased sources refuse before provider traffic.
+
+Persona and role readers validate names and complete path lengths before opening
+files. Project files must resolve inside the project, including through symlinks;
+links within it and trusted user/builtin fallbacks retain their existing behavior.
+The platform containment query resolves actual POSIX paths or Windows handles;
+it reports a filesystem fact and does not replace the higher-level retained
+workspace capability or eliminate filesystem rename races.
+
+All 660 native binaries, 30 proxy tests, PostgreSQL integration 168/168 (26 locally
+unavailable service checks), twenty actual-SDK/browser journeys, four budget
+refusals, two focused ASan/UBSan fixtures, the CMake agent library, Cppcheck without
+increased diagnostics and all 76 lint gates pass. Full-history secret scanning
+finds no leaks. Fresh CI is required for this new source snapshot. Windows native
+execution is not qualified by these Linux checks.
+
+Successful mirror-hook resource handling, other ingress/IR consumers, independent
+local grading/reuse, broader platforms/live subscription and reviewed production
+promotion remain unfinished. Recovered queued work without its original held
+capability fails closed; this is not qualification of restart/resume. Production
+remains KB-free and unpromoted.

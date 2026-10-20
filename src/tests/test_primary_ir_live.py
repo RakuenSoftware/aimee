@@ -449,6 +449,39 @@ def main():
 
         from test_native_ir_browser_control import prepare_browser_workspace
         mirror = prepare_browser_workspace(api, home, workspace, "queued-delegate-client")
+        # Policy/persona discovery must use the approved reconstruction too.
+        # Dirty client frontmatter would reject this role if consulted first.
+        client_roles = mirror / ".aimee" / "role_templates"
+        client_roles.mkdir(parents=True, exist_ok=True)
+        (client_roles / "diagnose.md").write_text("---\npermissions: [client_only_invalid_permission]\n---\nCLIENT_ROLE_MUST_NOT_BE_READ\n")
+        client_personas = mirror / ".aimee" / "personas"
+        client_personas.mkdir(parents=True, exist_ok=True)
+        (client_personas / "ir-client-only.md").write_text("---\nname: ir-client-only\n---\n\n## Persona\nCLIENT_PERSONA_MUST_NOT_BE_READ\n")
+
+        def source_refusal(cwd, expected, persona="engineer", prompt="Read @README.md from the approved source"):
+            before = len(observed)
+            launched = api("/v1/delegate/run", dict(role="diagnose", persona=persona,
+                via="ir-live-a", tools=True, prompt=prompt, session_id=sid, cwd=str(cwd)))
+            assert launched.get("job_id", 0) > 0, launched
+            deadline = time.monotonic() + 60
+            while True:
+                status = api("/v1/delegate/status", dict(job_id=launched["job_id"], full_result=True))
+                if status.get("job_status") in ("done", "failed", "partial", "cancelled"):
+                    break
+                assert time.monotonic() < deadline, status
+                time.sleep(0.05)
+            assert status["job_status"] == "failed" and expected in status["result"], status
+            assert len(observed) == before, "source refusal must precede provider traffic"
+        source_refusal(mirror, "unknown persona", persona="ir-client-only")
+        unregistered = home / "unregistered-delegate-source"
+        subprocess.run(["git", "clone", "--quiet", str(workspace), str(unregistered)], check=True)
+        (unregistered / "README.md").write_text("UNREGISTERED_SOURCE_MUST_NOT_BE_READ\n")
+        source_refusal(unregistered, "no held or registered authority")
+        # A raw server mirror path cannot recreate the capability carried by a
+        # live native callback. This also matches recovery without that lease.
+        owned = next(path for path in (home / "workspaces").glob("*/work") if path.is_dir())
+        source_refusal(owned, "no held or registered authority")
+        print("delegate source: dirty client templates ignored; unregistered and unleased sources refuse before file references")
         before = len(observed)
         launched = api("/v1/delegate/run", dict(role="diagnose", persona="engineer", via="ir-live-a", tools=True,
             prompt="IR_MIRROR_DELEGATE_READ read README.md and report its committed source", session_id=sid,

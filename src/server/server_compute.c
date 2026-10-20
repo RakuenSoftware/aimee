@@ -734,7 +734,7 @@ static void delegate_worker_run(void *arg)
     * server-side reconstruction of a client workspace. Declared here, ahead of
     * every `goto delegate_fail`, so no jump can skip its initialiser. Empty means
     * the turn runs in the caller's own cwd. See "ONE ROOT PER DELEGATE TURN". */
-   char turn_root[MAX_PATH_LEN] = "";
+   char turn_root[MAX_PATH_LEN] = "", source_cwd[MAX_PATH_LEN] = "";
    workspace_turn_scope_t *source_workspace = NULL;
    cJSON *req = cctx->req;
    bind_request_session_creds(req);
@@ -835,14 +835,55 @@ static void delegate_worker_run(void *arg)
          return;
       }
    }
+   /* Acquire the source before even role/persona discovery can inspect it.
+    * A recovered mirror path is not authority without its held capability;
+    * ordinary shared paths must still belong to a registered server source. */
+   if (!cwd[0])
+   {
+      if (!getcwd(source_cwd, sizeof source_cwd))
+      {
+         delegation_compute_error(cctx, "workspace: cannot resolve the background source");
+         goto delegate_fail;
+      }
+      cwd = source_cwd;
+   }
+   {
+      int bound = workspace_turn_scope_begin_background(cwd, &source_workspace);
+      if (bound < 0)
+      {
+         delegation_compute_error(cctx,
+                                  "workspace: cannot acquire the registered background source");
+         goto delegate_fail;
+      }
+      const char *resolved = workspace_turn_active_cwd();
+      if (bound > 0 && resolved && resolved[0])
+      {
+         snprintf(turn_root, sizeof turn_root, "%s", resolved);
+         cwd = turn_root;
+         aimee_log(LOG_INFO, "delegate",
+                   "delegate job %d: using registered server reconstruction %s",
+                   cctx->background_job_id, cwd);
+      }
+      else
+      {
+         char permitted[MAX_PATH_LEN];
+         if (!workspace_turn_workspace_authorized(cwd, permitted, sizeof permitted))
+         {
+            delegation_compute_error(
+                cctx, "workspace: background source has no held or registered authority");
+            goto delegate_fail;
+         }
+         snprintf(source_cwd, sizeof source_cwd, "%s", permitted);
+         cwd = source_cwd;
+      }
+   }
    if (!delegate_role_known(cwd && cwd[0] ? cwd : NULL, role))
    {
       char rolemsg[192];
       snprintf(rolemsg, sizeof(rolemsg),
                "unknown delegate role '%s' (see 'aimee delegate --list-roles')", role);
       delegation_compute_error(cctx, rolemsg);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
    if (!persona_exists(cwd && cwd[0] ? cwd : NULL, persona_override))
    {
@@ -850,8 +891,7 @@ static void delegate_worker_run(void *arg)
       snprintf(personamsg, sizeof(personamsg), "unknown persona '%s' (see 'aimee persona list')",
                persona_override);
       delegation_compute_error(cctx, personamsg);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
    /* Write delegates must prove what changed and which tests passed without
     * every CLI/MCP caller remembering an opt-in. An explicit JSON false keeps a
@@ -884,8 +924,7 @@ static void delegate_worker_run(void *arg)
                   "resolved, so it holds none. Check the role template's `permissions:` block.",
                   role);
          delegation_compute_error(cctx, permsmsg);
-         compute_ctx_free(cctx);
-         return;
+         goto delegate_fail;
       }
    }
 
@@ -915,8 +954,7 @@ static void delegate_worker_run(void *arg)
    if (polmsg)
    {
       delegation_compute_error(cctx, polmsg);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
 
    /* Load agent config */
@@ -924,8 +962,7 @@ static void delegate_worker_run(void *arg)
    if (agent_load_config(&acfg) != 0)
    {
       delegation_compute_error(cctx, "failed to load agent config");
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
    if (tool_loop_timeout_ms_cap > 0)
    {
@@ -947,8 +984,7 @@ static void delegate_worker_run(void *arg)
       if (via_name && via_name[0])
       {
          delegation_compute_error(cctx, "invalid delegate participant continuation");
-         compute_ctx_free(cctx);
-         return;
+         goto delegate_fail;
       }
       db1_agent_job_t prior;
       memset(&prior, 0, sizeof(prior));
@@ -956,8 +992,7 @@ static void delegate_worker_run(void *arg)
       {
          db1_agent_job_free(&prior);
          delegation_compute_error(cctx, "delegate participant continuation is unknown");
-         compute_ctx_free(cctx);
-         return;
+         goto delegate_fail;
       }
       snprintf(participant_agent, sizeof(participant_agent), "%s", prior.agent_name);
       db1_agent_job_free(&prior);
@@ -973,8 +1008,7 @@ static void delegate_worker_run(void *arg)
                                         sizeof(inline_acp_name)) != 0)
       {
          delegation_compute_error(cctx, "failed to register inline --acp delegate agent");
-         compute_ctx_free(cctx);
-         return;
+         goto delegate_fail;
       }
       via_name = inline_acp_name;
    }
@@ -1042,8 +1076,7 @@ static void delegate_worker_run(void *arg)
           delegate_route_preflight(&acfg, role, route_err, sizeof(route_err)) != 0)
       {
          delegation_compute_error(cctx, route_err);
-         compute_ctx_free(cctx);
-         return;
+         goto delegate_fail;
       }
    }
 
@@ -1061,8 +1094,7 @@ static void delegate_worker_run(void *arg)
                "scope=%s)",
                caps_buf[0] ? caps_buf : "none", min_context, agent_scope_name(scope));
       delegation_compute_error(cctx, errmsg);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
    /* Record the placement together with the ceiling it was made under. A scope
     * that silently failed to bind is indistinguishable from one that bound and
@@ -1084,8 +1116,7 @@ static void delegate_worker_run(void *arg)
                "(see DELEGATES.md for the Anthropic account-risk warning)",
                target_agent->name);
       delegation_compute_error(cctx, errmsg);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
    /* Never let a delegate run with a non-positive timeout: timeout_ms <= 0
     * disables the HTTP read deadline and a stalled provider hangs the worker
@@ -1122,8 +1153,7 @@ static void delegate_worker_run(void *arg)
          snprintf(errmsg, sizeof(errmsg), "no available credential in pool for agent '%s'",
                   target_agent->name);
       delegation_compute_error(cctx, errmsg);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
 
    /* Enforce delegation depth limit.
@@ -1186,28 +1216,6 @@ static void delegate_worker_run(void *arg)
                   total_spawns, max_spawns);
          delegation_compute_error(cctx, errmsg);
          goto delegate_fail;
-      }
-   }
-
-   /* Resolve the registered source before references, Git isolation or prompts
-    * can open it. A background detached registration uses its recorded mirror;
-    * an explicit mirror must never fall through to the client's local path. */
-   if (cwd[0])
-   {
-      int bound = workspace_turn_scope_begin_background(cwd, &source_workspace);
-      if (bound < 0)
-      {
-         delegation_compute_error(cctx,
-                                  "workspace: cannot acquire the registered background source");
-         goto delegate_fail;
-      }
-      const char *resolved = workspace_turn_active_cwd();
-      if (resolved && resolved[0])
-      {
-         snprintf(turn_root, sizeof turn_root, "%s", resolved);
-         aimee_log(LOG_INFO, "delegate", "delegate %s: using registered server reconstruction %s",
-                   deleg_id, turn_root);
-         cwd = turn_root;
       }
    }
 
