@@ -3737,3 +3737,25 @@ question journeys. Continue with owned mirror-lease capture/restore on retained
 native callback threads and native mirror delegation; the read/question fixtures
 do not establish that broader callback/delegate qualification. Independent local
 grading/reuse and production review/promotion remain unfinished and KB-free.
+
+
+## Attested session ownership repair: 20 October 2026
+
+CI run 39371398721 passed the sixteen real API/OAuth native journeys through
+registered mirrors and the Docker delegate learning/readback journey. The new
+root browser case still failed before execution with `cannot initialize canonical
+session`. The now-visible error led to session.create storing the socket peer UID
+as owner: root browser backends became uid:0 even though canonical execution
+correctly required their attested webuser principal.
+
+Session creation and the matching legacy import ownership check now use the
+ingress-attested principal. They preserve the existing UID fallback for legacy
+unattested local callers and ignore user-supplied principal fields. No ownership
+row is silently reassigned. A focused production-handler fixture covers two
+browser accounts sharing UID 0, long browser names, distinct certificate identities,
+ordinary UID callers and forged unattested/body principal fields. It passes Make,
+ASan/UBSan, CMake and Cppcheck with no increased diagnostics. All 76 lint gates pass.
+Fresh CI must qualify the root question journey beyond canonical initialization;
+stream termination diagnostics now retain final records when no question appears.
+The separate retained mirror callback/delegate lease continuation is prepared
+under /var/tmp, not applied to this qualified source snapshot.

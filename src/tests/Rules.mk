@@ -928,6 +928,11 @@ $(TESTPREFIX)/unit-test-server-native-launch: $(OBJDIR)/tests/test_server_native
     $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto
 
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-session-identity
+$(TESTPREFIX)/unit-test-server-session-identity: $(OBJDIR)/tests/test_server_session_identity.o \
+    $(OBJDIR)/server/server_auth.o $(OBJDIR)/posix/platform_random.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS)
+
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-execution
 $(TESTPREFIX)/unit-test-server-native-execution: $(OBJDIR)/tests/test_server_native_execution.o \
     $(OBJDIR)/server/server_native_execution.o $(OBJDIR)/server/server_native_launch.o $(OBJDIR)/server/cli_claude_native.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/server/cli_session.o \

@@ -499,6 +499,18 @@ if(NOT WIN32)
     ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
   aimee_enable_test_asserts(test_server_native_tool_admission)
   add_test(NAME test_server_native_tool_admission COMMAND test_server_native_tool_admission)
+  add_executable(test_server_session_identity test_server_session_identity.c
+    ../server/server_auth.c ../posix/platform_random.c ../vendor/cJSON.c)
+  target_include_directories(test_server_session_identity PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
+  target_compile_options(test_server_session_identity PRIVATE -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(test_server_session_identity PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(test_server_session_identity PRIVATE -Wl,--gc-sections)
+  endif()
+  aimee_enable_test_asserts(test_server_session_identity)
+  add_test(NAME test_server_session_identity COMMAND test_server_session_identity)
   add_executable(test_server_native_launch test_server_native_launch.c
     ../server/server_native_launch.c ../modules/ir/aimee_ir.c ../aimee_sha256.c ../vendor/cJSON.c)
   target_include_directories(test_server_native_launch PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS})

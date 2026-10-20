@@ -332,6 +332,17 @@ static int generate_uuid(char *buf, size_t len)
    return 0;
 }
 
+/* Use the account the ingress authenticated. Root web backends and certificate
+ * clients share process UIDs, which are not their session ownership identity. */
+static const char *session_caller_principal(const server_conn_t *conn, char fallback[32])
+{
+   if (conn->attested_transport > ATTEST_NONE && conn->attested_transport <= ATTEST_MTLS_CLIENT &&
+       conn->vault_principal[0])
+      return conn->vault_principal;
+   snprintf(fallback, 32, "uid:%d", (int)conn->peer_uid);
+   return fallback;
+}
+
 int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    cJSON *jct = cJSON_GetObjectItemCaseSensitive(req, "client_type");
@@ -344,9 +355,8 @@ int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (generate_uuid(sid, sizeof(sid)) != 0)
       return server_send_error(conn, "secure entropy unavailable; session not created", NULL);
 
-   /* Build principal from peer UID */
-   char principal[32];
-   snprintf(principal, sizeof(principal), "uid:%d", (int)conn->peer_uid);
+   char fallback[32];
+   const char *principal = session_caller_principal(conn, fallback);
 
    char ts[32];
    now_utc(ts, sizeof(ts));
@@ -393,8 +403,8 @@ int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJS
    const char *provider =
        (cJSON_IsString(jprov) && jprov->valuestring[0]) ? jprov->valuestring : "claude-code";
 
-   char caller[DB1_SS_PRINCIPAL_LEN];
-   snprintf(caller, sizeof(caller), "uid:%d", (int)conn->peer_uid);
+   char fallback[32];
+   const char *caller = session_caller_principal(conn, fallback);
 
    /* Register (idempotent) so the session is locatable even if SessionStart never
     * ran, then enforce ownership on the FINAL row before any durable write. When

@@ -97,6 +97,8 @@ def run_browser_control(api, home, workspace, marker):
             operator("/v1/chat/stream", {"attach_id": attachment,
                 "aimee_session_id": sid, "message": marker + "_FIRST",
                 "cwd": str(workspace), "ir_version": 1}, receive)
+            if not any(record["event"]["kind"] == "control_request" for record in stream_records):
+                raise AssertionError(("browser stream ended before its question", stream_records[-5:]))
         except Exception as error:
             stream_errors.append(repr(error))
             events.put({"error": repr(error)})
