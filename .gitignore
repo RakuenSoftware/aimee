@@ -93,6 +93,7 @@ src/schema_data.h
 CLAUDE.md
 GEMINI.md
 CODEX.md
+AGENTS.md
 .codex
 .claude/settings.json
 .claude/scheduled_tasks.lock
