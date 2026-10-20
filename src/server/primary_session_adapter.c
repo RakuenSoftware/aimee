@@ -487,19 +487,13 @@ int primary_session_adapter_compact(const primary_session_request_t *req,
          snprintf(error_out, error_len, "invalid primary session compact request");
       return -1;
    }
-   if (!primary_session_adapter_can_handle(req->agent))
-   {
-      if (error_out && error_len > 0)
-         snprintf(error_out, error_len, "agent '%s' is not a direct primary session adapter",
-                  req->agent->name);
-      return -1;
-   }
-
+   /* Compaction belongs to canonical history; it does not launch the selected
+    * model or require a provider-specific primary execution adapter. */
    const char *requested_id = "";
-   if (req->provider_session_id && req->provider_session_id[0])
-      requested_id = req->provider_session_id;
-   else if (req->aimee_session_id && req->aimee_session_id[0])
+   if (req->aimee_session_id && req->aimee_session_id[0])
       requested_id = req->aimee_session_id;
+   else if (req->provider_session_id && req->provider_session_id[0])
+      requested_id = req->provider_session_id;
    if (!requested_id[0])
    {
       if (error_out && error_len > 0)

@@ -12,7 +12,7 @@
 #include <stdio.h>
 
 static char *stored, *canonical_stored;
-static int fail_checkpoint;
+static int fail_checkpoint, compact_enabled;
 static const char *owner = "alice";
 const char *agent_get_request_vault_principal(void)
 {
@@ -86,10 +86,19 @@ const context_engine_t *context_engine_get_default(void)
 int session_compact(cJSON *messages, const session_compact_config_t *cfg,
                     session_compact_result_t *result)
 {
-   (void)messages;
    (void)cfg;
-   (void)result;
-   return -1;
+   if (!compact_enabled)
+      return -1;
+   int before = cJSON_GetArraySize(messages);
+   while (cJSON_GetArraySize(messages))
+      cJSON_DeleteItemFromArray(messages, 0);
+   cJSON_AddItemToArray(messages, cJSON_Parse("{\"role\":\"user\",\"blocks\":[{\"type\":\"text\","
+                                              "\"text\":\"canonical compacted history\"}]}"));
+   *result = (session_compact_result_t){.compacted = 1,
+                                        .messages_before = before,
+                                        .messages_after = 1,
+                                        .messages_removed = before - 1};
+   return 0;
 }
 int model_context_window(const char *model)
 {
@@ -168,8 +177,45 @@ static void turn(agent_t *agent, int count, int ok)
    assert((primary_session_adapter_turn(&req, &out, NULL, 0) == 0) == ok);
    assert(executions == before + ok);
 }
+static void test_native_compaction_owns_canonical_session(void)
+{
+   primary_session_adapter_reset();
+   free(canonical_stored);
+   canonical_stored =
+       strdup("[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"original task\"}]}]");
+   agent_t native = {0};
+   strcpy(native.name, "native-claude");
+   strcpy(native.provider, "anthropic");
+   strcpy(native.backend, AGENT_BACKEND_PROVIDER_CLI);
+   strcpy(native.cli_kind, "claude");
+   primary_session_request_t req = {
+       .agent = &native, .aimee_session_id = "stable", .provider_session_id = "foreign-sdk-handle"};
+   session_compact_result_t result;
+   char id[128], error[256];
+   int before = executions;
+   compact_enabled = 1;
+   int rc = primary_session_adapter_compact(&req, &result, id, sizeof id, error, sizeof error);
+   assert(!rc && result.compacted && !strcmp(id, "stable"));
+   assert(strstr(canonical_stored, "canonical compacted history") && executions == before);
+   char *saved = strdup(canonical_stored);
+   fail_checkpoint = 1;
+   rc = primary_session_adapter_compact(&req, &result, id, sizeof id, error, sizeof error);
+   assert(rc && !strcmp(saved, canonical_stored) && executions == before);
+   fail_checkpoint = 0;
+   owner = "mallory";
+   rc = primary_session_adapter_compact(&req, &result, id, sizeof id, error, sizeof error);
+   assert(rc && !strcmp(saved, canonical_stored) && executions == before);
+   owner = "alice";
+   compact_enabled = 0;
+   free(saved);
+   primary_session_adapter_reset();
+}
+
 int main(void)
 {
+   test_native_compaction_owns_canonical_session();
+   free(canonical_stored);
+   canonical_stored = NULL;
    agent_t a = {0}, b = {0};
    strcpy(a.name, "codex");
    strcpy(a.provider, "chatgpt");

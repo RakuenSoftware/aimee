@@ -379,6 +379,20 @@ int main(void)
    assert(cJSON_GetArraySize(log_entries) == 5 && writes == 0);
    cleanup(&legacy);
 
+   for (int committed = 0; committed < 2; committed++)
+   {
+      compute_ctx_t history = context();
+      int opened = server_chat_ir_begin(&history, "session-one", NULL);
+      assert(!opened && cJSON_GetArraySize(log_entries) == 1);
+      history.ir_history_checkpointed = committed;
+      int finished = server_chat_ir_finish(&history, NULL);
+      assert(!finished && cJSON_GetArraySize(log_entries) == 2);
+      const cJSON *terminal = cJSON_GetObjectItem(cJSON_GetArrayItem(log_entries, 1), "payload");
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(terminal, "status")),
+                     committed ? "completed" : "failed"));
+      cleanup(&history);
+   }
+
    compute_ctx_t checkpoint_context = context();
    assert(!server_chat_ir_begin(&checkpoint_context, "session-one", "hello"));
    cJSON_AddItemToArray(log_entries, cJSON_Parse("{\"kind\":\"history\",\"payload\":{\"scope\":"

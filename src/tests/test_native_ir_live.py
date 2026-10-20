@@ -193,6 +193,17 @@ def main():
             api(f"/v1/sessions/{sid}/primary", {"agent": marker})
             try:
                 for label in ("FIRST", "FOLLOWUP"):
+                    if label == "FOLLOWUP":
+                        compact = api("/v1/chat/stream", {"attach_id": attachment,
+                            "aimee_session_id": sid, "provider_session_id": "untrusted-sdk-handle",
+                            "compact": True, "ir_version": 1})
+                        checkpoint = [json.loads(line)["event"] for line in compact.splitlines()]
+                        terminal = checkpoint[-1]
+                        assert terminal == {"kind": "execution", "payload": {"status": "completed"}}, compact
+                        assert all(event["kind"] in ("execution", "history") for event in checkpoint), compact
+                        assert any(event["kind"] == "history" and event["payload"]["phase"] == "commit"
+                                   for event in checkpoint), compact
+                        assert count == 2, ("compaction launched a model", active, count)
                     raw = api("/v1/chat/stream", {"attach_id": attachment, "message": marker + "_" + label,
                               "aimee_session_id": sid, "cwd": str(workspace), "ir_version": 1})
                     records = [json.loads(line) for line in raw.splitlines() if line.strip()]
@@ -219,7 +230,7 @@ def main():
                 assert marker + "_FIRST" in replay and marker + "_FOLLOWUP" in replay
                 assert "canonical delegate fixture" in replay and active[3] in replay
                 assert "Continue the server-owned canonical turn." not in replay
-                print("native integration:", kind, wire, "original tool/result, canonical context and resumed turn pass", flush=True)
+                print("native integration:", kind, wire, "original tool/result, canonical compaction, durable replay and resumed turn pass", flush=True)
             finally:
                 api(f"/v1/sessions/{sid}/detach", {"attach_id": attachment})
     finally:

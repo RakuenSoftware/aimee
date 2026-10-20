@@ -46,6 +46,8 @@ typedef struct compute_ctx
    request_context_snapshot_t request_context;
    cJSON *req; /* owned by this context */
    int ir_enabled, ir_delivery, ir_failed, ir_completed, ir_native_owned;
+   /* Set only after the canonical compaction owner commits its checkpoint. */
+   int ir_history_checkpointed;
    /* Producer-only compatibility rendering of the committed canonical source. */
    int (*ir_legacy_emit)(struct compute_ctx *context, const char *event, const char *key,
                          const char *value);

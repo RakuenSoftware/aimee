@@ -473,17 +473,6 @@ static int chat_agent_select_provider(agent_config_t *acfg, const char *provider
 static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, const char *cwd,
                                      const char *aimee_sid, const char *provider,
                                      const char *model_override);
-static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message, const char *provider,
-                                     const char *thread_id, const char *cwd, const char *model,
-                                     const char *effort)
-{
-   /* All browser-native launchers share the registered workspace/turn owner.
-    * Client native handles never replace the canonical session's scoped cache. */
-   (void)thread_id;
-   (void)effort;
-   chat_stream_worker_agent(cctx, message, cwd, cctx->ir_session, provider, model);
-}
-
 static void chat_agent_add_default_roles(agent_t *ag)
 {
    /* These agents are synthesized from legacy provider settings, not from an
@@ -719,6 +708,10 @@ static int chat_native_print(compute_ctx_t *c, const agent_t *agent, const agent
                              .native_progress = chat_native_progress,
                              .native_progress_context = c};
    const cJSON *effort = cJSON_GetObjectItemCaseSensitive(c->req, "reasoning_effort");
+   if (!effort)
+      effort = cJSON_GetObjectItemCaseSensitive(c->req, "effort");
+   if (!effort)
+      effort = cJSON_GetObjectItemCaseSensitive(c->req, "model_reasoning_effort");
    if (effort && !cJSON_IsString(effort))
    {
       out->success = 0;
@@ -1057,23 +1050,6 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    compute_ctx_free(cctx);
 }
 
-static int chat_provider_uses_codex_cli(const char *provider)
-{
-   if (!provider)
-      return 0;
-   if (strcmp(provider, "codex-oauth") == 0)
-      return 1;
-   if (strcmp(provider, "codex-cli") == 0)
-      return 1;
-   if (strcmp(provider, "codex") != 0)
-      return 0;
-
-   agent_t ag;
-   if (agent_registry_find("codex", &ag) != 0)
-      return 1;
-   return !agent_adapter_agent_is_direct(&ag);
-}
-
 static int chat_provider_uses_primary_session(const char *provider)
 {
    agent_config_t acfg;
@@ -1087,46 +1063,6 @@ static int chat_provider_uses_primary_session(const char *provider)
       return 0;
    agent_t *ag = agent_find(&acfg, selected);
    return primary_session_adapter_can_handle(ag);
-}
-
-static void chat_stream_worker_codex_compact(compute_ctx_t *cctx, const char *thread_id,
-                                             const char *cwd)
-{
-   if (!thread_id || !thread_id[0])
-   {
-      compute_error(cctx, "no active codex thread to compact");
-      compute_ctx_free(cctx);
-      return;
-   }
-
-   compute_pool_set_job(POOL_JOB_CHAT, "provider=codex compact thread=%s", thread_id);
-
-   cli_codex_compact_request_t creq;
-   memset(&creq, 0, sizeof(creq));
-   creq.thread_id = thread_id;
-   creq.cwd = cwd && cwd[0] ? cwd : NULL;
-   creq.timeout_ms = -1;
-   creq.autonomous = config_autonomous();
-
-   compute_ctx_release_budget(cctx);
-
-   stream_event(cctx, "turn_start", NULL, NULL);
-   cli_codex_compact_result_t result;
-   int rc = cli_codex_compact_thread(&creq, &result);
-   if (rc != 0)
-   {
-      compute_error(cctx, result.error[0] ? result.error : "codex compaction failed");
-      compute_ctx_free(cctx);
-      return;
-   }
-
-   if (result.thread_id[0])
-      stream_event(cctx, "session", "id", result.thread_id);
-   stream_event(cctx, "text", "content", "Context compacted.");
-   stream_event(cctx, "turn_end", NULL, NULL);
-   stream_event(cctx, "done", NULL, NULL);
-   compute_ok(cctx);
-   compute_ctx_free(cctx);
 }
 
 static void chat_stream_worker_primary_session_compact(compute_ctx_t *cctx,
@@ -1156,10 +1092,10 @@ static void chat_stream_worker_primary_session_compact(compute_ctx_t *cctx,
    }
 
    agent_t *ag = agent_find(&acfg, selected);
-   if (!ag || !primary_session_adapter_can_handle(ag))
+   if (!ag)
    {
       char err[256];
-      snprintf(err, sizeof(err), "provider '%s' is not a direct primary session adapter",
+      snprintf(err, sizeof(err), "provider '%s' is not configured for primary history",
                lookup_provider && lookup_provider[0] ? lookup_provider : "default");
       compute_error(cctx, err);
       compute_ctx_free(cctx);
@@ -1188,6 +1124,7 @@ static void chat_stream_worker_primary_session_compact(compute_ctx_t *cctx,
       return;
    }
 
+   cctx->ir_history_checkpointed = 1;
    if (session_id[0])
       stream_event(cctx, "session", "id", session_id);
    if (result.compacted)
@@ -1217,12 +1154,7 @@ void chat_stream_worker(void *arg)
    cJSON *jcsid = cJSON_GetObjectItemCaseSensitive(req, "claude_session_id");
    cJSON *jasid = cJSON_GetObjectItemCaseSensitive(req, "aimee_session_id");
    cJSON *jmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
-   cJSON *jeffort = cJSON_GetObjectItemCaseSensitive(req, "reasoning_effort");
    cJSON *jcompact = cJSON_GetObjectItemCaseSensitive(req, "compact");
-   if (!cJSON_IsString(jeffort))
-      jeffort = cJSON_GetObjectItemCaseSensitive(req, "effort");
-   if (!cJSON_IsString(jeffort))
-      jeffort = cJSON_GetObjectItemCaseSensitive(req, "model_reasoning_effort");
 
    const char *message = cJSON_IsString(jmsg) ? jmsg->valuestring : "";
    const char *cwd = cJSON_IsString(jcwd) ? jcwd->valuestring : "";
@@ -1231,7 +1163,6 @@ void chat_stream_worker(void *arg)
       provider_sid = jcsid->valuestring;
    const char *aimee_sid = cJSON_IsString(jasid) ? jasid->valuestring : "";
    const char *model_override = cJSON_IsString(jmodel) ? jmodel->valuestring : "";
-   const char *effort_override = cJSON_IsString(jeffort) ? jeffort->valuestring : "";
    int compact = cJSON_IsTrue(jcompact);
 
    if (!message[0] && !compact)
@@ -1247,7 +1178,7 @@ void chat_stream_worker(void *arg)
     * subscriber's transport version. Legacy consumers retain their projection. */
    if (cctx->ir_delivery || (cctx->presence_locked && cctx->vault_principal[0] && aimee_sid[0]))
    {
-      if (server_chat_ir_begin(cctx, aimee_sid, message) != 0)
+      if (server_chat_ir_begin(cctx, aimee_sid, compact ? NULL : message) != 0)
       {
          compute_error(cctx, "cannot initialize canonical session");
          compute_ctx_free(cctx);
@@ -1291,14 +1222,14 @@ void chat_stream_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
-   if (chat_provider_uses_codex_cli(provider))
+   if (compact)
    {
+      /* The canonical checkpoint is the only compaction source. A private SDK
+       * handle cannot select history or be rebound by this host operation. */
+      cctx->ir_native_owned = 1;
       compute_ctx_release_budget(cctx);
-      if (compact)
-         chat_stream_worker_codex_compact(cctx, provider_sid, cwd);
-      else
-         chat_stream_worker_codex(cctx, message, provider, provider_sid, cwd, model_override,
-                                  effort_override);
+      chat_stream_worker_primary_session_compact(cctx, provider_sid, aimee_sid, provider,
+                                                 model_override);
       return;
    }
    /* Native API primaries retain their session adapter. Canonical Claude
@@ -1306,17 +1237,8 @@ void chat_stream_worker(void *arg)
    compute_ctx_release_budget(cctx);
    if (chat_provider_uses_primary_session(provider))
    {
-      if (compact)
-         chat_stream_worker_primary_session_compact(cctx, provider_sid, aimee_sid, provider,
-                                                    model_override);
-      else
-         chat_stream_worker_primary_session(cctx, message, provider_sid, cwd, aimee_sid, provider,
-                                            model_override);
-   }
-   else if (compact)
-   {
-      compute_error(cctx, "conversation compaction is not supported for this provider");
-      compute_ctx_free(cctx);
+      chat_stream_worker_primary_session(cctx, message, provider_sid, cwd, aimee_sid, provider,
+                                         model_override);
    }
    else
       chat_stream_worker_agent(cctx, message, cwd, aimee_sid, provider, model_override);

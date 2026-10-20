@@ -562,6 +562,7 @@ if(NOT WIN32)
     ../server/agent_adapter.c support/provider_cli_adapter_stub.c support/log_stub.c
     ../modules/translation/history_ir.c
     ../modules/translation/aimee_frontend_anthropic.c
+    ../modules/translation/aimee_backend_anthropic.c ../aimee_sha256.c
     ../modules/translation/aimee_frontend_openai.c
     ../modules/translation/aimee_frontend_responses.c
     ../modules/translation/aimee_backend_responses.c
@@ -573,6 +574,7 @@ if(NOT WIN32)
   foreach(history_test test_primary_session_adapter test_primary_history_client)
     target_include_directories(${history_test} PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
       ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+      ${CMAKE_CURRENT_SOURCE_DIR}/../modules/kb/c
       ${CMAKE_CURRENT_SOURCE_DIR}/../db1_client ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
     target_compile_options(${history_test} PRIVATE -ffunction-sections -fdata-sections)
     if(APPLE)

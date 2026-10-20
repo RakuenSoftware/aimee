@@ -3539,3 +3539,31 @@ remains KB-free. This is a continuation checkpoint, not completion of the overal
 migration. Retire the remaining private SDK compaction/ingress paths and finish
 independently graded local learning/reuse after publishing this qualified slice
 in the existing PR #3052.
+
+
+## Canonical browser compaction continuation: 20 October 2026
+
+The next local slice removes the browser's private Codex compaction launcher and
+its unused public C helper. Native browser turns now use the same agent dispatcher.
+Canonical compaction accepts any configured model because it performs no model or
+SDK execution; the authenticated canonical session takes priority over an SDK
+handle. Existing checkpoint ownership, history admission and failed-write refusal
+remain in force. Successful host checkpoint operations have a separate completion
+condition from model turns. They emit neither an empty user message nor invented
+model output. A missing checkpoint still fails completion.
+
+The actual-SDK journey now compacts between its tool-bearing turn and resumed
+turn, supplies a foreign provider handle, verifies a canonical checkpoint, and
+requires zero extra model calls. It passes for both SDKs on all three model wires.
+The native adapter keeps all three existing reasoning-effort request spellings.
+CMake qualification also repaired the history fixtures' missing private legacy
+include path and Anthropic replay/sha dependencies to match their Make targets.
+
+Local qualification: all 658 native binaries, two ASan/UBSan fixtures, one
+TSan fixture, two CMake fixtures, Cppcheck without increased diagnostics and full
+pinned-SDK PostgreSQL integration (168/168; 26 local service-dependent checks
+unavailable). All six actual SDK/model cases include canonical compaction. All
+76 lint gates passed; publication checks follow.
+The overall migration remains unfinished: canonical seeded-run native execution,
+remaining ingress/consumers, independently graded local learning/reuse, broader
+native platform/launcher and live subscription coverage still need completion.

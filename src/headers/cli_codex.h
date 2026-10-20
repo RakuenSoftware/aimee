@@ -89,30 +89,12 @@ extern "C"
       char error[512];
    } cli_codex_chat_result_t;
 
-   typedef struct
-   {
-      const char *thread_id; /* required: Codex thread to compact */
-      const char *cwd;       /* optional: child process working directory */
-      int timeout_ms;        /* idle timeout; <0 disables while caller stays attached */
-      int autonomous;
-   } cli_codex_compact_request_t;
-
-   typedef struct
-   {
-      char thread_id[128];
-      int latency_ms;
-      char error[512];
-   } cli_codex_compact_result_t;
-
    /* Stream one primary chat turn through `codex app-server`. Starts a new
     * thread when req->thread_id is empty, otherwise resumes that thread, then
     * emits "turn_start", "text", and "turn_end" callbacks as Codex notifies.
     * The resulting thread id is always copied into out->thread_id on success. */
    int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_event_cb cb,
                              void *userdata, cli_codex_chat_result_t *out);
-
-   int cli_codex_compact_thread(const cli_codex_compact_request_t *req,
-                                cli_codex_compact_result_t *out);
 
    /* Explicit Codex SDK tool boundaries. Output JSON/blocks are owned by caller.
     * Tool definitions come only from typed catalog fields. Calls require an

@@ -280,6 +280,8 @@ int server_chat_ir_begin(compute_ctx_t *c, const char *session, const char *text
                                       .execution_status = "running"};
    if (aimee_ir_session_emit(&lifecycle) != 0)
       return -1;
+   if (!text)
+      return 0; /* A host history operation has no model/user message to invent. */
    aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = (char *)text};
    aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
    aimee_session_event_t event = {
@@ -295,7 +297,7 @@ int server_chat_ir_finish(compute_ctx_t *c, const char *error)
    server_session_capture_counts_t counts = {0};
    if (server_session_capture_counts(c->ir_capture, &counts))
       error = "canonical capture owner unavailable";
-   if (!error && !agent_request_cancelled() && !counts.model_events)
+   if (!error && !agent_request_cancelled() && !counts.model_events && !c->ir_history_checkpointed)
       error = "Selected harness produced no canonical model output";
    aimee_session_event_t event = {.kind = AIMEE_SESSION_EXECUTION,
                                   .execution_status = agent_request_cancelled()
