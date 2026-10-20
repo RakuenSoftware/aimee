@@ -1353,11 +1353,11 @@ static void test_legacy_tmux_executes_structured_headless(void)
    agent_request_creds_restore(&empty);
    int messages = 0;
    aimee_ir_session_set_sink(headless_legacy_capture, &messages);
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(!agent_execute_with_tools(&agent, NULL, "system", "user", 100, 0.1, &out));
    assert(out.success && out.response && !strcmp(out.response, "structured legacy runtime"));
    assert(messages == 1);
-   free(out.response);
+   agent_result_clear_response(&out);
    aimee_ir_session_set_sink(NULL, NULL);
    agent_request_creds_restore(&previous);
    unlink(path);

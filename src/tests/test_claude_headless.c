@@ -160,7 +160,7 @@ static void strict_frames(const char *path, const provider_cli_cfg_t *cfg)
       events = binds = 0;
       aimee_ir_session_set_sink(capture, NULL);
       binary_script(path, (const unsigned char *)cases[i].bytes, cases[i].length, i % 2);
-      agent_result_t out;
+      agent_result_t out = {0};
       assert(claude_headless_run(cfg, bind_session, &binds, &out) == AGENT_RC_CAPTURE_FAILED);
       assert(!out.success && !out.response && !events && !binds);
       assert(!strcmp(out.error, "invalid Claude JSON frame"));
@@ -178,7 +178,7 @@ static void strict_frames(const char *path, const provider_cli_cfg_t *cfg)
    events = binds = 0;
    aimee_ir_session_set_sink(capture, NULL);
    binary_script(path, payload, prefix + extra, 0);
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(claude_headless_run(cfg, bind_session, &binds, &out) == AGENT_RC_CAPTURE_FAILED);
    assert(!out.success && !out.response && events == 6 && binds == 1);
    assert(!strcmp(out.error, "invalid Claude JSON frame"));
@@ -189,7 +189,7 @@ static void strict_frames(const char *path, const provider_cli_cfg_t *cfg)
    binary_script(path, payload, prefix - 1, 1);
    assert(!claude_headless_run(cfg, bind_session, &binds, &out) && out.success);
    assert(events == 6 && binds == 1 && out.response && !strcmp(out.response, "reply"));
-   free(out.response);
+   agent_result_clear_response(&out);
    free(payload);
 }
 static void interactive_script(const char *path)
@@ -245,12 +245,12 @@ int main(void)
                              .primary = 1,
                              .resume_id = "resume-one",
                              .session_id = "aimee-one"};
-   agent_result_t out;
+   agent_result_t out = {0};
    aimee_ir_session_set_sink(capture, NULL);
    script(path, success_frames);
    assert(claude_headless_run(&cfg, bind_session, &binds, &out) == 0 && out.success);
    assert(events == 6 && binds == 1 && !strcmp(out.response, "reply"));
-   free(out.response);
+   agent_result_clear_response(&out);
    assert(waitpid(child, NULL, WNOHANG) == -1 && errno == ECHILD);
 
    events = 0;
@@ -287,7 +287,7 @@ int main(void)
    interactive_script(path);
    assert(claude_headless_run(&cfg, bind_session, &binds, &out) == 0 && out.success);
    assert(events == 8 && binds == 1 && out.response && !strcmp(out.response, "reply"));
-   free(out.response);
+   agent_result_clear_response(&out);
    server_control_scope_close(scope);
    scope = server_control_scope_open("aimee-one", "test-turn", "alice");
    assert(scope);

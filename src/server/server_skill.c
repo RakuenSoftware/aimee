@@ -228,16 +228,16 @@ static int skill_server_trial_run(void *opaque, const char *system_prompt, const
                                   skill_trial_usage_t *usage_out, char *errbuf, size_t errbuf_len)
 {
    skill_server_trial_runner_t *runner = opaque;
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    if (agent_generate(&runner->config, runner->agent_name, system_prompt, prompt, max_tokens, 0.0,
                       &result) != 0)
    {
       snprintf(errbuf, errbuf_len, "%s", result.error[0] ? result.error : "model trial failed");
-      free(result.response);
+      agent_result_clear_response(&result);
       return -1;
    }
-   *response_out = result.response;
+   *response_out = agent_result_take_text(&result);
    result.response = NULL;
    memset(usage_out, 0, sizeof(*usage_out));
    usage_out->prompt_tokens = result.prompt_tokens;

@@ -58,16 +58,19 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 }
 static char *hook_test_exec(const workspace_provider_t *p, const char *cmd, int *rc)
 {
-   assert(p->kind == WS_PROVIDER_DETACHED && g_hook_bound);
+   assert(p->kind == (g_hook_remote == 2 ? WS_PROVIDER_SHARED : WS_PROVIDER_DETACHED) &&
+          g_hook_bound);
    assert(strcmp(cmd, "git rev-parse --show-toplevel") == 0);
-   assert(strcmp(g_hook_exec_cwd, g_hook_bound_cwd) == 0);
+   assert(strcmp(g_hook_exec_cwd,
+                 g_hook_remote == 2 ? "/server/approved/repo" : g_hook_bound_cwd) == 0);
    g_hook_probe_calls++;
    *rc = 0;
    return strdup("/client/only/repo\n");
 }
 static const workspace_provider_t g_hook_provider = {.kind = WS_PROVIDER_DETACHED,
                                                      .exec_shell = hook_test_exec};
-static const workspace_provider_t g_hook_shared = {.kind = WS_PROVIDER_SHARED};
+static const workspace_provider_t g_hook_shared = {.kind = WS_PROVIDER_SHARED,
+                                                   .exec_shell = hook_test_exec};
 int workspace_turn_bind_active(const char *cwd)
 {
    snprintf(g_hook_bound_cwd, sizeof(g_hook_bound_cwd), "%s", cwd ? cwd : "");
@@ -80,7 +83,41 @@ void workspace_turn_unbind_active(void)
 }
 const workspace_provider_t *workspace_provider_active(void)
 {
-   return g_hook_bound ? &g_hook_provider : &g_hook_shared;
+   return g_hook_bound && g_hook_remote != 2 ? &g_hook_provider : &g_hook_shared;
+}
+struct workspace_turn_scope
+{
+   int previous;
+};
+int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out)
+{
+   *out = NULL;
+   if (g_hook_remote < 0)
+      return -1;
+   *out = calloc(1, sizeof **out);
+   assert(*out);
+   (*out)->previous = g_hook_bound;
+   return workspace_turn_bind_active(cwd);
+}
+int workspace_turn_scope_end(workspace_turn_scope_t *scope)
+{
+   if (scope)
+   {
+      g_hook_bound = scope->previous;
+      free(scope);
+   }
+   return 0;
+}
+const char *workspace_turn_active_cwd(void)
+{
+   return g_hook_bound && g_hook_remote == 2 ? "/server/approved/repo" : NULL;
+}
+int workspace_turn_workspace_authorized(const char *cwd, char *out, size_t cap)
+{
+   if (!cwd || !g_hook_bound || g_hook_remote != 2 || strcmp(cwd, "/server/approved/repo"))
+      return 0;
+   snprintf(out, cap, "%s", cwd);
+   return 1;
 }
 const char *run_cmd_get_cwd(void)
 {
@@ -1659,6 +1696,7 @@ int pre_tool_check(const char *tool_name, const char *tool_input, session_state_
    if (g_hook_remote)
    {
       assert(g_hook_bound);
+      assert(!strcmp(cwd, g_hook_remote == 2 ? "/server/approved/repo" : g_hook_bound_cwd));
       int ec = -1;
       const workspace_provider_t *p = workspace_provider_active();
       char *out = p->exec_shell(p, "git rev-parse --show-toplevel", &ec);
@@ -2421,6 +2459,24 @@ static void test_hooks_pre_remote_workspace_scope(void)
             cJSON_Delete(req);
          }
    assert(g_hook_probe_calls == 30);
+   g_hook_remote = 2;
+   g_hook_bound = 1; /* A native callback already holds its producer's source. */
+   g_hook_guard_result = 0;
+   run_cmd_set_cwd("/previous/request");
+   const char *mirror = "{\"method\":\"hooks.pre\",\"session_id\":\"mirror-hook-test\","
+                        "\"cwd\":\"/client/only/repo\",\"tool_name\":\"Read\",\"tool_input\":{}}";
+   cJSON *mirror_reply = dispatch_json(ctx, conn, mirror, strlen(mirror));
+   assert(cJSON_GetObjectItem(mirror_reply, "exit_code")->valueint == 0);
+   assert(g_hook_bound == 1 && g_hook_probe_calls == 31);
+   assert(!strcmp(run_cmd_get_cwd(), "/previous/request"));
+   cJSON_Delete(mirror_reply);
+   const char *held = "{\"method\":\"hooks.pre\",\"session_id\":\"held-hook-test\","
+                      "\"cwd\":\"/server/approved/repo\",\"tool_name\":\"Read\",\"tool_input\":{}}";
+   mirror_reply = dispatch_json(ctx, conn, held, strlen(held));
+   assert(cJSON_GetObjectItem(mirror_reply, "exit_code")->valueint == 0);
+   assert(g_hook_bound == 1 && g_hook_probe_calls == 32);
+   cJSON_Delete(mirror_reply);
+   g_hook_bound = 0;
    g_hook_remote = -1; /* A registered mirror failed reconstruction. */
    g_pre_tool_seen_state = 0;
    g_session_state_save_calls = 0;
@@ -2433,7 +2489,7 @@ static void test_hooks_pre_remote_workspace_scope(void)
    assert(
        !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(refused, "request_id")), "failed-mirror"));
    assert(!g_pre_tool_seen_state && !g_session_state_save_calls && !g_hook_bound);
-   assert(g_hook_probe_calls == 30);
+   assert(g_hook_probe_calls == 32);
    assert(!strcmp(run_cmd_get_cwd(), "/previous/request"));
    cJSON_Delete(refused);
    g_hook_remote = g_hook_guard_result = 0;

@@ -443,7 +443,8 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, i
    drift[0] = '\0';
    if (!cwd || !cwd[0])
       return 0;
-   if (background)
+   /* Nested foreground hooks/tools and background workers retain the same
+    * producer-held mirror capability. A pathname alone still grants nothing. */
    {
       char actual[MAX_PATH_LEN];
       int source = realpath(cwd, actual) ? active_mirror_lease(actual) : -1;

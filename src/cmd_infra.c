@@ -141,7 +141,7 @@ static cJSON *git_sub_commit(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
       if (!msg)
       {
          agent_config_t acfg;
-         agent_result_t result;
+         agent_result_t result = {0};
          memset(&result, 0, sizeof(result));
          if (agent_load_config(&acfg) == 0)
          {

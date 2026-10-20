@@ -79,7 +79,7 @@ void platform_delegate_run_background(
    fclose(stdin);
 
    agent_http_init();
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    if (force_tools)
       agent_run_with_tools(cfg, role, sys_prompt, final_prompt, max_tokens, &result);
@@ -111,7 +111,7 @@ void platform_delegate_run_background(
    unlink(pid_path);
 
    delegate_worktree_restore(original_cwd, delegate_git_root, delegate_work_name, keep_worktree);
-   free(result.response);
+   agent_result_clear_response(&result);
    free(effective_prompt);
    free(file_prompt);
    _exit(0);
@@ -141,7 +141,7 @@ int platform_trace_run_task(agent_config_t *cfg, const char *role, const char *s
             cfg->agents[ai].timeout_ms = task_timeout;
       }
 
-      agent_result_t result;
+      agent_result_t result = {0};
       memset(&result, 0, sizeof(result));
       if (use_tools)
          agent_run_with_tools(cfg, role, sys, prompt, 0, &result);
@@ -149,7 +149,7 @@ int platform_trace_run_task(agent_config_t *cfg, const char *role, const char *s
          agent_run(cfg, role, sys, prompt, 0, &result);
       agent_http_cleanup();
       write_result_json(result_path, &result);
-      free(result.response);
+      agent_result_clear_response(&result);
       _exit(0);
    }
 

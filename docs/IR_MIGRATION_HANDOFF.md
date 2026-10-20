@@ -53,6 +53,29 @@ Installed CLI probes correctly resolve `aimee` and `wol-lore` from their own
 workspaces without an explicit project override; newer native callback cwd binding
 is separately pending promotion. The overall migration remains unfinished.
 
+## Active continuation: owned results, exact-request cache and workspace hooks
+
+The current implementation retains full owned canonical responses in internal agent results.
+HTTP and host-owned native producers transfer the admitted response; selection/repair preserve
+model and source identity. Explicit text extraction is an output boundary. Lifecycle consumers
+release typed storage together with its display projection, including error-only responses.
+The response snapshot codec preserves opaque sidecars separately from durable session JSON.
+Optional pure-text result caching binds authenticated owner, role, configured provider/model and
+exact admitted request. Captured/user sessions, opaque credentials and fallback lineage execute
+normally; legacy flat cache rows cannot hit. Reuse creates no fresh provider-health success or
+correctness evidence. Tests cover ownership separation, source invalidation and typed round trips.
+
+Native hook policy probes and memory interception now acquire the approved workspace resource,
+then restore the enclosing scope. Unknown/malformed Git worktree state forces verification rather
+than admitting old verification state. The Go wire explicitly emits `dirty:false` for a clean tree.
+Windows/macOS thin-client jobs no longer skip executable testing-target PRs; fresh CI must confirm
+those platforms. This does not qualify native server execution on those operating systems.
+
+The old process-success-to-KB-`fixes` feedback writer is retired. The canonical local terminal
+observer remains ungraded. Remaining compatibility native producers, independent local grading
+and next-run learning reuse, live subscription/platform qualification, and independent production
+promotion are still required. Do not stop continuation after publishing this checkpoint.
+
 ## Merged #3038 validation and replacement history: 18 October 2026
 
 The user authorized replacement of #3036 to satisfy the permanent attribution gate, then

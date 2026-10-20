@@ -189,7 +189,7 @@ void cmd_run(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* Run agent */
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    int rc = agent_run_with_tools(&acfg, role, sys_prompt, prompt, max_tokens, &result);
 
@@ -259,7 +259,7 @@ void cmd_run(app_ctx_t *ctx, int argc, char **argv)
    else if (cost_exceeded)
       exit_code = RUN_EXIT_LIMIT_HIT;
 
-   free(result.response);
+   agent_result_clear_response(&result);
 
    if (exit_code != RUN_EXIT_OK)
       exit(exit_code);

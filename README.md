@@ -69,6 +69,8 @@ The ongoing IR migration also runs qualified Linux Codex and Claude schedulers a
 Server's selected model and supervised tool registry. Their private launch homes carry a local
 capability; Vault credentials and original model/tool history remain with the Server. See the
 [current migration status](docs/IR_MIGRATION_HANDOFF.md) for qualification and remaining work.
+Internal HTTP and host-owned native results retain their complete canonical response through
+selection and repair; optional pure-text result reuse binds the exact request and authenticated owner.
 
 This is the basis of compatibility with any harness or UI that implements one of those contracts.
 It does not require a particular vendor's agent loop. Claude Code, Codex, VS Code, GitHub Copilot,

@@ -118,7 +118,7 @@ static void finish_final_tool_violation(agent_result_t *out, const agent_t *agen
                                               partial_text, last_tool_name, last_tool_result,
                                               total_tool_calls, diag, sizeof(diag));
 
-   free(out->response);
+   agent_result_clear_response(out);
    out->response = safe_strdup(diag);
    out->success = 0;
    out->abstained = 1;
@@ -127,10 +127,6 @@ static void finish_final_tool_violation(agent_result_t *out, const agent_t *agen
    snprintf(out->error, sizeof(out->error), "model attempted %s on the forced final response turn",
             attempted_tool && attempted_tool[0] ? attempted_tool : "a tool call");
 }
-
-/* agent_store_feedback is defined in agent.c and shared across platforms */
-void agent_store_feedback(const agent_result_t *result, const char *role,
-                          const char *prompt_summary);
 
 /* db1 agent_jobs heartbeat — defined in src/db1/agent_jobs.c. Forward
  * declarations match db1/agent_jobs.h to avoid pulling the db1 umbrella
@@ -505,9 +501,28 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
                                              aimee_response_t *canonical_out)
 {
    int previous = request_context_set_model_execution(1);
+   aimee_response_t final = {0};
    int rc = agent_execute_with_tools_impl(agent, network, role, system_prompt, user_prompt,
                                           max_tokens, temperature, initial_messages,
-                                          updated_messages, out, seed, canonical_out);
+                                          updated_messages, out, seed, &final);
+   if (!rc && out->success)
+   {
+      /* Native/nested owners may already retain their original response. */
+      if (final.role || final.n_content || final.error_message)
+      {
+         aimee_response_free(&out->canonical_response);
+         out->canonical_response = final;
+         final = (aimee_response_t){0};
+      }
+      if (canonical_out && aimee_ir_response_clone(&out->canonical_response, canonical_out))
+      {
+         out->success = 0;
+         snprintf(out->error, sizeof out->error, "cannot retain owned canonical execution output");
+         aimee_ir_session_fail_capture();
+         rc = AGENT_RC_CAPTURE_FAILED;
+      }
+   }
+   aimee_response_free(&final);
    if (previous >= 0)
       (void)request_context_set_model_execution(previous);
    return rc;
@@ -2373,9 +2388,6 @@ ir_capture_failed:
       snprintf(run_id, sizeof(run_id), "aimee-run-%d-%ld", (int)getpid(), (long)loop_start.tv_sec);
       agent_write_manifest(run_id, out, "");
    }
-
-   /* Store execution outcome as feedback for future context */
-   agent_store_feedback(out, "", user_prompt);
 
    return context_refused  ? AGENT_RC_CONTEXT_REFUSED
           : capture_failed ? AGENT_RC_CAPTURE_FAILED

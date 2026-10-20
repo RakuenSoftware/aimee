@@ -339,7 +339,7 @@ CONFIG_CLIENT_OBJS = $(CONFIG_CLIENT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/module_js
 
 IR_BASE_SRCS = modules/ir/aimee_ir.c
 HOOK_IR_SRCS = modules/translation/hook_ir.c
-IR_CONTRACT_SRCS = $(HOOK_IR_SRCS) $(IR_BASE_SRCS) modules/ir/session_event.c modules/translation/aimee_frontend_openai.c modules/translation/aimee_backend_openai.c
+IR_CONTRACT_SRCS = $(HOOK_IR_SRCS) $(IR_BASE_SRCS) modules/ir/response_codec.c modules/ir/session_event.c modules/translation/aimee_frontend_openai.c modules/translation/aimee_backend_openai.c
 
 CORE_SRCS = interaction_event_names.c diagnose_render.c clarify_render.c ensemble_render.c ensemble_view.c execution_plan_list.c remote_client_claim.c jti_replay_consume.c wfe_store_lists.c db1_store_ready.c command_registry.c module_commands.c $(CONFIG_CLIENT_SRCS) client_config.c session_id.c toolset.c util.c util_url.c aimee_sha256.c module_json_call.c providers_client.c kb/kb_identity.c modules/git/forge_credentials.c forge_app_token.c modules/vault/runtime_secret.c modules/workspace/workspace_mirror.c report_enrichment.c modules/audit/audit_action.c modules/audit/audit_worm.c modules/audit/audit_worm_chain.c modules/audit/audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c rrf.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
             aimee_home.c shared/kb_paths.c provider_client.c kb_curator_provider.c \
@@ -569,6 +569,7 @@ SERVER_SRCS = peer_client/peer_client.c db1_store_probe.c server/embedder_catalo
               modules/workflows/wfe_engine.c modules/workflows/wfe_blocks.c modules/workflows/wfe_approval.c \
               modules/workflows/wfe_verdict.c modules/workflows/wfe_roundtable.c modules/workflows/wfe_autonomy.c \
               server/server_workflow_api.c
+SERVER_SRCS += server/agent_result_cache.c
 SERVER_SRCS += server/server_governed_action.c server/server_clean_retry.c
 SERVER_SRCS += server/server_code_index.c
 SERVER_SRCS += server/server_runtime_identity.c

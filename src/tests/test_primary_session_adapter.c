@@ -151,7 +151,7 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
    strcpy(other.provider, "mistral");
    primary_session_request_t busy = {
        .agent = &other, .aimee_session_id = "stable", .user_prompt = "overlap"};
-   agent_result_t overlap;
+   agent_result_t overlap = {0};
    assert(primary_session_adapter_turn(&busy, &overlap, NULL, 0) != 0);
 
    assert(cJSON_GetArraySize(initial) == expected_count);
@@ -172,7 +172,7 @@ static void turn(agent_t *agent, int count, int ok)
    expected_count = count;
    primary_session_request_t req = {
        .agent = agent, .aimee_session_id = "stable", .user_prompt = "continue"};
-   agent_result_t out;
+   agent_result_t out = {0};
    int before = executions;
    assert((primary_session_adapter_turn(&req, &out, NULL, 0) == 0) == ok);
    assert(executions == before + ok);
@@ -255,7 +255,7 @@ int main(void)
    fail_checkpoint = 1;
    primary_session_request_t req = {
        .agent = &a, .aimee_session_id = "stable", .user_prompt = "continue"};
-   agent_result_t out;
+   agent_result_t out = {0};
    expected_count = 2;
    int before = executions;
    assert(primary_session_adapter_turn(&req, &out, NULL, 0) == AGENT_RC_CAPTURE_FAILED);

@@ -2109,15 +2109,13 @@
     "src/server/agent_runtime.c": {
       "disposition": "host-context",
       "symbols": [
-        "kb_client_memory_find_id_by_key_kind",
-        "kb_client_memory_insert",
         "kb_client_memory_recall_native_json",
         "kb_client_memory_scope_context_apply",
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "5078e2d794b86766c42daa0a2fcea87bca7d2150cdac8ffeded4e1ae2cc84b84",
-      "boundary_review": "2026-10-18 PR #3038: selected canonical runs enter the same role-policy, admission, context assembly and Go memory-owner calls. The new branch retains complete ordered input and disables flat KB hint substitution for that input. Existing native memory symbols and Go admission authority are unchanged; no native memory engine or independent production approval is introduced. Long-owner follow-up: the local identity-copy buffer now uses the Vault principal bound, preserving the attested owner suffix in canonical source references. Memory symbols and policy calls are unchanged."
+      "sha256": "f333b310ad6609d0cfd5a01388a48c448b499c763457918781617fd2eaa6b366",
+      "boundary_review": "2026-10-20 PR #3052: reviewed retirement of agent_store_feedback, which fabricated a KB succeeded/fixes relationship from process success. No replacement correctness claim is emitted. Canonical terminal observations remain independently ungraded. The four remaining Go memory context/recall APIs and their arguments are unchanged. Other source changes retain owned canonical output and restrict optional result caching to exact admitted requests and authenticated owners, excluding session capture and opaque credentials. This is boundary analysis, not independent reviewer approval."
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
@@ -2162,8 +2160,8 @@
         "kb_client_memory_scope_context_clear",
         "server_module_memory_data"
       ],
-      "sha256": "278734f423022d7ef54845a638ea9852dff769e2ec4beeac033404dde7d16743",
-      "boundary_review": "2026-10-20 PR #3052: Reviewed only fail-closed lifecycle-hook cleanup after workspace acquisition failure. Memory scope clearing and the memory data transport are unchanged. Reversing this diff reproduces the previously pinned source exactly."
+      "sha256": "f85ac466b71ab841956e574a45a75fad14f989ec76602b16a4a0e7cbd71f363b",
+      "boundary_review": "2026-10-20 PR #3052: Only handle_hooks_pre changed: a nested retained workspace scope supplies mirror policy/worktree probes and restores the enclosing binding. Active capability authorization does not trust request paths. Replacing just this function with its previous body reproduces the pinned source byte-for-byte; memory transport/policy bytes are unchanged. This is source-boundary analysis, not independent production approval. Memory-file interception is moved after the same source acquisition and receives the approved resource cwd; failed acquisition performs no memory write. Its deny path restores the enclosing lease and command cwd before returning. Memory policy and native intent remain with the existing owners."
     },
     "src/server/server_api.c": {
       "disposition": "host-transport",
@@ -2528,8 +2526,8 @@
         "memory_stats",
         "server_module_memory_data"
       ],
-      "sha256": "c87c20e0a21b119d24af8a7921590beee5b8e27a3aa93391acef417ff593c855",
-      "boundary_review": "2026-10-20 PR #3052: Reviewed only the registered-tool peer stub and failed mirror-hook regression. The memory data and scope peer fixtures are unchanged. Reversing this diff reproduces the previously pinned source exactly."
+      "sha256": "bca0d74c41f2b58ebd34f0b95f02ee69b49ae5c4a041ce019218a5203922de78",
+      "boundary_review": "2026-10-20 PR #3052: Hook resource-provider fixtures now cover nested acquisition, approved mirror cwd and enclosing binding restoration. Reversing only hook_test_exec/provider peers, pre_tool_check fixture and test_hooks_pre_remote_workspace_scope reproduces the pinned fixture byte-for-byte. Memory data/scope/stat fixtures are unchanged."
     },
     "src/tests/test_server_facts_transport.c": {
       "disposition": "host-fixture",

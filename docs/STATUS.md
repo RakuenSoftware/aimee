@@ -27,7 +27,13 @@ SDK conversation observations cannot replace them. Codex npm registrations resol
 native package without running the launcher script.
 
 Actual-SDK integration qualifies API-key and Vault OAuth forwarding, rotation, compaction, resume
-and seeded runs. Fresh CI must qualify the additional live browser-operator question journeys.
+and seeded runs. The browser-operator question/reconnect journeys and UI replay repairs passed
+the published CI checkpoint. New result-ownership and cache changes require fresh CI.
+HTTP and host-owned native executors now retain complete owned responses through selection and
+repair. Optional pure-text result reuse stores canonical snapshots, binds the exact native request
+and authenticated owner, and excludes user history capture and opaque credential lineage.
+Native hooks acquire the approved workspace before memory interception or filesystem probes;
+unknown Git worktree state cannot authorize cached verification.
 Remaining typed consumers, independently graded local learning/reuse, broader native platforms,
 live subscription acceptance and reviewed production promotion remain unfinished. Production stays
 KB-free. See the [migration boundaries](proposals/pending/canonical-ir-session-stream.md).

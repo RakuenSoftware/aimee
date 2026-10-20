@@ -21,10 +21,10 @@ streaming, durable history and final results. SDK-normalized arguments cannot be
 Native compaction uses the canonical session owner; asynchronous seeded runs preserve full context,
 workspace scope and cumulative usage. Codex npm commands resolve their matching held native binary.
 
-Sixteen actual-SDK journeys pass locally across API-key and Vault OAuth paths, including credential
+Twenty actual-SDK journeys pass locally across API-key and Vault OAuth paths, including credential
 rotation, tool execution, compaction, replay, resume and seeded execution. Browser operators reply
-through authenticated, session/turn-bound control requests; additional actual root-UDS operator
-journeys are required in fresh CI and are not yet reported qualified. Existing text-only history
+through authenticated, session/turn-bound control requests; actual root-UDS operator question,
+replay and reconnect journeys pass in the published qualification checkpoint. Existing text-only history
 retains explicit legacy fidelity. Remaining consumers, independently graded local learning/reuse,
 broader platform coverage, live subscription acceptance and reviewed production promotion remain
 unfinished. No KB service is enabled for production `.100`.
@@ -32,6 +32,22 @@ unfinished. No KB service is enabled for production `.100`.
 CLI index discovery now registers a missing canonical repository through the existing bounded
 client ingest path before querying it. Main checkouts and linked worktrees retain the caller's
 project scope; an unavailable registry does not trigger an upload.
+
+## Canonical result ownership and workspace probes
+
+Internal HTTP and host-owned native execution retain complete canonical output, including signed
+reasoning, tool identities, usage and opaque adapter sidecars. Selection and repair transfer that
+owned output; display annotations preserve the original observation. Optional pure-text result
+reuse now stores canonical snapshots under the exact admitted request and authenticated owner.
+Credential-backed calls and captured user turns execute through their existing owners.
+
+Native hooks preserve their enclosing workspace lease and use the approved server resource for
+memory interception and filesystem policy probes. Verification requires an explicit clean-tree
+reply; a missing module or malformed state cannot reuse an earlier successful check. Windows and
+macOS thin-client checks now run for executable changes targeting testing as well as main.
+
+Process completion no longer manufactures a KB `fixes` relationship. Independent local task grades
+and next-run learning reuse remain unfinished; these changes do not claim a completed migration.
 
 ## Browser chat repairs
 

@@ -840,7 +840,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    if (!cctx->ir_enabled && primary_cli_ingestor_enabled() && aimee_sid && aimee_sid[0])
       primary_cli_ingestor_enforce_preturn(aimee_sid, message, use_cwd);
 
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    /* This is the PRIMARY turn: the provider-named agent must be routable for
     * its own chat even though the delegate-policy filter excludes it as a
@@ -888,7 +888,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
           * stray marker with no content. */
          stream_event(cctx, "turn_end", NULL, NULL);
          stream_event(cctx, "done", NULL, NULL);
-         free(result.response);
+         agent_result_clear_response(&result);
          /* compute_ok is a no-op for a server-initiated turn (compute_respond
           * early-returns on conn_fd < 0); the pooled wrapper still emits the
           * presence-ring turn_done that the webchat events stream listens for. */
@@ -897,7 +897,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
          return;
       }
       compute_error(cctx, result.error[0] ? result.error : "agent provider failed");
-      free(result.response);
+      agent_result_clear_response(&result);
       compute_ctx_free(cctx);
       return;
    }
@@ -913,7 +913,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       stream_event(cctx, "text", "content", result.response);
    stream_event(cctx, "turn_end", NULL, NULL);
    stream_event(cctx, "done", NULL, NULL);
-   free(result.response);
+   agent_result_clear_response(&result);
    compute_ok(cctx);
    compute_ctx_free(cctx);
 }
@@ -1021,7 +1021,7 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    preq.temperature = 0.3;
 
    char session_id[128];
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    agent_tools_set_tool_event_cb(chat_tool_event_cb, cctx);
    int rc = primary_session_adapter_turn(&preq, &result, session_id, sizeof(session_id));
@@ -1034,7 +1034,7 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    if (rc != 0)
    {
       compute_error(cctx, result.error[0] ? result.error : "primary session adapter failed");
-      free(result.response);
+      agent_result_clear_response(&result);
       compute_ctx_free(cctx);
       return;
    }
@@ -1045,7 +1045,7 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
       stream_event(cctx, "text", "content", result.response);
    stream_event(cctx, "turn_end", NULL, NULL);
    stream_event(cctx, "done", NULL, NULL);
-   free(result.response);
+   agent_result_clear_response(&result);
    compute_ok(cctx);
    compute_ctx_free(cctx);
 }

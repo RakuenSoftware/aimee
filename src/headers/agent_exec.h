@@ -8,6 +8,7 @@
 struct cJSON; /* forward declaration for gemini_prompt_cache_attach */
 
 /* Execution */
+void agent_reject_degenerate_plain_response(agent_result_t *out, const char *agent_name);
 int agent_execute_with_tools(const agent_t *agent, const agent_network_t *network,
                              const char *system_prompt, const char *user_prompt, int max_tokens,
                              double temperature, agent_result_t *out);

@@ -145,8 +145,17 @@ static void *mirror_callback_worker(void *opaque)
    assert(!previous);
    accepted = workspace_turn_workspace_authorized(fixture->cwd, allowed, sizeof allowed);
    assert(accepted && !strcmp(allowed, fixture->cwd));
+   workspace_turn_scope_t *foreground = NULL;
+   int acquired = workspace_turn_scope_begin(fixture->cwd, &foreground);
+   assert(acquired == 1 && foreground);
+   assert(!strcmp(workspace_turn_active_cwd(), fixture->cwd));
+   assert(workspace_provider_active() == workspace_provider_shared());
+   acquired = workspace_turn_scope_end(foreground);
+   assert(!acquired);
+   accepted = workspace_turn_workspace_authorized(fixture->cwd, allowed, sizeof allowed);
+   assert(accepted && !strcmp(allowed, fixture->cwd));
    workspace_turn_scope_t *background = NULL;
-   int acquired = workspace_turn_scope_begin_background(fixture->cwd, &background);
+   acquired = workspace_turn_scope_begin_background(fixture->cwd, &background);
    assert(acquired == 1 && background);
    assert(!strcmp(workspace_turn_active_cwd(), fixture->cwd));
    assert(workspace_provider_active() == workspace_provider_shared());

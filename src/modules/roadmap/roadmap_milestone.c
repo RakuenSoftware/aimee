@@ -205,7 +205,7 @@ char *roadmap_milestone_validate(const char *roadmap_id, const char *milestone_i
    if (!prompt)
       return NULL;
 
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
 
    agent_http_init();
@@ -216,12 +216,12 @@ char *roadmap_milestone_validate(const char *roadmap_id, const char *milestone_i
 
    if (rc != 0 || !result.response)
    {
-      free(result.response);
+      agent_result_clear_response(&result);
       return NULL;
    }
 
    const char *verdict = roadmap_milestone_parse_verdict(result.response);
    char *ret = strdup(verdict);
-   free(result.response);
+   agent_result_clear_response(&result);
    return ret;
 }

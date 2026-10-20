@@ -1745,10 +1745,9 @@ jobs:
   # forced by -DAIMEE_THIN_CLIENT=ON in CMakeLists.txt), so it was removed.
   windows-build:
     needs: change-scope
-    # Thin-client portability. Required on main, so it runs for pull requests
-    # into main, for every push (including each merge into testing) and in the
-    # merge queue; pull requests into testing do not wait on a windows-latest runner.
-    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') && (github.event_name != 'pull_request' || github.base_ref == 'main') }}
+    # Shared native headers/build contracts also change on testing-target PRs.
+    # Qualify thin-client portability before merge on every executable change.
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -1840,10 +1839,9 @@ jobs:
 
   macos-build:
     needs: change-scope
-    # Thin-client portability. Required on main, so it runs for pull requests
-    # into main, for every push (including each merge into testing) and in the
-    # merge queue; pull requests into testing do not wait on a macos-latest runner.
-    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') && (github.event_name != 'pull_request' || github.base_ref == 'main') }}
+    # Shared native headers/build contracts also change on testing-target PRs.
+    # Qualify thin-client portability before merge on every executable change.
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: macos-latest
     timeout-minutes: 30
     steps:

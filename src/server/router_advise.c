@@ -65,7 +65,7 @@ static void *classify_thread(void *arg)
       memset(&acfg, 0, sizeof acfg);
       if (agent_load_config(&acfg) == 0)
       {
-         agent_result_t res;
+         agent_result_t res = {0};
          memset(&res, 0, sizeof res);
          struct timespec t0 = {0, 0}, t1 = {0, 0};
          clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -91,7 +91,7 @@ static void *classify_thread(void *arg)
                                      sizeof payload);
          db1_interaction_event_record(a->session_id, ie_event_type_name(IE_GUARDRAIL_DECISION),
                                       "router-s1", payload, "classifier");
-         free(res.response);
+         agent_result_clear_response(&res);
       }
    }
    free(a->message);

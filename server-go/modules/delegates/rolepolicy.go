@@ -55,8 +55,9 @@ func RoleIsBuiltIn(role string) bool {
 	return ok
 }
 
-// RoleResultCacheEnabled reports whether a response may be reused keyed only by
-// (role, prompt).
+// RoleResultCacheEnabled identifies pure text transforms eligible for result reuse.
+// The host must additionally bind the exact admitted request and owner; this
+// flag never authorizes a prompt-only, cross-owner or native-session cache.
 //
 // Opt-in, and only for pure text transforms. Repository inspection, execution
 // and custom roles must never cache: the same prompt can refer to a changed

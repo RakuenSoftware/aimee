@@ -60,6 +60,11 @@ typedef struct
  * Raw provider sidecars are deliberately not serialized into session events. */
 struct cJSON *aimee_ir_block_json(const aimee_block_t *block);
 struct cJSON *aimee_ir_message_json(const aimee_message_t *message);
+/* Exact owned response-cache snapshots, separate from session-event payloads.
+ * Includes opaque adapter sidecars. Decode validates typed response content and
+ * atomically replaces out only on success; neither path authorizes execution. */
+struct cJSON *aimee_ir_response_json(const aimee_response_t *response);
+int aimee_ir_response_parse(const struct cJSON *json, aimee_response_t *out);
 /* Canonical request/catalog snapshot: no native replay bytes or raw sidecars. */
 struct cJSON *aimee_ir_request_json(const aimee_request_t *request);
 /* Bounded identity/query projection for request policy, never a model prompt. */

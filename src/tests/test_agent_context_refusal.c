@@ -431,7 +431,7 @@ int main(void)
       assert(strstr(error, "memory context refused"));
       assert(agent_build_exec_context_for_role(&agent, &network, "review", "original prompt", 0) ==
              NULL);
-      agent_result_t result;
+      agent_result_t result = {0};
       int rc = agent_execute_with_tools_for_role(&agent, &network, "review", "original prompt",
                                                  "task", 128, 0, &result);
       assert(rc == AGENT_RC_CONTEXT_REFUSED);
@@ -439,7 +439,7 @@ int main(void)
       assert(strcmp(result.stop_reason, "context_refused") == 0);
       assert(strstr(result.error, "memory context refused"));
       assert(!agent_rc_should_try_another(rc, result.error));
-      free(result.response);
+      agent_result_clear_response(&result);
    }
    assert(recalls == 9 && provider_calls == 0);
    /* Reusing the same thread after a refusal must not poison a successful
@@ -456,12 +456,12 @@ int main(void)
     * In particular, one valid ID must not hide a later malformed identity. */
    for (malformed_projection = 1; malformed_projection <= 8; malformed_projection++)
    {
-      agent_result_t invalid_result;
+      agent_result_t invalid_result = {0};
       int invalid_rc = agent_execute_with_tools_for_role(
           &agent, &network, "review", "original prompt", "task", 128, 0, &invalid_result);
       assert(invalid_rc == AGENT_RC_CONTEXT_REFUSED && provider_calls == 0);
       assert(strstr(invalid_result.error, "invalid_projection"));
-      free(invalid_result.response);
+      agent_result_clear_response(&invalid_result);
    }
    malformed_projection = 0;
    /* An unconfigured standalone server has an empty mode, not necessarily
@@ -499,7 +499,7 @@ int main(void)
    snprintf(agent.endpoint, sizeof(agent.endpoint), "http://context-refusal.invalid/v1");
    agent.max_turns = 8;
    agent.timeout_ms = 10000;
-   agent_result_t result;
+   agent_result_t result = {0};
    int rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task",
                                               128, 0, &result);
    if (rc != AGENT_RC_CONTEXT_REFUSED)
@@ -510,7 +510,7 @@ int main(void)
    assert(strcmp(result.stop_reason, "context_refused") == 0);
    assert(strstr(result.error, "protected_context_overflow"));
    assert(!agent_rc_should_try_another(rc, result.error));
-   free(result.response);
+   agent_result_clear_response(&result);
    recalls = provider_calls = refuse_after = 0;
    final_response = 1;
    recall_reply = "{\"status\":\"ok\",\"recall\":{}}";
@@ -525,7 +525,7 @@ int main(void)
    assert(strcmp(result.stop_reason, "context_refused") == 0);
    assert(strcmp(result.error, "protected_context_overflow") == 0);
    assert(!agent_rc_should_try_another(rc, result.error));
-   free(result.response);
+   agent_result_clear_response(&result);
    request_context_clear();
    recalls = 0;
    rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
@@ -533,7 +533,7 @@ int main(void)
    assert(rc == 0 && result.success && !result.error[0]);
    assert(recalls == 1 && provider_calls == 1);
    assert(result.response && strstr(result.response, "Fixture completed."));
-   free(result.response);
+   agent_result_clear_response(&result);
    for (int fallback = 0; fallback <= 1; fallback++)
    {
       request_context_t retry_context = {0};
@@ -549,7 +549,7 @@ int main(void)
       assert(strcmp(result.stop_reason, "context_refused") == 0);
       assert(strcmp(result.error, "stale_context") == 0);
       assert(!agent_rc_should_try_another(rc, result.error));
-      free(result.response);
+      agent_result_clear_response(&result);
       /* The non-tool execution path must preserve the same refusal contract. */
       request_context_set(&retry_context);
       provider_calls = hook_calls = 0;
@@ -566,7 +566,7 @@ int main(void)
       assert(strcmp(result.stop_reason, "context_refused") == 0);
       assert(strcmp(result.error, "stale_context") == 0);
       assert(!agent_rc_should_try_another(rc, result.error));
-      free(result.response);
+      agent_result_clear_response(&result);
       request_context_clear();
    }
    /* A durable capture loss is local and terminal, including after dispatch.
@@ -586,7 +586,7 @@ int main(void)
       assert(!strcmp(result.stop_reason, "capture_failed"));
       assert(!agent_rc_should_try_another(rc, "quota exhausted"));
       assert(aimee_ir_session_capture_failed());
-      free(result.response);
+      agent_result_clear_response(&result);
       aimee_ir_session_set_sink(NULL, NULL);
       assert(!aimee_ir_session_capture_failed());
    }
@@ -600,7 +600,7 @@ int main(void)
                                           &result);
    assert(result.tool_calls == 17 && wide_uses == 17 && wide_results == 17);
    assert(pending->child == NULL && provider_calls <= 2);
-   free(result.response);
+   agent_result_clear_response(&result);
    aimee_ir_session_set_sink(NULL, NULL);
    cJSON_Delete(pending);
    wide_parallel = 0;
@@ -618,7 +618,7 @@ int main(void)
                                              0, &result);
       assert(rc == 0 && result.success && provider_calls == 2 && identity_results == 1);
       assert(result.tool_calls == 1 && result.successful_tool_calls == 0);
-      free(result.response);
+      agent_result_clear_response(&result);
       aimee_ir_session_set_sink(NULL, NULL);
    }
    identity_case = 2;
@@ -629,7 +629,7 @@ int main(void)
                                           &result);
    assert(rc == 0 && result.success && provider_calls == 2 && identity_results == 1);
    assert(result.tool_calls == 1 && result.successful_tool_calls == 0);
-   free(result.response);
+   agent_result_clear_response(&result);
    aimee_ir_session_set_sink(NULL, NULL);
    identity_case = 0;
    metadata_available = 1;
@@ -642,7 +642,7 @@ int main(void)
    rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
                                           &result);
    assert(result.successful_tool_calls == 0 && !bootstrap_evidence_seen);
-   free(result.response);
+   agent_result_clear_response(&result);
    run_cmd_set_cwd(NULL);
    agent_tools_register_classifier(NULL);
    agent_tools_register_metadata(NULL);

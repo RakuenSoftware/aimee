@@ -16,6 +16,7 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "agent_store_feedback",
     "tool_side_effect", "tool_validate",
     "tool_call_normalize_assistant_arguments", "tool_call_sanitize_assistant_arguments",
     "agent_execute_cli_shell_driver", "agent_shell_driver_get", "agent_shell_driver_register",

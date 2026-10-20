@@ -1678,7 +1678,7 @@ done:
    server_http_identity_clear();
    request_context_clear();
    aimee_response_free(&response);
-   free(result.response);
+   agent_result_clear_response(&result);
    run_job_free(job);
    return NULL;
 }

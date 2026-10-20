@@ -96,18 +96,18 @@ char *aux_call(const char *task_name, const char *prompt, int max_tokens)
    if (model[0])
       snprintf(local.model, sizeof(local.model), "%s", model);
 
-   agent_result_t res;
+   agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
    int rc = agent_dispatch_one(&local, NULL, NULL, NULL, prompt, tok, 0.0, 0 /* use_tools */, &res);
    if (rc != 0 || !res.response || !res.response[0])
    {
       LOG_WARN("aux", "aux_call task '%s': %s", task_name,
                res.error[0] ? res.error : "empty response");
-      free(res.response);
+      agent_result_clear_response(&res);
       cooldown_set(AUX_COOLDOWN_TRANSIENT_SECS);
       return NULL;
    }
-   return res.response;
+   return agent_result_take_text(&res);
 }
 
 void aux_config_show(void)

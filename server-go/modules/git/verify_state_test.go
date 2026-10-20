@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -182,5 +183,21 @@ func TestVerifyStateRefusesBadRequests(t *testing.T) {
 	// A write with no tree to key on would produce an entry nothing can match.
 	if _, status := call(t, VerifyStateRequest{Op: "state-write", ProjectRoot: t.TempDir()}); status != bus.ModuleStatusInvalidRequest {
 		t.Fatalf("hashless write accepted")
+	}
+}
+
+// The native gate requires a real boolean. Omitting false makes a clean tree
+// indistinguishable from an incomplete reply and must never authorize reuse.
+func TestVerifyCleanStateIsExplicitOnWire(t *testing.T) {
+	body, status := Handle(bus.ModuleInvocation{StageID: StageVerifyRun}, []byte(`{"op":"worktree-dirty","project_root":`+strconv.Quote(newRepo(t))+`}`))
+	if status != bus.ModuleStatusOK {
+		t.Fatalf("status %d", status)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if string(fields["dirty"]) != "false" || string(fields["ok"]) != "true" {
+		t.Fatalf("missing clean-state attestation: %s", body)
 	}
 }

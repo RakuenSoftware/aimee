@@ -681,3 +681,11 @@ if(NOT WIN32)
   target_include_directories(test_server_native_cache PRIVATE ${AIMEE_SRC_DIR}/modules/kb/c)
   target_link_libraries(test_server_native_cache PRIVATE OpenSSL::Crypto)
 endif()
+
+if(NOT WIN32)
+  aimee_add_test(test_agent_result_cache test_agent_result_cache.c
+    ../server/agent_result_cache.c ../server/agent_runtime_liveness.c ../server/liveness.c
+    ../modules/ir/response_codec.c ../modules/ir/session_event.c ../modules/ir/aimee_ir.c
+    ../modules/ir/aimee_ir_metrics.c ../aimee_sha256.c)
+  target_link_libraries(test_agent_result_cache PRIVATE OpenSSL::Crypto)
+endif()

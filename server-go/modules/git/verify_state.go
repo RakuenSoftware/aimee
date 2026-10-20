@@ -58,7 +58,7 @@ type VerifyStateRequest struct {
 type VerifyStateResponse struct {
 	OK      bool         `json:"ok"`
 	Hash    string       `json:"hash,omitempty"`
-	Dirty   bool         `json:"dirty,omitempty"`
+	Dirty   bool         `json:"dirty"`
 	Entries []StateEntry `json:"entries,omitempty"`
 }
 

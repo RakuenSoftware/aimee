@@ -525,7 +525,7 @@ int main(void)
          assert(!terminal && !completed);
          assert(!began || (aborted == 1 && closed == 1));
       }
-      free(out.response);
+      agent_result_clear_response(&out);
    }
    reset(0);
    snprintf(selected.provider, sizeof selected.provider, "codex-cli");
@@ -533,7 +533,7 @@ int main(void)
    agent_result_t alias = {0};
    assert(!provider_cli_adapter_host_execute(&cfg, &alias));
    assert(!strcmp(selected.provider, "codex-cli"));
-   free(alias.response);
+   agent_result_clear_response(&alias);
    finish(1);
    snprintf(selected.provider, sizeof selected.provider, "chatgpt");
    selected.auth_type[0] = 0;
@@ -565,7 +565,7 @@ int main(void)
    assert(!strcmp(canonical.content[1].thinking_encrypted_content, "opaque-original"));
    assert(!strcmp(seeded.response, "ORIGINAL canonical output"));
    aimee_response_free(&canonical);
-   free(seeded.response);
+   agent_result_clear_response(&seeded);
    finish(1);
    cfg.canonical_request = NULL;
    cfg.canonical_response = NULL;
@@ -576,7 +576,7 @@ int main(void)
    assert(!provider_cli_adapter_host_execute(&cfg, &claude));
    assert(!strcmp(claude.response, "ORIGINAL canonical output") && !retained && joined);
    assert(access(private_home, F_OK));
-   free(claude.response);
+   agent_result_clear_response(&claude);
    finish(1);
    assert(completed == 1 && closed == 1);
    active_sdk = "codex";
@@ -587,7 +587,7 @@ int main(void)
    agent_result_t refused = {0};
    assert(provider_cli_adapter_host_execute(&cfg, &refused) < 0);
    assert(!sdk_calls && !retained && restored == 1 && !terminal);
-   free(refused.response);
+   agent_result_clear_response(&refused);
 #endif
    run_cmd_set_cwd(NULL);
    cli_session_t cleanup = {.iso_home = strdup(temporary)};

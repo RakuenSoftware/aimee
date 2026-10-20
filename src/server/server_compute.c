@@ -1464,7 +1464,7 @@ static void delegate_worker_run(void *arg)
    /* Concurrency (global + per-agent + per-model caps) is enforced downstream by the single
     * agent_admission controller inside agent_dispatch_one — there is no separate per-model
     * gate here. A pinned turn blocks+queues there; fan-out/fallback fail fast. */
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    char *handoff_prompt = NULL;
    const char *run_prompt = prompt;
@@ -1750,7 +1750,7 @@ static void delegate_worker_run(void *arg)
              delegate_handoff_repair_prompt(result.response, handoff_validation.error);
          if (repair_prompt)
          {
-            agent_result_t repaired;
+            agent_result_t repaired = {0};
             memset(&repaired, 0, sizeof(repaired));
             int repair_rc =
                 force_tools
@@ -1761,9 +1761,7 @@ static void delegate_worker_run(void *arg)
             free(repair_prompt);
             if (repair_rc == 0 && repaired.response)
             {
-               free(result.response);
-               result.response = repaired.response;
-               repaired.response = NULL;
+               agent_result_move_response(&result, &repaired);
                result.turns += repaired.turns;
                result.tool_calls += repaired.tool_calls;
                if (repaired.agent_name[0])
@@ -1771,7 +1769,7 @@ static void delegate_worker_run(void *arg)
                (void)delegate_handoff_validate_text(result.response, NULL, 1, &handoff_validation);
                handoff_validation.repair_attempted = 1;
             }
-            free(repaired.response);
+            agent_result_clear_response(&repaired);
          }
       }
       if (!handoff_validation.valid)
@@ -1835,7 +1833,7 @@ static void delegate_worker_run(void *arg)
       result.success = 0;
       snprintf(result.error, sizeof(result.error),
                "delegate %s returned raw tool-call markup or another degenerate response", role);
-      free(result.response);
+      agent_result_clear_response(&result);
       result.response = NULL;
    }
    if (n_stale > 0 && result.response)
@@ -1855,8 +1853,7 @@ static void delegate_worker_run(void *arg)
       {
          memcpy(augmented, result.response, rl);
          memcpy(augmented + rl, note, nl + 1);
-         free(result.response);
-         result.response = augmented;
+         agent_result_replace_display_text(&result, augmented);
       }
    }
 
@@ -1880,7 +1877,7 @@ static void delegate_worker_run(void *arg)
       LOG_WARN("delegate", "delegate %s: terminal execution has incomplete learning capture",
                deleg_id);
 
-   free(result.response);
+   agent_result_clear_response(&result);
    free(handoff_prompt);
    free(resolved_prompt);
    free(template_sys_prompt);

@@ -322,7 +322,7 @@ int describe_one(const char *project_name, const char *project_path)
    /* Delegate to an agent with tools */
    agent_http_init();
 
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
 
    int rc = agent_run_with_tools(&cfg, "execute", describe_system_prompt, prompt, 4096, &result);
@@ -334,7 +334,7 @@ int describe_one(const char *project_name, const char *project_path)
       fprintf(stderr, "describe: failed for %s: %s\n", project_name,
               result.error[0] ? result.error : "no response");
       agent_http_cleanup();
-      free(result.response);
+      agent_result_clear_response(&result);
       return -1;
    }
 
@@ -351,7 +351,7 @@ int describe_one(const char *project_name, const char *project_path)
    if (!f)
    {
       fprintf(stderr, "describe: cannot write %s: %s\n", path, strerror(errno));
-      free(result.response);
+      agent_result_clear_response(&result);
       agent_http_cleanup();
       return -1;
    }
@@ -362,7 +362,7 @@ int describe_one(const char *project_name, const char *project_path)
    fprintf(stderr, "describe: wrote %s (%d turns, %d tool calls)\n", path, result.turns,
            result.tool_calls);
 
-   free(result.response);
+   agent_result_clear_response(&result);
    agent_http_cleanup();
    return 0;
 }
@@ -480,7 +480,7 @@ int style_one(const char *project_name, const char *project_path)
 
    agent_http_init();
 
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
 
    int rc = agent_run_with_tools(&cfg, "execute", style_system_prompt, prompt, 4096, &result);
@@ -492,7 +492,7 @@ int style_one(const char *project_name, const char *project_path)
       fprintf(stderr, "style: failed for %s: %s\n", project_name,
               result.error[0] ? result.error : "no response");
       agent_http_cleanup();
-      free(result.response);
+      agent_result_clear_response(&result);
       return -1;
    }
 
@@ -509,7 +509,7 @@ int style_one(const char *project_name, const char *project_path)
    if (!f)
    {
       fprintf(stderr, "style: cannot write %s: %s\n", path, strerror(errno));
-      free(result.response);
+      agent_result_clear_response(&result);
       agent_http_cleanup();
       return -1;
    }
@@ -520,7 +520,7 @@ int style_one(const char *project_name, const char *project_path)
    fprintf(stderr, "style: wrote %s (%d turns, %d tool calls)\n", path, result.turns,
            result.tool_calls);
 
-   free(result.response);
+   agent_result_clear_response(&result);
    agent_http_cleanup();
    return 0;
 }

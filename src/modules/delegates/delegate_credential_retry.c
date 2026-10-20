@@ -153,7 +153,7 @@ int delegate_run_with_credential_retry(agent_config_t *cfg, agent_t *agent, cons
       rc = run_delegate_attempt(cfg, role, system_prompt, run_prompt, max_tokens, force_tools,
                                 enforce_writes, result);
       result_add_prior_metrics(result, &prior);
-      free(prior.response);
+      agent_result_clear_response(&prior);
    }
 
    return rc;

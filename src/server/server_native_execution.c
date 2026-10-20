@@ -539,7 +539,7 @@ static int native_execution_result(native_execution_t *execution, agent_result_t
       return -1;
    }
    execution->cache = NULL;
-   free(out->response);
+   agent_result_clear_response(out);
    out->response = text;
    out->prompt_tokens = (int)original.usage_in;
    out->completion_tokens = (int)original.usage_out;
@@ -548,12 +548,11 @@ static int native_execution_result(native_execution_t *execution, agent_result_t
    snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
             original.raw_stop_reason ? original.raw_stop_reason
                                      : aimee_stop_reason_name(original.stop_reason));
-   if (canonical)
-   {
-      *canonical = original;
-      original = (aimee_response_t){0};
-   }
-   aimee_response_free(&original);
+   aimee_response_free(&out->canonical_response);
+   out->canonical_response = original;
+   original = (aimee_response_t){0};
+   if (canonical && aimee_ir_response_clone(&out->canonical_response, canonical))
+      return -1;
    return 0;
 }
 static int native_claude_init(const cJSON *frame, void *context)
@@ -712,7 +711,7 @@ int server_native_codex_chat_stream(const agent_t *selected,
       agent_result_t result = {0};
       if (!rc)
          rc = native_execution_result(execution, &result, NULL);
-      free(result.response);
+      agent_result_clear_response(&result);
       if (!rc)
       {
          out->prompt_tokens = result.prompt_tokens;

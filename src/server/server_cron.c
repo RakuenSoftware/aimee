@@ -213,13 +213,13 @@ static int cron_run_llm_prompt(const char *prompt, char **out, char *err, size_t
       return -1;
    }
 
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    int rc = agent_run(&acfg, "execute", NULL, prompt, CRON_LLM_MAX_TOKENS, &result);
    if (rc != 0)
    {
       snprintf(err, err_len, "%s", result.error[0] ? result.error : "cron LLM turn failed");
-      free(result.response);
+      agent_result_clear_response(&result);
       return -1;
    }
    *out = result.response ? result.response : strdup("");

@@ -24,7 +24,7 @@ int agent_request_cancelled(void)
 
 static void test_execute_rejects_missing_inputs(void)
 {
-   agent_result_t out;
+   agent_result_t out = {0};
    agent_t agent = {0};
    assert(agent_execute_cli_codex_at_cwd(&agent, NULL, NULL, "prompt", NULL) == -1);
    assert(agent_execute_cli_codex_at_cwd(NULL, NULL, NULL, "prompt", &out) == -1);
@@ -289,7 +289,7 @@ static void test_spawn_failure_captures_stderr_and_exit_status(void)
    snprintf(agent.cli_cmd, sizeof(agent.cli_cmd), "%s", path);
    agent.autonomous = 1;
 
-   agent_result_t out;
+   agent_result_t out = {0};
    int rc = agent_execute_cli_codex(&agent, NULL, "hello", &out);
    assert(rc == -1);
    assert(strstr(out.error, "status 42") != NULL);
@@ -398,11 +398,11 @@ static void test_agent_execute_cli_codex_uses_requested_cwd(void)
    snprintf(agent.cli_cmd, sizeof(agent.cli_cmd), "%s", script);
    agent.cli_idle_timeout_ms = 5000;
 
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(agent_execute_cli_codex_at_cwd(&agent, workdir, "system", "user prompt", &out) == 0);
    assert(out.response != NULL);
    assert(strcmp(out.response, "ok from fake codex") == 0);
-   free(out.response);
+   agent_result_clear_response(&out);
 
    char seen[512];
    fp = fopen(marker, "r");
@@ -436,7 +436,7 @@ static void test_agent_execute_cli_codex_uses_requested_cwd(void)
                              .bind_context = &bound};
    assert(!codex_provider_cli_adapter.execute(&cfg, &out));
    assert(out.success && bound == 1);
-   free(out.response);
+   agent_result_clear_response(&out);
    fp = fopen(resume_marker, "r");
    assert(fp && fgets(seen, sizeof seen, fp));
    seen[strcspn(seen, "\r\n")] = 0;
@@ -881,13 +881,13 @@ static void test_canonical_history_adoption(void)
                                          .history = &history,
                                          .user_prompt = "current user",
                                          .resume_id = resume ? "t-history" : NULL};
-               agent_result_t out;
+               agent_result_t out = {0};
                rc = codex_provider_cli_adapter.execute(&cfg, &out);
                if (!refuse)
                   assert(out.success && out.response && !strcmp(out.response, "history adopted"));
                else
                   assert(strstr(out.error, "canonical history adoption failed"));
-               free(out.response);
+               agent_result_clear_response(&out);
             }
             else
             {
@@ -1134,13 +1134,13 @@ static void test_dynamic_host_execution(void)
                                       .tool_catalog = &catalog,
                                       .tool_call = dynamic_host_fixture,
                                       .tool_context = &state};
-            agent_result_t out;
+            agent_result_t out = {0};
             rc = codex_provider_cli_adapter.execute(&cfg, &out);
             if (invalid_frame)
                assert(strstr(out.error, "invalid-json-rpc-frame"));
             if (success)
                assert(out.success && out.response && !strcmp(out.response, "host complete"));
-            free(out.response);
+            agent_result_clear_response(&out);
          }
          else
          {
@@ -1380,7 +1380,7 @@ static int native_history_probe(const char *resume, const char *history_file, in
 
 static void test_execute_refuses_missing_configuration(void)
 {
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(agent_execute_cli_codex(NULL, "system", "user", &out) == -1);
    assert(strcmp(out.error, "missing agent") == 0);
    assert(agent_execute_cli_codex(NULL, "system", "user", NULL) == -1);

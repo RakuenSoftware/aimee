@@ -541,7 +541,7 @@ static void test_context_refusal_does_not_rotate_credentials(void)
                                                 sizeof(name), env, sizeof(env)) == 0);
             context_attempts = 0;
             provider_failure_first = first;
-            agent_result_t result;
+            agent_result_t result = {0};
             int rc =
                 delegate_run_with_credential_retry(&cfg, &agent, "review", NULL, "task", 128, tools,
                                                    0, name, sizeof(name), NULL, &result);

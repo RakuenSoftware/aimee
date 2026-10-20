@@ -890,7 +890,10 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                request_id);
    }
    const char *target_cwd = hook.tool_cwd && hook.tool_cwd[0] ? hook.tool_cwd : cwd;
-   int registered = workspace_hook_registered(target_cwd);
+   char authorized_cwd[MAX_PATH_LEN];
+   int registered =
+       workspace_hook_registered(target_cwd) ||
+       workspace_turn_workspace_authorized(target_cwd, authorized_cwd, sizeof authorized_cwd);
    if (!registered)
    {
       free(ti_heap);
@@ -918,19 +921,6 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    session_state_t state;
    session_state_load(&state, sid);
 
-   /* Memory interception: redirect an agent's local memory-file write into the
-    * central store BEFORE the generic guardrails see it (rc==2 -> client deny). */
-   {
-      char mr_msg[1024] = "";
-      if (trusted_client && server_memory_intercept(&hook.call, cwd, req, trusted_client, mr_msg,
-                                                    sizeof(mr_msg)) == 2)
-      {
-         free(ti_heap);
-         aimee_hook_ir_free(&hook);
-         return hook_send_blocked(conn, mr_msg, request_id);
-      }
-   }
-
    /* S2 native-tool externalization gate (tracks 2+3): sends the block on deny. */
    int s2rc = s2_native_gate_hook_pre(conn, sid, tool_name, tool_input, request_id);
    if (s2rc >= 0)
@@ -954,22 +944,40 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int client_non_git =
        hook_identity == 1 &&
        cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "client_non_git_workspace"));
-   int bound = workspace_turn_bind_active(target_cwd);
+   workspace_turn_scope_t *hook_scope = NULL;
+   int bound = workspace_turn_scope_begin(target_cwd, &hook_scope);
    if (bound < 0)
    {
-      workspace_turn_unbind_active();
       free(ti_heap);
       aimee_hook_ir_free(&hook);
       return hook_send_blocked(conn, "Cannot acquire the registered workspace source.", request_id);
    }
    const workspace_provider_t *provider = workspace_provider_active();
+   const char *held_cwd = workspace_turn_active_cwd();
+   const char *resource_cwd = held_cwd && held_cwd[0] ? held_cwd : target_cwd;
    int detached = bound && provider->kind == WS_PROVIDER_DETACHED;
-   if (detached)
-      run_cmd_set_cwd(target_cwd);
-   else if (!client_non_git)
-      hooks_ensure_cwd_worktree(&state, sid, target_cwd);
+   if (bound)
+      run_cmd_set_cwd(resource_cwd);
+   /* Memory interception: redirect an agent's local memory-file write into the
+    * central store BEFORE the generic guardrails see it (rc==2 -> client deny). */
+   {
+      char mr_msg[1024] = "";
+      if (trusted_client && server_memory_intercept(&hook.call, resource_cwd, req, trusted_client,
+                                                    mr_msg, sizeof(mr_msg)) == 2)
+      {
+         run_cmd_set_cwd(saved_cwd[0] ? saved_cwd : NULL);
+         if (workspace_turn_scope_end(hook_scope))
+            snprintf(mr_msg, sizeof mr_msg, "Cannot restore the enclosing workspace source.");
+         free(ti_heap);
+         aimee_hook_ir_free(&hook);
+         return hook_send_blocked(conn, mr_msg, request_id);
+      }
+   }
+
+   if (!detached && !client_non_git)
+      hooks_ensure_cwd_worktree(&state, sid, resource_cwd);
    int rc = pre_tool_check_client_workspace(tool_name, tool_input, &state, config_guardrail_mode(),
-                                            target_cwd, msg, sizeof(msg), client_non_git);
+                                            resource_cwd, msg, sizeof(msg), client_non_git);
    session_state_save(&state, sid);
 
    if (rc != 2 && hook_identity == 1)
@@ -981,7 +989,11 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          rc = 2;
    }
    run_cmd_set_cwd(saved_cwd[0] ? saved_cwd : NULL);
-   workspace_turn_unbind_active();
+   if (workspace_turn_scope_end(hook_scope))
+   {
+      rc = 2;
+      snprintf(msg, sizeof msg, "Cannot restore the enclosing workspace source.");
+   }
 
    /* Sub-agent interception (enforce-delegate-only): the primary agent must not
     * spawn its OWN sub-agents. pre_tool_check already blocks Task/Agent/spawn_agent

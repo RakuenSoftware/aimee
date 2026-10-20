@@ -25,6 +25,7 @@
 #include "server_session_log.h"
 #include <aimee/ir/session_event.h>
 #include "agent_request_shaping.h"
+#include "agent_result_cache.h"
 #include "agent_request_build.h" /* agent_build_request + provider predicates */
 #include <aimee/tools/agent_tools.h>
 #include "agent_tunnel.h"
@@ -79,8 +80,6 @@ static int agent_apply_request_tool_loop_cap(const agent_config_t *cfg, agent_t 
       agent->tool_loop_timeout_ms_cap = remaining;
    return 0;
 }
-void agent_store_feedback(const agent_result_t *result, const char *role,
-                          const char *prompt_summary);
 const char *delegation_active_id(void);
 void agent_reject_degenerate_plain_response(agent_result_t *out, const char *agent_name);
 static int active_delegation_stopped(char *buf, size_t bufsz)
@@ -191,6 +190,10 @@ static const char *admission_ctx(const agent_t *ag, char *buf, size_t n)
    return buf;
 }
 
+/* Scoped to a non-tool pure-text transform. User/native sessions retain their
+ * own canonical execution/cache owners and never read a role-result cache. */
+static _Thread_local const char *result_cache_role;
+
 /* THE single per-agent turn executor — see agent_exec.h. Every model turn (panel
  * lens, ensemble reference, delegate, fallback peer, chat/responses passthrough,
  * aux) routes through here so admission control (global + per-agent + per-model caps)
@@ -279,9 +282,17 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
    else if (request)
       rc = agent_execute_request_with_tools(ag, net, role, request, response, out);
    else
+   {
+      const char *previous_cache_role = result_cache_role;
+      result_cache_role = !use_tools && role && role[0] && !agent_get_request_session()[0] &&
+                                  delegate_role_result_cache_enabled(role)
+                              ? role
+                              : NULL;
       rc = use_tools ? agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt,
                                                          max_tokens, temperature, out)
                      : agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
+      result_cache_role = previous_cache_role;
+   }
    if (log_scope && capture == 0)
    {
       char principal[VAULT_PRINCIPAL_MAX];
@@ -300,9 +311,9 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
       if (!out->error[0])
          snprintf(out->error, sizeof out->error, "canonical capture failed");
    }
-   if (rc == 0)
+   if (rc == 0 && !out->cache_hit)
       provider_catalog_record_success(ag->name);
-   else if (!agent_rc_is_local_refusal(rc))
+   else if (rc != 0 && !agent_rc_is_local_refusal(rc))
    {
       const char *ec = agent_error_is_registration_failure(out->error) ? "registration_error"
                        : agent_error_is_retryable(out->error)          ? "retryable"
@@ -354,22 +365,6 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
                                     strlen(user_prompt ? user_prompt : "") + 3) /
                                    4);
    cfg->route_output_tokens = max_tokens > 0 ? max_tokens : 4096;
-
-   int cache_enabled = delegate_role_result_cache_enabled(role);
-   /* The legacy role cache stores only flat text, with no canonical provenance.
-    * A user session must execute through its durable IR owner instead. */
-   int session_bound = agent_get_request_session()[0] != 0;
-   if (cache_enabled && !session_bound)
-   {
-      char *cached = db1_agent_cache_get(role, user_prompt);
-      if (cached)
-      {
-         out->response = cached;
-         out->success = 1;
-         snprintf(out->agent_name, MAX_AGENT_NAME, "cache");
-         return 0;
-      }
-   }
 
    /* Route to the best agent for the role (cost-tier), then retry other viable
     * agents at random until one succeeds. This replaces the configured
@@ -432,18 +427,17 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
 
       if (rc == 0)
       {
-         agent_log_call(out, role);
-         agent_store_feedback(out, role, user_prompt);
-
-         if (cache_enabled && !session_bound && out->response)
-            db1_agent_cache_put(role, user_prompt, out->response);
+         if (!out->cache_hit)
+         {
+            agent_log_call(out, role);
+         }
          return 0;
       }
       if (agent_rc_is_local_refusal(rc))
          return rc;
       if (cfg->route_pinned)
       {
-         free(out->response);
+         agent_result_clear_response(out);
          out->response = NULL;
          break;
       }
@@ -451,11 +445,9 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
        * (health already recorded by agent_dispatch_one for a real failure). */
       if (ntried < MAX_AGENTS)
          tried[ntried++] = ag->name;
-      free(out->response);
+      agent_result_clear_response(out);
       out->response = NULL;
    }
-
-   agent_store_feedback(out, role, user_prompt);
 
    if (!out->error[0])
       agent_route_failure_message(role, out->error, sizeof(out->error));
@@ -752,7 +744,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
             break;
          fb->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
 
-         free(out->response);
+         agent_result_clear_response(out);
          out->response = NULL;
          out->error[0] = '\0';
 
@@ -771,13 +763,6 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
    /* health is recorded per-turn inside agent_dispatch_one (main + fallbacks +
     * same-tier), so no final record_success here. */
    agent_log_call(out, role);
-   agent_store_feedback(out, role, user_prompt);
-
-   {
-   }
-   if (rc == 0 && !agent_get_request_session()[0] && delegate_role_result_cache_enabled(role) &&
-       out->response)
-      db1_agent_cache_put(role, user_prompt, out->response);
 
    return rc;
 }
@@ -802,79 +787,6 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
 /* The parallel fan-out machinery (parallel_worker, agent_run_parallel) lives in
  * agent_parallel.c — extracted to keep this file under the 2000-line cap. It
  * calls the now-non-static agent_run_named / agent_run_ex above. */
-
-void agent_store_feedback(const agent_result_t *result, const char *role,
-                          const char *prompt_summary)
-{
-   if (result->success && (!result->response || !result->response[0]))
-      return;
-
-   const char *r = (role && role[0]) ? role : "unknown";
-
-   /* Store outcome as L1 episode memory for future context */
-   char key[256];
-   snprintf(key, sizeof(key), "delegate_%s_%s_%s", result->agent_name, r,
-            result->success ? "ok" : "fail");
-
-   char excerpt[256] = "";
-   if (prompt_summary && prompt_summary[0])
-   {
-      snprintf(excerpt, sizeof(excerpt), "%.200s", prompt_summary);
-      /* Truncate at last space to avoid mid-word cuts */
-      if (strlen(prompt_summary) > 200)
-      {
-         char *last_sp = strrchr(excerpt, ' ');
-         if (last_sp && last_sp > excerpt + 100)
-            *last_sp = '\0';
-      }
-   }
-
-   char content[2048];
-   if (result->success)
-   {
-      snprintf(content, sizeof(content),
-               "Delegation [%s] via %s succeeded. %d turns, %d tool calls, %dms. "
-               "Confidence: %d. Task: %s",
-               r, result->agent_name, result->turns, result->tool_calls, result->latency_ms,
-               result->confidence, excerpt);
-   }
-   else
-   {
-      snprintf(content, sizeof(content),
-               "Delegation [%s] via %s failed. %d turns, %d tool calls, %dms. "
-               "Error: %.512s. Task: %s",
-               r, result->agent_name, result->turns, result->tool_calls, result->latency_ms,
-               result->error, excerpt);
-   }
-
-   memory_t mem;
-   if (kb_client_memory_insert(TIER_L1, KIND_EPISODE, key, content, result->success ? 0.8 : 0.4,
-                               "agent_feedback", &mem) == 0)
-   {
-      /* Causal Linking: if successful, link this episode to the original task */
-      if (result->success)
-      {
-         /* Look for the L2 task memory matching this role/prompt */
-         char task_key[256];
-         snprintf(task_key, sizeof(task_key), "task:%s", excerpt);
-         char norm_task_key[512];
-         normalize_key(task_key, norm_task_key, sizeof(norm_task_key));
-
-         int64_t task_id = kb_client_memory_find_id_by_key_kind(norm_task_key, "task");
-         if (task_id > 0)
-         {
-            char source_id[32], target_id[32];
-            snprintf(source_id, sizeof(source_id), "%lld", (long long)mem.id);
-            snprintf(target_id, sizeof(target_id), "%lld", (long long)task_id);
-            cJSON *request = cJSON_CreateObject();
-            cJSON_AddStringToObject(request, "source_id", source_id);
-            cJSON_AddStringToObject(request, "target_id", target_id);
-            cJSON_AddStringToObject(request, "relation", "fixes");
-            free(kb_v1_action_request("memory.link_create", request));
-         }
-      }
-   }
-}
 
 /* ================================================================
  * From: agent_context.c
@@ -943,7 +855,7 @@ static void parse_response(const char *body, const agent_t *agent,
       snprintf(out->error, sizeof out->error, "%s", response.error_message);
       snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
                aimee_stop_reason_name(response.stop_reason));
-      aimee_response_free(&response);
+      out->canonical_response = response;
       return;
    }
    out->prompt_tokens = response.usage_in;
@@ -958,7 +870,7 @@ static void parse_response(const char *body, const agent_t *agent,
    char *text = aimee_ir_response_text_alloc(&response);
    if (text && text[0])
    {
-      free(out->response);
+      agent_result_clear_response(out);
       out->response = text;
       out->success = 1;
    }
@@ -970,7 +882,7 @@ static void parse_response(const char *body, const agent_t *agent,
    else if (out->cache_write_tokens > 0)
       aimee_log(LOG_DEBUG, "agent_context", "prompt cache miss: %d tokens written to cache",
                 out->cache_write_tokens);
-   aimee_response_free(&response);
+   out->canonical_response = response;
 }
 
 /* --- Simple (non-tool) execution --- */
@@ -1053,6 +965,16 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       snprintf(out->error, sizeof out->error, "cannot bind native replay prefix");
       aimee_ir_session_fail_capture();
       return AGENT_RC_CAPTURE_FAILED;
+   }
+
+   char cache_key[65] = "";
+   if (agent_result_cache_open(result_cache_role, agent, body, auth_header, extra_headers,
+                               cache_key) &&
+       agent_result_cache_read(result_cache_role, cache_key, out))
+   {
+      free(body);
+      free(augmented_prompt);
+      return 0;
    }
 
    /* Measure latency */
@@ -1185,6 +1107,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       return AGENT_RC_CAPTURE_FAILED;
 
    agent_reject_degenerate_plain_response(out, agent->name);
+   agent_result_cache_write(result_cache_role, cache_key, out);
 
    if (!out->success && !out->error[0])
       snprintf(out->error, sizeof(out->error), "no content in response");

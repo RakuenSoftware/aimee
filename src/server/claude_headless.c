@@ -412,7 +412,7 @@ stop:
       out->completion_tokens = (int)response.usage_out;
       out->cache_read_tokens = (int)response.usage_cache_read;
       out->cache_write_tokens = (int)response.usage_cache_write;
-      aimee_response_free(&response);
+      out->canonical_response = response;
       if (!out->response)
       {
          snprintf(out->error, sizeof out->error, "cannot allocate canonical Claude response");

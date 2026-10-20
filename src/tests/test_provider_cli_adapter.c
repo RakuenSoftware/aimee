@@ -198,14 +198,14 @@ static void test_claude_stream_json_does_not_duplicate_final_result(void)
    snprintf(agent.cli_cmd, sizeof(agent.cli_cmd), "%s", path);
    agent.timeout_ms = 5000;
 
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(provider_cli_adapter_execute(provider_cli_adapter_get("claude"), &agent, ".", "sys",
                                        "user", &out) == 0);
    assert(out.success == 1);
    assert(out.response != NULL);
    assert(strcmp(out.response, "ok") == 0);
    assert(out.turns == 1);
-   free(out.response);
+   agent_result_clear_response(&out);
    unlink(path);
 }
 
@@ -240,12 +240,12 @@ static void test_provider_cli_captures_before_child_completion(void)
    agent.timeout_ms = 5000;
    int observed = 0;
    aimee_ir_session_set_sink(reject_live_capture, &observed);
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(provider_cli_adapter_execute(provider_cli_adapter_get("claude"), &agent, ".", "", "user",
                                        &out) == AGENT_RC_CAPTURE_FAILED);
    assert(observed == 1 && !out.success && access(marker, F_OK) != 0);
    aimee_ir_session_set_sink(NULL, NULL);
-   free(out.response);
+   agent_result_clear_response(&out);
    unlink(path);
 }
 
@@ -270,7 +270,7 @@ static void test_provider_cli_honors_workflow_tool_loop_cap(void)
    agent.timeout_ms = 5000;
    agent.tool_loop_timeout_ms_cap = 50;
 
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(provider_cli_adapter_execute(provider_cli_adapter_get("claude"), &agent, ".", "sys",
                                        "user", &out) != 0);
    assert(strstr(out.error, "timed out after 50 ms") != NULL);
@@ -296,7 +296,7 @@ static void test_mistral_native_adapter_execution(void)
 
    reset_seen_agent();
    assert(runtime_secret_store("MISTRAL_API_KEY", "unit-test-mistral-key") == 0);
-   agent_result_t out;
+   agent_result_t out = {0};
    assert(provider_cli_adapter_execute(mistral, &agent, ".", "sys", "user", &out) == 0);
    assert(out.success == 1);
    assert(out.response != NULL);
@@ -313,7 +313,7 @@ static void test_mistral_native_adapter_execution(void)
    assert(g_seen_agent.tools_enabled == 1);
    assert(g_seen_agent.max_tokens == 1234);
    assert(g_seen_agent.timeout_ms == 4321);
-   free(out.response);
+   agent_result_clear_response(&out);
    runtime_secret_remove("MISTRAL_API_KEY");
 }
 
