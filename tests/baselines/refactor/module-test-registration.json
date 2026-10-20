@@ -197,6 +197,12 @@
       "ctest": false,
       "make": true,
       "module": "git",
+      "test": "src/tests/test_git_pr_stage.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
       "test": "src/tests/test_git_project.c"
     },
     {

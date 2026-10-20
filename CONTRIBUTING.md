@@ -22,29 +22,34 @@ The `aimee` and `aimee-kb` binaries link no SQLite:
 
 ## Commit and PR identity
 
-Use the operator's Git identity for both author and committer. The `no-coauthor-trailers`
-CI gate rejects assistant identities, attribution trailers and generated-by footers, and AI app
-attribution recorded by GitHub on the opening PR entry (`performed_via_github_app`). Removing
-body text does not remove that metadata. The gate fetches the live issue representation and
-fails if attribution cannot be verified. Ordinary documentation references to a tool are allowed.
+Use the operator's Git identity for both author and committer. The attribution restriction is
+absolute: no co-authorship trailers, assistant identities, generated-by footers, session backlinks,
+or GitHub-app opening attribution. There are no SHA, branch, PR, promotion, or historical
+exceptions. Ordinary explanatory prose and documentation links are allowed.
 
-The `PR attribution` workflow owns this permanent check and runs on every PR edit.
-It has a separate concurrency group so live metadata checks do not wait for the source suite.
-Title/body edits queue source CI without cancelling an active qualification; code pushes and
-base changes still restart it. Edited events retain the full source suite, rather than reporting
-successful skipped required jobs.
+The `no-coauthor-trailers` check and Aimee's merge executor share the policy in
+`server-go/modules/git/attribution`. Both verify every incoming commit's raw author/committer and
+message, live PR title/body and `performed_via_github_app`, associated PRs, prior attribution
+rejections, and the complete PR issue catalog including closed originals. GitHub's commit-to-PR
+endpoint alone is insufficient: after an indirect merge it can omit the rejected original.
+Missing, malformed, unavailable, or incomplete evidence denies admission.
 
-Create and edit PRs through the registered `aimee git pr` commands using the operator's GitHub
-credentials. Personally authenticated `gh` is a fallback when the required Aimee operation is
-unavailable. Do not create or modify GitHub state through an assistant connector, and keep automatic
-reviews enabled. After creation, require the live `no-coauthor-trailers` check to pass before treating
-the PR's identity as verified; clean commit messages alone do not establish clean opening metadata.
+A replacement PR, empty commit, rerun, retarget, or indirect merge must never circumvent a
+rejection. An attribution rejection recorded on an incoming ancestor remains a rejection even
+when a different PR has green checks. Do not add allowlists or weaken the check to land work.
+If a PR is blocked, report the concrete violation and correct the offending material without
+carrying the rejected commits into the target. Immutable app metadata cannot be removed by
+editing a footer. Do not replace a blocked PR to conceal that metadata.
 
-If an existing PR carries app attribution, preserve the strict gate. With the operator's authorization,
-create a replacement branch from the tested migration head and open its PR through personal
-authentication. Verify the replacement's attribution check, link the original and replacement, then
-close the superseded PR while retaining its review history. Do not delete the original or add a
-PR-specific exemption to make the check pass.
+Create and edit PRs through registered `aimee git pr` commands with the operator's credentials.
+Personally authenticated `gh` is a fallback when the required Aimee operation is unavailable.
+Do not mutate GitHub through an assistant connector. Keep automatic reviews enabled.
+
+The `PR attribution` workflow checks all PR bases, edits, protected-branch pushes, merge groups,
+and explicit manual comparisons. Its concurrency is independent of source CI. Aimee repeats
+admission immediately before the merge and pins the verified head in the GitHub merge request.
+The legacy `auto=true` shell path is refused because it bypasses that final admission.
+Keep `no-coauthor-trailers` required in branch protection; no admin bypass is authorized.
 
 ## Build and test
 
@@ -96,8 +101,8 @@ changes do not repeatedly invalidate several candidates. Increase these after me
 The `CI`, `Release policy`, `core-c-package`, `Module exports and runtime validation`, and `Audit storage regressions` workflows accept
 `merge_group: checks_requested` for `testing`. They check out GitHub's event SHA, which is the
 queued integration commit. Queue runs always take the full test path, including documentation-only
-changes. PR attribution checks remain admission checks on the original PR; the queue has no PR
-title or body. Publishing and release workflows do not run on the temporary queue branches.
+changes. PR attribution checks also traverse every incoming commit and its PR history on the queue
+commit; the absence of a queue title/body does not skip enforcement. Publishing and release workflows do not run on the temporary queue branches.
 
 This workflow change does not activate repository settings. Until the queue requirement is enabled,
 the existing branch protection still applies. Promotion from `testing` to `main` is unchanged.

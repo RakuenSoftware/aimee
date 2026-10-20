@@ -18,6 +18,7 @@ static const void *g_reply;
 static uint32_t g_reply_len;
 static aimee_module_call_result_t g_result = AIMEE_MODULE_CALL_OK;
 static uint32_t g_last_event, g_last_stage;
+static uint64_t g_last_deadline;
 static int g_calls;
 static uint32_t g_event_reply_kind;
 static const char *g_event_reply;
@@ -81,6 +82,11 @@ const char *module_bus_stub_last_request(void)
    return g_last_request;
 }
 
+uint64_t module_bus_stub_last_deadline(void)
+{
+   return g_last_deadline;
+}
+
 int obs_bus_module_available(uint32_t event_kind)
 {
    return g_available || (g_event_reply && event_kind == g_event_reply_kind);
@@ -92,12 +98,13 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
                     uint32_t response_capacity, uint32_t *response_len,
                     aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
-   (void)trace_id, (void)deadline_ns, (void)cancelled, (void)cancel_context;
+   (void)trace_id, (void)cancelled, (void)cancel_context;
    g_calls++;
    g_last_event = event_kind;
    g_last_stage = stage_id;
-   size_t request_copy = request_len < sizeof(g_last_request) - 1 ? request_len
-                                                                  : sizeof(g_last_request) - 1;
+   g_last_deadline = deadline_ns;
+   size_t request_copy =
+       request_len < sizeof(g_last_request) - 1 ? request_len : sizeof(g_last_request) - 1;
    if (request_body && request_copy)
       memcpy(g_last_request, request_body, request_copy);
    g_last_request[request_copy] = '\0';

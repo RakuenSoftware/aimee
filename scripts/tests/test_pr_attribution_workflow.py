@@ -25,22 +25,26 @@ class AttributionWorkflowTests(unittest.TestCase):
         data = workflow(owners[0])
         job = data['jobs']['no-coauthor-trailers']
         self.assertEqual(job.get('name', 'no-coauthor-trailers'), 'no-coauthor-trailers')
-        self.assertEqual(job['if'], "github.event_name == 'pull_request'")
+        self.assertNotIn('if', job)
         self.assertEqual(data['permissions'], {'contents': 'read'})
-        self.assertEqual(job['permissions'], {'contents': 'read', 'issues': 'read', 'pull-requests': 'read'})
+        self.assertEqual(job['permissions'], {'contents': 'read', 'issues': 'read', 'pull-requests': 'read', 'checks': 'read'})
         steps = job['steps']
-        self.assertTrue(any('check-commit-identities.py' in step.get('run', '') for step in steps))
-        self.assertTrue(any('ATTRIBUTION_RE=' in step.get('run', '') for step in steps))
-        live = next(step for step in steps if 'check-pr-attribution.py' in step.get('run', ''))
-        self.assertIn('gh api --method GET', live['run'])
-        self.assertIn('issues/${PR_NUMBER}', live['run'])
+        live = next(step for step in steps if 'check-pr-attribution.go' in step.get('run', ''))
+        self.assertEqual(live['run'], 'go run ../scripts/check-pr-attribution.go')
+        self.assertEqual(live['env']['GH_TOKEN'], '${{ github.token }}')
+        self.assertNotIn('ATTRIBUTION_RE', (ROOT / '.github/workflows/pr-attribution.yml').read_text())
+        self.assertEqual(steps[0]['with']['persist-credentials'], 'false')
         self.assertNotIn('continue-on-error', job)
         for step in steps:
             self.assertNotIn('continue-on-error', step)
 
     def test_metadata_and_queue_events_preserve_the_existing_check_surface(self):
         source, attribution = workflow('ci.yml'), workflow('pr-attribution.yml')
-        self.assertEqual(source['on'], attribution['on'])
+        for event in ('push', 'merge_group'):
+            self.assertEqual(source['on'][event], attribution['on'][event])
+        self.assertNotIn('branches', attribution['on']['pull_request'])
+        for field in ('base_sha', 'head_sha'):
+            self.assertEqual(attribution['on']['workflow_dispatch']['inputs'][field]['required'], 'true')
         self.assertIn('edited', attribution['on']['pull_request']['types'])
         self.assertEqual(attribution['concurrency']['cancel-in-progress'], 'true')
         self.assertNotEqual(source['concurrency']['group'], attribution['concurrency']['group'])

@@ -302,8 +302,9 @@ static int gh_get(const gh_ctx_t *cx, const char *path, char **resp)
  * was passed and the local origin/HEAD cache is unset/stale. Returns 0 with buf
  * filled, or -1 — callers must NOT fall back to guessing "main": a repo whose
  * default is e.g. "testing" would get its PR opened against the wrong branch. */
-#define FORGE_STAGE_MAX_BODY   (1024u * 1024u)
-#define FORGE_STAGE_TIMEOUT_MS 25000
+#define FORGE_STAGE_MAX_BODY         (1024u * 1024u)
+#define FORGE_STAGE_TIMEOUT_MS       25000
+#define FORGE_MERGE_STAGE_TIMEOUT_MS 60000
 
 /* Run one forge operation in the git module (bus stage 4,
  * server-go/modules/git/forge_request.go). Which endpoint, which method and
@@ -351,8 +352,9 @@ static cJSON *forge_stage(const gh_ctx_t *cx, const char *op, cJSON *extra)
       }
       cJSON_Delete(extra);
    }
-   return aimee_module_json_call(AIMEE_GIT_EVENT_FORGE_REQUEST, AIMEE_GIT_STAGE_FORGE_REQUEST,
-                                 request, FORGE_STAGE_MAX_BODY, FORGE_STAGE_TIMEOUT_MS, NULL);
+   return aimee_module_json_call(
+       AIMEE_GIT_EVENT_FORGE_REQUEST, AIMEE_GIT_STAGE_FORGE_REQUEST, request, FORGE_STAGE_MAX_BODY,
+       strcmp(op, "pr_merge") == 0 ? FORGE_MERGE_STAGE_TIMEOUT_MS : FORGE_STAGE_TIMEOUT_MS, NULL);
 }
 
 static int gh_default_branch(const gh_ctx_t *cx, char *buf, size_t n)
