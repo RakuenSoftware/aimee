@@ -3667,3 +3667,19 @@ cases. Full PostgreSQL integration passes 168/168 with 26 unavailable local serv
 checks; all 76 lint gates pass. These are real SDK executions with synthetic Vault
 credentials and upstreams. They do not claim live subscription acceptance or
 production promotion. The latter remain separate qualification requirements.
+
+
+## Required native browser operator integration: 20 October 2026
+
+The native CI job now requires two further actual-SDK journeys, one per SDK: a
+request_input question must appear on the live browser IR stream while execution
+is blocked. An ordinary authenticated UID reply must be refused. A fresh matching
+root-UDS browser operator then replies through /v1/chat/control-reply; the original
+model receives its answer and the stream must include the matching control
+response and successful durable terminal. Server authorization is unchanged.
+
+Python compilation and all 76 lint gates pass. The preceding sixteen API-key/OAuth
+journeys are locally qualified. This workstation cannot run the additional root
+operator journey because passwordless sudo is unavailable; it is mandatory in
+CI, with no new CI skip or server authorization exception. Its actual CI execution
+remains pending and must be checked before this journey is reported qualified.

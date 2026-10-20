@@ -59,6 +59,7 @@ def main():
         return "native-" + kind + "-" + wire + ("-oauth" if auth != "api_key" else "")
     active = None
     async_case = False
+    browser_question = False
     observed = []
     errors = []
     count = 0
@@ -100,16 +101,17 @@ def main():
                 if auth == "claude-oauth":
                     assert self.headers.get("x-api-key") is None
                     assert "oauth" in self.headers.get("anthropic-beta", "")
-                logical = "mcp__aimee__read_file" if kind == "claude" else "read_file"
+                tool_name = "request_input" if browser_question else "read_file"
+                logical = "mcp__aimee__" + tool_name if kind == "claude" else tool_name
                 tools = request.get("tools", [])
                 names = {tool.get("name", tool.get("function", {}).get("name")) for tool in tools}
                 assert logical in names, (logical, names)
                 if count > 1:
-                    assert call_id in encoded and "canonical delegate fixture" in encoded, encoded[-4000:]
+                    assert call_id in encoded and ("BROWSER_REPLY" if browser_question else "canonical delegate fixture") in encoded, encoded[-4000:]
                 if count == 3:
                     assert marker + "_FOLLOWUP" in encoded
                 text = marker + ("_FINAL" if count == 2 else "_RESUMED")
-                arguments = json.dumps({"path": "README.md"})
+                arguments = json.dumps({"question": "BROWSER_QUESTION"} if browser_question else {"path": "README.md"})
                 if wire == "anthropic":
                     assert self.path.endswith("/messages"), self.path
                     content = [{"type": "tool_use", "id": call_id, "name": logical,
@@ -312,6 +314,17 @@ def main():
             assert "canonical delegate fixture" in encoded and "iVBORw0KGgo" in encoded
             assert "Continue the server-owned canonical turn." not in encoded
             print("native integration:", kind, wire, auth, "typed seeded run, real tool, original response and durable source pass", flush=True)
+        if os.environ.get("AIMEE_TEST_NATIVE_BROWSER_OPERATOR") == "1":
+            from test_native_ir_browser_control import run_browser_control
+            browser_question = True
+            async_case = False
+            for kind, wire in (("codex", "chatgpt"), ("claude", "anthropic")):
+                marker = case_name(kind, wire, "api_key")
+                active = (kind, wire, marker, "toolu_browser_" + kind)
+                count = 0
+                run_browser_control(api, home, workspace, marker)
+                assert count == 2 and not errors, (active, count, errors)
+            browser_question = False
     finally:
         if previous is None:
             models_path.unlink(missing_ok=True)

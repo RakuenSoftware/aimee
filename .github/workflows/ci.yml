@@ -1677,6 +1677,9 @@ jobs:
           test -x "$codex_native"
           test -x "$claude_native"
           printf 'AIMEE_TEST_NATIVE_CODEX=%s\nAIMEE_TEST_NATIVE_CLAUDE=%s\n' "$codex_native" "$claude_native" >> "$GITHUB_ENV"
+          # Exercise the real root-UDS browser operator boundary, without changing server authorization.
+          sudo -n true
+          echo 'AIMEE_TEST_NATIVE_BROWSER_OPERATOR=1' >> "$GITHUB_ENV"
       - name: Client/server integration harness with actual native SDKs
         run: cd src && make -j$(nproc) integration-tests
 
