@@ -1,4 +1,5 @@
 import { parseJSON } from './json';
+import { validVerificationProof, type VerificationProof } from './verification';
 /** Canonical session projection. No native provider/harness protocol is accepted
  * here. Live delivery and durable replay use exactly the same reducer. */
 export type Block = {
@@ -59,7 +60,7 @@ export type SessionEvent =
   | { kind: 'history'; payload: { scope: string; phase: 'message' | 'commit'; index?: number; count?: number; message?: Message } }
   | { kind: 'message'; message_id: string; payload: Message }
   | { kind: 'delta'; message_id: string; role: string; payload: Delta }
-  | { kind: 'execution'; payload: { status: 'running' | 'completed' | 'failed' | 'cancelled'; error?: string } }
+  | { kind: 'execution'; payload: { status: 'running' | 'completed' | 'failed' | 'cancelled'; error?: string; verification_proofs?: VerificationProof[] } }
   | { kind: 'control_request' | 'control_response'; request_id: string;
       control_kind: string; payload: Record<string, unknown> };
 export type Envelope = {
@@ -335,6 +336,13 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       const status = event.payload.status;
       if (!['running', 'completed', 'failed', 'cancelled'].includes(status))
         throw new Error('Invalid execution status');
+      if (event.payload.verification_proofs !== undefined) {
+        const proofs = event.payload.verification_proofs;
+        if (status !== 'completed' || !Array.isArray(proofs) || proofs.length < 1 || proofs.length > 8 ||
+            proofs.some(proof => !validVerificationProof(proof) || proof.session_id !== envelope.session_id ||
+              proof.turn_id !== envelope.turn_id || proof.actor !== envelope.actor))
+          throw new Error('Invalid execution verification proofs');
+      }
       const previous = state.executions[envelope.turn_id];
       if (previous && previous !== 'running') throw new Error('Execution is already terminal');
       if (!previous && status !== 'running') throw new Error('Execution has not started');

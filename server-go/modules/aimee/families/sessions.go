@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
 
@@ -52,6 +53,7 @@ const (
 	opSessionIRHistoryLoad        uint32 = 33
 	opSessionHarnessCompareSwap   uint32 = 34
 	opSessionIRRunningHistoryLoad uint32 = 35
+	opSessionIRAppendVerified     uint32 = 36
 )
 
 // Persona delivery states. The claim is an UPDATE guarded on unclaimed, so of
@@ -970,6 +972,7 @@ var Sessions = store.Family{
 		opServerSessionEraseSubject:   {Name: "server_session_erase_subject", Args: 2, Tx: true, Run: serverSessionEraseSubject},
 		opServerSessionErasureReceipt: {Name: "server_session_erasure_receipt", Args: 2, Run: serverSessionErasureReceipt},
 		opSessionIRAppend:             {Name: "session_ir_append", Args: 5, Tx: true, Run: sessionIRAppend},
+		opSessionIRAppendVerified:     {Name: "session_ir_append_verified", Args: 5, Tx: true, HostOnly: true, Run: sessionIRAppendVerified},
 		opSessionIRPage:               {Name: "session_ir_page", Args: 4, Run: sessionIRPage},
 		opSessionIRHistorySave:        {Name: "session_ir_history_save", Args: 5, Tx: true, Run: sessionIRHistorySave},
 		opSessionIRHistoryLoad:        {Name: "session_ir_history_load", Args: 4, Run: sessionIRHistoryLoad},
@@ -995,13 +998,55 @@ const sessionIRPageSQL = `SELECT sequence, event_id, turn_id, actor, payload
  AND EXISTS(SELECT 1 FROM server_sessions WHERE id=$1 AND principal=$4)
  ORDER BY sequence LIMIT $3`
 
+// The ordinary append cannot carry verification authority. Only the private
+// host operation may persist a proof, and every proof binds the same immutable
+// session/turn/actor as its terminal envelope. Schema validity alone never
+// establishes actual execution custody or a grade.
 func sessionIRAppend(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	return sessionIRAppendInternal(ctx, q, f, false)
+}
+func sessionIRAppendVerified(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	return sessionIRAppendInternal(ctx, q, f, true)
+}
+func sessionIRProofBindings(encoded []byte, session, turn, actor string, allowProof bool) bool {
+	var event struct {
+		Kind    string          `json:"kind"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if json.Unmarshal(encoded, &event) != nil {
+		return false
+	}
+	if event.Kind != "execution" {
+		return !allowProof
+	}
+	var payload canonical.ExecutionPayload
+	if !canonical.Decode(event.Payload, &payload) {
+		return false
+	}
+	if len(payload.VerificationProofs) == 0 {
+		return !allowProof
+	}
+	if !allowProof || payload.Status != "completed" || len(payload.VerificationProofs) > 8 {
+		return false
+	}
+	// The canonical event validator has admitted every exact proof schema.
+	for _, proof := range payload.VerificationProofs {
+		if proof.Session != session || proof.Turn != turn || proof.Actor != actor {
+			return false
+		}
+	}
+	return true
+}
+func sessionIRAppendInternal(ctx context.Context, q store.Queryer, f []string, allowProof bool) (uint32, []string, error) {
+	if len(f) != 5 {
+		return store.StatusInvalid, nil, nil
+	}
 	for _, identity := range f[:4] {
 		if identity == "" || len(identity) > 1024 {
 			return store.StatusInvalid, nil, nil
 		}
 	}
-	if !validSessionIREvent([]byte(f[4])) {
+	if !validSessionIREvent([]byte(f[4])) || !sessionIRProofBindings([]byte(f[4]), f[0], f[2], f[3], allowProof) {
 		return store.StatusInvalid, nil, nil
 	}
 	var locked string

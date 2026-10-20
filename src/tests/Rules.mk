@@ -1008,6 +1008,7 @@ $(TESTPREFIX)/unit-test-process-module-handlers: \
 # Register before both the archive dependency and shard snapshot.
 TEST_TARGETS += $(TESTPREFIX)/unit-test-cli-index-worktree
 TEST_TARGETS += $(TESTPREFIX)/unit-test-workspace-add-noscan
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-verification
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-session-capture
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-session-question
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-session-control
@@ -3951,6 +3952,7 @@ $(TESTPREFIX)/unit-test-gateway-stt-pairing: $(OBJDIR)/tests/test_gateway_stt_pa
 	$(TESTLINK) -o $@ $^ $(L_GATEWAY)
 
 $(TESTPREFIX)/unit-test-cron-runtime: $(OBJDIR)/tests/test_cron_runtime.o \
+                                      $(OBJDIR)/modules/ir/aimee_ir.o \
                                       $(OBJDIR)/server/server_cron.o \
                                       $(OBJDIR)/util.o \
                                       $(OBJDIR)/server/trigger_scheduler.o \
@@ -4555,6 +4557,7 @@ $(TESTPREFIX)/unit-test-tool-prompts: $(OBJDIR)/tests/test_tool_prompts.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-token-budget: $(OBJDIR)/tests/test_delegate_token_budget.o \
+                                       $(OBJDIR)/modules/ir/aimee_ir.o \
                                        $(OBJDIR)/server/agent_coord.o \
                                        $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -7117,7 +7120,7 @@ $(TESTPREFIX)/unit-test-server-session-log: $(OBJDIR)/tests/test_server_session_
     $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_session_log.o $(OBJDIR)/server/server_learning_outcome.o $(OBJDIR)/server/server_session_control.o \
     $(OBJDIR)/tests/support/learning_outcome_stub.o $(OBJDIR)/tests/support/log_stub.o \
     $(OBJDIR)/interaction_event_names.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
-    $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
+    $(OBJDIR)/aimee_sha256.o $(OBJDIR)/util.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-server-learning-application: $(OBJDIR)/tests/test_server_learning_application.o \
@@ -7160,3 +7163,10 @@ $(TESTPREFIX)/unit-test-agent-result-cache: $(OBJDIR)/tests/test_agent_result_ca
     $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
     $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/aimee_sha256.o $(filter-out $(OBJDIR)/wire_fence.o,$(TEST_CORE_OBJS))
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# The controller fixture includes its implementation to substitute only socket
+# discovery; its registered helper is a real joined subprocess.
+$(OBJDIR)/tests/test_server_verification.o: server/server_verification.c
+$(TESTPREFIX)/unit-test-server-verification: $(OBJDIR)/tests/test_server_verification.o \
+    $(OBJDIR)/aimee_sha256.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto

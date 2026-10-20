@@ -67,6 +67,23 @@ class IRBypassTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unqualified-learning-prompt"):
             checker.check(self.root)
 
+    def test_unscoped_approaches_cannot_enter_automatic_delegate_context(self):
+        self.source("src/approach_store.c", "char *approach_store_retry_context(const char *goal) { return 0; }")
+        self.source("src/headers/approach_store.h", "char *approach_store_retry_context(const char *goal);")
+        self.source("src/server_eval.c", "approach_store_recall(goal, results, 5); approach_store_render(results, 5, out, 1024);")
+        self.source("src/server/server_compute.c", "db1_execution_test_grade_recall(owner, project, NULL);")
+        checker.check(self.root)
+        for call in ("approach_store_retry_context(goal)", "approach_store_recall(goal, out, 5)",
+                     "approach_store_render(out, 5, prompt, 1024)"):
+            with self.subTest(call=call):
+                self.source("src/server/server_compute.c", call + ";")
+                with self.assertRaisesRegex(ValueError, "unscoped-approach-prompt"):
+                    checker.check(self.root)
+        self.source("src/server/server_compute.c", "db1_execution_test_grade_recall(owner, project, NULL);")
+        self.source("src/server/new.c", "approach_store_retry_context(goal);")
+        with self.assertRaisesRegex(ValueError, "unscoped-approach-prompt"):
+            checker.check(self.root)
+
     def test_native_shapes_refused_in_migrated_c_and_go_consumers(self):
         for relative in [*sorted(checker.CANONICAL_FILES),
                          "server-go/modules/economizer/new.go", "server-go/modules/memory/new.go"]:

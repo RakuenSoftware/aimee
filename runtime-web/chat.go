@@ -402,7 +402,7 @@ func (s *server) handleChatInterrupt(w http.ResponseWriter, r *http.Request) {
 // GET /api/chat/sessions (handleChatSessionsList), not here.
 func (s *server) handleChatThreads(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"threads":[],"active_id":0}`)
+	fmt.Fprintf(w, `{"threads":[],"active_id":0,"capabilities":{"branching":false}}`)
 }
 
 // notImplementedMutation answers a chat mutation that is not built yet.

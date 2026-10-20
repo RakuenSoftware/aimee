@@ -18,25 +18,30 @@ function ChildExecutionView({ reference, ancestors }: { reference: ChildExecutio
   useEffect(() => {
     if (!expanded || cyclic) return;
     setError('');
+    let disposed = false;
     const stream = new EventSource(`/api/chat/session-events?format=ir&sid=${encodeURIComponent(reference.session_id)}&cursor=${current.current.sequence}`);
     stream.addEventListener('ir', (message) => {
+      if (disposed) return;
       try {
         const envelope = parseJSON((message as MessageEvent).data) as Envelope;
         const next = reduceSession(current.current, envelope);
         current.current = next;
         setState(next);
         const status = next.executions[reference.turn_id];
-        if (status && status !== 'running') stream.close();
+        if (status && status !== 'running') { disposed = true; stream.close(); }
       } catch {
+        disposed = true;
         setError('Delegate history could not be read. Close and reopen to retry.');
         stream.close();
       }
     });
     stream.onerror = () => {
+      if (disposed) return;
+      disposed = true;
       setError('Delegate history is unavailable. Close and reopen to retry.');
       stream.close();
     };
-    return () => stream.close();
+    return () => { disposed = true; stream.close(); };
   }, [expanded, cyclic, reference.session_id, reference.turn_id]);
   return <details onToggle={event => setExpanded(event.currentTarget.open)}>
     <summary>Delegate: {reference.role} — {reference.status}</summary>
@@ -88,10 +93,10 @@ export default function IRTranscript({ state, onReply, ancestors = [], controlsR
         }
       }
     }))}
-    {pendingControls.map(([id, control]) => <ControlCard key={id} id={id} control={control} onReply={onReply} replyPending={pendingReplies?.has(id)} />)}
+    {pendingControls.map(([id, control]) => <ControlCard key={`${state.session}:${id}`} id={id} control={control} onReply={onReply} replyPending={pendingReplies?.has(id)} />)}
     {resolvedControls.length > 0 && <details className="ir-resolved-controls">
       <summary>Resolved requests ({resolvedControls.length})</summary>
-      {resolvedControls.map(([id, control]) => <ControlCard key={id} id={id} control={control} />)}
+      {resolvedControls.map(([id, control]) => <ControlCard key={`${state.session}:${id}`} id={id} control={control} />)}
     </details>}
     {Object.values(state.children ?? {}).map(child => <ChildExecutionView
       key={`${child.session_id}:${child.turn_id}`} reference={child} ancestors={[...ancestors, state.session]} />)}

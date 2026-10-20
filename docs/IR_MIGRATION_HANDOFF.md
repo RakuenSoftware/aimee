@@ -62,6 +62,58 @@ thin build/selfcheck and the full-runtime CMake cache fixture pass. That commit 
 completed all 59 CI checks, including Windows, macOS, strict attribution and every deployment
 tier (T1, T2, T2-luks, T3), with no platform skip or attribution exemption.
 
+## Working continuation: browser replay and KB-free durable verification
+
+Published `c5661a2b4` completed all 59 CI checks, without platform skips or attribution
+exemptions. The current continuation remains in PR #3052 and is under fresh qualification.
+Three parallel agents handled browser races, scoped recall and the isolated executor while
+the primary integrated their production owners. No production promotion has occurred.
+
+Browser model/persona requests and failed-save rollback are now session-bound. Controls have
+session-specific state; malformed streams withdraw stale controls and offer durable-cursor
+reconnection. A reproduced Send/Steer race came from copied activity state; the composer now
+uses canonical activity directly. Repeated Chromium journeys, readable tool-result contrast,
+mobile layout, 323 frontend tests and production builds pass. Failed primary/persona lookups
+remain errors, focus/visibility refreshes retain confirmed selections and reject stale reads,
+and the UI hides unsupported branching instead of offering a silent 501 action.
+
+Configured Git verification now reaches the native host tool catalog through the same owned
+Git dispatcher. A qualified run uses a held independent Git snapshot and exact Docker Unix
+resource, actual image/profile and immutable exec IDs, machine-observed normal exits, and
+acknowledged joined cleanup. Before prerequisites, an actual worker exec must read the exact
+random lease marker from the independent snapshot; matching inspect paths alone cannot qualify
+source custody. The helper watches its actual server parent and joins cancellation/cleanup if
+that parent disappears. Persistent owner identity and per-worker locks let startup cleanup
+remove acknowledged same-owner orphan IDs while preserving live and foreign workers. Private
+workers stay outside the ordinary delegate prefix/age reaper. Prerequisites run in that worker. No parent-control socket,
+network, cached pass, skipped command or opaque process status grants a grade. A proven
+preflight refusal with zero configured attempts can continue ordinary verification ungraded;
+unknown/started execution cannot be replayed that way. Incomplete configuration cannot qualify.
+
+The capture owner prepares source-bound receipts immediately before completion. Host-only
+DB1 operation 36 commits them inside the same canonical terminal event; ordinary append
+cannot introduce privileged receipts. Learning validates the typed terminal and proof, and
+host-only operation 61 stores an immutable configured-test grade whose complete proof must
+match that durable source. Replay rebuilds lost derived grades from the terminal. Operation 62
+returns whole bounded receipts only for the authenticated actor and registered project;
+primary/delegate context revalidates them through the existing provider-send fence. They are
+historical configured-test evidence, not semantic task correctness or causal procedure claims.
+Production remains KB-free; no endpoint, seeded learning rows or synthetic successes are added.
+The separate legacy goal-only failed-approach injection into write delegates is retired: its
+query had no principal/project/source fence. The bypass gate protects this boundary; legacy
+rows are not guessed into scoped owners or promoted to trusted procedure learning.
+
+The actual-daemon integration journey now requires real Docker in CI and covers model-invoked
+verification, durable proof/grade publication, erased-projection replay recovery and later scoped
+model context. Local absence of Docker skips exactly that journey and is not positive evidence.
+Fresh CI, remaining live-vendor/native-profile qualification and independently reviewed production
+promotion remain required. The Windows native tool-runtime stub and arbitrary daemon ACP profiles
+remain explicit unsupported profiles; thin-client CI does not qualify them as native servers.
+
+Cron, all-failed voting and commit-message output now release owned canonical results. The unused
+native-format compactor and its canonical-runtime calls are retired; adjacent canonical source
+classifications remain distinct. Do not stop at publication or claim the complete migration is done.
+
 ## Active continuation: compatibility native results and fallback retirement
 
 Codex and ACP compatibility executors now retain admitted typed model observations rather than

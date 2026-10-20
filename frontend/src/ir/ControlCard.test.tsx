@@ -24,6 +24,18 @@ describe('canonical browser controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send answers' }));
     await waitFor(() => expect(onReply).toHaveBeenCalledWith('t:q', { decision: 'allow', answers: { q1: ['B'] } }));
   });
+  it.each([false, true])('keeps a single-choice answer exclusive when switching to custom text or back (option last=%s)', async optionLast => {
+    const onReply = vi.fn().mockResolvedValue(undefined);
+    render(<ControlCard id="t:q" control={{ ...permission, kind: 'question', request: { questions: [
+      { id: 'q1', question: 'Which model?', multiple: false, options: [{ label: 'A' }] },
+    ] } }} onReply={onReply} />);
+    const option = () => fireEvent.click(screen.getByRole('radio', { name: 'A' }));
+    const custom = () => fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Custom model' } });
+    if (optionLast) { custom(); option(); } else { option(); custom(); }
+    fireEvent.click(screen.getByRole('button', { name: 'Send answers' }));
+    await waitFor(() => expect(onReply).toHaveBeenCalledWith('t:q', { decision: 'allow', answers: { q1: [optionLast ? 'A' : 'Custom model'] } }));
+  });
+
   it('surfaces stale/refused responses and allows a retry', async () => {
     const onReply = vi.fn().mockRejectedValue(new Error('Control request is stale'));
     render(<ControlCard id="t:p" control={permission} onReply={onReply} />);

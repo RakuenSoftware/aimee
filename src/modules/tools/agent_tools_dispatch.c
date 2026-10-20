@@ -267,7 +267,12 @@ agent_tool_permission_t agent_tools_permission_check(const char *name, const cJS
 {
    if (!name || !name[0])
       return AGENT_TOOL_PERMISSION_ROLE;
-   if ((strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0) &&
+   const char *verify_action =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "action"));
+   int verify_exec =
+       strcmp(name, "git_verify") == 0 &&
+       (!verify_action || (strcmp(verify_action, "check") && strcmp(verify_action, "status")));
+   if ((strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0 || verify_exec) &&
        !agent_tools_shell_allowed())
       return AGENT_TOOL_PERMISSION_SHELL;
    if (!agent_tools_tool_allowed_for_role(agent_tools_dispatch_role(), name))

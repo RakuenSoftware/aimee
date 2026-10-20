@@ -21,6 +21,31 @@
 #include "support/module_runtime_fixture.h"
 
 static int g_runtime_failure;
+static int g_grade_history_mode, g_grade_history_checks;
+char *db1_execution_test_grade_recall(const char *principal, const char *project,
+                                      const char *sources_json)
+{
+   if (!g_grade_history_mode)
+      return NULL;
+   assert(!strcmp(principal, "grade-actor") && !strcmp(project, "active-project"));
+   if (sources_json)
+   {
+      g_grade_history_checks++;
+      cJSON *reply = cJSON_Parse(sources_json);
+      assert(reply && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reply, "check_id")));
+      if (g_grade_history_mode == 2)
+         cJSON_ReplaceItemInObjectCaseSensitive(reply, "items", cJSON_CreateArray());
+      char *raw = cJSON_PrintUnformatted(reply);
+      cJSON_Delete(reply);
+      return raw;
+   }
+   return strdup(
+       "{\"schema_version\":1,\"principal\":\"grade-actor\",\"scope_kind\":\"project\",\"scope_"
+       "id\":\"active-project\",\"coverage\":\"recent_bounded\",\"items\":[{\"schema_version\":1,"
+       "\"source\":{\"actor\":\"grade-actor\",\"event_id\":\"terminal\"},\"qualification\":"
+       "\"configured_tests_only\",\"verification\":\"tests_bound_revision\",\"verdict\":\"passed\","
+       "\"proof\":{\"scope_kind\":\"project\",\"scope_id\":\"active-project\"}}]}");
+}
 static int g_private_source_fixture;
 static int g_private_source_calls;
 static int g_scope_active;
@@ -1285,6 +1310,33 @@ static void test_required_assembly_refusal_reaches_dispatch(void)
    request_context_clear();
    puts("required assembly failure reaches provider fence and clears on new request");
 }
+static void test_configured_test_history_at_provider_fence(void)
+{
+   request_context_t context = {0};
+   strcpy(context.request_id, "grade-history-request");
+   strcpy(context.principal, "grade-caller");
+   strcpy(context.vault_principal, "grade-actor");
+   context.vault_transport = ATTEST_UDS_PEERCRED;
+   request_context_set(&context);
+   int saved_budget = g_assembly_budget;
+   g_assembly_budget = 4096;
+   g_grade_history_mode = 1;
+   char *envelope = ingress_preinject_build("deployment matrix", 0);
+   assert(envelope && strstr(envelope, "configured-test-history"));
+   assert(strlen(request_context_get()->memory_source_release) == 32);
+   free(envelope);
+   context = *request_context_get();
+   assert(ingress_preinject_revalidate_sources() == 0 && g_grade_history_checks > 0);
+   request_context_set(&context);
+   g_grade_history_mode = 2; /* source erased after context was retained */
+   assert(ingress_preinject_revalidate_sources() == -1);
+   assert(request_context_get()->context_refused);
+   g_grade_history_mode = 0;
+   g_assembly_budget = saved_budget;
+   request_context_clear();
+   puts("configured-test source history is scoped and rechecked at provider fence");
+}
+
 static void test_source_revalidation_at_provider_fence(void)
 {
    request_context_t context = {0};
@@ -1744,6 +1796,7 @@ int main(void)
    test_replayable_provider_receipt();
    test_durable_provider_attempt();
    test_unversioned_provider_body_receipt();
+   test_configured_test_history_at_provider_fence();
    test_source_revalidation_at_provider_fence();
    test_preview_sources_at_provider_fence();
    test_required_assembly_refusal_reaches_dispatch();

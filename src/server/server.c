@@ -1,3 +1,4 @@
+#include "server_verification.h"
 /* server.c: aimee-server core -- event loop, connection handling, method dispatch */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -2159,6 +2160,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * registrations. aimee's agents and an external MCP client now reach the SAME
     * handler, so the two surfaces cannot drift apart: the drift is what left review
     * panelists unable to ask "is this still called?" while Claude Code could. */
+   server_verification_register();
    mcp_tool_register_native_surface();
    /* Hand the native agent surface aimee's git-write tools. Without this the
     * builtin set is read-only git, so a delegate's ONLY way to land work is to

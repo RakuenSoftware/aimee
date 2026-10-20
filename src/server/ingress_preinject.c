@@ -12,6 +12,7 @@
 #include "dstr.h"
 #include "log.h"
 #include "request_context.h"
+#include "db1_client/interaction_events.h"
 #include "agent_exec.h"
 #include "platform_random.h"
 #include "agent_code_capabilities.h"
@@ -186,7 +187,9 @@ static int ingress_revalidate_sources(void **guard_state)
    cJSON *plan = ingress_command(request, 1);
    const cJSON *owner_request = cJSON_GetObjectItemCaseSensitive(plan, "request");
    const cJSON *local_request = cJSON_GetObjectItemCaseSensitive(plan, "local_request");
-   if ((!cJSON_IsObject(owner_request) && !cJSON_IsObject(local_request)) ||
+   const cJSON *grade_request = cJSON_GetObjectItemCaseSensitive(plan, "execution_grade_request");
+   if ((!cJSON_IsObject(owner_request) && !cJSON_IsObject(local_request) &&
+        !cJSON_IsObject(grade_request)) ||
        (owner_request && !cJSON_IsObject(owner_request)) ||
        (local_request && !cJSON_IsObject(local_request)))
    {
@@ -199,6 +202,23 @@ static int ingress_revalidate_sources(void **guard_state)
    char *raw = owner_request ? kb_v1_action_request("memory.revalidate_sources",
                                                     cJSON_Duplicate(owner_request, 1))
                              : NULL;
+   cJSON *grade_response = NULL;
+   if (grade_request && context->vault_transport != ATTEST_NONE)
+   {
+      const char *actor =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(grade_request, "principal"));
+      const char *project =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(grade_request, "scope_id"));
+      if (actor && project && !strcmp(actor, context->vault_principal))
+      {
+         char *expected = cJSON_PrintUnformatted(grade_request);
+         char *current =
+             expected ? db1_execution_test_grade_recall(actor, project, expected) : NULL;
+         grade_response = current ? cJSON_Parse(current) : NULL;
+         free(current);
+         free(expected);
+      }
+   }
    if (guard_state)
       *guard_state = plan;
    else
@@ -212,6 +232,8 @@ static int ingress_revalidate_sources(void **guard_state)
                          owner_response ? owner_response : cJSON_CreateNull());
    cJSON_AddItemToObject(request, "local_response",
                          local_response ? local_response : cJSON_CreateNull());
+   cJSON_AddItemToObject(request, "execution_grade_response",
+                         grade_response ? grade_response : cJSON_CreateNull());
    cJSON *response = ingress_command(request, 1);
    int admitted = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "admitted"));
    cJSON_Delete(response);
@@ -972,6 +994,16 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    }
    cJSON *assembly = cJSON_Duplicate(assembly_plan, 1);
    cJSON_AddStringToObject(assembly, "project", active_project);
+   /* The host actor and active registered project are resolved independently of
+    * model arguments. Optional history remains data, with no KB dependency. */
+   if (active_scope && rctx && rctx->vault_principal[0] && rctx->vault_transport != ATTEST_NONE)
+   {
+      char *grades = db1_execution_test_grade_recall(rctx->vault_principal, active_project, NULL);
+      cJSON *projection = grades ? cJSON_Parse(grades) : NULL;
+      free(grades);
+      if (projection)
+         cJSON_AddItemToObject(assembly, "execution_test_grades", projection);
+   }
    int legacy_preview_on = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "legacy_preview"));
    int facts_on = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "facts"));
    int temporal_on = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(plan, "temporal"));

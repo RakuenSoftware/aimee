@@ -80,7 +80,9 @@
     "server-go/modules/aimee/families/task_projection_promotion.go",
     "server-go/modules/aimee/families/governed_actions.go",
     "server-go/modules/aimee/families/telemetry_procedure_events.go",
-    "server-go/modules/aimee/families/session_harness_checkpoint.go"
+    "server-go/modules/aimee/families/session_harness_checkpoint.go",
+    "server-go/modules/aimee/families/telemetry_execution_grades.go",
+    "server-go/modules/aimee/families/telemetry_execution_recall.go"
   ],
   "go_tests": [
     "server-go/modules/aimee/aimee_test.go",
@@ -140,7 +142,11 @@
     "server-go/modules/aimee/session_directory_test.go",
     "server-go/modules/aimee/unavailable_test.go",
     "server-go/modules/aimee/families/telemetry_procedure_events_live_test.go",
-    "server-go/modules/aimee/families/session_harness_checkpoint_test.go"
+    "server-go/modules/aimee/families/session_harness_checkpoint_test.go",
+    "server-go/modules/aimee/families/telemetry_execution_grades_live_test.go",
+    "server-go/modules/aimee/families/telemetry_execution_recall_live_test.go",
+    "server-go/modules/aimee/families/session_ir_verification_test.go",
+    "server-go/modules/aimee/families/session_ir_verification_live_test.go"
   ],
   "docs": [
     "docs/modules/aimee.md"

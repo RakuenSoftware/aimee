@@ -641,3 +641,32 @@ The rank API has explicit 256-candidate and 1 MiB bounds, with additional token/
 Cognee and Hillock implement [the reusable conversation v2 contract](../../integrations/memory/CONTRACT.md) through independent durable catalogs and provider ranking. It includes recall/composition/briefing, exact history, authenticated export, source revalidation/send barriers, and idempotent erasure with fresh host-admitted writes. Native is exempt. [Support validation](../validation/external-memory-support-2026-10-08.md) distinguishes completed integration from remaining answer/scale qualification.
 
 The catalog is bounded at 64 MiB; 16 for Cognee and 256 for Hillock are the per-request provider candidate counts, not the corpus size. Aimee scans eligible records and selects a lexical pool; retrieval is explicitly non-exhaustive. Cognee supports `AIMEE_MEMORY_BACKEND_AUTH=api-key` for Vault-backed service keys, alongside bearer and explicit development `none`.
+
+### Server-local configured-test history
+
+The host can recall independently admitted test receipts from the existing
+`interaction_events` ledger without a KB instance. Private telemetry operation
+62 requires the exact canonical actor and registered project, and joins each
+receipt to its still-owned canonical `session_ir_events` terminal. The transcript
+remains the session log. Exit observations remain ungraded; only Learning's
+private verified publisher can create the `tests_passed`/`tests_failed` records.
+
+Primary ingress and delegates pass bounded receipt projections to the existing
+server-local `memory.runtime` ingress assembler. It packs whole receipt projections into a
+`configured-test-history` data section, separate from reviewed procedures.
+`configured_tests_only` means those configured tests ran on the bound revision;
+it does not establish task correctness, procedure application, or a successful
+approach. The projection includes revision/configuration/profile identifiers and
+a digest of the complete retained receipt, rather than arbitrary verifier output.
+
+The existing source-release ticket retains exactly the packed receipt set.
+Before provider dispatch it issues a fresh nonce and the host re-reads those
+exact canonical sources through operation 62. Missing, erased, cancelled, changed
+or differently owned sources refuse admission; an old nonce cannot satisfy a new
+attempt. This is a source read check, not a lock preventing subsequent session
+erasure. The prepared provider receipt records these inputs under
+`configured_test_receipts`, with source coverage
+`retained_inputs_with_configured_tests`; the complete binding digest covers them.
+Typed-memory `sources` retain their existing meaning and do not acquire invented
+memory versions. Source-release handles, bounds, replay rules and host-only
+transport remain the existing ones.

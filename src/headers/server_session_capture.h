@@ -28,6 +28,22 @@ const char *server_session_capture_turn(const server_session_capture_t *owner);
 typedef void (*server_session_terminal_action_fn)(int success, void *resource);
 int server_session_capture_after_terminal(server_session_capture_t *owner,
                                           server_session_terminal_action_fn action, void *resource);
+/* Attach a bounded additional quiescent observer without replacing the primary
+ * resource action (for example, native replay/cache custody). The same join,
+ * transfer and failure rules apply. A resource cannot be transferred twice. */
+int server_session_capture_observe_terminal(server_session_capture_t *owner,
+                                            server_session_terminal_action_fn action,
+                                            void *resource);
+/* A quiescent verifier may prepare one typed receipt immediately before a
+ * completed terminal is serialized. Preparation runs under the writer lock:
+ * never re-enter capture APIs. NULL omits an unavailable receipt. The host
+ * binds it to this actor/turn and atomically stores it with that terminal;
+ * action still consumes the resource exactly once on every exit path. */
+typedef const struct cJSON *(*server_session_verification_prepare_fn)(void *resource);
+int server_session_capture_observe_verification(server_session_capture_t *owner,
+                                                server_session_verification_prepare_fn prepare,
+                                                server_session_terminal_action_fn action,
+                                                void *resource);
 /* A missing current owner is a successful NULL lease. Bind only inside a creator
  * or retained lease; release after unbinding and joining its callbacks. */
 int server_session_capture_retain_current(const char *execution_session, const char *principal,

@@ -1000,7 +1000,7 @@ jobs:
         working-directory: server-go
         env:
           AIMEE_TEST_PG_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_postgres_ci
-        run: go test -race -count=1 ./modules/aimee/families -run '^TestSessionIRLiveConcurrentReplayAndDeletion$'
+        run: go test -race -count=1 ./modules/aimee/families -run '^TestSessionIR(LiveConcurrentReplayAndDeletion|VerifiedTerminalProofPostgresAtomicReload)$'
       - name: Replay memory ownership and PostgreSQL sessions
         if: matrix.part == 'native'
         run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 postgres-knowledge-replay
@@ -2023,6 +2023,26 @@ jobs:
         run: echo "AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)" >> "$GITHUB_ENV"
       - name: Run the shipped deployment and regression gates
         run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} ${{ matrix.matrix_args }} --output /tmp/aimee-e2e-evidence
+      - name: Set up Go for private configured-test execution
+        if: matrix.topology == 'T3'
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
+          cache-dependency-path: server-go/go.sum
+      - name: Private configured tests use actual Docker custody and joined cleanup
+        if: matrix.topology == 'T3'
+        working-directory: server-go
+        env:
+          AIMEE_PRIVATE_TEST_REQUIRE_DOCKER: '1'
+          AIMEE_PRIVATE_TEST_DOCKER_SOCKET: /var/run/docker.sock
+          AIMEE_PRIVATE_TEST_DOCKER_IMAGE: ubuntu:22.04
+        run: |
+          for attempt in 1 2 3 4 5; do
+            docker pull "$AIMEE_PRIVATE_TEST_DOCKER_IMAGE" && break
+            test "$attempt" -lt 5 || exit 1
+            sleep $((attempt * 5))
+          done
+          go test -race -count=1 -v ./modules/delegates -run '^TestPrivateVerifierRealDocker$'
       - name: Installed Vault helper under hardened egress (both roles)
         if: matrix.topology == 'T3'
         run: python3 tests/e2e/egress-vault-e2e.py --output /tmp/aimee-e2e-evidence

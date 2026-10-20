@@ -131,6 +131,11 @@ typedef struct
 #define DOCKER_WORKDIR_DEFAULT  "/workspace"
 #define DOCKER_PROBE_TIMEOUT_MS 15000
 
+const char *delegate_backend_docker_default_image(void)
+{
+   return DOCKER_DEFAULT_IMAGE;
+}
+
 /* Test seam: production workdir is /workspace inside the container.
  * Unit tests substitute AIMEE_DOCKER_WORKDIR so file ops + mkdir
  * happen under a writable temp dir on the host (the fake-docker
@@ -297,8 +302,38 @@ static int is_container_id(const char *id)
    return 1;
 }
 
+static const char *resolve_delegate_egress_bin(void);
+
+/* Private verifier workers use owner labels and per-worker locks, never
+ * the ordinary delegate prefix or age cutoff. Failed reaps retain workers. */
+static void reap_private_verifier_orphans(void)
+{
+   const char *home = aimee_home();
+   if (!home || !home[0])
+      return;
+   char directory[MAX_PATH_LEN];
+   if (snprintf(directory, sizeof(directory), "%s/verification-workers", home) >=
+       (int)sizeof(directory))
+      return;
+   struct stat st;
+   if (lstat(directory, &st) != 0 || !S_ISDIR(st.st_mode))
+      return;
+   const char *argv[] = {resolve_delegate_egress_bin(),
+                         "reap-verifiers",
+                         "--owner-state-dir",
+                         directory,
+                         "--engine-socket",
+                         "/var/run/docker.sock",
+                         NULL};
+   char *out = NULL;
+   if (safe_exec_capture_cwd_env_timeout(argv, NULL, NULL, &out, 256, 25000) != 0)
+      LOG_WARN("delegate-sandbox", "private verifier orphan cleanup unavailable; workers retained");
+   free(out);
+}
+
 int delegate_backend_docker_remove_orphans(void)
 {
+   reap_private_verifier_orphans();
    const char *list_argv[] = {resolve_docker_bin(), "ps", "-a", "--format",
                               "{{.ID}} {{.Names}}", NULL};
    char *out = NULL;
@@ -792,7 +827,7 @@ static int docker_acquire(delegate_backend_t *self, const char *task_id,
    }
    snprintf(st->cwd, sizeof(st->cwd), "%s", st->workdir);
    snprintf(st->image, sizeof(st->image), "%s",
-            cfg->image && cfg->image[0] ? cfg->image : DOCKER_DEFAULT_IMAGE);
+            cfg->image && cfg->image[0] ? cfg->image : delegate_backend_docker_default_image());
 
    char container_sock[MAX_PATH_LEN + 32] = "";
    char host_sock[MAX_PATH_LEN + 32] = "";

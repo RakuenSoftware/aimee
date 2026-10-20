@@ -779,6 +779,111 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
    return out;
 }
 
+/* Exact member sets prevent this metadata carrier becoming an arbitrary JSON
+ * escape. Cross-field custody and outcome qualification remain owner policy. */
+static int verification_keys(const cJSON *object, const char *const *keys, size_t count)
+{
+   if (!cJSON_IsObject(object) || cJSON_GetArraySize(object) != (int)count)
+      return 0;
+   const cJSON *item;
+   cJSON_ArrayForEach(item, object)
+   {
+      size_t index = 0;
+      if (!item->string)
+         return 0;
+      for (; index < count && strcmp(item->string, keys[index]); ++index)
+      {
+      }
+      if (index == count)
+         return 0;
+      for (const cJSON *previous = object->child; previous != item; previous = previous->next)
+         if (!strcmp(previous->string, item->string))
+            return 0;
+   }
+   return 1;
+}
+static const char *verification_text(const cJSON *object, const char *key, size_t limit)
+{
+   const char *value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(object, key));
+   return value && value[0] && strlen(value) <= limit ? value : NULL;
+}
+static int verification_hex(const cJSON *object, const char *key, size_t first, size_t second)
+{
+   const char *value = verification_text(object, key, second > first ? second : first);
+   if (!value)
+      return 0;
+   size_t length = strlen(value);
+   return (length == first || length == second) && strspn(value, "0123456789abcdef") == length;
+}
+int aimee_ir_verification_proof_valid(const cJSON *proof)
+{
+   static const char *const keys[] = {"version",
+                                      "session_id",
+                                      "turn_id",
+                                      "actor",
+                                      "scope_kind",
+                                      "scope_id",
+                                      "isolation",
+                                      "snapshot_id",
+                                      "snapshot_commit",
+                                      "final_commit",
+                                      "snapshot_tree",
+                                      "final_tree",
+                                      "configuration_sha256",
+                                      "final_configuration_sha256",
+                                      "profile_sha256",
+                                      "completed",
+                                      "observed_at",
+                                      "steps"};
+   static const char *const step_keys[] = {"name",    "command_sha256", "ran",
+                                           "skipped", "termination",    "exit_code"};
+   if (!verification_keys(proof, keys, sizeof keys / sizeof *keys))
+      return 0;
+   const cJSON *version = cJSON_GetObjectItemCaseSensitive(proof, "version");
+   const char *scope = verification_text(proof, "scope_kind", 32);
+   const char *isolation = verification_text(proof, "isolation", 64);
+   const cJSON *steps = cJSON_GetObjectItemCaseSensitive(proof, "steps");
+   if (!cJSON_IsNumber(version) || version->valuedouble != 1 ||
+       !verification_text(proof, "session_id", 256) || !verification_text(proof, "turn_id", 256) ||
+       !verification_text(proof, "actor", 256) || !scope || strcmp(scope, "project") ||
+       !verification_text(proof, "scope_id", 256) || !isolation ||
+       strcmp(isolation, "private_source_snapshot") ||
+       !verification_hex(proof, "snapshot_id", 32, 32) ||
+       !verification_hex(proof, "snapshot_commit", 40, 64) ||
+       !verification_hex(proof, "final_commit", 40, 64) ||
+       !verification_hex(proof, "snapshot_tree", 40, 64) ||
+       !verification_hex(proof, "final_tree", 40, 64) ||
+       !verification_hex(proof, "configuration_sha256", 64, 64) ||
+       !verification_hex(proof, "final_configuration_sha256", 64, 64) ||
+       !verification_hex(proof, "profile_sha256", 64, 64) ||
+       !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(proof, "completed")) ||
+       !verification_text(proof, "observed_at", 64) || !cJSON_IsArray(steps) ||
+       cJSON_GetArraySize(steps) < 1 || cJSON_GetArraySize(steps) > 64)
+      return 0;
+   const cJSON *step;
+   cJSON_ArrayForEach(step, steps)
+   {
+      if (!verification_keys(step, step_keys, sizeof step_keys / sizeof *step_keys))
+         return 0;
+      const char *name = verification_text(step, "name", 128);
+      const char *termination = verification_text(step, "termination", 16);
+      const char *code = verification_text(step, "exit_code", 3);
+      if (!name || !verification_hex(step, "command_sha256", 64, 64) ||
+          !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(step, "ran")) ||
+          !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(step, "skipped")) || !termination ||
+          strcmp(termination, "exited") || !code || strspn(code, "0123456789") != strlen(code) ||
+          (code[0] == '0' && code[1]) || atoi(code) > 255)
+         return 0;
+      for (const cJSON *previous = steps->child; previous != step; previous = previous->next)
+         if (!strcmp(verification_text(previous, "name", 128), name))
+            return 0;
+   }
+   char *encoded = cJSON_PrintUnformatted(proof);
+   int bounded = encoded && strlen(encoded) <= 65536;
+   free(encoded);
+   return bounded;
+}
+
 cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
 {
    if (!event)
@@ -913,6 +1018,22 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
       if (!payload || !add_string(payload, "status", event->execution_status) ||
           !add_string(payload, "error", event->execution_error))
          goto fail;
+      if (event->verification_proofs)
+      {
+         if (strcmp(event->execution_status, "completed") ||
+             !cJSON_IsArray(event->verification_proofs) ||
+             cJSON_GetArraySize(event->verification_proofs) < 1 ||
+             cJSON_GetArraySize(event->verification_proofs) > 8)
+            goto fail;
+         const cJSON *proof;
+         cJSON_ArrayForEach(proof, event->verification_proofs)
+         {
+            if (!aimee_ir_verification_proof_valid(proof))
+               goto fail;
+         }
+         if (!add_copy(payload, "verification_proofs", event->verification_proofs))
+            goto fail;
+      }
       break;
    default:
       goto fail;

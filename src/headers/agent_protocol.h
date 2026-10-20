@@ -84,8 +84,6 @@ int agent_ir_decode_responses(const char *body, int rescue_mode, int *n_rescued,
 
 /* --- Message utilities --- */
 
-int messages_compact_consecutive(struct cJSON *messages);
-
 /* Repair a canonical working-history view. Missing results become explicit
  * unknown-outcome diagnostics; orphaned results are removed in causal order.
  * Native/mixed/malformed history refuses atomically; import belongs at translation.

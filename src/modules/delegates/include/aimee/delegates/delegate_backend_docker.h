@@ -27,6 +27,10 @@ extern "C"
     * collision (existing entry wins) or other registry failure. */
    int delegate_backend_register_docker(void);
 
+   /* Canonical backend image when no project, workspace or global override
+    * is configured. Borrowed static storage; callers must not free it. */
+   const char *delegate_backend_docker_default_image(void);
+
    /* Test seam — get the static docker backend instance directly,
     * bypassing the registry. */
    delegate_backend_t *delegate_backend_docker_get(void);

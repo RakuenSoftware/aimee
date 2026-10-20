@@ -269,6 +269,7 @@
 #define AIMEE_DB1_OP_SESSION_IR_HISTORY_LOAD                33u
 #define AIMEE_DB1_OP_SESSION_HARNESS_COMPARE_SWAP           34u
 #define AIMEE_DB1_OP_SESSION_IR_RUNNING_HISTORY_LOAD        35u
+#define AIMEE_DB1_OP_SESSION_IR_APPEND_VERIFIED             36u
 
 /* Family 7: machine-local runtime state: caches, this box's operator and
  * clones, the model catalogue it fetched, and the snapshots it took. */
@@ -708,7 +709,9 @@ static inline uint32_t aimee_db1_get_u32(const uint8_t *p)
 }
 
 /* Server-local immutable procedure experience (telemetry family). */
-#define AIMEE_DB1_OP_PROCEDURE_EVENT_LOAD   59u
-#define AIMEE_DB1_OP_PROCEDURE_EVENT_APPEND 60u
+#define AIMEE_DB1_OP_PROCEDURE_EVENT_LOAD        59u
+#define AIMEE_DB1_OP_PROCEDURE_EVENT_APPEND      60u
+#define AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECORD 61u
+#define AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECALL 62u
 
 #endif /* AIMEE_DB1_MODULE_API_H */

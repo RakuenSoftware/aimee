@@ -82,6 +82,8 @@ const (
 	opApproachFailureCandidates      = 58
 	opProcedureEventLoad             = 59
 	opProcedureEventAppend           = 60
+	opExecutionTestGradeRecord       = 61
+	opExecutionTestGradeRecall       = 62
 )
 
 // Telemetry is the family, ready to be bound to kind 11783.
@@ -90,8 +92,10 @@ var Telemetry = store.Family{
 	Event: EventTelemetry,
 	Stage: StageTelemetry,
 	Ops: map[uint32]store.Op{
-		opProcedureEventLoad:   {Name: "procedure_event_load", Args: 2, Cells: 1, Run: procedureEventLoad},
-		opProcedureEventAppend: {Name: "procedure_event_append", Args: 7, Cells: 1, Tx: true, Run: procedureEventAppend},
+		opExecutionTestGradeRecall: {Name: "execution_test_grade_recall", Args: 3, Cells: 1, HostOnly: true, Run: executionTestGradeRecall},
+		opExecutionTestGradeRecord: {Name: "execution_test_grade_record", Args: 2, Tx: true, HostOnly: true, Run: executionTestGradeRecord},
+		opProcedureEventLoad:       {Name: "procedure_event_load", Args: 2, Cells: 1, Run: procedureEventLoad},
+		opProcedureEventAppend:     {Name: "procedure_event_append", Args: 7, Cells: 1, Tx: true, Run: procedureEventAppend},
 
 		// --- token accounting ---
 		opTokenAuditInsert: {

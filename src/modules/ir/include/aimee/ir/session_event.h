@@ -43,6 +43,9 @@ typedef struct
    /* Host-task lifecycle is separate from each model response TURN_STOP. */
    const char *execution_status; /* running, completed, failed, cancelled */
    const char *execution_error;
+   /* Host-only joined verifier receipts committed atomically with a completed
+    * terminal. Exact bounded metadata, never model content or grade authority. */
+   const struct cJSON *verification_proofs;
    /* Private execution reference; its conversation remains in its own log. */
    const char *child_session, *child_turn, *child_role;
    /* Output-boundary fidelity report; never model content. */
@@ -81,6 +84,8 @@ int aimee_ir_history_repair(struct cJSON *messages);
 int aimee_ir_history_admit(const struct cJSON *messages);
 struct cJSON *aimee_ir_delta_json(const aimee_delta_t *delta);
 struct cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event);
+/* Structural metadata admission only; resource custody/grade policy is external. */
+int aimee_ir_verification_proof_valid(const struct cJSON *proof);
 
 /* Flat MCP form data and normalized operator replies. No transport or I/O. */
 int aimee_ir_form_validate(const struct cJSON *schema, const struct cJSON *content);

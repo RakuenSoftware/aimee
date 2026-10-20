@@ -235,6 +235,9 @@ func handleVerifyState(invocation bus.ModuleInvocation, request []byte) ([]byte,
 	if err := json.Unmarshal(request, &decoded); err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	if strings.HasPrefix(decoded.Op, "snapshot-") {
+		return handleVerificationSnapshot(invocation, request)
+	}
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}

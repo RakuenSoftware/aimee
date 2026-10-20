@@ -534,6 +534,17 @@ if(NOT WIN32)
     aimee-core-connection Threads::Threads OpenSSL::Crypto)
   aimee_enable_test_asserts(test_server_native_execution)
   add_test(NAME test_server_native_execution COMMAND test_server_native_execution)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(test_server_verification test_server_verification.c
+      ../aimee_sha256.c ../util.c ../text.c ../vendor/cJSON.c)
+    target_include_directories(test_server_verification PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+      ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
+    target_compile_options(test_server_verification PRIVATE -ffunction-sections -fdata-sections)
+    target_link_options(test_server_verification PRIVATE -Wl,--gc-sections)
+    target_link_libraries(test_server_verification PRIVATE aimee-core-codec Threads::Threads OpenSSL::Crypto)
+    aimee_enable_test_asserts(test_server_verification)
+    add_test(NAME test_server_verification COMMAND test_server_verification)
+  endif()
   add_executable(test_server_native_runtime test_server_native_runtime.c support/log_stub.c
     ../server/agent_tools.c ../posix/agent_source_authority.c ../modules/ir/aimee_ir.c
     ../server/server_native_runtime.c ../server/server_native_tool_admission.c ../server/server_session_question.c ../server/server_native_tool_source.c ../server/server_session_capture.c ../server/server_session_control.c

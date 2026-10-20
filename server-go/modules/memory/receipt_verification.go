@@ -115,11 +115,16 @@ func decodePreparedReceipt(raw []byte) (*providerReceiptEvent, bool) {
 	sources := sourceRevalidation{SchemaVersion: 1, CheckID: b.SourceCheckID, Sources: refs}
 	switch b.SourceCoverage {
 	case "retained_versioned_inputs":
-		if !sources.valid() {
+		if len(b.ConfiguredTests) > 0 || !sources.valid() {
+			return nil, false
+		}
+	case "retained_inputs_with_configured_tests":
+		var grades executionGradeSnapshot
+		if len(b.ConfiguredTests) == 0 || len(b.ConfiguredTests) > 60*1024 || json.Unmarshal(b.ConfiguredTests, &grades) != nil || grades.Schema != 1 || grades.Principal == "" || grades.ScopeKind != "project" || grades.ScopeID != b.Project || grades.Coverage != "recent_bounded" || len(grades.Items) == 0 || len(grades.Items) > 64 || !releaseTokenValid(b.SourceCheckID) || (len(refs) > 0 && !sources.valid()) {
 			return nil, false
 		}
 	case "no_versioned_source_handle":
-		if refs == nil || len(refs) != 0 || b.SourceCheckID != "" || b.Workspace != "" || b.Project != "" {
+		if len(b.ConfiguredTests) > 0 || refs == nil || len(refs) != 0 || b.SourceCheckID != "" || b.Workspace != "" || b.Project != "" {
 			return nil, false
 		}
 	default:

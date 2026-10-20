@@ -80,8 +80,8 @@ const char *mcp_git_identity_error(int rc);
  * write handlers own the safety rails (branch ownership, the verify gate,
  * AI-attribution stripping), and those must not depend on which surface called in.
  *
- * git_verify is deliberately NOT reachable here — it needs the server ctx/conn the
- * MCP path supplies, and the native agent has its own `verify` tool. `sid`, when
+ * Configured git_verify also uses this owner. With no server pool it runs
+ * synchronously, preserving the caller capture and cancellation scope. `sid`, when
  * non-empty, sets the session-id override for the call. */
 cJSON *mcp_git_run_tool(const char *tool, cJSON *args, const char *sid);
 

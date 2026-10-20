@@ -16,6 +16,13 @@ typedef struct
    unsigned long long sequence;
    int block_index;
 } source_claim_t;
+#define TERMINAL_OBSERVERS_MAX 8
+typedef struct
+{
+   server_session_terminal_action_fn action;
+   server_session_verification_prepare_fn prepare;
+   void *resource;
+} terminal_observer_t;
 struct server_session_capture
 {
    char session[128], turn[128], principal[VAULT_PRINCIPAL_MAX], execution_session[128];
@@ -27,6 +34,8 @@ struct server_session_capture
    char committed_sequence[32];
    server_session_terminal_action_fn terminal_action;
    void *terminal_resource;
+   terminal_observer_t terminal_observers[TERMINAL_OBSERVERS_MAX];
+   int n_terminal_observers;
    unsigned long long model_generation, model_active;
    source_claim_t *source_claims;
    int n_claims, claims_capacity;
@@ -131,6 +140,8 @@ int server_session_capture_after_terminal(server_session_capture_t *owner,
       return -1;
    pthread_mutex_lock(&owner->lock);
    int refused = !server_session_capture_accepting(owner) || owner->terminal_action != NULL;
+   for (int i = 0; !refused && i < owner->n_terminal_observers; i++)
+      refused = resource && resource == owner->terminal_observers[i].resource;
    if (!refused)
    {
       owner->terminal_action = action;
@@ -138,6 +149,49 @@ int server_session_capture_after_terminal(server_session_capture_t *owner,
    }
    pthread_mutex_unlock(&owner->lock);
    return refused ? -1 : 0;
+}
+int server_session_capture_observe_terminal(server_session_capture_t *owner,
+                                            server_session_terminal_action_fn action,
+                                            void *resource)
+{
+   return server_session_capture_observe_verification(owner, NULL, action, resource);
+}
+int server_session_capture_observe_verification(server_session_capture_t *owner,
+                                                server_session_verification_prepare_fn prepare,
+                                                server_session_terminal_action_fn action,
+                                                void *resource)
+{
+   if (!owner || !action)
+      return -1;
+   pthread_mutex_lock(&owner->lock);
+   int refused = !server_session_capture_accepting(owner) ||
+                 owner->n_terminal_observers >= TERMINAL_OBSERVERS_MAX ||
+                 (resource && resource == owner->terminal_resource);
+   for (int i = 0; !refused && i < owner->n_terminal_observers; i++)
+      refused = resource ? resource == owner->terminal_observers[i].resource
+                         : !owner->terminal_observers[i].resource &&
+                               action == owner->terminal_observers[i].action;
+   if (!refused)
+      owner->terminal_observers[owner->n_terminal_observers++] =
+          (terminal_observer_t){.action = action, .prepare = prepare, .resource = resource};
+   pthread_mutex_unlock(&owner->lock);
+   return refused ? -1 : 0;
+}
+/* Caller holds the writer lock. Callbacks run only after that lock is released. */
+static int terminal_observers_take(server_session_capture_t *owner,
+                                   terminal_observer_t out[TERMINAL_OBSERVERS_MAX])
+{
+   int count = owner->n_terminal_observers;
+   memcpy(out, owner->terminal_observers, (size_t)count * sizeof *out);
+   memset(owner->terminal_observers, 0, sizeof owner->terminal_observers);
+   owner->n_terminal_observers = 0;
+   return count;
+}
+static void terminal_observers_finish(server_session_capture_t *owner,
+                                      terminal_observer_t *observers, int count, int success)
+{
+   for (int i = 0; i < count; i++)
+      observers[i].action(success && !server_session_capture_failed(owner), observers[i].resource);
 }
 void server_session_capture_release(server_session_capture_t *owner)
 {
@@ -152,6 +206,7 @@ void server_session_capture_release(server_session_capture_t *owner)
       pthread_mutex_unlock(&owners_lock);
       if (owner->terminal_action)
          owner->terminal_action(0, owner->terminal_resource);
+      terminal_observers_finish(owner, owner->terminal_observers, owner->n_terminal_observers, 0);
       server_control_scope_release(owner->controls);
       pthread_mutex_destroy(&owner->lock);
       free(owner->source_claims);
@@ -168,9 +223,12 @@ void server_session_capture_close(server_session_capture_t *owner)
    void *resource = owner->terminal_resource;
    owner->terminal_action = NULL;
    owner->terminal_resource = NULL;
+   terminal_observer_t observers[TERMINAL_OBSERVERS_MAX];
+   int count = terminal_observers_take(owner, observers);
    pthread_mutex_unlock(&owner->lock);
    if (action)
       action(0, resource);
+   terminal_observers_finish(owner, observers, count, 0);
    if (current == owner)
       current = NULL;
    server_session_capture_release(owner);
@@ -361,6 +419,8 @@ int server_session_capture_append(server_session_capture_t *owner,
       return -1;
    server_session_terminal_action_fn action = NULL;
    void *resource = NULL;
+   terminal_observer_t observers[TERMINAL_OBSERVERS_MAX];
+   int n_observers = 0;
    int terminal_success = 0;
    pthread_mutex_lock(&owner->lock);
    int failure_terminal = event->kind == AIMEE_SESSION_EXECUTION && event->execution_status &&
@@ -371,8 +431,41 @@ int server_session_capture_append(server_session_capture_t *owner,
       pthread_mutex_unlock(&owner->lock);
       return -1;
    }
-   cJSON *payload = aimee_ir_session_event_json(event);
+   cJSON *proofs = NULL, *payload = NULL;
    int result = -1;
+   /* Only the retained verification owner may supply privileged metadata.
+    * Arbitrary producers cannot turn a JSON field into a grading receipt. */
+   if (event->verification_proofs)
+      goto finish;
+   if (event->kind == AIMEE_SESSION_EXECUTION && event->execution_status &&
+       !strcmp(event->execution_status, "completed") && !server_session_capture_failed(owner))
+   {
+      proofs = cJSON_CreateArray();
+      for (int i = 0; proofs && i < owner->n_terminal_observers; ++i)
+      {
+         terminal_observer_t *observer = &owner->terminal_observers[i];
+         const cJSON *proof = observer->prepare ? observer->prepare(observer->resource) : NULL;
+         if (!proof || !aimee_ir_verification_proof_valid(proof))
+            continue;
+         const char *session =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(proof, "session_id"));
+         const char *turn =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(proof, "turn_id"));
+         const char *actor = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(proof, "actor"));
+         if (strcmp(session, owner->session) || strcmp(turn, owner->turn) ||
+             strcmp(actor, owner->principal))
+            continue;
+         cJSON *copy = cJSON_Duplicate(proof, 1);
+         if (!copy || !cJSON_AddItemToArray(proofs, copy))
+         {
+            cJSON_Delete(copy);
+            goto finish;
+         }
+      }
+   }
+   aimee_session_event_t admitted = *event;
+   admitted.verification_proofs = cJSON_GetArraySize(proofs) ? proofs : NULL;
+   payload = aimee_ir_session_event_json(&admitted);
    if (!payload || qualify(payload, "message_id", owner->turn, event->message_id) ||
        qualify(payload, "request_id", owner->turn, event->request_id))
       goto finish;
@@ -383,9 +476,12 @@ int server_session_capture_append(server_session_capture_t *owner,
    char event_id[192], committed[32];
    snprintf(event_id, sizeof event_id, "%s:%llu", owner->turn, ++owner->counts.counter);
    char *wire = cJSON_PrintUnformatted(payload);
-   result = wire ? db1_session_ir_append(owner->session, event_id, owner->turn, owner->principal,
-                                         wire, committed)
-                 : -1;
+   if (wire)
+      result = admitted.verification_proofs
+                   ? db1_session_ir_append_verified(owner->session, event_id, owner->turn,
+                                                    owner->principal, wire, committed)
+                   : db1_session_ir_append(owner->session, event_id, owner->turn, owner->principal,
+                                           wire, committed);
    free(wire);
    if (result)
       goto finish;
@@ -399,6 +495,7 @@ int server_session_capture_append(server_session_capture_t *owner,
       resource = owner->terminal_resource;
       owner->terminal_action = NULL;
       owner->terminal_resource = NULL;
+      n_observers = terminal_observers_take(owner, observers);
       terminal_success = !strcmp(event->execution_status, "completed");
    }
    if (event->kind == AIMEE_SESSION_EXECUTION && strcmp(event->execution_status, "running"))
@@ -428,10 +525,13 @@ int server_session_capture_append(server_session_capture_t *owner,
 finish:
    if (result)
       server_session_capture_fail(owner);
+   cJSON_Delete(proofs);
    cJSON_Delete(payload);
    pthread_mutex_unlock(&owner->lock);
+   int resource_success = !result && terminal_success && !server_session_capture_failed(owner);
    if (action)
-      action(!result && terminal_success && !server_session_capture_failed(owner), resource);
+      action(resource_success, resource);
+   terminal_observers_finish(owner, observers, n_observers, resource_success);
    return result;
 }
 int server_session_capture_sink(const aimee_session_event_t *event, void *owner)

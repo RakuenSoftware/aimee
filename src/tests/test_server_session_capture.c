@@ -11,7 +11,7 @@
 
 static pthread_mutex_t storage = PTHREAD_MUTEX_INITIALIZER;
 static cJSON *rows;
-static int reject_append, observations;
+static int reject_append, observations, verified_appends;
 static int history_status;
 static const char *history_wire;
 int db1_session_ir_running_history_load(const char *session, const char *actor, const char *turn,
@@ -48,6 +48,17 @@ int db1_session_ir_append(const char *session, const char *id, const char *turn,
    pthread_mutex_unlock(&storage);
    return 0;
 }
+int db1_session_ir_append_verified(const char *session, const char *id, const char *turn,
+                                   const char *principal, const char *wire, char sequence[32])
+{
+   cJSON *event = cJSON_Parse(wire);
+   const cJSON *proofs = cJSON_GetObjectItemCaseSensitive(
+       cJSON_GetObjectItemCaseSensitive(event, "payload"), "verification_proofs");
+   assert(cJSON_IsArray(proofs) && cJSON_GetArraySize(proofs) > 0);
+   cJSON_Delete(event);
+   ++verified_appends;
+   return db1_session_ir_append(session, id, turn, principal, wire, sequence);
+}
 void server_learning_observe_terminal(const char *session, const char *turn, const char *sequence,
                                       const char *id, const char *principal, const cJSON *event)
 {
@@ -66,7 +77,7 @@ static void reset(void)
    cJSON_Delete(rows);
    rows = cJSON_CreateArray();
    assert(rows);
-   reject_append = observations = 0;
+   reject_append = observations = verified_appends = 0;
 }
 typedef struct
 {
@@ -496,6 +507,153 @@ static void test_quiescent_terminal_resource(void)
    for (int i = 0; i < 8; i++)
       assert(resources[i].calls == resources[i].registered);
 }
+static void terminal_resource_refuses(int success, void *owner)
+{
+   assert(success);
+   server_session_capture_fail(owner);
+}
+static void test_terminal_observers_preserve_primary_resource(void)
+{
+   for (int mode = 0; mode < 4; mode++)
+   {
+      reset();
+      server_session_capture_t *owner =
+          server_session_capture_open("private-child", "observer", "alice", "parent");
+      assert(owner);
+      terminal_resource_t primary = {
+          .owner = owner, .expected_success = mode == 0, .expected_rows = mode < 2 ? 1 : 0};
+      terminal_resource_t observer = primary;
+      assert(!server_session_capture_after_terminal(owner, terminal_resource, &primary));
+      assert(!server_session_capture_observe_terminal(owner, terminal_resource, &observer));
+      assert(server_session_capture_observe_terminal(owner, terminal_resource, &primary) < 0);
+      assert(server_session_capture_observe_terminal(owner, terminal_resource, &observer) < 0);
+      if (mode < 3)
+      {
+         reject_append = mode == 2;
+         aimee_session_event_t event = {.kind = AIMEE_SESSION_EXECUTION,
+                                        .execution_status = mode == 1 ? "cancelled" : "completed"};
+         int rc = server_session_capture_sink(&event, owner);
+         assert((rc == 0) == (mode != 2));
+         assert(primary.calls == (mode != 2) && observer.calls == (mode != 2));
+      }
+      server_session_capture_close(owner);
+      assert(primary.calls == 1 && observer.calls == 1);
+   }
+   reset();
+   server_session_capture_t *refused =
+       server_session_capture_open("private-child", "observer-refused", "alice", "parent");
+   assert(refused);
+   terminal_resource_t observer = {.owner = refused, .expected_success = 0, .expected_rows = 1};
+   assert(!server_session_capture_after_terminal(refused, terminal_resource_refuses, refused));
+   assert(!server_session_capture_observe_terminal(refused, terminal_resource, &observer));
+   aimee_session_event_t completed = {.kind = AIMEE_SESSION_EXECUTION,
+                                      .execution_status = "completed"};
+   assert(!server_session_capture_sink(&completed, refused));
+   assert(observer.calls == 1 && server_session_capture_failed(refused));
+   server_session_capture_close(refused);
+
+   reset();
+   server_session_capture_t *owner =
+       server_session_capture_open("private-child", "observer-bound", "alice", "parent");
+   assert(owner);
+   terminal_resource_t observers[32];
+   int admitted = 0;
+   for (int i = 0; i < 32; i++)
+   {
+      observers[i] =
+          (terminal_resource_t){.owner = owner, .expected_success = 0, .expected_rows = 0};
+      int rc = server_session_capture_observe_terminal(owner, terminal_resource, &observers[i]);
+      if (rc)
+         break;
+      admitted++;
+   }
+   assert(admitted > 0 && admitted < 32);
+   server_session_capture_close(owner);
+   for (int i = 0; i < admitted; i++)
+      assert(observers[i].calls == 1);
+}
+
+typedef struct
+{
+   cJSON *proof;
+   int prepared, finished, available, expected_success;
+} verification_resource_t;
+static const cJSON *prepare_verification(void *opaque)
+{
+   verification_resource_t *resource = opaque;
+   ++resource->prepared;
+   return resource->available ? resource->proof : NULL;
+}
+static void finish_verification(int success, void *opaque)
+{
+   verification_resource_t *resource = opaque;
+   assert(success == resource->expected_success && !resource->finished);
+   ++resource->finished;
+}
+static void test_atomic_verification_terminal(void)
+{
+   const char *wire =
+       "{\"version\":1,\"session_id\":\"private-child\",\"turn_id\":\"proof\",\"actor\":\"alice\","
+       "\"scope_kind\":\""
+       "project\",\"scope_id\":\"project\",\"isolation\":\"private_source_snapshot\",\"snapshot_"
+       "id\":\"aaaaaaa"
+       "aaaaaaaaaaaaaaaaaaaaaaaaa\",\"snapshot_commit\":"
+       "\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"f"
+       "inal_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"snapshot_tree\":"
+       "\"ccccccccccccccccc"
+       "ccccccccccccccccccccccc\",\"final_tree\":\"cccccccccccccccccccccccccccccccccccccccc\","
+       "\"configur"
+       "ation_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\","
+       "\"final_co"
+       "nfiguration_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\","
+       "\"pr"
+       "ofile_sha256\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\","
+       "\"complete"
+       "d\":true,\"observed_at\":\"2026-10-20T12:00:00Z\",\"steps\":[{\"name\":\"tests\",\"command_"
+       "sha256\":\"ff"
+       "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"ran\":true,\"skipped\":"
+       "false"
+       ",\"termination\":\"exited\",\"exit_code\":\"0\"}]}";
+   for (int mode = 0; mode < 6; ++mode)
+   {
+      reset();
+      verification_resource_t resource = {.proof = cJSON_Parse(wire),
+                                          .available = mode != 2,
+                                          .expected_success = mode != 3 && mode != 4};
+      assert(resource.proof && aimee_ir_verification_proof_valid(resource.proof));
+      if (mode == 1)
+         assert(cJSON_ReplaceItemInObjectCaseSensitive(resource.proof, "actor",
+                                                       cJSON_CreateString("bob")));
+      if (mode == 5)
+         assert(cJSON_ReplaceItemInObjectCaseSensitive(resource.proof, "turn_id",
+                                                       cJSON_CreateString("foreign")));
+      server_session_capture_t *owner =
+          server_session_capture_open("private-child", "proof", "alice", "parent");
+      assert(owner && !server_session_capture_observe_verification(owner, prepare_verification,
+                                                                   finish_verification, &resource));
+      aimee_session_event_t terminal = {.kind = AIMEE_SESSION_EXECUTION,
+                                        .execution_status = mode == 3 ? "failed" : "completed"};
+      reject_append = mode == 4;
+      assert(server_session_capture_sink(&terminal, owner) == (mode == 4 ? -1 : 0));
+      assert(resource.prepared == (mode == 3 ? 0 : 1));
+      if (mode == 4)
+         assert(!cJSON_GetArraySize(rows) && !observations && !resource.finished);
+      else
+      {
+         assert(cJSON_GetArraySize(rows) == 1 && observations == 1 && resource.finished == 1);
+         const cJSON *event =
+             cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rows, 0), "event");
+         const cJSON *proofs = cJSON_GetObjectItemCaseSensitive(
+             cJSON_GetObjectItemCaseSensitive(event, "payload"), "verification_proofs");
+         assert((proofs != NULL) == (mode == 0));
+         assert(verified_appends == (mode == 0 ? 1 : 0));
+      }
+      server_session_capture_close(owner);
+      assert(resource.finished == 1);
+      cJSON_Delete(resource.proof);
+   }
+}
+
 int main(void)
 {
    server_session_capture_t *absent = NULL;
@@ -508,6 +666,8 @@ int main(void)
    test_failure_refuses_success();
    test_running_history_source();
    test_quiescent_terminal_resource();
+   test_terminal_observers_preserve_primary_resource();
+   test_atomic_verification_terminal();
    cJSON_Delete(rows);
    puts("retained capture: copied identity, concurrent counters, exact IR, sealed turns and sticky "
         "failure passed");

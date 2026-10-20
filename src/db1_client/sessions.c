@@ -771,6 +771,21 @@ int db1_session_ir_append(const char *session_id, const char *event_id, const ch
        db1_call(&family, AIMEE_DB1_OP_SESSION_IR_APPEND, fields, 5, values, caps, 1, NULL));
 }
 
+int db1_session_ir_append_verified(const char *session_id, const char *event_id,
+                                   const char *turn_id, const char *actor, const char *payload,
+                                   char out_sequence[32])
+{
+   if (out_sequence)
+      out_sequence[0] = '\0';
+   if (!session_id || !event_id || !turn_id || !actor || !payload || !out_sequence)
+      return -1;
+   const char *fields[] = {session_id, event_id, turn_id, actor, payload};
+   char *const values[] = {out_sequence};
+   const size_t caps[] = {32u};
+   return write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_IR_APPEND_VERIFIED, fields, 5, values,
+                                caps, 1, NULL));
+}
+
 char *db1_session_ir_page(const char *session_id, const char *after, int limit,
                           const char *principal)
 {

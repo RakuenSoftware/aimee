@@ -634,7 +634,9 @@ static void test_acquire_creates_and_starts_container(void)
 
    delegate_backend_config_t cfg = {0};
    init_fixture_config(&cfg);
-   cfg.image = "ubuntu:22.04";
+   const char *default_image = delegate_backend_docker_default_image();
+   assert(default_image && default_image[0]);
+   cfg.image = NULL;
    void *state = NULL;
    assert(b->acquire(b, "task-acq-1", &cfg, &state) == 0);
    assert(state != NULL);
@@ -644,7 +646,7 @@ static void test_acquire_creates_and_starts_container(void)
    assert(fake_helper_args_contain("--worktree"));
    assert(fake_helper_args_contain(g_fixture_workspace));
    assert(fake_helper_args_contain("--writes-allowed"));
-   assert(fake_helper_args_contain("ubuntu:22.04"));
+   assert(fake_helper_args_contain(default_image));
 
    /* Resume is also delegated to Go and therefore invokes the helper again. */
    b->release(b, state, 1);

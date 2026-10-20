@@ -10,7 +10,6 @@
 #include "server_delegate_monitor.h" /* delegate heartbeat begin/end (keep slow delegates alive) */
 #include "server_compute_impl.h"
 #include "agent_config.h"
-#include "approach_store.h"
 #include <aimee/gateway/gateway_policy.h>
 #include "presence.h"
 #include "compute_pool.h"
@@ -33,6 +32,8 @@
 #include "db1_client/delegate_learning.h"
 #include "db1_client/delegate_reservation.h"
 #include "request_context.h" /* execution key carried as the idempotency key */
+#include "module_commands.h"
+#include "ingress_preinject.h"
 #include "kb_client.h"
 #include "kb_bandit.h"
 #include "db1_client/interaction_events.h"
@@ -1368,18 +1369,9 @@ static void delegate_worker_run(void *arg)
    delegate_append_owned_block(&system_prompt, &template_sys_prompt,
                                delegate_inject_graph_context(prompt, cwd));
 
-   /* Goal-specific negative knowledge closes the failure loop: a no-progress
-    * abort records the failed approach at exit, and a sufficiently similar
-    * future goal receives it before the first provider call. */
-   if (delegate_allows_writes)
-   {
-      char *retry_context = approach_store_retry_context(learning_goal);
-      if (retry_context)
-         aimee_log(LOG_INFO, "delegate",
-                   "delegate %s: injecting prior failed-approach learning for a similar goal",
-                   deleg_id);
-      delegate_append_owned_block(&system_prompt, &template_sys_prompt, retry_context);
-   }
+   /* Legacy goal-only approach rows have no authenticated principal/project or
+    * live canonical source binding. They cannot become delegate prompt context.
+    * Verified execution history is admitted below through canonical assembly. */
 
    /* Named-file drift guard: extract any repo-relative paths named in the prompt
     * and check pre-flight conditions before running the agent. */
@@ -1475,8 +1467,54 @@ static void delegate_worker_run(void *arg)
       if (handoff_prompt)
          run_prompt = handoff_prompt;
    }
-   /* Reviewed procedure context is assembled by the canonical memory owner.
-    * A role-wide list of pending exit lessons is not scoped reuse authority. */
+   /* Reuse independently admitted configured-test receipts for this host actor
+    * and registered project. Historical tests never imply semantic task success. */
+   const request_context_t *history_owner = request_context_get();
+   char history_project[512] = "";
+   if (history_owner && history_owner->vault_transport != ATTEST_NONE &&
+       history_owner->vault_principal[0] && cwd && cwd[0] &&
+       server_active_project_from_cwd(cwd, history_project, sizeof(history_project)) == 0)
+   {
+      char *history =
+          db1_execution_test_grade_recall(history_owner->vault_principal, history_project, NULL);
+      cJSON *projection = history ? cJSON_Parse(history) : NULL;
+      free(history);
+      if (projection)
+      {
+         cJSON *assembly = cJSON_CreateObject();
+         cJSON_AddStringToObject(assembly, "operation", "ingress-assemble");
+         cJSON_AddStringToObject(assembly, "project", history_project);
+         cJSON_AddNumberToObject(assembly, "budget", 4096);
+         cJSON_AddBoolToObject(assembly, "prepare_source_release", 1);
+         cJSON_AddStringToObject(assembly, "source_release_ticket",
+                                 history_owner->memory_source_release);
+         cJSON_AddStringToObject(assembly, "request_id", history_owner->request_id);
+         cJSON_AddStringToObject(assembly, "principal", history_owner->principal);
+         cJSON_AddStringToObject(assembly, "caller_subject", history_owner->caller_subject);
+         char history_workspace[512] = "", scope_project[512] = "";
+         if (ingress_preinject_resolve_active_scope(history_workspace, sizeof(history_workspace),
+                                                    scope_project, sizeof(scope_project)) == 0 &&
+             !strcmp(scope_project, history_project))
+            cJSON_AddStringToObject(assembly, "workspace", history_workspace);
+         cJSON_AddItemToObject(assembly, "execution_test_grades", projection);
+         cJSON *rendered = NULL;
+         if (aimee_module_commands_dispatch_internal_timeout("memory.runtime", assembly, 500,
+                                                             &rendered) == 1)
+         {
+            const char *block =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(rendered, "envelope"));
+            const char *ticket = cJSON_GetStringValue(
+                cJSON_GetObjectItemCaseSensitive(rendered, "source_release_ticket"));
+            if (block && block[0] && ticket && request_context_set_source_release(ticket) == 0)
+            {
+               (void)request_context_require_memory_receipt();
+               delegate_append_owned_block(&system_prompt, &template_sys_prompt, strdup(block));
+            }
+         }
+         cJSON_Delete(rendered);
+         cJSON_Delete(assembly);
+      }
+   }
 
    int rc = -1;
    int cost_limit_failed = 0;

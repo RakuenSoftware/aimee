@@ -172,3 +172,24 @@ it('answers a durable free-text host question and resolves it without creating m
   expect(screen.queryByRole('button')).toBeNull();
   expect(answered.messages).toEqual([]);
 });
+
+
+it('does not carry question answers or sent state between sessions with reused request IDs', async () => {
+  function question(session: string) {
+    return reduceSession(emptySession(session), { version: 1, session_id: session, sequence: '1', event_id: 'request', turn_id: 'turn', actor: 'alice',
+      event: { kind: 'control_request', request_id: 'same-id', control_kind: 'question', payload: { questions: [
+        { id: 'answer', question: 'Your choice?', multiple: false, options: [] },
+      ] } } });
+  }
+  const onReply = vi.fn().mockResolvedValue(undefined);
+  const view = render(<IRTranscript state={question('one')} onReply={onReply} />);
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Only for session one' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send answers' }));
+  await act(async () => {});
+  view.rerender(<IRTranscript state={question('two')} onReply={onReply} />);
+  expect(screen.getByRole('textbox')).toHaveProperty('value', '');
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Only for session two' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send answers' }));
+  await act(async () => {});
+  expect(onReply).toHaveBeenCalledTimes(2);
+});

@@ -1938,3 +1938,31 @@ int db1_procedure_event_append(const char *principal, const char *procedure_json
           : !strcmp(result, "retry")     ? 2
                                          : -1;
 }
+
+/* Private publication keeps test grades out of the generic event writer. */
+int db1_execution_test_grade_record(const char *principal, const char *grade_json)
+{
+   const char *fields[] = {principal ? principal : "", grade_json ? grade_json : ""};
+   return write_result(
+       db1_call(&family, AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECORD, fields, 2, NULL, NULL, 0, NULL));
+}
+
+/* Complete bounded source-owned projection, never the legacy 4096-byte row. */
+char *db1_execution_test_grade_recall(const char *principal, const char *project,
+                                      const char *sources_json)
+{
+   const char *fields[] = {principal ? principal : "", project ? project : "",
+                           sources_json ? sources_json : ""};
+   char *snapshot = malloc(65536u);
+   if (!snapshot)
+      return NULL;
+   char *const values[] = {snapshot};
+   const size_t caps[] = {65536u};
+   if (db1_call(&family, AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECALL, fields, 3, values, caps, 1,
+                NULL) != AIMEE_DB1_STATUS_OK)
+   {
+      free(snapshot);
+      return NULL;
+   }
+   return snapshot;
+}

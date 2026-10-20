@@ -59,6 +59,7 @@ static const aimee_tool_catalog_entry_t aimee_tool_catalog[] = {
    {"git_pr", {5u, 16u, 24u}},
    {"git_push", {5u, 16u, 24u}},
    {"git_status", {1u, 1u, 5u}},
+   {"git_verify", {3u, 2u, 34u}},
    {"grep", {1u, 1u, 5u}},
    {"index_blast_radius", {1u, 1u, 1u}},
    {"index_find_callers", {1u, 1u, 1u}},

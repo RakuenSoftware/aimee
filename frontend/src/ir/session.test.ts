@@ -337,3 +337,43 @@ it('records native compaction without replacing canonical model history', () => 
   for (const payload of [{}, { harness: 'unknown' }, { harness: null }, { harness: 'claude', summary: 'native summary' }])
     expect(() => reduceSession(emptySession('s'), envelope(1, { kind: 'native_compaction', payload } as SessionEvent))).toThrow();
 });
+
+function verificationProof() {
+  return {
+    version: 1 as const, session_id: 's', turn_id: 't', actor: 'operator', scope_kind: 'project' as const,
+    scope_id: 'project', isolation: 'private_source_snapshot' as const, snapshot_id: 'a'.repeat(32),
+    snapshot_commit: 'b'.repeat(40), final_commit: 'b'.repeat(40), snapshot_tree: 'c'.repeat(40), final_tree: 'c'.repeat(40),
+    configuration_sha256: 'd'.repeat(64), final_configuration_sha256: 'd'.repeat(64), profile_sha256: 'e'.repeat(64),
+    completed: true, observed_at: '2026-10-20T12:00:00Z',
+    steps: [{ name: 'unit', command_sha256: 'f'.repeat(64), ran: true, skipped: false, termination: 'exited' as const, exit_code: '0' }],
+  };
+}
+it('replays completed verifier receipts as metadata without creating messages or controls', () => {
+  const start = reduceSession(emptySession('s'), envelope(1, { kind: 'execution', payload: { status: 'running' } }));
+  const terminal = envelope(2, { kind: 'execution', payload: { status: 'completed', verification_proofs: [verificationProof()] } });
+  const completed = reduceSession(start, terminal);
+  expect(completed.executions).toEqual({ t: 'completed' });
+  expect(completed.messages).toEqual([]);
+  expect(completed.controls).toEqual({});
+  expect(completed.activeTurns).toEqual([]);
+  expect(reduceSession(start, parseJSON(stringifyJSON(terminal)) as Envelope)).toEqual(completed);
+});
+it('refuses foreign, malformed and oversized verifier metadata on execution terminals', () => {
+  const start = reduceSession(emptySession('s'), envelope(1, { kind: 'execution', payload: { status: 'running' } }));
+  const proof = verificationProof();
+  for (const invalid of [
+    { ...proof, session_id: 'other' }, { ...proof, turn_id: 'other' }, { ...proof, actor: 'other' },
+    { ...proof, prompt: 'not metadata' }, { ...proof, completed: null }, { ...proof, profile_sha256: 'unknown' },
+    { ...proof, steps: [{ ...proof.steps[0], exit_code: '00' }] },
+    { ...proof, steps: [proof.steps[0], proof.steps[0]] },
+  ]) expect(() => reduceSession(start, envelope(2, { kind: 'execution', payload: {
+    status: 'completed', verification_proofs: [invalid],
+  } } as unknown as SessionEvent))).toThrow('Invalid execution verification proofs');
+  for (const invalid of [null, [], Array.from({ length: 9 }, () => proof)])
+    expect(() => reduceSession(start, envelope(2, { kind: 'execution', payload: {
+      status: 'completed', verification_proofs: invalid,
+    } } as unknown as SessionEvent))).toThrow('Invalid execution verification proofs');
+  expect(() => reduceSession(emptySession('s'), envelope(1, { kind: 'execution', payload: {
+    status: 'running', verification_proofs: [proof],
+  } }))).toThrow('Invalid execution verification proofs');
+});

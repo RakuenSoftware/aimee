@@ -32,6 +32,22 @@ This path requires no KB connection. Its source is the canonical session log; a 
 failed projection write leaves that source intact and logs incomplete capture. It does not create an
 independently verified grade or replace receipt-bound procedure application policy.
 
+The same stage's private `grade` verb accepts only the host isolated-verification context.
+It binds a completed canonical terminal to an independently held source snapshot, exact commit/tree,
+configuration and image-profile digests, and normal machine-observed exits for every configured
+step. The worker has no parent-control socket or network; prerequisites run inside that same
+worker. Skips, cached passes, incomplete receipts, cancellation or unacknowledged cleanup cannot
+grant a grade. DB1's host-only operation 61 records immutable `tests_passed`/`tests_failed` rows
+beside the original observation; retries cannot change an existing receipt.
+Host-only session operation 36 binds proofs to the durable terminal atomically; ordinary append
+cannot carry them. Replay repairs a lost derived grade from that exact retained proof. These are
+`configured_tests_only` results, not semantic task correctness or proof a procedure caused success.
+Operation 62 recalls bounded whole receipts for the authenticated actor and registered project,
+rechecking the live canonical source. Primary and delegate context retain these as historical data,
+with source revalidation through the existing provider-send release fence. This path remains
+server-local with no KB endpoint or synthesis dependency.
+
+
 The descriptor declares the module-owned C implementation and parity adapter, the Go process handler
 and tests, its headers, direct C tests, and this document; it sets `ownership_complete: true`.
 `learning.h` and `module_api.h` are canonical public headers under

@@ -56,3 +56,13 @@ int db1_interaction_event_record(const char *session, const char *type, const ch
    atomic_fetch_add(&observations, 1);
    return 42;
 }
+
+/* These minimal ordinary-chat/session fixtures never own private verification.
+ * Keep unexpected grade publication observable instead of inventing a grade. */
+int db1_execution_test_grade_record(const char *principal, const char *grade_json)
+{
+   (void)principal;
+   (void)grade_json;
+   assert(!"unexpected test grade in ungraded learning fixture");
+   return -1;
+}

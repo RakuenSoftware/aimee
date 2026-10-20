@@ -65,6 +65,10 @@ void test_native_mcp_permission_admission(void)
    assert(agent_tools_permission_check("vendor:mutate", args) == AGENT_TOOL_PERMISSION_ROLE);
    assert(agent_tools_permission_check("bash", args) == AGENT_TOOL_PERMISSION_SHELL);
    assert(agent_tools_permission_check("execute_script", args) == AGENT_TOOL_PERMISSION_SHELL);
+   assert(agent_tools_permission_check("git_verify", args) == AGENT_TOOL_PERMISSION_SHELL);
+   cJSON_AddStringToObject(args, "action", "check");
+   assert(agent_tools_permission_check("git_verify", args) != AGENT_TOOL_PERMISSION_SHELL);
+   cJSON_DeleteItemFromObjectCaseSensitive(args, "action");
    assert(agent_tools_permission_check("read_file", args) == AGENT_TOOL_PERMISSION_ALLOWED);
    cJSON_Delete(args);
 

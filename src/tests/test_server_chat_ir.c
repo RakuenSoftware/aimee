@@ -71,6 +71,20 @@ int db1_session_ir_append(const char *sid, const char *eid, const char *turn, co
    snprintf(sequence, 32, "%d", cJSON_GetArraySize(log_entries));
    return 0;
 }
+/* This fixture has no private verifier owner. Privileged proof appends must
+ * remain unreachable; ordinary event capture retains its existing test path. */
+int db1_session_ir_append_verified(const char *session, const char *event, const char *turn,
+                                   const char *actor, const char *payload, char sequence[32])
+{
+   (void)session;
+   (void)event;
+   (void)turn;
+   (void)actor;
+   (void)payload;
+   (void)sequence;
+   assert(!"unexpected verifier proof in ordinary capture fixture");
+   return -1;
+}
 char *db1_session_ir_page(const char *sid, const char *after, int limit, const char *principal)
 {
    assert(!strcmp(sid, "session-one") && !strcmp(principal, owner) && limit == 128);

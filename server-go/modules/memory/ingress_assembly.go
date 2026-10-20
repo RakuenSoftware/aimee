@@ -128,6 +128,7 @@ type ingressProjectionEvidenceRef struct {
 }
 
 type ingressAssemblyRequest struct {
+	ExecutionGrades  json.RawMessage        `json:"execution_test_grades,omitempty"`
 	Project          string                 `json:"project"`
 	TaskPacketJSON   string                 `json:"task_packet_json,omitempty"`
 	TypedRequested   bool                   `json:"typed_requested"`
@@ -183,6 +184,13 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		}
 	}
 	entries := make([]ingressEntry, 0, 15)
+	gradeBlocks, err := executionGradeContexts(request.ExecutionGrades, request.Project)
+	if err != nil {
+		return nil, err
+	}
+	for _, gradeBlock := range gradeBlocks {
+		entries = append(entries, ingressEntry{"configured_tests", "", gradeBlock})
+	}
 	memoryEntries := make(map[int]ingressRetainedMemory, len(request.Memories))
 	memorySourceEntries := make(map[int]ingressMemoryPreview, len(request.Memories))
 	codeEntries := make(map[int]int, len(request.Code))
@@ -390,6 +398,9 @@ func ingressAssemble(request ingressAssemblyRequest) (map[string]any, error) {
 		}
 	}
 	result["packing_dispositions"] = dispositions
+	if grades := retainedExecutionGrades(request.ExecutionGrades, selected, len(gradeBlocks)); len(grades) > 0 {
+		result["execution_test_grades"] = grades
+	}
 	if memoryProjection != nil {
 		final, err := newPreviewProjection(retainedMemorySources)
 		if err != nil {

@@ -88,6 +88,19 @@ int db1_session_ir_running_history_load(const char *session, const char *actor, 
    assert(!"this producer fixture does not request a native startup snapshot");
    return -1;
 }
+/* No private verifier exists in this ordinary session-log fixture. */
+int db1_session_ir_append_verified(const char *session, const char *event, const char *turn,
+                                   const char *actor, const char *payload, char sequence[32])
+{
+   (void)session;
+   (void)event;
+   (void)turn;
+   (void)actor;
+   (void)payload;
+   (void)sequence;
+   assert(!"unexpected verifier proof in ordinary session-log fixture");
+   return -1;
+}
 int db1_session_ir_append(const char *session, const char *id, const char *turn, const char *actor,
                           const char *wire, char sequence[32])
 {

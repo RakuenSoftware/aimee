@@ -16,6 +16,7 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "messages_compact_consecutive",
     "agent_store_feedback",
     "provider_cli_collect_child",
     "provider_cli_parse_output",
@@ -49,6 +50,7 @@ RETIRED = (
     "anthropic_stream_get_usage", "anthropic_stream_free", "emit_message_as_sse",
 )
 RULES = {
+    "unscoped-approach-prompt": re.compile(r"\bapproach_store_(?:retry_context|recall|render)\s*\("),
     "unqualified-learning-prompt": re.compile(r"\bdb1_delegate_learning_inject_prompt\s*\("),
     "retired-api": re.compile(r"\b(?:" + "|".join(RETIRED) + r")\b"),
     "driver-bypass": re.compile(r"->\s*(?:parse_response|build_request)\s*\("),
@@ -134,6 +136,15 @@ def findings(root: Path) -> list[dict]:
         history_spans = (profile_function_spans(source, {"message_history_repair"})
                          if relative == "src/server/agent_bridge.c" else [])
         for rule, pattern in RULES.items():
+            # Legacy storage/read-only administration is not prompt admission.
+            # The retry-context API may exist, but no production caller can use
+            # it; direct recall/render also cannot bypass canonical execution
+            # context in the automatic delegate assembly owner.
+            if rule == "unscoped-approach-prompt":
+                if relative in {"src/approach_store.c", "src/headers/approach_store.h"}:
+                    continue
+                if relative != "src/server/server_compute.c":
+                    pattern = re.compile(r"\bapproach_store_retry_context\s*\(")
             if rule == "unqualified-learning-prompt" and relative in {"src/db1_client/delegation.c", "src/db1_client/delegate_learning.h"}:
                 continue
             if rule == "post-render-profile" and relative != "src/server/agent_request_build.c":

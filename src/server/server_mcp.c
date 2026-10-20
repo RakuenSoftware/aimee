@@ -1936,15 +1936,13 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
 /* See mcp_git.h. The native agent surface's door into the git tools: one dispatch
  * path, so a delegate committing through git_commit gets byte-for-byte the same
  * chdir/worktree refusal, mutating-context guard, branch-ownership check and
- * attribution strip an external MCP client gets. ctx/conn are NULL-safe here
- * because every use of them sits behind the git_verify branch, which this refuses. */
+ * attribution strip an external MCP client gets. Without a server pool, configured
+ * verification uses its synchronous owner and the same session cancellation ledger. */
 cJSON *mcp_git_run_tool(const char *tool, cJSON *args, const char *sid)
 {
    if (!tool || !tool[0])
       return NULL;
-   if (strcmp(tool, "git_verify") == 0)
-      return NULL; /* needs the server ctx/conn; native agents use their own `verify` */
-   int known = 0;
+   int known = strcmp(tool, "git_verify") == 0;
    for (size_t i = 0; i < sizeof(git_tool_table) / sizeof(git_tool_table[0]); i++)
       if (strcmp(tool, git_tool_table[i].name) == 0)
       {

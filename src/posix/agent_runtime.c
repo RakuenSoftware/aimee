@@ -399,10 +399,6 @@ static void maybe_compact_before_request(const agent_t *agent, cJSON *messages,
                 "session compacted before request: %d→%d messages (%d removed, %d repairs)",
                 sc_result.messages_before, sc_result.messages_after, sc_result.messages_removed,
                 sc_result.repairs);
-   else
-   {
-      messages_compact_consecutive(messages);
-   }
 }
 
 static void track_anthropic_payload_rewrite(const delegate_driver_t *driver, const agent_t *agent,
@@ -1077,11 +1073,6 @@ native_provider_http:
                 * has just destroyed the messages they came from. */
                rtr_begin(&rtr, &sc_result);
             }
-            else
-            {
-               /* A failed compaction leaves the admitted source unchanged. */
-               messages_compact_consecutive(messages);
-            }
             /* fall through: continue with the compacted history */
          }
 
@@ -1126,7 +1117,6 @@ native_provider_http:
          snprintf(out->error, sizeof out->error, "canonical history is incomplete or invalid");
          break;
       }
-      messages_compact_consecutive(messages);
 
       maybe_compact_before_request(&fb_agent, messages, sys);
 

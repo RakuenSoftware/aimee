@@ -2095,9 +2095,9 @@
       "symbols": [
         "kb_client_memory_scope_context_apply"
       ],
-      "sha256": "d3f3a8a9d033f8119c7ebe3e2c25ca2cb754a8f74e3c066298414c045e68fb25",
+      "sha256": "7065ddb7af5d09f4d659bfc46498c5216f6bc8d710352b19103e86db37ea8c9c",
       "boundary_change": "The dispatcher now returns its existing execution/receipt owner failure classification alongside the owned text result. Canonical consumers use this flag for is_error, evidence and liveness instead of guessing from text. Receipt completion can mark an unconfirmed outcome as failed before effect completion/audit. The kb_client_memory_scope_context_apply host-context seam and its arguments are unchanged; no memory eligibility, recall or scope policy moves into tools. This records the source change, not independent reviewer approval. Native exec-envelope outcome classification is relocated into the existing tools effect-contract source to keep the dispatcher below the file limit; its signals and policy ownership are unchanged. Role/toolset/deny-list, shell and knowledge command admission are extracted into a typed tools API shared with isolated served MCP callbacks. Existing memory scope application and policy ownership are unchanged. This records boundary analysis, not independent approval. Canonical callers now transfer their exact admitted argument object through the same dispatcher; only legacy ingress uses cached-schema coercion. Classifier registration moves to the existing effect-contract owner. The memory scope application seam, its arguments, host identity and Go-owned memory policy are unchanged. This is source boundary analysis, not independent reviewer approval.",
-      "boundary_review": "2026-10-20 PR #3052: reviewed only selection of the registered-tool guardrail entry after actual MCP registry resolution. Reversing that call-site change reproduces the previously pinned source exactly. All memory transport, source admission and result handling remain unchanged."
+      "boundary_review": "2026-10-20 PR #3052: Native configured verification now requires shell authority except read-only check/status; permission code uses existing role/toolset gates. No memory lookup, native memory authority, or knowledge-write rule changed. This records source-boundary review, not independent production-promotion approval."
     },
     "src/rel_types.c": {
       "disposition": "storage-protocol",
@@ -2127,7 +2127,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "c61073b2e29e10f5174448fbb05173528b609b811bcdd3ec4e8836e5b6a194dc"
+      "sha256": "984367338618ade96e00a1b7b04a0aaf5bcc1f02b23180cc6b2b189881de3a5f",
+      "boundary_review": "2026-10-20 PR #3052: Host-attested actor/registered project load bounded server-local configured-test receipts via DB1. Existing Go source-release plan/result fence revalidates accepted receipts; canonical memory/KB owners, budgets and refusal paths remain intact. PostgreSQL and real Go ingress/fence fixtures cover revocation. This records source-boundary review, not independent production-promotion approval."
     },
     "src/server/memory_audit_bridge.h": {
       "disposition": "host-transport",
@@ -2160,8 +2161,8 @@
         "kb_client_memory_scope_context_clear",
         "server_module_memory_data"
       ],
-      "sha256": "f85ac466b71ab841956e574a45a75fad14f989ec76602b16a4a0e7cbd71f363b",
-      "boundary_review": "2026-10-20 PR #3052: Only handle_hooks_pre changed: a nested retained workspace scope supplies mirror policy/worktree probes and restores the enclosing binding. Active capability authorization does not trust request paths. Replacing just this function with its previous body reproduces the pinned source byte-for-byte; memory transport/policy bytes are unchanged. This is source-boundary analysis, not independent production approval. Memory-file interception is moved after the same source acquisition and receives the approved resource cwd; failed acquisition performs no memory write. Its deny path restores the enclosing lease and command cwd before returning. Memory policy and native intent remain with the existing owners."
+      "sha256": "2af126b7575a5401e8725eda8beb1ffb41f86a9e93805aa581aaf890faf54fcb",
+      "boundary_review": "2026-10-20 PR #3052: Registers the host verification owner before native catalogs are snapshotted. Existing memory hooks and ownership are untouched. This records source-boundary review, not independent production-promotion approval."
     },
     "src/server/server_api.c": {
       "disposition": "host-transport",
@@ -2219,8 +2220,9 @@
         "kb_client_memory_scope_context_set",
         "server_module_memory_data"
       ],
-      "sha256": "368bff12ef0d32963903b7b01bd06c7205f0f015f1c94addcc3747c847223f5c",
-      "boundary_change": "Isolated native callbacks apply the existing tools permission owner to the resolved callable before dispatch. Git family expansion moves before workflow externalization admission. Existing authenticated memory transport and scope owners are unchanged. This records boundary analysis, not independent approval. Native admission also delegates directive and execution-policy checks using the host callback identity; no memory eligibility policy or effect/human grant is added. Shared Git dispatch now restores its caller cwd/session/worktree context on every existing return and owns a copy of a potentially TLS-borrowed operation session. Review of this diff finds no changes to memory symbols, admission, transport or eligibility; this is source-boundary analysis, not independent release approval. Git now uses an independent nested workspace binding instead of changing/releasing the enclosing turn binding; its memory adapter symbols and paths remain unchanged. This is boundary analysis, not independent approval. The existing negative Git resolution return now frees its owned diagnostic before returning the same refusal. 2026-10-20: Git acquires the registered workspace scope before remapping its client path; failed acquisition cannot fall through, and a retained mirror cwd bypasses stale session routing. Replacing only dispatch_git_tool_inner with its previous body reproduces HEAD byte-for-byte. All memory adapter symbols, transport, admission and eligibility remain unchanged; this is boundary analysis, not independent release approval."
+      "sha256": "d2645f1bb70cac40cf297c6efdc708003a4453a7a457d9d1d613ac4cda464699",
+      "boundary_change": "Isolated native callbacks apply the existing tools permission owner to the resolved callable before dispatch. Git family expansion moves before workflow externalization admission. Existing authenticated memory transport and scope owners are unchanged. This records boundary analysis, not independent approval. Native admission also delegates directive and execution-policy checks using the host callback identity; no memory eligibility policy or effect/human grant is added. Shared Git dispatch now restores its caller cwd/session/worktree context on every existing return and owns a copy of a potentially TLS-borrowed operation session. Review of this diff finds no changes to memory symbols, admission, transport or eligibility; this is source-boundary analysis, not independent release approval. Git now uses an independent nested workspace binding instead of changing/releasing the enclosing turn binding; its memory adapter symbols and paths remain unchanged. This is boundary analysis, not independent approval. The existing negative Git resolution return now frees its owned diagnostic before returning the same refusal. 2026-10-20: Git acquires the registered workspace scope before remapping its client path; failed acquisition cannot fall through, and a retained mirror cwd bypasses stale session routing. Replacing only dispatch_git_tool_inner with its previous body reproduces HEAD byte-for-byte. All memory adapter symbols, transport, admission and eligibility remain unchanged; this is boundary analysis, not independent release approval.",
+      "boundary_review": "2026-10-20 PR #3052: Configured verification uses the same Git scope/session restoration dispatcher; native calls use its supported synchronous owner. Existing memory handlers and scope checks are unchanged. This records source-boundary review, not independent production-promotion approval."
     },
     "src/server/server_mcp_call_table.c": {
       "disposition": "host-transport",
@@ -2234,8 +2236,8 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "a4bcc5be95bd5e6e7841b8215681bf901cc9d255f01eea738da3de37cf5bfb45",
-      "boundary_review": "2026-10-20 PR #3052: Reviewed only native delegate/status wrappers, registration and documentation. Existing memory handlers, scope application and recall transport are unchanged. Reversing this diff reproduces the previously pinned source exactly."
+      "sha256": "f3b69f282f44a2385161905df39f431c0c0a16165ca4a5af0dbc48d35f440dc2",
+      "boundary_review": "2026-10-20 PR #3052: Adds only the native configured Git verifier wrapper/registration, deriving its schema from the existing MCP catalog. Existing memory handlers and authorization/source policy are unchanged. This records source-boundary review, not independent production-promotion approval."
     },
     "src/server/server_memory.c": {
       "disposition": "host-transport",
@@ -2376,7 +2378,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "97e13d8a470a61c9c6e08895842f903ca8db3d4888cd84613bfed8020c760705"
+      "sha256": "ce51955756889cef8b49b29e0e4d748b07b9af86b27d314447ce6655fb309975",
+      "boundary_review": "2026-10-20 PR #3052: Adds explicit DB1 historical-receipt fixture and real Go assembly/source-revalidation checks. Retains existing memory assertions; no production authority is implemented by the stub. This records source-boundary review, not independent production-promotion approval."
     },
     "src/tests/test_ir_module_plan.c": {
       "disposition": "host-fixture",
@@ -2387,8 +2390,9 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "673df4dee914a7cd72f21bbbbb0d6877bac1b4955870e73f92932ce9b7b925ae",
-      "boundary_change": "Canonical gateway_policy view and descending catalog paths; the fixture calls the real Go memory owner for namespace policy. C retains host schema data and validates/applies the returned patch; no C memory or shell-selection policy is introduced."
+      "sha256": "ca2c667810eca2d2aae6ee3e933770d51e767c8856be5493719c20e5c6b84ee2",
+      "boundary_change": "Canonical gateway_policy view and descending catalog paths; the fixture calls the real Go memory owner for namespace policy. C retains host schema data and validates/applies the returned patch; no C memory or shell-selection policy is introduced.",
+      "boundary_review": "2026-10-20 PR #3052: Adds only a null historical-receipt DB1 stub for an ordinary nonverification IR plan. Existing source/typed memory assertions remain unchanged. This records source-boundary review, not independent production-promotion approval."
     },
     "src/tests/test_kb.c": {
       "disposition": "host-fixture",
@@ -2739,7 +2743,7 @@
     },
     "src/modules/tools/tool_catalog_data.h": {
       "disposition": "tool-policy-catalog",
-      "boundary_review": "PR #3050: explicit generated tool-policy data, with no memory authority or native memory implementation. Input/output hashes require review on changes; this is not independent production-promotion approval.",
+      "boundary_review": "PR #3052: generated output/input differ only by git_verify classified as execution/write, with matching Go parity and native shell-permission tests. No memory symbol, ownership disposition or policy changed. This is not independent production-promotion approval.",
       "symbols": [
         "memory_alerts",
         "memory_briefing",
@@ -2748,10 +2752,10 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "3418a9e7780280e3d71de21f2e2fb691541e45922b2452a775c10d951d4fa402",
+      "sha256": "5f54f30f47136fb387223f12a2258681e1d5c2f380b7b7a559cde7a8a3a6a9f3",
       "inputs": {
         "scripts/generate-tool-catalog.py": "3fc845b7d8370b25d9c7461c493a56cd4e5d51351a7055b8d2ab4e252bec3066",
-        "server-go/modules/tools/catalog.json": "ef4d0dc9919e29e52bf4e8465bce46260f2e2e72e8c71d337f2c306c1d88ca86"
+        "server-go/modules/tools/catalog.json": "2653908db6c9bed10232f5d1533b5b308d1cc39783949227bc885a7001190433"
       }
     }
   },

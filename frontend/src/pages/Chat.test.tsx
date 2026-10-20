@@ -80,6 +80,8 @@ beforeEach(() => {
   });
   Element.prototype.scrollIntoView = vi.fn();
   fetchMock = vi.fn(async (url: string) => {
+    if (url.startsWith('/api/chat/primary?')) return new Response(JSON.stringify({ agent: '' }));
+    if (url.startsWith('/api/chat/persona?')) return new Response(JSON.stringify({ name: 'engineer' }));
     if (url === '/api/chat/send') {
       return new Response(new ReadableStream<Uint8Array>({ start(c) { stream = c; } }), {
         headers: { 'Content-Type': 'text/event-stream' },
@@ -114,6 +116,117 @@ describe('canonical browser chat', () => {
     });
     expect(screen.getAllByText('Live channel message')).toHaveLength(1);
     expect(screen.getAllByText('Saved channel message')).toHaveLength(1);
+  });
+
+  it('hides unsupported branching instead of offering a mutation that always fails', async () => {
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    expect(screen.queryByRole('button', { name: 'Branch', exact: true })).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/chat/branch')).toBe(false);
+  });
+
+  it('shows a refused branch action if an advertised capability becomes unavailable', async () => {
+    const ordinaryFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/chat/threads') return Promise.resolve(new Response(JSON.stringify({ capabilities: { branching: true } })));
+      if (url === '/api/chat/branch') return Promise.resolve(new Response(JSON.stringify({ error: 'Conversation branching is unavailable' }), { status: 501 }));
+      return ordinaryFetch(url, init);
+    });
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: 'Branch', exact: true }));
+    await act(async () => {});
+    expect(screen.getByRole('alert').textContent).toBe('Conversation branching is unavailable');
+  });
+
+  it('labels an unavailable model lookup instead of displaying the default as a known pin', async () => {
+    const ordinaryFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/models') return Promise.resolve(new Response(JSON.stringify({ models: [{ name: 'default-model' }], default_agent: 'default-model' })));
+      if (url.startsWith('/api/chat/primary?')) return Promise.resolve(new Response('{}', { status: 503 }));
+      return ordinaryFetch(url, init);
+    });
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const selector = screen.getByRole('combobox', { name: 'Agent' }) as HTMLSelectElement;
+    expect(selector.value).toBe('');
+    expect(selector.selectedOptions[0].textContent).toBe('Agent unavailable');
+    expect(screen.getByRole('alert').textContent).toContain('Current selection is unavailable');
+  });
+
+  it('derives idle, running and terminal composer state from the canonical execution log', async () => {
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+    const running = envelope({ kind: 'execution', payload: { status: 'running' } });
+    await act(async () => { source.emit(running); });
+    await tick();
+    expect(screen.getByRole('button', { name: 'Send', exact: true })).toBeTruthy();
+    await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '1' }) }); });
+    expect(screen.getByRole('button', { name: 'Steer', exact: true })).toBeTruthy();
+    expect(screen.getByPlaceholderText('Steer the running turn…')).toBeTruthy();
+    await act(async () => { source.emit(running); });
+    await tick();
+    expect(screen.getByRole('button', { name: 'Steer', exact: true })).toBeTruthy();
+    await act(async () => { source.emit(envelope({ kind: 'execution', payload: { status: 'completed' } })); });
+    await tick();
+    expect(screen.getByRole('button', { name: 'Send', exact: true })).toBeTruthy();
+    expect(screen.getByPlaceholderText(/^Type a message/)).toBeTruthy();
+  });
+
+  it('waits for the selected model to be saved before sending the retained draft', async () => {
+    const ordinaryFetch = fetchMock.getMockImplementation()!;
+    let save!: (response: Response) => void;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/models') return Promise.resolve(new Response(JSON.stringify({ models: [{ name: 'old' }, { name: 'new' }], default_agent: 'old' })));
+      if (url.startsWith('/api/chat/primary?')) return Promise.resolve(new Response(JSON.stringify({ agent: 'old' })));
+      if (url === '/api/chat/primary' && init?.method === 'POST') return new Promise(resolve => { save = resolve; });
+      return ordinaryFetch(url, init);
+    });
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    fireEvent.change(screen.getByRole('combobox', { name: 'Agent' }), { target: { value: 'new' } });
+    await act(async () => {});
+    const input = screen.getByPlaceholderText(/^Type a message/);
+    fireEvent.change(input, { target: { value: 'Use the selected model' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    expect(input).toHaveProperty('value', 'Use the selected model');
+    await act(async () => { save(new Response('{}')); });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(1);
+    await close();
+  });
+
+  it('withdraws controls after a malformed live frame and ignores queued frames from the closed stream', async () => {
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const source = sources.filter(source => !source.closed).at(-1)!;
+    await act(async () => { source.emit(envelope({ kind: 'control_request', request_id: 'request', control_kind: 'permission', payload: {} })); });
+    await tick();
+    await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '1' }) }); });
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeTruthy();
+    await act(async () => { source.emit({ version: 1, session_id: 'foreign', sequence: '2' }); });
+    expect(source.closed).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull();
+    await act(async () => {
+      source.emit(envelope(message('late', 'Closed stream content')));
+      source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '1' }) });
+    });
+    await tick();
+    expect(screen.queryByText('Closed stream content')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull();
+    expect(screen.getByText('Invalid canonical session envelope')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect conversation' }));
+    await tick();
+    const recovered = sources.filter(candidate => !candidate.closed).at(-1)!;
+    expect(recovered).not.toBe(source);
+    expect(recovered.url).toContain('cursor=1');
+    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull();
+    await act(async () => { recovered.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '1' }) }); });
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Reconnect conversation' })).toBeNull();
   });
 
   it('waits for replay before offering controls and does not retrigger replies on duplicate delivery', async () => {

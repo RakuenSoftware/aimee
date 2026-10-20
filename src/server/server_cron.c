@@ -222,7 +222,9 @@ static int cron_run_llm_prompt(const char *prompt, char **out, char *err, size_t
       agent_result_clear_response(&result);
       return -1;
    }
-   *out = result.response ? result.response : strdup("");
+   *out = agent_result_take_text(&result);
+   if (!*out)
+      *out = strdup("");
    return 0;
 }
 

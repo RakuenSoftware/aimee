@@ -230,8 +230,86 @@ static void test_response_snapshot(void)
    assert(aimee_ir_response_clone(&invalid, &copy) < 0 && !strcmp(copy.id, "source"));
    aimee_response_free(&copy);
 }
+static cJSON *verification_fixture(void)
+{
+   cJSON *proof = cJSON_CreateObject();
+   char digest[65];
+   memset(digest, 'a', 64);
+   digest[64] = 0;
+   const char *fields[] = {"session_id", "turn_id", "actor", "scope_id"};
+   for (size_t i = 0; i < sizeof fields / sizeof *fields; ++i)
+      cJSON_AddStringToObject(proof, fields[i], "fixture");
+   cJSON_AddNumberToObject(proof, "version", 1);
+   cJSON_AddStringToObject(proof, "scope_kind", "project");
+   cJSON_AddStringToObject(proof, "isolation", "private_source_snapshot");
+   cJSON_AddStringToObject(proof, "observed_at", "2026-10-20T12:00:00Z");
+   cJSON_AddBoolToObject(proof, "completed", 1);
+   const char *hashes[] = {"snapshot_commit", "final_commit",         "snapshot_tree",
+                           "final_tree",      "configuration_sha256", "final_configuration_sha256",
+                           "profile_sha256"};
+   for (size_t i = 0; i < sizeof hashes / sizeof *hashes; ++i)
+      cJSON_AddStringToObject(proof, hashes[i], digest);
+   digest[32] = 0;
+   cJSON_AddStringToObject(proof, "snapshot_id", digest);
+   digest[32] = 'a';
+   cJSON *step = cJSON_CreateObject();
+   cJSON_AddStringToObject(step, "name", "unit");
+   cJSON_AddStringToObject(step, "command_sha256", digest);
+   cJSON_AddBoolToObject(step, "ran", 1);
+   cJSON_AddBoolToObject(step, "skipped", 0);
+   cJSON_AddStringToObject(step, "termination", "exited");
+   cJSON_AddStringToObject(step, "exit_code", "0");
+   cJSON_AddItemToArray(cJSON_AddArrayToObject(proof, "steps"), step);
+   return proof;
+}
+static void test_verification_proofs(void)
+{
+   cJSON *proof = verification_fixture();
+   assert(aimee_ir_verification_proof_valid(proof));
+   cJSON *proofs = cJSON_CreateArray();
+   cJSON_AddItemToArray(proofs, proof);
+   aimee_session_event_t event = {.kind = AIMEE_SESSION_EXECUTION,
+                                  .execution_status = "completed",
+                                  .verification_proofs = proofs};
+   cJSON *json = aimee_ir_session_event_json(&event);
+   assert(json);
+   assert(
+       cJSON_Compare(proofs,
+                     cJSON_GetObjectItemCaseSensitive(
+                         cJSON_GetObjectItemCaseSensitive(json, "payload"), "verification_proofs"),
+                     1));
+   cJSON_Delete(json);
+   const char *statuses[] = {"running", "failed", "cancelled"};
+   for (size_t i = 0; i < sizeof statuses / sizeof *statuses; ++i)
+   {
+      event.execution_status = statuses[i];
+      assert(!aimee_ir_session_event_json(&event));
+   }
+   event.execution_status = "completed";
+   cJSON *step = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(proof, "steps"), 0);
+   cJSON_ReplaceItemInObjectCaseSensitive(step, "exit_code", cJSON_CreateString("00"));
+   assert(!aimee_ir_verification_proof_valid(proof));
+   assert(!aimee_ir_session_event_json(&event));
+   cJSON_ReplaceItemInObjectCaseSensitive(step, "exit_code", cJSON_CreateString("1"));
+   assert(aimee_ir_verification_proof_valid(proof));
+   cJSON_AddStringToObject(proof, "prompt", "not metadata");
+   assert(!aimee_ir_verification_proof_valid(proof));
+   cJSON_DeleteItemFromObjectCaseSensitive(proof, "prompt");
+   cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(proof, "steps"), cJSON_Duplicate(step, 1));
+   assert(!aimee_ir_verification_proof_valid(proof));
+   cJSON_Delete(proofs);
+   proofs = cJSON_CreateArray();
+   event.verification_proofs = proofs;
+   assert(!aimee_ir_session_event_json(&event));
+   for (int i = 0; i < 9; ++i)
+      cJSON_AddItemToArray(proofs, verification_fixture());
+   assert(!aimee_ir_session_event_json(&event));
+   cJSON_Delete(proofs);
+}
+
 int main(void)
 {
+   test_verification_proofs();
    test_response_snapshot();
    test_owned_delta_assembly();
    test_opaque_delta_metadata();

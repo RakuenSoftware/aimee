@@ -57,11 +57,8 @@ func executionObservation(record ExecutionRecord, caller bus.CommandContext) (Ex
 		return empty, false
 	}
 	var event struct {
-		Kind    string `json:"kind"`
-		Payload struct {
-			Status string `json:"status"`
-			Error  string `json:"error,omitempty"`
-		} `json:"payload"`
+		Kind    string                     `json:"kind"`
+		Payload canonical.ExecutionPayload `json:"payload"`
 	}
 	if !canonical.Decode(record.Event, &event) || event.Kind != "execution" || (event.Payload.Status != "completed" && event.Payload.Status != "failed" && event.Payload.Status != "cancelled") {
 		return empty, false
@@ -81,7 +78,13 @@ func handleExecution(invocation bus.ModuleInvocation, raw []byte) ([]byte, bus.M
 	}
 	verb, args, caller, err := bus.DecodeCommandWithContext(raw)
 	var record ExecutionRecord
-	if err != nil || verb != "observe" || caller == nil || !canonical.Decode(args, &record) {
+	if err != nil || caller == nil {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if verb == "grade" {
+		return handleExecutionTestGrade(args, *caller)
+	}
+	if verb != "observe" || !canonical.Decode(args, &record) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	observation, ok := executionObservation(record, *caller)

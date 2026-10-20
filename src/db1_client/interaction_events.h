@@ -38,6 +38,12 @@ extern "C"
    int db1_interaction_event_record(const char *session_id, const char *type_name,
                                     const char *actor, const char *payload_json,
                                     const char *outcome);
+   /* Host-only immutable Learning result, checked against its durable terminal.
+    * Generic interaction recording cannot publish a test grade. */
+   int db1_execution_test_grade_record(const char *principal, const char *grade_json);
+   /* Caller frees the complete bounded JSON; NULL means unavailable. */
+   char *db1_execution_test_grade_recall(const char *principal, const char *project,
+                                         const char *sources_json);
 
    int db1_interaction_event_list_unreflected(const char *session_id, ie_event_row_t *out, int max);
    int db1_interaction_event_list_for_session(const char *session_id, ie_event_row_t *out, int max);

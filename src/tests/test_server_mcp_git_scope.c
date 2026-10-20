@@ -135,9 +135,8 @@ cJSON *handle_git_verify(server_ctx_t *ctx, cJSON *args, const char *session)
 {
    (void)ctx;
    (void)args;
-   (void)session;
-   assert(!"native Git verify is not dispatched");
-   return NULL;
+   assert(session && !strcmp(session, operation_sid));
+   return git_handler();
 }
 int main(void)
 {
@@ -201,6 +200,20 @@ int main(void)
          cJSON_Delete(response);
          cJSON_Delete(args);
       }
+   mirror_case = 0;
+   source_result = 0;
+   resolution = 1;
+   mismatch = calls = 0;
+   snprintf(operation_sid, sizeof operation_sid, "%s", "verify-session");
+   run_cmd_set_cwd("/outer/source");
+   session_id_set_override("outer-session");
+   cJSON *verify_args = cJSON_CreateObject();
+   cJSON_AddStringToObject(verify_args, "path", "/client/source");
+   cJSON *verified = mcp_git_run_tool("git_verify", verify_args, operation_sid);
+   assert(verified && calls == 1 && !live_workspace_scopes);
+   assert(!strcmp(run_cmd_get_cwd(), "/outer/source") && !strcmp(session_id(), "outer-session"));
+   cJSON_Delete(verified);
+   cJSON_Delete(verify_args);
    puts("shared Git dispatcher: caller cwd, session and worktree restored on success and refusals");
    return 0;
 }

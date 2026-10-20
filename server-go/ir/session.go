@@ -241,11 +241,23 @@ func ValidSessionEvent(encoded []byte) bool {
 			(child.Status == "running" || child.Status == "completed" || child.Status == "failed" || child.Status == "cancelled")
 	case "execution":
 		var x struct {
-			Status string `json:"status"`
-			Error  string `json:"error,omitempty"`
+			Status             string          `json:"status"`
+			Error              string          `json:"error,omitempty"`
+			VerificationProofs json.RawMessage `json:"verification_proofs,omitempty"`
 		}
 		if !Decode(e.Payload, &x) {
 			return false
+		}
+		if x.VerificationProofs != nil {
+			var proofs []json.RawMessage
+			if x.Status != "completed" || !Decode(x.VerificationProofs, &proofs) || len(proofs) < 1 || len(proofs) > 8 {
+				return false
+			}
+			for _, proof := range proofs {
+				if !ValidVerificationProof(proof) {
+					return false
+				}
+			}
 		}
 		return x.Status == "running" || x.Status == "completed" || x.Status == "failed" || x.Status == "cancelled"
 	default:

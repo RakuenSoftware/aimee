@@ -34,6 +34,11 @@ extern "C"
     * immutable field matches. Page returns owned canonical envelope-array JSON. */
    int db1_session_ir_append(const char *session_id, const char *event_id, const char *turn_id,
                              const char *actor, const char *payload, char out_sequence[32]);
+   /* Private host append for a completed terminal carrying source-bound
+    * verification proofs. Ordinary append rejects proof-bearing events. */
+   int db1_session_ir_append_verified(const char *session_id, const char *event_id,
+                                      const char *turn_id, const char *actor, const char *payload,
+                                      char out_sequence[32]);
    char *db1_session_ir_page(const char *session_id, const char *after, int limit,
                              const char *principal);
 

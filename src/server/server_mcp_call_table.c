@@ -73,6 +73,19 @@ static cJSON *mcph_kb_last_result(const char *message)
 
 /* ── thin wrappers: uniform signature over the existing tool_* helpers ─────── */
 
+static cJSON *mcph_git_verify(struct mcp_call *c)
+{
+   cJSON *args = cJSON_Duplicate(c->jargs, 1);
+   if (!args)
+      return text_content("error: cannot retain verification arguments");
+   const char *cwd = run_cmd_get_cwd();
+   if (!cJSON_GetObjectItemCaseSensitive(args, "path") &&
+       !cJSON_GetObjectItemCaseSensitive(args, "cwd") && cwd && cwd[0])
+      cJSON_AddStringToObject(args, "path", cwd);
+   cJSON *result = mcp_git_run_tool("git_verify", args, c->sid);
+   cJSON_Delete(args);
+   return result;
+}
 static cJSON *mcph_get_help(struct mcp_call *c)
 {
    return tool_get_help(c->jargs);
@@ -2159,6 +2172,7 @@ static const struct
     {"delegate", mcph_delegate_native, "primary"},
     {"delegate_status", mcph_delegate_native, "primary"},
     {"get_help", mcph_get_help, NULL},
+    {"git_verify", mcph_git_verify, "core"},
     {"ast_grep_search", mcph_ast_grep_search, "core,review_indexed"},
     {"search_memory", mcph_search_memory, NULL},
     {"mutate", mcph_mutate, NULL},

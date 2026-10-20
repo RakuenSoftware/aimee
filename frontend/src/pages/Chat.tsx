@@ -1,6 +1,7 @@
 import { parseJSON, stringifyJSON } from '../ir/json';
 import './chat.css';
 import { mergeChannelMessages, type ChannelMessage } from './chat/channelMessages';
+import { useSessionPreference } from './chat/useSessionPreference';
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import { AutoGrowTextarea, Button, Drawer, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
@@ -1308,6 +1309,7 @@ export default function Chat() {
   const [, setIRRevision] = useState(0);
   const [irTransportErrors, setIRTransportErrors] = useState<Record<string, string>>({});
   const [irReady, setIRReady] = useState<Record<string, boolean>>({});
+  const [irReconnect, setIRReconnect] = useState(0);
   function ingestIR(owner: string, raw: Record<string, unknown>) {
     if (raw.status === 'error') throw new Error(String(raw.message || 'Session capture failed'));
     const envelope = raw as unknown as Envelope;
@@ -1342,13 +1344,6 @@ export default function Chat() {
   const working = !!activeWork && (activeWork.pending > 0 || activeWork.queued > 0);
   const iterCur = activeWork?.iterCur ?? 0;
   const iterMax = activeWork?.iterMax ?? 0;
-  // True while a turn is in flight on this tab's session driven by *another*
-  // surface (CLI/TUI, another tab). Fed by the presence-event stream; shown only
-  // when this tab isn't itself working (see render).
-  const [remoteTurnActive, setRemoteTurnActive] = useState(false);
-  // Live text of the other surface's in-flight turn, accumulated from
-  // turn_delta events (emitted by the server when >1 surface shares a session).
-  const [remoteTurnText, setRemoteTurnText] = useState('');
   const [inputText, setInputText] = useState('');
   const [banner, setBanner] = useState<{ stacks: BootstrapStack[] } | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -1425,13 +1420,11 @@ export default function Chat() {
   const [availableSkills, setAvailableSkills] = useState<string[]>([]);
   const [activeSkill, setActiveSkill] = useState<string>('');
   const [availablePersonas, setAvailablePersonas] = useState<PersonaInfo[]>([]);
-  const [activePersona, setActivePersona] = useState<string>('');
   /* The agent serving this tab's turns. `activeAgent` is the SESSION PIN (empty
    * = not pinned); `defaultAgent` is what an unpinned turn actually lands on,
    * reported by /api/models (server-side agent_default_primary). The selector
    * shows the pin when there is one, else the default, so it always names the
    * agent you are really talking to. */
-  const [activeAgent, setActiveAgent] = useState<string>('');
   const [defaultAgent, setDefaultAgent] = useState<string>('');
   const [lspDiag, setLspDiag] = useState<{ errors: number; warnings: number; active_servers: number } | null>(null);
   const [workflowInfo, setWorkflowInfo] = useState<WorkflowSessionInfo | null>(null);
@@ -1443,6 +1436,8 @@ export default function Chat() {
   const [pluginsLoading, setPluginsLoading] = useState(false);
   const [pluginsError, setPluginsError] = useState<string | null>(null);
   const [agents, setAgents] = useState<ModelInfo[]>([]);
+  const [branchingSupported, setBranchingSupported] = useState(false);
+  const [threadError, setThreadError] = useState('');
 
   /* Channel state */
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
@@ -1480,9 +1475,6 @@ export default function Chat() {
   }
   const tabsRef = useRef<TabData[]>(tabs);
   const activeIdxRef = useRef(activeIdx);
-  // Live mirror of remoteTurnActive so sendMessage can synchronously tell whether
-  // a server/foreign turn (e.g. a steer auto-continue) is in flight for the tab.
-  const remoteTurnActiveRef = useRef(false);
   // Holds the aimeeSid we just sent a steer for (chat.interrupt). The next
   // turn_started on THAT session's events stream is the server-initiated
   // continuation — render it even though this surface may still look "working"
@@ -1515,6 +1507,10 @@ export default function Chat() {
   const renderedSidRef = useRef<string>('');
   const queueActive = working;
   const activePersonaSid = tabs[activeIdx]?.aimeeSid ?? '';
+  const persona = useSessionPreference(activePersonaSid, '/api/chat/persona', 'name');
+  const primary = useSessionPreference(activePersonaSid, '/api/chat/primary', 'agent');
+  const activePersona = persona.value;
+  const activeAgent = primary.value;
 
   /* Auto-scroll. Instant, not smooth: this runs ~10×/s during a stream, and a
    * smooth scrollIntoView restarts an animated scroll on every call — the
@@ -1616,7 +1612,10 @@ export default function Chat() {
             !/^(0|[1-9][0-9]*)$/.test(ready.cursor) || BigInt(ready.cursor) > BigInt(cursor))
           throw new Error('Invalid conversation replay boundary');
         setIRReady(prev => prev[activeAimeeSid] ? prev : { ...prev, [activeAimeeSid]: true });
+        setIRTransportErrors(prev => prev[activeAimeeSid] ? { ...prev, [activeAimeeSid]: '' } : prev);
       } catch (error) {
+        disposed = true;
+        setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
         setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: error instanceof Error ? error.message : 'Session replay failed' }));
         es.close();
       }
@@ -1627,13 +1626,18 @@ export default function Chat() {
         ingestIR(activeAimeeSid, parseJSON(event.data) as Record<string, unknown>);
         setIRTransportErrors(prev => prev[activeAimeeSid] ? { ...prev, [activeAimeeSid]: '' } : prev);
       } catch (error) {
+        disposed = true;
+        setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
         setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: error instanceof Error ? error.message : 'Session replay failed' }));
         es.close();
       }
     });
     return () => { disposed = true; es.close(); if (presenceSseRef.current === es) presenceSseRef.current = null; };
-  }, [activeAimeeSid]);
+  }, [activeAimeeSid, irReconnect]);
   const canonicalState = irSessions.current[activeAimeeSid];
+  // Execution activity is a canonical projection, not separately copied UI state.
+  // Keeping a second state/effect pair can lag a replayed running turn.
+  const remoteTurnActive = !!irReady[activeAimeeSid] && !!canonicalState?.activeTurns.length;
   const hiddenCount = canonicalState?.messages.length
     ? Math.max(0, canonicalState.messages.length - visibleCount) : hiddenLegacyCount;
   const submittedControls = useRef(new Set<string>());
@@ -1663,10 +1667,6 @@ export default function Chat() {
   const usage = canonicalState?.messages.slice().reverse().find(m => m.usage)?.usage;
   const lastUsage = usage ? { in: usage.input, out: usage.output, cost: 0 } : null;
   useEffect(() => {
-    const running = !!irReady[activeAimeeSid] && !!canonicalState?.activeTurns.length;
-    remoteTurnActiveRef.current = running;
-    setRemoteTurnActive(running);
-    setRemoteTurnText('');
     scrollToBottom();
   }, [canonicalState, irReady, activeAimeeSid, scrollToBottom]);
   useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
@@ -1793,20 +1793,6 @@ export default function Chat() {
       .catch(() => {});
   }, []);
 
-  /* Reflect the active tab's current persona (per-session, else durable default).
-     A tab that has not sent its first message yet has NO aimee session id — it
-     used to be left blank here, so the <select> fell back to whatever option
-     happened to be first rather than the persona the turn would actually use.
-     Ask without a sid in that case: the server answers with the durable default,
-     which is engineer unless the operator changed it. */
-  useEffect(() => {
-    const q = activePersonaSid ? `?sid=${encodeURIComponent(activePersonaSid)}` : '';
-    fetch(`/api/chat/persona${q}`)
-      .then(r => r.json())
-      .then((d: { name?: string }) => setActivePersona(d.name ?? ''))
-      .catch(() => {});
-  }, [activePersonaSid]);
-
   const refreshPlugins = useCallback(async () => {
     setPluginsLoading(true);
     try {
@@ -1838,6 +1824,16 @@ export default function Chat() {
     if (pluginsOpen) void refreshPlugins();
   }, [pluginsOpen, refreshPlugins]);
 
+  // Unsupported controls stay hidden until the backend advertises their capability.
+  useEffect(() => {
+    let disposed = false;
+    void fetch('/api/chat/threads').then(response => response.ok ? response.json() : {})
+      .then((body: { capabilities?: { branching?: boolean } }) => {
+        if (!disposed) setBranchingSupported(body.capabilities?.branching === true);
+      }).catch(() => {});
+    return () => { disposed = true; };
+  }, []);
+
   /* Fetch channel list on mount */
   useEffect(() => {
     fetch('/api/channels')
@@ -1855,15 +1851,6 @@ export default function Chat() {
       })
       .catch(() => {});
   }, []);
-
-  /* Reflect this tab's pinned agent (empty = following the configured default) */
-  useEffect(() => {
-    if (!activePersonaSid) { setActiveAgent(''); return; }
-    fetch(`/api/chat/primary?sid=${encodeURIComponent(activePersonaSid)}`)
-      .then(r => r.json())
-      .then((d: { agent?: string }) => setActiveAgent(d.agent ?? ''))
-      .catch(() => {});
-  }, [activePersonaSid]);
 
   useEffect(() => {
     fetch('/api/metrics')
@@ -1965,41 +1952,6 @@ export default function Chat() {
       });
       setActiveSkill(skill);
     } catch { /* ignore */ }
-  }
-
-  /* Set the active tab's persona server-side. It is sticky per session, so the
-     chat system prompt and delegate policy both follow it. */
-  async function changePersona(name: string) {
-    const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid;
-    if (!sid || !name) return;
-    const prev = activePersona;
-    setActivePersona(name);
-    try {
-      const resp = await fetch('/api/chat/persona', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-        body: JSON.stringify({ sid, name }),
-      });
-      if (!resp.ok) setActivePersona(prev);
-    } catch { setActivePersona(prev); }
-  }
-
-  /* Pin the agent that serves this tab's turns. Per session (like the persona),
-     so other tabs and the durable config are untouched; it takes effect on the
-     next turn (chat_stream_worker reads the pin before cfg.provider). */
-  async function changeAgent(name: string) {
-    const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid;
-    if (!sid || !name) return;
-    const prev = activeAgent;
-    setActiveAgent(name);
-    try {
-      const resp = await fetch('/api/chat/primary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-        body: JSON.stringify({ sid, agent: name }),
-      });
-      if (!resp.ok) setActiveAgent(prev);
-    } catch { setActiveAgent(prev); }
   }
 
   async function togglePlugin(name: string) {
@@ -2262,6 +2214,7 @@ export default function Chat() {
 
   /* Thread operations */
   async function branchThread() {
+    setThreadError('');
     try {
       const label = `branch-${(tabs[activeIdx]?.threads?.length ?? 0) + 1}`;
       const r = await fetch('/api/chat/branch', {
@@ -2269,11 +2222,12 @@ export default function Chat() {
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
         body: JSON.stringify({ label }),
       });
-      const d = await r.json() as { ok?: boolean; thread_id?: number };
+      const d = await r.json() as { ok?: boolean; thread_id?: number; error?: string };
+      if (!r.ok || !d.ok) throw new Error(d.error || 'Could not branch conversation');
       if (d.ok) {
         await refreshThreads();
       }
-    } catch { /* ignore */ }
+    } catch (error) { setThreadError(error instanceof Error ? error.message : 'Could not branch conversation'); }
   }
 
   async function switchThread(threadId: number) {
@@ -2363,7 +2317,7 @@ export default function Chat() {
   /* Send message */
   async function sendMessage() {
     const text = inputText.trim();
-    if (!text) return;
+    if (!text || primary.pending || persona.pending) return;
 
     setInputText('');
     // AutoGrowTextarea reflows its own height when inputText clears.
@@ -2375,7 +2329,7 @@ export default function Chat() {
     const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid ?? '';
     let clientInflight = false;
     activeSendAbortRefs.current.forEach(s => { if (s === sid) clientInflight = true; });
-    if (sid && (clientInflight || remoteTurnActiveRef.current)) {
+    if (sid && (clientInflight || (!!irReady[sid] && !!irSessions.current[sid]?.activeTurns.length))) {
       // Optimistically show the steer in the transcript and re-stick to bottom.
       atBottomRef.current = true;
       // The admitted user message arrives through the canonical session log.
@@ -2719,12 +2673,13 @@ export default function Chat() {
       </div>
 
       {/* Thread bar (conversation branching) */}
-      <ThreadBar
+      {branchingSupported && <ThreadBar
         threads={tabs[activeIdx]?.threads ?? []}
         activeThreadId={tabs[activeIdx]?.activeThreadId ?? 0}
         onSwitch={switchThread}
         onBranch={branchThread}
-      />
+      />}
+      {threadError && <p role="alert">{threadError}</p>}
 
       {/* Main content area: channel sidebar + chat + optional rules panel */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
@@ -2795,7 +2750,14 @@ export default function Chat() {
         {canonicalState && (canonicalState.messages.length > 0 || Object.keys(canonicalState.children ?? {}).length > 0 || Object.keys(canonicalState.controls).length > 0) ? <>
           <IRTranscript state={canonicalState} onReply={replyControl} controlsReady={!!irReady[activeAimeeSid]} messageLimit={visibleCount} pendingReplies={pendingReplies[activeAimeeSid]} /></> :
           <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />}
-        {irTransportErrors[activeAimeeSid] && <div role="alert">{irTransportErrors[activeAimeeSid]}</div>}
+        {irTransportErrors[activeAimeeSid] ? <div role="alert">
+          {irTransportErrors[activeAimeeSid]}{' '}
+          <button type="button" onClick={() => {
+            irPending.current[activeAimeeSid] = new Map();
+            setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+            setIRReconnect(value => value + 1);
+          }}>Reconnect conversation</button>
+        </div> : !irReady[activeAimeeSid] && <p role="status">Synchronizing conversation…</p>}
         {working && <div style={{ alignSelf: 'flex-start' }}><TypingIndicator /></div>}
         {remoteTurnActive && !working && (
           <div style={{
@@ -2804,14 +2766,7 @@ export default function Chat() {
             borderRadius: '10px', color: tokens.textFaint, fontSize: '11px', fontFamily: 'system-ui',
           }}>
             <div>● aimee is active on another surface…</div>
-            {remoteTurnText && (
-              <div style={{
-                marginTop: '4px', color: tokens.textSecondary, whiteSpace: 'pre-wrap',
-                maxHeight: '8em', overflowY: 'auto', fontSize: '12px',
-              }}>
-                {remoteTurnText}
-              </div>
-            )}
+
           </div>
         )}
         {iterCur > 0 && (
@@ -2922,8 +2877,9 @@ export default function Chat() {
               Agent:
             </span>
             <select
-              value={activeAgent || defaultAgent}
-              onChange={e => changeAgent(e.target.value)}
+              value={primary.known ? activeAgent || defaultAgent : ''}
+              onChange={e => primary.change(e.target.value)}
+              aria-label="Agent" aria-busy={primary.pending}
               title={activeAgent
                 ? 'The agent serving this tab (pinned for this session)'
                 : `Following the configured primary${defaultAgent ? ` (${defaultAgent})` : ''} — pick one to pin it for this session`}
@@ -2938,6 +2894,7 @@ export default function Chat() {
                 outline: 'none',
               }}
             >
+              {!primary.known && <option value="" disabled>{primary.error ? 'Agent unavailable' : 'Loading agent…'}</option>}
               {agents.map(a => (
                 <option key={a.name} value={a.name}>
                   {a.name}{a.name === defaultAgent ? ' (primary)' : ''}
@@ -2953,8 +2910,9 @@ export default function Chat() {
               Persona:
             </span>
             <select
-              value={activePersona}
-              onChange={e => changePersona(e.target.value)}
+              value={persona.known ? activePersona : ''}
+              onChange={e => persona.change(e.target.value)}
+              aria-label="Persona" aria-busy={persona.pending}
               title="Steers Aimee's role and delegate policy for this session"
               style={{
                 fontSize: '11px', fontFamily: 'system-ui',
@@ -2965,6 +2923,7 @@ export default function Chat() {
                 outline: 'none',
               }}
             >
+              {!persona.known && <option value="" disabled>{persona.error ? 'Persona unavailable' : 'Loading persona…'}</option>}
               {availablePersonas.map(p => (
                 <option key={p.name} value={p.name} title={p.description}>{p.name}</option>
               ))}
@@ -2972,6 +2931,8 @@ export default function Chat() {
           </>
         )}
       </div>
+      {(primary.error || persona.error) && <p role="alert">{primary.error || persona.error}</p>}
+      {(primary.pending || persona.pending) && <p role="status">Saving session selection…</p>}
 
       {/* Input area */}
       <div style={{
@@ -3003,6 +2964,7 @@ export default function Chat() {
             <Button
               variant="primary"
               busy={busy}
+              disabled={primary.pending || persona.pending}
               onClick={sendMessage}
               title={steering ? 'Interrupt the running turn and continue with this message' : 'Send'}
               style={{

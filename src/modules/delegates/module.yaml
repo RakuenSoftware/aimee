@@ -11,7 +11,8 @@
     "sandbox",
     "tools",
     "vault",
-    "workspace"
+    "workspace",
+    "egress"
   ],
   "public_headers": [
     "src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h",
@@ -111,7 +112,11 @@
     "server-go/modules/delegates/worktreeplan_stage.go",
     "server-go/modules/delegates/launchargs_stage.go",
     "server-go/modules/delegates/containername.go",
-    "server-go/modules/delegates/proxyguard.go"
+    "server-go/modules/delegates/proxyguard.go",
+    "server-go/modules/delegates/verification_profile.go",
+    "server-go/modules/delegates/verification_executor.go",
+    "server-go/modules/delegates/verification_owner_linux.go",
+    "server-go/modules/delegates/verification_owner_unsupported.go"
   ],
   "go_tests": [
     "server-go/modules/delegates/delegates_test.go",
@@ -159,7 +164,12 @@
     "server-go/modules/delegates/worktreeplan_stage_test.go",
     "server-go/modules/delegates/launchargs_stage_test.go",
     "server-go/modules/delegates/containername_test.go",
-    "server-go/modules/delegates/proxyguard_test.go"
+    "server-go/modules/delegates/proxyguard_test.go",
+    "server-go/modules/delegates/verification_profile_linux_test.go",
+    "server-go/modules/delegates/verification_executor_contract_linux_test.go",
+    "server-go/modules/delegates/verification_executor_linux_test.go",
+    "server-go/modules/delegates/verification_executor_docker_linux_test.go",
+    "server-go/modules/delegates/cmd/aimee-delegate-egress/parent_lifetime_linux_test.go"
   ],
   "tests": [
     "src/tests/test_aimee_ir_rescue.c",

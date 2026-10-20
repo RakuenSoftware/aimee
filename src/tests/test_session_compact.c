@@ -586,8 +586,36 @@ static void test_incomplete_cycles_refuse_without_repair(void)
       }
    PASS("unresolved and orphaned cycles refuse atomically even below compaction threshold");
 }
+static void test_adjacent_messages_preserve_distinct_source_boundaries(void)
+{
+   cJSON *messages = cJSON_CreateArray();
+   for (int i = 0; i < 2; i++)
+   {
+      aimee_block_t block = {.type = AIMEE_BLK_TEXT,
+                             .text = i ? "untrusted retrieved evidence" : "user task"};
+      aimee_ir_block_set_context(&block, i ? AIMEE_CTX_ORIGIN_RETRIEVAL : AIMEE_CTX_ORIGIN_USER,
+                                 i ? AIMEE_CTX_AUTH_EVIDENCE : AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                                 AIMEE_CTX_TRUST_UNVERIFIED, AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL,
+                                 0);
+      aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+      cJSON *json = aimee_ir_message_json(&message);
+      assert(json);
+      cJSON_AddItemToArray(messages, json);
+   }
+   cJSON *before = cJSON_Duplicate(messages, 1);
+   assert(before);
+   session_compact_config_t config = {.retain_tail = 16};
+   session_compact_result_t result;
+   assert(session_compact(messages, &config, &result) == 0 && !result.compacted);
+   assert(cJSON_GetArraySize(messages) == 2 && cJSON_Compare(messages, before, 1));
+   cJSON_Delete(before);
+   cJSON_Delete(messages);
+   PASS("adjacent canonical messages keep distinct instruction/evidence source boundaries");
+}
+
 int main(void)
 {
+   test_adjacent_messages_preserve_distinct_source_boundaries();
    test_incomplete_cycles_refuse_without_repair();
    test_pressure_unknown_window();
    test_pressure_ok();

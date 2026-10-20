@@ -28204,6 +28204,69 @@
       }
     },
     {
+      "family": "sessions",
+      "id": 36,
+      "name": "session_ir_append_verified",
+      "c_name": "db1_session_ir_append_verified",
+      "c_params": [
+        "session_id",
+        "event_id",
+        "turn_id",
+        "actor",
+        "payload",
+        "out_sequence"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid",
+        "failed",
+        "missing"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "event_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "turn_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "payload",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "sequence",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 4194304
+      },
+      "host_only": true
+    },
+    {
       "family": "telemetry",
       "id": 59,
       "name": "procedure_event_load",
@@ -28315,6 +28378,96 @@
           }
         ],
         "max_bytes": 64
+      }
+    },
+    {
+      "family": "telemetry",
+      "id": 61,
+      "name": "execution_test_grade_record",
+      "c_name": "db1_execution_test_grade_record",
+      "c_params": [
+        "principal",
+        "grade_json"
+      ],
+      "c_returns": "int",
+      "wire_format": "db1-fields-v2",
+      "scope": "principal",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "grade_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 0
+      }
+    },
+    {
+      "family": "telemetry",
+      "id": 62,
+      "name": "execution_test_grade_recall",
+      "c_name": "db1_execution_test_grade_recall",
+      "c_params": [
+        "principal",
+        "project",
+        "sources_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "principal",
+      "transaction": "none",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "project",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "sources_json",
+            "type": "text",
+            "required": false
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "snapshot",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 65536
       }
     }
   ]

@@ -2329,6 +2329,24 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# Independently graded reuse needs the real daemon/model dispatch as well as
+# the helper's Docker contract. CI requires Docker; local development reports
+# exactly this unavailable journey as a skip, without pretending it ran.
+EXECUTION_GRADE_LOG="$HOME/execution-grade-live.log"
+if python3 "$REPO_ROOT/src/tests/test_execution_grade_live.py" >"$EXECUTION_GRADE_LOG" 2>&1; then
+    GRADE_SKIPS=$(grep -c '^SKIP:' "$EXECUTION_GRADE_LOG" || true)
+    if [ "$GRADE_SKIPS" -eq 0 ]; then
+        PASS=$((PASS + 1))
+    fi
+    SKIP=$((SKIP + GRADE_SKIPS))
+    grep -E '^(SKIP:|execution grade:)' "$EXECUTION_GRADE_LOG" || true
+else
+    echo "FAIL: actual independently graded execution and scoped reuse"
+    tail -c 16000 "$EXECUTION_GRADE_LOG"
+    dump_server_log
+    FAIL=$((FAIL + 1))
+fi
+
 # Extended native qualification uses explicitly supplied executable descriptors.
 # Baseline service runs do not discover or install an ambient provider SDK.
 if [ -n "${AIMEE_TEST_NATIVE_CODEX:-}" ] && [ -n "${AIMEE_TEST_NATIVE_CLAUDE:-}" ]; then

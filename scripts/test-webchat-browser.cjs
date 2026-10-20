@@ -101,6 +101,7 @@ const { chromium } = require('../frontend/node_modules/playwright');
         '/api/git/projects': { root: '/work', projects: ['org/one', 'org/two'], details: [] },
         '/api/chat/bootstrap-status': { has_rules: true },
         '/api/chat/attach': { attach_id: 'attachment' },
+        '/api/chat/primary': { agent: '' }, '/api/chat/persona': { name: 'engineer' },
         '/api/git/credentials': { hosts: ['github.com'] },
         '/api/vault/credentials': { credentials: [{ agent: 'git', cred: 'author_name' }, { agent: 'git', cred: 'author_email' }] },
       };
@@ -167,6 +168,35 @@ const { chromium } = require('../frontend/node_modules/playwright');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Mobile page must not overflow horizontally');
     currentTurn = 'browser-question-turn';
     event({ kind: 'execution', payload: { status: 'running' } });
+    event({ kind: 'message', message_id: 'browser-tool-call', payload: { role: 'assistant', blocks: [
+      { type: 'tool_use', tool_id: 'browser-inspect', name: 'inspect_workspace', input: { path: '/work/org/two' } },
+    ] } });
+    event({ kind: 'message', message_id: 'browser-tool-result', payload: { role: 'tool', blocks: [
+      { type: 'tool_result', tool_id: 'browser-inspect', content: 'Read 12 project files. Canonical history is available for replay.' },
+    ] } });
+    await page.getByText('Tool: inspect_workspace', { exact: true }).click();
+    await page.getByText('Output', { exact: true }).click();
+    const output = page.getByText('Read 12 project files. Canonical history is available for replay.', { exact: true });
+    await output.waitFor();
+    const contrast = await output.evaluate(element => {
+      const rgb = value => (value.match(/[\d.]+/g) || []).map(Number);
+      const foreground = rgb(getComputedStyle(element).color);
+      let parent = element;
+      let background;
+      while (parent) {
+        const color = rgb(getComputedStyle(parent).backgroundColor);
+        if (color.length === 3 || color[3] > 0) { background = color; break; }
+        parent = parent.parentElement;
+      }
+      const luminance = color => color.slice(0, 3).map(channel => {
+        const value = channel / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+      const light = luminance(background || [255, 255, 255]);
+      const dark = luminance(foreground);
+      return (Math.max(light, dark) + 0.05) / (Math.min(light, dark) + 0.05);
+    });
+    assert.ok(contrast >= 4.5, `Tool output contrast was only ${contrast.toFixed(2)}:1`);
     const questionFrame = event({ kind: 'control_request', request_id: 'browser-question', control_kind: 'question',
       payload: { title: 'Choose the scope', questions: [{ id: 'scope', question: 'Which project should I inspect?', multiple: false,
         options: [{ label: 'Current project', description: 'Use the selected workspace.' }, { label: 'All projects' }] }] } });
@@ -189,7 +219,7 @@ const { chromium } = require('../frontend/node_modules/playwright');
     await page.getByText('Resolved requests (1)', { exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Send answers', exact: true }).count(), 0);
     assert.deepEqual(errors, []);
-    console.log('Webchat browser regressions passed: canonical POST/SSE overlap and reconnect stay unique; history survives refresh, reordering, navigation and reload; projects stay bound; mobile conversation and composer remain usable.');
+    console.log('Webchat browser regressions passed: canonical POST/SSE overlap and reconnect stay unique; history survives refresh, reordering, navigation and reload; projects stay bound; tool output remains readable; mobile conversation and composer remain usable.');
   } finally {
     if (browser) await browser.close();
     server.closeAllConnections();

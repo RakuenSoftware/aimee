@@ -1003,6 +1003,7 @@ list(APPEND SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_native_tool_admission.c
     ${AIMEE_SRC_DIR}/server/server_native_replay.c
     ${AIMEE_SRC_DIR}/server/server_learning_outcome.c
+    ${AIMEE_SRC_DIR}/server/server_verification.c
     ${AIMEE_SRC_DIR}/server/server_learning_application.c
 )
 

@@ -68,12 +68,18 @@ export default function ControlCard({ id, control, onReply, replyPending = false
       <legend>{q.question}</legend>
       {q.options.map(option => <label key={option.label} style={{ display: 'block' }}>
         <input type={q.multiple ? 'checkbox' : 'radio'} name={`${id}:${q.id}`} value={option.label}
-          checked={(answers[q.id] ?? []).includes(option.label)} onChange={event => setAnswers(old => ({ ...old,
-            [q.id]: q.multiple ? event.target.checked ? [...(old[q.id] ?? []), option.label] : (old[q.id] ?? []).filter(value => value !== option.label) : [option.label],
-          }))} />{option.label}{option.description && <span> — {option.description}</span>}
+          checked={(answers[q.id] ?? []).includes(option.label)} onChange={event => {
+            if (!q.multiple) setCustom(old => ({ ...old, [q.id]: '' }));
+            setAnswers(old => ({ ...old,
+              [q.id]: q.multiple ? event.target.checked ? [...(old[q.id] ?? []), option.label] : (old[q.id] ?? []).filter(value => value !== option.label) : [option.label],
+            }));
+          }} />{option.label}{option.description && <span> — {option.description}</span>}
       </label>)}
       <label>Your answer<input aria-label={`Your answer: ${q.question}`} value={custom[q.id] ?? ''}
-        onChange={event => setCustom(old => ({ ...old, [q.id]: event.target.value }))} /></label>
+        onChange={event => {
+          if (!q.multiple) setAnswers(old => ({ ...old, [q.id]: [] }));
+          setCustom(old => ({ ...old, [q.id]: event.target.value }));
+        }} /></label>
     </fieldset>)}
     {!closed && onReply && <div className="ir-control-actions">
       {(control.kind === 'permission' || control.kind === 'question') && <button className="ir-control-submit" type="button" disabled={pending || !canAnswer} onClick={() => void submit('allow')}>{control.kind === 'question' ? 'Send answers' : 'Allow once'}</button>}

@@ -568,6 +568,8 @@ int agent_vote(agent_config_t *cfg, const char *role, const char *prompt, int n_
    if (successes == 0)
    {
       snprintf(out->error, sizeof(out->error), "all voters failed");
+      for (int i = 0; i < n_voters; i++)
+         agent_result_clear_response(&results[i]);
       return -1;
    }
 
