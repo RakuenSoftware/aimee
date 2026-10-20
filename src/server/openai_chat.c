@@ -31,6 +31,10 @@
 #include "config.h" /* legacy_config_record, legacy_config_read */
 #include "agent_config.h"
 #include "agent_exec.h"
+#include "provider_cli_adapter.h"
+#include "platform_path.h"
+#include "modules/workspace/workspace_turn.h"
+#include <aimee/workspace/workspace.h>
 #include "agent_request_build.h"
 #include "agent_protocol.h" /* message_history_repair */
 #include "agent_response_projection.h"
@@ -1428,6 +1432,7 @@ done:
 typedef struct
 {
    char run_id[128], canonical_session[128];
+   char workspace_cwd[MAX_PATH_LEN];
    agent_t selected;
    aimee_request_t request;
    request_context_snapshot_t owner;
@@ -1543,6 +1548,8 @@ static void *run_job_worker(void *context)
    aimee_response_t response = {0};
    pthread_t watcher;
    int watching = 0;
+   workspace_turn_scope_t *workspace_scope = NULL;
+   char isolated_cwd[MAX_PATH_LEN];
    aimee_ir_session_begin_task();
    request_context_restore(&job->owner);
    server_http_identity_bind_request_owner(request_context_get());
@@ -1574,6 +1581,28 @@ static void *run_job_worker(void *context)
    }
    session_id_set_override(session);
    agent_set_request_session(session);
+   if (job->workspace_cwd[0])
+   {
+      int bound = workspace_turn_scope_begin(job->workspace_cwd, &workspace_scope);
+      if (bound < 0 ||
+          workspace_turn_reject_foreign_cwd(
+              bound, job->owner.value.capabilities == (unsigned int)CAPS_ALL, job->workspace_cwd))
+      {
+         run_finish_status(job, OPENAI_RUN_FAILED, "native run workspace owner unavailable");
+         goto done;
+      }
+      const char *effective = workspace_turn_active_cwd();
+      const char *cwd = effective ? effective : job->workspace_cwd;
+      int isolated = !effective && !bound ? session_isolation_target(cwd, session, isolated_cwd,
+                                                                     sizeof isolated_cwd, 1)
+                                          : 0;
+      if (isolated < 0)
+      {
+         run_finish_status(job, OPENAI_RUN_FAILED, "native run workspace isolation failed");
+         goto done;
+      }
+      run_cmd_set_cwd(isolated == 1 ? isolated_cwd : cwd);
+   }
    agent_config_t *config = calloc(1, sizeof *config);
    if (!config)
    {
@@ -1636,6 +1665,9 @@ done:
       pthread_join(watcher, NULL);
    }
    agent_tools_set_tool_event_cb(NULL, NULL);
+   if (workspace_scope)
+      (void)workspace_turn_scope_end(workspace_scope);
+   run_cmd_set_cwd(NULL);
    agent_set_ingress_source("");
    ingress_preinject_finish_sources();
    agent_set_request_cancel(NULL);
@@ -1693,6 +1725,21 @@ static int runs_handler(const char *body, char *resp, int cap)
       openai_format_error_code(resp, cap, "server_error", "no agent configured",
                                AIMEE_ERR_NO_PRIMARY);
       return 503;
+   }
+   const provider_cli_adapter_t *native = provider_cli_adapter_get(job->selected.cli_kind);
+   if (native && (!strcmp(native->cli_kind, "codex") || !strcmp(native->cli_kind, "claude")) &&
+       (strcmp(job->selected.backend, AGENT_BACKEND_PROVIDER_CLI) == 0 ||
+        strcmp(job->selected.backend, AGENT_BACKEND_CLI_STDIO) == 0 ||
+        strcmp(job->selected.backend, AGENT_BACKEND_TMUX_CLI) == 0))
+   {
+      const char *cwd =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(job->request.raw, "cwd"));
+      if (!cwd || !aimee_path_is_absolute(cwd) || strlen(cwd) >= sizeof job->workspace_cwd)
+      {
+         snprintf(error, sizeof error, "native run requires an absolute workspace cwd");
+         goto invalid;
+      }
+      snprintf(job->workspace_cwd, sizeof job->workspace_cwd, "%s", cwd);
    }
    if (is_chatgpt_provider(&job->selected) &&
        (job->request.has_max_tokens || job->request.has_temperature))

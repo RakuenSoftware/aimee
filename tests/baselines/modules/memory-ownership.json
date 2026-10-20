@@ -2729,12 +2729,12 @@
         "AIMEE_MEMORY_HEALTH_ENABLED",
         "memory_stats"
       ],
-      "sha256": "ac2e743098327dbdc45c3266e85ad5157187aba60ed72a487e92e2c7ee63c938",
+      "sha256": "7d717e7a01bfef61eba0a9f48944a4d1913d8738a2ce45582a1479ce4f1a200a",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "8080f9fbea2e7a7845dc6d05cf03a3aebd9c52c650907634dce95c55f678879b"
+        "api/openapi-server-v1.yaml": "97a9b0f3bf09f6435c13b3a99b1cedcfb509ddcc58e31e1134c1d65e100b753a"
       },
-      "boundary_review": "2026-10-18 PR #3038: only the /runs documentation changes: asynchronous canonical input, owner privacy, preserved controls and incomplete status. Memory routes and their Go ownership are unchanged."
+      "boundary_review": "2026-10-20 PR #3052: reviewed only /runs native Codex/Claude workspace cwd documentation/property. Reversing those additions reproduces both previously pinned source and generated output hashes exactly. Memory routes, symbols and Go ownership are unchanged."
     },
     "src/modules/tools/tool_catalog_data.h": {
       "disposition": "tool-policy-catalog",

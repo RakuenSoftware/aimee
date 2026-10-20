@@ -168,8 +168,7 @@ int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON 
                              const char *system, int max_tokens, double temperature,
                              aimee_wire_t wire, int delegate, aimee_request_t *out)
 {
-   (void)max_tokens;
-   (void)temperature;
+   assert(max_tokens == 0 && temperature == -1);
    (void)delegate;
    assert(cJSON_GetArraySize(messages) == 0 && cJSON_IsArray(tools));
    assert(!strcmp(system, "host environment") && wire == AIMEE_WIRE_RESPONSES);
@@ -267,10 +266,15 @@ int server_native_runtime_result(const server_native_runtime_t *r, aimee_respons
    if (mode == 3)
       return -1;
    out->role = strdup("assistant");
-   out->n_content = 1;
-   out->content = calloc(1, sizeof *out->content);
+   out->n_content = mode == 11 ? 2 : 1;
+   out->content = calloc((size_t)out->n_content, sizeof *out->content);
    out->content[0].type = AIMEE_BLK_TEXT;
    out->content[0].text = strdup("ORIGINAL canonical output");
+   if (mode == 11)
+      out->content[1] = (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                                        .text = strdup("original reasoning"),
+                                        .thinking_id = strdup("original-reasoning-id"),
+                                        .thinking_encrypted_content = strdup("opaque-original")};
    out->usage_in = 73;
    out->usage_out = 29;
    out->usage_cache_read = 11;
@@ -546,6 +550,25 @@ int main(void)
    assert(!retained && restored == 1 && access(private_home, F_OK));
    finish(1);
    assert(completed == 1 && closed == 1);
+   reset(11);
+   aimee_block_t input = {.type = AIMEE_BLK_TEXT, .text = "seeded canonical task"};
+   aimee_message_t message = {.role = "user", .blocks = &input, .n_blocks = 1};
+   aimee_request_t seed = {.model = "selected-model", .messages = &message, .n_messages = 1};
+   aimee_response_t canonical = {0};
+   cfg.canonical_request = &seed;
+   cfg.canonical_response = &canonical;
+   agent_result_t seeded = {0};
+   int seeded_rc = provider_cli_adapter_host_execute(&cfg, &seeded);
+   assert(!seeded_rc && seeded.success && canonical.n_content == 2);
+   assert(canonical.usage_in == 73 && canonical.usage_cache_read == 11);
+   assert(!strcmp(canonical.content[0].text, "ORIGINAL canonical output"));
+   assert(!strcmp(canonical.content[1].thinking_encrypted_content, "opaque-original"));
+   assert(!strcmp(seeded.response, "ORIGINAL canonical output"));
+   aimee_response_free(&canonical);
+   free(seeded.response);
+   finish(1);
+   cfg.canonical_request = NULL;
+   cfg.canonical_response = NULL;
    reset(0);
    active_sdk = "claude";
    snprintf(selected.cli_kind, sizeof selected.cli_kind, "%s", "claude");

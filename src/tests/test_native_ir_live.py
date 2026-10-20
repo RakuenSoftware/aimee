@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import socket
 import threading
+import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -21,7 +22,7 @@ class Local(http.client.HTTPConnection):
         self.sock.connect(str(Path(os.environ["AIMEE_HOME"]) / "aimee-http.sock"))
 
 
-def api(path, body=None):
+def api(path, body=None, expected=200):
     connection = Local("localhost")
     try:
         connection.request("GET" if body is None else "POST", path,
@@ -29,7 +30,7 @@ def api(path, body=None):
                            {"Content-Type": "application/json"})
         response = connection.getresponse()
         text = response.read().decode()
-        assert response.status == 200, (path, response.status, text)
+        assert response.status == expected, (path, response.status, text)
         return text if path == "/v1/chat/stream" or path.endswith("/events") else json.loads(text)
     finally:
         connection.close()
@@ -46,6 +47,7 @@ def main():
     cases = [("codex", "chatgpt"), ("codex", "anthropic"), ("codex", "openai"),
              ("claude", "anthropic"), ("claude", "chatgpt"), ("claude", "openai")]
     active = None
+    async_case = False
     observed = []
     errors = []
     count = 0
@@ -71,6 +73,11 @@ def main():
                 assert marker + "_FIRST" in encoded, encoded[:2000]
                 assert request["model"] == marker, request.get("model")
                 assert "Continue the server-owned canonical turn." not in encoded, encoded[:2000]
+                if async_case:
+                    assert "NATIVE_RUN_PRIOR" in encoded and "NATIVE_RUN_END" in encoded
+                    assert "RUN_INSTRUCTIONS" in encoded and "iVBORw0KGgo" in encoded
+                    if wire != "chatgpt":
+                        assert request["max_tokens"] == 128 and request["temperature"] == 0.25, request
                 if wire == "anthropic":
                     assert self.headers.get("x-api-key") == "native-fixture-only"
                 else:
@@ -185,6 +192,7 @@ def main():
         models_path.write_text(json.dumps(dict(default_agent=models[0]["name"], default_delegate=models[0]["name"],
                                                fallback_chain=[], models=models)))
         for kind, wire in cases:
+            async_case = False
             marker = "native-" + kind + "-" + wire
             active = (kind, wire, marker, "toolu_" + marker.replace("-", "_"))
             count = 0
@@ -233,6 +241,35 @@ def main():
                 print("native integration:", kind, wire, "original tool/result, canonical compaction, durable replay and resumed turn pass", flush=True)
             finally:
                 api(f"/v1/sessions/{sid}/detach", {"attach_id": attachment})
+            async_case = True
+            count = 0
+            api("/v1/runs", {"model": marker, "input": marker + "_FIRST"}, expected=400)
+            image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jr1sAAAAASUVORK5CYII="
+            request = {"model": marker, "cwd": str(workspace), "instructions": "RUN_INSTRUCTIONS",
+                       "input": [marker + "_FIRST", {"role": "assistant", "content": "NATIVE_RUN_PRIOR"},
+                                 {"role": "user", "content": [
+                                     {"type": "input_text", "text": "x" * 20000 + "NATIVE_RUN_END"},
+                                     {"type": "input_image", "image_url": image}]}]}
+            if wire != "chatgpt":
+                request.update(max_tokens=128, temperature=0.25)
+            run = api("/v1/runs", request)
+            deadline = time.monotonic() + 75
+            while True:
+                finished = api(f"/v1/runs/{run['id']}")
+                if finished["status"] in ("completed", "incomplete", "failed", "cancelled"):
+                    break
+                assert time.monotonic() < deadline, finished
+                time.sleep(0.05)
+            assert not errors, errors
+            assert finished["status"] == "completed" and marker + "_FINAL" in json.dumps(finished), finished
+            assert count == 2, (active, count)
+            assert finished["usage"]["input_tokens"] == 200 and finished["usage"]["output_tokens"] == 20, finished
+            saved = api("/v1/trajectory/export", {"session_id": finished["canonical_session_id"], "compress": False})["trajectory"]
+            encoded = json.dumps(saved, ensure_ascii=False)
+            assert "NATIVE_RUN_PRIOR" in encoded and "NATIVE_RUN_END" in encoded
+            assert "canonical delegate fixture" in encoded and "iVBORw0KGgo" in encoded
+            assert "Continue the server-owned canonical turn." not in encoded
+            print("native integration:", kind, wire, "typed seeded run, real tool, original response and durable source pass", flush=True)
     finally:
         if previous is None:
             models_path.unlink(missing_ok=True)

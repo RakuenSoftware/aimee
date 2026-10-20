@@ -14,6 +14,8 @@
 #include "agent_exec.h"
 #include "agent_protocol.h"
 #include "server_session_log.h"
+#include "server_session_capture.h"
+#include <openssl/crypto.h>
 #include "server_session_control.h"
 #include "cli_session.h"
 #include "db1_client/primary_sessions.h"
@@ -454,79 +456,37 @@ static const char *default_exec_instructions =
     "- If you encounter an error, try to diagnose and fix it.\n"
     "- Do not ask for confirmation. Execute the task directly.\n";
 
-typedef struct
-{
-   char session[128], principal[VAULT_PRINCIPAL_MAX];
-   const char *vendor;
-} native_harness_binding_t;
-
-static int native_harness_bind(const char *native_id, void *context)
-{
-   native_harness_binding_t *binding = context;
-   return db1_session_harness_bind(binding->session, binding->vendor, native_id,
-                                   binding->principal);
-}
-
 static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
                                           const agent_t *agent, const agent_network_t *network,
                                           const char *role, const char *system_prompt,
-                                          const char *user_prompt, agent_result_t *out)
+                                          const char *user_prompt, const aimee_request_t *seed,
+                                          aimee_response_t *canonical, agent_result_t *out)
 {
    provider_cli_cfg_t cfg = {.agent = agent,
                              .network = network,
                              .role = role,
                              .cwd = run_cmd_get_cwd(),
                              .system_prompt = system_prompt,
-                             .user_prompt = user_prompt};
+                             .user_prompt = user_prompt,
+                             .canonical_request = seed,
+                             .canonical_response = canonical};
    if (strcmp(adapter->cli_kind, "claude") && strcmp(adapter->cli_kind, "codex"))
       return provider_cli_adapter_execute_cfg(adapter, &cfg, out);
-   native_harness_binding_t binding = {.vendor = adapter->cli_kind};
-   int identity = server_session_log_identity(binding.session, sizeof binding.session,
-                                              binding.principal, sizeof binding.principal);
-   if (identity > 0)
-   {
-      agent_request_creds_t attestation;
-      agent_request_creds_snapshot(&attestation);
-      snprintf(binding.session, sizeof binding.session, "%s", attestation.session_id);
-      snprintf(binding.principal, sizeof binding.principal, "%s", attestation.vault_principal);
-   }
-   /* Non-session internal fixtures/completions have no durable native handle.
-    * Every attested user execution uses Vault and the private canonical scope. */
-   if (identity > 0 && !binding.session[0])
-      return provider_cli_adapter_execute_cfg(adapter, &cfg, out);
-   if (identity < 0 || !binding.principal[0])
-      goto refused;
    int host = provider_cli_adapter_host_execute(&cfg, out);
    if (host != 1)
       return host;
-   char home[4096] = "", resume[1025] = "", cwd[MAX_PATH_LEN] = "";
-   cli_session_t cleanup = {0};
-   cli_session_resolve_cwd(cfg.cwd, cwd, sizeof cwd);
-   cfg.cwd = cwd;
-   if (db1_session_harness_get(binding.session, binding.vendor, resume, sizeof resume,
-                               binding.principal) < 0 ||
-       cli_session_harness_home(binding.vendor, cfg.cwd, binding.session, home, sizeof home,
-                                &cleanup) != 0)
-      goto refused;
-   cfg.home = home;
-   cfg.resume_id = resume;
-   cfg.session_id = binding.session;
-   cfg.bind_session = native_harness_bind;
-   cfg.bind_context = &binding;
-   int rc = provider_cli_adapter_execute_cfg(adapter, &cfg, out);
-   cli_session_destroy(&cleanup);
-   if (aimee_ir_session_capture_failed())
-   {
-      out->success = 0;
-      snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
-      return AGENT_RC_CAPTURE_FAILED;
-   }
-   return rc;
-refused:
+   /* Standalone adapter fixtures have no server capture. An attested session
+    * cannot fall back to an SDK credential HOME or private native history. */
+   agent_request_creds_t attestation;
+   agent_request_creds_snapshot(&attestation);
+   int standalone = !seed && !attestation.session_id[0] && !server_session_log_active();
+   OPENSSL_cleanse(&attestation, sizeof attestation);
+   if (standalone)
+      return provider_cli_adapter_execute_cfg(adapter, &cfg, out);
    memset(out, 0, sizeof *out);
-   snprintf(out->error, sizeof out->error, "could not prepare scoped Vault-backed %s runtime",
+   snprintf(out->error, sizeof out->error, "canonical %s execution owner unavailable",
             adapter->display_name);
-   return -1;
+   return AGENT_RC_CONTEXT_REFUSED;
 }
 
 static int agent_execute_with_tools_impl(const agent_t *agent, const agent_network_t *network,
@@ -711,14 +671,29 @@ static int agent_execute_with_tools_impl(const agent_t *agent, const agent_netwo
             snprintf(out->error, sizeof(out->error), "%s", wire_fence_last_error());
             return -1;
          }
-         if (seed)
+         int owned_native =
+             !strcmp(adapter->cli_kind, "codex") || !strcmp(adapter->cli_kind, "claude");
+         if (seed &&
+             (!owned_native || !server_session_log_active() || !server_session_capture_current() ||
+              aimee_ir_history_admit(initial_messages) ||
+              server_session_log_history_save(initial_messages)))
          {
             snprintf(out->error, sizeof out->error,
-                     "native harness cannot adopt the complete run history");
+                     "canonical seeded execution history is unavailable");
             return AGENT_RC_CONTEXT_REFUSED;
          }
-         return agent_execute_provider_session(adapter, agent, network, role, system_prompt,
-                                               user_prompt, out);
+         int rc = agent_execute_provider_session(adapter, agent, network, role, system_prompt,
+                                                 user_prompt, seed, canonical_out, out);
+         if (!rc && seed && updated_messages &&
+             (server_session_capture_history(server_session_capture_current(), updated_messages) ||
+              aimee_ir_history_admit(*updated_messages)))
+         {
+            out->success = 0;
+            snprintf(out->error, sizeof out->error, "canonical native run result is unavailable");
+            aimee_ir_session_fail_capture();
+            rc = AGENT_RC_CAPTURE_FAILED;
+         }
+         return rc;
       }
       snprintf(out->error, sizeof(out->error),
                "provider-cli: unknown cli_kind '%s' (expected: codex, claude, mistral, "

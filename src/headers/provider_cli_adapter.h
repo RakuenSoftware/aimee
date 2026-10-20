@@ -63,6 +63,12 @@ extern "C"
       const char *user_prompt;
       /* Canonical items to adopt before the current turn (unseen tail on resume). */
       const aimee_request_t *history;
+      /* Server-owned seeded execution. Conversation is already committed to
+       * the active canonical capture; only admitted request controls are used.
+       * canonical_response, when supplied, starts empty and receives owned
+       * original provider IR after the SDK and its callbacks have joined. */
+      const aimee_request_t *canonical_request;
+      aimee_response_t *canonical_response;
       /* Optional typed host tool bridge. Both catalog and callback are required.
        * Borrowed for this synchronous execution. The host callback must verify
        * durable source identity and apply current policy/effect authorization;

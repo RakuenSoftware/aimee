@@ -699,7 +699,13 @@ static int probe_original_tool(void)
                               .block_id = 0,
                               .tool_args_delta = mode == 4 ? "[]" : arguments},
                              {.type = AIMEE_DELTA_BLOCK_STOP, .block_id = 0},
-                             {.type = AIMEE_DELTA_TURN_STOP, .stop_reason = AIMEE_STOP_TOOL_USE}};
+                             {.type = AIMEE_DELTA_TURN_STOP,
+                              .stop_reason = AIMEE_STOP_TOOL_USE,
+                              .usage_in = 19,
+                              .usage_out = 11,
+                              .usage_cache_read = 3,
+                              .usage_cache_write = 2,
+                              .usage_reasoning = 1}};
    for (unsigned i = 0; i < sizeof deltas / sizeof *deltas; i++)
    {
       aimee_session_event_t event = {.kind = AIMEE_SESSION_DELTA,
@@ -1334,6 +1340,11 @@ static void test_native_original_catalog(const agent_t *selected, const request_
       {
          assert(!result_status && original.n_content == 1 &&
                 original.stop_reason == AIMEE_STOP_TOOL_USE);
+         int completions = reference ? 2 : 1;
+         assert(original.usage_in == 19 * completions && original.usage_out == 11 * completions);
+         assert(original.usage_cache_read == 3 * completions &&
+                original.usage_cache_write == 2 * completions &&
+                original.usage_reasoning == completions);
          assert(!strcmp(original.content[0].tool_id, "wire-call:original") &&
                 !strcmp(original.content[0].tool_namespace, "aimee"));
          char *exact = cJSON_PrintUnformatted(original.content[0].tool_input);

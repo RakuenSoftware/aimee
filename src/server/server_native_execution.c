@@ -496,9 +496,13 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    char *system =
        agent_build_exec_context_checked(selected, cfg->network, cfg->role, cfg->system_prompt,
                                         !agent_tools_knowledge_write_allowed(), error, 512);
+   const aimee_request_t *seed = cfg->canonical_request;
    int prepared = empty && history && !aimee_ir_history_admit(history) && tools && system &&
-                  !agent_prepare_request_ir(selected, empty, tools, system, 0, -1, wire,
-                                            cfg->role != NULL, &execution->profile);
+                  (!seed || !aimee_ir_request_admit(seed)) &&
+                  !agent_prepare_request_ir(selected, empty, tools, system,
+                                            seed && seed->has_max_tokens ? seed->max_tokens : 0,
+                                            seed && seed->has_temperature ? seed->temperature : -1,
+                                            wire, cfg->role != NULL, &execution->profile);
    free(system);
    cJSON_Delete(empty);
    cJSON_Delete(tools);
@@ -556,7 +560,8 @@ refused:
    native_execution_close(execution);
    return NULL;
 }
-static int native_execution_result(native_execution_t *execution, agent_result_t *out)
+static int native_execution_result(native_execution_t *execution, agent_result_t *out,
+                                   aimee_response_t *canonical)
 {
    server_native_runtime_quiesce(execution->runtime);
    aimee_response_t original = {0};
@@ -596,6 +601,11 @@ static int native_execution_result(native_execution_t *execution, agent_result_t
    snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
             original.raw_stop_reason ? original.raw_stop_reason
                                      : aimee_stop_reason_name(original.stop_reason));
+   if (canonical)
+   {
+      *canonical = original;
+      original = (aimee_response_t){0};
+   }
    aimee_response_free(&original);
    return 0;
 }
@@ -707,7 +717,7 @@ int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg, agent_resul
                 ? native_claude_execute(execution, &owned, out)
                 : codex_provider_cli_adapter.execute(&owned, out);
    if (!rc && out->success)
-      rc = native_execution_result(execution, out);
+      rc = native_execution_result(execution, out, cfg->canonical_response);
    native_execution_close(execution);
    if (!rc && out->success)
       return 0;
@@ -754,7 +764,7 @@ int server_native_codex_chat_stream(const agent_t *selected,
       rc = native_bind(out->thread_id, execution);
       agent_result_t result = {0};
       if (!rc)
-         rc = native_execution_result(execution, &result);
+         rc = native_execution_result(execution, &result, NULL);
       free(result.response);
       if (!rc)
       {

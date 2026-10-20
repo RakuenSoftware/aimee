@@ -3567,3 +3567,35 @@ unavailable). All six actual SDK/model cases include canonical compaction. All
 The overall migration remains unfinished: canonical seeded-run native execution,
 remaining ingress/consumers, independently graded local learning/reuse, broader
 native platform/launcher and live subscription coverage still need completion.
+
+
+## Canonical seeded native runs continuation: 20 October 2026
+
+The local slice now admits complete canonical seeded run history for Codex and
+Claude. The admitted request is committed through the active session-log owner
+before launch; model context comes only from that durable capture. Admitted output
+limits/temperature reach the selected model profile. Native execution returns owned
+original typed content, retaining opaque reasoning fields, while compatibility
+text remains a separate projection. The old attested-session credential-HOME and
+private-handle fallback in the generic execution path is removed. Standalone
+adapter fixtures remain explicitly unowned and cannot borrow a server session.
+
+Asynchronous `/v1/runs` now accepts an absolute `cwd` for native SDK execution and
+holds the same nested workspace scope, foreign-path check and session isolation
+used by browser tools until native callbacks join. The API contract documents
+this native requirement. Direct HTTP model runs retain their existing behavior.
+Actual SDK runs use a full 20,000-character message, preceding conversation,
+inline PNG, explicit instructions, real read-file effect/result and durable
+trajectory export. All six SDK/provider combinations pass. Host task usage now
+sums committed model completions instead of reporting only the final model call;
+original per-response observations remain intact in canonical history. Overflow
+refuses rather than wrapping a counter.
+
+Local qualification completed: all 658 native binaries, three ASan/UBSan fixtures,
+two TSan fixtures, two CMake fixtures, Cppcheck without increased diagnostics and
+full pinned-SDK PostgreSQL integration (168/168; 26 local service checks require
+unavailable services). The extended native journey covers twelve browser/seeded
+cases. All 76 lint gates passed, including reviewed source/generated OpenAPI
+ownership pins. Publication checks follow. Continue in PR #3052 with the
+remaining launcher/platform qualification, IR-consumer audit and independently
+graded server-local learning/reuse. Production is still KB-free and unpromoted.

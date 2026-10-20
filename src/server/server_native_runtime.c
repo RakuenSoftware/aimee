@@ -24,6 +24,7 @@
 #include <aimee/ir/session_event.h>
 #include <openssl/crypto.h>
 #include <pthread.h>
+#include <limits.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -43,6 +44,7 @@ struct server_native_runtime
    cJSON *source_history;
    aimee_request_t request_profile;
    aimee_response_t last_response;
+   long usage[5]; /* Successful committed model completions in this execution. */
    int last_complete;
    int owns_request, bound_registry, n_bindings;
    atomic_int launch_attested;
@@ -248,10 +250,24 @@ static int native_original_result(native_model_capture_t *capture,
       view.usage_cache_write = event->delta->usage_cache_write;
       view.usage_reasoning = event->delta->usage_reasoning;
    }
+   long usage[] = {view.usage_in, view.usage_out, view.usage_cache_read, view.usage_cache_write,
+                   view.usage_reasoning};
+   if (stop)
+      for (unsigned i = 0; i < sizeof usage / sizeof usage[0]; i++)
+         if (usage[i] < 0 || runtime->usage[i] > LONG_MAX - usage[i])
+         {
+            free(identity);
+            return -1;
+         }
    int rc = aimee_ir_response_clone(&view, &runtime->last_response);
    free(identity);
    if (!rc)
+   {
       runtime->last_complete = stop || capture->builder.complete;
+      if (stop)
+         for (unsigned i = 0; i < sizeof usage / sizeof usage[0]; i++)
+            runtime->usage[i] += usage[i];
+   }
    return rc;
 }
 static int native_model_capture(const aimee_session_event_t *event, void *context)
@@ -1566,7 +1582,13 @@ int server_native_runtime_result(const server_native_runtime_t *runtime, aimee_r
        !pthread_equal(runtime->producer, pthread_self()) ||
        server_session_capture_failed(runtime->capture))
       return -1;
-   return aimee_ir_response_clone(&runtime->last_response, out);
+   aimee_response_t result = runtime->last_response;
+   result.usage_in = runtime->usage[0];
+   result.usage_out = runtime->usage[1];
+   result.usage_cache_read = runtime->usage[2];
+   result.usage_cache_write = runtime->usage[3];
+   result.usage_reasoning = runtime->usage[4];
+   return aimee_ir_response_clone(&result, out);
 }
 void server_native_runtime_close(server_native_runtime_t *runtime)
 {

@@ -1272,7 +1272,8 @@ paths:
         execution controls or client tool catalogs are rejected. Terminal snapshots
         expose canonical_session_id for durable history; the live store is bounded.
         A token-limited response has status incomplete. Runs are private to their
-        authenticated owner.
+        authenticated owner. Native Codex/Claude SDK runs require an absolute cwd;
+        workspace ownership and session isolation follow the browser tool path.
       requestBody:
         required: true
         content:
@@ -1282,6 +1283,9 @@ paths:
               required: [input]
               properties:
                 model: { type: string }
+                cwd:
+                  type: string
+                  description: Absolute host workspace path required for native Codex/Claude SDK execution.
                 input: {}
                 instructions: { type: string }
                 temperature: { type: number, minimum: 0, maximum: 2 }

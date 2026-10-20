@@ -94,7 +94,8 @@ int server_native_runtime_cache_scope(const server_native_runtime_t *runtime,
                                       const server_native_execution_profile_t *profile,
                                       char scope[65]);
 /* After the child is reaped, join its transport callbacks before consuming the
- * original canonical terminal response. No SDK-normalized result is imported. */
+ * original canonical terminal content and cumulative usage from this execution's
+ * committed model completions. No SDK-normalized result is imported. */
 void server_native_runtime_quiesce(server_native_runtime_t *runtime);
 int server_native_runtime_result(const server_native_runtime_t *runtime, aimee_response_t *out);
 void server_native_runtime_close(server_native_runtime_t *runtime);
