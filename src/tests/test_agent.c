@@ -717,6 +717,12 @@ static void test_tool_surface_single_source(void)
    assert(status == 0 && independent_count == count);
    cJSON *chat = build_tools_array();
    cJSON *resp = build_tools_array_responses();
+   assert(tools_has(chat, "request_input", 1) && tools_has(resp, "request_input", 0));
+   cJSON *question = tools_find(chat, "request_input", 1);
+   cJSON *parameters = cJSON_GetObjectItemCaseSensitive(question, "parameters");
+   cJSON *required = cJSON_GetObjectItemCaseSensitive(parameters, "required");
+   assert(cJSON_GetArraySize(required) == 1 &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(required, 0)), "question"));
 
    /* Chat tools nest {name,description,parameters} under "function"; Responses
     * tools carry them flat. Both tag type:function. */

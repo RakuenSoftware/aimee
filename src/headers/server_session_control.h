@@ -18,6 +18,12 @@ server_control_scope_t *server_control_scope_bind(server_control_scope_t *scope)
 server_control_scope_t *server_control_scope_current(void);
 int server_control_register(server_control_scope_t *scope, const char *native_id, const char *kind,
                             const cJSON *request);
+/* Reserve a host-consumed control before emitting it through canonical capture.
+ * Exactly one matching register consumes the reservation. Until then no reply
+ * is accepted; native harness drainers never take a host-consumed reply. */
+int server_control_reserve(server_control_scope_t *scope, const char *native_id, const char *kind,
+                           const cJSON *request);
+void server_control_scope_fail(server_control_scope_t *scope);
 /* Durable host controls record before publication/consumption. The callback
  * receives immutable copied identity and a turn-qualified canonical event.
  * It must not call control APIs; it runs under this scope's lock, never the
@@ -33,7 +39,7 @@ int server_control_scope_failed(const server_control_scope_t *scope);
 int server_control_reply(const char *session, const char *qualified_id, const char *principal,
                          const cJSON *reply);
 /* 1 with owned outputs, 0 when none ready. NULL selects the next native reply;
- * recorded host controls require their specific ID and cannot be drained by a
+ * reserved/recorded host controls require their specific ID and cannot be drained by a
  * native harness control loop. */
 int server_control_take(server_control_scope_t *scope, const char *native_id, char **out_id,
                         char **out_kind, cJSON **out_request, cJSON **out_reply);

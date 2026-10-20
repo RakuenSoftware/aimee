@@ -117,7 +117,7 @@ def main():
                 if wire == "anthropic":
                     assert self.path.endswith("/messages"), self.path
                     content = [{"type": "tool_use", "id": call_id, "name": logical,
-                                "input": {"path": "README.md"}}] if count == 1 else [{"type": "text", "text": text}]
+                                "input": json.loads(arguments)}] if count == 1 else [{"type": "text", "text": text}]
                     payload = {"id": "msg_" + marker + str(count), "type": "message", "role": "assistant",
                                "model": marker, "content": content,
                                "stop_reason": "tool_use" if count == 1 else "end_turn",

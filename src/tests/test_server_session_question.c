@@ -62,18 +62,18 @@ char *safe_strdup(const char *value)
 {
    return value ? strdup(value) : NULL;
 }
-int db1_session_ir_append(const char *session, const char *id, const char *turn,
-                          const char *principal, const char *wire, char sequence[32])
+static int question_sink(const aimee_session_event_t *input, void *unused)
 {
-   assert(!strcmp(session, "question-session") && !strcmp(turn, "question-turn"));
-   assert(!strcmp(principal, "webuser:alice"));
-   cJSON *event = aimee_ir_json_parse_frame(wire, strlen(wire));
+   (void)unused;
+   if (input->kind == AIMEE_SESSION_CONTROL_REQUEST &&
+       server_control_register(worker_scope, input->request_id, input->control_kind,
+                               input->control))
+      return -1;
+   cJSON *event = aimee_ir_session_event_json(input);
    assert(event);
    const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "kind"));
-   const char *request_id =
-       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "request_id"));
-   assert(kind && request_id && !strncmp(request_id, "question-turn:", 14));
-   assert(strstr(id, request_id) == id && strstr(id, ":host-question:"));
+   char request_id[192];
+   snprintf(request_id, sizeof request_id, "question-turn:%s", input->request_id);
    pthread_mutex_lock(&lock);
    int failed;
    if (!strcmp(kind, "control_request"))
@@ -100,7 +100,6 @@ int db1_session_ir_append(const char *session, const char *id, const char *turn,
       assert(last_response);
       failed = fail_response;
    }
-   snprintf(sequence, 32, "%d", requests + responses);
    pthread_cond_broadcast(&ready);
    pthread_mutex_unlock(&lock);
    cJSON_Delete(event);
@@ -110,8 +109,10 @@ static void *ask(void *unused)
 {
    (void)unused;
    assert(!server_control_scope_bind(worker_scope));
+   aimee_ir_session_set_sink(question_sink, NULL);
    worker_result = wait_seconds == 2 ? delegation_request_input("Which workspace?")
                                      : server_session_question("Which workspace?", wait_seconds);
+   aimee_ir_session_set_sink(NULL, NULL);
    assert(server_control_scope_bind(NULL) == worker_scope);
    return NULL;
 }

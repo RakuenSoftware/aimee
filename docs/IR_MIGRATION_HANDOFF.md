@@ -3759,3 +3759,37 @@ Fresh CI must qualify the root question journey beyond canonical initialization;
 stream termination diagnostics now retain final records when no question appears.
 The separate retained mirror callback/delegate lease continuation is prepared
 under /var/tmp, not applied to this qualified source snapshot.
+
+
+## Live browser question catalog and capture repair: 20 October 2026
+
+CI run 39372736936 passed the sixteen API/OAuth native journeys and real Docker
+learning/readback, then exposed the missing request_input model catalog entry.
+Its dispatcher and session question owner already existed, but the canonical
+built-in catalog did not advertise it. The catalog now supplies one schema to
+all three provider profiles, declares its internal control egress and includes
+it in the normal role toolsets.
+
+Actual local streaming then exposed direct DB1 question writes bypassing the
+canonical capture cursor and live delivery. Questions now reserve a host-only
+reply consumer, publish through the canonical sink and commit the response
+through that same sink before releasing an answer. Reservations admit exactly
+one matching publication; stale, changed and abandoned reservations refuse.
+Native harness drainers cannot steal the host reply. Cancellation and storage
+failure remain terminal, without borrowing a browser sink on callback workers.
+The Anthropic fixture's completed original input now matches its question delta;
+it had incorrectly retained the read-file arguments in the completed snapshot.
+
+An unprivileged user namespace provides a disposable server with a real root-UDS
+peer boundary, overcoming the unavailable passwordless sudo for local testing.
+All eighteen actual pinned-SDK journeys pass there: sixteen API/OAuth/history/run
+cases and both live browser questions, rejected UID impersonation, matching
+operator replies, canonical response and durable successful terminal. The full
+660-binary native suite, focused ASan/UBSan and TSan, two CMake fixtures and
+Cppcheck with no increased diagnostics pass. Fresh hosted CI remains required.
+The retained mirror callback lease work is stashed separately until this repair
+is published. The overall migration, independent local learning/reuse, broader
+native platforms and reviewed production promotion remain unfinished; production
+must remain KB-free.
+
+All 76 lint gates also pass on the final question repair.

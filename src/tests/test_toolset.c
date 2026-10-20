@@ -39,6 +39,7 @@ static void test_full_stack_resolves_union(void)
    assert(has_tool(tools, n, "bash"));
    assert(has_tool(tools, n, "git_status"));
    assert(has_tool(tools, n, "read_file"));
+   assert(has_tool(tools, n, "request_input"));
    assert(has_tool(tools, n, "search_memory"));
    /* edit_file is a write-capable tool the code role must expose (delegates
     * need surgical edits, not just whole-file write_file). */

@@ -1,7 +1,6 @@
 #include "server_session_question.h"
 #include "server_session_control.h"
 #include "agent_config.h"
-#include "db1_client/primary_sessions.h"
 #include "platform_random.h"
 #include "util.h"
 #include <stdio.h>
@@ -9,20 +8,15 @@
 #include <string.h>
 #include <time.h>
 
-static int question_record(const char *session, const char *turn, const char *principal,
-                           const aimee_session_event_t *event)
+static int question_emit(server_control_scope_t *scope, const char *id,
+                         aimee_session_event_kind_t kind, const cJSON *payload)
 {
-   cJSON *payload = aimee_ir_session_event_json(event);
-   char *wire = payload ? cJSON_PrintUnformatted(payload) : NULL;
-   cJSON_Delete(payload);
-   char id[192], sequence[32];
-   int n = snprintf(id, sizeof id, "%s:host-question:%s", event->request_id,
-                    event->kind == AIMEE_SESSION_CONTROL_REQUEST ? "request" : "response");
-   int result = wire && n > 0 && (size_t)n < sizeof id
-                    ? db1_session_ir_append(session, id, turn, principal, wire, sequence)
-                    : -1;
-   free(wire);
-   return result;
+   aimee_session_event_t event = {
+       .kind = kind, .request_id = id, .control_kind = "question", .control = payload};
+   int result = !aimee_ir_session_get_sink(NULL) || aimee_ir_session_emit(&event);
+   if (result)
+      server_control_scope_fail(scope);
+   return result ? -1 : 0;
 }
 static char *question_answer(const cJSON *reply)
 {
@@ -89,7 +83,8 @@ char *server_session_question(const char *question, int timeout_seconds)
            cJSON_AddStringToObject(item, "question", question) &&
            cJSON_AddBoolToObject(item, "multiple", 0) && cJSON_AddArrayToObject(item, "options");
    if (!valid || platform_random_hex(id, 32) ||
-       server_control_register_recorded(scope, id, "question", request, question_record))
+       server_control_reserve(scope, id, "question", request) ||
+       question_emit(scope, id, AIMEE_SESSION_CONTROL_REQUEST, request))
    {
       cJSON_Delete(request);
       answer = safe_strdup("error: could not durably publish question");
@@ -108,6 +103,11 @@ char *server_session_question(const char *question, int timeout_seconds)
       if (clock_failed || cancelled || timed_out)
       {
          int failed = server_control_abandon(scope, id);
+         cJSON *reply = cJSON_CreateObject();
+         if (!failed)
+            failed = !reply || !cJSON_AddStringToObject(reply, "decision", "cancel") ||
+                     question_emit(scope, id, AIMEE_SESSION_CONTROL_RESPONSE, reply);
+         cJSON_Delete(reply);
          answer = safe_strdup(failed      ? "error: could not durably close question"
                               : cancelled ? "error: question cancelled"
                               : timed_out ? "error: question timed out"
@@ -119,8 +119,10 @@ char *server_session_question(const char *question, int timeout_seconds)
       int taken = server_control_take(scope, id, &taken_id, &kind, &original, &reply);
       if (taken)
       {
-         answer = taken > 0 ? question_answer(reply)
-                            : safe_strdup("error: question owner closed or durable capture failed");
+         int recorded =
+             taken > 0 && !question_emit(scope, id, AIMEE_SESSION_CONTROL_RESPONSE, reply);
+         answer = recorded ? question_answer(reply)
+                           : safe_strdup("error: question owner closed or durable capture failed");
          free(taken_id);
          free(kind);
          cJSON_Delete(original);

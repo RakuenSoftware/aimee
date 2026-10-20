@@ -154,8 +154,44 @@ static void unrelated_scope_remains_responsive(void)
    server_control_scope_close(blocked);
 }
 
+static void host_control_reservation(void)
+{
+   server_control_scope_t *scope = server_control_scope_open("host-session", "turn", "alice");
+   cJSON *request = cJSON_Parse("{\"title\":\"Run?\"}");
+   cJSON *changed = cJSON_Parse("{\"title\":\"Changed\"}");
+   cJSON *reply = cJSON_Parse("{\"decision\":\"deny\"}");
+   assert(scope && request && changed && reply);
+   int reserved = server_control_reserve(scope, "host", "permission", request);
+   assert(!reserved);
+   assert(server_control_reply("host-session", "turn:host", "alice", reply) == 1);
+   assert(server_control_register(scope, "host", "permission", changed) < 0);
+   int published = server_control_register(scope, "host", "permission", request);
+   assert(!published);
+   assert(server_control_register(scope, "host", "permission", request) < 0);
+   assert(!server_control_reply("host-session", "turn:host", "alice", reply));
+   char *id = NULL, *kind = NULL;
+   cJSON *original = NULL, *decision = NULL;
+   assert(server_control_take(scope, NULL, &id, &kind, &original, &decision) == 0);
+   assert(server_control_take(scope, "host", &id, &kind, &original, &decision) == 1);
+   assert(!strcmp(id, "host") && cJSON_Compare(original, request, 1));
+   free(id);
+   free(kind);
+   cJSON_Delete(original);
+   cJSON_Delete(decision);
+   reserved = server_control_reserve(scope, "abandoned", "permission", request);
+   assert(!reserved);
+   int abandoned = server_control_abandon(scope, "abandoned");
+   assert(!abandoned);
+   assert(server_control_register(scope, "abandoned", "permission", request) < 0);
+   cJSON_Delete(request);
+   cJSON_Delete(changed);
+   cJSON_Delete(reply);
+   server_control_scope_close(scope);
+}
+
 int main(void)
 {
+   host_control_reservation();
    unrelated_scope_remains_responsive();
    retained_owner_teardown();
    long_owner_reply();

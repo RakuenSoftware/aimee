@@ -942,6 +942,18 @@ static void tp_prop_str_array(cJSON *props, const char *name, const char *desc)
    cJSON_AddItemToObject(props, name, p);
 }
 
+static cJSON *tp_request_input(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "question", "string", "The question for the current session operator or parent");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *required = cJSON_CreateArray();
+   cJSON_AddItemToArray(required, cJSON_CreateString("question"));
+   cJSON_AddItemToObject(params, "required", required);
+   return params;
+}
+
 static cJSON *tp_bash(void)
 {
    cJSON *params = tp_obj();
@@ -1519,6 +1531,9 @@ static cJSON *tp_search_docs(void)
  * Chat; search_docs before find_symbol for Responses). Emitting in this order,
  * filtered by surface, reproduces each builder's prior output exactly. */
 static const builtin_tool_def_t g_builtin_tools[] = {
+    {"request_input",
+     "Ask the current session operator or parent for input and wait for its reply.",
+     tp_request_input, TSURF_ALL},
     {"bash", "Run a shell command. Returns JSON with stdout, stderr, exit_code.", tp_bash,
      TSURF_ALL},
     {"execute_script",

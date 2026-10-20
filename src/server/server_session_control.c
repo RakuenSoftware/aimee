@@ -13,7 +13,7 @@ struct pending_control
 {
    char *id, *kind;
    cJSON *request, *reply;
-   int taken;
+   int taken, reserved, host_consumed;
    server_control_record_fn record;
    struct pending_control *next;
 };
@@ -176,9 +176,8 @@ int server_control_register(server_control_scope_t *scope, const char *id, const
 {
    return server_control_register_recorded(scope, id, kind, request, NULL);
 }
-int server_control_register_recorded(server_control_scope_t *scope, const char *id,
-                                     const char *kind, const cJSON *request,
-                                     server_control_record_fn record)
+static int register_control(server_control_scope_t *scope, const char *id, const char *kind,
+                            const cJSON *request, server_control_record_fn record, int reserved)
 {
    if (!scope || !id || !id[0] || strlen(id) > 1024 || !kind || !kind[0] ||
        !cJSON_IsObject(request) || !aimee_ir_json_unique(request))
@@ -189,6 +188,7 @@ int server_control_register_recorded(server_control_scope_t *scope, const char *
    p->id = strdup(id);
    p->kind = strdup(kind);
    p->request = cJSON_Duplicate(request, 1);
+   p->reserved = p->host_consumed = reserved;
    if (!p->id || !p->kind || !p->request)
    {
       free(p->id);
@@ -198,11 +198,24 @@ int server_control_register_recorded(server_control_scope_t *scope, const char *
       return -1;
    }
    pthread_mutex_lock(&scope->mutex);
-   int valid = !atomic_load(&scope->closed) && !atomic_load(&scope->failed) &&
-               scope->count < CONTROL_PENDING_MAX;
+   int valid = !atomic_load(&scope->closed) && !atomic_load(&scope->failed);
    for (struct pending_control *old = scope->pending; old; old = old->next)
       if (!strcmp(old->id, id))
+      {
+         if (valid && !reserved && !record && old->reserved && !old->taken &&
+             !strcmp(old->kind, kind) && cJSON_Compare(old->request, request, 1))
+         {
+            old->reserved = 0;
+            pthread_mutex_unlock(&scope->mutex);
+            free(p->id);
+            free(p->kind);
+            cJSON_Delete(p->request);
+            free(p);
+            return 0;
+         }
          valid = 0;
+      }
+   valid = valid && scope->count < CONTROL_PENDING_MAX;
    p->record = record;
    if (valid && record_control(scope, p, AIMEE_SESSION_CONTROL_REQUEST, p->request))
       valid = 0;
@@ -222,6 +235,22 @@ int server_control_register_recorded(server_control_scope_t *scope, const char *
       return -1;
    }
    return 0;
+}
+int server_control_register_recorded(server_control_scope_t *scope, const char *id,
+                                     const char *kind, const cJSON *request,
+                                     server_control_record_fn record)
+{
+   return register_control(scope, id, kind, request, record, 0);
+}
+int server_control_reserve(server_control_scope_t *scope, const char *id, const char *kind,
+                           const cJSON *request)
+{
+   return register_control(scope, id, kind, request, NULL, 1);
+}
+void server_control_scope_fail(server_control_scope_t *scope)
+{
+   if (scope)
+      atomic_store(&scope->failed, 1);
 }
 static int valid_reply(const cJSON *reply)
 {
@@ -291,7 +320,7 @@ int server_control_reply(const char *session, const char *qualified, const char 
       {
          if (strcmp(p->id, qualified + prefix + 1))
             continue;
-         if (p->reply || p->taken)
+         if (p->reply || p->taken || p->reserved)
             break;
          if (!aimee_ir_control_reply_valid(p->kind, p->request, reply))
          {
@@ -323,7 +352,7 @@ int server_control_take(server_control_scope_t *scope, const char *native_id, ch
    }
    for (struct pending_control *p = scope->pending; p; p = p->next)
    {
-      if (!p->reply || p->taken || (!native_id && p->record) ||
+      if (!p->reply || p->taken || p->reserved || (!native_id && (p->record || p->host_consumed)) ||
           (native_id && strcmp(p->id, native_id)))
          continue;
       char *id = strdup(p->id), *kind = strdup(p->kind);
