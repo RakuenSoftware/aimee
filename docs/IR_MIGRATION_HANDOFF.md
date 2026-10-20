@@ -3793,3 +3793,25 @@ native platforms and reviewed production promotion remain unfinished; production
 must remain KB-free.
 
 All 76 lint gates also pass on the final question repair.
+
+
+## Retained native mirror callback capability: 20 October 2026
+
+Native runtime owners now retain a duplicate of the exact approved mirror
+checkout descriptor. Every callback revalidates its path/inode, binds the held
+capability for its own thread and restores the previous binding; close releases
+it only after callback join. Nested scopes preserve the enclosing capability.
+No mirror-base prefix or request-body path claim becomes filesystem authority.
+The workspace fixture unbinds the original producer before a real callback thread
+uses its retained capability, tests nested restoration and refuses directory
+replacement with an escaping symlink. Native callback probes separately require
+the imported capability and prove it is cleared on teardown.
+
+The full 660-binary native suite, both ASan/UBSan and TSan fixtures, native runtime
+CMake fixture and Cppcheck without increased diagnostics pass. All eighteen actual
+pinned-SDK journeys pass again through the explicit mirror, including both live
+root-UDS browser questions and operator replies. Broader queued native delegation
+and durable workspace origin propagation still require their own producer/worker
+qualification. This is not completion of the migration or independent learning.
+
+All 76 lint gates also pass for the retained callback capability.

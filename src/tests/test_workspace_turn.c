@@ -14,6 +14,7 @@
 #include "util.h"
 #include <aimee/workspace/module_api.h>
 #include <stdint.h>
+#include <pthread.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -127,6 +128,97 @@ static void register_standard_workspaces(void)
    (void)config_workspace_remove(test_shared_workspace);
    assert(config_workspace_add(test_detached_workspace, "detached", NULL, NULL) == 0);
    assert(config_workspace_add("/tmp/ws-shared", "shared", NULL, NULL) == 0);
+}
+
+struct mirror_callback_fixture
+{
+   workspace_turn_mirror_lease_t *lease;
+   const char *cwd;
+};
+static void *mirror_callback_worker(void *opaque)
+{
+   struct mirror_callback_fixture *fixture = opaque;
+   char allowed[MAX_PATH_LEN], digest[65];
+   int accepted = workspace_turn_workspace_authorized(fixture->cwd, allowed, sizeof allowed);
+   assert(!accepted);
+   const workspace_turn_mirror_lease_t *previous = workspace_turn_mirror_bind(fixture->lease);
+   assert(!previous);
+   accepted = workspace_turn_workspace_authorized(fixture->cwd, allowed, sizeof allowed);
+   assert(accepted && !strcmp(allowed, fixture->cwd));
+   int fd = -1;
+   int rc = workspace_turn_resource_identity(fixture->cwd, &fd, digest);
+   assert(!rc && fd >= 0 && strlen(digest) == 64);
+   close(fd);
+   const workspace_turn_mirror_lease_t *nested = workspace_turn_mirror_bind(NULL);
+   assert(nested == fixture->lease);
+   accepted = workspace_turn_workspace_authorized(fixture->cwd, allowed, sizeof allowed);
+   assert(!accepted);
+   workspace_turn_mirror_bind(nested);
+   workspace_turn_mirror_bind(previous);
+   accepted = workspace_turn_workspace_authorized(fixture->cwd, allowed, sizeof allowed);
+   assert(!accepted);
+   return NULL;
+}
+static void test_owned_mirror_callback_lease(const char *temporary)
+{
+   char source[1024], client[1024], command[8192], actual[MAX_PATH_LEN];
+   snprintf(source, sizeof source, "%s/lease-source", temporary);
+   snprintf(client, sizeof client, "%s/foreign-client", temporary);
+   snprintf(command, sizeof command,
+            "git init -q '%s' && git -C '%s' config user.email t@t && "
+            "git -C '%s' config user.name t && echo source > '%s/README.md' && "
+            "git -C '%s' add README.md && git -C '%s' commit -q -m fixture",
+            source, source, source, source, source, source);
+   int rc = system(command);
+   assert(!rc);
+   snprintf(command, sizeof command, "git -C '%s' rev-parse HEAD", source);
+   char *head = run_cmd(command, &rc);
+   assert(!rc && head);
+   head[strcspn(head, "\r\n")] = 0;
+   rc = config_workspace_add(client, "mirror", source, head);
+   free(head);
+   assert(!rc);
+   rc = workspace_turn_bind_active(client);
+   assert(rc == 1 && workspace_turn_active_cwd());
+   snprintf(actual, sizeof actual, "%s", workspace_turn_active_cwd());
+   workspace_turn_mirror_lease_t *lease = NULL;
+   rc = workspace_turn_mirror_capture(actual, &lease);
+   assert(!rc && lease);
+   workspace_turn_unbind_active();
+   int valid = workspace_turn_mirror_valid(lease, actual);
+   assert(valid);
+   struct mirror_callback_fixture fixture = {lease, actual};
+   pthread_t worker;
+   rc = pthread_create(&worker, NULL, mirror_callback_worker, &fixture);
+   assert(!rc);
+   rc = pthread_join(worker, NULL);
+   assert(!rc);
+   char moved[MAX_PATH_LEN + 16], outside[1024];
+   snprintf(moved, sizeof moved, "%s.replaced", actual);
+   snprintf(outside, sizeof outside, "%s/lease-outside", temporary);
+   rc = mkdir(outside, 0700);
+   assert(!rc);
+   rc = rename(actual, moved);
+   assert(!rc);
+   rc = symlink(outside, actual);
+   assert(!rc);
+   valid = workspace_turn_mirror_valid(lease, actual);
+   assert(!valid);
+   const workspace_turn_mirror_lease_t *previous = workspace_turn_mirror_bind(lease);
+   char allowed[MAX_PATH_LEN];
+   valid = workspace_turn_workspace_authorized(actual, allowed, sizeof allowed);
+   assert(!valid);
+   workspace_turn_mirror_bind(previous);
+   rc = unlink(actual);
+   assert(!rc);
+   rc = rename(moved, actual);
+   assert(!rc);
+   valid = workspace_turn_mirror_valid(lease, actual);
+   assert(valid);
+   workspace_turn_mirror_release(lease);
+   rc = config_workspace_remove(client);
+   assert(!rc);
+   puts("  owned mirror callbacks: cross-thread/nested restore and replaced-inode refusal pass");
 }
 
 int main(void)
@@ -533,6 +625,7 @@ int main(void)
       delegate_backend_reset_for_test();
    }
 
+   test_owned_mirror_callback_lease(tmpdir);
    printf("workspace_turn: all tests passed\n");
    return 0;
 }

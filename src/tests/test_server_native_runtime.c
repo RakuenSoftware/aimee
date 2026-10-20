@@ -1,4 +1,5 @@
 #include "server_native_runtime.h"
+#include "modules/workspace/workspace_turn.h"
 #include "computer_use.h"
 #include <aimee/translation/aimee_backend.h>
 #include "agent_exec.h"
@@ -83,6 +84,36 @@ void agent_set_durable_job(int id)
 int agent_get_durable_job_id(void)
 {
    return job_id;
+}
+/* Workspace ownership is an explicit peer mock here; the actual descriptor,
+ * cross-thread restoration and replacement tests live in test_workspace_turn. */
+struct workspace_turn_mirror_lease
+{
+   int marker;
+};
+static workspace_turn_mirror_lease_t fixture_mirror;
+static _Thread_local const workspace_turn_mirror_lease_t *current_mirror;
+int workspace_turn_mirror_capture(const char *cwd, workspace_turn_mirror_lease_t **out)
+{
+   (void)cwd;
+   *out = &fixture_mirror;
+   return 0;
+}
+int workspace_turn_mirror_valid(const workspace_turn_mirror_lease_t *lease, const char *cwd)
+{
+   (void)cwd;
+   return lease == &fixture_mirror;
+}
+const workspace_turn_mirror_lease_t *
+workspace_turn_mirror_bind(const workspace_turn_mirror_lease_t *lease)
+{
+   const workspace_turn_mirror_lease_t *previous = current_mirror;
+   current_mirror = lease;
+   return previous;
+}
+void workspace_turn_mirror_release(workspace_turn_mirror_lease_t *lease)
+{
+   assert(!lease || lease == &fixture_mirror);
 }
 const workspace_provider_t *workspace_provider_active(void)
 {
@@ -177,6 +208,7 @@ static atomic_int calls, cancelled, wait_for_cancel, source_changed, session_rem
 
 static void restored_probe(void)
 {
+   assert(!current_mirror);
    assert(!current_model && !request_context_get());
    aimee_frontend_state_scope_t guard = aimee_frontend_bind_state_guard(NULL, NULL);
    aimee_frontend_state_scope_t owner = aimee_frontend_bind_request_owner(NULL, NULL);
@@ -252,6 +284,7 @@ static atomic_int execution_mode, dispatch_count, mcp_execution;
 static _Thread_local char execution_attempt[96];
 static void check_execution_owner(const char *name)
 {
+   assert(current_mirror == &fixture_mirror);
    const request_context_t *owner = request_context_get();
    assert(!strcmp(name, "read_file") && owner && owner->model_execution);
    assert(!strcmp(owner->vault_principal, "webuser:alice") && !strcmp(identity, "webuser:alice"));
@@ -521,6 +554,7 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
    assert(!strcmp(session_id(), owner->session_key));
    assert(job_id == (alice ? 11 : 22));
    assert(workspace == (alice ? &alice_workspace : &bob_workspace));
+   assert(current_mirror == &fixture_mirror);
    assert(delegate_scope.depth == (alice ? 2 : 0));
    assert(!strcmp(delegate_scope.parent, alice ? "parent-alice" : ""));
    assert(delegate_scope.mailbox == (alice ? (void *)&alice_workspace : NULL));

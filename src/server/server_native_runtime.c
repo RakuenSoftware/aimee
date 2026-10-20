@@ -11,6 +11,7 @@
 #include "server_session_control.h"
 #include "server_session_capture.h"
 #include "modules/workspace/workspace_provider.h"
+#include "modules/workspace/workspace_turn.h"
 #include "util.h"
 #include "server_native_replay.h"
 #include <aimee/translation/aimee_frontend.h>
@@ -57,6 +58,7 @@ struct server_native_runtime
    agent_source_authority_snapshot_t source;
    server_delegate_scope_t delegate;
    const workspace_provider_t *workspace;
+   workspace_turn_mirror_lease_t *mirror;
    char cwd[MAX_PATH_LEN];
    int job_id, api_key_source, claude_source;
    char session[128], token[65], url[64], binding[65], lineage[65];
@@ -847,6 +849,11 @@ static int native_perform(const char *method, const char *path, const char *head
          return -1;
       }
    }
+   if (runtime->mirror && !workspace_turn_mirror_valid(runtime->mirror, runtime->cwd))
+   {
+      free(input);
+      return -1;
+   }
    /* These host leases outlive the child and this listener. Workers receive
     * owned permission/source copies and borrowed stable resource providers. */
    agent_source_authority_snapshot_t previous_source = {0}, bound_source = {0};
@@ -875,6 +882,8 @@ static int native_perform(const char *method, const char *path, const char *head
    server_delegate_scope_t previous_delegate;
    server_delegate_scope_capture(&previous_delegate);
    const workspace_provider_t *previous_workspace = workspace_provider_active();
+   const workspace_turn_mirror_lease_t *previous_mirror =
+       workspace_turn_mirror_bind(runtime->mirror);
    int previous_job = agent_get_durable_job_id();
    char previous_cwd[MAX_PATH_LEN], previous_session[128] = "";
    const char *cwd = run_cmd_get_cwd();
@@ -1015,6 +1024,7 @@ restore:
    agent_tools_scope_restore(&previous_tools);
    agent_source_authority_tls_restore(&previous_source);
    server_delegate_scope_restore(&previous_delegate);
+   workspace_turn_mirror_bind(previous_mirror);
    workspace_provider_set_active(previous_workspace);
    agent_set_durable_job(previous_job);
    run_cmd_set_cwd(previous_cwd);
@@ -1237,6 +1247,8 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
    server_delegate_scope_capture(&runtime->delegate);
    const char *cwd = run_cmd_get_cwd();
    snprintf(runtime->cwd, sizeof runtime->cwd, "%s", cwd ? cwd : "");
+   if (workspace_turn_mirror_capture(runtime->cwd, &runtime->mirror))
+      goto failed;
    {
       request_context_snapshot_t previous_request;
       request_context_snapshot(&previous_request);
@@ -1612,6 +1624,7 @@ void server_native_runtime_close(server_native_runtime_t *runtime)
    server_session_capture_release(runtime->capture);
    agent_tools_scope_destroy_owned(&runtime->tools);
    agent_source_authority_snapshot_destroy(&runtime->source);
+   workspace_turn_mirror_release(runtime->mirror);
    OPENSSL_cleanse(runtime, sizeof *runtime);
    free(runtime);
 }

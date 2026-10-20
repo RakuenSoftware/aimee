@@ -26,6 +26,17 @@ int workspace_turn_bind_active(const char *cwd);
 typedef struct workspace_turn_scope workspace_turn_scope_t;
 int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out);
 int workspace_turn_scope_end(workspace_turn_scope_t *scope);
+
+/* An owned mirror directory capability for retained callbacks. Capture duplicates
+ * the owner's held descriptor. Bind borrows an immutable capability until restore;
+ * release only after every callback has joined. No path/JSON input creates one. */
+typedef struct workspace_turn_mirror_lease workspace_turn_mirror_lease_t;
+int workspace_turn_mirror_capture(const char *cwd, workspace_turn_mirror_lease_t **out);
+int workspace_turn_mirror_valid(const workspace_turn_mirror_lease_t *lease, const char *cwd);
+const workspace_turn_mirror_lease_t *
+workspace_turn_mirror_bind(const workspace_turn_mirror_lease_t *lease);
+void workspace_turn_mirror_release(workspace_turn_mirror_lease_t *lease);
+
 /* Identity-only attestation of the currently held tool resource. Shared/mirror
  * directories return an owned fd pinning the measured inode; container/detached
  * identities include this owner's live acquisition epoch, never a pointer.

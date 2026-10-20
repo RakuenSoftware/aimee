@@ -50,6 +50,13 @@ static __thread char t_turn_cwd[MAX_PATH_LEN];
 static __thread char t_turn_drift[256];
 static __thread char t_test_default_workspace[MAX_PATH_LEN];
 
+struct workspace_turn_mirror_lease
+{
+   int fd;
+   char cwd[MAX_PATH_LEN];
+};
+static __thread const workspace_turn_mirror_lease_t *t_callback_mirror;
+
 struct workspace_turn_scope
 {
    ws_detached_provider_t detached;
@@ -559,10 +566,58 @@ static int mirror_lease_matches(const char *real, const char *path, int fd)
 }
 static int active_mirror_lease(const char *real)
 {
+   if (t_callback_mirror &&
+       mirror_lease_matches(real, t_callback_mirror->cwd, t_callback_mirror->fd))
+      return t_callback_mirror->fd;
    for (workspace_turn_scope_t *scope = t_nested_scope; scope; scope = scope->previous)
       if (mirror_lease_matches(real, scope->cwd, scope->mirror_fd))
          return scope->mirror_fd;
    return mirror_lease_matches(real, t_turn_cwd, t_turn_mirror_fd) ? t_turn_mirror_fd : -1;
+}
+
+int workspace_turn_mirror_capture(const char *cwd, workspace_turn_mirror_lease_t **out)
+{
+   if (!out)
+      return -1;
+   *out = NULL;
+   char actual[MAX_PATH_LEN];
+   if (!cwd || !cwd[0] || !realpath(cwd, actual))
+      return 0;
+   int source = active_mirror_lease(actual);
+   if (source < 0)
+      return 0;
+   workspace_turn_mirror_lease_t *lease = calloc(1, sizeof *lease);
+   if (!lease)
+      return -1;
+   lease->fd = fcntl(source, F_DUPFD_CLOEXEC, 3);
+   if (lease->fd < 0)
+   {
+      free(lease);
+      return -1;
+   }
+   snprintf(lease->cwd, sizeof lease->cwd, "%s", actual);
+   *out = lease;
+   return 0;
+}
+int workspace_turn_mirror_valid(const workspace_turn_mirror_lease_t *lease, const char *cwd)
+{
+   char actual[MAX_PATH_LEN];
+   return lease && cwd && realpath(cwd, actual) &&
+          mirror_lease_matches(actual, lease->cwd, lease->fd);
+}
+const workspace_turn_mirror_lease_t *
+workspace_turn_mirror_bind(const workspace_turn_mirror_lease_t *lease)
+{
+   const workspace_turn_mirror_lease_t *previous = t_callback_mirror;
+   t_callback_mirror = lease;
+   return previous;
+}
+void workspace_turn_mirror_release(workspace_turn_mirror_lease_t *lease)
+{
+   if (!lease)
+      return;
+   close(lease->fd);
+   free(lease);
 }
 
 /* Is `workspace` a tree aimee may hand a delegate? Canonicalizes into `out` and
