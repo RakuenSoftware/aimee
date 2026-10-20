@@ -482,6 +482,21 @@ def main():
         owned = next(path for path in (home / "workspaces").glob("*/work") if path.is_dir())
         source_refusal(owned, "no held or registered authority")
         print("delegate source: dirty client templates ignored; unregistered and unleased sources refuse before file references")
+        tracked_cwd = home / ("git-cwd-" + sid)
+        previous_cwd = tracked_cwd.read_bytes() if tracked_cwd.exists() else None
+        tracked_cwd.write_text(str(unregistered) + "\n")
+        try:
+            for key in ("path", "cwd"):
+                checked = api("/v1/mcp/call", dict(tool="git_status", session_id=sid,
+                    arguments={key: str(mirror), "no_session_redirect": False}))
+                text = "\n".join(part.get("text", "") for part in checked.get("content", []))
+                assert "clean working tree" in text and "README.md" not in text, checked
+        finally:
+            if previous_cwd is None:
+                tracked_cwd.unlink()
+            else:
+                tracked_cwd.write_bytes(previous_cwd)
+        print("Git mirror: held source wins over dirty client and stale session cwd for path/cwd requests")
         before = len(observed)
         launched = api("/v1/delegate/run", dict(role="diagnose", persona="engineer", via="ir-live-a", tools=True,
             prompt="IR_MIRROR_DELEGATE_READ read README.md and report its committed source", session_id=sid,

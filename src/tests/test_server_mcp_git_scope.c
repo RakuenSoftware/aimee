@@ -9,6 +9,8 @@
 #include <string.h>
 static char cwd[MAX_PATH_LEN], sid[128], operation_sid[128];
 static int overridden, worktree, resolution, mismatch, calls;
+static int source_result, mirror_case, resolutions;
+static char source_target[MAX_PATH_LEN];
 const char *run_cmd_get_cwd(void)
 {
    return cwd[0] ? cwd : NULL;
@@ -53,6 +55,7 @@ int workspace_turn_resolve_mirror_cwd(const char *directory, char *out, size_t c
    (void)directory;
    assert(capacity);
    out[0] = 0;
+   assert(!"Git must acquire the source rather than resolve an unheld mirror path");
    return 0;
 }
 static int live_workspace_scopes;
@@ -73,10 +76,19 @@ void workspace_turn_unbind_active(void)
 int workspace_turn_scope_begin(const char *directory, workspace_turn_scope_t **out)
 {
    assert(directory && directory[0]);
+   snprintf(source_target, sizeof source_target, "%s", directory);
+   *out = NULL;
+   if (source_result < 0)
+      return -1;
    *out = calloc(1, sizeof **out);
    assert(*out);
    live_workspace_scopes++;
-   return 0; /* Even a non-detached scope must be paired. */
+   return source_result; /* Even a non-detached scope must be paired. */
+}
+const char *workspace_turn_active_cwd(void)
+{
+   assert(live_workspace_scopes == 1);
+   return source_result == 1 ? "/retained/mirror" : NULL;
 }
 int workspace_turn_scope_end(workspace_turn_scope_t *scope)
 {
@@ -90,8 +102,19 @@ int mcp_chdir_git_root_authorized(char *old, size_t capacity, cJSON *args, char 
 {
    (void)old;
    (void)capacity;
-   (void)args;
-   (void)authorized;
+   resolutions++;
+   assert(live_workspace_scopes == 1);
+   if (mirror_case)
+   {
+      const char *key = mirror_case == 1 ? "path" : "cwd";
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(args, key)),
+                     mirror_case == 3 ? "/client/source" : "/retained/mirror"));
+      assert(authorized == (mirror_case == 1));
+      if (mirror_case == 2)
+         assert(cJSON_IsTrue(cJSON_GetObjectItem(args, "no_session_redirect")));
+      if (mirror_case == 3)
+         assert(cJSON_IsFalse(cJSON_GetObjectItem(args, "no_session_redirect")));
+   }
    assert(!strcmp(session_id(), operation_sid));
    run_cmd_set_cwd("/resolved");
    session_id_set_override("resolver-owner");
@@ -153,6 +176,31 @@ int main(void)
          cJSON_Delete(args);
       }
    }
+   /* Acquisition must see the client identity, while resolution and execution
+    * retain the reconstructed source. A reconstruction refusal never probes a
+    * server-local fallback or leaves an enclosing binding changed. */
+   for (mirror_case = 1; mirror_case <= 3; mirror_case++)
+      for (int refused = 0; refused <= 1; refused++)
+      {
+         source_result = refused ? -1 : mirror_case == 3 ? 2 : 1;
+         resolution = 1;
+         mismatch = calls = resolutions = 0;
+         run_cmd_set_cwd("/outer/source");
+         session_id_set_override("outer-session");
+         snprintf(operation_sid, sizeof operation_sid, "%s", "mirror-session");
+         mcp_git_set_worktree(1);
+         cJSON *args = cJSON_CreateObject();
+         cJSON_AddStringToObject(args, mirror_case == 1 ? "path" : "cwd", "/client/source");
+         cJSON_AddBoolToObject(args, "no_session_redirect", 0);
+         cJSON *response = mcp_git_run_tool("git_status", args, "mirror-session");
+         assert(response && calls == !refused && resolutions == !refused);
+         assert(!strcmp(source_target, "/client/source") && !live_workspace_scopes);
+         assert(!strcmp(run_cmd_get_cwd(), "/outer/source"));
+         assert(session_id_override_active() && !strcmp(session_id(), "outer-session"));
+         assert(mcp_git_get_worktree());
+         cJSON_Delete(response);
+         cJSON_Delete(args);
+      }
    puts("shared Git dispatcher: caller cwd, session and worktree restored on success and refusals");
    return 0;
 }

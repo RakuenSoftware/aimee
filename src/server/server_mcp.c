@@ -1760,12 +1760,10 @@ static cJSON *dispatch_git_tool_inner(server_ctx_t *ctx, server_conn_t *conn, co
    if (sid && sid[0])
       session_id_set_override(sid);
 
-   /* A `mirror`-workspace target points at the CLIENT's path, which does not exist
-    * server-side; remap it to the reconstructed server-side worktree (driving the
-    * mirror lifecycle: ensure + reconstruct) so the git tool — e.g. `/pr` from the
-    * gateway — operates on the real tree. `path` is authoritative for every git
-    * operation except clone, whose path is a destination. No-op for
-    * shared/detached workspaces. */
+   /* Acquire using the registered client identity before replacing any path.
+    * Resolving first loses the mirror's retained directory capability and makes
+    * a failed reconstruction look like an ordinary server-local fallback.
+    * Clone's path is a destination, not the source workspace identity. */
    cJSON *jpath = cJSON_GetObjectItemCaseSensitive(args, "path");
    cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
    const char *path_arg = cJSON_IsString(jpath) ? jpath->valuestring : NULL;
@@ -1774,28 +1772,44 @@ static cJSON *dispatch_git_tool_inner(server_ctx_t *ctx, server_conn_t *conn, co
    int target_is_path = git_target && path_arg && git_target == path_arg;
    int clone_has_destination = strcmp(tool, "git_clone") == 0 && path_arg && path_arg[0];
    const char *git_target_key = target_is_path ? "path" : "cwd";
-   char mirror_target[MAX_PATH_LEN] = "";
-   int mirror_target_authorized = 0;
-   if (git_target &&
-       workspace_turn_resolve_mirror_cwd(git_target, mirror_target, sizeof(mirror_target)))
-   {
-      cJSON_ReplaceItemInObject(args, git_target_key, cJSON_CreateString(mirror_target));
-      git_target = mirror_target;
-      mirror_target_authorized = target_is_path;
-   }
-
-   /* A `detached`-workspace target ALSO points at the CLIENT's path (the workspace
-    * lives on the serving client), so there is nothing to chdir into locally.
-    * Bind the detached provider for this target's workspace — exactly as the
-    * chat-turn boundary does — so the git tool's rev-parse / exec marshal over
-    * the runner channel to the serving client, which holds the real tree (and
-    * its own creds). No-op for shared/mirror/unregistered targets (returns 0). */
    workspace_turn_scope_t *workspace_scope = NULL;
-   if (git_target && workspace_turn_scope_begin(git_target, &workspace_scope) < 0)
+   int workspace_bound = git_target ? workspace_turn_scope_begin(git_target, &workspace_scope) : 0;
+   if (workspace_bound < 0)
    {
       if (is_verify)
          conn_active_verify(conn, verify_sid, 0);
       return text_content("error: cannot retain nested Git workspace context");
+   }
+   char mirror_target[MAX_PATH_LEN] = "";
+   int mirror_target_authorized = 0;
+   const char *resolved_workspace = workspace_bound > 0 ? workspace_turn_active_cwd() : NULL;
+   if (resolved_workspace && resolved_workspace[0])
+   {
+      snprintf(mirror_target, sizeof mirror_target, "%s", resolved_workspace);
+      cJSON *replacement = cJSON_CreateString(mirror_target);
+      if (!replacement || !cJSON_ReplaceItemInObject(args, git_target_key, replacement))
+      {
+         cJSON_Delete(replacement);
+         (void)workspace_turn_scope_end(workspace_scope);
+         if (is_verify)
+            conn_active_verify(conn, verify_sid, 0);
+         return text_content("error: cannot retain reconstructed Git workspace path");
+      }
+      mirror_target_authorized = target_is_path;
+      /* A reconstructed cwd is the selected source, never a hint below an old
+       * session tracking file. Explicit path already has this behavior. */
+      if (!target_is_path)
+      {
+         while (cJSON_HasObjectItem(args, "no_session_redirect"))
+            cJSON_DeleteItemFromObjectCaseSensitive(args, "no_session_redirect");
+         if (!cJSON_AddBoolToObject(args, "no_session_redirect", 1))
+         {
+            (void)workspace_turn_scope_end(workspace_scope);
+            if (is_verify)
+               conn_active_verify(conn, verify_sid, 0);
+            return text_content("error: cannot retain reconstructed Git workspace routing");
+         }
+      }
    }
 
    char *mismatch_err = NULL;

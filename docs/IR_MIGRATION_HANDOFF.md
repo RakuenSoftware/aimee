@@ -4025,3 +4025,27 @@ delegate-role and cmd-delegate, now declare that dependency using the existing
 platform-selected object list. Both rebuilt fixtures pass ASan/UBSan. The
 containment check and sanitizer gate remain intact. Pending Git MCP source work
 is stashed separately while this CI repair is published.
+
+## Git mirror source retention: 20 October 2026
+
+The pending Git work was restored after publishing sanitizer-link repair
+38659f6a9. Git MCP now acquires its nested workspace scope using the original
+registered client identity before remapping the request. Failed acquisition
+cannot fall through to a server-local probe. Reconstructed cwd requests disable
+stale session redirection; explicit path requests retain their existing
+authoritative routing. Detached requests keep their runner and client path.
+Caller cwd/session/worktree state and the enclosing binding survive every exit.
+
+The real PostgreSQL/server journey deliberately points the session tracking file
+at another dirty checkout. Both path and cwd requests still observe the clean
+approved mirror rather than either dirty source. Full integration passes 168/168
+(26 locally unavailable service checks), including twenty actual-SDK/browser
+journeys and four budget refusals. The focused Git scope fixture passes normally
+and under ASan/UBSan; Cppcheck has no increased diagnostics and all 76 lint gates
+pass. Replacing only the changed Git-dispatch function with its previous body
+reproduces the pinned source exactly; the memory adapter/policy bytes are
+unchanged. This records boundary analysis, not independent release approval.
+
+Fresh CI remains required for this snapshot. The earlier pending migration,
+independent learning, platform/live and production qualifications remain open;
+production stays KB-free and unpromoted.
