@@ -45,3 +45,20 @@ cannot hide completed matches. Selecting that session explicitly reports that
 current history is unfinished and offers the observations view. Malformed
 canonical history still fails strictly; this policy does not reconcile or resume
 an interrupted execution.
+
+
+Use `view: "external_sdk"` for the latest committed external Claude Code hook
+snapshot. It is a separate canonical archive scope, `external-sdk:claude-code`,
+not host primary history or original host observations. SDK tool calls/results
+are reported content, not execution receipts, permission replies, verified test
+proofs or task correctness. They cannot drive native replay or learning grades.
+The importer accepts supported user/assistant JSONL envelopes bound to the same
+session, with unique keys and matching roles; unsupported records, mixed/native
+message arrays, sidechains and malformed messages refuse the whole snapshot.
+Known file-history/progress/queue and system turn-duration bookkeeping records
+add no messages; system compaction boundaries remain unsupported. No tool
+pair repair invents outcomes. Repeated identical source snapshots are idempotent;
+legacy stored transcripts are never merged into this archive. Ownership, text
+privacy filters, response bounds and view-specific source revisions apply as in
+the other views. A snapshot digest returned by transcript ingestion identifies
+that imported source; scrolling requires the search result's `source_revision`.

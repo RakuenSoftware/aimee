@@ -195,6 +195,7 @@ def main():
             pass
 
         def do_POST(self):
+            request = None
             try:
                 request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 assert request.get("model") in (model, child_model), request.get("model")
@@ -267,7 +268,11 @@ def main():
                 self.end_headers()
                 self.wfile.write(data)
             except Exception as error:
-                errors.append(repr(error))
+                errors.append(dict(phase=phase, error=repr(error),
+                    model=request.get("model") if isinstance(request, dict) else None,
+                    tool_names=sorted(str(item.get("function", {}).get("name", item.get("name")))
+                        for item in request.get("tools", []) if isinstance(item, dict))
+                        if isinstance(request, dict) else []))
                 self.send_error(500, "configured-test journey assertion failed")
 
     provider = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
@@ -439,7 +444,7 @@ def main():
                         break
                     assert time.monotonic() < deadline, result
                     time.sleep(0.1)
-                assert result["job_status"] == "done", result
+                assert result["job_status"] == "done", dict(job=result, provider_errors=errors, requests=state)
                 assert not errors and state["child_requests"] == child_before + (2 if qualified else 1), (errors, state)
                 while True:
                     experiences = probe_json(parent_sid, "experiences")

@@ -1232,8 +1232,67 @@ static void test_host_request_owner_precedes_proof_guard(void)
    puts("owned native entry precedes replay proof, preserves later transforms and restores scope");
 }
 
+static void test_external_claude_observation_import(void)
+{
+   const char *source =
+       "[{\"type\":\"file-history-snapshot\"},"
+       "{\"type\":\"user\",\"sessionId\":\"session\",\"message\":{\"role\":\"user\",\"content\":"
+       "\"question\"}},"
+       "{\"type\":\"assistant\",\"sessionId\":\"session\",\"message\":{\"role\":\"assistant\","
+       "\"content\":["
+       "{\"type\":\"thinking\",\"thinking\":\"private reasoning\",\"signature\":\"opaque\"},"
+       "{\"type\":\"tool_use\",\"id\":\"external-call\",\"name\":\"Bash\",\"input\":{\"command\":"
+       "\"false\"}}]}}]";
+   cJSON *records = cJSON_Parse(source);
+   cJSON *result = aimee_frontend_claude_transcript_import(records, "session");
+   assert(result && cJSON_GetArraySize(result) == 2);
+   aimee_message_t message = {0};
+   assert(!aimee_ir_message_parse(cJSON_GetArrayItem(result, 1), &message));
+   assert(message.n_blocks == 2 && message.blocks[1].type == AIMEE_BLK_TOOL_USE);
+   assert(!strcmp(message.blocks[1].tool_id, "external-call"));
+   for (int i = 0; i < message.n_blocks; i++)
+   {
+      assert(message.blocks[i].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+      assert(message.blocks[i].context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+      assert(!strcmp(message.blocks[i].context.revision_domain, "external-sdk"));
+      assert(!message.blocks[i].thinking_binding);
+   }
+   aimee_message_free(&message);
+   cJSON_Delete(result);
+   assert(!aimee_frontend_claude_transcript_import(records, "foreign"));
+   cJSON_Delete(records);
+   const char *invalid[] = {
+       "[{\"role\":\"user\",\"content\":\"native not envelope\"}]",
+       "[{\"type\":\"user\",\"message\":{\"role\":\"assistant\",\"content\":\"mismatch\"}}]",
+       "[{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"x\"}},{\"type\":"
+       "\"execution\",\"payload\":{\"verification_proofs\":[]}}]",
+       "[{\"type\":\"user\",\"isSidechain\":true,\"message\":{\"role\":\"user\",\"content\":\"x\"}}"
+       "]",
+       "[{\"type\":\"user\",\"type\":\"assistant\",\"message\":{\"role\":\"user\",\"content\":"
+       "\"x\"}}]",
+       "[{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\","
+       "\"text\":\"x\",\"context\":{}}]}}]",
+       "[{\"type\":\"summary\",\"summary\":\"unknown reconciliation\"}]"};
+   for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+   {
+      records = cJSON_Parse(invalid[i]);
+      assert(records);
+      cJSON *record;
+      cJSON_ArrayForEach(record, records)
+      {
+         const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(record, "type"));
+         if (type && (!strcmp(type, "user") || !strcmp(type, "assistant")))
+            cJSON_AddStringToObject(record, "sessionId", "session");
+      }
+      assert(!aimee_frontend_claude_transcript_import(records, "session"));
+      cJSON_Delete(records);
+   }
+   puts("external SDK import: owned typed observations only, no repair/effect/proof authority");
+}
+
 int main(void)
 {
+   test_external_claude_observation_import();
    test_host_request_owner_precedes_proof_guard();
    test_host_profile_sidecars_exclude_native_selectors();
    test_prompt_cache_controls();

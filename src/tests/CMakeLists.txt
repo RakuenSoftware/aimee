@@ -512,8 +512,26 @@ if(NOT WIN32)
     ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
   aimee_enable_test_asserts(test_server_native_tool_admission)
   add_test(NAME test_server_native_tool_admission COMMAND test_server_native_tool_admission)
+  add_executable(test_cli_transcript_archive test_cli_transcript_archive.c ../vendor/cJSON.c)
+  set_property(TARGET test_cli_transcript_archive PROPERTY INTERPROCEDURAL_OPTIMIZATION FALSE)
+  target_include_directories(test_cli_transcript_archive PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS})
+  target_compile_options(test_cli_transcript_archive PRIVATE -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(test_cli_transcript_archive PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(test_cli_transcript_archive PRIVATE -Wl,--gc-sections)
+  endif()
+  aimee_enable_test_asserts(test_cli_transcript_archive)
+  add_test(NAME test_cli_transcript_archive COMMAND test_cli_transcript_archive)
   add_executable(test_server_session_identity test_server_session_identity.c
-    ../server/server_auth.c ../posix/platform_random.c ../vendor/cJSON.c)
+    ../server/server_auth.c ../posix/platform_random.c ../vendor/cJSON.c
+    ../modules/translation/history_ir.c ../modules/translation/aimee_frontend_anthropic.c
+    ../modules/translation/aimee_frontend_openai.c ../modules/translation/aimee_frontend_responses.c
+    ../modules/translation/wire_codec.c ../modules/ir/aimee_ir.c ../modules/ir/session_event.c
+    ../aimee_sha256.c ../util.c ../text.c
+    ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_backend_responses.c)
+  set_property(TARGET test_server_session_identity PROPERTY INTERPROCEDURAL_OPTIMIZATION FALSE)
+  target_link_libraries(test_server_session_identity PRIVATE OpenSSL::Crypto m)
   target_include_directories(test_server_session_identity PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
     ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
   target_compile_options(test_server_session_identity PRIVATE -ffunction-sections -fdata-sections)

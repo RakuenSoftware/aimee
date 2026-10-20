@@ -16,6 +16,14 @@ import (
 
 const opSessionIRSearch uint32 = 37
 const sessionSearchResponseMax = 2 << 20
+const externalSDKHistoryScope = "external-sdk:claude-code"
+
+const sessionSearchExternalCommitSQL = `SELECT sequence::text,turn_id,event_id,payload
+ FROM session_ir_events WHERE session_id=$1 AND actor=$2
+ AND payload::jsonb->>'kind'='history'
+ AND payload::jsonb->'payload'->>'scope'='external-sdk:claude-code'
+ AND payload::jsonb->'payload'->>'phase'='commit'
+ ORDER BY sequence DESC LIMIT 1`
 
 // Search displays the canonical current-history reducer by default, including
 // imported checkpoint chunks. A separately named observations view exposes
@@ -31,12 +39,12 @@ const sessionSearchMessagesCTE = `WITH ordered AS (
  FROM session_ir_events e JOIN server_sessions s ON s.id=e.session_id
  WHERE s.principal=$1 AND e.actor=$1 AND e.payload::jsonb->>'kind' IN ('message','delta')
 ), observed AS (SELECT *,row_number() OVER (PARTITION BY session_id,turn_id,body->>'message_id' ORDER BY sequence DESC) AS latest FROM ordered WHERE body->>'kind'='message'), messages AS (SELECT * FROM observed WHERE latest=1),
- searchable AS (SELECT session_id,created_at,body FROM messages UNION ALL
+ searchable AS (SELECT session_id,created_at,body FROM messages WHERE $7 <> 'external_sdk' UNION ALL
  SELECT e.session_id,e.created_at,jsonb_build_object('payload',e.payload::jsonb->'payload'->'message')
  FROM session_ir_events e JOIN server_sessions s ON s.id=e.session_id
- WHERE $7='current' AND s.principal=$1 AND e.actor=$1
+ WHERE $7 IN ('current','external_sdk') AND s.principal=$1 AND e.actor=$1
  AND e.payload::jsonb->>'kind'='history'
- AND e.payload::jsonb->'payload'->>'scope'='primary'
+ AND e.payload::jsonb->'payload'->>'scope'=CASE WHEN $7='external_sdk' THEN 'external-sdk:claude-code' ELSE 'primary' END
  AND e.payload::jsonb->'payload'->>'phase'='message') `
 const sessionSearchCandidatesSQL = sessionSearchMessagesCTE + `
  SELECT s.id,s.title,s.client_type,
@@ -195,7 +203,7 @@ func sessionSearchRead(ctx context.Context, q store.Queryer, actor string, sessi
 		}
 		count++
 	}
-	if request.View == "current" {
+	if request.View == "current" || request.View == "external_sdk" {
 		var foreign bool
 		if err := q.QueryRow(ctx, sessionSearchForeignActorSQL, session.id, actor).Scan(&foreign); err != nil {
 			return nil, err
@@ -203,7 +211,21 @@ func sessionSearchRead(ctx context.Context, q store.Queryer, actor string, sessi
 		if foreign {
 			return nil, store.ErrNoRows
 		}
-		status, cells, err := sessionIRHistoryLoad(ctx, q, []string{session.id, "primary", actor, ""})
+		scope := "primary"
+		if request.View == "external_sdk" {
+			scope = externalSDKHistoryScope
+			var sequence, turn, eventID, payload string
+			if err := q.QueryRow(ctx, sessionSearchExternalCommitSQL, session.id, actor).Scan(&sequence, &turn, &eventID, &payload); err != nil {
+				return nil, err
+			}
+			// Equal messages from distinct SDK snapshots are distinct source custody.
+			// Bind the selected commit even when unrelated newer host events keep
+			// the global watermark unchanged after source erasure.
+			source, _ := json.Marshal([]string{sequence, turn, eventID, payload})
+			digest.Write(source)
+		}
+		digest.Write([]byte(scope + "\x00"))
+		status, cells, err := sessionIRHistoryLoad(ctx, q, []string{session.id, scope, actor, ""})
 		if errors.Is(err, errSessionIRUnfinishedExecution) {
 			if request.Session == "" {
 				return nil, store.ErrNoRows
@@ -296,7 +318,7 @@ func sessionIRSearch(ctx context.Context, q store.Queryer, f []string) (uint32, 
 	if request.View == "" {
 		request.View = "current"
 	}
-	if request.View != "current" && request.View != "observations" {
+	if request.View != "current" && request.View != "observations" && request.View != "external_sdk" {
 		return store.StatusInvalid, nil, nil
 	}
 	if request.Revision != "" && (len(request.Revision) != 64 || strings.Trim(request.Revision, "0123456789abcdef") != "" || request.Session == "" || request.Query != "") {

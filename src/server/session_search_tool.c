@@ -49,14 +49,17 @@ cJSON *session_search_mcp_tool(void)
        t, "description",
        "Search owned canonical session conversations. Default current view includes imported "
        "history; use view=observations for original messages removed by compaction. Preserve view "
-       "and source_revision when scrolling.");
+       "and source_revision when scrolling. Use view=external_sdk for separately archived "
+       "external Claude Code observations; these do not attest host tool execution or "
+       "correctness.");
    cJSON *schema = cJSON_Parse(
        "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},\"session_"
        "id\":{\"type\":\"string\"},\"around_message_id\":{\"type\":\"integer\"},"
        "\"window\":{\"type\":\"integer\"},\"limit\":{\"type\":\"integer\"},\"offset\":{\"type\":"
        "\"integer\",\"minimum\":0},\"include_"
        "sources\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"view\":{\"type\":"
-       "\"string\",\"enum\":[\"current\",\"observations\"]},\"source_revision\":{\"type\":"
+       "\"string\",\"enum\":[\"current\",\"observations\",\"external_sdk\"]},\"source_revision\":{"
+       "\"type\":"
        "\"string\",\"description\":\"Exact source_revision returned for this session and view; "
        "include with scroll to reject source changes.\"}}}");
    cJSON_AddItemToObject(t, "inputSchema", schema ? schema : cJSON_CreateObject());

@@ -218,7 +218,7 @@ func TestSessionIRLiveRunningHistoryOwnerSnapshotAndCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql", "schema_learning_projection_outbox.sql"} {
+	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql", "schema_native_cache_recovery.sql", "schema_learning_projection_outbox.sql"} {
 		sql, err := schemaFS.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)

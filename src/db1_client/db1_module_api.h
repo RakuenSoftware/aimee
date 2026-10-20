@@ -271,6 +271,8 @@
 #define AIMEE_DB1_OP_SESSION_IR_RUNNING_HISTORY_LOAD        35u
 #define AIMEE_DB1_OP_SESSION_IR_APPEND_VERIFIED             36u
 #define AIMEE_DB1_OP_SESSION_IR_SEARCH                      37u
+#define AIMEE_DB1_OP_SESSION_NATIVE_OWNER_CLAIM             38u
+#define AIMEE_DB1_OP_SESSION_NATIVE_RECONCILE               39u
 
 /* Family 7: machine-local runtime state: caches, this box's operator and
  * clones, the model catalogue it fetched, and the snapshots it took. */

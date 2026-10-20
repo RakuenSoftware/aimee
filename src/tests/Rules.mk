@@ -933,10 +933,20 @@ $(TESTPREFIX)/unit-test-server-native-launch: $(OBJDIR)/tests/test_server_native
 
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-session-identity
 $(TESTPREFIX)/unit-test-server-session-identity: $(OBJDIR)/tests/test_server_session_identity.o \
-    $(OBJDIR)/server/server_auth.o $(OBJDIR)/posix/platform_random.o $(OBJDIR)/cJSON.o
+    $(OBJDIR)/server/server_auth.o $(OBJDIR)/posix/platform_random.o $(OBJDIR)/cJSON.o \
+    $(OBJDIR)/modules/translation/history_ir.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
+    $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
+    $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o \
+    $(OBJDIR)/aimee_sha256.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
+    $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_backend_responses.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto -lm
+
+TEST_TARGETS += $(TESTPREFIX)/unit-test-cli-transcript-archive
+$(TESTPREFIX)/unit-test-cli-transcript-archive: $(OBJDIR)/tests/test_cli_transcript_archive.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS)
 
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-execution
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-cache-lease
 $(TESTPREFIX)/unit-test-server-native-execution: $(OBJDIR)/tests/test_server_native_execution.o \
     $(OBJDIR)/server/server_native_execution.o $(OBJDIR)/server/server_native_cache_lease.o $(OBJDIR)/platform_random.o $(OBJDIR)/server/server_native_launch.o $(OBJDIR)/server/cli_claude_native.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/server/cli_session.o \
     $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/modules/ir/session_event.o \
@@ -7181,7 +7191,6 @@ $(TESTPREFIX)/unit-test-server-learning-recovery: $(OBJDIR)/tests/test_server_le
     $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/interaction_event_names.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
 
-TEST_TARGETS += $(TESTPREFIX)/unit-test-server-native-cache-lease
 $(TESTPREFIX)/unit-test-server-native-cache-lease: $(OBJDIR)/tests/test_server_native_cache_lease.o \
     $(OBJDIR)/server/server_native_cache_lease.o $(OBJDIR)/cJSON.o $(OBJDIR)/platform_random.o $(OBJDIR)/posix/platform_random.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)

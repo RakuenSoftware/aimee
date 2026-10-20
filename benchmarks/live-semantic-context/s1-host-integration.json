@@ -65,6 +65,11 @@
   ],
   "src/server/server_mcp_call_table.c": [
     {
+      "release_text": "    {\"git_verify\", mcph_git_verify, \"core,current_code\"},\n",
+      "frozen_text": "    {\"git_verify\", mcph_git_verify, \"core\"},\n",
+      "review": "PR #3052 canonical-git-role-membership: exact Git verification membership addition to current_code while retaining core. Diagnose already has configured verification; its named canonical Git verifier now survives the same toolset filter. No other tool, permission ceiling, dispatch implementation, frozen probe, schema or LSP comparison changes. Reverse this exact one-line metadata change before the existing complete frozen comparison; modified, removed and duplicated entries remain rejected."
+    },
+    {
       "release_text": "   cJSON *result =\n       c->conn->vault_principal[0]\n           ? session_search_tool_result_for_principal(c->jargs, c->conn->vault_principal)\n           : session_search_tool_result_for_uid(c->jargs, (unsigned)c->conn->peer_uid);\n",
       "frozen_text": "   cJSON *result = session_search_tool_result_for_uid(c->jargs, (unsigned)c->conn->peer_uid);\n",
       "review": "PR #3052 canonical-session-search: exact authenticated actor selection, duplicate-principal regression and optional canonical history view/revision/pagination schema assertions. Reverse only these reviewed additions before all existing host/memory transforms; the complete frozen source comparison and every existing assertion remain required. No LSP implementation, probe input or unrelated golden entry is excluded."

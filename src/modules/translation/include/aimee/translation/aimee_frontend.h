@@ -83,6 +83,12 @@ int openai_family_tool_choice_parse(const struct cJSON *tool_choice,
  * the runtime supplies its current authoritative system separately. */
 struct cJSON *aimee_frontend_history_import(const struct cJSON *messages, aimee_wire_t legacy_wire);
 
+/* External Claude Code JSONL envelopes, already parsed into an array. Returns
+ * canonical observations only: never host history, controls, effects or proofs.
+ * Entire input must be supported, unique-keyed and bound to session_id. */
+struct cJSON *aimee_frontend_claude_transcript_import(const struct cJSON *records,
+                                                      const char *session_id);
+
 /* Render an IR response as a buffered client response, built PURELY from the IR
  * (ruling Q3: semantic correctness, NOT provider byte-parity). Returns a new cJSON
  * object the caller owns (cJSON_Delete), or NULL on bad args. The canonical

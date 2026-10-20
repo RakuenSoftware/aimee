@@ -58,7 +58,7 @@ func newProjectionTest(t *testing.T) *projectionTest {
 	}
 	t.Cleanup(func() { pool.Close(); root.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE") })
 	f := &projectionTest{t, ctx, pool}
-	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql", "schema_telemetry.sql", "schema_delegation.sql", "schema_learning_projection_outbox.sql"} {
+	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql", "schema_native_cache_recovery.sql", "schema_telemetry.sql", "schema_delegation.sql", "schema_learning_projection_outbox.sql"} {
 		body, err := schemaFS.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)

@@ -857,3 +857,22 @@ char *db1_session_ir_search(const char *principal, const char *request_json)
    primary_cells_free(cells, count);
    return result;
 }
+
+int db1_session_native_owner_claim(const char *principal, const char *request_json)
+{
+   const char *fields[] = {principal ? principal : "", request_json ? request_json : ""};
+   return write_result(
+       db1_call(&family, AIMEE_DB1_OP_SESSION_NATIVE_OWNER_CLAIM, fields, 2, NULL, NULL, 0, NULL));
+}
+int db1_session_native_reconcile(const char *principal, const char *request_json,
+                                 char out_sequence[32])
+{
+   if (!out_sequence)
+      return -1;
+   out_sequence[0] = 0;
+   const char *fields[] = {principal ? principal : "", request_json ? request_json : ""};
+   char *const values[] = {out_sequence};
+   const size_t caps[] = {32u};
+   return write_result(
+       db1_call(&family, AIMEE_DB1_OP_SESSION_NATIVE_RECONCILE, fields, 2, values, caps, 1, NULL));
+}

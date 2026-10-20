@@ -52,6 +52,7 @@ RETIRED = (
     "anthropic_stream_get_usage", "anthropic_stream_free", "emit_message_as_sse",
 )
 RULES = {
+    "legacy-transcript-write": re.compile(r"\bdb1_primary_session_save\s*\("),
     "legacy-session-search": re.compile(r"\bdb1_primary_session_(?:alloc_search|alloc_recent|get_latest)\b|\b(?:FROM|JOIN)\s+primary_sessions\b", re.IGNORECASE),
     "unscoped-approach-prompt": re.compile(r"\bapproach_store_(?:retry_context|recall|render)\s*\("),
     "unqualified-learning-prompt": re.compile(r"\bdb1_delegate_learning_inject_prompt\s*\("),
@@ -141,6 +142,8 @@ def findings(root: Path) -> list[dict]:
         history_spans = (profile_function_spans(source, {"message_history_repair"})
                          if relative == "src/server/agent_bridge.c" else [])
         for rule, pattern in RULES.items():
+            if rule == "legacy-transcript-write" and relative != "src/server/server_auth.c":
+                continue
             if rule == "legacy-session-search" and relative not in {
                     "src/server/session_search_tool.c",
                     "server-go/modules/aimee/families/session_ir_search.go"}:

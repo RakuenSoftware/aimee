@@ -14,6 +14,13 @@ from test_native_ir_live import api
 
 
 def main():
+    # Registration alone is insufficient: diagnose selects current_code, which
+    # intentionally does not inherit core/index tools. Catch a hidden verifier
+    # before Docker-dependent child execution can skip locally.
+    resolved = api("/v1/toolsets/resolve", dict(name="current_code"))
+    assert resolved.get("status") == "ok" and "git_verify" in resolved.get("tools", []), resolved
+    assert not set(resolved["tools"]) & {"git_commit", "git_push", "git_branch", "git_pr",
+        "index_ingest", "kb_build", "memory_store", "find_symbol", "search_memory"}, resolved
     home = Path(os.environ["AIMEE_HOME"])
     with tempfile.TemporaryDirectory(prefix="git-owner-", dir=home.parent) as temporary:
         root = Path(temporary)

@@ -61,6 +61,14 @@ class IRBypassTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "native-history-field"):
             checker.check(self.root)
 
+    def test_hook_archive_cannot_restore_legacy_transcript_write(self):
+        self.source("src/db1_client/sessions.c", "int db1_primary_session_save(void);")
+        self.source("src/server/server_auth.c", "db1_session_ir_history_save(session, digest, scope, actor, json);")
+        checker.check(self.root)
+        self.source("src/server/server_auth.c", "db1_primary_session_save(session, client, provider, json);")
+        with self.assertRaisesRegex(ValueError, "legacy-transcript-write"):
+            checker.check(self.root)
+
     def test_retired_api_and_driver_calls_in_c_and_go(self):
         for relative, source in [
             ("src/server/rogue.c", "anthropic_stream_feed_openai(s, p);"),

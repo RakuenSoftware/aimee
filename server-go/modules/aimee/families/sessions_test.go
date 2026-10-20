@@ -740,6 +740,8 @@ func (d *irAppendFixture) QueryRow(ctx context.Context, sql string, args ...any)
 		return sessRow{db: &sessDB{scanErr: d.lockErr}, values: []any{"actor"}}
 	case sessionIRExistingSQL:
 		return sessRow{db: &sessDB{}, values: d.existing}
+	case nativeRecoveryFenceSQL:
+		return sessRow{db: &sessDB{scanErr: store.ErrNoRows}}
 	case sessionIRInsertSQL:
 		return sessRow{db: &sessDB{scanErr: d.insertErr}, values: []any{d.inserted}}
 	default:
@@ -754,7 +756,7 @@ func TestSessionIRAppendRetryAndFailure(t *testing.T) {
 	if err != nil || status != store.StatusOK || len(cells) != 1 || cells[0] != "42" {
 		t.Fatalf("append %d %v %v", status, cells, err)
 	}
-	if len(db.reads) != 3 || db.reads[0] != sessionIRLockSQL || db.reads[2] != sessionIRInsertSQL {
+	if len(db.reads) != 4 || db.reads[0] != sessionIRLockSQL || db.reads[2] != nativeRecoveryFenceSQL || db.reads[3] != sessionIRInsertSQL {
 		t.Fatal("append was not serialized under session lock")
 	}
 	db = &irAppendFixture{sessDB: &sessDB{}, existing: []any{int64(42), "turn-1", "actor", payload}}

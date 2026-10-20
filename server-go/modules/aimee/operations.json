@@ -28665,6 +28665,90 @@
         "fields": [],
         "max_bytes": 0
       }
+    },
+    {
+      "family": "sessions",
+      "id": 38,
+      "name": "session_native_owner_claim",
+      "c_name": "db1_session_native_owner_claim",
+      "c_params": [
+        "principal",
+        "request_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "request_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 65536
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 39,
+      "name": "session_native_reconcile",
+      "c_name": "db1_session_native_reconcile",
+      "c_params": [
+        "principal",
+        "request_json",
+        "out_sequence"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "request_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "sequence",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 65536
+      }
     }
   ]
 }

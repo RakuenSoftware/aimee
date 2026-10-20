@@ -439,7 +439,7 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
         wrapper = next(block["release_text"] for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
                        if block["release_text"].startswith("static cJSON *mcph_git_verify("))
-        row = '    {"git_verify", mcph_git_verify, "core"},\n'
+        row = '    {"git_verify", mcph_git_verify, "core,current_code"},\n'
         for drift in (
             current.replace('mcp_git_run_tool("git_verify", args, c->sid)',
                             'mcp_git_run_tool("git_status", args, c->sid)', 1),
@@ -449,8 +449,29 @@ class LiveSemanticContextS1Test(unittest.TestCase):
             current + wrapper,
             current.replace(row, "", 1),
             current + row,
-            current.replace(row, row.replace('"core"', 'NULL'), 1),
+            current.replace(row, row.replace('"core,current_code"', 'NULL'), 1),
         ):
+            self.assertNotEqual(current, drift)
+            self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
+    def test_release_validator_rejects_verifier_role_membership_drift(self) -> None:
+        validator = load_release_validator()
+        path = "src/server/server_mcp_call_table.c"
+        current = (ROOT / path).read_text()
+        frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
+        blocks = [block for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
+                  if "canonical-git-role-membership:" in block.get("review", "")]
+        self.assertEqual(len(blocks), 1)
+        release, prior = blocks[0]["release_text"], blocks[0]["frozen_text"]
+        self.assertEqual(current.count(release), 1)
+        self.assertEqual(current.replace(release, prior, 1), subprocess.run(
+            ["git", "show", f"5780aa09a92d86e89412ecea0a714b8088efaaca:{path}"],
+            cwd=ROOT, check=True, capture_output=True, text=True).stdout)
+        self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+        for drift in (current.replace(release, "", 1), current + release,
+                      current.replace(release, prior, 1),
+                      current.replace(release, release.replace("core,current_code",
+                                                              "core,current_code,git_write"), 1)):
             self.assertNotEqual(current, drift)
             self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
 
@@ -468,6 +489,12 @@ class LiveSemanticContextS1Test(unittest.TestCase):
             # Prove these exact changes restore the reviewed host source before
             # any pre-existing host or frozen memory normalization is applied.
             original = current
+            # Normalize the separately reviewed later role membership first;
+            # the search-only reversal must still exactly restore its own base.
+            for block in validator.REVIEWED_HOST_INTEGRATIONS[path]:
+                if "canonical-git-role-membership:" in block.get("review", ""):
+                    self.assertEqual(original.count(block["release_text"]), 1)
+                    original = original.replace(block["release_text"], block["frozen_text"], 1)
             for block in blocks:
                 self.assertEqual(original.count(block["release_text"]), 1)
                 original = original.replace(block["release_text"], block["frozen_text"], 1)

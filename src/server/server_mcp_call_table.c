@@ -2175,7 +2175,7 @@ static const struct
     {"delegate", mcph_delegate_native, "primary"},
     {"delegate_status", mcph_delegate_native, "primary"},
     {"get_help", mcph_get_help, NULL},
-    {"git_verify", mcph_git_verify, "core"},
+    {"git_verify", mcph_git_verify, "core,current_code"},
     {"ast_grep_search", mcph_ast_grep_search, "core,review_indexed"},
     {"search_memory", mcph_search_memory, NULL},
     {"mutate", mcph_mutate, NULL},
