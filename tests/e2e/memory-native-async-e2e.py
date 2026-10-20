@@ -244,7 +244,7 @@ def inside(output):
             time.sleep(0.25)
         check('shared projection settled before '+name, False)
 
-    def run(name, limits=None, mode='single', input_text=None):
+    def run(name, limits=None, mode='single', input_text=None, cwd=None):
         nonlocal scenario, scenario_start, refresh_stop_ordinal
         if mode == 'refresh-outage':
             refresh_stop_ordinal = None
@@ -252,8 +252,11 @@ def inside(output):
             settle_shared_projection(name)
         started, before = time.monotonic(), len(captures)
         scenario, scenario_start = mode, before
-        status, created = api('/v1/runs', dict(model=prefix, input=input_text or 'Read the native memory fixture ' + prefix,
-                                              max_output_tokens=32), limits)
+        request = dict(model=prefix, input=input_text or 'Read the native memory fixture ' + prefix,
+                       max_output_tokens=32)
+        if cwd is not None:
+            request['cwd'] = str(cwd)
+        status, created = api('/v1/runs', request, limits)
         check(name + ' queues a real asynchronous worker', status == 200 and bool(created.get('id')))
         run_id = created['id']
         # A refresh with the owner deliberately stopped can traverse both
@@ -534,15 +537,16 @@ def inside(output):
             for backend in ('tmux-cli', 'provider-cli'):
                 external = json.loads(native_roster)
                 # Reach the execution fence, not the primary-only/client-only
-                # routing guards. Claude provider-cli normalizes to tmux, so
-                # use ACP for the distinct external adapter path.
+                # routing or workspace-admission guards. Native Claude runs
+                # require the actual isolated cwd. Use ACP for the distinct
+                # unsupported external adapter path.
                 external['models'][0].update(backend=backend,
                     cli_kind='claude' if backend == 'tmux-cli' else 'acp',
                     cli_cmd='/bin/false', primary_only=False, is_server_hosted=True)
                 roster.write_text(json.dumps(external))
                 before = len(captures)
                 result, events = run('unobservable ' + backend,
-                                     dict(schema_version=1, max_request_bytes=0))
+                                     dict(schema_version=1, max_request_bytes=0), cwd=fixture_read_root)
                 check(backend + ' refuses unobservable final request accounting',
                       result.get('status') == 'failed' and any(
                           'request_budget_unavailable' in text for text in strings(events)))

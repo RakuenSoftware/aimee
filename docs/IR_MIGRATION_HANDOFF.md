@@ -3815,3 +3815,26 @@ and durable workspace origin propagation still require their own producer/worker
 qualification. This is not completion of the migration or independent learning.
 
 All 76 lint gates also pass for the retained callback capability.
+
+
+## Deployment T3 native refusal fixture repair: 20 October 2026
+
+Published b55b174e0 passes real PostgreSQL integration 168/168, all eighteen actual
+native SDK journeys including both browser operator replies, and Docker delegate
+learning/readback. The T3 deployment job 118471635875 then fails in the separate
+memory-native-async fixture. Its retained native-async.json identifies the exact
+failed check: unobservable tmux-cli never queued a worker. The fixture had omitted
+the absolute cwd now required by canonical native /v1/runs admission; it therefore
+failed before reaching the accounting fence it intended to test.
+
+That fixture now supplies its already-created isolated checkout only for those
+external-backend cases. It still requires a queued asynchronous worker, the same
+request_budget_unavailable refusal and zero provider sends. The actual-server
+native fixture independently exercises both legacy tmux/Claude and unsupported
+provider/ACP negative cases with an approved mirror cwd and inherited zero byte
+cap. Both reach the intended worker refusal without a provider send, alongside
+all eighteen successful SDK journeys. No production admission, budget guard,
+assertion, deployment tier or platform gate is exempted. Fresh deployment CI
+must qualify the complete T3/T2 sequences after publication.
+
+All 76 lint gates also pass for the deployment fixture repair.

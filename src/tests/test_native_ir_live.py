@@ -24,12 +24,13 @@ class Local(http.client.HTTPConnection):
         self.sock.connect(str(Path(os.environ["AIMEE_HOME"]) / "aimee-http.sock"))
 
 
-def api(path, body=None, expected=200):
+def api(path, body=None, expected=200, limits=None):
     connection = Local("localhost")
     try:
         connection.request("GET" if body is None else "POST", path,
                            None if body is None else json.dumps(body),
-                           {"Content-Type": "application/json"})
+                           {"Content-Type": "application/json",
+                            **({"X-Aimee-Context-Limits": json.dumps(limits)} if limits is not None else {})})
         response = connection.getresponse()
         text = response.read().decode()
         assert response.status == expected, (path, response.status, text)
@@ -327,6 +328,33 @@ def main():
                 run_browser_control(api, home, workspace, marker)
                 assert count == 2 and not errors, (active, count, errors)
             browser_question = False
+        # The deployment fence must reach a real queued worker with the native
+        # cwd contract satisfied, then refuse before any unobservable send.
+        native_roster = models_path.read_bytes()
+        try:
+            marker = case_name("claude", "anthropic", "api_key")
+            for backend, cli_kind in (("tmux-cli", "claude"), ("provider-cli", "acp")):
+                roster = json.loads(native_roster)
+                selected = next(model for model in roster["models"] if model["name"] == marker)
+                selected.update(backend=backend, cli_kind=cli_kind, cli_cmd="/bin/false",
+                                primary_only=False, is_server_hosted=True)
+                models_path.write_text(json.dumps(roster))
+                before = len(observed)
+                run = api("/v1/runs", dict(model=marker, input="UNOBSERVABLE_BUDGET_FENCE", cwd=str(workspace)),
+                          limits=dict(schema_version=1, max_request_bytes=0))
+                assert run.get("id"), run
+                deadline = time.monotonic() + 30
+                while True:
+                    finished = api(f"/v1/runs/{run['id']}")
+                    if finished["status"] in ("completed", "incomplete", "failed", "cancelled"):
+                        break
+                    assert time.monotonic() < deadline, finished
+                    time.sleep(0.05)
+                assert finished["status"] == "failed" and "request_budget_unavailable" in json.dumps(finished), finished
+                assert len(observed) == before, (backend, observed[before:])
+                print("native execution fence:", backend, "owned cwd admits worker, budget refusal prevents provider send", flush=True)
+        finally:
+            models_path.write_bytes(native_roster)
     finally:
         if previous is None:
             models_path.unlink(missing_ok=True)
