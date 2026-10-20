@@ -423,6 +423,8 @@ class LiveSemanticContextS1Test(unittest.TestCase):
                     if "test_mcp" in path else
                     current.replace('{"lsp_context",', '{"lsp_context_drift",', 1)
                     if path.endswith("server_mcp_call_table.c") else
+                    current.replace("if (!declared)", "if (0)", 1)
+                    if path.endswith("/mcp_tools.c") else
                     current.replace('"git_%s"', '"%s"', 1),
                 ):
                     self.assertNotEqual(current, drift)

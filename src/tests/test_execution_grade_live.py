@@ -5,6 +5,7 @@ This extends test_integration.sh's disposable server/PostgreSQL journey. The
 provider is deterministic; tool dispatch, snapshots, Docker, grading, publication
 and subsequent model request assembly are the production owners.
 """
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,8 +22,8 @@ from test_native_ir_browser_control import assert_completed_parent
 
 
 # A PostgreSQL probe uses the integration's existing Go/pgx dependency. Its
-# sole write fault deletes this session's derived grade; canonical history and
-# proof are never edited, and no receipt is fabricated or seeded.
+# write faults delete only fixture-derived grades/experience/pending rows;
+# canonical history/proof/jobs are never edited, fabricated or seeded.
 READ_GRADES = r'''
 package main
 import (
@@ -41,6 +42,26 @@ func main() {
   AND i.outcome IN ('tests_passed','tests_failed')`,os.Args[1],os.Args[2]);if err!=nil{panic(err)}
   if err=json.NewEncoder(os.Stdout).Encode(map[string]int64{"removed":result.RowsAffected()});err!=nil{panic(err)};return
  }
+ if len(os.Args)==4 && os.Args[3]=="drop-delegate-projection" {
+  tx,err:=conn.Begin(ctx);if err!=nil{panic(err)};defer tx.Rollback(ctx)
+  _,err=tx.Exec(ctx,`DELETE FROM delegate_learnings l USING server_sessions s WHERE l.session_id=$1 AND s.id=l.session_id AND s.principal=$2`,os.Args[1],os.Args[2]);if err!=nil{panic(err)}
+  result,err:=tx.Exec(ctx,`DELETE FROM interaction_events i USING server_sessions s WHERE i.session_id=$1 AND s.id=i.session_id AND s.principal=$2 AND (i.event_type='delegate_experience' OR (i.event_type='task_outcome' AND i.outcome IN ('tests_passed','tests_failed')))`,os.Args[1],os.Args[2]);if err!=nil{panic(err)}
+  if err=tx.Commit(ctx);err!=nil{panic(err)}
+  if err=json.NewEncoder(os.Stdout).Encode(map[string]int64{"removed":result.RowsAffected()});err!=nil{panic(err)};return
+ }
+ if len(os.Args)==4 && os.Args[3]=="experiences" {
+  rows,err:=conn.Query(ctx,`SELECT jsonb_build_object('experience',d.payload::jsonb,'parent',p.payload::jsonb,'job_id',j.id::text,
+   'pending',jsonb_build_object('evidence',l.evidence_json::jsonb,'auto_applied',l.auto_applied,'review_status',l.review_status,'confidence',l.confidence))::text
+   FROM interaction_events d JOIN server_sessions s ON s.id=d.session_id AND s.principal=$2
+   JOIN server_sessions ps ON ps.id=$1 AND ps.principal=$2
+   JOIN session_ir_events p ON p.session_id=ps.id AND p.actor=$2 AND p.sequence::text=d.payload::jsonb->'parent_source'->>'sequence'
+    AND p.turn_id=d.payload::jsonb->'parent_source'->>'turn_id' AND p.event_id=d.payload::jsonb->'parent_source'->>'event_id'
+   JOIN agent_jobs j ON j.id::text=d.payload::jsonb->'child'->'learning_binding'->>'job_id'
+   JOIN delegate_learnings l ON l.session_id=d.session_id AND l.evidence_json::jsonb=d.payload::jsonb
+   WHERE d.event_type='delegate_experience' AND d.actor='system' AND d.payload::jsonb->'parent_source'->>'session_id'=$1 ORDER BY d.id`,os.Args[1],os.Args[2]);if err!=nil{panic(err)};defer rows.Close()
+  out:=[]json.RawMessage{};for rows.Next(){var raw string;if err=rows.Scan(&raw);err!=nil{panic(err)};out=append(out,json.RawMessage(raw))};if err=rows.Err();err!=nil{panic(err)}
+  if err=json.NewEncoder(os.Stdout).Encode(out);err!=nil{panic(err)};return
+ }
  rows,err:=conn.Query(ctx,`SELECT i.payload,e.payload FROM interaction_events i
  JOIN server_sessions s ON s.id=i.session_id AND s.principal=$2
  JOIN session_ir_events e ON e.session_id=i.session_id AND e.sequence::text=i.payload::jsonb->'source'->>'sequence'
@@ -51,6 +72,55 @@ func main() {
  if err=rows.Err();err!=nil{panic(err)};if err=json.NewEncoder(os.Stdout).Encode(out);err!=nil{panic(err)}
 }
 '''
+
+
+
+def job_ids(value):
+    """Read only actual returned job identifiers, including encoded tool results."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "job_id" and isinstance(item, (int, str)) and str(item).isdigit():
+                yield str(item)
+            else:
+                yield from job_ids(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from job_ids(item)
+    elif isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (ValueError, TypeError):
+            return
+        if not isinstance(parsed, str):
+            yield from job_ids(parsed)
+
+
+def assert_delegate_experience(row, parent, actor, project, model, job, qualified):
+    experience, event, pending = row["experience"], row["parent"], row["pending"]
+    child = experience["child"]
+    binding = child["learning_binding"]
+    assert binding == dict(version=1, job_id=job, scope_kind="project", scope_id=project,
+                           agent=model, provider="openai", model=model), binding
+    assert row["job_id"] == job, row
+    expected_child = "delegate-" + hashlib.sha256(f"{parent}:{job}:durable".encode()).hexdigest()
+    assert child["session_id"] == expected_child and child["status"] == "running" and child["role"] == "diagnose", child
+    assert event == dict(kind="child_execution", payload=child), event
+    assert experience["principal"] == actor and experience["scope_kind"] == "project" and experience["scope_id"] == project, experience
+    assert experience["parent_source"]["session_id"] == parent and experience["parent_source"]["actor"] == actor, experience
+    assert experience["source"]["session_id"] == expected_child and experience["source"]["actor"] == actor, experience
+    assert experience["source"]["turn_id"] == child["turn_id"] == experience["parent_source"]["turn_id"], experience
+    assert experience["observed_status"] == "completed", experience
+    assert pending["evidence"] == experience and pending["auto_applied"] == 0 and pending["confidence"] == 0 and pending["review_status"] == "pending", pending
+    if qualified:
+        assert experience["qualification"] == "configured_tests_only" and experience["verdict"] == "passed", experience
+        assert experience["verification_ref"].startswith("sha256:"), experience
+        actions = experience["actions"]
+        assert experience["action_coverage"] == "bounded_canonical_tool_calls", experience
+        assert any(action["name"] == "git_verify" and action["tool_id"] == "delegate-private-tests" for action in actions), actions
+        assert all(len(action["input_sha256"]) == 64 and len(action["event_sha256"]) == 64 for action in actions), actions
+    else:
+        assert experience["qualification"] == "ungraded" and not experience.get("verdict") and not experience.get("verification_ref"), experience
+    return experience
 
 
 def main():
@@ -74,11 +144,13 @@ def main():
     repository = Path(__file__).resolve().parents[2]
     actor = f"uid:{os.getuid()}"
     model = "execution-grade-live"
+    child_model = "execution-grade-child"
     observed, errors = [], []
     phase = "verify"
     reference = ""
     expected_commit = ""
-    state = {"verify_requests": 0}
+    state = {"verify_requests": 0, "delegate_requests": 0, "child_requests": 0}
+    expected_delegate_job = ""
 
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -87,12 +159,42 @@ def main():
         def do_POST(self):
             try:
                 request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                assert request.get("model") == model, request.get("model")
+                assert request.get("model") in (model, child_model), request.get("model")
                 observed.append(dict(phase=phase, request=request))
                 encoded = json.dumps(request, ensure_ascii=False)
                 message = dict(role="assistant", content="CONFIGURED_TEST_RECEIPT_OK")
                 finish = "stop"
-                if phase == "verify":
+                if request.get("model") == child_model:
+                    assert phase in ("delegate_verify", "delegate_ungraded"), phase
+                    state["child_requests"] += 1
+                    results = [item for item in request.get("messages", []) if item.get("role") == "tool"]
+                    if phase == "delegate_verify" and not results:
+                        names = {item.get("function", {}).get("name", item.get("name")) for item in request.get("tools", [])}
+                        assert "git_verify" in names, ("child verifier absent", sorted(names))
+                        message = dict(role="assistant", tool_calls=[dict(id="delegate-private-tests", type="function",
+                            function=dict(name="git_verify", arguments=json.dumps({"action": "run", "async": False, "format": "json"})))])
+                        finish = "tool_calls"
+                    elif phase == "delegate_verify":
+                        assert "private-source-proof" in json.dumps(results) and "passed" in json.dumps(results).lower(), results
+                    else:
+                        assert not results, results
+                        message["content"] = "UNVERIFIED_CHILD_OBSERVATION"
+                    message["content"] = message.get("content", "")
+                elif phase in ("delegate_verify", "delegate_ungraded"):
+                    state["delegate_requests"] += 1
+                    assert state["delegate_requests"] <= 2, encoded[-5000:]
+                    results = [item for item in request.get("messages", []) if item.get("role") == "tool"]
+                    if not results:
+                        names = {item.get("function", {}).get("name", item.get("name")) for item in request.get("tools", [])}
+                        assert "delegate" in names, ("delegate absent from parent catalog", sorted(names))
+                        message = dict(role="assistant", tool_calls=[dict(id="actual-delegate", type="function",
+                            function=dict(name="delegate", arguments=json.dumps(dict(role="diagnose", persona="engineer",
+                                via=child_model, tools=True, prompt="Run git_verify configured tests and report the result." if phase == "delegate_verify" else
+                                "Return an observation without running a verifier or claiming verified correctness."))))])
+                        finish = "tool_calls"
+                    else:
+                        assert "job_id" in json.dumps(results), results
+                elif phase == "verify":
                     state["verify_requests"] += 1
                     assert state["verify_requests"] <= 2, encoded[-5000:]
                     results = [item for item in request.get("messages", []) if item.get("role") == "tool"]
@@ -110,12 +212,15 @@ def main():
                     assert "configured-test-history" in encoded and "configured_tests_only" in encoded, encoded[-6000:]
                     assert expected_commit in encoded, encoded[-6000:]
                     assert "Delegate succeeded in role" not in encoded, encoded[-6000:]
+                    if expected_delegate_job:
+                        assert 'delegate_experience' in encoded and expected_delegate_job in encoded, encoded[-8000:]
+                        assert "bounded_canonical_tool_calls" in encoded and "delegate-private-tests" in encoded, encoded[-8000:]
                 elif phase == "foreign_project":
                     assert reference and reference not in encoded, ("receipt crossed project scope", encoded[-6000:])
                     assert "configured-test-history" not in encoded, encoded[-6000:]
                 else:
                     raise AssertionError(phase)
-                data = json.dumps(dict(id="actual-grade-response", model=model,
+                data = json.dumps(dict(id="actual-grade-response", model=request["model"],
                     choices=[dict(index=0, message=message, finish_reason=finish)],
                     usage=dict(prompt_tokens=100, completion_tokens=20))).encode()
                 self.send_response(200)
@@ -160,10 +265,11 @@ def main():
                           "    - name: private-source-proof\n"
                           '      run: test "$(cat receipt.txt)" = CANONICAL_SOURCE && test -d .git && test ! -S /run/aimee/aimee-http.sock\n')
         configurations.append(config)
-        models_path.write_text(json.dumps(dict(default_agent=model, default_delegate=model, fallback_chain=[], models=[
-            dict(name=model, model=model, provider="openai", auth_type="none", backend="http",
+        models_path.write_text(json.dumps(dict(default_agent=model, default_delegate=child_model, fallback_chain=[], models=[
+            dict(name=name, model=name, provider="openai", auth_type="none", backend="http",
                  endpoint=f"http://127.0.0.1:{provider.server_port}/v1", roles=["all"], enabled=True,
-                 tools_enabled=True, context_window=131072, max_tokens=4096, timeout_ms=120000, max_turns=4)])))
+                 tools_enabled=True, context_window=131072, max_tokens=4096, timeout_ms=120000, max_turns=4)
+            for name in (model, child_model)])))
 
         def session():
             sid = api("/v1/sessions/create", dict(client_type="configured-test-journey"))["session_id"]
@@ -258,9 +364,92 @@ def main():
             phase = "foreign_project"
             foreign_sid, foreign_attach = session()
             turn(foreign_sid, foreign_attach, roots[1], "Summarize the available configured-test evidence.")
+
+            def probe_json(probe_sid, mode=None):
+                read = subprocess.run([str(probe), probe_sid, actor, *([mode] if mode else [])],
+                                      capture_output=True, text=True, timeout=20)
+                assert read.returncode == 0, read.stderr
+                return json.loads(read.stdout)
+
+            def delegate_attempt(qualified):
+                nonlocal phase
+                phase = "delegate_verify" if qualified else "delegate_ungraded"
+                state["delegate_requests"] = 0
+                child_before = state["child_requests"]
+                parent_sid, parent_attach = session()
+                returned = turn(parent_sid, parent_attach, roots[0], "Launch the requested diagnostic delegate.")
+                jobs = set(job_ids(returned))
+                assert len(jobs) == 1, returned
+                job = jobs.pop()
+                deadline = time.monotonic() + 120
+                while True:
+                    result = api("/v1/delegate/status", dict(job_id=int(job), full_result=True))
+                    if result.get("job_status") in ("done", "failed", "partial", "cancelled"):
+                        break
+                    assert time.monotonic() < deadline, result
+                    time.sleep(0.1)
+                assert result["job_status"] == "done", result
+                assert not errors and state["child_requests"] == child_before + (2 if qualified else 1), (errors, state)
+                while True:
+                    experiences = probe_json(parent_sid, "experiences")
+                    if experiences:
+                        break
+                    assert time.monotonic() < deadline, ("actual delegated execution published no source-bound experience", result)
+                    time.sleep(0.1)
+                assert len(experiences) == 1, experiences
+                experience = assert_delegate_experience(experiences[0], parent_sid, actor, proof["scope_id"], child_model, job, qualified)
+                child_sid = experience["source"]["session_id"]
+                child_grades = probe_json(child_sid)
+                if qualified:
+                    assert len(child_grades) == 1, child_grades
+                    child_grade, child_terminal = child_grades[0]["grade"], child_grades[0]["event"]
+                    assert child_grade["source"] == experience["source"] and child_grade["verification_ref"] == experience["verification_ref"], child_grades
+                    assert child_grade["proof"] in child_terminal["payload"]["verification_proofs"], child_grades
+                    assert child_grade["proof"]["scope_id"] == proof["scope_id"] and child_grade["proof"]["snapshot_commit"] == expected_commit, child_grades
+                else:
+                    assert child_grades == [], ("successful child execution without verifier was graded", child_grades)
+                return parent_sid, experience, experiences, child_grades
+
+            delegate_sid, experience, original_experiences, child_grades = delegate_attempt(True)
+            reference = experience["verification_ref"]
+            expected_delegate_job = experience["child"]["learning_binding"]["job_id"]
+            child_sid = experience["source"]["session_id"]
+            assert probe_json(child_sid, "drop-delegate-projection") == {"removed": 2}
+            assert probe_json(child_sid) == [] and probe_json(delegate_sid, "experiences") == []
+
+            def replay_parent_binding():
+                connection = Local("localhost")
+                try:
+                    # Only the parent is requested; recovery must resolve the
+                    # exact child receipt through its protected running binding.
+                    connection.request("GET", f"/v1/sessions/{delegate_sid}/events?format=ir&cursor=0")
+                    response = connection.getresponse()
+                    assert response.status == 200, response.status
+                    while True:
+                        line = response.readline().decode()
+                        assert line, "parent replay ended before delegate binding"
+                        if line.startswith("data: "):
+                            record = json.loads(line[6:])
+                            if record.get("sequence") == experience["parent_source"]["sequence"]:
+                                assert record["event"] == original_experiences[0]["parent"] and record["actor"] == actor, record
+                                break
+                finally:
+                    connection.close()
+
+            for _ in range(2):
+                replay_parent_binding()
+                assert probe_json(child_sid) == child_grades, "parent-only replay did not restore exactly one original grade"
+                assert probe_json(delegate_sid, "experiences") == original_experiences, "parent-only replay changed or duplicated experience/pending evidence"
+            phase = "reuse"
+            reuse_sid, reuse_attach = session()
+            turn(reuse_sid, reuse_attach, roots[0], "Summarize the available delegate configured-test evidence.")
+            phase = "foreign_project"
+            foreign_sid, foreign_attach = session()
+            turn(foreign_sid, foreign_attach, roots[1], "Summarize the available delegate configured-test evidence.")
+            delegate_attempt(False)
         assert subprocess.check_output(["git", "-C", str(roots[0]), "status", "--porcelain"], text=True) == ""
         assert not errors, errors
-        print("execution grade: actual daemon tool -> private Docker tests -> canonical proof -> durable grade/replay recovery -> fresh-session scoped model reuse")
+        print("execution grade: actual daemon primary/delegate -> private Docker tests -> canonical proof -> grade/experience/pending -> parent-only recovery -> fresh-session scoped reuse; no-verifier delegate remains ungraded")
     finally:
         cleanup_errors = []
         for sid, attach in zip(sessions, attachments):

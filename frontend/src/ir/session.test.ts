@@ -377,3 +377,32 @@ it('refuses foreign, malformed and oversized verifier metadata on execution term
     status: 'running', verification_proofs: [proof],
   } }))).toThrow('Invalid execution verification proofs');
 });
+
+
+it('admits typed delegate custody metadata without projecting messages or controls', () => {
+  const learning_binding = { version: 1 as const, job_id: '2147483647', scope_kind: 'project' as const,
+    scope_id: 'registered-project', agent: 'selected-agent', provider: 'actual-provider', model: 'actual-model' };
+  const child = { session_id: 'private-child', turn_id: 'child-run', role: 'review', status: 'running' as const, learning_binding };
+  const events = [envelope(1, { kind: 'child_execution', payload: child }),
+    envelope(2, { kind: 'child_execution', payload: { ...child, status: 'completed' } })];
+  const state = events.reduce(reduceSession, emptySession('s'));
+  expect(state.children['private-child:child-run'].learning_binding).toEqual(learning_binding);
+  expect(state.messages).toEqual([]);
+  expect(state.controls).toEqual({});
+  expect(state.activeTurns).toEqual([]);
+  expect(state.errors).toEqual([]);
+  expect(JSON.parse(JSON.stringify(events)).reduce(reduceSession, emptySession('s'))).toEqual(state);
+  for (const invalid of [null, {}, { ...learning_binding, version: 2 },
+    { ...learning_binding, job_id: '01' }, { ...learning_binding, job_id: '0' },
+    { ...learning_binding, job_id: '2147483648' }, { ...learning_binding, job_id: 1 },
+    { ...learning_binding, scope_kind: 'global' }, { ...learning_binding, scope_id: '' },
+    { ...learning_binding, agent: 'é'.repeat(32) }, { ...learning_binding, provider: 'p'.repeat(128) },
+    { ...learning_binding, model: 'm'.repeat(256) }, { ...learning_binding, agent: 'a\0b' },
+    { ...learning_binding, verdict: 'passed' },
+  ]) {
+    expect(() => reduceSession(emptySession('s'), envelope(1, { kind: 'child_execution',
+      payload: { ...child, learning_binding: invalid } } as unknown as SessionEvent))).toThrow(/reference/);
+  }
+  expect(() => reduceSession(emptySession('s'), envelope(1, { kind: 'child_execution',
+    payload: { ...child, arbitrary_metadata: {} } } as unknown as SessionEvent))).toThrow(/reference/);
+});

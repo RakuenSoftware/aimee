@@ -6,6 +6,11 @@
 typedef struct server_session_log server_session_log_t;
 /* 0 installed, 1 no session or an existing primary owner, -1 refused. */
 int server_session_log_begin(const char *role, const char *prompt, server_session_log_t **out);
+/* Actual selected registration, supplied only by the admitted host runtime.
+ * Missing project/job identity keeps ordinary execution observational/unbound. */
+int server_session_log_begin_selected(const char *role, const char *prompt, const char *agent,
+                                      const char *provider, const char *model,
+                                      server_session_log_t **out);
 /* Restores the calling task's sink; capture failure remains sticky. */
 int server_session_log_finish(server_session_log_t *scope, int success, const char *error);
 int server_session_log_active(void);

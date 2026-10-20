@@ -32,6 +32,7 @@ type localExecutionTestGrade struct {
 	Verdict        string               `json:"verdict"`
 	VerificationID string               `json:"verification_ref"`
 	Proof          json.RawMessage      `json:"proof"`
+	Experience     *delegateExperience  `json:"delegate_experience,omitempty"`
 }
 
 // Match the complete admitted typed proof, independent of JSON member order
@@ -60,7 +61,7 @@ func executionProofInTerminal(encoded []byte, payload canonical.ExecutionPayload
 func executionTestGradeRecord(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	var grade localExecutionTestGrade
 	if f[0] == "" || len(f[0]) > 600 || len(f[1]) > 256*1024 ||
-		!canonical.Decode([]byte(f[1]), &grade) || grade.SchemaVersion != 1 ||
+		!canonical.Decode([]byte(f[1]), &grade) || grade.Experience != nil || grade.SchemaVersion != 1 ||
 		grade.ObservedStatus != "completed" || grade.Verification != "tests_bound_revision" ||
 		grade.Qualification != "configured_tests_only" || (grade.Verdict != "passed" && grade.Verdict != "failed") ||
 		!strings.HasPrefix(grade.VerificationID, "sha256:") || len(grade.VerificationID) != 71 ||

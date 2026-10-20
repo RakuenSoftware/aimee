@@ -50,7 +50,12 @@ export type Delta = {
 };
 export type ProjectionReport = { model: string; boundary: 'request' | 'response'; omitted_reasoning_blocks: number; omitted_opaque_state_blocks: number; omitted_cache_controls?: number };
 export type ExecutionStatus = 'running' | 'completed' | 'failed' | 'cancelled';
-export type ChildExecution = { session_id: string; turn_id: string; role: string; status: ExecutionStatus };
+/** Host custody metadata. Browser schema admission grants no execution authority. */
+export type DelegateLearningBinding = {
+  version: 1; job_id: string; scope_kind: 'project'; scope_id: string;
+  agent: string; provider: string; model: string;
+};
+export type ChildExecution = { session_id: string; turn_id: string; role: string; status: ExecutionStatus; learning_binding?: DelegateLearningBinding };
 export type SessionEvent =
   | { kind: 'native_compaction'; payload: { harness: 'codex' | 'claude' } }
   | { kind: 'native_checkpoint'; payload: { scope: string; context_digest: string; prefix_digest: string; harness: 'codex' | 'claude'; native_id: string; claim: string; message_count: number } }
@@ -98,6 +103,19 @@ function sequence(value: string): bigint {
 const kinds = new Set(['text', 'thinking', 'tool_use', 'tool_result', 'image', 'document']);
 function nonempty(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+function validDelegateLearningBinding(value: unknown): value is DelegateLearningBinding {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const binding = value as Record<string, unknown>;
+  const fields = ['version', 'job_id', 'scope_kind', 'scope_id', 'agent', 'provider', 'model'];
+  if (Object.keys(binding).length !== fields.length || !Object.keys(binding).every(key => fields.includes(key)) ||
+      binding.version !== 1 || binding.scope_kind !== 'project' || typeof binding.job_id !== 'string' ||
+      !/^[1-9][0-9]{0,9}$/.test(binding.job_id) || BigInt(binding.job_id) > 2147483647n) return false;
+  return (['scope_id', 'agent', 'provider', 'model'] as const).every((key, index) => {
+    const field = binding[key];
+    return typeof field === 'string' && field.length > 0 && !field.includes('\0') &&
+      new TextEncoder().encode(field).length <= [256, 63, 127, 255][index];
+  });
 }
 function validateBlock(block: Block): void {
   if (block?.message_group !== undefined && (!Number.isInteger(block.message_group) || block.message_group < 1 || block.message_group > 4096))
@@ -163,7 +181,9 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
     }
     case 'child_execution': {
       const child = event.payload;
-      if (![child.session_id, child.turn_id, child.role].every(value => nonempty(value) && new TextEncoder().encode(value).length <= 127) ||
+      if (!Object.keys(child).every(key => ['session_id', 'turn_id', 'role', 'status', 'learning_binding'].includes(key)) ||
+          (Object.prototype.hasOwnProperty.call(child, 'learning_binding') && !validDelegateLearningBinding(child.learning_binding)) ||
+          ![child.session_id, child.turn_id, child.role].every(value => nonempty(value) && new TextEncoder().encode(value).length <= 127) ||
           child.session_id === state.session || !['running', 'completed', 'failed', 'cancelled'].includes(child.status))
         throw new Error('Invalid child execution reference');
       const key = `${child.session_id}:${child.turn_id}`;

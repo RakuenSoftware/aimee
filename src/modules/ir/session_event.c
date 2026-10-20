@@ -815,6 +815,23 @@ static int verification_hex(const cJSON *object, const char *key, size_t first, 
    size_t length = strlen(value);
    return (length == first || length == second) && strspn(value, "0123456789abcdef") == length;
 }
+static int child_learning_binding_valid(const cJSON *binding)
+{
+   static const char *const keys[] = {"version", "job_id",   "scope_kind", "scope_id",
+                                      "agent",   "provider", "model"};
+   const cJSON *version = cJSON_GetObjectItemCaseSensitive(binding, "version");
+   const char *job = verification_text(binding, "job_id", 10);
+   const char *scope = verification_text(binding, "scope_kind", 32);
+   if (!verification_keys(binding, keys, sizeof keys / sizeof *keys) || !cJSON_IsNumber(version) ||
+       version->valuedouble != 1 || !job || job[0] == '0' ||
+       strspn(job, "0123456789") != strlen(job) || strtoull(job, NULL, 10) > 2147483647ULL ||
+       !scope || strcmp(scope, "project") || !verification_text(binding, "scope_id", 256) ||
+       !verification_text(binding, "agent", 63) || !verification_text(binding, "provider", 127) ||
+       !verification_text(binding, "model", 255))
+      return 0;
+   return 1;
+}
+
 int aimee_ir_verification_proof_valid(const cJSON *proof)
 {
    static const char *const keys[] = {"version",
@@ -1004,7 +1021,10 @@ cJSON *aimee_ir_session_event_json(const aimee_session_event_t *event)
       if (!payload || !add_string(payload, "session_id", event->child_session) ||
           !add_string(payload, "turn_id", event->child_turn) ||
           !add_string(payload, "role", event->child_role) ||
-          !add_string(payload, "status", event->execution_status))
+          !add_string(payload, "status", event->execution_status) ||
+          (event->child_learning_binding &&
+           (!child_learning_binding_valid(event->child_learning_binding) ||
+            !add_copy(payload, "learning_binding", event->child_learning_binding))))
          goto fail;
       break;
    case AIMEE_SESSION_EXECUTION:

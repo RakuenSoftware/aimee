@@ -670,3 +670,9 @@ erasure. The prepared provider receipt records these inputs under
 Typed-memory `sources` retain their existing meaning and do not acquire invented
 memory versions. Source-release handles, bounds, replay rules and host-only
 transport remain the existing ones.
+
+Configured-test receipts may also retain bounded delegate experience: protected parent/job/child
+identity and canonical action descriptors with input digests. Recall and the existing source-release
+recheck require those parent, child, job and action sources to remain present and owned in the same
+project. These are historical execution inputs; they cannot become instructions, an applied procedure,
+or a causal success claim. Legacy unscoped failure rows are excluded from automatic delegate context.

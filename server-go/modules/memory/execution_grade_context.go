@@ -36,6 +36,21 @@ func executionGradeContexts(raw json.RawMessage, project string) ([]string, erro
 			Source        struct {
 				Actor string `json:"actor"`
 			} `json:"source"`
+			Experience *struct {
+				Principal     string `json:"principal"`
+				Qualification string `json:"qualification"`
+				ScopeKind     string `json:"scope_kind"`
+				ScopeID       string `json:"scope_id"`
+				Verdict       string `json:"verdict"`
+				Coverage      string `json:"action_coverage"`
+				Source        struct {
+					Actor string `json:"actor"`
+				} `json:"source"`
+				Parent struct {
+					Actor string `json:"actor"`
+				} `json:"parent_source"`
+				Actions []json.RawMessage `json:"actions"`
+			} `json:"delegate_experience,omitempty"`
 			Proof struct {
 				ScopeID   string `json:"scope_id"`
 				ScopeKind string `json:"scope_kind"`
@@ -43,6 +58,9 @@ func executionGradeContexts(raw json.RawMessage, project string) ([]string, erro
 		}
 		if json.Unmarshal(raw, &grade) != nil || grade.Qualification != "configured_tests_only" || grade.Verification != "tests_bound_revision" || (grade.Verdict != "passed" && grade.Verdict != "failed") || grade.Source.Actor != snapshot.Principal || grade.Proof.ScopeKind != "project" || grade.Proof.ScopeID != project {
 			return nil, fmt.Errorf("invalid configured-test receipt")
+		}
+		if e := grade.Experience; e != nil && (e.Principal != snapshot.Principal || e.Qualification != "configured_tests_only" || e.ScopeKind != "project" || e.ScopeID != project || e.Verdict != grade.Verdict || e.Source.Actor != snapshot.Principal || e.Parent.Actor != snapshot.Principal || e.Coverage != "bounded_canonical_tool_calls" || len(e.Actions) > 32) {
+			return nil, fmt.Errorf("unbound delegate execution experience")
 		}
 	}
 	// Marshal escapes angle brackets in user-controlled identifiers. Each receipt

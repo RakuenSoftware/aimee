@@ -2075,7 +2075,8 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "0762ddf6824dc312581908dfbcd5ae44b4bde4daea6258c6a1f6d9d8b24abe5e"
+      "sha256": "6f02a6ae3d01822e31fe4021b96a6feaf83b8921f37cbe0caf31667152b0c886",
+      "boundary_review": " 2026-10-20 PR #3052: Reviewed canonical Git advert projection and its exact real-catalog tests. Existing memory schemas, handlers, arguments, admission and Go policy remain unchanged; reversing only the reviewed Git helper/caller/tests reproduces the previously pinned source exactly. This is boundary analysis, not independent production-promotion approval."
     },
     "src/modules/protocols/mcp/mcp_tools_extended.c": {
       "disposition": "protocol-catalog",
@@ -2114,8 +2115,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "f333b310ad6609d0cfd5a01388a48c448b499c763457918781617fd2eaa6b366",
-      "boundary_review": "2026-10-20 PR #3052: reviewed retirement of agent_store_feedback, which fabricated a KB succeeded/fixes relationship from process success. No replacement correctness claim is emitted. Canonical terminal observations remain independently ungraded. The four remaining Go memory context/recall APIs and their arguments are unchanged. Other source changes retain owned canonical output and restrict optional result caching to exact admitted requests and authenticated owners, excluding session capture and opaque credentials. This is boundary analysis, not independent reviewer approval."
+      "sha256": "59d5e7fda1e245dd64599c525a8d8dfd85891f2e9e67a7c5cc21291bed6135a2",
+      "boundary_review": "2026-10-20 PR #3052: reviewed retirement of agent_store_feedback, which fabricated a KB succeeded/fixes relationship from process success. No replacement correctness claim is emitted. Canonical terminal observations remain independently ungraded. The four remaining Go memory context/recall APIs and their arguments are unchanged. Other source changes retain owned canonical output and restrict optional result caching to exact admitted requests and authenticated owners, excluding session capture and opaque credentials. This is boundary analysis, not independent reviewer approval. 2026-10-20 PR #3052: Reviewed transport of actual selected agent/provider/model to the canonical child-log owner for protected delegate experience binding. Reversing only this call-signature change reproduces the previously pinned source exactly. Existing memory context/recall inputs and Go admission policy are unchanged. This records source-boundary analysis, not independent production-promotion approval."
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
@@ -2236,8 +2237,8 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "f3b69f282f44a2385161905df39f431c0c0a16165ca4a5af0dbc48d35f440dc2",
-      "boundary_review": "2026-10-20 PR #3052: Adds only the native configured Git verifier wrapper/registration, deriving its schema from the existing MCP catalog. Existing memory handlers and authorization/source policy are unchanged. This records source-boundary review, not independent production-promotion approval."
+      "sha256": "610fdb55cf2a595dfae9b4244ead35a313a7bb058d4b341fd0e58c9d720c2697",
+      "boundary_review": "2026-10-20 PR #3052: Adds only the native configured Git verifier wrapper/registration, deriving its schema from the existing MCP catalog. Existing memory handlers and authorization/source policy are unchanged. This records source-boundary review, not independent production-promotion approval. 2026-10-20 PR #3052: Reviewed canonical Git advert projection and its exact real-catalog tests. Existing memory schemas, handlers, arguments, admission and Go policy remain unchanged; reversing only the reviewed Git helper/caller/tests reproduces the previously pinned source exactly. This is boundary analysis, not independent production-promotion approval."
     },
     "src/server/server_memory.c": {
       "disposition": "host-transport",
@@ -2437,9 +2438,9 @@
       "symbols": [
         "memory_recall"
       ],
-      "sha256": "199b2849a9de261527ba6ad9de3da7470dbaaa3bd877ceac1c8b5c6b5ec8b0ea",
+      "sha256": "b7c2c817d0ef3675add56aa1b75fa1d54c3e2ead7f90cd6e1c9ad9308a10636d",
       "boundary_change": "Adds Git family identity and output-capacity regressions. Existing memory recall catalog assertions are unchanged. This records boundary analysis, not independent approval. Catalog signature scratch arrays are initialized for the pinned static analyzer; schema assertions retain their existing meaning.",
-      "boundary_review": "PR #3050: adds a tools metadata coverage assertion over the real flat MCP catalog. Existing memory tool schemas, fixtures, runtime policy and Go ownership are unchanged."
+      "boundary_review": "PR #3050: adds a tools metadata coverage assertion over the real flat MCP catalog. Existing memory tool schemas, fixtures, runtime policy and Go ownership are unchanged. 2026-10-20 PR #3052: Reviewed canonical Git advert projection and its exact real-catalog tests. Existing memory schemas, handlers, arguments, admission and Go policy remain unchanged; reversing only the reviewed Git helper/caller/tests reproduces the previously pinned source exactly. This is boundary analysis, not independent production-promotion approval."
     },
     "src/tests/test_mcp_directive_transport.c": {
       "disposition": "host-fixture",

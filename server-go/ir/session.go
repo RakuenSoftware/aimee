@@ -230,13 +230,15 @@ func ValidSessionEvent(encoded []byte) bool {
 			(*projection.Reasoning > 0 || projection.CacheControls > 0) &&
 			*projection.Opaque >= 0 && *projection.Opaque <= *projection.Reasoning
 	case "child_execution":
-		var child struct {
-			Session string `json:"session_id"`
-			Turn    string `json:"turn_id"`
-			Role    string `json:"role"`
-			Status  string `json:"status"`
+		var child ChildExecutionPayload
+		var fields map[string]json.RawMessage
+		if !Decode(e.Payload, &fields) {
+			return false
 		}
-		return Decode(e.Payload, &child) && child.Session != "" && len(child.Session) <= 127 &&
+		if binding, present := fields["learning_binding"]; present && bytes.Equal(bytes.TrimSpace(binding), []byte("null")) {
+			return false
+		}
+		return Decode(e.Payload, &child) && ValidDelegateLearningBinding(child.LearningBinding) && child.Session != "" && len(child.Session) <= 127 &&
 			child.Turn != "" && len(child.Turn) <= 127 && child.Role != "" && len(child.Role) <= 127 &&
 			(child.Status == "running" || child.Status == "completed" || child.Status == "failed" || child.Status == "cancelled")
 	case "execution":

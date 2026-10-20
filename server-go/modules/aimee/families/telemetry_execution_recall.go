@@ -14,7 +14,28 @@ import (
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
 
-const executionGradeRecallSQL = `SELECT i.payload,e.payload FROM interaction_events i
+const executionGradeRecallSQL = `SELECT i.payload,e.payload,
+ COALESCE((SELECT jsonb_build_object('experience',d.payload::jsonb,'parent',p.payload::jsonb)::text
+ FROM interaction_events d
+ JOIN server_sessions ps ON ps.id=d.payload::jsonb->'parent_source'->>'session_id' AND ps.principal=$1
+ JOIN session_ir_events p ON p.session_id=ps.id AND p.actor=$1
+ AND p.sequence::text=d.payload::jsonb->'parent_source'->>'sequence'
+ AND p.event_id=d.payload::jsonb->'parent_source'->>'event_id'
+ AND p.turn_id=d.payload::jsonb->'parent_source'->>'turn_id'
+ JOIN agent_jobs j ON j.id::text=d.payload::jsonb->'child'->'learning_binding'->>'job_id'
+ AND j.role=d.payload::jsonb->'child'->>'role'
+ AND j.agent_name=d.payload::jsonb->'child'->'learning_binding'->>'agent'
+ WHERE d.session_id=i.session_id AND d.event_type='delegate_experience' AND d.actor='system'
+ AND d.payload::jsonb->'source'=i.payload::jsonb->'source'
+ AND d.payload::jsonb->>'verification_ref'=i.payload::jsonb->>'verification_ref'
+ AND d.payload::jsonb->>'principal'=$1 AND d.payload::jsonb->>'scope_id'=$2
+ AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(d.payload::jsonb->'actions') action
+ WHERE NOT EXISTS(SELECT 1 FROM session_ir_events ae WHERE ae.session_id=i.session_id
+ AND ae.actor=$1 AND ae.turn_id=e.turn_id AND ae.sequence::text=action->>'sequence'
+ AND ae.event_id=action->>'event_id'
+ AND encode(sha256(convert_to(ae.payload,'UTF8')),'hex')=action->>'event_sha256'))
+ ORDER BY d.id DESC LIMIT 1),'null')
+ FROM interaction_events i
  JOIN server_sessions s ON s.id=i.session_id AND s.principal=$1
  JOIN session_ir_events e ON e.session_id=i.session_id
  AND e.sequence::text=i.payload::jsonb->'source'->>'sequence'
@@ -73,8 +94,8 @@ func executionTestGradeRecall(ctx context.Context, q store.Queryer, f []string) 
 	items := []localExecutionTestGrade{}
 	total := 0
 	for rows.Next() {
-		var raw, terminal string
-		if err = rows.Scan(&raw, &terminal); err != nil {
+		var raw, terminal, experienceRaw string
+		if err = rows.Scan(&raw, &terminal, &experienceRaw); err != nil {
 			return store.StatusFailed, nil, err
 		}
 		if len(raw) > 256*1024 || !canonical.ValidSessionEvent([]byte(terminal)) {
@@ -101,6 +122,19 @@ func executionTestGradeRecall(ctx context.Context, q store.Queryer, f []string) 
 		}
 		if grade.SchemaVersion != 1 || grade.Source.Kind != "canonical_session_log" || grade.Source.Actor != f[0] || grade.ObservedStatus != "completed" || grade.Verification != "tests_bound_revision" || grade.Qualification != "configured_tests_only" || (grade.Verdict != "passed" && grade.Verdict != "failed") || binding.Version != 1 || binding.Actor != f[0] || binding.Session != grade.Source.Session || binding.Turn != grade.Source.Turn || binding.ScopeKind != "project" || binding.ScopeID != f[1] {
 			continue
+		}
+		if experienceRaw != "null" {
+			var retained struct {
+				Experience delegateExperience `json:"experience"`
+				Parent     json.RawMessage    `json:"parent"`
+			}
+			if json.Unmarshal([]byte(experienceRaw), &retained) == nil {
+				exp := retained.Experience
+				child, valid := decodeExperienceChild(string(retained.Parent))
+				if valid && exp.Schema == 1 && exp.Kind == "delegate_execution_experience" && exp.Principal == f[0] && exp.ScopeKind == "project" && exp.ScopeID == f[1] && exp.Source == grade.Source && validExperienceSource(exp.ParentSource, f[0]) && exp.VerificationRef == grade.VerificationID && exp.Verdict == grade.Verdict && exp.Qualification == "configured_tests_only" && exp.ObservedStatus == "completed" && child.Session == grade.Source.Session && child.Turn == grade.Source.Turn && child.LearningBinding.ScopeID == f[1] && mustJSON(child) == mustJSON(exp.Child) {
+					grade.Experience = &exp
+				}
+			}
 		}
 		// Context carries a typed receipt projection, not arbitrary verifier
 		// output. Bind the complete stored body by digest and retain only the

@@ -272,7 +272,8 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
    if (durable_job_id > 0)
       db1_agent_job_set_agent(durable_job_id, ag->name);
    server_session_log_t *log_scope = NULL;
-   int capture = server_session_log_begin(role, request ? NULL : user_prompt, &log_scope);
+   int capture = server_session_log_begin_selected(role, request ? NULL : user_prompt, ag->name,
+                                                   ag->provider, ag->model, &log_scope);
    int rc;
    if (capture < 0)
    {

@@ -709,9 +709,11 @@ static inline uint32_t aimee_db1_get_u32(const uint8_t *p)
 }
 
 /* Server-local immutable procedure experience (telemetry family). */
-#define AIMEE_DB1_OP_PROCEDURE_EVENT_LOAD        59u
-#define AIMEE_DB1_OP_PROCEDURE_EVENT_APPEND      60u
-#define AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECORD 61u
-#define AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECALL 62u
+#define AIMEE_DB1_OP_PROCEDURE_EVENT_LOAD                 59u
+#define AIMEE_DB1_OP_PROCEDURE_EVENT_APPEND               60u
+#define AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECORD          61u
+#define AIMEE_DB1_OP_EXECUTION_TEST_GRADE_RECALL          62u
+#define AIMEE_DB1_OP_DELEGATE_EXECUTION_EXPERIENCE_RECORD 63u
+#define AIMEE_DB1_OP_DELEGATE_EXECUTION_TERMINAL_LOOKUP   64u
 
 #endif /* AIMEE_DB1_MODULE_API_H */

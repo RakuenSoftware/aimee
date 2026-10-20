@@ -6,6 +6,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+char *db1_delegate_execution_terminal_lookup(const char *principal, const char *source)
+{
+   (void)principal;
+   (void)source;
+   assert(!"unexpected child terminal lookup in primary chat fixture");
+   return NULL;
+}
+
+/* Primary chat never owns a child job binding. */
+int db1_delegate_execution_experience_record(const char *principal, const char *source)
+{
+   (void)principal;
+   (void)source;
+   assert(!"unexpected delegate projection in primary chat fixture");
+   return -1;
+}
+
 static cJSON *log_entries;
 static int writes, fail_store, disconnected, cancelled, delivered_sequence;
 static server_session_capture_t *page_writer;

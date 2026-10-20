@@ -26,6 +26,10 @@ cJSON *mcp_build_tools_list(void);
  * discriminator instead of N. aimee's own agents need the individual names, because
  * a toolset grants tools one at a time. See mcp_collapse_families. */
 cJSON *mcp_build_tools_list_flat(void);
+/* Owned native advert from a canonical list. Exact names are copied unchanged;
+ * absent git_* names project only enum-declared operations from the Git schema,
+ * with the command discriminator supplied by the name. Never mutates list. */
+cJSON *mcp_tool_advert_from_list(const cJSON *list, const char *tool);
 
 /* Resolve the active MCP presentation profile: the explicit argument if set,
  * else AIMEE_MCP_TOOL_PROFILE, else "core" (the lean default). Not owned. */

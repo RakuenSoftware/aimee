@@ -4,6 +4,7 @@
   "dependencies": [
     "audit",
     "config",
+    "egress",
     "execution-policy",
     "ir",
     "module-runtime",
@@ -11,8 +12,7 @@
     "sandbox",
     "tools",
     "vault",
-    "workspace",
-    "egress"
+    "workspace"
   ],
   "public_headers": [
     "src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h",

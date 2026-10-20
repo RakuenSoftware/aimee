@@ -73,7 +73,7 @@ Browser model/persona requests and failed-save rollback are now session-bound. C
 session-specific state; malformed streams withdraw stale controls and offer durable-cursor
 reconnection. A reproduced Send/Steer race came from copied activity state; the composer now
 uses canonical activity directly. Repeated Chromium journeys, readable tool-result contrast,
-mobile layout, 323 frontend tests and production builds pass. Failed primary/persona lookups
+mobile layout, 324 frontend tests and production builds pass. Failed primary/persona lookups
 remain errors, focus/visibility refreshes retain confirmed selections and reject stale reads,
 and the UI hides unsupported branching instead of offering a silent 501 action.
 
@@ -98,6 +98,16 @@ match that durable source. Replay rebuilds lost derived grades from the terminal
 returns whole bounded receipts only for the authenticated actor and registered project;
 primary/delegate context revalidates them through the existing provider-send fence. They are
 historical configured-test evidence, not semantic task correctness or causal procedure claims.
+
+The next working increment binds actual selected delegate/job/project metadata to a protected
+canonical parent reference before child execution. Ordinary append cannot forge that binding.
+Host-only operations 63/64 resolve the exact owned child terminal and project source-bound
+pending delegate observations; proof-less exit remains ungraded, and retained proofs require
+all matching derived grades before projection. Parent-only replay recovers lost child grades
+and observations idempotently, using exact terminal lookup rather than scanning a bounded
+prefix. Recall rechecks parent, child, job and action sources through the same freshness fence.
+No observation is auto-applied or promoted to causal/procedure success. The project prerequisite
+is an approved held workspace and local repository identity, not a KB or code-index service.
 Production remains KB-free; no endpoint, seeded learning rows or synthetic successes are added.
 The separate legacy goal-only failed-approach injection into write delegates is retired: its
 query had no principal/project/source fence. The bypass gate protects this boundary; legacy
@@ -106,6 +116,13 @@ rows are not guessed into scoped owners or promoted to trusted procedure learnin
 The actual-daemon integration journey now requires real Docker in CI and covers model-invoked
 verification, durable proof/grade publication, erased-projection replay recovery and later scoped
 model context. Local absence of Docker skips exactly that journey and is not positive evidence.
+Published `aee506721` adds the browser/durable verification slice; `9667034f5` records the
+exact native verifier integration in the frozen semantic-context gate. Smoke and Linux LSP pass
+on that repair. Actual Docker CI then caught a missing native `git_verify` advert: its dispatch
+existed but the canonical catalog exposes the multiplexed `git` schema. The working repair
+projects a fixed named command only from an actually advertised enum entry and preserves the
+remaining schema and cached catalog. The source-bound delegate increment and this catalog
+repair are not yet CI-qualified or promoted.
 Fresh CI, remaining live-vendor/native-profile qualification and independently reviewed production
 promotion remain required. The Windows native tool-runtime stub and arbitrary daemon ACP profiles
 remain explicit unsupported profiles; thin-client CI does not qualify them as native servers.

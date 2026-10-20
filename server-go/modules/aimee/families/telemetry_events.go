@@ -214,6 +214,9 @@ func interactionExecutionRetry(ctx context.Context, q store.Queryer, f []string)
 }
 
 func interactionEventRecord(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	if f[1] == "delegate_experience" {
+		return store.StatusInvalid, nil, nil
+	}
 	if f[1] == "task_outcome" {
 		status, duplicate, err := interactionExecutionRetry(ctx, q, f)
 		if err != nil || status != store.StatusOK {

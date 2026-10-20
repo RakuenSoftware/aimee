@@ -2315,17 +2315,7 @@ static cJSON *mcp_native_advert(const char *tool)
        * was fine and only the advert lied — exactly the silent shape this merge exists
        * to end. Caught by running a real server, not by CI. */
       list = mcp_build_tools_list_flat(); /* process-lifetime cache; the list is static */
-   cJSON *found = NULL;
-   cJSON *item = NULL;
-   cJSON_ArrayForEach(item, list)
-   {
-      cJSON *name = cJSON_GetObjectItemCaseSensitive(item, "name");
-      if (cJSON_IsString(name) && strcmp(name->valuestring, tool) == 0)
-      {
-         found = cJSON_Duplicate(item, 1);
-         break;
-      }
-   }
+   cJSON *found = mcp_tool_advert_from_list(list, tool);
    pthread_mutex_unlock(&lock);
    return found;
 }

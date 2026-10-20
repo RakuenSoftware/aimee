@@ -52,7 +52,7 @@ func TestExecutionGradeRecallPostgresNextRunScopeAndErasure(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql", "schema_telemetry.sql"} {
+	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql", "schema_telemetry.sql", "schema_delegation.sql"} {
 		body, err := schemaFS.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)

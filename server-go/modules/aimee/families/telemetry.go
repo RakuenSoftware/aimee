@@ -70,20 +70,22 @@ const (
 
 	// Eval candidates and approach memory, added upstream in the C store after
 	// this branch forked. Handlers live in telemetry_eval_candidates.go.
-	opEvalCandidateObserve           = 49
-	opEvalCandidateGetBySignature    = 50
-	opEvalCandidateList              = 51
-	opEvalCandidateMarkAdmitted      = 52
-	opEvalCandidateMarkRejected      = 53
-	opEvalCandidateMarkArchived      = 54
-	opEvalCandidateSetPassingWindows = 55
-	opEvalAblationGrid               = 56
-	opApproachFailureRecord          = 57
-	opApproachFailureCandidates      = 58
-	opProcedureEventLoad             = 59
-	opProcedureEventAppend           = 60
-	opExecutionTestGradeRecord       = 61
-	opExecutionTestGradeRecall       = 62
+	opEvalCandidateObserve              = 49
+	opEvalCandidateGetBySignature       = 50
+	opEvalCandidateList                 = 51
+	opEvalCandidateMarkAdmitted         = 52
+	opEvalCandidateMarkRejected         = 53
+	opEvalCandidateMarkArchived         = 54
+	opEvalCandidateSetPassingWindows    = 55
+	opEvalAblationGrid                  = 56
+	opApproachFailureRecord             = 57
+	opApproachFailureCandidates         = 58
+	opProcedureEventLoad                = 59
+	opProcedureEventAppend              = 60
+	opExecutionTestGradeRecord          = 61
+	opExecutionTestGradeRecall          = 62
+	opDelegateExecutionExperienceRecord = 63
+	opDelegateExecutionTerminalLookup   = 64
 )
 
 // Telemetry is the family, ready to be bound to kind 11783.
@@ -92,10 +94,12 @@ var Telemetry = store.Family{
 	Event: EventTelemetry,
 	Stage: StageTelemetry,
 	Ops: map[uint32]store.Op{
-		opExecutionTestGradeRecall: {Name: "execution_test_grade_recall", Args: 3, Cells: 1, HostOnly: true, Run: executionTestGradeRecall},
-		opExecutionTestGradeRecord: {Name: "execution_test_grade_record", Args: 2, Tx: true, HostOnly: true, Run: executionTestGradeRecord},
-		opProcedureEventLoad:       {Name: "procedure_event_load", Args: 2, Cells: 1, Run: procedureEventLoad},
-		opProcedureEventAppend:     {Name: "procedure_event_append", Args: 7, Cells: 1, Tx: true, Run: procedureEventAppend},
+		opDelegateExecutionTerminalLookup:   {Name: "delegate_execution_terminal_lookup", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: delegateExecutionTerminalLookup},
+		opDelegateExecutionExperienceRecord: {Name: "delegate_execution_experience_record", Args: 2, Tx: true, HostOnly: true, Run: delegateExecutionExperienceRecord},
+		opExecutionTestGradeRecall:          {Name: "execution_test_grade_recall", Args: 3, Cells: 1, HostOnly: true, Run: executionTestGradeRecall},
+		opExecutionTestGradeRecord:          {Name: "execution_test_grade_record", Args: 2, Tx: true, HostOnly: true, Run: executionTestGradeRecord},
+		opProcedureEventLoad:                {Name: "procedure_event_load", Args: 2, Cells: 1, Run: procedureEventLoad},
+		opProcedureEventAppend:              {Name: "procedure_event_append", Args: 7, Cells: 1, Tx: true, Run: procedureEventAppend},
 
 		// --- token accounting ---
 		opTokenAuditInsert: {

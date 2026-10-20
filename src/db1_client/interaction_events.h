@@ -40,6 +40,10 @@ extern "C"
                                     const char *outcome);
    /* Host-only immutable Learning result, checked against its durable terminal.
     * Generic interaction recording cannot publish a test grade. */
+   char *db1_delegate_execution_terminal_lookup(const char *principal,
+                                                const char *parent_source_json);
+   int db1_delegate_execution_experience_record(const char *principal,
+                                                const char *parent_source_json);
    int db1_execution_test_grade_record(const char *principal, const char *grade_json);
    /* Caller frees the complete bounded JSON; NULL means unavailable. */
    char *db1_execution_test_grade_recall(const char *principal, const char *project,

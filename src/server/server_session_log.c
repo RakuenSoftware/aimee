@@ -3,6 +3,13 @@
 #include "server_session_control.h"
 #include "agent_config.h"
 #include "agent_tasks.h"
+#include "db1_client/agent_jobs.h"
+#include "server_learning_outcome.h"
+#include "modules/workspace/workspace_turn.h"
+#include "util.h"
+#include <unistd.h>
+
+int server_active_project_from_cwd(const char *cwd, char *out, size_t capacity);
 #include "aimee_sha256.h"
 #include "db1_client/primary_sessions.h"
 #include "db1_client/server_sessions.h"
@@ -17,6 +24,8 @@ struct server_session_log
    char session[128], turn[33], principal[VAULT_PRINCIPAL_MAX];
    char parent[128], role[128];
    int announced;
+   cJSON *learning_binding;
+   char learning_sequence[32];
    server_session_capture_t *capture, *previous_capture;
    aimee_ir_session_sink_fn previous_sink;
    void *previous_context;
@@ -48,15 +57,36 @@ static int publish_child(server_session_log_t *scope, const char *status)
                                   .child_session = scope->session,
                                   .child_turn = scope->turn,
                                   .child_role = scope->role,
+                                  .child_learning_binding = scope->learning_binding,
                                   .execution_status = status};
    cJSON *payload = aimee_ir_session_event_json(&event);
    char *wire = payload ? cJSON_PrintUnformatted(payload) : NULL;
    cJSON_Delete(payload);
    char id[96], sequence[32];
    snprintf(id, sizeof id, "%s:child:%s", scope->turn, status);
-   int rc = wire ? db1_session_ir_append(scope->parent, id, scope->turn, scope->principal, wire,
-                                         sequence)
-                 : -1;
+   int rc = !wire ? -1
+            : scope->learning_binding
+                ? db1_session_ir_append_verified(scope->parent, id, scope->turn, scope->principal,
+                                                 wire, sequence)
+                : db1_session_ir_append(scope->parent, id, scope->turn, scope->principal, wire,
+                                        sequence);
+   if (!rc && scope->learning_binding)
+   {
+      if (!strcmp(status, "running"))
+         snprintf(scope->learning_sequence, sizeof scope->learning_sequence, "%s", sequence);
+      else if (scope->learning_sequence[0])
+      {
+         /* The running binding predates execution and survives a crash between
+          * child terminal and parent terminal publication. It is the sole key. */
+         event.execution_status = "running";
+         cJSON *source_event = aimee_ir_session_event_json(&event);
+         char source_id[96];
+         snprintf(source_id, sizeof source_id, "%s:child:running", scope->turn);
+         server_learning_observe_child(scope->parent, scope->turn, scope->learning_sequence,
+                                       source_id, scope->principal, source_event);
+         cJSON_Delete(source_event);
+      }
+   }
    free(wire);
    if (rc)
    {
@@ -78,7 +108,57 @@ static int ensure_owner(const char *session, const char *type, const char *princ
    }
    return strcmp(row.principal, principal) ? -1 : 0;
 }
+static cJSON *delegate_binding(const char *role, const char *agent, const char *provider,
+                               const char *model)
+{
+   /* A nested synchronous model call has no independent durable-job admission,
+    * even when it inherits exactly the same role and selected agent. */
+   if (current && current->role[0])
+      return NULL;
+   int job_id = agent_get_durable_job_id();
+   if (!role || !agent || !agent[0] || !provider || !provider[0] || !model || !model[0] ||
+       job_id <= 0)
+      return NULL;
+   db1_agent_job_t job = {0};
+   if (db1_agent_job_get(job_id, &job))
+      return NULL;
+   int matches = !strcmp(job.role, role) && !strcmp(job.agent_name, agent);
+   db1_agent_job_free(&job);
+   if (!matches)
+      return NULL; /* Nested model roles cannot attest their inherited outer job. */
+   const char *cwd = run_cmd_get_cwd();
+   char identity[65], project[257];
+   int fd = -1;
+   if (!cwd || workspace_turn_resource_identity(cwd, &fd, identity))
+      return NULL; /* No process-CWD or unapproved workspace fallback. */
+   int resolved = server_active_project_from_cwd(cwd, project, sizeof project);
+   if (fd >= 0)
+      close(fd);
+   if (resolved || !project[0])
+      return NULL;
+   cJSON *binding = cJSON_CreateObject();
+   char job_text[32];
+   snprintf(job_text, sizeof job_text, "%d", job_id);
+   if (!binding || !cJSON_AddNumberToObject(binding, "version", 1) ||
+       !cJSON_AddStringToObject(binding, "job_id", job_text) ||
+       !cJSON_AddStringToObject(binding, "scope_kind", "project") ||
+       !cJSON_AddStringToObject(binding, "scope_id", project) ||
+       !cJSON_AddStringToObject(binding, "agent", agent) ||
+       !cJSON_AddStringToObject(binding, "provider", provider) ||
+       !cJSON_AddStringToObject(binding, "model", model))
+   {
+      cJSON_Delete(binding);
+      return NULL;
+   }
+   return binding;
+}
 int server_session_log_begin(const char *role, const char *prompt, server_session_log_t **out)
+{
+   return server_session_log_begin_selected(role, prompt, NULL, NULL, NULL, out);
+}
+int server_session_log_begin_selected(const char *role, const char *prompt, const char *agent,
+                                      const char *provider, const char *model,
+                                      server_session_log_t **out)
 {
    if (!out)
       return -1;
@@ -104,6 +184,7 @@ int server_session_log_begin(const char *role, const char *prompt, server_sessio
       if (!role[0] || strlen(role) >= sizeof scope->role)
          goto fail;
       snprintf(scope->role, sizeof scope->role, "%s", role);
+      scope->learning_binding = delegate_binding(role, agent, provider, model);
       if (current && strcmp(current->principal, scope->principal))
          goto fail;
       snprintf(scope->parent, sizeof scope->parent, "%s",
@@ -149,6 +230,7 @@ int server_session_log_begin(const char *role, const char *prompt, server_sessio
       return -1; /* Caller must finish *out, including failed admission. */
    return 0;
 fail:
+   cJSON_Delete(scope->learning_binding);
    free(scope);
    return -1;
 }
@@ -227,6 +309,7 @@ int server_session_log_finish(server_session_log_t *scope, int success, const ch
    server_session_capture_close(scope->capture);
    aimee_ir_session_restore_sink(scope->previous_sink, scope->previous_context, failed);
    server_control_scope_bind(scope->previous_controls);
+   cJSON_Delete(scope->learning_binding);
    free(scope);
    return failed ? -1 : 0;
 }

@@ -289,6 +289,14 @@ static void handle_session_ir_events(int fd, const char *input, const char *requ
                    seq->valuestring,
                    cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "event_id")), actor,
                    source);
+            if (kind && !strcmp(kind, "child_execution") && event_actor &&
+                !strcmp(event_actor, actor))
+               server_learning_observe_child(
+                   session,
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "turn_id")),
+                   seq->valuestring,
+                   cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "event_id")), actor,
+                   source);
             if (write_all_fd(fd, "id: ", 4) < 0 ||
                 write_all_fd(fd, seq->valuestring, strlen(seq->valuestring)) < 0 ||
                 write_all_fd(fd, "\nevent: ir\ndata: ", 17) < 0 ||

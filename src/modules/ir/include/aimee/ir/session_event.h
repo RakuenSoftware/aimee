@@ -48,6 +48,7 @@ typedef struct
    const struct cJSON *verification_proofs;
    /* Private execution reference; its conversation remains in its own log. */
    const char *child_session, *child_turn, *child_role;
+   const struct cJSON *child_learning_binding; /* host-owned job/registration snapshot */
    /* Output-boundary fidelity report; never model content. */
    const char *projection_model, *projection_boundary;
    int projection_reasoning, projection_opaque, projection_cache_controls;

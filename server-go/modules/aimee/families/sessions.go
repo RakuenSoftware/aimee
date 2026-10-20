@@ -1016,6 +1016,16 @@ func sessionIRProofBindings(encoded []byte, session, turn, actor string, allowPr
 	if json.Unmarshal(encoded, &event) != nil {
 		return false
 	}
+	if event.Kind == "child_execution" {
+		var child canonical.ChildExecutionPayload
+		if !canonical.Decode(event.Payload, &child) {
+			return false
+		}
+		if child.LearningBinding == nil {
+			return !allowProof
+		}
+		return allowProof && child.Turn == turn && child.Session != session && canonical.ValidDelegateLearningBinding(child.LearningBinding) && validDelegateChildIdentity(session, child)
+	}
 	if event.Kind != "execution" {
 		return !allowProof
 	}

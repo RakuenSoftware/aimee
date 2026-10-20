@@ -28469,6 +28469,90 @@
         ],
         "max_bytes": 65536
       }
+    },
+    {
+      "family": "telemetry",
+      "id": 63,
+      "name": "delegate_execution_experience_record",
+      "c_name": "db1_delegate_execution_experience_record",
+      "c_params": [
+        "principal",
+        "parent_source_json"
+      ],
+      "c_returns": "int",
+      "wire_format": "db1-fields-v2",
+      "scope": "principal",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "parent_source_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [],
+        "max_bytes": 0
+      }
+    },
+    {
+      "family": "telemetry",
+      "id": 64,
+      "name": "delegate_execution_terminal_lookup",
+      "c_name": "db1_delegate_execution_terminal_lookup",
+      "c_params": [
+        "principal",
+        "parent_source_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "principal",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "principal",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "parent_source_json",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "record",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 2097152
+      }
     }
   ]
 }
