@@ -1129,6 +1129,50 @@ static void test_docker_workspace_validation_refusals(void)
    cfg.workspace = dwt;
    assert(b->acquire(b, "task-disjoint-bad", &cfg, &state) == DELEGATE_ACQUIRE_REFUSED_ISOLATION);
 
+   /* Actual Git bare mirror, matching the server's reconstructed source. Its
+    * admin directory is <mirror>/worktrees/<name>, with no .git component. */
+   char source[400], bare[400], owned[500], admin[500], gitmark[600], metadata[600];
+   snprintf(source, sizeof source, "%s/source", base);
+   snprintf(bare, sizeof bare, "%s/mirror", base);
+   snprintf(owned, sizeof owned, "%s/.aimee/worktrees/owned/main", bare);
+   snprintf(admin, sizeof admin, "%s/worktrees/main", bare);
+   snprintf(gitmark, sizeof gitmark, "%s/.git", owned);
+   char setup[4096];
+   snprintf(setup, sizeof setup,
+            "git init -q -b main '%s' && printf fixture > '%s/README.md' && "
+            "git -C '%s' add README.md && git -C '%s' -c user.name=fixture "
+            "-c user.email=fixture@example.invalid -c commit.gpgsign=false "
+            "-c core.hooksPath=/dev/null commit -qm fixture && "
+            "git clone -q --bare '%s' '%s' && git -C '%s' worktree add -q --detach '%s' HEAD",
+            source, source, source, source, source, bare, bare, owned);
+   int setup_result = system(setup);
+   assert(!setup_result);
+   cfg.workspace = owned;
+   int acquired = b->acquire(b, "task-bare-mirror", &cfg, &state);
+   assert(!acquired && state);
+   assert(fake_helper_args_contain(bare) && fake_helper_args_contain(owned));
+   assert(fake_helper_args_contain(admin));
+   b->release(b, state, 0);
+   state = NULL;
+   snprintf(metadata, sizeof metadata, "%s/gitdir", admin);
+   FILE *bare_backlink = fopen(metadata, "w");
+   assert(bare_backlink);
+   fprintf(bare_backlink, "%s/somewhere-else/.git\n", base);
+   fclose(bare_backlink);
+   acquired = b->acquire(b, "task-bare-bad-backlink", &cfg, &state);
+   assert(acquired == DELEGATE_ACQUIRE_REFUSED_ISOLATION && !state);
+   bare_backlink = fopen(metadata, "w");
+   assert(bare_backlink);
+   fprintf(bare_backlink, "%s\n", gitmark);
+   fclose(bare_backlink);
+   snprintf(metadata, sizeof metadata, "%s/commondir", admin);
+   FILE *common = fopen(metadata, "w");
+   assert(common);
+   fputs("../unrelated\n", common);
+   fclose(common);
+   acquired = b->acquire(b, "task-bare-bad-common", &cfg, &state);
+   assert(acquired == DELEGATE_ACQUIRE_REFUSED_ISOLATION && !state);
+
    snprintf(cmd, sizeof(cmd), "rm -rf %s", base);
    (void)system(cmd);
    teardown_fake_docker();

@@ -458,6 +458,46 @@ static int docker_read_gitlink(const char *gitfile, char *out, size_t outsz)
  * metadata directory. For a PLAIN checkout `repo` is `real` itself and `gitdir`
  * is empty: the tree carries its own .git and there is nothing separate to find.
  * Returns 0, or -1 having logged why. */
+/* Bare mirrors have <common>/worktrees/<name>, without a .git component.
+ * Follow Git's admin metadata rather than guessing an ancestor from the checkout
+ * path. The caller separately verifies the worktree's reverse link below. */
+static int docker_bare_worktree_repo(const char *gitdir, char *repo, size_t repo_cap)
+{
+   char common[MAX_PATH_LEN], path[MAX_PATH_LEN], line[MAX_PATH_LEN];
+   if (!realpath(gitdir, common))
+      return -1;
+   char *name = strrchr(common, '/');
+   if (!name || !name[1])
+      return -1;
+   *name = 0;
+   char *worktrees = strrchr(common, '/');
+   if (!worktrees || strcmp(worktrees, "/worktrees"))
+      return -1;
+   *worktrees = 0;
+   if (!common[0] || (size_t)snprintf(path, sizeof path, "%s/commondir", gitdir) >= sizeof path)
+      return -1;
+   FILE *file = fopen(path, "r");
+   if (!file)
+      return -1;
+   int read = fgets(line, sizeof line, file) != NULL;
+   fclose(file);
+   if (!read)
+      return -1;
+   line[strcspn(line, "\r\n")] = 0;
+   if (strcmp(line, "../.."))
+      return -1;
+   struct stat metadata;
+   const char *parts[] = {"HEAD", "objects", "refs"};
+   for (size_t i = 0; i < sizeof parts / sizeof parts[0]; i++)
+   {
+      if ((size_t)snprintf(path, sizeof path, "%s/%s", common, parts[i]) >= sizeof path ||
+          lstat(path, &metadata) ||
+          (i == 0 ? !S_ISREG(metadata.st_mode) : !S_ISDIR(metadata.st_mode)))
+         return -1;
+   }
+   return (size_t)snprintf(repo, repo_cap, "%s", common) < repo_cap ? 0 : -1;
+}
+
 static int docker_discover_repo(const char *real, char *repo, size_t repo_cap, char *gitdir,
                                 size_t gitdir_cap)
 {
@@ -513,19 +553,25 @@ static int docker_discover_repo(const char *real, char *repo, size_t repo_cap, c
    }
    /* The repo root is what contains that gitdir: <repo>/.git/worktrees/<name>. */
    const char *marker = strstr(gitdir, "/.git/");
+   int bare = marker == NULL;
    if (!marker)
    {
-      aimee_log(LOG_ERROR, "delegate-backend-docker",
-                "workspace '%s': gitdir '%s' is not under a <repo>/.git/ — cannot derive the repo "
-                "root to mount; refusing",
-                real, gitdir);
-      return -1;
+      if (docker_bare_worktree_repo(gitdir, repo, repo_cap))
+      {
+         aimee_log(LOG_ERROR, "delegate-backend-docker",
+                   "workspace '%s': gitdir '%s' has no valid common repository; refusing", real,
+                   gitdir);
+         return -1;
+      }
    }
-   size_t rlen = (size_t)(marker - gitdir);
-   if (rlen == 0 || rlen >= repo_cap)
-      return -1;
-   memcpy(repo, gitdir, rlen);
-   repo[rlen] = '\0';
+   else
+   {
+      size_t rlen = (size_t)(marker - gitdir);
+      if (rlen == 0 || rlen >= repo_cap)
+         return -1;
+      memcpy(repo, gitdir, rlen);
+      repo[rlen] = '\0';
+   }
 
    /* Is the worktree physically nested under its repo root? A normal delegate
     * sibling worktree (under <repo>/.aimee/worktrees/) is; a WFE per-slice
@@ -540,7 +586,7 @@ static int docker_discover_repo(const char *real, char *repo, size_t repo_cap, c
     * (`real` is already realpath-canonicalized and workspace-authorized.) */
    size_t plen = strlen(repo);
    int nested = (strncmp(real, repo, plen) == 0 && (real[plen] == '/' || real[plen] == '\0'));
-   if (!nested)
+   if (bare || !nested)
    {
       char backlink[MAX_PATH_LEN], expect[MAX_PATH_LEN], got[MAX_PATH_LEN] = "";
       if ((size_t)snprintf(backlink, sizeof(backlink), "%s/gitdir", gitdir) >= sizeof(backlink) ||

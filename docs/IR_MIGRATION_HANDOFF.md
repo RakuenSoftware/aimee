@@ -3894,3 +3894,21 @@ Docker completion. Native-primary orchestration exposure and queued transfer of
 an already-held callback capability remain unfinished, alongside independent
 local grading/reuse, remaining consumers/platforms and reviewed production
 promotion. Production remains KB-free.
+
+
+## Docker bare-mirror discovery CI repair: 20 October 2026
+
+Published 70a042fcd reaches the queued mirror source and creates its dedicated
+checkout, but CI integration job 118492993945 fails before the first delegate
+model request: Docker discovery assumes every linked admin directory contains
+<repo>/.git/. The actual registered mirror is bare and has <mirror>/worktrees.
+The eighteen native SDK journeys and both real browser controls still pass in
+that job; the new Docker mirror completion correctly remains a required failure.
+
+Discovery now accepts the bare repository's standard commondir relationship,
+requires its Git metadata and verifies the worktree backlink even when nested.
+Existing workspace authorization, isolated networking and mount ownership are
+unchanged. A real Git bare-mirror regression covers successful discovery, broken
+backlinks and unrelated common directories. Hosted Docker must qualify the actual
+execution after publication. Native-primary orchestration and queued callback
+capability transfer remain stashed separately; they are not part of this CI fix.
