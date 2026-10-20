@@ -419,6 +419,68 @@ func TestSessionIRLiveSearchCanonicalOnlyAndOwnerScoped(t *testing.T) {
 	if _, err := pool.Exec(ctx, `DELETE FROM server_sessions WHERE id='busy-search'`); err != nil {
 		t.Fatal(err)
 	}
+	// Pathological unbounded display metadata can make even one source exceed
+	// the page budget. Refuse explicitly without truncating identity or hiding
+	// that source behind an advancing continuation token.
+	if _, err := pool.Exec(ctx, `INSERT INTO server_sessions(id,principal,client_type,title) VALUES('oversized-search','alice','browser',$1)`, strings.Repeat("\x01", 400000)); err != nil {
+		t.Fatal(err)
+	}
+	appendMessage("oversized-search", "alice", "oversized-message", "oversized-needle")
+	oversizedTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer oversizedTx.Rollback(context.Background())
+	oversizedStatus, _, err := sessionIRAppend(ctx, sessionIRLiveTx{oversizedTx}, []string{"oversized-search", "terminal", "turn", "alice", runningDone})
+	if err != nil || oversizedStatus != store.StatusOK {
+		oversizedTx.Rollback(ctx)
+		t.Fatal(oversizedStatus, err)
+	}
+	if err := oversizedTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, _, oversizedErr := current("alice", "", "oversized-needle", "current", "")
+	if oversizedErr == nil || !strings.Contains(oversizedErr.Error(), "display exceeds 2 MiB") {
+		t.Fatal("oversized first source lacked explicit error", oversizedErr)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM server_sessions WHERE id='alice-session'`); err != nil {
+		t.Fatal(err)
+	}
+	if search("alice", "needle 10%", nil)["count"] != float64(0) {
+		t.Fatal("deleted source remained visible")
+	}
+}
+
+// Maximum-window pagination is an independent canonical-history journey, not
+// part of the deadline shared by ownership, revisions, privacy and corruption.
+func TestSessionIRLiveSearchLargeCanonicalWindowsPageWithoutSkipping(t *testing.T) {
+	root := livePool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	schema := fmt.Sprintf("session_search_%d", time.Now().UnixNano())
+	if _, err := root.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer root.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+	config, err := pgxpool.ParseConfig(os.Getenv("AIMEE_TEST_PG_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql", "schema_native_cache_recovery.sql", "schema_learning_projection_outbox.sql"} {
+		sql, err := schemaFS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = pool.Exec(ctx, string(sql)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// Maximum accepted limits/windows must produce bounded whole-session pages,
 	// including worst-case JSON escaping, valid UTF-8 and private blocks. Use
 	// real checkpoint imports so candidate selection and the current reducer
@@ -426,42 +488,51 @@ func TestSessionIRLiveSearchCanonicalOnlyAndOwnerScoped(t *testing.T) {
 	const largeSessions = 8
 	for n := 0; n < largeSessions; n++ {
 		id := fmt.Sprintf("large-search-%02d", n)
-		if _, err := pool.Exec(ctx, `INSERT INTO server_sessions(id,principal,client_type) VALUES($1,'alice','browser')`, id); err != nil {
-			t.Fatal(err)
-		}
-		messages := make([]map[string]any, 43)
-		for i := range messages {
-			text := "界<&>" + strings.Repeat("\x01", 4090)
-			if i == 21 {
-				text = "page-needle" + text
+		if !t.Run(id, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if _, err := pool.Exec(ctx, `INSERT INTO server_sessions(id,principal,client_type) VALUES($1,'alice','browser')`, id); err != nil {
+				t.Fatal(err)
 			}
-			messages[i] = map[string]any{"role": "assistant", "blocks": []map[string]any{
-				{"type": "text", "text": text},
-				{"type": "text", "text": "private-pagination-secret", "context": map[string]any{"model_visible": false}},
-			}}
-		}
-		encoded, err := json.Marshal(messages)
-		if err != nil {
-			t.Fatal(err)
-		}
-		tx, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer tx.Rollback(context.Background())
-		status, _, err := sessionIRHistorySave(ctx, sessionIRLiveTx{tx}, []string{id, "large-import", "primary", "alice", string(encoded)})
-		if err != nil || status != store.StatusOK {
-			tx.Rollback(ctx)
-			t.Fatal(status, err)
-		}
-		if err := tx.Commit(ctx); err != nil {
-			t.Fatal(err)
+			messages := make([]map[string]any, 43)
+			for i := range messages {
+				text := "界<&>" + strings.Repeat("\x01", 4090)
+				if i == 21 {
+					text = "page-needle" + text
+				}
+				messages[i] = map[string]any{"role": "assistant", "blocks": []map[string]any{
+					{"type": "text", "text": text},
+					{"type": "text", "text": "private-pagination-secret", "context": map[string]any{"model_visible": false}},
+				}}
+			}
+			encoded, err := json.Marshal(messages)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tx, err := pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback(context.Background())
+			status, _, err := sessionIRHistorySave(ctx, sessionIRLiveTx{tx}, []string{id, "large-import", "primary", "alice", string(encoded)})
+			if err != nil || status != store.StatusOK {
+				tx.Rollback(ctx)
+				t.Fatal(status, err)
+			}
+			if err := tx.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}) {
+			return
 		}
 	}
 	seen := map[string]bool{}
 	offset := 0
 	pages := 0
-	for {
+	readPage := func(offset int) string {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		request, _ := json.Marshal(map[string]any{"_principal": "alice", "query": "page-needle", "window": 20, "limit": 20, "offset": offset})
 		tx, err := pool.Begin(ctx)
 		if err != nil {
@@ -473,11 +544,15 @@ func TestSessionIRLiveSearchCanonicalOnlyAndOwnerScoped(t *testing.T) {
 		if err != nil || status != store.StatusOK || len(cells) != 1 {
 			t.Fatal(status, err)
 		}
-		if len(cells[0]) > sessionSearchResponseMax || strings.Contains(cells[0], "private-pagination-secret") {
+		return cells[0]
+	}
+	for {
+		encodedPage := readPage(offset)
+		if len(encodedPage) > sessionSearchResponseMax || strings.Contains(encodedPage, "private-pagination-secret") {
 			t.Fatal("page exceeded bound or leaked hidden text")
 		}
 		var page map[string]any
-		if err := json.Unmarshal([]byte(cells[0]), &page); err != nil {
+		if err := json.Unmarshal([]byte(encodedPage), &page); err != nil {
 			t.Fatal(err)
 		}
 		entries := page["sessions"].([]any)
@@ -515,35 +590,5 @@ func TestSessionIRLiveSearchCanonicalOnlyAndOwnerScoped(t *testing.T) {
 	}
 	if len(seen) != largeSessions || pages < 2 {
 		t.Fatal("large allowed request did not page completely", len(seen), pages)
-	}
-	// Pathological unbounded display metadata can make even one source exceed
-	// the page budget. Refuse explicitly without truncating identity or hiding
-	// that source behind an advancing continuation token.
-	if _, err := pool.Exec(ctx, `INSERT INTO server_sessions(id,principal,client_type,title) VALUES('oversized-search','alice','browser',$1)`, strings.Repeat("\x01", 400000)); err != nil {
-		t.Fatal(err)
-	}
-	appendMessage("oversized-search", "alice", "oversized-message", "oversized-needle")
-	oversizedTx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer oversizedTx.Rollback(context.Background())
-	oversizedStatus, _, err := sessionIRAppend(ctx, sessionIRLiveTx{oversizedTx}, []string{"oversized-search", "terminal", "turn", "alice", runningDone})
-	if err != nil || oversizedStatus != store.StatusOK {
-		oversizedTx.Rollback(ctx)
-		t.Fatal(oversizedStatus, err)
-	}
-	if err := oversizedTx.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	_, _, oversizedErr := current("alice", "", "oversized-needle", "current", "")
-	if oversizedErr == nil || !strings.Contains(oversizedErr.Error(), "display exceeds 2 MiB") {
-		t.Fatal("oversized first source lacked explicit error", oversizedErr)
-	}
-	if _, err := pool.Exec(ctx, `DELETE FROM server_sessions WHERE id='alice-session'`); err != nil {
-		t.Fatal(err)
-	}
-	if search("alice", "needle 10%", nil)["count"] != float64(0) {
-		t.Fatal("deleted source remained visible")
 	}
 }
