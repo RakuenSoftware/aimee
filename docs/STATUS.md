@@ -17,14 +17,20 @@ MR-07 remains observe-only, selection and utility-horizon policies remain disabl
 retry remains opt-in. Existing detached source spans still require a published snapshot, and
 workspace registration alone does not start a client runner.
 
-## Browser chat integration (2026-10-17)
+## Browser chat integration (2026-10-20)
 
 The browser submits canonical IR turns and replays the Server-owned event log through one reducer.
-Claude uses structured print mode; Codex app-server and ACP convert native frames at entry.
-Per-harness resume handles and runtime credentials stay server-side. Permission and question
-replies use authenticated browser transport and correlated native control channels. Global legacy-loop
-removal and live subscription qualification remain separate gates.
-See the [migration boundaries](proposals/pending/canonical-ir-session-stream.md).
+Primary loading, model switching and compaction use that durable source. Qualified Linux Codex
+and Claude schedulers use held native executables, closed environments and the existing workspace
+and supervised tool owners. The Server supplies original model context, tool calls and typed results;
+SDK conversation observations cannot replace them. Codex npm registrations resolve the matching
+native package without running the launcher script.
+
+Actual-SDK integration qualifies API-key and Vault OAuth forwarding, rotation, compaction, resume
+and seeded runs. Fresh CI must qualify the additional live browser-operator question journeys.
+Remaining typed consumers, independently graded local learning/reuse, broader native platforms,
+live subscription acceptance and reviewed production promotion remain unfinished. Production stays
+KB-free. See the [migration boundaries](proposals/pending/canonical-ir-session-stream.md).
 
 ## Runtime
 
@@ -101,7 +107,7 @@ See the [migration boundaries](proposals/pending/canonical-ir-session-stream.md)
 | External witness and anchor | Gated | Needed for evidence against a compromised host. |
 | Org budgets and rate limits | Done | Catalog, admission, spend, and quota surfaces. |
 | Browser workspace | Done | Top session tabs open chat with a session-owned project and history. Chat forwards the authenticated actor and displays tool lifecycle activity, including direct primary models. The left panel opens projects, agents, workflows, graph, logs, settings, and VS Code. |
-| Canonical IR migration | In progress | Direct primary load, switching and compaction use canonical log checkpoints; native observations remain immutable. Claude/Codex browser permission and question replies work. Native Anthropic ingress uses cache-preserving IR replay. Native CLI execution now uses structured headless adapters with scoped Vault homes; the tmux execution engine and detached delegate bypass are removed. MCP forms, credential/tool custody qualification and remaining legacy consumers are unfinished. |
+| Canonical IR migration | In progress | Durable primary history, model switching and compaction; original-source native Codex/Claude execution with supervised tools and closed credential-free SDK homes; typed seeded results and cumulative usage. Sixteen actual-SDK API/OAuth journeys pass locally. Live browser operator CI, remaining consumers, independent local learning/reuse, broader platforms and live subscription/production qualification remain open. |
 | Managed container deploy | Done | Browser manages Server model containers through the mounted Docker socket. A KB is deployed and enrolled separately. |
 | Split deploy | Done | Server and KB can run without Docker-socket delegation. |
 | Native thin clients | Done | Linux, macOS, and Windows; no database linkage. |

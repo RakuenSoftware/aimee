@@ -3683,3 +3683,21 @@ journeys are locally qualified. This workstation cannot run the additional root
 operator journey because passwordless sudo is unavailable; it is mandatory in
 CI, with no new CI skip or server authorization exception. Its actual CI execution
 remains pending and must be checked before this journey is reported qualified.
+
+
+## Current documentation and CI queue continuation: 20 October 2026
+
+README, STATUS, WHATS_NEW and the pending canonical session proposal now distinguish
+qualified native original-source execution and closed homes from the earlier
+credential-bearing scheduler implementation. API/OAuth qualification is recorded
+as sixteen local journeys; actual root-UDS browser journeys still await CI.
+Independent learning/reuse, remaining consumers/platforms, live subscription and
+reviewed production qualification remain unfinished.
+
+The latest source run 39368457405 for 71b361ccf is pending behind the still-running
+OAuth run 39368084307. The following documentation push has no PR metadata edit,
+so its source synchronize event can supersede the stale run under the existing
+concurrency policy. No workflow gate, automatic review, attribution rule or
+production configuration is changed. Registered PR commands expose check/failure
+reads but no workflow cancellation. Personal gh is not authenticated and no
+browser is available; no connector mutation or new login was attempted.

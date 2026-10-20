@@ -13,14 +13,21 @@ observation events. Transcript reads no longer have a separate 1 MiB buffer ceil
 Untouched native Anthropic requests preserve client cache breakpoints and TTLs; typed edits
 force rebuilding instead of replaying stale content.
 
-Claude primary and delegate turns use `claude -p` with structured streaming instead of tmux capture. Historical `tmux-cli` agent records are migrated to native provider adapters; the router no longer lets that spelling mask HTTP peers. Claude,
-Codex app-server and ACP frames are converted at their native entry adapters. Claude and Codex
-resume handles are stored separately for each Aimee session; their runtime homes receive
-credentials from the Vault. Existing text-only history remains explicitly marked as legacy.
-Browser operators can answer permission and question requests. Replies are bound to the
-authenticated user, session and pending turn, and are recorded before native delivery. Admitted
-legacy subscribers also capture canonical events while retaining their transport projection.
-Remaining consumer cutovers and live subscription qualification remain migration work.
+Qualified Linux Codex and Claude primary/delegate turns now use the Server-owned canonical
+execution path. The SDK receives an opaque scheduler trigger and a local capability in a private
+launch home. The Server retains Vault credentials, supplies complete original model context and
+executes original tool calls through the supervised registry. Original typed responses supply
+streaming, durable history and final results. SDK-normalized arguments cannot become effect input.
+Native compaction uses the canonical session owner; asynchronous seeded runs preserve full context,
+workspace scope and cumulative usage. Codex npm commands resolve their matching held native binary.
+
+Sixteen actual-SDK journeys pass locally across API-key and Vault OAuth paths, including credential
+rotation, tool execution, compaction, replay, resume and seeded execution. Browser operators reply
+through authenticated, session/turn-bound control requests; additional actual root-UDS operator
+journeys are required in fresh CI and are not yet reported qualified. Existing text-only history
+retains explicit legacy fidelity. Remaining consumers, independently graded local learning/reuse,
+broader platform coverage, live subscription acceptance and reviewed production promotion remain
+unfinished. No KB service is enabled for production `.100`.
 
 CLI index discovery now registers a missing canonical repository through the existing bounded
 client ingest path before querying it. Main checkouts and linked worktrees retain the caller's
