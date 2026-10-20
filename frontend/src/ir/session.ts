@@ -1,6 +1,7 @@
-import { ExactJSONNumber, parseJSON } from './json';
+import { ExactJSONNumber, parseJSON, stringifyJSON } from './json';
 import { validNativeOwner, validToolInterruption, type NativeOwner, type ToolInterruption } from './interruption';
 import { validVerificationProof, type VerificationProof } from './verification';
+import { validImportHistory, type ImportHistory, type ImportObservation } from './importReport';
 /** Canonical session projection. No native provider/harness protocol is accepted
  * here. Live delivery and durable replay use exactly the same reducer. */
 export type Block = {
@@ -64,7 +65,7 @@ export type SessionEvent =
   | { kind: 'replay_proof'; payload: { scope: string; block_digest: string; wire: 'anthropic' | 'responses'; thinking_binding?: string } }
   | { kind: 'child_execution'; payload: ChildExecution }
   | { kind: 'projection'; payload: ProjectionReport }
-  | { kind: 'history'; payload: { scope: string; phase: 'message' | 'commit'; index?: number; count?: number; message?: Message } }
+  | { kind: 'history'; payload: ImportHistory | { scope: string; phase: 'message' | 'commit'; index?: number; count?: number; message?: Message } }
   | { kind: 'message'; message_id: string; payload: Message; native_owner?: NativeOwner; partial?: true }
   | { kind: 'delta'; message_id: string; role: string; payload: Delta }
   | { kind: 'execution'; payload: { status: 'running' | 'completed' | 'failed' | 'cancelled'; error?: string; verification_proofs?: VerificationProof[] } }
@@ -101,9 +102,11 @@ export type SessionState = {
   toolSources: Record<string, { sequence: string; event_id: string; turn: string; actor: string; owner: NativeOwner }>;
   terminalSources: Record<string, { sequence: string; actor: string }>;
   toolInterruptions: Record<string, ToolInterruption & { id: string }>;
+  importReports: ImportObservation[];
+  pendingArchives: Record<string, { actor: string; chunks: string[] }>;
 };
 export function emptySession(session: string): SessionState {
-  return { session, sequence: '0', messages: [], controls: {}, activeTurns: [], errors: [], projections: [], executions: {}, children: {}, toolSources: {}, terminalSources: {}, toolInterruptions: {} };
+  return { session, sequence: '0', messages: [], controls: {}, activeTurns: [], errors: [], projections: [], executions: {}, children: {}, toolSources: {}, terminalSources: {}, toolInterruptions: {}, importReports: [], pendingArchives: {} };
 }
 function sequence(value: string): bigint {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) throw new Error('Invalid session sequence');
@@ -171,6 +174,14 @@ function validateBlock(block: Block): void {
     throw new Error('Invalid tool result status');
   if ((block.type === 'image' || block.type === 'document') &&
       (!nonempty(block.media_ref) || (block.media_type !== undefined && !nonempty(block.media_type)))) throw new Error('Invalid media reference');
+}
+export function validateHistoryMessage(value: unknown): asserts value is Message {
+  const message = value as Message;
+  if (!message || !['system', 'developer', 'user', 'assistant', 'tool'].includes(message.role) || !Array.isArray(message.blocks) ||
+      Object.keys(message).some(key => !['role', 'blocks', 'content_scalar'].includes(key)) ||
+      message.content_scalar !== undefined && typeof message.content_scalar !== 'boolean') throw new Error('Invalid imported canonical message');
+  stringifyJSON(message);
+  message.blocks.forEach(validateBlock);
 }
 export function reduceSession(state: SessionState, envelope: Envelope): SessionState {
   if (envelope.version !== 1 || envelope.session_id !== state.session || !nonempty(envelope.event_id) ||
@@ -264,6 +275,61 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
     }
     case 'history': {
       const history = event.payload;
+      const imported = state.importReports?.find(item => item.turn === envelope.turn_id && item.checkpoint);
+      if (imported && (history.phase === 'message' || history.phase === 'message_fragment' || history.phase === 'commit')) {
+        if (imported.actor !== envelope.actor || imported.scope !== history.scope || imported.checkpoint!.committed)
+          throw new Error('Imported checkpoint owner or scope mismatch');
+        const checkpoint = imported.checkpoint!;
+        const entries = [...checkpoint.entries];
+        const last = entries[entries.length - 1];
+        const partial = last && 'parts' in last && last.parts.length < last.count;
+        let bytes = checkpoint.bytes;
+        if (history.phase === 'message_fragment') {
+          if (!Object.keys(event).every(key => ['kind', 'payload'].includes(key)) || !validImportHistory(history)) throw new Error('Invalid imported fragment');
+          const fragment = history.fragment;
+          if (fragment.message_index !== entries.length - (partial ? 1 : 0) ||
+              (partial ? fragment.part_index !== last.parts.length || fragment.message_sha256 !== last.sha256 || fragment.part_count !== last.count : fragment.part_index !== 0))
+            throw new Error('Imported fragment order mismatch');
+          const entry = { parts: [...(partial ? last.parts : []), fragment.text], sha256: fragment.message_sha256, count: fragment.part_count };
+          if (partial) entries[entries.length - 1] = entry; else entries.push(entry);
+          bytes += new TextEncoder().encode(fragment.text).length;
+        } else if (history.phase === 'message') {
+          if (partial || (history.index ?? 0) !== entries.length || !history.message) throw new Error('Imported message order mismatch');
+          validateHistoryMessage(history.message);
+          entries.push({ message: history.message });
+          bytes += new TextEncoder().encode(stringifyJSON(history.message)).length;
+        } else if (partial || history.count !== entries.length || history.count !== imported.report.imported_messages)
+          throw new Error('Imported checkpoint count mismatch');
+        if (bytes > 16777216 || entries.length > imported.report.imported_messages) throw new Error('Imported checkpoint budget exceeded');
+        next.importReports = state.importReports.map(item => item === imported ? { ...item, checkpoint: { entries, bytes, committed: history.phase === 'commit' } } : item);
+        return next;
+      }
+      if (history.phase === 'message_fragment') {
+        if (!Object.keys(event).every(key => ['kind', 'payload'].includes(key)) || !validImportHistory(history))
+          throw new Error('Invalid history message fragment');
+        // Host-only checkpoint fragments are prompt metadata, never observations or controls.
+        return next;
+      }
+      if (history.phase === 'archive' || history.phase === 'import_report') {
+        if (!Object.keys(event).every(key => ['kind', 'payload'].includes(key)) || !validImportHistory(history))
+          throw new Error('Invalid history import metadata');
+        const pending = state.pendingArchives?.[envelope.turn_id];
+        if (history.phase === 'archive') {
+          if (history.index !== (pending?.chunks.length ?? 0) || pending && pending.actor !== envelope.actor ||
+              state.importReports?.some(report => report.turn === envelope.turn_id)) throw new Error('Invalid archive chunk order');
+          next.pendingArchives = { ...(state.pendingArchives ?? {}), [envelope.turn_id]: { actor: envelope.actor, chunks: [...(pending?.chunks ?? []), history.archive_text] } };
+        } else {
+          const report = history.import_report;
+          if (state.importReports?.some(report => report.turn === envelope.turn_id) ||
+              (report.outcome === 'archived' ? !pending || pending.actor !== envelope.actor || pending.chunks.length !== report.archive_chunks : !!pending))
+            throw new Error('Incomplete history archive');
+          next.importReports = [...(state.importReports ?? []), { id: envelope.event_id, turn: envelope.turn_id, actor: envelope.actor,
+            scope: history.scope, report: { ...report }, ...(['exact', 'normalized'].includes(report.outcome) ? { checkpoint: { entries: [], committed: false, bytes: 0 } } : {}), ...(pending ? { chunks: pending.chunks } : {}) }];
+          next.pendingArchives = { ...(state.pendingArchives ?? {}) };
+          delete next.pendingArchives[envelope.turn_id];
+        }
+        return next;
+      }
       if (!nonempty(history.scope) || (history.phase !== 'message' && history.phase !== 'commit'))
         throw new Error('Invalid history checkpoint');
       if (history.phase === 'message') {

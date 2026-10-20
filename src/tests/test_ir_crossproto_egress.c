@@ -270,6 +270,18 @@ static void test_history_entry_migration(void)
       assert(input);
       cJSON *history = aimee_frontend_history_import(input, wires[wire]);
       assert(history);
+      cJSON *report = NULL;
+      cJSON *reported = aimee_frontend_history_import_report(native[wire],
+                                                             wire == 0   ? "anthropic"
+                                                             : wire == 2 ? "chatgpt"
+                                                                         : "openai",
+                                                             "owned", "agent", &report);
+      assert(reported && report && cJSON_Compare(history, reported, 1));
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(report, "outcome")), "normalized"));
+      if (wire == 0)
+         assert(cJSON_GetObjectItem(report, "removed_thinking_bindings")->valueint > 0);
+      cJSON_Delete(reported);
+      cJSON_Delete(report);
       int calls = 0, results = 0, thinking = 0;
       const cJSON *item;
       cJSON_ArrayForEach(item, history)
@@ -299,6 +311,28 @@ static void test_history_entry_migration(void)
       cJSON_Delete(history);
       cJSON_Delete(input);
    }
+   cJSON *report = NULL;
+   const char *canonical =
+       "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"original\"}]}]";
+   cJSON *exact =
+       aimee_frontend_history_import_report(canonical, "anthropic", "owned", "agent", &report);
+   assert(exact && report &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(report, "outcome")), "exact"));
+   cJSON_Delete(exact);
+   cJSON_Delete(report);
+   report = NULL;
+   assert(!aimee_frontend_history_import_report("screen: tool call may have occurred\n", "tmux-cli",
+                                                "owned", "agent", &report));
+   assert(report &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(report, "outcome")), "archived"));
+   assert(cJSON_GetObjectItem(report, "imported_messages")->valueint == 0);
+   cJSON_Delete(report);
+   report = NULL;
+   assert(!aimee_frontend_history_import_report("", "tmux-cli", "owned", "agent", &report));
+   assert(report &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(report, "outcome")), "refused"));
+   assert(cJSON_GetObjectItem(report, "archive_chunks")->valueint == 0);
+   cJSON_Delete(report);
    printf("  native-history-entry-retains-reasoning-and-tool-pairs OK\n");
 }
 

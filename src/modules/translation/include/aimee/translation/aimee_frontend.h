@@ -82,6 +82,12 @@ int openai_family_tool_choice_parse(const struct cJSON *tool_choice,
  * NULL on malformed/mixed shapes. Lifted legacy system blocks are excluded:
  * the runtime supplies its current authoritative system separately. */
 struct cJSON *aimee_frontend_history_import(const struct cJSON *messages, aimee_wire_t legacy_wire);
+/* Caller owns history and report. A NULL history with a report explicitly
+ * refuses model admission; tmux text is archival only, never inferred roles. */
+struct cJSON *aimee_frontend_history_import_report(const char *raw, const char *provider,
+                                                   const char *source_session,
+                                                   const char *source_agent,
+                                                   struct cJSON **out_report);
 
 /* External Claude Code JSONL envelopes, already parsed into an array. Returns
  * canonical observations only: never host history, controls, effects or proofs.

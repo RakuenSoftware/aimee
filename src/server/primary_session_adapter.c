@@ -148,38 +148,71 @@ static primary_session_state_t *primary_session_create_locked(const agent_t *age
    return primary_session_create_with_id_locked(agent, NULL);
 }
 
-/* Provider names describe legacy storage only. Once admitted, primary history is
- * canonical regardless of the model selected for the next turn. */
-static cJSON *primary_history_import(const char *json, const char *provider)
+/* A one-time import is acknowledged only after its exact legacy source and
+ * fidelity report/checkpoint have committed atomically under the durable owner. */
+static int primary_history_import_source(const char *target, const char *id, const char *actor,
+                                         cJSON **imported, int browse)
 {
-   cJSON *native = json ? cJSON_Parse(json) : NULL;
-   if (!native)
-      return NULL;
-   aimee_wire_t wire = provider && strcmp(provider, "anthropic") == 0 ? AIMEE_WIRE_ANTHROPIC
-                       : provider && strcmp(provider, "chatgpt") == 0 ? AIMEE_WIRE_RESPONSES
-                                                                      : AIMEE_WIRE_OPENAI_CHAT;
-   cJSON *messages = aimee_frontend_history_import(native, wire);
-   cJSON_Delete(native);
-   return messages;
+   *imported = NULL;
+   db1_primary_session_row_t row;
+   int status = db1_primary_session_get_latest(id, &row);
+   if (status != 0)
+      return status == 1 ? 1 : -1;
+   cJSON *report = NULL;
+   cJSON *messages = aimee_frontend_history_import_report(row.messages_json, row.provider, id,
+                                                          row.agent_name, &report);
+   char *metadata = report ? cJSON_PrintUnformatted(report) : NULL;
+   char *history = messages ? cJSON_PrintUnformatted(messages) : strdup("[]");
+   const char *digest =
+       report ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(report, "source_sha256"))
+              : NULL;
+   int acknowledged =
+       metadata && history && digest && actor && actor[0] &&
+       (browse ? db1_session_ir_history_import_browse(target, actor, row.agent_name, digest,
+                                                      history, metadata) >= 0
+               : !db1_session_ir_history_import(target, "primary", actor, id, row.agent_name,
+                                                digest, history, metadata));
+   free(metadata);
+   free(history);
+   cJSON_Delete(report);
+   db1_primary_session_row_clear(&row);
+   if (!acknowledged)
+   {
+      cJSON_Delete(messages);
+      LOG_WARN("primary.session", "legacy source has no acknowledged resumable canonical import");
+      return -1;
+   }
+   *imported = messages;
+   return 0;
+}
+
+int primary_session_history_open(const char *session, const char *actor)
+{
+   const char *attested = agent_get_request_vault_principal();
+   db1_server_session_t owner;
+   if (!session || !session[0] || !actor || !actor[0] || !attested || strcmp(actor, attested) ||
+       db1_server_session_get(session, &owner) || strcmp(owner.principal, actor))
+      return -1;
+   cJSON *messages = NULL;
+   int status = primary_history_import_source(session, session, actor, &messages, 1);
+   cJSON_Delete(messages);
+   /* Archived/refused sources are browseable metadata, never model admission.
+    * Host50 rechecks exact source/hash/owner under its atomic append locks. */
+   return status < 0 ? -1 : 0;
 }
 
 static int primary_session_adopt_latest_for_id(primary_session_state_t *state, const char *id)
 {
    if (!state || !id || !id[0])
       return 0;
-   db1_primary_session_row_t row;
-   int status = db1_primary_session_get_latest(id, &row);
-   if (status != 0)
+   cJSON *messages = NULL;
+   int status = primary_history_import_source(state->scope_id, id,
+                                              agent_get_request_vault_principal(), &messages, 0);
+   if (status == 1)
+      return 0;
+   if (status < 0 || !messages)
    {
-      if (status < 0)
-         LOG_WARN("primary.session", "legacy history read unavailable");
-      return status == 1 ? 0 : -1;
-   }
-   cJSON *messages = primary_history_import(row.messages_json, row.provider);
-   db1_primary_session_row_clear(&row);
-   if (!messages)
-   {
-      LOG_WARN("primary.session", "session %s history could not be imported; refusing turn", id);
+      cJSON_Delete(messages);
       return -1;
    }
    cJSON_Delete(state->messages);

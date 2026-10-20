@@ -234,38 +234,55 @@ func delegateExecutionExperienceRecord(ctx context.Context, q store.Queryer, f [
 	if len(grades) != len(event.Payload.VerificationProofs) {
 		return store.StatusMissing, nil, nil
 	}
-	rows, err := q.Query(ctx, `SELECT sequence::text,event_id,payload FROM session_ir_events WHERE session_id=$1 AND turn_id=$2 AND actor=$3 AND sequence<$4::bigint AND payload::jsonb->>'kind'='message' ORDER BY session_ir_events.sequence LIMIT 65`, source.Session, source.Turn, f[0], source.Sequence)
-	if err != nil {
-		return store.StatusFailed, nil, err
-	}
-	for rows.Next() {
-		var sequence, id, raw string
-		if err = rows.Scan(&sequence, &id, &raw); err != nil {
-			break
+	last := "0"
+	seen := 0
+	for seen < 65 {
+		limit := 8
+		if 65-seen < limit {
+			limit = 65 - seen
 		}
-		var message struct {
-			Kind    string            `json:"kind"`
-			Payload canonical.Message `json:"payload"`
+		// Preserve the first 65 candidate messages, including non-assistant
+		// messages, while bounding each SQL wire reply before role reduction.
+		rows, queryErr := q.Query(ctx, `SELECT sequence::text,event_id,payload FROM session_ir_events WHERE session_id=$1 AND turn_id=$2 AND actor=$3 AND sequence<$4::bigint AND sequence>$5::bigint AND payload::jsonb->>'kind'='message' ORDER BY session_ir_events.sequence LIMIT $6`, source.Session, source.Turn, f[0], source.Sequence, last, limit)
+		if queryErr != nil {
+			return store.StatusFailed, nil, queryErr
 		}
-		if !canonical.ValidSessionEvent([]byte(raw)) || json.Unmarshal([]byte(raw), &message) != nil || message.Payload.Role != "assistant" {
-			continue
-		}
-		for _, block := range message.Payload.Blocks {
-			if block.Type != "tool_use" || len(experience.Actions) >= 32 {
+		pageCount := 0
+		for rows.Next() {
+			var sequence, id, raw string
+			if err = rows.Scan(&sequence, &id, &raw); err != nil {
+				break
+			}
+			last = sequence
+			seen++
+			pageCount++
+			var message struct {
+				Kind    string            `json:"kind"`
+				Payload canonical.Message `json:"payload"`
+			}
+			if !canonical.ValidSessionEvent([]byte(raw)) || json.Unmarshal([]byte(raw), &message) != nil || message.Payload.Role != "assistant" {
 				continue
 			}
-			input, _ := json.Marshal(block.Input)
-			digest := sha256.Sum256(input)
-			experience.Actions = append(experience.Actions, delegateAction{sequence, id, block.ToolID, block.Namespace, block.Name, hex.EncodeToString(digest[:]), eventDigest(raw)})
+			for _, block := range message.Payload.Blocks {
+				if block.Type != "tool_use" || len(experience.Actions) >= 32 {
+					continue
+				}
+				input, _ := json.Marshal(block.Input)
+				digest := sha256.Sum256(input)
+				experience.Actions = append(experience.Actions, delegateAction{sequence, id, block.ToolID, block.Namespace, block.Name, hex.EncodeToString(digest[:]), eventDigest(raw)})
+			}
 		}
-	}
-	rowErr = rows.Err()
-	rows.Close()
-	if err != nil {
-		return store.StatusFailed, nil, err
-	}
-	if rowErr != nil {
-		return store.StatusFailed, nil, rowErr
+		rowErr = rows.Err()
+		rows.Close()
+		if err != nil {
+			return store.StatusFailed, nil, err
+		}
+		if rowErr != nil {
+			return store.StatusFailed, nil, rowErr
+		}
+		if pageCount < limit {
+			break
+		}
 	}
 	if len(grades) == 0 {
 		return persistDelegateExperience(ctx, q, experience)

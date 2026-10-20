@@ -335,12 +335,83 @@ func ValidBlock(encoded []byte) bool {
 	}
 }
 
+// HistoryImportReport is host migration metadata, never model content/effect evidence.
+type HistoryImportReport struct {
+	Version                 int    `json:"version"`
+	SourceFormat            string `json:"source_format"`
+	Outcome                 string `json:"outcome"`
+	SourceSHA256            string `json:"source_sha256"`
+	SourceSession           string `json:"source_session"`
+	SourceAgent             string `json:"source_agent"`
+	SourceProvider          string `json:"source_provider"`
+	SourceMessages          int    `json:"source_messages"`
+	ImportedMessages        int    `json:"imported_messages"`
+	RemovedThinkingBindings int    `json:"removed_thinking_bindings"`
+	ToolStructure           string `json:"tool_structure"`
+	ArchiveChunks           int    `json:"archive_chunks"`
+}
+
+func ValidHistoryImportReport(r *HistoryImportReport) bool {
+	if r == nil || r.Version != 1 || len(r.SourceSHA256) != 64 || strings.Trim(r.SourceSHA256, "0123456789abcdef") != "" || r.SourceSession == "" || len(r.SourceSession) >= 128 || len(r.SourceAgent) >= 64 || len(r.SourceProvider) >= 64 || r.SourceMessages < 0 || r.SourceMessages > 16777216 || r.ImportedMessages < 0 || r.ImportedMessages > 16777216 || r.RemovedThinkingBindings < 0 || r.RemovedThinkingBindings > 16777216 || r.ArchiveChunks < 0 || r.ArchiveChunks > 4096 {
+		return false
+	}
+	for _, v := range []string{r.SourceSession, r.SourceAgent, r.SourceProvider} {
+		if strings.ContainsRune(v, 0) || !utf8.ValidString(v) {
+			return false
+		}
+	}
+	switch r.SourceFormat {
+	case "canonical", "anthropic", "openai_chat", "responses", "tmux_text", "unknown":
+	default:
+		return false
+	}
+	switch r.Outcome {
+	case "exact":
+		return r.SourceFormat == "canonical" && r.SourceMessages == r.ImportedMessages && r.RemovedThinkingBindings == 0 && r.ToolStructure == "preserved" && r.ArchiveChunks == 0
+	case "normalized":
+		return r.SourceFormat != "tmux_text" && r.SourceFormat != "unknown" && r.ToolStructure == "preserved" && r.ArchiveChunks == 0
+	case "archived":
+		return r.SourceFormat == "tmux_text" && r.SourceMessages == 0 && r.ImportedMessages == 0 && r.RemovedThinkingBindings == 0 && r.ToolStructure == "unrecoverable" && r.ArchiveChunks > 0
+	case "refused":
+		return r.ImportedMessages == 0 && r.ToolStructure == "unrecoverable" && r.ArchiveChunks == 0
+	}
+	return false
+}
+
+func DecodeHistoryImportReport(raw json.RawMessage, r *HistoryImportReport) bool {
+	var fields map[string]json.RawMessage
+	if !Decode(raw, &fields) || len(fields) != 12 {
+		return false
+	}
+	for _, v := range fields {
+		if bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+			return false
+		}
+	}
+	return Decode(raw, r) && ValidHistoryImportReport(r)
+}
+
+type HistoryMessageFragment struct {
+	MessageIndex  int    `json:"message_index"`
+	PartIndex     int    `json:"part_index"`
+	PartCount     int    `json:"part_count"`
+	MessageSHA256 string `json:"message_sha256"`
+	Text          string `json:"text"`
+}
+
+func ValidHistoryMessageFragment(f *HistoryMessageFragment) bool {
+	return f != nil && f.MessageIndex >= 0 && f.MessageIndex < 16777216 && f.PartIndex >= 0 && f.PartIndex < 4096 && f.PartCount > 0 && f.PartCount <= 4096 && f.PartIndex < f.PartCount && len(f.MessageSHA256) == 64 && strings.Trim(f.MessageSHA256, "0123456789abcdef") == "" && len(f.Text) > 0 && len(f.Text) <= 65536 && utf8.ValidString(f.Text)
+}
+
 type HistoryEvent struct {
-	Scope   string          `json:"scope"`
-	Phase   string          `json:"phase"`
-	Index   int             `json:"index,omitempty"`
-	Count   int             `json:"count,omitempty"`
-	Message json.RawMessage `json:"message,omitempty"`
+	Fragment     *HistoryMessageFragment `json:"fragment,omitempty"`
+	ImportReport *HistoryImportReport    `json:"import_report,omitempty"`
+	ArchiveText  *string                 `json:"archive_text,omitempty"`
+	Scope        string                  `json:"scope"`
+	Phase        string                  `json:"phase"`
+	Index        int                     `json:"index,omitempty"`
+	Count        int                     `json:"count,omitempty"`
+	Message      json.RawMessage         `json:"message,omitempty"`
 }
 
 func ValidMessage(raw json.RawMessage) bool {
@@ -363,10 +434,38 @@ func ValidMessage(raw json.RawMessage) bool {
 
 func ValidHistoryEvent(raw json.RawMessage) bool {
 	var event HistoryEvent
-	if !Decode(raw, &event) || event.Scope == "" || len(event.Scope) > 128 {
+	if !Decode(raw, &event) || event.Scope == "" || len(event.Scope) > 128 || (event.Phase != "import_report" && event.ImportReport != nil) || (event.Phase != "archive" && event.ArchiveText != nil) || (event.Phase != "message_fragment" && event.Fragment != nil) {
 		return false
 	}
 	switch event.Phase {
+	case "message_fragment":
+		if event.Index != 0 || event.Count != 0 || event.Message != nil || event.ImportReport != nil || event.ArchiveText != nil || !ValidHistoryMessageFragment(event.Fragment) {
+			return false
+		}
+		var outer map[string]json.RawMessage
+		var fields map[string]json.RawMessage
+		if !Decode(raw, &outer) || len(outer) != 3 || !Decode(outer["fragment"], &fields) || len(fields) != 5 {
+			return false
+		}
+		for _, v := range fields {
+			if bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+				return false
+			}
+		}
+		return fields["message_index"] != nil && fields["part_index"] != nil && fields["part_count"] != nil && fields["message_sha256"] != nil && fields["text"] != nil
+	case "import_report":
+		var fields map[string]json.RawMessage
+		var report HistoryImportReport
+		if !Decode(raw, &fields) || len(fields) != 3 || !DecodeHistoryImportReport(fields["import_report"], &report) {
+			return false
+		}
+		return event.Index == 0 && event.Count == 0 && event.Message == nil && event.ArchiveText == nil && ValidHistoryImportReport(event.ImportReport) && (event.ImportReport.Outcome != "archived" || event.Scope == "legacy-archive")
+	case "archive":
+		var fields map[string]json.RawMessage
+		if !Decode(raw, &fields) || len(fields) != 4 || fields["index"] == nil || bytes.Equal(bytes.TrimSpace(fields["index"]), []byte("null")) {
+			return false
+		}
+		return event.Scope == "legacy-archive" && event.Index >= 0 && event.Index < 4096 && event.Count == 0 && event.Message == nil && event.ImportReport == nil && event.ArchiveText != nil && len(*event.ArchiveText) > 0 && len(*event.ArchiveText) <= 65536 && utf8.ValidString(*event.ArchiveText)
 	case "message":
 		return event.Index >= 0 && event.Count == 0 && ValidMessage(event.Message)
 	case "commit":

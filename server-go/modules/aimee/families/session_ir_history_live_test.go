@@ -152,11 +152,69 @@ func TestSessionIRLiveHistoryCheckpointOwnershipIsolationAndAtomicReload(t *test
 	if status, _, err := sessionIRHistorySave(ctx, sessionIRLiveTx{tx}, []string{"s", "large", "primary", "alice", string(encoded)}); err != nil || status != store.StatusOK {
 		t.Fatalf("large checkpoint: %d %v", status, err)
 	}
-	if _, got := load("primary", "alice"); got != base {
-		t.Fatal("reader saw uncommitted partial checkpoint")
+	// Paged history owns a consistent source view: a distinct reader must wait
+	// for the checkpoint writer's session lock, then see its complete commit.
+	type readAnswer struct {
+		status uint32
+		cells  []string
+		err    error
+	}
+	readerPID := make(chan uint32, 1)
+	readerDone := make(chan readAnswer, 1)
+	go func() {
+		reader, e := pool.Begin(ctx)
+		if e != nil {
+			readerDone <- readAnswer{err: e}
+			return
+		}
+		defer reader.Rollback(ctx)
+		readerPID <- reader.Conn().PgConn().PID()
+		status, cells, e := sessionIRHistoryLoad(ctx, sessionIRLiveTx{reader}, []string{"s", "primary", "alice", "turn"})
+		readerDone <- readAnswer{status, cells, e}
+	}()
+	var backend uint32
+	select {
+	case backend = <-readerPID:
+	case answer := <-readerDone:
+		t.Fatalf("concurrent reader could not start: %v", answer.err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	waitCtx, stopWait := context.WithTimeout(ctx, 5*time.Second)
+	defer stopWait()
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		var waiting bool
+		if err := pool.QueryRow(waitCtx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE pid=$1 AND wait_event_type='Lock')`, backend).Scan(&waiting); err != nil {
+			t.Fatal("observe concurrent history row-lock wait", err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case answer := <-readerDone:
+			t.Fatalf("reader returned before checkpoint commit: status=%d err=%v", answer.status, answer.err)
+		case <-tick.C:
+		case <-waitCtx.Done():
+			t.Fatal("history reader never reached actual PostgreSQL lock wait", waitCtx.Err())
+		}
+	}
+	select {
+	case answer := <-readerDone:
+		t.Fatalf("reader returned uncommitted checkpoint: status=%d err=%v", answer.status, answer.err)
+	default:
 	}
 	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case answer := <-readerDone:
+		if answer.err != nil || answer.status != store.StatusOK || len(answer.cells) != 1 || answer.cells[0] != string(encoded) {
+			t.Fatalf("concurrent reader did not see whole committed checkpoint: status=%d cells=%d err=%v", answer.status, len(answer.cells), answer.err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
 	if _, got := load("primary", "alice"); got != string(encoded) {
 		t.Fatalf("large reload differs (%d vs %d bytes)", len(got), len(encoded))

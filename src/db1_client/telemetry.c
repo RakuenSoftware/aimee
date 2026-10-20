@@ -26,6 +26,8 @@
 
 
 static db1_family_t family = {"db1.telemetry", "telemetry", AIMEE_DB1_EVENT_TELEMETRY, AIMEE_DB1_STAGE_TELEMETRY, 2000, 0};
+/* Exact canonical child evidence can span bounded SQL source pages. */
+static db1_family_t source_family = {"db1.telemetry", "telemetry", AIMEE_DB1_EVENT_TELEMETRY, AIMEE_DB1_STAGE_TELEMETRY, 30000, 0};
 
 
 /* A write answers 0 or -1; the store either took it or it did not. */
@@ -1972,8 +1974,8 @@ int db1_delegate_execution_experience_record(const char *principal, const char *
 {
    const char *fields[] = {principal ? principal : "",
                            parent_source_json ? parent_source_json : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_DELEGATE_EXECUTION_EXPERIENCE_RECORD, fields,
-                                2, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&source_family, AIMEE_DB1_OP_DELEGATE_EXECUTION_EXPERIENCE_RECORD,
+                                fields, 2, NULL, NULL, 0, NULL));
 }
 
 /* Exact owner-checked terminal, including full retained proof metadata. */

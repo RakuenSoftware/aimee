@@ -79,6 +79,15 @@ extern "C"
     * Save appends an atomic checkpoint; load replays the latest checkpoint and
     * subsequent completed harness observations. scope keeps child prompts private.
     * Load returns 0 found, 1 missing, -1 failure; caller frees *out. */
+   int db1_session_ir_history_import(const char *session_id, const char *scope, const char *actor,
+                                     const char *source_session, const char *source_agent,
+                                     const char *source_sha256, const char *messages_json,
+                                     const char *report_json);
+   /* Browse returns0 imported,1 skipped for an already-authoritative primary, -1 refusal.
+    * Never grants model admission from the skipped disposition. */
+   int db1_session_ir_history_import_browse(const char *session_id, const char *actor,
+                                            const char *source_agent, const char *source_sha256,
+                                            const char *messages_json, const char *report_json);
    int db1_session_ir_history_save(const char *session_id, const char *checkpoint,
                                    const char *scope, const char *actor, const char *messages_json);
    int db1_session_ir_history_load(const char *session_id, const char *scope, const char *actor,

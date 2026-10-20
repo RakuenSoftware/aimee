@@ -9282,7 +9282,7 @@
       "c_returns": "text",
       "wire_format": "db1-fields-v2",
       "scope": "global",
-      "transaction": "none",
+      "transaction": "single",
       "idempotency": "safe",
       "results": [
         "ok",
@@ -9509,7 +9509,7 @@
       ],
       "wire_format": "db1-fields-v2",
       "scope": "global",
-      "transaction": "none",
+      "transaction": "single",
       "idempotency": "safe",
       "results": [
         "ok",
@@ -28112,7 +28112,7 @@
       ],
       "wire_format": "db1-fields-v2",
       "scope": "global",
-      "transaction": "none",
+      "transaction": "single",
       "idempotency": "safe",
       "results": [
         "ok",
@@ -28166,7 +28166,7 @@
       ],
       "wire_format": "db1-fields-v2",
       "scope": "global",
-      "transaction": "none",
+      "transaction": "single",
       "idempotency": "safe",
       "results": [
         "ok",
@@ -29242,6 +29242,92 @@
       },
       "reply": {
         "fields": [],
+        "max_bytes": 32768
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 50,
+      "name": "session_ir_history_import",
+      "c_name": "db1_session_ir_history_import",
+      "c_params": [
+        "session_id",
+        "scope",
+        "actor",
+        "source_session",
+        "source_agent",
+        "source_sha256",
+        "messages_json",
+        "report_json"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "scope",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "source_session",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "source_agent",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "source_sha256",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "messages_json",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "report_json",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "mode",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "disposition",
+            "type": "text",
+            "required": true
+          }
+        ],
         "max_bytes": 32768
       }
     }

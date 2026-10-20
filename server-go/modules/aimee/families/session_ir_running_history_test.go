@@ -46,7 +46,7 @@ func TestSessionIRRunningHistoryIncludesOnlyOwnedCommittedConversation(t *testin
 			t.Fatal("source content changed", exact, cells)
 		}
 	}
-	if db.executed[0] != sessionIRRunningHistorySQL || fmt.Sprint(db.args[0]) != "[s owner]" {
+	if db.executed[0] != sessionIRRunningHistorySQL || fmt.Sprint(db.args[0]) != "[s owner 0]" {
 		t.Fatal("owner query changed", db.executed, db.args)
 	}
 	// Completed-history callers retain their original contract: the open turn is
@@ -312,5 +312,33 @@ func TestSessionIRLiveRunningHistoryOwnerSnapshotAndCheckpoint(t *testing.T) {
 	appendEvent("active:done", "active", runningDone)
 	if status, wire, err = snapshot("owner"); err != nil || status != store.StatusMissing || wire != "" {
 		t.Fatal("closed source admitted", status, wire, err)
+	}
+}
+
+func TestCanonicalHistoryBudgetsAreOperationSpecific(t *testing.T) {
+	history := map[uint32]bool{33: true, 35: true, 37: true, 41: true, 44: true, 45: true, 50: true}
+	for id, op := range Sessions.Ops {
+		if history[id] {
+			if op.Timeout != store.CanonicalHistoryTimeout {
+				t.Fatalf("operation %d missing bounded history budget", id)
+			}
+		} else if op.Timeout != 0 {
+			t.Fatalf("unrelated operation %d changed ordinary budget", id)
+		}
+	}
+	if !Sessions.Ops[33].Tx || !Sessions.Ops[35].Tx {
+		t.Fatal("paged source read lost enclosing owner transaction")
+	}
+}
+
+func TestDelegateSourceBudgetIsOperationSpecific(t *testing.T) {
+	for id, op := range Telemetry.Ops {
+		if id == opDelegateExecutionExperienceRecord {
+			if op.Timeout != store.CanonicalHistoryTimeout {
+				t.Fatal("delegate source budget missing")
+			}
+		} else if op.Timeout != 0 {
+			t.Fatalf("unrelated telemetry op %d budget changed", id)
+		}
 	}
 }

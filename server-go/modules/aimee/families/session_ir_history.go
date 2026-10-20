@@ -2,12 +2,15 @@ package families
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	"sort"
 	"strconv"
+	"strings"
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
@@ -67,13 +70,77 @@ func sessionIRHistorySave(ctx context.Context, q store.Queryer, f []string) (uin
 	return store.StatusOK, nil, nil
 }
 
-const sessionIRHistorySQL = `SELECT sequence::text,turn_id,actor,event_id,payload FROM session_ir_events
- WHERE session_id=$1 AND EXISTS(SELECT 1 FROM server_sessions WHERE id=$1 AND principal=$2)
- ORDER BY session_ir_events.sequence`
+// Every page holds the same owner row lock until the enclosing transaction ends.
+// Bound both row count and encoded text bytes below the SQL store reply limits.
+// The reducer still checks every immutable source sequence without truncation.
+const sessionIRHistoryPageSize = 256
+const sessionIRHistorySQL = `WITH owned AS MATERIALIZED (
+ SELECT id FROM server_sessions WHERE id=$1 AND principal=$2 FOR SHARE
+), candidates AS MATERIALIZED (
+ SELECT sequence,turn_id,actor,event_id,payload FROM session_ir_events
+ WHERE session_id IN (SELECT id FROM owned) AND sequence>$3::bigint
+ ORDER BY session_ir_events.sequence LIMIT 256
+), budgeted AS (
+ SELECT *,sum(octet_length(turn_id)+octet_length(actor)+octet_length(event_id)+octet_length(payload)+64)
+ OVER (ORDER BY candidates.sequence) AS wire_bytes FROM candidates
+) SELECT sequence::text,turn_id,actor,event_id,payload FROM budgeted
+ WHERE wire_bytes<=8388608 ORDER BY budgeted.sequence`
+const sessionIRRunningHistorySQL = sessionIRHistorySQL
 
-const sessionIRRunningHistorySQL = `SELECT sequence::text,turn_id,actor,event_id,payload FROM session_ir_events
- WHERE session_id=$1 AND EXISTS(SELECT 1 FROM server_sessions WHERE id=$1 AND principal=$2)
- ORDER BY session_ir_events.sequence`
+type sessionIRHistoryRows struct {
+	ctx                   context.Context
+	q                     store.Queryer
+	session, actor, after string
+	rows                  store.Rows
+	count                 int
+	err                   error
+	closed                bool
+}
+
+func (r *sessionIRHistoryRows) Next() bool {
+	if r.closed || r.err != nil {
+		return false
+	}
+	if r.rows.Next() {
+		r.count++
+		return true
+	}
+	r.err = r.rows.Err()
+	r.rows.Close()
+	if r.err != nil || r.count == 0 {
+		r.closed = true
+		return false
+	}
+	r.rows, r.err = r.q.Query(r.ctx, sessionIRHistorySQL, r.session, r.actor, r.after)
+	r.count = 0
+	if r.err != nil {
+		return false
+	}
+	return r.Next()
+}
+func (r *sessionIRHistoryRows) Scan(dest ...any) error {
+	if err := r.rows.Scan(dest...); err != nil {
+		return err
+	}
+	sequence, ok := dest[0].(*string)
+	if !ok {
+		return fmt.Errorf("invalid canonical page cursor")
+	}
+	n, e := strconv.ParseUint(*sequence, 10, 64)
+	previous, _ := strconv.ParseUint(r.after, 10, 64)
+	if e != nil || n <= previous {
+		return fmt.Errorf("canonical history page did not advance")
+	}
+	r.after = *sequence
+	return nil
+}
+func (r *sessionIRHistoryRows) Err() error { return r.err }
+func (r *sessionIRHistoryRows) Close() {
+	if r.rows != nil {
+		r.rows.Close()
+	}
+	r.closed = true
+}
 
 func sessionIRHistoryLoad(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	return sessionIRHistoryProject(ctx, q, f, false)
@@ -112,13 +179,22 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 	if running {
 		query = sessionIRRunningHistorySQL
 	}
-	rows, err := q.Query(ctx, query, f[0], f[2])
+	first, err := q.Query(ctx, query, f[0], f[2], "0")
 	if err != nil {
 		return 0, nil, err
 	}
+	rows := &sessionIRHistoryRows{ctx: ctx, q: q, session: f[0], actor: f[2], after: "0", rows: first}
 	defer rows.Close()
 	history := make([]json.RawMessage, 0)
 	checkpoints := map[string][]json.RawMessage{}
+	imports := map[string]bool{}
+	type fragmentState struct {
+		index, next, count int
+		hash               string
+		text               strings.Builder
+	}
+	fragments := map[string]*fragmentState{}
+	fragmentBytes := 0
 	pending := map[string][]json.RawMessage{}
 	positions := map[string]map[string]int{}
 	pendingOrder := map[string][]uint64{}
@@ -185,8 +261,45 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 			if !decodeIR(event.Payload, &h) || !validIRHistoryEvent(event.Payload) {
 				return 0, nil, fmt.Errorf("invalid canonical history checkpoint")
 			}
+			if h.Phase == "import_report" || h.Phase == "archive" {
+				if h.Phase == "import_report" && h.Scope == f[1] && (h.ImportReport.Outcome == "exact" || h.ImportReport.Outcome == "normalized") {
+					imports[turn] = true
+				}
+				continue
+			}
 			if h.Scope != f[1] {
 				continue
+			}
+
+			if h.Phase == "message_fragment" {
+				part := h.Fragment
+				current := fragments[turn]
+				if part.PartIndex == 0 {
+					if current != nil || part.MessageIndex != len(checkpoints[turn]) {
+						return 0, nil, fmt.Errorf("unordered canonical message fragment")
+					}
+					current = &fragmentState{index: part.MessageIndex, count: part.PartCount, hash: part.MessageSHA256}
+					fragments[turn] = current
+				}
+				if current == nil || part.MessageIndex != current.index || part.PartIndex != current.next || part.PartCount != current.count || part.MessageSHA256 != current.hash || fragmentBytes > 16*1024*1024-len(part.Text) {
+					return 0, nil, fmt.Errorf("invalid canonical message fragment sequence")
+				}
+				current.text.WriteString(part.Text)
+				fragmentBytes += len(part.Text)
+				current.next++
+				if current.next == current.count {
+					raw := []byte(current.text.String())
+					sum := sha256.Sum256(raw)
+					if hex.EncodeToString(sum[:]) != current.hash || !validIRHistoryMessage(raw) {
+						return 0, nil, fmt.Errorf("canonical message fragment digest or content mismatch")
+					}
+					checkpoints[turn] = append(checkpoints[turn], json.RawMessage(raw))
+					delete(fragments, turn)
+				}
+				continue
+			}
+			if fragments[turn] != nil {
+				return 0, nil, fmt.Errorf("incomplete canonical message fragment")
 			}
 			if h.Phase == "message" {
 				if h.Index != len(checkpoints[turn]) {
@@ -194,28 +307,41 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 				}
 				checkpoints[turn] = append(checkpoints[turn], h.Message)
 			} else {
+				if len(fragments) > 0 {
+					return 0, nil, fmt.Errorf("checkpoint interrupted unfinished canonical message fragments")
+				}
 				if h.Count != len(checkpoints[turn]) {
 					return 0, nil, fmt.Errorf("incomplete canonical history checkpoint")
 				}
 				history = append(history[:0], checkpoints[turn]...)
 				checkpoints = map[string][]json.RawMessage{}
+				fragmentBytes = 0
 				// All prior observations are incorporated by this host projection. A later
 				// execution-stop must not append the same observed conversation again.
-				pending = map[string][]json.RawMessage{}
-				pendingRefs = map[string][]canonical.ToolInterruptionSource{}
-				for sequence, ref := range historyRefs {
-					ref.Index = -1
-					historyRefs[sequence] = ref
+				// An imported legacy base predates current captured user/tool
+				// observations. Unlike a normal full checkpoint it contains none
+				// of those pending turns, so their immutable source must survive.
+				if !imports[turn] {
+					pending = map[string][]json.RawMessage{}
+					pendingRefs = map[string][]canonical.ToolInterruptionSource{}
+					for sequence, ref := range historyRefs {
+						ref.Index = -1
+						historyRefs[sequence] = ref
+					}
+					protected = map[string]map[string]nativeOwnedMessage{}
+					protectedRefs = map[string]map[string]map[string]nativeHistorySource{}
+					firstCalls = map[string]map[string]map[int]bool{}
+					positions = map[string]map[string]int{}
+					pendingOrder = map[string][]uint64{}
+					firstObserved = map[string]map[string]uint64{}
 				}
-				protected = map[string]map[string]nativeOwnedMessage{}
-				protectedRefs = map[string]map[string]map[string]nativeHistorySource{}
-				firstCalls = map[string]map[string]map[int]bool{}
-				positions = map[string]map[string]int{}
-				pendingOrder = map[string][]uint64{}
-				firstObserved = map[string]map[string]uint64{}
+				delete(imports, turn)
 				found = true
 			}
 		case "tool_interruption":
+			if f[1] != "primary" {
+				continue
+			}
 			var receipt canonical.ToolInterruption
 			if !canonical.Decode(event.Payload, &receipt) || receipt.Source.Session != f[0] || receipt.Source.Turn != turn || receipt.Source.Actor != actor {
 				return 0, nil, fmt.Errorf("foreign interrupted call source")
@@ -361,6 +487,9 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 		if err != nil {
 			return 0, nil, err
 		}
+	}
+	if len(fragments) > 0 {
+		return 0, nil, fmt.Errorf("unfinished canonical message fragments")
 	}
 	if !found {
 		return store.StatusMissing, nil, nil

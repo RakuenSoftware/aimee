@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { chromium } = require('../frontend/node_modules/playwright');
 
 (async () => {
@@ -443,6 +444,52 @@ const { chromium } = require('../frontend/node_modules/playwright');
     await page.getByText('permission: Closed', { exact: false }).waitFor({ state: 'attached' });
     assert.equal(await page.getByRole('button', { name: 'Allow once', exact: true }).count(), 0);
     assert.equal(controlReplies, 3, 'Child terminal replay must never reopen or resend controls');
+    currentTurn = 'import-checkpoint';
+    const archivedText = 'Original terminal text only: <script>never execute</script>\nTool-like text has no recoverable message role.';
+    event({ kind: 'history', payload: { phase: 'archive', scope: 'legacy-archive', index: 0, archive_text: archivedText.slice(0, 30) } });
+    event({ kind: 'history', payload: { phase: 'archive', scope: 'legacy-archive', index: 1, archive_text: archivedText.slice(30) } });
+    assert.equal(await page.getByText('View archived terminal text', { exact: true }).count(), 0, 'Incomplete archive must remain hidden');
+    const importReport = { version: 1, source_format: 'tmux_text', outcome: 'archived',
+      source_sha256: crypto.createHash('sha256').update(archivedText).digest('hex'), source_session: 'private-legacy-source',
+      source_agent: 'private-agent', source_provider: '', source_messages: 0, imported_messages: 0,
+      removed_thinking_bindings: 0, tool_structure: 'unrecoverable', archive_chunks: 2 };
+    const importFrame = event({ kind: 'history', payload: { phase: 'import_report', scope: 'legacy-archive', import_report: importReport } });
+    await page.getByText('View archived terminal text', { exact: true }).waitFor();
+    assert.equal(await page.getByText(archivedText, { exact: true }).count(), 0, 'Archive contents should mount only when requested');
+    await page.getByText('View archived terminal text', { exact: true }).click();
+    const archiveNote = page.getByRole('note').filter({ hasText: 'Legacy terminal text was archived outside model history.' });
+    assert.equal(await archiveNote.locator('pre').textContent(), archivedText);
+    assert.equal(await archiveNote.getAttribute('aria-live'), 'off');
+    assert.equal(await archiveNote.locator('script').count(), 0);
+    assert.ok(!(await archiveNote.textContent()).includes(importReport.source_sha256));
+    assert.ok(!(await archiveNote.textContent()).includes(importReport.source_session));
+    currentTurn = 'normalized-import-checkpoint';
+    event({ kind: 'history', payload: { phase: 'import_report', scope: 'primary', import_report: { ...importReport,
+      source_format: 'anthropic', outcome: 'normalized', source_messages: 2, imported_messages: 2,
+      removed_thinking_bindings: 1, tool_structure: 'preserved', archive_chunks: 0 } } });
+    await page.getByText('1 reasoning replay binding was removed.', { exact: true }).waitFor();
+    const importedMessage = { role: 'user', blocks: [{ type: 'text', text: 'Original imported historical question' }] };
+    event({ kind: 'history', payload: { phase: 'message', scope: 'primary', index: 0, message: importedMessage } });
+    const largeImportedRaw = JSON.stringify({ role: 'assistant', blocks: [{ type: 'text', text: 'Verified fragmented historical answer 火' }] });
+    const largeImportedHash = crypto.createHash('sha256').update(largeImportedRaw).digest('hex');
+    for (const [index, text] of [largeImportedRaw.slice(0, 30), largeImportedRaw.slice(30)].entries())
+      event({ kind: 'history', payload: { phase: 'message_fragment', scope: 'primary', fragment: {
+        message_index: 1, part_index: index, part_count: 2, message_sha256: largeImportedHash, text } } });
+    assert.equal(await page.getByText('Original imported historical question', { exact: true }).count(), 0, 'Import base must remain hidden until complete');
+    event({ kind: 'history', payload: { phase: 'commit', scope: 'primary', count: 2 } });
+    await page.getByText('Verified fragmented historical answer 火', { exact: true }).waitFor();
+    assert.equal(await page.getByText('Original imported historical question', { exact: true }).count(), 1);
+
+    assert.equal(controlReplies, 3);
+    for (const response of subscribers.get(sent.aimee_session_id) || []) response.write(importFrame);
+    const importReconnect = page.waitForRequest(request => new URL(request.url()).pathname === '/api/chat/session-events');
+    for (const response of subscribers.get(sent.aimee_session_id) || []) response.end();
+    await importReconnect;
+    await page.getByText('1 reasoning replay binding was removed.', { exact: true }).waitFor();
+    assert.equal(await page.getByText('View archived terminal text', { exact: true }).count(), 1);
+    assert.equal(await page.getByText('Original imported historical question', { exact: true }).count(), 1);
+    assert.equal(await page.getByText('Verified fragmented historical answer 火', { exact: true }).count(), 1);
+    assert.equal(controlReplies, 3, 'Import/archive metadata replay cannot send control replies');
     assert.deepEqual(errors, []);
     console.log('Webchat browser regressions passed: canonical POST/SSE overlap and reconnect stay unique; history survives refresh, reordering, navigation and reload; projects stay bound; tool output remains readable; interrupted effects stay unknown through replay without control retries; mobile conversation/composer and wrapped session preferences remain usable.');
   } finally {

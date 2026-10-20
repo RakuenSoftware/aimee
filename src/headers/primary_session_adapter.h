@@ -40,6 +40,9 @@ extern "C"
    int primary_session_adapter_compact_by_session_id(const char *session_id,
                                                      session_compact_result_t *result_out,
                                                      char *error_out, size_t error_len);
+   /* Read-only browser opening may acknowledge a same-session legacy source.
+    * Requires attested durable owner; never starts a model/native/tool turn. */
+   int primary_session_history_open(const char *session, const char *actor);
    void primary_session_adapter_reset(void);
    /* Host startup installs its authenticated session recovery owner. Standalone
     * adapters can only admit a complete empty native owner list. No weak fallback. */

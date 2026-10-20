@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "aimee.h"
+#include "primary_session_adapter.h"
 #include "db1_client/db1_module_api.h"
 #include "support/module_bus_stub.h"
 #include "db1_client/db1.h"
@@ -673,6 +674,14 @@ void session_start_emit(app_ctx_t *ctx, const char *hook_input, FILE *out)
 /* handle_hooks_session_start now registers a server_sessions row; stub the two
  * db1 accessors it uses so this dispatch-routing test need not link the db1
  * layer. get -> miss (so create is attempted), create -> success. */
+/* This dispatch-only fixture does not open canonical browser streams. */
+int primary_session_history_open(const char *session, const char *actor)
+{
+   (void)session;
+   (void)actor;
+   assert(0 && "unexpected browser history opening in dispatch-only fixture");
+   return -1;
+}
 int db1_server_session_get(const char *id, db1_server_session_t *out)
 {
    (void)id;

@@ -4,73 +4,124 @@ Prepared 17 October 2026, with subsequent continuation checkpoints. The current
 user instruction is to keep implementing the unfinished migration; the historical
 stop/handoff request below is superseded.
 
-## Current continuation status: PR #3052; migration still unfinished
+## Current continuation status: PR #3052; final qualification in progress
 
-Latest published checkpoint: `1eebd14ac` passes all 59 GitHub checks,
-including attribution, actual-Docker integration and every configured deployment
-tier. Integration passes 170 checks, including independently configured delegate
-verification, durable grades, scoped reuse and unattended recovery of a lost
-learning projection after a literal daemon restart. `2353731e8` fixed descriptor
-documentation validation; `840b0ab8c` retained approved source custody separately
-from container execution; `1eebd14ac` releases live test attachments before
-restarting their owning daemon. No assertions or attribution checks were exempted.
-The earlier local checkpoint at `99aba1e65` passed all 76 lint gates, the full
-native suite, focused sanitizers/CMake, 327 frontend tests, both frontend builds,
-789 benchmark tests and the full-history secret scan. Those results do not qualify
-all subsequent unpublished changes.
+Active work remains in [PR #3052](https://github.com/RakuenSoftware/aimee/pull/3052),
+targeting `testing`. Recovery baseline `a6bd31897` passed fresh CI, including
+all four configured deployment tiers. The continuation below includes later
+changes; the PR checks qualify its exact published head.
+Keep automatic review and the strict attribution gate enabled. No production
+promotion or final fresh-CI result is claimed.
 
-The unpublished continuation wires migration 49 reservation operations 40–44,
-shared cache epochs, DB-first unpublished lease acquisition, session-wide active
-owner discovery (HostOnly46), optional Linux containment and prehistory recovery.
-Containment uses an actual delegated cgroup with pre-exec attachment, private
-namespaces, filesystem restrictions and bounded network access. Runtime routes
-are deactivated while their bound port remains held until actual tree quiescence;
-failed cleanup retains bounded custody instead of granting cache reuse. Existing
-SDK state is preserved when a replacement epoch is required. Focused normal,
-actual-kernel, PostgreSQL race and CMake fixtures pass. Two strict integration runs
-each qualify all eight pinned Codex/Claude wire/credential configurations with
-actual initial and resumed SDK turns and checked containment/cache ownership.
-The focused actual-SDK crash/interruption journey now passes for both Codex and
-Claude. It freezes the actual SDK tree before daemon death, verifies recovery
-quiescence, durable cancellation/fencing and epoch rotation, retains old state
-files, and completes a fresh turn using the persisted selected model. It also
-interrupts an actual host question, verifies its source-bound unknown receipt in
-subsequent model context, declines one separately requested mutation, verifies
-second-attempt suppression, and replays without new prompts or effects. Its
-five setup/recovery/shutdown checks pass; that focused invocation does not run the
-general integration or eight-profile matrix. Two defects were fixed rather than
-exempted: selected primaries were RAM-only, and PostgreSQL output aliases sorted
-numeric sequence values as text. Primary selection now lives in owner-checked
-session metadata; lifecycle, history search and delegate learning order physical
-numeric sequence columns. The startup probe also uses the actual flat config key.
+The supported browser/Linux cutovers are implemented: canonical primary loading
+and model switching, durable session-log history, request/response streaming,
+scoped native tools, delegate execution/history, persisted model selection and scoped persona controls,
+and canonical permission/question replies. Each child owns its controls; replies
+bind the actual durable child session, turn and actor. Replay readiness prevents
+historical controls from appearing before their saved replies. Reconnect and
+repeated delivery do not resend replies or reopen denied requests. Unsupported
+branching is hidden; mobile preferences wrap without clipping. Failed steering
+is a durable failed admission and never becomes later model instructions.
 
-HostOnly45/47, protected partial-message publication, typed interruption receipts,
-source-authenticated history and final effective-argument permission checks are
-implemented locally. Generic history admission still refuses privileged unknown
-receipts. The legacy compatibility transcript writer and automatic delegate
-question mailbox fallback are removed. Each child conversation owns canonical
-controls; browser replies target that exact child, turn and actor after replay
-readiness. Explicit mailbox operations retain their separate timeout/cancellation
-coverage. Rejected steering never enters later model context. A separately
-reproduced cancelled-transaction leak now rolls back using bounded cleanup
-independent of caller cancellation.
+Native Linux Codex/Claude launches retain canonical host calls/results and
+cache/replay custody. Optional qualified containment uses a delegated cgroup,
+pre-exec attachment, private namespaces, restricted filesystem/network access and
+an exact durable owner reservation. Recovery proves actual tree quiescence before
+fencing an abandoned turn and rotating the shared cache epoch; old SDK files are
+preserved. An interrupted tool effect remains unknown, with its first protected
+call source and terminal binding retained. A later mutation requires permission
+for its exact effective arguments; denial suppresses repeated attempts in that
+turn. Ordinary launches without the optional boundary keep their successful
+launch path but do not acquire a whole-tree crash-recovery proof.
 
-The combined source passes 365 frontend tests, actual Chromium desktop/mobile/dark
-and child-reply/reconnect checks, runtime-web race tests and its reduced Docker
-source-context build, the full Go race suite with actual PostgreSQL, nine focused
-CMake tests, focused ASan/UBSan/leak checks and actual-kernel containment. The
-preceding full native run passed 670 binaries; all 77 script tests and 789 benchmark
-tests passed. Source/static checks report no new diagnostics. New browser control
-frames reuse the strict shared codec before forwarding original bytes. Full final
-regression and fresh CI remain required after integration. Worker agents are
-finishing the original backlog's explicit durable legacy-import fidelity reports
-and archival-only terminal-text migration. No synthetic tool success, source
-removal or inferred cancellation substitutes for source-bound unknown outcomes.
+Legacy import now happens on browser opening, before SSE headers, as well as on
+model loading. HostOnly50 locks the actual session/agent/provider source, owner
+and raw-source hash. Its explicit browse mode returns `skipped` without appending
+when completed canonical primary history wins; model import remains strict.
+Pending turns and their reply paths remain live. Empty legacy agent selectors
+are preserved. Reports distinguish exact import, normalization, archive and
+refusal; source rows remain intact. Terminal text is a passive archive with no
+invented message roles or tools. Large canonical messages use bounded protected
+fragments instead of imposing a smaller pre-compaction history limit.
 
-Production `.100` remains KB-free and unpromoted. Live vendor subscription,
-unsupported native profiles/platforms, the remaining handoff consumer audit and
-recorded independent production review remain outstanding. Keep working in
-#3052; do not interpret this checkpoint as completion or an instruction to stop.
+The browser shows the acknowledged imported conversation in chronological
+position before newer observations, using its exact canonical roles and blocks.
+It exposes that base only after its report-bound checkpoint is complete; fragment
+hashes are verified before parsing/rendering. Archive count and raw UTF-8 digest
+also verify before explicit expansion. Ordinary recurring prompt checkpoints
+remain cursor-only, so browsing does not duplicate them. Historical browser rendering grants no execution, control, learning-grade or
+model-observation authority.
+
+KB-free learning uses canonical terminal evidence and a source-pointer outbox.
+Configured-test grades, pending delegate observations and same-project recall
+retain actor, project, parent/job/child and provider-send freshness fences.
+Unattended bounded recovery republishes unacknowledged projections after daemon
+restart, without reconstructing evicted delivered rows. Ungraded execution stays
+ungraded; exit success does not imply independent semantic correctness or causal
+procedure success. No KB instance, seeded facts/grades or fabricated successful
+outcomes are required. Production `.100` must remain KB-free.
+
+### Qualification recorded before the final boundary repairs
+
+The integrated source has passed the full native suite, all 76 lint gates, the
+full Go race suite against a fresh actual PostgreSQL database, nine focused CMake
+tests, focused ASan/UBSan/leak checks, all 77 script tests and both frontend builds.
+Frontend coverage increased from 396 to 399 tests with the initial-open/imported
+conversation follow-up. Actual Chromium checks cover desktop/mobile/dark,
+primary/child replies, source-bound unknown effects, passive archives, verified
+imported fragments, reconnect and duplicate delivery. The HTTP fixture checks
+that ownership/import completes before SSE headers, foreign owners are refused,
+and migration failure emits no successful stream or model/network work. The
+primary fixture exercises the real importer separately. Actual PostgreSQL race
+fixtures prove that a competing completed checkpoint wins under lock, browse
+skips without appending, and model import still refuses the stale replacement.
+
+The complete actual-server integration run passed 170/170 checks on the initial
+fidelity slice, before the browser-opening follow-up. It includes all eight
+pinned SDK wire/credential configurations, real model/tool/resume turns and both
+Codex/Claude daemon-crash/interruption journeys. Those journeys freeze the actual
+SDK tree, kill only the owned daemon, restart with the same durable store,
+recover/fence the old source, preserve old state, complete a fresh turn, load the
+unknown effect into later model context, deny a real mutation once and verify
+second-attempt suppression plus replay. This is actual pinned SDK execution
+against owned provider fixtures; it does not claim live upstream subscription
+or vendor acceptance.
+
+The confirmed boundary repairs are implemented: canonical history, browser replay,
+interruption sources and delegate-learning scans page before SQL transport framing.
+Only the affected source-complete operations select a bounded 30-second budget;
+caller deadlines still clamp it and unrelated operations retain two seconds. Legacy
+source reads use bounded UTF-8 chunks without changing global wire or cell limits.
+Migration 50 validates a 16 MiB retained-source constraint. The original migration
+20 file/checksum stays unchanged; one exact deferred-validation variant permits
+pre-limit historical rows to reach migration 50. Both known histories replay, and
+unknown checksums still refuse. Whole replies retain their existing frame budget,
+including metadata overhead; oversized replies fail instead of truncating source.
+
+Their final combined tests, exact-tree regression, fresh CI and configured
+deployment jobs remain pending. Earlier passes do not qualify those later edits.
+Do not label the migration or production promotion 100% complete while those
+checks or the recorded independent review remain outstanding.
+
+### Current completion matrix
+
+| Requirement | Implemented behavior and evidence | Remaining action |
+| --- | --- | --- |
+| Canonical primary/delegate/browser execution | Durable canonical history, persisted owner-bound model selection, native request/tool/result paths, separate child history, canonical controls and recovery are implemented. Both pinned Linux SDKs pass actual crash/interruption journeys. | Qualify the exact integrated tree in local gates and fresh CI. |
+| Honest legacy history on opening | Owner-bound browse preflight, atomic fidelity report/checkpoint or passive archive, and verified chronological imported-base display are implemented. Focused native, PostgreSQL lock-race, 399 frontend tests and actual Chromium pass. | Run the final combined actual-daemon integration after the follow-up and boundary repairs. |
+| Browser controls and usability | Exact primary/child reply ownership, replay readiness, no duplicate/reconnect resend, denial suppression, readable tool output and responsive composer/preferences are implemented and tested. | Complete automated exact-tree checks. The browser is ready for manual validation; a later manual pass is not a reason to stop finishing automated work. |
+| KB-free project and learning | Approved held repository identity resolves without a KB index. Canonical terminal/outbox owners publish source-bound configured-test grades and observational delegate learning; next-context reuse is actor/project/source fenced. Actual Docker/restart journeys pass. | Qualify the final tree, then verify real `.100` capture/reuse after authorized promotion. Leave KB mode/endpoint unset; add no fabricated learning rows. |
+| Meaning of learned evidence | Observational tool sequences, configured-test results and ungraded outcomes keep distinct labels. No automatic causal/procedure promotion or semantic task-success claim is inferred. | Preserve those labels during production verification. Synthesis is not a prerequisite for the KB-free capture/reuse path. |
+| Linux native coverage | Qualified descriptor-based pinned Codex/Claude model/tool/resume and optional cgroup/Landlock crash recovery have actual SDK and kernel-backed evidence. Unqualified ordinary launches remain fail-closed for uncertain crash recovery. | Finish exact-tree qualification. Live upstream/vendor subscription acceptance remains separately unqualified. |
+| macOS, Windows and unsupported profiles | macOS/Windows thin clients are supported server-access build/test targets. They are not native server-execution coverage. Arbitrary daemon ACP profiles and non-Linux native tool runtimes remain explicitly unsupported/refused. | Report these boundaries honestly; do not convert thin-client passes into native-server claims. |
+| Production review and promotion | `.100` is KB-free and no promotion is claimed. `OWNERS.md` requires Governance to assign/record a second qualified GitHub identity in the live ruleset; the approving reviewer must differ from the author. Agent reviews do not satisfy it. | Obtain the recorded independent review for the final head, retain live-control evidence, deploy through the supported path and verify `.100` without adding a KB. |
+
+The sections below are chronological checkpoints. Their older statements that a
+path is missing describe that checkpoint, not an additional current defect when
+the matrix and current source establish the cutover. Dead compatibility APIs and
+unsupported profiles are not working-runtime coverage. The supported-path audit
+found no additional confirmed reachable raw-provider history/tool bypass. Fresh
+results must still qualify every later change.
 
 The user confirmed #3038 and its follow-up #3047 merged and requested the remaining
 migration and standalone learning work. #3050 was subsequently merged at
@@ -4381,3 +4432,22 @@ now uses a compact decorative spinner with reduced-motion support; the browser
 regression requires a busy button at most 48px high and a mobile input at least
 250px wide. Selecting a channel closes the rail, and only affirmative control
 actions receive primary styling.
+
+### Retained large legacy sources
+
+Legacy load/latest and host50 source verification read the exact retained
+`primary_sessions` tuple through bounded UTF-8 chunks under its row lock.
+Individual PostgreSQL cells remain capped at 1MiB. Complete source bytes and
+SHA256 are preserved; tmux archives remain outside model history.
+
+Schema migration50 validates a 16MiB bound only for that retained source column.
+The original migration20 SQL/checksum stays immutable. Pending upgrades use one
+explicit alternate20 plan differing only by deferred validation of this source
+check; its actual SQL has its own recorded checksum. Replay accepts only the
+original or this exact alternate plan. Unknown plans still refuse before later
+DDL. Ordinary legacy writes retain their existing wire limit.
+
+The retained-source storage ceiling is inclusive 16MiB; a complete legacy getter
+reply must also fit its existing 16MiB module frame, including its header, field
+lengths and metadata. Load/latest return typed `too_long` without source bytes
+when that complete envelope would exceed the frame. The retained row is unchanged.

@@ -6,6 +6,7 @@
 #endif
 #include "server_http_internal.h"
 #include "agent_config.h"
+#include "primary_session_adapter.h"
 #include "server_learning_outcome.h"
 #include "db1_client/server_sessions.h"
 #include "db1_client/primary_sessions.h"
@@ -232,10 +233,18 @@ static void handle_session_ir_events(int fd, const char *input, const char *requ
       send_response(fd, 403, "{\"error\":\"session actor required\"}", request_id);
       return;
    }
-   if (db1_server_session_get(session, &row) == 0 && strcmp(row.principal, actor))
+   if (db1_server_session_get(session, &row) == 0)
    {
-      send_response(fd, 403, "{\"error\":\"session ownership mismatch\"}", request_id);
-      return;
+      if (strcmp(row.principal, actor))
+      {
+         send_response(fd, 403, "{\"error\":\"session ownership mismatch\"}", request_id);
+         return;
+      }
+      if (primary_session_history_open(session, actor))
+      {
+         send_response(fd, 503, "{\"error\":\"session history unavailable\"}", request_id);
+         return;
+      }
    }
    write_sse_headers(fd, request_id);
    int seen = 0, quiet = 0, replay_complete = 0;

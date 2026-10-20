@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 static char *transcript;
 static unsigned calls;
@@ -23,14 +24,25 @@ aimee_module_call_result_t obs_bus_module_call(uint32_t kind, uint32_t stage, ui
    (void)kind;
    (void)stage;
    (void)trace;
-   (void)deadline;
+
    (void)request_len;
    (void)cancelled;
    (void)context;
    calls++;
    uint32_t op = aimee_db1_get_u32(request);
    int running = op == AIMEE_DB1_OP_SESSION_IR_RUNNING_HISTORY_LOAD;
-   int load = op == AIMEE_DB1_OP_PRIMARY_SESSION_LOAD || running;
+   int import = op == AIMEE_DB1_OP_SESSION_IR_HISTORY_IMPORT;
+   int canonical = running || op == AIMEE_DB1_OP_SESSION_IR_HISTORY_LOAD ||
+                   op == AIMEE_DB1_OP_SESSION_NATIVE_HISTORY ||
+                   op == AIMEE_DB1_OP_SESSION_IR_SEARCH || import;
+   struct timespec now;
+   assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+   uint64_t ns = (uint64_t)now.tv_sec * 1000000000u + (uint64_t)now.tv_nsec;
+   uint64_t expected_ms = canonical ? 30000u : 2000u;
+   assert(deadline > ns && deadline - ns <= expected_ms * 1000000u);
+   assert(deadline - ns > (expected_ms - 1000u) * 1000000u);
+   int load = op == AIMEE_DB1_OP_PRIMARY_SESSION_LOAD || canonical;
+   const char *reply_text = import ? "imported" : transcript;
    if (running)
    {
       assert(kind == AIMEE_DB1_EVENT_SESSIONS && stage == AIMEE_DB1_STAGE_SESSIONS);
@@ -51,7 +63,7 @@ aimee_module_call_result_t obs_bus_module_call(uint32_t kind, uint32_t stage, ui
    int count = transcript ? (load ? 1 : 6) : 0;
    size_t total = 8;
    for (int i = 0; i < count; i++)
-      total += 4 + strlen(load ? transcript : cells[i]);
+      total += 4 + strlen(load ? reply_text : cells[i]);
    *length = too_large ? 17u * 1024u * 1024u : (uint32_t)total;
    if (*length > capacity)
       return AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE;
@@ -61,7 +73,7 @@ aimee_module_call_result_t obs_bus_module_call(uint32_t kind, uint32_t stage, ui
    uint32_t at = 8;
    for (int i = 0; i < count; i++)
    {
-      const char *cell = load ? transcript : cells[i];
+      const char *cell = load ? reply_text : cells[i];
       uint32_t size = (uint32_t)strlen(cell);
       aimee_db1_put_u32(out + at, size);
       at += 4;
@@ -83,6 +95,15 @@ int main(void)
    int snapshot = db1_session_ir_running_history_load("session", "owner", "active", &loaded);
    assert(!snapshot && loaded && !strcmp(loaded, transcript));
    free(loaded);
+   assert(db1_session_ir_history_load("session", "primary", "owner", "", &loaded) == 0);
+   free(loaded);
+   assert(db1_session_native_history_load("owner", "session", "completed", "", &loaded) == 0);
+   free(loaded);
+   loaded = db1_session_ir_search("owner", "{}");
+   assert(loaded);
+   free(loaded);
+   assert(db1_session_ir_history_import("session", "primary", "owner", "session", "", "hash", "[]",
+                                        "{}") == 0);
    db1_primary_session_row_t row;
    assert(db1_primary_session_get_latest("session", &row) == 0);
    assert(!strcmp(row.messages_json, transcript) && !strcmp(row.provider, "chatgpt"));

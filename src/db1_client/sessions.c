@@ -50,6 +50,30 @@
 static db1_family_t family = {"db1.sessions", "sessions", AIMEE_DB1_EVENT_SESSIONS,
                               AIMEE_DB1_STAGE_SESSIONS, DB1_SESSIONS_CALL_TIMEOUT_MS, 0};
 
+/* Source-complete canonical reads/imports may span bounded store pages. Other
+ * session operations retain their ordinary budget. The Go family still clamps
+ * work to this invocation deadline. Keep aligned with
+ * CanonicalHistoryTimeout. */
+#define DB1_SESSIONS_HISTORY_TIMEOUT_MS 30000
+static db1_family_t history_family = {"db1.sessions", "sessions", AIMEE_DB1_EVENT_SESSIONS,
+                                      AIMEE_DB1_STAGE_SESSIONS, DB1_SESSIONS_HISTORY_TIMEOUT_MS, 0};
+static uint64_t sessions_call_timeout_ms(uint32_t op)
+{
+   switch (op)
+   {
+   case AIMEE_DB1_OP_SESSION_IR_HISTORY_LOAD:
+   case AIMEE_DB1_OP_SESSION_IR_RUNNING_HISTORY_LOAD:
+   case AIMEE_DB1_OP_SESSION_NATIVE_HISTORY:
+   case AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_RECONCILE:
+   case AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_FINISH:
+   case AIMEE_DB1_OP_SESSION_IR_SEARCH:
+   case AIMEE_DB1_OP_SESSION_IR_HISTORY_IMPORT:
+      return DB1_SESSIONS_HISTORY_TIMEOUT_MS;
+   default:
+      return DB1_SESSIONS_CALL_TIMEOUT_MS;
+   }
+}
+
 /* A write answers 0 or -1; the store either took it or it did not. */
 static int write_result(int status)
 {
@@ -325,8 +349,10 @@ char *db1_server_session_erasure_receipt(const char *request_id, const char *pri
  return receipt;
 }
 
-/* Read-only variable-width replies. Retry only these reads when the transport
- * reports the complete frame size; writes must never be replayed here. Decode
+/* Variable-width replies. Retry read-only calls when the transport reports the
+ * complete frame size. Host50 is also admitted here: its exact immutable source
+ * tuple/digest and deterministic receipt make an acknowledgment retry idempotent;
+ * no other writes may be replayed here. Decode
  * into owned strings so a large transcript is bounded by the bus contract,
  * rather than a per-cell malloc ceiling. */
 static int primary_read(uint32_t op, const char *const *fields, uint32_t count,
@@ -349,7 +375,7 @@ static int primary_read(uint32_t op, const char *const *fields, uint32_t count,
       return -1;
    }
    db1_request_encode(request, op, fields, count);
-   uint64_t deadline = aimee_module_call_deadline_ns(DB1_SESSIONS_CALL_TIMEOUT_MS);
+   uint64_t deadline = aimee_module_call_deadline_ns(sessions_call_timeout_ms(op));
    aimee_module_call_result_t rc;
    for (;;)
    {
@@ -907,8 +933,8 @@ int db1_session_native_reservation_reconcile(const char *principal, const char *
    const char *fields[] = {principal ? principal : "", request_json ? request_json : ""};
    char *const values[] = {out_sequence, out_epoch};
    const size_t caps[] = {32u, 33u};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_RECONCILE, fields,
-                                2, values, caps, 2, NULL));
+   return write_result(db1_call(&history_family, AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_RECONCILE,
+                                fields, 2, values, caps, 2, NULL));
 }
 int db1_session_native_reservation_lookup_checked(const char *principal, const char *request_json,
                                                   char **out_json)
@@ -953,8 +979,8 @@ int db1_session_native_reservation_finish_checked(const char *principal, const c
    char disposition[16] = "";
    char *const values[] = {out_sequence, out_epoch, disposition};
    const size_t caps[] = {32u, 33u, sizeof disposition};
-   int rc = write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_FINISH, fields,
-                                  2, values, caps, 3, NULL));
+   int rc = write_result(db1_call(&history_family, AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_FINISH,
+                                  fields, 2, values, caps, 3, NULL));
    if (rc || (strcmp(disposition, "finished") && strcmp(disposition, "absent")))
    {
       out_sequence[0] = 0;
@@ -1061,4 +1087,51 @@ int db1_server_session_primary_set(const char *principal, const char *session_id
                            agent ? agent : ""};
    return write_result(
        db1_call(&family, AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_SET, fields, 3, NULL, NULL, 0, NULL));
+}
+
+static int session_ir_history_import_mode(const char *session_id, const char *scope,
+                                          const char *actor, const char *source_session,
+                                          const char *source_agent, const char *source_sha256,
+                                          const char *messages_json, const char *report_json,
+                                          const char *mode)
+{
+   const char *fields[] = {session_id ? session_id : "",
+                           scope ? scope : "",
+                           actor ? actor : "",
+                           source_session ? source_session : "",
+                           source_agent ? source_agent : "",
+                           source_sha256 ? source_sha256 : "",
+                           messages_json ? messages_json : "",
+                           report_json ? report_json : "",
+                           mode};
+   char **cells = NULL;
+   uint32_t count = 0;
+   int status = primary_read(AIMEE_DB1_OP_SESSION_IR_HISTORY_IMPORT, fields, 9, &cells, &count);
+   int result = -1;
+   if (status == AIMEE_DB1_STATUS_OK && count == 1 && cells[0])
+   {
+      if (!strcmp(cells[0], "imported"))
+         result = 0;
+      else if (!strcmp(mode, "browse") && !strcmp(cells[0], "skipped"))
+         result = 1;
+   }
+   primary_cells_free(cells, count);
+   return result;
+}
+
+int db1_session_ir_history_import(const char *session_id, const char *scope, const char *actor,
+                                  const char *source_session, const char *source_agent,
+                                  const char *source_sha256, const char *messages_json,
+                                  const char *report_json)
+{
+   return session_ir_history_import_mode(session_id, scope, actor, source_session, source_agent,
+                                         source_sha256, messages_json, report_json, "model");
+}
+
+int db1_session_ir_history_import_browse(const char *session_id, const char *actor,
+                                         const char *source_agent, const char *source_sha256,
+                                         const char *messages_json, const char *report_json)
+{
+   return session_ir_history_import_mode(session_id, "primary", actor, session_id, source_agent,
+                                         source_sha256, messages_json, report_json, "browse");
 }

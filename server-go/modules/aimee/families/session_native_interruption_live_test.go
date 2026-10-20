@@ -198,6 +198,14 @@ func TestSessionNativeLiveInterruptionReceiptAndHistory(t *testing.T) {
 		if !strings.Contains(history[0], "123.123456789012345678901234567890") || !strings.Contains(history[0], canonical.ToolInterruptionDomain) || !strings.Contains(history[0], "actual value") || !strings.Contains(history[0], "explicit_permission_required") {
 			t.Fatal(history)
 		}
+		// Isolated archive views must not resolve primary unknown-call receipts.
+		archival := `[{"role":"user","blocks":[{"type":"text","text":"isolated external archive"}]}]`
+		if status, _, err := run(opSessionIRHistorySave, session, "external-checkpoint", "external-sdk:claude-code", "actor", archival); err != nil || status != store.StatusOK {
+			t.Fatal("external archive checkpoint", status, err)
+		}
+		if status, cells, err := run(opSessionIRHistoryLoad, session, "external-sdk:claude-code", "actor", ""); err != nil || status != store.StatusOK || len(cells) != 1 || !strings.Contains(cells[0], "isolated external archive") {
+			t.Fatal("primary receipt poisoned isolated archive", status, cells, err)
+		}
 		var projection struct {
 			Messages json.RawMessage `json:"messages"`
 		}

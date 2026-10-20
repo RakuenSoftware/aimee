@@ -5,6 +5,8 @@ import { Message, ThinkingBlock, ToolBlock } from '../pages/chat/ChatPrimitives'
 import { emptySession, reduceSession, toolResults, toolBlockKey } from './session';
 import type { ChildExecution, Envelope, SessionState } from './session';
 import ControlCard, { type ReplyControl } from './ControlCard';
+import ImportReportView from './ImportReportView';
+import ImportedCheckpointView from './ImportedCheckpointView';
 const pretty = (value: unknown) => typeof value === 'string' ? value : stringifyJSON(value, 2) ?? '';
 function ExecutionError({ error }: { error: string }) {
   try {
@@ -96,8 +98,8 @@ function ChildExecutionView({ reference, ancestors, onReply, pendingRepliesBySes
   </details>;
 }
 
-export default function IRTranscript({ state, onReply, ancestors = [], controlsReady = true, messageLimit, pendingReplies, pendingRepliesBySession }: {
-  state: SessionState; onReply?: ReplyControl; ancestors?: string[]; controlsReady?: boolean; messageLimit?: number; pendingReplies?: ReadonlySet<string>;
+export default function IRTranscript({ state, onReply, ancestors = [], controlsReady = true, messageLimit, pendingReplies, pendingRepliesBySession, historicalRoles = false }: {
+  state: SessionState; historicalRoles?: boolean; onReply?: ReplyControl; ancestors?: string[]; controlsReady?: boolean; messageLimit?: number; pendingReplies?: ReadonlySet<string>;
   pendingRepliesBySession?: Readonly<Record<string, ReadonlySet<string>>>;
 }) {
   const { byCall, matched } = toolResults(state);
@@ -108,7 +110,13 @@ export default function IRTranscript({ state, onReply, ancestors = [], controlsR
   const resolvedControls = Object.entries(state.controls).filter(([, control]) =>
     (control.response || control.closed) && (messageLimit === undefined || visibleTurns.has(control.turn) || !messageTurns.has(control.turn)));
   return <>
-    {messages.flatMap(m => m.blocks.map((b, index) => {
+    {(state.importReports ?? []).map(observation => <section key={observation.id}>
+      <ImportReportView observation={observation} />
+      <ImportedCheckpointView observation={observation} renderMessages={imported => <IRTranscript historicalRoles controlsReady={false}
+        state={{ ...emptySession(state.session), messages: imported.map((message, index) => ({ ...message, id: `${observation.id}:message:${index}`,
+          turn: observation.turn, complete: true, argumentFragments: {}, stoppedBlocks: message.blocks.map((_, i) => i) })) }} />} />
+    </section>)}
+    {messages.flatMap(m => [...(historicalRoles ? [<p key={`${m.id}:role`} className="text-xs text-muted-foreground">{m.role}</p>] : []), ...m.blocks.map((b, index) => {
       const key = toolBlockKey(m, index);
       switch (b.type) {
         case 'text': {
@@ -138,7 +146,7 @@ export default function IRTranscript({ state, onReply, ancestors = [], controlsR
           return url ? <a key={key} href={url} target="_blank" rel="noreferrer">Document ({b.media_type})</a> : <pre key={key}>{b.media_ref}</pre>;
         }
       }
-    }))}
+    })])}
     {pendingControls.map(([id, control]) => <ControlCard key={`${state.session}:${id}`} id={id} control={control} onReply={onReply} replyPending={pendingReplies?.has(id)} />)}
     {resolvedControls.length > 0 && <details className="ir-resolved-controls">
       <summary>Resolved requests ({resolvedControls.length})</summary>

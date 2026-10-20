@@ -16,6 +16,7 @@ static int fail_checkpoint, compact_enabled;
 static int fail_recovery, recovered_before_history, recovery_reset;
 static int standalone_active, standalone_unavailable;
 static int host_history_calls, host_history_failure;
+static int browse_open, browse_store_failure;
 static int mock_native_history_load(const char *session, const char *actor, const char *active,
                                     int running, cJSON **messages, cJSON **receipts)
 {
@@ -77,8 +78,13 @@ int db1_session_ir_history_load(const char *id, const char *scope, const char *a
                                 const char *active_turn, char **out)
 {
    assert(!strcmp(id, "stable") && !strcmp(scope, "primary") && !strcmp(actor, "alice"));
-   assert(recovered_before_history);
-   recovered_before_history = 0;
+   if (!browse_open)
+   {
+      assert(recovered_before_history);
+      recovered_before_history = 0;
+   }
+   if (browse_store_failure)
+      return -1;
    *out = canonical_stored ? strdup(canonical_stored) : NULL;
    return *out ? 0 : 1;
 }
@@ -93,6 +99,37 @@ int db1_session_ir_history_save(const char *id, const char *checkpoint, const ch
    canonical_stored = strdup(json);
    return 0;
 }
+static int import_reports, import_failure;
+int db1_session_ir_history_import(const char *id, const char *scope, const char *actor,
+                                  const char *source, const char *agent, const char *digest,
+                                  const char *messages, const char *report)
+{
+   assert(!strcmp(id, "stable") && !strcmp(source, "stable") && !strcmp(scope, "primary") &&
+          !strcmp(actor, "alice") && !strcmp(agent, "legacy-agent") && strlen(digest) == 64);
+   cJSON *metadata = cJSON_Parse(report);
+   assert(metadata);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(metadata, "source_sha256")), digest));
+   import_reports++;
+   const char *outcome = cJSON_GetStringValue(cJSON_GetObjectItem(metadata, "outcome"));
+   if (!import_failure && strcmp(outcome, "archived") && strcmp(outcome, "refused"))
+   {
+      free(canonical_stored);
+      canonical_stored = strdup(messages);
+   }
+   cJSON_Delete(metadata);
+   return import_failure ? -1 : 0;
+}
+static int browse_skipped;
+int db1_session_ir_history_import_browse(const char *id, const char *actor, const char *agent,
+                                         const char *digest, const char *messages,
+                                         const char *report)
+{
+   if (browse_store_failure)
+      return -1;
+   if (browse_skipped)
+      return 1;
+   return db1_session_ir_history_import(id, "primary", actor, id, agent, digest, messages, report);
+}
 static char stored_provider[64];
 static int expected_count, executions;
 
@@ -103,6 +140,7 @@ int db1_primary_session_get_latest(const char *id, db1_primary_session_row_t *ro
    if (!stored)
       return 1;
    row->messages_json = strdup(stored);
+   snprintf(row->agent_name, sizeof(row->agent_name), "%s", "legacy-agent");
    snprintf(row->provider, sizeof(row->provider), "%s", stored_provider);
    return 0;
 }
@@ -273,8 +311,105 @@ static void test_authenticated_history_loader(void)
    free(canonical_stored);
    canonical_stored = NULL;
 }
+static void test_large_legacy_import_precedes_compaction(void)
+{
+   primary_session_adapter_reset();
+   free(canonical_stored);
+   canonical_stored = NULL;
+   free(stored);
+   cJSON *many = cJSON_CreateArray();
+   for (int i = 0; i < 4097; i++)
+      assert(cJSON_AddItemToArray(
+          many,
+          cJSON_Parse("{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"legacy\"}]}")));
+   stored = cJSON_PrintUnformatted(many);
+   cJSON_Delete(many);
+   strcpy(stored_provider, "anthropic");
+   agent_t native = {0};
+   strcpy(native.name, "native-claude");
+   strcpy(native.provider, "anthropic");
+   strcpy(native.backend, AGENT_BACKEND_PROVIDER_CLI);
+   strcpy(native.cli_kind, "claude");
+   primary_session_request_t req = {.agent = &native, .aimee_session_id = "stable"};
+   session_compact_result_t result;
+   char id[128], error[256];
+   compact_enabled = 1;
+   int before = executions;
+   assert(primary_session_adapter_compact(&req, &result, id, sizeof id, error, sizeof error) == 0);
+   assert(result.messages_before == 4097 && result.compacted && executions == before);
+   assert(strstr(canonical_stored, "canonical compacted history"));
+   primary_session_adapter_reset();
+   free(canonical_stored);
+   canonical_stored = NULL;
+   free(stored);
+   cJSON *paired = cJSON_Parse(
+       "[{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"large-result\","
+       "\"name\":\"read\",\"input\":{}}]},{\"role\":\"user\",\"blocks\":[{\"type\":\"tool_result\","
+       "\"tool_id\":\"large-result\",\"content\":\"\",\"is_error\":false}]}]");
+   assert(paired);
+   char *large = malloc(1200001);
+   assert(large);
+   memset(large, 'x', 1200000);
+   large[1200000] = 0;
+   cJSON *output =
+       cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetArrayItem(paired, 1), "blocks"), 0);
+   assert(cJSON_SetValuestring(cJSON_GetObjectItem(output, "content"), large));
+   free(large);
+   stored = cJSON_PrintUnformatted(paired);
+   cJSON_Delete(paired);
+   assert(primary_session_adapter_compact(&req, &result, id, sizeof id, error, sizeof error) == 0);
+   assert(result.messages_before == 2 && result.compacted && executions == before);
+   assert(strstr(canonical_stored, "canonical compacted history"));
+   compact_enabled = 0;
+   primary_session_adapter_reset();
+   free(stored);
+   stored = NULL;
+}
+
+static void test_browser_history_open(void)
+{
+   browse_open = 1;
+   int before = executions;
+   int reports = import_reports;
+   free(stored);
+   stored = strdup(
+       "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"Old browsing input\"}]}]");
+   free(canonical_stored);
+   canonical_stored = NULL;
+   strcpy(stored_provider, "anthropic");
+   assert(primary_session_history_open("stable", "mallory") == -1);
+   owner = "mallory";
+   assert(primary_session_history_open("stable", "alice") == -1);
+   owner = "alice";
+   browse_store_failure = 1;
+   assert(primary_session_history_open("stable", "alice") == -1);
+   browse_store_failure = 0;
+   import_failure = 1;
+   assert(primary_session_history_open("stable", "alice") == -1);
+   assert(!canonical_stored);
+   import_failure = 0;
+   assert(primary_session_history_open("stable", "alice") == 0);
+   assert(canonical_stored && strstr(canonical_stored, "Old browsing input"));
+   int acknowledged = import_reports;
+   browse_skipped = 1;
+   assert(primary_session_history_open("stable", "alice") == 0 && import_reports == acknowledged);
+   browse_skipped = 0;
+   free(canonical_stored);
+   canonical_stored = NULL;
+   free(stored);
+   stored = strdup("Legacy terminal transcript must be browseable before sending");
+   strcpy(stored_provider, "tmux");
+   assert(primary_session_history_open("stable", "alice") == 0 && !canonical_stored);
+   assert(import_reports > reports && executions == before);
+   free(stored);
+   stored = NULL;
+   assert(primary_session_history_open("stable", "alice") == 0);
+   browse_open = 0;
+}
+
 int main(void)
 {
+   test_browser_history_open();
    test_authenticated_history_loader();
    test_native_compaction_owns_canonical_session();
    free(canonical_stored);
@@ -324,7 +459,14 @@ int main(void)
    canonical_stored = NULL;
    stored = strdup("[{\"role\":\"user\",\"content\":\"legacy\"}]");
    strcpy(stored_provider, "anthropic");
-   turn(&a, 1, 1); /* Import at load uses the stored provider, not the selected one. */
+   import_failure = 1;
+   int before_import_executions = executions;
+   turn(&a, 0, 0); /* No effects/model call before durable migration acknowledgement. */
+   assert(executions == before_import_executions && !canonical_stored);
+   primary_session_adapter_reset();
+   import_failure = 0;
+   turn(&a, 1, 1); /* Import uses stored source format, not selected model. */
+   assert(import_reports >= 2);
    primary_session_adapter_reset();
    owner = "mallory";
    turn(&a, 0, 0);
@@ -340,6 +482,7 @@ int main(void)
    fail_checkpoint = 0;
    turn(&a, 0, 0); /* A failed checkpoint cannot replay a turn after tools ran. */
    primary_session_adapter_reset();
+   test_large_legacy_import_precedes_compaction();
    free(stored);
    free(canonical_stored);
    puts("primary canonical history: switch, switch back, reload, legacy import and refusal passed");

@@ -2,6 +2,7 @@
  * the per-session persona store (no socket I/O). */
 #include "server_http.h"
 #include "server_session_control.h"
+#include "primary_session_adapter.h"
 #include "server/server_error_kind.h"
 #include "server_http_authz.h"
 #include "server_write_tier_db1.h"
@@ -43,6 +44,7 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 
+static int history_open_effects;
 static char *kb_agent_surfaces_stub(void)
 {
    return strdup("{\"cli_only\":[],\"mcp_only\":[\"kb_future\"]}");
@@ -319,6 +321,7 @@ int agent_http_post(const char *url, const char *auth, const char *body, char **
    (void)body;
    (void)timeout;
    (void)extra;
+   history_open_effects++;
    *response = NULL;
    return -1;
 }
@@ -333,6 +336,7 @@ int agent_http_post_bytes(const char *url, const char *auth, const void *body, s
 static char g_stream_principal[128];
 int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *request)
 {
+   history_open_effects++;
    (void)ctx;
    (void)request;
    snprintf(g_stream_principal, sizeof g_stream_principal, "%s", conn->vault_principal);
@@ -488,12 +492,87 @@ static void submit_and_wait_op(const char *method)
    submit_and_wait_op_owned(method, NULL);
 }
 
+/* The HTTP fixture replaces only the import owner. The primary adapter fixture
+ * links the real implementation; this seam asserts route ordering and custody. */
+static int history_open_fixture, history_open_calls, history_open_pages;
+static int history_open_peer = -1;
+int primary_session_history_open(const char *session, const char *actor)
+{
+   assert(history_open_fixture && !strcmp(session, "legacy") && !strcmp(actor, "webuser:alice"));
+   assert(!strcmp(agent_get_request_vault_principal(), actor));
+   char byte;
+   errno = 0;
+   assert(recv(history_open_peer, &byte, 1, MSG_PEEK | MSG_DONTWAIT) == -1 &&
+          (errno == EAGAIN || errno == EWOULDBLOCK)); /* No successful SSE headers yet. */
+   history_open_calls++;
+   return history_open_fixture == 3 ? -1 : 0;
+}
+static aimee_module_call_result_t history_open_store_reply(uint32_t op, const uint8_t *wire,
+                                                           uint32_t request_len, void *body,
+                                                           uint32_t capacity, uint32_t *length)
+{
+   uint32_t count = aimee_db1_get_u32(wire + 4), at = 8;
+   char fields[4][128] = {{0}};
+   assert(count <= 4);
+   for (uint32_t i = 0; i < count; i++)
+   {
+      assert(at + 4 <= request_len);
+      uint32_t size = aimee_db1_get_u32(wire + at);
+      at += 4;
+      assert(size < sizeof fields[i] && at + size <= request_len);
+      memcpy(fields[i], wire + at, size);
+      at += size;
+   }
+   const char *values[10] = {
+       "legacy", "primary", history_open_fixture == 2 ? "webuser:other" : "webuser:alice",
+       "",       "",        "",
+       "",       "",        "",
+       ""};
+   uint32_t size = 10;
+   assert(!strcmp(fields[0], "legacy"));
+   if (op == AIMEE_DB1_OP_SESSION_IR_PAGE)
+   {
+      assert(count == 4 && history_open_calls == 1 && !strcmp(fields[3], "webuser:alice"));
+      if (history_open_pages++)
+         return AIMEE_MODULE_CALL_TRANSPORT;
+      values[0] =
+          "[{\"version\":1,\"session_id\":\"legacy\",\"sequence\":\"1\",\"event_id\":\"import-"
+          "base\","
+          "\"turn_id\":\"import\",\"actor\":\"webuser:alice\",\"event\":{\"kind\":\"history\","
+          "\"payloa"
+          "d\":{\"scope\":\"primary\",\"phase\":\"import_report\",\"import_report\":{\"version\":1,"
+          "\""
+          "source_format\":\"unknown\",\"outcome\":\"refused\",\"source_sha256\":\"aaaaaaaaaaaaaa"
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"source_session\":\"legacy"
+          "\",\"source_agent\":\"\",\"source_provider\":\"\",\"source_messages\":0,\"imported_messa"
+          "ges\":0,\"removed_thinking_bindings\":0,\"tool_structure\":\"unrecoverable\",\"archi"
+          "ve_chunks\":0}}}}]";
+      size = 1;
+   }
+   else
+      assert(op == AIMEE_DB1_OP_SERVER_SESSION_GET && count == 1);
+   uint8_t *response = body;
+   assert(capacity >= 8);
+   aimee_db1_put_u32(response, AIMEE_DB1_STATUS_OK);
+   aimee_db1_put_u32(response + 4, size);
+   *length = 8;
+   for (uint32_t i = 0; i < size; i++)
+   {
+      uint32_t bytes = (uint32_t)strlen(values[i]);
+      assert(*length + 4 + bytes <= capacity);
+      aimee_db1_put_u32(response + *length, bytes);
+      memcpy(response + *length + 4, values[i], bytes);
+      *length += 4 + bytes;
+   }
+   return AIMEE_MODULE_CALL_OK;
+}
+
 /* The bus is not started in a unit test, so the module surface is stubbed to
  * report exactly that. obs_bus_module_call must still resolve for the link even
  * though an unattached module is answered before it is reached. */
 int obs_bus_module_available(uint32_t event_kind)
 {
-   return primary_store_fixture && event_kind == AIMEE_DB1_EVENT_SESSIONS;
+   return (primary_store_fixture || history_open_fixture) && event_kind == AIMEE_DB1_EVENT_SESSIONS;
 }
 
 aimee_module_call_result_t
@@ -502,6 +581,9 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
                     uint32_t response_capacity, uint32_t *response_len,
                     aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
+   if (history_open_fixture && event_kind == AIMEE_DB1_EVENT_SESSIONS && request_len >= 8)
+      return history_open_store_reply(aimee_db1_get_u32(request_body), request_body, request_len,
+                                      response_body, response_capacity, response_len);
    if (primary_store_fixture && event_kind == AIMEE_DB1_EVENT_SESSIONS && request_len >= 8)
    {
       const uint8_t *wire = request_body;
@@ -869,8 +951,48 @@ static void test_native_http_handoff_preserves_owner_and_caps(void)
    server_http_set_chat_handler(NULL);
 }
 
+static void test_history_open_precedes_sse_headers(void)
+{
+   for (int mode = 1; mode <= 3; mode++)
+   {
+      int pair[2];
+      assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
+      history_open_fixture = mode;
+      history_open_calls = 0;
+      history_open_pages = 0;
+      history_open_peer = pair[1];
+      int effects = history_open_effects;
+      agent_set_request_vault_principal("webuser:alice");
+      handle_session_events(pair[0], "legacy?format=ir&cursor=0", "history-open-test");
+      agent_set_request_vault_principal(NULL);
+      shutdown(pair[0], SHUT_WR);
+      char response[8192];
+      ssize_t bytes = read(pair[1], response, sizeof response - 1);
+      assert(bytes > 0);
+      response[bytes] = 0;
+      if (mode == 1)
+      {
+         assert(strstr(response, "200") && strstr(response, "text/event-stream") &&
+                strstr(response, "import_report"));
+         assert(history_open_calls == 1 && history_open_pages == 2);
+      }
+      else
+      {
+         assert(strstr(response, mode == 2 ? "403" : "503"));
+         assert(!strstr(response, "text/event-stream") && !strstr(response, "event: ir"));
+         assert(history_open_calls == (mode == 2 ? 0 : 1) && history_open_pages == 0);
+      }
+      assert(history_open_effects == effects);
+      close(pair[0]);
+      close(pair[1]);
+      history_open_fixture = 0;
+      history_open_peer = -1;
+   }
+}
+
 int main(void)
 {
+   test_history_open_precedes_sse_headers();
    test_stream_handoff_retains_attested_owner();
    test_operator_control_reply_route();
    extern int server_http_declared_status(const char *json);

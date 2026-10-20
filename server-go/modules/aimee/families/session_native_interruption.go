@@ -154,46 +154,60 @@ func nativeUnansweredCalls(observations []interruptionObservation) ([]canonical.
 }
 
 func nativeInterruptionSources(ctx context.Context, q store.Queryer, v nativeReservation) ([]canonical.ToolInterruptionSource, error) {
-	rows, err := q.Query(ctx, `SELECT sequence::text,event_id,actor,payload FROM session_ir_events WHERE session_id=$1 AND turn_id=$2 AND (payload::jsonb->>'kind'='message' OR (payload::jsonb->>'kind'='delta' AND payload::jsonb->'payload'->>'type'='TURN_START')) ORDER BY session_ir_events.sequence LIMIT 4097`, v.Session, v.Turn)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	var observed []interruptionObservation
 	ownedSources := map[string]bool{}
 	bytes := 0
-	for rows.Next() {
-		var o interruptionObservation
-		o.Source.Session = v.Session
-		o.Source.Turn = v.Turn
-		var raw string
-		if err := rows.Scan(&o.Source.Sequence, &o.Source.EventID, &o.Source.Actor, &raw); err != nil {
+	last := "0"
+	for {
+		// Eight <=1 MiB canonical events plus row metadata fit the SQL
+		// transport frame. Page before transport, not after decoding its reply.
+		rows, err := q.Query(ctx, `SELECT sequence::text,event_id,actor,payload FROM session_ir_events WHERE session_id=$1 AND turn_id=$2 AND sequence>$3::bigint AND (payload::jsonb->>'kind'='message' OR (payload::jsonb->>'kind'='delta' AND payload::jsonb->'payload'->>'type'='TURN_START')) ORDER BY session_ir_events.sequence LIMIT 8`, v.Session, v.Turn, last)
+		if err != nil {
 			return nil, err
 		}
-		bytes += len(raw)
-		if bytes > 16<<20 {
-			return nil, fmt.Errorf("native interruption source byte capacity exceeded")
+		pageCount := 0
+		err = func() error {
+			defer rows.Close()
+			for rows.Next() {
+				var o interruptionObservation
+				o.Source.Session = v.Session
+				o.Source.Turn = v.Turn
+				var raw string
+				if err := rows.Scan(&o.Source.Sequence, &o.Source.EventID, &o.Source.Actor, &raw); err != nil {
+					return err
+				}
+				last = o.Source.Sequence
+				pageCount++
+				bytes += len(raw)
+				if bytes > 16<<20 {
+					return fmt.Errorf("native interruption source byte capacity exceeded")
+				}
+				o.Event = json.RawMessage(raw)
+				var owned nativeOwnedMessage
+				if json.Unmarshal(o.Event, &owned) != nil {
+					return fmt.Errorf("invalid native source envelope")
+				}
+				if owned.Kind == "message" && owned.Owner != nil {
+					expected := canonical.NativeExecutionOwner{Version: 1, Harness: v.Harness, ToolInterruptionOwner: canonical.ToolInterruptionOwner{Owner: v.Owner, Binding: v.Binding, Epoch: v.Epoch, Containment: v.Containment}}
+					ownedSources[o.Source.Sequence] = *owned.Owner == expected
+				}
+				if o.Source.Actor != v.Actor {
+					return fmt.Errorf("foreign native tool source actor")
+				}
+				o.Order = uint64(len(observed) + 1)
+				observed = append(observed, o)
+				if len(observed) > 4096 {
+					return fmt.Errorf("native interruption source capacity exceeded")
+				}
+			}
+			return rows.Err()
+		}()
+		if err != nil {
+			return nil, err
 		}
-		o.Event = json.RawMessage(raw)
-		var owned nativeOwnedMessage
-		if json.Unmarshal(o.Event, &owned) != nil {
-			return nil, fmt.Errorf("invalid native source envelope")
+		if pageCount < 8 {
+			break
 		}
-		if owned.Kind == "message" && owned.Owner != nil {
-			expected := canonical.NativeExecutionOwner{Version: 1, Harness: v.Harness, ToolInterruptionOwner: canonical.ToolInterruptionOwner{Owner: v.Owner, Binding: v.Binding, Epoch: v.Epoch, Containment: v.Containment}}
-			ownedSources[o.Source.Sequence] = *owned.Owner == expected
-		}
-		if o.Source.Actor != v.Actor {
-			return nil, fmt.Errorf("foreign native tool source actor")
-		}
-		o.Order = uint64(len(observed) + 1)
-		observed = append(observed, o)
-		if len(observed) > 4096 {
-			return nil, fmt.Errorf("native interruption source capacity exceeded")
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	calls, err := nativeUnansweredCalls(observed)
 	if err != nil {

@@ -99,7 +99,7 @@ var Telemetry = store.Family{
 		opLearningProjectionClaim:           {Name: "learning_projection_claim", Args: 0, Cells: 1, Tx: true, HostOnly: true, Run: learningProjectionClaim},
 		opLearningProjectionAck:             {Name: "learning_projection_ack", Args: 2, Tx: true, HostOnly: true, Run: learningProjectionAck},
 		opDelegateExecutionTerminalLookup:   {Name: "delegate_execution_terminal_lookup", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: delegateExecutionTerminalLookup},
-		opDelegateExecutionExperienceRecord: {Name: "delegate_execution_experience_record", Args: 2, Tx: true, HostOnly: true, Run: delegateExecutionExperienceRecord},
+		opDelegateExecutionExperienceRecord: {Name: "delegate_execution_experience_record", Timeout: store.CanonicalHistoryTimeout, Args: 2, Tx: true, HostOnly: true, Run: delegateExecutionExperienceRecord},
 		opExecutionTestGradeRecall:          {Name: "execution_test_grade_recall", Args: 3, Cells: 1, HostOnly: true, Run: executionTestGradeRecall},
 		opExecutionTestGradeRecord:          {Name: "execution_test_grade_record", Args: 2, Tx: true, HostOnly: true, Run: executionTestGradeRecord},
 		opProcedureEventLoad:                {Name: "procedure_event_load", Args: 2, Cells: 1, Run: procedureEventLoad},

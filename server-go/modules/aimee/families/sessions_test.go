@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -96,6 +97,20 @@ func (d *sessDB) Exec(_ context.Context, sql string, args ...any) (store.Tag, er
 func (d *sessDB) Query(_ context.Context, sql string, args ...any) (store.Rows, error) {
 	d.executed = append(d.executed, sql)
 	d.args = append(d.args, args)
+	if sql == sessionIRHistorySQL {
+		after, _ := strconv.ParseUint(args[2].(string), 10, 64)
+		page := make([][]any, 0, sessionIRHistoryPageSize)
+		for _, row := range d.rows {
+			n, _ := strconv.ParseUint(row[0].(string), 10, 64)
+			if n > after {
+				page = append(page, row)
+				if len(page) == sessionIRHistoryPageSize {
+					break
+				}
+			}
+		}
+		return &sessRows{rows: page}, nil
+	}
 	return &sessRows{rows: d.rows}, nil
 }
 func (d *sessDB) QueryRow(_ context.Context, sql string, args ...any) store.Row {
