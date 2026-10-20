@@ -3651,3 +3651,19 @@ actual focused compaction link. Fresh CI on the preceding published 72599fe5f
 has 45 passes, two existing platform skips and nine pending checks, with no failures
 at the last completed enumeration. Overall migration/learning qualification remains
 unfinished; production remains KB-free and unpromoted.
+
+
+## Native Vault OAuth integration qualification: 20 October 2026
+
+Actual pinned native Codex/Claude now also exercise the selected host's Vault-held
+OAuth credential path against synthetic local upstreams. The fixture checks the
+Codex account header and Claude OAuth/beta headers, rotates each OAuth source
+between browser turns, and requires the fresh token on subsequent model traffic.
+Neither old/new access tokens nor refresh material may appear in model content.
+The schedulers retain their closed credential-free launch environment.
+
+All sixteen browser/compaction/resume/seeded journeys pass, including both OAuth
+cases. Full PostgreSQL integration passes 168/168 with 26 unavailable local service
+checks; all 76 lint gates pass. These are real SDK executions with synthetic Vault
+credentials and upstreams. They do not claim live subscription acceptance or
+production promotion. The latter remain separate qualification requirements.

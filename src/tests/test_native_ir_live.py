@@ -2,8 +2,10 @@
 """Actual native SDKs against a disposable server, Vault and durable session log.
 
 Invoked by test_integration.sh when both explicit registered SDK command paths are set.
-Local synthetic providers exercise all model wires; no subscription or KB is used.
+Local synthetic providers exercise all model wires and Vault credential kinds;
+no live subscription or KB is used.
 """
+import base64
 import http.client
 import json
 import os
@@ -45,8 +47,16 @@ def main():
         with open(executable, "rb") as stream:
             native = stream.read(4) == b"\x7fELF"
         assert native or (kind == "codex" and executable.endswith("/bin/codex.js")), executable
-    cases = [("codex", "chatgpt"), ("codex", "anthropic"), ("codex", "openai"),
-             ("claude", "anthropic"), ("claude", "chatgpt"), ("claude", "openai")]
+    cases = [(kind, wire, "api_key") for kind, wire in
+             [("codex", "chatgpt"), ("codex", "anthropic"), ("codex", "openai"),
+              ("claude", "anthropic"), ("claude", "chatgpt"), ("claude", "openai")]]
+    cases += [("codex", "chatgpt", "codex-oauth"), ("claude", "anthropic", "claude-oauth")]
+    authorizations = {}
+    documents = {}
+    forbidden_credentials = {"native-refresh-only"}
+
+    def case_name(kind, wire, auth):
+        return "native-" + kind + "-" + wire + ("-oauth" if auth != "api_key" else "")
     active = None
     async_case = False
     observed = []
@@ -79,10 +89,17 @@ def main():
                     assert "RUN_INSTRUCTIONS" in encoded and "iVBORw0KGgo" in encoded
                     if wire != "chatgpt":
                         assert request["max_tokens"] == 128 and request["temperature"] == 0.25, request
-                if wire == "anthropic":
-                    assert self.headers.get("x-api-key") == "native-fixture-only"
+                auth, token = authorizations[marker]
+                assert all(secret not in encoded for secret in forbidden_credentials)
+                if wire == "anthropic" and auth == "api_key":
+                    assert self.headers.get("x-api-key") == token
                 else:
-                    assert self.headers.get("Authorization") == "Bearer native-fixture-only"
+                    assert self.headers.get("Authorization") == "Bearer " + token
+                if auth == "codex-oauth":
+                    assert self.headers.get("chatgpt-account-id") == "native-account"
+                if auth == "claude-oauth":
+                    assert self.headers.get("x-api-key") is None
+                    assert "oauth" in self.headers.get("anthropic-beta", "")
                 logical = "mcp__aimee__read_file" if kind == "claude" else "read_file"
                 tools = request.get("tools", [])
                 names = {tool.get("name", tool.get("function", {}).get("name")) for tool in tools}
@@ -182,19 +199,32 @@ def main():
         actor = "uid:" + str(os.getuid())
         api("/v1/vault/capability", {"action": "grant", "principal": actor})
         models = []
-        for kind, wire in cases:
-            name = "native-" + kind + "-" + wire
-            models.append(dict(name=name, model=name, provider=wire, auth_type="api_key",
+        for kind, wire, auth in cases:
+            name = case_name(kind, wire, auth)
+            models.append(dict(name=name, model=name, provider=wire, auth_type=auth,
                 endpoint=f"http://127.0.0.1:{server.server_port}/v1", backend="provider-cli", cli_kind=kind,
                 cli_cmd=binaries[kind], roles=["all"], enabled=True, tools_enabled=True,
                 context_window=131072, max_tokens=4096, timeout_ms=15000, cli_idle_timeout_ms=15000,
                 max_parallel=1, max_turns=4))
-            api("/v1/vault/set_server", {"agent": name, "cred": "api_key", "secret": "native-fixture-only"})
+            token = "native-fixture-only"
+            document = None
+            if auth == "codex-oauth":
+                payload = base64.urlsafe_b64encode(json.dumps({"exp": int(time.time()) + 86400}).encode()).decode().rstrip("=")
+                token = "e30." + payload + ".fixture"
+                document = {"tokens": {"access_token": token, "refresh_token": "native-refresh-only", "account_id": "native-account"}}
+            elif auth == "claude-oauth":
+                document = {"claudeAiOauth": {"accessToken": token, "refreshToken": "native-refresh-only",
+                    "expiresAt": (int(time.time()) + 86400) * 1000, "scopes": ["user:inference", "user:profile"]}}
+            authorizations[name] = (auth, token)
+            documents[name] = document
+            forbidden_credentials.add(token)
+            api("/v1/vault/set_server", {"agent": name, "cred": "oauth" if document else "api_key",
+                                        "secret": json.dumps(document) if document else token})
         models_path.write_text(json.dumps(dict(default_agent=models[0]["name"], default_delegate=models[0]["name"],
                                                fallback_chain=[], models=models)))
-        for kind, wire in cases:
+        for kind, wire, auth in cases:
             async_case = False
-            marker = "native-" + kind + "-" + wire
+            marker = case_name(kind, wire, auth)
             active = (kind, wire, marker, "toolu_" + marker.replace("-", "_"))
             count = 0
             sid = api("/v1/sessions/create", {"client_type": "native-ir-integration"})["session_id"]
@@ -203,6 +233,17 @@ def main():
             try:
                 for label in ("FIRST", "FOLLOWUP"):
                     if label == "FOLLOWUP":
+                        if auth != "api_key":
+                            document = documents[marker]
+                            old_token = authorizations[marker][1]
+                            token = old_token.rsplit(".", 1)[0] + ".rotated" if auth == "codex-oauth" else "native-fixture-rotated"
+                            if auth == "codex-oauth":
+                                document["tokens"]["access_token"] = token
+                            else:
+                                document["claudeAiOauth"]["accessToken"] = token
+                            forbidden_credentials.add(token)
+                            authorizations[marker] = (auth, token)
+                            api("/v1/vault/set_server", {"agent": marker, "cred": "oauth", "secret": json.dumps(document)})
                         compact = api("/v1/chat/stream", {"attach_id": attachment,
                             "aimee_session_id": sid, "provider_session_id": "untrusted-sdk-handle",
                             "compact": True, "ir_version": 1})
@@ -239,7 +280,7 @@ def main():
                 assert marker + "_FIRST" in replay and marker + "_FOLLOWUP" in replay
                 assert "canonical delegate fixture" in replay and active[3] in replay
                 assert "Continue the server-owned canonical turn." not in replay
-                print("native integration:", kind, wire, "original tool/result, canonical compaction, durable replay and resumed turn pass", flush=True)
+                print("native integration:", kind, wire, auth, "original tool/result, canonical compaction, durable replay and resumed turn pass", flush=True)
             finally:
                 api(f"/v1/sessions/{sid}/detach", {"attach_id": attachment})
             async_case = True
@@ -270,7 +311,7 @@ def main():
             assert "NATIVE_RUN_PRIOR" in encoded and "NATIVE_RUN_END" in encoded
             assert "canonical delegate fixture" in encoded and "iVBORw0KGgo" in encoded
             assert "Continue the server-owned canonical turn." not in encoded
-            print("native integration:", kind, wire, "typed seeded run, real tool, original response and durable source pass", flush=True)
+            print("native integration:", kind, wire, auth, "typed seeded run, real tool, original response and durable source pass", flush=True)
     finally:
         if previous is None:
             models_path.unlink(missing_ok=True)
