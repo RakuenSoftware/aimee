@@ -48,3 +48,57 @@ and `aimee-bus-module-caller-check`, the Rust caller as its own admitted process
 runtime's module and against the Rust module process.
 CI runs the same target in the `rust-bus-tests` job, which the `unit-tests` aggregate requires.
 The toolchain is pinned in `rust/rust-toolchain.toml`.
+
+## Backend module adapter
+
+`module_adapter` provides the communication adapter for independently owned
+backends. Implement its `Backend` trait in the backend's repository and install
+`Adapter::new(backend, stage_limits)?.handler()` in the existing
+`ModuleProcessConfig`. Its opaque byte interface adds no application protocol.
+
+```rust
+use aimee_bus::module_adapter::{Adapter, Backend, Response, StageLimits};
+use aimee_bus::module_protocol::ModuleStatus;
+use aimee_bus::module_runtime::Invocation;
+use std::{io::Write, sync::Arc};
+
+struct Echo;
+impl Backend for Echo {
+    fn invoke(&self, invocation: &Invocation, request: &[u8], response: &mut Response)
+        -> Result<(), ModuleStatus>
+    {
+        if invocation.cancelled() { return Err(ModuleStatus::Cancelled); }
+        response.write_all(request).map_err(|_| ModuleStatus::Internal)
+    }
+}
+let handler = Adapter::new(Arc::new(Echo), [StageLimits {
+    stage_id: 1, request_bytes: 4096, response_bytes: 4096,
+}]).unwrap().handler();
+// The backend executable installs `handler` in its own ModuleProcessConfig.
+```
+
+The adapter validates nonempty, unique stage IDs and budgets within the AMOD
+maximum, rejects unconfigured stages and oversized assembled requests before
+backend dispatch, and supplies a bounded response writer. An ignored overflow
+or allocation error still invalidates the whole reply. A backend failure drops
+all partial output and returns only its AMOD status; it does not supply a body
+for runtime diagnostic logging. `Err(ModuleStatus::Ok)` is an internal error.
+
+The invocation preserves caller identity, trace, deadline and cancellation.
+Authentication, fragmented transport, scheduling, panic containment and runtime
+shutdown remain in the existing bus/runtime; the adapter adds none of them.
+Backend handlers may run concurrently and must observe cancellation around bounded
+units of work. Stage limits apply **after** runtime request reassembly; they do
+not replace the runtime's 16 MiB assembly bound or constrain a backend's own
+allocations. Cancellation cannot undo an operation already performed.
+
+The adapter never retries. Backends own authorization, stable mutation IDs,
+request meaning, storage and execution. A transport correlation ID is not an
+application idempotency key. Process binaries, supervision, installation and
+backend lifecycle also remain with their existing owners.
+
+`tests/module_adapter.rs` drives the unchanged runtime with fragmented binary
+payloads, caller metadata, limits, unknown stages, backend failures, panic
+containment, deadline expiry and active cancellation. The existing C-host process
+interop helper also uses this adapter, so `make -C src rust-bus-tests` exercises
+it across real process boundaries in both C-caller and Rust-caller legs.

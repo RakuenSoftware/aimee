@@ -6,10 +6,12 @@
 //! Serves kind 5889 stage 1 as principal class 1 ref 7. It echoes the
 //! request, except "cancel", which waits until the call is cancelled.
 
-use aimee_bus::module_protocol::ModuleStatus;
+use aimee_bus::module_adapter::{Adapter, Backend, Response, StageLimits};
+use aimee_bus::module_protocol::{MODULE_MESSAGE_MAX_BODY, ModuleStatus};
 use aimee_bus::module_runtime::{
     Invocation, ModuleProcessConfig, ModuleStage, Shutdown, run_module_process,
 };
+use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -33,6 +35,24 @@ fn install_signal_handlers() {
             libc::sigemptyset(&mut action.sa_mask);
             libc::sigaction(sig, &action, std::ptr::null_mut());
         }
+    }
+}
+
+#[derive(Debug)]
+struct Echo;
+impl Backend for Echo {
+    fn invoke(
+        &self,
+        inv: &Invocation,
+        req: &[u8],
+        response: &mut Response,
+    ) -> Result<(), ModuleStatus> {
+        if req == b"cancel" {
+            while !inv.cancelled() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        response.write_all(req).map_err(|_| ModuleStatus::Internal)
     }
 }
 
@@ -61,14 +81,18 @@ fn main() {
             event_kind: TEST_KIND,
             stage_id: TEST_STAGE,
         }],
-        handler: Some(Arc::new(|inv: &Invocation, req: &[u8]| {
-            if req == b"cancel" {
-                while !inv.cancelled() {
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-            }
-            (req.to_vec(), ModuleStatus::Ok)
-        })),
+        handler: Some(
+            Adapter::new(
+                Arc::new(Echo),
+                [StageLimits {
+                    stage_id: TEST_STAGE,
+                    request_bytes: MODULE_MESSAGE_MAX_BODY as usize,
+                    response_bytes: MODULE_MESSAGE_MAX_BODY as usize,
+                }],
+            )
+            .expect("fixture limits")
+            .handler(),
+        ),
         max_idle_poll: Duration::ZERO,
         after_attach: None,
     };
