@@ -60,10 +60,15 @@ translation admits only the exact SDK API-error marker and the allowlisted
 rate-limit category. It emits the static message "Claude request was rate limited
 by the provider." only after a failed terminal result; provider diagnostic text
 never becomes assistant output. Cancellation, capture failure and later success
-retain precedence. Normal, ASan/UBSan/leak fixtures and CMake tests pass. The
-actual saved SDK envelope matches the tested shape. Old history is unchanged.
-Fresh CI and the matching VM deployment qualify this follow-up separately from
-the green `230b49062` qualification above; the CT image remains exactly `230b49062`.
+retain precedence. Normal, ASan/UBSan/leak fixtures and CMake tests cover this
+boundary. The saved SDK conversation log uses an internal camelCase marker;
+inspection of the pinned Claude 2.1.227 stdout mapper and its query-loop call site
+established the actual emitted marker, `is_api_error_message`. The parser and
+fixtures use this snake_case contract; a camelCase-only lookalike cannot classify
+an error. The initial log-shaped fixture did not qualify stdout handling and is
+superseded by that correction. Old history is unchanged. Fresh CI and the matching
+VM deployment qualify this follow-up separately from the green `230b49062`
+qualification above; the CT image remains exactly `230b49062`.
 Production `.100` remains unchanged, KB-free and unpromoted; the distinct reviewer
 and live-ruleset requirements in `OWNERS.md` remain outstanding.
 

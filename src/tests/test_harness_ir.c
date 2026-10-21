@@ -509,7 +509,7 @@ static void claude_failure_classification(void)
       {
          char raw[1024];
          snprintf(raw, sizeof raw,
-                  "{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"error\":\"%s\","
+                  "{\"type\":\"assistant\",\"is_api_error_message\":true,\"error\":\"%s\","
                   "\"message\":{\"id\":\"sdk-api-error\",\"role\":\"assistant\",\"content\":["
                   "{\"type\":\"text\",\"text\":\"PRIVATE_PROVIDER_DIAGNOSTIC\"}]}}",
                   codes[i]);
@@ -518,9 +518,10 @@ static void claude_failure_classification(void)
                 (i == 0 ? AIMEE_HARNESS_FAILURE_RATE_LIMIT : AIMEE_HARNESS_FAILURE_NONE));
          assert(cJSON_GetArraySize(events) == before && !state.claude_message);
       }
-      assert(!frame("{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"error\":\"rate_limit\","
-                    "\"message\":{\"role\":\"assistant\"}}",
-                    &state, 0));
+      assert(
+          !frame("{\"type\":\"assistant\",\"is_api_error_message\":true,\"error\":\"rate_limit\","
+                 "\"message\":{\"role\":\"assistant\"}}",
+                 &state, 0));
       assert(state.failure == AIMEE_HARNESS_FAILURE_RATE_LIMIT);
       assert(!frame("{\"type\":\"result\",\"is_error\":false}", &state, 0));
       assert(state.failure == AIMEE_HARNESS_FAILURE_NONE);
@@ -528,14 +529,19 @@ static void claude_failure_classification(void)
    }
    /* Ordinary assistant content and non-boolean lookalikes cannot classify. */
    aimee_harness_ir_t state = {.host_model_capture = 1};
-   assert(!frame("{\"type\":\"assistant\",\"isApiErrorMessage\":\"true\",\"error\":\"rate_limit\","
-                 "\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\","
-                 "\"text\":\"rate_limit\"}]}}",
-                 &state, 0));
+   assert(
+       !frame("{\"type\":\"assistant\",\"is_api_error_message\":\"true\",\"error\":\"rate_limit\","
+              "\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\","
+              "\"text\":\"rate_limit\"}]}}",
+              &state, 0));
    assert(state.failure == AIMEE_HARNESS_FAILURE_NONE);
    assert(!frame(
        "{\"type\":\"assistant\",\"error\":\"rate_limit\",\"message\":{\"role\":\"assistant\"}}",
        &state, 0));
+   /* Camel case belongs to the internal conversation log, not print stdout. */
+   assert(!frame("{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"error\":\"rate_limit\","
+                 "\"message\":{\"role\":\"assistant\"}}",
+                 &state, 0));
    assert(state.failure == AIMEE_HARNESS_FAILURE_NONE && cJSON_GetArraySize(events) == before);
    aimee_harness_ir_free(&state);
 }

@@ -194,9 +194,10 @@ static void strict_frames(const char *path, const provider_cli_cfg_t *cfg)
 }
 static void api_failure_diagnostic(const char *path, const provider_cli_cfg_t *cfg)
 {
-   /* Actual SDK envelope shape; arbitrary diagnostic text must never be copied. */
+   /* Pinned print-mode stdout uses snake case; the internal log uses camel case.
+    * Arbitrary diagnostic text must never be copied. */
    const char *assistant =
-       "{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"error\":\"rate_limit\","
+       "{\"type\":\"assistant\",\"is_api_error_message\":true,\"error\":\"rate_limit\","
        "\"session_id\":\"native-one\",\"message\":{\"id\":\"sdk-api-error\",\"type\":\"message\","
        "\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"PRIVATE_PROVIDER_"
        "DIAGNOSTIC\"}]}}\n";

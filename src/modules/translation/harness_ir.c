@@ -521,7 +521,7 @@ static int aimee_claude_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
    if (!strcmp(type, "assistant"))
    {
       s->failure = AIMEE_HARNESS_FAILURE_NONE;
-      if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(f, "isApiErrorMessage")))
+      if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(f, "is_api_error_message")))
       {
          const cJSON *message = cJSON_GetObjectItemCaseSensitive(f, "message");
          if (!cJSON_IsObject(message) || strcmp(str(message, "role"), "assistant"))
