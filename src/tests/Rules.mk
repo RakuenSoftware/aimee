@@ -1620,7 +1620,7 @@ $(TESTPREFIX)/unit-test-cli-v1-subcommands: $(OBJDIR)/tests/test_cli_v1_subcomma
                                   $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-cli-native-bridge: $(OBJDIR)/tests/test_cli_native_bridge.o \
+$(TESTPREFIX)/unit-test-cli-native-bridge: $(OBJDIR)/tests/test_cli_native_bridge.o $(OBJDIR)/cli_proxy.o \
                                   $(OBJDIR)/server/server_native_cli.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o \
                                   $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o \
                                   $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \

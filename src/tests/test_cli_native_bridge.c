@@ -2,6 +2,9 @@
  * route fallback. This is the production cli_v1_forward entry, not a hand-built
  * MCP request sent instead of the registered CLI. */
 #include "cli_client.h"
+#include "cli_proxy.h"
+#include <sys/wait.h>
+#include <stdatomic.h>
 #include "server_native_cli.h"
 #include "cli_v1_routes_internal.h"
 #include "cJSON.h"
@@ -92,8 +95,94 @@ static void *serve(void *unused)
    }
    return NULL;
 }
-int main(void)
+static atomic_int strict_calls, strict_error;
+static int strict_route(const char *method, const char *path, void *context)
 {
+   (void)context;
+   return (!strcmp(method, "GET") && !strcmp(path, "/v1/cli/manifest")) ||
+          (!strcmp(method, "POST") && !strcmp(path, "/v1/native/cli"));
+}
+static int strict_authorize(const char *method, const char *path, const char *token, void *context)
+{
+   return strict_route(method, path, context) && !strcmp(token, "exact-child-grant");
+}
+static int strict_forward(const char *method, const char *path, const char *headers,
+                          const void *body, unsigned long length, const char *session,
+                          const cli_proxy_io_t *io, void *context)
+{
+   (void)headers;
+   (void)context;
+   assert(!strcmp(session, "native-child-session"));
+   assert(!strcmp(io->local_credential, "exact-child-grant"));
+   const char *result;
+   if (!strcmp(method, "GET"))
+   {
+      assert(!strcmp(path, "/v1/cli/manifest") && !length);
+      result = "{\"manifest_version\":1,\"marshal\":[]}";
+   }
+   else
+   {
+      assert(!strcmp(path, "/v1/native/cli"));
+      cJSON *request = cJSON_ParseWithLength(body, length);
+      char tool[128], nonce[33];
+      cJSON *arguments = NULL;
+      assert(!server_native_cli_project(request, tool, &arguments, nonce));
+      assert(!strcmp(tool, "index_investigate"));
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(arguments, "query")),
+                     "whole real CLI via strict proxy"));
+      cJSON_Delete(arguments);
+      cJSON_Delete(request);
+      result =
+          atomic_load(&strict_error)
+              ? "{\"content\":[{\"type\":\"text\",\"text\":\"owned refusal\"}],\"isError\":true}"
+              : "{\"content\":[{\"type\":\"text\",\"text\":\"owned result\"}],\"isError\":false}";
+   }
+   atomic_fetch_add(&strict_calls, 1);
+   char response[1024];
+   int n = snprintf(response, sizeof response,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %zu\r\n"
+                    "Connection: close\r\n\r\n%s",
+                    strlen(result), result);
+   return io->write_response(response, (unsigned long)n, io->context);
+}
+static void strict_binary_entry(const char *binary)
+{
+   unsigned port = 0;
+   cli_proxy_t *proxy =
+       cli_proxy_start_authorized(0, "master-not-child", "native-child-session", &port,
+                                  strict_route, strict_authorize, strict_forward, NULL);
+   assert(proxy && port);
+   char endpoint[64];
+   snprintf(endpoint, sizeof endpoint, "http://127.0.0.1:%u", port);
+   for (int error = 0; error < 2; error++)
+   {
+      atomic_store(&strict_error, error);
+      pid_t pid = fork();
+      assert(pid >= 0);
+      if (!pid)
+      {
+         setenv("AIMEE_NATIVE_CLI", "1", 1);
+         setenv("AIMEE_API_ENDPOINT", endpoint, 1);
+         setenv("AIMEE_API_BEARER", "exact-child-grant", 1);
+         execl(binary, binary, "--json", "index", "investigate", "whole real CLI via strict proxy",
+               (char *)NULL);
+         _exit(127);
+      }
+      int status;
+      assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status));
+      assert(WEXITSTATUS(status) == error);
+   }
+   cli_proxy_stop(proxy);
+   assert(atomic_load(&strict_calls) == 4); /* both real GET + POST round trips */
+   puts("whole thin-client main through actual strict proxy: ok");
+}
+int main(int argc, char **argv)
+{
+   if (argc == 2)
+   {
+      strict_binary_entry(argv[1]);
+      return 0;
+   }
    char home[] = "/var/tmp/aimee-cli-child-home-XXXXXX";
    assert(mkdtemp(home));
    setenv("AIMEE_HOME", home, 1);

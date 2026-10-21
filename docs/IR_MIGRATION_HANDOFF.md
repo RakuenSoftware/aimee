@@ -14,6 +14,30 @@ merged baseline, not the subsequent browser repairs. Continue on
 `fix/browser-ir-live-acceptance` in [PR #3057](https://github.com/RakuenSoftware/aimee/pull/3057) for their fresh CI. Keep automatic review and
 the strict attribution gate enabled. No production promotion is claimed.
 
+### Live native CLI authority repair
+
+The complete packaged GUI at `25e62c1e0f17c5455dd7b03d245c06d8c825a924`
+passed normal PAM, exact running artifact hashes, managed model TLS discovery,
+read-only replay/reload and desktop/390/320 screenshots. The Reasoning label no
+longer implies completed history is still running; no extra send/reply/cancel
+occurred and all 28 original API recovery records remained identical. The
+isolated real-PostgreSQL/Docker integration passed 171/171 checks. Five optional
+HTTP400 checks also passed separately through the actual C-over-UDS service with
+its runtime-web status owner; 20 KB-dependent checks remain intentionally
+excluded. Production still has no KB instance.
+
+A single genuine native Bash CLI invocation then exposed HTTP400 before index
+admission: the POSIX client omitted the listener port from HTTP Host, while the
+private proxy correctly required its exact authority. Its failed canonical turn
+and absence of nested index admission are preserved; no project-scope success is
+claimed for that attempt. The client repair separates HTTP authority (including
+port and IPv6 brackets) from the bare TLS verification/SNI hostname. Proxy checks
+are unchanged. The real thin client now passes against the real strict proxy;
+the pre-fix client fails the same regression. Actual TLS hostname acceptance,
+wrong-hostname refusal, IPv6, normal and sanitizer checks pass. The existing CI
+step now requires the whole-binary proxy regression. Fresh CI, matching deployment
+and one new genuine native CLI turn must still qualify this repair.
+
 ### Live source-handoff result and remaining integration repair
 
 Executable source `38d55ba726e22e11e0a7cae8750200139ae0da87` is deployed on owned

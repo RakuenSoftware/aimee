@@ -599,11 +599,14 @@ jobs:
       # A configured remote is an exclusive transport: no local probe, no local
       # execution, no local fallback. The test is black-box (temp HOME, a local
       # HTTP stand-in, and a unix-socket sentinel that must never be contacted),
-      # needs only the client this job already built, and runs in seconds. It
+      # uses the real client and strict native-proxy fixture, and runs in seconds. It
       # also lives in the `integration-tests` make target, which no workflow
       # invokes — without this step the guarantee is unenforced in CI.
       - name: Thin-client remote exclusivity
-        run: python3 scripts/test-thin-client-remote-exclusive.py ./aimee
+        run: |
+          make -C src -j2 build/obj/tests/unit-test-cli-native-bridge
+          python3 scripts/test-thin-client-remote-exclusive.py ./aimee \
+            --native-proxy-fixture src/build/obj/tests/unit-test-cli-native-bridge
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
