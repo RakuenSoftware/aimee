@@ -41,12 +41,13 @@ could reuse an attachment that unload had detached. The follow-up forwards the
 actual actor, admits the exact durable browser owner before attachment success,
 and acquires a page-owned attachment before preferences, replay or sends.
 Explicit reconnect reacquires a lost surface without retrying the failed action;
-background replay no longer clears its send error. Foreign owners remain refused.
+background replay no longer clears its send error. Cached Back navigation keeps its
+live surface; only a genuine page discard detaches it. Foreign owners remain refused.
 
 The combined derivative passed live first-open model pinning before any chat,
 reload with zero sends, real model switching and durable history, a real pending
 question across reload, exactly one browser reply and resolved replay, plus
-320/390 px layout checks. The source passes 404 frontend tests, both frontend
+320/390 px layout checks. The source passes 405 frontend tests, both frontend
 builds, the Chromium component harness, runtime-web race tests, normal HTTP and
 presence fixtures, HTTP ASan/UBSan/LSan, and all 76 lint gates. The published
 baseline and manually built test derivatives are separately identified; fresh

@@ -1663,7 +1663,9 @@ export default function Chat() {
     // Detach presence only on a GENUINE unload: a tab going to the background — or
     // entering bfcache (pagehide persisted=true, restored without re-mounting) —
     // is still an active session and must stay attached.
-    const onBeforeUnload = () => { flushPendingTabs(); detachAll(); };
+    // beforeunload also fires for BFcache entry or a cancelled navigation.
+    // Only pagehide can tell whether this document is actually being discarded.
+    const onBeforeUnload = () => { flushPendingTabs(); };
     const onPageHide = (e: PageTransitionEvent) => { flushPendingTabs(); if (!e.persisted) detachAll(); };
     const onVisibility = () => { if (document.visibilityState === 'hidden') flushPendingTabs(); };
     window.addEventListener('beforeunload', onBeforeUnload);

@@ -195,6 +195,32 @@ describe('canonical browser chat', () => {
     await close();
   });
 
+  it('keeps the live surface through BFcache navigation and detaches only on a genuine page discard', async () => {
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(1);
+    await act(async () => {
+      window.dispatchEvent(new Event('beforeunload'));
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    });
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/detach')).toHaveLength(0);
+    fireEvent.change(screen.getByPlaceholderText(/^Type a message/), { target: { value: 'After a real Back navigation' } });
+    fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(1);
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/chat/send')?.[1]?.body)).attach_id).toBe('attach-1');
+    await close();
+    await act(async () => {
+      window.dispatchEvent(new Event('beforeunload'));
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }));
+    });
+    const detaches = fetchMock.mock.calls.filter(([url]) => url === '/api/chat/detach');
+    expect(detaches).toHaveLength(1);
+    expect(JSON.parse(String(detaches[0][1]?.body))).toEqual({ sid: 'web-one', attach_id: 'attach-1' });
+    expect(detaches[0][1]?.keepalive).toBe(true);
+  });
+
   it('merges delayed channel history with repeated live frames and reconnect snapshots', async () => {
     localStorage.setItem('aimee_active_channel', 'room');
     const ordinaryFetch = fetchMock.getMockImplementation()!;
