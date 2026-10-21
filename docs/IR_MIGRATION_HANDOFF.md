@@ -4,14 +4,55 @@ Prepared 17 October 2026, with subsequent continuation checkpoints. The current
 user instruction is to keep implementing the unfinished migration; the historical
 stop/handoff request below is superseded.
 
-## Current continuation status: PR #3052; final qualification in progress
+## Current continuation status: live `.252` acceptance follow-up
 
-Active work remains in [PR #3052](https://github.com/RakuenSoftware/aimee/pull/3052),
-targeting `testing`. Recovery baseline `a6bd31897` passed fresh CI, including
-all four configured deployment tiers. The continuation below includes later
-changes; the PR checks qualify its exact published head.
-Keep automatic review and the strict attribution gate enabled. No production
-promotion or final fresh-CI result is claimed.
+[PR #3052](https://github.com/RakuenSoftware/aimee/pull/3052) merged into `testing`
+as `aa8c774edcc324f5defb6c5cea592f0e1dd5314d`. Its final premerge checks and
+all 54 postmerge main CI jobs passed, including every configured deployment
+tier; the seven-job artifact publisher also passed. Those results qualify the
+merged baseline, not the subsequent browser repairs. Continue on
+`fix/browser-ir-live-acceptance` for their fresh CI. Keep automatic review and
+the strict attribution gate enabled. No production promotion is claimed.
+
+### Actual `.252` qualification, 21 October 2026
+
+Disposable CT 8162 and VM 8163 on `pvetest` were created for this work; existing
+guests were left alone. The immutable merged application and PostgreSQL images
+were used for KB-free T3 deployment. Its seven gates passed, with 217 personal
+memory, 15 semantic memory, 21 exploratory memory, 352 provider-boundary and 87
+native-async checks. Egress/Vault passed 18 checks. Plain storage passed all 11
+checks on an unchanged fresh retry; its initial startup timeout remains recorded
+with an undetermined cause. The CT's initial Docker memlock failure was resolved
+by raising only its own Docker/containerd limits to the shipped 1 GiB setting.
+
+The Proxmox host lacks Landlock, so native containment was qualified in VM 8163
+with its own supported Debian kernel rather than weakening the guard. Actual
+server integration passed **171/171**, including all eight pinned SDK profiles,
+both Codex/Claude crash recoveries and both interruption/denial journeys. The 25
+unconfigured-service skips remain explicit. The persisted-learning audit found
+79 ungraded canonical outcomes, two configured-test grades and nine delegate
+observations across four principals/project scopes, with no invalid source,
+proof, scope, pending-review or duplicate bindings. No learning rows were seeded.
+
+Real Chromium against the deployed GUI exposed defects that the earlier
+component fixtures did not: primary selection omitted the authenticated webuser,
+fresh presence did not establish its durable canonical owner, and a page reload
+could reuse an attachment that unload had detached. The follow-up forwards the
+actual actor, admits the exact durable browser owner before attachment success,
+and acquires a page-owned attachment before preferences, replay or sends.
+Explicit reconnect reacquires a lost surface without retrying the failed action;
+background replay no longer clears its send error. Foreign owners remain refused.
+
+The combined derivative passed live first-open model pinning before any chat,
+reload with zero sends, real model switching and durable history, a real pending
+question across reload, exactly one browser reply and resolved replay, plus
+320/390 px layout checks. The source passes 404 frontend tests, both frontend
+builds, the Chromium component harness, runtime-web race tests, normal HTTP and
+presence fixtures, HTTP ASan/UBSan/LSan, and all 76 lint gates. The published
+baseline and manually built test derivatives are separately identified; fresh
+follow-up CI and production `.100` promotion/verification are still required.
+Owned provider fixtures establish runtime contracts, not live vendor acceptance
+or semantic model quality. Production `.100` must remain KB-free.
 
 The supported browser/Linux cutovers are implemented: canonical primary loading
 and model switching, durable session-log history, request/response streaming,
