@@ -84,6 +84,65 @@ int main(void)
    assert(server_native_history_admit(messages, receipts) == -1);
    assert(
        cJSON_ReplaceItemInObjectCaseSensitive(receipt, "outcome", cJSON_CreateString("unknown")));
+   cJSON *entry = cJSON_GetArrayItem(receipts, 0);
+   cJSON *source = cJSON_GetObjectItemCaseSensitive(receipt, "source");
+   cJSON *native = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(receipt, "owner"), 1);
+   cJSON *operator= cJSON_CreateObject();
+   assert(cJSON_AddStringToObject(operator, "operator_cancel_event_id", "operator-cancel:old"));
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(receipt, "owner", operator));
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(
+       entry, "event_id", cJSON_CreateString("operator-interruption:old:2:0")));
+   cJSON *ctx = cJSON_GetObjectItemCaseSensitive(block, "context");
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(
+       ctx, "revision_scope", cJSON_CreateString("operator-interruption:old:2:0")));
+   assert(!server_native_history_admit(messages, receipts));
+   assert(cJSON_AddStringToObject(operator, "owner_id", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+   assert(server_native_history_admit(messages, receipts) == -1);
+   cJSON_DeleteItemFromObjectCaseSensitive(operator, "owner_id");
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(operator, "operator_cancel_event_id",
+                                                 cJSON_CreateString("operator-cancel:foreign")));
+   assert(server_native_history_admit(messages, receipts) == -1);
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(operator, "operator_cancel_event_id",
+                                                 cJSON_CreateString("operator-cancel:old")));
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(entry, "event_id", cJSON_CreateString("forged")));
+   assert(server_native_history_admit(messages, receipts) == -1);
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(
+       entry, "event_id", cJSON_CreateString("operator-interruption:old:2:0")));
+   char long_actor[161];
+   memset(long_actor, 'a', 160);
+   long_actor[160] = 0;
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(source, "actor", cJSON_CreateString(long_actor)));
+   assert(server_native_history_admit(messages, receipts) == -1);
+   long_actor[159] = 0;
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(source, "actor", cJSON_CreateString(long_actor)));
+   assert(!server_native_history_admit(messages, receipts));
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(source, "actor", cJSON_CreateString("owner")));
+   cJSON *saved_input = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(originalCall, "input"), 1);
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(originalCall, "input",
+                                                 cJSON_Parse("{\"changed\":true}")));
+   assert(server_native_history_admit(messages, receipts) == -1);
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(originalCall, "input", saved_input));
+   cJSON *calls = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(messages, 0), "blocks");
+   assert(cJSON_AddItemToArray(calls, cJSON_Duplicate(originalCall, 1)));
+   assert(server_native_history_admit(messages, receipts) == -1);
+   cJSON_DeleteItemFromArray(calls, 1);
+   char *native_durable = durable;
+   durable = cJSON_PrintUnformatted(root);
+   assert(!server_native_history_load("s", "owner", "next", 1, &loaded, &authority));
+   cJSON_Delete(loaded);
+   cJSON_Delete(authority);
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(source, "actor", cJSON_CreateString("foreign")));
+   free(durable);
+   durable = cJSON_PrintUnformatted(root);
+   assert(server_native_history_load("s", "owner", "next", 1, &loaded, &authority) == -1);
+   free(durable);
+   durable = native_durable;
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(source, "actor", cJSON_CreateString("owner")));
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(receipt, "owner", native));
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(entry, "event_id", cJSON_CreateString("receipt")));
+   assert(cJSON_ReplaceItemInObjectCaseSensitive(ctx, "revision_scope",
+                                                 cJSON_CreateString("receipt")));
+   assert(!server_native_history_admit(messages, receipts));
    cJSON *context = cJSON_GetObjectItemCaseSensitive(block, "context");
    assert(cJSON_ReplaceItemInObjectCaseSensitive(context, "origin", cJSON_CreateNumber(7)));
    assert(aimee_ir_history_admit(messages) == -1 &&

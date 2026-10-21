@@ -1,6 +1,7 @@
 /* Native children hold only a lifetime-scoped local capability. Existing HTTP
  * owners admit model/tool requests under the captured actor and registration. */
 #include "server_native_runtime.h"
+#include "ingress_preinject.h"
 #include "log.h"
 #include "server_native_tool_admission.h"
 #include "agent_exec.h"
@@ -958,6 +959,7 @@ static int native_perform(const char *method, const char *path, const char *head
    agent_codex_credentials_t current = {0};
    agent_api_credentials_t current_api = {0};
    agent_claude_credentials_t current_claude = {0};
+   int forked_sources = 0;
    request_context_t admitted = runtime->owner;
    unsigned char request_nonce[16];
    if (platform_random_bytes(request_nonce, sizeof request_nonce))
@@ -970,6 +972,9 @@ static int native_perform(const char *method, const char *path, const char *head
    admitted.idempotency_key[0] = 0;
    request_context_set(&admitted);
    server_http_identity_bind_request_owner(&admitted);
+   if (ingress_preinject_fork_sources(&runtime->owner))
+      goto restore;
+   forked_sources = runtime->owner.memory_source_release[0] != 0;
    agent_request_creds_restore(&runtime->credentials);
    agent_set_request_session(runtime->session);
    if (runtime->lineage[0])
@@ -1058,6 +1063,8 @@ static int native_perform(const char *method, const char *path, const char *head
    if (!work)
       anthropic_http_capture_request_headers(NULL);
 restore:
+   if (forked_sources)
+      ingress_preinject_finish_sources();
    OPENSSL_cleanse(&current_claude, sizeof current_claude);
    OPENSSL_cleanse(&current_api, sizeof current_api);
    OPENSSL_cleanse(&current, sizeof current);

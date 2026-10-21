@@ -14,6 +14,54 @@ merged baseline, not the subsequent browser repairs. Continue on
 `fix/browser-ir-live-acceptance` in [PR #3057](https://github.com/RakuenSoftware/aimee/pull/3057) for their fresh CI. Keep automatic review and
 the strict attribution gate enabled. No production promotion is claimed.
 
+### Current qualification checkpoint, 21 October 2026
+
+Committed head `4ad4843b2c7013d8fc37d1c70453bf8bd261ba3c` passed all 53
+main CI jobs and all eight workflow runs. On owned `.252` VM 8163, its normal
+PAM browser recovered an actual interrupted Codex question produced by the
+previous `d0234bc8` build. Recovery proved the exact frozen SDK containment leaf
+empty before retiring it, appended canonical cancellation and a source-bound
+unknown-outcome receipt, and restored the composer. A subsequent real
+write_file request was declined once through the normal browser. The model
+completed, reload repeated neither send nor reply, and independent host
+inspection found no file and no active native reservation. Default systemd
+KillMode was restored. The packet records producer and recovery builds
+separately; this is genuine vendor execution, not seeded receipt validation.
+
+That same build's genuine delegate validation failed before producing a child
+tool result. The qualified child launched and finished custody, but the SDK
+reported an unavailable stream while ingress source assembly failed. This is
+retained failure evidence, not a successful delegate grade. Source inspection
+found the captured source-release ticket was still bound to the parent's
+request ID when the callback minted its required distinct transport ID.
+
+The next changes implement an explicit host-only Go source-release fork: the
+same actor/caller must prove the parent binding, and existing local/shared/grade
+owners freshly revalidate the sources before the new callback handle is
+published. Parent expiry is retained; provider send guards still run separately.
+No ticket is cleared to bypass validation. The duplicate legacy delegate-learning
+writer is retired; canonical source-bound execution observations remain the sole
+learning publisher, while operational exit metrics remain independent.
+
+Generic API execution also gains explicit exact-turn operator cancellation.
+This cancels continuation without asserting process or effect quiescence, fences
+late writes/action admission, and atomically records unknown-outcome receipts
+for actual unmatched API calls. History reload and native switching authenticate
+the immutable original calls and privileged cancellation. The browser retains
+text on failures and submits one continuation only after the exact canonical
+terminal. Actual PostgreSQL race tests and cross-language fixtures cover pending
+questions, repeated call IDs, compaction, forged receipts and ownership refusal.
+These newer changes require fresh CI and genuine API crash/replay acceptance;
+the previous head's green jobs and native recovery do not qualify them.
+
+Remaining live acceptance includes a successful source-fork delegate run, an
+actual API-model orphan with pending tools through the new browser continuation,
+and native Bash use of the registered Aimee CLI. The shell CLI currently lacks
+an endpoint in its private environment; a direct native MCP index pass does not
+qualify that path. Claude still reaches the actual vendor but returns HTTP 429;
+no successful Claude inference is claimed. Production remains KB-free and
+unmodified; independent production review and promotion are outstanding.
+
 ### Genuine live-model continuation, 21 October 2026
 
 PR #3057 now includes executable-source commit `e9bde72c703c0b9e6569326d46063401f6ebe369`

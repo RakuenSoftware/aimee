@@ -93,7 +93,9 @@
     "server-go/modules/aimee/families/session_native_interruption.go",
     "server-go/modules/aimee/families/session_native_source.go",
     "server-go/modules/aimee/families/session_primary_selection.go",
-    "server-go/modules/aimee/families/session_ir_import.go"
+    "server-go/modules/aimee/families/session_ir_import.go",
+    "server-go/modules/aimee/families/session_ir_cancel.go",
+    "server-go/modules/aimee/families/session_operator_interruption.go"
   ],
   "go_tests": [
     "server-go/modules/aimee/aimee_test.go",
@@ -175,7 +177,8 @@
     "server-go/modules/aimee/families/session_primary_selection_live_test.go",
     "server-go/modules/aimee/families/session_ir_import_live_test.go",
     "server-go/modules/aimee/families/session_ir_import_compat_live_test.go",
-    "server-go/modules/aimee/families/session_ir_import_browse_race_live_test.go"
+    "server-go/modules/aimee/families/session_ir_import_browse_race_live_test.go",
+    "server-go/modules/aimee/families/session_ir_cancel_test.go"
   ],
   "docs": [
     "docs/modules/aimee.md"

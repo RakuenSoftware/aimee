@@ -29,6 +29,8 @@ type sourceReleaseState struct {
 	healthBytes     int
 	mu              sync.Mutex
 	entries         map[string]*sourceReleaseEntry
+	forks           map[string]*sourceReleaseFork
+	forkBindings    map[string]time.Time
 	bytes           int
 	receipts        map[string]*providerReceiptEntry
 	receiptBytes    int
@@ -90,6 +92,7 @@ func releaseBinding(args commandArgs) string {
 	return releaseDigest([]string{args.stringOr("request_id", ""), args.stringOr("principal", ""), args.stringOr("caller_subject", "")})
 }
 func (s *sourceReleaseState) expire(now time.Time) {
+	s.expireForks(now)
 	for token, receipt := range s.receipts {
 		if !now.Before(receipt.expires) {
 			delete(s.receipts, token)
@@ -273,7 +276,7 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	if len(metadata) > 12000 {
 		metadata, _ = json.Marshal(map[string]any{"projection_commitment": assemblyDigest, "truncated": true, "reason": "assembly_metadata_limit"})
 	}
-	if len(s.entries) >= sourceReleaseMaxEntries || s.bytes+len(metadata)+len(raw)+len(grades) > sourceReleaseMaxBytes || len(raw) > maxDataBody/2 {
+	if len(s.entries)+len(s.forks) >= sourceReleaseMaxEntries || s.bytes+len(metadata)+len(raw)+len(grades) > sourceReleaseMaxBytes || len(raw) > maxDataBody/2 {
 		return "", errors.New("source release capacity")
 	}
 	if s.entries == nil {
@@ -307,8 +310,17 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.expire(time.Now())
+	return s.handleSourceReleaseLocked(args, nil)
+}
+
+// Caller holds the owner mutex. Private fork candidates use the identical
+// challenge/result validation without becoming public source handles.
+func (s *sourceReleaseState) handleSourceReleaseLocked(args commandArgs, candidate *sourceReleaseEntry) ([]byte, bus.ModuleStatus) {
 	ticket := args.stringOr("source_release_ticket", "")
 	entry := s.entries[ticket]
+	if candidate != nil {
+		entry = candidate
+	}
 	operation := args.stringOr("operation", "")
 	if operation == "exploration-owner-generation" {
 		if s.receiptProducer == "" {

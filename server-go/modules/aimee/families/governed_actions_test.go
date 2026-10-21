@@ -40,7 +40,7 @@ func TestGovernedActionLiveAtomicOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	for _, name := range []string{"schema_sessions.sql", "schema_governed_actions.sql"} {
+	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql", "schema_governed_actions.sql"} {
 		body, e := schemaFS.ReadFile(name)
 		if e != nil {
 			t.Fatal(e)

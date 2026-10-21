@@ -170,33 +170,20 @@ int ingress_preinject_accept_native_projection(const cJSON *projection)
    return rc;
 }
 
-/* The host carries opaque owner requests and responses. Source policy, version
- * comparison, scope selection and response validation all remain in Go. */
-static int ingress_revalidate_sources(void **guard_state)
+/* Source owners retain policy and validate their own answers. Both an ordinary
+ * wire fence and a native request handoff use this identical transport. */
+static cJSON *ingress_source_answers(const cJSON *plan, const request_context_t *context,
+                                     const char *operation)
 {
-   if (guard_state)
-      *guard_state = NULL;
-   const request_context_t *context = request_context_get();
-   if (!context || !context->memory_source_release[0])
-      return 0;
-   cJSON *request = cJSON_CreateObject();
-   cJSON_AddStringToObject(request, "operation", "source-release-plan");
-   if (guard_state)
-      cJSON_AddBoolToObject(request, "send_guard", 1);
-   ingress_release_context(request, context);
-   cJSON *plan = ingress_command(request, 1);
    const cJSON *owner_request = cJSON_GetObjectItemCaseSensitive(plan, "request");
    const cJSON *local_request = cJSON_GetObjectItemCaseSensitive(plan, "local_request");
    const cJSON *grade_request = cJSON_GetObjectItemCaseSensitive(plan, "execution_grade_request");
    if ((!cJSON_IsObject(owner_request) && !cJSON_IsObject(local_request) &&
         !cJSON_IsObject(grade_request)) ||
        (owner_request && !cJSON_IsObject(owner_request)) ||
-       (local_request && !cJSON_IsObject(local_request)))
-   {
-      (void)request_context_refuse_assembly("unavailable");
-      cJSON_Delete(plan);
-      return -1;
-   }
+       (local_request && !cJSON_IsObject(local_request)) ||
+       (grade_request && !cJSON_IsObject(grade_request)))
+      return NULL;
    cJSON *local_response =
        local_request ? ingress_command(cJSON_Duplicate(local_request, 1), 1) : NULL;
    char *raw = owner_request ? kb_v1_action_request("memory.revalidate_sources",
@@ -219,14 +206,10 @@ static int ingress_revalidate_sources(void **guard_state)
          free(expected);
       }
    }
-   if (guard_state)
-      *guard_state = plan;
-   else
-      cJSON_Delete(plan);
    cJSON *owner_response = raw ? cJSON_Parse(raw) : NULL;
    free(raw);
-   request = cJSON_CreateObject();
-   cJSON_AddStringToObject(request, "operation", "source-release-result");
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", operation);
    ingress_release_context(request, context);
    cJSON_AddItemToObject(request, "owner_response",
                          owner_response ? owner_response : cJSON_CreateNull());
@@ -234,12 +217,81 @@ static int ingress_revalidate_sources(void **guard_state)
                          local_response ? local_response : cJSON_CreateNull());
    cJSON_AddItemToObject(request, "execution_grade_response",
                          grade_response ? grade_response : cJSON_CreateNull());
-   cJSON *response = ingress_command(request, 1);
+   return request;
+}
+
+static int ingress_revalidate_sources(void **guard_state)
+{
+   if (guard_state)
+      *guard_state = NULL;
+   const request_context_t *context = request_context_get();
+   if (!context || !context->memory_source_release[0])
+      return 0;
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "source-release-plan");
+   if (guard_state)
+      cJSON_AddBoolToObject(request, "send_guard", 1);
+   ingress_release_context(request, context);
+   cJSON *plan = ingress_command(request, 1);
+   request = ingress_source_answers(plan, context, "source-release-result");
+   if (guard_state && request)
+      *guard_state = plan;
+   else
+      cJSON_Delete(plan);
+   cJSON *response = request ? ingress_command(request, 1) : NULL;
    int admitted = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "admitted"));
    cJSON_Delete(response);
    if (!admitted)
       (void)request_context_refuse_assembly("unavailable");
    return admitted ? 0 : -1;
+}
+
+int ingress_preinject_fork_sources(const request_context_t *parent)
+{
+   const request_context_t *current = request_context_get();
+   if (!parent || !current)
+      return -1;
+   if (!parent->memory_source_release[0])
+      return current->memory_source_release[0] ? -1 : 0;
+   if (!current->request_id[0] || !strcmp(parent->request_id, current->request_id) ||
+       strcmp(parent->memory_source_release, current->memory_source_release) ||
+       strcmp(parent->principal, current->principal) ||
+       strcmp(parent->caller_subject, current->caller_subject) ||
+       strcmp(parent->vault_principal, current->vault_principal) ||
+       parent->vault_transport != current->vault_transport)
+      goto refused;
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "operation", "source-release-fork-plan");
+   ingress_release_context(request, parent);
+   cJSON_AddStringToObject(request, "new_request_id", current->request_id);
+   cJSON *plan = ingress_command(request, 1);
+   const char *challenge =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "fork_ticket"));
+   const char *new_id =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(plan, "new_request_id"));
+   request = challenge && strlen(challenge) == 32 && new_id && !strcmp(new_id, current->request_id)
+                 ? ingress_source_answers(plan, parent, "source-release-fork-result")
+                 : NULL;
+   if (request)
+   {
+      cJSON_AddStringToObject(request, "fork_ticket", challenge);
+      cJSON_AddStringToObject(request, "new_request_id", current->request_id);
+   }
+   cJSON_Delete(plan);
+   cJSON *response = request ? ingress_command(request, 1) : NULL;
+   const char *ticket =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "source_release_ticket"));
+   new_id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "new_request_id"));
+   int accepted = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "admitted")) && ticket &&
+                  strlen(ticket) == 32 && strcmp(ticket, parent->memory_source_release) && new_id &&
+                  !strcmp(new_id, current->request_id) &&
+                  request_context_set_source_release(ticket) == 0;
+   cJSON_Delete(response);
+   if (accepted)
+      return 0;
+refused:
+   (void)request_context_refuse_assembly("unavailable");
+   return -1;
 }
 
 int ingress_preinject_revalidate_sources(void)

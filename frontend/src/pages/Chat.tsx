@@ -10,6 +10,7 @@ import ProjectPicker from '../components/ProjectPicker';
 import { useSessions } from '../SessionContext';
 import IRTranscript from '../ir/Transcript';
 import { emptySession, reduceSession } from '../ir/session';
+import { operatorCancelError } from '../ir/interruption';
 import type { Envelope, SessionState } from '../ir/session';
 import type { ControlReply } from '../ir/ControlCard';
 import { reconcileSessionMessages } from '../sessionPersistence';
@@ -1347,6 +1348,7 @@ export default function Chat() {
   const iterCur = activeWork?.iterCur ?? 0;
   const iterMax = activeWork?.iterMax ?? 0;
   const [inputText, setInputText] = useState('');
+  const stoppingSessions = useRef(new Set<string>());
   const [banner, setBanner] = useState<{ stacks: BootstrapStack[] } | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
@@ -1477,13 +1479,6 @@ export default function Chat() {
   }
   const tabsRef = useRef<TabData[]>(tabs);
   const activeIdxRef = useRef(activeIdx);
-  // Holds the aimeeSid we just sent a steer for (chat.interrupt). The next
-  // turn_started on THAT session's events stream is the server-initiated
-  // continuation — render it even though this surface may still look "working"
-  // while the cancelled turn's stream closes (otherwise the wasWorking self-echo
-  // guard would drop the steered reply). Keyed by sid so switching tabs can't
-  // make a different tab's turn consume it. '' = none.
-  const expectSteerRef = useRef<string>('');
   // turn_ids already committed to history from the presence ring this session.
   // The ring replays turn_started→deltas→turn_done from cursor 0 on EVERY new
   // subscription (reconnect / tab switch back), so dedup is required to avoid
@@ -2408,56 +2403,68 @@ export default function Chat() {
     const text = inputText.trim();
     if (!text || primary.pending || persona.pending) return;
 
-    setInputText('');
-    // AutoGrowTextarea reflows its own height when inputText clears.
-
-    // Steering: if a turn is already in flight for the active tab — a local send
-    // (client stream open) or a server/foreign turn (events stream) — sending
-    // INTERRUPTS the running turn and submits this message as the steer, which the
-    // server auto-continues as the next turn (it arrives on the events stream).
+    // A new message during a turn explicitly stops that exact canonical turn.
+    // The browser submits the new text only after its terminal is replayed.
     const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid ?? '';
     let clientInflight = false;
     activeSendAbortRefs.current.forEach(s => { if (s === sid) clientInflight = true; });
     if (sid && (clientInflight || (!!irReady[sid] && !!irSessions.current[sid]?.activeTurns.length))) {
-      // Optimistically show the steer in the transcript and re-stick to bottom.
       atBottomRef.current = true;
-      // The admitted user message arrives through the canonical session log.
+      // The eventual admitted user message comes from the canonical session log.
       void steerInterrupt(sid, text);
       return;
     }
 
+    setInputText('');
     enqueueChatMessage(text);
   }
 
-  // Stop the in-flight turn for `sid` and queue `text` as the steer continuation.
-  // The server only honours the steer when a turn was actually in flight; on the
-  // race where it just finished (interrupted:false), fall back to a normal send.
+  // Explicitly stop the exact canonical turn, then send this new text once.
+  // Cancellation acknowledgement alone is not a claim that effects have stopped.
   async function steerInterrupt(sid: string, text: string) {
+    if (stoppingSessions.current.has(sid)) return;
+    const turnIds = irSessions.current[sid]?.activeTurns ?? [];
+    if (!irReady[sid] || turnIds.length !== 1) {
+      setSendErrors(prev => ({ ...prev, [sid]: 'Wait for the running turn to appear in conversation history before stopping it. Your message is retained.' }));
+      return;
+    }
+    const turnId = turnIds[0];
+    const version = sendQueueVersionRef.current;
     const projectRoot = activeSession?.projectRoot ?? '';
-    expectSteerRef.current = sid;
-    // Safety net: if the server continuation never starts (dispatch failed), clear
-    // the one-shot so it can't force-render a later turn on this session.
-    window.setTimeout(() => { if (expectSteerRef.current === sid) expectSteerRef.current = ''; }, 12000);
-    const sendNormally = () => {
-      if (expectSteerRef.current === sid) expectSteerRef.current = '';
-      pushToSendQueue(sid, { text, version: sendQueueVersionRef.current, originSid: sid, projectRoot });
-      recomputeWorkCounts();
-      void drainSendQueue(sid);
-    };
+    stoppingSessions.current.add(sid);
+    setSendErrors(prev => ({ ...prev, [sid]: '' }));
     try {
-      const resp = await fetch('/api/chat/interrupt', {
+      const resp = await fetch('/api/chat/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-        body: JSON.stringify({ aimee_session_id: sid }),
+        body: JSON.stringify({ session_id: sid, turn_id: turnId }),
       });
       if (resp.status === 401) { window.location.href = '/login'; return; }
-      const j = resp.ok ? (await resp.json().catch(() => ({})) as { interrupted?: boolean }) : {};
-      // No turn was actually in flight (or the steer couldn't be queued): send it
-      // as an ordinary turn instead so the message is never lost.
-      void j; sendNormally();
-    } catch {
-      sendNormally();
-    }
+      if (!resp.ok) throw new Error('Could not stop the selected turn. Your message is retained.');
+      const reply = await resp.json() as { status?: string; session_id?: string; turn_id?: string; disposition?: string; terminal_sequence?: string };
+      if (reply.status !== 'ok' || reply.session_id !== sid || reply.turn_id !== turnId ||
+          !['stopping', 'cancelled'].includes(reply.disposition ?? '') ||
+          (reply.disposition === 'cancelled' && (typeof reply.terminal_sequence !== 'string' || !/^[1-9][0-9]*$/.test(reply.terminal_sequence))))
+        throw new Error('Cancellation was not confirmed for this turn. Your message is retained.');
+      const deadline = Date.now() + 30000;
+      while (!irSessions.current[sid]?.terminalSources[turnId]) {
+        if (Date.now() >= deadline) throw new Error('The turn is still stopping. Your message is retained; wait for its terminal status before continuing.');
+        await new Promise(resolve => window.setTimeout(resolve, 100));
+      }
+      const terminal = irSessions.current[sid].terminalSources[turnId];
+      if (reply.disposition === 'cancelled' && (terminal.sequence !== reply.terminal_sequence ||
+          terminal.event_id !== `operator-cancel:${turnId}` || terminal.status !== 'cancelled' || terminal.error !== operatorCancelError))
+        throw new Error('The exact operator cancellation is not present in history. Your message is retained.');
+      if (version !== sendQueueVersionRef.current || tabsRef.current[activeIdxRef.current]?.aimeeSid !== sid ||
+          (irSessions.current[sid]?.activeTurns.length ?? 0) !== 0)
+        throw new Error('Conversation changed while stopping. Your message is retained; select the conversation before continuing.');
+      setInputText(current => current.trim() === text ? '' : current);
+      pushToSendQueue(sid, { text, version, originSid: sid, projectRoot });
+      recomputeWorkCounts();
+      void drainSendQueue(sid);
+    } catch (error) {
+      setSendErrors(prev => ({ ...prev, [sid]: error instanceof Error ? error.message : 'Could not stop this turn. Your message is retained.' }));
+    } finally { stoppingSessions.current.delete(sid); }
   }
 
   function enqueueChatMessage(text: string) {

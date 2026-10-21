@@ -19,11 +19,15 @@
 #define DEC_INGRESS_PREINJECT_H 1
 
 #include "cJSON.h"
+#include "request_context.h"
 #include "index.h" /* code_search_hit_t */
 #include <stddef.h>
 
 /* Authenticated transport for Go-owned source revalidation at the wire fence. */
 int ingress_preinject_revalidate_sources(void);
+/* Fork retained provenance to the current distinct host request only after fresh
+ * owner validation. Parent lifetime and final provider send guards are separate. */
+int ingress_preinject_fork_sources(const request_context_t *parent);
 int ingress_preinject_acquire_send_guard(void **state);
 void ingress_preinject_release_send_guard(void *state);
 int ingress_preinject_accept_native_projection(const cJSON *projection);

@@ -6,6 +6,7 @@
 #include "ingress_preinject.h"
 #include "module_commands.h"
 #include "request_context.h"
+#include "server_session_capture.h"
 #include "util.h"
 #include <aimee/tools/module_api.h>
 #include <stdio.h>
@@ -17,6 +18,7 @@ static __thread char action_attempt[128];
 static __thread char action_session[129];
 static __thread char action_principal[129];
 static __thread char action_actor[VAULT_PRINCIPAL_MAX];
+static __thread char action_turn_session[128], action_turn[128];
 static __thread cJSON *action_intent;
 static __thread cJSON *action_verification_request;
 static __thread cJSON *action_existing_receipt;
@@ -26,6 +28,7 @@ void policy_action_attempt(const char *attempt)
 {
    snprintf(action_attempt, sizeof(action_attempt), "%s", attempt ? attempt : "");
    action_refusal[0] = 0;
+   action_turn_session[0] = action_turn[0] = 0;
    cJSON_Delete(action_existing_receipt);
    action_existing_receipt = NULL;
    cJSON_Delete(action_intent);
@@ -145,6 +148,26 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
       policy_unknown_effect_clear();
       return -1;
    }
+   /* The journal may belong to a verified source session while a private child
+    * owns the canonical destination. Only the retained host capture supplies
+    * this tuple; public tool arguments cannot nominate a turn. */
+   server_session_capture_t *capture = NULL;
+   if (server_session_capture_retain_current(sid, request_context_session_actor(ctx), &capture) ||
+       (ctx->model_execution && !capture))
+   {
+      policy_unknown_effect_clear();
+      return -1;
+   }
+   const char *turn_session = server_session_capture_session(capture);
+   const char *turn = server_session_capture_turn(capture);
+   if (capture && (!server_session_capture_accepting(capture) || !turn_session ||
+                   !turn_session[0] || strlen(turn_session) >= sizeof action_turn_session ||
+                   !turn || !turn[0] || strlen(turn) >= sizeof action_turn))
+   {
+      server_session_capture_release(capture);
+      policy_unknown_effect_clear();
+      return -1;
+   }
    int rc = -1;
    void *guard = NULL;
    cJSON *caller = cJSON_CreateObject(), *request = cJSON_CreateObject();
@@ -209,6 +232,11 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
       cJSON_AddStringToObject(intent, fields[i], action_text(evidence, fields[i]));
    request = cJSON_CreateObject();
    cJSON_AddStringToObject(request, "operation", "issue");
+   if (capture)
+   {
+      cJSON_AddStringToObject(request, "turn_session_id", turn_session);
+      cJSON_AddStringToObject(request, "turn_id", turn);
+   }
    cJSON_AddItemToObject(request, "arguments", cJSON_Duplicate(*arguments, 1));
    cJSON_AddStringToObject(request, "registry_class", action_text(resource, "class"));
    cJSON_AddItemToObject(request, "intent", intent);
@@ -259,6 +287,9 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
    snprintf(action_session, sizeof(action_session), "%s", sid);
    snprintf(action_principal, sizeof(action_principal), "%s", ctx->principal);
    snprintf(action_actor, sizeof(action_actor), "%s", request_context_session_actor(ctx));
+   snprintf(action_turn_session, sizeof action_turn_session, "%s",
+            turn_session ? turn_session : "");
+   snprintf(action_turn, sizeof action_turn, "%s", turn ? turn : "");
    rc = 0;
    action_refusal[0] = 0;
 done:
@@ -271,6 +302,7 @@ done:
    cJSON_Delete(intent);
    cJSON_Delete(decision);
    cJSON_Delete(next);
+   server_session_capture_release(capture);
    return rc;
 }
 
@@ -346,6 +378,11 @@ char *policy_action_finish(const char *verdict, char *result, int *is_error)
    cJSON_AddStringToObject(outcome, "destination", action_text(action_intent, "destination"));
    cJSON_AddStringToObject(outcome, "payload_sha256", action_text(action_intent, "payload_sha256"));
    cJSON_AddItemToObject(request, "outcome", outcome);
+   if (action_turn[0])
+   {
+      cJSON_AddStringToObject(request, "turn_session_id", action_turn_session);
+      cJSON_AddStringToObject(request, "turn_id", action_turn);
+   }
    cJSON *decision = action_store(action_actor, action_session, request);
    if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(decision, "allowed")))
       state = "outcome_unknown";

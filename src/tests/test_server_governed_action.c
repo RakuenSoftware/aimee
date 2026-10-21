@@ -2,6 +2,7 @@
 #include "server.h"
 #include "agent_exec.h"
 #include "request_context.h"
+#include "server_session_capture.h"
 #include "module_commands.h"
 #include "ingress_preinject.h"
 #include "db1_client/session_state.h"
@@ -23,6 +24,45 @@ static int calls, dispatched, outcomes, guard_held, guard_released;
 static int fail_resource, fail_verify, fail_store, memory_required, stale;
 static const char *replay_state;
 static const char *expected_actor = "alice";
+static const char *capture_source = "session";
+#ifndef GOVERNED_ACTION_CAPTURE_EXTERNAL
+static int capture_present, capture_ready = 1;
+static const char *capture_destination = "session", *capture_turn = "host-turn";
+server_session_capture_t *server_session_capture_current(void)
+{
+   return capture_present ? (void *)1 : NULL;
+}
+const char *server_session_capture_session(const server_session_capture_t *capture)
+{
+   return capture ? capture_destination : NULL;
+}
+const char *server_session_capture_turn(const server_session_capture_t *capture)
+{
+   return capture ? capture_turn : NULL;
+}
+int server_session_capture_accepting(const server_session_capture_t *capture)
+{
+   return capture && capture_ready;
+}
+#endif
+int server_session_capture_retain_current(const char *source, const char *actor,
+                                          server_session_capture_t **out)
+{
+   *out = NULL;
+   server_session_capture_t *current = server_session_capture_current();
+   if (!current)
+      return 0;
+   if (strcmp(source, capture_source) || strcmp(actor, expected_actor) ||
+       !server_session_capture_accepting(current))
+      return -1;
+   *out = current;
+   return 0;
+}
+void server_session_capture_release(server_session_capture_t *capture)
+{
+   assert(!capture || capture == (void *)1);
+}
+
 static const char *text(const cJSON *j, const char *key)
 {
    const char *s = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, key));
@@ -132,12 +172,26 @@ int db1_governed_action_apply(const char *principal, const char *sid, const char
       return -1;
    cJSON *j = cJSON_Parse(wire), *r = cJSON_CreateObject();
    const char *op = text(j, "operation");
+   const char *host_turn = text(j, "turn_id"), *host_session = text(j, "turn_session_id");
+   assert((host_turn[0] != 0) == (host_session[0] != 0));
+   if (strcmp(op, "issue") && (host_turn[0] || !strcmp(op, "admit") || !strcmp(op, "dispatch")))
+   {
+      assert(!strcmp(host_turn, text(stored_intent, "turn_id")));
+      assert(!strcmp(host_session, text(stored_intent, "turn_session_id")));
+   }
    cJSON_AddBoolToObject(r, "allowed", 1);
    if (!strcmp(op, "issue"))
    {
       cJSON_Delete(stored_intent);
       stored_intent = cJSON_Duplicate(cJSON_GetObjectItem(j, "intent"), 1);
       assert(!strcmp(text(stored_intent, "attempt_id"), "attempt"));
+      if (host_turn[0])
+      {
+         /* The real store binds these host-only fields into its immutable
+          * intent. Model arguments cannot provide either tuple component. */
+         cJSON_AddStringToObject(stored_intent, "turn_session_id", host_session);
+         cJSON_AddStringToObject(stored_intent, "turn_id", host_turn);
+      }
       cJSON_AddStringToObject(stored_intent, "action_id", "action");
       cJSON_AddStringToObject(stored_intent, "policy_generation", "policy");
    }
@@ -185,6 +239,50 @@ static cJSON *input(void)
 {
    return cJSON_Parse("{\"path\":\"target\",\"content\":\"expected\"}");
 }
+#ifndef GOVERNED_ACTION_CAPTURE_EXTERNAL
+static void test_canonical_capture_binding(void)
+{
+   memset(&context, 0, sizeof context);
+   snprintf(context.principal, sizeof context.principal, "alice");
+   snprintf(context.request_id, sizeof context.request_id, "canonical-request");
+   context.model_execution = 1;
+   expected_actor = "alice";
+   fail_verify = fail_store = fail_resource = memory_required = stale = 0;
+   cJSON *args = cJSON_Parse("{\"path\":\"target\",\"content\":\"expected\","
+                             "\"turn_session_id\":\"forged\",\"turn_id\":\"forged\"}");
+   int before = calls;
+   policy_action_attempt("attempt");
+   assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) < 0);
+   assert(calls == before); /* A model cannot omit its canonical capture. */
+   capture_present = 1;
+   capture_source = "foreign-source";
+   assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) < 0);
+   assert(calls == before);
+   capture_source = "session";
+   capture_ready = 0;
+   assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) < 0);
+   assert(calls == before);
+   capture_ready = 1;
+   capture_destination = "canonical-child";
+   capture_turn = "canonical-turn";
+   policy_action_attempt("attempt");
+   assert(!policy_action_begin("write_file", &args, "/workspace", "session", 1));
+   assert(!strcmp(text(stored_intent, "turn_session_id"), "canonical-child"));
+   assert(!strcmp(text(stored_intent, "turn_id"), "canonical-turn"));
+   /* Completion retains the original child tuple even when callback context
+    * has moved to another turn; the source journal session stays unchanged. */
+   capture_destination = "another-child";
+   capture_turn = "another-turn";
+   int error = 0;
+   char *result = policy_action_finish("ok", strdup("saved"), &error);
+   assert(!error && result);
+   free(result);
+   cJSON_Delete(args);
+   capture_present = 0;
+   context.model_execution = 0;
+}
+#endif
+
 int main(void)
 {
    snprintf(context.principal, sizeof(context.principal), "alice");
@@ -300,6 +398,9 @@ int main(void)
    assert(!is_error);
    free(result);
    cJSON_Delete(args);
+#ifndef GOVERNED_ACTION_CAPTURE_EXTERNAL
+   test_canonical_capture_binding();
+#endif
    cJSON_Delete(stored_intent);
    puts("governed action host transport: ok");
    return 0;

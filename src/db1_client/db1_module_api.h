@@ -283,6 +283,7 @@
 #define AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_GET             48u
 #define AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_SET             49u
 #define AIMEE_DB1_OP_SESSION_IR_HISTORY_IMPORT              50u
+#define AIMEE_DB1_OP_SESSION_IR_CANCEL                      53u
 #define AIMEE_DB1_OP_SESSION_NATIVE_ACTIVE_OWNED            46u
 
 /* Family 7: machine-local runtime state: caches, this box's operator and

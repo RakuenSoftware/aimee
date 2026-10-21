@@ -89,6 +89,21 @@ static void test_cancel_and_find(void)
    printf("ok: cancel + find\n");
 }
 
+static void test_exact_turn_cancel(void)
+{
+   turn_entry_t *e = turn_registry_publish("exact-session", "current-turn");
+   assert(e && turn_registry_cancel_exact("exact-session", "old-turn") == -1);
+   assert(!turn_entry_cancelled(e));
+   assert(turn_registry_cancel_exact("absent-session", "current-turn") == 0);
+   assert(turn_registry_cancel_exact("exact-session", "current-turn") == 1);
+   assert(turn_entry_cancelled(e));
+   turn_registry_clear(e);
+   e = turn_registry_publish("exact-session", "next-turn");
+   assert(e && turn_registry_cancel_exact("exact-session", "current-turn") == -1);
+   assert(!turn_entry_cancelled(e));
+   turn_registry_clear(e);
+}
+
 static void test_cancel_all(void)
 {
    turn_entry_t *e1 = turn_registry_publish("sess-E1", "t");
@@ -169,6 +184,7 @@ int main(void)
    test_publish_and_collision();
    test_cancel_and_find();
    test_cancel_authz();
+   test_exact_turn_cancel();
    test_cancel_all();
    test_reaped();
    test_steer_set_take();

@@ -29332,6 +29332,57 @@
         ],
         "max_bytes": 32768
       }
+    },
+    {
+      "family": "sessions",
+      "id": 53,
+      "name": "session_ir_cancel",
+      "c_name": "db1_session_ir_cancel",
+      "c_params": [
+        "actor",
+        "session_id",
+        "turn_id"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "actor",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "session_id",
+            "type": "text",
+            "required": true
+          },
+          {
+            "name": "turn_id",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "sequence",
+            "type": "text",
+            "required": true
+          }
+        ],
+        "max_bytes": 32768
+      }
     }
   ]
 }

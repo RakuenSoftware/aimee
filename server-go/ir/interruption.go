@@ -20,10 +20,11 @@ type ToolInterruptionSource struct {
 	Name       string `json:"name"`
 }
 type ToolInterruptionOwner struct {
-	Owner       string `json:"owner_id"`
-	Binding     string `json:"binding_sha256"`
-	Epoch       string `json:"epoch"`
-	Containment string `json:"containment_sha256"`
+	OperatorCancel string `json:"operator_cancel_event_id,omitempty"`
+	Owner          string `json:"owner_id,omitempty"`
+	Binding        string `json:"binding_sha256,omitempty"`
+	Epoch          string `json:"epoch,omitempty"`
+	Containment    string `json:"containment_sha256,omitempty"`
 }
 type ToolInterruption struct {
 	Version  int                    `json:"version"`
@@ -50,13 +51,20 @@ func ValidToolInterruption(raw []byte) bool {
 	hex := func(v string, n int) bool { return len(v) == n && strings.Trim(v, "0123456789abcdef") == "" }
 	var fields struct {
 		Source map[string]json.RawMessage `json:"source"`
+		Owner  map[string]json.RawMessage `json:"owner"`
 	}
 	var index *int
 	if json.Unmarshal(raw, &fields) != nil || !Decode(fields.Source["block_index"], &index) || index == nil {
 		return false
 	}
 	s := r.Source
-	return positive(s.Sequence) && positive(r.Terminal) && text(s.Session, 128) && text(s.Turn, 128) && text(s.EventID, 1024) && text(s.Actor, 128) && text(s.MessageID, 1024) && s.BlockIndex >= 0 && s.BlockIndex < 4096 && text(s.ToolID, 1024) && text(s.Name, 1024) && hex(r.Owner.Owner, 32) && hex(r.Owner.Binding, 64) && hex(r.Owner.Containment, 64) && (r.Owner.Epoch == "0" || hex(r.Owner.Epoch, 32))
+	actorLimit := 128
+	ownerValid := len(fields.Owner) == 4 && r.Owner.OperatorCancel == "" && hex(r.Owner.Owner, 32) && hex(r.Owner.Binding, 64) && hex(r.Owner.Containment, 64) && (r.Owner.Epoch == "0" || hex(r.Owner.Epoch, 32))
+	if len(fields.Owner) == 1 && r.Owner.OperatorCancel == "operator-cancel:"+s.Turn {
+		ownerValid = true
+		actorLimit = 159
+	}
+	return positive(s.Sequence) && positive(r.Terminal) && text(s.Session, 128) && text(s.Turn, 128) && text(s.EventID, 1024) && text(s.Actor, actorLimit) && text(s.MessageID, 1024) && s.BlockIndex >= 0 && s.BlockIndex < 4096 && text(s.ToolID, 1024) && text(s.Name, 1024) && ownerValid
 }
 
 // InterruptionMessage is a model-facing report that a result is unavailable,
@@ -87,7 +95,7 @@ type NativeExecutionOwner struct {
 func ValidNativeExecutionOwner(raw []byte) bool {
 	var owner NativeExecutionOwner
 	var fields map[string]json.RawMessage
-	if len(raw) > 2048 || !Decode(raw, &owner) || !Decode(raw, &fields) || len(fields) != 6 || owner.Version != 1 || (owner.Harness != "codex" && owner.Harness != "claude") {
+	if len(raw) > 2048 || !Decode(raw, &owner) || !Decode(raw, &fields) || len(fields) != 6 || owner.OperatorCancel != "" || owner.Version != 1 || (owner.Harness != "codex" && owner.Harness != "claude") {
 		return false
 	}
 	hex := func(v string, n int) bool { return len(v) == n && strings.Trim(v, "0123456789abcdef") == "" }

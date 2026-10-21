@@ -364,6 +364,45 @@ func (s *server) handleChatClear(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"status":"ok"}`)
 }
 
+// handleChatCancel requests an exact turn stop. It never submits user text.
+func (s *server) handleChatCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !sameOriginRequest(r) {
+		http.Error(w, "cross-origin cancellation refused", http.StatusForbidden)
+		return
+	}
+	if currentUser(r) == "" {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+	if err != nil || !canonical.ValidJSON(body) {
+		http.Error(w, "invalid cancellation frame", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		SessionID string `json:"session_id"`
+		TurnID    string `json:"turn_id"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil || req.SessionID == "" || len(req.SessionID) > 128 || req.TurnID == "" || len(req.TurnID) > 128 {
+		http.Error(w, "exact session_id and turn_id required", http.StatusBadRequest)
+		return
+	}
+	status, data, err := s.v1RequestWebuser(r.Context(), currentUser(r), http.MethodPost, "/v1/chat/graceful_cancel", body)
+	if err != nil {
+		http.Error(w, "cancellation service unavailable", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write(data)
+}
+
 // handleChatInterrupt handles POST /api/chat/interrupt: stop the in-flight turn
 // for a session and queue a steering message the server auto-continues as the
 // next turn (streamed to the session's /events). The reply is small JSON

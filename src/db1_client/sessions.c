@@ -70,6 +70,7 @@ static uint64_t sessions_call_timeout_ms(uint32_t op)
    case AIMEE_DB1_OP_SESSION_NATIVE_RESERVATION_FINISH:
    case AIMEE_DB1_OP_SESSION_IR_SEARCH:
    case AIMEE_DB1_OP_SESSION_IR_HISTORY_IMPORT:
+   case AIMEE_DB1_OP_SESSION_IR_CANCEL:
       return DB1_SESSIONS_HISTORY_TIMEOUT_MS;
    default:
       return DB1_SESSIONS_CALL_TIMEOUT_MS;
@@ -1061,6 +1062,30 @@ int db1_session_native_source_append(const char *session_id, const char *event_i
    const size_t caps[] = {32u};
    return write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_NATIVE_SOURCE_APPEND, fields, 5,
                                 values, caps, 1, NULL));
+}
+
+int db1_session_ir_cancel(const char *actor, const char *session_id, const char *turn_id,
+                          char out_sequence[32])
+{
+   if (!out_sequence)
+      return -1;
+   out_sequence[0] = 0;
+   const char *fields[] = {actor ? actor : "", session_id ? session_id : "",
+                           turn_id ? turn_id : ""};
+   char *const values[] = {out_sequence};
+   const size_t caps[] = {32u};
+   int status =
+       db1_call(&history_family, AIMEE_DB1_OP_SESSION_IR_CANCEL, fields, 3, values, caps, 1, NULL);
+   if (status == (int)AIMEE_DB1_STATUS_OK)
+   {
+      size_t n = strlen(out_sequence);
+      if (n && out_sequence[0] != '0' && n <= 19 && strspn(out_sequence, "0123456789") == n &&
+          (n < 19 || strcmp(out_sequence, "9223372036854775807") <= 0))
+         return 0;
+   }
+   out_sequence[0] = 0;
+   return status == (int)AIMEE_DB1_STATUS_INVALID || status == (int)AIMEE_DB1_STATUS_MISSING ? 1
+                                                                                             : -1;
 }
 
 int db1_server_session_primary_get(const char *principal, const char *session_id, char *out,

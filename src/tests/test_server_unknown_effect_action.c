@@ -4,7 +4,9 @@
 #define main                               governed_action_baseline_main
 #define policy_recheck_action_tool_attempt fixture_baseline_recheck
 #define policy_unknown_effect_clear        fixture_clear_noop
+#define GOVERNED_ACTION_CAPTURE_EXTERNAL   1
 #include "test_server_governed_action.c"
+#undef GOVERNED_ACTION_CAPTURE_EXTERNAL
 #undef policy_recheck_action_tool_attempt
 #undef main
 #undef policy_unknown_effect_clear

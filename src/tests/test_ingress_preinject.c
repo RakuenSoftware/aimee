@@ -1316,6 +1316,65 @@ static void test_configured_test_history_at_provider_fence(void)
    puts("configured-test source history is scoped and rechecked at provider fence");
 }
 
+/* Native callbacks keep distinct transport IDs. Provenance must be revalidated
+ * and forked by its owner, rather than copying or clearing the parent ticket. */
+static void test_native_source_request_handoff(void)
+{
+   request_context_t parent = {0};
+   strcpy(parent.request_id, "native-parent-request");
+   strcpy(parent.principal, "grade-caller");
+   strcpy(parent.caller_subject, "native-subject");
+   strcpy(parent.vault_principal, "grade-actor");
+   parent.vault_transport = ATTEST_UDS_PEERCRED;
+   request_context_set(&parent);
+   int saved_budget = g_assembly_budget;
+   g_assembly_budget = 4096;
+   g_grade_history_mode = 1;
+   char *envelope = ingress_preinject_build("deployment matrix", 0);
+   assert(envelope && request_context_get()->memory_source_release[0]);
+   free(envelope);
+   parent = *request_context_get();
+   request_context_t child = parent;
+   strcpy(child.request_id, "native-callback-request");
+   request_context_set(&child);
+   assert(ingress_preinject_revalidate_sources() == -1);
+   request_context_set(&child);
+   int checks = g_grade_history_checks;
+   assert(ingress_preinject_fork_sources(&parent) == 0);
+   assert(g_grade_history_checks > checks);
+   assert(!request_context_get()->context_refused);
+   assert(strcmp(request_context_get()->memory_source_release, parent.memory_source_release));
+   assert(!strcmp(request_context_get()->request_id, child.request_id));
+   assert(ingress_preinject_revalidate_sources() == 0);
+   ingress_preinject_finish_sources();
+   request_context_set(&parent);
+   assert(ingress_preinject_revalidate_sources() == 0);
+   strcpy(child.request_id, "native-revoked-callback");
+   request_context_set(&child);
+   g_grade_history_mode = 2;
+   assert(ingress_preinject_fork_sources(&parent) == -1);
+   assert(request_context_get()->context_refused);
+   assert(!strcmp(request_context_get()->memory_source_release, parent.memory_source_release));
+   g_grade_history_mode = 1;
+   strcpy(child.request_id, "native-foreign-callback");
+   strcpy(child.principal, "other-caller");
+   request_context_set(&child);
+   checks = g_grade_history_checks;
+   assert(ingress_preinject_fork_sources(&parent) == -1);
+   assert(g_grade_history_checks == checks && request_context_get()->context_refused);
+   request_context_set(&parent);
+   assert(ingress_preinject_fork_sources(&parent) == -1);
+   request_context_set(&parent);
+   ingress_preinject_finish_sources();
+   memset(&parent, 0, sizeof parent);
+   request_context_set(&parent);
+   assert(ingress_preinject_fork_sources(&parent) == 0);
+   g_grade_history_mode = 0;
+   g_assembly_budget = saved_budget;
+   request_context_clear();
+   puts("native callback source handoff revalidates fresh identity and preserves parent ownership");
+}
+
 /* Ordinary browser/primary tasks do not set evidence_requirements. Grade
  * history must still use the real Go assembler and provider freshness fence,
  * without accidentally enabling optional KB preview/typed/fact retrieval. */
@@ -1834,6 +1893,7 @@ int main(void)
    test_durable_provider_attempt();
    test_unversioned_provider_body_receipt();
    test_configured_test_history_at_provider_fence();
+   test_native_source_request_handoff();
    test_default_primary_grade_only_context();
    test_source_revalidation_at_provider_fence();
    test_preview_sources_at_provider_fence();

@@ -81,6 +81,10 @@ const { chromium } = require('../frontend/node_modules/playwright');
     ];
     const bindings = [];
     let controlReplies = 0;
+    let cancelMode = 'reject';
+    const cancelRequests = [];
+    let browserSendRequests = 0;
+    page.on('request', request => { if (new URL(request.url()).pathname === '/api/chat/send' && request.method() === 'POST') browserSendRequests++; });
     let lastControlReply;
     let lookupAgent = '', lookupPersona = 'engineer';
     await page.route(`${origin}/**`, async route => {
@@ -88,6 +92,13 @@ const { chromium } = require('../frontend/node_modules/playwright');
       const url = new URL(request.url());
       const p = url.pathname;
       if (p === '/api/chat/send' || p === '/api/chat/session-events') return route.continue();
+      if (p === '/api/chat/cancel') {
+        const body = request.postDataJSON();
+        cancelRequests.push(body);
+        return route.fulfill({ status: cancelMode === 'reject' ? 503 : 200, contentType: 'application/json',
+          body: JSON.stringify(cancelMode === 'reject' ? { error: 'Unavailable' } :
+            { status: 'ok', session_id: body.session_id, turn_id: body.turn_id, disposition: 'stopping' }) });
+      }
       if (!p.startsWith('/api/')) return route.fulfill({ contentType: 'text/html', body: html });
       if (p === '/api/chat/control-reply') { controlReplies++; lastControlReply = request.postDataJSON(); }
       if ((p === '/api/chat/primary' || p === '/api/chat/persona') && request.method() === 'POST')
@@ -499,6 +510,29 @@ const { chromium } = require('../frontend/node_modules/playwright');
     assert.equal(await page.getByText('Original imported historical question', { exact: true }).count(), 1);
     assert.equal(await page.getByText('Verified fragmented historical answer 火', { exact: true }).count(), 1);
     assert.equal(controlReplies, 3, 'Import/archive metadata replay cannot send control replies');
+    assert.deepEqual(errors, []);
+    currentTurn = 'explicit-stop-regression';
+    event({ kind: 'execution', payload: { status: 'running' } });
+    const stopDraft = page.getByPlaceholder('Steer the running turn…');
+    await stopDraft.fill('Explicit next message after a confirmed stop');
+    const beforeStopSends = browserSendRequests;
+    await page.getByRole('button', { name: 'Steer', exact: true }).click();
+    await page.getByText('Could not stop the selected turn. Your message is retained.', { exact: false }).waitFor();
+    assert.equal(await stopDraft.inputValue(), 'Explicit next message after a confirmed stop');
+    assert.equal(browserSendRequests, beforeStopSends, 'Rejected stop cannot send a continuation');
+    cancelMode = 'stopping';
+    await page.getByRole('button', { name: 'Steer', exact: true }).click();
+    await page.waitForTimeout(150);
+    assert.equal(cancelRequests.length, 2);
+    assert.deepEqual(cancelRequests[1], { session_id: sent.aimee_session_id, turn_id: 'explicit-stop-regression' });
+    assert.equal(browserSendRequests, beforeStopSends, 'Stop ACK must wait for canonical terminal');
+    const nextSend = page.waitForRequest(request => new URL(request.url()).pathname === '/api/chat/send');
+    event({ kind: 'execution', payload: { status: 'cancelled' } });
+    await nextSend;
+    assert.equal(browserSendRequests, beforeStopSends + 1);
+    event({ kind: 'execution', payload: { status: 'cancelled' } });
+    await page.waitForTimeout(150);
+    assert.equal(browserSendRequests, beforeStopSends + 1, 'Terminal replay cannot repeat the continuation');
     assert.deepEqual(errors, []);
     console.log('Webchat browser regressions passed: canonical POST/SSE overlap and reconnect stay unique; history survives refresh, reordering, navigation and reload; projects stay bound; tool output remains readable; interrupted effects stay unknown through replay without control retries; mobile conversation/composer and wrapped session preferences remain usable.');
   } finally {

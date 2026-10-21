@@ -146,43 +146,45 @@ static void test_completion_does_not_fabricate_correctness_or_effects(void)
    assert(!strcmp(dl_failure_mode_to_string(DL_MODE_UNKNOWN), "unknown"));
 }
 
-static void test_capture_reports_each_failed_durable_write(void)
+static void test_exit_metrics_cannot_duplicate_canonical_learning(void)
 {
    agent_result_t result = {.turns = 2, .tool_calls = 1};
    agent_config_t cfg = {0};
    agent_t target = {0};
    snprintf(target.provider, sizeof target.provider, "test-provider");
    snprintf(target.model, sizeof target.model, "fixture-model");
-   for (int failed = 0; failed < 3; failed++)
+   for (int failed = 0; failed < 2; failed++)
    {
-      learning_rc = failed == 1 ? -1 : 0;
-      exit_rc = failed == 2 ? -1 : 42;
-      approach_rc = 0;
+      learning_rc = approach_rc = -1;
+      exit_rc = failed ? -1 : 42;
       learning_calls = exit_calls = approach_calls = 0;
-      int rc = delegate_record_exit_learning("receipt-session", "execute", &result, 0, 30, &cfg,
-                                             &target, "actual goal", "receipt-delegate");
-      assert((rc == 0) == (failed == 0));
-      assert(learning_calls == 1 && exit_calls == 1 && approach_calls == 0);
+      int rc = delegate_record_exit_metrics("receipt-session", "execute", &result, 0, 30, &cfg,
+                                            &target, "receipt-delegate");
+      assert((rc == 0) == !failed);
+      assert(learning_calls == 0 && exit_calls == 1 && approach_calls == 0);
       cJSON *payload = cJSON_Parse(stored_payload);
-      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(payload, "learning_recorded")) ==
-             (learning_rc == 0));
+      assert(!cJSON_GetObjectItemCaseSensitive(payload, "learning_recorded"));
+      assert(
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "learning_owner")),
+                  "canonical_session_log"));
       assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "provider")),
                      "test-provider"));
+      assert(cJSON_GetObjectItemCaseSensitive(payload, "turns")->valueint == 2);
+      assert(cJSON_GetObjectItemCaseSensitive(payload, "tool_calls")->valueint == 1);
       cJSON_Delete(payload);
    }
-   learning_rc = 0;
    exit_rc = 42;
    snprintf(result.error, sizeof result.error,
             "no-progress circuit breaker tripped after 28 successful calls without an edit");
-   for (int failed = 0; failed < 2; failed++)
-   {
-      approach_rc = failed ? -1 : 0;
-      learning_calls = exit_calls = approach_calls = 0;
-      int rc = delegate_record_exit_learning("receipt-session", "execute", &result, -1, 30, &cfg,
-                                             &target, "actual goal", "receipt-delegate");
-      assert((rc == 0) == !failed);
-      assert(learning_calls == 1 && exit_calls == 1 && approach_calls == 1);
-   }
+   learning_calls = exit_calls = approach_calls = 0;
+   assert(!delegate_record_exit_metrics("receipt-session", "execute", &result, -1, 30, &cfg,
+                                        &target, "receipt-delegate"));
+   assert(learning_calls == 0 && exit_calls == 1 && approach_calls == 0);
+   cJSON *payload = cJSON_Parse(stored_payload);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "failure_mode")),
+                  "no-progress/retrieval-loop"));
+   assert(!cJSON_GetObjectItemCaseSensitive(payload, "approach_failure_recorded"));
+   cJSON_Delete(payload);
 }
 
 int main(void)
@@ -192,7 +194,7 @@ int main(void)
    test_other_failures_keep_existing_classification();
    test_failure_evidence_preserves_escaped_errors();
    test_completion_does_not_fabricate_correctness_or_effects();
-   test_capture_reports_each_failed_durable_write();
+   test_exit_metrics_cannot_duplicate_canonical_learning();
    printf("ok\n");
    return 0;
 }

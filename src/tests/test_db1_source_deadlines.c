@@ -11,11 +11,20 @@
 static uint32_t expected_op;
 static uint64_t expected_budget;
 static int calls;
+static int cancel_status;
+static const char *cancel_sequence = "9007199254740993";
 int db1_call(db1_family_t *family, uint32_t op, const char *const *fields, uint32_t count,
              char *const *values, const size_t *caps, uint32_t slots, uint32_t *filled)
 {
    (void)filled;
    assert(op == expected_op && family->timeout_ms == expected_budget);
+   if (op == AIMEE_DB1_OP_SESSION_IR_CANCEL)
+   {
+      assert(count == 3 && !strcmp(fields[0], "actor") && !strcmp(fields[1], "session") &&
+             !strcmp(fields[2], "exact-turn") && slots == 1 && caps[0] == 32);
+      snprintf(values[0], caps[0], "%s", cancel_sequence);
+      return cancel_status;
+   }
    assert(count == 2 && !strcmp(fields[0], "actor") && !strcmp(fields[1], "{}"));
    calls++;
    if (slots)
@@ -51,6 +60,25 @@ int main(void)
    expected_op = AIMEE_DB1_OP_SESSION_NATIVE_EPOCH;
    assert(!db1_session_native_epoch("actor", "{}", epoch));
    assert(calls == 4);
+   expected_budget = 30000;
+   expected_op = AIMEE_DB1_OP_SESSION_IR_CANCEL;
+   assert(!db1_session_ir_cancel("actor", "session", "exact-turn", sequence));
+   assert(!strcmp(sequence, "9007199254740993"));
+   cancel_sequence = "9223372036854775807";
+   assert(!db1_session_ir_cancel("actor", "session", "exact-turn", sequence));
+   const char *invalid[] = {"", "0", "01", "-1", "1x", "9223372036854775808"};
+   for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+   {
+      cancel_sequence = invalid[i];
+      assert(db1_session_ir_cancel("actor", "session", "exact-turn", sequence) == -1);
+      assert(!sequence[0]);
+   }
+   cancel_status = AIMEE_DB1_STATUS_INVALID;
+   assert(db1_session_ir_cancel("actor", "session", "exact-turn", sequence) == 1 && !sequence[0]);
+   cancel_status = AIMEE_DB1_STATUS_MISSING;
+   assert(db1_session_ir_cancel("actor", "session", "exact-turn", sequence) == 1 && !sequence[0]);
+   cancel_status = -1;
+   assert(db1_session_ir_cancel("actor", "session", "exact-turn", sequence) == -1 && !sequence[0]);
    puts("DB1 bounded source deadlines: OK");
    return 0;
 }

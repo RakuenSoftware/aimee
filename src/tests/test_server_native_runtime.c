@@ -397,6 +397,24 @@ char *policy_annotate_indexed(const char *name, const char *arguments, const cha
    return text;
 }
 
+/* The real owner handshake is exercised by test_ingress_preinject. This runtime
+ * fixture verifies callbacks reach it under their distinct captured identity. */
+int ingress_preinject_fork_sources(const request_context_t *parent)
+{
+   const request_context_t *current = request_context_get();
+   assert(parent && current && strcmp(parent->request_id, current->request_id));
+   assert(!strcmp(parent->principal, current->principal));
+   assert(!strcmp(parent->vault_principal, current->vault_principal));
+   if (parent->memory_source_release[0])
+      return request_context_set_source_release("0123456789abcdef0123456789abcdef");
+   return 0;
+}
+void ingress_preinject_finish_sources(void)
+{
+   assert(request_context_get()->memory_source_release[0]);
+   assert(request_context_set_source_release("") == 0);
+}
+
 const agent_t *agent_registry_bind_ingress_model(const agent_t *selected)
 {
    const agent_t *previous = current_model;

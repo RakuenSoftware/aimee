@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Chat from './Chat';
 import type { SessionEvent } from '../ir/session';
+import { operatorCancelError } from '../ir/interruption';
 
 const context = vi.hoisted(() => {
   const sessions = ['one', 'two'].map(id => ({
@@ -325,6 +326,93 @@ describe('canonical browser chat', () => {
     await tick();
     expect(screen.getByRole('button', { name: 'Send', exact: true })).toBeTruthy();
     expect(screen.getByPlaceholderText(/^Type a message/)).toBeTruthy();
+  });
+
+  async function runningDraft(text: string) {
+    const view = render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+    await act(async () => { source.emit(envelope({ kind: 'execution', payload: { status: 'running' } }));
+      source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '1' }) }); });
+    const box = screen.getByPlaceholderText('Steer the running turn…');
+    fireEvent.change(box, { target: { value: text } });
+    fireEvent.keyDown(box, { key: 'Enter', shiftKey: false });
+    await act(async () => {});
+    return { source, box, view };
+  }
+
+  it('stops the exact canonical turn and waits for its terminal before one continuation', async () => {
+    const ordinary = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/cancel'
+      ? Promise.resolve(new Response(JSON.stringify({ status: 'ok', session_id: 'web-one', turn_id: 'turn-one', disposition: 'stopping' })))
+      : ordinary(url, init));
+    const { source, box } = await runningDraft('New explicit continuation');
+    const stops = () => fetchMock.mock.calls.filter(([url]) => url === '/api/chat/cancel');
+    const sends = () => fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send');
+    expect(stops()).toHaveLength(1);
+    expect(JSON.parse(String(stops()[0][1]?.body))).toEqual({ session_id: 'web-one', turn_id: 'turn-one' });
+    expect(sends()).toHaveLength(0);
+    expect((box as HTMLTextAreaElement).value).toBe('New explicit continuation');
+    fireEvent.keyDown(box, { key: 'Enter', shiftKey: false });
+    await act(async () => { source.emit(envelope({ kind: 'execution', payload: { status: 'cancelled' } })); });
+    await tick(300);
+    expect(stops()).toHaveLength(1);
+    expect(sends()).toHaveLength(1);
+    await act(async () => { source.emit(envelope({ kind: 'execution', payload: { status: 'cancelled' } })); });
+    await tick(300);
+    expect(sends()).toHaveLength(1);
+  });
+
+  it.each(['http', 'network', 'malformed', 'wrong-turn'])('retains the stop draft and sends nothing after %s failure', async failure => {
+    const ordinary = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url !== '/api/chat/cancel') return ordinary(url, init);
+      if (failure === 'network') return Promise.reject(new Error('Network unavailable'));
+      return Promise.resolve(new Response(JSON.stringify(failure === 'wrong-turn'
+        ? { session_id: 'web-one', turn_id: 'another-turn', disposition: 'stopping' } : {}), { status: failure === 'http' ? 503 : 200 }));
+    });
+    const { box } = await runningDraft('Keep this draft');
+    await tick(300);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/interrupt')).toHaveLength(0);
+    expect((box as HTMLTextAreaElement).value).toBe('Keep this draft');
+    expect(screen.getByRole('alert').textContent).toMatch(/retained|Network unavailable/);
+  });
+
+  it('does not continue into another selected session after a successful stop', async () => {
+    const ordinary = fetchMock.getMockImplementation()!;
+    let acknowledge!: (response: Response) => void;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/cancel'
+      ? new Promise<Response>(resolve => { acknowledge = resolve; }) : ordinary(url, init));
+    const { source, view } = await runningDraft('Original session draft');
+    await act(async () => { source.emit(envelope({ kind: 'execution', payload: { status: 'cancelled' } })); });
+    context.active = context.sessions[1];
+    view.rerender(<StrictMode><Chat /></StrictMode>);
+    await act(async () => { acknowledge(new Response(JSON.stringify({ status: 'ok', session_id: 'web-one', turn_id: 'turn-one', disposition: 'stopping' }))); });
+    await tick(300);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+  });
+
+  it('keeps the draft when a stop is acknowledged but no canonical terminal arrives', async () => {
+    const ordinary = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/cancel'
+      ? Promise.resolve(new Response(JSON.stringify({ status: 'ok', session_id: 'web-one', turn_id: 'turn-one', disposition: 'stopping' }))) : ordinary(url, init));
+    const { box } = await runningDraft('Wait for a real terminal');
+    await tick(30100);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    expect((box as HTMLTextAreaElement).value).toBe('Wait for a real terminal');
+    expect(screen.getByRole('alert').textContent).toMatch(/still stopping/);
+  });
+
+  it.each(['exact', 'wrong-event', 'wrong-error', 'wrong-sequence'])('requires the exact committed cancellation marker before continuation: %s', async mode => {
+    const ordinary = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/cancel'
+      ? Promise.resolve(new Response(JSON.stringify({ status: 'ok', session_id: 'web-one', turn_id: 'turn-one', disposition: 'cancelled', terminal_sequence: mode === 'wrong-sequence' ? '3' : '2' }))) : ordinary(url, init));
+    const { source, box } = await runningDraft('Continue only after the exact marker');
+    await act(async () => { source.emit({ ...envelope({ kind: 'execution', payload: { status: 'cancelled', error: mode === 'wrong-error' ? 'ordinary stop' : operatorCancelError } }), event_id: mode === 'wrong-event' ? 'unrelated-stop' : 'operator-cancel:turn-one' }); });
+    await tick(300);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(mode === 'exact' ? 1 : 0);
+    if (mode !== 'exact') expect((box as HTMLTextAreaElement).value).toBe('Continue only after the exact marker');
   });
 
   it('waits for the selected model to be saved before sending the retained draft', async () => {
