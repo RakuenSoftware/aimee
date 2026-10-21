@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -97,6 +98,47 @@ func TestSessionExplorationLiveAtomicOwner(t *testing.T) {
 		frame, _ := wire.EncodeFields(8, []string{principal, "session", string(body)})
 		return handler(bus.ModuleInvocation{StageID: StageGuardrailState}, frame)
 	}
+	t.Run("canonical actor bounds and exact ownership", func(t *testing.T) {
+		longActor := "webuser:" + strings.Repeat("a", 151)
+		for _, row := range []struct{ sid, actor string }{{"long-actor", longActor}, {"web-actor", "webuser:operator"}, {"overlong-actor", longActor + "a"}} {
+			if _, err := pool.Exec(ctx, `INSERT INTO server_sessions(id,principal) VALUES($1,$2)`, row.sid, row.actor); err != nil {
+				t.Fatal(err)
+			}
+		}
+		apply := func(actor, sid string) uint32 {
+			binding := map[string]any{"principal": actor, "session": sid, "task": "session-task", "project": "project", "worktree_generation": "w1", "index_generation": "i1", "memory_owner": "m1"}
+			now := time.Now().UTC()
+			contract := map[string]any{"id": "actor-bound", "revision": 1, "binding": binding, "plan_digest": "plan", "source_versions_digest": "versions", "query_class": "symbol", "coverage_complete": true, "confidence_provenance": "uncalibrated", "supported_classes": []string{"raw_scan"}, "created": now.Add(-time.Second), "expires": now.Add(time.Hour), "limits": map[string]any{"enabled": true, "raw_scans": 0}, "tier": "enforce"}
+			body, _ := json.Marshal(map[string]any{"operation": "issue", "binding": binding, "contract": contract})
+			frame, _ := wire.EncodeFields(8, []string{actor, sid, string(body)})
+			raw, ms := handler(bus.ModuleInvocation{StageID: StageGuardrailState}, frame)
+			if ms != bus.ModuleStatusOK {
+				t.Fatalf("module status %v", ms)
+			}
+			code, _, ok := store.DecodeRequest(raw)
+			if !ok {
+				t.Fatal("invalid reply")
+			}
+			return code
+		}
+		for _, actor := range []string{"uid:1000", "webchat:operator", "webuser:mallory"} {
+			if status := apply(actor, "web-actor"); status != store.StatusInvalid {
+				t.Fatalf("foreign or legacy actor %q admitted: %v", actor, status)
+			}
+		}
+		for _, row := range []struct{ sid, actor string }{{"long-actor", longActor}, {"web-actor", "webuser:operator"}} {
+			if status := apply(row.actor, row.sid); status != store.StatusOK {
+				t.Fatalf("valid canonical actor refused: %v", status)
+			}
+		}
+		if apply(longActor+"a", "overlong-actor") != store.StatusInvalid {
+			t.Fatal("160-byte actor admitted")
+		}
+		var count int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM session_state WHERE session_id IN ('long-actor','web-actor','overlong-actor')`).Scan(&count); err != nil || count != 2 {
+			t.Fatal("unexpected owner state", count, err)
+		}
+	})
 	now := time.Now().UTC()
 	bindings := []map[string]any{}
 	for i := 0; i < 2; i++ {

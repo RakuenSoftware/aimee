@@ -30,6 +30,13 @@
 
 extern char **environ;
 
+static workspace_turn_project_open_fn project_owner;
+
+void workspace_turn_register_project_owner(workspace_turn_project_open_fn owner)
+{
+   project_owner = owner;
+}
+
 /* The detached provider bound for the current turn lives here for the turn's
  * duration (the active-provider pointer aliases &t_turn_detached.base). */
 static __thread ws_detached_provider_t t_turn_detached;
@@ -782,6 +789,22 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
          }
       }
    }
+   if (project_owner)
+   {
+      int fd = project_owner(real);
+      if (fd >= 0)
+      {
+         struct stat held, named;
+         int valid = !fstat(fd, &held) && !stat(real, &named) && held.st_dev == named.st_dev &&
+                     held.st_ino == named.st_ino;
+         close(fd);
+         if (valid)
+         {
+            snprintf(out, out_cap, "%s", real);
+            return 1;
+         }
+      }
+   }
    for (int i = 0; i < config_workspace_count(); i++)
    {
       const char *provider = config_workspace_providers(i);
@@ -1055,6 +1078,10 @@ int workspace_turn_resource_identity(const char *cwd, int *directory_fd, char di
          mirror = active_mirror_lease(actual);
       if (mirror >= 0)
          fd = fcntl(mirror, F_DUPFD_CLOEXEC, 3);
+      else if (project_owner && (fd = project_owner(cwd)) >= 0)
+      {
+         /* Retain the exact project-owner descriptor, never reopen by path. */
+      }
       else if (workspace_turn_workspace_authorized(cwd, actual, sizeof actual))
          fd = open(actual, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
       if (fd < 0 || fstat(fd, &status))

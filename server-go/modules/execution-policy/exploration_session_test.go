@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -480,5 +481,28 @@ func TestSessionCheckRetainsOwnedPolicyCategories(t *testing.T) {
 	}
 	if decision.Allowed || decision.Reason != "policy blocks network operations" {
 		t.Fatalf("session lost categories: %+v", decision)
+	}
+}
+
+func TestSessionExplorationCanonicalActorBoundsAndIdentity(t *testing.T) {
+	actor := "webuser:" + strings.Repeat("a", 151)
+	now := time.Now()
+	c := testContract(now)
+	c.Binding.Principal = actor
+	raw, _ := json.Marshal(sessionExplorationRequest{Operation: "issue", Binding: c.Binding, Contract: &c})
+	state, _, err := SessionExploration(actor, c.Binding.Session, nil, raw, now)
+	if err != nil {
+		t.Fatal("valid159-byteactor", err)
+	}
+	inspect, _ := json.Marshal(sessionExplorationRequest{Operation: "inspect", Binding: c.Binding})
+	for _, foreign := range []string{"uid:1000", "webchat:operator", "webuser:mallory"} {
+		if _, _, err := SessionExploration(foreign, c.Binding.Session, state, inspect, now); err == nil {
+			t.Fatalf("foreign actor %q admitted", foreign)
+		}
+	}
+	c.Binding.Principal = actor + "a"
+	raw, _ = json.Marshal(sessionExplorationRequest{Operation: "issue", Binding: c.Binding, Contract: &c})
+	if _, _, err := SessionExploration(actor+"a", c.Binding.Session, nil, raw, now); err == nil {
+		t.Fatal("160-byteactor admitted")
 	}
 }

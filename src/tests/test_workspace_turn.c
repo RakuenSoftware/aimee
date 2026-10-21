@@ -331,6 +331,14 @@ static void test_owned_mirror_callback_lease(const char *temporary)
    puts("  owned mirror callbacks: cross-thread/nested restore and replaced-inode refusal pass");
 }
 
+static const char *test_owned_project;
+static int test_project_open(const char *cwd)
+{
+   return test_owned_project && !strcmp(cwd, test_owned_project)
+              ? open(cwd, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+              : -1;
+}
+
 int main(void)
 {
    /* A failed owner acquisition is never a truthy authorization, even locally. */
@@ -380,6 +388,31 @@ int main(void)
       close(second);
       assert(!rmdir(path) && !rmdir(old));
       assert(!config_workspace_remove(path));
+   }
+
+   /* Only the registered host project owner can admit an unconfigured clone;
+    * identity retains the actual directory fd and never broadens to siblings. */
+   {
+      char project[768], sibling[768], allowed[768], digest[65];
+      snprintf(project, sizeof project, "%s/owned-clone", tmpdir);
+      snprintf(sibling, sizeof sibling, "%s/owned-clone-foreign", tmpdir);
+      assert(!mkdir(project, 0700) && !mkdir(sibling, 0700));
+      int fd = -1;
+      assert(workspace_turn_resource_identity(project, &fd, digest) < 0 && fd == -1);
+      workspace_turn_register_project_owner(test_project_open);
+      test_owned_project = project;
+      assert(!workspace_turn_resource_identity(project, &fd, digest) && fd >= 0);
+      struct stat measured, actual;
+      assert(!fstat(fd, &measured) && !stat(project, &actual) && measured.st_ino == actual.st_ino &&
+             measured.st_dev == actual.st_dev);
+      close(fd);
+      assert(workspace_turn_workspace_authorized(project, allowed, sizeof allowed));
+      assert(!workspace_turn_workspace_authorized(sibling, allowed, sizeof allowed));
+      assert(workspace_turn_resource_identity(sibling, &fd, digest) < 0 && fd == -1);
+      workspace_turn_register_project_owner(NULL);
+      assert(workspace_turn_resource_identity(project, &fd, digest) < 0 && fd == -1);
+      test_owned_project = NULL;
+      assert(!rmdir(project) && !rmdir(sibling));
    }
 
    /* cwd inside the detached workspace -> binds a detached provider active */

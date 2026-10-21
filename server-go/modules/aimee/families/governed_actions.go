@@ -27,7 +27,7 @@ type governedActionRequest struct {
 
 func governedActionApply(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
 	principal, sid, body := f[0], f[1], f[2]
-	if principal == "" || sid == "" || len(principal) > 128 || len(sid) > 128 || len(body) > 65536 {
+	if principal == "" || sid == "" || len(principal) >= 160 || len(sid) > 128 || len(body) > 65536 {
 		return store.StatusInvalid, nil, nil
 	}
 	var req governedActionRequest

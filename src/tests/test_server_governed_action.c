@@ -22,6 +22,7 @@ static cJSON *stored_intent;
 static int calls, dispatched, outcomes, guard_held, guard_released;
 static int fail_resource, fail_verify, fail_store, memory_required, stale;
 static const char *replay_state;
+static const char *expected_actor = "alice";
 static const char *text(const cJSON *j, const char *key)
 {
    const char *s = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, key));
@@ -92,6 +93,7 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    (void)timeout;
    assert(!strcmp(method, "memory.runtime") && !strcmp(text(args, "operation"), "action-evidence"));
    assert(guard_held);
+   assert(!strcmp(text(args, "principal"), "alice"));
    *reply = cJSON_Parse(stale ? "{\"status\":\"unavailable\"}"
                               : "{\"status\":\"ok\",\"evidence_sha256\":\"evidence\",\"context_"
                                 "receipt\":\"receipt\",\"revocation_generation\":\"revision\","
@@ -103,6 +105,7 @@ cJSON *aimee_module_command_call_context(uint32_t event, uint32_t stage, const c
 {
    assert(event == 6914 && stage == 2);
    assert(cJSON_IsTrue(cJSON_GetObjectItem(caller, "authenticated")));
+   assert(!strcmp(text(caller, "principal"), "alice"));
    if (!strcmp(verb, "describe"))
    {
       if (fail_resource)
@@ -123,7 +126,7 @@ cJSON *aimee_module_command_call_context(uint32_t event, uint32_t stage, const c
 int db1_governed_action_apply(const char *principal, const char *sid, const char *wire, char *reply,
                               size_t cap)
 {
-   assert(!strcmp(principal, "alice") && !strcmp(sid, "session"));
+   assert(!strcmp(principal, expected_actor) && !strcmp(sid, "session"));
    calls++;
    if (fail_store)
       return -1;
@@ -251,6 +254,51 @@ int main(void)
       free(prior);
    }
    replay_state = NULL;
+   /* Real native/browser requests retain an account principal distinct from
+    * the canonical session actor. All durable phases, including reconciliation
+    * and fork, must use the latter; resource and memory callers remain alice. */
+   context.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+   snprintf(context.vault_principal, sizeof(context.vault_principal), "webuser:alice");
+   expected_actor = context.vault_principal;
+   policy_action_attempt("attempt");
+   guard_released = 0;
+   assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) == 0);
+   result = policy_action_finish("ok", strdup("saved"), &is_error);
+   assert(!is_error);
+   free(result);
+   req = cJSON_Parse(
+       "{\"operation\":\"reconcile\",\"session_id\":\"session\",\"action_id\":\"action\"}");
+   reconciled = action_receipt_command(req);
+   assert(!strcmp(text(reconciled, "completion_claim"), "effect_confirmed"));
+   cJSON_Delete(req);
+   cJSON_Delete(reconciled);
+   snprintf(context.exploration_binding, sizeof(context.exploration_binding),
+            "{\"principal\":\"webuser:alice\",\"session\":\"parent\"}");
+   assert(policy_action_inherit("session") == 0);
+   snprintf(context.exploration_binding, sizeof(context.exploration_binding),
+            "{\"principal\":\"alice\",\"session\":\"parent\"}");
+   before = calls;
+   assert(policy_action_inherit("session") == -1 && calls == before);
+   context.context_refused = 0;
+   context.exploration_binding[0] = 0;
+   /* An attested-but-empty actor fails closed rather than using alice. */
+   context.vault_principal[0] = 0;
+   policy_action_attempt("attempt");
+   assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) == -1);
+   assert(calls == before);
+   /* Preserve the complete canonical actor across the finish callback. */
+   memset(context.vault_principal, 'x', sizeof(context.vault_principal) - 1);
+   context.vault_principal[sizeof(context.vault_principal) - 1] = 0;
+   char long_actor[VAULT_PRINCIPAL_MAX];
+   snprintf(long_actor, sizeof(long_actor), "%s", context.vault_principal);
+   expected_actor = long_actor;
+   policy_action_attempt("attempt");
+   guard_released = 0;
+   assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) == 0);
+   snprintf(context.vault_principal, sizeof(context.vault_principal), "webuser:other-request");
+   result = policy_action_finish("ok", strdup("saved"), &is_error);
+   assert(!is_error);
+   free(result);
    cJSON_Delete(args);
    cJSON_Delete(stored_intent);
    puts("governed action host transport: ok");

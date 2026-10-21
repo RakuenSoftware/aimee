@@ -16,6 +16,7 @@
 static __thread char action_attempt[128];
 static __thread char action_session[129];
 static __thread char action_principal[129];
+static __thread char action_actor[VAULT_PRINCIPAL_MAX];
 static __thread cJSON *action_intent;
 static __thread cJSON *action_verification_request;
 static __thread cJSON *action_existing_receipt;
@@ -66,12 +67,12 @@ int policy_action_inherit(const char *session)
       return 0;
    }
    int accepted = 0;
-   if (!strcmp(action_text(binding, "principal"), ctx->principal))
+   if (!strcmp(action_text(binding, "principal"), request_context_session_actor(ctx)))
    {
       cJSON *request = cJSON_CreateObject();
       cJSON_AddStringToObject(request, "operation", "fork");
       cJSON_AddStringToObject(request, "parent_session", parent);
-      cJSON *reply = action_store(ctx->principal, session, request);
+      cJSON *reply = action_store(request_context_session_actor(ctx), session, request);
       accepted = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "allowed"));
       cJSON_Delete(reply);
       cJSON_Delete(request);
@@ -130,8 +131,9 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
 {
    const request_context_t *ctx = request_context_get();
    snprintf(action_refusal, sizeof(action_refusal), "host_action_binding_unavailable");
-   if (!ctx || ctx->context_refused || !ctx->principal[0] || !ctx->request_id[0] || !sid ||
-       !sid[0] || !action_attempt[0] || (!authorized && !(ctx->capabilities & CAP_TOOL_EXECUTE)) ||
+   if (!ctx || ctx->context_refused || !ctx->principal[0] ||
+       !request_context_session_actor(ctx)[0] || !ctx->request_id[0] || !sid || !sid[0] ||
+       !action_attempt[0] || (!authorized && !(ctx->capabilities & CAP_TOOL_EXECUTE)) ||
        action_intent)
    {
       policy_unknown_effect_clear();
@@ -189,9 +191,10 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
    intent = cJSON_CreateObject();
    cJSON_AddStringToObject(intent, "request_id", ctx->request_id);
    cJSON *task_binding = cJSON_Parse(ctx->exploration_binding);
-   const char *task = !strcmp(action_text(task_binding, "principal"), ctx->principal)
-                          ? action_text(task_binding, "task")
-                          : "";
+   const char *task =
+       !strcmp(action_text(task_binding, "principal"), request_context_session_actor(ctx))
+           ? action_text(task_binding, "task")
+           : "";
    cJSON_AddStringToObject(intent, "task_id", task[0] ? task : sid);
    cJSON_Delete(task_binding);
    cJSON_AddStringToObject(intent, "attempt_id", action_attempt);
@@ -211,7 +214,7 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
    cJSON_AddItemToObject(request, "intent", intent);
    intent = NULL;
    snprintf(action_refusal, sizeof(action_refusal), "action_owner_unavailable");
-   decision = action_store(ctx->principal, sid, request);
+   decision = action_store(request_context_session_actor(ctx), sid, request);
    next = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(
                               cJSON_GetObjectItemCaseSensitive(decision, "receipt"), "intent"),
                           1);
@@ -232,7 +235,7 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
       cJSON_ReplaceItemInObjectCaseSensitive(request, "operation",
                                              cJSON_CreateString(operations[i]));
       cJSON_Delete(decision);
-      decision = action_store(ctx->principal, sid, request);
+      decision = action_store(request_context_session_actor(ctx), sid, request);
       if (!cJSON_IsTrue(
               cJSON_GetObjectItemCaseSensitive(decision, i ? "dispatch_allowed" : "allowed")))
       {
@@ -255,6 +258,7 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
                            action_text(action_intent, "payload_sha256"));
    snprintf(action_session, sizeof(action_session), "%s", sid);
    snprintf(action_principal, sizeof(action_principal), "%s", ctx->principal);
+   snprintf(action_actor, sizeof(action_actor), "%s", request_context_session_actor(ctx));
    rc = 0;
    action_refusal[0] = 0;
 done:
@@ -342,7 +346,7 @@ char *policy_action_finish(const char *verdict, char *result, int *is_error)
    cJSON_AddStringToObject(outcome, "destination", action_text(action_intent, "destination"));
    cJSON_AddStringToObject(outcome, "payload_sha256", action_text(action_intent, "payload_sha256"));
    cJSON_AddItemToObject(request, "outcome", outcome);
-   cJSON *decision = action_store(action_principal, action_session, request);
+   cJSON *decision = action_store(action_actor, action_session, request);
    if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(decision, "allowed")))
       state = "outcome_unknown";
    cJSON *envelope = cJSON_CreateObject();
@@ -367,7 +371,8 @@ char *policy_action_finish(const char *verdict, char *result, int *is_error)
  * the resource owner. Public JSON cannot submit an outcome or object version. */
 cJSON *action_receipt_command(cJSON *input)
 {
-   const char *principal = request_context_principal();
+   const request_context_t *ctx = request_context_get();
+   const char *principal = request_context_session_actor(ctx);
    const char *sid = action_text(input, "session_id");
    const char *id = action_text(input, "action_id");
    const char *operation = action_text(input, "operation");
@@ -415,7 +420,7 @@ cJSON *action_receipt_command(cJSON *input)
    cJSON *arguments = cJSON_ParseWithOpts(action_text(input, "arguments_json"), NULL, 1);
    cJSON *probe = cJSON_CreateObject(), *caller = cJSON_CreateObject();
    cJSON_AddBoolToObject(caller, "authenticated", 1);
-   cJSON_AddStringToObject(caller, "principal", principal);
+   cJSON_AddStringToObject(caller, "principal", ctx->principal);
    cJSON_AddStringToObject(probe, "tool", action_text(intent, "tool"));
    cJSON_AddStringToObject(probe, "directory", action_text(input, "directory"));
    cJSON_AddStringToObject(probe, "destination", action_text(intent, "destination"));

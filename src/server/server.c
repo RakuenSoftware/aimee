@@ -70,6 +70,7 @@
 #include <aimee/workspace/workspace.h>
 #include "worktree_gc.h"
 #include "modules/git/git_verify.h"
+#include "server_project_workspace.h"
 #include "toolset.h"
 #include "cJSON.h"
 #include "s2_native_gate_hook.h" /* S2 native-tool gate (server-side, tracks 2+3) */
@@ -1931,6 +1932,11 @@ static void server_shell_git_gate_log_posture(void)
              "ARMED: git/gh in a delegate shell is refused; delegates use the git_* tools");
 }
 
+static int server_project_workspace_open(const char *cwd)
+{
+   return server_project_workspace_open_owned(request_context_get(), cwd);
+}
+
 int server_init(server_ctx_t *ctx, const char *socket_path)
 {
    memset(ctx, 0, sizeof(*ctx));
@@ -1948,6 +1954,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* Install host custody/policy before any background worker starts. Detached
     * delegates can outlive a bounded shutdown drain, so these fail-closed hooks
     * remain installed for the process lifetime, including store teardown. */
+   workspace_turn_register_project_owner(server_project_workspace_open);
    primary_session_adapter_set_native_reconcile(server_native_session_reconcile);
    primary_session_adapter_set_native_history_load(server_native_history_load);
    aimee_ir_history_set_host_admission(server_native_history_admit_current);

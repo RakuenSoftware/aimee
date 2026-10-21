@@ -81,6 +81,14 @@ typedef struct
    char aimee_tool_transport[16];
 } request_context_t;
 
+/* Durable sessions are owned by the host-attested actor, which can differ
+ * from the account/tenant identity used by memory and tool resource owners.
+ * A malformed attested context must not fall back to a different owner. */
+static inline const char *request_context_session_actor(const request_context_t *ctx)
+{
+   return ctx ? (ctx->vault_transport != ATTEST_NONE ? ctx->vault_principal : ctx->principal) : "";
+}
+
 /* Owned async copy. An absent context must restore absence, not leave the
  * previous pooled request's identity or limits installed. */
 typedef struct

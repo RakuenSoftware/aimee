@@ -125,7 +125,7 @@ size_t agent_tool_output_cap(void)
 int db1_session_exploration_apply(const char *principal, const char *sid, const char *request,
                                   char *reply, size_t reply_len)
 {
-   assert(strcmp(principal, "alice") == 0 && strcmp(sid, "session") == 0);
+   assert(strcmp(principal, "webuser:alice") == 0 && strcmp(sid, "session") == 0);
    cJSON *body = cJSON_Parse(request);
    assert(cJSON_IsObject(body));
    const char *operation =
@@ -266,6 +266,8 @@ int main(void)
 
    context_active = 1;
    snprintf(test_context.principal, sizeof(test_context.principal), "alice");
+   test_context.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+   snprintf(test_context.vault_principal, sizeof(test_context.vault_principal), "webuser:alice");
    snprintf(test_context.request_id, sizeof(test_context.request_id), "request");
    cJSON *offer = cJSON_Parse("{\"memory_owner\":\"m1\",\"index_generation\":\"i1\"}");
    assert(policy_prepare_exploration(offer, "session", "/project", "project") == 0);

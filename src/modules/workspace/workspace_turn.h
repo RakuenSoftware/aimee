@@ -46,6 +46,12 @@ const workspace_turn_mirror_lease_t *
 workspace_turn_mirror_bind(const workspace_turn_mirror_lease_t *lease);
 void workspace_turn_mirror_release(workspace_turn_mirror_lease_t *lease);
 
+/* The host may supply a held directory from its authenticated, registered
+ * project owner. A path alone cannot create this capability; missing callbacks
+ * and refused ownership keep the existing explicit-registration requirements. */
+typedef int (*workspace_turn_project_open_fn)(const char *cwd);
+void workspace_turn_register_project_owner(workspace_turn_project_open_fn owner);
+
 /* Identity-only attestation of the currently held tool resource. Shared/mirror
  * directories return an owned fd pinning the measured inode; container/detached
  * identities include this owner's live acquisition epoch, never a pointer.
