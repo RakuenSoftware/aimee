@@ -388,6 +388,21 @@ class LiveSemanticContextS1Test(unittest.TestCase):
                     self.assertFalse(validator.reviewed_memory_equivalent(path, frozen, drift))
         self.assertFalse(validator.reviewed_memory_equivalent("src/tests/test_lsp.c", "same", "same"))
 
+    def test_release_validator_refuses_cli_discriminator_accessor_drift(self) -> None:
+        validator = load_release_validator()
+        path = "src/modules/protocols/mcp/mcp_tools_extended.c"
+        frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
+        current = (ROOT / path).read_text()
+        self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+        block = next(row["release_text"] for row in validator.REVIEWED_HOST_INTEGRATIONS[path]
+                     if "const char *mcp_family_discriminator(" in row["release_text"])
+        for drift in (
+            current.replace(block, block.replace('return "command";', 'return "action";'), 1),
+            current.replace(block, "", 1),
+            current + block,
+        ):
+            self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
     def test_release_validator_refuses_drift_in_tool_metadata_coverage(self) -> None:
         validator = load_release_validator()
         path = "src/tests/test_mcp_client_registry.c"

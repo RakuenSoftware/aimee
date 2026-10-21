@@ -153,7 +153,7 @@ int policy_action_begin(const char *name, cJSON **arguments, const char *cwd, co
     * this tuple; public tool arguments cannot nominate a turn. */
    server_session_capture_t *capture = NULL;
    if (server_session_capture_retain_current(sid, request_context_session_actor(ctx), &capture) ||
-       (ctx->model_execution && !capture))
+       (ctx->model_execution && !ctx->operator_script_origin && !capture))
    {
       policy_unknown_effect_clear();
       return -1;

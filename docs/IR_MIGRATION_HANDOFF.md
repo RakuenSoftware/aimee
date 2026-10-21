@@ -14,6 +14,79 @@ merged baseline, not the subsequent browser repairs. Continue on
 `fix/browser-ir-live-acceptance` in [PR #3057](https://github.com/RakuenSoftware/aimee/pull/3057) for their fresh CI. Keep automatic review and
 the strict attribution gate enabled. No production promotion is claimed.
 
+### Live source-handoff result and remaining integration repair
+
+Executable source `38d55ba726e22e11e0a7cae8750200139ae0da87` is deployed on owned
+VM 8163 and in complete immutable CT image
+`sha256:18b9f69453dfc66b15cce1ca6d7724db6cfdbcc4f6b9289d1e179703f7b4de72`.
+The CT image includes runtime-web and code-server; clean-image artifact hashes,
+normal PAM login, the served SPA and managed-mTLS E4B probe passed. PostgreSQL
+identity/start time/volumes, provider configuration, login HMAC and TLS were
+preserved. The VM's first install rolled back when generated runtime composition
+was missing; regeneration from exact descriptors subsequently proved all 52
+composition files identical before successful installation. No app state was
+reconstructed or reset.
+
+A genuine Codex delegate now passed configured verification. Job 2's child
+`delegate-d4cd3fcd4dae947e822c4258c4fc1f208a3443b350bcdb6d9fe85fe8ed68de99`
+completed turn `bdd9a1c01eeb20e6acc60ed3cac64fbc` at sequence 18. Its actual
+git_verify ran once on original task commit
+`d940c6640b38331491ce18bf38903f33141d1c31`. Independent database readback
+confirmed the canonical inline proof equals stored test-grade event 127,
+source-bound delegate experience 128 equals the sole matching learning row 3,
+and actor/project/parent/job/child/revision bindings agree. The row remains
+pending review with zero confidence and no automatic application. This is a
+configured-test verification-only delegate, not a new causal repair grade or
+unrestricted semantic-quality claim. The previous failed job 1 remains intact.
+
+A fresh single Claude request on this source again reached Anthropic and failed
+canonically after actual HTTP 429/rate_limit, before assistant or tool output.
+Existing SDK retry/backoff occurred within that one outer request. No agent retry
+loop or quota override was used; successful Claude vendor acceptance remains
+blocked. The actual API-model pending-question/crash/continuation journey uses
+the full tool catalog. A real request_input became source 4/question 6; the owned
+app was killed without resetting PostgreSQL. Normal browser recovery produced
+exactly one operator-cancel terminal 7, authenticated unknown-outcome receipt 8,
+and one continuation 9/user 10. That continuation executed read_file on README,
+with canonical call 13/result 15 and independently confirmed actual file content.
+The real model then completed; the final marker was visible and reload showed
+no question, no Reconnect state and no retransmission. Exact totals were two
+sends, zero question replies and one explicit cancellation. The fixture first
+tripped over mount-array ordering after the crash; only that comparison was
+normalized, preserving the original failure packet and the same container,
+question, source and nonce. No provider response or history row was fabricated.
+The E4B validation alias explicitly uses 32768 context, 1800000 ms timeout and
+max_output 1024; max_output is capacity metadata, not the generation budget.
+The actual upstream generation limit was 8192; use max_tokens for future bounded
+CPU runs. Other aliases and the actual provider/model/endpoint remain unchanged.
+This is not a default responsiveness qualification.
+
+Scan-metadata-only follow-up `28fb5ca07c8d7c4200662645ed3a593935a1f3cb` records one
+exact public OpenAPI checksum false-positive fingerprint; recomputation and the
+complete-history secret scan passed. Fresh CI passed 52 of 53 main jobs; only
+integration failed. One failure expected the retired raw delegate-learning
+publisher; its repair requires positive actual canonical child observations and
+keeps historical compatibility in a separate PostgreSQL test. The other exposed
+that script RPC had marked direct operator scripts as model execution while
+omitting canonical capture handoff. The repair retains/binds/releases real
+captures for model-origin workers, keeps all scripts untrusted, and marks only
+the original authenticated direct-operator script path with host-only provenance.
+Actual model entry clears that provenance; the durable cancellation fence still
+applies. Real tools/policy-owner fixtures cover both paths and missing capture.
+
+The native shell CLI bridge uses lifetime-scoped child grants,
+normal actor/cwd/capture admission, exact registered family projection and nonce
+replay protection. It must use the actual generation's final post-policy catalog,
+not the initial request profile. No new model tool-call IDs or alternative
+conversation store are created. Container/detached shells do not receive a host
+loopback grant. The real thin-client binary dispatches native commands before
+operator profiles, remote credentials, local handlers and workspace bootstrap;
+it cannot fall back to those paths when its child grant is missing. Real-binary
+entry regressions, focused normal/sanitizer checks, CMake fixtures and all 76 lint
+gates passed before the final combined run. Fresh combined CI, isolated full
+integration and actual shell CLI validation remain required;
+production `.100` remains unchanged and KB-free.
+
 ### Current qualification checkpoint, 21 October 2026
 
 Committed head `4ad4843b2c7013d8fc37d1c70453bf8bd261ba3c` passed all 53

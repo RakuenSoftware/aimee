@@ -4,6 +4,7 @@
 #include "agent_config.h"
 #include "agent_source_authority.h"
 #include "request_context.h"
+#include "server_session_capture.h"
 #include "script_tool_execution.h"
 #include "script_rpc.h"
 #include <arpa/inet.h>
@@ -78,6 +79,23 @@ void agent_tools_scope_destroy_owned(agent_tools_scope_snapshot_t *scope)
 
 /* No authenticated host task in this framing-only fixture. Real context
  * propagation is exercised through unit-test-agent's actual dispatcher. */
+int server_session_capture_retain_current(const char *session, const char *actor,
+                                          server_session_capture_t **out)
+{
+   (void)session;
+   (void)actor;
+   *out = NULL;
+   return 0;
+}
+server_session_capture_t *server_session_capture_bind(server_session_capture_t *capture)
+{
+   assert(!capture);
+   return NULL;
+}
+void server_session_capture_release(server_session_capture_t *capture)
+{
+   assert(!capture);
+}
 void request_context_snapshot(request_context_snapshot_t *out)
 {
    memset(out, 0, sizeof *out);

@@ -578,9 +578,23 @@ if(NOT WIN32)
     aimee_enable_test_asserts(test_server_verification)
     add_test(NAME test_server_verification COMMAND test_server_verification)
   endif()
+  add_executable(test_server_native_cli test_server_native_cli.c ../server/server_native_cli.c
+    ../modules/protocols/mcp/mcp_tools_extended.c ../aimee_sha256.c ../platform_random.c
+    ../posix/platform_random.c ../vendor/cJSON.c)
+  target_include_directories(test_server_native_cli PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../headers)
+  target_compile_options(test_server_native_cli PRIVATE -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(test_server_native_cli PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(test_server_native_cli PRIVATE -Wl,--gc-sections)
+  endif()
+  target_link_libraries(test_server_native_cli PRIVATE aimee-core-connection Threads::Threads OpenSSL::Crypto)
+  aimee_enable_test_asserts(test_server_native_cli)
+  add_test(NAME test_server_native_cli COMMAND test_server_native_cli)
   add_executable(test_server_native_runtime test_server_native_runtime.c support/log_stub.c
     ../server/agent_tools.c ../posix/agent_source_authority.c ../modules/ir/aimee_ir.c
-    ../server/server_native_runtime.c ../server/server_native_history.c ../server/server_native_tool_admission.c ../server/server_session_question.c ../server/server_native_tool_source.c ../server/server_session_capture.c ../server/server_session_control.c
+    ../server/server_native_runtime.c ../server/server_native_cli.c ../modules/protocols/mcp/mcp_tools_extended.c ../server/server_native_history.c ../server/server_native_tool_admission.c ../server/server_session_question.c ../server/server_native_tool_source.c ../server/server_session_capture.c ../server/server_session_control.c
     ../modules/ir/session_event.c ../cli_proxy.c ../server/request_context.c
     ../modules/translation/wire_codec.c
     ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c
@@ -593,6 +607,12 @@ if(NOT WIN32)
     ${CMAKE_CURRENT_SOURCE_DIR}/../db1_client ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
   target_link_libraries(test_server_native_runtime PRIVATE
     aimee-core-connection Threads::Threads OpenSSL::Crypto)
+  target_compile_options(test_server_native_runtime PRIVATE -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(test_server_native_runtime PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(test_server_native_runtime PRIVATE -Wl,--gc-sections)
+  endif()
   aimee_enable_test_asserts(test_server_native_runtime)
   add_test(NAME test_server_native_runtime COMMAND test_server_native_runtime)
 endif()

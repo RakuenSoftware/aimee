@@ -437,11 +437,14 @@ def main():
         workspace = Path(os.environ["AIMEE_IR_DELEGATE_WORKSPACE"])
         assert (workspace / ".git").is_dir(), "registered integration checkout is missing"
 
+        learning_jobs = []
+
         def learning_task(run):
             launched = api("/v1/delegate/run", dict(role="format", persona="engineer", via="ir-live-a", tools=False,
                 prompt=f"IR_LEARNING_RECEIPT_{run} return PRIMARY_OK", session_id=sid,
                 cwd=str(workspace), max_turns=2))
             assert launched.get("job_id", 0) > 0, launched
+            learning_jobs.append(str(launched["job_id"]))
             deadline = time.monotonic() + 120
             while True:
                 status = api("/v1/delegate/status", dict(job_id=launched["job_id"], full_result=True))
@@ -473,10 +476,11 @@ def main():
                 str(Path(__file__).resolve().parents[2] / "server-go"), "test", "./modules/learning",
                 "-run", "^TestDelegateExitLiveUngradedRetention$", "-count=1"],
                 env={**os.environ, "AIMEE_LEARNING_LIVE_SESSION": sid,
-                     "AIMEE_LEARNING_LIVE_ACTOR": f"uid:{os.getuid()}"},
+                     "AIMEE_LEARNING_LIVE_ACTOR": f"uid:{os.getuid()}",
+                     "AIMEE_LEARNING_LIVE_JOBS": json.dumps(learning_jobs)},
                 capture_output=True, text=True, timeout=120)
             assert verification.returncode == 0, verification.stdout + verification.stderr
-            print("delegate learning: actual exits persist without fabricated writes/grades or next-run prompt authority")
+            print("delegate learning: actual canonical child observations persist once without fabricated grades or next-run prompt authority")
 
         from test_native_ir_browser_control import prepare_browser_workspace
         mirror = prepare_browser_workspace(api, home, workspace, "queued-delegate-client")

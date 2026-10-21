@@ -1,6 +1,7 @@
 /* A host-bound listener must never consult global CLI/provider credentials. */
 #include "cli_proxy.h"
 #include <aimee/core/connection/socket.h>
+#include <aimee/core/connection/auth.h>
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -23,6 +24,7 @@ static int forward(const char *method, const char *path, const char *headers, co
    host_scope_t *scope = context;
    assert(!strcmp(method, "POST") && !strcmp(path, scope->path ? scope->path : "/v1/responses"));
    assert(!strcmp(session, scope->session));
+   assert(io->local_credential && io->local_credential[0]);
    assert(!strstr(headers, "spoof") && !strstr(headers, "local-token"));
    assert(body_len == strlen(payload) && !memcmp(body, payload, body_len));
    atomic_fetch_add(&scope->calls, 1);
@@ -86,6 +88,14 @@ static void read_response(int fd, char *response, size_t capacity)
    }
    response[used] = 0;
    aimee_core_socket_close(fd);
+}
+
+static atomic_int child_revoked;
+static int authorize_child(const char *method, const char *path, const char *token, void *context)
+{
+   (void)context;
+   return !atomic_load(&child_revoked) && !strcmp(method, "POST") &&
+          !strcmp(path, "/v1/native/cli") && aimee_core_credential_equal(token, "child-token");
 }
 
 int main(void)
@@ -157,6 +167,21 @@ int main(void)
    assert(!cli_proxy_start_bound(a_port, "other-token", "other-session", &forbidden, forward, &a));
    assert(atomic_load(&runtime.calls) == 1);
    cli_proxy_stop(runtime_listener);
+   host_scope_t child = {
+       .owner = "child-owner", .session = "child-session", .path = "/v1/native/cli"};
+   cli_proxy_t *child_listener = cli_proxy_start_authorized(
+       0, "parent-token", child.session, &a_port, runtime_route, authorize_child, forward, &child);
+   assert(child_listener);
+   read_response(send_request(a_port, "child-token", "/v1/native/cli"), response, sizeof response);
+   assert(strstr(response, "200 OK") && atomic_load(&child.calls) == 1);
+   read_response(send_request(a_port, "parent-token", "/v1/native/cli"), response, sizeof response);
+   assert(strstr(response, "401") && atomic_load(&child.calls) == 1);
+   atomic_store(&child_revoked, 1);
+   read_response(send_request(a_port, "child-token", "/v1/native/cli"), response, sizeof response);
+   assert(strstr(response, "401") && atomic_load(&child.calls) == 1);
+   read_response(send_request(a_port, "child-token", "/v1/config/get"), response, sizeof response);
+   assert(strstr(response, "404") && atomic_load(&child.calls) == 1);
+   cli_proxy_stop(child_listener);
    puts("bound model listener: owner/session isolation, framing and cancellation passed");
    return 0;
 }

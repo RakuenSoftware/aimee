@@ -230,7 +230,10 @@ static void test_model_intent_scope(void)
    request_context_t owner = {.trusted = 1};
    strcpy(owner.principal, "alice");
    request_context_set(&owner);
+   assert(request_context_set_operator_script_origin(1) == 0);
+   assert(request_context_get()->operator_script_origin);
    int previous = request_context_set_model_execution(1);
+   assert(!request_context_get()->operator_script_origin);
    assert(previous == 0 && request_context_get()->model_execution);
    assert(request_context_set_model_execution(1) == 1);
    assert(!request_context_set_source_release("source-added-inside-model"));

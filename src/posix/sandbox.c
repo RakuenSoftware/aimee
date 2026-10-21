@@ -26,6 +26,7 @@
 #endif
 
 #include "sandbox.h"
+#include "child_environment.h"
 #include "aimee_home.h"
 #include "log.h"
 
@@ -774,6 +775,8 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
       pid_t pid = fork();
       if (pid == 0)
       {
+         if (cfg && child_environment_overlay(cfg->child_environment))
+            _exit(126);
          dup2(out_fd, STDOUT_FILENO);
          dup2(err_fd, STDERR_FILENO);
          if (workspace && workspace[0])
@@ -802,6 +805,8 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
       pid_t pid = fork();
       if (pid == 0)
       {
+         if (cfg && child_environment_overlay(cfg->child_environment))
+            _exit(126);
          dup2(out_fd, STDOUT_FILENO);
          dup2(err_fd, STDERR_FILENO);
          if (workspace && workspace[0])
@@ -866,6 +871,8 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
 
    if (pid == 0)
    {
+      if (child_environment_overlay(cfg->child_environment))
+         _exit(126);
       /* Child — wait for uid/gid map to be written before doing anything */
       close(g_sync_pipe[1]);
       g_sync_pipe[1] = -1;

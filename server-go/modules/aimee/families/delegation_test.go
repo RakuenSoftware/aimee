@@ -755,3 +755,41 @@ func TestDelegateExitObservationIsNotAutomaticallyApplied(t *testing.T) {
 		t.Fatal("observation was not retained")
 	}
 }
+
+// Compatibility for explicitly stored historical observations is independent
+// of live delegate execution, whose sole publisher is canonical projection.
+func TestDelegateLegacyObservationPostgresRetention(t *testing.T) {
+	pool := livePool(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `CREATE SCHEMA delegate_legacy_retention_fixture; SET LOCAL search_path TO delegate_legacy_retention_fixture`); err != nil {
+		t.Fatal(err)
+	}
+	body, err := schemaFS.ReadFile("schema_delegation.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, string(body)); err != nil {
+		t.Fatal(err)
+	}
+	q := sessionIRLiveTx{tx}
+	for i := 0; i < 2; i++ {
+		status, _, err := delegateLearningRecord(ctx, q, []string{"historical-session", "format", "success", "historical process completion", `{"verification":"ungraded","had_writes":null}`, "0.6"})
+		if err != nil || status != store.StatusOK {
+			t.Fatal("historical record compatibility", status, err)
+		}
+	}
+	var count, invalid int
+	err = tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE auto_applied<>0 OR review_status<>'pending' OR evidence_json::jsonb->>'verification' IS DISTINCT FROM 'ungraded' OR evidence_json::jsonb->'had_writes' IS DISTINCT FROM 'null'::jsonb) FROM delegate_learnings WHERE session_id='historical-session' AND role='format' AND failure_mode='success'`).Scan(&count, &invalid)
+	if err != nil || count != 2 || invalid != 0 {
+		t.Fatalf("historical observations remain readable: count=%d invalid=%d error=%v", count, invalid, err)
+	}
+	status, _, err := delegateLearningInjectPrompt(ctx, q, []string{"format", "", ""})
+	if err != nil || status != store.StatusInvalid {
+		t.Fatal("historical retention must not restore role-only prompt authority", status, err)
+	}
+}

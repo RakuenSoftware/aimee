@@ -1,4 +1,5 @@
 #include "aimee.h"
+#include "child_environment.h"
 #include "util.h"
 #include <aimee/tools/agent_tools.h>
 #include "aimee_home.h"
@@ -42,6 +43,19 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <sys/wait.h>
+static _Thread_local char *const *bash_environment;
+char *const *agent_tools_bind_bash_environment(char *const environment[])
+{
+   char *const *previous = bash_environment;
+   bash_environment = environment;
+   return previous;
+}
+static void bash_install_child_environment(void)
+{
+   if (child_environment_overlay(bash_environment))
+      _exit(126);
+}
+
 int agent_get_durable_job_id(void) __attribute__((weak));
 int agent_request_cancelled(void) __attribute__((weak));
 int db1_agent_job_is_cancelled(int job_id) __attribute__((weak));
@@ -584,6 +598,7 @@ static pid_t guarded_readonly_exec(const char *command, int out_fd, int err_fd,
    pid_t pid = fork();
    if (pid == 0)
    {
+      bash_install_child_environment();
       setpgid(0, 0);
       dup2(out_fd, STDOUT_FILENO);
       dup2(err_fd, STDERR_FILENO);
@@ -662,6 +677,7 @@ static pid_t guarded_workspace_exec(const char *command, int out_fd, int err_fd,
    pid_t pid = fork();
    if (pid == 0)
    {
+      bash_install_child_environment();
       setpgid(0, 0);
       dup2(out_fd, STDOUT_FILENO);
       dup2(err_fd, STDERR_FILENO);
@@ -812,6 +828,7 @@ char *tool_bash(const char *command, int timeout_ms)
       return safe_strdup("{\"stdout\":\"\",\"stderr\":\"pipe failed\",\"exit_code\":-1}");
    sandbox_config_t sbox_cfg;
    config_sandbox(&sbox_cfg);
+   sbox_cfg.child_environment = bash_environment;
    const char *guard_ro = agent_tools_parent_write_guard_root();
    const char *guard_rw = agent_tools_parent_write_guard_write_root();
    int guarded_parent = guard_ro && guard_ro[0];
@@ -893,6 +910,7 @@ char *tool_bash(const char *command, int timeout_ms)
       {
          if ((pid = fork()) == 0)
          {
+            bash_install_child_environment();
             setpgid(0, 0);
             dup2(stdout_pipe[1], STDOUT_FILENO);
             dup2(stderr_pipe[1], STDERR_FILENO);
@@ -937,6 +955,7 @@ char *tool_bash(const char *command, int timeout_ms)
       }
       if (pid == 0)
       {
+         bash_install_child_environment();
          setpgid(0, 0);
          close(stdout_pipe[0]);
          close(stderr_pipe[0]);

@@ -254,6 +254,18 @@ static void test_canonical_capture_binding(void)
    policy_action_attempt("attempt");
    assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) < 0);
    assert(calls == before); /* A model cannot omit its canonical capture. */
+   /* Only the host-captured direct operator script may use the existing
+    * unbound action path; Go still owns cancellation/admission authority. */
+   context.operator_script_origin = 1;
+   assert(!policy_action_begin("write_file", &args, "/workspace", "session", 1));
+   assert(!text(stored_intent, "turn_id")[0]);
+   int operator_error = 0;
+   char *operator_result = policy_action_finish("ok", strdup("saved"), &operator_error);
+   assert(operator_result && !operator_error);
+   free(operator_result);
+   context.operator_script_origin = 0;
+   before = calls;
+   policy_action_attempt("attempt");
    capture_present = 1;
    capture_source = "foreign-source";
    assert(policy_action_begin("write_file", &args, "/workspace", "session", 1) < 0);

@@ -2097,6 +2097,24 @@ static void test_agent_is_exec_role(void)
 
 static void test_tool_bash(void)
 {
+   /* The native CLI bridge overlays only the actual shell child; pooled host
+    * threads and subsequent ordinary commands retain their environment. */
+   setenv("AIMEE_ENV_SCOPE_TEST", "parent-only", 1);
+   char *environment[] = {"AIMEE_ENV_SCOPE_TEST=child-private", NULL};
+   char *const *previous = agent_tools_bind_bash_environment(environment);
+   char *scoped = tool_bash("printf '%s' \"$AIMEE_ENV_SCOPE_TEST\"", 5000);
+   agent_tools_bind_bash_environment(previous);
+   assert(scoped);
+   cJSON *private_reply = cJSON_Parse(scoped);
+   assert(private_reply);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(private_reply, "stdout")),
+                  "child-private"));
+   assert(cJSON_GetObjectItem(private_reply, "exit_code")->valueint == 0);
+   assert(!strcmp(getenv("AIMEE_ENV_SCOPE_TEST"), "parent-only"));
+   cJSON_Delete(private_reply);
+   free(scoped);
+   unsetenv("AIMEE_ENV_SCOPE_TEST");
+
    /* Basic echo */
    char *result = tool_bash("echo hello", 5000);
    assert(result != NULL);

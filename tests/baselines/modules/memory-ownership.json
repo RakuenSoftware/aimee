@@ -2088,8 +2088,9 @@
         "memory_get",
         "memory_recall"
       ],
-      "sha256": "eac406679570f2be64ef92ee0a4ac6b4ab34b215ac2a6a97711b6af7a9f0f45a",
-      "boundary_change": "Git multiplex commands now resolve before host admission; family identity truncation refuses. Memory tool schema and ownership are unchanged. This records boundary analysis, not independent approval."
+      "sha256": "4b47bbd620e04fbdf47e00d3a50e4517744b6e34fa18ad046223416832f01e31",
+      "boundary_change": "Git multiplex commands now resolve before host admission; family identity truncation refuses. Memory tool schema and ownership are unchanged. This records boundary analysis, not independent approval.",
+      "boundary_review": "2026-10-21 PR #3057: Reviewed the sole added mcp_family_discriminator metadata accessor. It returns the already-owned family command/action key (including the existing Git special case), granting no execution or scope authority. Exact removal restores the previous source bytes. Memory tool rows, handlers, schemas, demultiplexing and Go memory ownership are unchanged. The native child CLI projects through the existing owner and separately requires the actual source-advertised tool plus normal admission. This source-boundary review is not independent production approval."
     },
     "src/modules/tools/agent_tools_dispatch.c": {
       "disposition": "host-context",
