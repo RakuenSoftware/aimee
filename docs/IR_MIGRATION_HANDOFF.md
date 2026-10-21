@@ -173,6 +173,20 @@ proved explanation for the observed rate-limit failure. Neither forwarding
 invented SDK identities nor bypassing canonical request ownership is permitted;
 live qualification of the exact combined revision remains required.
 
+Source `2c20c49ec` completed all 53 main CI jobs and all seven auxiliary
+workflows successfully. The next clean `91355fd35` build passed server/CLI and
+build-only KB/gateway compilation without enabling KB services. Its new SPA's
+137 tracked frontend inputs matched the tested build. Actual normal-PAM desktop
+and 320px replay of the retained failed turn showed one clear terminal alert and
+collapsed details, with no repeated actions. A composed actual-pinned-SDK to
+production proxy/header capture/C socket loopback test also passed; this is
+synthetic-provider protocol evidence, not vendor acceptance. A warning in that
+composed LTO context prompted a one-line valid-C-string length-check correction;
+normal/sanitizer socket tests and the warning-free composed probe pass again.
+Keep that corrected source distinct from the already installed `91355fd35`
+producer when rebuilding for the next live request. All 76 lint checks were run;
+the sole missing-clang-format19 tooling failure passed on explicit-binary recheck.
+
 ### Final live qualification: 21 October 2026
 
 Source `230b490627b716b3aa41af30672e6c2b3269d19a` passed all 53 main CI

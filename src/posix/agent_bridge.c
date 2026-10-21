@@ -493,7 +493,7 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
 {
    /* Preserve complete supported headers rather than silently truncating a
     * caller's version/beta or scoped SDK transport metadata. */
-   size_t extra_size = extra_headers ? strnlen(extra_headers, 8193) : 0;
+   size_t extra_size = extra_headers ? strlen(extra_headers) : 0;
    if (extra_size > 8192 || body_len > SIZE_MAX - extra_size - 4096)
       return -1;
    int forwarded_user_agent = 0;
