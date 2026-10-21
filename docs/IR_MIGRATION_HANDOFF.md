@@ -11,7 +11,7 @@ as `aa8c774edcc324f5defb6c5cea592f0e1dd5314d`. Its final premerge checks and
 all 54 postmerge main CI jobs passed, including every configured deployment
 tier; the seven-job artifact publisher also passed. Those results qualify the
 merged baseline, not the subsequent browser repairs. Continue on
-`fix/browser-ir-live-acceptance` for their fresh CI. Keep automatic review and
+`fix/browser-ir-live-acceptance` in [PR #3057](https://github.com/RakuenSoftware/aimee/pull/3057) for their fresh CI. Keep automatic review and
 the strict attribution gate enabled. No production promotion is claimed.
 
 ### Actual `.252` qualification, 21 October 2026
@@ -47,11 +47,29 @@ live surface; only a genuine page discard detaches it. Foreign owners remain ref
 The combined derivative passed live first-open model pinning before any chat,
 reload with zero sends, real model switching and durable history, a real pending
 question across reload, exactly one browser reply and resolved replay, plus
-320/390 px layout checks. The source passes 405 frontend tests, both frontend
+320/390 px layout checks. The source passes 419 frontend tests, both frontend
 builds, the Chromium component harness, runtime-web race tests, normal HTTP and
 presence fixtures, HTTP ASan/UBSan/LSan, and all 76 lint gates. The published
 baseline and manually built test derivatives are separately identified; fresh
 follow-up CI and production `.100` promotion/verification are still required.
+A second real Chromium pass exercised actual Codex and Claude interruption
+permissions. Both deny replies reached the exact native waiter once, remained
+resolved after reload and produced no write or repeated prompt. Its focused
+recovery run passed 5/5, separately from the immutable 171-test baseline; the
+test-only browser handoff was restored byte-exact afterward. This exposed a
+remaining browser consumer mismatch: canonical owned assistant snapshots may
+carry a matching outer role, and owned tool-result messages use role `tool`.
+The browser now accepts those existing Go/C contracts while retaining exact
+owner validation, immutable source custody and assistant-only partial messages.
+Actual native snapshots and negative role/owner cases have regression coverage.
+
+The first follow-up CI head also failed the vulnerability gate on Go 1.26.9
+(GO-2026-6809). All three module directives and active Go build-image versions
+now use Go 1.26.10 with the official production image digest. Actual vulnerability
+checks passed across all three modules; affected image/build pin checks passed.
+Fresh CI must still qualify the combined follow-up head and rebuild its images;
+the previous published baseline is not the production promotion candidate.
+
 Owned provider fixtures establish runtime contracts, not live vendor acceptance
 or semantic model quality. Production `.100` must remain KB-free.
 

@@ -66,7 +66,7 @@ export type SessionEvent =
   | { kind: 'child_execution'; payload: ChildExecution }
   | { kind: 'projection'; payload: ProjectionReport }
   | { kind: 'history'; payload: ImportHistory | { scope: string; phase: 'message' | 'commit'; index?: number; count?: number; message?: Message } }
-  | { kind: 'message'; message_id: string; payload: Message; native_owner?: NativeOwner; partial?: true }
+  | { kind: 'message'; message_id: string; payload: Message; role?: string; native_owner?: NativeOwner; partial?: true }
   | { kind: 'delta'; message_id: string; role: string; payload: Delta }
   | { kind: 'execution'; payload: { status: 'running' | 'completed' | 'failed' | 'cancelled'; error?: string; verification_proofs?: VerificationProof[] } }
   | { kind: 'control_request' | 'control_response'; request_id: string;
@@ -357,9 +357,18 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       if (previous?.nativeOwner && (!owner || !sameJSON(owner, previous.nativeOwner)))
         throw new Error('Native snapshot owner changed');
       if (owner) {
-        if (!Object.keys(event).every(key => ['kind', 'message_id', 'payload', 'native_owner', 'partial'].includes(key)))
+        if (!Object.keys(event).every(key => ['kind', 'message_id', 'payload', 'role', 'native_owner', 'partial'].includes(key)))
           throw new Error('Invalid native snapshot owner');
-        if (event.payload.role !== 'assistant') throw new Error('Native snapshot requires an assistant message');
+        // The shared C/Go contract permits the redundant outer role only when
+        // it is omitted/empty or agrees with the typed payload. Keep original
+        // canonical source bytes and all custody checks intact.
+        if (Object.prototype.hasOwnProperty.call(event, 'role') &&
+            (typeof event.role !== 'string' || event.role !== '' && event.role !== event.payload.role))
+          throw new Error('Invalid native snapshot role');
+        if (event.payload.role !== 'assistant' && event.payload.role !== 'tool')
+          throw new Error('Native snapshot requires an assistant or tool message');
+        if (event.partial && (event.payload.role !== 'assistant' || event.payload.blocks.length === 0))
+          throw new Error('Invalid native partial snapshot');
         const protectedCount = previous?.ownedBlockCount ?? 0;
         if (event.payload.blocks.length < protectedCount || previous && event.payload.blocks.some((block, index) =>
           (index < protectedCount || previous.stoppedBlocks.includes(index)) && !sameClosedBlock(previous.blocks[index], block)))

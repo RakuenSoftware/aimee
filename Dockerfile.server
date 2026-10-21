@@ -29,7 +29,7 @@ RUN sh /tmp/build-audit-sqlite.sh /out
 # The module runtime is a static multicall binary. The canonical process
 # contracts decide which executable names are populated from it in the C build
 # stage below, so Docker never carries a second language-selection list.
-FROM golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS module-go-build
+FROM golang:1.26.10-bookworm@sha256:fe3da92a5cb2881e4aa75e625cb0b7c50571632fb4cf340cbe53e6ccdcffdd51 AS module-go-build
 WORKDIR /src/server-go
 COPY server-go/go.mod server-go/go.sum ./
 RUN go mod download
@@ -109,7 +109,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # --- webchat service: standalone Go browser server (cgo: legacy crypt migration + sqlite) ---
-FROM golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS runtime-web-build
+FROM golang:1.26.10-bookworm@sha256:fe3da92a5cb2881e4aa75e625cb0b7c50571632fb4cf340cbe53e6ccdcffdd51 AS runtime-web-build
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
@@ -131,7 +131,7 @@ RUN CGO_ENABLED=1 go build -o /out/aimee-runtime-web .
 # without putting C back in charge of workflow transitions. This is crash
 # containment, not an OS security boundary: both processes currently share the
 # appliance service identity for repository credentials and Unix-socket access.
-FROM golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS wfe-build
+FROM golang:1.26.10-bookworm@sha256:fe3da92a5cb2881e4aa75e625cb0b7c50571632fb4cf340cbe53e6ccdcffdd51 AS wfe-build
 WORKDIR /src/server-go
 COPY server-go/go.mod server-go/go.sum ./
 RUN go mod download
