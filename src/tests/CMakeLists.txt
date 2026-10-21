@@ -578,6 +578,25 @@ if(NOT WIN32)
     aimee_enable_test_asserts(test_server_verification)
     add_test(NAME test_server_verification COMMAND test_server_verification)
   endif()
+  # The fixture includes all cli_v1_routes_*.c directly to test static marshallers;
+  # link their extracted native client owner without duplicating those sources.
+  add_executable(test_cli_v1_delegate test_cli_v1_delegate.c
+    ../cli_native_bridge.c ../code_collect.c ../modules/workspace/workspace_client_diff.c
+    ../vendor/cJSON.c ../cli_argspec.c ../posix/util.c ../aimee_client.c ../http_uds_client.c
+    ../codex_auth.c ../posix/platform_path.c ../posix/platform_random.c
+    ../posix/cli_client.c ../cli_client.c ../aimee_tls.c)
+  target_include_directories(test_cli_v1_delegate PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR}/db1_client ${AIMEE_SRC_DIR}/modules/kb/c)
+  target_compile_options(test_cli_v1_delegate PRIVATE -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(test_cli_v1_delegate PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(test_cli_v1_delegate PRIVATE -Wl,--gc-sections)
+  endif()
+  target_link_libraries(test_cli_v1_delegate PRIVATE aimee-core-connection
+    Threads::Threads OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB m)
+  aimee_enable_test_asserts(test_cli_v1_delegate)
+  add_test(NAME test_cli_v1_delegate COMMAND test_cli_v1_delegate)
   add_executable(test_server_native_cli test_server_native_cli.c ../server/server_native_cli.c
     ../modules/protocols/mcp/mcp_tools_extended.c ../aimee_sha256.c ../platform_random.c
     ../posix/platform_random.c ../vendor/cJSON.c)
