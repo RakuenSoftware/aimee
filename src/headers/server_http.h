@@ -416,6 +416,7 @@ extern "C"
     * once per request from the HTTP dispatch; `raw_request` is the full request
     * buffer (NULL clears). Defined in server/anthropic_http.c. */
    void anthropic_http_capture_request_headers(const char *raw_request);
+   int anthropic_http_capture_native_request_headers(const char *headers);
 
    /* Retry-After (seconds) the parity passthrough relays on its own response when
     * it forwarded an upstream 429/529 that carried one (0 = none). Read by

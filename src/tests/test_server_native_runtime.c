@@ -580,6 +580,11 @@ void anthropic_http_capture_request_headers(const char *headers)
              !strstr(headers, "forged"));
    }
 }
+int anthropic_http_capture_native_request_headers(const char *headers)
+{
+   anthropic_http_capture_request_headers(headers);
+   return 0;
+}
 int server_http_native_forward(int fd, const char *method, const char *path, const char *body,
                                int length)
 {

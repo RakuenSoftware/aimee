@@ -86,9 +86,16 @@ static int model_route(const char *method, const char *path)
 
 static int protocol_header(const char *name)
 {
-   static const char *const allowed[] = {
-       "content-type", "content-encoding",     "accept", "anthropic-version", "anthropic-beta",
-       "openai-beta",  "mcp-protocol-version", NULL};
+   static const char *const allowed[] = {"content-type",
+                                         "content-encoding",
+                                         "accept",
+                                         "anthropic-version",
+                                         "anthropic-beta",
+                                         "openai-beta",
+                                         "mcp-protocol-version",
+                                         "user-agent",
+                                         "x-app",
+                                         NULL};
    for (int i = 0; allowed[i]; i++)
       if (strcasecmp(name, allowed[i]) == 0)
          return 1;
@@ -211,6 +218,7 @@ static void proxy_request(proxy_worker_t *worker)
    char authenticated[256] = "";
    size_t forwarded_len = 0, content_length = 0;
    int have_length = 0, have_auth = 0, have_host = 0, have_session = 0;
+   unsigned metadata_seen = 0;
    for (char *line = line_end + 2; line < buffer + header_len - 2; line = line_end + 2)
    {
       line_end = strstr(line, "\r\n");
@@ -285,6 +293,18 @@ static void proxy_request(proxy_worker_t *worker)
       }
       else if (protocol_header(line))
       {
+         const char *bounded[] = {"user-agent", "x-app", "anthropic-version", "anthropic-beta"};
+         const size_t capacity[] = {256, 64, 64, 512};
+         for (unsigned i = 0; i < sizeof bounded / sizeof bounded[0]; i++)
+            if (!strcasecmp(line, bounded[i]))
+            {
+               if ((metadata_seen & (1u << i)) || !value[0] || strlen(value) >= capacity[i])
+                  goto malformed;
+               for (const unsigned char *p = (const unsigned char *)value; *p; p++)
+                  if (*p < 32 || *p > 126)
+                     goto malformed;
+               metadata_seen |= 1u << i;
+            }
          int n = snprintf(forwarded + forwarded_len, sizeof(forwarded) - forwarded_len,
                           "%s: %s\r\n", line, value);
          if (n < 0 || (size_t)n >= sizeof(forwarded) - forwarded_len)

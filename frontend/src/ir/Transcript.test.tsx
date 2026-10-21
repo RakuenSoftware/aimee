@@ -29,6 +29,75 @@ it('keeps ordinary and malformed steering diagnostics as ordinary error text', (
   expect(screen.getByText('Ordinary failure')).toBeTruthy();
   expect(screen.getByText(malformed)).toBeTruthy();
 });
+it('prioritizes one failed turn explanation while retaining both canonical diagnostics and closed controls on replay', () => {
+  const generic = 'Provider stream failed canonical admission or ended before completion';
+  const reason = 'Claude request was rate limited by the provider.';
+  const envelope = (sequence: string, event: Envelope['event']): Envelope => ({ version: 1, session_id: 's',
+    sequence, event_id: `failure-${sequence}`, turn_id: 'failed-turn', actor: 'alice', event });
+  const records = [envelope('1', { kind: 'execution', payload: { status: 'running' } }),
+    envelope('2', { kind: 'control_request', request_id: 'question', control_kind: 'question',
+      payload: { questions: [{ id: 'answer', question: 'A real question', multiple: false, options: [] }] } }),
+    envelope('3', { kind: 'delta', message_id: 'pre-frame', role: 'assistant', payload: { type: 'ERROR', error_message: generic } }),
+    envelope('4', { kind: 'execution', payload: { status: 'failed', error: reason } })];
+  const state = records.reduce(reduceSession, emptySession('s'));
+  const onReply = vi.fn();
+  const view = render(<IRTranscript state={state} onReply={onReply} />);
+  expect(screen.getAllByRole('alert').map(element => element.textContent)).toEqual([reason]);
+  const details = screen.getByText('Response details').closest('details')!;
+  expect(details.open).toBe(false);
+  expect(details.textContent).toContain('The provider did not return a complete response.');
+  expect(view.container.textContent).not.toContain('canonical admission');
+  expect(state.errors).toEqual([generic, reason]);
+  expect(state.sequence).toBe('4');
+  expect(state.executions).toEqual({ 'failed-turn': 'failed' });
+  expect(state.controls.question.closed).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Send answers' })).toBeNull();
+  const replayed = records.reduce(reduceSession, state);
+  expect(replayed).toBe(state);
+  view.rerender(<IRTranscript state={replayed} onReply={onReply} />);
+  fireEvent.click(screen.getByText('Response details'));
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  expect(onReply).not.toHaveBeenCalled();
+  expect(state.errors).toEqual([generic, reason]);
+});
+
+it('keeps an unrelated turn diagnostic visible instead of borrowing another failed turn', () => {
+  const generic = 'Provider stream failed canonical admission or ended before completion';
+  const events: Envelope[] = [
+    { version: 1, session_id: 's', sequence: '1', event_id: 'old-error', turn_id: 'other', actor: 'alice',
+      event: { kind: 'delta', message_id: 'old', role: 'assistant', payload: { type: 'ERROR', error_message: generic } } },
+    { version: 1, session_id: 's', sequence: '2', event_id: 'running', turn_id: 'failed', actor: 'alice',
+      event: { kind: 'execution', payload: { status: 'running' } } },
+    { version: 1, session_id: 's', sequence: '3', event_id: 'terminal', turn_id: 'failed', actor: 'alice',
+      event: { kind: 'execution', payload: { status: 'failed', error: 'A different failure' } } },
+  ];
+  render(<IRTranscript state={events.reduce(reduceSession, emptySession('s'))} />);
+  expect(screen.getAllByRole('alert').map(element => element.textContent)).toEqual([
+    'The provider did not return a complete response.', 'A different failure']);
+  expect(screen.queryByText('Response details')).toBeNull();
+});
+
+it('never folds custom diagnostics or a failure without an actionable terminal explanation', () => {
+  const generic = 'Provider stream failed canonical admission or ended before completion';
+  const custom = 'Workspace permission was refused.';
+  const record = (sequence: string, event: Envelope['event']): Envelope => ({ version: 1,
+    session_id: 's', sequence, event_id: `preserve-${sequence}`, turn_id: 't', actor: 'alice', event });
+  const diagnostics = [record('1', { kind: 'execution', payload: { status: 'running' } }),
+    record('2', { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'ERROR', error_message: generic } }),
+    record('3', { kind: 'delta', message_id: 'm', role: 'assistant', payload: { type: 'ERROR', error_message: custom } })];
+  const state = diagnostics.reduce(reduceSession, emptySession('s'));
+  const view = render(<IRTranscript state={reduceSession(state, record('4', { kind: 'execution', payload: { status: 'failed' } }))} />);
+  expect(screen.getAllByRole('alert').map(element => element.textContent)).toEqual([
+    'The provider did not return a complete response.', custom]);
+  expect(screen.queryByText('Response details')).toBeNull();
+  view.rerender(<IRTranscript state={reduceSession(state, record('4', { kind: 'execution', payload: { status: 'failed', error: 'A safe terminal explanation' } }))} />);
+  expect(screen.getAllByRole('alert').map(element => element.textContent)).toEqual([custom, 'A safe terminal explanation']);
+  expect(screen.getByText('Response details')).toBeTruthy();
+  view.rerender(<IRTranscript state={{ ...state, errorOrigins: undefined }} />);
+  expect(screen.queryByText('Response details')).toBeNull();
+  expect(screen.getAllByRole('alert')).toHaveLength(2);
+});
+
 it('displays authored message groups without changing persisted text fragments', () => {
   const envelope: Envelope = { version: 1, session_id: 's', sequence: '1', event_id: 'e', turn_id: 't', actor: 'alice',
     event: { kind: 'message', message_id: 'a', payload: { role: 'assistant', blocks: [

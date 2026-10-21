@@ -125,6 +125,54 @@ clang-format19, documentation and IR bypass gates pass. Qualify the exact newly
 committed unmodified runtime through normal PAM/browser next; do not relabel the
 previous logging overlays as final-source vendor acceptance.
 
+The clean, unmodified `2c20c49ec` server and CLI were rebuilt in a fresh object
+directory (840 compile commands) and installed only in the owned local runtime.
+Independent `/proc` executable hashing matched the candidate, with the original
+namespace, delegated cgroup, PAM account and database retained. Unchanged Go,
+runtime-web and SPA components have separate input/hash lineage; they are not
+represented as newly built components. The actual SDK child had all fourteen
+expected environment entries, including fixed attribution-header value `0`, and
+no parent OAuth secret. Its single normal-PAM full-Opus browser request still
+failed before any tool or question, with the trusted SDK rate-limit classification.
+Canonical records 1/2/3/4 persisted, native ownership reached FINISHED at 4, all
+reservations became inactive and the exact execution leaf was removed naturally.
+Desktop and 320px reload repeated no send, reply, cancel or metadata mutation.
+This qualifies clean-source failure handling, not successful Claude execution.
+
+The supported interactive Claude `/usage` command performed no inference and
+reported about 2% weekly usage, with current session usage at 0%. Combined with
+the earlier successful direct pinned-SDK diagnostic, this does not support a
+blanket account-exhaustion explanation for Aimee's opaque upstream failure.
+Neither the two protocol corrections nor quota exhaustion is established as its
+cause. Continue the source/protocol comparison without blind provider retries,
+invented client identities or relaxed canonical ownership. Actual local Claude
+read/question/reply/completion and permission denial remain unqualified.
+
+The failed request also exposed presentation noise: the generic stream diagnostic
+and clearer terminal explanation appeared as two primary alerts. The browser now
+keeps both canonical observations, prioritizes the failed terminal's explanation
+and places only the exact generic diagnostic from that same turn under collapsed
+Response details. Custom errors, other turns, unknown origins and terminals with
+no explanation retain their diagnostics. The standalone generic message uses
+plain language. All 445 frontend tests and both SPA/console production builds
+pass; replay and closed controls remain unchanged. The newly built SPA has its
+own hash/input lineage and must be qualified separately from the previously
+deployed frontend.
+
+The native gateway also dropped the pinned SDK's actual User-Agent and x-app
+headers. Authenticated native callbacks now retain those original bounded
+singletons as transport metadata, without assigning identity or capability
+authority. Ordinary ingress and every native exit clear the thread-local values;
+ordinary Aimee requests keep their existing User-Agent. The socket writer emits
+one User-Agent and preserves complete bounded extra headers instead of its old
+512-byte truncation. Baseline socket fixtures reproduce both duplicate-header
+and lost-tail failures. Four focused normal and ASan/UBSan/leak fixtures pass,
+as do clang-format19 and an independent source review. The actual 53-tool SDK
+loopback probe's beta block fits the old limit, so that truncation is not a
+proved explanation for the observed rate-limit failure. Neither forwarding
+invented SDK identities nor bypassing canonical request ownership is permitted;
+live qualification of the exact combined revision remains required.
+
 ### Final live qualification: 21 October 2026
 
 Source `230b490627b716b3aa41af30672e6c2b3269d19a` passed all 53 main CI

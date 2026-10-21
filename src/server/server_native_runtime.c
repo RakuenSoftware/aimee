@@ -1122,6 +1122,8 @@ static int native_perform(const char *method, const char *path, const char *head
                           const cli_proxy_io_t *io, void *context, native_tool_work_t *work)
 {
    /* The listener admits protocol headers only, never identity or credentials. */
+   if (!work)
+      anthropic_http_capture_request_headers(NULL);
    server_native_runtime_t *runtime = context;
    path = native_model_path(path, runtime);
    if (!session || strcmp(session, runtime->session) || length > 4u * 1024u * 1024u ||
@@ -1314,6 +1316,16 @@ static int native_perform(const char *method, const char *path, const char *head
                                               current.account_id);
       }
    }
+   if (!work)
+   {
+      if (model_request)
+      {
+         if (anthropic_http_capture_native_request_headers(headers))
+            goto restore;
+      }
+      else
+         anthropic_http_capture_request_headers(headers);
+   }
    atomic_int *previous_cancel = agent_get_request_cancel();
    native_cancellation_t watch = {.io = io, .cli = work ? work->cli : NULL};
    pthread_t monitor;
@@ -1326,8 +1338,6 @@ static int native_perform(const char *method, const char *path, const char *head
        .parent = previous_cli_cancel};
    if (work && work->cli)
       agent_request_cancel_scope_bind(&cli_cancel);
-   if (!work)
-      anthropic_http_capture_request_headers(headers);
    void *previous_sink_context = NULL;
    aimee_ir_session_sink_fn previous_sink = aimee_ir_session_get_sink(&previous_sink_context);
    int previous_failed = aimee_ir_session_capture_failed();
@@ -1376,9 +1386,9 @@ static int native_perform(const char *method, const char *path, const char *head
    agent_set_request_cancel(previous_cancel);
    if (work && work->cli)
       agent_request_cancel_scope_bind(previous_cli_cancel);
+restore:
    if (!work)
       anthropic_http_capture_request_headers(NULL);
-restore:
    if (forked_sources)
       ingress_preinject_finish_sources();
    OPENSSL_cleanse(&current_claude, sizeof current_claude);

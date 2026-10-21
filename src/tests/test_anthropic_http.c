@@ -817,6 +817,66 @@ static void test_messages_buffered_anthropic_parity_passthrough(void)
    PASS("messages_buffered_anthropic_parity_passthrough");
 }
 
+/* The connection parser is a peer of this isolated ingress fixture. Native
+ * duplicate/length/control checks are exercised in the production helper. */
+int http_header(const char *headers, const char *name, char *out, size_t capacity)
+{
+   out[0] = 0;
+   for (const char *line = headers ? headers : ""; *line;)
+   {
+      const char *end = strstr(line, "\r\n");
+      if (!end)
+         end = line + strlen(line);
+      size_t n = strlen(name);
+      if ((size_t)(end - line) > n && !strncasecmp(line, name, n) && line[n] == ':')
+      {
+         const char *value = line + n + 1;
+         while (value < end && *value == ' ')
+            value++;
+         size_t length = (size_t)(end - value);
+         if (length >= capacity)
+            length = capacity - 1;
+         memcpy(out, value, length);
+         out[length] = 0;
+         return 1;
+      }
+      line = *end ? end + 2 : end;
+   }
+   return 0;
+}
+
+static void test_native_transport_headers(void)
+{
+   agent_t agent = {0};
+   char headers[2048];
+   const char *original = "claude-cli/2.1.227 (external, sdk-cli)";
+   assert(!anthropic_http_capture_native_request_headers(
+       "User-Agent: claude-cli/2.1.227 (external, sdk-cli)\r\nx-app: cli\r\n"
+       "Anthropic-Version: 2023-06-01\r\nAnthropic-Beta: original-beta\r\n"));
+   assert(!build_anthropic_parity_headers(headers, sizeof headers, &agent));
+   assert(strstr(headers, original) && strstr(headers, "x-app: cli") &&
+          strstr(headers, "original-beta"));
+   /* An ordinary request, and an exit/reset, cannot inherit the SDK profile. */
+   anthropic_http_capture_request_headers("User-Agent: foreign-client\r\n");
+   assert(!build_anthropic_parity_headers(headers, sizeof headers, &agent));
+   assert(!strstr(headers, "User-Agent") && !strstr(headers, "x-app"));
+   const char *bad[] = {"User-Agent: one\r\nuser-agent: two\r\n", "x-app: one\r\nX-App: two\r\n",
+                        "User-Agent: bad\tvalue\r\n", "User-Agent: \r\n", "x-app: value"};
+   for (unsigned i = 0; i < sizeof bad / sizeof bad[0]; i++)
+   {
+      assert(anthropic_http_capture_native_request_headers(bad[i]));
+      assert(!build_anthropic_parity_headers(headers, sizeof headers, &agent));
+      assert(!strstr(headers, "User-Agent") && !strstr(headers, "x-app"));
+   }
+   char oversized[300];
+   memset(oversized, 'a', sizeof oversized);
+   memcpy(oversized, "User-Agent: ", 12);
+   memcpy(oversized + sizeof oversized - 3, "\r\n", 3);
+   assert(anthropic_http_capture_native_request_headers(oversized));
+   anthropic_http_capture_request_headers(NULL);
+   PASS("native transport metadata is exact, bounded and cleared between requests");
+}
+
 static void test_native_admission_failure_sends_no_provider_request(void)
 {
    const delegate_driver_t anthropic = {
@@ -1601,6 +1661,7 @@ int main(void)
    test_invalid_native_response_never_uses_legacy_parser();
    test_messages_buffered_anthropic_preserves_request_shape();
    test_messages_buffered_anthropic_parity_passthrough();
+   test_native_transport_headers();
    test_native_admission_failure_sends_no_provider_request();
    test_native_host_guidance_retains_client_cache();
    test_messages_native_frame_retains_exact_bytes();

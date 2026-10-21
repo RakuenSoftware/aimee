@@ -96,6 +96,7 @@ export type Control = {
 export type SessionState = {
   session: string; sequence: string; messages: ProjectedMessage[];
   controls: Record<string, Control>; activeTurns: string[]; errors: string[];
+  errorOrigins?: Record<number, { turn: string; sequence: string; terminal: boolean }>;
   projections: (ProjectionReport & { id: string; turn: string })[];
   children: Record<string, ChildExecution>;
   executions: Record<string, 'running' | 'completed' | 'failed' | 'cancelled'>;
@@ -442,6 +443,7 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       if (d.type === 'ERROR') {
         const error = d.error_message || 'Runtime error';
         next.errors = [...state.errors, error];
+        next.errorOrigins = { ...state.errorOrigins, [state.errors.length]: { turn: envelope.turn_id, sequence: envelope.sequence, terminal: false } };
         if (index >= 0) {
           const message = state.messages[index];
           if (message.role !== event.role || message.turn !== envelope.turn_id)
@@ -557,7 +559,10 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       next.executions = { ...state.executions, [envelope.turn_id]: status };
       next.activeTurns = status === 'running' ? [...state.activeTurns, envelope.turn_id] :
         state.activeTurns.filter(turn => turn !== envelope.turn_id);
-      if (event.payload.error) next.errors = [...state.errors, event.payload.error];
+      if (event.payload.error) {
+        next.errors = [...state.errors, event.payload.error];
+        next.errorOrigins = { ...state.errorOrigins, [state.errors.length]: { turn: envelope.turn_id, sequence: envelope.sequence, terminal: status !== 'running' } };
+      }
       if (status !== 'running') {
         next.terminalSources = { ...state.terminalSources, [envelope.turn_id]: { sequence: envelope.sequence, actor: envelope.actor, event_id: envelope.event_id, status, error: event.payload.error } };
         const open = state.messages.filter(m => m.turn === envelope.turn_id && !m.complete);
