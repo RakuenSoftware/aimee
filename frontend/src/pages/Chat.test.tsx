@@ -79,7 +79,7 @@ beforeEach(() => {
     disconnect() {}
   });
   Element.prototype.scrollIntoView = vi.fn();
-  fetchMock = vi.fn(async (url: string) => {
+  fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.startsWith('/api/chat/primary?')) return new Response(JSON.stringify({ agent: '' }));
     if (url.startsWith('/api/chat/persona?')) return new Response(JSON.stringify({ name: 'engineer' }));
     if (url === '/api/chat/send') {
@@ -87,7 +87,7 @@ beforeEach(() => {
         headers: { 'Content-Type': 'text/event-stream' },
       });
     }
-    return new Response(JSON.stringify(url === '/api/chat/attach' ? { attach_id: 'attach-1' } : {}));
+    return new Response(JSON.stringify(url === '/api/chat/attach' ? { session_id: JSON.parse(String(init?.body)).sid, attach_id: 'attach-1' } : {}));
   });
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -99,6 +99,102 @@ afterEach(() => {
 });
 
 describe('canonical browser chat', () => {
+  it('admits a fresh session before preferences or replay and reuses its surface for sending', async () => {
+    let resolveAttach!: (response: Response) => void;
+    const ordinary = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/attach'
+      ? new Promise<Response>(resolve => { resolveAttach = resolve; }) : ordinary(url, init));
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/chat/primary'))).toBe(false);
+    expect(sources).toHaveLength(0);
+    await act(async () => { resolveAttach(new Response(JSON.stringify({ session_id: 'web-one', attach_id: 'fresh-surface' }))); });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/chat/primary?sid=web-one'))).toBe(true);
+    expect(sources.filter(source => !source.closed)).toHaveLength(1);
+    fireEvent.change(screen.getByPlaceholderText(/^Type a message/), { target: { value: 'Fresh session first turn' } });
+    fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
+    await act(async () => {});
+    const sent = fetchMock.mock.calls.find(([url]) => url === '/api/chat/send');
+    expect(JSON.parse(String(sent?.[1]?.body))).toMatchObject({ aimee_session_id: 'web-one', attach_id: 'fresh-surface' });
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(1);
+    await close();
+  });
+
+  it('does not revive a cached attachment after a real page remount', async () => {
+    localStorage.setItem('aimee_chat_tabs', JSON.stringify([{ sessionId: 'one', aimeeSid: 'web-one', attachId: 'dead-surface', messages: [] }]));
+    let view = await start();
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/chat/send')?.[1]?.body)).attach_id).toBe('attach-1');
+    await close();
+    view.unmount();
+    await act(async () => {});
+    expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/chat/detach' && JSON.parse(String(init?.body)).attach_id === 'attach-1')).toBe(true);
+    fetchMock.mockClear();
+    view = await start();
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(1);
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/chat/send')?.[1]?.body)).attach_id).toBe('attach-1');
+    await close(); view.unmount();
+  });
+
+  it('releases a late attachment when its page has already closed', async () => {
+    let resolveAttach!: (response: Response) => void;
+    fetchMock.mockImplementation((url: string) => url === '/api/chat/attach'
+      ? new Promise<Response>(resolve => { resolveAttach = resolve; }) : Promise.resolve(new Response('{}')));
+    const view = render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    view.unmount();
+    await act(async () => { resolveAttach(new Response(JSON.stringify({ session_id: 'web-one', attach_id: 'late-surface' }))); });
+    const detaches = fetchMock.mock.calls.filter(([url]) => url === '/api/chat/detach');
+    expect(detaches).toHaveLength(1);
+    expect(JSON.parse(String(detaches[0][1]?.body))).toEqual({ sid: 'web-one', attach_id: 'late-surface' });
+    expect(sources).toHaveLength(0);
+  });
+
+  it('refuses foreign attachment replies and retries through the admitted owner route', async () => {
+    const ordinary = fetchMock.getMockImplementation()!;
+    let attempts = 0;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/attach'
+      ? Promise.resolve(new Response(JSON.stringify({ session_id: ++attempts === 1 ? 'foreign-session' : 'web-one', attach_id: 'owned-surface' }))) : ordinary(url, init));
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    expect(screen.getByRole('alert').textContent).toContain('Invalid conversation attachment');
+    expect(sources).toHaveLength(0);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/chat/primary'))).toBe(false);
+    fireEvent.click(screen.getByText('Reconnect conversation'));
+    await act(async () => {});
+    expect(attempts).toBe(2);
+    expect(sources.filter(source => !source.closed)).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/chat/primary?sid=web-one'))).toBe(true);
+  });
+
+  it('keeps a refused send visible through replay and reacquires its surface only on explicit reconnect', async () => {
+    await start();
+    const source = sources.filter(source => !source.closed).at(-1)!;
+    await emit(['ir', { status: 'error', message: 'invalid chat attachment', http_status: 502 }]);
+    await close();
+    expect(screen.getByRole('alert').textContent).toContain('invalid chat attachment');
+    await act(async () => {
+      source.emit(envelope(message('saved', 'A saved message arriving during reconnect')));
+      source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '1' }) });
+    });
+    expect(screen.getByRole('alert').textContent).toContain('invalid chat attachment');
+    const ordinary = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/attach'
+      ? Promise.resolve(new Response(JSON.stringify({ session_id: 'web-one', attach_id: 'replacement-surface' }))) : ordinary(url, init));
+    fireEvent.click(screen.getByText('Reconnect conversation'));
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/chat/detach' && JSON.parse(String(init?.body)).attach_id === 'attach-1')).toBe(true);
+    fireEvent.change(screen.getByPlaceholderText(/^Type a message/), { target: { value: 'An explicitly requested new turn' } });
+    fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
+    await act(async () => {});
+    const sends = fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send');
+    expect(sends).toHaveLength(2);
+    expect(JSON.parse(String(sends[1][1]?.body)).attach_id).toBe('replacement-surface');
+    await close();
+  });
+
   it('merges delayed channel history with repeated live frames and reconnect snapshots', async () => {
     localStorage.setItem('aimee_active_channel', 'room');
     const ordinaryFetch = fetchMock.getMockImplementation()!;

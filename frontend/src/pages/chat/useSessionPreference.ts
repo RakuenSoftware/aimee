@@ -4,7 +4,7 @@ type Preference = { loaded: boolean; value: string; confirmed: string; revision:
 
 /** Keep server-owned preferences on their originating session. A late history
  * read cannot undo a user selection, and writes reach the server in click order. */
-export function useSessionPreference(session: string, endpoint: string, field: string) {
+export function useSessionPreference(session: string, endpoint: string, field: string, enabled = true) {
   const values = useRef(new Map<string, Preference>());
   const [, refresh] = useState(0);
   const mounted = useRef(false);
@@ -20,6 +20,7 @@ export function useSessionPreference(session: string, endpoint: string, field: s
   }
   const current = entry(session);
   useEffect(() => {
+    if (!enabled) return;
     const value = entry(session);
     let disposed = false;
     let abort: AbortController | undefined;
@@ -53,10 +54,10 @@ export function useSessionPreference(session: string, endpoint: string, field: s
       window.removeEventListener('focus', load);
       document.removeEventListener('visibilitychange', load);
     };
-  }, [session, endpoint, field, redraw]);
+  }, [session, endpoint, field, enabled, redraw]);
 
   const change = useCallback((name: string) => {
-    if (!session || !name) return;
+    if (!enabled || !session || !name) return;
     const value = entry(session);
     const revision = ++value.revision;
     value.value = name;
@@ -79,6 +80,6 @@ export function useSessionPreference(session: string, endpoint: string, field: s
         }
       } finally { value.pending--; redraw(); }
     });
-  }, [session, endpoint, field, redraw]);
-  return { known: current.loaded || current.pending > 0, value: current.value, pending: current.pending > 0, error: current.error, change };
+  }, [session, endpoint, field, enabled, redraw]);
+  return { known: enabled && (current.loaded || current.pending > 0), value: current.value, pending: current.pending > 0, error: current.error, change };
 }

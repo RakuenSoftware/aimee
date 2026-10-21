@@ -107,7 +107,7 @@ const { chromium } = require('../frontend/node_modules/playwright');
         '/api/chat/bootstrap-status': { has_rules: true },
         '/api/models': { default_agent: 'primary-model-with-a-long-name-for-responsive-layout', models: [{name:'primary-model-with-a-long-name-for-responsive-layout'}] },
         '/api/chat/personas': { personas: [{name:'engineer'},{name:'reviewer'}] },
-        '/api/chat/attach': { attach_id: 'attachment' },
+        '/api/chat/attach': { session_id: p === '/api/chat/attach' ? request.postDataJSON().sid : '', attach_id: 'attachment' },
         '/api/chat/primary': { agent: lookupAgent }, '/api/chat/persona': { name: lookupPersona },
         '/api/git/credentials': { hosts: ['github.com'] },
         '/api/vault/credentials': { credentials: [{ agent: 'git', cred: 'author_name' }, { agent: 'git', cred: 'author_email' }] },

@@ -10,6 +10,7 @@
 #include "server_http_identity.h"
 #include "runtime_secret.h"
 #include "request_context.h"
+#include "presence.h"
 #include "server_compute_impl.h"
 #include "http_content_encoding.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
@@ -426,6 +427,66 @@ server_ctx_t *server_active_ctx(void)
 static char primary_rows[2][64];
 static int primary_store_unavailable;
 static int primary_store_fixture;
+static int attach_store_fixture, attach_store_calls, attach_store_creates;
+static char attach_store_actor[160], attach_store_owner[160];
+static aimee_module_call_result_t attach_store_reply(const uint8_t *wire, uint32_t request_len,
+                                                     void *body, uint32_t cap, uint32_t *length)
+{
+   uint32_t op = aimee_db1_get_u32(wire), count = aimee_db1_get_u32(wire + 4), at = 8;
+   char fields[3][160] = {{0}};
+   assert(count <= 3);
+   for (uint32_t i = 0; i < count; i++)
+   {
+      assert(at + 4 <= request_len);
+      uint32_t n = aimee_db1_get_u32(wire + at);
+      at += 4;
+      assert(n < sizeof fields[i] && at + n <= request_len);
+      memcpy(fields[i], wire + at, n);
+      at += n;
+   }
+   attach_store_calls++;
+   if (attach_store_fixture == 2)
+      return AIMEE_MODULE_CALL_TRANSPORT;
+   uint32_t status = AIMEE_DB1_STATUS_OK, values = 0;
+   if (op == AIMEE_DB1_OP_SERVER_SESSION_CREATE)
+   {
+      assert(count == 3 && !strcmp(fields[1], "webchat") && !strcmp(fields[2], attach_store_actor));
+      attach_store_creates++;
+      assert(!attach_store_owner[0]); /* CREATE never rewrites an owner. */
+      snprintf(attach_store_owner, sizeof attach_store_owner, "%s",
+               attach_store_fixture == 3 ? "webuser:foreign" : attach_store_actor);
+      if (attach_store_fixture == 4)
+         status = AIMEE_DB1_STATUS_INVALID; /* Same-actor concurrent INSERT. */
+      if (attach_store_fixture == 5)
+         return AIMEE_MODULE_CALL_TRANSPORT; /* CREATE committed, ACK lost. */
+   }
+   else
+   {
+      assert(op == AIMEE_DB1_OP_SERVER_SESSION_GET && count == 1);
+      if (attach_store_fixture == 6 && attach_store_owner[0])
+         return AIMEE_MODULE_CALL_TRANSPORT;
+      if (!attach_store_owner[0])
+         status = AIMEE_DB1_STATUS_MISSING;
+      else
+         values = 10;
+   }
+   const char *cells[] = {fields[0], "webchat", attach_store_owner, "", "", "", "", "", "", ""};
+   uint8_t *out = body;
+   assert(cap >= 8);
+   aimee_db1_put_u32(out, status);
+   aimee_db1_put_u32(out + 4, values);
+   *length = 8;
+   for (uint32_t i = 0; i < values; i++)
+   {
+      uint32_t n = (uint32_t)strlen(cells[i]);
+      assert(*length + 4 + n <= cap);
+      aimee_db1_put_u32(out + *length, n);
+      memcpy(out + *length + 4, cells[i], n);
+      *length += 4 + n;
+   }
+   return AIMEE_MODULE_CALL_OK;
+}
+
 static int primary_fixture_get(const char *actor, const char *sid, char *out, size_t cap)
 {
    if (out && cap)
@@ -572,7 +633,8 @@ static aimee_module_call_result_t history_open_store_reply(uint32_t op, const ui
  * though an unattached module is answered before it is reached. */
 int obs_bus_module_available(uint32_t event_kind)
 {
-   return (primary_store_fixture || history_open_fixture) && event_kind == AIMEE_DB1_EVENT_SESSIONS;
+   return (primary_store_fixture || history_open_fixture || attach_store_fixture) &&
+          event_kind == AIMEE_DB1_EVENT_SESSIONS;
 }
 
 aimee_module_call_result_t
@@ -581,6 +643,9 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
                     uint32_t response_capacity, uint32_t *response_len,
                     aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
+   if (attach_store_fixture && event_kind == AIMEE_DB1_EVENT_SESSIONS && request_len >= 8)
+      return attach_store_reply(request_body, request_len, response_body, response_capacity,
+                                response_len);
    if (history_open_fixture && event_kind == AIMEE_DB1_EVENT_SESSIONS && request_len >= 8)
       return history_open_store_reply(aimee_db1_get_u32(request_body), request_body, request_len,
                                       response_body, response_capacity, response_len);
@@ -635,6 +700,80 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
  *
  * What is still C's to answer is the unattached case. A control call with no
  * module serving the stage must say so, not hang or claim success. */
+static void test_browser_attach_admits_exact_durable_owner(void)
+{
+   char response[1024];
+   request_context_t owner = {.vault_transport = ATTEST_WEBCHAT_TRUSTED};
+   snprintf(owner.vault_principal, sizeof owner.vault_principal, "webuser:alice");
+   for (int mode = 1; mode <= 6; mode++)
+   {
+      presence_init();
+      attach_store_fixture = mode;
+      attach_store_calls = attach_store_creates = 0;
+      attach_store_owner[0] = 0;
+      snprintf(attach_store_actor, sizeof attach_store_actor, "%s", owner.vault_principal);
+      request_context_set(&owner);
+      int status = route_session_attach("browser-admission", "{\"surface\":\"webchat\"}", response,
+                                        sizeof response);
+      int admitted = mode == 1 || mode == 4 || mode == 5;
+      assert(status == (admitted ? 200 : mode == 3 ? 403 : 503));
+      assert(presence_attachment_count("browser-admission") == admitted);
+      assert(!admitted || !strcmp(attach_store_owner, owner.vault_principal));
+      if (admitted)
+      {
+         assert(attach_store_creates == 1);
+         assert(route_session_attach("browser-admission", "{\"surface\":\"webchat\"}", response,
+                                     sizeof response) == 200);
+         assert(attach_store_creates == 1); /* Exact retry reads the existing owner. */
+      }
+      presence_shutdown();
+   }
+   presence_init();
+   attach_store_fixture = 1;
+   attach_store_calls = attach_store_creates = 0;
+   snprintf(attach_store_owner, sizeof attach_store_owner, "webuser:foreign");
+   assert(route_session_attach("foreign-admission", "{\"surface\":\"webchat\"}", response,
+                               sizeof response) == 403);
+   assert(!attach_store_creates && !presence_attachment_count("foreign-admission"));
+   attach_store_owner[0] = 0;
+   int before = attach_store_calls;
+   assert(route_session_attach("spoofed-admission",
+                               "{\"surface\":\"webchat\",\"owner\":\"webuser:foreign\"}", response,
+                               sizeof response) == 403);
+   assert(attach_store_calls == before && !presence_attachment_count("spoofed-admission"));
+   request_context_t empty_owner = {.vault_transport = ATTEST_WEBCHAT_TRUSTED};
+   request_context_set(&empty_owner);
+   assert(route_session_attach("missing-owner", "{\"surface\":\"webchat\"}", response,
+                               sizeof response) == 400);
+   assert(attach_store_calls == before && !presence_attachment_count("missing-owner"));
+   request_context_set(&owner);
+   char long_session[PRESENCE_SESSION_ID_MAX + 1];
+   memset(long_session, 's', sizeof long_session - 1);
+   long_session[sizeof long_session - 1] = 0;
+   assert(route_session_attach(long_session, "{\"surface\":\"webchat\"}", response,
+                               sizeof response) == 400);
+   assert(attach_store_calls == before);
+   /* The complete host principal remains usable on an idempotent reattach. */
+   memcpy(owner.vault_principal, "webuser:", 8);
+   memset(owner.vault_principal + 8, 'a', sizeof owner.vault_principal - 9);
+   owner.vault_principal[sizeof owner.vault_principal - 1] = 0;
+   snprintf(attach_store_actor, sizeof attach_store_actor, "%s", owner.vault_principal);
+   request_context_set(&owner);
+   assert(route_session_attach("long-owner", "{\"surface\":\"webchat\"}", response,
+                               sizeof response) == 200);
+   assert(route_session_attach("long-owner", "{\"surface\":\"webchat\"}", response,
+                               sizeof response) == 200);
+   assert(!strcmp(attach_store_owner, owner.vault_principal));
+   attach_store_fixture = 0;
+   request_context_clear();
+   before = attach_store_calls;
+   assert(route_session_attach("ordinary-no-store", "{\"surface\":\"tui\",\"owner\":\"local\"}",
+                               response, sizeof response) == 200);
+   assert(presence_attachment_count("ordinary-no-store") == 1 && attach_store_calls == before);
+   presence_shutdown();
+   presence_init();
+}
+
 static void test_workflow_control_reports_an_unattached_module(void)
 {
    char response[256];
@@ -1012,6 +1151,7 @@ int main(void)
    printf("server_http: ");
 
    test_workflow_control_reports_an_unattached_module();
+   test_browser_attach_admits_exact_durable_owner();
 
    char home[PATH_MAX];
    snprintf(home, sizeof(home), "%s/aimee-shttp-XXXXXX", platform_tmpdir());
