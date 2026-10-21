@@ -96,6 +96,35 @@ HTTP fixtures and existing policy/workflow regressions pass. Retain the original
 failed-run evidence when replacing the latest unmerged commit with the combined
 reviewed corrections; add no historical SHA or provenance exemption.
 
+### Claude gateway protocol compatibility follow-up
+
+The actual operator credential file did not change after supported enrollment;
+its expiry remained valid and the supported enrollment audit matched that source.
+A further real full-Opus request yielded a complete 114-byte HTTP429 error body
+with only `rate_limit_error` and a generic message, without a reset instruction.
+Its envelope was 46,911 bytes with 53 tools and one message; the successful direct
+SDK diagnostic used about 22K input/cache tokens. No specific quota or context-size
+cause is established. Every updated-runtime request failed durably and finished
+custody without a restart; successful question/reply/permission execution is pending.
+
+Official gateway guidance and pinned-SDK source exposed two concrete compatibility
+gaps. Because the host reshapes system content, its verified native launch now sets
+`CLAUDE_CODE_ATTRIBUTION_HEADER=0`, causing the SDK to omit its fingerprint block
+rather than having a gateway strip or relocate it. This is unrelated to Git/PR
+attribution policy. A real descriptor child and actual pinned SDK against a local
+synthetic provider verify omission; neither is live vendor acceptance.
+
+The original SDK's typed `metadata.user_id` was also lost when canonical host
+ownership replaced its parsed request. The gateway now preserves this bounded
+optional correlation field per callback, retaining host metadata and refusing
+conflicts. No SDK system/transcript/tools/raw sidecar or new identity authority
+is admitted. The baseline fixture reproduces the loss; twelve normal/sanitizer
+scenarios cover the contract, malformed values and unchanged non-Anthropic behavior.
+Combined fixtures retain the earlier pre-frame error fix. Independent reviews,
+clang-format19, documentation and IR bypass gates pass. Qualify the exact newly
+committed unmodified runtime through normal PAM/browser next; do not relabel the
+previous logging overlays as final-source vendor acceptance.
+
 ### Final live qualification: 21 October 2026
 
 Source `230b490627b716b3aa41af30672e6c2b3269d19a` passed all 53 main CI

@@ -460,8 +460,12 @@ static int native_environment(native_execution_t *execution)
           snprintf(url, sizeof url, "ANTHROPIC_BASE_URL=%s",
                    server_native_runtime_url(execution->runtime)) >= (int)sizeof url)
          return -1;
+      /* The canonical gateway replaces SDK system content. Claude's gateway
+       * protocol requires client-side omission of its fingerprint block in
+       * this case; neither stripping nor moving that block is supported. */
       const char *extra[] = {key, url, "DISABLE_AUTOUPDATER=1",
-                             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"};
+                             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+                             "CLAUDE_CODE_ATTRIBUTION_HEADER=0"};
       for (unsigned i = 0; i < sizeof extra / sizeof extra[0]; i++)
       {
          execution->environment[9 + i] = strdup(extra[i]);

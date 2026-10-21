@@ -404,10 +404,75 @@ static int native_digest_valid(const char *digest)
    return 1;
 }
 
+/* SDK correlation metadata is transport data, never account/session authority.
+ * Keep only the provider's bounded user_id contract through canonical ownership;
+ * the SDK's model, system, transcript, tools and raw extensions stay excluded. */
+static int native_sdk_metadata_copy(const aimee_request_t *request, cJSON **out)
+{
+   *out = NULL;
+   if (request->frontend != AIMEE_WIRE_ANTHROPIC || !request->metadata)
+      return 0;
+   const cJSON *metadata = request->metadata;
+   if (!cJSON_IsObject(metadata) || !aimee_ir_json_unique(metadata))
+      return -1;
+   const cJSON *id = NULL;
+   for (const cJSON *field = metadata->child; field; field = field->next)
+   {
+      if (!field->string || strcmp(field->string, "user_id"))
+         return -1;
+      id = field;
+   }
+   if (id && !cJSON_IsNull(id) && !cJSON_IsString(id))
+      return -1;
+   if (cJSON_IsString(id))
+   {
+      size_t bytes = strnlen(id->valuestring, 2049), characters = 0;
+      if (bytes > 2048)
+         return -1;
+      for (size_t i = 0; i < bytes; i++)
+         characters += ((unsigned char)id->valuestring[i] & 0xc0) != 0x80;
+      if (characters > 512)
+         return -1;
+   }
+   char encoded[4096];
+   if (!cJSON_PrintPreallocated((cJSON *)metadata, encoded, sizeof encoded, 0))
+      return -1;
+   *out = aimee_ir_json_parse_frame(encoded, strlen(encoded));
+   return *out ? 0 : -1;
+}
+static int native_sdk_metadata_merge(aimee_request_t *request, cJSON *sdk)
+{
+   if (!sdk)
+      return 0;
+   if (!request->metadata)
+   {
+      request->metadata = cJSON_Duplicate(sdk, 1);
+      return request->metadata ? 0 : -1;
+   }
+   if (!cJSON_IsObject(request->metadata) || !aimee_ir_json_unique(request->metadata))
+      return -1;
+   const cJSON *id = cJSON_GetObjectItemCaseSensitive(sdk, "user_id");
+   if (!id)
+      return 0;
+   const cJSON *host = cJSON_GetObjectItemCaseSensitive(request->metadata, "user_id");
+   if (host)
+      return cJSON_Compare(host, id, 1) ? 0 : -1;
+   cJSON *copy = cJSON_Duplicate(id, 1);
+   if (!copy || !cJSON_AddItemToObject(request->metadata, "user_id", copy))
+   {
+      cJSON_Delete(copy);
+      return -1;
+   }
+   return 0;
+}
+
 static int native_owned_request(aimee_request_t *request, void *context)
 {
    native_request_owner_t *owner = context;
    server_native_runtime_t *runtime = owner->runtime;
+   cJSON *sdk_metadata = NULL;
+   if (native_sdk_metadata_copy(request, &sdk_metadata))
+      goto failed;
    if (!owner->prepared)
    {
       cJSON *history = NULL;
@@ -445,9 +510,14 @@ static int native_owned_request(aimee_request_t *request, void *context)
          goto failed;
       owner->prepared = 1;
    }
-   if (!aimee_ir_request_clone(&owner->request, request))
+   if (!aimee_ir_request_clone(&owner->request, request) &&
+       !native_sdk_metadata_merge(request, sdk_metadata))
+   {
+      cJSON_Delete(sdk_metadata);
       return 0;
+   }
 failed:
+   cJSON_Delete(sdk_metadata);
    server_session_capture_fail(runtime->capture);
    return -1;
 }

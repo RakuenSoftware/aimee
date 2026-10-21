@@ -706,6 +706,7 @@ struct server_native_replay
 };
 static atomic_int owned_profile_probe, snapshot_generation, tool_source_probe, postpolicy_gap,
     flat_bound_probe, preframe_error_probe;
+#include "support/native_sdk_metadata_fixture.h"
 static cJSON *source_rows;
 server_native_replay_t *server_native_replay_open(const char *session, const char *actor,
                                                   const char *scope, const char *model)
@@ -827,11 +828,14 @@ static void probe_replay_scope(const char *path)
       {
          assert(request_owner_scope.guard);
          request.model = strdup("SDK model selector");
+         int metadata_mode = atomic_load(&sdk_metadata_case);
+         request.frontend = metadata_mode == 12 ? AIMEE_WIRE_RESPONSES : AIMEE_WIRE_ANTHROPIC;
+         request.metadata = sdk_metadata_fixture(metadata_mode);
          request.raw = cJSON_Parse("{\"conversation\":\"SDK private history\"}");
          request.raw_bytes = strdup("SDK original bytes");
          request.raw_length = strlen(request.raw_bytes);
          int admitted = request_owner_scope.guard(&request, request_owner_scope.context);
-         if (atomic_load(&snapshot_fault) == 3)
+         if (atomic_load(&snapshot_fault) == 3 || sdk_metadata_refuses(metadata_mode))
          {
             assert(admitted == -1);
             aimee_request_free(&request);
@@ -839,6 +843,20 @@ static void probe_replay_scope(const char *path)
          }
          assert(!admitted && !strcmp(request.model, "selected-model") && request.mutated);
          assert(!request.raw && !request.raw_bytes && !request.raw_length);
+         const char *sdk_id =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request.metadata, "user_id"));
+         if (metadata_mode == 1 || metadata_mode == 12)
+            assert(!sdk_id);
+         else if (metadata_mode == 2)
+            assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(request.metadata, "user_id")));
+         else if (metadata_mode == 3)
+            assert(sdk_id && strlen(sdk_id) == 1536);
+         else
+            assert(sdk_id && !strcmp(sdk_id, sdk_metadata_value()));
+         if (atomic_load(&sdk_host_metadata))
+            assert(!strcmp(cJSON_GetStringValue(
+                               cJSON_GetObjectItemCaseSensitive(request.metadata, "host_marker")),
+                           "host-profile"));
          assert(request.n_system == 1 && !strcmp(request.system[0].text, "host-owned system"));
          assert(request.n_messages == 1 && request.n_tools == 1);
          assert(!strcmp(request.messages[0].blocks[0].text, atomic_load(&snapshot_generation) == 1
@@ -2094,6 +2112,56 @@ static void test_native_bound_mcp(const agent_t *selected, const request_context
    }
 }
 
+static void test_sdk_metadata(const agent_t *selected, const request_context_t *owner)
+{
+   for (int mode = 1; mode <= 12; mode++)
+   {
+      owner_tools(1);
+      aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
+      aimee_tool_t function = {.name = "read_file"};
+      aimee_tool_t tools = {
+          .kind = AIMEE_TOOL_NAMESPACE, .name = "aimee", .children = &function, .n_children = 1};
+      cJSON *host_metadata = cJSON_Parse("{\"host_marker\":\"host-profile\"}");
+      atomic_store(&snapshot_generation, 1);
+      if (mode == 9 || mode == 10)
+         cJSON_AddStringToObject(host_metadata, "user_id",
+                                 mode == 9 ? "host-conflicting-id" : sdk_metadata_value());
+      aimee_request_t profile = {.model = "selected-model",
+                                 .frontend = AIMEE_WIRE_RESPONSES,
+                                 .system = &system,
+                                 .n_system = 1,
+                                 .tools = &tools,
+                                 .n_tools = 1,
+                                 .metadata = host_metadata,
+                                 .prompt_cache_key = "",
+                                 .mutated = 1};
+      server_session_capture_t *capture =
+          server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+      assert(capture && !server_session_capture_bind(capture));
+      server_native_runtime_t *runtime =
+          server_native_runtime_open_request(selected, owner, "session-a", &profile);
+      assert(runtime && server_session_capture_bind(NULL) == capture);
+      cJSON_Delete(host_metadata); /* The runtime must own the original host fields. */
+      captured_rows = cJSON_CreateArray();
+      atomic_store(&expected_capture, capture);
+      atomic_store(&owned_profile_probe, 1);
+      atomic_store(&sdk_host_metadata, 1);
+      atomic_store(&sdk_metadata_case, mode);
+      char response[1024];
+      request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
+      assert(server_session_capture_failed(capture) == sdk_metadata_refuses(mode));
+      server_native_runtime_close(runtime);
+      server_session_capture_close(capture);
+      atomic_store(&expected_capture, NULL);
+      atomic_store(&owned_profile_probe, 0);
+      atomic_store(&sdk_host_metadata, 0);
+      atomic_store(&sdk_metadata_case, 0);
+      atomic_store(&snapshot_generation, 0);
+      cJSON_Delete(captured_rows);
+      captured_rows = NULL;
+   }
+}
+
 static void test_owned_native_context(const agent_t *selected, const request_context_t *owner)
 {
    owner_tools(1);
@@ -2393,6 +2461,7 @@ int main(void)
    test_native_original_catalog(&selected, &a);
    test_native_supervised_execution(&selected, &a);
    test_native_bound_mcp(&selected, &a);
+   test_sdk_metadata(&selected, &a);
    test_owned_native_context(&selected, &a);
    test_source_snapshot_refusal(&selected, &a);
    test_private_source_revocation(&selected, &a);

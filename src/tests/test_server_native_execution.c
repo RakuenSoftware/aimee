@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <stdatomic.h>
 
@@ -680,6 +681,56 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    const cli_claude_host_launch_t *host = cfg->claude_host;
    char proof[65];
    assert(!cli_claude_native_launch_digest(cfg, proof) && !strcmp(proof, host->expected_profile));
+   /* The exact fixed gateway setting is covered by the launch proof, not
+    * inherited from the operator or inferred from SDK initialization. */
+   int attribution_index = -1;
+   char *changed_environment[17] = {0};
+   for (int i = 0; host->environment[i]; i++)
+   {
+      assert(i < 16);
+      changed_environment[i] = host->environment[i];
+      if (!strncmp(host->environment[i], "CLAUDE_CODE_ATTRIBUTION_HEADER=", 31))
+      {
+         assert(!strcmp(host->environment[i], "CLAUDE_CODE_ATTRIBUTION_HEADER=0"));
+         assert(attribution_index == -1);
+         attribution_index = i;
+      }
+   }
+   assert(attribution_index >= 0);
+   cli_claude_host_launch_t changed_host = *host;
+   provider_cli_cfg_t changed_cfg = *cfg;
+   changed_host.environment = changed_environment;
+   changed_cfg.claude_host = &changed_host;
+   changed_environment[attribution_index] = "CLAUDE_CODE_ATTRIBUTION_HEADER=1";
+   assert(cli_claude_native_launch_digest(&changed_cfg, proof));
+   changed_environment[attribution_index] = NULL;
+   assert(cli_claude_native_launch_digest(&changed_cfg, proof));
+   changed_environment[attribution_index] = host->environment[attribution_index];
+   int environment_count = 0;
+   while (host->environment[environment_count])
+      environment_count++;
+   changed_environment[environment_count] = host->environment[attribution_index];
+   assert(cli_claude_native_launch_digest(&changed_cfg, proof));
+#if defined(__linux__)
+   /* Run the real descriptor-based spawn and inspect its actual child env.
+    * This is a probe executable, not a simulated provider response. */
+   cli_claude_host_launch_t probe_host = *host;
+   provider_cli_cfg_t probe_cfg = *cfg;
+   probe_host.executable_fd = open("/proc/self/exe", O_RDONLY | O_CLOEXEC);
+   assert(probe_host.executable_fd >= 0);
+   probe_host.spawn_guard = NULL;
+   probe_cfg.claude_host = &probe_host;
+   int input = -1, output = -1, status = -1;
+   pid_t probe;
+   assert(!cli_claude_native_spawn(&probe_cfg, &input, &output, &probe));
+   close(input);
+   char observed[128] = {0};
+   ssize_t bytes = read(output, observed, sizeof observed - 1);
+   assert(bytes > 0 && !strcmp(observed, "native Claude gateway environment verified\n"));
+   close(output);
+   assert(waitpid(probe, &status, 0) == probe && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+   close(probe_host.executable_fd);
+#endif
    snprintf(private_home, sizeof private_home, "%s", host->home);
    child_executable = host->executable_fd;
    child_directory = host->cwd_fd;
@@ -784,8 +835,18 @@ static void finish(int success)
    action(success, terminal_resource);
    terminal_resource = NULL;
 }
-int main(void)
+int main(int argc, char **argv)
 {
+   if (argc > 1 && !strcmp(argv[1], "--bare"))
+   {
+      const char *setting = getenv("CLAUDE_CODE_ATTRIBUTION_HEADER");
+      assert(setting && !strcmp(setting, "0"));
+      assert(!getenv("PARENT_SECRET") && !getenv("ANTHROPIC_AUTH_TOKEN"));
+      assert(getenv("ANTHROPIC_API_KEY") &&
+             !strcmp(getenv("ANTHROPIC_API_KEY"), "local-capability-fixture"));
+      puts("native Claude gateway environment verified");
+      return 0;
+   }
    char temporary[4096];
    assert(snprintf(temporary, sizeof temporary, "%s/native-factory-XXXXXX", platform_tmpdir()) <
           (int)sizeof temporary);
@@ -795,6 +856,7 @@ int main(void)
    setenv("AIMEE_OAUTH_RUNTIME_DIR", temporary, 1);
    setenv("AIMEE_HOME", temporary, 1);
    setenv("PARENT_SECRET", "do-not-inherit", 1);
+   setenv("CLAUDE_CODE_ATTRIBUTION_HEADER", "1", 1);
    agent_t selected = {0};
    snprintf(selected.cli_kind, sizeof selected.cli_kind, "codex");
    snprintf(selected.cli_cmd, sizeof selected.cli_cmd, "/bin/true");
