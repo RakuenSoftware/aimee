@@ -21,6 +21,55 @@ to `main`. Its later promotion review is not a blocker for code review or the
 current IR acceptance work. Automatic reviews and strict attribution remain
 unchanged. No self-approval or production promotion is asserted.
 
+### Latest local Claude acceptance: source `384683799`
+
+The previously unqualified genuine local Claude path now passes. The clean,
+unmodified four-product build has 1,297 compile commands with no warnings/errors;
+only the owned server/CLI were installed, with KB/gateway build-only. Actual
+running server SHA256 is
+`eed11404a9d57624ffeedde7765566be6d6b70c21bd88086ff9995a55d20f935`.
+The unchanged qualified SPA is `60756abfa7c545434f2771c565c6dc798738c9c44693700cee8606ce8797016e`.
+
+Normal PAM and the actual Max-backed Opus5 profile executed README `read_file`,
+then `request_input`. Reload preserved the pending question; one real operator
+reply produced the matching tool result and completed at 80/checkpoint 81.
+Independent actor/project/call/result and acknowledged read-intent checks agree.
+The actual SDK child retained the exact fourteen-entry credential-free environment.
+Desktop/320 replay sent no duplicate actions. Session is
+`web-0079d51e-760c-43f1-802b-7c10a7978ed5`.
+
+A separate genuine permission journey continued that same session. The retained
+SDK session from checkpoint 81 produced the next actual question/source 105;
+its JSONL message ID matches the canonical original. Literal resume argv was not
+captured and is not claimed. A verified qualified leaf was frozen before killing
+only the owned daemon. Normal browser recovery retired the physically quiescent
+old execution, appended cancellation 109 and source-bound unknown outcome 110,
+and changed the ownership epoch. A real `write_file` call at 139 requested
+permission 142; one browser Decline produced DENY 143 and matching error result
+144. The target file is absent, completed 226/checkpoint 227 are durable and all
+native work/three leaves are gone. Refusal occurred before governed write issue
+or dispatch, so no fictional write-effect journal row is claimed.
+
+An ordinary idle restart, without freezing or inference, separately preserved
+all 227 canonical/source hashes, both cache-owner rows, four harness rows, three
+reservation rows and the valid cache's device/inode/bytes/hash exactly. Actual
+PAM desktop/320 replay also matched all 227 envelopes with zero send/reply/cancel
+or configuration mutations. Controlled crash recovery is not substituted for
+that ordinary restart check.
+
+Two proof-driver assertions were corrected read-only: one selected hidden folded
+tool arguments instead of the final assistant paragraph; another assumed a write
+call was block zero although thinking preceded it. Their failures remain in the
+packets; no model sends, replies, database seeding or product changes repeated
+those actions. Six combined normal/sanitizer fixtures and all 76 lint gates pass.
+The preceding `d3639f1dc` completed all 53 main CI jobs and all seven auxiliary
+workflows. Fresh final-head CI and fresh owned `.252` deployment qualification
+remain separate; prior VM 8163 no longer exists and must not be retaken.
+
+This checkpoint supersedes the older local-Claude-unqualified statements below.
+It qualifies this pinned Linux SDK/Max/Opus profile, not every subscription or
+native platform. Production `.100` remains untouched until a merge to `main`.
+
 Separate fresh reviews of `aa8c774..ff71e5d48` covered browser/history and
 cancellation races, execution/security and native grant lifetime, source forks,
 project custody, canonical learning ownership and the remaining C/build changes.
@@ -776,7 +825,7 @@ checks or the recorded independent review remain outstanding.
 | Browser controls and usability | Exact primary/child reply ownership, replay readiness, no duplicate/reconnect resend, denial suppression, readable tool output and responsive composer/preferences are implemented and tested. | Local automated checks pass; finish fresh exact-head CI. The browser is ready for manual validation; a later manual pass is not a reason to stop finishing automated work. |
 | KB-free project and learning | Approved held repository identity resolves without a KB index. Canonical terminal/outbox owners publish source-bound configured-test grades and observational delegate learning; next-context reuse is actor/project/source fenced. Actual Docker/restart journeys pass. | Finish fresh exact-head CI, then verify real `.100` capture/reuse after authorized promotion. Leave KB mode/endpoint unset; add no fabricated learning rows. |
 | Meaning of learned evidence | Observational tool sequences, configured-test results and ungraded outcomes keep distinct labels. No automatic causal/procedure promotion or semantic task-success claim is inferred. | Preserve those labels during production verification. Synthesis is not a prerequisite for the KB-free capture/reuse path. |
-| Linux native coverage | Qualified descriptor-based pinned Codex/Claude model/tool/resume and optional cgroup/Landlock crash recovery have actual SDK and kernel-backed evidence. Unqualified ordinary launches remain fail-closed for uncertain crash recovery. | Local integrated qualification passes; finish fresh exact-head CI. Live upstream/vendor subscription acceptance remains separately unqualified. |
+| Linux native coverage | Qualified descriptor-based pinned Codex/Claude model/tool/resume and cgroup/Landlock crash recovery have actual SDK and kernel-backed evidence. Genuine local Claude Max/Opus read/question/reply, permission denial, interrupted recovery and ordinary cache-preserving restart pass on `384683799`; owned `.252` Codex evidence retains its own producer revisions. Unqualified launches remain fail-closed. | Finish fresh final-head CI and current-source owned `.252` deployment qualification; do not generalize to untested profiles or native platforms. |
 | macOS, Windows and unsupported profiles | macOS/Windows thin clients are supported server-access build/test targets. They are not native server-execution coverage. Arbitrary daemon ACP profiles and non-Linux native tool runtimes remain explicitly unsupported/refused. | Report these boundaries honestly; do not convert thin-client passes into native-server claims. |
 | Production review and promotion | `.100` is KB-free and no promotion is claimed. `OWNERS.md` requires Governance to assign/record a second qualified GitHub identity in the live ruleset; the approving reviewer must differ from the author. Agent reviews do not satisfy it. | Obtain the recorded independent review for the final head, retain live-control evidence, deploy through the supported path and verify `.100` without adding a KB. |
 
