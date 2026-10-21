@@ -568,6 +568,35 @@ static void test_native_ir_fragmentation_and_persistence(void)
    PASS("native IR fragmentation preserves signed state and persists before rendering");
 }
 
+static int preframe_error_sink(const aimee_session_event_t *event, void *context)
+{
+   int *count = context;
+   assert(event->kind == AIMEE_SESSION_DELTA && event->delta &&
+          event->delta->type == AIMEE_DELTA_ERROR);
+   assert(!strcmp(event->message_id, "native")); /* host correlation, no provider message */
+   assert(!strcmp(event->delta->error_message,
+                  "Provider stream failed canonical admission or ended before completion"));
+   (*count)++;
+   return 0;
+}
+static void test_native_ir_preframe_transport_error(void)
+{
+   reset_capture();
+   g_stream_status = 503;
+   g_stream_payload = NULL;
+   emit_capture_t cap = {0};
+   agent_t agent = {0};
+   int diagnostics = 0;
+   aimee_ir_session_set_sink(preframe_error_sink, &diagnostics);
+   assert(messages_stream_native_ir("fixture", "", native_stream_request,
+                                    strlen(native_stream_request), "", &agent, "model", cap_emit,
+                                    &cap, NULL) < 0);
+   aimee_ir_session_set_sink(NULL, NULL);
+   assert(diagnostics == 1 && cap.count == 1 && !strcmp(cap.events[0], "error"));
+   reset_capture();
+   PASS("pre-frame transport failure emits only its typed error diagnostic");
+}
+
 static void test_native_ir_refuses_incomplete_and_invalid_streams(void)
 {
    const char *bad[] = {
@@ -1566,6 +1595,7 @@ int main(void)
    test_explicit_unknown_model_is_rejected();
    test_messages_stream_anthropic_reasoning_metrics();
    test_native_ir_fragmentation_and_persistence();
+   test_native_ir_preframe_transport_error();
    test_native_ir_refuses_incomplete_and_invalid_streams();
    test_native_response_retains_all_typed_blocks_and_long_tools();
    test_invalid_native_response_never_uses_legacy_parser();

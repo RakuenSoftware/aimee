@@ -557,7 +557,7 @@ static void submit_and_wait_op(const char *method)
 
 /* The HTTP fixture replaces only the import owner. The primary adapter fixture
  * links the real implementation; this seam asserts route ordering and custody. */
-static int history_open_fixture, history_open_calls, history_open_pages;
+static int history_open_fixture, history_open_calls, history_open_pages, history_open_gets;
 static int history_open_peer = -1;
 int primary_session_history_open(const char *session, const char *actor)
 {
@@ -586,6 +586,9 @@ static aimee_module_call_result_t history_open_store_reply(uint32_t op, const ui
       memcpy(fields[i], wire + at, size);
       at += size;
    }
+   if (op == AIMEE_DB1_OP_SERVER_SESSION_GET && ++history_open_gets == 1 &&
+       history_open_fixture == 4)
+      return AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
    const char *values[10] = {
        "legacy", "primary", history_open_fixture == 2 ? "webuser:other" : "webuser:alice",
        "",       "",        "",
@@ -1189,13 +1192,14 @@ static void test_native_http_handoff_preserves_owner_and_caps(void)
 
 static void test_history_open_precedes_sse_headers(void)
 {
-   for (int mode = 1; mode <= 3; mode++)
+   for (int mode = 1; mode <= 4; mode++)
    {
       int pair[2];
       assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
       history_open_fixture = mode;
       history_open_calls = 0;
       history_open_pages = 0;
+      history_open_gets = 0;
       history_open_peer = pair[1];
       int effects = history_open_effects;
       agent_set_request_vault_principal("webuser:alice");
@@ -1216,7 +1220,9 @@ static void test_history_open_precedes_sse_headers(void)
       {
          assert(strstr(response, mode == 2 ? "403" : "503"));
          assert(!strstr(response, "text/event-stream") && !strstr(response, "event: ir"));
-         assert(history_open_calls == (mode == 2 ? 0 : 1) && history_open_pages == 0);
+         assert(history_open_calls == (mode == 3 ? 1 : 0) && history_open_pages == 0);
+         if (mode == 4)
+            assert(history_open_gets == 1); /* A later hit must not bypass history opening. */
       }
       assert(history_open_effects == effects);
       close(pair[0]);

@@ -233,18 +233,22 @@ static void handle_session_ir_events(int fd, const char *input, const char *requ
       send_response(fd, 403, "{\"error\":\"session actor required\"}", request_id);
       return;
    }
-   if (db1_server_session_get(session, &row) == 0)
+   /* An attached browser already owns a durable session. A failed lookup is
+    * not permission to skip history recovery and advertise a successful replay. */
+   if (db1_server_session_get(session, &row))
    {
-      if (strcmp(row.principal, actor))
-      {
-         send_response(fd, 403, "{\"error\":\"session ownership mismatch\"}", request_id);
-         return;
-      }
-      if (primary_session_history_open(session, actor))
-      {
-         send_response(fd, 503, "{\"error\":\"session history unavailable\"}", request_id);
-         return;
-      }
+      send_response(fd, 503, "{\"error\":\"session history unavailable\"}", request_id);
+      return;
+   }
+   if (strcmp(row.principal, actor))
+   {
+      send_response(fd, 403, "{\"error\":\"session ownership mismatch\"}", request_id);
+      return;
+   }
+   if (primary_session_history_open(session, actor))
+   {
+      send_response(fd, 503, "{\"error\":\"session history unavailable\"}", request_id);
+      return;
    }
    write_sse_headers(fd, request_id);
    int seen = 0, quiet = 0, replay_complete = 0;

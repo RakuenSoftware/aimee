@@ -166,6 +166,11 @@ static int native_capture_admit(native_model_capture_t *capture, const aimee_ses
       return 0;
    if (!event->delta || !event->message_id || !event->role || strcmp(event->role, "assistant"))
       return -1;
+   /* Transport/admission can fail before the provider starts a message. This
+    * typed diagnostic has a host correlation ID, not an original assistant
+    * message or a tool source. Do not manufacture TURN_START to admit it. */
+   if (event->delta->type == AIMEE_DELTA_ERROR && !capture->builder.started)
+      return 0;
    if (event->delta->type == AIMEE_DELTA_TURN_START)
    {
       if (capture->builder.started && !capture->builder.complete)
@@ -190,6 +195,9 @@ static int native_record_source(native_model_capture_t *capture, const aimee_ses
    if (!capture->runtime->owns_request ||
        (event->kind != AIMEE_SESSION_DELTA && event->kind != AIMEE_SESSION_MESSAGE))
       return 0;
+   if (event->kind == AIMEE_SESSION_DELTA && event->delta->type == AIMEE_DELTA_ERROR &&
+       !capture->builder.started)
+      return 0; /* A pre-message failure cannot establish original tool provenance. */
    cJSON *row = wire ? aimee_ir_json_parse_frame(wire, strlen(wire)) : NULL;
    const cJSON *payload = cJSON_GetObjectItemCaseSensitive(row, "event");
    const char *message_id =

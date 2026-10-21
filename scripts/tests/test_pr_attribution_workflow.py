@@ -29,7 +29,10 @@ class AttributionWorkflowTests(unittest.TestCase):
         self.assertEqual(data['permissions'], {'contents': 'read'})
         self.assertEqual(job['permissions'], {'contents': 'read', 'issues': 'read', 'pull-requests': 'read', 'checks': 'read'})
         steps = job['steps']
-        live = next(step for step in steps if 'check-pr-attribution.go' in step.get('run', ''))
+        live = next(step for step in steps if step.get('run', '').startswith('go run '))
+        self.assertTrue(any(step.get('run') ==
+                            'go test ../scripts/check-pr-attribution.go ../scripts/check-pr-attribution_test.go'
+                            for step in steps))
         self.assertEqual(live['run'], 'go run ../scripts/check-pr-attribution.go')
         self.assertEqual(live['env']['GH_TOKEN'], '${{ github.token }}')
         self.assertNotIn('ATTRIBUTION_RE', (ROOT / '.github/workflows/pr-attribution.yml').read_text())

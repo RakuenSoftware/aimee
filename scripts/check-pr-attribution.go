@@ -14,14 +14,21 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/git/attribution"
 )
 
-func check(ctx context.Context) error {
-	repo, token := os.Getenv("GITHUB_REPOSITORY"), os.Getenv("GH_TOKEN")
-	if !regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`).MatchString(repo) || token == "" {
-		return fmt.Errorf("repository and authenticated read access are required")
-	}
-	client := &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	c := attribution.Checker{Get: func(ctx context.Context, path string) ([]byte, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+repo+"/"+path, nil)
+// Retry only authenticated reads after transient transport/server failures. No
+// incomplete response reaches policy evaluation, and exhausted reads still deny.
+func readAttributionAPI(ctx context.Context, client *http.Client, endpoint, token string) ([]byte, error) {
+	var failure error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			timer := time.NewTimer(time.Duration(attempt) * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -30,18 +37,37 @@ func check(ctx context.Context) error {
 		req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 		response, err := client.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("attribution API transport failed")
+			failure = fmt.Errorf("attribution API transport failed")
+			continue
 		}
-		defer response.Body.Close()
-		if response.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("attribution API returned HTTP %d", response.StatusCode)
+		status := response.StatusCode
+		if status != http.StatusOK {
+			response.Body.Close()
+			failure = fmt.Errorf("attribution API returned HTTP %d", status)
+			if status == 500 || status == 502 || status == 503 || status == 504 {
+				continue
+			}
+			return nil, failure
 		}
 		const limit = 16 << 20
 		body, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
+		response.Body.Close()
 		if err != nil || len(body) > limit {
 			return nil, fmt.Errorf("incomplete attribution API response")
 		}
 		return body, nil
+	}
+	return nil, failure
+}
+
+func check(ctx context.Context) error {
+	repo, token := os.Getenv("GITHUB_REPOSITORY"), os.Getenv("GH_TOKEN")
+	if !regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`).MatchString(repo) || token == "" {
+		return fmt.Errorf("repository and authenticated read access are required")
+	}
+	client := &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	c := attribution.Checker{Get: func(ctx context.Context, path string) ([]byte, error) {
+		return readAttributionAPI(ctx, client, "https://api.github.com/repos/"+repo+"/"+path, token)
 	}}
 	path := os.Getenv("GITHUB_EVENT_PATH")
 	raw, err := os.ReadFile(path)

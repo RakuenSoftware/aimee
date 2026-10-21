@@ -705,7 +705,7 @@ struct server_native_replay
    char actor[VAULT_PRINCIPAL_MAX], session[128];
 };
 static atomic_int owned_profile_probe, snapshot_generation, tool_source_probe, postpolicy_gap,
-    flat_bound_probe;
+    flat_bound_probe, preframe_error_probe;
 static cJSON *source_rows;
 server_native_replay_t *server_native_replay_open(const char *session, const char *actor,
                                                   const char *scope, const char *model)
@@ -919,6 +919,19 @@ static void probe_replay_scope(const char *path)
          }
       }
       aimee_request_free(&request);
+      if (atomic_load(&preframe_error_probe))
+      {
+         /* Actual ingress emits this host diagnostic when transport fails
+          * before any vendor message_start. It is not an assistant message. */
+         aimee_delta_t error = {.type = AIMEE_DELTA_ERROR,
+                                .error_message = "Provider transport failed before first frame"};
+         aimee_session_event_t diagnostic = {.kind = AIMEE_SESSION_DELTA,
+                                             .role = "assistant",
+                                             .message_id = "native",
+                                             .delta = &error};
+         assert(!aimee_ir_session_emit(&diagnostic));
+         return;
+      }
       aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
                                      .projection_model = "selected-model",
                                      .projection_boundary = "response",
@@ -1314,13 +1327,16 @@ static void test_source_claim(server_native_runtime_t *runtime, const char *name
 void server_learning_observe_terminal(const char *session, const char *turn, const char *sequence,
                                       const char *id, const char *actor, const cJSON *event)
 {
-   (void)session;
-   (void)turn;
-   (void)sequence;
    (void)id;
-   (void)actor;
-   (void)event;
-   assert(!"listener fixture must not invent a completed execution");
+   /* Only the explicit transport-failure regression owns a host terminal;
+    * model callbacks themselves still cannot manufacture completion. */
+   assert(atomic_load(&preframe_error_probe));
+   assert(!strcmp(session, "private-child") && !strcmp(turn, "native-turn") &&
+          !strcmp(actor, "webuser:alice") && !strcmp(sequence, "3"));
+   const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "kind"));
+   const cJSON *payload = cJSON_GetObjectItemCaseSensitive(event, "payload");
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "status"));
+   assert(kind && !strcmp(kind, "execution") && status && !strcmp(status, "failed"));
 }
 static void test_retained_capture(const agent_t *selected, const request_context_t *owner)
 {
@@ -1386,6 +1402,64 @@ static void test_retained_capture(const agent_t *selected, const request_context
       cJSON_Delete(captured_rows);
       captured_rows = NULL;
    }
+}
+
+static void test_native_preframe_error(const agent_t *selected, const request_context_t *owner)
+{
+   owner_tools(1);
+   aimee_tool_t function = {.name = "read_file"};
+   aimee_tool_t space = {
+       .kind = AIMEE_TOOL_NAMESPACE, .name = "aimee", .children = &function, .n_children = 1};
+   aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
+   aimee_request_t profile = {.model = "selected-model",
+                              .frontend = AIMEE_WIRE_ANTHROPIC,
+                              .tools = &space,
+                              .n_tools = 1,
+                              .system = &system,
+                              .n_system = 1,
+                              .prompt_cache_key = "",
+                              .mutated = 1};
+   server_session_capture_t *capture =
+       server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+   assert(capture && !server_session_capture_bind(capture));
+   server_native_runtime_t *runtime =
+       server_native_runtime_open_request(selected, owner, "session-a", &profile);
+   assert(runtime && server_session_capture_bind(NULL) == capture);
+   atomic_store(&expected_capture, capture);
+   captured_rows = cJSON_CreateArray();
+   atomic_store(&owned_profile_probe, 1);
+   atomic_store(&snapshot_generation, 1);
+   atomic_store(&preframe_error_probe, 1);
+   aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
+   assert(!server_session_capture_append(capture, &started, NULL, NULL));
+   char response[1024];
+   request(runtime, "/v1/messages", server_native_runtime_token(runtime), response);
+   assert(!server_session_capture_failed(capture));
+   server_native_runtime_quiesce(runtime);
+   aimee_response_t original = {0};
+   assert(server_native_runtime_result(runtime, &original) < 0);
+   server_native_tool_claim_t claim = {0};
+   assert(server_native_runtime_claim_reference(runtime, "invented-call", "aimee", "read_file",
+                                                &claim) < 0);
+   aimee_session_event_t failed = {.kind = AIMEE_SESSION_EXECUTION,
+                                   .execution_status = "failed",
+                                   .execution_error =
+                                       "Provider transport failed before first frame"};
+   assert(!server_session_capture_append(capture, &failed, NULL, NULL));
+   assert(!server_session_capture_accepting(capture));
+   assert(cJSON_GetArraySize(captured_rows) == 3);
+   char *wire = cJSON_PrintUnformatted(captured_rows);
+   assert(wire && strstr(wire, "Provider transport failed before first frame") &&
+          strstr(wire, "failed") && !strstr(wire, "tool_use") && !strstr(wire, "\"message\""));
+   free(wire);
+   server_native_runtime_close(runtime);
+   server_session_capture_close(capture);
+   atomic_store(&expected_capture, NULL);
+   atomic_store(&owned_profile_probe, 0);
+   atomic_store(&snapshot_generation, 0);
+   atomic_store(&preframe_error_probe, 0);
+   cJSON_Delete(captured_rows);
+   captured_rows = NULL;
 }
 
 static void test_native_original_catalog(const agent_t *selected, const request_context_t *owner)
@@ -2315,6 +2389,7 @@ int main(void)
    server_native_runtime_close(claude);
    atomic_store(&source_changed, 0);
    test_retained_capture(&selected, &a);
+   test_native_preframe_error(&selected, &a);
    test_native_original_catalog(&selected, &a);
    test_native_supervised_execution(&selected, &a);
    test_native_bound_mcp(&selected, &a);

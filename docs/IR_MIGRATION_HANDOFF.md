@@ -14,6 +14,88 @@ merged baseline, not the subsequent browser repairs. Continue on
 `fix/browser-ir-live-acceptance` in [PR #3057](https://github.com/RakuenSoftware/aimee/pull/3057) for their fresh CI. Keep automatic review and
 the strict attribution gate enabled. No production promotion is claimed.
 
+### Current review and local Claude acceptance scope
+
+The user clarified that production `.100` must remain untouched until a merge
+to `main`. Its later promotion review is not a blocker for code review or the
+current IR acceptance work. Automatic reviews and strict attribution remain
+unchanged. No self-approval or production promotion is asserted.
+
+Separate fresh reviews of `aa8c774..ff71e5d48` covered browser/history and
+cancellation races, execution/security and native grant lifetime, source forks,
+project custody, canonical learning ownership and the remaining C/build changes.
+No confirmed blocking regression was found. These are code audits, distinct
+from a later approving GitHub identity under `OWNERS.md`.
+
+The VM API profile's actual HTTP429 did not establish that local Claude was
+unavailable. The workstation already has an authenticated Max login and the
+pinned Claude 2.1.227 executable. Local qualification uses an owned user/mount
+namespace with an actual private PAM account, a delegated user service, a
+separate restricted PostgreSQL database and the exact `ff71e5d48` server/module
+build. The qualified SPA is retained with its identical frontend input tree.
+The existing local OAuth login is enrolled through the supported credential
+owner into an isolated test profile; permission mode remains `default`.
+No host accounts, unrelated databases or `.100` state are changed. Actual local
+question/reply and permission-denial results must be recorded separately from
+the earlier VM API failure; a bare CLI response alone is not integration proof.
+
+The first local browser request admitted the actual operator and pinned SDK but
+produced no model/tool/question output before a persistence failure and SDK
+shutdown. No upstream status was established. The SDK process tree was proved
+empty and its scoped token revoked; no reply or duplicate send occurred. A
+controlled replacement retained the original database, namespace and cgroup
+identity. Supported canonical browsing preserved running/user records 1/2,
+appended one restart cancellation at 3, reconciled the same reservation and
+returned replay completion with zero active native reservations. This qualifies
+recovery of that failed attempt, not successful Claude execution.
+
+A second normal-UI attempt, without extra replay observers, also failed capture
+before upstream HTTP. Supported settled recovery preserved its records 1/2 and
+appended exactly one cancellation at 3, with zero active native reservations.
+A transient directory-read timeout during its earlier browse exposed a separate
+bug: canonical SSE could send HTTP200 and replay without running history recovery.
+The route now requires successful owner lookup and history opening before any SSE
+headers. The regression reproduces the old bypass when the first lookup times
+out and a later lookup would succeed; the fixed full HTTP fixture and formatting
+check pass. Normal browser attachment already acknowledges the durable owned row.
+
+The third local request passed credential and canonical-history stages, but the
+attached debugger then crashed and terminated the isolated daemon. Its normal
+recovery is separately proved; it is diagnostic contamination, not a provider
+outcome. The fourth logging-only diagnostic run exposed the secondary defect:
+a typed transport ERROR before TURN_START was rejected by the native response
+builder, poisoning capture. The fix preserves that host diagnostic without
+manufacturing an assistant message, original response or tool source. The actual
+pre-frame-error fixture reproduces the old failure; native-runtime and Anthropic
+fixtures pass normally and under ASan/UBSan with leak checks.
+
+The fifth real normal-PAM local-Max request on the reviewed production changes
+plus a separately hashed logging overlay reached upstream HTTP429. Its original
+running/user records 1/2 remain intact, typed diagnostic 3 persisted, and failed
+terminal 4 reports the safe trusted SDK rate-limit classification. Independent
+readback proved FINISHED ownership, zero active reservations and removal of the
+exact native cgroup leaf without restart. Desktop/320 reload repeated no send,
+reply or cancellation and showed no stale controls or reconnect error. The SDK's
+internal error record is not raw stdout evidence; numeric HTTP429 is separately
+proved by the actual transport. No specific quota cause is established.
+
+A bounded pinned-SDK diagnostic with the actual operator's locally successful
+Opus5 model returned successfully in 4.7 seconds. This is not Aimee integration.
+The isolated model was then updated through the supported owner API to Opus5;
+its normal full-catalog browser request also reached upstream429. Question/reply
+and permission denial remain pending. Next diagnostics retain only allowlisted
+429 metadata and envelope counts, with strict TLS and source guards unchanged.
+
+The replay-fix revision `79b9f97df` completed all 53 main CI jobs. Six auxiliary
+workflows passed; attribution verification failed because GitHub returned HTTP503,
+not because a policy violation was reported. The read-only API helper now retries
+transient transport/500/502/503/504 failures at most three times, with cancellable
+backoff; authorization failures, incomplete metadata and exhausted reads still
+fail closed. Strict provenance/history checks and automatic review are unchanged.
+HTTP fixtures and existing policy/workflow regressions pass. Retain the original
+failed-run evidence when replacing the latest unmerged commit with the combined
+reviewed corrections; add no historical SHA or provenance exemption.
+
 ### Final live qualification: 21 October 2026
 
 Source `230b490627b716b3aa41af30672e6c2b3269d19a` passed all 53 main CI
