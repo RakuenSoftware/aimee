@@ -16,6 +16,10 @@ server_session_capture_t *server_session_capture_open(const char *session, const
                                                       const char *execution_session);
 server_session_capture_t *server_session_capture_bind(server_session_capture_t *owner);
 server_session_capture_t *server_session_capture_current(void);
+/* Process-local ownership hint for authenticated native browse recovery only.
+ * Exact identity remains registered through retained callback cleanup, including
+ * a closed writer. This grants no history, control or execution authority. */
+int server_session_capture_has_owner(const char *session, const char *actor, const char *turn);
 /* Immutable destination history identity, valid for the held owner lease.
  * It may differ from the verified transport/source session. NULL without owner. */
 const char *server_session_capture_session(const server_session_capture_t *owner);

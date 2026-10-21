@@ -654,11 +654,37 @@ static void test_atomic_verification_terminal(void)
    }
 }
 
+static void test_registered_owner_recovery_hint(void)
+{
+   reset();
+   assert(!server_session_capture_has_owner(NULL, "alice", "turn"));
+   assert(!server_session_capture_has_owner("owned", "alice", "turn"));
+   server_session_capture_t *owner =
+       server_session_capture_open("owned", "turn", "alice", "transport");
+   assert(owner);
+   assert(server_session_capture_has_owner("owned", "alice", "turn"));
+   assert(!server_session_capture_has_owner("owned", "mallory", "turn"));
+   assert(!server_session_capture_has_owner("foreign", "alice", "turn"));
+   assert(!server_session_capture_has_owner("owned", "alice", "other-turn"));
+   assert(!server_session_capture_bind(owner));
+   server_session_capture_t *retained = NULL;
+   assert(!server_session_capture_retain_current("transport", "alice", &retained));
+   assert(retained == owner);
+   server_session_capture_fail(owner);
+   server_session_capture_close(owner);
+   /* Callback cleanup still owns this exact writer after close/failure. A
+    * browse must not attempt to take its native lease until it is released. */
+   assert(server_session_capture_has_owner("owned", "alice", "turn"));
+   server_session_capture_release(retained);
+   assert(!server_session_capture_has_owner("owned", "alice", "turn"));
+}
+
 int main(void)
 {
    server_session_capture_t *absent = NULL;
    int captured = server_session_capture_retain_current(NULL, NULL, &absent);
    assert(!captured && !absent);
+   test_registered_owner_recovery_hint();
    test_concurrent_owner();
    test_host_turn_generation_and_source_claims();
    test_one_live_writer_per_turn();

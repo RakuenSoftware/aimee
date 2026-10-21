@@ -124,10 +124,65 @@ the workstation login rotated after enrollment. The healthy current
 workstation document was a newer snapshot. Supported whole-document
 re-enrollment passed, and Claude acquired qualified native custody and
 reached the real Anthropic endpoint. The vendor currently returns HTTP 429,
-so its browser matrix remains unqualified while the bounded SDK retry settles.
+so its browser matrix remains unqualified; the bounded SDK turn failed canonically.
 No credential guard or vendor limit is bypassed, and no successful Claude
 vendor run is yet claimed. Production remains KB-free and unmodified. Do not call the migration
 or live acceptance complete while these cases remain outstanding.
+
+### Genuine interrupted-turn browser recovery follow-up
+
+Source commit `d0234bc8c430c6208a8c6d2d1d6644ad4b0d3c89` passed all
+53 main CI jobs, including four deployment tiers, both thin-client platforms,
+real-provider LSP, PostgreSQL replay and strict static analysis. Its complete
+immutable image `sha256:014a9877e81601128bf59914a82dd742454f09a4268bd99194b82198c4072b55`
+was built from the exact source archive and deployed on owned CT 8162. The
+image-only upgrade preserved PostgreSQL identity/start time/volumes, normal PAM
+login, provider configuration, Vault session HMAC and TLS. Running server,
+runtime-web, SPA and provider artifacts match the clean image; code-server is
+present. Normal PAM browser login, exact served SPA and actual managed-mTLS
+E4B inference probe passed. This is not full-tool E4B Chat acceptance.
+
+The combined project repair also passed genuine native default-scope lookup on
+VM 8163: one actual index_investigate call without an explicit project completed
+without scope_required. A same-actor HTTP call from the selected worktree also
+passed while the only indexed project remained an unrelated repository. The
+truthful result was empty/unavailable evidence, not fabricated hits or a KB.
+New-session genuine Codex recall reproduced the two actual configured-test
+records in the same project and exposed neither in a foreign project. An
+ordinary same-build service restart preserved the complete canonical prefix,
+completed a new registered file read and reused the exact Codex SDK session ID;
+reported cached-input tokens were zero. No vendor token-cache hit is claimed.
+
+A subsequent genuine interrupted-turn test exposed a remaining browser deadlock:
+recovery ran only before a new model turn, while stale canonical Running state
+left the composer offering only Steer. Browser opening now invokes a separate
+registered browse-recovery owner after exact attestation/durable-owner checks,
+before legacy import or SSE. It validates all native records, preserves exact
+process-local retained writers, and applies the unchanged physical lease,
+fresh database authority and whole-tree containment proof to abandoned owners.
+Arbitrary busy leases and malformed/foreign records still refuse; strict model
+admission is unchanged. Canonical actors up to 159 bytes can browse an empty
+owner set without inheriting the native execution profile's narrower bound.
+No model or tool turn is started by browsing. Focused regressions and sanitizer
+checks cover this seam; fresh CI and genuine same-source recovery/permission
+retesting must qualify this later repair.
+
+A separate source audit found the analogous generic API-provider crash gap:
+without a native reservation, browsing cannot reconcile the old Running turn,
+and process-local cancellation cannot recover a lost registry entry. Graceful
+shutdown drains and terminalizes workers; hard interruption is the unresolved
+case. This path is source-confirmed but not yet live reproduced. Do not weaken
+the existing unfinished-history guard or infer cross-process quiescence from
+absence of a local writer. A sound generic durable-owner/cancellation repair
+and meaningful regression remain required; the native repair does not cover it.
+
+The VM's separate core/module test services must restart together after killing
+the core; a stale module bus initially caused configuration bootstrap refusal.
+That test-orchestration correction is distinct from the confirmed browser bug.
+The original qualified native leaf/source remains preserved for retesting; no
+synthetic recovery, permission reply or effect was seeded. Production `.100`
+remains unchanged and KB-free; Claude successful vendor inference remains
+unqualified after actual HTTP 429.
 
 ### Actual `.252` qualification, 21 October 2026
 

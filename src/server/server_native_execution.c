@@ -734,13 +734,13 @@ static int native_recovery_record_admit(const cJSON *record, const char *session
 /* Discovery is session/actor scoped and precedes model/account/SDK selection.
  * A physical lease plus re-read DB authority is required for every old owner;
  * neither a writable marker nor the new selected model nominates a boundary. */
-int server_native_session_reconcile(const char *session, const char *actor, const char *active_turn,
-                                    char error[512])
+static int native_session_reconcile(const char *session, const char *actor, const char *active_turn,
+                                    char error[512], int browse)
 {
    if (error)
       error[0] = 0;
    if (!session || !session[0] || strlen(session) > 128 || !actor || !actor[0] ||
-       strlen(actor) > 128)
+       strlen(actor) >= (browse ? VAULT_PRINCIPAL_MAX : 129))
       return -1;
    pthread_mutex_lock(&native_quarantine_lock);
    int stopping = native_quarantine_stopping;
@@ -776,6 +776,12 @@ int server_native_session_reconcile(const char *session, const char *actor, cons
    }
    cJSON_ArrayForEach(record, owners)
    {
+      /* A durable record alone does not establish liveness. Only the exact
+       * process-local retained writer can defer browse recovery; an arbitrary
+       * locked lease, PID or unavailable authority remains a refusal. */
+      if (browse &&
+          server_session_capture_has_owner(session, actor, native_string(record, "turn_id")))
+         continue;
       const char *sdk = native_string(record, "harness"),
                  *binding = native_string(record, "binding_sha256");
       cJSON *prior = NULL;
@@ -812,6 +818,15 @@ done:
    if (rc && error && !error[0])
       snprintf(error, 512, "native session ownership recovery refused");
    return rc;
+}
+int server_native_session_reconcile(const char *session, const char *actor, const char *active_turn,
+                                    char error[512])
+{
+   return native_session_reconcile(session, actor, active_turn, error, 0);
+}
+int server_native_session_reconcile_browse(const char *session, const char *actor, char error[512])
+{
+   return native_session_reconcile(session, actor, NULL, error, 1);
 }
 static int native_custody_open(native_execution_t *execution, char error[512])
 {

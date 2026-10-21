@@ -44,6 +44,22 @@ struct server_session_capture
 static _Thread_local server_session_capture_t *current;
 static pthread_mutex_t owners_lock = PTHREAD_MUTEX_INITIALIZER;
 static server_session_capture_t *owners;
+int server_session_capture_has_owner(const char *session, const char *actor, const char *turn)
+{
+   if (!session || !session[0] || !actor || !actor[0] || !turn || !turn[0])
+      return 0;
+   int found = 0;
+   pthread_mutex_lock(&owners_lock);
+   for (const server_session_capture_t *owner = owners; owner; owner = owner->next)
+      if (!strcmp(owner->session, session) && !strcmp(owner->principal, actor) &&
+          !strcmp(owner->turn, turn))
+      {
+         found = 1;
+         break;
+      }
+   pthread_mutex_unlock(&owners_lock);
+   return found;
+}
 server_session_capture_t *server_session_capture_current(void)
 {
    return current;

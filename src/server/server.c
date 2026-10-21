@@ -1956,6 +1956,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * remain installed for the process lifetime, including store teardown. */
    workspace_turn_register_project_owner(server_project_workspace_open);
    primary_session_adapter_set_native_reconcile(server_native_session_reconcile);
+   primary_session_adapter_set_native_browse_reconcile(server_native_session_reconcile_browse);
    primary_session_adapter_set_native_history_load(server_native_history_load);
    aimee_ir_history_set_host_admission(server_native_history_admit_current);
    policy_set_unknown_effect_gate(server_unknown_effect_policy_stage);

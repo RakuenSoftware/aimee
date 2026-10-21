@@ -66,9 +66,23 @@ static char observed_epoch[33] = "0";
 static cJSON *durable_reservation;
 static const char *active_override;
 static int lookup_changed, lookup_missing, old_completed;
+static const char *local_live_session, *local_live_actor, *local_live_turn;
+static int local_owner_queries;
+int server_session_capture_has_owner(const char *session, const char *actor, const char *turn)
+{
+   local_owner_queries++;
+   return local_live_session && !strcmp(session, local_live_session) && local_live_actor &&
+          !strcmp(actor, local_live_actor) && local_live_turn && !strcmp(turn, local_live_turn);
+}
 int db1_session_native_active_owned(const char *actor, const char *session, char **out)
 {
    *out = NULL;
+   if (!strcmp(session, "destination") && strlen(actor) == VAULT_PRINCIPAL_MAX - 1 &&
+       strspn(actor, "L") == strlen(actor))
+   {
+      *out = strdup("[]");
+      return *out ? 0 : -1;
+   }
    if (strcmp(actor, "actor") || strcmp(session, "destination"))
       return -1;
    if (active_override)
@@ -749,6 +763,8 @@ static void reset(int next)
    runtime_closed = 0;
    active_override = NULL;
    lookup_changed = lookup_missing = old_completed = 0;
+   local_live_session = local_live_actor = local_live_turn = NULL;
+   local_owner_queries = 0;
    recovered = lookup_failure = quiescence_failure = finish_failure = preclaim_drop = 0;
    snprintf(observed_epoch, sizeof observed_epoch, "0");
    opened = joined = child_closed = began = completed = aborted = closed = 0;
@@ -896,7 +912,52 @@ int main(void)
    assert(live);
    assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0);
    assert(!quiesced && !recovered);
+   /* Browsing a live writer is observational: the exact actor/session/turn
+    * remains registered until its retained terminal resources are released. */
+   local_live_session = "destination";
+   local_live_actor = "actor";
+   local_live_turn = "old-turn";
+   assert(!server_native_session_reconcile_browse("destination", "actor", recovery_error));
+   assert(local_owner_queries == 1 && !quiesced && !recovered && durable_reservation);
+   /* Strict prehistory retains its refusal even for a process-local writer. */
+   assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0);
+   assert(local_owner_queries == 1 && !quiesced && !recovered);
+   local_live_turn = "different-turn";
+   assert(server_native_session_reconcile_browse("destination", "actor", recovery_error) < 0);
+   assert(!quiesced && !recovered);
+   local_live_turn = "old-turn";
+   local_live_actor = "different-actor";
+   assert(server_native_session_reconcile_browse("destination", "actor", recovery_error) < 0);
+   local_live_actor = "actor";
+   local_live_session = "different-session";
+   assert(server_native_session_reconcile_browse("destination", "actor", recovery_error) < 0);
+   local_live_session = "destination";
+   /* Validate all records before any liveness query: a valid live first entry
+    * cannot mask a malformed or foreign second entry. */
+   cJSON *invalid_records = cJSON_CreateArray();
+   cJSON_AddItemToArray(invalid_records, cJSON_Duplicate(durable_reservation, 1));
+   cJSON_AddItemToArray(invalid_records, cJSON_CreateObject());
+   char *invalid_wire = cJSON_PrintUnformatted(invalid_records);
+   cJSON_Delete(invalid_records);
+   active_override = invalid_wire;
+   local_owner_queries = 0;
+   assert(server_native_session_reconcile_browse("destination", "actor", recovery_error) < 0);
+   assert(!local_owner_queries && !quiesced && !recovered);
+   free(invalid_wire);
+   active_override = NULL;
+   assert(server_native_session_reconcile_browse("destination", "foreign-actor", recovery_error) <
+          0);
+   assert(server_native_session_reconcile_browse("foreign-session", "actor", recovery_error) < 0);
+   assert(!local_owner_queries && !quiesced && !recovered);
+   local_live_session = local_live_actor = local_live_turn = NULL;
    assert(!server_native_cache_lease_close(live, 1));
+   /* With no process-local writer or live physical lease, browse follows the
+    * unchanged source-bound orphan recovery path and starts no SDK/HOME. */
+   assert(!server_native_session_reconcile_browse("destination", "actor", recovery_error));
+   assert(recovered == 1 && quiesced == 1 && !durable_reservation && !sdk_calls &&
+          !private_home[0]);
+   reset(0);
+   seed_abandoned("actor");
    cJSON_ReplaceItemInObjectCaseSensitive(durable_reservation, "turn_id",
                                           cJSON_CreateString("turn"));
    assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0);
@@ -907,6 +968,17 @@ int main(void)
    assert(server_native_session_reconcile("destination", "foreign-actor", "turn", recovery_error) <
           0);
    assert(server_native_session_reconcile("foreign-session", "actor", "turn", recovery_error) < 0);
+   char long_actor[VAULT_PRINCIPAL_MAX + 1];
+   memset(long_actor, 'L', sizeof long_actor);
+   long_actor[VAULT_PRINCIPAL_MAX - 1] = 0;
+   assert(!server_native_session_reconcile_browse("destination", long_actor, recovery_error));
+   /* Ordinary browsing adds no narrower actor precondition, while the existing
+    * strict native profile's supported bound remains unchanged. */
+   assert(server_native_session_reconcile("destination", long_actor, "turn", recovery_error) < 0);
+   long_actor[VAULT_PRINCIPAL_MAX - 1] = 'L';
+   long_actor[VAULT_PRINCIPAL_MAX] = 0;
+   assert(server_native_session_reconcile_browse("destination", long_actor, recovery_error) < 0);
+   assert(!local_owner_queries && !quiesced);
    active_override = "[{}]";
    assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0 &&
           !quiesced);
