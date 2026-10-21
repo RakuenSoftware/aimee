@@ -14,6 +14,99 @@ merged baseline, not the subsequent browser repairs. Continue on
 `fix/browser-ir-live-acceptance` in [PR #3057](https://github.com/RakuenSoftware/aimee/pull/3057) for their fresh CI. Keep automatic review and
 the strict attribution gate enabled. No production promotion is claimed.
 
+### Genuine live-model continuation, 21 October 2026
+
+PR #3057 now includes executable-source commit `e9bde72c703c0b9e6569326d46063401f6ebe369`
+and the reviewed memory-boundary ledger follow-up
+`4eeee289ed3dd636de1664db4f63fe52d9fa6a86`. The latter changes no executable
+source. That head passed both Windows and macOS builds, frontend, lint and
+PostgreSQL test execution, but the reliability release gate detected the newly
+expanded governed-action fixture fingerprint. Its explicit fixture review now
+records the added canonical-actor cases, retaining every existing assertion,
+required case, group and release predicate. Fresh CI must qualify the subsequent
+combined head. The earlier 58 successful checks qualified `b8c7670a6`, not
+these subsequent live repairs.
+
+Actual model validation exposed failures beyond the owned provider fixtures:
+
+- Durable action and exploration consumers used the account principal
+  (`uid:0` or `webchat:<user>`) where canonical sessions require the attested
+  actor (`webuser:<user>`). Their typed store calls and task projection now
+  use the canonical actor; resource and memory-owner calls retain their
+  existing account identity. Actor mismatch remains refused, an empty
+  attested actor cannot fall back, and complete actors survive the finish
+  callback. Three Go bounds now match the native 159-byte actor capacity.
+- Normal GUI clones were absent from native workspace custody. The host now
+  obtains a held directory descriptor from the actual registered Git project
+  owner, requiring the PAM attestation, tool capability, published clone,
+  matching registered remote, lifecycle lock and no-symlink traversal.
+  Unregistered and foreign roots remain refused; the documented shared
+  environment namespace is preserved.
+- A real discovered model ID plus provider name exceeded the local alias
+  limit. Enrollment now provides an editable Name in Aimee, validates the
+  backend UTF-8 byte limit before sending, and preserves the actual model ID
+  and provider registration. All 426 frontend tests and the real API
+  enrollment check passed.
+
+The four actor C fixtures passed normally and under ASan/UBSan with leak
+checking. Actual PostgreSQL owner/race regressions and the execution-policy
+race suite passed; clone custody fixtures, their sanitizer runs and the
+production server object passed. All 76 local lint gates were exercised; the
+reviewed boundary record and explicit installed Go/clang-format tools resolved
+the three initial failures without disabling a gate.
+
+Genuine shipped E2B inference completed a full-catalog browser turn, persisted
+canonical deltas and its terminal assistant answer, and replayed after reload
+without a resend. This low-power CPU took about 599 seconds with explicitly
+configured 32768 context and 600000 ms timeout. The original 8192 context
+overflow and default-timeout failures are preserved. A sequential, separately
+identified E4B image passed actual mTLS discovery, UI enrollment and the normal
+Models probe; that probe is not full-tool Chat acceptance. Both use actual
+model weights and responses, not the external provider fixtures.
+
+The exact repaired source is deployed in owned VM 8163. A genuine Codex turn
+performed an acknowledged read_file and completed canonically; its native
+reservation finished under qualified user/mount/PID/cgroup/network/write
+containment. The VM uses proper systemd delegation rather than a manually
+chowned sibling cgroup. The normal PAM browser also passed actual Codex
+selection, streaming, completion and history replay, followed by a genuine
+acknowledged file read and request_input across reload: exactly three sends,
+one operator reply, final completion and resolved replay without a repeated
+send or question. The same session subsequently preserved its entire
+canonical prefix across Codex → Claude (HTTP 429 failure) → Codex, performed
+another acknowledged file read, recalled the actual operator answer and
+replayed without resending. This qualifies continuity through a failed model
+switch, not successful Claude inference. A genuine coding task produced a real local commit that
+passes sixteen independent signed boundary cases without changing the pinned
+existing tests or configuration. Its configured verification did not run: a
+root-owned global verify lock from the earlier fixture phase refused the live
+service UID. The supported state-local lock setting will be used for the live
+service; actual configured grades and scoped reuse remain unqualified.
+
+The actual native index_investigate call still returned scope_required. Unlike
+HTTP dispatch, its direct MCP handler omitted the active-project injection
+boundary. That native context now shares the HTTP project resolver on a private
+argument copy and uses only the host-installed cwd. The actual wrapper and
+resolver pass normal and sanitizer regressions with unavailable/empty KB,
+explicit project preservation, foreign model cwd and immutable canonical
+inputs. Genuine live indexed lookup on the new build is still required;
+successful file reads do not qualify it. The user's original regular CLI
+example was also checked read-only from the real wol-lore checkout using the
+registered CLI: it resolved only wol-lore hits and returned no scope_required.
+That CLI result does not waive the confirmed native bypass.
+
+Claude now passes GUI clone custody. Its first credential-source refusal was
+traced through existing safe Vault audit records: source parsing and atomic
+credential storage succeeded, but the enrolled access token had expired and
+the workstation login rotated after enrollment. The healthy current
+workstation document was a newer snapshot. Supported whole-document
+re-enrollment passed, and Claude acquired qualified native custody and
+reached the real Anthropic endpoint. The vendor currently returns HTTP 429,
+so its browser matrix remains unqualified while the bounded SDK retry settles.
+No credential guard or vendor limit is bypassed, and no successful Claude
+vendor run is yet claimed. Production remains KB-free and unmodified. Do not call the migration
+or live acceptance complete while these cases remain outstanding.
+
 ### Actual `.252` qualification, 21 October 2026
 
 Disposable CT 8162 and VM 8163 on `pvetest` were created for this work; existing

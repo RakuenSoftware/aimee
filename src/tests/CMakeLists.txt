@@ -35,6 +35,8 @@ endfunction()
 # Portable unit tests that build cleanly under both POSIX and the current
 # Windows CMake target set.
 aimee_add_test(test_roundtable_brief test_roundtable_brief.c)
+aimee_add_test(test_server_mcp_project test_server_mcp_project.c
+               ../server/server_mcp_project.c ../server/server_active_project.c)
 aimee_add_test(test_server_active_project test_server_active_project.c
                ../server/server_active_project.c)
 aimee_add_test(test_harness_memory_scope test_harness_memory_scope.c)

@@ -920,6 +920,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_skill_jobs.c
     ${AIMEE_SRC_DIR}/server/server_mcp.c
     ${AIMEE_SRC_DIR}/server/server_mcp_call_table.c
+    ${AIMEE_SRC_DIR}/server/server_mcp_project.c
     ${AIMEE_SRC_DIR}/server/server_mcp_ast_grep.c
     ${AIMEE_SRC_DIR}/server/server_mcp_tools.c
     ${AIMEE_SRC_DIR}/server/server_mcp_delegate.c

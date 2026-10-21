@@ -301,6 +301,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-workspace-provider-container \
                $(TESTPREFIX)/unit-test-mcp-native-surface \
                $(TESTPREFIX)/unit-test-mcp-native-dispatch \
+               $(TESTPREFIX)/unit-test-server-mcp-project \
                $(TESTPREFIX)/unit-test-extractors \
                $(TESTPREFIX)/unit-test-text \
                $(TESTPREFIX)/unit-test-roundtable-preset \
@@ -7246,3 +7247,7 @@ $(TESTPREFIX)/unit-test-db1-source-deadlines: \
                                        $(OBJDIR)/tests/test_db1_source_deadlines.o \
                                        $(OBJDIR)/db1_client/sessions.o $(OBJDIR)/db1_client/telemetry.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-server-mcp-project: $(OBJDIR)/tests/test_server_mcp_project.o \
+    $(OBJDIR)/server/server_mcp_project.o $(OBJDIR)/server/server_active_project.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)

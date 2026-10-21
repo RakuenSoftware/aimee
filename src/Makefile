@@ -572,6 +572,7 @@ SERVER_SRCS = peer_client/peer_client.c db1_store_probe.c server/embedder_catalo
 SERVER_SRCS += server/agent_result_cache.c
 SERVER_SRCS += server/server_governed_action.c server/server_clean_retry.c
 SERVER_SRCS += server/server_code_index.c
+SERVER_SRCS += server/server_mcp_project.c
 SERVER_SRCS += server/server_runtime_identity.c
 # The command catalogue the thin client renders (served via /v1/cli/manifest).
 SERVER_SRCS += server/cli_command_defs.c
