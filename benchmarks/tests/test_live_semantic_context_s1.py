@@ -464,7 +464,12 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         self.assertEqual(len(blocks), 1)
         release, prior = blocks[0]["release_text"], blocks[0]["frozen_text"]
         self.assertEqual(current.count(release), 1)
-        self.assertEqual(current.replace(release, prior, 1), subprocess.run(
+        original = current
+        for block in validator.REVIEWED_HOST_INTEGRATIONS[path]:
+            if "canonical-native-project-dispatch:" in block.get("review", ""):
+                self.assertEqual(original.count(block["release_text"]), 1)
+                original = original.replace(block["release_text"], block["frozen_text"], 1)
+        self.assertEqual(original.replace(release, prior, 1), subprocess.run(
             ["git", "show", f"5780aa09a92d86e89412ecea0a714b8088efaaca:{path}"],
             cwd=ROOT, check=True, capture_output=True, text=True).stdout)
         self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
@@ -489,10 +494,11 @@ class LiveSemanticContextS1Test(unittest.TestCase):
             # Prove these exact changes restore the reviewed host source before
             # any pre-existing host or frozen memory normalization is applied.
             original = current
-            # Normalize the separately reviewed later role membership first;
-            # the search-only reversal must still exactly restore its own base.
+            # Normalize the separately reviewed later native callback extraction
+            # and role membership first; search must still restore its own base.
             for block in validator.REVIEWED_HOST_INTEGRATIONS[path]:
-                if "canonical-git-role-membership:" in block.get("review", ""):
+                if ("canonical-git-role-membership:" in block.get("review", "") or
+                        "canonical-native-project-dispatch:" in block.get("review", "")):
                     self.assertEqual(original.count(block["release_text"]), 1)
                     original = original.replace(block["release_text"], block["frozen_text"], 1)
             for block in blocks:
@@ -526,6 +532,46 @@ class LiveSemanticContextS1Test(unittest.TestCase):
                     with self.subTest(path=path, delta=release[:70], drift=label):
                         self.assertNotEqual(current, drift)
                         self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+
+    def test_release_validator_rejects_native_project_dispatch_drift(self) -> None:
+        validator = load_release_validator()
+        path = "src/server/server_mcp_call_table.c"
+        frozen = validator.git_output("show", f"474bd69954237fca249eb44e942caeab4270ad5e:{path}")
+        current = (ROOT / path).read_text()
+        blocks = [block for block in validator.REVIEWED_HOST_INTEGRATIONS[path]
+                  if "canonical-native-project-dispatch:" in block.get("review", "")]
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual(validator.REVIEWED_HOST_INTEGRATIONS[path][:2], blocks)
+        original = current
+        for block in blocks:
+            self.assertEqual(original.count(block["release_text"]), 1)
+            original = original.replace(block["release_text"], block["frozen_text"], 1)
+        self.assertEqual(original, subprocess.run(
+            ["git", "show", f"4eeee289ed3dd636de1664db4f63fe52d9fa6a86:{path}"], cwd=ROOT, check=True,
+            capture_output=True, text=True).stdout)
+        self.assertTrue(validator.reviewed_host_equivalent(path, frozen, current))
+
+        # The new callback identity, advert body and LSP dispatch remain exact.
+        # Restoring only an old wrapper (even its original body) is not reviewed.
+        for drift in (
+            current.replace("agent_tools_set_mcp_provider(server_mcp_native_call,",
+                            "agent_tools_set_mcp_provider(unreviewed_native_call,", 1),
+            current.replace("agent_tools_set_mcp_provider(server_mcp_native_call,",
+                            "agent_tools_set_mcp_provider(mcp_native_call,", 1),
+            current.replace("   return found;\n", "   return NULL;\n", 1),
+            current.replace('{"lsp_context",', '{"lsp_context_drift",', 1),
+            current.replace(blocks[0]["release_text"], blocks[0]["frozen_text"], 1),
+            current.replace(blocks[0]["release_text"], blocks[0]["frozen_text"].replace(
+                "   return fn(&c);\n", "   return NULL;\n", 1), 1),
+        ):
+            self.assertNotEqual(current, drift)
+            self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
+        for block in blocks:
+            release = block["release_text"]
+            for drift in (current + release, current.replace(release, "", 1),
+                          current.replace(release, release + "/* unreviewed body */\n", 1)):
+                self.assertNotEqual(current, drift)
+                self.assertFalse(validator.reviewed_host_equivalent(path, frozen, drift))
 
     def test_release_validator_only_allows_exact_reviewed_build_additions(self) -> None:
         validator = load_release_validator()

@@ -29,7 +29,11 @@ cJSON *server_mcp_native_call(const char *tool, cJSON *args, const char *sid)
    server_mcp_inject_active_project(prepared, run_cmd_get_cwd());
    struct mcp_call c = {
        .ctx = NULL, .conn = NULL, .jargs = prepared, .sid = sid, .tool = tool, .structured = NULL};
-   cJSON *result = fn(&c);
+   cJSON *raw = fn(&c);
+   /* A handler's response may reference its call-owned arguments. Retain an
+    * independent JSON tree before releasing either the response or call frame. */
+   cJSON *result = raw ? cJSON_Duplicate(raw, 1) : NULL;
+   cJSON_Delete(raw);
    cJSON_Delete(prepared);
    return result;
 }

@@ -177,6 +177,17 @@ int main(void)
       assert(server_active_project_from_cwd("/srv/settle/app", out, sizeof(out)) == 0);
       assert(strcmp(out, "settle") == 0);
 
+      /* A different project's first scan must not make an existing unindexed
+       * repository lose its active identity. This is the live GUI/native case:
+       * the selected local repository and an indexed GUI clone coexist. */
+      assert(server_active_project_from_cwd("/srv/unindexed/.aimee/worktrees/task/main", out,
+                                            sizeof(out)) == 0);
+      assert(strcmp(out, g_identity) == 0);
+      g_identity = NULL;
+      assert(server_active_project_from_cwd("/srv/unindexed/.aimee/worktrees/task/main", out,
+                                            sizeof(out)) == -1);
+      assert(!out[0]);
+
       /* No identity at all (the remote-client case) still matches on root. */
       g_identity = NULL;
       assert(server_active_project_from_cwd("/srv/settle", out, sizeof(out)) == 0);

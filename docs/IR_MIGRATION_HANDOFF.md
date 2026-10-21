@@ -76,24 +76,46 @@ send or question. The same session subsequently preserved its entire
 canonical prefix across Codex → Claude (HTTP 429 failure) → Codex, performed
 another acknowledged file read, recalled the actual operator answer and
 replayed without resending. This qualifies continuity through a failed model
-switch, not successful Claude inference. A genuine coding task produced a real local commit that
-passes sixteen independent signed boundary cases without changing the pinned
-existing tests or configuration. Its configured verification did not run: a
-root-owned global verify lock from the earlier fixture phase refused the live
-service UID. The supported state-local lock setting will be used for the live
-service; actual configured grades and scoped reuse remain unqualified.
+switch, not successful Claude inference. An initial genuine coding task produced a real local commit that passed sixteen
+independent signed boundary cases without changing the pinned existing tests or
+configuration. Its configured verification failed on a root-owned global lock;
+that failure remains recorded. After configuring the supported state-local lock,
+a fresh genuine Codex task repaired the code, made registered Git commit
+`d940c6640b38331491ce18bf38903f33141d1c31`, and ran the private configured tests
+successfully. Canonical session `af360a42-2822-eca5-7332-863c1ed0b26a` completed
+at sequence 72. Its inline verification proof equals the actual stored grade
+proof, bound to the same canonical actor, project, event, turn and revision.
+An independent sixteen-case semantic check also passed; trusted tests,
+configuration and instructions remained unchanged. This is a configured-test
+grade plus a separate independent task oracle, not an unrestricted quality claim.
+Actual scoped reuse and delegate learning still require their live checks.
 
-The actual native index_investigate call still returned scope_required. Unlike
-HTTP dispatch, its direct MCP handler omitted the active-project injection
-boundary. That native context now shares the HTTP project resolver on a private
-argument copy and uses only the host-installed cwd. The actual wrapper and
-resolver pass normal and sanitizer regressions with unavailable/empty KB,
-explicit project preservation, foreign model cwd and immutable canonical
-inputs. Genuine live indexed lookup on the new build is still required;
-successful file reads do not qualify it. The user's original regular CLI
-example was also checked read-only from the real wol-lore checkout using the
-registered CLI: it resolved only wol-lore hits and returned no scope_required.
-That CLI result does not waive the confirmed native bypass.
+The actual native index_investigate call exposed two scope defects. Unlike HTTP
+dispatch, its direct MCP handler omitted active-project injection. The native
+context now shares the HTTP resolver on a private argument copy and uses only
+the host-installed cwd. Live retesting then revealed that an unrelated indexed
+repository prevented fallback to the selected checkout's valid persisted project
+identity. Resolution now preserves matching indexed identity/root precedence,
+then uses the actual checkout identity even when other repositories are indexed.
+Missing identity and unmatched roots still refuse; explicit project arguments
+remain unchanged. No KB instance is required or introduced. The combined wrapper
+and resolver regressions cover unavailable, empty and unrelated indexes, hostile
+model cwd, immutable admitted input and response lifetime. ASan reproduced a
+handler-response use-after-free before the independent response-copy repair;
+normal, sanitizer and the exact affected Cppcheck shard pass after repair.
+Genuine default-scope lookup on the combined new build remains required; the
+explicit-project diagnostic and successful file reads do not qualify it. The
+user's original regular CLI example was checked read-only from the real wol-lore
+checkout: it resolved only wol-lore hits without scope_required.
+
+The real CI LSP providers completed all twenty trials each for gopls and pyright.
+The frozen release guard then refused the reviewed extraction of the native MCP
+host wrapper. Two exact literal reversals now restore that host table to its
+previous reviewed bytes before the existing whole-file frozen comparison.
+Callback, advert, LSP, missing-block and duplicate-block mutations still refuse.
+All 22 benchmark tests and revalidation of the unchanged real CI artifact pass;
+no provider threshold, lineage, fixture or frozen-source exemption was added.
+Fresh CI must qualify the combined commit.
 
 Claude now passes GUI clone custody. Its first credential-source refusal was
 traced through existing safe Vault audit records: source parsing and atomic

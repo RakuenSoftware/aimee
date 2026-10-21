@@ -12,6 +12,7 @@ static const cJSON *original;
 static cJSON *observed;
 static int resolver_calls, handler_calls, resolver_result;
 static int index_calls, index_count = -1;
+static int borrowed_response;
 
 const char *run_cmd_get_cwd(void)
 {
@@ -29,8 +30,13 @@ int workspace_repo_identity(const char *cwd, char *project, size_t capacity, cha
 }
 int kb_client_index_list(project_info_t *out, int capacity)
 {
-   (void)out;
-   (void)capacity;
+   if (index_count > 0)
+   {
+      assert(out && capacity > 0 && index_count == 1);
+      memset(out, 0, sizeof *out);
+      snprintf(out->name, sizeof out->name, "%s", "unrelated-index-project");
+      snprintf(out->root, sizeof out->root, "%s", "/different/checkout");
+   }
    index_calls++;
    return index_count; /* No KB instance is configured for this real resolver. */
 }
@@ -56,6 +62,12 @@ static cJSON *native_handler(struct mcp_call *call)
    observed = cJSON_Duplicate(call->jargs, 1);
    /* A handler cannot accidentally mutate the canonical admitted input. */
    cJSON_AddBoolToObject(call->jargs, "handler-local", 1);
+   if (borrowed_response)
+   {
+      cJSON *reply = cJSON_CreateObject();
+      cJSON_AddItemReferenceToObject(reply, "arguments", call->jargs);
+      return reply;
+   }
    return cJSON_CreateString("native-result");
 }
 mcp_tool_handler_fn mcp_tool_lookup(const char *tool)
@@ -91,6 +103,11 @@ int main(void)
    index_count = 0;
    invoke("{\"query\":\"owner\"}");
    assert(index_calls == 2 && resolver_calls == 2);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(observed, "project")),
+                  "local:registered-project"));
+   index_count = 1;
+   invoke("{\"query\":\"owner\"}");
+   assert(index_calls == 3 && resolver_calls == 3);
    assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(observed, "project")),
                   "local:registered-project"));
    index_count = -1;
@@ -133,6 +150,24 @@ int main(void)
    assert(handler_calls == calls && resolver_calls == 2);
    cJSON_Delete(reply);
    cJSON_Delete(args);
+
+   /* The callback owns its result container but can reference call-scoped
+    * data. The public response must outlive both the callback and input. */
+   borrowed_response = 1;
+   args = cJSON_Parse("{\"query\":\"retained-response\"}");
+   original = args;
+   reply = server_mcp_native_call("index_investigate", args, "canonical-session");
+   cJSON_Delete(args);
+   original = NULL;
+   const cJSON *retained = cJSON_GetObjectItemCaseSensitive(reply, "arguments");
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(retained, "query")),
+                  "retained-response"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(retained, "project")),
+                  "local:registered-project"));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(retained, "handler-local")));
+   cJSON_Delete(reply);
+   borrowed_response = 0;
+   resolver_calls--; /* Keep the HTTP contract assertion independent. */
 
    /* The HTTP caller explicitly supplies its existing transport cwd; inference
     * remains shared, while native can never choose this model-provided field. */
