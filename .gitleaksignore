@@ -318,3 +318,8 @@ b70c51d8f4170b4980b6567941c8139b1f2dd3c9:src/tests/test_agent.c:generic-api-key:
 # Reviewed public SHA-256 of api/openapi-server-v1.yaml for seeded native /runs cwd.
 # This exact protocol-catalog input digest is not an API credential.
 ca19c574dcb98708bf0588bce846f674ea05366b:tests/baselines/modules/memory-ownership.json:generic-api-key:2735
+
+# Verified public OpenAPI source checksum in the reviewed generated-file ledger.
+# SHA-256 is recomputed by check_memory_ownership.py; this value is no credential.
+# Restrict this false positive to its exact commit/file/rule/line fingerprint.
+38d55ba726e22e11e0a7cae8750200139ae0da87:tests/baselines/modules/memory-ownership.json:generic-api-key:2741
