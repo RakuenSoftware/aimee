@@ -116,6 +116,15 @@ const { chromium } = require('../frontend/node_modules/playwright');
         contentType: 'application/json', body: JSON.stringify(fixtures[p] || {}) });
     });
     async function assertPreferenceLayout(mobile) {
+      const toolbar = page.locator('.chat-session-toolbar');
+      const toolbarControls = [toolbar.locator('select'), toolbar.getByRole('button', {name:'Channels',exact:true}),
+        toolbar.getByRole('button', {name:'Clear',exact:true}), toolbar.getByRole('button', {name:'+ Clone repo',exact:true})];
+      const toolbarBoxes = await Promise.all(toolbarControls.map(control => control.boundingBox()));
+      for (let i = 0; i < toolbarBoxes.length; i++) for (let j = i + 1; j < toolbarBoxes.length; j++) {
+        const a = toolbarBoxes[i], b = toolbarBoxes[j];
+        assert.ok(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y,
+          `Project and toolbar actions must not overlap at ${page.viewportSize().width}px: ${JSON.stringify({a,b})}`);
+      }
       const footer = page.getByRole('group', {name:'Session preferences',exact:true});
       const viewport = page.viewportSize();
       const fields = [];

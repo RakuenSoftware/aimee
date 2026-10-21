@@ -47,14 +47,18 @@ live surface; only a genuine page discard detaches it. Foreign owners remain ref
 The combined derivative passed live first-open model pinning before any chat,
 reload with zero sends, real model switching and durable history, a real pending
 question across reload, exactly one browser reply and resolved replay, plus
-320/390 px layout checks. The source passes 419 frontend tests, both frontend
+320/390 px layout checks. Visual inspection then found that the mobile project
+selector overlapped Channels despite fitting the viewport. Its flex wrapper now
+occupies a separate row, with actual control-overlap assertions at desktop,
+320 px and 390 px. The source passes 419 frontend tests, both frontend
 builds, the Chromium component harness, runtime-web race tests, normal HTTP and
 presence fixtures, HTTP ASan/UBSan/LSan, and all 76 lint gates. The published
 baseline and manually built test derivatives are separately identified; fresh
 follow-up CI and production `.100` promotion/verification are still required.
 A second real Chromium pass exercised actual Codex and Claude interruption
 permissions. Both deny replies reached the exact native waiter once, remained
-resolved after reload and produced no write or repeated prompt. Its focused
+resolved after reload and produced no write or repeated prompt. Both final
+assistant messages also rendered without protocol/reconnect errors. Its focused
 recovery run passed 5/5, separately from the immutable 171-test baseline; the
 test-only browser handoff was restored byte-exact afterward. This exposed a
 remaining browser consumer mismatch: canonical owned assistant snapshots may

@@ -9,7 +9,7 @@
 .chat-shell textarea { min-width: 0; }
 @media (max-width: 760px) {
   .chat-session-toolbar { flex-wrap: wrap; padding: 6px 48px 8px 10px !important; }
-  .chat-session-toolbar > div:first-child { flex-basis: 100%; }
+  .chat-session-toolbar > div:first-child { flex: 1 0 100% !important; }
   .chat-session-toolbar > div:first-child > div { padding: 4px 0 !important; border: 0 !important; }
   .chat-channels { position: absolute; top: 0; bottom: 0; left: 0; z-index: 20; box-shadow: 4px 0 20px #0003; }
   .chat-messages { padding: 12px !important; }
