@@ -127,11 +127,17 @@ questions, repeated call IDs, compaction, forged receipts and ownership refusal.
 These newer changes require fresh CI and genuine API crash/replay acceptance;
 the previous head's green jobs and native recovery do not qualify them.
 
-Remaining live acceptance includes a successful source-fork delegate run, an
-actual API-model orphan with pending tools through the new browser continuation,
-and native Bash use of the registered Aimee CLI. The shell CLI currently lacks
-an endpoint in its private environment; a direct native MCP index pass does not
-qualify that path. Claude still reaches the actual vendor but returns HTTP 429;
+At that earlier checkpoint, live delegate source-fork, API orphan recovery and
+native Bash CLI acceptance were outstanding. The first two have since passed
+as recorded above. Commit `606bf3db236a942d935410b56c3329f3b6935854` implements
+the child-scoped CLI bridge and both integration repairs; all 76 lint gates pass.
+Its exact-source isolated integration and packaged GUI qualification are running.
+GitHub has the new branch ref but reports delayed pull-request/webhook delivery;
+no new workflow run has started at this checkpoint. Actual native Bash CLI
+acceptance still must qualify the new matching server and client. The final
+browser display refinement labels retained reasoning as Reasoning, so completed
+history does not falsely appear to be thinking again; it changes no execution or
+replay state. Claude still reaches the actual vendor but returns HTTP 429;
 no successful Claude inference is claimed. Production remains KB-free and
 unmodified; independent production review and promotion are outstanding.
 

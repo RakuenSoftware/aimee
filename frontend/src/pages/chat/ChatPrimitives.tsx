@@ -72,7 +72,7 @@ export const Message = memo(function Message({ role, text, streaming }: { role: 
 export const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
   return (
     <details style={{ margin: '4px 0', padding: '8px 10px', background: tokens.surfaceAlt, borderLeft: `3px solid ${tokens.borderMedium}`, borderRadius: '4px', fontSize: '12px', color: tokens.textSecondary, alignSelf: 'flex-start', maxWidth: '80%' }}>
-      <summary style={{ cursor: 'pointer', color: tokens.text, fontStyle: 'italic' }}>Thinking…</summary>
+      <summary style={{ cursor: 'pointer', color: tokens.text, fontStyle: 'italic' }}>Reasoning</summary>
       <pre style={{ marginTop: '6px', fontSize: '11px', color: tokens.textSecondary, maxHeight: '200px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{text}</pre>
     </details>
   );
