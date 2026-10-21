@@ -518,6 +518,26 @@ static int aimee_claude_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
    if (!cJSON_IsObject(f) || !s)
       return -1;
    const char *type = str(f, "type");
+   if (!strcmp(type, "assistant"))
+   {
+      s->failure = AIMEE_HARNESS_FAILURE_NONE;
+      if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(f, "isApiErrorMessage")))
+      {
+         const cJSON *message = cJSON_GetObjectItemCaseSensitive(f, "message");
+         if (!cJSON_IsObject(message) || strcmp(str(message, "role"), "assistant"))
+            return -1;
+         /* This SDK envelope is a transport diagnostic, not model output.
+          * Never copy its message/errors text into canonical observations. */
+         if (!strcmp(str(f, "error"), "rate_limit"))
+            s->failure = AIMEE_HARNESS_FAILURE_RATE_LIMIT;
+         return 0;
+      }
+   }
+   else if ((!strcmp(type, "result") &&
+             cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(f, "is_error"))) ||
+            (!strcmp(type, "stream_event") &&
+             !strcmp(str(cJSON_GetObjectItemCaseSensitive(f, "event"), "type"), "message_start")))
+      s->failure = AIMEE_HARNESS_FAILURE_NONE;
    if (s->host_model_capture && (!strcmp(type, "stream_event") || !strcmp(type, "assistant") ||
                                  !strcmp(type, "user") || !strcmp(type, "result")))
       return 0; /* Original host capture owns model/tool/history observations. */

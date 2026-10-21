@@ -498,6 +498,47 @@ static void owned_results(void)
    next_execution();
 }
 
+static void claude_failure_classification(void)
+{
+   const char *codes[] = {"rate_limit", "unknown_new_code", "PRIVATE_PROVIDER_DIAGNOSTIC"};
+   int before = cJSON_GetArraySize(events);
+   for (int host = 0; host < 2; host++)
+   {
+      aimee_harness_ir_t state = {.host_model_capture = host};
+      for (unsigned i = 0; i < sizeof codes / sizeof *codes; i++)
+      {
+         char raw[1024];
+         snprintf(raw, sizeof raw,
+                  "{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"error\":\"%s\","
+                  "\"message\":{\"id\":\"sdk-api-error\",\"role\":\"assistant\",\"content\":["
+                  "{\"type\":\"text\",\"text\":\"PRIVATE_PROVIDER_DIAGNOSTIC\"}]}}",
+                  codes[i]);
+         assert(!frame(raw, &state, 0));
+         assert(state.failure ==
+                (i == 0 ? AIMEE_HARNESS_FAILURE_RATE_LIMIT : AIMEE_HARNESS_FAILURE_NONE));
+         assert(cJSON_GetArraySize(events) == before && !state.claude_message);
+      }
+      assert(!frame("{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"error\":\"rate_limit\","
+                    "\"message\":{\"role\":\"assistant\"}}",
+                    &state, 0));
+      assert(state.failure == AIMEE_HARNESS_FAILURE_RATE_LIMIT);
+      assert(!frame("{\"type\":\"result\",\"is_error\":false}", &state, 0));
+      assert(state.failure == AIMEE_HARNESS_FAILURE_NONE);
+      aimee_harness_ir_free(&state);
+   }
+   /* Ordinary assistant content and non-boolean lookalikes cannot classify. */
+   aimee_harness_ir_t state = {.host_model_capture = 1};
+   assert(!frame("{\"type\":\"assistant\",\"isApiErrorMessage\":\"true\",\"error\":\"rate_limit\","
+                 "\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\","
+                 "\"text\":\"rate_limit\"}]}}",
+                 &state, 0));
+   assert(state.failure == AIMEE_HARNESS_FAILURE_NONE);
+   assert(!frame(
+       "{\"type\":\"assistant\",\"error\":\"rate_limit\",\"message\":{\"role\":\"assistant\"}}",
+       &state, 0));
+   assert(state.failure == AIMEE_HARNESS_FAILURE_NONE && cJSON_GetArraySize(events) == before);
+   aimee_harness_ir_free(&state);
+}
 int main(void)
 {
    control_outputs();
@@ -524,6 +565,8 @@ int main(void)
    assert(cJSON_IsObject(cJSON_GetObjectItem(form, "schema")));
    aimee_harness_ir_free(&form_state);
    cJSON_DeleteItemFromArray(events, 0);
+   claude_failure_classification();
+   next_execution();
    claude();
    next_execution();
    claude_block_snapshots();

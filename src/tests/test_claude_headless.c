@@ -192,6 +192,48 @@ static void strict_frames(const char *path, const provider_cli_cfg_t *cfg)
    agent_result_clear_response(&out);
    free(payload);
 }
+static void api_failure_diagnostic(const char *path, const provider_cli_cfg_t *cfg)
+{
+   /* Actual SDK envelope shape; arbitrary diagnostic text must never be copied. */
+   const char *assistant =
+       "{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"error\":\"rate_limit\","
+       "\"session_id\":\"native-one\",\"message\":{\"id\":\"sdk-api-error\",\"type\":\"message\","
+       "\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"PRIVATE_PROVIDER_"
+       "DIAGNOSTIC\"}]}}\n";
+   const char *failed = "{\"type\":\"result\",\"subtype\":\"error_during_execution\","
+                        "\"is_error\":true,\"errors\":[\"PRIVATE_RESULT_DIAGNOSTIC\"]}\n";
+   char frames[2048];
+   snprintf(frames, sizeof frames, "%s%s", assistant, failed);
+   binary_script(path, (const unsigned char *)frames, strlen(frames), 0);
+   events = 0;
+   agent_result_t out = {0};
+   assert(claude_headless_run(cfg, NULL, NULL, &out) < 0 && !out.success);
+   assert(!strcmp(out.error, "Claude request was rate limited by the provider."));
+   assert(!events && !out.response && !out.canonical_response.n_content);
+   agent_result_clear_response(&out);
+
+   /* Missing terminal/cancellation never borrows a terminal failure category. */
+   binary_script(path, (const unsigned char *)assistant, strlen(assistant), 0);
+   assert(claude_headless_run(cfg, NULL, NULL, &out) < 0 && !out.success);
+   assert(!strcmp(out.error, "Claude structured turn failed") && !events);
+   char script_body[4096];
+   snprintf(script_body, sizeof script_body, "cat <<'SDK_ERROR'\n%s%sSDK_ERROR\nsleep 30\n",
+            assistant, failed);
+   script(path, script_body);
+   cancel_at = now_ms() + 100;
+   assert(claude_headless_run(cfg, NULL, NULL, &out) < 0 && !out.success);
+   assert(!strcmp(out.error, "Claude turn interrupted"));
+   cancel_at = 0;
+
+   /* SDK retries may eventually succeed: do not retain a transient diagnosis. */
+   snprintf(script_body, sizeof script_body, "cat <<'SDK_ERROR'\n%sSDK_ERROR\n%s", assistant,
+            success_frames);
+   script(path, script_body);
+   events = 0;
+   assert(!claude_headless_run(cfg, NULL, NULL, &out) && out.success);
+   assert(!out.error[0] && out.response && !strcmp(out.response, "reply") && events == 6);
+   agent_result_clear_response(&out);
+}
 static void interactive_script(const char *path)
 {
    FILE *f = fopen(path, "w");
@@ -264,6 +306,7 @@ int main(void)
    assert(claude_headless_run(&cfg, bind_session, &binds, &out) < 0 && !out.success && !events);
    reject_bind = 0;
 
+   api_failure_diagnostic(path, &cfg);
    script(path, "printf '%s\\n' '{\"type\":\"result\",\"is_error\":true}'\n");
    assert(claude_headless_run(&cfg, NULL, NULL, &out) < 0 && !out.success);
    script(path, "printf '%s\\n' "

@@ -14,6 +14,59 @@ merged baseline, not the subsequent browser repairs. Continue on
 `fix/browser-ir-live-acceptance` in [PR #3057](https://github.com/RakuenSoftware/aimee/pull/3057) for their fresh CI. Keep automatic review and
 the strict attribution gate enabled. No production promotion is claimed.
 
+### Final live qualification: 21 October 2026
+
+Source `230b490627b716b3aa41af30672e6c2b3269d19a` passed all 53 main CI
+jobs with no skips and all seven auxiliary workflows. The exact complete GUI
+image `sha256:c32b572c592d85032625ef136ae728d6e5a5390479915c5e00ecb5125d6d0f45`
+passed all 10,106 source-file comparisons, running artifact hashes, normal PAM
+login, managed model TLS discovery and desktop/390/320 replay/reload. The original
+28 API recovery records remain unchanged; no send, reply or cancellation was
+repeated. PostgreSQL, Vault, provider and TLS state were preserved. Matching
+fresh C consumers were deployed together on owned VM 8163; byte-identical Go,
+configuration, runtime-web and SPA components retain their explicit input proof.
+
+A genuine native Bash invocation of
+`aimee index investigate 'classify.sh zero boundary'` succeeded without project,
+endpoint or token overrides. Independent database and filesystem readback
+confirmed original call 153, successful result 155 and completion 159 in session
+`af360a42-2822-eca5-7332-863c1ed0b26a`, with the actual operator principal,
+workspace, local project UUID and checkout revision. The selected project is
+`local:92584937-94a1-48e0-84f5-2e7b2c384912`; the actual checkout is
+`d940c6640b38331491ce18bf38903f33141d1c31`. The result is a successful scoped
+read with empty retrieval, not evidence of corpus hits. Ordinary index reads are
+outside the governed-effect journal's eligibility contract; no fabricated nested
+model call, mutation receipt or indexed-outcome row is claimed.
+
+The KB-free real-service integration passed 171/171 applicable checks on the
+production component at `7138bf6e3`; final-source CI integration also passed.
+Five optional HTTP400 cases were qualified separately through actual C-over-UDS
+with the runtime-web status owner. The remaining 20 KB-dependent checks are
+intentionally excluded because production must not use a KB instance.
+
+One fresh normal-browser Claude request on the exact `230b49062` build reached
+Anthropic and received actual HTTP429/rate_limit. Its existing SDK backoff ran
+inside that single request; there were no agent retries or quota changes. Session
+`web-c766156a-883b-4b5e-84a7-8c33ce39cc5c` contains only running, user and failed
+terminal records. Independent database readback confirmed the finished
+reservation, zero active work and zero tool/question records. Read-only PAM reload
+sent nothing and left no pending controls. Successful genuine Claude questions
+and permission execution remain unqualified. The available SDK record does not
+establish which upstream quota or rate condition caused the 429.
+
+That actual failure also exposed a final usability gap: the generic canonical
+failure concealed the SDK's rate-limit classification. The follow-up
+translation admits only the exact SDK API-error marker and the allowlisted
+rate-limit category. It emits the static message "Claude request was rate limited
+by the provider." only after a failed terminal result; provider diagnostic text
+never becomes assistant output. Cancellation, capture failure and later success
+retain precedence. Normal, ASan/UBSan/leak fixtures and CMake tests pass. The
+actual saved SDK envelope matches the tested shape. Old history is unchanged.
+Fresh CI and the matching VM deployment qualify this follow-up separately from
+the green `230b49062` qualification above; the CT image remains exactly `230b49062`.
+Production `.100` remains unchanged, KB-free and unpromoted; the distinct reviewer
+and live-ruleset requirements in `OWNERS.md` remain outstanding.
+
 ### Live native CLI authority repair
 
 The complete packaged GUI at `25e62c1e0f17c5455dd7b03d245c06d8c825a924`
