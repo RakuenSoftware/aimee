@@ -77,7 +77,22 @@ static void mint_msg_id(char *buf, size_t n)
  * requests or onto a non-ingress route on a reused worker thread); read by
  * send_response in server_http_response.inc via anthropic_http_response_retry_after. */
 static __thread int g_response_retry_after = 0;
+static __thread int g_native_beta_query;
 static __thread char g_native_user_agent[256], g_native_x_app[64];
+
+/* Only the authenticated native callback can retain the SDK beta surface.
+ * The destination stays the host-selected endpoint; never copy an SDK URL. */
+static int native_beta_url(char *url, size_t capacity, int anthropic)
+{
+   if (!g_native_beta_query || !anthropic)
+      return 0;
+   size_t used = strlen(url);
+   const char suffix[] = "?beta=true";
+   if (strchr(url, '?') || strchr(url, '#') || used + sizeof suffix > capacity)
+      return -1;
+   memcpy(url + used, suffix, sizeof suffix);
+   return 0;
+}
 
 /* Append a header line to `buf`, inserting a '\n' separator (mirrors
  * agent_config.c's append_header_line; the upstream HTTP layer splits on '\n'). */
@@ -641,6 +656,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
       goto cleanup;
    }
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
+       native_beta_url(url, sizeof url, parity) ||
        agent_resolve_auth_headers(ag, auth, sizeof auth, extra, sizeof extra) != 0)
    {
       /* Internal: we never reached the provider — the endpoint or credentials for
@@ -1289,6 +1305,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       goto cleanup;
    }
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
+       native_beta_url(url, sizeof url, parity) ||
        agent_resolve_auth_headers(ag, auth, sizeof auth, extra, sizeof extra) != 0)
       goto cleanup;
    /* The Responses replay path is keyed off the actual upstream shape, not the
@@ -1452,7 +1469,8 @@ static int count_tokens(const char *body, char *resp, int cap)
          {
             int hs;
             snprintf(ct_url, sizeof(ct_url), "%s/count_tokens", url); /* url ends in /messages */
-            if (build_anthropic_parity_headers(extra, sizeof extra, ag))
+            if (native_beta_url(ct_url, sizeof ct_url, 1) ||
+                build_anthropic_parity_headers(extra, sizeof extra, ag))
             {
                aimee_request_free(&policy);
                cJSON_Delete(req);
@@ -1520,6 +1538,7 @@ void anthropic_http_capture_request_headers(const char *raw_request)
 {
    char a_ver[64] = "", a_beta[512] = "";
    g_native_user_agent[0] = g_native_x_app[0] = 0;
+   g_native_beta_query = 0;
    if (raw_request)
    {
       http_header(raw_request, "Anthropic-Version", a_ver, sizeof(a_ver));
@@ -1571,6 +1590,20 @@ int anthropic_http_capture_native_request_headers(const char *headers)
 refused:
    anthropic_http_capture_request_headers(NULL);
    return -1;
+}
+
+int anthropic_http_capture_native_request_path(const char *path)
+{
+   g_native_beta_query = 0;
+   if (!path || strchr(path, '#'))
+      return -1;
+   if (!strcmp(path, "/v1/messages?beta=true") ||
+       !strcmp(path, "/v1/messages/count_tokens?beta=true"))
+   {
+      g_native_beta_query = 1;
+      return 0;
+   }
+   return strchr(path, '?') ? -1 : 0;
 }
 
 void anthropic_http_register(void)

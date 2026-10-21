@@ -3,6 +3,7 @@
 #include "server_native_execution.h"
 #include "server_native_history.h"
 #include "server_native_launch.h"
+#include "server_native_sdk_profile.h"
 #include "cli_claude_native.h"
 #include "claude_headless.h"
 #include "server_native_runtime.h"
@@ -1187,10 +1188,18 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
       prepared = 0;
    if (!prepared)
       goto refused;
+   const char *sdk = execution->selected.cli_kind;
+   stage = "SDK executable";
+   execution->executable_fd = server_native_launch_open(
+       sdk, cfg->agent->cli_cmd[0] ? cfg->agent->cli_cmd : sdk, execution->build, error);
+   if (execution->executable_fd < 0)
+      goto refused;
+   stage = "owned SDK identity";
+   if (server_native_sdk_profile_prepare(&execution->profile, sdk, execution->executable_fd))
+      goto refused;
    stage = "native tool registry";
    if (native_registry_open(execution, owner))
       goto refused;
-   const char *sdk = execution->selected.cli_kind;
    stage = "native cache custody";
    if (native_custody_open(execution, error))
       goto refused;
@@ -1231,11 +1240,6 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    if (cli_session_native_home(sdk, cwd, server_session_capture_session(execution->capture),
                                execution->effective_binding, execution->home,
                                sizeof execution->home, &execution->home_cleanup))
-      goto refused;
-   stage = "SDK executable";
-   execution->executable_fd = server_native_launch_open(
-       sdk, cfg->agent->cli_cmd[0] ? cfg->agent->cli_cmd : sdk, execution->build, error);
-   if (execution->executable_fd < 0)
       goto refused;
    stage = "owned SDK configuration";
    if (!strcmp(sdk, "codex") ? native_write_config(execution, selected)

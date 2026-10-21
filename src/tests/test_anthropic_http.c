@@ -38,6 +38,7 @@ const char *agent_request_auth_error(void)
 #define PASS(name) printf("  PASS: %s\n", (name))
 
 static const delegate_driver_t *g_driver;
+static char g_last_url[2048];
 static char *g_last_body;
 static char *g_last_extra; /* upstream extra-header block from the last post */
 static int g_stream_status = 200;
@@ -213,7 +214,7 @@ int agent_request_max_tokens(const agent_t *agent, int requested)
 int agent_http_post(const char *url, const char *auth_header, const char *body, char **response_buf,
                     int timeout_ms, const char *extra_headers)
 {
-   (void)url;
+   snprintf(g_last_url, sizeof g_last_url, "%s", url);
    (void)auth_header;
    (void)timeout_ms;
    free(g_last_body);
@@ -238,7 +239,7 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
                            agent_http_stream_cb callback, void *userdata, int timeout_ms,
                            const char *extra_headers)
 {
-   (void)url;
+   snprintf(g_last_url, sizeof g_last_url, "%s", url);
    (void)auth_header;
    (void)timeout_ms;
    (void)extra_headers;
@@ -843,6 +844,50 @@ int http_header(const char *headers, const char *name, char *out, size_t capacit
       line = *end ? end + 2 : end;
    }
    return 0;
+}
+
+static void test_native_beta_query(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic"};
+   const char *body = "{\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+   char response[4096], url[128];
+   reset_capture();
+   g_driver = &anthropic;
+   assert(!anthropic_http_capture_native_request_headers(NULL));
+   assert(!anthropic_http_capture_native_request_path("/v1/messages?beta=true"));
+   assert(messages_buffered(body, response, sizeof response) == 200);
+   assert(!strcmp(g_last_url, "https://example.invalid/v1/messages?beta=true"));
+   emit_capture_t capture = {0};
+   assert(!messages_stream(body, cap_emit, &capture));
+   assert(!strcmp(g_last_url, "https://example.invalid/v1/messages?beta=true"));
+   assert(messages_buffered(body, response, sizeof response) == 200);
+   assert(!strcmp(g_last_url, "https://example.invalid/v1/messages?beta=true"));
+   assert(!anthropic_http_capture_native_request_path("/v1/messages/count_tokens?beta=true"));
+   assert(count_tokens(body, response, sizeof response) == 200);
+   assert(!strcmp(g_last_url, "https://example.invalid/v1/messages/count_tokens?beta=true"));
+   strcpy(url, "https://example.invalid/v1/chat/completions");
+   assert(!native_beta_url(url, sizeof url, 0) && !strchr(url, '?'));
+   const char *invalid[] = {"/v1/messages?beta=false", "/v1/messages?beta=true&model=other",
+                            "/v1/responses?beta=true", "/v1/messages?beta=true#fragment"};
+   for (unsigned i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+   {
+      assert(anthropic_http_capture_native_request_path(invalid[i]));
+      strcpy(url, "https://example.invalid/v1/messages");
+      assert(!native_beta_url(url, sizeof url, 1) && !strchr(url, '?'));
+   }
+   assert(!anthropic_http_capture_native_request_path("/v1/messages?beta=true"));
+   strcpy(url, "https://example.invalid/v1/messages?other=1");
+   assert(native_beta_url(url, sizeof url, 1));
+   strcpy(url, "https://example.invalid/v1/messages");
+   assert(native_beta_url(url, strlen(url) + 1, 1));
+   anthropic_http_capture_request_headers(NULL);
+   assert(messages_buffered(body, response, sizeof response) == 200);
+   assert(!strcmp(g_last_url, "https://example.invalid/v1/messages"));
+   assert(!anthropic_http_capture_native_request_path("/v1/messages"));
+   assert(messages_buffered(body, response, sizeof response) == 200);
+   assert(!strcmp(g_last_url, "https://example.invalid/v1/messages"));
+   reset_capture();
+   PASS("native beta surface is exact, host-routed and request-scoped");
 }
 
 static void test_native_transport_headers(void)
@@ -1661,6 +1706,7 @@ int main(void)
    test_invalid_native_response_never_uses_legacy_parser();
    test_messages_buffered_anthropic_preserves_request_shape();
    test_messages_buffered_anthropic_parity_passthrough();
+   test_native_beta_query();
    test_native_transport_headers();
    test_native_admission_failure_sends_no_provider_request();
    test_native_host_guidance_retains_client_cache();

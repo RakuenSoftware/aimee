@@ -2,6 +2,7 @@
  * executable descriptors, launch configuration and cleanup use production code.
  * Actual SDK/config protocol fidelity is covered by test_codex_native_adoption.py. */
 #include "server_native_execution.h"
+#include "server_native_sdk_profile.h"
 #include "cli_claude_native.h"
 #include "claude_headless.h"
 #include "server_native_runtime.h"
@@ -462,6 +463,11 @@ server_native_runtime_t *server_native_runtime_open_bound_request(
 {
    assert(request_owner == &owner && !strcmp(source, "transport"));
    assert(!strcmp(selected->model, "selected-model") && profile->n_messages == 0);
+   if (!strcmp(active_sdk, "claude"))
+      assert(profile->n_system > 0 &&
+             !strcmp(profile->system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY));
+   else
+      assert(!profile->n_system || strcmp(profile->system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY));
    assert(!strcmp(selected->provider, "chatgpt"));
    assert(!durable_reservation); /* Session recovery precedes current profile. */
    assert(profile->n_tools == 1 && profile->tools[0].kind == AIMEE_TOOL_FUNCTION);

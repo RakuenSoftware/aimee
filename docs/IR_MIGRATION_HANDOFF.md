@@ -187,6 +187,33 @@ Keep that corrected source distinct from the already installed `91355fd35`
 producer when rebuilding for the next live request. All 76 lint checks were run;
 the sole missing-clang-format19 tooling failure passed on explicit-binary recheck.
 
+The clean corrected `d3639f1dc` four-product build also passed without warnings.
+Its one actual full-Opus browser request still failed before tools/questions;
+independent readback confirmed failed terminal 4, FINISHED ownership, zero active
+reservations and natural removal of the execution leaf. New-SPA desktop/320
+replay showed one clear terminal error and repeated no actions. This is another
+retained failure, not question/reply or permission acceptance.
+
+Two further independently reviewed protocol losses are repaired in the next
+combined source. The actual pinned SDK deliberately prepends its fixed Agent SDK
+component identity even when given a custom system prompt. After measuring and
+holding that executable, the host now represents this truthful identity as typed
+profile evidence before registry/cache copies. Host policy, history, tools and
+per-block cache markers remain intact; arbitrary SDK system text is still ignored.
+The typed mutation is marked, and Codex profiles remain unchanged. Missing-identity
+baseline, malicious incoming-system and repeated-profile cache cases are covered.
+
+The exact admitted SDK `?beta=true` marker now reaches the host-selected Anthropic
+model/count endpoint. This is not arbitrary URL forwarding: the capability route
+still normalizes to the same owner, and only the fixed marker survives as transport
+metadata, cleared on every ordinary request and native exit. URL construction
+precedes wire fencing. Official SDK fallback code distinguishes the beta surface;
+ordinary beta headers alone do not prove the query irrelevant. A scoped cache
+contract revision prevents silent reuse of the earlier stripped-query policy.
+Baseline dispatch reproduces query loss; buffered/stream/count, reset, invalid
+query, unowned and non-Anthropic cases are covered. These corrections require
+fresh exact-source live acceptance; neither is asserted as the cause of the 429.
+
 ### Final live qualification: 21 October 2026
 
 Source `230b490627b716b3aa41af30672e6c2b3269d19a` passed all 53 main CI

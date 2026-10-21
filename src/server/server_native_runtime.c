@@ -1125,6 +1125,7 @@ static int native_perform(const char *method, const char *path, const char *head
    if (!work)
       anthropic_http_capture_request_headers(NULL);
    server_native_runtime_t *runtime = context;
+   const char *native_path = path;
    path = native_model_path(path, runtime);
    if (!session || strcmp(session, runtime->session) || length > 4u * 1024u * 1024u ||
        (!work && !native_route(method, path, runtime)) ||
@@ -1320,7 +1321,8 @@ static int native_perform(const char *method, const char *path, const char *head
    {
       if (model_request)
       {
-         if (anthropic_http_capture_native_request_headers(headers))
+         if (anthropic_http_capture_native_request_headers(headers) ||
+             anthropic_http_capture_native_request_path(native_path))
             goto restore;
       }
       else
@@ -1740,6 +1742,16 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
    for (size_t i = 0; i < sizeof parts / sizeof parts[0]; i++)
    {
       int n = snprintf(binding + used, sizeof binding - used, "%zu:%s", strlen(parts[i]), parts[i]);
+      if (n < 0 || (size_t)n >= sizeof binding - used)
+         goto failed;
+      used += (size_t)n;
+   }
+   /* Invalidate only the old owned Anthropic transport contract. The marker
+    * itself is callback metadata, not a provider/identity choice known here. */
+   if (runtime->owns_request && runtime->request_profile.frontend == AIMEE_WIRE_ANTHROPIC)
+   {
+      const char contract[] = "native-anthropic-beta-query-v1";
+      int n = snprintf(binding + used, sizeof binding - used, "%zu:%s", strlen(contract), contract);
       if (n < 0 || (size_t)n >= sizeof binding - used)
          goto failed;
       used += (size_t)n;

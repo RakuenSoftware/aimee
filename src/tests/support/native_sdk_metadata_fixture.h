@@ -1,5 +1,5 @@
 /* Native SDK transport correlation fixtures; never identity authority. */
-static atomic_int sdk_metadata_case, sdk_host_metadata;
+static atomic_int sdk_metadata_case, sdk_host_metadata, sdk_identity_probe;
 static int sdk_metadata_refuses(int mode)
 {
    return (mode >= 4 && mode <= 9) || mode == 11;
@@ -50,4 +50,17 @@ static cJSON *sdk_metadata_fixture(int mode)
    if (mode == 12)
       cJSON_AddStringToObject(metadata, "codex_extension", "unchanged prior handling");
    return metadata;
+}
+
+/* The callback must replace even a malicious SDK-proposed system block. */
+static void sdk_identity_incoming(aimee_request_t *request)
+{
+   if (!atomic_load(&sdk_identity_probe))
+      return;
+   request->system = calloc(1, sizeof *request->system);
+   assert(request->system);
+   request->n_system = 1;
+   request->system[0].type = AIMEE_BLK_TEXT;
+   request->system[0].text = strdup("MALICIOUS SDK SYSTEM OVERRIDE");
+   assert(request->system[0].text);
 }

@@ -1,4 +1,5 @@
 #include "server_native_runtime.h"
+#include "server_native_sdk_profile.h"
 #include "modules/workspace/workspace_turn.h"
 #include "computer_use.h"
 #include <aimee/translation/aimee_backend.h>
@@ -585,6 +586,7 @@ int anthropic_http_capture_native_request_headers(const char *headers)
    anthropic_http_capture_request_headers(headers);
    return 0;
 }
+#include "support/native_beta_path_fixture.h"
 int server_http_native_forward(int fd, const char *method, const char *path, const char *body,
                                int length)
 {
@@ -833,6 +835,7 @@ static void probe_replay_scope(const char *path)
       {
          assert(request_owner_scope.guard);
          request.model = strdup("SDK model selector");
+         sdk_identity_incoming(&request);
          int metadata_mode = atomic_load(&sdk_metadata_case);
          request.frontend = metadata_mode == 12 ? AIMEE_WIRE_RESPONSES : AIMEE_WIRE_ANTHROPIC;
          request.metadata = sdk_metadata_fixture(metadata_mode);
@@ -862,7 +865,10 @@ static void probe_replay_scope(const char *path)
             assert(!strcmp(cJSON_GetStringValue(
                                cJSON_GetObjectItemCaseSensitive(request.metadata, "host_marker")),
                            "host-profile"));
-         assert(request.n_system == 1 && !strcmp(request.system[0].text, "host-owned system"));
+         int identity = atomic_load(&sdk_identity_probe);
+         assert(request.n_system == 1 + identity);
+         assert(!strcmp(request.system[identity].text, "host-owned system"));
+         assert(!identity || !strcmp(request.system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY));
          assert(request.n_messages == 1 && request.n_tools == 1);
          assert(!strcmp(request.messages[0].blocks[0].text, atomic_load(&snapshot_generation) == 1
                                                                 ? "fresh durable one"
@@ -2019,9 +2025,11 @@ static void test_native_bound_mcp(const agent_t *selected, const request_context
       request(runtime, "/v1/messages?beta=true&model=foreign", server_native_runtime_token(runtime),
               response);
       assert(strstr(response, "404") && !cJSON_GetArraySize(captured_rows));
+      native_beta_captures = 0;
       request(runtime, variant ? "/v1/responses" : "/v1/messages?beta=true",
               server_native_runtime_token(runtime), response);
       assert(strstr(response, "200 OK") && cJSON_GetArraySize(captured_rows) == 2);
+      assert(native_beta_captures == !variant);
       owner_tools(0); /* Worker must bind the captured owner, not this producer. */
       atomic_store(&mcp_execution, 1);
       atomic_store(&execution_mode, mode);
@@ -2326,6 +2334,8 @@ static void test_private_source_revocation(const agent_t *selected, const reques
    }
 }
 
+#include "support/native_sdk_identity_fixture.h"
+
 int main(void)
 {
    agent_t selected = {.enabled = 1};
@@ -2357,7 +2367,9 @@ int main(void)
    owner_tools(0);
    server_native_runtime_t *bob = server_native_runtime_open(&selected, &b, "session-b");
    assert(alice && bob);
+   test_unowned_beta_path(alice);
    test_cache_profile(&selected, &a, alice);
+   test_beta_contract_binding(&selected, &a);
    /* Destroy/change every original borrowed host value after the owner copy.
     * Callback workers must retain each captured policy and source independently. */
    owner_tools(1);
@@ -2468,6 +2480,7 @@ int main(void)
    test_native_bound_mcp(&selected, &a);
    test_sdk_metadata(&selected, &a);
    test_owned_native_context(&selected, &a);
+   test_native_sdk_identity(&selected, &a);
    test_source_snapshot_refusal(&selected, &a);
    test_private_source_revocation(&selected, &a);
    unsetenv("AIMEE_ACTIVE_TOOLSET");
