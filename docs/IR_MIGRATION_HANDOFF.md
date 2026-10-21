@@ -21,6 +21,16 @@ to `main`. Its later promotion review is not a blocker for code review or the
 current IR acceptance work. Automatic reviews and strict attribution remain
 unchanged. No self-approval or production promotion is asserted.
 
+### Native integration beta-route assertion follow-up
+
+Fresh final-head CI caught the actual-SDK synthetic provider fixture matching
+`self.path.endswith("/messages")`, rejecting the now-correct retained
+`?beta=true` marker and causing cascading provider retries. The fixture now
+splits path/query and requires exactly `beta=true` for Claude-to-Anthropic,
+including token counts, and an empty query for other host-selected wires.
+This changes tests only; the qualified C/Go/frontend products remain unchanged.
+Fresh CI must qualify the corrected fixture rather than waive the failed run.
+
 ### Latest local Claude acceptance: source `384683799`
 
 The previously unqualified genuine local Claude path now passes. The clean,

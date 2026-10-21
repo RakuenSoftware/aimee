@@ -19,6 +19,7 @@ import tempfile
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 
 class Local(http.client.HTTPConnection):
@@ -188,7 +189,13 @@ def main():
                 kind, wire, marker, call_id = active
                 observed.append(request)
                 (home / "native-provider-requests.json").write_text(json.dumps(observed, indent=2))
-                if self.path.endswith("/count_tokens"):
+                route = urlsplit(self.path)
+                # The pinned Claude SDK selects Anthropic's beta surface. The
+                # native gateway must preserve that exact marker only when the
+                # host-selected upstream is Anthropic, including token counts.
+                expected_query = "beta=true" if kind == "claude" and wire == "anthropic" else ""
+                assert route.query == expected_query and not route.fragment, self.path
+                if route.path.endswith("/count_tokens"):
                     self.send_payload({"input_tokens": 100})
                     return
                 count += 1
@@ -235,7 +242,7 @@ def main():
                     assert len(jobs) == 1, "native status call needs the returned job"
                     arguments = json.dumps(dict(job_id=jobs.pop(), full_result=True))
                 if wire == "anthropic":
-                    assert self.path.endswith("/messages"), self.path
+                    assert route.path.endswith("/messages"), self.path
                     content = [{"type": "tool_use", "id": call_id, "name": logical,
                                 "input": json.loads(arguments)}] if tool_call else [{"type": "text", "text": text}]
                     payload = {"id": "msg_" + marker + str(count), "type": "message", "role": "assistant",
@@ -258,7 +265,7 @@ def main():
                                    "stop_reason": payload["stop_reason"], "stop_sequence": None}, "usage": {"output_tokens": 10}}),
                                ("message_stop", {"type": "message_stop"})]
                 elif wire == "chatgpt":
-                    assert self.path.endswith("/responses"), self.path
+                    assert route.path.endswith("/responses"), self.path
                     item = {"type": "function_call", "id": "fc_" + marker, "call_id": call_id,
                             "name": logical, "arguments": arguments, "status": "completed"} if tool_call else {
                             "type": "message", "id": "msg_" + marker + str(count), "role": "assistant",
@@ -275,7 +282,7 @@ def main():
                     frames += [("response.output_item.done", {"type": "response.output_item.done", "output_index": 0, "item": item}),
                                ("response.completed", {"type": "response.completed", "response": payload})]
                 else:
-                    assert self.path.endswith("/chat/completions"), self.path
+                    assert route.path.endswith("/chat/completions"), self.path
                     delta = {"tool_calls": [{"index": 0, "id": call_id, "type": "function",
                               "function": {"name": logical, "arguments": arguments}}]} if tool_call else {"content": text}
                     payload = {"id": "chat_" + marker + str(count), "object": "chat.completion.chunk", "model": marker,
