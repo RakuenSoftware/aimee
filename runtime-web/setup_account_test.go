@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -511,5 +512,57 @@ func TestSetupDismissalScopeConcurrentFirstReads(t *testing.T) {
 		} else if scope != first {
 			t.Fatal("concurrent first reads published different scopes")
 		}
+	}
+}
+
+func TestSetupDismissalInvalidStateDoesNotBlockAccountStatus(t *testing.T) {
+	for _, kind := range []string{"malformed", "oversized", "directory", "symlink", "fifo"} {
+		t.Run(kind, func(t *testing.T) {
+			s, _ := newSetupAccountTestServer(t)
+			path := filepath.Join(s.setupAccountDir(), "setup-dismissal-id")
+			switch kind {
+			case "malformed":
+				if err := os.WriteFile(path, []byte(strings.Repeat("x", 64)), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "oversized":
+				if err := os.WriteFile(path, []byte(strings.Repeat("a", 65)), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "directory":
+				if err := os.Mkdir(path, 0700); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink":
+				target := filepath.Join(t.TempDir(), "other-install")
+				if err := os.WriteFile(target, []byte(strings.Repeat("a", 64)), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, path); err != nil {
+					t.Fatal(err)
+				}
+			case "fifo":
+				mkfifo, err := exec.LookPath("mkfifo")
+				if err != nil {
+					t.Skip("Unix FIFO utility unavailable")
+				}
+				if err := exec.Command(mkfifo, path).Run(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			done := make(chan map[string]any, 1)
+			go func() { done <- s.setupAccountStatus(defaultBootstrapUsername) }()
+			select {
+			case status := <-done:
+				if _, ok := status["dismissal_scope"]; ok {
+					t.Fatal("invalid local state acquired a dismissal scope")
+				}
+				if status["complete"] != false || status["required"] != true {
+					t.Fatal("invalid local state changed readiness")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("optional local preference blocked account status")
+			}
+		})
 	}
 }

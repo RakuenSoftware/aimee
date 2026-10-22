@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/RakuenSoftware/smoothgui/auth"
@@ -261,7 +263,22 @@ func (s *server) setupAccountStatus(caller string) map[string]any {
 func (s *server) setupDismissalScope(bootstrapUsername string) string {
 	path := filepath.Join(s.setupAccountDir(), "setup-dismissal-id")
 	read := func() string {
-		data, err := os.ReadFile(path)
+		before, err := os.Lstat(path)
+		if err != nil || !before.Mode().IsRegular() || before.Size() != 64 {
+			return ""
+		}
+		// Nonblocking open also handles a regular-file-to-FIFO replacement.
+		// Never follow a preexisting symlink or read an unbounded local file.
+		file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+		if err != nil {
+			return ""
+		}
+		defer file.Close()
+		after, err := file.Stat()
+		if err != nil || !after.Mode().IsRegular() || !os.SameFile(before, after) {
+			return ""
+		}
+		data, err := io.ReadAll(io.LimitReader(file, 65))
 		if err != nil || len(data) != 64 {
 			return ""
 		}
