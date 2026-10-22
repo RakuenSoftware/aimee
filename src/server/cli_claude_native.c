@@ -260,7 +260,8 @@ int cli_claude_native_launch_digest(const provider_cli_cfg_t *cfg, char digest[6
                           "ANTHROPIC_BASE_URL",
                           "DISABLE_AUTOUPDATER",
                           "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-                          "CLAUDE_CODE_ATTRIBUTION_HEADER"};
+                          "CLAUDE_CODE_ATTRIBUTION_HEADER",
+                          "MCP_CONNECTION_NONBLOCKING"};
    char config[4200], temporary[4200];
    if (snprintf(config, sizeof config, "%s/.claude", host->home) >= (int)sizeof config ||
        snprintf(temporary, sizeof temporary, "%s/tmp", host->home) >= (int)sizeof temporary)
@@ -278,6 +279,7 @@ int cli_claude_native_launch_digest(const provider_cli_cfg_t *cfg, char digest[6
                              host->gateway_url,
                              "1",
                              "1",
+                             "0",
                              "0"};
    const char *normalized[] = {"$NATIVE_HOME",
                                "$NATIVE_HOME/.claude",
@@ -292,6 +294,7 @@ int cli_claude_native_launch_digest(const provider_cli_cfg_t *cfg, char digest[6
                                "$OWNED_GATEWAY",
                                "1",
                                "1",
+                               "0",
                                "0"};
    unsigned seen = 0;
    for (int i = 0; host->environment[i]; i++)

@@ -702,12 +702,18 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    assert(!cli_claude_native_launch_digest(cfg, proof) && !strcmp(proof, host->expected_profile));
    /* The exact fixed gateway setting is covered by the launch proof, not
     * inherited from the operator or inferred from SDK initialization. */
-   int attribution_index = -1;
+   int attribution_index = -1, readiness_index = -1;
    char *changed_environment[17] = {0};
    for (int i = 0; host->environment[i]; i++)
    {
       assert(i < 16);
       changed_environment[i] = host->environment[i];
+      if (!strncmp(host->environment[i], "MCP_CONNECTION_NONBLOCKING=", 27))
+      {
+         assert(!strcmp(host->environment[i], "MCP_CONNECTION_NONBLOCKING=0"));
+         assert(readiness_index == -1);
+         readiness_index = i;
+      }
       if (!strncmp(host->environment[i], "CLAUDE_CODE_ATTRIBUTION_HEADER=", 31))
       {
          assert(!strcmp(host->environment[i], "CLAUDE_CODE_ATTRIBUTION_HEADER=0"));
@@ -715,7 +721,7 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
          attribution_index = i;
       }
    }
-   assert(attribution_index >= 0);
+   assert(attribution_index >= 0 && readiness_index >= 0);
    cli_claude_host_launch_t changed_host = *host;
    provider_cli_cfg_t changed_cfg = *cfg;
    changed_host.environment = changed_environment;
@@ -729,6 +735,14 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    while (host->environment[environment_count])
       environment_count++;
    changed_environment[environment_count] = host->environment[attribution_index];
+   assert(cli_claude_native_launch_digest(&changed_cfg, proof));
+   changed_environment[environment_count] = NULL;
+   changed_environment[readiness_index] = "MCP_CONNECTION_NONBLOCKING=1";
+   assert(cli_claude_native_launch_digest(&changed_cfg, proof));
+   changed_environment[readiness_index] = NULL;
+   assert(cli_claude_native_launch_digest(&changed_cfg, proof));
+   changed_environment[readiness_index] = host->environment[readiness_index];
+   changed_environment[environment_count] = host->environment[readiness_index];
    assert(cli_claude_native_launch_digest(&changed_cfg, proof));
 #if defined(__linux__)
    /* Run the real descriptor-based spawn and inspect its actual child env.
@@ -893,6 +907,8 @@ int main(int argc, char **argv)
    {
       const char *setting = getenv("CLAUDE_CODE_ATTRIBUTION_HEADER");
       assert(setting && !strcmp(setting, "0"));
+      setting = getenv("MCP_CONNECTION_NONBLOCKING");
+      assert(setting && !strcmp(setting, "0"));
       assert(!getenv("PARENT_SECRET") && !getenv("ANTHROPIC_AUTH_TOKEN"));
       assert(getenv("ANTHROPIC_API_KEY") &&
              !strcmp(getenv("ANTHROPIC_API_KEY"), "local-capability-fixture"));
@@ -909,6 +925,7 @@ int main(int argc, char **argv)
    setenv("AIMEE_HOME", temporary, 1);
    setenv("PARENT_SECRET", "do-not-inherit", 1);
    setenv("CLAUDE_CODE_ATTRIBUTION_HEADER", "1", 1);
+   setenv("MCP_CONNECTION_NONBLOCKING", "1", 1);
    agent_t selected = {0};
    snprintf(selected.cli_kind, sizeof selected.cli_kind, "codex");
    snprintf(selected.cli_cmd, sizeof selected.cli_cmd, "/bin/true");

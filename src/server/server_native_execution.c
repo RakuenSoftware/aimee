@@ -464,9 +464,15 @@ static int native_environment(native_execution_t *execution)
       /* The canonical gateway replaces SDK system content. Claude's gateway
        * protocol requires client-side omission of its fingerprint block in
        * this case; neither stripping nor moving that block is supported. */
-      const char *extra[] = {key, url, "DISABLE_AUTOUPDATER=1",
+      /* Stream-json startup otherwise reports a pending MCP server with no
+       * tools before discovery completes. Require the SDK's blocking startup
+       * mode; the exact connected/catalog readback remains mandatory. */
+      const char *extra[] = {key,
+                             url,
+                             "DISABLE_AUTOUPDATER=1",
                              "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
-                             "CLAUDE_CODE_ATTRIBUTION_HEADER=0"};
+                             "CLAUDE_CODE_ATTRIBUTION_HEADER=0",
+                             "MCP_CONNECTION_NONBLOCKING=0"};
       for (unsigned i = 0; i < sizeof extra / sizeof extra[0]; i++)
       {
          execution->environment[9 + i] = strdup(extra[i]);
