@@ -53,6 +53,31 @@ leakage; foreign-session refusal and focused translator/headless tests pass
 normally and under ASan/UBSan/leak checks. These fixtures do not establish the cause of
 failed live event 54, whose actual stdout was not retained.
 
+The subsequent quiet HOST diagnosis proves the audit writer is progressing,
+not frozen: 3,225 records committed during the 90-second stop, while its queue
+remained near 4,096 and drops increased. The detached readiness sampler has no
+shutdown path and remains active during that drain. The pending repair joins an
+interruptible sampler before retiring its module dependencies; normal, sanitizer
+and ThreadSanitizer lifecycle tests pass. A separate bounded FIFO group commit
+preserves SQLite FULL synchronization and existing synchronous action/idempotent
+contracts. Real WAL tests prove 64 queued rows use one atomic transaction and
+mid-group failure rolls back the whole group; bus retry/FIFO/concurrency tests
+pass normally and under sanitizers. A final payload-free shutdown receipt exposes
+actual unwritten, guardrail-pending, written and dropped counts after draining.
+These repairs still require canonical builds and genuine HOST stop acceptance.
+
+The editor repair is now genuinely qualified on candidate `315f6feec`: normal
+upgrade preserves all 54 events and exact cache/configuration evidence, and the
+actual worktree README is readable at desktop and 320px. Browser-scoped pinning
+of the owned fixture certificate resolves the webview service-worker SSL error;
+no global certificate trust or product TLS bypass changed. A distinct code-server
+PWA worker request still escapes to `/_static/` and returns 404. The reverse-proxy
+repair strips its mount prefix, keeps redirects and worker scope under that
+mount, and preserves encoded paths/queries and credential stripping. Its real
+HTTP worker-fetch regression, WebSocket exchange and full runtime-web race suite
+pass. Deployment and actual PWA-worker acceptance remain required; no global
+asset route or vendor rewrite was added.
+
 Keep implementation and validation moving without requiring an open PR. Remaining
 work includes the native-resume failure, graceful HOST shutdown, deployment of
 the editor repair, final current-source CI and published fresh-install acceptance,

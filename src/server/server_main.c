@@ -472,6 +472,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
                "error: dedicated management listener failed at %s\n",
                server_http_management_last_error());
       startup_notify(notify_fd, management_error);
+      server_ready_stop();
       server_http_stop();
       server_shutdown(&g_ctx);
       agent_http_cleanup();
@@ -495,6 +496,8 @@ static int run_server(const char *socket_path, log_level_t log_level)
    startup_notify(notify_fd, "ok\n");
    int rc = server_run(&g_ctx);
 
+   /* Retire dependency probes while their module owners and bus still live. */
+   server_ready_stop();
    server_code_index_stop();
    server_kb_heartbeat_stop();
    server_http_stop();

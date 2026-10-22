@@ -22,6 +22,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 #include <aimee/audit/obs_bus.h>
 #include <aimee/core/event_bus/module_client.h>
@@ -134,8 +135,78 @@ static int durable_module_sink(const char *role, const char *principal, const ch
    return 0;
 }
 
+static atomic_int batch_ready, batch_calls, batch_rows, batch_attempts, largest_batch;
+static char expected[139][32];
+static int batch_sink(const obs_bus_durable_record_t *rows, size_t count, void *ctx)
+{
+   (void)ctx;
+   assert(count && count <= OBS_BUS_DURABLE_BATCH_MAX);
+   atomic_fetch_add(&batch_attempts, 1);
+   if (!atomic_load(&batch_ready))
+      return -1;
+   if ((int)count > atomic_load(&largest_batch))
+      atomic_store(&largest_batch, (int)count);
+   int offset = atomic_load(&batch_rows);
+   for (size_t i = 0; i < count; i++)
+   {
+      assert(!strcmp(rows[i].action, "test.batch"));
+      assert(!strcmp(rows[i].subject, expected[offset + (int)i]));
+   }
+   /* A producer appends while the callback owns borrowed prefix views. */
+   if (offset == 0)
+      obs_bus_emit_durable_event("test.batch", expected[130], "ok", "{}");
+   atomic_fetch_add(&batch_calls, 1);
+   atomic_fetch_add(&batch_rows, (int)count);
+   return 0;
+}
+static void test_batch_retry(void)
+{
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-busbatch-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(home) && !setenv("AIMEE_HOME", home, 1));
+   audit_log_open();
+   assert(obs_bus_set_durable_batch_sink(NULL, batch_sink, NULL) < 0);
+   assert(!obs_bus_set_durable_batch_sink(durable_module_sink, batch_sink, NULL));
+   assert(!obs_bus_start());
+   assert(obs_bus_set_durable_batch_sink(durable_module_sink, batch_sink, NULL) < 0);
+   /* A synchronous action still calls the single sink, even with batching on. */
+   atomic_store(&durable_ready, 1);
+   assert(!obs_bus_commit_action("operator", "sync.test", "args", "command", "mode", "ok", "allow",
+                                 0));
+   assert(!atomic_load(&batch_attempts));
+
+   for (int i = 0; i < 139; i++)
+      snprintf(expected[i], sizeof expected[i], "fifo-%d", i);
+   for (int i = 0; i < 130; i++)
+      obs_bus_emit_durable_event("test.batch", expected[i], "ok", "{}");
+   for (int i = 0; i < 2000 && !atomic_load(&batch_attempts); i++)
+      usleep(1000);
+   assert(atomic_load(&batch_attempts) && !atomic_load(&batch_rows));
+   atomic_store(&batch_ready, 1);
+   obs_bus_flush();
+   /* The callback publishes after the first flush snapshots its target. */
+   obs_bus_flush();
+   assert(atomic_load(&batch_rows) == 131 && atomic_load(&batch_calls) >= 3);
+   assert(obs_bus_written() == 131 && !obs_bus_dropped());
+   assert(atomic_load(&largest_batch) > 1);
+   for (int i = 131; i < 139; i++)
+      obs_bus_emit_durable_event("test.batch", expected[i], "ok", "{}");
+   obs_bus_stop();
+   assert(atomic_load(&batch_rows) == 139 && obs_bus_written() == 139 && !obs_bus_dropped());
+   puts("  queued batch FIFO/retry/concurrent enqueue: ok");
+}
+
 int main(void)
 {
+   pid_t child = fork();
+   assert(child >= 0);
+   if (!child)
+   {
+      test_batch_retry();
+      exit(0);
+   }
+   int status = 0;
+   assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
    printf("obs_bus_module_concurrency:\n");
    char home[256];
    snprintf(home, sizeof home, "%s/aimee-busconc-XXXXXX", platform_tmpdir());
@@ -146,6 +217,8 @@ int main(void)
    }
    setenv("AIMEE_HOME", home, 1);
    audit_log_open();
+   assert(!obs_bus_set_durable_batch_sink(durable_module_sink, batch_sink, NULL));
+   /* The legacy setter must clear a previously configured optional batch. */
    assert(obs_bus_set_durable_sink(durable_module_sink, NULL) == 0);
    if (obs_bus_start() != 0)
    {

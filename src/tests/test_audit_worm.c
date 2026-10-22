@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <pthread.h>
 #include <sys/statvfs.h>
 
 #include <aimee/audit/audit_worm.h>
@@ -443,6 +444,119 @@ static void test_detail_capped(void)
    cJSON_Delete(page);
    audit_worm_close();
    printf("  test_detail_capped: ok\n");
+}
+
+/* Count actual WAL transaction commit markers, not elapsed-time performance. */
+static unsigned wal_commits(const char *path)
+{
+   char wal_path[340];
+   snprintf(wal_path, sizeof wal_path, "%s-wal", path);
+   FILE *f = fopen(wal_path, "rb");
+   assert(f);
+   unsigned char header[32], frame[24];
+   assert(fread(header, 1, sizeof header, f) == sizeof header);
+   unsigned page = ((unsigned)header[8] << 24) | ((unsigned)header[9] << 16) |
+                   ((unsigned)header[10] << 8) | header[11];
+   assert(page >= 512 && page <= 65536);
+   unsigned commits = 0;
+   while (fread(frame, 1, sizeof frame, f) == sizeof frame)
+   {
+      if (frame[4] || frame[5] || frame[6] || frame[7])
+         commits++;
+      assert(fseek(f, page, SEEK_CUR) == 0);
+   }
+   fclose(f);
+   return commits;
+}
+static void *single_action_writer(void *unused)
+{
+   (void)unused;
+   for (int i = 0; i < 16; i++)
+      assert(!audit_worm_append("action", "operator", "sync.action", "one", "ok", "{}"));
+   return NULL;
+}
+static void test_atomic_batch(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/batch.db", g_dir);
+   assert(!audit_worm_init_at(path));
+   long long original = 0, repeated = 0;
+   assert(!audit_worm_append_idempotent("seed", "2026-01-02T03:04:05Z", "kb", "worker", "seed",
+                                        "seed", "ok", "{}", &original));
+   audit_worm_record_t rows[AUDIT_WORM_BATCH_MAX];
+   char subjects[AUDIT_WORM_BATCH_MAX][32];
+   for (size_t i = 0; i < AUDIT_WORM_BATCH_MAX; i++)
+   {
+      snprintf(subjects[i], sizeof subjects[i], "batch-%zu", i);
+      rows[i] = (audit_worm_record_t){"system", "event-bus", "batch", subjects[i], "ok", "{}"};
+   }
+   assert(audit_worm_append_batch(NULL, 1) < 0);
+   assert(audit_worm_append_batch(rows, 0) < 0);
+   assert(audit_worm_append_batch(rows, AUDIT_WORM_BATCH_MAX + 1) < 0);
+   rows[32].action = NULL;
+   assert(audit_worm_append_batch(rows, AUDIT_WORM_BATCH_MAX) < 0 && audit_worm_count() == 1);
+   rows[32].action = "batch";
+   char overlong[AUDIT_WORM_BATCH_FIELD_MAX + 2];
+   memset(overlong, 'x', sizeof overlong - 1);
+   overlong[sizeof overlong - 1] = 0;
+   rows[32].subject = overlong;
+   assert(audit_worm_append_batch(rows, AUDIT_WORM_BATCH_MAX) < 0 && audit_worm_count() == 1);
+   rows[32].subject = subjects[32];
+   char big[AUDIT_WORM_DETAIL_MAX + 201];
+   memset(big, 'd', sizeof big - 1);
+   big[sizeof big - 1] = 0;
+   rows[63].detail = big;
+   unsigned before = wal_commits(path);
+   assert(!audit_worm_append_batch(rows, AUDIT_WORM_BATCH_MAX));
+   assert(wal_commits(path) == before + 1 && audit_worm_count() == 65);
+   sqlite3 *raw = NULL;
+   assert(sqlite3_open(path, &raw) == SQLITE_OK);
+   sqlite3_stmt *q = NULL;
+   assert(sqlite3_prepare_v2(raw,
+                             "SELECT subject FROM audit_event WHERE action='batch' ORDER BY seq",
+                             -1, &q, NULL) == SQLITE_OK);
+   for (size_t i = 0; i < AUDIT_WORM_BATCH_MAX; i++)
+      assert(sqlite3_step(q) == SQLITE_ROW &&
+             !strcmp((const char *)sqlite3_column_text(q, 0), subjects[i]));
+   assert(sqlite3_step(q) == SQLITE_DONE);
+   sqlite3_finalize(q);
+   assert(sqlite3_prepare_v2(raw, "SELECT detail FROM audit_event WHERE seq=65", -1, &q, NULL) ==
+          SQLITE_OK);
+   assert(sqlite3_step(q) == SQLITE_ROW);
+   const char *detail = (const char *)sqlite3_column_text(q, 0);
+   assert(strstr(detail, "worm-truncated 200 bytes") &&
+          strlen(detail) < AUDIT_WORM_DETAIL_MAX + 96);
+   sqlite3_finalize(q);
+
+   assert(sqlite3_exec(raw,
+                       "CREATE TRIGGER reject_middle BEFORE INSERT ON audit_event WHEN "
+                       "NEW.subject='batch-32' BEGIN SELECT RAISE(ABORT,'fixture'); END",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   assert(audit_worm_append_batch(rows, AUDIT_WORM_BATCH_MAX) < 0);
+   assert(audit_worm_count() == 65 && !audit_worm_verify_chain(NULL, 0));
+   assert(sqlite3_exec(raw, "DROP TRIGGER reject_middle", NULL, NULL, NULL) == SQLITE_OK);
+   assert(!audit_worm_append_batch(rows, AUDIT_WORM_BATCH_MAX) && audit_worm_count() == 129);
+   /* Existing producer IDs and original timestamps remain unchanged across batches. */
+   assert(!audit_worm_append_idempotent("seed", "2026-01-02T03:04:05Z", "kb", "worker", "seed",
+                                        "seed", "ok", "{}", &repeated));
+   assert(repeated == original && audit_worm_count() == 129);
+   assert(audit_worm_append_idempotent("seed", "2026-01-02T03:04:05Z", "kb", "worker", "seed",
+                                       "changed", "ok", "{}", NULL) < 0);
+   pthread_t action;
+   assert(!pthread_create(&action, NULL, single_action_writer, NULL));
+   assert(!audit_worm_append_batch(rows, AUDIT_WORM_BATCH_MAX));
+   assert(!pthread_join(action, NULL));
+   assert(audit_worm_count() == 209 && !audit_worm_verify_chain(NULL, 0));
+   assert(sqlite3_prepare_v2(
+              raw,
+              "SELECT max(seq)-min(seq),count(*) FROM audit_event WHERE action='batch' AND seq>129",
+              -1, &q, NULL) == SQLITE_OK);
+   assert(sqlite3_step(q) == SQLITE_ROW && sqlite3_column_int(q, 0) == 63 &&
+          sqlite3_column_int(q, 1) == 64);
+   sqlite3_finalize(q);
+   sqlite3_close(raw);
+   audit_worm_close();
+   puts("  test_atomic_batch: ok (one FULL transaction, rollback, FIFO, concurrent action)");
 }
 
 /* A durable producer may retry after SQLite committed but before its delivery
@@ -878,6 +992,7 @@ int main(int argc, char **argv)
    test_metric_snapshot();
    test_detail_capped();
    test_idempotent_outbox_delivery();
+   test_atomic_batch();
    test_read_page();
    test_append_and_chain();
    test_worm_triggers_block_mutation();
