@@ -1914,7 +1914,10 @@ static int native_mcp_request(const server_native_runtime_t *runtime, const char
    const char *port = strrchr(server_native_runtime_url(runtime), ':') + 1;
    int fd = aimee_core_socket_connect("127.0.0.1", port, 2000);
    assert(fd >= 0 && !aimee_core_socket_set_timeouts(fd, 5000, 2000));
-   char request[8192], response[16384];
+   char request[8192];
+   const size_t capacity = 1024 * 1024;
+   char *response = malloc(capacity);
+   assert(response);
    int length = snprintf(
        request, sizeof request,
        "%s /v1/mcp/call HTTP/1.1\r\nHost: 127.0.0.1:%s\r\nAuthorization: Bearer %s\r\n"
@@ -1927,8 +1930,8 @@ static int native_mcp_request(const server_native_runtime_t *runtime, const char
    size_t used = 0;
    for (;;)
    {
-      assert(used < sizeof response - 1);
-      long n = aimee_core_socket_read(fd, response + used, sizeof response - used - 1);
+      assert(used < capacity - 1);
+      long n = aimee_core_socket_read(fd, response + used, capacity - used - 1);
       assert(n >= 0);
       if (!n)
          break;
@@ -1940,8 +1943,72 @@ static int native_mcp_request(const server_native_runtime_t *runtime, const char
    assert(sscanf(response, "HTTP/1.1 %d", &status) == 1);
    const char *payload = strstr(response, "\r\n\r\n");
    assert(payload);
+   const char *content_length = strstr(response, "Content-Length: ");
+   assert(content_length && strtoul(content_length + strlen("Content-Length: "), NULL, 10) ==
+                                used - (size_t)(payload + 4 - response));
    *out = payload[4] ? aimee_ir_json_parse_frame(payload + 4, strlen(payload + 4)) : NULL;
+   free(response);
    return status;
+}
+static void test_native_large_mcp_catalog(const agent_t *selected, const request_context_t *owner)
+{
+   enum
+   {
+      COUNT = 53
+   };
+   owner_tools(1);
+   assert(!server_control_scope_bind(alice_controls));
+   server_session_capture_t *capture =
+       server_session_capture_open("session-a", "native-turn", "webuser:alice", "session-a");
+   assert(capture && !server_session_capture_bind(capture));
+   aimee_tool_t functions[COUNT] = {0};
+   server_native_tool_binding_t bindings[COUNT] = {0};
+   char names[COUNT][64], exposed[COUNT][64], description[4097];
+   memset(description, 'x', sizeof description - 1);
+   description[sizeof description - 1] = 0;
+   cJSON *schema =
+       cJSON_Parse("{\"type\":\"object\",\"properties\":{\"amount\":{\"type\":\"number\"}}}");
+   for (int i = 0; i < COUNT; i++)
+   {
+      snprintf(names[i], sizeof names[i], "mcp__aimee__catalog_%d", i);
+      snprintf(exposed[i], sizeof exposed[i], "catalog_%d", i);
+      functions[i] = (aimee_tool_t){.name = names[i], .description = description, .schema = schema};
+      bindings[i] = (server_native_tool_binding_t){
+          .name = names[i], .registry_name = "read_file", .mcp_name = exposed[i]};
+   }
+   aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
+   aimee_request_t profile = {.model = "selected-model",
+                              .frontend = AIMEE_WIRE_RESPONSES,
+                              .system = &system,
+                              .n_system = 1,
+                              .tools = functions,
+                              .n_tools = COUNT,
+                              .prompt_cache_key = "",
+                              .mutated = 1};
+   server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+       selected, owner, "session-a", &profile, bindings, COUNT);
+   assert(runtime);
+   cJSON_Delete(schema); /* Real listener owns a deep profile copy. */
+   assert(server_session_capture_bind(NULL) == capture);
+   assert(server_control_scope_bind(NULL) == alice_controls);
+   int before = atomic_load(&dispatch_count);
+   cJSON *rpc = NULL;
+   int status = native_mcp_request(
+       runtime, "POST", "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}", NULL, &rpc);
+   assert(status == 200 && rpc);
+   const cJSON *tools = cJSON_GetObjectItem(cJSON_GetObjectItem(rpc, "result"), "tools");
+   assert(cJSON_GetArraySize(tools) == COUNT);
+   for (int i = 0; i < COUNT; i++)
+   {
+      const cJSON *tool = cJSON_GetArrayItem(tools, i);
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(tool, "name")), exposed[i]));
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(tool, "description")), description));
+      assert(cJSON_IsObject(cJSON_GetObjectItem(tool, "inputSchema")));
+   }
+   assert(atomic_load(&dispatch_count) == before);
+   cJSON_Delete(rpc);
+   server_native_runtime_close(runtime);
+   server_session_capture_close(capture);
 }
 static void test_native_bound_mcp(const agent_t *selected, const request_context_t *owner)
 {
@@ -2477,6 +2544,7 @@ int main(void)
    test_native_preframe_error(&selected, &a);
    test_native_original_catalog(&selected, &a);
    test_native_supervised_execution(&selected, &a);
+   test_native_large_mcp_catalog(&selected, &a);
    test_native_bound_mcp(&selected, &a);
    test_sdk_metadata(&selected, &a);
    test_owned_native_context(&selected, &a);

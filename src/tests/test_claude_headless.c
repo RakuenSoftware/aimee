@@ -1,5 +1,7 @@
 #include "claude_headless.h"
 #include "cli_claude_native.h"
+#include "log.h"
+#include <stdarg.h>
 #include "agent_exec.h"
 #include "platform_test_util.h"
 #include "server_session_control.h"
@@ -16,6 +18,18 @@
 #include <time.h>
 #include <unistd.h>
 
+static int profile_logs;
+static char profile_metadata[512];
+void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
+{
+   assert(level == LOG_ERROR && !strcmp(module, "native.claude"));
+   va_list args;
+   va_start(args, fmt);
+   int length = vsnprintf(profile_metadata, sizeof profile_metadata, fmt, args);
+   va_end(args);
+   assert(length > 0 && (size_t)length < sizeof profile_metadata);
+   profile_logs++;
+}
 static long long cancel_at;
 static int events, reject_after, binds, reject_bind;
 static pid_t child;
@@ -302,6 +316,7 @@ static void profile_refusals(const char *path, const provider_cli_cfg_t *cfg)
       host.init = i == 0 ? NULL : profile_init;
       host.cwd = i == 3 ? "/different" : "/approved";
       init_calls = 0;
+      profile_logs = 0;
       init_refused = i == 1;
       agent_result_t out;
       aimee_ir_session_set_sink(capture, NULL);
@@ -311,6 +326,11 @@ static void profile_refusals(const char *path, const provider_cli_cfg_t *cfg)
       snprintf(error, sizeof error, "Claude native launch profile was refused (%s)", expected[i]);
       assert(!strcmp(out.error, error));
       assert(init_calls == (i == 1 || i == 2));
+      assert(profile_logs == 1);
+      assert(!strcmp(
+          profile_metadata,
+          "init profile mismatch: expected_tools=0 reported_tools=0 mcp_servers=0 "
+          "aimee_connected=0 plugins=0 missing_owned_sha256=- unexpected_reported_sha256=-"));
       assert(events == 0);
    }
    init_refused = 0;

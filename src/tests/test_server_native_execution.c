@@ -1,3 +1,4 @@
+#include "aimee_sha256.h"
 /* Factory lifecycle fixture. Peer owners are explicit mocks; actual private HOME,
  * executable descriptors, launch configuration and cleanup use production code.
  * Actual SDK/config protocol fidelity is covered by test_codex_native_adoption.py. */
@@ -804,7 +805,24 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    cJSON_ReplaceItemInArray(cJSON_GetObjectItemCaseSensitive(bad_name, "tools"), 0,
                             cJSON_CreateString("unowned-value-must-not-be-logged"));
    assert(!strcmp(cli_claude_native_profile_error(host, bad_name), "tool names"));
+   cli_claude_profile_summary_t summary;
+   cli_claude_native_profile_summary(host, bad_name, &summary);
+   assert(summary.expected_tools == 1 && summary.reported_tools == 1 && summary.mcp_servers == 1 &&
+          summary.aimee_connected == 1 && summary.plugins == 0);
+   char expected_hash[65];
+   assert(
+       !aimee_sha256_hex("mcp__aimee__read_file", strlen("mcp__aimee__read_file"), expected_hash));
+   assert(!strcmp(summary.missing_owned_sha256, expected_hash));
+   const char *unexpected = "unowned-value-must-not-be-logged";
+   assert(!aimee_sha256_hex(unexpected, strlen(unexpected), expected_hash));
+   assert(!strcmp(summary.unexpected_reported_sha256, expected_hash));
+   assert(!strcmp(cJSON_GetStringValue(
+                      cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(bad_name, "tools"), 0)),
+                  unexpected));
    cJSON_Delete(bad_name);
+   cli_claude_native_profile_summary(host, frame, &summary);
+   assert(!strcmp(summary.missing_owned_sha256, "-") &&
+          !strcmp(summary.unexpected_reported_sha256, "-"));
    cJSON *bad_servers = cJSON_Duplicate(frame, 1);
    cJSON_DeleteItemFromArray(cJSON_GetObjectItemCaseSensitive(bad_servers, "mcp_servers"), 0);
    assert(!strcmp(cli_claude_native_profile_error(host, bad_servers), "MCP server count"));

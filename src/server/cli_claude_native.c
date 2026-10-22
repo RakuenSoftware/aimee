@@ -61,6 +61,74 @@ const char *cli_claude_native_profile_error(const cli_claude_host_launch_t *host
    }
    return NULL;
 }
+void cli_claude_native_profile_summary(const cli_claude_host_launch_t *host, const cJSON *frame,
+                                       cli_claude_profile_summary_t *summary)
+{
+   if (!summary)
+      return;
+   *summary = (cli_claude_profile_summary_t){
+       .expected_tools = -1, .reported_tools = -1, .mcp_servers = -1, .plugins = -1};
+   snprintf(summary->missing_owned_sha256, sizeof summary->missing_owned_sha256, "-");
+   snprintf(summary->unexpected_reported_sha256, sizeof summary->unexpected_reported_sha256, "-");
+   const cJSON *tools = cJSON_GetObjectItemCaseSensitive(frame, "tools");
+   const cJSON *servers = cJSON_GetObjectItemCaseSensitive(frame, "mcp_servers");
+   const cJSON *plugins = cJSON_GetObjectItemCaseSensitive(frame, "plugins");
+   if (cJSON_IsArray(tools))
+      summary->reported_tools = cJSON_GetArraySize(tools);
+   if (cJSON_IsArray(servers))
+   {
+      summary->mcp_servers = cJSON_GetArraySize(servers);
+      const cJSON *server;
+      cJSON_ArrayForEach(server, servers) if (field(server, "name") &&
+                                              !strcmp(field(server, "name"), "aimee") &&
+                                              field(server, "status") &&
+                                              !strcmp(field(server, "status"), "connected"))
+          summary->aimee_connected = 1;
+   }
+   if (cJSON_IsArray(plugins))
+      summary->plugins = cJSON_GetArraySize(plugins);
+   if (!host || !host->catalog || host->catalog->n_tools < 0 ||
+       host->catalog->n_tools > AIMEE_IR_MAX_BLOCKS ||
+       (host->catalog->n_tools && !host->catalog->tools))
+      return;
+   summary->expected_tools = host->catalog->n_tools;
+   if (!cJSON_IsArray(tools) || summary->reported_tools > AIMEE_IR_MAX_BLOCKS)
+      return;
+   for (int i = 0; i < host->catalog->n_tools; i++)
+   {
+      const char *owned = host->catalog->tools[i].name;
+      if (!owned)
+         continue;
+      int present = 0;
+      const cJSON *tool;
+      cJSON_ArrayForEach(tool, tools) present |=
+          cJSON_IsString(tool) && !strcmp(tool->valuestring, owned);
+      if (!present)
+      {
+         (void)aimee_sha256_hex(owned, strlen(owned), summary->missing_owned_sha256);
+         break;
+      }
+   }
+   const cJSON *tool;
+   cJSON_ArrayForEach(tool, tools)
+   {
+      if (!cJSON_IsString(tool))
+         continue;
+      int matches = 0, duplicate = 0;
+      for (int i = 0; i < host->catalog->n_tools; i++)
+         matches += host->catalog->tools[i].name &&
+                    !strcmp(tool->valuestring, host->catalog->tools[i].name);
+      const cJSON *previous;
+      for (previous = tools->child; previous != tool; previous = previous->next)
+         duplicate |= cJSON_IsString(previous) && !strcmp(previous->valuestring, tool->valuestring);
+      if (matches != 1 || duplicate)
+      {
+         (void)aimee_sha256_hex(tool->valuestring, strlen(tool->valuestring),
+                                summary->unexpected_reported_sha256);
+         break;
+      }
+   }
+}
 int cli_claude_native_verify(const cli_claude_host_launch_t *host, const cJSON *frame)
 {
    return cli_claude_native_profile_error(host, frame) ? -1 : 0;

@@ -8,6 +8,7 @@
 #include <aimee/translation/harness_ir.h>
 #include <aimee/translation/aimee_backend.h>
 #include "cJSON.h"
+#include "log.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -292,6 +293,15 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                         reason = "host callback";
                      if (reason)
                      {
+                        cli_claude_profile_summary_t summary;
+                        cli_claude_native_profile_summary(cfg->claude_host, frame, &summary);
+                        aimee_log(LOG_ERROR, "native.claude",
+                                  "init profile mismatch: expected_tools=%d reported_tools=%d "
+                                  "mcp_servers=%d aimee_connected=%d plugins=%d "
+                                  "missing_owned_sha256=%s unexpected_reported_sha256=%s",
+                                  summary.expected_tools, summary.reported_tools,
+                                  summary.mcp_servers, summary.aimee_connected, summary.plugins,
+                                  summary.missing_owned_sha256, summary.unexpected_reported_sha256);
                         cJSON_Delete(frame);
                         snprintf(out->error, sizeof out->error,
                                  "Claude native launch profile was refused (%s)", reason);

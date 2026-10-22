@@ -24,5 +24,14 @@ int cli_claude_native_launch_digest(const provider_cli_cfg_t *cfg, char digest[6
 /* Static allowlisted reason only; never returns SDK-supplied values. NULL means valid. */
 const char *cli_claude_native_profile_error(const cli_claude_host_launch_t *host,
                                             const struct cJSON *frame);
+typedef struct
+{
+   int expected_tools, reported_tools, mcp_servers, aimee_connected, plugins;
+   char missing_owned_sha256[65], unexpected_reported_sha256[65];
+} cli_claude_profile_summary_t;
+/* Nonmutating bounded diagnostics; names are returned only as SHA-256 commitments. */
+void cli_claude_native_profile_summary(const cli_claude_host_launch_t *host,
+                                       const struct cJSON *frame,
+                                       cli_claude_profile_summary_t *summary);
 int cli_claude_native_verify(const cli_claude_host_launch_t *host, const struct cJSON *frame);
 #endif
