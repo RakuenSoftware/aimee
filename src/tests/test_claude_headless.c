@@ -317,6 +317,140 @@ static int profile_init(const cJSON *frame, void *context)
    init_calls++;
    return init_refused;
 }
+/* The SDK must never receive user input while its required MCP server is
+ * pending. Control-plane metadata is not conversation history. */
+static void native_readiness(const char *path, const provider_cli_cfg_t *cfg)
+{
+   aimee_request_t catalog = {0};
+   catalog.tools = calloc(1, sizeof *catalog.tools);
+   assert(catalog.tools);
+   catalog.tools[0].name = "read_file";
+   cli_claude_host_launch_t host = {.cwd = "/approved", .catalog = &catalog, .init = profile_init};
+   provider_cli_cfg_t owned = *cfg;
+   agent_t agent = *cfg->agent;
+   owned.agent = &agent;
+   owned.control_channel = 1;
+   owned.claude_host = &host;
+   char trace[4096];
+   assert(snprintf(trace, sizeof trace, "%s.input", path) < (int)sizeof trace);
+   for (int mode = 0; mode <= 19; mode++)
+   {
+      catalog.n_tools = mode == 17 ? 0 : 1;
+      agent.cli_idle_timeout_ms = 120000;
+      server_control_scope_t *scope = server_control_scope_open("aimee-one", "readiness", "alice");
+      assert(scope);
+      server_control_scope_bind(scope);
+      unlink(trace);
+      cJSON *trace_value = cJSON_CreateString(trace);
+      char *literal = cJSON_PrintUnformatted(trace_value);
+      assert(literal);
+      FILE *f = fopen(path, "w");
+      assert(f);
+      fprintf(f, "#!/usr/bin/python3\nimport sys,json,select,time\nmode=%d\ntrace=%s\n", mode,
+              literal);
+      free(literal);
+      cJSON_Delete(trace_value);
+      fputs("def read():\n"
+            " q=json.loads(sys.stdin.readline())\n"
+            " if q['type']=='user':\n"
+            "  with open(trace,'a') as f: f.write('user\\n')\n"
+            " return q\n"
+            "def reply(q,servers):\n"
+            " r={'type':'control_response','response':{'subtype':'success','request_id':q['request_"
+            "id'],'response':{'mcpServers':servers}}}\n"
+            " if "
+            "mode==8:r['response']['subtype']='error';r['response']['error']='PRIVATE_RESPONSE_"
+            "ERROR'\n"
+            " if mode==9:r['response']['request_id']='stale-request'\n"
+            " print(json.dumps(r),flush=True)\n"
+            " if mode==10:print(json.dumps(r),flush=True)\n"
+            "q=read();assert q['request']['subtype']=='initialize'\n"
+            "ack={'type':'control_response','response':{'subtype':'success','request_id':q['"
+            "request_id'],'response':{}}}\n"
+            "if mode==15:ack['response']['request_id']='unowned-init'\n"
+            "print(json.dumps(ack),flush=True)\n"
+            "if mode==16:print(json.dumps(ack),flush=True)\n"
+            "if mode==18:\n"
+            " print(json.dumps({'type':'system','subtype':'init','session_id':'native-one','cwd':'/"
+            "approved','apiKeySource':'ANTHROPIC_API_KEY','permissionMode':'default','tools':['"
+            "read_file'],'mcp_servers':[{'name':'aimee','status':'connected'}],'plugins':[]}),"
+            "flush=True)\n"
+            "ids=set()\n"
+            "if mode!=17:\n"
+            " for state in ['pending','pending','connected']:\n"
+            "  q=read();assert q['type']=='control_request' and "
+            "q['request']['subtype']=='mcp_status'\n"
+            "  assert q['request_id'] not in ids;ids.add(q['request_id'])\n"
+            "  if mode==13:time.sleep(65)\n"
+            "  if mode==14:time.sleep(5)\n"
+            "  if mode==11:\n"
+            "   "
+            "print(json.dumps({'type':'control_request','request_id':'unowned-permission','request'"
+            ":{'subtype':'can_use_tool','tool_name':'Read','input':{}}}),flush=True)\n"
+            "  if mode in "
+            "[1,2,3,4]:state={1:'failed',2:'needs-auth',3:'disabled',4:'PRIVATE_UNKNOWN_STATUS'}["
+            "mode]\n"
+            "  "
+            "servers=[{'name':'aimee','status':state,'error':'PRIVATE_STATUS_ERROR','config':{'"
+            "headers':{'Authorization':'PRIVATE_STATUS_TOKEN'}}}]\n"
+            "  if mode==5:servers=[]\n"
+            "  if mode==6:servers=servers*2\n"
+            "  if mode==7:servers='PRIVATE_NOT_ARRAY'\n"
+            "  reply(q,servers)\n"
+            "  if state=='pending': assert not select.select([sys.stdin],[],[],0.08)[0]\n"
+            "u=read();assert u['type']=='user' and u['message']['content']=='hello'\n"
+            "if mode==19:print(json.dumps(ack),flush=True)\n"
+            "tools=[] if mode in [12,17] else ['read_file']\n"
+            "servers=[] if mode==17 else [{'name':'aimee','status':'connected'}]\n"
+            "print(json.dumps({'type':'system','subtype':'init','session_id':'native-one','cwd':'/"
+            "approved','apiKeySource':'ANTHROPIC_API_KEY','permissionMode':'default','tools':tools,"
+            "'mcp_servers':servers,'plugins':[]}),flush=True)\n"
+            "print(json.dumps({'type':'result','is_error':False}),flush=True)\n"
+            "assert not sys.stdin.read()\n",
+            f);
+      assert(!fclose(f) && !chmod(path, 0700));
+      aimee_ir_session_set_sink(capture, NULL);
+      init_calls = init_refused = events = profile_logs = 0;
+      cancel_at = mode == 14 ? now_ms() + 350 : 0;
+      long long start = now_ms();
+      agent_result_t out = {0};
+      int rc = claude_headless_run(&owned, NULL, NULL, &out);
+      if (mode == 0 || mode == 17)
+         assert(!rc && out.success && init_calls == 1 && !profile_logs);
+      else
+         assert(rc < 0 && !out.success && !init_calls);
+      assert(!events && !out.response);
+      if (mode == 12)
+         assert(profile_logs == 1 &&
+                !strcmp(out.error, "Claude native launch profile was refused (tool count)"));
+      else
+         assert(!profile_logs);
+      if (mode == 13)
+         assert(!strcmp(out.error, "Claude control initialization timed out") &&
+                now_ms() - start >= 60000 && now_ms() - start < 65000);
+      if (mode == 14)
+         assert(!strcmp(out.error, "Claude turn interrupted") && now_ms() - start < 4000);
+      FILE *input = fopen(trace, "r");
+      int users = 0;
+      if (input)
+      {
+         char line[32];
+         while (fgets(line, sizeof line, input))
+         {
+            assert(!strcmp(line, "user\n"));
+            users++;
+         }
+         fclose(input);
+      }
+      assert(users == (mode == 0 || mode == 12 || mode == 17 || mode == 19));
+      assert(!strstr(out.error, "PRIVATE_"));
+      agent_result_clear_response(&out);
+      cancel_at = 0;
+      server_control_scope_close(scope);
+   }
+   unlink(trace);
+   free(catalog.tools);
+}
 static void profile_refusals(const char *path, const provider_cli_cfg_t *cfg)
 {
    const char *init =
@@ -350,12 +484,39 @@ static void profile_refusals(const char *path, const provider_cli_cfg_t *cfg)
       assert(!strcmp(out.error, error));
       assert(init_calls == (i == 1 || i == 2));
       assert(profile_logs == 1);
-      assert(!strcmp(
-          profile_metadata,
-          "init profile mismatch: expected_tools=0 reported_tools=0 mcp_servers=0 "
-          "aimee_connected=0 plugins=0 missing_owned_sha256=- unexpected_reported_sha256=-"));
+      assert(!strcmp(profile_metadata,
+                     "init profile mismatch: expected_tools=0 reported_tools=0 mcp_servers=0 "
+                     "aimee_connected=0 aimee_status=unknown plugins=0 missing_owned_sha256=- "
+                     "unexpected_reported_sha256=-"));
       assert(events == 0);
    }
+   /* Unknown state and nested SDK error text must not be copied into the
+    * single profile diagnostic or canonical history. */
+   cJSON *private_frame = cJSON_Parse(init);
+   cJSON *private_server = cJSON_CreateObject();
+   assert(private_frame && private_server);
+   cJSON_AddStringToObject(private_server, "name", "aimee");
+   cJSON_AddStringToObject(private_server, "status", "PRIVATE_STATUS_DIAGNOSTIC");
+   cJSON_AddStringToObject(private_server, "error", "PRIVATE_MCP_ERROR_TEXT");
+   cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(private_frame, "mcp_servers"),
+                        private_server);
+   char *private_json = cJSON_PrintUnformatted(private_frame);
+   assert(private_json);
+   char body[4096];
+   snprintf(body, sizeof body, "printf '%%s\\n' '%s'\n", private_json);
+   free(private_json);
+   cJSON_Delete(private_frame);
+   script(path, body);
+   host.cwd = "/approved";
+   host.init = profile_init;
+   profile_logs = init_calls = events = 0;
+   agent_result_t out = {0};
+   assert(claude_headless_run(&owned, NULL, NULL, &out) < 0 && !out.success);
+   assert(profile_logs == 1 && !init_calls && !events && !out.response);
+   assert(strstr(profile_metadata, "aimee_status=unknown") &&
+          !strstr(profile_metadata, "PRIVATE_STATUS_DIAGNOSTIC") &&
+          !strstr(profile_metadata, "PRIVATE_MCP_ERROR_TEXT"));
+   agent_result_clear_response(&out);
    init_refused = 0;
 }
 int main(void)
@@ -448,6 +609,7 @@ int main(void)
    assert(!out.success && !out.response);
    strict_frames(path, &cfg);
    profile_refusals(path, &cfg);
+   native_readiness(path, &cfg);
    aimee_ir_session_set_sink(NULL, NULL);
    unlink(path);
    puts("Claude headless lifecycle and strict byte-frame tests passed");

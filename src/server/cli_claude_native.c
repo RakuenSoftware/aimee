@@ -107,6 +107,32 @@ const char *cli_claude_native_profile_error(const cli_claude_host_launch_t *host
    }
    return NULL;
 }
+const char *cli_claude_mcp_status_name(cli_claude_mcp_status_t status)
+{
+   switch (status)
+   {
+   case CLI_CLAUDE_MCP_PENDING:
+      return "pending";
+   case CLI_CLAUDE_MCP_FAILED:
+      return "failed";
+   case CLI_CLAUDE_MCP_NEEDS_AUTH:
+      return "needs-auth";
+   case CLI_CLAUDE_MCP_DISABLED:
+      return "disabled";
+   case CLI_CLAUDE_MCP_CONNECTED:
+      return "connected";
+   default:
+      return "unknown";
+   }
+}
+static cli_claude_mcp_status_t native_mcp_status(const char *status)
+{
+   if (status)
+      for (int i = CLI_CLAUDE_MCP_PENDING; i <= CLI_CLAUDE_MCP_CONNECTED; i++)
+         if (!strcmp(status, cli_claude_mcp_status_name((cli_claude_mcp_status_t)i)))
+            return (cli_claude_mcp_status_t)i;
+   return CLI_CLAUDE_MCP_UNKNOWN;
+}
 void cli_claude_native_profile_summary(const cli_claude_host_launch_t *host, const cJSON *frame,
                                        cli_claude_profile_summary_t *summary)
 {
@@ -125,11 +151,18 @@ void cli_claude_native_profile_summary(const cli_claude_host_launch_t *host, con
    {
       summary->mcp_servers = cJSON_GetArraySize(servers);
       const cJSON *server;
-      cJSON_ArrayForEach(server, servers) if (field(server, "name") &&
-                                              !strcmp(field(server, "name"), "aimee") &&
-                                              field(server, "status") &&
-                                              !strcmp(field(server, "status"), "connected"))
-          summary->aimee_connected = 1;
+      int matches = 0;
+      cJSON_ArrayForEach(server, servers)
+      {
+         if (!field(server, "name") || strcmp(field(server, "name"), "aimee"))
+            continue;
+         matches++;
+         summary->aimee_status = native_mcp_status(field(server, "status"));
+         if (field(server, "status") && !strcmp(field(server, "status"), "connected"))
+            summary->aimee_connected = 1;
+      }
+      if (matches != 1)
+         summary->aimee_status = CLI_CLAUDE_MCP_UNKNOWN;
    }
    if (cJSON_IsArray(plugins))
       summary->plugins = cJSON_GetArraySize(plugins);

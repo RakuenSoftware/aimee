@@ -1,7 +1,7 @@
 package main
 
 // git.go: webchat git-projects proxies (webchat-git WP-F). The browser never
-// holds git credentials or absolute server paths: these handlers forward to
+// holds git credentials: these handlers forward to
 // aimee-server's first-class /v1/workspace/* routes over the token-bearing,
 // X-Aimee-Webuser-asserted channel (v1RequestWebuser, see vault.go). Credentials
 // live only in the user's sealed server vault; webchat just relays the action.
@@ -614,7 +614,26 @@ func (s *server) handleGitSessionDir(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	body, _ := json.Marshal(map[string]any{"project": req.Project, "session_id": req.SessionID})
 	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/workspace/session-dir", body)
-	s.gitRelay(w, st, data, err)
+	// The editor needs this owner-resolved path for its folder URL. Keep it
+	// specific to this route rather than widening every git relay's allowlist.
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "git: aimee-server unavailable")
+		return
+	}
+	if st != http.StatusOK {
+		writeJSONError(w, st, vaultSafeErrorMessage(data))
+		return
+	}
+	var up struct {
+		Dir string `json:"dir"`
+	}
+	if json.Unmarshal(data, &up) != nil || up.Dir == "" {
+		writeJSONError(w, http.StatusBadGateway, "git: invalid session directory reply")
+		return
+	}
+	out, _ := json.Marshal(map[string]any{"ok": true, "dir": up.Dir})
+	w.Write(out)
 }
 
 // GET /api/git/org-repos?host=&owner= — list the repos under an owner/org on a git

@@ -488,8 +488,11 @@ static int native_prepare_directory(native_execution_t *execution)
     * stable only within this admitted lease/epoch, while HOME/config/tmp stay
     * per-launch. The tool runtime retains the actual operator project cwd. */
    if (!strcmp(execution->selected.cli_kind, "claude"))
-      execution->scheduler_fd = server_native_cache_workspace_open(
-          execution->lease, execution->epoch, execution->cwd, sizeof execution->cwd);
+   {
+      if (!server_native_cache_workspace_valid(execution->lease, execution->epoch,
+                                               execution->scheduler_fd, execution->cwd))
+         return -1;
+   }
    else
    {
       if (snprintf(execution->cwd, sizeof execution->cwd, "%s/workspace", execution->home) >=
@@ -1263,8 +1266,19 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    if (!strcmp(sdk, "claude") &&
        server_native_cache_sdk_identity(execution->lease, execution->sdk_identity))
       goto refused;
+   /* Seed Claude's project-scoped configuration for the actual held SDK cwd,
+    * never for the distinct operator workspace used by host-owned tools. */
+   stage = "private SDK workspace";
+   if (!strcmp(sdk, "claude"))
+   {
+      execution->scheduler_fd = server_native_cache_workspace_open(
+          execution->lease, execution->epoch, execution->cwd, sizeof execution->cwd);
+      if (execution->scheduler_fd < 0)
+         goto refused;
+   }
    stage = "private SDK HOME";
-   if (cli_session_native_home(sdk, cwd, server_session_capture_session(execution->capture),
+   if (cli_session_native_home(sdk, !strcmp(sdk, "claude") ? execution->cwd : cwd,
+                               server_session_capture_session(execution->capture),
                                execution->effective_binding,
                                !strcmp(sdk, "claude") ? execution->sdk_identity : NULL,
                                execution->home, sizeof execution->home, &execution->home_cleanup))

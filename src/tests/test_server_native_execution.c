@@ -898,6 +898,26 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                       cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(bad_name, "tools"), 0)),
                   unexpected));
    cJSON_Delete(bad_name);
+   /* SDK status strings are untrusted. Only the closed enum can reach logs,
+    * including when a future SDK emits private diagnostic text as status. */
+   const char *statuses[] = {"pending",    "failed",
+                             "needs-auth", "disabled",
+                             "connected",  "PRIVATE_SDK_STATUS=https://secret.invalid/token"};
+   const char *safe_statuses[] = {"pending",  "failed",    "needs-auth",
+                                  "disabled", "connected", "unknown"};
+   for (unsigned i = 0; i < sizeof statuses / sizeof statuses[0]; i++)
+   {
+      cJSON *status_frame = cJSON_Duplicate(frame, 1);
+      cJSON *status_server =
+          cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(status_frame, "mcp_servers"), 0);
+      assert(cJSON_ReplaceItemInObjectCaseSensitive(status_server, "status",
+                                                    cJSON_CreateString(statuses[i])));
+      cli_claude_native_profile_summary(host, status_frame, &summary);
+      assert(!strcmp(cli_claude_mcp_status_name(summary.aimee_status), safe_statuses[i]));
+      assert(!strstr(cli_claude_mcp_status_name(summary.aimee_status), "PRIVATE_SDK_STATUS"));
+      cJSON_Delete(status_frame);
+   }
+   assert(!strcmp(cli_claude_mcp_status_name((cli_claude_mcp_status_t)-1), "unknown"));
    cli_claude_native_profile_summary(host, frame, &summary);
    assert(!strcmp(summary.missing_owned_sha256, "-") &&
           !strcmp(summary.unexpected_reported_sha256, "-"));
@@ -983,6 +1003,27 @@ int main(int argc, char **argv)
       assert(!getenv("PARENT_SECRET") && !getenv("ANTHROPIC_AUTH_TOKEN"));
       assert(getenv("ANTHROPIC_API_KEY") &&
              !strcmp(getenv("ANTHROPIC_API_KEY"), "local-capability-fixture"));
+      /* The real factory's descriptor spawn has already fchdir'd this probe.
+       * Read the exact path selected by the SDK environment, not a duplicate
+       * test-generated config or the original operator/tool workspace. */
+      char actual_cwd[4096], config_path[8192], config_bytes[16385];
+      const char *config_dir = getenv("CLAUDE_CONFIG_DIR");
+      assert(config_dir && getcwd(actual_cwd, sizeof actual_cwd));
+      assert(snprintf(config_path, sizeof config_path, "%s/.claude.json", config_dir) <
+             (int)sizeof config_path);
+      FILE *config = fopen(config_path, "r");
+      assert(config);
+      size_t count = fread(config_bytes, 1, sizeof config_bytes - 1, config);
+      assert(!ferror(config) && feof(config) && !fclose(config));
+      config_bytes[count] = 0;
+      cJSON *value = cJSON_Parse(config_bytes);
+      assert(cJSON_IsObject(value));
+      cJSON *projects = cJSON_GetObjectItemCaseSensitive(value, "projects");
+      assert(cJSON_IsObject(projects) && cJSON_GetArraySize(projects) == 1);
+      cJSON *project = cJSON_GetObjectItemCaseSensitive(projects, actual_cwd);
+      assert(project && "factory config must key trust to actual SDK getcwd");
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(project, "hasTrustDialogAccepted")));
+      cJSON_Delete(value);
       puts("native Claude gateway environment verified");
       return 0;
    }

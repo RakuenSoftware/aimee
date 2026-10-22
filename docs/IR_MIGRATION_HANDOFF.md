@@ -18,6 +18,50 @@ continue on `fix/fresh-claude-provider-setup`, requiring their own follow-up PR.
 Keep automatic review and the strict attribution gate enabled. No production
 promotion is claimed.
 
+### Current published-runtime verification: 22 October 2026
+
+PR #3060 merged as `ee9fa572e` after all 57 checks passed. The published
+application digest is `sha256:538ef1bfa7ace46d9dfed5a0580897f645e87d88fc5678fe7893ccce22cc7cfb`;
+its registry provenance binds that exact source. PR #3061 subsequently merged as
+`251536ddb`, repairing Clang CI package downloads after the Azure Ubuntu mirror
+stalled. Its postmerge CI, Audit and Attribution workflows passed. That workflow
+change did not publish a new runtime image.
+
+Fresh published-image and canonical HOST launches both encountered Claude's
+strict profile refusal: 53 expected tools, zero reported. Neither first failed
+turn was retried. A later isolated diagnostic reached the guarded model path
+with all upstream HTTPS blocked; this proves profile acceptance in that run,
+not a successful provider request or a fix for the original failure. The exact
+SDK init frame was not captured in that diagnostic. Startup timing remains under investigation; do not weaken the catalog or
+ownership gates or declare this acceptance complete. The retained imported
+credential was outside the refresh window, and the isolated trace showed no
+multi-second credential-lock wait.
+
+The native control channel now polls the SDK's supported `mcp_status` before
+sending its first user message. Only a matching successful response with the
+expected connected server releases that message; pending status stays within the
+original 60-second initialization deadline. Readiness responses remain private
+transport metadata. The later actual system/init frame still must pass the full
+catalog, cwd, authentication, permission, plugin and host-attestation checks.
+Zero-tool launches retain their existing path. A deterministic regression proves
+the old code sent user input while discovery was pending. An isolated, exact
+Claude 2.1.177 probe with seven-second MCP delay verifies pending-to-connected
+polling before user input and the full 53-tool init afterward. Its immediate-user
+control also passed that run, so this does not prove the original failure's cause.
+Twenty focused readiness cases pass normally and under ASan/UBSan/leak checks,
+including the real 60-second deadline, cancellation, stale/duplicate replies,
+malformed metadata, zero-tool launches and continued full-profile refusal after
+readiness. Two independent reviews found no guard or lifetime regression.
+
+The next repair batch preserves the editor's owner-resolved session directory
+through its dedicated web route, seeds Claude trust for its actual held SDK cwd,
+and adds allowlisted MCP status/stage timing diagnostics. The editor regression
+and full Go race suite pass. Combined headless, native-runtime and native-factory
+fixtures pass normally and under ASan/UBSan/leak checks. These changes are not
+published yet. Genuine permission Allow, cross-vendor A/B/A, final published
+restart/UI/deployment acceptance and owned-resource cleanup remain outstanding.
+Production `.100` remains untouched and KB-free.
+
 ### Current PR continuation and audit correction: 22 October 2026
 
 Continue on [PR #3060](https://github.com/RakuenSoftware/aimee/pull/3060), branch

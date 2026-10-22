@@ -683,6 +683,56 @@ typedef struct
    const cJSON *cli_request;
    int cli_manifest;
 } native_tool_work_t;
+/* Metadata diagnostics are limited to two fixed protocol methods. No request
+ * identifiers, user/model paths, tool names or SDK-supplied error text enter
+ * these logs. The correlation counter is local to this host process. */
+typedef struct
+{
+   const char *method;
+   struct timespec start;
+   unsigned long long counter;
+} native_mcp_diagnostic_t;
+static atomic_ullong native_mcp_diagnostic_counter;
+static native_mcp_diagnostic_t native_mcp_diagnostic_begin(const native_tool_work_t *work)
+{
+   native_mcp_diagnostic_t diagnostic = {0};
+   const char *method =
+       work && work->rpc
+           ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(work->rpc, "method"))
+           : NULL;
+   if (method && !strcmp(method, "initialize"))
+      diagnostic.method = "initialize";
+   else if (method && !strcmp(method, "tools/list"))
+      diagnostic.method = "tools-list";
+   if (diagnostic.method && clock_gettime(CLOCK_MONOTONIC, &diagnostic.start))
+      diagnostic.method = NULL;
+   if (diagnostic.method)
+      diagnostic.counter = atomic_fetch_add(&native_mcp_diagnostic_counter, 1) + 1;
+   return diagnostic;
+}
+typedef enum
+{
+   NATIVE_MCP_STAGE_BEGIN,
+   NATIVE_MCP_STAGE_OK,
+   NATIVE_MCP_STAGE_FAILED
+} native_mcp_stage_result_t;
+static void native_mcp_stage(const native_mcp_diagnostic_t *diagnostic, const char *stage,
+                             native_mcp_stage_result_t result)
+{
+   struct timespec now;
+   if (!diagnostic || !diagnostic->method || clock_gettime(CLOCK_MONOTONIC, &now))
+      return;
+   long long elapsed = (long long)(now.tv_sec - diagnostic->start.tv_sec) * 1000 +
+                       (now.tv_nsec - diagnostic->start.tv_nsec) / 1000000;
+   if (elapsed < 0)
+      return;
+   aimee_log(LOG_INFO, "native.claude",
+             "MCP metadata counter=%llu method=%s stage=%s elapsed_ms=%lld result=%s",
+             diagnostic->counter, diagnostic->method, stage, elapsed,
+             result == NATIVE_MCP_STAGE_BEGIN ? "begin"
+             : result == NATIVE_MCP_STAGE_OK  ? "ok"
+                                              : "failed");
+}
 
 static const server_native_tool_binding_t *
 native_tool_binding(const server_native_runtime_t *runtime, const char *space, const char *name,
@@ -864,7 +914,7 @@ static cJSON *native_mcp_error(int code, const char *message)
    return error;
 }
 static int native_mcp_dispatch(server_native_runtime_t *runtime, native_tool_work_t *work,
-                               const cli_proxy_io_t *io)
+                               const cli_proxy_io_t *io, const native_mcp_diagnostic_t *diagnostic)
 {
    const cJSON *rpc = work->rpc;
    const char *method = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(rpc, "method"));
@@ -1001,7 +1051,9 @@ static int native_mcp_dispatch(server_native_runtime_t *runtime, native_tool_wor
       cJSON_Delete(response);
       return -1;
    }
+   native_mcp_stage(diagnostic, "write", NATIVE_MCP_STAGE_BEGIN);
    int rc = native_mcp_write(io, 200, response);
+   native_mcp_stage(diagnostic, "write", rc ? NATIVE_MCP_STAGE_FAILED : NATIVE_MCP_STAGE_OK);
    cJSON_Delete(response);
    return rc;
 }
@@ -1132,17 +1184,20 @@ static int native_perform(const char *method, const char *path, const char *head
    if (!work)
       anthropic_http_capture_request_headers(NULL);
    server_native_runtime_t *runtime = context;
+   native_mcp_diagnostic_t diagnostic = native_mcp_diagnostic_begin(work);
    const char *native_path = path;
    path = native_model_path(path, runtime);
    if (!session || strcmp(session, runtime->session) || length > 4u * 1024u * 1024u ||
        (!work && !native_route(method, path, runtime)) ||
        (runtime->capture && !server_session_capture_accepting(runtime->capture)))
       return native_mcp_refused(work, path, "initial owner binding");
+   native_mcp_stage(&diagnostic, "ownership", NATIVE_MCP_STAGE_BEGIN);
    db1_server_session_t source;
    if (db1_server_session_get(runtime->session, &source) ||
        strcmp(source.principal, runtime->owner.vault_principal))
    {
       server_session_capture_fail(runtime->capture);
+      native_mcp_stage(&diagnostic, "ownership", NATIVE_MCP_STAGE_FAILED);
       return native_mcp_refused(work, path, "source session ownership");
    }
    const char *destination = server_session_capture_session(runtime->capture);
@@ -1153,8 +1208,10 @@ static int native_perform(const char *method, const char *path, const char *head
       /* A parent's transport grant does not survive deletion or reassignment
        * of the private history which this execution would disclose. */
       server_session_capture_fail(runtime->capture);
+      native_mcp_stage(&diagnostic, "ownership", NATIVE_MCP_STAGE_FAILED);
       return native_mcp_refused(work, path, "destination session ownership");
    }
+   native_mcp_stage(&diagnostic, "ownership", NATIVE_MCP_STAGE_OK);
    int model_request = !work && !strcmp(method, "POST") && (strncmp(path, "/v1/mcp/", 8) != 0);
    /* Model state requires the actual selected Vault source's stable lineage.
     * Unsupported credential sources cannot borrow a default account. */
@@ -1291,8 +1348,13 @@ static int native_perform(const char *method, const char *path, const char *head
    request_context_set(&admitted);
    server_http_identity_bind_request_owner(&admitted);
    failure_stage = "source fork";
+   native_mcp_stage(&diagnostic, "source-fork", NATIVE_MCP_STAGE_BEGIN);
    if (ingress_preinject_fork_sources(&runtime->owner))
+   {
+      native_mcp_stage(&diagnostic, "source-fork", NATIVE_MCP_STAGE_FAILED);
       goto restore;
+   }
+   native_mcp_stage(&diagnostic, "source-fork", NATIVE_MCP_STAGE_OK);
    forked_sources = runtime->owner.memory_source_release[0] != 0;
    agent_request_creds_restore(&runtime->credentials);
    agent_set_request_session(runtime->session);
@@ -1303,11 +1365,21 @@ static int native_perform(const char *method, const char *path, const char *head
       if (runtime->claude_source)
       {
          failure_stage = "Claude credential read";
+         native_mcp_stage(&diagnostic, "credential-read", NATIVE_MCP_STAGE_BEGIN);
          if (agent_claude_connection_credentials(registration, &current_claude))
+         {
+            native_mcp_stage(&diagnostic, "credential-read", NATIVE_MCP_STAGE_FAILED);
             goto restore;
+         }
+         native_mcp_stage(&diagnostic, "credential-read", NATIVE_MCP_STAGE_OK);
          failure_stage = "Claude credential lineage";
+         native_mcp_stage(&diagnostic, "lineage", NATIVE_MCP_STAGE_BEGIN);
          if (strcmp(current_claude.source_digest, runtime->lineage))
+         {
+            native_mcp_stage(&diagnostic, "lineage", NATIVE_MCP_STAGE_FAILED);
             goto restore;
+         }
+         native_mcp_stage(&diagnostic, "lineage", NATIVE_MCP_STAGE_OK);
          failure_stage = "Claude credential binding";
          if (model_request &&
              agent_set_request_claude_creds_for(&runtime->selected, &current_claude))
@@ -1376,15 +1448,17 @@ static int native_perform(const char *method, const char *path, const char *head
    if (retained_writer)
       aimee_ir_session_set_sink(server_session_capture_sink, runtime->capture);
    failure_stage = "dispatch";
+   native_mcp_stage(&diagnostic, "dispatch", NATIVE_MCP_STAGE_BEGIN);
    if (work)
       rc = work->cli   ? native_cli_dispatch(runtime, work, io)
-           : work->rpc ? native_mcp_dispatch(runtime, work, io)
+           : work->rpc ? native_mcp_dispatch(runtime, work, io, &diagnostic)
                        : native_execute_claimed(runtime, work);
    else
    {
       io->response_started(io->context);
       rc = server_http_native_forward(io->downstream_fd, method, path, input, (int)length);
    }
+   native_mcp_stage(&diagnostic, "dispatch", rc ? NATIVE_MCP_STAGE_FAILED : NATIVE_MCP_STAGE_OK);
    if (aimee_ir_session_capture_failed())
       server_session_capture_fail(runtime->capture);
    if (retained_writer)
@@ -1407,6 +1481,7 @@ static int native_perform(const char *method, const char *path, const char *head
    if (work && work->cli)
       agent_request_cancel_scope_bind(previous_cli_cancel);
 restore:
+   native_mcp_stage(&diagnostic, "finish", rc ? NATIVE_MCP_STAGE_FAILED : NATIVE_MCP_STAGE_OK);
    if (rc)
       (void)native_mcp_refused(work, path, failure_stage);
    if (!work)
