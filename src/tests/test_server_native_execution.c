@@ -771,13 +771,16 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    cJSON_AddArrayToObject(frame, "plugins");
    assert(!cli_claude_native_verify(host, frame));
    const char *bad_keys[] = {"cwd", "apiKeySource", "permissionMode", "subtype"};
+   const char *bad_reasons[] = {"workspace", "API source", "permission mode", "init frame"};
    for (unsigned i = 0; i < sizeof bad_keys / sizeof bad_keys[0]; i++)
    {
       cJSON *bad = cJSON_Duplicate(frame, 1);
       cJSON_ReplaceItemInObjectCaseSensitive(bad, bad_keys[i], cJSON_CreateString("foreign"));
       assert(cli_claude_native_verify(host, bad));
+      assert(!strcmp(cli_claude_native_profile_error(host, bad), bad_reasons[i]));
       cJSON_Delete(bad);
    }
+   const char *shape_reasons[] = {"tool count", "tool count", "plugins", "MCP connection"};
    for (int i = 0; i < 4; i++)
    {
       cJSON *bad = cJSON_Duplicate(frame, 1);
@@ -794,8 +797,19 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
              cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(bad, "mcp_servers"), 0), "status",
              cJSON_CreateString("failed"));
       assert(cli_claude_native_verify(host, bad));
+      assert(!strcmp(cli_claude_native_profile_error(host, bad), shape_reasons[i]));
       cJSON_Delete(bad);
    }
+   cJSON *bad_name = cJSON_Duplicate(frame, 1);
+   cJSON_ReplaceItemInArray(cJSON_GetObjectItemCaseSensitive(bad_name, "tools"), 0,
+                            cJSON_CreateString("unowned-value-must-not-be-logged"));
+   assert(!strcmp(cli_claude_native_profile_error(host, bad_name), "tool names"));
+   cJSON_Delete(bad_name);
+   cJSON *bad_servers = cJSON_Duplicate(frame, 1);
+   cJSON_DeleteItemFromArray(cJSON_GetObjectItemCaseSensitive(bad_servers, "mcp_servers"), 0);
+   assert(!strcmp(cli_claude_native_profile_error(host, bad_servers), "MCP server count"));
+   cJSON_Delete(bad_servers);
+   assert(!cli_claude_native_profile_error(host, frame));
    assert(!host->init(frame, host->context));
    assert(!bind("native-result", context));
    cJSON_Delete(frame);

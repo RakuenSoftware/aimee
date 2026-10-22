@@ -21,5 +21,8 @@ int cli_claude_native_spawn(const provider_cli_cfg_t *cfg, int *input, int *outp
  * scoped resume resources normalized out before hashing. */
 int cli_claude_native_launch_digest(const provider_cli_cfg_t *cfg, char digest[65]);
 /* Pure readback of the actual SDK's initialization before host model release. */
+/* Static allowlisted reason only; never returns SDK-supplied values. NULL means valid. */
+const char *cli_claude_native_profile_error(const cli_claude_host_launch_t *host,
+                                            const struct cJSON *frame);
 int cli_claude_native_verify(const cli_claude_host_launch_t *host, const struct cJSON *frame);
 #endif

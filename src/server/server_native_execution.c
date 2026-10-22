@@ -1321,12 +1321,20 @@ static int native_claude_init(const cJSON *frame, void *context)
    const char *id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(frame, "session_id"));
    const char *resume = server_native_cache_resume(execution->cache);
    char proof[65];
-   if (!id || !id[0] || strlen(id) >= sizeof execution->native_id ||
-       (resume && resume[0] && strcmp(resume, id)) ||
-       cli_claude_native_launch_digest(&execution->launching, proof) ||
-       strcmp(proof, execution->claude_digest))
-      return -1;
-   return server_native_runtime_attest_launch(execution->runtime, proof);
+   const char *reason = NULL;
+   if (!id || !id[0] || strlen(id) >= sizeof execution->native_id)
+      reason = "session identity";
+   else if (resume && resume[0] && strcmp(resume, id))
+      reason = "resume identity";
+   else if (cli_claude_native_launch_digest(&execution->launching, proof))
+      reason = "launch digest computation";
+   else if (strcmp(proof, execution->claude_digest))
+      reason = "launch digest mismatch";
+   else if (server_native_runtime_attest_launch(execution->runtime, proof))
+      reason = "runtime attestation";
+   if (reason)
+      aimee_log(LOG_ERROR, "native.claude", "initialization refused: %s", reason);
+   return reason ? -1 : 0;
 }
 static int native_claude_execute(native_execution_t *execution, const provider_cli_cfg_t *cfg,
                                  agent_result_t *out)

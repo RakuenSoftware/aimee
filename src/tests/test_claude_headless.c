@@ -1,4 +1,5 @@
 #include "claude_headless.h"
+#include "cli_claude_native.h"
 #include "agent_exec.h"
 #include "platform_test_util.h"
 #include "server_session_control.h"
@@ -271,6 +272,49 @@ static void interactive_script(const char *path)
    fputs("sys.stdin.read()\n", f);
    assert(!fclose(f) && !chmod(path, 0700));
 }
+static int init_calls, init_refused;
+static int profile_init(const cJSON *frame, void *context)
+{
+   (void)frame;
+   (void)context;
+   init_calls++;
+   return init_refused;
+}
+static void profile_refusals(const char *path, const provider_cli_cfg_t *cfg)
+{
+   const char *init =
+       "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"native-one\","
+       "\"cwd\":\"/approved\",\"apiKeySource\":\"ANTHROPIC_API_KEY\","
+       "\"permissionMode\":\"default\",\"tools\":[],\"mcp_servers\":[],\"plugins\":[]}";
+   aimee_request_t catalog = {0};
+   cli_claude_host_launch_t host = {.cwd = "/approved", .catalog = &catalog};
+   provider_cli_cfg_t owned = *cfg;
+   owned.claude_host = &host;
+   const char *expected[] = {"missing host callback", "host callback", "duplicate initialization",
+                             "workspace"};
+   for (int i = 0; i < 4; i++)
+   {
+      char body[4096];
+      snprintf(body, sizeof body, "printf '%%s\\n' '%s'\n", init);
+      if (i == 2)
+         snprintf(body, sizeof body, "printf '%%s\\n' '%s' '%s'\n", init, init);
+      script(path, body);
+      host.init = i == 0 ? NULL : profile_init;
+      host.cwd = i == 3 ? "/different" : "/approved";
+      init_calls = 0;
+      init_refused = i == 1;
+      agent_result_t out;
+      aimee_ir_session_set_sink(capture, NULL);
+      events = 0;
+      assert(claude_headless_run(&owned, NULL, NULL, &out) < 0 && !out.success);
+      char error[256];
+      snprintf(error, sizeof error, "Claude native launch profile was refused (%s)", expected[i]);
+      assert(!strcmp(out.error, error));
+      assert(init_calls == (i == 1 || i == 2));
+      assert(events == 0);
+   }
+   init_refused = 0;
+}
 int main(void)
 {
    char path[4096];
@@ -360,6 +404,7 @@ int main(void)
    assert(claude_headless_run(&cfg, NULL, NULL, &out) == AGENT_RC_CAPTURE_FAILED);
    assert(!out.success && !out.response);
    strict_frames(path, &cfg);
+   profile_refusals(path, &cfg);
    aimee_ir_session_set_sink(NULL, NULL);
    unlink(path);
    puts("Claude headless lifecycle and strict byte-frame tests passed");

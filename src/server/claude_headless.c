@@ -283,13 +283,18 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                   if (!strcmp(frame_type->valuestring, "system") && subtype &&
                       !strcmp(subtype, "init"))
                   {
-                     if (profile_seen || cli_claude_native_verify(cfg->claude_host, frame) ||
-                         !cfg->claude_host->init ||
-                         cfg->claude_host->init(frame, cfg->claude_host->context))
+                     const char *reason =
+                         profile_seen ? "duplicate initialization"
+                                      : cli_claude_native_profile_error(cfg->claude_host, frame);
+                     if (!reason && !cfg->claude_host->init)
+                        reason = "missing host callback";
+                     if (!reason && cfg->claude_host->init(frame, cfg->claude_host->context))
+                        reason = "host callback";
+                     if (reason)
                      {
                         cJSON_Delete(frame);
                         snprintf(out->error, sizeof out->error,
-                                 "Claude native launch profile was refused");
+                                 "Claude native launch profile was refused (%s)", reason);
                         goto capture_stop;
                      }
                      profile_seen = 1;

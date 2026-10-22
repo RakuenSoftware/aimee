@@ -1117,6 +1117,13 @@ done:
    return rc;
 }
 
+/* Only fixed stage names reach logs; request/profile/credential values never do. */
+static int native_mcp_refused(const native_tool_work_t *work, const char *path, const char *stage)
+{
+   if (work && work->rpc && path && !strcmp(path, "/v1/mcp/call"))
+      aimee_log(LOG_ERROR, "native.claude", "MCP request refused: %s", stage);
+   return -1;
+}
 static int native_perform(const char *method, const char *path, const char *headers,
                           const void *body, unsigned long length, const char *session,
                           const cli_proxy_io_t *io, void *context, native_tool_work_t *work)
@@ -1130,13 +1137,13 @@ static int native_perform(const char *method, const char *path, const char *head
    if (!session || strcmp(session, runtime->session) || length > 4u * 1024u * 1024u ||
        (!work && !native_route(method, path, runtime)) ||
        (runtime->capture && !server_session_capture_accepting(runtime->capture)))
-      return -1;
+      return native_mcp_refused(work, path, "initial owner binding");
    db1_server_session_t source;
    if (db1_server_session_get(runtime->session, &source) ||
        strcmp(source.principal, runtime->owner.vault_principal))
    {
       server_session_capture_fail(runtime->capture);
-      return -1;
+      return native_mcp_refused(work, path, "source session ownership");
    }
    const char *destination = server_session_capture_session(runtime->capture);
    if (destination && strcmp(destination, runtime->session) &&
@@ -1146,7 +1153,7 @@ static int native_perform(const char *method, const char *path, const char *head
       /* A parent's transport grant does not survive deletion or reassignment
        * of the private history which this execution would disclose. */
       server_session_capture_fail(runtime->capture);
-      return -1;
+      return native_mcp_refused(work, path, "destination session ownership");
    }
    int model_request = !work && !strcmp(method, "POST") && (strncmp(path, "/v1/mcp/", 8) != 0);
    /* Model state requires the actual selected Vault source's stable lineage.
@@ -1171,7 +1178,7 @@ static int native_perform(const char *method, const char *path, const char *head
    }
    char *input = malloc((size_t)length + 1);
    if (!input)
-      return -1;
+      return native_mcp_refused(work, path, "request allocation");
    if (length)
       memcpy(input, body, (size_t)length);
    input[length] = 0;
@@ -1210,7 +1217,7 @@ static int native_perform(const char *method, const char *path, const char *head
    if (runtime->mirror && !workspace_turn_mirror_valid(runtime->mirror, runtime->cwd))
    {
       free(input);
-      return -1;
+      return native_mcp_refused(work, path, "workspace mirror");
    }
    /* These host leases outlive the child and this listener. Workers receive
     * owned permission/source copies and borrowed stable resource providers. */
@@ -1221,7 +1228,7 @@ static int native_perform(const char *method, const char *path, const char *head
       agent_source_authority_snapshot_destroy(&previous_source);
       agent_source_authority_snapshot_destroy(&bound_source);
       free(input);
-      return -1;
+      return native_mcp_refused(work, path, "source snapshot");
    }
    int request_locked =
        model_request && runtime->owns_request && strcmp(path, "/v1/messages/count_tokens");
@@ -1270,6 +1277,7 @@ static int native_perform(const char *method, const char *path, const char *head
    agent_api_credentials_t current_api = {0};
    agent_claude_credentials_t current_claude = {0};
    int forked_sources = 0;
+   const char *failure_stage = "request owner nonce";
    request_context_t admitted = runtime->owner;
    unsigned char request_nonce[16];
    if (platform_random_bytes(request_nonce, sizeof request_nonce))
@@ -1282,6 +1290,7 @@ static int native_perform(const char *method, const char *path, const char *head
    admitted.idempotency_key[0] = 0;
    request_context_set(&admitted);
    server_http_identity_bind_request_owner(&admitted);
+   failure_stage = "source fork";
    if (ingress_preinject_fork_sources(&runtime->owner))
       goto restore;
    forked_sources = runtime->owner.memory_source_release[0] != 0;
@@ -1293,14 +1302,20 @@ static int native_perform(const char *method, const char *path, const char *head
                                                                    : runtime->selected.name;
       if (runtime->claude_source)
       {
-         if (agent_claude_connection_credentials(registration, &current_claude) ||
-             strcmp(current_claude.source_digest, runtime->lineage) ||
-             (model_request &&
-              agent_set_request_claude_creds_for(&runtime->selected, &current_claude)))
+         failure_stage = "Claude credential read";
+         if (agent_claude_connection_credentials(registration, &current_claude))
+            goto restore;
+         failure_stage = "Claude credential lineage";
+         if (strcmp(current_claude.source_digest, runtime->lineage))
+            goto restore;
+         failure_stage = "Claude credential binding";
+         if (model_request &&
+             agent_set_request_claude_creds_for(&runtime->selected, &current_claude))
             goto restore;
       }
       else if (runtime->api_key_source)
       {
+         failure_stage = "API credential binding";
          if (agent_api_connection_credentials(&runtime->selected, &current_api) ||
              strcmp(current_api.source_digest, runtime->lineage) ||
              (model_request &&
@@ -1309,6 +1324,7 @@ static int native_perform(const char *method, const char *path, const char *head
       }
       else
       {
+         failure_stage = "Codex credential binding";
          if (agent_codex_connection_credentials(registration, &current) ||
              strcmp(current.source_digest, runtime->lineage))
             goto restore;
@@ -1331,6 +1347,7 @@ static int native_perform(const char *method, const char *path, const char *head
    atomic_int *previous_cancel = agent_get_request_cancel();
    native_cancellation_t watch = {.io = io, .cli = work ? work->cli : NULL};
    pthread_t monitor;
+   failure_stage = "cancellation monitor";
    if (pthread_create(&monitor, NULL, native_cancel_watch, &watch))
       goto restore;
    agent_set_request_cancel(&watch.cancelled);
@@ -1358,6 +1375,7 @@ static int native_perform(const char *method, const char *path, const char *head
    int retained_writer = work && !pthread_equal(runtime->producer, pthread_self());
    if (retained_writer)
       aimee_ir_session_set_sink(server_session_capture_sink, runtime->capture);
+   failure_stage = "dispatch";
    if (work)
       rc = work->cli   ? native_cli_dispatch(runtime, work, io)
            : work->rpc ? native_mcp_dispatch(runtime, work, io)
@@ -1389,6 +1407,8 @@ static int native_perform(const char *method, const char *path, const char *head
    if (work && work->cli)
       agent_request_cancel_scope_bind(previous_cli_cancel);
 restore:
+   if (rc)
+      (void)native_mcp_refused(work, path, failure_stage);
    if (!work)
       anthropic_http_capture_request_headers(NULL);
    if (forked_sources)

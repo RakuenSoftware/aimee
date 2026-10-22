@@ -14,44 +14,56 @@ static const char *field(const cJSON *value, const char *key)
 {
    return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, key));
 }
-int cli_claude_native_verify(const cli_claude_host_launch_t *host, const cJSON *frame)
+const char *cli_claude_native_profile_error(const cli_claude_host_launch_t *host,
+                                            const cJSON *frame)
 {
-   if (!host || !host->catalog || !field(frame, "type") || strcmp(field(frame, "type"), "system") ||
-       !field(frame, "subtype") || strcmp(field(frame, "subtype"), "init") ||
-       !field(frame, "cwd") || strcmp(field(frame, "cwd"), host->cwd) ||
-       !field(frame, "apiKeySource") || strcmp(field(frame, "apiKeySource"), "ANTHROPIC_API_KEY") ||
-       !field(frame, "permissionMode") || strcmp(field(frame, "permissionMode"), "default"))
-      return -1;
+   if (!host || !host->catalog)
+      return "host catalog";
+   if (!field(frame, "type") || strcmp(field(frame, "type"), "system") ||
+       !field(frame, "subtype") || strcmp(field(frame, "subtype"), "init"))
+      return "init frame";
+   if (!field(frame, "cwd") || strcmp(field(frame, "cwd"), host->cwd))
+      return "workspace";
+   if (!field(frame, "apiKeySource") || strcmp(field(frame, "apiKeySource"), "ANTHROPIC_API_KEY"))
+      return "API source";
+   if (!field(frame, "permissionMode") || strcmp(field(frame, "permissionMode"), "default"))
+      return "permission mode";
    const cJSON *tools = cJSON_GetObjectItemCaseSensitive(frame, "tools");
    const cJSON *servers = cJSON_GetObjectItemCaseSensitive(frame, "mcp_servers");
    const cJSON *plugins = cJSON_GetObjectItemCaseSensitive(frame, "plugins");
-   if (!cJSON_IsArray(tools) || cJSON_GetArraySize(tools) != host->catalog->n_tools ||
-       !cJSON_IsArray(servers) || cJSON_GetArraySize(servers) != (host->catalog->n_tools ? 1 : 0) ||
-       !cJSON_IsArray(plugins) || cJSON_GetArraySize(plugins))
-      return -1;
+   if (!cJSON_IsArray(tools) || cJSON_GetArraySize(tools) != host->catalog->n_tools)
+      return "tool count";
+   if (!cJSON_IsArray(servers) || cJSON_GetArraySize(servers) != (host->catalog->n_tools ? 1 : 0))
+      return "MCP server count";
+   if (!cJSON_IsArray(plugins) || cJSON_GetArraySize(plugins))
+      return "plugins";
    const cJSON *name;
    cJSON_ArrayForEach(name, tools)
    {
       if (!cJSON_IsString(name))
-         return -1;
+         return "tool names";
       int matches = 0;
       for (int i = 0; i < host->catalog->n_tools; i++)
          matches += !strcmp(host->catalog->tools[i].name, name->valuestring);
       if (matches != 1)
-         return -1;
+         return "tool names";
       const cJSON *other;
       for (other = tools->child; other != name; other = other->next)
          if (cJSON_IsString(other) && !strcmp(other->valuestring, name->valuestring))
-            return -1;
+            return "tool names";
    }
    if (host->catalog->n_tools)
    {
       const cJSON *server = cJSON_GetArrayItem(servers, 0);
       if (!field(server, "name") || strcmp(field(server, "name"), "aimee") ||
           !field(server, "status") || strcmp(field(server, "status"), "connected"))
-         return -1;
+         return "MCP connection";
    }
-   return 0;
+   return NULL;
+}
+int cli_claude_native_verify(const cli_claude_host_launch_t *host, const cJSON *frame)
+{
+   return cli_claude_native_profile_error(host, frame) ? -1 : 0;
 }
 static char **native_arguments(const provider_cli_cfg_t *cfg)
 {
