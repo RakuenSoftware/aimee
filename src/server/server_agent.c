@@ -282,7 +282,8 @@ int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * record). Backs the Web GUI's per-agent Edit modal. Args are CLI-style:
  *   set <name> [--model M] [--endpoint E] [--provider P] [--cost-tier N]
  *       [--max-turns N] [--max-parallel N] [--context-window N] [--tools on|off]
- *       [--roles csv] [--personas csv] [--enabled true|false] [--key K]
+ *       [--inject-respond-tool on|off] [--roles csv] [--personas csv]
+ *       [--enabled true|false] [--key K]
  *       [--default] [--delegate-default]
  * A flag that is absent leaves that field untouched. */
 int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

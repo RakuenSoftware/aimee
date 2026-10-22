@@ -6,6 +6,37 @@ stop/handoff request below is superseded.
 
 ## Current continuation status: live `.252` acceptance follow-up
 
+### Active work and delivery constraint: 22 October 2026
+
+Continue implementation and validation on `fix/native-mcp-startup-and-editor`.
+The user's current instruction is one eventual PR for the remaining migration,
+with no intermediate PRs or merges. An open PR is not a prerequisite for any
+implementation or local/live validation. Earlier follow-up-PR instructions below
+are historical. Do not investigate or change `.100`; validation uses the owned
+`.252` environment.
+
+The full `78f3f85af` candidate passes 169 local integration checks and all eight
+actual SDK wire/auth profiles, with 27 explicit optional-service/Docker skips;
+these skips do not qualify configured Docker grading. All 76 lint gates pass.
+Its full Docker build and canonical HOST build were independently qualified.
+Normal upgrades preserve canonical histories and native cache bytes. The HOST
+upgrade's old core required systemd's existing 90-second stop timeout; this was
+not a graceful-stop pass.
+
+Live catalog selection now returns offered Codex models. A model-only save
+reproduced an unrelated change to `inject_respond_tool`; the current repair
+preserves this independent policy when the resubmitted tools flag is unchanged.
+The public `aimee agent set NAME --inject-respond-tool on|off` option supports
+explicit policy changes and overrides simultaneous tools-toggle coupling.
+Invalid values fail without saving. This allows restoration through the normal
+authenticated route while retaining the registered model and its evidence.
+A separate model-editor repair names the actual dialog from its visible title.
+The latter passes 468 frontend tests, type checking and both builds; provider
+save/reload regressions and the provider race suite pass. These two repairs are
+not yet deployed. Genuine single-permission Allow with a verified effect,
+cross-vendor continuation, current configured Docker grading/reuse, final
+published-image acceptance and owned-resource cleanup remain outstanding.
+
 [PR #3052](https://github.com/RakuenSoftware/aimee/pull/3052) merged into `testing`
 as `aa8c774edcc324f5defb6c5cea592f0e1dd5314d`. Its final premerge checks and
 all 54 postmerge main CI jobs passed, including every configured deployment

@@ -731,6 +731,16 @@ static void test_agent_set_route_and_marshaling(void)
    assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(args, 0)), "qwen38") == 0);
    assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(args, 1)), "--delegate-default") == 0);
    cJSON_Delete(req);
+
+   char *policy[] = {"set", "account:model", "--tools", "on", "--inject-respond-tool", "off"};
+   assert(cli_v1_lookup("agent", 6, policy, &route));
+   assert(strcmp(route.method, "model.set") == 0);
+   req = marshal_request(route.method, 5, policy + 1);
+   args = cJSON_GetObjectItemCaseSensitive(req, "args");
+   assert(cJSON_IsArray(args) && cJSON_GetArraySize(args) == 5);
+   for (int i = 0; i < 5; i++)
+      assert(strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(args, i)), policy[i + 1]) == 0);
+   cJSON_Delete(req);
 }
 
 static void test_catalog_routes_and_marshaling(void)

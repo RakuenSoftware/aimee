@@ -1,6 +1,7 @@
 /* Models: model selection, limits, prices, and routing configuration. */
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { Panel, Badge, Spinner, Modal, InlineStatus, EmptyState, KeyValue, Button } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, Spinner, InlineStatus, EmptyState, KeyValue, Button } from "@rakuensoftware/smoothgui";
+import Modal from "../components/TitledModal";
 import PrimaryChooser from "../setup/PrimaryChooser";
 import AddProviderModel from "../providers/AddProviderModel";
 

@@ -2742,7 +2742,8 @@ paths:
       responses: { "200": { description: Agent personas updated, content: { application/json: { schema: { type: object } } } } }
   /model/set:
     post:
-      summary: Surgically patch only the provided fields of an existing agent (model, endpoint, provider, cost_tier, max_turns, max_parallel, context_window, tools, roles, personas, enabled, key)
+      summary: Surgically patch only the provided fields of an existing agent (model, endpoint, provider, cost_tier, max_turns, max_parallel, context_window, tools, inject-respond-tool, roles, personas, enabled, key)
+      description: CLI-style args accept --inject-respond-tool on|off to explicitly set respond-tool injection independently of tools. This explicit value overrides coupling from a simultaneous --tools toggle. Without it, unchanged tools preserves the existing injection policy; an actual tools toggle retains legacy coupling.
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Updated agent record, content: { application/json: { schema: { type: object } } } } }
   /model/probe:

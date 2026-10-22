@@ -520,6 +520,19 @@ func (m *Manager) modelCommand(ctx context.Context, req Request, root object) (o
 			}
 		}
 	default:
+		var injectRespond *bool
+		if raw, ok := opts["inject-respond-tool"]; ok {
+			var value bool
+			switch raw {
+			case "on", "true", "1":
+				value = true
+			case "off", "false", "0":
+				value = false
+			default:
+				return nil, errors.New("inject-respond-tool must be on or off")
+			}
+			injectRespond = &value
+		}
 		if v, ok := opts["model"]; ok && v != str(model, "model") {
 			delete(model, "competence")
 		}
@@ -558,11 +571,17 @@ func (m *Manager) modelCommand(ctx context.Context, req Request, root object) (o
 		}
 		for option, field := range map[string]string{"tools": "tools_enabled", "enabled": "enabled", "primary-only": "primary_only"} {
 			if v, ok := opts[option]; ok {
-				model[field] = v == "on" || v == "true" || v == "1"
-				if option == "tools" {
-					model["inject_respond_tool"] = model[field]
+				value := v == "on" || v == "true" || v == "1"
+				// Full-dialog saves resend tools; preserve the independent respond
+				// policy unless the operator actually changes tool availability.
+				if option == "tools" && value != boolean(model, field, true) {
+					model["inject_respond_tool"] = value
 				}
+				model[field] = value
 			}
+		}
+		if injectRespond != nil {
+			model["inject_respond_tool"] = *injectRespond
 		}
 		for _, field := range []string{"roles", "personas", "exec-roles"} {
 			if v, ok := opts[field]; ok {
