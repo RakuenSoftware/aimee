@@ -1,4 +1,4 @@
-#include <aimee/translation/harness_ir.h>
+#include "../modules/translation/harness_ir.c" /* Exercise private canonical compatibility accumulation. */
 #include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>
@@ -426,6 +426,49 @@ static void native_compactions(void)
    aimee_harness_ir_free(&state);
 }
 
+static int decode_refusal(const cJSON *frame, aimee_harness_ir_t *state)
+{
+   (void)frame;
+   (void)state;
+   aimee_refusal_details_t details = {.category = "future_category", .explanation = NULL};
+   aimee_delta_t deltas[] = {
+       {.type = AIMEE_DELTA_TURN_START},
+       {.type = AIMEE_DELTA_BLOCK_START, .block_id = 0, .kind = AIMEE_BLK_TEXT},
+       {.type = AIMEE_DELTA_BLOCK_DELTA,
+        .block_id = 0,
+        .kind = AIMEE_BLK_TEXT,
+        .text_delta = "Declined"},
+       {.type = AIMEE_DELTA_BLOCK_STOP, .block_id = 0},
+       {.type = AIMEE_DELTA_TURN_STOP,
+        .stop_reason = AIMEE_STOP_CONTENT_FILTER,
+        .raw_stop_reason = "refusal",
+        .refusal = &details}};
+   for (size_t i = 0; i < sizeof deltas / sizeof *deltas; i++)
+   {
+      aimee_session_event_t event = {.kind = AIMEE_SESSION_DELTA,
+                                     .role = "assistant",
+                                     .message_id = "refused",
+                                     .delta = &deltas[i]};
+      if (aimee_ir_session_emit(&event))
+         return -1;
+   }
+   return 0;
+}
+static void refusal_owned_result(void)
+{
+   next_execution();
+   aimee_harness_ir_t state = {0};
+   aimee_response_t result = {0};
+   assert(!harness_output_decode(NULL, &state, decode_refusal));
+   assert(!aimee_harness_ir_response(&state, &result));
+   assert(result.refusal && !strcmp(result.refusal->category, "future_category") &&
+          !result.refusal->explanation);
+   aimee_harness_ir_free(&state);
+   assert(!strcmp(result.refusal->category, "future_category"));
+   aimee_response_free(&result);
+   next_execution();
+}
+
 static void owned_results(void)
 {
    next_execution();
@@ -623,6 +666,7 @@ int main(void)
    control_outputs();
    events = cJSON_CreateArray();
    aimee_ir_session_set_sink(capture, NULL);
+   refusal_owned_result();
    owned_results();
    cJSON_Delete(events);
    events = cJSON_CreateArray();

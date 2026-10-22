@@ -54,6 +54,15 @@ cJSON *aimee_ir_response_json(const aimee_response_t *response)
        optional_string(json, "raw_stop_reason", copy.raw_stop_reason) ||
        add_copy(json, "raw", copy.raw))
       goto fail;
+   if (copy.refusal)
+   {
+      cJSON *details = aimee_refusal_details_json(copy.refusal);
+      if (!details || !cJSON_AddItemToObject(json, "refusal", details))
+      {
+         cJSON_Delete(details);
+         goto fail;
+      }
+   }
    long values[] = {copy.usage_in, copy.usage_out, copy.usage_cache_read, copy.usage_cache_write,
                     copy.usage_reasoning};
    for (size_t i = 0; i < sizeof values / sizeof *values; i++)
@@ -104,9 +113,9 @@ int aimee_ir_response_parse(const cJSON *json, aimee_response_t *out)
 {
    if (!out || !cJSON_IsObject(json) || !aimee_ir_json_unique(json))
       return -1;
-   static const char *const fields[] = {"schema",          "role", "blocks", "usage",
-                                        "stop_reason",     "id",   "model",  "error_message",
-                                        "raw_stop_reason", "raw"};
+   static const char *const fields[] = {"schema",          "role",    "blocks", "usage",
+                                        "stop_reason",     "id",      "model",  "error_message",
+                                        "raw_stop_reason", "refusal", "raw"};
    const cJSON *field;
    cJSON_ArrayForEach(field, json)
    {
@@ -164,6 +173,9 @@ int aimee_ir_response_parse(const cJSON *json, aimee_response_t *out)
    if (read_optional(json, "id", &result.id) || read_optional(json, "model", &result.model) ||
        read_optional(json, "error_message", &result.error_message) ||
        read_optional(json, "raw_stop_reason", &result.raw_stop_reason))
+      goto fail;
+   if (aimee_refusal_details_parse(cJSON_GetObjectItemCaseSensitive(json, "refusal"),
+                                   &result.refusal))
       goto fail;
    const cJSON *raw = cJSON_GetObjectItemCaseSensitive(json, "raw");
    if (raw && !(result.raw = cJSON_Duplicate(raw, 1)))

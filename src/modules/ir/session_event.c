@@ -709,6 +709,10 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
         (delta->usage_in < 0 || delta->usage_out < 0 || delta->usage_cache_read < 0 ||
          delta->usage_cache_write < 0 || delta->usage_reasoning < 0)))
       return NULL;
+   if (delta->refusal &&
+       (delta->type != AIMEE_DELTA_TURN_STOP || delta->stop_reason != AIMEE_STOP_CONTENT_FILTER ||
+        !aimee_refusal_details_valid(delta->refusal)))
+      return NULL;
    if (delta->message_group &&
        (delta->message_group < 1 || delta->message_group > AIMEE_IR_MAX_BLOCKS ||
         delta->type != AIMEE_DELTA_BLOCK_START || delta->kind != AIMEE_BLK_TEXT))
@@ -773,6 +777,15 @@ cJSON *aimee_ir_delta_json(const aimee_delta_t *delta)
    if (delta->type == AIMEE_DELTA_TURN_STOP)
    {
       ok = ok && add_string(out, "raw_stop_reason", delta->raw_stop_reason);
+      if (delta->refusal)
+      {
+         cJSON *details = aimee_refusal_details_json(delta->refusal);
+         if (!details || !cJSON_AddItemToObject(out, "refusal", details))
+         {
+            cJSON_Delete(details);
+            ok = 0;
+         }
+      }
       if (delta->usage_cache_read)
          ok = ok &&
               cJSON_AddNumberToObject(out, "usage_cache_read", delta->usage_cache_read) != NULL;
@@ -1224,6 +1237,7 @@ int aimee_ir_session_emit_buffered_response(const aimee_response_t *response,
    delta = (aimee_delta_t){.type = AIMEE_DELTA_TURN_STOP,
                            .stop_reason = response->stop_reason,
                            .raw_stop_reason = response->raw_stop_reason,
+                           .refusal = response->refusal,
                            .usage_in = response->usage_in,
                            .usage_out = response->usage_out,
                            .usage_cache_read = response->usage_cache_read,

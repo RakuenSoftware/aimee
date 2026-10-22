@@ -32,8 +32,53 @@ static const char *OPENAI =
     "\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},"
     "\"required\":[\"path\"]}}}]}";
 
+static int refusal_emits;
+static void refusal_chat(void *context, const char *json)
+{
+   (void)context;
+   (void)json;
+   refusal_emits++;
+}
+static void refusal_sse(void *context, const char *event, const char *json)
+{
+   (void)context;
+   (void)event;
+   (void)json;
+   refusal_emits++;
+}
+static void unrepresentable_refusal(void)
+{
+   aimee_refusal_details_t details = {.category = "future_category",
+                                      .explanation = "Diagnostic only"};
+   aimee_response_t response = {.role = "assistant",
+                                .stop_reason = AIMEE_STOP_CONTENT_FILTER,
+                                .raw_stop_reason = "refusal",
+                                .refusal = &details};
+   char buffer[4096];
+   assert(!openai_frontend_render(&response));
+   assert(!responses_frontend_render(&response));
+   assert(aimee_openai_buffered_response(&response, "r", "model", 1, 0, buffer, sizeof(buffer)) <
+          0);
+   assert(aimee_openai_buffered_response(&response, "r", "model", 1, 1, buffer, sizeof(buffer)) <
+          0);
+   assert(aimee_openai_emit_chat_response(&response, "r", "model", 1, refusal_chat, NULL) < 0);
+   assert(aimee_openai_emit_responses_tail(&response, "r", "model", 1, refusal_sse, NULL) < 0);
+   assert(!refusal_emits && response.refusal == &details);
+   assert(!strcmp(response.refusal->category, "future_category"));
+   assert(!strcmp(response.refusal->explanation, "Diagnostic only"));
+   details.category = details.explanation = NULL;
+   assert(!openai_frontend_render(&response) && !responses_frontend_render(&response));
+   response.refusal = NULL;
+   cJSON *chat = openai_frontend_render(&response),
+         *responses = responses_frontend_render(&response);
+   assert(chat && responses); /* Legacy content_filter without details remains representable. */
+   cJSON_Delete(chat);
+   cJSON_Delete(responses);
+}
+
 int main(void)
 {
+   unrepresentable_refusal();
    printf("aimee-frontend: ");
    char err[128];
 

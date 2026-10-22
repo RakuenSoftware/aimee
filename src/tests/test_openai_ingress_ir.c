@@ -296,6 +296,25 @@ static void test_canonical_response_cache_round_trip(void)
    free(bad);
    cJSON_Delete(invalid);
    free(encoded);
+   response.stop_reason = AIMEE_STOP_CONTENT_FILTER;
+   free(response.raw_stop_reason);
+   response.raw_stop_reason = strdup("refusal");
+   aimee_refusal_details_t details = {.category = "future_category", .explanation = NULL};
+   response.refusal = aimee_refusal_details_clone(&details);
+   assert(response.refusal);
+   encoded = openai_ir_cache_encode(&response, &first);
+   assert(encoded && !openai_ir_cache_decode(encoded, &restored, &replay));
+   assert(restored.refusal && !strcmp(restored.refusal->category, "future_category") &&
+          !restored.refusal->explanation);
+   aimee_response_free(&restored);
+   cJSON *refused = cJSON_Parse(encoded);
+   cJSON_AddStringToObject(cJSON_GetObjectItemCaseSensitive(refused, "refusal"),
+                           "fallback_credit_token", "never retained");
+   char *malformed = cJSON_PrintUnformatted(refused);
+   assert(openai_ir_cache_decode(malformed, &restored, &replay) < 0 && !restored.refusal);
+   free(malformed);
+   cJSON_Delete(refused);
+   free(encoded);
    aimee_response_free(&response);
 }
 

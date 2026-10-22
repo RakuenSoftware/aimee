@@ -712,7 +712,7 @@ struct server_native_replay
    char actor[VAULT_PRINCIPAL_MAX], session[128];
 };
 static atomic_int owned_profile_probe, snapshot_generation, tool_source_probe, postpolicy_gap,
-    flat_bound_probe, preframe_error_probe;
+    flat_bound_probe, preframe_error_probe, buffered_refusal_probe;
 #include "support/native_sdk_metadata_fixture.h"
 static cJSON *source_rows;
 server_native_replay_t *server_native_replay_open(const char *session, const char *actor,
@@ -948,6 +948,21 @@ static void probe_replay_scope(const char *path)
          }
       }
       aimee_request_free(&request);
+      if (atomic_load(&buffered_refusal_probe))
+      {
+         /* Real buffered ingress emits MESSAGE then terminal metadata without
+          * a streamed builder. The retained result must own the terminal data. */
+         aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "Declined"};
+         aimee_refusal_details_t details = {.category = "future_category", .explanation = NULL};
+         aimee_response_t response = {.role = "assistant",
+                                      .content = &block,
+                                      .n_content = 1,
+                                      .stop_reason = AIMEE_STOP_CONTENT_FILTER,
+                                      .raw_stop_reason = "refusal",
+                                      .refusal = &details};
+         assert(!aimee_ir_session_emit_buffered_response(&response, "native-refusal"));
+         return;
+      }
       if (atomic_load(&preframe_error_probe))
       {
          /* Actual ingress emits this host diagnostic when transport fails
@@ -1487,6 +1502,54 @@ static void test_native_preframe_error(const agent_t *selected, const request_co
    atomic_store(&owned_profile_probe, 0);
    atomic_store(&snapshot_generation, 0);
    atomic_store(&preframe_error_probe, 0);
+   cJSON_Delete(captured_rows);
+   captured_rows = NULL;
+}
+
+static void test_native_buffered_refusal(const agent_t *selected, const request_context_t *owner)
+{
+   owner_tools(1);
+   aimee_tool_t function = {.name = "read_file"};
+   aimee_tool_t space = {
+       .kind = AIMEE_TOOL_NAMESPACE, .name = "aimee", .children = &function, .n_children = 1};
+   aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
+   aimee_request_t profile = {.model = "selected-model",
+                              .frontend = AIMEE_WIRE_ANTHROPIC,
+                              .tools = &space,
+                              .n_tools = 1,
+                              .system = &system,
+                              .n_system = 1,
+                              .prompt_cache_key = "",
+                              .mutated = 1};
+   server_session_capture_t *capture =
+       server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+   assert(capture && !server_session_capture_bind(capture));
+   server_native_runtime_t *runtime =
+       server_native_runtime_open_request(selected, owner, "session-a", &profile);
+   assert(runtime && server_session_capture_bind(NULL) == capture);
+   atomic_store(&expected_capture, capture);
+   captured_rows = cJSON_CreateArray();
+   atomic_store(&owned_profile_probe, 1);
+   atomic_store(&snapshot_generation, 1);
+   atomic_store(&buffered_refusal_probe, 1);
+   aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
+   assert(!server_session_capture_append(capture, &started, NULL, NULL));
+   char response[1024];
+   request(runtime, "/v1/messages", server_native_runtime_token(runtime), response);
+   assert(!server_session_capture_failed(capture));
+   server_native_runtime_quiesce(runtime);
+   aimee_response_t original = {0};
+   assert(!server_native_runtime_result(runtime, &original));
+   assert(original.stop_reason == AIMEE_STOP_CONTENT_FILTER && original.refusal);
+   assert(!strcmp(original.refusal->category, "future_category") && !original.refusal->explanation);
+   assert(!strcmp(original.raw_stop_reason, "refusal"));
+   aimee_response_free(&original);
+   server_native_runtime_close(runtime);
+   server_session_capture_close(capture);
+   atomic_store(&expected_capture, NULL);
+   atomic_store(&owned_profile_probe, 0);
+   atomic_store(&snapshot_generation, 0);
+   atomic_store(&buffered_refusal_probe, 0);
    cJSON_Delete(captured_rows);
    captured_rows = NULL;
 }
@@ -2542,6 +2605,7 @@ int main(void)
    atomic_store(&source_changed, 0);
    test_retained_capture(&selected, &a);
    test_native_preframe_error(&selected, &a);
+   test_native_buffered_refusal(&selected, &a);
    test_native_original_catalog(&selected, &a);
    test_native_supervised_execution(&selected, &a);
    test_native_large_mcp_catalog(&selected, &a);

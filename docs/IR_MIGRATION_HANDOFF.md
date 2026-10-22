@@ -21,11 +21,12 @@ interoperability gates. The five editor regressions, all 473 frontend tests,
 type checking and both frontend builds pass; the frontend inputs are unchanged
 since that qualification. These are local results, not fresh GitHub CI.
 
-The previous runtime `10d0a87ac` passed configured Docker integration (170/170)
-and T3 deployment (7/7 topology gates, 692/692 family assertions). Its integration
-retained 25 explicitly unconfigured KB/runtime-web checks; Docker grading,
-recovery and scoped reuse actually ran. New exact-source integration and T3
-fixtures for `2623e00a0` are prepared and remain separate qualifications.
+Exact runtime `2623e00a0` also passes configured Docker integration (170/170)
+and T3 deployment (7/7 topology gates, 692/692 family assertions). Integration
+retains 25 explicitly unconfigured KB/runtime-web checks; real Docker grading,
+recovery and scoped reuse ran. These fixtures and their temporary database roles,
+containers, volumes and networks are cleaned up. Their private evidence is retained.
+These results qualify that runtime, not the subsequent refusal-fidelity changes.
 
 Full canonical Docker and HOST builds and normal upgrades of `2623e00a0` pass.
 The normal three-service Docker restart preserves all 54 canonical events,
@@ -55,10 +56,31 @@ and unchanged cache prefix, but failed at canonical event 54. Its retained
 207-byte text exactly matches SDK 2.1.177's locally constructed refusal diagnostic.
 Actual stdout and numeric HTTP status were not retained; upstream origin and root
 cause remain unestablished. Do not retry that turn, reset its cache, import the
-SDK transcript or describe the original A/B/A as passing. A separate, newly
-created benign two-turn native resume control is being qualified; it cannot
-establish the cause of the original failure. Local Claude controls succeeded;
-account comparability is unproved.
+SDK transcript or describe the original A/B/A as passing. A separate new native A/A control passed both turns using the same real SDK UUID,
+cwd and exact cache prefix. Its desktop/tablet/phone replay checks passed without
+idle lifecycle or mutation requests. The following supported HTTP B continuation
+also passed with correct recall. Returning to that same native A then failed at
+event 33 with canonical raw stop reason `refusal`, zero output tokens and the same
+SDK-generated diagnostic. All 33 events and the full 7,048-byte cache are retained;
+the original failed 54-event conversation remains unchanged. Neither failed turn
+is retried. There is no retained numeric provider HTTP status for either failure.
+
+Offline inspection of the actual SDK requests and canonical history did not find
+an established request-structure defect: non-message SDK request fields matched,
+and the production canonical projector emitted the expected alternating history.
+Do not import SDK transcripts, reset cache identity, invent a provider HTTP error,
+or claim the cross-vendor acceptance passes.
+
+The current repair preserves bounded refusal category/explanation
+through canonical responses, stream deltas, snapshots, durable events and browser
+replay. Only diagnostic fields are projected; provider fallback tokens and model
+recommendations are excluded. Refusals cannot trigger completion-policy tool
+continuations. Unsupported wire projections fail explicitly rather than dropping
+these details. Focused normal/sanitizer and frontend/race regressions pass, including the
+compatibility accumulator, native buffered result and response cache consumers.
+Combined exact-source qualification and a real-SDK local provider refusal fixture
+are in progress. This repairs demonstrated diagnostic and
+continuation defects; it does not establish the cause of the live provider refusal.
 
 The editor now resolves hydrated display basenames through the owner's registry
 before requesting the session worktree, and shows a refusal instead of silently

@@ -179,7 +179,12 @@ export default function IRTranscript({ state, onReply, ancestors = [], controlsR
           return url ? <a key={key} href={url} target="_blank" rel="noreferrer">Document ({b.media_type})</a> : <pre key={key}>{b.media_ref}</pre>;
         }
       }
-    })])}
+    }), ...(m.role === 'assistant' && (m.stopReason === 'content_filter' || m.nativeStopReason === 'refusal') ? [<details key={`${m.id}:refusal`} className="ir-provider-refusal">
+      <summary>Provider refusal</summary>
+      <p>The provider declined to complete this response.</p>
+      {m.refusal?.category !== null && m.refusal?.category !== undefined && <p style={{ overflowWrap: 'anywhere' }}>Category: <span>{m.refusal.category}</span></p>}
+      {m.refusal?.explanation !== null && m.refusal?.explanation !== undefined && <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{m.refusal.explanation}</p>}
+    </details>] : [])])}
     {pendingControls.map(([id, control]) => <ControlCard key={`${state.session}:${id}`} id={id} control={control} onReply={onReply} replyPending={pendingReplies?.has(id)} />)}
     {resolvedControls.length > 0 && <details className="ir-resolved-controls">
       <summary>Resolved requests ({resolvedControls.length})</summary>

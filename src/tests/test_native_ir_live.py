@@ -148,6 +148,9 @@ def main():
     async_case = False
     browser_question = False
     browser_delegate_question = False
+    refusal_case = False
+    refusal_details = dict(type="refusal", category="future_fixture_category",
+                           explanation="Synthetic provider decline for fidelity validation.")
     delegation_case = False
     delegation_released = threading.Event()
     child_requests = []
@@ -220,6 +223,31 @@ def main():
                 if auth == "claude-oauth":
                     assert self.headers.get("x-api-key") is None
                     assert "oauth" in self.headers.get("anthropic-beta", "")
+                if refusal_case:
+                    assert kind == "claude" and wire == "anthropic" and count == 1
+                    payload = dict(id="msg_native_refusal", type="message", role="assistant",
+                                   model=marker, content=[], stop_reason="refusal",
+                                   stop_details={**refusal_details,
+                                       "fallback_credit_token": "DO_NOT_PERSIST_REFUSAL_CREDIT",
+                                       "recommended_model": "DO_NOT_SELECT_THIS_MODEL"},
+                                   usage=dict(input_tokens=100, output_tokens=0))
+                    if request.get("stream"):
+                        frames = [("message_start", dict(type="message_start", message={
+                            **payload, "stop_reason": None, "stop_details": None})),
+                            ("message_delta", dict(type="message_delta", delta=dict(
+                                stop_reason="refusal", stop_details=payload["stop_details"]),
+                                usage=dict(output_tokens=0))),
+                            ("message_stop", dict(type="message_stop"))]
+                        data = "".join("event: " + name + "\ndata: " + json.dumps(value) + "\n\n"
+                                       for name, value in frames).encode()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/event-stream")
+                        self.send_header("Content-Length", str(len(data)))
+                        self.end_headers()
+                        self.wfile.write(data)
+                    else:
+                        self.send_payload(payload)
+                    return
                 tool_call = count == 1 or (delegation_case and count == 2)
                 if delegation_case and count == 2:
                     call_id += "_status"
@@ -469,6 +497,74 @@ def main():
             assert "canonical delegate fixture" in encoded and "iVBORw0KGgo" in encoded
             assert "Continue the server-owned canonical turn." not in encoded
             print("native integration:", kind, wire, auth, "typed seeded run, real tool, original response and durable source pass", flush=True)
+        # A refusal is a normal provider response, not an invented HTTP error.
+        # Exercise the real SDK and durable owner without a live provider or retry.
+        refusal_case = True
+        async_case = False
+        marker = case_name("claude", "anthropic", "api_key")
+        active = ("claude", "anthropic", marker, "unused_refusal_tool")
+        count = 0
+        sid = api("/v1/sessions/create", dict(client_type="native-ir-refusal-integration"))["session_id"]
+        sdk_root = home / "browser-claude" / sid
+        sdk_before = {path: path.read_bytes() for path in sdk_root.rglob("*.jsonl")}
+        attachment = api(f"/v1/sessions/{sid}/attach", dict(surface="webchat", owner=actor))["attach_id"]
+        api(f"/v1/sessions/{sid}/primary", dict(agent=marker))
+        try:
+            raw = api("/v1/chat/stream", dict(attach_id=attachment, message=marker + "_FIRST",
+                aimee_session_id=sid, cwd=str(workspace), ir_version=1))
+            records = [json.loads(line) for line in raw.splitlines() if line.strip()]
+            assert count == 1 and not errors, (count, errors)
+            events = [record["event"] for record in records]
+            executions = [event["payload"]["status"] for event in events if event["kind"] == "execution"]
+            assert executions == ["running", "failed"], executions
+            stops = [event["payload"] for event in events
+                     if event["kind"] == "delta" and event["payload"]["type"] == "TURN_STOP"]
+            expected = dict(category=refusal_details["category"], explanation=refusal_details["explanation"])
+            assert len(stops) == 1 and stops[0]["stop_reason"] == "content_filter", stops
+            assert stops[0]["raw_stop_reason"] == "refusal" and stops[0]["refusal"] == expected, stops
+            assert not any(event["kind"] in ("native_checkpoint", "control_request", "control_response")
+                           for event in events), events
+            for event in events:
+                if event["kind"] == "message" and event["payload"]["role"] == "assistant":
+                    assert not event["payload"]["blocks"], "SDK diagnostic became model content"
+                if event["kind"] == "delta" and event["role"] == "assistant":
+                    assert event["payload"].get("kind") != "tool_use"
+                    assert not event["payload"].get("text_delta"), "SDK diagnostic became model text"
+            assert "DO_NOT_PERSIST_REFUSAL_CREDIT" not in raw and "DO_NOT_SELECT_THIS_MODEL" not in raw
+            connection = Local("localhost")
+            try:
+                connection.request("GET", f"/v1/sessions/{sid}/events?format=ir&cursor=0")
+                response = connection.getresponse()
+                assert response.status == 200
+                replayed = []
+                target = int(records[-1]["sequence"])
+                while not replayed or int(replayed[-1]["sequence"]) < target:
+                    line = response.readline().decode()
+                    assert line, (sid, target)
+                    if line.startswith("data: "):
+                        replayed.append(json.loads(line[6:]))
+                assert replayed == records, "Refusal metadata changed between live delivery and durable replay"
+            finally:
+                connection.close()
+            diagnostics = []
+            for path in sdk_root.rglob("*.jsonl"):
+                data = path.read_bytes()
+                if data == sdk_before.get(path, b""):
+                    continue
+                assert b"DO_NOT_PERSIST_REFUSAL_CREDIT" not in data and b"DO_NOT_SELECT_THIS_MODEL" not in data
+                for line in data.splitlines():
+                    record = json.loads(line)
+                    message = record.get("message")
+                    if (record.get("type") == "assistant" and isinstance(message, dict)
+                            and message.get("role") == "assistant" and message.get("stop_reason") == "refusal"):
+                        diagnostics.append(message.get("stop_details"))
+            assert diagnostics == [refusal_details], diagnostics
+            print("native integration: Claude actual SDK refusal retains typed category/explanation, "
+                  "durable replay and one-request/no-retry boundary pass", flush=True)
+        finally:
+            api(f"/v1/sessions/{sid}/detach", dict(attach_id=attachment))
+            refusal_case = False
+
         # The model calls the real orchestration tool without supplying cwd.
         # The child must retain the approved mirror after its parent SDK closes.
         delegation_case = True

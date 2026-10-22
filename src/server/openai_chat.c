@@ -1075,6 +1075,10 @@ static int openai_post_ir(const agent_t *agent, aimee_request_t *request, aimee_
 static char *openai_ir_cache_encode(const aimee_response_t *response,
                                     const openai_ir_cache_t *cache)
 {
+   if (response->refusal &&
+       (response->error_message || response->stop_reason != AIMEE_STOP_CONTENT_FILTER ||
+        !aimee_refusal_details_valid(response->refusal)))
+      return NULL;
    aimee_message_t message = {.role = response->role ? response->role : "assistant",
                               .blocks = response->content,
                               .n_blocks = response->n_content};
@@ -1101,6 +1105,15 @@ static char *openai_ir_cache_encode(const aimee_response_t *response,
       ok = ok && cJSON_AddStringToObject(root, "model", response->model);
    if (response->raw_stop_reason)
       ok = ok && cJSON_AddStringToObject(root, "raw_stop_reason", response->raw_stop_reason);
+   if (response->refusal)
+   {
+      cJSON *details = aimee_refusal_details_json(response->refusal);
+      if (!details || !cJSON_AddItemToObject(root, "refusal", details))
+      {
+         cJSON_Delete(details);
+         ok = 0;
+      }
+   }
    char *encoded = ok ? cJSON_PrintUnformatted(root) : NULL;
    cJSON_Delete(root);
    return encoded;
@@ -1114,8 +1127,8 @@ static int openai_ir_cache_decode(const char *encoded, aimee_response_t *respons
    const char *stop = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "stop_reason"));
    aimee_message_t message = {0};
    long created;
-   if (!schema || strcmp(schema, "aimee.response-cache.ir.v1") || !id || !id[0] ||
-       strlen(id) >= sizeof cache->client_id || !stop ||
+   if (!aimee_ir_json_unique(root) || !schema || strcmp(schema, "aimee.response-cache.ir.v1") ||
+       !id || !id[0] || strlen(id) >= sizeof cache->client_id || !stop ||
        aimee_ir_read_usage(root, "created", &created) ||
        aimee_ir_message_parse(cJSON_GetObjectItemCaseSensitive(root, "message"), &message))
       goto invalid;
@@ -1133,7 +1146,9 @@ static int openai_ir_cache_decode(const char *encoded, aimee_response_t *respons
       if (field && (!cJSON_IsString(field) || !(*destinations[i] = strdup(field->valuestring))))
          goto invalid;
    }
-   if (aimee_ir_read_usage(root, "usage_in", &response->usage_in) ||
+   if (aimee_refusal_details_parse(cJSON_GetObjectItemCaseSensitive(root, "refusal"),
+                                   &response->refusal) ||
+       aimee_ir_read_usage(root, "usage_in", &response->usage_in) ||
        aimee_ir_read_usage(root, "usage_out", &response->usage_out) ||
        aimee_ir_read_usage(root, "usage_cache_read", &response->usage_cache_read) ||
        aimee_ir_read_usage(root, "usage_cache_write", &response->usage_cache_write) ||
@@ -1391,6 +1406,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    aimee_delta_t terminal = {.type = AIMEE_DELTA_TURN_STOP,
                              .stop_reason = response.stop_reason,
                              .raw_stop_reason = response.raw_stop_reason,
+                             .refusal = response.refusal,
                              .usage_in = response.usage_in,
                              .usage_out = response.usage_out,
                              .usage_cache_read = response.usage_cache_read,

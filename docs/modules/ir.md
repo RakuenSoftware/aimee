@@ -88,7 +88,19 @@ provider arrays cross an explicit migration adapter before execution; mixed or u
 fails admission rather than becoming an empty response.
 
 Buffered responses publish `TURN_START`, a complete message, and `TURN_STOP`, retaining canonical
-stop reasons and input/output, cache-read/write and reasoning usage. Provider failures publish
+stop reasons and input/output, cache-read/write and reasoning usage. A `TURN_STOP` may also
+carry optional `refusal` diagnostics: either null (no details), or an exact object with
+`category` and `explanation`, each a string or null. Non-null details require canonical
+`content_filter`; the native stop spelling remains independently preserved. Category is bounded
+to 64 UTF-8 bytes and explanation to 4096; NUL, duplicate/unknown fields and malformed values
+are rejected. Unknown categories are retained as inert diagnostics. These fields never become
+model messages, tool instructions, permissions or automatic retry actions. Go durable admission
+and browser live/replay projection retain the same contract. The browser exposes them as escaped,
+read-only provider-refusal details even when the assistant has no content blocks. Chat Completions
+and Responses wire projections cannot represent these structured diagnostics and explicitly refuse
+non-null details, including an object whose two fields are null. The canonical response remains
+unchanged; legacy `content_filter` responses without details retain their existing rendering.
+No explanation is invented as model text. Provider failures publish
 `ERROR` with a typed error message. Streamed harness snapshots use the existing native stream's
 lifecycle and do not manufacture another turn. Canonical message decoding preserves opaque tool
 IDs, signatures, encrypted/redacted reasoning, media references and context metadata. MIME type

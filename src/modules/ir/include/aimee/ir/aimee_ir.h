@@ -330,6 +330,23 @@ typedef enum
    AIMEE_STOP_ERROR
 } aimee_stop_reason_t;
 
+/* Optional terminal diagnostics, never message content or execution authority.
+ * NULL fields are meaningful; unknown categories remain bounded inert data. */
+#define AIMEE_REFUSAL_CATEGORY_MAX    64u
+#define AIMEE_REFUSAL_EXPLANATION_MAX 4096u
+typedef struct
+{
+   char *category;
+   char *explanation;
+} aimee_refusal_details_t;
+int aimee_refusal_details_valid(const aimee_refusal_details_t *details);
+aimee_refusal_details_t *aimee_refusal_details_clone(const aimee_refusal_details_t *details);
+void aimee_refusal_details_free(aimee_refusal_details_t *details);
+/* Neutral JSON uses exactly nullable category/explanation. NULL represents no
+ * details. Decode replaces initialized owned storage only after validation. */
+struct cJSON *aimee_refusal_details_json(const aimee_refusal_details_t *details);
+int aimee_refusal_details_parse(const struct cJSON *json, aimee_refusal_details_t **out);
+
 typedef struct aimee_response
 {
    char *id;
@@ -345,7 +362,8 @@ typedef struct aimee_response
    long usage_cache_read;
    long usage_cache_write;
    long usage_reasoning;
-   struct cJSON *raw; /* sidecar */
+   struct cJSON *raw;                /* sidecar */
+   aimee_refusal_details_t *refusal; /* owned terminal diagnostic; NULL when absent */
 } aimee_response_t;
 
 /* ---- streaming: a SEPARATE IR surface (event stream, not one object) ----
@@ -391,7 +409,8 @@ typedef struct
    const char *raw_stop_reason;     /* native terminal spelling, borrowed */
    long usage_in, usage_out;        /* TURN_STOP */
    long usage_cache_read, usage_cache_write, usage_reasoning;
-   const char *error_message; /* ERROR */
+   const char *error_message;              /* ERROR */
+   const aimee_refusal_details_t *refusal; /* TURN_STOP diagnostic, borrowed */
 } aimee_delta_t;
 
 /* Bounded owned model-delta assembly for canonical persistence/replay. This

@@ -307,8 +307,42 @@ static void test_verification_proofs(void)
    cJSON_Delete(proofs);
 }
 
+static void test_refusal_terminal_json(void)
+{
+   aimee_refusal_details_t details = {.category = "future_category", .explanation = NULL};
+   aimee_delta_t delta = {.type = AIMEE_DELTA_TURN_STOP,
+                          .stop_reason = AIMEE_STOP_CONTENT_FILTER,
+                          .raw_stop_reason = "refusal",
+                          .refusal = &details};
+   cJSON *json = aimee_ir_delta_json(&delta);
+   assert(json);
+   cJSON *refusal = cJSON_GetObjectItemCaseSensitive(json, "refusal");
+   assert(cJSON_IsObject(refusal) && cJSON_GetArraySize(refusal) == 2);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(refusal, "category")),
+                  "future_category"));
+   assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(refusal, "explanation")));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "raw_stop_reason")),
+                  "refusal"));
+   cJSON_Delete(json);
+   details.category = NULL;
+   json = aimee_ir_delta_json(&delta);
+   assert(json && cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(
+                      cJSON_GetObjectItemCaseSensitive(json, "refusal"), "category")));
+   cJSON_Delete(json);
+   delta.type = AIMEE_DELTA_TURN_START;
+   assert(!aimee_ir_delta_json(&delta));
+   delta.type = AIMEE_DELTA_TURN_STOP;
+   delta.stop_reason = AIMEE_STOP_END_TURN;
+   assert(!aimee_ir_delta_json(&delta));
+   delta.refusal = NULL;
+   json = aimee_ir_delta_json(&delta);
+   assert(json && !cJSON_HasObjectItem(json, "refusal"));
+   cJSON_Delete(json);
+}
+
 int main(void)
 {
+   test_refusal_terminal_json();
    test_verification_proofs();
    test_response_snapshot();
    test_owned_delta_assembly();

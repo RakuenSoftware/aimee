@@ -5,6 +5,7 @@
 #include <aimee/translation/aimee_frontend.h>
 
 #include "cJSON.h"
+#include "anthropic_refusal.h"
 #include "aimee_sha256.h"
 #include <stdint.h>
 #include <ctype.h>
@@ -1071,14 +1072,21 @@ int anthropic_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
 {
    if (out)
       memset(out, 0, sizeof *out);
-   if (!resp || !cJSON_IsObject(resp) || !out)
+   if (!resp || !cJSON_IsObject(resp) || !out || !aimee_ir_json_unique(resp))
    {
       if (err && errn)
          snprintf(err, errn, "anthropic_backend_parse: null/non-object response");
       return -1;
    }
-   out->raw = cJSON_Duplicate(resp, 1);
    const cJSON *failure = cJSON_GetObjectItemCaseSensitive(resp, "error");
+   const cJSON *stop_details = cJSON_GetObjectItemCaseSensitive(resp, "stop_details");
+   if (failure && !cJSON_IsNull(failure) && stop_details && !cJSON_IsNull(stop_details))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid stop details on provider error");
+      return -1;
+   }
+   out->raw = cJSON_Duplicate(resp, 1);
    if (failure && !cJSON_IsNull(failure))
    {
       const char *message =
@@ -1097,6 +1105,29 @@ int anthropic_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
    out->role = dupstr(ostr(resp, "role"));
    const char *sr = ostr(resp, "stop_reason");
    out->raw_stop_reason = dupstr(sr);
+   aimee_refusal_details_t refusal = {0};
+   int has_refusal = 0;
+   if (anthropic_refusal_read(cJSON_GetObjectItemCaseSensitive(resp, "stop_details"), sr, &refusal,
+                              &has_refusal))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid provider stop details");
+      aimee_response_free(out);
+      return -1;
+   }
+   if (has_refusal)
+   {
+      out->refusal = aimee_refusal_details_clone(&refusal);
+      cJSON *safe = anthropic_refusal_json(&refusal);
+      if (!out->refusal || !safe ||
+          !cJSON_ReplaceItemInObjectCaseSensitive(out->raw, "stop_details", safe))
+      {
+         cJSON_Delete(safe);
+         aimee_response_free(out);
+         return -1;
+      }
+   }
+
    out->stop_reason = aimee_stop_reason_parse(sr); /* end_turn/tool_use/max_tokens/stop_sequence */
 
    const cJSON *content = cJSON_GetObjectItemCaseSensitive((cJSON *)resp, "content");

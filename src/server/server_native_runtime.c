@@ -284,6 +284,7 @@ static int native_original_result(native_model_capture_t *capture,
    {
       view.stop_reason = event->delta->stop_reason;
       view.raw_stop_reason = (char *)event->delta->raw_stop_reason;
+      view.refusal = (aimee_refusal_details_t *)event->delta->refusal;
       view.usage_in = event->delta->usage_in;
       view.usage_out = event->delta->usage_out;
       view.usage_cache_read = event->delta->usage_cache_read;

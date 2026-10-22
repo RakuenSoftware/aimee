@@ -16,9 +16,11 @@
 #include <aimee/ir/session_event.h>
 
 #include "support/rescue_fixture_provider.h"
+#include "support/refusal_details_fixture.h"
 
 int main(void)
 {
+   test_refusal_snapshot_codec();
    printf("agent-ir-parse:\n");
    delegate_register_rescue_provider(rescue_fixture_provider);
 

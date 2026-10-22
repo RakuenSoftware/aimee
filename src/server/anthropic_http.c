@@ -251,6 +251,8 @@ static int messages_decode_response(const char *frame, const delegate_driver_t *
 
 static const char *messages_stop_reason(const aimee_response_t *response)
 {
+   if (response->stop_reason == AIMEE_STOP_CONTENT_FILTER)
+      return "refusal";
    return response->stop_reason == AIMEE_STOP_UNKNOWN && response->raw_stop_reason
               ? response->raw_stop_reason
               : aimee_stop_reason_name(response->stop_reason);
@@ -283,6 +285,10 @@ static int messages_emit_json(server_http_sse_event_emit emit, void *context, co
 static int messages_emit_response(const aimee_response_t *response, const char *id,
                                   const char *model, server_http_sse_event_emit emit, void *context)
 {
+   if (response->refusal &&
+       (response->stop_reason != AIMEE_STOP_CONTENT_FILTER || response->error_message ||
+        !aimee_refusal_details_valid(response->refusal)))
+      return -1;
    anthropic_stream_state_t state = {0};
    aimee_delta_t delta = {.type = AIMEE_DELTA_TURN_START,
                           .usage_in = response->usage_in,
@@ -359,6 +365,17 @@ static int messages_emit_response(const aimee_response_t *response, const char *
    {
       cJSON_Delete(last);
       return -1;
+   }
+   if (response->refusal)
+   {
+      cJSON *details = aimee_refusal_details_json(response->refusal);
+      if (!cJSON_IsObject(details) || !cJSON_AddStringToObject(details, "type", "refusal") ||
+          !cJSON_AddItemToObject(stop, "stop_details", details))
+      {
+         cJSON_Delete(details);
+         cJSON_Delete(last);
+         return -1;
+      }
    }
    if (messages_emit_json(emit, context, "message_delta", last))
       return -1;

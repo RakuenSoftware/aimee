@@ -158,8 +158,45 @@ static void test_shell_edit_and_instruction_surface(void)
    aimee_request_free(&policy);
 }
 
+static void test_provider_refusal_cannot_trigger_completion(void)
+{
+   for (int details = 1; details >= 0; details--)
+   {
+      aimee_request_t policy = request(edit_history, "Bash", empty_schema);
+      aimee_response_t out = response("The same issue was left unchanged.");
+      out.stop_reason = AIMEE_STOP_CONTENT_FILTER;
+      out.raw_stop_reason = strdup("refusal");
+      assert(out.raw_stop_reason && gw_ir_response_completion_armed(&policy));
+      if (details)
+      {
+         out.refusal = calloc(1, sizeof *out.refusal);
+         assert(out.refusal);
+         out.refusal->category = strdup("future_category");
+         out.refusal->explanation = strdup("Diagnostic only");
+         assert(out.refusal->category && out.refusal->explanation);
+      }
+      assert(!aimee_ir_response_admit(&out));
+      aimee_block_t *content = out.content;
+      aimee_refusal_details_t *refusal = out.refusal;
+      char *raw = out.raw_stop_reason;
+      assert(!gw_ir_response_run_completion(&out, &policy));
+      assert(out.n_content == 2 && out.content == content && !aimee_ir_response_has_tool_use(&out));
+      assert(out.stop_reason == AIMEE_STOP_CONTENT_FILTER && out.raw_stop_reason == raw);
+      assert(!strcmp(out.raw_stop_reason, "refusal"));
+      assert(!strcmp(out.content[1].text, "The same issue was left unchanged."));
+      assert(!strcmp(out.content[0].thinking_signature, "signed"));
+      assert(out.refusal == refusal && !aimee_ir_response_admit(&out));
+      if (details)
+         assert(!strcmp(out.refusal->category, "future_category") &&
+                !strcmp(out.refusal->explanation, "Diagnostic only"));
+      aimee_response_free(&out);
+      aimee_request_free(&policy);
+   }
+}
+
 int main(void)
 {
+   test_provider_refusal_cannot_trigger_completion();
    test_intervention_retains_reasoning_and_bounds_retry();
    test_no_unrelated_or_evidence_intervention();
    test_shell_edit_and_instruction_surface();

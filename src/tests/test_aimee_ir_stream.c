@@ -271,6 +271,161 @@ int main(void)
       A_DONE();
    }
 
+   /* Native Anthropic refusals have the same canonical meaning as content
+    * filtering, while their original stop spelling must survive the wire relay.
+    * Future provider stops still retain the unknown classification. */
+   for (int refused = 0; refused < 2; refused++)
+   {
+      anthropic_backend_stream_state_t st;
+      anthropic_backend_stream_state_init(&st);
+      aimee_delta_t d[4];
+      cJSON *p;
+      int n;
+      A_FEED("message_start", "{\"message\":{\"role\":\"assistant\"}}");
+      assert(n == 1);
+      A_DONE();
+      const char *reason = refused ? "refusal" : "future_stop";
+      char terminal[160];
+      snprintf(terminal, sizeof terminal,
+               "{\"delta\":{\"stop_reason\":\"%s\"},\"usage\":{\"output_tokens\":0}}", reason);
+      A_FEED("message_delta", terminal);
+      assert(n == 0);
+      A_DONE();
+      A_FEED("message_stop", "{}");
+      assert(n == 1 && d[0].type == AIMEE_DELTA_TURN_STOP);
+      assert(d[0].stop_reason == (refused ? AIMEE_STOP_CONTENT_FILTER : AIMEE_STOP_UNKNOWN));
+      assert(!strcmp(d[0].raw_stop_reason, reason));
+      anthropic_stream_state_t rendered = {0};
+      char *wire = anthropic_delta_render(&d[0], &rendered, "msg_refusal", "claude");
+      assert(wire);
+      char expected[80];
+      snprintf(expected, sizeof expected, "\"stop_reason\":\"%s\"", reason);
+      assert(strstr(wire, expected));
+      free(wire);
+      A_DONE();
+   }
+
+   /* Refusal details outlive the message_delta JSON and remain diagnostic
+    * through canonical assembly and native rendering. Nullable and empty hints
+    * are distinct; unrelated provider fallback hints are never copied. */
+   for (int hints = 0; hints < 3; hints++)
+   {
+      anthropic_backend_stream_state_t st;
+      anthropic_backend_stream_state_init(&st);
+      aimee_delta_t d[4];
+      cJSON *p;
+      int n;
+      A_FEED("message_start", "{\"message\":{\"role\":\"assistant\"}}");
+      assert(n == 1);
+      A_DONE();
+      const char *details[] = {"{\"type\":\"refusal\",\"category\":null,\"explanation\":null}",
+                               "{\"type\":\"refusal\",\"category\":\"future_category\","
+                               "\"explanation\":\"Declined <untrusted> "
+                               "text.\",\"fallback_credit_token\":\"PRIVATE_HINT\"}",
+                               "{\"type\":\"refusal\",\"category\":\"\",\"explanation\":\"\"}"};
+      char terminal[512];
+      snprintf(terminal, sizeof terminal,
+               "{\"delta\":{\"stop_reason\":\"refusal\",\"stop_details\":%s},"
+               "\"usage\":{\"output_tokens\":0}}",
+               details[hints]);
+      A_FEED("message_delta", terminal);
+      assert(n == 0);
+      A_DONE(); /* The following pointers must not borrow this deleted JSON. */
+      A_FEED("message_stop", "{}");
+      assert(n == 1 && d[0].stop_reason == AIMEE_STOP_CONTENT_FILTER && d[0].refusal);
+      if (!hints)
+         assert(!d[0].refusal->category && !d[0].refusal->explanation);
+      else
+      {
+         assert(!strcmp(d[0].refusal->category, hints == 1 ? "future_category" : ""));
+         assert(!strcmp(d[0].refusal->explanation, hints == 1 ? "Declined <untrusted> text." : ""));
+      }
+      anthropic_stream_state_t rendered = {0};
+      char *wire = anthropic_delta_render(&d[0], &rendered, "msg_refusal", "claude");
+      assert(wire && strstr(wire, "\"stop_reason\":\"refusal\"") &&
+             strstr(wire, "\"stop_details\":{\"type\":\"refusal\""));
+      assert(!strstr(wire, "PRIVATE_HINT") && !strstr(wire, "fallback_credit_token"));
+      free(wire);
+      A_DONE();
+   }
+
+   const char *invalid_details[] = {
+       "{\"type\":\"future_type\"}", "{\"type\":\"refusal\",\"category\":[]}",
+       "{\"type\":\"refusal\",\"explanation\":true}",
+       "{\"type\":\"refusal\",\"category\":null,\"category\":\"cyber\"}"};
+   for (size_t i = 0; i < sizeof invalid_details / sizeof invalid_details[0]; i++)
+   {
+      anthropic_backend_stream_state_t st;
+      anthropic_backend_stream_state_init(&st);
+      aimee_delta_t d[4];
+      cJSON *p;
+      int n;
+      A_FEED("message_start", "{\"message\":{\"role\":\"assistant\"}}");
+      assert(n == 1);
+      A_DONE();
+      char terminal[512];
+      snprintf(terminal, sizeof terminal,
+               "{\"delta\":{\"stop_reason\":\"refusal\",\"stop_details\":%s}}", invalid_details[i]);
+      A_FEED("message_delta", terminal);
+      assert(n == -1);
+      A_DONE();
+   }
+
+   for (int oversized = 0; oversized < 3; oversized++)
+   {
+      anthropic_backend_stream_state_t st;
+      anthropic_backend_stream_state_init(&st);
+      aimee_delta_t d[4];
+      cJSON *p;
+      int n;
+      A_FEED("message_start", "{\"message\":{\"role\":\"assistant\"}}");
+      assert(n == 1);
+      A_DONE();
+      char category[66], explanation[4098];
+      memset(category, 'c', 64 + (oversized == 1));
+      category[64 + (oversized == 1)] = 0;
+      memset(explanation, 'e', 4096 + (oversized == 2));
+      explanation[4096 + (oversized == 2)] = 0;
+      cJSON *terminal = cJSON_CreateObject(), *delta = cJSON_AddObjectToObject(terminal, "delta");
+      cJSON_AddStringToObject(delta, "stop_reason", "refusal");
+      cJSON *details = cJSON_AddObjectToObject(delta, "stop_details");
+      cJSON_AddStringToObject(details, "type", "refusal");
+      cJSON_AddStringToObject(details, "category", category);
+      cJSON_AddStringToObject(details, "explanation", explanation);
+      char *encoded = cJSON_PrintUnformatted(terminal);
+      A_FEED("message_delta", encoded);
+      assert(n == (oversized ? -1 : 0));
+      A_DONE();
+      free(encoded);
+      cJSON_Delete(terminal);
+      if (!oversized)
+      {
+         A_FEED("message_stop", "{}");
+         assert(n == 1 && d[0].refusal && strlen(d[0].refusal->category) == 64 &&
+                strlen(d[0].refusal->explanation) == 4096);
+         A_DONE();
+      }
+   }
+
+   /* A canonical content filter must remain a refusal even without native hints. */
+   {
+      aimee_delta_t d = {.type = AIMEE_DELTA_TURN_STOP, .stop_reason = AIMEE_STOP_CONTENT_FILTER};
+      anthropic_stream_state_t st = {0};
+      char *wire = anthropic_delta_render(&d, &st, "msg_refusal", "claude");
+      assert(wire && strstr(wire, "\"stop_reason\":\"refusal\""));
+      free(wire);
+      aimee_refusal_details_t details = {.category = "future_category"};
+      d.refusal = &details;
+      d.stop_reason = AIMEE_STOP_END_TURN;
+      assert(!anthropic_delta_render(&d, &st, "msg_refusal", "claude"));
+      d.type = AIMEE_DELTA_TURN_START;
+      d.stop_reason = AIMEE_STOP_CONTENT_FILTER;
+      assert(!anthropic_delta_render(&d, &st, "msg_refusal", "claude"));
+      g_emit_acc[0] = 0;
+      assert(anthropic_delta_emit(&d, &st, "msg_refusal", "claude", emit_collect, NULL) < 0);
+      assert(!g_emit_acc[0]);
+   }
+
    /* --- Anthropic backend rejects malformed KNOWN events ---------------------- */
    {
       anthropic_backend_stream_state_t st;

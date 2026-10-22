@@ -228,6 +228,7 @@ int aimee_harness_ir_response(const aimee_harness_ir_t *state, aimee_response_t 
       view.id = entry->id;
       view.stop_reason = response->stop_reason;
       view.raw_stop_reason = response->raw_stop_reason;
+      view.refusal = response->refusal;
       view.usage_in = response->usage_in;
       view.usage_out = response->usage_out;
       view.usage_cache_read = response->usage_cache_read;

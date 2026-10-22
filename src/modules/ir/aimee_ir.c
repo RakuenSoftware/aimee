@@ -332,6 +332,120 @@ cJSON *aimee_ir_json_parse_frame(const char *frame, size_t length)
    return json;
 }
 
+static int refusal_text_valid(const char *text, size_t maximum)
+{
+   if (!text)
+      return 1;
+   size_t length = strnlen(text, maximum + 1);
+   if (length > maximum)
+      return 0;
+   for (size_t i = 0; i < length;)
+   {
+      unsigned int cp = (unsigned char)text[i++], minimum;
+      size_t extra;
+      if (cp < 0x80)
+         continue;
+      if (cp >= 0xc2 && cp <= 0xdf)
+         minimum = 0x80, extra = 1, cp &= 0x1f;
+      else if (cp >= 0xe0 && cp <= 0xef)
+         minimum = 0x800, extra = 2, cp &= 0x0f;
+      else if (cp >= 0xf0 && cp <= 0xf4)
+         minimum = 0x10000, extra = 3, cp &= 7;
+      else
+         return 0;
+      if (extra > length - i)
+         return 0;
+      while (extra--)
+      {
+         unsigned int next = (unsigned char)text[i++];
+         if ((next & 0xc0) != 0x80)
+            return 0;
+         cp = (cp << 6) | (next & 0x3f);
+      }
+      if (cp < minimum || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff))
+         return 0;
+   }
+   return 1;
+}
+int aimee_refusal_details_valid(const aimee_refusal_details_t *details)
+{
+   return details && refusal_text_valid(details->category, AIMEE_REFUSAL_CATEGORY_MAX) &&
+          refusal_text_valid(details->explanation, AIMEE_REFUSAL_EXPLANATION_MAX);
+}
+void aimee_refusal_details_free(aimee_refusal_details_t *details)
+{
+   if (!details)
+      return;
+   free(details->category);
+   free(details->explanation);
+   free(details);
+}
+aimee_refusal_details_t *aimee_refusal_details_clone(const aimee_refusal_details_t *details)
+{
+   if (!aimee_refusal_details_valid(details))
+      return NULL;
+   aimee_refusal_details_t *copy = calloc(1, sizeof *copy);
+   if (!copy)
+      return NULL;
+   if ((details->category && !(copy->category = strdup(details->category))) ||
+       (details->explanation && !(copy->explanation = strdup(details->explanation))))
+   {
+      aimee_refusal_details_free(copy);
+      return NULL;
+   }
+   return copy;
+}
+cJSON *aimee_refusal_details_json(const aimee_refusal_details_t *details)
+{
+   if (!details)
+      return cJSON_CreateNull();
+   if (!aimee_refusal_details_valid(details))
+      return NULL;
+   cJSON *json = cJSON_CreateObject();
+   cJSON *category = details->category ? cJSON_CreateString(details->category) : cJSON_CreateNull();
+   cJSON *explanation =
+       details->explanation ? cJSON_CreateString(details->explanation) : cJSON_CreateNull();
+   if (!json || !category || !explanation)
+      goto failed;
+   if (!cJSON_AddItemToObject(json, "category", category))
+      goto failed;
+   category = NULL;
+   if (!cJSON_AddItemToObject(json, "explanation", explanation))
+      goto failed;
+   return json;
+failed:
+   cJSON_Delete(category);
+   cJSON_Delete(explanation);
+   cJSON_Delete(json);
+   return NULL;
+}
+int aimee_refusal_details_parse(const cJSON *json, aimee_refusal_details_t **out)
+{
+   if (!out)
+      return -1;
+   if (!json || cJSON_IsNull(json))
+   {
+      aimee_refusal_details_free(*out);
+      *out = NULL;
+      return 0;
+   }
+   if (!cJSON_IsObject(json) || !aimee_ir_json_unique(json) || cJSON_GetArraySize(json) != 2)
+      return -1;
+   const cJSON *category = cJSON_GetObjectItemCaseSensitive(json, "category"),
+               *explanation = cJSON_GetObjectItemCaseSensitive(json, "explanation");
+   if ((!cJSON_IsNull(category) && !cJSON_IsString(category)) ||
+       (!cJSON_IsNull(explanation) && !cJSON_IsString(explanation)))
+      return -1;
+   aimee_refusal_details_t borrowed = {.category = cJSON_GetStringValue(category),
+                                       .explanation = cJSON_GetStringValue(explanation)};
+   aimee_refusal_details_t *copy = aimee_refusal_details_clone(&borrowed);
+   if (!copy)
+      return -1;
+   aimee_refusal_details_free(*out);
+   *out = copy;
+   return 0;
+}
+
 cJSON *aimee_ir_json_canonical_copy(const cJSON *json)
 {
    cJSON *copy = cJSON_Duplicate(json, 1);
@@ -586,7 +700,9 @@ int aimee_ir_response_clone(const aimee_response_t *source, aimee_response_t *ou
    copy.content = NULL;
    copy.n_content = 0;
    copy.raw = NULL;
-   if (clone_string(&copy.id, source->id) || clone_string(&copy.model, source->model) ||
+   copy.refusal = NULL;
+   if ((source->refusal && !(copy.refusal = aimee_refusal_details_clone(source->refusal))) ||
+       clone_string(&copy.id, source->id) || clone_string(&copy.model, source->model) ||
        clone_string(&copy.role, source->role) ||
        clone_string(&copy.error_message, source->error_message) ||
        clone_string(&copy.raw_stop_reason, source->raw_stop_reason) ||
@@ -721,6 +837,7 @@ void aimee_response_free(aimee_response_t *r)
    free_str(r->role);
    free_blocks(r->content, r->n_content);
    free_str(r->raw_stop_reason);
+   aimee_refusal_details_free(r->refusal);
    free_str(r->error_message);
    cJSON_Delete(r->raw);
    memset(r, 0, sizeof *r);
@@ -1079,7 +1196,7 @@ aimee_stop_reason_t aimee_stop_reason_parse(const char *name)
       return AIMEE_STOP_TOOL_USE;
    if (strcmp(name, "stop_sequence") == 0)
       return AIMEE_STOP_STOP_SEQUENCE;
-   if (strcmp(name, "content_filter") == 0)
+   if (strcmp(name, "content_filter") == 0 || strcmp(name, "refusal") == 0)
       return AIMEE_STOP_CONTENT_FILTER;
    if (strcmp(name, "error") == 0)
       return AIMEE_STOP_ERROR;
@@ -1276,6 +1393,10 @@ static int response_valid(const aimee_response_t *response)
        (response->n_content && !response->content))
       return -1;
    if (response->role && strcmp(response->role, "assistant"))
+      return -1;
+   if (response->refusal &&
+       (response->error_message || response->stop_reason != AIMEE_STOP_CONTENT_FILTER ||
+        !aimee_refusal_details_valid(response->refusal)))
       return -1;
    if (response->usage_in < 0 || response->usage_out < 0 || response->usage_cache_read < 0 ||
        response->usage_cache_write < 0 || response->usage_reasoning < 0)
@@ -1541,6 +1662,10 @@ int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
 {
    if (!builder || !delta || builder->complete)
       return -1;
+   if (delta->refusal &&
+       (delta->type != AIMEE_DELTA_TURN_STOP || delta->stop_reason != AIMEE_STOP_CONTENT_FILTER ||
+        !aimee_refusal_details_valid(delta->refusal)))
+      return -1;
    if (delta->message_group &&
        (delta->message_group < 1 || delta->message_group > AIMEE_IR_MAX_BLOCKS ||
         delta->type != AIMEE_DELTA_BLOCK_START || delta->kind != AIMEE_BLK_TEXT))
@@ -1576,6 +1701,16 @@ int aimee_ir_response_builder_apply(aimee_ir_response_builder_t *builder,
       for (int i = 0; i < builder->response.n_content; i++)
          if (!builder->storage[i].stopped)
             return -1;
+      if (delta->refusal)
+      {
+         size_t size = sizeof *delta->refusal +
+                       (delta->refusal->category ? strlen(delta->refusal->category) + 1 : 0) +
+                       (delta->refusal->explanation ? strlen(delta->refusal->explanation) + 1 : 0);
+         if (size > IR_BUILDER_MAX_BYTES || builder->bytes > IR_BUILDER_MAX_BYTES - size ||
+             !(builder->response.refusal = aimee_refusal_details_clone(delta->refusal)))
+            return -1;
+         builder->bytes += size;
+      }
       builder->response.stop_reason = delta->stop_reason;
       builder->response.raw_stop_reason =
           delta->raw_stop_reason ? strdup(delta->raw_stop_reason) : NULL;

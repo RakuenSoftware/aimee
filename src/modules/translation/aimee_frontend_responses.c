@@ -376,9 +376,10 @@ oom:
    return -1;
 }
 
+/* This wire has no representation for typed provider refusal diagnostics. */
 cJSON *responses_frontend_render(const aimee_response_t *r)
 {
-   if (!r)
+   if (!r || r->refusal)
       return NULL;
    if (r->error_message)
    {

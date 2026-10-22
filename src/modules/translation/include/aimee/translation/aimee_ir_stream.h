@@ -112,6 +112,10 @@ typedef struct
    int closed[AIMEE_STREAM_MAX_TOOLS];
    int stop_seen;
    char raw_stop_reason[128]; /* native enum; oversized values fail admission */
+   aimee_refusal_details_t refusal;
+   int has_refusal;
+   char refusal_category[AIMEE_REFUSAL_CATEGORY_MAX + 1];
+   char refusal_explanation[AIMEE_REFUSAL_EXPLANATION_MAX + 1]; /* owned until terminal */
    int failed;
    int started;                             /* message_start seen */
    int terminal_emitted;                    /* TURN_STOP emitted */

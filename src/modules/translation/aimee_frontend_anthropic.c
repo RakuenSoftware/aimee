@@ -4,6 +4,7 @@
 #include <aimee/translation/aimee_backend.h>
 
 #include "cJSON.h"
+#include "anthropic_refusal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -391,6 +392,8 @@ static const char *anthropic_stop(const aimee_response_t *r)
       return "max_tokens";
    case AIMEE_STOP_STOP_SEQUENCE:
       return "stop_sequence";
+   case AIMEE_STOP_CONTENT_FILTER:
+      return "refusal";
    default:
       /* preserve a provider-specific value if the canonical enum was UNKNOWN */
       return r->raw_stop_reason ? r->raw_stop_reason : "end_turn";
@@ -400,6 +403,9 @@ static const char *anthropic_stop(const aimee_response_t *r)
 cJSON *anthropic_frontend_render(const aimee_response_t *r)
 {
    if (!r)
+      return NULL;
+   if (r->refusal && (r->stop_reason != AIMEE_STOP_CONTENT_FILTER || r->error_message ||
+                      !aimee_refusal_details_valid(r->refusal)))
       return NULL;
    if (r->error_message)
    {
@@ -434,6 +440,17 @@ cJSON *anthropic_frontend_render(const aimee_response_t *r)
       }
    }
    cJSON_AddStringToObject(out, "stop_reason", anthropic_stop(r));
+   if (r->refusal)
+   {
+      cJSON *details = anthropic_refusal_json(r->refusal);
+      if (!details || !cJSON_AddItemToObject(out, "stop_details", details))
+      {
+         cJSON_Delete(details);
+         cJSON_Delete(out);
+         return NULL;
+      }
+   }
+
    cJSON_AddNullToObject(out, "stop_sequence");
    cJSON *usage = cJSON_AddObjectToObject(out, "usage");
    cJSON_AddNumberToObject(usage, "input_tokens", (double)r->usage_in);

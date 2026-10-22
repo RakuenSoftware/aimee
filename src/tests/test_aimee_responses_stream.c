@@ -55,8 +55,48 @@ static int text(aimee_responses_stream_t *stream, int *count)
    "{\"response\":{\"id\":\"r\",\"status\":\"completed\",\"output\":[{\"type\":\"message\","       \
    "\"id\":\"m\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hello\"}]}],\"usage\":{"        \
    "\"input_tokens\":7,\"output_tokens\":2}}}"
+static void refusal_projection(void)
+{
+   aimee_refusal_details_t details = {.category = "future_category",
+                                      .explanation = "Inert diagnostic"};
+   aimee_delta_t start = {.type = AIMEE_DELTA_TURN_START};
+   aimee_delta_t stop = {.type = AIMEE_DELTA_TURN_STOP,
+                         .stop_reason = AIMEE_STOP_CONTENT_FILTER,
+                         .raw_stop_reason = "refusal",
+                         .refusal = &details};
+   aimee_ir_response_builder_t canonical = {0};
+   assert(!aimee_ir_response_builder_apply(&canonical, &start));
+   assert(!aimee_ir_response_builder_apply(&canonical, &stop));
+   aimee_responses_frontend_t *target = aimee_responses_frontend_new("refusal", "model", 1);
+   assert(target && !aimee_responses_frontend_delta(target, &start, capture, NULL));
+   int before = client_deltas + client_done;
+   assert(aimee_responses_frontend_matches(target, &canonical.response) < 0);
+   assert(aimee_responses_frontend_complete(target, &canonical.response, capture, NULL) < 0);
+   assert(client_deltas + client_done == before);
+   aimee_responses_frontend_free(target);
+   target = aimee_responses_frontend_new("delta", "model", 1);
+   assert(target && !aimee_responses_frontend_delta(target, &start, capture, NULL));
+   assert(aimee_responses_frontend_delta(target, &stop, capture, NULL) < 0);
+   assert(client_deltas + client_done == before);
+   assert(canonical.response.refusal &&
+          !strcmp(canonical.response.refusal->category, "future_category"));
+   assert(!strcmp(canonical.response.refusal->explanation, "Inert diagnostic"));
+   assert(stop.refusal == &details); /* Projection failure cannot mutate canonical evidence. */
+   aimee_responses_frontend_free(target);
+   target = aimee_responses_frontend_new("legacy", "model", 1);
+   aimee_response_t legacy = canonical.response;
+   legacy.refusal = NULL;
+   assert(target && !aimee_responses_frontend_delta(target, &start, capture, NULL));
+   assert(!aimee_responses_frontend_matches(target, &legacy));
+   assert(!aimee_responses_frontend_complete(target, &legacy, capture, NULL));
+   aimee_responses_frontend_free(target);
+   client_deltas = client_done = 0;
+   aimee_ir_response_builder_free(&canonical);
+}
+
 int main(void)
 {
+   refusal_projection();
    int count;
    aimee_response_t final = {0};
    frontend = aimee_responses_frontend_new("client", "model", 10);

@@ -42,6 +42,33 @@ type Context struct {
 	RevisionScope  string `json:"revision_scope,omitempty"`
 	RevisionEpoch  string `json:"revision_epoch,omitempty"`
 }
+
+// RefusalDetails is inert provider diagnostics, never model content or approval.
+type RefusalDetails struct {
+	Category    *string `json:"category"`
+	Explanation *string `json:"explanation"`
+}
+
+func validRefusalDetails(raw json.RawMessage) bool {
+	var fields map[string]json.RawMessage
+	if !Decode(raw, &fields) || len(fields) != 2 || fields["category"] == nil || fields["explanation"] == nil {
+		return false
+	}
+	var details RefusalDetails
+	if !Decode(raw, &details) {
+		return false
+	}
+	for _, field := range []struct {
+		value *string
+		limit int
+	}{{details.Category, 64}, {details.Explanation, 4096}} {
+		if field.value != nil && (len(*field.value) > field.limit || strings.ContainsRune(*field.value, 0)) {
+			return false
+		}
+	}
+	return true
+}
+
 type Message struct {
 	ContentScalar bool    `json:"content_scalar,omitempty"`
 	Role          string  `json:"role"`
@@ -118,6 +145,7 @@ func ValidSessionEvent(encoded []byte) bool {
 			Input           json.RawMessage `json:"input"`
 			StopReason      string          `json:"stop_reason"`
 			RawStopReason   string          `json:"raw_stop_reason"`
+			Refusal         json.RawMessage `json:"refusal"`
 			UsageIn         *int64          `json:"usage_in"`
 			UsageOut        *int64          `json:"usage_out"`
 			UsageCacheRead  *int64          `json:"usage_cache_read"`
@@ -126,6 +154,9 @@ func ValidSessionEvent(encoded []byte) bool {
 			Error           string          `json:"error_message"`
 		}
 		if e.MessageID == "" || e.Role == "" || !Decode(e.Payload, &d) || (d.RawStopReason != "" && d.Type != "TURN_STOP") {
+			return false
+		}
+		if d.Refusal != nil && (d.Type != "TURN_STOP" || (!bytes.Equal(bytes.TrimSpace(d.Refusal), []byte("null")) && (d.StopReason != "content_filter" || !validRefusalDetails(d.Refusal)))) {
 			return false
 		}
 		if d.MessageGroup != nil {

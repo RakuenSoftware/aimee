@@ -222,8 +222,121 @@ static void test_owned_request_clone(void)
         "OK");
 }
 
+static void test_owned_refusal_clone(void)
+{
+   aimee_response_t source = {.stop_reason = AIMEE_STOP_CONTENT_FILTER,
+                              .raw_stop_reason = dup("refusal")};
+   source.refusal = calloc(1, sizeof *source.refusal);
+   assert(source.refusal);
+   source.refusal->category = dup("future_category");
+   source.refusal->explanation = dup("Bounded diagnostic, not model content.");
+   aimee_response_t copy = {0};
+   assert(!aimee_ir_response_clone(&source, &copy));
+   assert(copy.refusal && copy.refusal != source.refusal);
+   assert(copy.refusal->category != source.refusal->category);
+   assert(copy.refusal->explanation != source.refusal->explanation);
+   assert(!strcmp(copy.refusal->category, source.refusal->category));
+   assert(!strcmp(copy.refusal->explanation, source.refusal->explanation));
+   aimee_response_free(&source);
+   assert(!strcmp(copy.refusal->category, "future_category"));
+   aimee_response_free(&copy);
+}
+
+static void test_refusal_details_validation(void)
+{
+   aimee_refusal_details_t details = {0};
+   assert(aimee_refusal_details_valid(&details));
+   assert(!aimee_refusal_details_valid(NULL));
+   cJSON *json = aimee_refusal_details_json(&details);
+   assert(json && cJSON_GetArraySize(json) == 2);
+   assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(json, "category")));
+   aimee_refusal_details_t *parsed = NULL;
+   assert(!aimee_refusal_details_parse(json, &parsed));
+   assert(parsed && !parsed->category && !parsed->explanation);
+   cJSON_Delete(json);
+   details.category = "unknown_future_category";
+   details.explanation = "A diagnostic only; never an instruction.";
+   json = aimee_refusal_details_json(&details);
+   assert(!aimee_refusal_details_parse(json, &parsed));
+   assert(!strcmp(parsed->category, details.category));
+   assert(!strcmp(parsed->explanation, details.explanation));
+   cJSON_Delete(json);
+   const char *invalid[] = {
+       "{\"category\":null}",
+       "{\"category\":false,\"explanation\":null}",
+       "{\"category\":null,\"explanation\":[]}",
+       "{\"category\":null,\"category\":null,\"explanation\":null}",
+       "{\"category\":null,\"explanation\":null,\"fallback_credit_token\":\"never adopt\"}",
+       "{\"type\":\"refusal\",\"explanation\":null}"};
+   for (size_t i = 0; i < sizeof invalid / sizeof *invalid; i++)
+   {
+      json = cJSON_Parse(invalid[i]);
+      assert(json);
+      aimee_refusal_details_t *before = parsed;
+      assert(aimee_refusal_details_parse(json, &parsed) < 0 && parsed == before);
+      cJSON_Delete(json);
+   }
+   char category[66], explanation[4098];
+   memset(category, 'x', sizeof category);
+   memset(explanation, 'x', sizeof explanation);
+   category[64] = 0;
+   explanation[4096] = 0;
+   details = (aimee_refusal_details_t){category, explanation};
+   assert(aimee_refusal_details_valid(&details));
+   category[64] = 'x';
+   category[65] = 0;
+   assert(!aimee_refusal_details_valid(&details));
+   assert(!aimee_refusal_details_json(&details));
+   category[64] = 0;
+   explanation[4096] = 'x';
+   explanation[4097] = 0;
+   assert(!aimee_refusal_details_valid(&details));
+   explanation[4096] = 0;
+   const char *bad_utf8[] = {"\xc0\x80", "\xed\xa0\x80", "\xf4\x90\x80\x80", "\xe2\x82"};
+   for (size_t i = 0; i < sizeof bad_utf8 / sizeof *bad_utf8; i++)
+   {
+      details.category = (char *)bad_utf8[i];
+      assert(!aimee_refusal_details_valid(&details));
+   }
+   details.category = "\xe2\x82\xac";
+   assert(aimee_refusal_details_valid(&details));
+   assert(!aimee_refusal_details_parse(NULL, &parsed) && !parsed);
+   aimee_refusal_details_free(parsed);
+}
+
+static void test_refusal_builder_and_admission(void)
+{
+   aimee_refusal_details_t details = {.category = "future", .explanation = NULL};
+   aimee_ir_response_builder_t builder = {0};
+   aimee_delta_t delta = {.type = AIMEE_DELTA_TURN_START, .refusal = &details};
+   assert(aimee_ir_response_builder_apply(&builder, &delta) < 0 && !builder.started);
+   delta.refusal = NULL;
+   assert(!aimee_ir_response_builder_apply(&builder, &delta));
+   delta = (aimee_delta_t){
+       .type = AIMEE_DELTA_TURN_STOP, .stop_reason = AIMEE_STOP_END_TURN, .refusal = &details};
+   assert(aimee_ir_response_builder_apply(&builder, &delta) < 0 && !builder.complete);
+   delta.stop_reason = AIMEE_STOP_CONTENT_FILTER;
+   delta.raw_stop_reason = "refusal";
+   assert(!aimee_ir_response_builder_apply(&builder, &delta));
+   assert(builder.complete && builder.response.refusal && builder.response.refusal != &details &&
+          !strcmp(builder.response.refusal->category, "future"));
+   assert(!builder.response.refusal->explanation);
+   assert(!strcmp(builder.response.raw_stop_reason, "refusal"));
+   assert(aimee_ir_response_builder_apply(&builder, &delta) < 0);
+   builder.response.error_message = dup("contradictory API error");
+   assert(aimee_ir_response_admit(&builder.response) < 0);
+   free(builder.response.error_message);
+   builder.response.error_message = NULL;
+   builder.response.stop_reason = AIMEE_STOP_END_TURN;
+   assert(aimee_ir_response_admit(&builder.response) < 0);
+   aimee_ir_response_builder_free(&builder);
+}
+
 int main(void)
 {
+   test_owned_refusal_clone();
+   test_refusal_details_validation();
+   test_refusal_builder_and_admission();
    test_owned_request_clone();
    test_exact_function_identity();
    printf("aimee-ir: ");

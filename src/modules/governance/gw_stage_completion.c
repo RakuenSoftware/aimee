@@ -176,7 +176,8 @@ static int response_defers_repair(const char *text)
 int gw_ir_response_run_completion(aimee_response_t *response, const aimee_request_t *request)
 {
    const char *name = NULL, *key = NULL;
-   if (!response || aimee_ir_response_has_tool_use(response) || response->error_message ||
+   if (!response || response->stop_reason == AIMEE_STOP_CONTENT_FILTER ||
+       aimee_ir_response_has_tool_use(response) || response->error_message ||
        response->n_content >= AIMEE_IR_MAX_BLOCKS || !gw_ir_response_completion_armed(request) ||
        !ir_shell_tool(request, &name, &key))
       return 0;
