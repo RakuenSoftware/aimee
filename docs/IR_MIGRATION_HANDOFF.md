@@ -15,73 +15,87 @@ implementation or local/live validation. Earlier follow-up-PR instructions below
 are historical. Do not investigate or change `.100`; validation uses the owned
 `.252` environment.
 
-Current qualified source `10d0a87ac` passes all 76 lint gates, the full
-configured Docker integration (170/170), and the T3 deployment matrix (7/7
-topology gates and 692/692 family assertions). Integration retains 25 explicitly
-unconfigured KB/runtime-web checks; Docker grading, recovery and scoped reuse
-actually ran. Full canonical Docker and HOST builds and normal upgrades passed
-artifact/history/cache preservation checks. These are candidate qualifications,
-not final published-image acceptance or fresh CI for subsequent changes.
+Runtime candidate `2623e00a0` passes all 76 lint gates, all three Go module
+suites normally and with the race detector, and the real Rust/C and Go/C bus
+interoperability gates. The five editor regressions, all 473 frontend tests,
+type checking and both frontend builds pass; the frontend inputs are unchanged
+since that qualification. These are local results, not fresh GitHub CI.
 
-Genuine HOST permission recovery now passes: one permission, one human Allow,
-one governed dispatch and an independently verified filesystem effect. Strict
-1280/390/320 browser replay and the retained refused-stream recovery test pass
-without automatic sends or replies. Normal HOST stop still reaches systemd's
-90-second timeout even with module peers alive; graceful shutdown is unresolved.
+The previous runtime `10d0a87ac` passed configured Docker integration (170/170)
+and T3 deployment (7/7 topology gates, 692/692 family assertions). Its integration
+retained 25 explicitly unconfigured KB/runtime-web checks; Docker grading,
+recovery and scoped reuse actually ran. New exact-source integration and T3
+fixtures for `2623e00a0` are prepared and remain separate qualifications.
 
-The actual HTTP Codex B continuation completed with correct prior-answer recall.
-The single subsequent native Claude A return used the original SDK UUID, stable
-cwd and unchanged cache prefix, but failed at canonical event 54. Its retained
-SDK log reports an upstream invalid-request refusal. Actual stdout and numeric
-HTTP status were not retained; the cause is unproved. Do not retry that turn,
-reset its cache, import the SDK transcript or describe A/B/A as passing. Current
-local Claude controls succeeded; account comparability is unproved.
+Full canonical Docker and HOST builds and normal upgrades of `2623e00a0` pass.
+The normal three-service Docker restart preserves all 54 canonical events,
+the full 20,454-byte SDK file and its original 17,898-byte prefix, UUID, device,
+cwd, models, cache and configuration authority. All 86 image products and 19
+modules match. Strict 1280/390/320 replay checks run 15 seconds each with zero
+idle lifecycle or mutation requests; controls stay closed and the browser exits.
 
-The model policy and accessible dialog repairs are deployed in this candidate.
-A further browser editor repair resolves hydrated display basenames through the
-owner's project registry before requesting the session worktree. A refusal now
-shows an error instead of silently opening the base checkout. Its five focused
-regressions, all 473 frontend tests, type checking and both builds pass; deployment
-and actual worktree editor acceptance remain required for this change.
+The upgraded HOST server now passes a genuine normal quiet stop in 1.861 seconds,
+without a timeout override or forced kill. Its single fresh, PID/inode/offset-bound
+shutdown receipt reports zero durable unwritten records, zero guardrail pending
+records and zero dropped records (unchanged from the baseline). Normal recovery
+and 30-second stability pass; all canonical history, five native metadata tables,
+models and cache manifest remain exact, and the native execution cgroup is empty.
+Earlier 90-second failures remain retained as failures. Joining the interruptible
+readiness sampler before module teardown and atomically committing bounded queued
+audit batches fix that observed shutdown case. SQLite FULL synchronization and
+synchronous action/idempotent contracts remain intact. Lifecycle, batch, retry,
+FIFO and concurrency fixtures pass normally and under sanitizers; readiness also
+passes ThreadSanitizer. No general bus-quiesce mechanism was added.
 
-A source-backed SDK 2.1.177 compatibility repair now suppresses its flagless
-assistant error envelopes as transport diagnostics. Unknown codes retain generic
-failure; only known typed codes select existing static messages. The unchanged
-native session-binding check now runs before decoding, preventing observations
-from a refused foreign session. Baseline regressions reproduce diagnostic
-leakage; foreign-session refusal and focused translator/headless tests pass
-normally and under ASan/UBSan/leak checks. These fixtures do not establish the cause of
-failed live event 54, whose actual stdout was not retained.
+Genuine HOST permission recovery previously passed: one permission, one human
+Allow, one governed dispatch and an independently verified filesystem effect.
+The HTTP Codex B continuation completed with correct prior-answer recall. The
+single subsequent native Claude A return used the original SDK UUID, stable cwd
+and unchanged cache prefix, but failed at canonical event 54. Its retained
+207-byte text exactly matches SDK 2.1.177's locally constructed refusal diagnostic.
+Actual stdout and numeric HTTP status were not retained; upstream origin and root
+cause remain unestablished. Do not retry that turn, reset its cache, import the
+SDK transcript or describe the original A/B/A as passing. A separate, newly
+created benign two-turn native resume control is being qualified; it cannot
+establish the cause of the original failure. Local Claude controls succeeded;
+account comparability is unproved.
 
-The subsequent quiet HOST diagnosis proves the audit writer is progressing,
-not frozen: 3,225 records committed during the 90-second stop, while its queue
-remained near 4,096 and drops increased. The detached readiness sampler has no
-shutdown path and remains active during that drain. The pending repair joins an
-interruptible sampler before retiring its module dependencies; normal, sanitizer
-and ThreadSanitizer lifecycle tests pass. A separate bounded FIFO group commit
-preserves SQLite FULL synchronization and existing synchronous action/idempotent
-contracts. Real WAL tests prove 64 queued rows use one atomic transaction and
-mid-group failure rolls back the whole group; bus retry/FIFO/concurrency tests
-pass normally and under sanitizers. A final payload-free shutdown receipt exposes
-actual unwritten, guardrail-pending, written and dropped counts after draining.
-These repairs still require canonical builds and genuine HOST stop acceptance.
+The editor now resolves hydrated display basenames through the owner's registry
+before requesting the session worktree, and shows a refusal instead of silently
+opening the base checkout. Actual worktree README rendering at desktop and 320px
+passes. The code-server proxy preserves encoded paths/queries and credential
+stripping while serving both PWA and webview workers within `/vscode/`; both actual
+workers register successfully with HTTP 200. Browser-scoped pinning of the owned
+fixture certificate is explicit; no global trust or product TLS bypass changed.
+The real HTTP worker-fetch regression, WebSocket exchange and runtime-web race
+suite pass. No global asset route or vendor rewrite was added.
 
-The editor repair is now genuinely qualified on candidate `315f6feec`: normal
-upgrade preserves all 54 events and exact cache/configuration evidence, and the
-actual worktree README is readable at desktop and 320px. Browser-scoped pinning
-of the owned fixture certificate resolves the webview service-worker SSL error;
-no global certificate trust or product TLS bypass changed. A distinct code-server
-PWA worker request still escapes to `/_static/` and returns 404. The reverse-proxy
-repair strips its mount prefix, keeps redirects and worker scope under that
-mount, and preserves encoded paths/queries and credential stripping. Its real
-HTTP worker-fetch regression, WebSocket exchange and full runtime-web race suite
-pass. Deployment and actual PWA-worker acceptance remain required; no global
-asset route or vendor rewrite was added.
+A separate SDK 2.1.177 compatibility repair suppresses flagless assistant error
+envelopes as transport diagnostics. Unknown codes retain generic failure; only
+known typed codes select existing static messages. The unchanged native session
+binding check runs before decoding, preventing observations from a refused foreign
+session. Baseline leakage regressions and focused translator/headless fixtures
+pass normally and under ASan/UBSan/leak checks. These fixtures do not resolve the
+original failed native resume.
+
+The broad local sanitizer lane exposed a missing OCR test-double definition in
+the HTTP ingestion unit target before the suite could execute. The test explicitly
+disables OCR; its repaired double fails if invoked, rather than returning fabricated
+success. The focused target passes normally and under sanitizers. All 678 binaries in
+the broad ASan/UBSan/leak lane now complete successfully with this sole test-only
+delta; unconfigured optional fixtures retain explicit skips.
+The history secret scan also found one public OpenAPI input checksum in the
+ownership ledger. Its exact historical fingerprint is admitted only after checking
+it against the committed schema; full-history scanning remains enabled. Git's
+warnings about historical invalid-UTF-8 filenames are retained independently.
 
 Keep implementation and validation moving without requiring an open PR. Remaining
-work includes the native-resume failure, graceful HOST shutdown, deployment of
-the editor repair, final current-source CI and published fresh-install acceptance,
-and owned-resource cleanup. No completion or production promotion is claimed.
+work includes resolving the failed native-resume acceptance, completing current
+sanitizer/integration/deployment qualifications, final current-source CI and
+published fresh-install acceptance, and owned-resource cleanup. Keep automatic
+review and the strict attribution gate enabled. No completion or production
+promotion is claimed. The PR timeline below is historical; the current delivery
+constraint remains one eventual PR and no intermediate merges.
 
 [PR #3052](https://github.com/RakuenSoftware/aimee/pull/3052) merged into `testing`
 as `aa8c774edcc324f5defb6c5cea592f0e1dd5314d`. Its final premerge checks and
