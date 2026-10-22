@@ -2738,12 +2738,12 @@
         "AIMEE_MEMORY_HEALTH_ENABLED",
         "memory_stats"
       ],
-      "sha256": "50d3ce3b93a7d37dd2a53ee58063213454b1097b600233a9dbde80cbb44b9400",
+      "sha256": "a8254e276ad77874aabae44b57278c52ba3138b7a7990fdcae6d7cd9dc901da3",
       "inputs": {
         "src/gen_openapi_server.py": "8fcf9f6981b68deed2ead14165396dec7d9f784e06a80d83be1dff7d3248e916",
-        "api/openapi-server-v1.yaml": "6fcfcb239b94b61ed404b52de9e3e443ca57076d3c2b994c705b7a1b3557e565"
+        "api/openapi-server-v1.yaml": "5524ace1526a2330a2d834b8d009a53b18a021a6a89abda1fa421e314df1fe7b"
       },
-      "boundary_review": "2026-10-20 PR #3052: reviewed only /runs native Codex/Claude workspace cwd documentation/property. Reversing those additions reproduces both previously pinned source and generated output hashes exactly. Memory routes, symbols and Go ownership are unchanged. 2026-10-21 PR #3057: Reviewed the sole added /chat/graceful_cancel documentation path and its regenerated output using the unchanged pinned generator. Exact actor-owned operator cancellation, no queued message and no effect-quiescence claim are documented; existing memory paths, symbols and Go ownership are unchanged. This is source-boundary review, not independent production approval."
+      "boundary_review": "2026-10-20 PR #3052: reviewed only /runs native Codex/Claude workspace cwd documentation/property. Reversing those additions reproduces both previously pinned source and generated output hashes exactly. Memory routes, symbols and Go ownership are unchanged. 2026-10-21 PR #3057: Reviewed the sole added /chat/graceful_cancel documentation path and its regenerated output using the unchanged pinned generator. Exact actor-owned operator cancellation, no queued message and no effect-quiescence claim are documented; existing memory paths, symbols and Go ownership are unchanged. This is source-boundary review, not independent production approval. 2026-10-22: Reviewed only /model/set summary and description for explicit respond-tool policy and unchanged-save semantics. The unchanged pinned generator reproduces the previously pinned output from the prior input exactly. Memory routes, symbols and Go ownership are unchanged; this is source-boundary review, not production-promotion approval."
     },
     "src/modules/tools/tool_catalog_data.h": {
       "disposition": "tool-policy-catalog",
