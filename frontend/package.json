@@ -13,7 +13,7 @@
     "test:browser:webchat": "node ../scripts/test-webchat-browser.cjs"
   },
   "dependencies": {
-    "@rakuensoftware/smoothgui": "file:vendor/rakuensoftware-smoothgui-0.11.0.tgz",
+    "@rakuensoftware/smoothgui": "file:vendor/rakuensoftware-smoothgui-0.12.3.tgz",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.18.2"
