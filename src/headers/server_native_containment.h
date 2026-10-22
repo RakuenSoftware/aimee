@@ -16,6 +16,10 @@ server_native_containment_t *server_native_containment_open(const char *root,
                                                             size_t port_count, char error[512]);
 const cJSON *server_native_containment_manifest(const server_native_containment_t *owner);
 int server_native_containment_sha256(const server_native_containment_t *owner, char out[65]);
+/* Bind an independently materialized fresh credential HOME before first spawn.
+ * Only HOME and its exact SDK state interior become writable; cwd stays separate.
+ * Child reopens paths after unshare and checks these same identities. */
+int server_native_containment_bind_home(server_native_containment_t *owner, const char *home);
 const cli_native_spawn_guard_t *server_native_containment_guard(server_native_containment_t *owner);
 /* Reopening proves identity only, never proves that an SDK was admitted. */
 server_native_containment_t *server_native_containment_reopen(const cJSON *manifest,

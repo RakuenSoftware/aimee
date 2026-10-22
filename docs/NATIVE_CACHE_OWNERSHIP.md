@@ -22,6 +22,21 @@ copies SDK correlation afresh for each callback. This field establishes no
 account, actor, session or effect authority. SDK system content, transcripts,
 tool catalogs and raw request extensions do not replace their canonical owners.
 
+Claude's scheduler cwd is a private `sdk-workspaces/{epoch}` directory beneath
+that session and account/model binding's exclusive cache lease. Its pathname and
+inode survive ordinary turns and A→B→A model selection within the same epoch;
+the real operator project remains the tool runtime's separate authority. HOME,
+configuration, capabilities and temporary files are still fresh per launch. The
+host rechecks the private cwd path against its retained descriptor before launch
+and initialization. Qualified containment binds the fresh HOME and exact SDK
+state interior independently, leaving the stable scheduler cwd read-only.
+
+The versioned scheduler-workspace policy participates in the Claude launch digest
+and therefore the existing cache scope. Pre-fix handles whose project namespace
+was keyed by a deleted temporary cwd are not adopted under this new contract.
+Their files and canonical history remain intact; the host neither rewrites a
+transcript nor substitutes a resume ID to make old handles appear valid.
+
 The host acquires an exclusive cache-directory lease before creating a native
 HOME, linking SDK conversation files, writing launch configuration, or spawning
 the SDK. Its key is the actual `browser-{sdk}/{session}/{binding}` directory;

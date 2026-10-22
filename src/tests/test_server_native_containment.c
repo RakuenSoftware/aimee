@@ -17,6 +17,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 static uint16_t allowed_ports[1], denied_port;
+static const char *bound_home;
 static char directory[4096], executable[4096], ready[4096], manifest_path[4096], written[4096];
 static void filename(char out[4096], const char *name)
 {
@@ -47,7 +48,7 @@ static void wait_ok(pid_t child)
    assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 }
 static int sdk(const char *mode, const char *root, const char *output, const char *host_parent,
-               const char *allowed, const char *denied)
+               const char *allowed, const char *denied, const char *home)
 {
    assert(getpid() == 1);
    char own[4096];
@@ -114,7 +115,20 @@ static int sdk(const char *mode, const char *root, const char *output, const cha
    assert(snprintf(own, sizeof own, "%s/cgroup.procs", root) < (int)sizeof own);
    assert(open(own, O_WRONLY) < 0); // Ancestor host control path is outside the namespace root.
    char cache[4096], control[4096], destination[4096];
-   ssize_t length = readlink("../.codex/sessions", cache, sizeof cache - 1);
+   const char *state_link = "../.codex/sessions";
+   char explicit_link[4096];
+   if (home)
+   {
+      assert(snprintf(explicit_link, sizeof explicit_link, "%s/.claude/projects", home) <
+             (int)sizeof explicit_link);
+      state_link = explicit_link;
+      assert(open("private-cwd-write", O_WRONLY | O_CREAT, 0600) < 0 && errno == EACCES);
+      assert(snprintf(destination, sizeof destination, "%s/ephemeral-write", home) <
+             (int)sizeof destination);
+      write_file(destination, "private HOME only");
+      assert(!unlink(destination));
+   }
+   ssize_t length = readlink(state_link, cache, sizeof cache - 1);
    assert(length > 0 && length < (ssize_t)sizeof cache - 1);
    cache[length] = 0;
    assert(snprintf(destination, sizeof destination, "%s/retained-cache", cache) <
@@ -138,11 +152,16 @@ static int sdk(const char *mode, const char *root, const char *output, const cha
    snprintf(fdpath, sizeof fdpath, "/proc/self/fd/%d", fd);
    assert(linkat(AT_FDCWD, fdpath, AT_FDCWD, "fd-hardlinked-control", AT_SYMLINK_FOLLOW) < 0);
    close(fd);
-   assert(!symlink(control, "control-alias"));
-   assert(open("control-alias", O_WRONLY) < 0 && errno == EACCES);
-   assert(!unlink("control-alias"));
+   if (home)
+      assert(symlink(control, "control-alias") < 0 && errno == EACCES);
+   else
+   {
+      assert(!symlink(control, "control-alias"));
+      assert(open("control-alias", O_WRONLY) < 0 && errno == EACCES);
+      assert(!unlink("control-alias"));
+   }
    assert(rename(cache, "moved-binding") < 0);
-   if (!strcmp(mode, "--probe"))
+   if (!strcmp(mode, "--probe") || !strcmp(mode, "--stable-probe"))
       return 0;
    pid_t child = fork();
    assert(child >= 0);
@@ -188,8 +207,9 @@ static pid_t spawn(server_native_containment_t *owner, const char *mode, const c
          _exit(126);
       assert(fcntl(81, F_GETFD) < 0 && errno == EBADF);
       assert(fcntl(cwd, F_GETFD) < 0 && errno == EBADF);
-      char *args[] = {executable,  (char *)mode, (char *)root, (char *)output,
-                      host_parent, allowed,      denied,       NULL};
+      char *args[] = {executable,     (char *)mode,       (char *)root,
+                      (char *)output, host_parent,        allowed,
+                      denied,         (char *)bound_home, NULL};
       char *env[] = {"PATH=/usr/bin:/bin", NULL};
       fexecve(exe, args, env);
       _exit(127);
@@ -197,8 +217,10 @@ static pid_t spawn(server_native_containment_t *owner, const char *mode, const c
    close(exe);
    close(cwd);
    close(81);
-   if (admit)
+   if (admit > 0)
       assert(!guard->parent(guard->context, child));
+   else if (admit < 0)
+      assert(guard->parent(guard->context, child));
    return child;
 }
 static cJSON *read_manifest(void)
@@ -216,8 +238,9 @@ static cJSON *read_manifest(void)
 }
 int main(int argc, char **argv)
 {
-   if (argc == 7 && (!strcmp(argv[1], "--probe") || !strcmp(argv[1], "--writer")))
-      return sdk(argv[1], argv[2], argv[3], argv[4], argv[5], argv[6]);
+   if ((argc == 7 || argc == 8) && (!strcmp(argv[1], "--probe") || !strcmp(argv[1], "--writer") ||
+                                    !strcmp(argv[1], "--stable-probe")))
+      return sdk(argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argc == 8 ? argv[7] : NULL);
    const char *root = getenv("AIMEE_TEST_NATIVE_CGROUP_ROOT");
    if (!root || !*root)
    {
@@ -307,6 +330,67 @@ int main(int argc, char **argv)
    assert(!server_native_containment_reopen(identity, error));
    cJSON_Delete(identity);
    server_native_containment_close(owner, 1);
+   /* Claude keeps a stable read-only cwd outside its fresh credential HOME.
+    * Bind only the original two write interiors; never grant the binding or
+    * stable scheduler parents merely to make the SDK launch succeed. */
+   char original_directory[4096], claude_home[4096], claude_paths[6][4096], claude_link[4096];
+   snprintf(original_directory, sizeof original_directory, "%s", directory);
+   assert(snprintf(claude_home, sizeof claude_home, "%s/n.XXXXXX", temporary) <
+              (int)sizeof claude_home &&
+          mkdtemp(claude_home));
+   const char *suffixes[] = {
+       "browser-claude", "browser-claude/session",
+       "browser-claude/session/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "browser-claude/session/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/"
+       "projects"};
+   for (unsigned i = 0; i < 4; i++)
+      assert(snprintf(claude_paths[i], sizeof claude_paths[i], "%s/%s", temporary, suffixes[i]) <
+                 (int)sizeof claude_paths[i] &&
+             !mkdir(claude_paths[i], 0700));
+   assert(snprintf(claude_paths[4], sizeof claude_paths[4], "%s/.claude", claude_home) <
+              (int)sizeof claude_paths[4] &&
+          !mkdir(claude_paths[4], 0700));
+   assert(snprintf(claude_link, sizeof claude_link, "%s/projects", claude_paths[4]) <
+              (int)sizeof claude_link &&
+          !symlink(claude_paths[3], claude_link));
+   assert(snprintf(claude_paths[5], sizeof claude_paths[5], "%s/.aimee-native-owner.lock",
+                   claude_paths[2]) < (int)sizeof claude_paths[5]);
+   write_file(claude_paths[5], "host control");
+   assert(snprintf(directory, sizeof directory, "%s/stable-private-cwd", claude_paths[2]) <
+              (int)sizeof directory &&
+          !mkdir(directory, 0700));
+   bound_home = claude_home;
+   owner = server_native_containment_open(root, allowed_ports, 1, error);
+   assert(owner && server_native_containment_bind_home(owner, temporary));
+   assert(!server_native_containment_bind_home(owner, claude_home));
+   assert(server_native_containment_bind_home(owner, claude_home)); // One-time immutable binding.
+   child = spawn(owner, "--stable-probe", root, written, 1);
+   wait_ok(child);
+   assert(server_native_containment_empty(owner) == 1);
+   server_native_containment_close(owner, 1);
+   /* A state-path replacement after binding must fail before SDK exec. */
+   owner = server_native_containment_open(root, allowed_ports, 1, error);
+   assert(owner && !server_native_containment_bind_home(owner, claude_home));
+   char moved_state[4096];
+   assert(snprintf(moved_state, sizeof moved_state, "%s-moved", claude_paths[3]) <
+          (int)sizeof moved_state);
+   assert(!rename(claude_paths[3], moved_state) && !mkdir(claude_paths[3], 0700));
+   child = spawn(owner, "--stable-probe", root, written, -1);
+   int refusal;
+   assert(waitpid(child, &refusal, 0) == child && WIFEXITED(refusal) && WEXITSTATUS(refusal) != 0);
+   assert(server_native_containment_empty(owner) == 1);
+   server_native_containment_close(owner, 1);
+   assert(!rmdir(claude_paths[3]) && !rename(moved_state, claude_paths[3]));
+   bound_home = NULL;
+   assert(!rmdir(directory));
+   snprintf(directory, sizeof directory, "%s", original_directory);
+   char retained_claude[4096];
+   assert(snprintf(retained_claude, sizeof retained_claude, "%s/retained-cache", claude_paths[3]) <
+          (int)sizeof retained_claude);
+   assert(!unlink(retained_claude) && !unlink(claude_link) && !unlink(claude_paths[5]));
+   assert(!rmdir(claude_paths[4]) && !rmdir(claude_home));
+   for (int i = 3; i >= 0; i--)
+      assert(!rmdir(claude_paths[i]));
    // A real owner dies with a detached setsid writer still changing the cache.
    pid_t daemon = fork();
    assert(daemon >= 0);

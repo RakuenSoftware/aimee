@@ -1,6 +1,7 @@
 #ifndef AIMEE_SERVER_NATIVE_CACHE_LEASE_H
 #define AIMEE_SERVER_NATIVE_CACHE_LEASE_H
 #include "cJSON.h"
+#include <stddef.h>
 /* Host-only cache-directory custody, acquired before native HOME creation or
  * SDK launch. A released flock is never evidence that an old child tree died:
  * the durable marker survives crashes and must continue to refuse restart. */
@@ -29,6 +30,13 @@ int server_native_cache_lease_rotate_unpublished(server_native_cache_lease_t *le
                                                  const char *turn, char error[512]);
 int server_native_cache_lease_rotate(server_native_cache_lease_t *lease, const char *turn,
                                      char error[512]);
+/* Private SDK scheduler cwd; never the operator project or credential HOME.
+ * Caller holds this lease and supplies the independently admitted DB epoch.
+ * Returned fd is caller-owned; validate again before spawn and init readback. */
+int server_native_cache_workspace_open(server_native_cache_lease_t *lease, const char *epoch,
+                                       char *path, size_t capacity);
+int server_native_cache_workspace_valid(const server_native_cache_lease_t *lease, const char *epoch,
+                                        int fd, const char *path);
 /* clean requires the existing synchronous child shutdown and successful cache
  * completion/abort, or refusal before child launch. Never use after losing the
  * process owner. Closing unclean retains the marker; no cache files are erased. */

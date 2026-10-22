@@ -226,7 +226,10 @@ int cli_claude_native_launch_digest(const provider_cli_cfg_t *cfg, char digest[6
    cJSON *plan = cJSON_CreateObject();
    cJSON *args = plan ? cJSON_AddArrayToObject(plan, "argv") : NULL;
    cJSON *environment = plan ? cJSON_AddObjectToObject(plan, "environment") : NULL;
-   if (!arguments || !args || !environment)
+   /* Claude keys saved conversations by scheduler cwd. Old ephemeral-cwd
+    * handles cannot be adopted under the stable lease/epoch path contract. */
+   if (!arguments || !args || !environment ||
+       !cJSON_AddNumberToObject(plan, "scheduler_workspace_version", 1))
       goto refused;
    for (int i = 0; arguments[i]; i++)
    {

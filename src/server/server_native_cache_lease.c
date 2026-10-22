@@ -70,11 +70,30 @@ int server_native_cache_lease_rotate_unpublished(server_native_cache_lease_t *le
    (void)error;
    return -1;
 }
+int server_native_cache_workspace_open(server_native_cache_lease_t *lease, const char *epoch,
+                                       char *path, size_t capacity)
+{
+   (void)lease;
+   (void)epoch;
+   if (path && capacity)
+      path[0] = 0;
+   return -1;
+}
+int server_native_cache_workspace_valid(const server_native_cache_lease_t *lease, const char *epoch,
+                                        int fd, const char *path)
+{
+   (void)lease;
+   (void)epoch;
+   (void)fd;
+   (void)path;
+   return 0;
+}
 #else
 #include "platform_random.h"
 #include "cJSON.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -85,6 +104,7 @@ int server_native_cache_lease_rotate_unpublished(server_native_cache_lease_t *le
 struct server_native_cache_lease
 {
    int directory, lock;
+   char home[PATH_MAX];
    struct stat marker;
    cJSON *manifest;
    int published;
@@ -105,6 +125,109 @@ static int owned_directory(int parent, const char *name)
       return -1;
    }
    return fd;
+}
+static int workspace_epoch(const char *epoch)
+{
+   return epoch &&
+          (!strcmp(epoch, "0") || (strlen(epoch) == 32 && strspn(epoch, "0123456789abcdef") == 32));
+}
+static int directory_safe(int fd, int private)
+{
+   struct stat st;
+   return fd >= 0 && !fstat(fd, &st) && S_ISDIR(st.st_mode) && st.st_uid == geteuid() &&
+          (private ? (st.st_mode & 0777) == 0700 : !(st.st_mode & 0022));
+}
+static int directory_same(int left, int right)
+{
+   struct stat a, b;
+   return !fstat(left, &a) && !fstat(right, &b) && a.st_dev == b.st_dev && a.st_ino == b.st_ino;
+}
+/* Rewalk the host-owned cache namespace rather than trusting an absolute leaf
+ * path with unchecked intermediate components. Detect renamed lease roots too. */
+static int workspace_root(const server_native_cache_lease_t *lease, char *path, size_t capacity)
+{
+   if (!lease || !lease->manifest || !path || !capacity)
+      return -1;
+   const char *sdk = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(lease->manifest, "sdk"));
+   const char *session =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(lease->manifest, "session_id"));
+   const char *binding =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(lease->manifest, "binding"));
+   char vendor[32];
+   if (!sdk || !session || !binding ||
+       snprintf(vendor, sizeof vendor, "browser-%s", sdk) >= (int)sizeof vendor ||
+       snprintf(path, capacity, "%s/%s/%s/%s", lease->home, vendor, session, binding) >=
+           (int)capacity)
+      return -1;
+   int root = open(lease->home, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+   const char *parts[] = {vendor, session, binding};
+   for (unsigned i = 0; root >= 0 && i < sizeof parts / sizeof parts[0]; i++)
+   {
+      int next = directory_safe(root, 0)
+                     ? openat(root, parts[i], O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+                     : -1;
+      close(root);
+      root = next;
+   }
+   if (!directory_safe(root, 0) || !directory_same(root, lease->directory))
+   {
+      if (root >= 0)
+         close(root);
+      return -1;
+   }
+   return root;
+}
+int server_native_cache_workspace_open(server_native_cache_lease_t *lease, const char *epoch,
+                                       char *path, size_t capacity)
+{
+   if (!path || !capacity)
+      return -1;
+   path[0] = 0;
+   if (!workspace_epoch(epoch))
+      return -1;
+   char root_path[PATH_MAX];
+   int root = workspace_root(lease, root_path, sizeof root_path);
+   if (root < 0)
+      return -1;
+   int parent = owned_directory(root, "sdk-workspaces");
+   close(root);
+   int fd = directory_safe(parent, 1) ? owned_directory(parent, epoch) : -1;
+   if (parent >= 0)
+      close(parent);
+   if (!directory_safe(fd, 1) ||
+       snprintf(path, capacity, "%s/sdk-workspaces/%s", root_path, epoch) >= (int)capacity ||
+       !server_native_cache_workspace_valid(lease, epoch, fd, path))
+   {
+      if (fd >= 0)
+         close(fd);
+      path[0] = 0;
+      return -1;
+   }
+   return fd;
+}
+int server_native_cache_workspace_valid(const server_native_cache_lease_t *lease, const char *epoch,
+                                        int fd, const char *path)
+{
+   if (!workspace_epoch(epoch) || !directory_safe(fd, 1) || !path)
+      return 0;
+   char root_path[PATH_MAX], expected[PATH_MAX];
+   int root = workspace_root(lease, root_path, sizeof root_path);
+   if (root < 0)
+      return 0;
+   int parent = openat(root, "sdk-workspaces", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+   close(root);
+   int current = directory_safe(parent, 1)
+                     ? openat(parent, epoch, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+                     : -1;
+   if (parent >= 0)
+      close(parent);
+   int valid = directory_safe(current, 1) && directory_same(current, fd) &&
+               snprintf(expected, sizeof expected, "%s/sdk-workspaces/%s", root_path, epoch) <
+                   (int)sizeof expected &&
+               !strcmp(path, expected);
+   if (current >= 0)
+      close(current);
+   return valid;
 }
 static int label(const char *value)
 {
@@ -141,10 +264,10 @@ static server_native_cache_lease_t *lease_acquire(const char *home, const char *
       *prior = NULL;
    if (error)
       error[0] = 0;
-   if (!home || home[0] != '/' || !sdk || (strcmp(sdk, "codex") && strcmp(sdk, "claude")) ||
-       !label(session) || !binding || strlen(binding) != 64 ||
-       strspn(binding, "0123456789abcdef") != 64 || !actor || !actor[0] || strlen(actor) > 128 ||
-       !turn || !turn[0] || strlen(turn) > 128)
+   if (!home || home[0] != '/' || strlen(home) >= PATH_MAX || !sdk ||
+       (strcmp(sdk, "codex") && strcmp(sdk, "claude")) || !label(session) || !binding ||
+       strlen(binding) != 64 || strspn(binding, "0123456789abcdef") != 64 || !actor || !actor[0] ||
+       strlen(actor) > 128 || !turn || !turn[0] || strlen(turn) > 128)
       return NULL;
    int root = open(home, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
    char vendor[32];
@@ -222,6 +345,7 @@ static server_native_cache_lease_t *lease_acquire(const char *home, const char *
       cJSON *copy = lease ? cJSON_Duplicate(manifest, 1) : NULL;
       if (lease && copy)
       {
+         snprintf(lease->home, sizeof lease->home, "%s", home);
          lease->directory = root;
          lease->lock = lock;
          lease->marker = existing;
@@ -266,6 +390,7 @@ static server_native_cache_lease_t *lease_acquire(const char *home, const char *
       close(root);
       goto unavailable;
    }
+   snprintf(lease->home, sizeof lease->home, "%s", home);
    lease->directory = root;
    lease->lock = lock;
    if (publish_fresh)

@@ -29,11 +29,97 @@ static void wait_exit(pid_t child)
    int status;
    assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && !WEXITSTATUS(status));
 }
+static void private_workspace(void)
+{
+   const char other_binding[] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+   const char epoch[] = "11111111111111111111111111111111";
+   char error[512], a[8192], b[8192], fresh[8192], saved[8192];
+   server_native_cache_lease_t *lease = server_native_cache_lease_open(
+       home, "claude", "workspace-session", binding, "actor", "A1", error);
+   assert(lease);
+   int first = server_native_cache_workspace_open(lease, "0", a, sizeof a);
+   assert(first >= 0 && server_native_cache_workspace_valid(lease, "0", first, a));
+   struct stat original, returned;
+   assert(!fstat(first, &original));
+   close(first);
+   assert(!server_native_cache_lease_close(lease, 1));
+   lease = server_native_cache_lease_open(home, "claude", "workspace-session", other_binding,
+                                          "actor", "B", error);
+   assert(lease);
+   int other = server_native_cache_workspace_open(lease, "0", b, sizeof b);
+   assert(other >= 0 && strcmp(a, b));
+   close(other);
+   assert(!server_native_cache_lease_close(lease, 1));
+   lease = server_native_cache_lease_open(home, "claude", "workspace-session", binding, "actor",
+                                          "A2", error);
+   assert(lease);
+   first = server_native_cache_workspace_open(lease, "0", b, sizeof b);
+   assert(first >= 0 && !strcmp(a, b) && !fstat(first, &returned) &&
+          original.st_dev == returned.st_dev && original.st_ino == returned.st_ino);
+   other = server_native_cache_workspace_open(lease, epoch, fresh, sizeof fresh);
+   assert(other >= 0 && strcmp(a, fresh));
+   assert(!server_native_cache_workspace_valid(lease, epoch, first, a));
+   assert(server_native_cache_workspace_open(lease, "../0", b, sizeof b) < 0);
+   assert(server_native_cache_workspace_open(lease, "", b, sizeof b) < 0);
+   assert(server_native_cache_workspace_open(lease, "../escape", b, sizeof b) < 0);
+   close(other);
+   assert(!chmod(a, 0770));
+   assert(!server_native_cache_workspace_valid(lease, "0", first, a));
+   assert(server_native_cache_workspace_open(lease, "0", b, sizeof b) < 0);
+   assert(!chmod(a, 0600));
+   assert(!server_native_cache_workspace_valid(lease, "0", first, a));
+   assert(!chmod(a, 0700));
+   assert(snprintf(saved, sizeof saved, "%s-moved", a) < (int)sizeof saved);
+   assert(!rename(a, saved) && !mkdir(a, 0700));
+   assert(!server_native_cache_workspace_valid(lease, "0", first, a));
+   assert(!rmdir(a) && !symlink(saved, a));
+   assert(!server_native_cache_workspace_valid(lease, "0", first, a));
+   assert(server_native_cache_workspace_open(lease, "0", b, sizeof b) < 0);
+   assert(!unlink(a) && !rename(saved, a));
+   assert(server_native_cache_workspace_valid(lease, "0", first, a));
+   /* Parent replacement is refused even if the retained leaf is still valid. */
+   char parent[8192], parent_saved[8192];
+   snprintf(parent, sizeof parent, "%s", a);
+   *strrchr(parent, '/') = 0;
+   assert(snprintf(parent_saved, sizeof parent_saved, "%s-moved", parent) <
+          (int)sizeof parent_saved);
+   assert(!rename(parent, parent_saved) && !symlink(parent_saved, parent));
+   assert(!server_native_cache_workspace_valid(lease, "0", first, a));
+   assert(server_native_cache_workspace_open(lease, "0", b, sizeof b) < 0);
+   assert(!unlink(parent) && !rename(parent_saved, parent));
+   assert(server_native_cache_workspace_valid(lease, "0", first, a));
+   close(first);
+   assert(!server_native_cache_lease_close(lease, 1));
+   assert(!rmdir(a) && !rmdir(fresh));
+   const char *bindings[] = {binding, other_binding};
+   for (unsigned i = 0; i < 2; i++)
+   {
+      assert(snprintf(a, sizeof a, "%s/browser-claude/workspace-session/%s/sdk-workspaces%s", home,
+                      bindings[i], i ? "/0" : "") < (int)sizeof a);
+      assert(!rmdir(a));
+      if (i)
+      {
+         *strrchr(a, '/') = 0;
+         assert(!rmdir(a));
+      }
+      assert(snprintf(a, sizeof a,
+                      "%s/browser-claude/workspace-session/%s/.aimee-native-owner.lock", home,
+                      bindings[i]) < (int)sizeof a);
+      assert(!unlink(a));
+      *strrchr(a, '/') = 0;
+      assert(!rmdir(a));
+   }
+   assert(snprintf(a, sizeof a, "%s/browser-claude/workspace-session", home) < (int)sizeof a);
+   assert(!rmdir(a));
+   *strrchr(a, '/') = 0;
+   assert(!rmdir(a));
+}
 int main(void)
 {
    assert(snprintf(home, sizeof home, "%s/native-cache-lease-XXXXXX", platform_tmpdir()) <
           (int)sizeof home);
    assert(mkdtemp(home));
+   private_workspace();
    assert(snprintf(directory, sizeof directory, "%s/browser-codex/session/%s", home, binding) <
           (int)sizeof directory);
    char error[512], marker[8192], lock[8192], cache[8192], replacement[8192];

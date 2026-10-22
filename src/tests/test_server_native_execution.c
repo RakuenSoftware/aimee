@@ -56,6 +56,8 @@ static int child_executable, child_directory;
 static const char *active_sdk = "codex";
 static aimee_wire_t expected_wire = AIMEE_WIRE_RESPONSES;
 static const char *expected_provider, *expected_endpoint, *expected_auth;
+static char observed_claude_cwd[4096];
+static int bound_credential_home;
 static const char digest[] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 struct server_native_containment
 {
@@ -225,6 +227,13 @@ int server_native_containment_sha256(const server_native_containment_t *owner, c
 {
    assert(owner == &boundary);
    snprintf(out, 65, "%s", digest);
+   return 0;
+}
+int server_native_containment_bind_home(server_native_containment_t *owner, const char *home)
+{
+   assert(owner == &boundary && !strcmp(active_sdk, "claude"));
+   assert(home && strstr(home, "/n.") && !access(home, F_OK));
+   assert(!bound_credential_home++);
    return 0;
 }
 const cli_native_spawn_guard_t *server_native_containment_guard(server_native_containment_t *owner)
@@ -698,8 +707,13 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
           !cfg->system_prompt);
    assert(!cfg->history && !strcmp(cfg->resume_id, "native-result") && began == 1);
    const cli_claude_host_launch_t *host = cfg->claude_host;
+   assert(bound_credential_home == (host->spawn_guard ? 1 : 0));
+   snprintf(observed_claude_cwd, sizeof observed_claude_cwd, "%s", host->cwd);
    char proof[65];
    assert(!cli_claude_native_launch_digest(cfg, proof) && !strcmp(proof, host->expected_profile));
+   /* Exact deterministic pre-stable-cwd launch contract for this fixture.
+    * Old complete handles must not be admitted under the new cwd policy. */
+   assert(strcmp(proof, "a0d85eb248a7007b6c4b2865a72206439a5e29febd33e61bc2c59c590112ff46"));
    /* The exact fixed gateway setting is covered by the launch proof, not
     * inherited from the operator or inferred from SDK initialization. */
    int attribution_index = -1, readiness_index = -1;
@@ -842,6 +856,12 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    assert(!strcmp(cli_claude_native_profile_error(host, bad_servers), "MCP server count"));
    cJSON_Delete(bad_servers);
    assert(!cli_claude_native_profile_error(host, frame));
+   char moved_cwd[8192];
+   assert(snprintf(moved_cwd, sizeof moved_cwd, "%s-replaced", host->cwd) < (int)sizeof moved_cwd);
+   assert(!rename(host->cwd, moved_cwd) && !mkdir(host->cwd, 0700));
+   assert(
+       host->init(frame, host->context)); // Retained fd cannot attest a different pathname inode.
+   assert(!rmdir(host->cwd) && !rename(moved_cwd, host->cwd));
    assert(!host->init(frame, host->context));
    assert(!bind("native-result", context));
    cJSON_Delete(frame);
@@ -888,6 +908,7 @@ static void reset(int next)
    terminal_committed = sdk_calls = restored = ready_calls = rejected_terminal = 0;
    child_executable = child_directory = -1;
    private_home[0] = 0;
+   bound_credential_home = 0;
    snprintf(parent_role, sizeof parent_role, "parent");
    snprintf(owner.vault_principal, sizeof owner.vault_principal, "actor");
    aimee_ir_session_begin_task();
@@ -1238,6 +1259,35 @@ int main(int argc, char **argv)
    agent_result_clear_response(&claude);
    finish(1);
    assert(completed == 1 && closed == 1);
+   /* The credential HOME remains per-launch; Claude project lookup must use
+    * the same private scheduler cwd across successful continuation turns. */
+   char first_claude_cwd[4096], first_claude_home[4096];
+   snprintf(first_claude_cwd, sizeof first_claude_cwd, "%s", observed_claude_cwd);
+   snprintf(first_claude_home, sizeof first_claude_home, "%s", private_home);
+   struct stat first_cwd, next_cwd;
+   assert(!stat(first_claude_cwd, &first_cwd));
+   reset(0);
+   agent_result_t continuation = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &continuation));
+   assert(!strcmp(first_claude_cwd, observed_claude_cwd));
+   assert(strcmp(first_claude_home, private_home) && access(first_claude_home, F_OK) &&
+          access(private_home, F_OK));
+   assert(!stat(observed_claude_cwd, &next_cwd) && first_cwd.st_dev == next_cwd.st_dev &&
+          first_cwd.st_ino == next_cwd.st_ino);
+   assert(strcmp(observed_claude_cwd, host_workspace));
+   agent_result_clear_response(&continuation);
+   finish(1);
+   reset(0);
+   qualified_mode = 1;
+   setenv("AIMEE_NATIVE_CONTAINMENT_ROOT", "/fixture-owned-root", 1);
+   agent_result_t qualified_claude = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &qualified_claude));
+   assert(bound_credential_home == 1 && reserved);
+   agent_result_clear_response(&qualified_claude);
+   finish(1);
+   assert(finished_reservation && !durable_reservation);
+   unsetenv("AIMEE_NATIVE_CONTAINMENT_ROOT");
+   qualified_mode = 0;
    /* Normal Models setup stores SDK aliases, while the host profile owns the
     * actual upstream wire and endpoint. Explicit cross-wire profiles above
     * remain unchanged; aliases must not become empty OpenAI profiles. */

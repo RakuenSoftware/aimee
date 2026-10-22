@@ -484,11 +484,21 @@ static int native_environment(native_execution_t *execution)
 }
 static int native_prepare_directory(native_execution_t *execution)
 {
-   if (snprintf(execution->cwd, sizeof execution->cwd, "%s/workspace", execution->home) >=
-           (int)sizeof execution->cwd ||
-       mkdir(execution->cwd, 0700))
-      return -1;
-   execution->scheduler_fd = open(execution->cwd, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+   /* Claude locates its project transcript by cwd. Keep that private path
+    * stable only within this admitted lease/epoch, while HOME/config/tmp stay
+    * per-launch. The tool runtime retains the actual operator project cwd. */
+   if (!strcmp(execution->selected.cli_kind, "claude"))
+      execution->scheduler_fd = server_native_cache_workspace_open(
+          execution->lease, execution->epoch, execution->cwd, sizeof execution->cwd);
+   else
+   {
+      if (snprintf(execution->cwd, sizeof execution->cwd, "%s/workspace", execution->home) >=
+              (int)sizeof execution->cwd ||
+          mkdir(execution->cwd, 0700))
+         return -1;
+      execution->scheduler_fd =
+          open(execution->cwd, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+   }
    char temporary[4200];
    return execution->scheduler_fd < 0 ||
                   snprintf(temporary, sizeof temporary, "%s/tmp", execution->home) >=
@@ -1258,6 +1268,9 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    if (!strcmp(sdk, "codex") ? native_write_config(execution, selected)
                              : native_prepare_directory(execution) || native_environment(execution))
       goto refused;
+   if (!strcmp(sdk, "claude") && execution->containment &&
+       server_native_containment_bind_home(execution->containment, execution->home))
+      goto refused;
    execution->launch = (cli_codex_host_launch_t){
        .executable_fd = execution->executable_fd,
        .cwd_fd = execution->scheduler_fd,
@@ -1328,7 +1341,10 @@ static int native_claude_init(const cJSON *frame, void *context)
    const char *resume = server_native_cache_resume(execution->cache);
    char proof[65];
    const char *reason = NULL;
-   if (!id || !id[0] || strlen(id) >= sizeof execution->native_id)
+   if (!server_native_cache_workspace_valid(execution->lease, execution->epoch,
+                                            execution->scheduler_fd, execution->cwd))
+      reason = "private workspace custody";
+   else if (!id || !id[0] || strlen(id) >= sizeof execution->native_id)
       reason = "session identity";
    else if (resume && resume[0] && strcmp(resume, id))
       reason = "resume identity";
@@ -1407,6 +1423,9 @@ static int native_claude_execute(native_execution_t *execution, const provider_c
    if (native_cache_ready(execution, execution->claude_digest, &replay))
       return -1;
    owned->resume_id = replay.resume_id;
+   if (!server_native_cache_workspace_valid(execution->lease, execution->epoch,
+                                            execution->scheduler_fd, execution->cwd))
+      return -1;
    return claude_headless_run(owned, native_bind, execution, out);
 }
 

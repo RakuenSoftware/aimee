@@ -36,7 +36,8 @@ struct server_native_containment
    uint16_t tcp_ports[8];
    size_t port_count;
    char uidmap[64], gidmap[64], name[64];
-   struct stat root_stat, leaf_stat;
+   struct stat root_stat, leaf_stat, cache_stat[2];
+   char cache_home[4096];
    cJSON *manifest;
    cli_native_spawn_guard_t guard;
 };
@@ -208,16 +209,22 @@ static void close_other_fds(server_native_containment_t *o, int executable, int 
  * cache-state symlink. Only their interiors get write authority, never the
  * persistent binding/control parents. Caller credentials and cache locks remain
  * outside these rules even though the SDK has the same host filesystem UID. */
-static int cache_write_directories(const char *cwd_path, int directories[2])
+static int cache_write_directories(const char *cwd_path, const char *explicit_home,
+                                   int directories[2])
 {
    char home[4096], link[4096], target[4096];
-   if (strlen(cwd_path) >= sizeof home)
+   const char *source = explicit_home ? explicit_home : cwd_path;
+   if (!source || source[0] != '/' || strlen(source) >= sizeof home)
       return -1;
-   snprintf(home, sizeof home, "%s", cwd_path);
-   char *part = strrchr(home, '/');
-   if (!part || strcmp(part, "/workspace"))
-      return -1;
-   *part = 0;
+   snprintf(home, sizeof home, "%s", source);
+   char *part;
+   if (!explicit_home)
+   {
+      part = strrchr(home, '/');
+      if (!part || strcmp(part, "/workspace"))
+         return -1;
+      *part = 0;
+   }
    part = strrchr(home, '/');
    if (!part || strlen(part + 1) != 8 || strncmp(part + 1, "n.", 2) ||
        strspn(part + 3, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") != 6)
@@ -276,6 +283,22 @@ failed:
    directories[0] = directories[1] = -1;
    return -1;
 }
+int server_native_containment_bind_home(server_native_containment_t *o, const char *home)
+{
+   if (!o || o->used || o->cache_home[0])
+      return -1;
+   int directories[2] = {-1, -1};
+   if (cache_write_directories(NULL, home, directories))
+      return -1;
+   int valid =
+       !fstat(directories[0], &o->cache_stat[0]) && !fstat(directories[1], &o->cache_stat[1]);
+   close(directories[0]);
+   close(directories[1]);
+   if (!valid)
+      return -1;
+   snprintf(o->cache_home, sizeof o->cache_home, "%s", home);
+   return 0;
+}
 /* Landlock ABI4 controls TCP ports, not destination addresses. No bind
  * grants: SDK listeners and arbitrary host-service ports remain unavailable. */
 static int restrict_resources(const server_native_containment_t *o, const char *cwd_path)
@@ -293,7 +316,16 @@ static int restrict_resources(const server_native_containment_t *o, const char *
    if (rules < 0)
       return -1;
    int directories[2] = {-1, -1};
-   int valid = !cache_write_directories(cwd_path, directories);
+   int valid =
+       !cache_write_directories(cwd_path, o->cache_home[0] ? o->cache_home : NULL, directories);
+   /* Resolve only after the new mount namespace exists. Do not retain a
+    * pre-unshare write FD that could pin an old host mount. */
+   for (unsigned i = 0; valid && o->cache_home[0] && i < 2; i++)
+   {
+      struct stat current;
+      valid = !fstat(directories[i], &current) && current.st_dev == o->cache_stat[i].st_dev &&
+              current.st_ino == o->cache_stat[i].st_ino;
+   }
    for (unsigned i = 0; valid && i < 2; i++)
    {
       struct
@@ -818,6 +850,12 @@ int server_native_containment_sha256(const server_native_containment_t *o, char 
 {
    (void)o;
    (void)out;
+   return -1;
+}
+int server_native_containment_bind_home(server_native_containment_t *o, const char *home)
+{
+   (void)o;
+   (void)home;
    return -1;
 }
 const cli_native_spawn_guard_t *server_native_containment_guard(server_native_containment_t *o)
