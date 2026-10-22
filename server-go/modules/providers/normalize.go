@@ -92,6 +92,11 @@ func normalizeModel(model object) error {
 	if provider := str(model, "provider"); provider == "claude" || provider == "claude-code" {
 		model["backend"], model["cli_kind"] = "provider-cli", "claude"
 		model["session_reuse"], model["endpoint"] = true, ""
+		// These SDK aliases use the registered Claude OAuth document. The UI's
+		// historical none/bearer defaults must not select API-key lineage instead.
+		if auth := str(model, "auth_type"); auth == "none" || auth == "bearer" {
+			model["auth_type"] = "claude-oauth"
+		}
 	}
 	if str(model, "backend") == "cli-stdio" {
 		model["backend"] = "provider-cli"

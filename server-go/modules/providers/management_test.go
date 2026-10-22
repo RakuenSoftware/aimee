@@ -316,7 +316,7 @@ func TestClaudeConnectionOnlyEnrollmentRetainsNativeDispatch(t *testing.T) {
 				if str(model, "backend") != "provider-cli" || str(model, "cli_kind") != "claude" || str(model, "cli_cmd") != "claude" || str(model, "endpoint") != "" || !boolean(model, "session_reuse", false) {
 					t.Fatalf("native dispatch lost after applying connection: %#v", model)
 				}
-				if str(model, "registration") != "max" || str(model, "auth_type") != "none" || str(model, "model") != "claude-opus-5" {
+				if str(model, "registration") != "max" || str(model, "auth_type") != "claude-oauth" || str(model, "model") != "claude-opus-5" {
 					t.Fatal("credential or model identity changed")
 				}
 			}
@@ -378,5 +378,55 @@ func TestClaudeMirroredLegacyConnectionDoesNotPoisonNewRegisteredModel(t *testin
 				t.Fatal("connection command lost exact migration scope")
 			}
 		})
+	}
+}
+
+func TestClaudeSDKConnectionDefaultsSelectOAuthLineage(t *testing.T) {
+	for _, provider := range []string{"claude", "claude-code"} {
+		for _, auth := range []string{"none", "bearer", "claude-oauth", "x-api-key", "custom-auth"} {
+			t.Run(provider+"/"+auth, func(t *testing.T) {
+				m, home, vault := manager(t)
+				call(t, m, "provider.save_connection", object{"name": "max", "provider": provider, "endpoint": "", "auth_type": auth, "api_key": "$EXPLICIT_CREDENTIAL_REF", "create": true})
+				call(t, m, "model.add", object{"args": []string{"max:opus", "ignored", "claude-opus-5", "--registration", "max"}})
+				want := auth
+				if auth == "none" || auth == "bearer" {
+					want = "claude-oauth"
+				}
+				check := func() {
+					t.Helper()
+					cfg := call(t, m, "snapshot.load", nil)["config"].(map[string]any)
+					model := find(rows(cfg, "models"), "max:opus")
+					if str(model, "auth_type") != want {
+						t.Fatalf("native lineage auth=%q want=%q", str(model, "auth_type"), want)
+					}
+					if str(model, "registration") != "max" || str(model, "api_key") != "$EXPLICIT_CREDENTIAL_REF" {
+						t.Fatal("credential identity changed")
+					}
+					connection := find(rows(cfg, "providers"), "max")
+					if str(connection, "auth_type") != auth || str(connection, "api_key_ref") != "$EXPLICIT_CREDENTIAL_REF" {
+						t.Fatal("saved connection authority changed")
+					}
+				}
+				check()
+				call(t, m, "model.set", object{"args": []string{"max:opus", "--primary-only", "true"}})
+				check()
+				store, err := NewStore(home)
+				if err != nil {
+					t.Fatal(err)
+				}
+				m = NewManager(store, vault)
+				check()
+			})
+		}
+	}
+}
+
+func TestCustomClaudeAdapterDoesNotAcquireSDKOAuthIdentity(t *testing.T) {
+	model := object{"name": "custom", "provider": "custom-native", "backend": "provider-cli", "cli_kind": "claude", "cli_cmd": "/opt/owned/custom", "model": "custom-model", "auth_type": "none", "endpoint": "https://custom.invalid/v1", "api_key": "$CUSTOM_KEY"}
+	if err := normalizeModel(model); err != nil {
+		t.Fatal(err)
+	}
+	if str(model, "auth_type") != "none" || str(model, "provider") != "custom-native" || str(model, "endpoint") != "https://custom.invalid/v1" || str(model, "api_key") != "$CUSTOM_KEY" {
+		t.Fatal("custom adapter acquired a different credential identity")
 	}
 }

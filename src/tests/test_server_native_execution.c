@@ -54,7 +54,7 @@ static char parent_role[64], private_home[4096], host_workspace[4096];
 static int child_executable, child_directory;
 static const char *active_sdk = "codex";
 static aimee_wire_t expected_wire = AIMEE_WIRE_RESPONSES;
-static const char *expected_provider, *expected_endpoint;
+static const char *expected_provider, *expected_endpoint, *expected_auth;
 static const char digest[] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 struct server_native_containment
 {
@@ -415,6 +415,8 @@ int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON 
       assert(!strcmp(agent->provider, expected_provider));
    if (expected_endpoint)
       assert(!strcmp(agent->endpoint, expected_endpoint));
+   if (expected_auth)
+      assert(!strcmp(agent->auth_type, expected_auth));
    out->model = strdup(agent->model);
    out->tools = calloc(1, sizeof *out->tools);
    assert(out->tools);
@@ -477,6 +479,8 @@ server_native_runtime_t *server_native_runtime_open_bound_request(
    assert(!strcmp(selected->provider, expected_provider ? expected_provider : "chatgpt"));
    if (expected_endpoint)
       assert(!strcmp(selected->endpoint, expected_endpoint));
+   if (expected_auth)
+      assert(!strcmp(selected->auth_type, expected_auth));
    assert(!durable_reservation); /* Session recovery precedes current profile. */
    assert(profile->n_tools == 1 && profile->tools[0].kind == AIMEE_TOOL_FUNCTION);
    const char *logical = !strcmp(active_sdk, "claude") ? "mcp__aimee__read_file" : "read_file";
@@ -824,7 +828,7 @@ static void reset(int next)
    assert(!terminal && !retained);
    mode = next;
    expected_wire = AIMEE_WIRE_RESPONSES;
-   expected_provider = expected_endpoint = NULL;
+   expected_provider = expected_endpoint = expected_auth = NULL;
    reserved = quiesced = finished_reservation = published_claim = 0;
    disposed = 0;
    runtime_closed = 0;
@@ -1196,6 +1200,8 @@ int main(int argc, char **argv)
          reset(0);
          expected_wire = profile == 3 ? AIMEE_WIRE_OPENAI_CHAT : AIMEE_WIRE_ANTHROPIC;
          expected_provider = profile < 2 ? "anthropic" : claude_profiles[profile];
+         expected_auth = profile < 2 ? "claude-oauth" : profile == 2 ? "x-api-key" : "bearer";
+         snprintf(selected.auth_type, sizeof selected.auth_type, "%s", expected_auth);
          expected_endpoint =
              custom ? "https://owned.example.invalid/v1" : "https://api.anthropic.com/v1";
          snprintf(selected.provider, sizeof selected.provider, "%s", claude_profiles[profile]);
@@ -1206,11 +1212,13 @@ int main(int argc, char **argv)
          assert(alias_result.success && sdk_calls == 1 && joined);
          assert(!strcmp(selected.provider, claude_profiles[profile]));
          assert(!strcmp(selected.endpoint, custom ? expected_endpoint : ""));
+         assert(!strcmp(selected.auth_type, expected_auth));
          agent_result_clear_response(&alias_result);
          finish(1);
          assert(completed == 1 && closed == 1);
       }
    }
+   snprintf(selected.auth_type, sizeof selected.auth_type, "%s", "codex-oauth");
    snprintf(selected.provider, sizeof selected.provider, "%s", "chatgpt");
    selected.endpoint[0] = 0;
    active_sdk = "codex";
