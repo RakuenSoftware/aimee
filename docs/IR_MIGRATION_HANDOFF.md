@@ -5577,3 +5577,9 @@ and final fresh published-testing installation remain open.
 
 Production .100 remains untouched and KB-free. Do not claim complete migration
 or uniform three-turn success from these partial qualification results.
+
+Combined catalog snapshot 79d348da2 passed 75 of 76 lint gates. The remaining
+ownership-ledger gate correctly required review of the changed private Vault
+adapter. Review confirms the only change is a nonsecret compatibility-version
+field; memory transport, custody and Go policy ownership are unchanged. Its
+source fingerprint and review evidence are updated without changing the gate.

@@ -2639,12 +2639,14 @@
       "symbols": [
         "AIMEE_MEMORY_BACKEND_TOKEN"
       ],
-      "sha256": "834e9bceb88a851dbf172292c078843f70658f07129bba96bd5e472eff92078e",
-      "reason": "Reviewed 2026-10-18: the existing attested private Vault helper returns the selected Codex token, account and source lineage together using serving's refresh-aware resolver. The computed response remains pipe-only. AIMEE_MEMORY_BACKEND_TOKEN import/custody, grants and the Go memory owner are unchanged. This records source-boundary reasoning, not independent reviewer approval.",
+      "sha256": "92e7c8cb999fa163f508156d17c0f977469ecc74536e7f74f86af987ba5616ae",
+      "reason": "Reviewed 2026-10-22: the attested private Codex credential response additionally carries the existing pinned, nonsecret adapter compatibility version for account catalog GETs. Token/account/source custody, response clearing, selected-account refresh and pipe-only transport are unchanged. AIMEE_MEMORY_BACKEND_TOKEN import/custody, grants and the Go memory owner are unchanged. The new header contains only the installer version constant. This records exact source-boundary reasoning, not release approval.",
       "evidence": [
         "src/tests/test_agent.c",
         "server-go/modules/providers/inspect_test.go",
-        "docs/validation/deployment-repair-1.0.2-2026-10-17.md"
+        "docs/validation/deployment-repair-1.0.2-2026-10-17.md",
+        "server-go/modules/providers/codex_catalog_test.go",
+        "src/headers/codex_client_version.h"
       ]
     },
     "src/server/server_state_vectors.c": {
