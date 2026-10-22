@@ -15,27 +15,39 @@ implementation or local/live validation. Earlier follow-up-PR instructions below
 are historical. Do not investigate or change `.100`; validation uses the owned
 `.252` environment.
 
-The full `78f3f85af` candidate passes 169 local integration checks and all eight
-actual SDK wire/auth profiles, with 27 explicit optional-service/Docker skips;
-these skips do not qualify configured Docker grading. All 76 lint gates pass.
-Its full Docker build and canonical HOST build were independently qualified.
-Normal upgrades preserve canonical histories and native cache bytes. The HOST
-upgrade's old core required systemd's existing 90-second stop timeout; this was
-not a graceful-stop pass.
+Current qualified source `10d0a87ac` passes all 76 lint gates, the full
+configured Docker integration (170/170), and the T3 deployment matrix (7/7
+topology gates and 692/692 family assertions). Integration retains 25 explicitly
+unconfigured KB/runtime-web checks; Docker grading, recovery and scoped reuse
+actually ran. Full canonical Docker and HOST builds and normal upgrades passed
+artifact/history/cache preservation checks. These are candidate qualifications,
+not final published-image acceptance or fresh CI for subsequent changes.
 
-Live catalog selection now returns offered Codex models. A model-only save
-reproduced an unrelated change to `inject_respond_tool`; the current repair
-preserves this independent policy when the resubmitted tools flag is unchanged.
-The public `aimee agent set NAME --inject-respond-tool on|off` option supports
-explicit policy changes and overrides simultaneous tools-toggle coupling.
-Invalid values fail without saving. This allows restoration through the normal
-authenticated route while retaining the registered model and its evidence.
-A separate model-editor repair names the actual dialog from its visible title.
-The latter passes 468 frontend tests, type checking and both builds; provider
-save/reload regressions and the provider race suite pass. These two repairs are
-not yet deployed. Genuine single-permission Allow with a verified effect,
-cross-vendor continuation, current configured Docker grading/reuse, final
-published-image acceptance and owned-resource cleanup remain outstanding.
+Genuine HOST permission recovery now passes: one permission, one human Allow,
+one governed dispatch and an independently verified filesystem effect. Strict
+1280/390/320 browser replay and the retained refused-stream recovery test pass
+without automatic sends or replies. Normal HOST stop still reaches systemd's
+90-second timeout even with module peers alive; graceful shutdown is unresolved.
+
+The actual HTTP Codex B continuation completed with correct prior-answer recall.
+The single subsequent native Claude A return used the original SDK UUID, stable
+cwd and unchanged cache prefix, but failed at canonical event 54. Its retained
+SDK log reports an upstream invalid-request refusal. Actual stdout and numeric
+HTTP status were not retained; the cause is unproved. Do not retry that turn,
+reset its cache, import the SDK transcript or describe A/B/A as passing. Current
+local Claude controls succeeded; account comparability is unproved.
+
+The model policy and accessible dialog repairs are deployed in this candidate.
+A further browser editor repair resolves hydrated display basenames through the
+owner's project registry before requesting the session worktree. A refusal now
+shows an error instead of silently opening the base checkout. Its five focused
+regressions, all 473 frontend tests, type checking and both builds pass; deployment
+and actual worktree editor acceptance remain required for this change.
+
+Keep implementation and validation moving without requiring an open PR. Remaining
+work includes the native-resume failure, graceful HOST shutdown, deployment of
+the editor repair, final current-source CI and published fresh-install acceptance,
+and owned-resource cleanup. No completion or production promotion is claimed.
 
 [PR #3052](https://github.com/RakuenSoftware/aimee/pull/3052) merged into `testing`
 as `aa8c774edcc324f5defb6c5cea592f0e1dd5314d`. Its final premerge checks and
