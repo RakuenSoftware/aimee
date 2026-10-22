@@ -18,6 +18,118 @@ continue on `fix/fresh-claude-provider-setup`, requiring their own follow-up PR.
 Keep automatic review and the strict attribution gate enabled. No production
 promotion is claimed.
 
+### Fresh-install acceptance continuation: 22 October 2026
+
+The first published-image failure remains retained separately. Subsequent full
+canonical candidate builds exposed OAuth-lineage and MCP-startup defects. The
+default installed Claude 2.1.177 emits its initial profile before asynchronous
+MCP discovery unless the host explicitly waits. The repaired launch fixes
+MCP_CONNECTION_NONBLOCKING=0 and attests it; no discovery timeout or catalog gate
+was relaxed. Exact SDK probes with delayed MCP responses reproduced the failure
+and verified all 53 tools after blocking startup.
+
+Full candidate source 1c8b55ff73f6915248c841da433e0cf99b05303e passed a genuine
+fresh normal PAM/Providers/Models/Vault/project browser journey: one README read,
+one pending question surviving reload, one human reply, and one ordinary
+`aimee index investigate "README Hello World"` execution. The CLI selected the
+approved project without scope overrides; its honest empty symbol hits are not
+a retrieval-quality pass. The initial turn completed, and switching the same
+conversation from Opus to a normally enrolled Sonnet model completed with correct
+prior-answer recall. No live permission waiter occurred in this journey.
+
+Returning to Opus failed with `Claude structured turn failed`. It was not retried.
+The original SDK JSONL remained unchanged. A credential-free, network-isolated
+probe of copied retained cache bytes reached a local model endpoint under the
+original scheduler cwd, but exited before any model request under a different
+cwd. The production SDK's raw error was not retained; the probe's exact error
+must not be attributed to that production process. Claude locates saved projects
+by cwd, while the host had removed and regenerated that temporary cwd each turn.
+
+The repair retains a private scheduler directory within the admitted cache lease
+and epoch, with path/inode revalidation. Credential HOME and temporary files stay
+per-launch; tool authority remains the operator's approved project. Configured
+containment binds only its existing HOME and SDK-state write interiors and leaves
+the stable cwd read-only. A versioned launch contract avoids adopting old handles
+keyed by deleted temporary directories; their files and canonical history remain
+intact. Normal lease/factory/headless/runtime and ASan/UBSan/leak checks pass, as
+do all 76 lint gates. The actual configured-host containment fixture also passes on the owned VM
+under UID1000 with a delegated cgroup; its unit/cgroup cleanup is verified. The
+default Compose application remains ordinary direct launch. Fresh full-image
+acceptance is pending at this checkpoint.
+
+A separate browser regression preserves existing conversation titles when only
+canonical IR history is populated. Its baseline fails; 449 frontend tests and
+both production builds pass. SmoothGUI 0.12.3 was already merged separately in
+PR #3058; these later backend/title repairs are on
+`fix/fresh-claude-provider-setup`. Fresh CI and a follow-up PR remain required.
+Production `.100` has not been changed.
+
+The full canonical `6a790b7f0265` image then passed a new fresh-install first
+read/question/reply/CLI turn (completed at 197, checkpoint 198) and Sonnet switch
+(completed at 224, checkpoint 225). Returning to Opus used the exact original SDK
+UUID, stable cwd pathname and inode, and a new credential HOME. It nevertheless
+failed at 231: authenticated model observations include an empty assistant and
+`raw_stop_reason=refusal`, with zero output tokens. The retained SDK diagnostic
+identifies `invalid_request` and an explicit upstream Usage Policy rejection.
+This is a genuine failed acceptance case, preserved without retry; it is distinct
+from the repaired missing-directory failure. All earlier canonical prefixes
+remain equal. No prompt, model or cache was changed to evade the rejection.
+
+An isolated copied-cache probe using the exact installed SDK and actual host
+initialization protocol reaches a local model endpoint after control response
+and valid system/init. It preserves the source cache prefix and has no
+no-conversation error. It is deliberately terminated after reaching that local
+endpoint; it does not qualify successful model inference or reproduce the actual
+provider refusal. No launch or canonical-admission gate was relaxed.
+
+Late onboarding overlays and incorrect inferred tab titles caused separate
+zero-send harness preparation failures. Those were preserved separately and
+corrected using normal visible dialog dismissal and observed tab metadata. The
+first 320px completion image is obstructed and is not an unobstructed visual pass.
+Restart/persistence, full-image T3 and read-only three-viewport audit continue
+against the complete 231-event baseline, including the failed terminal. No live
+permission waiter or cross-vendor OAuth switching is claimed by this journey.
+
+The idle Docker restart of all three owned application containers passes. All
+231 canonical events, native handles/owner/reservation rows, all four SDK cache
+files (inode, bytes and hash), and configuration hashes remain exactly equal.
+There are no active native jobs or SDK processes after restart. This qualifies
+idle persistence, not successful continuation after the rejected provider turn.
+
+The final candidate's unchanged canonical T3 runner passes all seven topology
+gates and 692 family subchecks: 217 local memory, 15 semantic memory, 21 concurrent
+owner/exploratory memory, 352 provider boundary, and 87 native asynchronous
+execution/refusal/recovery. There are zero failed or skipped checks. The 18
+allowlisted injected-failure diagnostic events are reported separately, not
+counted as passed assertions. Actual image remains
+`sha256:3fb20800584e7533343c9cbda0d38a08502309543a5be373985b79c3c814e238`;
+this is a locally built full canonical candidate, not a published registry image.
+Its isolated test topology has zero remaining containers, volumes and networks.
+
+The final read-only normal PAM browser audit passes at 1280, 390 and 320px. Each
+explicit reload preserves all 231 envelopes and exactly one question response;
+resolved controls never become actionable. Each settled 15-second idle interval
+has zero attach/detach, primary-history refresh, SSE reconnect or mutation. The
+whole audit makes zero send/reply/cancel/configuration requests and has zero page
+errors. Root reviewed all three unobstructed screenshots: controls fit, though
+the rules banner remains large and two reasoning-omission notices are redundant.
+Pending first-boot account setup deliberately reopens onboarding after each
+explicit document reload; normal Later dismisses it before idle measurement.
+This behavior is a UX finding, not an observed idle replay loop.
+
+Qualification artifacts are retained privately outside the repository. Main
+custody archive SHA256 is
+`db1e57e7a8aea9e78d5ded52667513ae6dbfdc31aedc486b3cab05a260a631a7`;
+T3 archive is
+`5f1a73d8135952e0526188e858448b14d973d571ff949604d8c95726a3e006be`;
+read-only report is
+`8f3070bac36c8d9bd5e6d257a9749df1461bacaba43a52a0178673123c820c48`.
+The tested code revision is `6a790b7f0265a1bbdd9cf144c7d8769130c62e5e`;
+this later handoff-only commit does not identify a different tested runtime.
+Fresh CI/follow-up PR housekeeping remains deferred at the user's request. No
+production promotion, cross-vendor OAuth journey, live permission waiter, broader
+platform qualification or overall migration completion is asserted.
+
 ### Published-image fresh-install failure and candidate repair
 
 The merged revision passed all 54 post-merge main CI jobs. Publisher run
@@ -53,7 +165,7 @@ and all 76 lint gates pass. Full candidate-image fresh-install acceptance and
 fresh CI remain required at this checkpoint; preserve the immutable-image
 failure separately from any later candidate result.
 
-The same follow-up vendors SmoothGUI 0.12.3 from upstream main commit
+The separately merged PR #3058 vendors SmoothGUI 0.12.3 from upstream main commit
 `57d8308f38665d24221cb30b2aa2453926eed464`, with recorded tarball integrity.
 All 447 frontend tests, both production builds and Chromium regressions pass.
 The published `testing-861b5b0` image contains the preceding dependency, so its
