@@ -11,11 +11,12 @@ as `aa8c774edcc324f5defb6c5cea592f0e1dd5314d`. Its final premerge checks and
 all 54 postmerge main CI jobs passed, including every configured deployment
 tier; the seven-job artifact publisher also passed. Those results qualify the
 merged baseline, not the subsequent browser repairs. PR #3057 subsequently merged
-into `testing` as `861b5b0ff20d2c24f7fb89a5826198f175f7a685`. Its published-image
-fresh-install follow-up and the SmoothGUI update continue in
-[PR #3058](https://github.com/RakuenSoftware/aimee/pull/3058), on
-`chore/update-smoothgui-0.12.3`. Keep automatic review and the strict attribution
-gate enabled. No production promotion is claimed.
+into `testing` as `861b5b0ff20d2c24f7fb89a5826198f175f7a685`. The SmoothGUI update
+in [PR #3058](https://github.com/RakuenSoftware/aimee/pull/3058) subsequently merged
+as `24ecd8b39ea7a6fef78fba838a3bfe1a188831ed`. The fresh-install Claude repairs
+continue on `fix/fresh-claude-provider-setup`, requiring their own follow-up PR.
+Keep automatic review and the strict attribution gate enabled. No production
+promotion is claimed.
 
 ### Published-image fresh-install failure and candidate repair
 
