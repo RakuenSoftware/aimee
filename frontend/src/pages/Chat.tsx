@@ -1685,7 +1685,13 @@ export default function Chat() {
     const es = new EventSource(`/api/chat/session-events?format=ir&sid=${encodeURIComponent(activeAimeeSid)}&cursor=${state.sequence}`);
     presenceSseRef.current = es;
     es.addEventListener('error', () => {
-      if (!disposed) setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+      if (disposed) return;
+      disposed = true;
+      setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+      // EventSource hides HTTP refusal details. Keep history and drafts, but
+      // withdraw controls until an explicit reconnect completes canonical replay.
+      setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: 'Conversation connection failed. Reconnect to load the latest history.' }));
+      es.close();
     });
     es.addEventListener('replay_complete', (event: MessageEvent<string>) => {
       if (disposed) return;

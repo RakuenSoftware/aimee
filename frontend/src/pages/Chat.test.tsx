@@ -495,6 +495,52 @@ describe('canonical browser chat', () => {
     await close();
   });
 
+  it.each([false, true])('shows a failed history connection and reconnects without resubmitting (previously ready: %s)', async (previouslyReady) => {
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+    await act(async () => {
+      source.emit(envelope(message('saved-history', 'Previously admitted history')));
+      source.emit(envelope({ kind: 'control_request', request_id: 'request', control_kind: 'permission', payload: {} }));
+      if (previouslyReady) source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '2' }) });
+    });
+    await tick();
+    expect(!!screen.queryByRole('button', { name: 'Allow once' })).toBe(previouslyReady);
+    const input = screen.getByPlaceholderText(/^Type a message/);
+    fireEvent.change(input, { target: { value: 'Retain this unsent draft' } });
+    // Browsers expose HTTP 502/refused EventSource responses through this error
+    // event without making the status or response body available to JavaScript.
+    await act(async () => { source.listeners.get('error')?.({ data: '' }); });
+    expect(screen.getByRole('alert').textContent).toContain('Conversation connection failed');
+    expect(screen.queryByText('Synchronizing conversation…')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull();
+    expect(source.closed).toBe(true);
+    expect(screen.getByText('Previously admitted history')).toBeTruthy();
+    await act(async () => {
+      source.emit(envelope(message('late', 'Failed stream content')));
+      source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '2' }) });
+    });
+    await tick(15000);
+    expect(screen.queryByText('Failed stream content')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull();
+    expect(sources.filter(candidate => !candidate.closed)).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect conversation' }));
+    await tick();
+    const recovered = sources.filter(candidate => !candidate.closed).at(-1)!;
+    expect(recovered).not.toBe(source);
+    expect(recovered.url).toContain('cursor=2');
+    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull();
+    await act(async () => { recovered.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '2' }) }); });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeTruthy();
+    // A late error from the retired generation must not disable the new stream.
+    await act(async () => { source.listeners.get('error')?.({ data: '' }); });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeTruthy();
+    expect(input).toHaveProperty('value', 'Retain this unsent draft');
+    expect(fetchMock.mock.calls.filter(([url, init]) => init?.method === 'POST' && /\/api\/chat\/(send|reply|control-reply|cancel|interrupt)$/.test(String(url)))).toHaveLength(0);
+  });
+
   it('withdraws controls after a malformed live frame and ignores queued frames from the closed stream', async () => {
     render(<StrictMode><Chat /></StrictMode>);
     await act(async () => {});

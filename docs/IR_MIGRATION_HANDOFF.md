@@ -5583,3 +5583,36 @@ ownership-ledger gate correctly required review of the changed private Vault
 adapter. Review confirms the only change is a nonsecret compatibility-version
 field; memory transport, custody and Go policy ownership are unchanged. Its
 source fingerprint and review evidence are updated without changing the gate.
+
+### Stream refusal UX and final candidate checks
+
+The exact 504c9b85f source passes the full local integration target: 169/169
+checks pass, 27 explicitly unconfigured service checks skip, and none fail.
+All eight actual SDK wire/auth profiles pass tools/results, compaction, durable
+replay/resume and seeded execution. Docker-dependent grading is unavailable
+on this workstation and remains a separate live qualification.
+
+An actual refused history stream exposed an indefinite Synchronizing state.
+A failed canonical EventSource now closes its generation, displays a fixed
+reconnect message, preserves admitted history and drafts, and withholds controls
+until explicit reconnect finishes replay. Late frames/errors from the closed
+generation cannot affect its replacement. The two refusal/disconnect regressions
+fail on the old source and pass with the fix; all 467 frontend tests and both
+production builds pass. No message or permission reply is automatically retried.
+
+The second HOST permission attempt reached a genuine question and qualified
+native leaf, then its custom restart controller timed out before any Allow.
+It incorrectly waited for configuration readiness before restarting stale module
+peers. Its safety stop retired all owned processes and removed the old cgroup
+root. Subsequent recovery correctly refuses the changed root inode; the old
+claim remains a retained negative fixture, with no SQL repair or weakened
+identity check. The shipping container restarts its planes together. A corrected
+HOST controller starts fresh module peers before requiring readiness and proves
+the replacement listener belongs to the actual new core. Fresh genuine Allow
+qualification remains open; neither failed harness attempt is an Allow pass.
+
+All remaining work stays on fix/native-mcp-startup-and-editor in one PR.
+Aimee's registered Git runner is currently blocked before Git dispatch by a
+server-side PKI 503. No connector writes, client-auth downgrade or host-trust
+bypass is permitted to work around that outage. Fresh PR CI, publication,
+released-image acceptance and owned-resource cleanup remain required.
