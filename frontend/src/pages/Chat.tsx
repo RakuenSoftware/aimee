@@ -2472,6 +2472,7 @@ export default function Chat() {
     const idx = activeIdxRef.current;
     const activeSidForTitle = tabsRef.current[idx]?.aimeeSid ?? '';
     const hasExistingMessages = (tabsRef.current[idx]?.messages.length ?? 0) > 0 ||
+      (irSessions.current[activeSidForTitle]?.messages.length ?? 0) > 0 ||
       streamMsgs.length > 0 || activeSendAbortRefs.current.size > 0 ||
       (sendQueuesRef.current.get(activeSidForTitle)?.length ?? 0) > 0;
     if (!hasExistingMessages) {

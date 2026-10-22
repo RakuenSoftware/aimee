@@ -100,6 +100,61 @@ afterEach(() => {
 });
 
 describe('canonical browser chat', () => {
+  it('still auto-titles the first explicit message in an empty conversation', async () => {
+    const session = context.sessions[0];
+    const originalMessages = session.messages;
+    session.messages = [];
+    try {
+      render(<StrictMode><Chat /></StrictMode>);
+      await act(async () => {});
+      const source = sources.filter(item => !item.closed).at(-1)!;
+      await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
+      context.patchSession.mockClear();
+      fireEvent.change(screen.getByPlaceholderText(/^Type a message/), { target: { value: 'First explicit question' } });
+      fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
+      await act(async () => {});
+      expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(1);
+      expect(context.patchSession.mock.calls.filter(([, patch]) => Object.hasOwn(patch, 'name')))
+        .toEqual([['one', { name: 'First explicit question' }]]);
+      await close();
+    } finally { session.messages = originalMessages; }
+  });
+
+  it('preserves a canonical-only conversation title when sending after replay', async () => {
+    const session = context.sessions[0];
+    const originalMessages = session.messages;
+    const originalName = session.name;
+    session.messages = [];
+    session.name = 'User chosen investigation title';
+    context.patchSession.mockClear();
+    try {
+      render(<StrictMode><Chat /></StrictMode>);
+      await act(async () => {});
+      const source = sources.filter(item => !item.closed).at(-1)!;
+      await act(async () => {
+        source.emit(envelope({ kind: 'message', message_id: 'historical-user', payload: {
+          role: 'user', blocks: [{ type: 'text', text: 'Original question' }],
+        } }));
+        source.emit(envelope(message('historical-answer', 'Historical canonical answer')));
+        source.emit(envelope({ kind: 'execution', payload: { status: 'completed' } }));
+        source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: String(sequence) }) });
+      });
+      await tick();
+      expect(screen.getByText('Historical canonical answer')).toBeTruthy();
+      expect(session.messages).toHaveLength(0); // Canonical replay is the real history owner.
+      context.patchSession.mockClear();
+      fireEvent.change(screen.getByPlaceholderText(/^Type a message/), { target: { value: 'Next model follow-up' } });
+      fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
+      await act(async () => {});
+      expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(1);
+      expect(context.patchSession.mock.calls.filter(([, patch]) => Object.hasOwn(patch, 'name'))).toHaveLength(0);
+      await close();
+    } finally {
+      session.messages = originalMessages;
+      session.name = originalName;
+    }
+  });
+
   it('admits a fresh session before preferences or replay and reuses its surface for sending', async () => {
     let resolveAttach!: (response: Response) => void;
     const ordinary = fetchMock.getMockImplementation()!;
