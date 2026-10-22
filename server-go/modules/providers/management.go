@@ -126,6 +126,16 @@ func (m *Manager) Manage(ctx context.Context, req Request) (object, error) {
 		}
 		return reply, err
 	}
+	var codexDefault object
+	var codexRevision string
+	if req.Operation == "model.register_subscription" && str(req.Arguments, "vendor") == "codex" {
+		var existing object
+		var err error
+		codexDefault, codexRevision, existing, err = m.prepareCodexSubscription(ctx)
+		if err != nil || existing != nil {
+			return existing, err
+		}
+	}
 	changes := []credentialChange{}
 	req.credentials = &changes
 	result, err := m.store.transactionBeforeCommit(!read, func(root object) (reply object, err error) {
@@ -137,7 +147,15 @@ func (m *Manager) Manage(ctx context.Context, req Request) (object, error) {
 		}()
 		switch req.Operation {
 		case "model.register_subscription":
-			return subscription(root, str(req.Arguments, "vendor"))
+			if str(req.Arguments, "vendor") == "codex" {
+				if find(rows(root, "models"), "codex") != nil {
+					return object{"status": "ok", "agent": "codex"}, nil
+				}
+				if revision(root) != codexRevision {
+					return nil, errors.New("configuration changed during Codex model discovery; retry registration")
+				}
+			}
+			return subscription(root, str(req.Arguments, "vendor"), codexDefault)
 		case "snapshot.load":
 			config := copyObject(root)
 			config["revision"] = revision(root)

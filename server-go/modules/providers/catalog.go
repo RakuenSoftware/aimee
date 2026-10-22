@@ -142,7 +142,48 @@ func (m *Manager) catalog(ctx context.Context, req Request) (object, error) {
 	return nil, fmt.Errorf("unknown catalog operation %s", req.Operation)
 }
 
-func subscription(root object, vendor string) (object, error) {
+// Discovery and credential refresh must never run under the roster's exclusive
+// transaction. Recheck the roster revision when publishing the first default.
+func (m *Manager) prepareCodexSubscription(ctx context.Context) (object, string, object, error) {
+	var p, existing object
+	expected := ""
+	_, err := m.store.transaction(false, func(root object) (object, error) {
+		expected = revision(root)
+		if find(rows(root, "models"), "codex") != nil {
+			existing = object{"status": "ok", "agent": "codex", "revision": expected}
+			return nil, nil
+		}
+		if saved := find(rows(root, "providers"), "codex"); saved != nil {
+			p = copyObject(saved)
+		} else {
+			p = object{"name": "codex", "provider": "chatgpt", "auth_type": "codex-oauth", "endpoint": "https://chatgpt.com/backend-api/codex"}
+		}
+		return nil, nil
+	})
+	if err != nil || existing != nil {
+		return nil, expected, existing, err
+	}
+	if !codexCatalog(p) {
+		return nil, "", nil, errors.New("Codex subscription connection requires its selected OAuth account")
+	}
+	catalog, source, err := m.discoverSnapshot(ctx, p)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	details := rows(catalog, "details")
+	if len(details) == 0 {
+		return nil, "", nil, errors.New("selected Codex account has no visible model catalog; select a model explicitly")
+	}
+	current, err := m.resolveCodexSnapshot(ctx, p)
+	if err != nil || current.Source != source {
+		return nil, "", nil, errors.New("Codex account changed during registration; retry")
+	}
+	selection := copyObject(details[0])
+	selection["connection"] = p
+	return selection, expected, nil, nil
+}
+
+func subscription(root object, vendor string, selected object) (object, error) {
 	if vendor != "claude" && vendor != "codex" {
 		return nil, errors.New("vendor must be claude or codex")
 	}
@@ -168,7 +209,19 @@ func subscription(root object, vendor string) (object, error) {
 		model[k] = v
 	}
 	if vendor == "codex" {
-		model["provider"], model["auth_type"], model["endpoint"], model["model"], model["context_window"], model["cost_tier"] = "chatgpt", "codex-oauth", "https://chatgpt.com/backend-api/codex", "gpt-5.5", 272000, 0
+		if selected == nil || str(selected, "id") == "" {
+			return nil, errors.New("Codex account model selection required")
+		}
+		connection, _ := selected["connection"].(map[string]any)
+		for _, field := range connectionFields {
+			if value, ok := connection[field]; ok {
+				model[field] = value
+			}
+		}
+		model["model"], model["cost_tier"] = str(selected, "id"), 0
+		if window := number(selected, "context_window"); window > 0 {
+			model["context_window"] = window
+		}
 	} else {
 		model["provider"], model["auth_type"], model["backend"], model["cli_kind"], model["cli_cmd"], model["session_reuse"], model["primary_only"], model["context_window"], model["cost_tier"] = "claude", "none", "provider-cli", "claude", "claude", true, true, 200000, 1
 	}
@@ -179,14 +232,14 @@ func subscription(root object, vendor string) (object, error) {
 		}
 	}
 	connections := rows(root, "providers")
-	if old := find(connections, name); old != nil {
+	if old := find(connections, name); old != nil && vendor != "codex" {
 		for k := range old {
 			delete(old, k)
 		}
 		for k, v := range p {
 			old[k] = v
 		}
-	} else {
+	} else if find(connections, name) == nil {
 		connections = append(connections, p)
 	}
 	root["providers"], root["models"] = connections, models

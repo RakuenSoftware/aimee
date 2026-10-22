@@ -16,8 +16,14 @@ import (
 
 func (m *Manager) SetEgress(client egress.Executor) { m.egress = client }
 func (m *Manager) request(ctx context.Context, p object, method, suffix string, body []byte) (egress.HTTPResponse, error) {
+	reply, _, err := m.requestSnapshot(ctx, p, method, suffix, body)
+	return reply, err
+}
+
+func (m *Manager) requestSnapshot(ctx context.Context, p object, method, suffix string, body []byte) (egress.HTTPResponse, string, error) {
+	source := ""
 	if m.egress == nil {
-		return egress.HTTPResponse{}, errors.New("provider network service unavailable")
+		return egress.HTTPResponse{}, "", errors.New("provider network service unavailable")
 	}
 	endpoint := str(p, "endpoint")
 	if !strings.Contains(endpoint, "://") {
@@ -35,7 +41,7 @@ func (m *Manager) request(ctx context.Context, p object, method, suffix string, 
 	target := endpoint + suffix
 	parsed, err := url.Parse(target)
 	if err != nil || parsed.Hostname() == "" {
-		return egress.HTTPResponse{}, errors.New("invalid provider endpoint")
+		return egress.HTTPResponse{}, "", errors.New("invalid provider endpoint")
 	}
 	auth := str(p, "auth_type")
 	if auth == "" || auth == "api_key" || auth == "codex-oauth" {
@@ -61,14 +67,30 @@ func (m *Manager) request(ctx context.Context, p object, method, suffix string, 
 	}
 	if credential {
 		if m.resources == nil {
-			return egress.HTTPResponse{}, errors.New("credential storage unavailable")
+			return egress.HTTPResponse{}, "", errors.New("credential storage unavailable")
 		}
 		var key string
 		var err error
 		if str(p, "auth_type") == "codex-oauth" {
-			var account string
-			key, account, err = m.resolveCodex(ctx, p)
+			var pair codexCredentialSnapshot
+			pair, err = m.resolveCodexSnapshot(ctx, p)
+			key, source = pair.Token, pair.Source
+			account := pair.Account
+			if err == nil && method == "GET" && codexCatalog(p) {
+				if !validCatalogVersion(pair.ClientVersion) {
+					return egress.HTTPResponse{}, "", errors.New("Codex model catalog client version unavailable")
+				}
+				query := parsed.Query()
+				query.Set("client_version", pair.ClientVersion)
+				parsed.RawQuery = query.Encode()
+				target = parsed.String()
+				req.TargetURL = target
+				req.RequestSHA256 = egress.RequestDigest(method, target, body, credential)
+			}
 			req.Headers["Accept"] = "text/event-stream"
+			if method == "GET" {
+				req.Headers["Accept"] = "application/json"
+			}
 			req.Headers["originator"] = "codex_cli_rs"
 			if account != "" {
 				req.Headers["ChatGPT-Account-ID"] = account
@@ -77,20 +99,20 @@ func (m *Manager) request(ctx context.Context, p object, method, suffix string, 
 			key, err = m.resolveKey(ctx, p)
 		}
 		if err != nil {
-			return egress.HTTPResponse{}, err
+			return egress.HTTPResponse{}, "", err
 		}
 		if key != "" {
 			sealer, ok := m.egress.(interface {
 				SealProviderCredential(context.Context, uint64, string, string, string, []byte) (*egress.CredentialEnvelope, error)
 			})
 			if !ok {
-				return egress.HTTPResponse{}, errors.New("credential sealing unavailable")
+				return egress.HTTPResponse{}, "", errors.New("credential sealing unavailable")
 			}
 			secret := []byte(key)
 			req.Credential, err = sealer.SealProviderCredential(ctx, 0, target, str(p, "name"), auth, secret)
 			clear(secret)
 			if err != nil {
-				return egress.HTTPResponse{}, err
+				return egress.HTTPResponse{}, "", err
 			}
 			req.CredentialResource = str(p, "name")
 		} else {
@@ -100,7 +122,8 @@ func (m *Manager) request(ctx context.Context, p object, method, suffix string, 
 			req.RequestSHA256 = egress.RequestDigest(method, target, body, false)
 		}
 	}
-	return m.egress.Do(ctx, 0, req)
+	reply, err := m.egress.Do(ctx, 0, req)
+	return reply, source, err
 }
 func (m *Manager) inspect(ctx context.Context, req Request) (object, error) {
 	var provider, model object
@@ -156,9 +179,10 @@ func (m *Manager) inspect(ctx context.Context, req Request) (object, error) {
 	if req.Operation == "provider.connection_models" {
 		return m.discover(ctx, provider)
 	}
-	// Codex is a Responses service, not an OpenAI model-list service.
-	// Its actual inference result is the availability test.
-	skipModels := str(provider, "provider") == "chatgpt"
+	// An execution probe retains its single Responses request. A read-only
+	// probe uses the selected account catalog and never sends inference.
+	_, opts := arguments(req.Arguments)
+	skipModels := str(provider, "provider") == "chatgpt" && opts["no-run"] != "true"
 	var listed object
 	var fetchErr error
 	if !skipModels {
@@ -178,7 +202,6 @@ func (m *Manager) inspect(ctx context.Context, req Request) (object, error) {
 			available = true
 		}
 	}
-	_, opts := arguments(req.Arguments)
 	result := object{"status": "ok", "name": str(model, "name"), "provider": str(provider, "provider"), "endpoint": str(provider, "endpoint"), "model": str(model, "model"), "models_status": responseStatus, "model_available": available, "slots_probe_skipped": true, "slots_source": "config", "slots": number(model, "max_parallel"), "context_window": number(model, "context_window"), "execution_tested": false}
 	if skipModels {
 		result["models_probe_skipped"] = true
@@ -250,12 +273,42 @@ func (m *Manager) inspect(ctx context.Context, req Request) (object, error) {
 }
 
 func (m *Manager) discover(ctx context.Context, provider object) (object, error) {
+	reply, _, err := m.discoverSnapshot(ctx, provider)
+	return reply, err
+}
+
+func codexCatalog(p object) bool {
+	return str(p, "provider") == "chatgpt" && str(p, "auth_type") == "codex-oauth"
+}
+func validCatalogVersion(v string) bool {
+	if v == "" || len(v) > 64 {
+		return false
+	}
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, c := range part {
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (m *Manager) discoverSnapshot(ctx context.Context, provider object) (object, string, error) {
+	source := ""
 	p := copyObject(provider)
 	suffix := "/models"
 	if target := str(p, "models_url"); target != "" {
 		u, err := url.Parse(target)
 		if err != nil || u.Host == "" {
-			return nil, errors.New("invalid model discovery URL")
+			return nil, "", errors.New("invalid model discovery URL")
 		}
 		p["endpoint"] = u.Scheme + "://" + u.Host
 		suffix = u.RequestURI()
@@ -273,23 +326,29 @@ func (m *Manager) discover(ctx context.Context, provider object) (object, error)
 			}
 			path += separator + "after_id=" + url.QueryEscape(last)
 		}
-		response, err := m.request(ctx, p, "GET", path, nil)
+		response, currentSource, err := m.requestSnapshot(ctx, p, "GET", path, nil)
+		if source != "" && source != currentSource {
+			return nil, "", errors.New("provider account changed during model discovery")
+		}
+		source = currentSource
 		if err != nil {
-			return nil, fmt.Errorf("provider could not list models: %w; enter a model ID manually", err)
+			return nil, "", fmt.Errorf("provider could not list models: %w; enter a model ID manually", err)
 		}
 		if response.Status < 200 || response.Status >= 300 {
-			return nil, fmt.Errorf("provider could not list models (HTTP %d); enter a model ID manually", response.Status)
+			return nil, "", fmt.Errorf("provider could not list models (HTTP %d); enter a model ID manually", response.Status)
 		}
 		var root object
 		if json.Unmarshal(response.Body, &root) != nil {
-			return nil, errors.New("provider returned an invalid model list; enter a model ID manually")
+			return nil, "", errors.New("provider returned an invalid model list; enter a model ID manually")
 		}
 		listed, ok := root["data"].([]any)
-		if !ok {
+		if codexCatalog(p) {
+			listed, ok = root["models"].([]any)
+		} else if !ok {
 			listed, ok = root["models"].([]any)
 		}
 		if !ok {
-			return nil, errors.New("provider returned an invalid model list; enter a model ID manually")
+			return nil, "", errors.New("provider returned an invalid model list; enter a model ID manually")
 		}
 		for _, item := range listed {
 			row, ok := item.(map[string]any)
@@ -299,18 +358,27 @@ func (m *Manager) discover(ctx context.Context, provider object) (object, error)
 				}
 			}
 			id := str(row, "id")
-			if id == "" {
+			if codexCatalog(p) {
+				id = str(row, "slug")
+				if id == "" || !validText(id, 256) {
+					return nil, "", errors.New("Codex model catalog contains an invalid slug")
+				}
+				if str(row, "visibility") != "list" {
+					continue
+				}
+			}
+			if id == "" && !codexCatalog(p) {
 				id = str(row, "name")
 			}
 			if id == "" {
-				return nil, errors.New("provider model list contains an empty ID")
+				return nil, "", errors.New("provider model list contains an empty ID")
 			}
 			if seen[id] {
 				continue
 			}
 			seen[id] = true
 			entry := object{"id": id}
-			for _, field := range []string{"display_name", "context_window", "max_output", "deprecated"} {
+			for _, field := range []string{"display_name", "context_window", "max_output", "deprecated", "visibility", "supported_in_api", "priority"} {
 				if v, ok := row[field]; ok {
 					entry[field] = v
 				}
@@ -324,15 +392,15 @@ func (m *Manager) discover(ctx context.Context, provider object) (object, error)
 			ids = append(ids, id)
 		}
 		if !boolean(root, "has_more", false) {
-			return object{"status": "ok", "models": ids, "details": details, "count": len(ids)}, nil
+			return object{"status": "ok", "models": ids, "details": details, "count": len(ids)}, source, nil
 		}
 		next := str(root, "last_id")
 		if next == "" || next == last {
-			return nil, errors.New("provider pagination did not advance")
+			return nil, "", errors.New("provider pagination did not advance")
 		}
 		last = next
 	}
-	return nil, errors.New("provider model list exceeded pagination limit")
+	return nil, "", errors.New("provider model list exceeded pagination limit")
 }
 
 func endpointHost(endpoint string) string {

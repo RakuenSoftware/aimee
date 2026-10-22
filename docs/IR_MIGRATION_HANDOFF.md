@@ -5544,3 +5544,36 @@ The retained-source storage ceiling is inclusive 16MiB; a complete legacy getter
 reply must also fit its existing 16MiB module frame, including its header, field
 lengths and metadata. Load/latest return typed `too_long` without source bytes
 when that complete envelope would exceed the frame. The retained row is unchanged.
+
+## Live qualification and account catalog repair: 22 October 2026
+
+PR #3061 is merged; its post-merge CI run 39807229032 succeeded. The
+subsequent a12100390 candidate is pushed on fix/native-mcp-startup-and-editor;
+it still requires a pull request and fresh CI. Its full source-built Docker
+installation on the owned .252 guest passed the first native Claude browser
+turn, including a real question reply, governed tools, canonical terminal and
+checkpoint, and indexed lookup against the selected octocat/Hello-World project.
+The SDK discovery barrier also waited through real delayed MCP discovery.
+
+The HTTP Codex switch then failed because its configured gpt-5.5 model was no
+longer supported by the selected ChatGPT account. Public account discovery
+returned HTTP 400: the legacy adapter omitted its compatibility-version query
+and parsed the wrong model-ID field. Discovery now uses the selected sealed
+OAuth account, the adapter's existing pinned compatibility version, JSON GET,
+and visible model slugs in server order. Initial subscription registration uses
+the discovered account catalog instead of guessing a static model; existing
+operator model selections remain intact. Read-only probes issue no inference.
+Roster revision and credential-source revalidation reject observed changes
+during discovery. Providers race tests and three normal plus three sanitizer
+C fixtures passed; live catalog and resumed model switching remain required.
+
+The first HOST permission attempt was a harness failure after one question
+Send: an assertion used session_id instead of aimee_session_id. Closing that
+driver was followed by a canonical cancellation and normal completion. No
+restart fault or human permission reply occurred; this is not an Allow pass.
+Its original evidence and canonical history are retained separately. A corrected
+fresh attempt, independent kernel retirement checks, strict idle UI checks,
+and final fresh published-testing installation remain open.
+
+Production .100 remains untouched and KB-free. Do not claim complete migration
+or uniform three-turn success from these partial qualification results.

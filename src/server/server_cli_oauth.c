@@ -8,6 +8,7 @@
  * never log raw pane contents. Tokens live in 0700 per-vendor dirs on the home
  * volume. A per-vendor lock serialises setups. */
 #include "server_cli_oauth.h"
+#include "codex_client_version.h"
 #include "aimee.h"
 #include "util.h" /* safe_exec_capture_env */
 #include "log.h"
@@ -56,7 +57,7 @@ static const vendor_info_t g_vendors[] = {
     [CLI_OAUTH_CLAUDE] = {"claude", "claude", "@anthropic-ai/claude-code", "2.1.177", "claude",
                           "https://claude.com/", "install.cjs"},
     /* codex ships a plain-JS entrypoint (bin/codex.js) with no postinstall. */
-    [CLI_OAUTH_CODEX] = {"codex", "codex", "@openai/codex", "0.139.0", "codex",
+    [CLI_OAUTH_CODEX] = {"codex", "codex", "@openai/codex", AIMEE_CODEX_CLIENT_VERSION, "codex",
                          "https://auth.openai.com/codex/device", NULL},
 };
 
