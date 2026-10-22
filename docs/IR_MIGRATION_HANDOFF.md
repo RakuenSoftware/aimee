@@ -18,6 +18,48 @@ continue on `fix/fresh-claude-provider-setup`, requiring their own follow-up PR.
 Keep automatic review and the strict attribution gate enabled. No production
 promotion is claimed.
 
+### Current PR continuation and audit correction: 22 October 2026
+
+Continue on [PR #3060](https://github.com/RakuenSoftware/aimee/pull/3060), branch
+`fix/fresh-claude-provider-setup`. Its first full CI run exposed two independent
+causes: native config fixtures still expected Claude's retired `none` default,
+and provider normalization converted explicit native Claude/OpenAI host profiles
+into an alias and cleared their endpoint on reload. The fixture now checks both
+Claude OAuth aliases and preservation of unrelated explicit `none` profiles;
+normal and ASan/UBSan/leak runs pass. The normalizer preserves explicit upstream
+wire, endpoint and authentication. Ten real store/edit/reload cases reproduce
+its baseline failure, and the complete provider race suite passes after repair.
+These changes were pushed at `430f5d15c`; fresh CI is required for later changes.
+
+The remaining-consumer audit corrects earlier broad unfinished statements:
+primary durable history, compaction/seeded runs, delegate execution/history and
+owner-bound local grading/reuse are already implemented. `check_ir_bypass.py`
+passes. The actual configured-test grade/recovery/scoped-reuse integration and
+independent signed 16-case semantic oracle are recorded in the later checkpoints
+below; their production owners are unchanged. Do not rebuild a learning store,
+seed grades, import private SDK transcripts or treat pending observations as
+applied knowledge. Linux descriptor-based native server execution is the current
+supported contract. macOS/Windows CI exercises thin-client server access; old
+historical testing-branch skip notes are superseded by the current workflow.
+
+Normal setup dismissal now has an authenticated, non-secret installation/account
+scope. Remembering Later/Close does not change account readiness; a reinstall
+with the same bootstrap username receives a new scope. Concurrent first reads
+and process restarts retain one stable scope; runtime-web race tests pass.
+Frontend work remembers normal dismissal, compacts the mobile rules banner and
+groups compatibility notices while retaining every canonical observation. Its
+465 tests, both production builds and built-browser checks at 320/390/1280 pass.
+
+Trusted SDK `invalid_request` failures now display a static provider-rejection
+message instead of an undifferentiated structured-turn failure. Arbitrary SDK
+text remains excluded, the terminal remains failed, and cancellation/capture
+failure take precedence. Normal and sanitizer regressions pass. This reporting
+change does not assert that the upstream policy rejection has been repaired.
+Further offline inspection identified fresh-HOME device identity regeneration;
+a separate host-owned non-secret identity repair is in progress and must be
+verified before another successful resume claim. Live/published-image acceptance
+and final current-source CI remain required; production `.100` is untouched.
+
 ### Fresh-install acceptance continuation: 22 October 2026
 
 The first published-image failure remains retained separately. Subsequent full
