@@ -37,6 +37,9 @@ int server_native_cache_workspace_open(server_native_cache_lease_t *lease, const
                                        char *path, size_t capacity);
 int server_native_cache_workspace_valid(const server_native_cache_lease_t *lease, const char *epoch,
                                         int fd, const char *path);
+/* Nonsecret Claude device correlation, scoped to this exclusive account/model
+ * binding. Credentials and SDK configuration never enter this persistent file. */
+int server_native_cache_sdk_identity(server_native_cache_lease_t *lease, char identity[65]);
 /* clean requires the existing synchronous child shutdown and successful cache
  * completion/abort, or refusal before child launch. Never use after losing the
  * process owner. Closing unclean retains the marker; no cache files are erased. */

@@ -70,7 +70,7 @@ typedef struct
    cli_claude_host_launch_t claude;
    provider_cli_cfg_t launching;
    char *mcp_config;
-   char claude_digest[65];
+   char claude_digest[65], sdk_identity[65];
    char home[4096], cwd[4096], build[65], workspace[65];
    int executable_fd, scheduler_fd, workspace_fd;
    cJSON *config;
@@ -1259,10 +1259,15 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    stage = "ambient SDK configuration";
    if (!native_ambient_config_absent(sdk))
       goto refused;
+   stage = "nonsecret SDK identity";
+   if (!strcmp(sdk, "claude") &&
+       server_native_cache_sdk_identity(execution->lease, execution->sdk_identity))
+      goto refused;
    stage = "private SDK HOME";
    if (cli_session_native_home(sdk, cwd, server_session_capture_session(execution->capture),
-                               execution->effective_binding, execution->home,
-                               sizeof execution->home, &execution->home_cleanup))
+                               execution->effective_binding,
+                               !strcmp(sdk, "claude") ? execution->sdk_identity : NULL,
+                               execution->home, sizeof execution->home, &execution->home_cleanup))
       goto refused;
    stage = "owned SDK configuration";
    if (!strcmp(sdk, "codex") ? native_write_config(execution, selected)
@@ -1387,6 +1392,7 @@ static int native_claude_execute(native_execution_t *execution, const provider_c
        .executable_fd = execution->executable_fd,
        .cwd_fd = execution->scheduler_fd,
        .home = execution->home,
+       .sdk_identity = execution->sdk_identity,
        .cwd = execution->cwd,
        .mcp_config = execution->mcp_config,
        .gateway_url = server_native_runtime_url(execution->runtime),

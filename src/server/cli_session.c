@@ -1708,11 +1708,13 @@ int cli_session_harness_home(const char *vendor, const char *cwd, const char *si
 }
 
 int cli_session_native_home(const char *vendor, const char *cwd, const char *sid,
-                            const char *binding, char *home, size_t capacity,
-                            cli_session_t *cleanup)
+                            const char *binding, const char *sdk_identity, char *home,
+                            size_t capacity, cli_session_t *cleanup)
 {
-   if (!vendor || (strcmp(vendor, "claude") && strcmp(vendor, "codex")) || !sid || !sid[0] ||
-       strlen(sid) >= 128 ||
+   if (!vendor || (strcmp(vendor, "claude") && strcmp(vendor, "codex")) ||
+       (!strcmp(vendor, "claude") && (!sdk_identity || strlen(sdk_identity) != 64 ||
+                                      strspn(sdk_identity, "0123456789abcdef") != 64)) ||
+       (!strcmp(vendor, "codex") && sdk_identity) || !sid || !sid[0] || strlen(sid) >= 128 ||
        strspn(sid, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") !=
            strlen(sid) ||
        !binding || strlen(binding) != 64 || strspn(binding, "0123456789abcdef") != 64 || !home ||
@@ -1740,7 +1742,8 @@ int cli_session_native_home(const char *vendor, const char *cwd, const char *sid
       cJSON *root = cJSON_CreateObject();
       cJSON *projects = root ? cJSON_AddObjectToObject(root, "projects") : NULL;
       cJSON *project = projects && cwd && cwd[0] ? cJSON_AddObjectToObject(projects, cwd) : NULL;
-      if (!root || !projects || !cJSON_AddBoolToObject(root, "hasCompletedOnboarding", 1) ||
+      if (!root || !projects || !cJSON_AddStringToObject(root, "userID", sdk_identity) ||
+          !cJSON_AddBoolToObject(root, "hasCompletedOnboarding", 1) ||
           (cwd && cwd[0] &&
            (!project || !cJSON_AddBoolToObject(project, "hasTrustDialogAccepted", 1))))
       {
@@ -1749,8 +1752,8 @@ int cli_session_native_home(const char *vendor, const char *cwd, const char *sid
       }
       char *json = cJSON_PrintUnformatted(root);
       cJSON_Delete(root);
-      int rc = snprintf(link, sizeof link, "%s/.claude.json", home) >= (int)sizeof link || !json ||
-               cli_write_file_atomic(link, json);
+      int rc = snprintf(link, sizeof link, "%s/.claude.json", directory) >= (int)sizeof link ||
+               !json || cli_write_file_atomic(link, json);
       free(json);
       if (rc)
          goto failed;

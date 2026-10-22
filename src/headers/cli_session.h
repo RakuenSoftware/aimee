@@ -139,9 +139,11 @@ int cli_session_harness_home(const char *vendor, const char *cwd, const char *si
 /* Credential-free native runtime. `binding` is a host-owned connection lineage
  * digest, not a client account name. Only conversation state in that exact
  * session/binding is linked; auth files and shared auth configuration are absent. */
+/* Claude requires a held-cache-lease nonsecret SDK identity; Codex requires NULL.
+ * Only this identity is seeded, never an operator SDK config or credentials. */
 int cli_session_native_home(const char *vendor, const char *cwd, const char *sid,
-                            const char *binding, char *home, size_t capacity,
-                            cli_session_t *cleanup);
+                            const char *binding, const char *sdk_identity, char *home,
+                            size_t capacity, cli_session_t *cleanup);
 
 /* Materialize seam: read the vaulted (agent, "oauth") token into `out`. The strong
  * implementation (server_cli_oauth.c) reads the vault; a weak default in

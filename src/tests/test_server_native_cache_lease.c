@@ -29,6 +29,72 @@ static void wait_exit(pid_t child)
    int status;
    assert(waitpid(child, &status, 0) == child && WIFEXITED(status) && !WEXITSTATUS(status));
 }
+static void sdk_identity(void)
+{
+   const char other_binding[] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+   char error[512], first[65], repeated[65], other[65], file[8192], extra[8192], parent[8192],
+       moved[8192];
+   server_native_cache_lease_t *lease = server_native_cache_lease_open(
+       home, "claude", "identity-session", binding, "actor", "A1", error);
+   assert(lease && !server_native_cache_sdk_identity(lease, first));
+   assert(strlen(first) == 64 && strspn(first, "0123456789abcdef") == 64);
+   assert(!server_native_cache_sdk_identity(lease, repeated) && !strcmp(first, repeated));
+   assert(!server_native_cache_lease_close(lease, 1));
+   lease = server_native_cache_lease_open(home, "claude", "identity-session", binding, "actor",
+                                          "A2", error);
+   assert(lease && !server_native_cache_sdk_identity(lease, repeated) && !strcmp(first, repeated));
+   assert(snprintf(parent, sizeof parent, "%s/browser-claude/identity-session/%s", home, binding) <
+          (int)sizeof parent);
+   assert(snprintf(file, sizeof file, "%s/.aimee-claude-sdk-user-id", parent) < (int)sizeof file);
+   struct stat status;
+   assert(!lstat(file, &status) && S_ISREG(status.st_mode) && (status.st_mode & 0777) == 0600 &&
+          status.st_nlink == 1);
+   assert(!chmod(file, 0644) && server_native_cache_sdk_identity(lease, repeated) < 0 &&
+          !repeated[0]);
+   assert(!chmod(file, 0600));
+   assert(snprintf(extra, sizeof extra, "%s-extra", file) < (int)sizeof extra);
+   assert(!link(file, extra) && server_native_cache_sdk_identity(lease, repeated) < 0);
+   assert(!unlink(extra));
+   assert(!rename(file, extra) && !symlink(extra, file));
+   assert(server_native_cache_sdk_identity(lease, repeated) < 0);
+   assert(!unlink(file) && !rename(extra, file));
+   FILE *f = fopen(file, "w");
+   assert(f && fwrite("bad", 1, 3, f) == 3 && !fclose(f));
+   assert(server_native_cache_sdk_identity(lease, repeated) < 0);
+   assert(!stat(file, &status) && status.st_size == 3);
+   f = fopen(file, "w");
+   assert(f && fwrite(first, 1, 64, f) == 64 && fputc('\n', f) == '\n' && !fclose(f));
+   assert(server_native_cache_sdk_identity(lease, repeated) < 0);
+   f = fopen(file, "w");
+   assert(f && fwrite(first, 1, 64, f) == 64 && !fclose(f));
+   assert(!server_native_cache_sdk_identity(lease, repeated) && !strcmp(first, repeated));
+   assert(snprintf(moved, sizeof moved, "%s-moved", parent) < (int)sizeof moved);
+   assert(!rename(parent, moved) && !mkdir(parent, 0700));
+   assert(server_native_cache_sdk_identity(lease, repeated) < 0);
+   assert(!rmdir(parent) && !rename(moved, parent));
+   assert(!server_native_cache_lease_close(lease, 1));
+   lease = server_native_cache_lease_open(home, "claude", "identity-session", other_binding,
+                                          "actor", "B", error);
+   assert(lease && !server_native_cache_sdk_identity(lease, other) && strcmp(first, other));
+   assert(!server_native_cache_lease_close(lease, 1));
+   const char *bindings[] = {binding, other_binding};
+   for (unsigned i = 0; i < 2; i++)
+   {
+      assert(snprintf(parent, sizeof parent, "%s/browser-claude/identity-session/%s", home,
+                      bindings[i]) < (int)sizeof parent);
+      assert(snprintf(file, sizeof file, "%s/.aimee-claude-sdk-user-id", parent) <
+                 (int)sizeof file &&
+             !unlink(file));
+      assert(snprintf(file, sizeof file, "%s/.aimee-native-owner.lock", parent) <
+                 (int)sizeof file &&
+             !unlink(file));
+      assert(!rmdir(parent));
+   }
+   *strrchr(parent, '/') = 0;
+   assert(!rmdir(parent));
+   *strrchr(parent, '/') = 0;
+   assert(!rmdir(parent));
+}
 static void private_workspace(void)
 {
    const char other_binding[] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -119,6 +185,7 @@ int main(void)
    assert(snprintf(home, sizeof home, "%s/native-cache-lease-XXXXXX", platform_tmpdir()) <
           (int)sizeof home);
    assert(mkdtemp(home));
+   sdk_identity();
    private_workspace();
    assert(snprintf(directory, sizeof directory, "%s/browser-codex/session/%s", home, binding) <
           (int)sizeof directory);

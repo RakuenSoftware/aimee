@@ -1302,16 +1302,33 @@ static void test_native_home_has_no_credentials_and_partitions_state(void)
    {
       char first[PATH_MAX], other[PATH_MAX], resumed[PATH_MAX], path[PATH_MAX];
       cli_session_t one = {0}, two = {0}, again = {0};
-      assert(!cli_session_native_home(vendors[i], "/native/project", "native-source", a, first,
-                                      sizeof first, &one));
+      assert(!cli_session_native_home(vendors[i], "/native/project", "native-source", a,
+                                      i ? a : NULL, first, sizeof first, &one));
+      if (i)
+      {
+         snprintf(path, sizeof path, "%s/.claude/.claude.json", first);
+         FILE *config = fopen(path, "r");
+         assert(config);
+         char bytes[1024];
+         size_t n = fread(bytes, 1, sizeof bytes - 1, config);
+         assert(!ferror(config) && feof(config) && !fclose(config));
+         bytes[n] = 0;
+         cJSON *value = cJSON_Parse(bytes);
+         const char *identity =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, "userID"));
+         assert(identity && !strcmp(identity, a));
+         cJSON_Delete(value);
+         snprintf(path, sizeof path, "%s/.claude.json", first);
+         assert(access(path, F_OK));
+      }
       const char *state = i ? "projects" : "sessions";
       snprintf(path, sizeof path, "%s/.%s/%s/retained", first, vendors[i], state);
       FILE *file = fopen(path, "w");
       assert(file);
       fputs("owned native conversation", file);
       fclose(file);
-      assert(!cli_session_native_home(vendors[i], "/native/project", "native-source", b, other,
-                                      sizeof other, &two));
+      assert(!cli_session_native_home(vendors[i], "/native/project", "native-source", b,
+                                      i ? b : NULL, other, sizeof other, &two));
       snprintf(path, sizeof path, "%s/.%s/%s/retained", other, vendors[i], state);
       assert(access(path, F_OK) != 0);
       snprintf(path, sizeof path, "%s/.%s/%s", first, vendors[i],
@@ -1322,17 +1339,17 @@ static void test_native_home_has_no_credentials_and_partitions_state(void)
       assert(access(path, F_OK) != 0);
       cli_session_destroy(&one);
       assert(access(first, F_OK) != 0);
-      assert(!cli_session_native_home(vendors[i], "/native/project", "native-source", a, resumed,
-                                      sizeof resumed, &again));
+      assert(!cli_session_native_home(vendors[i], "/native/project", "native-source", a,
+                                      i ? a : NULL, resumed, sizeof resumed, &again));
       snprintf(path, sizeof path, "%s/.%s/%s/retained", resumed, vendors[i], state);
       assert(access(path, F_OK) == 0);
       unlink(path);
       cli_session_destroy(&again);
       cli_session_destroy(&two);
-      assert(cli_session_native_home(vendors[i], ".", "../other", a, first, sizeof first, &one) <
-             0);
-      assert(cli_session_native_home(vendors[i], ".", "native-source", "../other", first,
+      assert(cli_session_native_home(vendors[i], ".", "../other", a, i ? a : NULL, first,
                                      sizeof first, &one) < 0);
+      assert(cli_session_native_home(vendors[i], ".", "native-source", "../other", i ? a : NULL,
+                                     first, sizeof first, &one) < 0);
    }
    assert(reads == g_credential_reads);
    puts("  PASS: credential-free native homes retain only session/connection-owned state");

@@ -88,6 +88,13 @@ int server_native_cache_workspace_valid(const server_native_cache_lease_t *lease
    (void)path;
    return 0;
 }
+int server_native_cache_sdk_identity(server_native_cache_lease_t *lease, char identity[65])
+{
+   (void)lease;
+   if (identity)
+      identity[0] = 0;
+   return -1;
+}
 #else
 #include "platform_random.h"
 #include "cJSON.h"
@@ -176,6 +183,96 @@ static int workspace_root(const server_native_cache_lease_t *lease, char *path, 
       return -1;
    }
    return root;
+}
+static int sdk_identity_read(int root, char identity[65])
+{
+   const char *name = ".aimee-claude-sdk-user-id";
+   int fd = openat(root, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+   if (fd < 0)
+      return errno == ENOENT ? 1 : -1;
+   struct stat st, linked;
+   char bytes[65];
+   size_t used = 0;
+   int valid = !fstat(fd, &st) && S_ISREG(st.st_mode) && st.st_uid == geteuid() &&
+               (st.st_mode & 0777) == 0600 && st.st_nlink == 1 && st.st_size == 64;
+   while (valid && used < sizeof bytes)
+   {
+      ssize_t n = read(fd, bytes + used, sizeof bytes - used);
+      if (n < 0 && errno == EINTR)
+         continue;
+      if (n < 0)
+         valid = 0;
+      if (n <= 0)
+         break;
+      used += (size_t)n;
+   }
+   valid = valid && used == 64 && !fstatat(root, name, &linked, AT_SYMLINK_NOFOLLOW) &&
+           linked.st_dev == st.st_dev && linked.st_ino == st.st_ino;
+   close(fd);
+   if (!valid)
+      return -1;
+   bytes[64] = 0;
+   if (strspn(bytes, "0123456789abcdef") != 64)
+      return -1;
+   memcpy(identity, bytes, 65);
+   return 0;
+}
+int server_native_cache_sdk_identity(server_native_cache_lease_t *lease, char identity[65])
+{
+   if (!identity)
+      return -1;
+   identity[0] = 0;
+   const char *sdk =
+       lease && lease->manifest
+           ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(lease->manifest, "sdk"))
+           : NULL;
+   if (!sdk || strcmp(sdk, "claude"))
+      return -1;
+   char root_path[PATH_MAX];
+   int root = workspace_root(lease, root_path, sizeof root_path);
+   if (root < 0)
+      return -1;
+   int rc = sdk_identity_read(root, identity);
+   if (rc != 1)
+   {
+      close(root);
+      return rc;
+   }
+   char generated[65], nonce[33], temporary[96];
+   if (platform_random_hex(generated, 64) || platform_random_hex(nonce, 32))
+   {
+      close(root);
+      return -1;
+   }
+   snprintf(temporary, sizeof temporary, ".aimee-claude-sdk-user-id-%s.tmp", nonce);
+   int fd = openat(root, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+   int created = fd >= 0, valid = created;
+   size_t sent = 0;
+   while (valid && sent < 64)
+   {
+      ssize_t n = write(fd, generated + sent, 64 - sent);
+      if (n < 0 && errno == EINTR)
+         continue;
+      if (n <= 0)
+         valid = 0;
+      else
+         sent += (size_t)n;
+   }
+   if (valid)
+      valid = !fsync(fd);
+   if (fd >= 0 && close(fd))
+      valid = 0;
+   /* Never replace an existing identity, even after malformed state or a race. */
+   if (valid)
+      valid = !linkat(root, temporary, root, ".aimee-claude-sdk-user-id", 0);
+   if (created && unlinkat(root, temporary, 0))
+      valid = 0;
+   if (valid)
+      valid = !fsync(root) && !sdk_identity_read(root, identity);
+   close(root);
+   if (!valid)
+      identity[0] = 0;
+   return valid ? 0 : -1;
 }
 int server_native_cache_workspace_open(server_native_cache_lease_t *lease, const char *epoch,
                                        char *path, size_t capacity)

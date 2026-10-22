@@ -10,9 +10,55 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 static const char *field(const cJSON *value, const char *key)
 {
    return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(value, key));
+}
+static int native_identity_config(const cli_claude_host_launch_t *host)
+{
+   if (!host->sdk_identity || strlen(host->sdk_identity) != 64 ||
+       strspn(host->sdk_identity, "0123456789abcdef") != 64)
+      return -1;
+   int home = open(host->home, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+   int directory =
+       home >= 0 ? openat(home, ".claude", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC) : -1;
+   struct stat root, dir, st, linked;
+   int valid = home >= 0 && directory >= 0 && !fstat(home, &root) && !fstat(directory, &dir) &&
+               root.st_uid == geteuid() && dir.st_uid == geteuid() &&
+               (root.st_mode & 0777) == 0700 && (dir.st_mode & 0777) == 0700;
+   int fd = valid
+                ? openat(directory, ".claude.json", O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+                : -1;
+   valid = valid && fd >= 0 && !fstat(fd, &st) && S_ISREG(st.st_mode) && st.st_uid == geteuid() &&
+           (st.st_mode & 0777) == 0600 && st.st_nlink == 1 && st.st_size > 0 && st.st_size <= 16384;
+   char bytes[16385];
+   size_t used = 0;
+   while (valid && used < sizeof bytes)
+   {
+      ssize_t n = read(fd, bytes + used, sizeof bytes - used);
+      if (n < 0 && errno == EINTR)
+         continue;
+      if (n < 0)
+         valid = 0;
+      if (n <= 0)
+         break;
+      used += (size_t)n;
+   }
+   valid = valid && used == (size_t)st.st_size && used <= 16384 &&
+           !fstatat(directory, ".claude.json", &linked, AT_SYMLINK_NOFOLLOW) &&
+           linked.st_dev == st.st_dev && linked.st_ino == st.st_ino;
+   cJSON *config = valid ? aimee_ir_json_parse_frame(bytes, used) : NULL;
+   const char *identity = field(config, "userID");
+   valid = cJSON_IsObject(config) && identity && !strcmp(identity, host->sdk_identity);
+   cJSON_Delete(config);
+   if (fd >= 0)
+      close(fd);
+   if (directory >= 0)
+      close(directory);
+   if (home >= 0)
+      close(home);
+   return valid ? 0 : -1;
 }
 const char *cli_claude_native_profile_error(const cli_claude_host_launch_t *host,
                                             const cJSON *frame)
@@ -220,7 +266,7 @@ int cli_claude_native_launch_digest(const provider_cli_cfg_t *cfg, char digest[6
 {
    const cli_claude_host_launch_t *host = cfg ? cfg->claude_host : NULL;
    if (!host || !host->home || !host->gateway_url || !host->gateway_token || !host->environment ||
-       !digest)
+       !digest || native_identity_config(host))
       return -1;
    char **arguments = native_arguments(cfg);
    cJSON *plan = cJSON_CreateObject();
@@ -229,7 +275,9 @@ int cli_claude_native_launch_digest(const provider_cli_cfg_t *cfg, char digest[6
    /* Claude keys saved conversations by scheduler cwd. Old ephemeral-cwd
     * handles cannot be adopted under the stable lease/epoch path contract. */
    if (!arguments || !args || !environment ||
-       !cJSON_AddNumberToObject(plan, "scheduler_workspace_version", 1))
+       !cJSON_AddNumberToObject(plan, "scheduler_workspace_version", 1) ||
+       !cJSON_AddNumberToObject(plan, "sdk_identity_version", 1) ||
+       !cJSON_AddStringToObject(plan, "sdk_identity", host->sdk_identity))
       goto refused;
    for (int i = 0; arguments[i]; i++)
    {

@@ -51,7 +51,7 @@ static server_session_terminal_action_fn terminal;
 static void *terminal_resource;
 static int mode, retained, opened, joined, child_closed, began, completed, aborted, closed;
 static int terminal_committed, sdk_calls, restored, ready_calls, rejected_terminal;
-static char parent_role[64], private_home[4096], host_workspace[4096];
+static char parent_role[64], private_home[4096], host_workspace[4096], observed_sdk_identity[65];
 static int child_executable, child_directory;
 static const char *active_sdk = "codex";
 static aimee_wire_t expected_wire = AIMEE_WIRE_RESPONSES;
@@ -707,6 +707,10 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
           !cfg->system_prompt);
    assert(!cfg->history && !strcmp(cfg->resume_id, "native-result") && began == 1);
    const cli_claude_host_launch_t *host = cfg->claude_host;
+   assert(host->sdk_identity && strlen(host->sdk_identity) == 64 &&
+          strspn(host->sdk_identity, "0123456789abcdef") == 64);
+   snprintf(observed_sdk_identity, sizeof observed_sdk_identity, "%s", host->sdk_identity);
+
    assert(bound_credential_home == (host->spawn_guard ? 1 : 0));
    snprintf(observed_claude_cwd, sizeof observed_claude_cwd, "%s", host->cwd);
    char proof[65];
@@ -714,6 +718,9 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    /* Exact deterministic pre-stable-cwd launch contract for this fixture.
     * Old complete handles must not be admitted under the new cwd policy. */
    assert(strcmp(proof, "a0d85eb248a7007b6c4b2865a72206439a5e29febd33e61bc2c59c590112ff46"));
+   /* Exact prior stable-cwd/no-device-identity contract measured from c829.
+    * Its complete handles predate the nonsecret identity binding. */
+   assert(strcmp(proof, "6ad2d900433affaaf554d1213ac88efe2949d1d4a149b674d60bd25e42c27218"));
    /* The exact fixed gateway setting is covered by the launch proof, not
     * inherited from the operator or inferred from SDK initialization. */
    int attribution_index = -1, readiness_index = -1;
@@ -740,6 +747,49 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    provider_cli_cfg_t changed_cfg = *cfg;
    changed_host.environment = changed_environment;
    changed_cfg.claude_host = &changed_host;
+   changed_host.sdk_identity = NULL;
+   assert(cli_claude_native_launch_digest(&changed_cfg, proof));
+   changed_host.sdk_identity = "bad";
+   assert(cli_claude_native_launch_digest(&changed_cfg, proof));
+   changed_host.sdk_identity = host->sdk_identity;
+   /* Valid replacement correlation selects a different cache profile; mismatch,
+    * unsafe config custody and missing identity never adopt the old profile. */
+   char config_path[8192], original_config[2048], replacement[65];
+   assert(snprintf(config_path, sizeof config_path, "%s/.claude/.claude.json", host->home) <
+          (int)sizeof config_path);
+   FILE *config_file = fopen(config_path, "r");
+   assert(config_file);
+   size_t config_size = fread(original_config, 1, sizeof original_config - 1, config_file);
+   assert(!ferror(config_file) && feof(config_file) && !fclose(config_file));
+   original_config[config_size] = 0;
+   cJSON *config_value = cJSON_Parse(original_config);
+   assert(config_value);
+   memset(replacement, host->sdk_identity[0] == 'e' ? 'f' : 'e', 64);
+   replacement[64] = 0;
+   assert(
+       cJSON_SetValuestring(cJSON_GetObjectItemCaseSensitive(config_value, "userID"), replacement));
+   char *changed_config = cJSON_PrintUnformatted(config_value);
+   cJSON_Delete(config_value);
+   assert(changed_config);
+   config_file = fopen(config_path, "w");
+   assert(config_file &&
+          fwrite(changed_config, 1, strlen(changed_config), config_file) ==
+              strlen(changed_config) &&
+          !fclose(config_file));
+   free(changed_config);
+   assert(cli_claude_native_launch_digest(cfg, proof));
+   changed_host.sdk_identity = replacement;
+   assert(!cli_claude_native_launch_digest(&changed_cfg, proof) &&
+          strcmp(proof, host->expected_profile));
+   assert(!chmod(config_path, 0644) && cli_claude_native_launch_digest(&changed_cfg, proof));
+   assert(!chmod(config_path, 0600));
+   config_file = fopen(config_path, "w");
+   assert(config_file && fwrite(original_config, 1, config_size, config_file) == config_size &&
+          !fclose(config_file));
+   changed_host.sdk_identity = host->sdk_identity;
+   assert(!cli_claude_native_launch_digest(&changed_cfg, proof) &&
+          !strcmp(proof, host->expected_profile));
+
    changed_environment[attribution_index] = "CLAUDE_CODE_ATTRIBUTION_HEADER=1";
    assert(cli_claude_native_launch_digest(&changed_cfg, proof));
    changed_environment[attribution_index] = NULL;
@@ -1261,7 +1311,8 @@ int main(int argc, char **argv)
    assert(completed == 1 && closed == 1);
    /* The credential HOME remains per-launch; Claude project lookup must use
     * the same private scheduler cwd across successful continuation turns. */
-   char first_claude_cwd[4096], first_claude_home[4096];
+   char first_claude_cwd[4096], first_claude_home[4096], first_sdk_identity[65];
+   snprintf(first_sdk_identity, sizeof first_sdk_identity, "%s", observed_sdk_identity);
    snprintf(first_claude_cwd, sizeof first_claude_cwd, "%s", observed_claude_cwd);
    snprintf(first_claude_home, sizeof first_claude_home, "%s", private_home);
    struct stat first_cwd, next_cwd;
@@ -1270,6 +1321,7 @@ int main(int argc, char **argv)
    agent_result_t continuation = {0};
    assert(!provider_cli_adapter_host_execute(&cfg, &continuation));
    assert(!strcmp(first_claude_cwd, observed_claude_cwd));
+   assert(!strcmp(first_sdk_identity, observed_sdk_identity));
    assert(strcmp(first_claude_home, private_home) && access(first_claude_home, F_OK) &&
           access(private_home, F_OK));
    assert(!stat(observed_claude_cwd, &next_cwd) && first_cwd.st_dev == next_cwd.st_dev &&

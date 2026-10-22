@@ -6,6 +6,7 @@ typedef struct cli_claude_host_launch
 {
    int executable_fd, cwd_fd;
    const char *home, *cwd, *mcp_config, *gateway_url, *gateway_token, *expected_profile;
+   const char *sdk_identity; /* Host-owned nonsecret correlation; never authentication. */
    char *const *environment;
    const aimee_request_t *catalog;
    const cli_native_spawn_guard_t *spawn_guard;
