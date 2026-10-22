@@ -410,11 +410,6 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                      goto capture_stop;
                   }
                }
-               if (aimee_claude_frame_ir(frame, &ir) != 0)
-               {
-                  cJSON_Delete(frame);
-                  goto capture_stop;
-               }
                const cJSON *sid = cJSON_GetObjectItemCaseSensitive(frame, "session_id");
                if (cJSON_IsString(sid) && sid->valuestring[0] && strcmp(bound, sid->valuestring) &&
                    (strlen(sid->valuestring) > 1024 ||
@@ -425,6 +420,11 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
                }
                if (cJSON_IsString(sid) && strlen(sid->valuestring) <= 1024)
                   snprintf(bound, sizeof(bound), "%s", sid->valuestring);
+               if (aimee_claude_frame_ir(frame, &ir) != 0)
+               {
+                  cJSON_Delete(frame);
+                  goto capture_stop;
+               }
                const cJSON *type = cJSON_GetObjectItemCaseSensitive(frame, "type");
                if (cJSON_IsString(type) && !strcmp(type->valuestring, "result"))
                {

@@ -208,8 +208,8 @@ static void strict_frames(const char *path, const provider_cli_cfg_t *cfg)
 }
 static void api_failure_diagnostic(const char *path, const provider_cli_cfg_t *cfg)
 {
-   /* Pinned print-mode stdout uses snake case; the internal log uses camel case.
-    * Arbitrary diagnostic text must never be copied. */
+   /* Newer print serializers mark diagnostics with snake case; SDK 2.1.177
+    * omits that flag. Internal logs use camel case. Never copy diagnostic text. */
    const char *codes[] = {"rate_limit", "invalid_request"};
    const char *messages[] = {"Claude request was rate limited by the provider.",
                              "Claude provider rejected the request."};
@@ -272,6 +272,61 @@ static void api_failure_diagnostic(const char *path, const provider_cli_cfg_t *c
       assert(!out.error[0] && out.response && !strcmp(out.response, "reply") && events == 6);
       agent_result_clear_response(&out);
    }
+}
+static void legacy_diagnostic(const char *path, const provider_cli_cfg_t *cfg)
+{
+   /* Exact legacy envelope shape, synthetic unknown diagnostic; no text authority. */
+   const char *assistant =
+       "{\"type\":\"assistant\",\"error\":\"unknown\",\"session_id\":\"native-one\","
+       "\"uuid\":\"sdk-uuid\",\"parent_tool_use_id\":null,\"message\":{\"id\":\"diag\","
+       "\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"PRIVATE_DIAGNOSTIC\"}]}}"
+       "\n";
+   char frames[2048];
+   snprintf(frames, sizeof frames, "%s%s", assistant,
+            "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true}\n");
+   binary_script(path, (const unsigned char *)frames, strlen(frames), 0);
+   agent_result_t out = {0};
+   binds = events = 0;
+   assert(claude_headless_run(cfg, bind_session, &binds, &out) < 0 && !out.success);
+   assert(!strcmp(out.error, "Claude structured turn failed"));
+   assert(binds == 1 && !events && !out.response && !out.canonical_response.n_content);
+   agent_result_clear_response(&out);
+   binary_script(path, (const unsigned char *)assistant, strlen(assistant), 0);
+   assert(claude_headless_run(cfg, bind_session, &binds, &out) < 0 && !out.success);
+   assert(!strcmp(out.error, "Claude structured turn failed") && !events);
+   agent_result_clear_response(&out);
+
+   /* Constructed known-code legacy envelopes exercise the source contract;
+    * they are not captured wire evidence for the failed live turn. */
+   const char *codes[] = {"rate_limit", "invalid_request"};
+   const char *errors[] = {"Claude request was rate limited by the provider.",
+                           "Claude provider rejected the request."};
+   for (size_t i = 0; i < 2; i++)
+   {
+      cJSON *legacy = cJSON_Parse(assistant);
+      assert(legacy &&
+             cJSON_ReplaceItemInObjectCaseSensitive(legacy, "error", cJSON_CreateString(codes[i])));
+      char *raw = cJSON_PrintUnformatted(legacy);
+      assert(raw);
+      snprintf(frames, sizeof frames, "%s\n{\"type\":\"result\",\"is_error\":true}\n", raw);
+      free(raw);
+      cJSON_Delete(legacy);
+      binary_script(path, (const unsigned char *)frames, strlen(frames), 0);
+      events = binds = 0;
+      assert(claude_headless_run(cfg, bind_session, &binds, &out) < 0 && !out.success);
+      assert(!strcmp(out.error, errors[i]) && binds == 1 && !events && !out.response);
+      agent_result_clear_response(&out);
+   }
+
+   /* A foreign ordinary assistant must be refused before any observation. */
+   const char *foreign =
+       "{\"type\":\"assistant\",\"session_id\":\"foreign-one\",\"message\":{\"id\":\"foreign\","
+       "\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"FOREIGN_TEXT\"}]}}\n";
+   binary_script(path, (const unsigned char *)foreign, strlen(foreign), 0);
+   events = binds = 0;
+   assert(claude_headless_run(cfg, bind_session, &binds, &out) == AGENT_RC_CAPTURE_FAILED);
+   assert(binds == 1 && !events && !out.response && !out.canonical_response.n_content);
+   agent_result_clear_response(&out);
 }
 static void interactive_script(const char *path)
 {
@@ -555,6 +610,7 @@ int main(void)
    assert(claude_headless_run(&cfg, bind_session, &binds, &out) < 0 && !out.success && !events);
    reject_bind = 0;
 
+   legacy_diagnostic(path, &cfg);
    api_failure_diagnostic(path, &cfg);
    script(path, "printf '%s\\n' '{\"type\":\"result\",\"is_error\":true}'\n");
    assert(claude_headless_run(&cfg, NULL, NULL, &out) < 0 && !out.success);

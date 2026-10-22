@@ -521,13 +521,28 @@ static int aimee_claude_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
    if (!strcmp(type, "assistant"))
    {
       s->failure = AIMEE_HARNESS_FAILURE_NONE;
-      if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(f, "is_api_error_message")))
+      const cJSON *flag = cJSON_GetObjectItemCaseSensitive(f, "is_api_error_message");
+      const cJSON *error = cJSON_GetObjectItemCaseSensitive(f, "error");
+      if (cJSON_IsTrue(flag) || error)
       {
          const cJSON *message = cJSON_GetObjectItemCaseSensitive(f, "message");
          if (!cJSON_IsObject(message) || strcmp(str(message, "role"), "assistant"))
             return -1;
-         /* This SDK envelope is a transport diagnostic, not model output.
-          * Never copy its message/errors text into canonical observations. */
+         if (!cJSON_IsTrue(flag))
+         {
+            /* The 2.1.177 print serializer retains error but omits its internal
+             * diagnostic flag. Only its main-assistant envelope is admitted;
+             * persisted camel-case records and contradictory markers are not. */
+            const cJSON *parent = cJSON_GetObjectItemCaseSensitive(f, "parent_tool_use_id");
+            if (flag || cJSON_GetObjectItemCaseSensitive(f, "isApiErrorMessage") ||
+                !cJSON_IsString(error) || !error->valuestring[0] ||
+                strlen(error->valuestring) > 128 || !cJSON_IsNull(parent) ||
+                !str(f, "session_id")[0] || strlen(str(f, "session_id")) > 1024 ||
+                !str(f, "uuid")[0] || strlen(str(f, "uuid")) > 1024)
+               return -1;
+         }
+         /* Reserved SDK diagnostics are never canonical model observations.
+          * Unknown codes stay generic; diagnostic text is never authority. */
          if (!strcmp(str(f, "error"), "rate_limit"))
             s->failure = AIMEE_HARNESS_FAILURE_RATE_LIMIT;
          else if (!strcmp(str(f, "error"), "invalid_request"))

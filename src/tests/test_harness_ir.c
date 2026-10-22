@@ -498,6 +498,63 @@ static void owned_results(void)
    next_execution();
 }
 
+/* SDK 2.1.177 stdout serializes the reserved error field without a flag.
+ * Unknown is observed in a synthetic local HTTP400 control; known values below
+ * are constructed source-contract cases, not a claim about a live failure. */
+static void claude_legacy_diagnostic(void)
+{
+   const char *codes[] = {"unknown", "rate_limit", "invalid_request"};
+   int before = cJSON_GetArraySize(events);
+   for (int host = 0; host < 2; host++)
+      for (size_t i = 0; i < sizeof codes / sizeof *codes; i++)
+      {
+         aimee_harness_ir_t state = {.host_model_capture = host};
+         char raw[1024];
+         snprintf(raw, sizeof raw,
+                  "{\"type\":\"assistant\",\"error\":\"%s\",\"session_id\":\"native-one\","
+                  "\"uuid\":\"sdk-uuid\",\"parent_tool_use_id\":null,\"message\":{"
+                  "\"id\":\"sdk-diagnostic\",\"role\":\"assistant\",\"content\":[{"
+                  "\"type\":\"text\",\"text\":\"PRIVATE_DIAGNOSTIC\"}]}}",
+                  codes[i]);
+         assert(!frame(raw, &state, 0));
+         assert(cJSON_GetArraySize(events) == before && !state.claude_message);
+         assert(state.failure == (i == 1   ? AIMEE_HARNESS_FAILURE_RATE_LIMIT
+                                  : i == 2 ? AIMEE_HARNESS_FAILURE_PROVIDER_REJECTED
+                                           : AIMEE_HARNESS_FAILURE_NONE));
+         /* Each malformed case changes exactly one otherwise complete field. */
+         if (i == 0)
+         {
+            for (int bad_parent = 0; bad_parent < 2; bad_parent++)
+            {
+               cJSON *bad = cJSON_Parse(raw);
+               assert(bad);
+               if (bad_parent)
+                  assert(cJSON_ReplaceItemInObjectCaseSensitive(
+                      bad, "parent_tool_use_id", cJSON_CreateString("subagent-tool")));
+               else
+                  assert(cJSON_ReplaceItemInObjectCaseSensitive(
+                      cJSON_GetObjectItemCaseSensitive(bad, "message"), "role",
+                      cJSON_CreateString("user")));
+               char *malformed = cJSON_PrintUnformatted(bad);
+               assert(malformed && frame(malformed, &state, 0) < 0);
+               assert(state.failure == AIMEE_HARNESS_FAILURE_NONE &&
+                      cJSON_GetArraySize(events) == before && !state.claude_message);
+               free(malformed);
+               cJSON_Delete(bad);
+               next_execution();
+            }
+         }
+         aimee_harness_ir_free(&state);
+      }
+   /* A non-diagnostic assistant may carry unrelated SDK metadata. */
+   aimee_harness_ir_t normal = {.host_model_capture = 1};
+   assert(!frame("{\"type\":\"assistant\",\"is_api_error_message\":false,"
+                 "\"future_metadata\":true,\"message\":{\"role\":\"assistant\","
+                 "\"content\":[{\"type\":\"text\",\"text\":\"invalid_request\"}]}}",
+                 &normal, 0));
+   assert(normal.failure == AIMEE_HARNESS_FAILURE_NONE && cJSON_GetArraySize(events) == before);
+   aimee_harness_ir_free(&normal);
+}
 static void claude_failure_classification(void)
 {
    const char *codes[] = {"rate_limit", "invalid_request", "unknown_new_code",
@@ -532,23 +589,28 @@ static void claude_failure_classification(void)
    /* Ordinary assistant content and non-boolean lookalikes cannot classify. */
    aimee_harness_ir_t state = {.host_model_capture = 1};
    assert(
-       !frame("{\"type\":\"assistant\",\"is_api_error_message\":\"true\",\"error\":\"rate_limit\","
-              "\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\","
-              "\"text\":\"rate_limit\"}]}}",
-              &state, 0));
+       frame("{\"type\":\"assistant\",\"is_api_error_message\":\"true\",\"error\":\"rate_limit\","
+             "\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\","
+             "\"text\":\"rate_limit\"}]}}",
+             &state, 0) < 0);
+   next_execution();
    assert(state.failure == AIMEE_HARNESS_FAILURE_NONE);
-   assert(!frame(
-       "{\"type\":\"assistant\",\"error\":\"rate_limit\",\"message\":{\"role\":\"assistant\"}}",
-       &state, 0));
+   assert(
+       frame(
+           "{\"type\":\"assistant\",\"error\":\"rate_limit\",\"message\":{\"role\":\"assistant\"}}",
+           &state, 0) < 0);
+   next_execution();
    /* Camel case belongs to the internal conversation log, not print stdout. */
-   assert(!frame("{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"error\":\"rate_limit\","
-                 "\"message\":{\"role\":\"assistant\"}}",
-                 &state, 0));
+   assert(frame("{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"error\":\"rate_limit\","
+                "\"message\":{\"role\":\"assistant\"}}",
+                &state, 0) < 0);
+   next_execution();
    assert(state.failure == AIMEE_HARNESS_FAILURE_NONE && cJSON_GetArraySize(events) == before);
    /* Provider text and result errors are not SDK API classification authority. */
-   assert(!frame("{\"type\":\"assistant\",\"is_api_error_message\":false,"
-                 "\"error\":\"invalid_request\",\"message\":{\"role\":\"assistant\"}}",
-                 &state, 0));
+   assert(frame("{\"type\":\"assistant\",\"is_api_error_message\":false,"
+                "\"error\":\"invalid_request\",\"message\":{\"role\":\"assistant\"}}",
+                &state, 0) < 0);
+   next_execution();
    assert(state.failure == AIMEE_HARNESS_FAILURE_NONE);
    assert(!frame("{\"type\":\"result\",\"is_error\":true,"
                  "\"errors\":[\"invalid_request\",\"PRIVATE_PROVIDER_DIAGNOSTIC\"]}",
@@ -582,6 +644,7 @@ int main(void)
    assert(cJSON_IsObject(cJSON_GetObjectItem(form, "schema")));
    aimee_harness_ir_free(&form_state);
    cJSON_DeleteItemFromArray(events, 0);
+   claude_legacy_diagnostic();
    claude_failure_classification();
    next_execution();
    claude();

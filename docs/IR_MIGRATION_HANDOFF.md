@@ -44,6 +44,15 @@ shows an error instead of silently opening the base checkout. Its five focused
 regressions, all 473 frontend tests, type checking and both builds pass; deployment
 and actual worktree editor acceptance remain required for this change.
 
+A source-backed SDK 2.1.177 compatibility repair now suppresses its flagless
+assistant error envelopes as transport diagnostics. Unknown codes retain generic
+failure; only known typed codes select existing static messages. The unchanged
+native session-binding check now runs before decoding, preventing observations
+from a refused foreign session. Baseline regressions reproduce diagnostic
+leakage; foreign-session refusal and focused translator/headless tests pass
+normally and under ASan/UBSan/leak checks. These fixtures do not establish the cause of
+failed live event 54, whose actual stdout was not retained.
+
 Keep implementation and validation moving without requiring an open PR. Remaining
 work includes the native-resume failure, graceful HOST shutdown, deployment of
 the editor repair, final current-source CI and published fresh-install acceptance,
