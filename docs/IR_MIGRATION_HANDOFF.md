@@ -10,9 +10,53 @@ stop/handoff request below is superseded.
 as `aa8c774edcc324f5defb6c5cea592f0e1dd5314d`. Its final premerge checks and
 all 54 postmerge main CI jobs passed, including every configured deployment
 tier; the seven-job artifact publisher also passed. Those results qualify the
-merged baseline, not the subsequent browser repairs. Continue on
-`fix/browser-ir-live-acceptance` in [PR #3057](https://github.com/RakuenSoftware/aimee/pull/3057) for their fresh CI. Keep automatic review and
-the strict attribution gate enabled. No production promotion is claimed.
+merged baseline, not the subsequent browser repairs. PR #3057 subsequently merged
+into `testing` as `861b5b0ff20d2c24f7fb89a5826198f175f7a685`. Its published-image
+fresh-install follow-up and the SmoothGUI update continue in
+[PR #3058](https://github.com/RakuenSoftware/aimee/pull/3058), on
+`chore/update-smoothgui-0.12.3`. Keep automatic review and the strict attribution
+gate enabled. No production promotion is claimed.
+
+### Published-image fresh-install failure and candidate repair
+
+The merged revision passed all 54 post-merge main CI jobs. Publisher run
+`39747388946` passed all seven jobs. Registry SLSA/BuildKit provenance identifies
+that exact revision for application amd64 digest
+`68b0a21ae5f3b7e495c0544f07414403bc22e70ed227b38ee0519d70277fa1df`.
+Fresh owned VM 8165 on `.252` pulled that image normally and started the documented
+managed, KB-free Compose installation with fresh Vault, PostgreSQL and PAM state.
+It reports `vtesting-861b5b0`, all 19 module rows and ready owners, and serves SPA
+`60756abf`. The default installed SDKs are Claude 2.1.177 and Codex 0.139.0.
+The separate published-container T3 suite passed all seven topology gates,
+including memory, persistence, provider/tool and native-async recovery checks.
+
+The first genuine browser request through a normally added Claude connection
+**failed** with `failed to build request URL`; no read, question or vendor
+completion passed. Failure proof SHA256 is
+`86d04363fe9eac423dafaf491e719cc37e2508cbf2f42911345411b20d31b633`.
+Applying the saved connection had removed the model's native backend and kind,
+causing HTTP dispatch with an empty endpoint. The same setup also generated an
+inline `--model` command in a field that the attested launcher treats as one
+executable. These are actual default-setup defects; the earlier configured-host
+acceptance does not qualify this path.
+
+Go normalization now derives native Claude dispatch after applying connection
+authority, keeps model selection separate from the executable, and narrowly
+repairs matching legacy generated commands. Explicit custom paths and unrelated
+API connections retain their meaning. The C owner projects only Claude SDK
+aliases into its host-owned Anthropic wire/default endpoint, preserving explicit
+endpoints, cross-wire profiles and the original caller configuration.
+All three Go regressions and the C alias regression fail on their original
+sources. The provider race suite, normal C factory fixture, ASan/UBSan/leak checks
+and all 76 lint gates pass. Full candidate-image fresh-install acceptance and
+fresh CI remain required at this checkpoint; preserve the immutable-image
+failure separately from any later candidate result.
+
+The same follow-up vendors SmoothGUI 0.12.3 from upstream main commit
+`57d8308f38665d24221cb30b2aa2453926eed464`, with recorded tarball integrity.
+All 447 frontend tests, both production builds and Chromium regressions pass.
+The published `testing-861b5b0` image contains the preceding dependency, so its
+results must not be attributed to this update. Production `.100` stays untouched.
 
 ### Current review and local Claude acceptance scope
 
