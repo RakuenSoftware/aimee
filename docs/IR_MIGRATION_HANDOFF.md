@@ -29,7 +29,10 @@ Claude OAuth aliases and preservation of unrelated explicit `none` profiles;
 normal and ASan/UBSan/leak runs pass. The normalizer preserves explicit upstream
 wire, endpoint and authentication. Ten real store/edit/reload cases reproduce
 its baseline failure, and the complete provider race suite passes after repair.
-These changes were pushed at `430f5d15c`; fresh CI is required for later changes.
+These changes were pushed at `430f5d15c`. The later `f2edf66f8` actual-SDK
+integration passes 170/170, including all 16 browser/seeded wire/auth cases and
+real configured grading/recovery/scoped reuse. All formerly failing native and
+PostgreSQL shards also pass. Final current-source CI remains required.
 
 The remaining-consumer audit corrects earlier broad unfinished statements:
 primary durable history, compaction/seeded runs, delegate execution/history and
@@ -55,9 +58,14 @@ message instead of an undifferentiated structured-turn failure. Arbitrary SDK
 text remains excluded, the terminal remains failed, and cancellation/capture
 failure take precedence. Normal and sanitizer regressions pass. This reporting
 change does not assert that the upstream policy rejection has been repaired.
-Further offline inspection identified fresh-HOME device identity regeneration;
-a separate host-owned non-secret identity repair is in progress and must be
-verified before another successful resume claim. Live/published-image acceptance
+Further offline inspection identified fresh-HOME device identity regeneration.
+The host now retains only the nonsecret correlation ID in its checked cache lease,
+seeds the SDK's actual config path in each fresh HOME, and binds the version and
+actual identity into the launch digest. Four focused fixtures pass normally and
+under ASan/UBSan/leak checks. An exact installed-SDK control proves the seeded
+device hash remains stable across fresh HOMEs; it does not prove causality for
+the earlier provider rejection. Existing cache bytes and canonical history are
+preserved; pre-identity handles are not adopted. Live/published-image acceptance
 and final current-source CI remain required; production `.100` is untouched.
 
 ### Fresh-install acceptance continuation: 22 October 2026

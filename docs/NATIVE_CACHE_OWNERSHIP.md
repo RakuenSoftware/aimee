@@ -37,6 +37,16 @@ was keyed by a deleted temporary cwd are not adopted under this new contract.
 Their files and canonical history remain intact; the host neither rewrites a
 transcript nor substitutes a resume ID to make old handles appear valid.
 
+Claude also retains one nonsecret 64-hex SDK device-correlation ID in the same
+verified account/model cache lease. The host copies it into each fresh
+`CLAUDE_CONFIG_DIR/.claude.json`; no credential, mutable SDK configuration or
+operator account document is persisted with it. The SDK identity version and
+actual ID participate in the launch digest. Pre-identity handles are therefore
+not adopted, and replacing a valid ID changes cache compatibility. The original
+canonical history and SDK files remain intact. The host validates the private
+seed file before launch and initialization; unsafe lease/config state refuses
+before model execution.
+
 The host acquires an exclusive cache-directory lease before creating a native
 HOME, linking SDK conversation files, writing launch configuration, or spawning
 the SDK. Its key is the actual `browser-{sdk}/{session}/{binding}` directory;
