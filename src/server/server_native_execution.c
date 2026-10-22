@@ -1107,12 +1107,19 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    if (!cfg || !cfg->agent)
       goto refused;
    execution->selected = *cfg->agent;
-   if (!strcmp(execution->selected.auth_type, "codex-oauth") &&
-       (!execution->selected.provider[0] || !strcmp(execution->selected.provider, "codex") ||
-        !strcmp(execution->selected.provider, "codex-oauth") ||
-        !strcmp(execution->selected.provider, "codex-cli")))
+   const char *adapter_name = NULL;
+   if (!strcmp(execution->selected.cli_kind, "claude") &&
+       (!strcmp(execution->selected.provider, "claude") ||
+        !strcmp(execution->selected.provider, "claude-code")))
+      adapter_name = "anthropic";
+   else if (!strcmp(execution->selected.auth_type, "codex-oauth") &&
+            (!execution->selected.provider[0] || !strcmp(execution->selected.provider, "codex") ||
+             !strcmp(execution->selected.provider, "codex-oauth") ||
+             !strcmp(execution->selected.provider, "codex-cli")))
+      adapter_name = "codex";
+   if (adapter_name)
    {
-      const agent_adapter_t *adapter = agent_adapter_for_name("codex");
+      const agent_adapter_t *adapter = agent_adapter_for_name(adapter_name);
       if (!adapter)
          goto refused;
       snprintf(execution->selected.provider, sizeof execution->selected.provider, "%s",

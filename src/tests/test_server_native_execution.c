@@ -53,6 +53,8 @@ static int terminal_committed, sdk_calls, restored, ready_calls, rejected_termin
 static char parent_role[64], private_home[4096], host_workspace[4096];
 static int child_executable, child_directory;
 static const char *active_sdk = "codex";
+static aimee_wire_t expected_wire = AIMEE_WIRE_RESPONSES;
+static const char *expected_provider, *expected_endpoint;
 static const char digest[] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 struct server_native_containment
 {
@@ -408,7 +410,11 @@ int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON 
    assert(max_tokens == 0 && temperature == -1);
    (void)delegate;
    assert(cJSON_GetArraySize(messages) == 0 && cJSON_IsArray(tools));
-   assert(!strcmp(system, "host environment") && wire == AIMEE_WIRE_RESPONSES);
+   assert(!strcmp(system, "host environment") && wire == expected_wire);
+   if (expected_provider)
+      assert(!strcmp(agent->provider, expected_provider));
+   if (expected_endpoint)
+      assert(!strcmp(agent->endpoint, expected_endpoint));
    out->model = strdup(agent->model);
    out->tools = calloc(1, sizeof *out->tools);
    assert(out->tools);
@@ -468,7 +474,9 @@ server_native_runtime_t *server_native_runtime_open_bound_request(
              !strcmp(profile->system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY));
    else
       assert(!profile->n_system || strcmp(profile->system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY));
-   assert(!strcmp(selected->provider, "chatgpt"));
+   assert(!strcmp(selected->provider, expected_provider ? expected_provider : "chatgpt"));
+   if (expected_endpoint)
+      assert(!strcmp(selected->endpoint, expected_endpoint));
    assert(!durable_reservation); /* Session recovery precedes current profile. */
    assert(profile->n_tools == 1 && profile->tools[0].kind == AIMEE_TOOL_FUNCTION);
    const char *logical = !strcmp(active_sdk, "claude") ? "mcp__aimee__read_file" : "read_file";
@@ -815,6 +823,8 @@ static void reset(int next)
 {
    assert(!terminal && !retained);
    mode = next;
+   expected_wire = AIMEE_WIRE_RESPONSES;
+   expected_provider = expected_endpoint = NULL;
    reserved = quiesced = finished_reservation = published_claim = 0;
    disposed = 0;
    runtime_closed = 0;
@@ -1175,6 +1185,34 @@ int main(int argc, char **argv)
    agent_result_clear_response(&claude);
    finish(1);
    assert(completed == 1 && closed == 1);
+   /* Normal Models setup stores SDK aliases, while the host profile owns the
+    * actual upstream wire and endpoint. Explicit cross-wire profiles above
+    * remain unchanged; aliases must not become empty OpenAI profiles. */
+   const char *claude_profiles[] = {"claude", "claude-code", "anthropic", "openai"};
+   for (size_t profile = 0; profile < sizeof claude_profiles / sizeof *claude_profiles; profile++)
+   {
+      for (int custom = profile < 2 ? 0 : 1; custom < 2; custom++)
+      {
+         reset(0);
+         expected_wire = profile == 3 ? AIMEE_WIRE_OPENAI_CHAT : AIMEE_WIRE_ANTHROPIC;
+         expected_provider = profile < 2 ? "anthropic" : claude_profiles[profile];
+         expected_endpoint =
+             custom ? "https://owned.example.invalid/v1" : "https://api.anthropic.com/v1";
+         snprintf(selected.provider, sizeof selected.provider, "%s", claude_profiles[profile]);
+         snprintf(selected.endpoint, sizeof selected.endpoint, "%s",
+                  custom ? expected_endpoint : "");
+         agent_result_t alias_result = {0};
+         assert(!provider_cli_adapter_host_execute(&cfg, &alias_result));
+         assert(alias_result.success && sdk_calls == 1 && joined);
+         assert(!strcmp(selected.provider, claude_profiles[profile]));
+         assert(!strcmp(selected.endpoint, custom ? expected_endpoint : ""));
+         agent_result_clear_response(&alias_result);
+         finish(1);
+         assert(completed == 1 && closed == 1);
+      }
+   }
+   snprintf(selected.provider, sizeof selected.provider, "%s", "chatgpt");
+   selected.endpoint[0] = 0;
    active_sdk = "codex";
    reset(0);
    snprintf(selected.cli_kind, sizeof selected.cli_kind, "codex");
