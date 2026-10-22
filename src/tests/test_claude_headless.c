@@ -74,9 +74,8 @@ static int capture(const aimee_session_event_t *event, void *context)
 static int bind_session(const char *id, void *context)
 {
    assert(context == &binds);
-   assert(!strcmp(id, "native-one"));
    binds++;
-   return reject_bind ? -1 : 0;
+   return reject_bind || strcmp(id, "native-one") ? -1 : 0;
 }
 static int spawn_fixture(const provider_cli_cfg_t *cfg, const char *prompt, int *input, int *output,
                          pid_t *pid)
@@ -211,44 +210,68 @@ static void api_failure_diagnostic(const char *path, const provider_cli_cfg_t *c
 {
    /* Pinned print-mode stdout uses snake case; the internal log uses camel case.
     * Arbitrary diagnostic text must never be copied. */
-   const char *assistant =
-       "{\"type\":\"assistant\",\"is_api_error_message\":true,\"error\":\"rate_limit\","
-       "\"session_id\":\"native-one\",\"message\":{\"id\":\"sdk-api-error\",\"type\":\"message\","
-       "\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"PRIVATE_PROVIDER_"
-       "DIAGNOSTIC\"}]}}\n";
-   const char *failed = "{\"type\":\"result\",\"subtype\":\"error_during_execution\","
-                        "\"is_error\":true,\"errors\":[\"PRIVATE_RESULT_DIAGNOSTIC\"]}\n";
-   char frames[2048];
-   snprintf(frames, sizeof frames, "%s%s", assistant, failed);
-   binary_script(path, (const unsigned char *)frames, strlen(frames), 0);
-   events = 0;
-   agent_result_t out = {0};
-   assert(claude_headless_run(cfg, NULL, NULL, &out) < 0 && !out.success);
-   assert(!strcmp(out.error, "Claude request was rate limited by the provider."));
-   assert(!events && !out.response && !out.canonical_response.n_content);
-   agent_result_clear_response(&out);
+   const char *codes[] = {"rate_limit", "invalid_request"};
+   const char *messages[] = {"Claude request was rate limited by the provider.",
+                             "Claude provider rejected the request."};
+   for (size_t category = 0; category < 2; category++)
+   {
+      char assistant[1024];
+      snprintf(assistant, sizeof assistant,
+               "{\"type\":\"assistant\",\"is_api_error_message\":true,\"error\":\"%s\","
+               "\"session_id\":\"native-one\",\"message\":{\"id\":\"sdk-api-error\",\"type\":"
+               "\"message\","
+               "\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"PRIVATE_PROVIDER_"
+               "DIAGNOSTIC\"}]}}\n",
+               codes[category]);
+      const char *failed = "{\"type\":\"result\",\"subtype\":\"error_during_execution\","
+                           "\"is_error\":true,\"errors\":[\"PRIVATE_RESULT_DIAGNOSTIC\"]}\n";
+      char frames[2048];
+      snprintf(frames, sizeof frames, "%s%s", assistant, failed);
+      binary_script(path, (const unsigned char *)frames, strlen(frames), 0);
+      events = 0;
+      agent_result_t out = {0};
+      assert(claude_headless_run(cfg, NULL, NULL, &out) < 0 && !out.success);
+      assert(!strcmp(out.error, messages[category]));
+      assert(!events && !out.response && !out.canonical_response.n_content);
+      agent_result_clear_response(&out);
 
-   /* Missing terminal/cancellation never borrows a terminal failure category. */
-   binary_script(path, (const unsigned char *)assistant, strlen(assistant), 0);
-   assert(claude_headless_run(cfg, NULL, NULL, &out) < 0 && !out.success);
-   assert(!strcmp(out.error, "Claude structured turn failed") && !events);
-   char script_body[4096];
-   snprintf(script_body, sizeof script_body, "cat <<'SDK_ERROR'\n%s%sSDK_ERROR\nsleep 30\n",
-            assistant, failed);
-   script(path, script_body);
-   cancel_at = now_ms() + 100;
-   assert(claude_headless_run(cfg, NULL, NULL, &out) < 0 && !out.success);
-   assert(!strcmp(out.error, "Claude turn interrupted"));
-   cancel_at = 0;
+      /* A diagnostic from a refused native session cannot label this execution. */
+      cJSON *foreign = cJSON_Parse(assistant);
+      assert(foreign && cJSON_ReplaceItemInObjectCaseSensitive(foreign, "session_id",
+                                                               cJSON_CreateString("foreign-one")));
+      char *foreign_json = cJSON_PrintUnformatted(foreign);
+      assert(foreign_json);
+      snprintf(frames, sizeof frames, "%s\n%s", foreign_json, failed);
+      free(foreign_json);
+      cJSON_Delete(foreign);
+      binary_script(path, (const unsigned char *)frames, strlen(frames), 0);
+      binds = events = 0;
+      assert(claude_headless_run(cfg, bind_session, &binds, &out) == AGENT_RC_CAPTURE_FAILED);
+      assert(!out.success && binds == 1 && !events && strcmp(out.error, messages[category]));
+      agent_result_clear_response(&out);
 
-   /* SDK retries may eventually succeed: do not retain a transient diagnosis. */
-   snprintf(script_body, sizeof script_body, "cat <<'SDK_ERROR'\n%sSDK_ERROR\n%s", assistant,
-            success_frames);
-   script(path, script_body);
-   events = 0;
-   assert(!claude_headless_run(cfg, NULL, NULL, &out) && out.success);
-   assert(!out.error[0] && out.response && !strcmp(out.response, "reply") && events == 6);
-   agent_result_clear_response(&out);
+      /* Missing terminal/cancellation never borrows a terminal failure category. */
+      binary_script(path, (const unsigned char *)assistant, strlen(assistant), 0);
+      assert(claude_headless_run(cfg, NULL, NULL, &out) < 0 && !out.success);
+      assert(!strcmp(out.error, "Claude structured turn failed") && !events);
+      char script_body[4096];
+      snprintf(script_body, sizeof script_body, "cat <<'SDK_ERROR'\n%s%sSDK_ERROR\nsleep 30\n",
+               assistant, failed);
+      script(path, script_body);
+      cancel_at = now_ms() + 100;
+      assert(claude_headless_run(cfg, NULL, NULL, &out) < 0 && !out.success);
+      assert(!strcmp(out.error, "Claude turn interrupted"));
+      cancel_at = 0;
+
+      /* SDK retries may eventually succeed: do not retain a transient diagnosis. */
+      snprintf(script_body, sizeof script_body, "cat <<'SDK_ERROR'\n%sSDK_ERROR\n%s", assistant,
+               success_frames);
+      script(path, script_body);
+      events = 0;
+      assert(!claude_headless_run(cfg, NULL, NULL, &out) && out.success);
+      assert(!out.error[0] && out.response && !strcmp(out.response, "reply") && events == 6);
+      agent_result_clear_response(&out);
+   }
 }
 static void interactive_script(const char *path)
 {

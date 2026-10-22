@@ -530,6 +530,8 @@ static int aimee_claude_frame_ir_decode(const cJSON *f, aimee_harness_ir_t *s)
           * Never copy its message/errors text into canonical observations. */
          if (!strcmp(str(f, "error"), "rate_limit"))
             s->failure = AIMEE_HARNESS_FAILURE_RATE_LIMIT;
+         else if (!strcmp(str(f, "error"), "invalid_request"))
+            s->failure = AIMEE_HARNESS_FAILURE_PROVIDER_REJECTED;
          return 0;
       }
    }

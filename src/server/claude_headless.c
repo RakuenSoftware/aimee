@@ -443,6 +443,9 @@ stop:
                interrupted ? "Claude turn interrupted"
                : !capture_failed && saw_result < 0 && ir.failure == AIMEE_HARNESS_FAILURE_RATE_LIMIT
                    ? "Claude request was rate limited by the provider."
+               : !capture_failed && saw_result < 0 &&
+                       ir.failure == AIMEE_HARNESS_FAILURE_PROVIDER_REJECTED
+                   ? "Claude provider rejected the request."
                    : "Claude structured turn failed");
 finish:
 {

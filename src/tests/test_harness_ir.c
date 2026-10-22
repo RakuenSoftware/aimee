@@ -500,7 +500,8 @@ static void owned_results(void)
 
 static void claude_failure_classification(void)
 {
-   const char *codes[] = {"rate_limit", "unknown_new_code", "PRIVATE_PROVIDER_DIAGNOSTIC"};
+   const char *codes[] = {"rate_limit", "invalid_request", "unknown_new_code",
+                          "PRIVATE_PROVIDER_DIAGNOSTIC"};
    int before = cJSON_GetArraySize(events);
    for (int host = 0; host < 2; host++)
    {
@@ -514,8 +515,9 @@ static void claude_failure_classification(void)
                   "{\"type\":\"text\",\"text\":\"PRIVATE_PROVIDER_DIAGNOSTIC\"}]}}",
                   codes[i]);
          assert(!frame(raw, &state, 0));
-         assert(state.failure ==
-                (i == 0 ? AIMEE_HARNESS_FAILURE_RATE_LIMIT : AIMEE_HARNESS_FAILURE_NONE));
+         assert(state.failure == (i == 0   ? AIMEE_HARNESS_FAILURE_RATE_LIMIT
+                                  : i == 1 ? AIMEE_HARNESS_FAILURE_PROVIDER_REJECTED
+                                           : AIMEE_HARNESS_FAILURE_NONE));
          assert(cJSON_GetArraySize(events) == before && !state.claude_message);
       }
       assert(
@@ -541,6 +543,15 @@ static void claude_failure_classification(void)
    /* Camel case belongs to the internal conversation log, not print stdout. */
    assert(!frame("{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"error\":\"rate_limit\","
                  "\"message\":{\"role\":\"assistant\"}}",
+                 &state, 0));
+   assert(state.failure == AIMEE_HARNESS_FAILURE_NONE && cJSON_GetArraySize(events) == before);
+   /* Provider text and result errors are not SDK API classification authority. */
+   assert(!frame("{\"type\":\"assistant\",\"is_api_error_message\":false,"
+                 "\"error\":\"invalid_request\",\"message\":{\"role\":\"assistant\"}}",
+                 &state, 0));
+   assert(state.failure == AIMEE_HARNESS_FAILURE_NONE);
+   assert(!frame("{\"type\":\"result\",\"is_error\":true,"
+                 "\"errors\":[\"invalid_request\",\"PRIVATE_PROVIDER_DIAGNOSTIC\"]}",
                  &state, 0));
    assert(state.failure == AIMEE_HARNESS_FAILURE_NONE && cJSON_GetArraySize(events) == before);
    aimee_harness_ir_free(&state);
