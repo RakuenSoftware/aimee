@@ -2,6 +2,7 @@
  * session's hidden checkout; model context still enters through shared ingress. */
 #include "cli_client.h"
 #include "cli_session_start.h"
+#include "session_degraded_notice.h"
 #include "client_config.h"
 #include "cJSON.h"
 #include "client_session_worktree.h" /* client_session_id_publish */
@@ -109,6 +110,55 @@ static const char *ss_registered_transport_guidance(void)
    return AIMEE_GUIDANCE_BLOCK;
 }
 
+/* A recall that could not be read is not the same as a recall that was empty,
+ * and the difference has to survive into the model's context. Without it the
+ * envelope still arrives carrying the static guidance, so an outage is
+ * indistinguishable from a turn where nothing applied.
+ *
+ * The wording and the trigger already exist, tested, in session_degraded_notice
+ * -- written for exactly this ("the message is the only thing that stops an
+ * agent reading an empty search result as an authoritative not-found"). It had
+ * no caller in the shipped binary: its intended home, handle_session_start,
+ * deliberately emits no context, so the notice was built into the CLI and never
+ * rendered. This is that call site.
+ *
+ * A failed recall is itself proof that retrieval did not answer, so the
+ * dependency state is known without a second request to /v1/ready. */
+static void ss_add_recall_unavailable(struct ss_sbuf *b)
+{
+   char notice[640];
+   if (ss_degraded_notice(NULL, "fail", notice, sizeof(notice)))
+      ss_add(b, notice);
+}
+
+/* Emit a PreCompact additionalContext envelope for whatever is in b. */
+static void ss_emit_precompact(struct ss_sbuf *b)
+{
+   if (!b->p || !b->p[0])
+      return;
+   cJSON *out = cJSON_CreateObject();
+   if (!out)
+      return;
+   cJSON *hook_out = cJSON_AddObjectToObject(out, "hookSpecificOutput");
+   if (hook_out)
+   {
+      cJSON_AddStringToObject(hook_out, "hookEventName", "PreCompact");
+      struct ss_sbuf ctx = {0};
+      ss_add(&ctx, "# Proactive Recall (re-primed after compaction)\n\n");
+      ss_add(&ctx, b->p);
+      cJSON_AddStringToObject(hook_out, "additionalContext", ctx.p ? ctx.p : b->p);
+      char *s = cJSON_PrintUnformatted(out);
+      if (s)
+      {
+         fputs(s, stdout);
+         fputc('\n', stdout);
+         free(s);
+      }
+      free(ctx.p);
+   }
+   cJSON_Delete(out);
+}
+
 /* Thin-client UserPromptSubmit hook (P1 context pre-injection for Claude Code).
  * Fires once per user turn. Fetches recall seeded by the user's prompt
  * (read-only POST /v1/memory/recall, task_hint = the prompt) and emits the
@@ -120,9 +170,20 @@ static const char *ss_registered_transport_guidance(void)
  * Deliberately the Claude-Code delivery path for pre-injection: the Anthropic
  * /v1/messages proxy is kept a pure stateless wire-format proxy (mutating it
  * would corrupt the context Claude Code builds), so the envelope rides in via
- * the hook rather than the wire. Renders only the per-turn sections (session-
- * level identity/preferences/rules already land at SessionStart). Always
- * soft-fails (exit 0) so a prompt is never blocked. */
+ * the hook rather than the wire.
+ *
+ * Renders every section the recall returns, including the session-level ones.
+ * This used to render only the per-turn slices on the grounds that identity,
+ * preferences and rules "already land at SessionStart" -- but
+ * handle_session_start deliberately emits no context (it would duplicate the
+ * shared model-ingress context that only thin clients receive). On this path
+ * nothing else injects them, so always-on rules were fetched and then
+ * discarded, and a session could run with rules the model never saw. The
+ * server decides what a per-turn recall contains; the hook's job is to deliver
+ * it, not to second-guess which sections are worth showing.
+ *
+ * Always soft-fails (exit 0) so a prompt is never blocked -- but a failed
+ * recall says so. */
 /* Persist the host's on-disk conversation transcript (Claude Code's
  * transcript_path — JSONL, one message object per line) to DB1 under the real
  * session id. This is what makes a chat that flows through the anonymous
@@ -262,6 +323,7 @@ int handle_user_prompt_submit(void)
 
    int status = 0;
    cJSON *resp = NULL;
+   const int recall_attempted = endpoint != NULL;
    if (endpoint)
    {
       cJSON *body = cJSON_CreateObject();
@@ -284,10 +346,21 @@ int handle_user_prompt_submit(void)
    if (resp && status == 200)
    {
       cJSON *recall = cJSON_GetObjectItemCaseSensitive(resp, "recall");
+      ss_render_section(&b, "Always-On Rules", cJSON_GetObjectItem(recall, "always_on_rules"));
+      ss_render_section(&b, "Identity", cJSON_GetObjectItem(recall, "identity"));
+      ss_render_section(&b, "Preferences", cJSON_GetObjectItem(recall, "preferences"));
       ss_render_section(&b, "Active Context", cJSON_GetObjectItem(recall, "active_context"));
       ss_render_section(&b, "Open Commitments", cJSON_GetObjectItem(recall, "open_commitments"));
       ss_render_section(&b, "Reminders", cJSON_GetObjectItem(recall, "reminders"));
       ss_render_section(&b, "Directives", cJSON_GetObjectItem(recall, "directives"));
+   }
+   else if (recall_attempted)
+   {
+      /* Say it out loud. Emitting only the static guidance makes an outage look
+       * exactly like "no rule matched": the reader cannot tell a clean turn
+       * from one where every stored rule, preference and commitment was
+       * unreadable, and silently proceeds as if unconstrained. */
+      ss_add_recall_unavailable(&b);
    }
 
    /* The registered CLI/MCP guidance is useful even when recall is empty or the
@@ -349,14 +422,20 @@ int handle_pre_compact(void)
    free(endpoint);
    free(bearer);
    free(body_s);
+   struct ss_sbuf b = {0};
    if (!resp || status != 200)
    {
+      /* Compaction has just dropped the conversation. Returning silently here
+       * leaves the fresh context with no recall and no hint that recall was
+       * even attempted, which is the worst moment to be quietly unconstrained. */
+      ss_add_recall_unavailable(&b);
+      ss_emit_precompact(&b);
+      free(b.p);
       cJSON_Delete(resp);
       return 0;
    }
 
    cJSON *recall = cJSON_GetObjectItemCaseSensitive(resp, "recall");
-   struct ss_sbuf b = {0};
    ss_render_section(&b, "Always-On Rules", cJSON_GetObjectItem(recall, "always_on_rules"));
    ss_render_section(&b, "Identity", cJSON_GetObjectItem(recall, "identity"));
    ss_render_section(&b, "Preferences", cJSON_GetObjectItem(recall, "preferences"));
@@ -365,25 +444,7 @@ int handle_pre_compact(void)
    ss_render_section(&b, "Reminders", cJSON_GetObjectItem(recall, "reminders"));
    ss_render_section(&b, "Directives", cJSON_GetObjectItem(recall, "directives"));
 
-   if (b.p && b.p[0])
-   {
-      cJSON *out = cJSON_CreateObject();
-      cJSON *hook_out = cJSON_AddObjectToObject(out, "hookSpecificOutput");
-      cJSON_AddStringToObject(hook_out, "hookEventName", "PreCompact");
-      struct ss_sbuf ctx = {0};
-      ss_add(&ctx, "# Proactive Recall (re-primed after compaction)\n\n");
-      ss_add(&ctx, b.p);
-      cJSON_AddStringToObject(hook_out, "additionalContext", ctx.p ? ctx.p : b.p);
-      char *s = cJSON_PrintUnformatted(out);
-      if (s)
-      {
-         fputs(s, stdout);
-         fputc('\n', stdout);
-         free(s);
-      }
-      free(ctx.p);
-      cJSON_Delete(out);
-   }
+   ss_emit_precompact(&b);
    free(b.p);
    cJSON_Delete(resp);
    return 0;
