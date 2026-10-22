@@ -1,12 +1,18 @@
 /* test_server_http.c: unit tests for the aimee-server /v1 persona routes and
  * the per-session persona store (no socket I/O). */
 #include "server_http.h"
+#include "server_session_control.h"
+#include "primary_session_adapter.h"
 #include "server/server_error_kind.h"
 #include "server_http_authz.h"
+#include "server_write_tier_db1.h"
 #include "server_http_internal.h"
 #include "server_http_identity.h"
 #include "runtime_secret.h"
 #include "request_context.h"
+#include "presence.h"
+#include "turn_registry.h"
+#include "server_compute_impl.h"
 #include "http_content_encoding.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
@@ -19,6 +25,7 @@
 #include "delegate_permissions_stub.h"
 #include "cJSON.h"
 #include "db1_client/db1.h"
+#include "db1_client/db1_module_api.h"
 #include "openai_runs_store.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -39,6 +46,7 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 
+static int history_open_effects;
 static char *kb_agent_surfaces_stub(void)
 {
    return strdup("{\"cli_only\":[],\"mcp_only\":[\"kb_future\"]}");
@@ -242,6 +250,102 @@ static _Thread_local char g_disp_method[96];
 static _Thread_local char g_disp_body[24576];
 static char g_agg_body[24576];
 static atomic_int g_op_context_clean;
+/* The socket handoff fixture exercises HTTP parsing and identity, without a
+ * provider, egress broker or context-assembly service. */
+int server_conn_io_read(int fd, void *buf, int n)
+{
+   return (int)read(fd, buf, (size_t)n);
+}
+int server_write_tier_verify_for_request(const char *token, size_t len, int64_t now,
+                                         server_write_tier_outcome_t *outcome,
+                                         server_identity_token_claims_t *claims)
+{
+   (void)token;
+   (void)len;
+   (void)now;
+   (void)claims;
+   *outcome = SERVER_WRITE_TIER_ABSENT;
+   return SERVER_REMOTE_WRITES_OFF;
+}
+int server_write_tier_consume_for_request(const server_identity_token_claims_t *claims, int64_t now,
+                                          server_write_tier_outcome_t *outcome)
+{
+   (void)claims;
+   (void)now;
+   *outcome = SERVER_WRITE_TIER_INVALID;
+   return SERVER_REMOTE_WRITES_OFF;
+}
+const char *server_write_tier_outcome_str(server_write_tier_outcome_t outcome)
+{
+   (void)outcome;
+   return "fixture_refused";
+}
+int server_tls_mtls_mode(void)
+{
+   return 0;
+}
+int delegate_egress_adapter_serve(int fd, int uds, const char *head, size_t len, const char *tag)
+{
+   (void)fd;
+   (void)uds;
+   (void)head;
+   (void)len;
+   (void)tag;
+   assert(0);
+   return -1;
+}
+void ingress_preinject_finish_sources(void)
+{
+}
+void ingress_preinject_set_request_disabled(int disabled)
+{
+   (void)disabled;
+}
+void ingress_preinject_set_turn_id(const char *id)
+{
+   (void)id;
+}
+int ingress_preinject_mint_turn_id(char *out, size_t len)
+{
+   if (len)
+      out[0] = '\0';
+   return 0;
+}
+void anthropic_http_capture_request_headers(const char *headers)
+{
+   (void)headers;
+}
+int agent_http_post(const char *url, const char *auth, const char *body, char **response,
+                    int timeout, const char *extra)
+{
+   (void)url;
+   (void)auth;
+   (void)body;
+   (void)timeout;
+   (void)extra;
+   history_open_effects++;
+   *response = NULL;
+   return -1;
+}
+/* The HTTP surface fixture denies outbound network access for both byte and
+ * text APIs. Sanitized builds retain the OSV gate's byte-oriented call path. */
+int agent_http_post_bytes(const char *url, const char *auth, const void *body, size_t body_len,
+                          char **response, int timeout, const char *extra)
+{
+   (void)body_len;
+   return agent_http_post(url, auth, body, response, timeout, extra);
+}
+static char g_stream_principal[128];
+int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *request)
+{
+   history_open_effects++;
+   (void)ctx;
+   (void)request;
+   snprintf(g_stream_principal, sizeof g_stream_principal, "%s", conn->vault_principal);
+   assert(conn->attested_transport == ATTEST_UDS_PEERCRED);
+   return 0;
+}
+
 static server_ctx_t g_test_server_ctx;
 static int g_test_server_ctx_available = 1;
 
@@ -273,10 +377,35 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    {
       agent_request_creds_t creds;
       agent_request_creds_snapshot(&creds);
-      atomic_store(&g_op_context_clean, run_cmd_get_cwd() == NULL && creds.session_id[0] == '\0' &&
-                                            creds.codex_token[0] == '\0' &&
-                                            creds.codex_account_id[0] == '\0' &&
-                                            creds.vault_principal[0] == '\0');
+      atomic_store(&g_op_context_clean,
+                   run_cmd_get_cwd() == NULL && creds.session_id[0] == '\0' &&
+                       creds.codex_token[0] == '\0' && creds.codex_account_id[0] == '\0' &&
+                       !strcmp(creds.vault_principal, "webuser:fresh-op") &&
+                       request_context_get() && !request_context_get()->caller_authorization[0] &&
+                       !request_context_get()->request_budget_present &&
+                       conn->attested_transport == ATTEST_WEBCHAT_TRUSTED &&
+                       !strcmp(conn->vault_principal, "webuser:fresh-op"));
+   }
+   else if (!strcmp(g_disp_method, "test.inspect_owned_op_context"))
+   {
+      const request_context_t *owner = request_context_get();
+      assert(owner && owner->capabilities == CAP_DELEGATE);
+      assert(conn->capabilities == CAP_DELEGATE);
+      assert(conn->attested_transport == ATTEST_WEBCHAT_TRUSTED);
+      assert(!strcmp(conn->vault_principal, "webuser:op-owner"));
+      assert(!strcmp(agent_get_request_vault_principal(), "webuser:op-owner"));
+      assert(!strcmp(owner->caller_authorization, "test-only-op-owner-proof"));
+      assert(owner->request_budget_present == 1);
+      assert(!strcmp(owner->request_budget_limits, "{\"max_tokens\":1234}"));
+   }
+   else if (!strcmp(g_disp_method, "test.inspect_connection_op_context"))
+   {
+      const request_context_t *owner = request_context_get();
+      assert(owner && !strcmp(owner->vault_principal, "cert:pipeline-owner"));
+      assert(conn->attested_transport == ATTEST_MTLS_CLIENT);
+      assert(!strcmp(conn->vault_principal, "cert:pipeline-owner"));
+      assert(conn->capabilities == CAP_DELEGATE);
+      assert(!owner->caller_authorization[0] && !owner->request_budget_present);
    }
    /* Mimic a real method handler: write an NDJSON response to the loopback fd
     * the first-class /v1 route handed us, so the capture path is exercised end to
@@ -294,10 +423,115 @@ server_ctx_t *server_active_ctx(void)
    return g_test_server_ctx_available ? &g_test_server_ctx : NULL;
 }
 
-static void submit_and_wait_op(const char *method)
+/* DB-boundary surrogate: deliberately independent of connection RAM. Actual
+ * PostgreSQL tests cover transactions, row ownership and restart persistence. */
+static char primary_rows[2][64];
+static int primary_store_unavailable;
+static int primary_store_fixture;
+static int cancel_store_calls, cancel_store_status;
+static int attach_store_fixture, attach_store_calls, attach_store_creates;
+static char attach_store_actor[160], attach_store_owner[160];
+static aimee_module_call_result_t attach_store_reply(const uint8_t *wire, uint32_t request_len,
+                                                     void *body, uint32_t cap, uint32_t *length)
+{
+   uint32_t op = aimee_db1_get_u32(wire), count = aimee_db1_get_u32(wire + 4), at = 8;
+   char fields[3][160] = {{0}};
+   assert(count <= 3);
+   for (uint32_t i = 0; i < count; i++)
+   {
+      assert(at + 4 <= request_len);
+      uint32_t n = aimee_db1_get_u32(wire + at);
+      at += 4;
+      assert(n < sizeof fields[i] && at + n <= request_len);
+      memcpy(fields[i], wire + at, n);
+      at += n;
+   }
+   attach_store_calls++;
+   if (attach_store_fixture == 2)
+      return AIMEE_MODULE_CALL_TRANSPORT;
+   uint32_t status = AIMEE_DB1_STATUS_OK, values = 0;
+   if (op == AIMEE_DB1_OP_SERVER_SESSION_CREATE)
+   {
+      assert(count == 3 && !strcmp(fields[1], "webchat") && !strcmp(fields[2], attach_store_actor));
+      attach_store_creates++;
+      assert(!attach_store_owner[0]); /* CREATE never rewrites an owner. */
+      snprintf(attach_store_owner, sizeof attach_store_owner, "%s",
+               attach_store_fixture == 3 ? "webuser:foreign" : attach_store_actor);
+      if (attach_store_fixture == 4)
+         status = AIMEE_DB1_STATUS_INVALID; /* Same-actor concurrent INSERT. */
+      if (attach_store_fixture == 5)
+         return AIMEE_MODULE_CALL_TRANSPORT; /* CREATE committed, ACK lost. */
+   }
+   else
+   {
+      assert(op == AIMEE_DB1_OP_SERVER_SESSION_GET && count == 1);
+      if (attach_store_fixture == 6 && attach_store_owner[0])
+         return AIMEE_MODULE_CALL_TRANSPORT;
+      if (!attach_store_owner[0])
+         status = AIMEE_DB1_STATUS_MISSING;
+      else
+         values = 10;
+   }
+   const char *cells[] = {fields[0], "webchat", attach_store_owner, "", "", "", "", "", "", ""};
+   uint8_t *out = body;
+   assert(cap >= 8);
+   aimee_db1_put_u32(out, status);
+   aimee_db1_put_u32(out + 4, values);
+   *length = 8;
+   for (uint32_t i = 0; i < values; i++)
+   {
+      uint32_t n = (uint32_t)strlen(cells[i]);
+      assert(*length + 4 + n <= cap);
+      aimee_db1_put_u32(out + *length, n);
+      memcpy(out + *length + 4, cells[i], n);
+      *length += 4 + n;
+   }
+   return AIMEE_MODULE_CALL_OK;
+}
+
+static int primary_fixture_get(const char *actor, const char *sid, char *out, size_t cap)
+{
+   if (out && cap)
+      out[0] = 0;
+   if (primary_store_unavailable || strcmp(actor, "webuser:primary-owner") || !cap)
+      return -1;
+   int i = !strcmp(sid, "psess-A") ? 0 : !strcmp(sid, "psess-B") ? 1 : -1;
+   if (i < 0 && strcmp(sid, "psess-none"))
+      return -1;
+   const char *value = i < 0 ? "" : primary_rows[i];
+   if (strlen(value) >= cap)
+      return -1;
+   snprintf(out, cap, "%s", value);
+   return 0;
+}
+static int primary_fixture_set(const char *actor, const char *sid, const char *agent)
+{
+   if (primary_store_unavailable || strcmp(actor, "webuser:primary-owner"))
+      return -1;
+   int i = !strcmp(sid, "psess-A") ? 0 : !strcmp(sid, "psess-B") ? 1 : -1;
+   if (i < 0 || strlen(agent) >= sizeof primary_rows[i])
+      return -1;
+   snprintf(primary_rows[i], sizeof primary_rows[i], "%s", agent);
+   return 0;
+}
+
+static void submit_and_wait_op_owned(const char *method, const server_conn_t *conn)
 {
    char response[8192];
-   assert(server_http_submit_op_run(method, "{}", CAPS_ALL, response, sizeof(response)) == 200);
+   if (!conn && !request_context_get())
+   {
+      request_context_t fresh = {0};
+      fresh.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+      fresh.capabilities = CAPS_ALL;
+      snprintf(fresh.vault_principal, sizeof fresh.vault_principal, "webuser:fresh-op");
+      request_context_set(&fresh);
+   }
+   int rc = conn ? server_http_submit_op_run_owned(method, "{}", conn, response, sizeof(response))
+                 : server_http_submit_op_run(method, "{}", CAPS_ALL, response, sizeof(response));
+   assert(rc == 200);
+   /* The submitting HTTP request can end before its queued worker starts. */
+   request_context_clear();
+   server_http_identity_clear();
    cJSON *queued = cJSON_Parse(response);
    assert(queued);
    const char *run_id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(queued, "id"));
@@ -316,13 +550,96 @@ static void submit_and_wait_op(const char *method)
    assert(status == OPENAI_RUN_COMPLETED);
 }
 
+static void submit_and_wait_op(const char *method)
+{
+   submit_and_wait_op_owned(method, NULL);
+}
+
+/* The HTTP fixture replaces only the import owner. The primary adapter fixture
+ * links the real implementation; this seam asserts route ordering and custody. */
+static int history_open_fixture, history_open_calls, history_open_pages, history_open_gets;
+static int history_open_peer = -1;
+int primary_session_history_open(const char *session, const char *actor)
+{
+   assert(history_open_fixture && !strcmp(session, "legacy") && !strcmp(actor, "webuser:alice"));
+   assert(!strcmp(agent_get_request_vault_principal(), actor));
+   char byte;
+   errno = 0;
+   assert(recv(history_open_peer, &byte, 1, MSG_PEEK | MSG_DONTWAIT) == -1 &&
+          (errno == EAGAIN || errno == EWOULDBLOCK)); /* No successful SSE headers yet. */
+   history_open_calls++;
+   return history_open_fixture == 3 ? -1 : 0;
+}
+static aimee_module_call_result_t history_open_store_reply(uint32_t op, const uint8_t *wire,
+                                                           uint32_t request_len, void *body,
+                                                           uint32_t capacity, uint32_t *length)
+{
+   uint32_t count = aimee_db1_get_u32(wire + 4), at = 8;
+   char fields[4][128] = {{0}};
+   assert(count <= 4);
+   for (uint32_t i = 0; i < count; i++)
+   {
+      assert(at + 4 <= request_len);
+      uint32_t size = aimee_db1_get_u32(wire + at);
+      at += 4;
+      assert(size < sizeof fields[i] && at + size <= request_len);
+      memcpy(fields[i], wire + at, size);
+      at += size;
+   }
+   if (op == AIMEE_DB1_OP_SERVER_SESSION_GET && ++history_open_gets == 1 &&
+       history_open_fixture == 4)
+      return AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+   const char *values[10] = {
+       "legacy", "primary", history_open_fixture == 2 ? "webuser:other" : "webuser:alice",
+       "",       "",        "",
+       "",       "",        "",
+       ""};
+   uint32_t size = 10;
+   assert(!strcmp(fields[0], "legacy"));
+   if (op == AIMEE_DB1_OP_SESSION_IR_PAGE)
+   {
+      assert(count == 4 && history_open_calls == 1 && !strcmp(fields[3], "webuser:alice"));
+      if (history_open_pages++)
+         return AIMEE_MODULE_CALL_TRANSPORT;
+      values[0] =
+          "[{\"version\":1,\"session_id\":\"legacy\",\"sequence\":\"1\",\"event_id\":\"import-"
+          "base\","
+          "\"turn_id\":\"import\",\"actor\":\"webuser:alice\",\"event\":{\"kind\":\"history\","
+          "\"payloa"
+          "d\":{\"scope\":\"primary\",\"phase\":\"import_report\",\"import_report\":{\"version\":1,"
+          "\""
+          "source_format\":\"unknown\",\"outcome\":\"refused\",\"source_sha256\":\"aaaaaaaaaaaaaa"
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"source_session\":\"legacy"
+          "\",\"source_agent\":\"\",\"source_provider\":\"\",\"source_messages\":0,\"imported_messa"
+          "ges\":0,\"removed_thinking_bindings\":0,\"tool_structure\":\"unrecoverable\",\"archi"
+          "ve_chunks\":0}}}}]";
+      size = 1;
+   }
+   else
+      assert(op == AIMEE_DB1_OP_SERVER_SESSION_GET && count == 1);
+   uint8_t *response = body;
+   assert(capacity >= 8);
+   aimee_db1_put_u32(response, AIMEE_DB1_STATUS_OK);
+   aimee_db1_put_u32(response + 4, size);
+   *length = 8;
+   for (uint32_t i = 0; i < size; i++)
+   {
+      uint32_t bytes = (uint32_t)strlen(values[i]);
+      assert(*length + 4 + bytes <= capacity);
+      aimee_db1_put_u32(response + *length, bytes);
+      memcpy(response + *length + 4, values[i], bytes);
+      *length += 4 + bytes;
+   }
+   return AIMEE_MODULE_CALL_OK;
+}
+
 /* The bus is not started in a unit test, so the module surface is stubbed to
  * report exactly that. obs_bus_module_call must still resolve for the link even
  * though an unattached module is answered before it is reached. */
 int obs_bus_module_available(uint32_t event_kind)
 {
-   (void)event_kind;
-   return 0;
+   return (primary_store_fixture || history_open_fixture || attach_store_fixture) &&
+          event_kind == AIMEE_DB1_EVENT_SESSIONS;
 }
 
 aimee_module_call_result_t
@@ -331,15 +648,82 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
                     uint32_t response_capacity, uint32_t *response_len,
                     aimee_module_cancelled_fn cancelled, void *cancel_context)
 {
-   (void)event_kind;
+   if (attach_store_fixture && event_kind == AIMEE_DB1_EVENT_SESSIONS && request_len >= 8 &&
+       aimee_db1_get_u32(request_body) == AIMEE_DB1_OP_SESSION_IR_CANCEL)
+   {
+      const uint8_t *wire = request_body;
+      assert(aimee_db1_get_u32(wire + 4) == 3);
+      uint32_t at = 8;
+      const char *expected[] = {"webuser:alice", "cancel-session", "cancel-turn"};
+      for (int i = 0; i < 3; i++)
+      {
+         uint32_t n = aimee_db1_get_u32(wire + at);
+         at += 4;
+         assert(n == strlen(expected[i]) && !memcmp(wire + at, expected[i], n));
+         at += n;
+      }
+      assert(at == request_len);
+      cancel_store_calls++;
+      if (cancel_store_status < 0)
+         return AIMEE_MODULE_CALL_TRANSPORT;
+      uint8_t *out = response_body;
+      aimee_db1_put_u32(out, cancel_store_status ? AIMEE_DB1_STATUS_INVALID : AIMEE_DB1_STATUS_OK);
+      aimee_db1_put_u32(out + 4, cancel_store_status ? 0 : 1);
+      *response_len = 8;
+      if (!cancel_store_status)
+      {
+         assert(response_capacity >= 14);
+         aimee_db1_put_u32(out + 8, 2);
+         memcpy(out + 12, "71", 2);
+         *response_len = 14;
+      }
+      return AIMEE_MODULE_CALL_OK;
+   }
+   if (attach_store_fixture && event_kind == AIMEE_DB1_EVENT_SESSIONS && request_len >= 8)
+      return attach_store_reply(request_body, request_len, response_body, response_capacity,
+                                response_len);
+   if (history_open_fixture && event_kind == AIMEE_DB1_EVENT_SESSIONS && request_len >= 8)
+      return history_open_store_reply(aimee_db1_get_u32(request_body), request_body, request_len,
+                                      response_body, response_capacity, response_len);
+   if (primary_store_fixture && event_kind == AIMEE_DB1_EVENT_SESSIONS && request_len >= 8)
+   {
+      const uint8_t *wire = request_body;
+      uint32_t op = aimee_db1_get_u32(wire), count = aimee_db1_get_u32(wire + 4), at = 8;
+      if ((op != AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_GET &&
+           op != AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_SET) ||
+          count > 3)
+         return AIMEE_MODULE_CALL_TRANSPORT;
+      char fields[3][128] = {{0}};
+      for (uint32_t i = 0; i < count; ++i)
+      {
+         assert(at + 4 <= request_len);
+         uint32_t n = aimee_db1_get_u32(wire + at);
+         at += 4;
+         assert(n < sizeof fields[i] && at + n <= request_len);
+         memcpy(fields[i], wire + at, n);
+         at += n;
+      }
+      char selected[64] = "";
+      int rc = op == AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_GET
+                   ? primary_fixture_get(fields[0], fields[1], selected, sizeof selected)
+                   : primary_fixture_set(fields[0], fields[1], fields[2]);
+      uint8_t *response = response_body;
+      uint32_t values = rc == 0 && op == AIMEE_DB1_OP_SERVER_SESSION_PRIMARY_GET ? 1 : 0;
+      assert(response_capacity >= (values ? 12 + strlen(selected) : 8));
+      aimee_db1_put_u32(response, rc == 0 ? AIMEE_DB1_STATUS_OK : AIMEE_DB1_STATUS_INVALID);
+      aimee_db1_put_u32(response + 4, values);
+      *response_len = 8;
+      if (values)
+      {
+         aimee_db1_put_u32(response + 8, (uint32_t)strlen(selected));
+         memcpy(response + 12, selected, strlen(selected));
+         *response_len = 12 + (uint32_t)strlen(selected);
+      }
+      return AIMEE_MODULE_CALL_OK;
+   }
    (void)stage_id;
    (void)trace_id;
    (void)deadline_ns;
-   (void)request_body;
-   (void)request_len;
-   (void)response_body;
-   (void)response_capacity;
-   (void)response_len;
    (void)cancelled;
    (void)cancel_context;
    return AIMEE_MODULE_CALL_TRANSPORT;
@@ -352,6 +736,80 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
  *
  * What is still C's to answer is the unattached case. A control call with no
  * module serving the stage must say so, not hang or claim success. */
+static void test_browser_attach_admits_exact_durable_owner(void)
+{
+   char response[1024];
+   request_context_t owner = {.vault_transport = ATTEST_WEBCHAT_TRUSTED};
+   snprintf(owner.vault_principal, sizeof owner.vault_principal, "webuser:alice");
+   for (int mode = 1; mode <= 6; mode++)
+   {
+      presence_init();
+      attach_store_fixture = mode;
+      attach_store_calls = attach_store_creates = 0;
+      attach_store_owner[0] = 0;
+      snprintf(attach_store_actor, sizeof attach_store_actor, "%s", owner.vault_principal);
+      request_context_set(&owner);
+      int status = route_session_attach("browser-admission", "{\"surface\":\"webchat\"}", response,
+                                        sizeof response);
+      int admitted = mode == 1 || mode == 4 || mode == 5;
+      assert(status == (admitted ? 200 : mode == 3 ? 403 : 503));
+      assert(presence_attachment_count("browser-admission") == admitted);
+      assert(!admitted || !strcmp(attach_store_owner, owner.vault_principal));
+      if (admitted)
+      {
+         assert(attach_store_creates == 1);
+         assert(route_session_attach("browser-admission", "{\"surface\":\"webchat\"}", response,
+                                     sizeof response) == 200);
+         assert(attach_store_creates == 1); /* Exact retry reads the existing owner. */
+      }
+      presence_shutdown();
+   }
+   presence_init();
+   attach_store_fixture = 1;
+   attach_store_calls = attach_store_creates = 0;
+   snprintf(attach_store_owner, sizeof attach_store_owner, "webuser:foreign");
+   assert(route_session_attach("foreign-admission", "{\"surface\":\"webchat\"}", response,
+                               sizeof response) == 403);
+   assert(!attach_store_creates && !presence_attachment_count("foreign-admission"));
+   attach_store_owner[0] = 0;
+   int before = attach_store_calls;
+   assert(route_session_attach("spoofed-admission",
+                               "{\"surface\":\"webchat\",\"owner\":\"webuser:foreign\"}", response,
+                               sizeof response) == 403);
+   assert(attach_store_calls == before && !presence_attachment_count("spoofed-admission"));
+   request_context_t empty_owner = {.vault_transport = ATTEST_WEBCHAT_TRUSTED};
+   request_context_set(&empty_owner);
+   assert(route_session_attach("missing-owner", "{\"surface\":\"webchat\"}", response,
+                               sizeof response) == 400);
+   assert(attach_store_calls == before && !presence_attachment_count("missing-owner"));
+   request_context_set(&owner);
+   char long_session[PRESENCE_SESSION_ID_MAX + 1];
+   memset(long_session, 's', sizeof long_session - 1);
+   long_session[sizeof long_session - 1] = 0;
+   assert(route_session_attach(long_session, "{\"surface\":\"webchat\"}", response,
+                               sizeof response) == 400);
+   assert(attach_store_calls == before);
+   /* The complete host principal remains usable on an idempotent reattach. */
+   memcpy(owner.vault_principal, "webuser:", 8);
+   memset(owner.vault_principal + 8, 'a', sizeof owner.vault_principal - 9);
+   owner.vault_principal[sizeof owner.vault_principal - 1] = 0;
+   snprintf(attach_store_actor, sizeof attach_store_actor, "%s", owner.vault_principal);
+   request_context_set(&owner);
+   assert(route_session_attach("long-owner", "{\"surface\":\"webchat\"}", response,
+                               sizeof response) == 200);
+   assert(route_session_attach("long-owner", "{\"surface\":\"webchat\"}", response,
+                               sizeof response) == 200);
+   assert(!strcmp(attach_store_owner, owner.vault_principal));
+   attach_store_fixture = 0;
+   request_context_clear();
+   before = attach_store_calls;
+   assert(route_session_attach("ordinary-no-store", "{\"surface\":\"tui\",\"owner\":\"local\"}",
+                               response, sizeof response) == 200);
+   assert(presence_attachment_count("ordinary-no-store") == 1 && attach_store_calls == before);
+   presence_shutdown();
+   presence_init();
+}
+
 static void test_workflow_control_reports_an_unattached_module(void)
 {
    char response[256];
@@ -533,8 +991,253 @@ static int recall_fault_status(const char *kind, uint32_t *status)
    return 0;
 }
 
+static void test_stream_handoff_retains_attested_owner(void)
+{
+   int pair[2];
+   assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+   const char *wire = "POST /v1/chat/stream HTTP/1.1\r\nHost: localhost\r\nContent-Type: "
+                      "application/json\r\nContent-Length: 2\r\n\r\n{}";
+   assert(write(pair[1], wire, strlen(wire)) == (ssize_t)strlen(wire));
+   g_stream_principal[0] = '\0';
+   handle_conn_inline(pair[0], 0);
+   char expected[64];
+   snprintf(expected, sizeof expected, "uid:%lu", (unsigned long)getuid());
+   assert(!strcmp(g_stream_principal, expected));
+   assert(!server_http_identity_principal()[0]);
+   close(pair[0]);
+   close(pair[1]);
+}
+
+static void test_operator_control_reply_route(void)
+{
+   server_control_scope_t *scope =
+       server_control_scope_open("control-session", "control-turn", "webuser:alice");
+   assert(scope);
+   cJSON *request = cJSON_Parse("{\"title\":\"Run a command?\"}");
+   assert(server_control_register(scope, "71", "permission", request) == 0);
+   cJSON_Delete(request);
+   const char *body = "{\"session_id\":\"control-session\",\"request_id\":\"control-turn:71\","
+                      "\"reply\":{\"decision\":\"deny\"}}";
+   char response[1024];
+   server_http_identity_clear();
+   assert(server_http_route("POST", "/v1/chat/control-reply", body, (int)strlen(body), response,
+                            sizeof response) == 403);
+   // A model's bearer and a forged browser assertion cannot approve via TCP.
+   server_http_identity_capture(-1, 1,
+                                "POST /v1/chat/control-reply HTTP/1.1\r\nAuthorization: Bearer "
+                                "model-token\r\nX-Aimee-Webuser: alice\r\n\r\n");
+   assert(server_http_route("POST", "/v1/chat/control-reply", body, (int)strlen(body), response,
+                            sizeof response) == 403);
+   request_context_t model_owner = {0};
+   model_owner.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+   model_owner.peer_uid = 0;
+   snprintf(model_owner.vault_principal, sizeof model_owner.vault_principal, "webuser:alice");
+   server_http_identity_bind_request_owner(&model_owner);
+   assert(!server_http_identity_browser_operator());
+   assert(server_http_route("POST", "/v1/chat/control-reply", body, (int)strlen(body), response,
+                            sizeof response) == 403);
+   int pair[2];
+   assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+   server_http_identity_capture(
+       pair[0], 0, "POST /v1/chat/control-reply HTTP/1.1\r\nX-Aimee-Webuser: alice\r\n\r\n");
+   /* Exact framing precedes field selection: neither duplicate outer routing
+    * fields nor trailing documents can choose a different pending request. */
+   const char *invalid[] = {
+       "{\"session_id\":\"control-session\",\"session_id\":\"other\","
+       "\"request_id\":\"control-turn:71\",\"reply\":{\"decision\":\"deny\"}}",
+       "{\"session_id\":\"control-session\",\"request_id\":\"control-turn:71\","
+       "\"request_id\":\"other:71\",\"reply\":{\"decision\":\"deny\"}}",
+       "{\"session_id\":\"control-session\",\"request_id\":\"control-turn:71\","
+       "\"reply\":{\"decision\":\"allow\"},\"reply\":{\"decision\":\"deny\"}}",
+       "{\"session_id\":\"control-session\",\"request_id\":\"control-turn:71\","
+       "\"reply\":{\"decision\":\"deny\"}} {}",
+   };
+   for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+      assert(server_http_route("POST", "/v1/chat/control-reply", invalid[i],
+                               (int)strlen(invalid[i]), response, sizeof response) ==
+             (getuid() == 0 || i == sizeof invalid / sizeof invalid[0] - 1 ? 400 : 403));
+   char embedded[512];
+   size_t length = strlen(body);
+   assert(length + 4 < sizeof embedded);
+   memcpy(embedded, body, length + 1);
+   memcpy(embedded + length + 1, "{}", 2);
+   assert(server_http_route("POST", "/v1/chat/control-reply", embedded, (int)length + 3, response,
+                            sizeof response) == 400);
+   int expected = getuid() == 0 ? 200 : 403;
+   assert(server_http_route("POST", "/v1/chat/control-reply", body, (int)strlen(body), response,
+                            sizeof response) == expected);
+   if (expected == 200)
+      assert(server_http_route("POST", "/v1/chat/control-reply", body, (int)strlen(body), response,
+                               sizeof response) == 409);
+   server_http_identity_clear();
+   close(pair[0]);
+   close(pair[1]);
+   server_control_scope_close(scope);
+}
+
+static void test_operator_exact_cancel_route(void)
+{
+   char response[1024];
+   const char *body = "{\"session_id\":\"cancel-session\",\"turn_id\":\"cancel-turn\"}";
+   server_http_identity_clear();
+   assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                            sizeof response) == 403);
+   request_context_t inherited = {0};
+   inherited.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+   inherited.peer_uid = 0;
+   strcpy(inherited.vault_principal, "webuser:alice");
+   server_http_identity_bind_request_owner(&inherited);
+   assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                            sizeof response) == 403);
+   int pair[2];
+   assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+   server_http_identity_capture(
+       pair[0], 0, "POST /v1/chat/graceful_cancel HTTP/1.1\r\nX-Aimee-Webuser: alice\r\n\r\n");
+   if (getuid() == 0)
+   {
+      attach_store_fixture = 1;
+      strcpy(attach_store_actor, "webuser:alice");
+      strcpy(attach_store_owner, "webuser:foreign");
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 403);
+      strcpy(attach_store_owner, "webuser:alice");
+      turn_registry_init();
+      turn_entry_t *turn = turn_registry_publish("cancel-session", "different-turn");
+      assert(turn);
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 409);
+      assert(!turn_entry_cancelled(turn) && !cancel_store_calls);
+      turn_registry_clear(turn);
+      turn = turn_registry_publish("cancel-session", "cancel-turn");
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 200);
+      assert(turn_entry_cancelled(turn) && strstr(response, "stopping") && !cancel_store_calls);
+      turn_registry_clear(turn);
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 200);
+      assert(strstr(response, "cancelled") && strstr(response, "71") && cancel_store_calls == 1);
+      cancel_store_status = 1;
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 409);
+      cancel_store_status = -1;
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 503);
+      cancel_store_status = 0;
+      const char *bad =
+          "{\"session_id\":\"cancel-session\",\"turn_id\":\"cancel-turn\",\"message\":\"no\"}";
+      int calls = cancel_store_calls;
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", bad, strlen(bad), response,
+                               sizeof response) == 400 &&
+             cancel_store_calls == calls);
+      attach_store_fixture = 0;
+   }
+   else
+      assert(server_http_route("POST", "/v1/chat/graceful_cancel", body, strlen(body), response,
+                               sizeof response) == 403);
+   server_http_identity_clear();
+   close(pair[0]);
+   close(pair[1]);
+}
+
+static int native_owner_probe(const char *body, char *response, int capacity)
+{
+   assert(!strcmp(body, "{}"));
+   assert(!strcmp(server_http_identity_principal(), "webuser:native-owner"));
+   assert(!strcmp(server_http_identity_session_hdr(), "native-session"));
+   assert(server_http_identity_transport() == ATTEST_WEBCHAT_TRUSTED);
+   assert(!server_http_identity_browser_operator());
+   assert(request_context_get()->capabilities == CAP_CHAT);
+   snprintf(response, (size_t)capacity, "{\"native_owner\":true}");
+   return 200;
+}
+
+static void test_native_http_handoff_preserves_owner_and_caps(void)
+{
+   request_context_t owner = {.vault_transport = ATTEST_WEBCHAT_TRUSTED, .capabilities = CAP_CHAT};
+   strcpy(owner.vault_principal, "webuser:native-owner");
+   strcpy(owner.session_key, "native-session");
+   request_context_t long_owner = owner;
+   memset(long_owner.session_key, 's', sizeof long_owner.session_key - 1);
+   server_http_identity_bind_request_owner(&long_owner);
+   assert(!strcmp(server_http_identity_session_hdr(), long_owner.session_key));
+   assert(strlen(server_http_identity_session_hdr()) == SERVER_SESSION_ID_MAX - 1);
+   server_http_identity_clear();
+   server_http_set_chat_handler(native_owner_probe);
+   for (int mode = 0; mode < 4; mode++)
+   {
+      int pair[2];
+      assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
+      owner.capabilities = mode == 1 ? CAP_MEMORY_READ : CAP_CHAT;
+      request_context_set(mode == 0 ? NULL : &owner);
+      server_http_identity_bind_request_owner(request_context_get());
+      const char *body = mode == 2 ? "{} trailing" : "{}";
+      int rc = server_http_native_forward(pair[0], "POST", "/v1/chat/completions", body,
+                                          (int)strlen(body));
+      assert((rc == 0) == (mode == 3));
+      shutdown(pair[0], SHUT_WR);
+      char response[2048];
+      ssize_t n = read(pair[1], response, sizeof response - 1);
+      assert(n > 0);
+      response[n] = 0;
+      assert(strstr(response, mode < 2 ? "403" : mode == 2 ? "400" : "200"));
+      if (mode == 3)
+         assert(strstr(response, "\"native_owner\":true"));
+      close(pair[0]);
+      close(pair[1]);
+      request_context_clear();
+      server_http_identity_clear();
+   }
+   server_http_set_chat_handler(NULL);
+}
+
+static void test_history_open_precedes_sse_headers(void)
+{
+   for (int mode = 1; mode <= 4; mode++)
+   {
+      int pair[2];
+      assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
+      history_open_fixture = mode;
+      history_open_calls = 0;
+      history_open_pages = 0;
+      history_open_gets = 0;
+      history_open_peer = pair[1];
+      int effects = history_open_effects;
+      agent_set_request_vault_principal("webuser:alice");
+      handle_session_events(pair[0], "legacy?format=ir&cursor=0", "history-open-test");
+      agent_set_request_vault_principal(NULL);
+      shutdown(pair[0], SHUT_WR);
+      char response[8192];
+      ssize_t bytes = read(pair[1], response, sizeof response - 1);
+      assert(bytes > 0);
+      response[bytes] = 0;
+      if (mode == 1)
+      {
+         assert(strstr(response, "200") && strstr(response, "text/event-stream") &&
+                strstr(response, "import_report"));
+         assert(history_open_calls == 1 && history_open_pages == 2);
+      }
+      else
+      {
+         assert(strstr(response, mode == 2 ? "403" : "503"));
+         assert(!strstr(response, "text/event-stream") && !strstr(response, "event: ir"));
+         assert(history_open_calls == (mode == 3 ? 1 : 0) && history_open_pages == 0);
+         if (mode == 4)
+            assert(history_open_gets == 1); /* A later hit must not bypass history opening. */
+      }
+      assert(history_open_effects == effects);
+      close(pair[0]);
+      close(pair[1]);
+      history_open_fixture = 0;
+      history_open_peer = -1;
+   }
+}
+
 int main(void)
 {
+   test_history_open_precedes_sse_headers();
+   test_stream_handoff_retains_attested_owner();
+   test_operator_control_reply_route();
+   test_operator_exact_cancel_route();
    extern int server_http_declared_status(const char *json);
    assert(server_http_declared_status("{\"status\":\"error\",\"kind\":\"not_found\"}") == 502);
    assert(server_http_declared_status("{\"status\":\"error\",\"http_status\":404}") == 404);
@@ -547,10 +1250,12 @@ int main(void)
    server_error_kind_register_http_status_provider(NULL);
 
    test_json_number_serialization_is_exact();
+   test_native_http_handoff_preserves_owner_and_caps();
    test_role_template_show_reports_what_the_role_came_to();
    printf("server_http: ");
 
    test_workflow_control_reports_an_unattached_module();
+   test_browser_attach_admits_exact_durable_owner();
 
    char home[PATH_MAX];
    snprintf(home, sizeof(home), "%s/aimee-shttp-XXXXXX", platform_tmpdir());
@@ -816,6 +1521,23 @@ int main(void)
       st = server_http_route("POST", "/v1/runs/nope/stop", NULL, 0, resp, sizeof(resp));
       assert(st == 404);
 
+      assert(
+          openai_runs_store_create_owned("run_owned", "{\"id\":\"run_owned\"}", "webuser:owner"));
+      request_context_t owner = {.vault_transport = ATTEST_WEBCHAT_TRUSTED,
+                                 .vault_principal = "webuser:other"};
+      server_http_identity_bind_request_owner(&owner);
+      assert(server_http_route("GET", "/v1/runs/run_owned", NULL, 0, resp, sizeof resp) == 404);
+      assert(server_http_route("POST", "/v1/runs/run_owned/stop", NULL, 0, resp, sizeof resp) ==
+             404);
+      assert(!openai_runs_store_cancel_requested("run_owned"));
+      snprintf(owner.vault_principal, sizeof owner.vault_principal, "%s", "webuser:owner");
+      server_http_identity_bind_request_owner(&owner);
+      assert(server_http_route("GET", "/v1/runs/run_owned", NULL, 0, resp, sizeof resp) == 200);
+      assert(server_http_route("POST", "/v1/runs/run_owned/stop", NULL, 0, resp, sizeof resp) ==
+             200);
+      assert(openai_runs_store_cancel_requested("run_owned"));
+      server_http_identity_clear();
+
       /* /events is served by the SSE path in handle_conn, not this buffered
        * router, so server_http_route does not match it (404 here). */
       st = server_http_route("GET", "/v1/runs/run_xyz/events", NULL, 0, resp, sizeof(resp));
@@ -931,6 +1653,13 @@ int main(void)
    /* --- session primary-agent store: set/get + isolation + GET route --- */
    {
       char got[64];
+      primary_store_fixture = 1;
+      request_context_t primary_owner = {.vault_transport = ATTEST_WEBCHAT_TRUSTED,
+                                         .vault_principal = "webuser:primary-owner"};
+      request_context_clear();
+      assert(session_primary_get("psess-A", got, sizeof(got)) == -1);
+      assert(session_primary_set("psess-A", "minimax") == -1);
+      request_context_set(&primary_owner);
       assert(session_primary_get("psess-A", got, sizeof(got)) == 0);
 
       session_primary_set("psess-A", "minimax");
@@ -955,8 +1684,26 @@ int main(void)
       st = server_http_route("DELETE", "/v1/sessions/psess-A/primary", NULL, 0, resp, sizeof(resp));
       assert(st == 200 && strstr(resp, "\"agent\":\"\""));
       assert(session_primary_get("psess-A", got, sizeof(got)) == 0);
-      session_primary_clear("psess-B"); /* direct clear API */
+      assert(session_primary_clear("psess-B") == 0);
       assert(session_primary_get("psess-B", got, sizeof(got)) == 0);
+      assert(session_primary_set("psess-A", "codex") == 0);
+      /* Reconstructed request state reads the same durable selection. */
+      request_context_clear();
+      request_context_set(&primary_owner);
+      assert(session_primary_get("psess-A", got, sizeof(got)) == 1 && !strcmp(got, "codex"));
+      primary_store_unavailable = 1;
+      assert(session_primary_get("psess-A", got, sizeof(got)) == -1 && !got[0]);
+      assert(session_primary_set("psess-A", "claude") == -1);
+      assert(session_primary_clear("psess-A") == -1);
+      assert(route_session_primary_get("psess-A", resp, sizeof(resp)) == 503);
+      primary_store_unavailable = 0;
+      snprintf(primary_owner.vault_principal, sizeof primary_owner.vault_principal,
+               "webuser:foreign");
+      request_context_set(&primary_owner);
+      assert(session_primary_get("psess-A", got, sizeof(got)) == -1 && !got[0]);
+      assert(session_primary_clear("psess-A") == -1);
+      request_context_clear();
+      primary_store_fixture = 0;
    }
 
    /* --- POST unknown persona -> 404, session unchanged --- */
@@ -2166,6 +2913,8 @@ int main(void)
       /* Memory read family (P1): memory.* reads -> CAP_MEMORY_READ. */
       assert(server_http_route_caps("POST", "/v1/memory/search") ==
              server_capability_for_method("memory.search"));
+      assert(server_http_route_caps("POST", "/v1/learning/approaches") == CAP_MEMORY_READ);
+      assert(server_capability_for_method("learning.approaches") == CAP_MEMORY_READ);
       assert(server_http_route_caps("POST", "/v1/memory/search") == CAP_MEMORY_READ);
       assert(server_http_route_caps("POST", "/v1/memory/list") == CAP_MEMORY_READ);
       assert(server_http_route_caps("GET", "/v1/memory/stats") == CAP_MEMORY_READ);
@@ -2372,6 +3121,10 @@ int main(void)
        * — proving the row matched and dispatched. */
       assert(server_http_route("GET", "/v1/rules", NULL, 0, rb, sizeof(rb)) == 503);
       openai_runs_store_reset();
+      request_context_t initial_op_owner = {.vault_transport = ATTEST_WEBCHAT_TRUSTED,
+                                            .vault_principal = "webuser:initial-op-owner"};
+      request_context_set(&initial_op_owner);
+      server_http_identity_bind_request_owner(&initial_op_owner);
       const char *roundtable_body = "{\"prompt\":\"draft\"}";
       assert(server_http_route("POST", "/v1/roundtable/review", roundtable_body,
                                (int)strlen(roundtable_body), rb, sizeof(rb)) == 200);
@@ -2415,6 +3168,75 @@ int main(void)
       g_disp_body[0] = '\0';
       openai_runs_store_reset();
 
+      request_context_clear();
+      server_http_identity_clear();
+      request_context_t op_owner = {0};
+      op_owner.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+      op_owner.peer_uid = 0;
+      op_owner.capabilities = CAP_DELEGATE;
+      op_owner.request_budget_present = 1;
+      snprintf(op_owner.vault_principal, sizeof op_owner.vault_principal, "webuser:op-owner");
+      snprintf(op_owner.caller_authorization, sizeof op_owner.caller_authorization,
+               "test-only-op-owner-proof");
+      snprintf(op_owner.request_budget_limits, sizeof op_owner.request_budget_limits,
+               "{\"max_tokens\":1234}");
+      compute_ctx_t inherited = {0};
+      request_context_set(&op_owner);
+      compute_ctx_capture_request_context(&inherited, NULL);
+      assert(inherited.conn_caps == CAP_DELEGATE);
+      assert(inherited.attested_transport == ATTEST_WEBCHAT_TRUSTED);
+      assert(!strcmp(inherited.vault_principal, "webuser:op-owner"));
+      request_context_clear();
+      compute_ctx_bind_request_context(&inherited);
+      assert(request_context_get()->capabilities == CAP_DELEGATE);
+      assert(!strcmp(request_context_caller_authorization(), "test-only-op-owner-proof"));
+      server_conn_t bound = {0};
+      server_http_identity_apply(&bound);
+      assert(bound.attested_transport == ATTEST_WEBCHAT_TRUSTED);
+      assert(!strcmp(bound.vault_principal, "webuser:op-owner"));
+      compute_ctx_clear_request_context();
+      assert(!request_context_get() && !agent_get_request_vault_principal()[0]);
+      server_http_identity_apply(&bound);
+      assert(bound.attested_transport == ATTEST_NONE);
+      request_context_snapshot_clear(&inherited.request_context);
+
+      /* An explicit authenticated new owner must not inherit the old owner's
+       * caller proof/limits, and an un-attested loopback cannot broaden caps. */
+      request_context_set(&op_owner);
+      server_conn_t scoped = {0};
+      scoped.capabilities = CAPS_ALL;
+      compute_ctx_capture_request_context(&inherited, &scoped);
+      assert(inherited.conn_caps == CAP_DELEGATE);
+      request_context_snapshot_clear(&inherited.request_context);
+      scoped.attested_transport = ATTEST_MTLS_CLIENT;
+      scoped.capabilities = CAP_CHAT;
+      snprintf(scoped.vault_principal, sizeof scoped.vault_principal, "cert:other-owner");
+      compute_ctx_capture_request_context(&inherited, &scoped);
+      assert(inherited.conn_caps == CAP_CHAT && inherited.attested_transport == ATTEST_MTLS_CLIENT);
+      assert(!strcmp(inherited.vault_principal, "cert:other-owner"));
+      assert(!inherited.request_context.value.caller_authorization[0]);
+      assert(!inherited.request_context.value.request_budget_present);
+      assert(inherited.request_context.value.peer_uid == -1);
+      request_context_snapshot_clear(&inherited.request_context);
+      request_context_clear();
+      compute_ctx_capture_request_context(&inherited, NULL);
+      assert(inherited.conn_caps == CAPS_ALL && inherited.attested_transport == ATTEST_NONE);
+      request_context_snapshot_clear(&inherited.request_context);
+
+      request_context_set(&op_owner);
+      submit_and_wait_op("test.inspect_owned_op_context");
+      assert(!request_context_get());
+      request_context_set(&op_owner);
+      server_conn_t pipeline_owner = {0};
+      pipeline_owner.capabilities = CAP_DELEGATE;
+      pipeline_owner.attested_transport = ATTEST_MTLS_CLIENT;
+      snprintf(pipeline_owner.vault_principal, sizeof pipeline_owner.vault_principal,
+               "cert:pipeline-owner");
+      submit_and_wait_op_owned("test.inspect_connection_op_context", &pipeline_owner);
+      assert(!request_context_get());
+      assert(server_http_submit_op_run("roundtable.review", "{}", CAP_DELEGATE, rb, sizeof rb) ==
+             403);
+
       /* A pooled orchestration worker must begin every op with empty checkout
        * and credential TLS, even when the previous op leaked both. This is the
        * roundtable artifact/Codex-seat isolation boundary under concurrency.
@@ -2431,6 +3253,7 @@ int main(void)
       assert(server_http_submit_op_run("roundtable.review", "{\"prompt\":\"draft\"}",
                                        CAP_TOOL_EXECUTE, rb, sizeof(rb)) == 403);
       assert(strstr(rb, "insufficient capabilities"));
+      request_context_set(&op_owner);
       g_test_server_ctx_available = 0;
       assert(server_http_submit_op_run("roundtable.review", "{\"prompt\":\"draft\"}", CAP_DELEGATE,
                                        rb, sizeof(rb)) == 503);
@@ -2440,6 +3263,7 @@ int main(void)
       assert(server_http_submit_op_run("roundtable.review", "{\"prompt\":\"draft\"}", CAP_DELEGATE,
                                        rb, sizeof(rb)) == 503);
       assert(strstr(rb, "orchestration unavailable"));
+      request_context_clear();
       /* The /v1/rpc bridge was retired: the path is now unrouted (404). */
       assert(server_http_route("POST", "/v1/rpc", "{}", 2, rb, sizeof(rb)) == 404);
       /* A deeper run path (two segments, no /stop|/events) does not match. */
@@ -2624,6 +3448,27 @@ int main(void)
    {
       int pair[2];
       assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+      const char *owner_headers = "GET /v1/search HTTP/1.1\r\n"
+                                  "X-Aimee-Principal: webuser:display-only\r\n\r\n";
+      server_http_identity_capture(pair[0], 0, owner_headers);
+      server_conn_t captured_owner = {0};
+      server_http_identity_apply(&captured_owner);
+      server_http_populate_request_context(pair[0], 0, owner_headers, "ctx-uds", "GET",
+                                           "/v1/search", CAPS_ALL);
+      const request_context_t *captured_context = request_context_get();
+      assert(captured_context->vault_transport == captured_owner.attested_transport);
+      assert(!strcmp(captured_context->vault_principal, captured_owner.vault_principal));
+      assert(strcmp(captured_context->vault_principal, "webuser:display-only"));
+      server_http_identity_clear();
+      server_conn_t cleared_owner = {0};
+      server_http_identity_apply(&cleared_owner);
+      assert(cleared_owner.attested_transport == ATTEST_NONE);
+      server_http_identity_bind_request_owner(captured_context);
+      server_http_identity_apply(&cleared_owner);
+      assert(cleared_owner.attested_transport == captured_owner.attested_transport);
+      assert(!strcmp(cleared_owner.vault_principal, captured_owner.vault_principal));
+      server_http_identity_clear();
+      server_http_identity_capture(pair[0], 0, "GET /v1/search HTTP/1.1\r\n\r\n");
       server_http_populate_request_context(pair[0], 0, "GET /v1/search HTTP/1.1\r\n\r\n", "ctx-uds",
                                            "GET", "/v1/search", CAPS_ALL);
       struct passwd *pw = getpwuid(getuid());

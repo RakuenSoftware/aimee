@@ -21,12 +21,6 @@ const char *delegation_active_id(void)
    return NULL;
 }
 static __thread char g_dispatch_role[64];
-static agent_tool_classifier_fn g_tool_classifier;
-
-void agent_tools_register_classifier(agent_tool_classifier_fn classifier)
-{
-   g_tool_classifier = classifier;
-}
 void agent_tools_set_dispatch_role(const char *role)
 {
    if (role && role[0])
@@ -93,30 +87,6 @@ static void td_outcome_set(const char *verdict, const char *reason)
    g_td_verdict = verdict;
    g_td_reason = reason;
    g_td_explicit = 1;
-}
-
-/* The exec family returns a SUCCESS-shaped JSON envelope even on failure
- * ({stdout,stderr,exit_code} or {status}), so the "error:" prefix heuristic would
- * mislabel a non-zero exit — the highest-traffic tools — as ok. Classify from the
- * real signal instead: a non-zero exit_code or status="failed" is an error, a
- * stderr beginning "refused:" is the fail-closed sandbox refusal. Only the numeric
- * exit_code, the status string, and a stderr PREFIX are read — no content is
- * stored; the parsed tree is freed. */
-static void td_classify_exec_result(const char *result)
-{
-   cJSON *r = cJSON_Parse(result);
-   if (!r)
-      return; /* not the JSON envelope; the prefix fallback will run */
-   cJSON *stderr_j = cJSON_GetObjectItem(r, "stderr");
-   cJSON *exit_j = cJSON_GetObjectItem(r, "exit_code");
-   cJSON *status_j = cJSON_GetObjectItem(r, "status");
-   if (cJSON_IsString(stderr_j) && strncmp(stderr_j->valuestring, "refused:", 8) == 0)
-      td_outcome_set("refused", "policy");
-   else if (cJSON_IsNumber(exit_j) && exit_j->valuedouble != 0)
-      td_outcome_set("error", "tool_error");
-   else if (cJSON_IsString(status_j) && strcmp(status_j->valuestring, "failed") == 0)
-      td_outcome_set("error", "tool_error");
-   cJSON_Delete(r);
 }
 
 /* db1_session_write_path_record from db1/session_paths.h — declared
@@ -291,6 +261,54 @@ static char *current_code_role_policy_error(const char *role, const char *detail
    snprintf(err, sizeof(err), "error: %s delegates may only use current-checkout evidence; %s",
             role ? role : "this", detail);
    return safe_strdup(err);
+}
+
+agent_tool_permission_t agent_tools_permission_check(const char *name, const cJSON *args)
+{
+   if (!name || !name[0])
+      return AGENT_TOOL_PERMISSION_ROLE;
+   const char *verify_action =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(args, "action"));
+   int verify_exec =
+       strcmp(name, "git_verify") == 0 &&
+       (!verify_action || (strcmp(verify_action, "check") && strcmp(verify_action, "status")));
+   if ((strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0 || verify_exec) &&
+       !agent_tools_shell_allowed())
+      return AGENT_TOOL_PERMISSION_SHELL;
+   if (!agent_tools_tool_allowed_for_role(agent_tools_dispatch_role(), name))
+      return AGENT_TOOL_PERMISSION_ROLE;
+   if (!agent_tools_knowledge_write_allowed())
+   {
+      const char *key = strcmp(name, "bash") == 0             ? "command"
+                        : strcmp(name, "execute_script") == 0 ? "body"
+                                                              : NULL;
+      const cJSON *command = key ? cJSON_GetObjectItem(args, key) : NULL;
+      if (cJSON_IsString(command) && command_uses_aimee_stale_context(command->valuestring))
+         return AGENT_TOOL_PERMISSION_KNOWLEDGE;
+   }
+   return AGENT_TOOL_PERMISSION_ALLOWED;
+}
+
+char *agent_tools_permission_error(agent_tool_permission_t permission)
+{
+   switch (permission)
+   {
+   case AGENT_TOOL_PERMISSION_ALLOWED:
+      return NULL;
+   case AGENT_TOOL_PERMISSION_SHELL:
+      return safe_strdup("error: this delegate does not hold the `shell` permission, so it "
+                         "cannot run commands. Use the file and index tools, or give the role "
+                         "`shell` in its template's permissions block.");
+   case AGENT_TOOL_PERMISSION_KNOWLEDGE:
+      return current_code_role_policy_error(
+          agent_tools_dispatch_role(),
+          "mutating or broad aimee context commands are disabled for this role");
+   case AGENT_TOOL_PERMISSION_ROLE:
+   default:
+      return current_code_role_policy_error(
+          agent_tools_dispatch_role(), "indexed, memory, docs, notes, and remote MCP tools are "
+                                       "disabled for this role");
+   }
 }
 
 /* Surgical edit: replace old_string with new_string in an existing file.
@@ -2032,16 +2050,29 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
 }
 
 static char *dispatch_tool_call_ctx_inner(const char *name, const char *arguments_json,
-                                          int timeout_ms);
+                                          int timeout_ms, cJSON *admitted_arguments);
 
 /* Public entry: fire the tool-event hook (no-op unless a worker installed one)
  * around the actual dispatch, so streaming/run consumers see started/completed
  * without the dispatcher's many return paths needing to care. */
 char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms)
 {
+   return dispatch_tool_call_ctx_status(name, arguments_json, timeout_ms, NULL);
+}
+
+char *dispatch_tool_call_ctx_status(const char *name, const char *arguments_json, int timeout_ms,
+                                    int *is_error)
+{
+   return agent_tools_dispatch_owned(name, arguments_json, timeout_ms, is_error, NULL);
+}
+
+char *agent_tools_dispatch_owned(const char *name, const char *arguments_json, int timeout_ms,
+                                 int *is_error, cJSON *admitted_arguments)
+{
    agent_tools_emit_tool_event("started", name);
    td_outcome_reset();
-   char *result = dispatch_tool_call_ctx_inner(name, arguments_json, timeout_ms);
+   char *result =
+       dispatch_tool_call_ctx_inner(name, arguments_json, timeout_ms, admitted_arguments);
    agent_tools_emit_tool_event("completed", name);
 
    /* Completion audit (a no-op unless the server installed a bridge). Fires once
@@ -2051,17 +2082,28 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
     * leading "error:" marker — read only that marker, never the rest of the
     * string, so no tool output can reach the hook. */
    if (!g_td_explicit && result &&
-       agent_tools_effect_classification(name ? name : "", g_tool_classifier) ==
-           AIMEE_TOOL_CLASS_EXEC)
-      td_classify_exec_result(result);
+       agent_tools_classification(name ? name : "") == AIMEE_TOOL_CLASS_EXEC)
+   {
+      const char *verdict, *reason;
+      if (agent_tools_effect_exec_failure(result, &verdict, &reason))
+         td_outcome_set(verdict, reason);
+   }
    if (!g_td_explicit && result && strncmp(result, "error: timeout", 14) == 0)
       td_outcome_set("timeout", "timeout");
    else if (!g_td_explicit && result && strncmp(result, "error: timed out", 16) == 0)
       td_outcome_set("timeout", "timeout");
    else if (!g_td_explicit && result && strncmp(result, "error:", 6) == 0)
       td_outcome_set("error", "tool_error");
+   int failed = !result || strcmp(g_td_verdict, "ok") != 0;
+   result = agent_tools_effect_receipt(g_td_verdict, result, &failed);
+   failed = failed || !result;
+   if (failed && !strcmp(g_td_verdict, "ok"))
+      td_outcome_set("error", "effect_contract");
+   else if (!failed && strcmp(g_td_verdict, "ok"))
+      td_outcome_set("ok", ""); /* The owner returned a confirmed prior receipt. */
    agent_tools_effect_finish(g_td_verdict, g_td_reason);
-   result = agent_tools_effect_receipt(g_td_verdict, result);
+   if (is_error)
+      *is_error = failed;
    {
       const char *who = session_id();
       agent_tool_completion_t o = {.actor = (who && who[0]) ? who : "tool",
@@ -2074,9 +2116,9 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
 }
 
 static char *dispatch_tool_call_ctx_inner(const char *name, const char *arguments_json,
-                                          int timeout_ms)
+                                          int timeout_ms, cJSON *admitted_arguments)
 {
-   cJSON *args = cJSON_Parse(arguments_json);
+   cJSON *args = admitted_arguments ? admitted_arguments : cJSON_Parse(arguments_json);
    if (!args)
    {
       td_outcome_set("error", "bad_args");
@@ -2091,13 +2133,9 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       return safe_strdup(cancel_msg);
    }
 
-   /* --- Argument canonicalization ---------------------------------------
-    *
-    * One shape, decided in one place (headers/tool_args_coerce.h). The agent
-    * loop canonicalizes BEFORE its gates and hands the result down, so for that
-    * caller this is a no-op; the call stays here for the entry points that do
-    * not go through the loop (script RPC, the MCP gateway), which would
-    * otherwise dispatch un-normalized arguments. Idempotent, so both are safe. */
+   /* Legacy ingress still normalizes using the cached catalog. Canonical IR
+    * callers transfer the exact admitted arguments and must not use that cache. */
+   if (!admitted_arguments)
    {
       cJSON *canonical = tool_args_canonicalize(agent_tool_get_schema_cached(name), args);
       if (canonical && canonical != args)
@@ -2107,53 +2145,14 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       }
    }
 
-   /* The `shell` permission, enforced where the command would run.
-    *
-    * Deliberately ahead of the toolset check and independent of it: a delegate
-    * gets its toolset from a map keyed on the role NAME, so a role an operator
-    * defined without `shell` still resolves to one carrying bash. This is the
-    * check that binds it. */
-   if ((strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0) &&
-       !agent_tools_shell_allowed())
+   /* Shared by in-process execution and isolated native MCP callbacks. Toolset
+    * membership cannot grant a permission withheld by the captured role. */
+   agent_tool_permission_t permission = agent_tools_permission_check(name, args);
+   if (permission != AGENT_TOOL_PERMISSION_ALLOWED)
    {
       cJSON_Delete(args);
-      td_outcome_set("refused", "permission");
-      return safe_strdup("error: this delegate does not hold the `shell` permission, so it "
-                         "cannot run commands. Use the file and index tools, or give the role "
-                         "`shell` in its template's permissions block.");
-   }
-
-   const char *active_role = agent_tools_dispatch_role();
-   if (!agent_tools_tool_allowed_for_role(active_role, name))
-   {
-      cJSON_Delete(args);
-      td_outcome_set("refused", "role");
-      return current_code_role_policy_error(
-          active_role, "indexed, memory, docs, notes, and remote MCP tools are "
-                       "disabled for this role");
-   }
-   if (!agent_tools_knowledge_write_allowed())
-   {
-      const char *command = NULL;
-      if (strcmp(name, "bash") == 0)
-      {
-         cJSON *cmd = cJSON_GetObjectItem(args, "command");
-         if (cJSON_IsString(cmd))
-            command = cmd->valuestring;
-      }
-      else if (strcmp(name, "execute_script") == 0)
-      {
-         cJSON *body = cJSON_GetObjectItem(args, "body");
-         if (cJSON_IsString(body))
-            command = body->valuestring;
-      }
-      if (command_uses_aimee_stale_context(command))
-      {
-         cJSON_Delete(args);
-         td_outcome_set("refused", "role");
-         return current_code_role_policy_error(
-             active_role, "mutating or broad aimee context commands are disabled for this role");
-      }
+      td_outcome_set("refused", permission == AGENT_TOOL_PERMISSION_SHELL ? "permission" : "role");
+      return agent_tools_permission_error(permission);
    }
 
    /* --- Guardrail enforcement for ALL tool execution paths --- */
@@ -2230,8 +2229,11 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       char *gr_input = guardrail_input_json(name, arguments_json);
 
       char msg[1024] = "";
-      int rc = pre_tool_check(name, gr_input, &state, config_guardrail_mode(), dispatch_cwd, msg,
-                              sizeof(msg));
+      int rc = agent_tools_is_mcp_derived(name)
+                   ? pre_tool_check_registered_tool(name, gr_input, &state, config_guardrail_mode(),
+                                                    dispatch_cwd, msg, sizeof msg)
+                   : pre_tool_check(name, gr_input, &state, config_guardrail_mode(), dispatch_cwd,
+                                    msg, sizeof msg);
 
       session_state_save(&state, dispatch_sid);
       free(gr_input);
@@ -2291,7 +2293,7 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
 
    /* Contract the effective call only after mechanical policy rewrites have
     * settled its target and arguments, and always before the side effect. */
-   int effect_classification = agent_tools_effect_classification(name, g_tool_classifier);
+   int effect_classification = agent_tools_classification(name);
    if (agent_tools_effect_admit(name, &args, dispatch_cwd, dispatch_sid, effect_classification) !=
        0)
    {

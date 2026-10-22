@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -117,7 +118,7 @@ func (s *server) handleChannelsCreate(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleChannelMessages(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	rows, err := s.db.Query(
-		`SELECT speaker, text, created_at FROM channel_messages WHERE channel=? ORDER BY id LIMIT 200`,
+		`SELECT id, speaker, text, created_at FROM (SELECT id, speaker, text, created_at FROM channel_messages WHERE channel=? ORDER BY id DESC LIMIT 200) ORDER BY id`,
 		name,
 	)
 	w.Header().Set("Content-Type", "application/json")
@@ -127,6 +128,7 @@ func (s *server) handleChannelMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	type msg struct {
+		ID        string `json:"id"`
 		Speaker   string `json:"sender"`
 		Text      string `json:"text"`
 		CreatedAt string `json:"created_at,omitempty"`
@@ -134,7 +136,10 @@ func (s *server) handleChannelMessages(w http.ResponseWriter, r *http.Request) {
 	var msgs []msg
 	for rows.Next() {
 		var m msg
-		rows.Scan(&m.Speaker, &m.Text, &m.CreatedAt)
+		if err := rows.Scan(&m.ID, &m.Speaker, &m.Text, &m.CreatedAt); err != nil {
+			http.Error(w, "channel history unavailable", http.StatusInternalServerError)
+			return
+		}
 		msgs = append(msgs, m)
 	}
 	if msgs == nil {
@@ -157,7 +162,7 @@ func (s *server) handleChannelPost(w http.ResponseWriter, r *http.Request) {
 		body.Speaker = "user"
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(
+	result, err := s.db.Exec(
 		`INSERT INTO channel_messages(channel, speaker, text, created_at) VALUES (?,?,?,?)`,
 		name, body.Speaker, body.Text, now,
 	)
@@ -168,7 +173,13 @@ func (s *server) handleChannelPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	id, err := result.LastInsertId()
+	if err != nil {
+		http.Error(w, "message identity unavailable", http.StatusInternalServerError)
+		return
+	}
 	payload, _ := json.Marshal(map[string]string{
+		"id":     strconv.FormatInt(id, 10),
 		"sender": body.Speaker, "text": body.Text, "created_at": now,
 	})
 	broker.publish(name, string(payload))
@@ -183,6 +194,18 @@ func (s *server) handleChannelEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var cursor int64
+	if raw := r.Header.Get("Last-Event-ID"); raw != "" {
+		var err error
+		cursor, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || cursor < 0 {
+			http.Error(w, "invalid event cursor", http.StatusBadRequest)
+			return
+		}
+	} else if err := s.db.QueryRow(`SELECT COALESCE(MAX(id),0) FROM channel_messages WHERE channel=?`, name).Scan(&cursor); err != nil {
+		http.Error(w, "channel history unavailable", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -192,19 +215,47 @@ func (s *server) handleChannelEvents(w http.ResponseWriter, r *http.Request) {
 	defer broker.unsubscribe(name, ch)
 
 	ctx := r.Context()
-	keepalive := time.NewTicker(25 * time.Second)
+	keepalive := time.NewTicker(time.Second)
 	defer keepalive.Stop()
 
+	// The broker only wakes the reader. SQLite supplies ordered, durable frames,
+	// including anything missed while the bounded broker queue was full.
+	flusher.Flush()
 	for {
+		rows, err := s.db.QueryContext(ctx, `SELECT id, speaker, text, created_at FROM channel_messages WHERE channel=? AND id>? ORDER BY id LIMIT 200`, name, cursor)
+		if err != nil {
+			return
+		}
+		count := 0
+		for rows.Next() {
+			var id int64
+			var sender, text, created string
+			if err = rows.Scan(&id, &sender, &text, &created); err != nil {
+				break
+			}
+			payload, _ := json.Marshal(map[string]string{"id": strconv.FormatInt(id, 10), "sender": sender, "text": text, "created_at": created})
+			if _, err = fmt.Fprintf(w, "id: %d\ndata: %s\n\n", id, payload); err != nil {
+				break
+			}
+			cursor = id
+			count++
+		}
+		rowsErr := rows.Err()
+		rows.Close()
+		if err != nil || rowsErr != nil {
+			return
+		}
+		if count > 0 {
+			flusher.Flush()
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-keepalive.C:
 			fmt.Fprintf(w, ": keepalive\n\n")
 			flusher.Flush()
-		case data := <-ch:
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
+		case <-ch:
 		}
 	}
 }

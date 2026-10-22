@@ -30,6 +30,10 @@ int model_sampling_get(const char *model_key, model_sampling_row_t *out);
  * catalog vendor to tell moonshotai's "k3" from anyone else's. */
 double model_sampling_required_temperature(const agent_t *agent);
 
+/* Resolve provider/model constraints and opt-in defaults without constructing
+ * a provider request. Negative values mean omitted; returned strings are borrowed. */
+model_sampling_row_t model_sampling_resolve(const agent_t *agent, double caller_temperature);
+
 void model_sampling_apply_openai(const agent_t *agent, struct cJSON *req,
                                  double caller_temperature);
 void model_sampling_apply_anthropic(const agent_t *agent, struct cJSON *req,

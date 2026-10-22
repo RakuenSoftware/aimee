@@ -3,6 +3,7 @@ package kbsynthesis
 
 import (
 	"encoding/binary"
+	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
@@ -61,24 +62,6 @@ var sideEffectingCallees = map[string]struct{}{
 	"unlinkat": {}, "unsetenv": {}, "vfprintf": {}, "vfork": {}, "write": {},
 }
 
-func zeroPadding(value []byte) bool {
-	for _, item := range value {
-		if item != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func nonzeroText(value []byte) bool {
-	for _, item := range value {
-		if item == 0 {
-			return false
-		}
-	}
-	return true
-}
-
 func claimShapeValid(kind claimKind, count int) bool {
 	switch kind {
 	case claimNone, claimNonString:
@@ -102,7 +85,7 @@ func decodeTextArray(request []byte, count, maximum, lengthsOff, valuesOff int) 
 		textLen := int(wireLen)
 		slot := request[valuesOff+index*textSlot : valuesOff+(index+1)*textSlot]
 		if (index >= count && textLen != 0) ||
-			!nonzeroText(slot[:textLen]) || !zeroPadding(slot[textLen:]) {
+			!modulewire.NonzeroText(slot[:textLen]) || !modulewire.ZeroPadding(slot[textLen:]) {
 			return nil, false
 		}
 		if index < count {

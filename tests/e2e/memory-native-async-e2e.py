@@ -45,6 +45,7 @@ def inside(output):
     prefix = 'native-memory-' + uuid.uuid4().hex[:10]
     content = 'Complete native Go memory fixture 界🦊; preserve LIMIT_7 and identifier ' + prefix
     owner_pid, memory_id = None, None
+    refresh_stop_ordinal = None
     refresh_id = None
     shared_change_id = None
     has_shared = False
@@ -110,7 +111,7 @@ def inside(output):
             pass
 
         def do_POST(self):
-            nonlocal refresh_id, shared_change_id
+            nonlocal refresh_id, shared_change_id, refresh_stop_ordinal
             raw = self.rfile.read(int(self.headers.get('Content-Length', '0')))
             body = json.loads(raw)
             # Independent read-only connection sees committed intent before the
@@ -163,6 +164,7 @@ def inside(output):
                             if admission is not None:
                                 expected_unresolved.add(admission['attempt_id'])
                             os.kill(owner_pid, signal.SIGSTOP)
+                            refresh_stop_ordinal = ordinal
                     except Exception as exc:
                         provider_errors.append(type(exc).__name__ + ': ' + str(exc))
             if scenario == 'correction-before-retry' and ordinal == 1:
@@ -242,14 +244,19 @@ def inside(output):
             time.sleep(0.25)
         check('shared projection settled before '+name, False)
 
-    def run(name, limits=None, mode='single', input_text=None):
-        nonlocal scenario, scenario_start
+    def run(name, limits=None, mode='single', input_text=None, cwd=None):
+        nonlocal scenario, scenario_start, refresh_stop_ordinal
+        if mode == 'refresh-outage':
+            refresh_stop_ordinal = None
         if name != 'paused Go memory owner':
             settle_shared_projection(name)
         started, before = time.monotonic(), len(captures)
         scenario, scenario_start = mode, before
-        status, created = api('/v1/runs', dict(model=prefix, input=input_text or 'Read the native memory fixture ' + prefix,
-                                              max_output_tokens=32), limits)
+        request = dict(model=prefix, input=input_text or 'Read the native memory fixture ' + prefix,
+                       max_output_tokens=32)
+        if cwd is not None:
+            request['cwd'] = str(cwd)
+        status, created = api('/v1/runs', request, limits)
         check(name + ' queues a real asynchronous worker', status == 200 and bool(created.get('id')))
         run_id = created['id']
         # A refresh with the owner deliberately stopped can traverse both
@@ -480,7 +487,8 @@ def inside(output):
         try:
             before = len(captures)
             result, events = run('native refresh owner outage', mode='refresh-outage')
-            check('native refresh intervention succeeds', not provider_errors)
+            check('native refresh intervention succeeds after five provider requests',
+                  not provider_errors and refresh_stop_ordinal == 5)
             check('native refresh reports memory owner refusal', result.get('status') == 'failed' and
                   any('unavailable' in text for text in strings(events)))
             check('native refresh refusal prevents a sixth provider request', len(captures) == before + 5)
@@ -529,15 +537,16 @@ def inside(output):
             for backend in ('tmux-cli', 'provider-cli'):
                 external = json.loads(native_roster)
                 # Reach the execution fence, not the primary-only/client-only
-                # routing guards. Claude provider-cli normalizes to tmux, so
-                # use ACP for the distinct external adapter path.
+                # routing or workspace-admission guards. Codex/Claude now use
+                # observable host gateways; ACP remains an unsupported external
+                # transport under both legacy and current backend spellings.
                 external['models'][0].update(backend=backend,
-                    cli_kind='claude' if backend == 'tmux-cli' else 'acp',
+                    cli_kind='acp',
                     cli_cmd='/bin/false', primary_only=False, is_server_hosted=True)
                 roster.write_text(json.dumps(external))
                 before = len(captures)
                 result, events = run('unobservable ' + backend,
-                                     dict(schema_version=1, max_request_bytes=0))
+                                     dict(schema_version=1, max_request_bytes=0), cwd=fixture_read_root)
                 check(backend + ' refuses unobservable final request accounting',
                       result.get('status') == 'failed' and any(
                           'request_budget_unavailable' in text for text in strings(events)))
@@ -605,7 +614,8 @@ def inside(output):
                 exploration_session=exploration_session,
                 source_contracts=[entry['binding'].get('sources', []) for entry, _ in receipt_captures if entry is not None],
                 receipt_attempts=[entry['attempt_id'] for entry, _ in receipt_captures if entry is not None],
-                unresolved_attempts=sorted(expected_unresolved)), indent=2) + '\n')
+                unresolved_attempts=sorted(expected_unresolved),
+                refresh_stop_ordinal=refresh_stop_ordinal), indent=2) + '\n')
     return 0
 
 

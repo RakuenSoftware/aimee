@@ -14,6 +14,7 @@
 #include "kb_identity_token.h"
 #include "server_write_tier.h"
 #include "server_write_tier_db1.h"
+#include "db1_client/server_sessions.h"
 #include "db1_client/db1.h" /* db1_store_probe — the mTLS ramp needs a live store */
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
@@ -70,7 +71,6 @@ static struct
 {
    char session_id[128];
    char persona[PERSONA_NAME_MAX];
-   char active_primary[MAX_AGENT_NAME];
 } g_sessions[SHTTP_MAX_SESSIONS];
 static int g_session_count = 0;
 static pthread_mutex_t g_session_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -118,66 +118,39 @@ int session_persona_get(const char *session_id, char *out, size_t n)
    return found;
 }
 
-void session_primary_set(const char *session_id, const char *agent)
+/* Selection belongs to the durable, authenticated session, not the connection cache. */
+static const char *session_primary_actor(void)
 {
-   if (!session_id || !session_id[0] || !agent || !agent[0])
-      return;
-   pthread_mutex_lock(&g_session_lock);
-   for (int i = 0; i < g_session_count; i++)
-   {
-      if (strcmp(g_sessions[i].session_id, session_id) == 0)
-      {
-         snprintf(g_sessions[i].active_primary, sizeof(g_sessions[i].active_primary), "%s", agent);
-         pthread_mutex_unlock(&g_session_lock);
-         return;
-      }
-   }
-   int slot = (g_session_count < SHTTP_MAX_SESSIONS)
-                  ? g_session_count++
-                  : (SHTTP_MAX_SESSIONS - 1); /* overwrite last */
-   snprintf(g_sessions[slot].session_id, sizeof(g_sessions[slot].session_id), "%s", session_id);
-   snprintf(g_sessions[slot].active_primary, sizeof(g_sessions[slot].active_primary), "%s", agent);
-   pthread_mutex_unlock(&g_session_lock);
+   const request_context_t *owner = request_context_get();
+   return owner && owner->vault_principal[0] ? owner->vault_principal : NULL;
+}
+
+int session_primary_set(const char *session_id, const char *agent)
+{
+   const char *actor = session_primary_actor();
+   if (!actor || !session_id || !session_id[0] || !agent || !agent[0] ||
+       strlen(agent) >= MAX_AGENT_NAME)
+      return -1;
+   return db1_server_session_primary_set(actor, session_id, agent);
 }
 
 int session_primary_get(const char *session_id, char *out, size_t n)
 {
    if (out && n)
-      out[0] = '\0';
-   if (!session_id || !session_id[0] || !out || !n)
-      return 0;
-   int found = 0;
-   pthread_mutex_lock(&g_session_lock);
-   for (int i = 0; i < g_session_count; i++)
-   {
-      if (strcmp(g_sessions[i].session_id, session_id) == 0)
-      {
-         if (g_sessions[i].active_primary[0])
-         {
-            snprintf(out, n, "%s", g_sessions[i].active_primary);
-            found = 1;
-         }
-         break;
-      }
-   }
-   pthread_mutex_unlock(&g_session_lock);
-   return found;
+      out[0] = 0;
+   const char *actor = session_primary_actor();
+   if (!actor || !session_id || !session_id[0] || !out || !n ||
+       db1_server_session_primary_get(actor, session_id, out, n) != 0)
+      return -1;
+   return out[0] ? 1 : 0;
 }
 
-void session_primary_clear(const char *session_id)
+int session_primary_clear(const char *session_id)
 {
-   if (!session_id || !session_id[0])
-      return;
-   pthread_mutex_lock(&g_session_lock);
-   for (int i = 0; i < g_session_count; i++)
-   {
-      if (strcmp(g_sessions[i].session_id, session_id) == 0)
-      {
-         g_sessions[i].active_primary[0] = '\0';
-         break;
-      }
-   }
-   pthread_mutex_unlock(&g_session_lock);
+   const char *actor = session_primary_actor();
+   if (!actor || !session_id || !session_id[0])
+      return -1;
+   return db1_server_session_primary_set(actor, session_id, "");
 }
 
 const char *server_http_delegate_block(const char *session_id, const char *role, const char *prompt,
@@ -396,7 +369,8 @@ int route_session_primary_get(const char *session_id, char *resp, int cap)
    if (!session_id || !session_id[0])
       return err_json(resp, cap, 400, "missing session id");
    char name[MAX_AGENT_NAME] = "";
-   session_primary_get(session_id, name, sizeof(name));
+   if (session_primary_get(session_id, name, sizeof(name)) < 0)
+      return err_json(resp, cap, 503, "session primary selection unavailable");
    cJSON *o = cJSON_CreateObject();
    cJSON_AddStringToObject(o, "agent", name);
    return emit(resp, cap, o);
@@ -413,6 +387,11 @@ int route_session_primary_set(const char *session_id, const char *body, char *re
       cJSON_Delete(req);
       return err_json(resp, cap, 400, "missing agent name");
    }
+   if (strlen(jn->valuestring) >= MAX_AGENT_NAME)
+   {
+      cJSON_Delete(req);
+      return err_json(resp, cap, 400, "agent name too long");
+   }
    char name[MAX_AGENT_NAME];
    snprintf(name, sizeof(name), "%s", jn->valuestring);
    cJSON_Delete(req);
@@ -422,7 +401,8 @@ int route_session_primary_set(const char *session_id, const char *body, char *re
    if (agent_registry_find(name, &agbuf) != 0)
       return err_json(resp, cap, 404, "no such agent");
 
-   session_primary_set(session_id, name);
+   if (session_primary_set(session_id, name) != 0)
+      return err_json(resp, cap, 503, "session primary selection unavailable");
    cJSON *o = cJSON_CreateObject();
    cJSON_AddStringToObject(o, "agent", name);
    return emit(resp, cap, o);
@@ -432,7 +412,8 @@ int route_session_primary_clear(const char *session_id, char *resp, int cap)
 {
    if (!session_id || !session_id[0])
       return err_json(resp, cap, 400, "missing session id");
-   session_primary_clear(session_id);
+   if (session_primary_clear(session_id) != 0)
+      return err_json(resp, cap, 503, "session primary selection unavailable");
    cJSON *o = cJSON_CreateObject();
    cJSON_AddStringToObject(o, "agent", "");
    return emit(resp, cap, o);
@@ -473,6 +454,42 @@ int route_session_attach(const char *session_id, const char *body, char *resp, i
    const char *target = (cJSON_IsString(jt) && jt->valuestring[0]) ? jt->valuestring : NULL;
    const cJSON *jo = cJSON_GetObjectItemCaseSensitive(req, "owner");
    const char *owner = (cJSON_IsString(jo) && jo->valuestring[0]) ? jo->valuestring : NULL;
+   /* A browser's explicit attach precedes preferences/history and its first
+    * turn. Admit the canonical owner here, before acknowledging a live surface;
+    * the in-memory presence registry cannot establish durable ownership. */
+   const request_context_t *context = request_context_get();
+   if (!strcmp(surface, "webchat") && context && context->vault_transport == ATTEST_WEBCHAT_TRUSTED)
+   {
+      const char *actor = context->vault_principal;
+      if (!actor[0] || strlen(session_id) >= PRESENCE_SESSION_ID_MAX)
+      {
+         cJSON_Delete(req);
+         return err_json(resp, cap, 400, "invalid browser session owner or id");
+      }
+      if (owner && strcmp(owner, actor))
+      {
+         cJSON_Delete(req);
+         return err_json(resp, cap, 403, "browser session owner mismatch");
+      }
+      db1_server_session_t row;
+      if (db1_server_session_get(session_id, &row) != 0)
+      {
+         /* Creation never updates an existing owner. A concurrent creator or
+          * lost acknowledgement is resolved only by reading the durable row. */
+         (void)db1_server_session_create(session_id, "webchat", actor);
+         if (db1_server_session_get(session_id, &row) != 0)
+         {
+            cJSON_Delete(req);
+            return err_json(resp, cap, 503, "browser session admission unavailable");
+         }
+      }
+      if (strcmp(row.principal, actor))
+      {
+         cJSON_Delete(req);
+         return err_json(resp, cap, 403, "browser session owner mismatch");
+      }
+      owner = actor;
+   }
    const cJSON *jm = cJSON_GetObjectItemCaseSensitive(req, "subscribe_mask");
    unsigned mask = cJSON_IsNumber(jm) ? (unsigned)jm->valuedouble : (unsigned)PRESENCE_EV_ALL;
    const cJSON *jp = cJSON_GetObjectItemCaseSensitive(req, "persistent");
@@ -812,6 +829,8 @@ int route_runs_get(const char *id, char *resp, int cap)
 {
    if (!id || !id[0])
       return err_json(resp, cap, 400, "missing run id");
+   if (openai_runs_store_access(id, server_http_identity_principal()) == 0)
+      return err_json(resp, cap, 404, "no such run");
    if (!openai_runs_store_get(id, resp, (size_t)cap))
       return run_missing_response(id, resp, cap);
    return 200;
@@ -825,6 +844,8 @@ int route_runs_stop(const char *id, char *resp, int cap)
 {
    if (!id || !id[0])
       return err_json(resp, cap, 400, "missing run id");
+   if (openai_runs_store_access(id, server_http_identity_principal()) == 0)
+      return err_json(resp, cap, 404, "no such run");
    openai_run_status_t st;
    if (!openai_runs_store_status(id, &st))
       return run_missing_response(id, resp, cap);
@@ -1168,6 +1189,58 @@ static void handle_messages_stream(int fd, const char *body, const char *request
    server_http_sse_live_run(fd, body, g_messages_stream_handler);
 }
 
+int server_http_native_forward(int fd, const char *method, const char *path, const char *body,
+                               int body_len)
+{
+   const request_context_t *owner = request_context_get();
+   if (!owner || owner->vault_transport == ATTEST_NONE || !owner->vault_principal[0] ||
+       server_http_identity_transport() != owner->vault_transport ||
+       strcmp(server_http_identity_principal(), owner->vault_principal) ||
+       server_http_identity_browser_operator() || !method || !path || strncmp(path, "/v1/", 4) ||
+       strchr(path, '?') || strchr(path, '#') || body_len < 0 ||
+       !server_http_route_allowed_caps(0, owner->capabilities, method, path, 0))
+   {
+      send_response(fd, 403, "{\"error\":\"native request scope unavailable\"}", NULL);
+      return -1;
+   }
+   if (strcmp(method, "POST") == 0 && !server_http_json_body_is_single_value(body, body_len))
+   {
+      send_response(fd, 400, "{\"error\":\"invalid JSON body\"}", NULL);
+      return -1;
+   }
+   uint32_t previous_caps = g_rpc_conn_caps;
+   g_rpc_conn_caps = owner->capabilities;
+   server_http_keepalive_set(0);
+   server_http_gzip_set(0);
+   int rc = 0;
+   if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
+       !strcmp(path, "/v1/responses") && g_responses_stream_handler)
+      handle_responses_stream(fd, body, owner->request_id);
+   else if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
+            !strcmp(path, "/v1/messages") && g_messages_stream_handler)
+      handle_messages_stream(fd, body, owner->request_id);
+   else if (!strcmp(method, "POST") && openai_request_bool(body, "stream") &&
+            !strcmp(path, "/v1/chat/completions") && g_chat_stream_handler)
+      handle_stream(fd, body, g_chat_stream_handler, owner->request_id);
+   else
+   {
+      char *response = malloc(SHTTP_RESP_MAX);
+      if (response)
+      {
+         int status = server_http_route(method, path, body, body_len, response, SHTTP_RESP_MAX);
+         send_response(fd, status, response, owner->request_id);
+         free(response);
+      }
+      else
+      {
+         send_response(fd, 500, "{\"error\":\"out of memory\"}", owner->request_id);
+         rc = -1;
+      }
+   }
+   g_rpc_conn_caps = previous_caps;
+   return rc;
+}
+
 static void handle_cli_session_stream(int fd, const char *id, const char *request_id)
 {
    if (!cli_session_pty_forwarding_enabled())
@@ -1186,6 +1259,11 @@ static void handle_cli_session_stream(int fd, const char *id, const char *reques
  * valid op-runs return 410; arbitrary unknown ids return 404. */
 static void handle_run_events(int fd, const char *id, const char *request_id)
 {
+   if (openai_runs_store_access(id, server_http_identity_principal()) == 0)
+   {
+      send_response(fd, 404, "{\"error\":\"no such run\"}", request_id);
+      return;
+   }
    openai_run_status_t st0;
    if (!openai_runs_store_status(id, &st0))
    {
@@ -1253,90 +1331,6 @@ static void handle_run_events(int fd, const char *id, const char *request_id)
  * the session has no live presence. */
 /* handle_session_events lives in server_http_sse.inc (textual include) to keep
  * this file under the 2000-line cap; it shares this TU's static SSE helpers. */
-
-/* SSE event streams (handle_session_events / handle_run_events) are long-lived:
- * running them inline in handle_conn would block the single listener thread for
- * the stream's whole lifetime, starving every other /v1 connection (a presence
- * subscriber would freeze the entire HTTP surface). Offload each to a detached
- * thread on a dup'd fd — mirroring the chat.send_stream worker — so the listener
- * returns immediately. The listener's close(fd) only drops its own reference;
- * the worker streams on the dup until the client disconnects, then closes it. A
- * modest cap bounds concurrent streams against fd/thread exhaustion. */
-typedef void (*sse_stream_fn)(int fd, const char *id, const char *request_id);
-typedef struct
-{
-   int fd;
-   sse_stream_fn fn;
-   char id[160];
-   char request_id[64];
-} sse_offload_t;
-
-static atomic_int g_sse_live = 0;
-#define SSE_LIVE_DEFAULT 256
-static int g_sse_max = SSE_LIVE_DEFAULT; /* configurable via aimee.api.max_event_streams */
-
-/* Set the cap on concurrent SSE event streams. n <= 0 restores the default.
- * Called once at startup (server_http_start) before any stream is accepted. */
-void server_http_set_max_event_streams(int n)
-{
-   g_sse_max = (n > 0) ? n : SSE_LIVE_DEFAULT;
-}
-
-static void *sse_offload_thread(void *arg)
-{
-   sse_offload_t *o = (sse_offload_t *)arg;
-   o->fn(o->fd, o->id, o->request_id);
-   close(o->fd);
-   atomic_fetch_sub(&g_sse_live, 1);
-   free(o);
-   return NULL;
-}
-
-/* Hand an SSE stream to a detached worker on a dup'd fd. Returns 0 on success
- * (the caller must not touch fd afterward beyond the listener's own close).
- * Returns -1 if the live-stream cap is hit or resources are exhausted, in which
- * case the caller should send an error on fd and not stream. */
-static int sse_offload(int fd, sse_stream_fn fn, const char *id, const char *request_id)
-{
-   /* SSE offload dups the fd to a detached thread; a TLS conn's SSL is owned by
-    * this conn's worker and cannot be shared with the dup (and the dup has no SSL
-    * registered → it would emit plaintext on the TLS socket). Refuse over TLS; the
-    * caller turns this into a 503. SSE-over-TLS is phase 1c. */
-   if (server_conn_io_has_ssl(fd))
-      return -1;
-   if (atomic_fetch_add(&g_sse_live, 1) >= g_sse_max)
-   {
-      atomic_fetch_sub(&g_sse_live, 1);
-      return -1;
-   }
-   int dfd = dup(fd);
-   if (dfd < 0)
-   {
-      atomic_fetch_sub(&g_sse_live, 1);
-      return -1;
-   }
-   sse_offload_t *o = (sse_offload_t *)calloc(1, sizeof(*o));
-   if (!o)
-   {
-      close(dfd);
-      atomic_fetch_sub(&g_sse_live, 1);
-      return -1;
-   }
-   o->fd = dfd;
-   o->fn = fn;
-   snprintf(o->id, sizeof(o->id), "%s", id ? id : "");
-   snprintf(o->request_id, sizeof(o->request_id), "%s", request_id ? request_id : "");
-   pthread_t t;
-   if (pthread_create(&t, NULL, sse_offload_thread, o) != 0)
-   {
-      close(dfd);
-      free(o);
-      atomic_fetch_sub(&g_sse_live, 1);
-      return -1;
-   }
-   pthread_detach(t);
-   return 0;
-}
 
 /* Extract a request header value (case-insensitive name match) from the raw
  * request `buf` into out[n], trimmed of leading whitespace and the trailing
@@ -1594,7 +1588,11 @@ void handle_conn(int fd, int is_tcp, int is_management)
    effective_caps =
        server_http_enrollment_caps(effective_caps, is_tcp, mtls_authenticated,
                                    server_conn_io_has_ssl(fd), request_bearer, method, path);
-   /* Capture context only after the certificate and effective caps are known. */
+   /* Capture the verified connection before copying its owner into the request
+    * context. Connection workers clear both on every exit, including refusals. */
+   server_http_identity_capture(fd, is_tcp, buf);
+   if (first_user_principal[0])
+      server_http_identity_override_principal(first_user_principal);
    server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path, effective_caps);
    if (server_http_apply_caller_context(is_tcp, buf, first_user_principal, identity_present,
                                         identity_claims.subject) != 0)
@@ -1751,6 +1749,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
        http_header(buf, "Accept-Encoding", accept_encoding, sizeof(accept_encoding)) &&
        strcasestr(accept_encoding, "gzip") != NULL);
 
+   server_http_identity_set_query(query); /* cleared by server_http_identity_clear */
    /* GET /v1/runs/{id}/events takes the SSE path (no body); other run routes
     * fall through to the buffered router below. */
    {
@@ -1769,7 +1768,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
             id[idlen] = '\0';
             /* Offload to a detached worker so the long-lived SSE stream does not
              * block the listener thread; fall back to a 503 if the cap is hit. */
-            if (sse_offload(fd, handle_run_events, id, request_id) != 0)
+            if (server_http_sse_offload(fd, handle_run_events, id, request_id) != 0)
                send_response(fd, 503, "{\"error\":\"too many event streams\"}", request_id);
             LOG_INFO("server.http", "GET %s -> events req_id=%s", path, request_id);
             return;
@@ -1798,7 +1797,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
              * EventSource auto-reconnect sends the native Last-Event-ID header
              * (most recent); a fresh remount has no header and instead passes
              * ?cursor=<persisted> in the query. Absent/0 = replay from oldest. */
-            char idc[160];
+            char idc[256];
             char leid[40] = "";
             const char *src = NULL;
             if (http_header(buf, "Last-Event-ID", leid, sizeof(leid)) && leid[0])
@@ -1828,10 +1827,19 @@ void handle_conn(int fd, int is_tcp, int is_management)
                snprintf(idc, sizeof(idc), "%s?cursor=%llu", id, n);
             else
                snprintf(idc, sizeof(idc), "%s", id);
+            if (strstr(query, "format=ir"))
+            {
+               if (!server_http_identity_principal()[0])
+               {
+                  send_response(fd, 403, "{\"error\":\"session actor required\"}", request_id);
+                  return;
+               }
+               snprintf(idc, sizeof(idc), "%s?format=ir&cursor=%llu", id, n);
+            }
             /* Offload to a detached worker so the long-lived presence SSE stream
              * does not block the listener thread (a subscriber would otherwise
              * freeze the whole /v1 surface); 503 if the live-stream cap is hit. */
-            if (sse_offload(fd, handle_session_events, idc, request_id) != 0)
+            if (server_http_sse_offload(fd, handle_session_events, idc, request_id) != 0)
                send_response(fd, 503, "{\"error\":\"too many event streams\"}", request_id);
             LOG_INFO("server.http", "GET %s -> presence events req_id=%s", path, request_id);
             return;
@@ -1850,7 +1858,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
          idlen = idlen < sizeof(id) ? idlen : sizeof(id) - 1;
          memcpy(id, path + 16, idlen);
          id[idlen] = '\0';
-         if (sse_offload(fd, handle_cli_session_stream, id, request_id) != 0)
+         if (server_http_sse_offload(fd, handle_cli_session_stream, id, request_id) != 0)
             send_response(fd, 503, "{\"error\":\"too many event streams\"}", request_id);
          return;
       }
@@ -2064,14 +2072,6 @@ void handle_conn(int fd, int is_tcp, int is_management)
     * CAPS_ALL, TCP => bearer-scoped) so loopback_rpc / server_dispatch re-check
     * per-method capability. Reset to the read-only default afterward. */
    g_rpc_conn_caps = effective_caps;
-   /* WP-C.0 hop 1 of 3: capture the attested vault identity (kernel UDS peer uid,
-    * or a root-UDS-gated webuser assertion) into thread-locals, live until
-    * loopback_rpc copies it into the synthesized conn. Cleared after the route so
-    * a reused worker thread cannot leak it into the next request. */
-   server_http_identity_capture(fd, is_tcp, buf);
-   if (first_user_principal[0])
-      server_http_identity_override_principal(first_user_principal);
-   server_http_identity_set_query(query); /* cleared by server_http_identity_clear */
    int status = server_http_route(method, path, body, body_len, resp, SHTTP_RESP_MAX);
    g_rpc_conn_caps = CAPS_READ_ONLY;
    server_http_identity_clear();

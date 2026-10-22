@@ -34,8 +34,7 @@ func TestCJSONPreservesOrderAndDoesNotHTMLEscape(t *testing.T) {
 func TestCJSONNumberSpelling(t *testing.T) {
 	raw := `{"a":3.0,"b":0.1,"c":1e300,"d":-0.0000001,"e":2147483648,` +
 		`"f":1234567890123456789,"g":0.30000000000000004,"h":-2147483649}`
-	want := `{"a":3,"b":0.1,"c":1e+300,"d":-1e-07,"e":2147483648,` +
-		`"f":1.2345678901234568e+18,"g":0.3,"h":-2147483649}`
+	want := raw // The vendored native codec now retains original decimal tokens.
 	if got := roundTrip(t, raw); got != want {
 		t.Errorf("\n got: %s\nwant: %s", got, want)
 	}
@@ -91,26 +90,27 @@ func TestCJSONParseFailure(t *testing.T) {
 	}
 }
 
-// Trailing bytes are IGNORED, matching cJSON_ParseWithLength, which is called
-// without require_null_terminated. Verified against C: it parses
-// `{"a":1}trailing` as `{"a":1}`.
-func TestCJSONTrailingBytesIgnored(t *testing.T) {
-	if got := roundTrip(t, `{"a":1}trailing`); got != `{"a":1}` {
-		t.Errorf("got %s, want {\"a\":1}", got)
+func TestCJSONCanonicalFraming(t *testing.T) {
+	for _, raw := range []string{`{"a":1}trailing`, `{"a":1,"a":2}`, `{"a":{"x":1,"x":2}}`, `{"a":1,"\u0061":2}`, `{"a":"\u0000"}`, `{"\u0000":1}`, "{\"c\":\"x\x01y\"}"} {
+		if ParseJSON(raw) != nil {
+			t.Errorf("accepted ambiguous/malformed JSON: %q", raw)
+		}
 	}
 }
 
-// KNOWN DIVERGENCE, pinned so it cannot drift silently.
-//
-// cJSON accepts a RAW control byte inside a string and re-emits it escaped:
-// C turns {"c":"x<0x01>y"} into {"c":"xy"}. Go's encoding/json rejects
-// that input, so ParseJSON returns nil where cJSON would have succeeded, and the
-// compress lever then falls back to head+tail where C produced a JSON summary.
-func TestCJSONRawControlByteDivergence(t *testing.T) {
-	raw := "{\"c\":\"x\x01y\"}"
-	if v := ParseJSON(raw); v != nil {
-		t.Fatal("encoding/json unexpectedly accepted a raw control byte — the " +
-			"documented divergence has closed; update the comment in cjson.go")
+func TestCJSONOpaqueDecimalsSurviveCloneAndMutation(t *testing.T) {
+	raw := `{"input":{"id":9007199254740993,"ratio":0.12345678901234567890123456789,"tiny":1e-9000,"huge":1e9000},"values":[1.000,1E+00]}`
+	original := ParseJSON(raw)
+	if original == nil || PrintJSONUnformatted(original.Clone()) != raw {
+		t.Fatal("opaque decimal changed")
+	}
+	clone := original.Clone()
+	clone.Get("input").Get("id").Num = 7
+	if got := clone.Get("input").Get("id").numberText(); got != "7" {
+		t.Fatal("stale parsed number survived mutation", got)
+	}
+	if PrintJSONUnformatted(original) != raw {
+		t.Fatal("clone mutated original")
 	}
 }
 

@@ -14,8 +14,13 @@
 #include "util.h"
 #include <aimee/workspace/module_api.h>
 #include <stdint.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static const char test_shared_workspace[] = "/tmp/ws-shared";
+static const char test_detached_workspace[] = "/tmp/ws-detached";
 
 #include <assert.h>
 #include <stdio.h>
@@ -67,6 +72,20 @@ static int g_acquires, g_releases, g_last_hibernate, g_acquire_fails;
 static char g_last_workspace[512];
 static int g_last_read_only;
 static int g_fake_state = 1;
+static int g_replace_workspace;
+static char g_retired_workspace[1024];
+
+static int count_source_fds(const char *source)
+{
+   struct stat expected, current;
+   assert(!stat(source, &expected));
+   int count = 0;
+   for (int fd = 0; fd < 1024; fd++)
+      if (!fstat(fd, &current) && current.st_dev == expected.st_dev &&
+          current.st_ino == expected.st_ino)
+         count++;
+   return count;
+}
 
 static int fake_acquire(delegate_backend_t *self, const char *task_id,
                         const delegate_backend_config_t *cfg, void **out)
@@ -79,6 +98,11 @@ static int fake_acquire(delegate_backend_t *self, const char *task_id,
    g_last_read_only = cfg ? cfg->workspace_read_only : -1;
    if (g_acquire_fails)
       return -1;
+   if (g_replace_workspace)
+   {
+      assert(!rename(cfg->workspace, g_retired_workspace));
+      assert(!mkdir(cfg->workspace, 0700));
+   }
    *out = &g_fake_state;
    return 0;
 }
@@ -120,14 +144,207 @@ static void register_standard_workspaces(void)
 {
    (void)config_workspace_remove("/");
    (void)config_workspace_remove("/tmp/ws-mirror-unresolvable");
-   (void)config_workspace_remove("/tmp/ws-detached");
+   (void)config_workspace_remove(test_detached_workspace);
    (void)config_workspace_remove(test_shared_workspace);
-   assert(config_workspace_add("/tmp/ws-detached", "detached", NULL, NULL) == 0);
+   assert(config_workspace_add(test_detached_workspace, "detached", NULL, NULL) == 0);
    assert(config_workspace_add("/tmp/ws-shared", "shared", NULL, NULL) == 0);
+}
+
+struct mirror_callback_fixture
+{
+   workspace_turn_mirror_lease_t *lease;
+   const char *cwd;
+};
+static void *mirror_callback_worker(void *opaque)
+{
+   struct mirror_callback_fixture *fixture = opaque;
+   char allowed[MAX_PATH_LEN], digest[65];
+   int accepted = workspace_turn_workspace_authorized(fixture->cwd, allowed, sizeof allowed);
+   assert(!accepted);
+   const workspace_turn_mirror_lease_t *previous = workspace_turn_mirror_bind(fixture->lease);
+   assert(!previous);
+   accepted = workspace_turn_workspace_authorized(fixture->cwd, allowed, sizeof allowed);
+   assert(accepted && !strcmp(allowed, fixture->cwd));
+   workspace_turn_scope_t *foreground = NULL;
+   int acquired = workspace_turn_scope_begin(fixture->cwd, &foreground);
+   assert(acquired == 1 && foreground);
+   assert(!strcmp(workspace_turn_active_cwd(), fixture->cwd));
+   assert(workspace_provider_active() == workspace_provider_shared());
+   acquired = workspace_turn_scope_end(foreground);
+   assert(!acquired);
+   accepted = workspace_turn_workspace_authorized(fixture->cwd, allowed, sizeof allowed);
+   assert(accepted && !strcmp(allowed, fixture->cwd));
+   workspace_turn_scope_t *background = NULL;
+   acquired = workspace_turn_scope_begin_background(fixture->cwd, &background);
+   assert(acquired == 1 && background);
+   assert(!strcmp(workspace_turn_active_cwd(), fixture->cwd));
+   assert(workspace_provider_active() == workspace_provider_shared());
+   acquired = workspace_turn_scope_end(background);
+   assert(!acquired);
+   int fd = -1;
+   int rc = workspace_turn_resource_identity(fixture->cwd, &fd, digest);
+   assert(!rc && fd >= 0 && strlen(digest) == 64);
+   close(fd);
+   const workspace_turn_mirror_lease_t *nested = workspace_turn_mirror_bind(NULL);
+   assert(nested == fixture->lease);
+   accepted = workspace_turn_workspace_authorized(fixture->cwd, allowed, sizeof allowed);
+   assert(!accepted);
+   workspace_turn_mirror_bind(nested);
+   workspace_turn_mirror_bind(previous);
+   accepted = workspace_turn_workspace_authorized(fixture->cwd, allowed, sizeof allowed);
+   assert(!accepted);
+   return NULL;
+}
+static void test_background_source_scope(const char *client, const char *source, const char *head,
+                                         const char *kind, const char *temporary)
+{
+   int rc = config_workspace_add(client, kind, source, head);
+   assert(!rc);
+   workspace_turn_scope_t *scope = NULL;
+   rc = workspace_turn_scope_begin_background(client, &scope);
+   assert(rc == 1 && scope && workspace_turn_active_cwd());
+   char actual[MAX_PATH_LEN], child[MAX_PATH_LEN + 64], allowed[MAX_PATH_LEN], command[16384];
+   snprintf(actual, sizeof actual, "%s", workspace_turn_active_cwd());
+   assert(strcmp(actual, client) && workspace_provider_active() == workspace_provider_shared());
+   snprintf(command, sizeof command, "git -C '%s' rev-parse --git-common-dir", actual);
+   char *repository = run_cmd(command, &rc);
+   assert(!rc && repository);
+   repository[strcspn(repository, "\r\n")] = 0;
+   snprintf(child, sizeof child, "%s/.aimee/worktrees/background/main", repository);
+   free(repository);
+   snprintf(command, sizeof command, "git -C '%s' worktree add --quiet --detach '%s' HEAD", actual,
+            child);
+   rc = system(command);
+   assert(!rc);
+   int authorized = workspace_turn_workspace_authorized(child, allowed, sizeof allowed);
+   assert(!authorized);
+   const char *ambient = getenv("GIT_DIR");
+   char *saved_git_dir = ambient ? strdup(ambient) : NULL;
+   char spoof[MAX_PATH_LEN];
+   snprintf(spoof, sizeof spoof, "%s/.git", source);
+   rc = platform_setenv("GIT_DIR", spoof);
+   assert(!rc);
+   rc = workspace_turn_scope_hold_created_worktree(scope, temporary);
+   assert(rc < 0); /* A host creation receipt cannot grant a different source. */
+   rc = workspace_turn_scope_hold_created_worktree(scope, child);
+   assert(!rc); /* The owned Git relationship ignores ambient redirection. */
+   if (saved_git_dir)
+      platform_setenv("GIT_DIR", saved_git_dir);
+   else
+      platform_unsetenv("GIT_DIR");
+   free(saved_git_dir);
+   authorized = workspace_turn_workspace_authorized(child, allowed, sizeof allowed);
+   assert(authorized);
+   workspace_turn_mirror_lease_t *lease = NULL;
+   rc = workspace_turn_mirror_capture(child, &lease);
+   assert(!rc && lease);
+   rc = workspace_turn_scope_end(scope);
+   assert(!rc && !workspace_turn_active_cwd());
+   struct mirror_callback_fixture fixture = {lease, child};
+   pthread_t worker;
+   rc = pthread_create(&worker, NULL, mirror_callback_worker, &fixture);
+   assert(!rc);
+   rc = pthread_join(worker, NULL);
+   assert(!rc);
+   workspace_turn_mirror_release(lease);
+   snprintf(command, sizeof command, "git -C '%s' worktree remove --force '%s'", actual, child);
+   rc = system(command);
+   assert(!rc);
+   rc = config_workspace_remove(client);
+   assert(!rc);
+}
+
+static void test_owned_mirror_callback_lease(const char *temporary)
+{
+   char source[1024], client[1024], command[8192], actual[MAX_PATH_LEN], recorded_head[65];
+   snprintf(source, sizeof source, "%s/lease-source", temporary);
+   snprintf(client, sizeof client, "%s/foreign-client", temporary);
+   int made_client = mkdir(client, 0700);
+   assert(!made_client);
+   snprintf(command, sizeof command,
+            "git init -q '%s' && git -C '%s' config user.email t@t && "
+            "git -C '%s' config user.name t && echo source > '%s/README.md' && "
+            "git -C '%s' add README.md && git -C '%s' commit -q -m fixture",
+            source, source, source, source, source, source);
+   int rc = system(command);
+   assert(!rc);
+   snprintf(command, sizeof command, "git -C '%s' rev-parse HEAD", source);
+   char *head = run_cmd(command, &rc);
+   assert(!rc && head);
+   head[strcspn(head, "\r\n")] = 0;
+   snprintf(recorded_head, sizeof recorded_head, "%s", head);
+   rc = config_workspace_add(client, "mirror", source, head);
+   free(head);
+   assert(!rc);
+   char denied[MAX_PATH_LEN];
+   int raw_authorized = workspace_turn_workspace_authorized(client, denied, sizeof denied);
+   assert(!raw_authorized); /* Registered foreign input is not a local mount grant. */
+   rc = workspace_turn_bind_active(client);
+   assert(rc == 1 && workspace_turn_active_cwd());
+   snprintf(actual, sizeof actual, "%s", workspace_turn_active_cwd());
+   workspace_turn_mirror_lease_t *lease = NULL;
+   rc = workspace_turn_mirror_capture(actual, &lease);
+   assert(!rc && lease);
+   workspace_turn_unbind_active();
+   int valid = workspace_turn_mirror_valid(lease, actual);
+   assert(valid);
+   struct mirror_callback_fixture fixture = {lease, actual};
+   pthread_t worker;
+   rc = pthread_create(&worker, NULL, mirror_callback_worker, &fixture);
+   assert(!rc);
+   rc = pthread_join(worker, NULL);
+   assert(!rc);
+   char moved[MAX_PATH_LEN + 16], outside[1024];
+   snprintf(moved, sizeof moved, "%s.replaced", actual);
+   snprintf(outside, sizeof outside, "%s/lease-outside", temporary);
+   rc = mkdir(outside, 0700);
+   assert(!rc);
+   rc = rename(actual, moved);
+   assert(!rc);
+   rc = symlink(outside, actual);
+   assert(!rc);
+   valid = workspace_turn_mirror_valid(lease, actual);
+   assert(!valid);
+   const workspace_turn_mirror_lease_t *previous = workspace_turn_mirror_bind(lease);
+   char allowed[MAX_PATH_LEN];
+   valid = workspace_turn_workspace_authorized(actual, allowed, sizeof allowed);
+   assert(!valid);
+   workspace_turn_mirror_bind(previous);
+   rc = unlink(actual);
+   assert(!rc);
+   rc = rename(moved, actual);
+   assert(!rc);
+   valid = workspace_turn_mirror_valid(lease, actual);
+   assert(valid);
+   workspace_turn_mirror_release(lease);
+   rc = config_workspace_remove(client);
+   assert(!rc);
+   test_background_source_scope(client, source, recorded_head, "mirror", temporary);
+   test_background_source_scope(client, source, recorded_head, "detached", temporary);
+   rc = config_workspace_add(client, "detached", NULL, NULL);
+   assert(!rc);
+   workspace_turn_scope_t *scope = NULL;
+   rc = workspace_turn_scope_begin_background(client, &scope);
+   assert(rc < 0 && !scope && !workspace_turn_active_cwd());
+   rc = config_workspace_remove(client);
+   assert(!rc);
+   puts("  owned mirror callbacks: cross-thread/nested restore and replaced-inode refusal pass");
+}
+
+static const char *test_owned_project;
+static int test_project_open(const char *cwd)
+{
+   return test_owned_project && !strcmp(cwd, test_owned_project)
+              ? open(cwd, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+              : -1;
 }
 
 int main(void)
 {
+   /* A failed owner acquisition is never a truthy authorization, even locally. */
+   int rejected = workspace_turn_reject_foreign_cwd(-1, 1, "/tmp/owner-acquisition-failed");
+   assert(rejected);
+
    /* Isolated temp HOME for the module caller's process-level helpers. */
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-wsturn-XXXXXX", platform_tmpdir());
@@ -143,13 +360,60 @@ int main(void)
 
    /* Restore only explicitly configured detached roots after a cold registry
     * start. A shared, nested, or unknown path cannot create a serving queue. */
-   assert(ws_runner_registry_register_configured("/tmp/ws-detached") == 1);
+   assert(ws_runner_registry_register_configured(test_detached_workspace) == 1);
    assert(ws_runner_registry_register_configured("/tmp/ws-shared") == 0);
    assert(ws_runner_registry_register_configured("/tmp/ws-detached/subdir") == 0);
    assert(ws_runner_registry_register_configured("/tmp/not-registered") == 0);
    assert(ws_runner_registry_register_configured(NULL) == 0);
 
    const workspace_provider_t *shared = workspace_provider_shared();
+   /* Shared identities survive a new turn but change when the actual directory
+    * is replaced. The held descriptor continues to pin the measured resource. */
+   {
+      char path[768], old[768], before[65], same[65], replaced[65];
+      snprintf(path, sizeof path, "%s/identity-workspace", tmpdir);
+      snprintf(old, sizeof old, "%s/identity-old", tmpdir);
+      assert(!mkdir(path, 0700));
+      assert(!config_workspace_add(path, "shared", NULL, NULL));
+      int first = -1, second = -1;
+      assert(!workspace_turn_resource_identity(path, &first, before) && first >= 0);
+      assert(!workspace_turn_resource_identity(path, &second, same) && !strcmp(before, same));
+      close(second);
+      assert(!rename(path, old) && !mkdir(path, 0700));
+      assert(!workspace_turn_resource_identity(path, &second, replaced) &&
+             strcmp(before, replaced));
+      struct stat pinned, changed;
+      assert(!fstat(first, &pinned) && !fstat(second, &changed) && pinned.st_ino != changed.st_ino);
+      close(first);
+      close(second);
+      assert(!rmdir(path) && !rmdir(old));
+      assert(!config_workspace_remove(path));
+   }
+
+   /* Only the registered host project owner can admit an unconfigured clone;
+    * identity retains the actual directory fd and never broadens to siblings. */
+   {
+      char project[768], sibling[768], allowed[768], digest[65];
+      snprintf(project, sizeof project, "%s/owned-clone", tmpdir);
+      snprintf(sibling, sizeof sibling, "%s/owned-clone-foreign", tmpdir);
+      assert(!mkdir(project, 0700) && !mkdir(sibling, 0700));
+      int fd = -1;
+      assert(workspace_turn_resource_identity(project, &fd, digest) < 0 && fd == -1);
+      workspace_turn_register_project_owner(test_project_open);
+      test_owned_project = project;
+      assert(!workspace_turn_resource_identity(project, &fd, digest) && fd >= 0);
+      struct stat measured, actual;
+      assert(!fstat(fd, &measured) && !stat(project, &actual) && measured.st_ino == actual.st_ino &&
+             measured.st_dev == actual.st_dev);
+      close(fd);
+      assert(workspace_turn_workspace_authorized(project, allowed, sizeof allowed));
+      assert(!workspace_turn_workspace_authorized(sibling, allowed, sizeof allowed));
+      assert(workspace_turn_resource_identity(sibling, &fd, digest) < 0 && fd == -1);
+      workspace_turn_register_project_owner(NULL);
+      assert(workspace_turn_resource_identity(project, &fd, digest) < 0 && fd == -1);
+      test_owned_project = NULL;
+      assert(!rmdir(project) && !rmdir(sibling));
+   }
 
    /* cwd inside the detached workspace -> binds a detached provider active */
    {
@@ -158,14 +422,29 @@ int main(void)
       assert(bound == 1);
       const workspace_provider_t *active = workspace_provider_active();
       assert(active != shared && active->kind == WS_PROVIDER_DETACHED);
+      workspace_turn_scope_t *nested = NULL;
+      int rebound = workspace_turn_scope_begin(test_detached_workspace, &nested);
+      assert(rebound == 1 && nested && workspace_provider_active() != active);
+      assert(active->kind == WS_PROVIDER_DETACHED);
+      int restored = workspace_turn_scope_end(nested);
+      assert(!restored && workspace_provider_active() == active);
       workspace_turn_unbind_active();
       assert(workspace_provider_active() == shared); /* restored */
    }
 
    /* the workspace root itself also matches */
    {
-      assert(workspace_turn_bind_active("/tmp/ws-detached") == 1);
+      assert(workspace_turn_bind_active(test_detached_workspace) == 1);
       assert(workspace_provider_active()->kind == WS_PROVIDER_DETACHED);
+      char first[65], repeated[65], reacquired[65];
+      int fd = -1;
+      assert(!workspace_turn_resource_identity(test_detached_workspace, &fd, first) && fd == -1);
+      assert(!workspace_turn_resource_identity(test_detached_workspace, &fd, repeated) &&
+             !strcmp(first, repeated));
+      workspace_turn_unbind_active();
+      assert(workspace_turn_bind_active(test_detached_workspace) == 1);
+      assert(!workspace_turn_resource_identity(test_detached_workspace, &fd, reacquired) &&
+             strcmp(first, reacquired));
       workspace_turn_unbind_active();
    }
 
@@ -261,6 +540,33 @@ int main(void)
          /* The container-bound predicate the shell-git gate keys off: true while
           * bound, false once released. */
          assert(workspace_turn_container_bound() == 1);
+         char lease[65], same[65], remote[65];
+         int identity_fd = -1;
+         assert(!workspace_turn_resource_identity(test_shared_workspace, &identity_fd, lease) &&
+                identity_fd == -1);
+
+         /* A nested shared lookup and detached Git operation cannot steal the
+          * container lease or overwrite its provider storage. */
+         workspace_turn_scope_t *outer = NULL, *inner = NULL;
+         int scoped = workspace_turn_scope_begin(test_shared_workspace, &outer);
+         assert(scoped == 0 && outer && workspace_provider_active() == p);
+         assert(workspace_turn_container_bound() && !g_releases);
+         scoped = workspace_turn_scope_begin(test_detached_workspace, &inner);
+         assert(scoped == 1 && inner && workspace_provider_active() != p);
+         const workspace_provider_t *nested = workspace_provider_active();
+         assert(nested->kind == WS_PROVIDER_DETACHED && p->kind == WS_PROVIDER_CONTAINER);
+         assert(!workspace_turn_resource_identity(test_detached_workspace, &identity_fd, remote) &&
+                strcmp(lease, remote));
+         assert(!workspace_turn_container_bound() && !g_releases);
+         int closed = workspace_turn_scope_end(outer);
+         assert(closed < 0 && workspace_provider_active() == nested && !g_releases);
+         closed = workspace_turn_scope_end(inner);
+         assert(!closed && workspace_provider_active() == p);
+         assert(workspace_turn_container_bound() && !g_releases);
+         closed = workspace_turn_scope_end(outer);
+         assert(!closed && workspace_provider_active() == p && !g_releases);
+         assert(!workspace_turn_resource_identity(test_shared_workspace, &identity_fd, same) &&
+                !strcmp(lease, same));
 
          /* Unbind must RELEASE the container, not just drop the pointer: a leaked
           * container outlives its turn and pins its workspace. And the active
@@ -270,8 +576,75 @@ int main(void)
          assert(g_releases == 1);
          assert(workspace_provider_active() == shared);
          assert(workspace_turn_container_bound() == 0); /* cleared on unbind */
+         /* Even the fixture's recycled backend state address cannot reuse a
+          * released acquisition's identity. */
+         assert(workspace_turn_bind_container("deleg-reacquired", NULL, test_shared_workspace, 0) ==
+                1);
+         assert(!workspace_turn_resource_identity(test_shared_workspace, &identity_fd, same) &&
+                strcmp(lease, same));
+         workspace_turn_unbind_active();
+         assert(g_releases == 2);
       }
 
+      /* Source inspection has its own exact local capability; file/exec stays
+       * container-bound and detached nesting cannot borrow that capability. */
+      {
+         char source[768], sibling[768], retired[768], digest[65], resource[65];
+         snprintf(source, sizeof source, "%s/container-source", tmpdir);
+         snprintf(sibling, sizeof sibling, "%s/container-sibling", tmpdir);
+         snprintf(retired, sizeof retired, "%s/container-retired", tmpdir);
+         assert(!mkdir(source, 0700) && !mkdir(sibling, 0700));
+         assert(!config_workspace_add(source, "shared", NULL, NULL));
+         assert(!config_workspace_add(sibling, "shared", NULL, NULL));
+         g_acquires = g_releases = 0;
+         int before = count_source_fds(source);
+         g_acquire_fails = 1;
+         assert(workspace_turn_bind_container("source-failed", NULL, source, 0) < 0);
+         assert(count_source_fds(source) == before && workspace_provider_active() == shared);
+         g_acquire_fails = 0;
+         snprintf(g_retired_workspace, sizeof g_retired_workspace, "%s", retired);
+         g_replace_workspace = 1;
+         assert(workspace_turn_bind_container("source-replaced-during-acquire", NULL, source, 0) <
+                0);
+         assert(g_releases == 1 && workspace_provider_active() == shared);
+         assert(count_source_fds(retired) == before);
+         assert(!rmdir(source) && !rename(retired, source));
+         g_replace_workspace = 0;
+         g_acquires = g_releases = 0;
+         assert(workspace_turn_bind_container("source-owned", NULL, source, 0) == 1);
+         const workspace_provider_t *container = workspace_provider_active();
+         assert(container->kind == WS_PROVIDER_CONTAINER && count_source_fds(source) == before + 1);
+         int fd = -1;
+         assert(!workspace_turn_resource_identity(source, &fd, resource) && fd == -1);
+         assert(!workspace_turn_source_identity(source, &fd, digest) && fd >= 0);
+         struct stat measured, actual;
+         assert(!fstat(fd, &measured) && !stat(source, &actual) &&
+                measured.st_ino == actual.st_ino);
+         close(fd);
+         assert(workspace_turn_source_identity(sibling, &fd, digest) < 0 && fd == -1 && !digest[0]);
+         assert(workspace_provider_active() == container);
+         workspace_turn_scope_t *nested = NULL;
+         assert(workspace_turn_scope_begin(test_detached_workspace, &nested) == 1 && nested);
+         assert(workspace_turn_source_identity(source, &fd, digest) < 0 && fd == -1 && !digest[0]);
+         assert(workspace_turn_source_identity(test_detached_workspace, &fd, digest) < 0 &&
+                fd == -1);
+         assert(!workspace_turn_scope_end(nested) && workspace_provider_active() == container);
+         assert(!rename(source, retired) && !mkdir(source, 0700));
+         assert(workspace_turn_source_identity(source, &fd, digest) < 0 && fd == -1 && !digest[0]);
+         assert(!rmdir(source) && !rename(retired, source));
+         assert(!workspace_turn_source_identity(source, &fd, digest) && fd >= 0);
+         close(fd);
+         /* An acquired exact source survives registration churn for this turn;
+          * unbinding closes it and cannot grant a now-unregistered host path. */
+         assert(!config_workspace_remove(source));
+         assert(!workspace_turn_source_identity(source, &fd, digest) && fd >= 0);
+         close(fd);
+         workspace_turn_unbind_active();
+         assert(g_releases == 1 && count_source_fds(source) == before);
+         assert(workspace_turn_source_identity(source, &fd, digest) < 0 && fd == -1 && !digest[0]);
+         assert(!config_workspace_remove(sibling));
+         assert(!rmdir(source) && !rmdir(sibling));
+      }
       /* The complete tree reaches the backend. */
       {
          g_acquires = g_releases = 0;
@@ -342,7 +715,7 @@ int main(void)
       /* A registered root of "/" must NOT authorize the whole host: that is not a
        * workspace registration, it is the absence of one. */
       {
-         assert(config_workspace_remove("/tmp/ws-detached") == 0);
+         assert(config_workspace_remove(test_detached_workspace) == 0);
          assert(config_workspace_remove("/tmp/ws-shared") == 0);
          assert(config_workspace_add("/", "shared", NULL, NULL) == 0);
 
@@ -387,6 +760,10 @@ int main(void)
 
             assert(rc == 0); /* behaviour unchanged: still refuses to resolve */
             assert(!out[0]); /* and still clears the output */
+            workspace_turn_scope_t *failed = NULL;
+            int bound = workspace_turn_scope_begin("/tmp/ws-mirror-unresolvable/src", &failed);
+            assert(bound < 0 && !failed);
+            assert(workspace_turn_reject_foreign_cwd(bound, 1, "/tmp/ws-mirror-unresolvable/src"));
 
             FILE *f = fopen(capture, "r");
             assert(f);
@@ -454,6 +831,7 @@ int main(void)
       delegate_backend_reset_for_test();
    }
 
+   test_owned_mirror_callback_lease(tmpdir);
    printf("workspace_turn: all tests passed\n");
    return 0;
 }

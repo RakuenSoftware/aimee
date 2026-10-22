@@ -1,5 +1,7 @@
 /* cli_claude.c: legacy Claude provider-CLI adapter. */
 #include "provider_cli_adapter.h"
+#include "claude_headless.h"
+#include "cli_claude_native.h"
 
 #include <stddef.h>
 
@@ -8,7 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define CLAUDE_ARG_MAX 48
+#define CLAUDE_ARG_MAX 64
 
 /* Build `claude -p` argv into tokens[]. The leading *split_count tokens (the
  * parsed cli_cmd, default "claude") are heap-allocated; the rest are borrowed.
@@ -73,6 +75,14 @@ static int claude_build_argv(const provider_cli_cfg_t *cfg, char **tokens, int c
    CLAUDE_ADD_ARG("stream-json");
    CLAUDE_ADD_ARG("--verbose");
    CLAUDE_ADD_ARG("--include-partial-messages");
+   if (cfg && cfg->control_channel)
+   {
+      CLAUDE_ADD_ARG("--input-format");
+      CLAUDE_ADD_ARG("stream-json");
+      CLAUDE_ADD_ARG("--permission-prompt-tool");
+      CLAUDE_ADD_ARG("stdio");
+   }
+
    /* Hand the delegate aimee. `aimee mcp serve` is the stdio MCP proxy that
     * forwards tool calls to this server over /v1, so a spawned CLI delegate reaches
     * the same tools a native agent does — git_commit / git_push / git_pr, memory,
@@ -96,7 +106,19 @@ static int claude_build_argv(const provider_cli_cfg_t *cfg, char **tokens, int c
     * let the primary keep spawning its own subagents despite the gateway request
     * strip, which only removes Task from the API request, not from the CLI's own
     * built-in tool registry. Mirrors guardrails' Task->Subagent canonicalization. */
-   CLAUDE_ADD_ARG("AskUserQuestion,Task,Agent,RemoteTrigger");
+   CLAUDE_ADD_ARG(cfg && cfg->control_channel ? "Task,Agent,RemoteTrigger"
+                                              : "AskUserQuestion,Task,Agent,RemoteTrigger");
+   if (cfg && cfg->primary && !cfg->control_channel && !strstr(cmd, "--permission-mode") &&
+       !strstr(cmd, "--dangerously-skip-permissions"))
+   {
+      CLAUDE_ADD_ARG("--permission-mode");
+      CLAUDE_ADD_ARG("bypassPermissions");
+   }
+   if (cfg && cfg->resume_id && cfg->resume_id[0])
+   {
+      CLAUDE_ADD_ARG("--resume");
+      CLAUDE_ADD_ARG(cfg->resume_id);
+   }
    if (cfg && cfg->system_prompt && cfg->system_prompt[0])
    {
       CLAUDE_ADD_ARG("--append-system-prompt");
@@ -115,6 +137,8 @@ static int claude_spawn(const provider_cli_cfg_t *cfg, const char *task_prompt, 
                         int *stdout_fd, pid_t *pid_out)
 {
    (void)task_prompt;
+   if (cfg && cfg->claude_host)
+      return cli_claude_native_spawn(cfg, stdin_fd, stdout_fd, pid_out);
    char *tokens[CLAUDE_ARG_MAX + 1] = {0};
    int split = 0;
    int argc = claude_build_argv(cfg, tokens, CLAUDE_ARG_MAX, &split);
@@ -266,6 +290,12 @@ static int claude_parse_line(const char *line, cli_event_t *event_out)
    return matched;
 }
 
+static int claude_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
+{
+   return claude_headless_run(cfg, cfg ? cfg->bind_session : NULL, cfg ? cfg->bind_context : NULL,
+                              out);
+}
+
 const provider_cli_adapter_t claude_provider_cli_adapter = {
     .cli_kind = "claude",
     .display_name = "Claude CLI",
@@ -279,5 +309,5 @@ const provider_cli_adapter_t claude_provider_cli_adapter = {
     .is_write_event = provider_cli_event_is_write,
     .build_prompt = claude_build_prompt,
     .build_argv = claude_build_argv,
-    .execute = NULL,
+    .execute = claude_execute,
 };

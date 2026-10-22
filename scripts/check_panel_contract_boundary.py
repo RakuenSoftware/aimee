@@ -21,7 +21,6 @@ TEMPORARY_TYPE_CONSUMERS = {
     # (`./aimee` has no such command path) and nothing live referenced them.
 }
 TEMPORARY_ENSEMBLE_CONSUMERS = {
-    "src/cmd_agent_delegate.c",
     "src/headers/evidence_replay.h",
     "src/headers/server_compute_internal.h",
     # wfe_live_panel.c paid this debt off: its delegate_ensemble.h include was

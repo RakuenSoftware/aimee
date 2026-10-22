@@ -141,7 +141,7 @@ static cJSON *git_sub_commit(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
       if (!msg)
       {
          agent_config_t acfg;
-         agent_result_t result;
+         agent_result_t result = {0};
          memset(&result, 0, sizeof(result));
          if (agent_load_config(&acfg) == 0)
          {
@@ -153,8 +153,9 @@ static cJSON *git_sub_commit(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
                fprintf(stderr, "Auto-message unavailable: %s\n", why);
             }
             else if (agent_execute(ag, NULL, prompt, 128, 0.0, &result) == 0)
-               msg = result.response;
+               msg = agent_result_take_text(&result);
          }
+         agent_result_clear_response(&result);
       }
       if (msg)
          fprintf(stderr, "Auto-message: %s\n", msg);

@@ -10,7 +10,6 @@
 #include "server_delegate_monitor.h" /* delegate heartbeat begin/end (keep slow delegates alive) */
 #include "server_compute_impl.h"
 #include "agent_config.h"
-#include "approach_store.h"
 #include <aimee/gateway/gateway_policy.h>
 #include "presence.h"
 #include "compute_pool.h"
@@ -33,6 +32,8 @@
 #include "db1_client/delegate_learning.h"
 #include "db1_client/delegate_reservation.h"
 #include "request_context.h" /* execution key carried as the idempotency key */
+#include "module_commands.h"
+#include "ingress_preinject.h"
 #include "kb_client.h"
 #include "kb_bandit.h"
 #include "db1_client/interaction_events.h"
@@ -59,12 +60,6 @@
 #include "cJSON.h"
 #include "dstr.h"
 
-/* Defined in agent_runtime_tmux.c (no shared header). Drives the standard CLI
- * agent over a tmux session, which runs on the client over the reverse channel
- * when the active workspace is detached. */
-int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
-                              const char *system_prompt, const char *user_prompt, int max_tokens,
-                              double temperature, agent_result_t *out);
 #include <ctype.h>
 #include <errno.h>
 #include <pthread.h>
@@ -254,6 +249,33 @@ static void compute_update_coord_task(compute_ctx_t *cctx, cJSON *resp)
 /* Write response and free context */
 void compute_respond(compute_ctx_t *cctx, cJSON *resp)
 {
+   if (cctx->ir_enabled)
+   {
+      const cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+      const cJSON *message = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      int failed =
+          cctx->ir_failed || (cJSON_IsString(status) && !strcmp(status->valuestring, "error"));
+      if (server_chat_ir_finish(cctx, failed
+                                          ? (cJSON_IsString(message) ? message->valuestring
+                                                                     : "canonical capture failed")
+                                          : NULL) == 0)
+      {
+         if (cctx->ir_delivery)
+         {
+            cJSON_Delete(resp);
+            return;
+         }
+      }
+      else
+      {
+         /* No successful completion after a storage failure. The transport error
+          * is deliberately outside the persisted content protocol. */
+         cJSON_Delete(resp);
+         resp = cJSON_CreateObject();
+         cJSON_AddStringToObject(resp, "status", "error");
+         cJSON_AddStringToObject(resp, "message", "canonical session persistence failed");
+      }
+   }
    compute_update_background_job(cctx, resp);
    compute_update_coord_task(cctx, resp);
 
@@ -337,6 +359,7 @@ void compute_ctx_release_budget(compute_ctx_t *cctx)
 
 void compute_ctx_free(compute_ctx_t *cctx)
 {
+   server_chat_ir_close(cctx);
    if (cctx->background_job_id > 0)
       agent_set_durable_job(0);
    if (cctx->compute_grant > 0)
@@ -356,6 +379,11 @@ void compute_ctx_free(compute_ctx_t *cctx)
    if (cctx->conn_fd >= 0)
       close(cctx->conn_fd);
 #endif
+   request_context_snapshot_clear(&cctx->request_context);
+   const workspace_turn_mirror_lease_t *bound = workspace_turn_mirror_bind(NULL);
+   if (bound != cctx->source_mirror)
+      workspace_turn_mirror_bind(bound);
+   workspace_turn_mirror_release(cctx->source_mirror);
    free(cctx);
 }
 
@@ -667,8 +695,9 @@ static int delegate_apply_cost_limit(agent_t *agent, double max_cost_usd, int in
    return 0;
 }
 
-void delegate_worker(void *arg)
+static void delegate_worker_run(void *arg)
 {
+   aimee_ir_session_begin_task();
    compute_ctx_t *cctx = (compute_ctx_t *)arg;
    compute_ctx_begin_budget(cctx);
    if (cctx->background_job_id > 0)
@@ -706,7 +735,8 @@ void delegate_worker(void *arg)
     * server-side reconstruction of a client workspace. Declared here, ahead of
     * every `goto delegate_fail`, so no jump can skip its initialiser. Empty means
     * the turn runs in the caller's own cwd. See "ONE ROOT PER DELEGATE TURN". */
-   char turn_root[MAX_PATH_LEN] = "";
+   char turn_root[MAX_PATH_LEN] = "", source_cwd[MAX_PATH_LEN] = "";
+   workspace_turn_scope_t *source_workspace = NULL;
    cJSON *req = cctx->req;
    bind_request_session_creds(req);
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
@@ -737,7 +767,6 @@ void delegate_worker(void *arg)
    const char *role =
        delegate_role_canonicalize(cJSON_IsString(jrole) ? jrole->valuestring : "execute");
    const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
-   const char *learning_goal = prompt; /* Preserve before worktree/evidence rewrites. */
    int max_tokens = cJSON_IsNumber(jmax) ? (int)jmax->valuedouble : 0; /* 0 => model-derived */
    double max_cost_usd = cJSON_IsNumber(jmaxcost) ? jmaxcost->valuedouble : 0.0;
    const char *system_prompt = cJSON_IsString(jsystem) ? jsystem->valuestring : NULL;
@@ -806,14 +835,55 @@ void delegate_worker(void *arg)
          return;
       }
    }
+   /* Acquire the source before even role/persona discovery can inspect it.
+    * A recovered mirror path is not authority without its held capability;
+    * ordinary shared paths must still belong to a registered server source. */
+   if (!cwd[0])
+   {
+      if (!getcwd(source_cwd, sizeof source_cwd))
+      {
+         delegation_compute_error(cctx, "workspace: cannot resolve the background source");
+         goto delegate_fail;
+      }
+      cwd = source_cwd;
+   }
+   {
+      int bound = workspace_turn_scope_begin_background(cwd, &source_workspace);
+      if (bound < 0)
+      {
+         delegation_compute_error(cctx,
+                                  "workspace: cannot acquire the registered background source");
+         goto delegate_fail;
+      }
+      const char *resolved = workspace_turn_active_cwd();
+      if (bound > 0 && resolved && resolved[0])
+      {
+         snprintf(turn_root, sizeof turn_root, "%s", resolved);
+         cwd = turn_root;
+         aimee_log(LOG_INFO, "delegate",
+                   "delegate job %d: using registered server reconstruction %s",
+                   cctx->background_job_id, cwd);
+      }
+      else
+      {
+         char permitted[MAX_PATH_LEN];
+         if (!workspace_turn_workspace_authorized(cwd, permitted, sizeof permitted))
+         {
+            delegation_compute_error(
+                cctx, "workspace: background source has no held or registered authority");
+            goto delegate_fail;
+         }
+         snprintf(source_cwd, sizeof source_cwd, "%s", permitted);
+         cwd = source_cwd;
+      }
+   }
    if (!delegate_role_known(cwd && cwd[0] ? cwd : NULL, role))
    {
       char rolemsg[192];
       snprintf(rolemsg, sizeof(rolemsg),
                "unknown delegate role '%s' (see 'aimee delegate --list-roles')", role);
       delegation_compute_error(cctx, rolemsg);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
    if (!persona_exists(cwd && cwd[0] ? cwd : NULL, persona_override))
    {
@@ -821,8 +891,7 @@ void delegate_worker(void *arg)
       snprintf(personamsg, sizeof(personamsg), "unknown persona '%s' (see 'aimee persona list')",
                persona_override);
       delegation_compute_error(cctx, personamsg);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
    /* Write delegates must prove what changed and which tests passed without
     * every CLI/MCP caller remembering an opt-in. An explicit JSON false keeps a
@@ -855,8 +924,7 @@ void delegate_worker(void *arg)
                   "resolved, so it holds none. Check the role template's `permissions:` block.",
                   role);
          delegation_compute_error(cctx, permsmsg);
-         compute_ctx_free(cctx);
-         return;
+         goto delegate_fail;
       }
    }
 
@@ -886,8 +954,7 @@ void delegate_worker(void *arg)
    if (polmsg)
    {
       delegation_compute_error(cctx, polmsg);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
 
    /* Load agent config */
@@ -895,8 +962,7 @@ void delegate_worker(void *arg)
    if (agent_load_config(&acfg) != 0)
    {
       delegation_compute_error(cctx, "failed to load agent config");
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
    if (tool_loop_timeout_ms_cap > 0)
    {
@@ -918,8 +984,7 @@ void delegate_worker(void *arg)
       if (via_name && via_name[0])
       {
          delegation_compute_error(cctx, "invalid delegate participant continuation");
-         compute_ctx_free(cctx);
-         return;
+         goto delegate_fail;
       }
       db1_agent_job_t prior;
       memset(&prior, 0, sizeof(prior));
@@ -927,8 +992,7 @@ void delegate_worker(void *arg)
       {
          db1_agent_job_free(&prior);
          delegation_compute_error(cctx, "delegate participant continuation is unknown");
-         compute_ctx_free(cctx);
-         return;
+         goto delegate_fail;
       }
       snprintf(participant_agent, sizeof(participant_agent), "%s", prior.agent_name);
       db1_agent_job_free(&prior);
@@ -944,85 +1008,13 @@ void delegate_worker(void *arg)
                                         sizeof(inline_acp_name)) != 0)
       {
          delegation_compute_error(cctx, "failed to register inline --acp delegate agent");
-         compute_ctx_free(cctx);
-         return;
+         goto delegate_fail;
       }
       via_name = inline_acp_name;
    }
 
-   /* Claude over the standard `claude` CLI/tmux on a DETACHED (thin-client)
-    * workspace: claude runs its own interactive session on the CLIENT (the tmux
-    * driver marshals its commands over the reverse channel) against the client's
-    * tree, doing its own edits — so it bypasses the server-side worktree
-    * isolation / write-guard machinery below (which assumes a local fs), exactly
-    * as the primary chat path does. Gated by the agent's `primary_only` flag. */
-   if (via_name && via_name[0])
-   {
-      agent_t *cag = agent_find(&acfg, via_name);
-      if (cag && agent_is_claude_cli(cag))
-      {
-         int detached_bound = workspace_turn_bind_active(cwd);
-         const workspace_provider_t *wsp = workspace_provider_active();
-         if (detached_bound && wsp && wsp->kind == WS_PROVIDER_DETACHED && wsp->exec_shell)
-         {
-            if (cag->primary_only)
-            {
-               workspace_turn_unbind_active();
-               char m[320];
-               snprintf(m, sizeof(m),
-                        "agent '%s' is marked Primary Agent Only and cannot run as a delegate; "
-                        "uncheck 'Primary Agent Only' for it in the Agents tab to allow delegation "
-                        "(see DELEGATES.md for the Anthropic account-risk warning)",
-                        cag->name);
-               delegation_compute_error(cctx, m);
-               compute_ctx_free(cctx);
-               return;
-            }
-            if (cwd[0] == '/' && !strstr(cwd, "/.."))
-               run_cmd_set_cwd(cwd);
-            char *tmpl = NULL;
-            const char *sysp = delegate_assemble_system_prompt(system_prompt, role, prompt, cwd,
-                                                               persona_override, cwd, &tmpl);
-            agent_result_t result;
-            memset(&result, 0, sizeof(result));
-            int cli_max_tokens = AGENT_DEFAULT_MAX_TOKENS;
-            int cli_cost_failed = 0;
-            if (max_cost_usd != 0.0)
-            {
-               size_t bytes = strlen(sysp ? sysp : "") + strlen(prompt);
-               int input_tokens = bytes > (size_t)(INT_MAX - 32768) ? INT_MAX : (int)bytes + 32768;
-               char cost_err[256] = "";
-               if (max_cost_usd < 0.0 ||
-                   delegate_apply_cost_limit(cag, max_cost_usd, input_tokens, &cli_max_tokens,
-                                             cost_err, sizeof(cost_err)) != 0)
-               {
-                  snprintf(result.error, sizeof(result.error), "%s",
-                           max_cost_usd < 0.0 ? "max_cost_usd cannot be negative" : cost_err);
-                  cli_cost_failed = 1;
-               }
-            }
-            if (!cli_cost_failed && wire_fence_external_backend() != 0)
-            {
-               snprintf(result.error, sizeof(result.error), "%s", wire_fence_last_error());
-               cli_cost_failed = 1;
-            }
-            int rc = cli_cost_failed
-                         ? -1
-                         : agent_execute_cli_session(cag, NULL, sysp ? sysp : "", prompt,
-                                                     cli_max_tokens, 0.3, &result);
-            run_cmd_set_cwd(NULL);
-            workspace_turn_unbind_active();
-            free(tmpl);
-            cJSON *resp = delegate_build_result_response(deleg_id, rc, &result, &acfg, role, cag,
-                                                         -1, 0, NULL, NULL);
-            free(result.response);
-            compute_respond(cctx, resp);
-            compute_ctx_free(cctx);
-            return;
-         }
-         workspace_turn_unbind_active();
-      }
-   }
+   /* Native CLI delegates follow the same scoped admission, durable capture
+    * and workspace policy as every other delegate. */
    unsigned required_caps = cJSON_IsNumber(jreq_caps) ? (unsigned)jreq_caps->valuedouble : 0;
    int min_context = cJSON_IsNumber(jmin_ctx) ? (int)jmin_ctx->valuedouble : 0;
    /* A delegate packet is bounded unless its caller explicitly says it owns the
@@ -1084,8 +1076,7 @@ void delegate_worker(void *arg)
           delegate_route_preflight(&acfg, role, route_err, sizeof(route_err)) != 0)
       {
          delegation_compute_error(cctx, route_err);
-         compute_ctx_free(cctx);
-         return;
+         goto delegate_fail;
       }
    }
 
@@ -1103,8 +1094,7 @@ void delegate_worker(void *arg)
                "scope=%s)",
                caps_buf[0] ? caps_buf : "none", min_context, agent_scope_name(scope));
       delegation_compute_error(cctx, errmsg);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
    /* Record the placement together with the ceiling it was made under. A scope
     * that silently failed to bind is indistinguishable from one that bound and
@@ -1126,8 +1116,7 @@ void delegate_worker(void *arg)
                "(see DELEGATES.md for the Anthropic account-risk warning)",
                target_agent->name);
       delegation_compute_error(cctx, errmsg);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
    /* Never let a delegate run with a non-positive timeout: timeout_ms <= 0
     * disables the HTTP read deadline and a stalled provider hangs the worker
@@ -1164,8 +1153,7 @@ void delegate_worker(void *arg)
          snprintf(errmsg, sizeof(errmsg), "no available credential in pool for agent '%s'",
                   target_agent->name);
       delegation_compute_error(cctx, errmsg);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
 
    /* Enforce delegation depth limit.
@@ -1230,43 +1218,6 @@ void delegate_worker(void *arg)
          goto delegate_fail;
       }
    }
-
-   /* ONE ROOT PER DELEGATE TURN.
-    *
-    * Everything below derives from `cwd`: the worktree the file tools write to
-    * (delegate_resolve_worktree), the working directory the shell runs in
-    * (run_cmd_set_cwd), the absolute paths rewritten in the prompt, the tree the
-    * no-op detector diffs, the parent-write guard. Resolving the turn's root
-    * HERE -- once, before any of them -- is what stops them disagreeing.
-    *
-    * They used to. A background delegate on a DETACHED (client-served) workspace
-    * had its shell redirected into a server-side tree hundreds of lines below
-    * this point, after the worktree had already been resolved against the
-    * client's path. One delegate, two roots: it wrote through a path that existed
-    * only on the client and ran `pwd` somewhere else entirely. So it could edit
-    * code and could not build, test, or diff the edit -- and nothing told it so.
-    * Measured: asked to add one comment line to a 2157-line file, such a delegate
-    * truncated it to 5 lines and reported success.
-    *
-    * A no-op for every other turn. The resolver returns 0 unless this is a
-    * background job on a detached workspace that has recorded a remote and head
-    * via `aimee workspace mirror-sync`; a detached workspace with nothing
-    * recorded is handled further down, where having no usable tree at all is a
-    * refusal rather than a redirect. */
-   if (cwd[0] && cctx->background_job_id > 0 &&
-       workspace_turn_resolve_detached_mirror_cwd(cwd, turn_root, sizeof(turn_root)) &&
-       turn_root[0])
-   {
-      aimee_log(LOG_WARN, "delegate",
-                "delegate %s: detached workspace '%s' has no client to serve this background job; "
-                "binding the whole turn -- shell and file tools alike -- to the server-side "
-                "reconstruction at %s. That tree is the last state synced by `aimee workspace "
-                "mirror-sync` and may be behind the client",
-                deleg_id, cwd, turn_root);
-      cwd = turn_root;
-   }
-   else
-      turn_root[0] = '\0'; /* a partial write from a failed resolve is not a root */
 
    /* Resolve @path/to/file references in the delegate prompt */
    if (strchr(prompt, '@'))
@@ -1344,6 +1295,13 @@ void delegate_worker(void *arg)
       goto delegate_fail;
    }
 
+   if (source_workspace && delegate_worktree_path[0] &&
+       workspace_turn_scope_hold_created_worktree(source_workspace, delegate_worktree_path))
+   {
+      delegation_compute_error(cctx, "workspace: cannot retain the dedicated delegate worktree");
+      goto delegate_fail;
+   }
+
    /* Rewrite operator-cwd absolute paths so provider/tool writes stay isolated. */
    if (!delegate_shared_worktree && delegate_worktree_path[0] && cwd[0] == '/' &&
        strcmp(cwd, delegate_worktree_path) != 0)
@@ -1410,18 +1368,9 @@ void delegate_worker(void *arg)
    delegate_append_owned_block(&system_prompt, &template_sys_prompt,
                                delegate_inject_graph_context(prompt, cwd));
 
-   /* Goal-specific negative knowledge closes the failure loop: a no-progress
-    * abort records the failed approach at exit, and a sufficiently similar
-    * future goal receives it before the first provider call. */
-   if (delegate_allows_writes)
-   {
-      char *retry_context = approach_store_retry_context(learning_goal);
-      if (retry_context)
-         aimee_log(LOG_INFO, "delegate",
-                   "delegate %s: injecting prior failed-approach learning for a similar goal",
-                   deleg_id);
-      delegate_append_owned_block(&system_prompt, &template_sys_prompt, retry_context);
-   }
+   /* Legacy goal-only approach rows have no authenticated principal/project or
+    * live canonical source binding. They cannot become delegate prompt context.
+    * Verified execution history is admitted below through canonical assembly. */
 
    /* Named-file drift guard: extract any repo-relative paths named in the prompt
     * and check pre-flight conditions before running the agent. */
@@ -1506,7 +1455,7 @@ void delegate_worker(void *arg)
    /* Concurrency (global + per-agent + per-model caps) is enforced downstream by the single
     * agent_admission controller inside agent_dispatch_one — there is no separate per-model
     * gate here. A pinned turn blocks+queues there; fan-out/fallback fail fast. */
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    char *handoff_prompt = NULL;
    const char *run_prompt = prompt;
@@ -1517,12 +1466,54 @@ void delegate_worker(void *arg)
       if (handoff_prompt)
          run_prompt = handoff_prompt;
    }
-   char *learning_sys_prompt =
-       delegate_agent_uses_mistral_path(target_agent)
-           ? NULL
-           : db1_delegate_learning_inject_prompt(role, system_prompt ? system_prompt : "", 3);
-   if (learning_sys_prompt)
-      system_prompt = learning_sys_prompt;
+   /* Reuse independently admitted configured-test receipts for this host actor
+    * and registered project. Historical tests never imply semantic task success. */
+   const request_context_t *history_owner = request_context_get();
+   char history_project[512] = "";
+   if (history_owner && history_owner->vault_transport != ATTEST_NONE &&
+       history_owner->vault_principal[0] && cwd && cwd[0] &&
+       server_learning_project_from_cwd(cwd, history_project, sizeof(history_project)) == 0)
+   {
+      char *history =
+          db1_execution_test_grade_recall(history_owner->vault_principal, history_project, NULL);
+      cJSON *projection = history ? cJSON_Parse(history) : NULL;
+      free(history);
+      if (projection)
+      {
+         cJSON *assembly = cJSON_CreateObject();
+         cJSON_AddStringToObject(assembly, "operation", "ingress-assemble");
+         cJSON_AddStringToObject(assembly, "project", history_project);
+         cJSON_AddNumberToObject(assembly, "budget", 4096);
+         cJSON_AddBoolToObject(assembly, "prepare_source_release", 1);
+         cJSON_AddStringToObject(assembly, "source_release_ticket",
+                                 history_owner->memory_source_release);
+         cJSON_AddStringToObject(assembly, "request_id", history_owner->request_id);
+         cJSON_AddStringToObject(assembly, "principal", history_owner->principal);
+         cJSON_AddStringToObject(assembly, "caller_subject", history_owner->caller_subject);
+         char history_workspace[512] = "", scope_project[512] = "";
+         if (ingress_preinject_resolve_active_scope(history_workspace, sizeof(history_workspace),
+                                                    scope_project, sizeof(scope_project)) == 0 &&
+             !strcmp(scope_project, history_project))
+            cJSON_AddStringToObject(assembly, "workspace", history_workspace);
+         cJSON_AddItemToObject(assembly, "execution_test_grades", projection);
+         cJSON *rendered = NULL;
+         if (aimee_module_commands_dispatch_internal_timeout("memory.runtime", assembly, 500,
+                                                             &rendered) == 1)
+         {
+            const char *block =
+                cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(rendered, "envelope"));
+            const char *ticket = cJSON_GetStringValue(
+                cJSON_GetObjectItemCaseSensitive(rendered, "source_release_ticket"));
+            if (block && block[0] && ticket && request_context_set_source_release(ticket) == 0)
+            {
+               (void)request_context_require_memory_receipt();
+               delegate_append_owned_block(&system_prompt, &template_sys_prompt, strdup(block));
+            }
+         }
+         cJSON_Delete(rendered);
+         cJSON_Delete(assembly);
+      }
+   }
 
    int rc = -1;
    int cost_limit_failed = 0;
@@ -1792,7 +1783,7 @@ void delegate_worker(void *arg)
              delegate_handoff_repair_prompt(result.response, handoff_validation.error);
          if (repair_prompt)
          {
-            agent_result_t repaired;
+            agent_result_t repaired = {0};
             memset(&repaired, 0, sizeof(repaired));
             int repair_rc =
                 force_tools
@@ -1803,9 +1794,7 @@ void delegate_worker(void *arg)
             free(repair_prompt);
             if (repair_rc == 0 && repaired.response)
             {
-               free(result.response);
-               result.response = repaired.response;
-               repaired.response = NULL;
+               agent_result_move_response(&result, &repaired);
                result.turns += repaired.turns;
                result.tool_calls += repaired.tool_calls;
                if (repaired.agent_name[0])
@@ -1813,7 +1802,7 @@ void delegate_worker(void *arg)
                (void)delegate_handoff_validate_text(result.response, NULL, 1, &handoff_validation);
                handoff_validation.repair_attempted = 1;
             }
-            free(repaired.response);
+            agent_result_clear_response(&repaired);
          }
       }
       if (!handoff_validation.valid)
@@ -1877,7 +1866,7 @@ void delegate_worker(void *arg)
       result.success = 0;
       snprintf(result.error, sizeof(result.error),
                "delegate %s returned raw tool-call markup or another degenerate response", role);
-      free(result.response);
+      agent_result_clear_response(&result);
       result.response = NULL;
    }
    if (n_stale > 0 && result.response)
@@ -1897,8 +1886,7 @@ void delegate_worker(void *arg)
       {
          memcpy(augmented, result.response, rl);
          memcpy(augmented + rl, note, nl + 1);
-         free(result.response);
-         result.response = augmented;
+         agent_result_replace_display_text(&result, augmented);
       }
    }
 
@@ -1915,11 +1903,16 @@ void delegate_worker(void *arg)
    delegate_checkout_add_result_ex(resp, launch_worktree_path, launch_head, parent_worktree_path,
                                    parent_worktree_head, parent_worktree_fingerprint);
 
-   free(result.response);
+   /* Canonical child capture publishes source-bound experience. Preserve exit
+    * metrics without duplicating it from flat response/error classification. */
+   if (delegate_record_exit_metrics(sid, role, &result, rc, max_turns, &acfg, target_agent,
+                                    deleg_id) != 0)
+      LOG_WARN("delegate", "delegate %s: terminal execution has incomplete exit metrics", deleg_id);
+
+   agent_result_clear_response(&result);
    free(handoff_prompt);
    free(resolved_prompt);
    free(template_sys_prompt);
-   free(learning_sys_prompt);
    compute_respond(cctx, resp);
 
    /* Unified-presence "speak first": tell the launching session's surfaces this
@@ -1934,10 +1927,6 @@ void delegate_worker(void *arg)
                role && role[0] ? role : "task", result.turns, result.tool_calls);
       (void)presence_route_event(effective_sid, PRESENCE_EV_DELEGATE, "delegate_done", summary);
    }
-
-   /* Classify and record a learning from this delegate exit. */
-   delegate_record_exit_learning(sid, role, &result, rc, max_turns, &acfg, target_agent,
-                                 learning_goal, deleg_id);
 
    /* Close the delegate_routing bandit decision (if one was sampled) with the run
     * outcome. By default success (rc == 0) -> 1.0, otherwise 0.0. When the
@@ -1985,7 +1974,7 @@ void delegate_worker(void *arg)
    if (target_agent && leased_cred_name[0])
    {
       failover_reason_t reason = FAILOVER_NONE;
-      if (rc != AGENT_RC_CONTEXT_REFUSED && !result.success)
+      if (!agent_rc_is_local_refusal(rc) && !result.success)
          reason = delegate_credentials_classify_failure(target_agent->provider, result.error);
       if (reason != FAILOVER_NONE)
          delegate_credentials_report_failure(leased_principal, target_agent->name, leased_cred_name,
@@ -1997,8 +1986,9 @@ void delegate_worker(void *arg)
       leased_principal[0] = '\0';
    }
 
-   /* Clear thread-local CWD */
+   /* Clear thread-local CWD and release the source after all child work. */
    run_cmd_set_cwd(NULL);
+   (void)workspace_turn_scope_end(source_workspace);
 
    compute_ctx_free(cctx);
    return;
@@ -2016,7 +2006,18 @@ delegate_fail:
       delegate_credentials_release(leased_principal, target_agent->name, leased_cred_name);
    if (delegate_worktree_path[0] && delegate_git_root[0])
       worktree_cleanup(delegate_git_root, deleg_id, delegate_work_name);
+   (void)workspace_turn_scope_end(source_workspace);
    compute_ctx_free(cctx);
+}
+
+void delegate_worker(void *arg)
+{
+   const workspace_turn_mirror_lease_t *previous =
+       workspace_turn_mirror_bind(((compute_ctx_t *)arg)->source_mirror);
+   compute_ctx_bind_request_context(arg);
+   delegate_worker_run(arg);
+   compute_ctx_clear_request_context();
+   workspace_turn_mirror_bind(previous);
 }
 
 int handle_delegate_launch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -2077,19 +2078,7 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
 #endif
       cctx->conn_alive = 1;
    }
-   /* Capture the peer's caps for the foreign-cwd trust check (AC #6). A UDS peer
-    * is CAPS_ALL (same filesystem); a remote/TCP peer is less, and its cwd must
-    * not be opened on the server's own fs. A NULL conn is an in-process caller. */
-   cctx->conn_caps = conn ? conn->capabilities : CAPS_ALL;
-
-   /* WP-C vault identity: the conn's attested principal (hop 3) wins; else fall back
-    * to the chat turn's per-turn thread-local — the chat-spawned delegate's loopback
-    * conn carries no restored identity, and the TL is cleared per turn (no leak). */
-   if (conn)
-      cctx->attested_transport = conn->attested_transport;
-   snprintf(cctx->vault_principal, sizeof(cctx->vault_principal), "%s",
-            (conn && conn->vault_principal[0]) ? conn->vault_principal
-                                               : agent_get_request_vault_principal());
+   compute_ctx_capture_request_context(cctx, conn);
 
    /* Clone the request since the original will be freed after dispatch */
    cctx->req = cJSON_Duplicate(req, 1);
@@ -2097,6 +2086,12 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
    /* Create per-context write mutex */
    cctx->write_mutex = malloc(sizeof(pthread_mutex_t));
    pthread_mutex_init(cctx->write_mutex, NULL);
+
+   if (workspace_turn_mirror_capture(run_cmd_get_cwd(), &cctx->source_mirror))
+   {
+      compute_ctx_free(cctx);
+      return NULL;
+   }
 
    return cctx;
 }
@@ -2209,6 +2204,14 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    cJSON *jvia = cJSON_GetObjectItemCaseSensitive(req, "via");
    const char *initial_agent =
        cJSON_IsString(jvia) && jvia->valuestring[0] ? jvia->valuestring : "";
+   if (server_delegate_startup_reconcile() != 0)
+   {
+      compute_ctx_free(cctx);
+      if (err)
+         snprintf(err, errn,
+                  "delegate startup reconciliation unavailable; retry after store attachment");
+      return -1;
+   }
    int job_id = db1_agent_job_create(role, prompt, initial_agent, lease_owner);
    if (job_id <= 0)
    {
@@ -2409,7 +2412,15 @@ int handle_delegate_reply(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, augmented, NULL);
    }
 
-   mailbox_reply(mb, jcontent->valuestring);
+   int queued = mailbox_reply(mb, jcontent->valuestring);
+   mailbox_put(mb);
+   if (queued)
+   {
+      char augmented[1024];
+      delegation_augment_error("delegation closed before the reply was queued", augmented,
+                               sizeof(augmented));
+      return server_send_error(conn, augmented, NULL);
+   }
    cJSON *resp = jo_ok();
    return server_send_ok(conn, resp);
 }

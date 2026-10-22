@@ -4,6 +4,7 @@
 #include "aimee.h"
 #include "agent_config.h"
 #include "agent_exec.h"
+#include "request_context.h"
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdarg.h>
@@ -76,6 +77,17 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    (void)max_tokens;
    (void)temperature;
    memset(out, 0, sizeof(*out));
+   if (name && !strcmp(name, "context-owner"))
+   {
+      const request_context_t *owner = request_context_get();
+      assert(owner && user_prompt && !strcmp(owner->principal, user_prompt));
+      assert(owner->capabilities == 7 && owner->transport == REQ_TRANSPORT_TCP);
+      assert(!strcmp(owner->caller_authorization, "test-only-owner-proof"));
+      assert(owner->request_budget_present == 1 &&
+             !strcmp(owner->request_budget_limits, "{\"max_tokens\":1234}"));
+      assert(!owner->context_refused);
+      assert(!request_context_refuse_assembly("worker-only-refusal"));
+   }
    if (name && strcmp(name, "slow") == 0)
    {
       for (int elapsed = 0; elapsed < 3000 && !agent_request_cancelled(); elapsed += 10)
@@ -193,8 +205,8 @@ static void test_deadline_cancels_and_joins_slow_worker(void)
    assert(out[1].success == 0); /* slow worker cancelled -> failed slot */
    assert(out[1].response == NULL);
    assert(strcmp(out[1].error, "cancelled") == 0);
-   free(out[0].response);
-   free(out[2].response);
+   agent_result_clear_response(&out[0]);
+   agent_result_clear_response(&out[2]);
    printf("  test_deadline_cancels_and_joins_slow_worker: ok (%ldms, %d ok)\n", elapsed, succ);
 }
 
@@ -216,7 +228,7 @@ static void test_no_deadline_runs_all(void)
    for (int i = 0; i < 3; i++)
    {
       assert(out[i].success == 1);
-      free(out[i].response);
+      agent_result_clear_response(&out[i]);
    }
    printf("  test_no_deadline_runs_all: ok\n");
 }
@@ -228,7 +240,7 @@ static void test_parallel_worker_inherits_cwd(void)
    task.agent = "reviewer";
    task.role = "review";
    task.use_tools = 1;
-   agent_result_t out;
+   agent_result_t out = {0};
    memset(&out, 0, sizeof(out));
    agent_config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
@@ -238,7 +250,7 @@ static void test_parallel_worker_inherits_cwd(void)
    assert(agent_run_parallel(&cfg, &task, 1, &out, 1) == 1);
    run_cmd_set_cwd(NULL);
    assert(atomic_load(&g_saw_expected_cwd) == 1);
-   free(out.response);
+   agent_result_clear_response(&out);
 }
 
 static void test_no_deadline_ignores_generic_compute_width(void)
@@ -265,7 +277,7 @@ static void test_no_deadline_ignores_generic_compute_width(void)
    g_aimee_compute_threads_override = 0;
    assert(atomic_load(&g_wave_high_water) == task_count);
    for (int i = 0; i < task_count; i++)
-      free(out[i].response);
+      agent_result_clear_response(&out[i]);
    printf("  test_no_deadline_ignores_generic_compute_width: ok (%d concurrent)\n",
           atomic_load(&g_wave_high_water));
 }
@@ -307,7 +319,7 @@ static void test_process_limit_is_shared_across_panels(void)
    assert(atomic_load(&g_wave_high_water) <= 64);
    for (int p = 0; p < 2; p++)
       for (int i = 0; i < 40; i++)
-         free(calls[p].out[i].response);
+         agent_result_clear_response(&calls[p].out[i]);
    printf("  test_process_limit_is_shared_across_panels: ok (%d concurrent)\n",
           atomic_load(&g_wave_high_water));
 }
@@ -329,35 +341,35 @@ static void test_use_tools_routes_to_tools_runner(void)
    named.use_tools = 1;
    named.require_initial_tool_call = 1;
    atomic_store(&g_saw_required_tool_call, 0);
-   agent_result_t out1;
+   agent_result_t out1 = {0};
    memset(&out1, 0, sizeof(out1));
    assert(agent_run_parallel(&cfg, &named, 1, &out1, 0) == 1);
    assert(strcmp(out1.response, "ok+tools") == 0);
    assert(atomic_load(&g_saw_required_tool_call) == 1);
    assert(g_require_initial_tool_call == 0); /* policy cannot bleed into the next task */
-   free(out1.response);
+   agent_result_clear_response(&out1);
 
    /* single-task fast path, routed BY ROLE (no agent name) */
    agent_task_t byrole = {0};
    byrole.role = "review";
    byrole.user_prompt = "review this";
    byrole.use_tools = 1;
-   agent_result_t out2;
+   agent_result_t out2 = {0};
    memset(&out2, 0, sizeof(out2));
    assert(agent_run_parallel(&cfg, &byrole, 1, &out2, 0) == 1);
    assert(strcmp(out2.response, "ok+tools") == 0);
-   free(out2.response);
+   agent_result_clear_response(&out2);
 
    /* the default is unchanged: no use_tools -> the plain completion */
    agent_task_t plain = {0};
    plain.role = "draft";
    plain.user_prompt = "draft this";
    plain.agent = "seat-1";
-   agent_result_t out3;
+   agent_result_t out3 = {0};
    memset(&out3, 0, sizeof(out3));
    assert(agent_run_parallel(&cfg, &plain, 1, &out3, 0) == 1);
    assert(strcmp(out3.response, "ok") == 0);
-   free(out3.response);
+   agent_result_clear_response(&out3);
 
    /* and through the threaded fan-out, not just the fast path */
    agent_task_t many[2] = {0};
@@ -375,14 +387,46 @@ static void test_use_tools_routes_to_tools_runner(void)
    for (int i = 0; i < 2; i++)
    {
       assert(strcmp(outn[i].response, "ok+tools") == 0);
-      free(outn[i].response);
+      agent_result_clear_response(&outn[i]);
    }
    printf("  test_use_tools_routes_to_tools_runner: ok\n");
+}
+
+static void test_parallel_preserves_owner_and_limits(void)
+{
+   agent_config_t cfg = {0};
+   for (int deadline = 0; deadline < 2; deadline++)
+   {
+      request_context_t owner = {0};
+      snprintf(owner.principal, sizeof owner.principal, "owner-%d", deadline);
+      snprintf(owner.caller_authorization, sizeof owner.caller_authorization,
+               "test-only-owner-proof");
+      owner.capabilities = 7;
+      owner.transport = REQ_TRANSPORT_TCP;
+      owner.request_budget_present = 1;
+      snprintf(owner.request_budget_limits, sizeof owner.request_budget_limits,
+               "{\"max_tokens\":1234}");
+      request_context_set(&owner);
+      agent_task_t tasks[2] = {0};
+      agent_result_t results[2] = {0};
+      for (int i = 0; i < 2; i++)
+      {
+         tasks[i].agent = "context-owner";
+         tasks[i].user_prompt = owner.principal;
+      }
+      assert(agent_run_parallel(&cfg, tasks, 2, results, deadline ? 1000 : 0) == 2);
+      assert(request_context_get() && !memcmp(request_context_get(), &owner, sizeof owner));
+      for (int i = 0; i < 2; i++)
+         agent_result_clear_response(&results[i]);
+      request_context_clear();
+   }
+   puts("  parallel owner proof, capability scope, limits and local refusal isolation: ok");
 }
 
 int main(void)
 {
    printf("agent_parallel tests\n");
+   test_parallel_preserves_owner_and_limits();
    test_deadline_cancels_and_joins_slow_worker();
    test_no_deadline_runs_all();
    test_parallel_worker_inherits_cwd();

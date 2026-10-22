@@ -48,6 +48,7 @@ header without declaring it now fails CI on `rule=ownership-complete`.
 - `audit`: records repository reads, mutations, provenance, policy decisions, and outcomes.
 - `config`: supplies verification, forge, credential, identity, and repository-operation settings.
 - `execution-policy`: authorizes repository, network, credential, hook, and subprocess effects.
+- `ir`: validates typed canonical verification requests and source-bound snapshot observations.
 - `memory`: exclusively owns code-intelligence persistence and accepts redacted repository records.
 - `module-runtime`: supplies required lifecycle and readiness contracts for repository capability.
 - `vault`: supplies principal-scoped forge tokens, SSH keys, and credential references.
@@ -180,6 +181,11 @@ list plus the diffstat. Deterministic, with no model call: the commit subjects a
 asking the caller to write one costs a turn to say the same thing. An explicit `title` always wins, and a
 branch with no commits ahead of base is told exactly that.
 
+PR check rows display a cancelled workflow as `cancelled`, separately from a failed test.
+This is presentation only: cancellation remains non-green in the Go-owned merge verdict.
+PR metadata edits run the attribution gate and can supersede an in-flight CI run on the same
+head; inspect the replacement run before treating cancelled checks as test regressions.
+
 ## Data and migrations
 
 Git state includes repository index/refs/commits, verify configuration/state, `git_project` mappings, host
@@ -247,3 +253,21 @@ New forge or credential providers implement bounded Git seams without expanding 
 Provider-specific OAuth remains distinct from optional governance OIDC. Shell wrappers, duplicate tool
 schemas, and forge helpers with no caller beyond registration/tests are `configuration-only`, `test-only`,
 or `duplicated-by-adjacent-module` candidates; deletion requires later runtime liveness evidence.
+
+
+### Private configured-test resources
+
+The verify-run bus stage owns host-only `snapshot-create`, `snapshot-state`, `snapshot-renew`,
+`snapshot-release` and `snapshot-source-state` operations. Creation checks a held directory identity,
+fetches the exact committed source into independent private Git metadata, and excludes the caller's
+dirty/untracked files. Opaque bounded leases expire; renewal checks the held directory without
+mistaking an in-progress test's writes for a clean snapshot. Final state and original-source checks
+use sanitized Git configuration and exact commit/tree identities.
+
+The existing synchronous/background verification coordinator can acquire an installed host execution
+owner. Owned runs bypass cached/incremental passes and join the private worker before reporting;
+ordinary CLI runs retain their existing executor. Incomplete configuration parsing/discovery cannot
+qualify learning. The host prepares its proof only while the original source/configuration still match, then commits
+it atomically inside the completed canonical terminal through the host-only append operation.
+Derived learning rows can be rebuilt from that retained source after a restart. Unsupported resource
+profiles remain ungraded.

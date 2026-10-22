@@ -17,6 +17,37 @@ MR-07 remains observe-only, selection and utility-horizon policies remain disabl
 retry remains opt-in. Existing detached source spans still require a published snapshot, and
 workspace registration alone does not start a client runner.
 
+## Browser chat integration (2026-10-20)
+
+The browser submits canonical IR turns and replays the Server-owned event log through one reducer.
+Primary loading, model switching and compaction use that durable source. Qualified Linux Codex
+and Claude schedulers use held native executables, closed environments and the existing workspace
+and supervised tool owners. The Server supplies original model context, tool calls and typed results;
+SDK conversation observations cannot replace them. Codex npm registrations resolve the matching
+native package without running the launcher script.
+
+Actual-SDK integration covers API-key and Vault OAuth forwarding, rotation,
+compaction, resume and seeded runs. The current continuation also passes actual
+Codex/Claude daemon-crash and interrupted-question recovery, source-bound unknown
+outcomes, one-use operator denial and replay without renewed effects or prompts.
+Session-selected models persist in owner-checked metadata across restarts.
+Private delegate histories now own canonical question/permission scopes; browser
+replies target the child session after replay readiness. The web transport rejects
+ambiguous reply frames before forwarding validated bytes unchanged.
+
+HTTP and host-owned native executors retain complete owned responses through
+selection and repair. Cache claims require durable terminal state and actual tree
+quiescence when the optional Linux containment boundary is configured. KB-free
+configured-test grading, delegate observations and source-checked next-run reuse
+are implemented and have actual-store integration coverage. Legacy import records
+exact/normalized fidelity, explicit refusal or a passive text archive, with large
+messages and retained sources handled in bounded chunks. Final exact-head CI
+qualification remains in progress in #3052.
+Production remains KB-free and unpromoted; live subscription and independently
+reviewed promotion are separate qualification gates. Existing macOS/Windows
+thin-client support does not imply native server execution on those platforms.
+See the [current handoff](IR_MIGRATION_HANDOFF.md).
+
 ## Runtime
 
 | Feature | State | Boundary |
@@ -91,7 +122,8 @@ workspace registration alone does not start a client runner.
 | WORM audit chain | Done | Hash chain, checkpoints, verification, seal, and evidence exports. |
 | External witness and anchor | Gated | Needed for evidence against a compromised host. |
 | Org budgets and rate limits | Done | Catalog, admission, spend, and quota surfaces. |
-| Browser workspace | Done | Top session tabs open chat with a session-owned project and history. The left panel opens projects, agents, workflows, graph, logs, settings, and VS Code. |
+| Browser workspace | Done | Top session tabs open chat with a session-owned project and history. Chat forwards the authenticated actor and displays tool lifecycle activity, including direct primary models. The left panel opens projects, agents, workflows, graph, logs, settings, and VS Code. |
+| Canonical IR migration | In progress | Canonical primary/delegate history, persistent model selection, source-owned Linux native execution, durable interruption recovery and child browser replies are implemented. Legacy-import fidelity and final CI remain in progress; production promotion requires separate review. |
 | Managed container deploy | Done | Browser manages Server model containers through the mounted Docker socket. A KB is deployed and enrolled separately. |
 | Split deploy | Done | Server and KB can run without Docker-socket delegation. |
 | Native thin clients | Done | Linux, macOS, and Windows; no database linkage. |

@@ -40,6 +40,11 @@ int oauth_token_parse_response(const char *json, oauth_token_response_t *out);
 /* Persist the tokens from |resp| for the given MCP client name.
  * Returns 0 on success; -1 if any store call fails. */
 int oauth_token_store(const char *client_name, const oauth_token_response_t *resp);
+/* Persist a newly selected native login and its source fence in the same atomic
+ * update. The historical key is shared by Codex/Claude registration adapters. */
+#define OAUTH_SOURCE_CREDENTIAL "codex_oauth_source"
+int oauth_token_store_source(const char *client_name, const oauth_token_response_t *resp,
+                             const char *source_digest);
 
 /* Load a valid access token for |client_name| into |buf| (size |len|).
  * Returns 0 if a non-expired token is loaded, -1 otherwise. */
@@ -67,6 +72,23 @@ int oauth_token_refresh(const char *client_name, const char *client_id, const ch
  * was rejected and the operator must re-authenticate (D6). Cleared automatically
  * on the next successful token store. */
 int oauth_token_reauth_required(const char *client_name);
+
+/* Typed refresh request profile. The owner supplies public provider metadata;
+ * refresh secrets are loaded from Vault and sent on curl stdin only. */
+typedef enum
+{
+   OAUTH_REFRESH_FORM = 0,
+   OAUTH_REFRESH_JSON = 1
+} oauth_refresh_format_t;
+typedef struct
+{
+   const char *client_id;
+   const char *token_endpoint;
+   const char *scope; /* JSON profile: exact granted scopes; NULL omits */
+   oauth_refresh_format_t format;
+} oauth_refresh_profile_t;
+int oauth_token_get_profile(const char *client_name, const oauth_refresh_profile_t *profile,
+                            int skew_secs, char *buf, size_t len);
 
 /* ---- High-level accessor ---- */
 

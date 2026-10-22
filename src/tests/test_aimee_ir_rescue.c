@@ -155,6 +155,55 @@ int main(void)
       printf("  PASS: multiple calls count as one rescue recovery\n");
    }
 
+   /* Dynamic canonical recovery retains whole call groups and identities. */
+   {
+      char name[301];
+      memset(name, 'n', sizeof name - 1);
+      name[sizeof name - 1] = 0;
+      size_t capacity = 40 * (sizeof name + 256), used = 0;
+      char *text = calloc(capacity, 1);
+      assert(text);
+      for (int i = 0; i < 40; i++)
+      {
+         int n = snprintf(text + used, capacity - used,
+                          "<tool_call><name>%s</name><arguments>{\"id\":9007199254740993}</"
+                          "arguments></tool_call>",
+                          name);
+         assert(n > 0 && (size_t)n < capacity - used);
+         used += (size_t)n;
+      }
+      aimee_response_t *r = resp_of(AIMEE_BLK_TEXT, text);
+      free(text);
+      r->content[0].cache_control = strdup("ephemeral");
+      r->content[0].cache_ttl = strdup("1h");
+      r->content[0].context.origin = AIMEE_CTX_ORIGIN_MODEL;
+      assert(aimee_ir_rescue_tool_calls(r, 0) == 40 && r->n_content == 40);
+      for (int i = 0; i < 40; i++)
+      {
+         assert(!strcmp(r->content[i].tool_name, name));
+         char *input = cJSON_PrintUnformatted(r->content[i].tool_input);
+         assert(input && strstr(input, "9007199254740993"));
+         free(input);
+         assert(r->content[i].context.origin == AIMEE_CTX_ORIGIN_MODEL);
+      }
+      assert(!strcmp(r->content[39].cache_ttl, "1h"));
+      resp_destroy(r);
+   }
+   /* Prepare/validate every recovery before changing any original content. */
+   {
+      aimee_response_t *r = resp_of(AIMEE_BLK_TEXT, XMLCALL);
+      r->content = realloc(r->content, 2 * sizeof *r->content);
+      assert(r->content);
+      memset(&r->content[1], 0, sizeof r->content[1]);
+      r->n_content = 2;
+      r->content[1].type = AIMEE_BLK_TEXT;
+      r->content[1].text = strdup(
+          "<tool_call><name>bash</name><arguments>{\"x\":1} trailing</arguments></tool_call>");
+      assert(aimee_ir_rescue_tool_calls(r, 0) == -1);
+      assert(r->n_content == 2 && r->content[0].type == AIMEE_BLK_TEXT &&
+             !strcmp(r->content[0].text, XMLCALL));
+      resp_destroy(r);
+   }
    /* 7. Degenerate input must not crash. */
    assert(aimee_ir_rescue_tool_calls(NULL, 0) == 0);
    printf("  PASS: NULL response is a no-op\n");

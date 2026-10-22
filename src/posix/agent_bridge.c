@@ -7,6 +7,7 @@
 #include <aimee/core/connection/socket.h>
 #include <aimee/core/connection/tls_openssl.h>
 #include <string.h>
+#include <stdint.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <time.h>
@@ -490,8 +491,34 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
                         const char *extra_headers, const char *user_agent, const char *body,
                         size_t body_len)
 {
-   /* Build request into a dynamic buffer */
-   size_t cap = 4096 + body_len;
+   /* Preserve complete supported headers rather than silently truncating a
+    * caller's version/beta or scoped SDK transport metadata. */
+   size_t extra_size = extra_headers ? strlen(extra_headers) : 0;
+   if (extra_size > 8192 || body_len > SIZE_MAX - extra_size - 4096)
+      return -1;
+   int forwarded_user_agent = 0;
+   for (const char *line = extra_headers ? extra_headers : ""; *line;)
+   {
+      const char *next = strchr(line, '\n');
+      const char *end = next ? next : line + strlen(line);
+      while (end > line && (end[-1] == '\r' || end[-1] == ' '))
+         end--;
+      const char *colon = memchr(line, ':', (size_t)(end - line));
+      if (colon && colon - line == 10 && !strncasecmp(line, "User-Agent", 10))
+      {
+         const char *value = colon + 1;
+         while (value < end && (*value == ' ' || *value == '\t'))
+            value++;
+         if (forwarded_user_agent++ || value == end || end - value >= 256)
+            return -1;
+         for (const unsigned char *p = (const unsigned char *)value; p < (const unsigned char *)end;
+              p++)
+            if (*p < 32 || *p > 126)
+               return -1;
+      }
+      line = next ? next + 1 : line + strlen(line);
+   }
+   size_t cap = 4096 + body_len + extra_size;
    char *req = malloc(cap);
    if (!req)
       return -1;
@@ -501,7 +528,7 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
    if (off < 0 || (size_t)off >= cap)
       off = (int)(cap - 1);
 
-   if (user_agent)
+   if (user_agent && !forwarded_user_agent)
    {
       int n = snprintf(req + off, cap - (size_t)off, "User-Agent: %s\r\n", user_agent);
       if (n > 0 && (size_t)off + (size_t)n < cap)
@@ -541,25 +568,27 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
     * why page reads failed against real sites while search (which happened to
     * use bare '\n') worked. Trim the CR so both conventions are accepted. */
    if (extra_headers && extra_headers[0])
-   {
-      char tmp[512];
-      snprintf(tmp, sizeof(tmp), "%s", extra_headers);
-      char *saveptr;
-      char *line = strtok_r(tmp, "\n", &saveptr);
-      while (line)
+      for (const char *line = extra_headers; *line;)
       {
-         size_t ll = strlen(line);
-         while (ll > 0 && (line[ll - 1] == '\r' || line[ll - 1] == ' '))
-            line[--ll] = '\0';
-         if (line[0])
+         const char *next = strchr(line, '\n');
+         const char *end = next ? next : line + strlen(line);
+         while (end > line && (end[-1] == '\r' || end[-1] == ' '))
+            end--;
+         size_t length = (size_t)(end - line);
+         if (length)
          {
-            int n = snprintf(req + off, cap - (size_t)off, "%s\r\n", line);
-            if (n > 0 && (size_t)off + (size_t)n < cap)
-               off += n;
+            if (length + 2 >= cap - (size_t)off)
+            {
+               free(req);
+               return -1;
+            }
+            memcpy(req + off, line, length);
+            off += (int)length;
+            memcpy(req + off, "\r\n", 2);
+            off += 2;
          }
-         line = strtok_r(NULL, "\n", &saveptr);
+         line = next ? next + 1 : line + strlen(line);
       }
-   }
 
    {
       int n;
@@ -1190,6 +1219,8 @@ static int http_read_response(http_conn_t *conn, char **out_body, size_t *out_le
 int agent_http_get_location(const char *url, const char *extra_headers, char *location,
                             size_t location_cap, char **response_buf, int timeout_ms)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
    if (location && location_cap)
       location[0] = '\0';
@@ -1226,6 +1257,8 @@ int agent_http_get_location(const char *url, const char *extra_headers, char *lo
 int agent_http_get_pinned(const char *url, const char *pinned_ip, const char *extra_headers,
                           char **response_buf, int timeout_ms)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
    parsed_url_t pu;
    if (parse_url(url, &pu) < 0)
@@ -1254,6 +1287,8 @@ int agent_http_get_pinned(const char *url, const char *pinned_ip, const char *ex
 
 int agent_http_get(const char *url, const char *extra_headers, char **response_buf, int timeout_ms)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1323,6 +1358,8 @@ int agent_http_post_guarded_bytes(const char *url, const char *auth_header, cons
                                   size_t body_len, char **response_buf, int timeout_ms,
                                   const char *extra_headers, const agent_http_send_guard_t *guard)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1353,6 +1390,11 @@ int agent_http_post_guarded_bytes(const char *url, const char *auth_header, cons
    size_t resp_len = 0;
    int status = http_read_response(&conn, response_buf, &resp_len);
    conn_close(&conn);
+   /* This JSON POST API returns a C string. Refuse before discarding the
+    * transport length: otherwise a valid JSON prefix can hide later bytes.
+    * Streaming and explicit content-type transports retain their binary contract. */
+   if (status >= 0 && *response_buf && memchr(*response_buf, '\0', resp_len))
+      status = -1;
    if (status < 0)
    {
       free(*response_buf);
@@ -1366,6 +1408,8 @@ int agent_http_post_content_type(const char *url, const char *auth_header, const
                                  const char *body, char **response_buf, int timeout_ms,
                                  const char *extra_headers)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1419,6 +1463,8 @@ int agent_http_post_content_type(const char *url, const char *auth_header, const
 int agent_http_put(const char *url, const char *auth_header, const char *body, char **response_buf,
                    int timeout_ms, const char *extra_headers)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1452,6 +1498,8 @@ int agent_http_put(const char *url, const char *auth_header, const char *body, c
 int agent_http_patch(const char *url, const char *auth_header, const char *body,
                      char **response_buf, int timeout_ms, const char *extra_headers)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;
@@ -1483,6 +1531,8 @@ int agent_http_patch(const char *url, const char *auth_header, const char *body,
 
 int agent_http_post_form(const char *url, const char *body, char **response_buf, int timeout_ms)
 {
+   if (!response_buf)
+      return -1;
    *response_buf = NULL;
 
    parsed_url_t pu;

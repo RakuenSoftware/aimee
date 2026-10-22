@@ -3,6 +3,7 @@ package roundtable
 
 import (
 	"encoding/binary"
+	modulewire "github.com/JBailes/aimee/server-go/modules/module-runtime/wire"
 
 	"github.com/JBailes/aimee/server-go/bus"
 )
@@ -37,15 +38,6 @@ const (
 	VerifyReject
 )
 
-func zeroPadding(value []byte) bool {
-	for _, item := range value {
-		if item != 0 {
-			return false
-		}
-	}
-	return true
-}
-
 func normalizedSeverity(claimed string) string {
 	if claimed == "" {
 		return "suggestion"
@@ -78,7 +70,7 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	severityLen := int(binary.LittleEndian.Uint32(request[16:20]))
-	if !zeroPadding(request[requestSeverityOff+severityLen:]) {
+	if !modulewire.ZeroPadding(request[requestSeverityOff+severityLen:]) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	if invocation.Cancelled() {

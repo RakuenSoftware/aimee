@@ -1,0 +1,37 @@
+.ir-control {
+  border: 1px solid var(--sg-border-medium);
+  border-left: 3px solid var(--sg-primary);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: var(--sg-surface-alt);
+  color: var(--sg-text);
+  max-width: 760px;
+  box-sizing: border-box;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.ir-control > summary { cursor: pointer; font-weight: 600; text-transform: capitalize; }
+.ir-control[data-closed="true"] { border-left-color: var(--sg-border-medium); color: var(--sg-text-secondary); padding: 10px 14px; }
+.ir-control pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font-size: 12px; }
+.ir-control fieldset { border: 0; padding: 12px 0; margin: 0; }
+.ir-control legend { font-weight: 600; padding-top: 12px; }
+.ir-control label { padding: 6px 0; }
+.ir-control input:not([type="checkbox"]):not([type="radio"]) {
+  display: block; width: 100%; box-sizing: border-box; margin-top: 6px;
+  padding: 10px 12px; border-radius: 6px; border: 1px solid var(--sg-border-medium);
+  background: var(--sg-surface); color: var(--sg-text); font: inherit;
+}
+.ir-control input[type="checkbox"], .ir-control input[type="radio"] { margin-right: 8px; }
+.ir-control-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.ir-control button {
+  min-height: 40px; padding: 8px 14px; border-radius: 6px;
+  border: 1px solid var(--sg-border-medium); background: var(--sg-surface);
+  color: var(--sg-text); font: inherit; cursor: pointer;
+}
+.ir-control-actions > .ir-control-submit { background: var(--sg-primary); color: #10202a; border-color: var(--sg-primary); font-weight: 600; }
+.ir-control button:disabled { opacity: .6; cursor: not-allowed; }
+.ir-control-response { margin-top: 10px; font-size: 12px; }
+.ir-control :focus-visible { outline: 2px solid var(--sg-primary); outline-offset: 3px; }
+.ir-resolved-controls { color: var(--sg-text-secondary); font-size: 12px; }
+.ir-resolved-controls > summary { cursor: pointer; padding: 8px 0; }
+.ir-resolved-controls .ir-control { margin: 6px 0; }

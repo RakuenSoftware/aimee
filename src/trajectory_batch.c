@@ -6,9 +6,8 @@
 #include "agent_exec.h"
 #include "config.h"
 #include "cJSON.h"
-#include "db1_client/interaction_events.h"
 #include "platform_path.h"
-#include "platform_process.h"
+#include <aimee/tools/agent_tools.h>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -135,43 +134,17 @@ static int task_passed(const eval_task_t *task, const agent_result_t *result, in
    return result->success;
 }
 
-static char *task_payload(const eval_task_t *task, const char *toolset)
-{
-   cJSON *obj = cJSON_CreateObject();
-   cJSON_AddStringToObject(obj, "content", task->prompt);
-   cJSON_AddStringToObject(obj, "task", task->name);
-   cJSON_AddStringToObject(obj, "toolset", toolset ? toolset : "");
-   char *json = cJSON_PrintUnformatted(obj);
-   cJSON_Delete(obj);
-   return json;
-}
-
-static char *result_payload(const agent_result_t *result, int passed, const char *toolset)
-{
-   cJSON *obj = cJSON_CreateObject();
-   cJSON_AddStringToObject(obj, "content", result->response ? result->response : "");
-   cJSON_AddStringToObject(obj, "agent", result->agent_name);
-   cJSON_AddStringToObject(obj, "toolset", toolset ? toolset : "");
-   cJSON_AddBoolToObject(obj, "success", passed);
-   cJSON_AddNumberToObject(obj, "turns", result->turns);
-   cJSON_AddNumberToObject(obj, "tool_calls", result->tool_calls);
-   if (result->error[0])
-      cJSON_AddStringToObject(obj, "error", result->error);
-   char *json = cJSON_PrintUnformatted(obj);
-   cJSON_Delete(obj);
-   return json;
-}
-
 static int write_text_file(const char *path, const char *text)
 {
    FILE *fp = fopen(path, "w");
    if (!fp)
       return -1;
-   if (text)
-      fputs(text, fp);
-   fputc('\n', fp);
-   fclose(fp);
-   return 0;
+   int failed = (text && fputs(text, fp) == EOF) || fputc('\n', fp) == EOF;
+   if (fclose(fp) != 0)
+      failed = 1;
+   if (failed)
+      (void)unlink(path);
+   return failed ? -1 : 0;
 }
 
 int trajectory_batch_run(agent_config_t *cfg, const trajectory_batch_opts_t *opts,
@@ -180,6 +153,12 @@ int trajectory_batch_run(agent_config_t *cfg, const trajectory_batch_opts_t *opt
    if (!cfg || !opts || !opts->tasks_path || !opts->tasks_path[0] || !summary_json)
       return -1;
    *summary_json = NULL;
+   const char *principal = agent_get_request_vault_principal();
+   const char *session = agent_get_request_session();
+   char actor[VAULT_PRINCIPAL_MAX];
+   if (!principal || !principal[0] || strlen(principal) >= sizeof actor || !session || !session[0])
+      return -1;
+   snprintf(actor, sizeof actor, "%s", principal);
 
    eval_task_t tasks[TRAJ_BATCH_MAX_TASKS];
    int task_count = load_batch_tasks(opts->tasks_path, tasks, TRAJ_BATCH_MAX_TASKS);
@@ -194,7 +173,7 @@ int trajectory_batch_run(agent_config_t *cfg, const trajectory_batch_opts_t *opt
    if (platform_mkdir_p(out_dir, 0700) != 0)
       return -1;
 
-   const char *saved_toolset = getenv("AIMEE_ACTIVE_TOOLSET");
+   const char *saved_toolset = agent_tools_active_toolset();
    char saved_buf[128] = "";
    if (saved_toolset && saved_toolset[0])
       snprintf(saved_buf, sizeof(saved_buf), "%s", saved_toolset);
@@ -212,32 +191,21 @@ int trajectory_batch_run(agent_config_t *cfg, const trajectory_batch_opts_t *opt
    for (int i = 0; i < task_count; i++)
    {
       const char *toolset = trajectory_toolset_for_index(opts->toolset_dist, i);
-      platform_setenv("AIMEE_ACTIVE_TOOLSET", toolset ? toolset : "");
+      agent_tools_set_active_toolset(toolset);
 
       char safe[128];
       safe_name(tasks[i].name, safe, sizeof(safe));
-      char sid[160];
-      snprintf(sid, sizeof(sid), "traj-%ld-%03d-%s", (long)getpid(), i + 1, safe);
-
-      char *tp = task_payload(&tasks[i], toolset);
-      (void)db1_interaction_event_record(sid, ie_event_type_name(IE_USER_TURN), "user",
-                                         tp ? tp : "{}", "ok");
-      free(tp);
-
-      agent_result_t ar;
+      agent_result_t ar = {0};
       int rc = agent_run(cfg, tasks[i].role[0] ? tasks[i].role : "execute", NULL, tasks[i].prompt,
                          0, &ar);
       int passed = task_passed(&tasks[i], &ar, rc);
-      char *rp = result_payload(&ar, passed, toolset);
-      (void)db1_interaction_event_record(sid, ie_event_type_name(IE_AGENT_TURN), "agent",
-                                         rp ? rp : "{}", passed ? "ok" : "error");
-      free(rp);
-
       char *traj = NULL;
-      if (trajectory_export(sid, &opts->export_opts, &traj) != 0 || !traj)
+      if (!ar.canonical_session_id[0] ||
+          trajectory_export(ar.canonical_session_id, actor, &opts->export_opts, &traj) != 0 ||
+          !traj)
       {
          failures++;
-         free(ar.response);
+         agent_result_clear_response(&ar);
          free(traj);
          continue;
       }
@@ -250,7 +218,7 @@ int trajectory_batch_run(agent_config_t *cfg, const trajectory_batch_opts_t *opt
       {
          cJSON *item = cJSON_CreateObject();
          cJSON_AddStringToObject(item, "task", tasks[i].name);
-         cJSON_AddStringToObject(item, "session_id", sid);
+         cJSON_AddStringToObject(item, "session_id", ar.canonical_session_id);
          cJSON_AddStringToObject(item, "path", path);
          cJSON_AddStringToObject(item, "toolset", toolset ? toolset : "");
          cJSON_AddBoolToObject(item, "success", passed);
@@ -262,10 +230,10 @@ int trajectory_batch_run(agent_config_t *cfg, const trajectory_batch_opts_t *opt
             cJSON_AddNumberToObject(counts, toolset ? toolset : "", 1);
       }
       free(traj);
-      free(ar.response);
+      agent_result_clear_response(&ar);
    }
 
-   platform_setenv("AIMEE_ACTIVE_TOOLSET", saved_buf);
+   agent_tools_set_active_toolset(saved_buf);
    cJSON_AddNumberToObject(summary, "tasks", task_count);
    cJSON_AddNumberToObject(summary, "failures", failures);
    *summary_json = cJSON_PrintUnformatted(summary);

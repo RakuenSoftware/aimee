@@ -2,7 +2,7 @@
 
 #include <aimee/delegates/delegate_credential_retry.h>
 
-#include "agent_config.h" /* agent_set_request_codex_creds, *_token_present */
+#include "agent_config.h" /* selected-registration request credentials */
 #include "agent_exec.h"
 #include "config.h" /* config_output_dir */
 #include <aimee/delegates/delegate_credentials.h>
@@ -15,43 +15,12 @@
 #include <string.h>
 #include <time.h>
 
-/* WP-C.3 codex-oauth migration: if `principal` has a vaulted Codex OAuth token for
- * `agent`, bind it as this turn's token so it OVERRIDES the on-disk/session token.
- * A fresh per-turn client push still wins (we defer when one is already bound).
- * The transient plaintext is cleansed; lifetime mirrors the existing per-turn
- * codex token (overwritten by the next turn's bind on this worker thread). */
-static void codex_oauth_apply_vault_override(const char *principal, const agent_t *target_agent)
-{
-   if (!target_agent)
-      return;
-   if (strcmp(target_agent->auth_type, "codex-oauth") != 0)
-      return;
-   if (agent_request_codex_token_present())
-      return; /* a live client push is authoritative */
-
-   char tok[MAX_API_KEY_LEN] = "";
-   char acct[128] = "";
-   vault_status_t st = VAULT_NO_ENTRY;
-
-   (void)principal;
-   st = vault_service_get_server_principal(target_agent->name, VAULT_CODEX_TOKEN_CRED, tok,
-                                           sizeof(tok));
-   if (st == VAULT_OK)
-      (void)vault_service_get_server_principal(target_agent->name, VAULT_CODEX_ACCOUNT_CRED, acct,
-                                               sizeof(acct));
-
-   if (st != VAULT_OK || !tok[0])
-      return;
-   agent_set_request_codex_creds(tok, acct[0] ? acct : NULL);
-   OPENSSL_cleanse(tok, sizeof(tok));
-   OPENSSL_cleanse(acct, sizeof(acct));
-}
-
 delegate_cred_resolve_status_t delegate_resolve_credentials(
     const char *vault_principal, agent_t *target_agent, char *leased_principal,
     size_t leased_principal_cap, char *leased_cred_name, size_t leased_cred_name_cap,
     char *credential_state_path, size_t credential_state_path_cap, int *cooldown_secs)
 {
+   (void)vault_principal; /* Actor attribution does not select provider credentials. */
    if (cooldown_secs)
       *cooldown_secs = 0;
    if (!target_agent)
@@ -86,11 +55,11 @@ delegate_cred_resolve_status_t delegate_resolve_credentials(
          snprintf(leased_cred_name, leased_cred_name_cap, "%s", VAULT_API_KEY_CRED);
          return DELEGATE_CRED_RESOLVE_OK;
       }
-      /* miss -> codex override / shared named pool below */
+      /* miss -> shared named pool below */
    }
 
-   /* WP-C.3 codex-oauth: a vaulted token overrides the on-disk/session token. */
-   codex_oauth_apply_vault_override(vault_principal, target_agent);
+   /* Codex serving resolves the selected Vault credential/account together at
+    * dispatch. Do not pin a separately read token on this reusable worker. */
 
    /* Lease one credential from the shared Vault-backed pool (principal ""), if
     * configured. api_key_env is a legacy slot name, never a runtime env read. */
@@ -129,9 +98,9 @@ static int run_delegate_attempt(agent_config_t *cfg, const char *role, const cha
 
 static int result_failed_for_pool(const agent_result_t *result, int rc)
 {
-   /* A Go context refusal is not evidence against a provider credential, even
-    * if its diagnostic contains an auth/rate-limit string. */
-   return rc != AGENT_RC_CONTEXT_REFUSED && (rc != 0 || !result || !result->success);
+   /* Local context/capture refusals are not evidence against a provider
+    * credential, even if a diagnostic contains an auth/rate-limit string. */
+   return !agent_rc_is_local_refusal(rc) && (rc != 0 || !result || !result->success);
 }
 
 static void result_add_prior_metrics(agent_result_t *result, const agent_result_t *prior)
@@ -184,7 +153,7 @@ int delegate_run_with_credential_retry(agent_config_t *cfg, agent_t *agent, cons
       rc = run_delegate_attempt(cfg, role, system_prompt, run_prompt, max_tokens, force_tools,
                                 enforce_writes, result);
       result_add_prior_metrics(result, &prior);
-      free(prior.response);
+      agent_result_clear_response(&prior);
    }
 
    return rc;

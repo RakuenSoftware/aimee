@@ -1,3 +1,9 @@
+#include <aimee/translation/harness_ir.h>
+#include <aimee/translation/aimee_backend.h>
+#include "agent_config.h"
+#include "agent_exec.h"
+#include "aimee_home.h"
+#include "cli_codex_profile.h"
 /* cli_codex.c: see cli_codex.h. Spawns `codex app-server`, drives the
  * JSON-RPC handshake (initialize → thread/start → turn/start), reads
  * notifications until turn/completed, and assembles the final
@@ -9,6 +15,7 @@
 #include "cJSON.h"
 #include "log.h"
 #include "provider_cli_adapter.h"
+#include "server_session_control.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -27,7 +34,7 @@
 #define CLI_CODEX_DEFAULT_IDLE_TIMEOUT_MS        -1     /* no idle timeout */
 #define CLI_CODEX_QUIET_POLL_MS                  300000 /* 5 min */
 #define CLI_CODEX_LINE_MAX                       (8 * 1024 * 1024)
-#define CLI_CODEX_APPROVAL_POLICY_CONFIG         "approval_policy=\"untrusted\""
+#define CLI_CODEX_APPROVAL_POLICY_CONFIG         "approval_policy=\"on-request\""
 #define CLI_CODEX_SANDBOX_READ_ONLY_CONFIG       "sandbox_mode=\"read-only\""
 #define CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG "sandbox_mode=\"workspace-write\""
 #define CLI_CODEX_SANDBOX_DANGER_CONFIG          "sandbox_mode=\"danger-full-access\""
@@ -45,6 +52,7 @@ typedef enum
    CLI_CODEX_READ_READ_ERR,
    CLI_CODEX_READ_LINE_TOO_LARGE,
    CLI_CODEX_READ_OOM,
+   CLI_CODEX_READ_FRAME_ERR,
 } cli_codex_read_status_t;
 
 typedef struct
@@ -55,6 +63,7 @@ typedef struct
    int err_fd; /* aimee reads here ← codex stderr (diagnostics) */
    /* incremental line buffer for stdout */
    char *buf;
+   char *line; /* Borrowed by readers until the next read or close. */
    size_t buf_len;
    size_t buf_cap;
    /* tail-buffer of stderr — last STDERR_TAIL_CAP bytes only, drained
@@ -74,6 +83,20 @@ typedef struct
    int child_reaped;
    int child_status;
    cli_codex_read_status_t last_read_status;
+   aimee_harness_ir_t ir;
+   const char *home;
+   const cli_codex_host_launch_t *host_launch;
+   int (*progress)(void *context);
+   void *progress_context;
+   const char *session_id;
+   const aimee_request_t *tool_catalog;
+   int (*tool_call)(const aimee_block_t *, aimee_block_t *, void *);
+   void *tool_context;
+   cJSON *dynamic_tools;
+   cJSON *dynamic_seen;
+   char *dynamic_thread;
+   char *dynamic_turn;
+   int dynamic_failed;
 } cli_codex_t;
 
 /* Read whatever stderr has buffered without blocking, append to the
@@ -265,6 +288,12 @@ static void cli_codex_exit_status_desc(const cli_codex_t *c, char *out, size_t o
 static int cli_codex_spawn(cli_codex_t *c, const char *cli_cmd, const char *cwd,
                            const char *sandbox_config)
 {
+   if (c->host_launch && c->host_launch->spawn_guard &&
+       (!c->host_launch->spawn_guard->child || !c->host_launch->spawn_guard->parent))
+      return -1;
+   char aimee_root[4096] = "";
+   if (c->home && c->home[0])
+      snprintf(aimee_root, sizeof(aimee_root), "%s", aimee_home());
    int in_pipe[2] = {-1, -1};
    int out_pipe[2] = {-1, -1};
    int err_pipe[2] = {-1, -1};
@@ -302,16 +331,44 @@ static int cli_codex_spawn(cli_codex_t *c, const char *cli_cmd, const char *cwd,
        * codex node wrapper AND the inner codex binary it execs. Without
        * this, signaling the wrapper PID alone leaves the inner binary
        * reparented to PID 1, leaking processes on every stalled abort. */
-      setsid();
-      dup2(in_pipe[0], STDIN_FILENO);
-      dup2(out_pipe[1], STDOUT_FILENO);
-      dup2(err_pipe[1], STDERR_FILENO);
+      if (setsid() < 0 && c->host_launch)
+         _exit(126);
+      if (dup2(in_pipe[0], STDIN_FILENO) < 0 || dup2(out_pipe[1], STDOUT_FILENO) < 0 ||
+          dup2(err_pipe[1], STDERR_FILENO) < 0)
+         _exit(126);
       close(in_pipe[0]);
       close(in_pipe[1]);
       close(out_pipe[0]);
       close(out_pipe[1]);
       close(err_pipe[0]);
       close(err_pipe[1]);
+      if (c->host_launch)
+      {
+         const cli_codex_host_launch_t *host = c->host_launch;
+         if (host->executable_fd < 0 || host->cwd_fd < 0 || !host->environment ||
+             fchdir(host->cwd_fd))
+            _exit(126);
+         /* The child inherits only its pipes and explicitly owned launch
+          * resources. Never leak server/Vault sockets through SDK descendants. */
+         long limit = sysconf(_SC_OPEN_MAX);
+         if (limit < 0)
+            _exit(126);
+         for (int fd = 3; fd < limit; fd++)
+            if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0 && errno != EBADF)
+               _exit(126);
+         if (host->spawn_guard && host->spawn_guard->child(host->spawn_guard->context,
+                                                           host->executable_fd, host->cwd_fd))
+            _exit(126);
+         char *const arguments[] = {"codex", "app-server", NULL};
+#if defined(__linux__)
+         fexecve(host->executable_fd, arguments, host->environment);
+#else
+         /* This owner needs an executable-descriptor launch implementation on
+          * other hosts before claiming custody; no ambient executable fallback. */
+         (void)arguments;
+#endif
+         _exit(127);
+      }
       if (cwd && cwd[0] && chdir(cwd) != 0)
       {
          dprintf(STDERR_FILENO, "aimee: chdir(%s) failed: %s\n", cwd, strerror(errno));
@@ -321,11 +378,48 @@ static int cli_codex_spawn(cli_codex_t *c, const char *cli_cmd, const char *cwd,
       const char *sandbox = (sandbox_config && sandbox_config[0])
                                 ? sandbox_config
                                 : CLI_CODEX_SANDBOX_READ_ONLY_CONFIG;
+      if (c->home && c->home[0])
+      {
+         char codex_home[4096];
+         if (snprintf(codex_home, sizeof(codex_home), "%s/.codex", c->home) >=
+             (int)sizeof(codex_home))
+            _exit(126);
+         setenv("AIMEE_HOME", aimee_root, 1);
+         char endpoint[4140];
+         if (snprintf(endpoint, sizeof(endpoint), "unix:%s/aimee-http.sock", aimee_root) >=
+             (int)sizeof(endpoint))
+            _exit(126);
+         setenv("AIMEE_API_ENDPOINT", endpoint, 1);
+         setenv("HOME", c->home, 1);
+         setenv("CODEX_HOME", codex_home, 1);
+         unsetenv("OPENAI_API_KEY");
+         if (c->session_id && c->session_id[0])
+            setenv("AIMEE_SESSION_ID", c->session_id, 1);
+         execlp(cmd, cmd, "app-server", "-c", CLI_CODEX_APPROVAL_POLICY_CONFIG, "-c", sandbox, "-c",
+                "model_provider=\"openai\"", "-c", "mcp_servers.aimee.command=\"aimee\"", "-c",
+                "mcp_servers.aimee.args=[\"mcp\",\"serve\"]", (char *)NULL);
+         _exit(127);
+      }
       execlp(cmd, cmd, "app-server", "-c", CLI_CODEX_APPROVAL_POLICY_CONFIG, "-c", sandbox,
              (char *)NULL);
       _exit(127);
    }
-   /* Parent */
+   /* Parent: the optional owner attaches this exact child before SDK exec. */
+   if (c->host_launch && c->host_launch->spawn_guard &&
+       c->host_launch->spawn_guard->parent(c->host_launch->spawn_guard->context, pid))
+   {
+      (void)kill(pid, SIGKILL);
+      while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
+      {
+      }
+      close(in_pipe[0]);
+      close(in_pipe[1]);
+      close(out_pipe[0]);
+      close(out_pipe[1]);
+      close(err_pipe[0]);
+      close(err_pipe[1]);
+      return -1;
+   }
    close(in_pipe[0]);
    close(out_pipe[1]);
    close(err_pipe[1]);
@@ -426,6 +520,13 @@ static void cli_codex_close(cli_codex_t *c)
    }
    free(c->buf);
    c->buf = NULL;
+   free(c->line);
+   c->line = NULL;
+   aimee_harness_ir_free(&c->ir);
+   cJSON_Delete(c->dynamic_tools);
+   cJSON_Delete(c->dynamic_seen);
+   free(c->dynamic_thread);
+   free(c->dynamic_turn);
 }
 
 static int cli_codex_reserve_stdout(cli_codex_t *c, size_t need, cli_codex_read_status_t *status)
@@ -532,6 +633,8 @@ static int cli_codex_write_all(cli_codex_t *c, const char *data, size_t total)
 
 static int cli_codex_send(cli_codex_t *c, cJSON *msg)
 {
+   if (aimee_ir_session_get_sink(NULL) && aimee_codex_reply_ir(msg, &c->ir) != 0)
+      return -1;
    char *s = cJSON_PrintUnformatted(msg);
    if (!s)
       return -1;
@@ -558,20 +661,62 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
          *status = CLI_CODEX_READ_EOF;
       return NULL;
    }
+   long long line_deadline = timeout_ms > 0 ? util_now_ms() + timeout_ms : 0;
    for (;;)
    {
+      if (c->progress && c->progress(c->progress_context))
+      {
+         aimee_ir_session_fail_capture();
+         if (status)
+            *status = CLI_CODEX_READ_READ_ERR;
+         return NULL;
+      }
+      if (c->dynamic_failed || agent_request_cancelled() || aimee_ir_session_capture_failed())
+      {
+         if (status)
+            *status = CLI_CODEX_READ_READ_ERR;
+         return NULL;
+      }
       /* Look for newline in current buffer. */
       char *nl = c->buf ? memchr(c->buf, '\n', c->buf_len) : NULL;
       if (nl)
       {
-         *nl = '\0';
-         /* Stash the line bounds; shift buffer afterwards. */
-         static __thread char *line_dup;
-         free(line_dup);
-         line_dup = strdup(c->buf);
-         size_t consumed = (size_t)(nl - c->buf) + 1;
+         size_t length = (size_t)(nl - c->buf);
+         /* Admit the exact byte frame before any C-string operation can hide
+          * an embedded NUL, a duplicate field or trailing JSON. */
+         cJSON *frame = aimee_ir_json_parse_frame(c->buf, length);
+         if (!cJSON_IsObject(frame))
+         {
+            cJSON_Delete(frame);
+            c->dynamic_failed = 1;
+            aimee_ir_session_fail_capture();
+            if (status)
+               *status = CLI_CODEX_READ_FRAME_ERR;
+            return NULL;
+         }
+         char *line_dup = malloc(length + 1);
+         if (!line_dup)
+         {
+            cJSON_Delete(frame);
+            if (status)
+               *status = CLI_CODEX_READ_OOM;
+            return NULL;
+         }
+         memcpy(line_dup, c->buf, length);
+         line_dup[length] = 0;
+         free(c->line);
+         c->line = line_dup;
+         size_t consumed = length + 1;
          memmove(c->buf, c->buf + consumed, c->buf_len - consumed);
          c->buf_len -= consumed;
+         int rc = aimee_codex_frame_ir(frame, &c->ir);
+         cJSON_Delete(frame);
+         if (rc)
+         {
+            if (status)
+               *status = CLI_CODEX_READ_READ_ERR;
+            return NULL;
+         }
          return line_dup;
       }
 
@@ -599,12 +744,17 @@ static char *cli_codex_read_line(cli_codex_t *c, int timeout_ms, long long deadl
          if (c->err_fd > max_fd)
             max_fd = c->err_fd;
       }
+      /* Poll cancellation while preserving the caller's complete line budget. */
+      if (ms > 100 && aimee_ir_session_get_sink(NULL))
+         ms = 100;
       struct timeval tv;
       tv.tv_sec = ms / 1000;
       tv.tv_usec = (ms % 1000) * 1000;
       int sel = select(max_fd + 1, &rfds, NULL, NULL, &tv);
       if (sel == 0)
       {
+         if (aimee_ir_session_get_sink(NULL) && (!line_deadline || util_now_ms() < line_deadline))
+            continue;
          if (status)
             *status = CLI_CODEX_READ_LINE_TIMEOUT;
          return NULL;
@@ -699,6 +849,8 @@ static const char *cli_codex_read_status_str(cli_codex_read_status_t s)
       return "line-too-large";
    case CLI_CODEX_READ_OOM:
       return "out-of-memory";
+   case CLI_CODEX_READ_FRAME_ERR:
+      return "invalid-json-rpc-frame";
    }
    return "unknown";
 }
@@ -1167,6 +1319,63 @@ static int cli_codex_send_elicitation_decision(cli_codex_t *c, cJSON *id)
    return cli_codex_send_jsonrpc_result(c, id, result);
 }
 
+static const char *codex_string(const cJSON *object, const char *key)
+{
+   return cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(object, key));
+}
+static int codex_bind_dynamic_tools(cli_codex_t *c, const aimee_request_t *catalog,
+                                    int (*call)(const aimee_block_t *, aimee_block_t *, void *),
+                                    void *context)
+{
+   if (!catalog && !call)
+      return 0;
+   if (!catalog || !call)
+      return -1;
+   c->dynamic_tools = cli_codex_dynamic_tools(catalog);
+   c->dynamic_seen = cJSON_CreateObject();
+   if (!c->dynamic_tools || !c->dynamic_seen)
+      return -1;
+   c->tool_catalog = catalog;
+   c->tool_call = call;
+   c->tool_context = context;
+   return 0;
+}
+static int codex_handle_dynamic_call(cli_codex_t *c, const cJSON *frame, cJSON *rpcid)
+{
+   const cJSON *params = cJSON_GetObjectItemCaseSensitive(frame, "params");
+   const char *thread = codex_string(params, "threadId"), *turn = codex_string(params, "turnId");
+   aimee_block_t call = {0}, result = {0};
+   cJSON *reply = NULL;
+   int valid = c->tool_call && c->dynamic_thread && c->dynamic_turn && thread && turn &&
+               !strcmp(thread, c->dynamic_thread) && !strcmp(turn, c->dynamic_turn) &&
+               aimee_ir_json_unique(frame) && (cJSON_IsString(rpcid) || cJSON_IsNumber(rpcid)) &&
+               !cli_codex_dynamic_call(params, c->tool_catalog, &call);
+   /* Provider call IDs can repeat in later model responses. Only a repeated
+    * JSON-RPC request is a transport replay; original-source claims belong to
+    * the host callback. Keep string and numeric RPC identities distinct. */
+   cJSON *identity = valid ? aimee_ir_json_canonical_copy(rpcid) : NULL;
+   char *key = identity ? cJSON_PrintUnformatted(identity) : NULL;
+   cJSON_Delete(identity);
+   if (valid)
+      valid = key && !cJSON_GetObjectItemCaseSensitive(c->dynamic_seen, key) &&
+              cJSON_AddTrueToObject(c->dynamic_seen, key);
+   free(key);
+   if (valid)
+      valid = !c->tool_call(&call, &result, c->tool_context) && result.tool_id &&
+              !strcmp(result.tool_id, call.tool_id) && (reply = cli_codex_dynamic_result(&result));
+   int rc =
+       valid ? cli_codex_send_jsonrpc_result(c, rpcid, reply)
+             : cli_codex_send_jsonrpc_error(c, rpcid, -32602, "Host tool source or result refused");
+   aimee_block_free_contents(&call);
+   aimee_block_free_contents(&result);
+   if (!valid || rc)
+   {
+      c->dynamic_failed = 1;
+      aimee_ir_session_fail_capture();
+   }
+   return 1;
+}
+
 /* Aimee drives codex app-server headlessly. If the server asks the client for
  * approval or user input and we ignore it, the nested delegate waits forever.
  * Reply explicitly, approving only when Aimee autonomous mode is active. */
@@ -1186,6 +1395,58 @@ static int cli_codex_handle_server_request(cli_codex_t *c, const char *line)
    }
 
    const char *m = method->valuestring;
+   if (!strcmp(m, "item/tool/call"))
+   {
+      int handled = codex_handle_dynamic_call(c, obj, id);
+      cJSON_Delete(obj);
+      return handled;
+   }
+   server_control_scope_t *scope = server_control_scope_current();
+   int supported = strstr(m, "requestApproval") || !strcmp(m, "item/tool/requestUserInput") ||
+                   !strcmp(m, "mcpServer/elicitation/request") ||
+                   !strcmp(m, "execCommandApproval") || !strcmp(m, "applyPatchApproval");
+   if (scope && supported)
+   {
+      char *key = cJSON_PrintUnformatted(id), *native_id = NULL, *kind = NULL;
+      cJSON *request = NULL, *reply = NULL;
+      int taken = 0;
+      while (key && !agent_request_cancelled() && !aimee_ir_session_capture_failed())
+      {
+         taken = server_control_take(scope, key, &native_id, &kind, &request, &reply);
+         if (taken != 0)
+            break;
+         struct timespec pause = {0, 100000000L};
+         nanosleep(&pause, NULL);
+      }
+      if (taken == 1)
+      {
+         cJSON *result =
+             aimee_codex_control_reply(m, cJSON_GetObjectItemCaseSensitive(obj, "params"), reply);
+         if (result && aimee_harness_control_decision_ir(&c->ir, native_id, reply))
+         {
+            cJSON_Delete(result);
+            result = NULL;
+            aimee_ir_session_fail_capture();
+         }
+         int rc = aimee_ir_session_capture_failed() ? -1
+                  : result
+                      ? cli_codex_send_jsonrpc_result(c, id, result)
+                      : cli_codex_send_jsonrpc_error(
+                            c, id, -32602, "Operator reply could not satisfy this control request");
+         if (rc != 0)
+            aimee_ir_session_fail_capture();
+      }
+      else if (!agent_request_cancelled())
+         aimee_ir_session_fail_capture();
+      free(key);
+      free(native_id);
+      free(kind);
+      cJSON_Delete(request);
+      cJSON_Delete(reply);
+      cJSON_Delete(obj);
+      return 1;
+   }
+
    if (strcmp(m, "item/commandExecution/requestApproval") == 0 ||
        strcmp(m, "item/fileChange/requestApproval") == 0 || strcmp(m, "execCommandApproval") == 0 ||
        strcmp(m, "applyPatchApproval") == 0)
@@ -1241,6 +1502,34 @@ static int cli_codex_agent_idle_timeout_ms(const agent_t *agent)
 static cJSON *cli_codex_request(cli_codex_t *c, const char *method, cJSON *params, int id,
                                 long long *deadline_ms, int idle_timeout_ms)
 {
+   if (c->host_launch && (!strcmp(method, "thread/start") || !strcmp(method, "thread/resume")) &&
+       !cJSON_AddStringToObject(params, "cwd", c->host_launch->cwd))
+   {
+      cJSON_Delete(params);
+      return NULL;
+   }
+   if (c->dynamic_tools)
+   {
+      if (!strcmp(method, "initialize"))
+      {
+         cJSON *capabilities = cJSON_AddObjectToObject(params, "capabilities");
+         if (!capabilities || !cJSON_AddTrueToObject(capabilities, "experimentalApi"))
+         {
+            cJSON_Delete(params);
+            return NULL;
+         }
+      }
+      if (!strcmp(method, "thread/start"))
+      {
+         cJSON *tools = cJSON_Duplicate(c->dynamic_tools, 1);
+         if (!tools || !cJSON_AddItemToObject(params, "dynamicTools", tools))
+         {
+            cJSON_Delete(tools);
+            cJSON_Delete(params);
+            return NULL;
+         }
+      }
+   }
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "jsonrpc", "2.0");
    cJSON_AddNumberToObject(req, "id", id);
@@ -1277,6 +1566,34 @@ static cJSON *cli_codex_request(cli_codex_t *c, const char *method, cJSON *param
       cJSON *jid = cJSON_GetObjectItemCaseSensitive(obj, "id");
       if (cJSON_IsNumber(jid) && jid->valueint == id)
       {
+         if (c->dynamic_tools && !cJSON_GetObjectItemCaseSensitive(obj, "error"))
+         {
+            const cJSON *result = cJSON_GetObjectItemCaseSensitive(obj, "result");
+            const char *identity = NULL;
+            char **destination = NULL;
+            if (!strcmp(method, "thread/start") || !strcmp(method, "thread/resume"))
+            {
+               identity = codex_string(cJSON_GetObjectItemCaseSensitive(result, "thread"), "id");
+               destination = &c->dynamic_thread;
+            }
+            else if (!strcmp(method, "turn/start"))
+            {
+               identity = codex_string(cJSON_GetObjectItemCaseSensitive(result, "turn"), "id");
+               destination = &c->dynamic_turn;
+            }
+            if (destination)
+            {
+               char *owned = identity && identity[0] ? strdup(identity) : NULL;
+               if (!owned)
+               {
+                  cJSON_Delete(obj);
+                  c->dynamic_failed = 1;
+                  return NULL;
+               }
+               free(*destination);
+               *destination = owned;
+            }
+         }
          /* Either a "result" or "error" envelope; return for caller to inspect. */
          return obj;
       }
@@ -1345,6 +1662,61 @@ static void cli_codex_set_context_error(cli_codex_t *c, const char *context,
       snprintf(out, outsz, "%s", detail);
 }
 
+/* Stable SDK boundary: failed adoption refuses before any model turn starts. */
+static int cli_codex_adopt_history(cli_codex_t *c, const char *thread_id,
+                                   const aimee_request_t *history, int *next_id,
+                                   long long *deadline_ms, int idle_timeout_ms)
+{
+   if (!history)
+      return 0;
+   cJSON *items = aimee_codex_history_items(history);
+   if (!items)
+      return -1;
+   if (!cJSON_GetArraySize(items))
+   {
+      cJSON_Delete(items);
+      return 0;
+   }
+   cJSON *params = cJSON_CreateObject();
+   if (!params || !cJSON_AddStringToObject(params, "threadId", thread_id) ||
+       !cJSON_AddItemToObject(params, "items", items))
+   {
+      cJSON_Delete(items);
+      cJSON_Delete(params);
+      return -1;
+   }
+   cJSON *reply = cli_codex_request(c, "thread/inject_items", params, (*next_id)++, deadline_ms,
+                                    idle_timeout_ms);
+   int accepted = reply && cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(reply, "result")) &&
+                  !cJSON_GetObjectItemCaseSensitive(reply, "error");
+   cJSON_Delete(reply);
+   return accepted ? 0 : -1;
+}
+
+static int cli_codex_host_ready(cli_codex_t *c, cli_codex_host_replay_t *replay, int *next_id,
+                                long long *deadline_ms, int idle_timeout_ms)
+{
+   const cli_codex_host_launch_t *host = c->host_launch;
+   if (!host)
+      return 0;
+   if (!host->home || !host->cwd || !host->build_digest || strlen(host->build_digest) != 64 ||
+       !host->gateway_url || !host->gateway_token || !host->expected_config || !host->ready)
+      return -1;
+   cJSON *params = cJSON_CreateObject();
+   if (!params || !cJSON_AddStringToObject(params, "cwd", host->cwd) ||
+       !cJSON_AddTrueToObject(params, "includeLayers"))
+   {
+      cJSON_Delete(params);
+      return -1;
+   }
+   cJSON *reply =
+       cli_codex_request(c, "config/read", params, (*next_id)++, deadline_ms, idle_timeout_ms);
+   char digest[65];
+   int rc = cli_codex_profile_verify(host, reply, digest);
+   cJSON_Delete(reply);
+   return rc ? -1 : host->ready(digest, replay, host->context);
+}
+
 int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_event_cb cb,
                           void *userdata, cli_codex_chat_result_t *out)
 {
@@ -1367,6 +1739,18 @@ int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_ev
    c.err_fd = -1;
    c.err_log_fd = -1;
    c.autonomous = req->autonomous;
+   c.home = req->home;
+   c.host_launch = req->host_launch;
+   c.ir.host_model_capture = c.host_launch != NULL;
+   c.session_id = req->session_id;
+   c.ir.admitted_prompt = req->user_prompt;
+   if (codex_bind_dynamic_tools(&c, req->tool_catalog, req->tool_call, req->tool_context))
+   {
+      if (out)
+         snprintf(out->error, sizeof(out->error), "invalid typed host tool bridge");
+      cli_codex_close(&c);
+      return -1;
+   }
    const char *sandbox_config =
        req->autonomous ? CLI_CODEX_SANDBOX_DANGER_CONFIG : CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG;
    if (cli_codex_spawn(&c, NULL, req->cwd, sandbox_config) != 0)
@@ -1398,11 +1782,20 @@ int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_ev
       cJSON_Delete(resp);
    }
 
+   cli_codex_host_replay_t replay = {.history = req->history, .resume_id = req->thread_id};
+   if (cli_codex_host_ready(&c, &replay, &next_id, &deadline_ms, idle_timeout_ms))
+   {
+      if (out)
+         snprintf(out->error, sizeof out->error, "native SDK configuration could not be verified");
+      aimee_ir_session_fail_capture();
+      cli_codex_close(&c);
+      return -1;
+   }
    char thread_id[128] = {0};
-   if (req->thread_id && req->thread_id[0])
+   if (replay.resume_id && replay.resume_id[0])
    {
       cJSON *params = cJSON_CreateObject();
-      cJSON_AddStringToObject(params, "threadId", req->thread_id);
+      cJSON_AddStringToObject(params, "threadId", replay.resume_id);
       cJSON *resp =
           cli_codex_request(&c, "thread/resume", params, next_id++, &deadline_ms, idle_timeout_ms);
       if (!resp || !cJSON_GetObjectItemCaseSensitive(resp, "result"))
@@ -1415,7 +1808,7 @@ int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_ev
          return -1;
       }
       if (!cli_codex_response_thread_id(resp, thread_id, sizeof(thread_id)))
-         snprintf(thread_id, sizeof(thread_id), "%s", req->thread_id);
+         snprintf(thread_id, sizeof(thread_id), "%s", replay.resume_id);
       cJSON_Delete(resp);
    }
    else
@@ -1442,6 +1835,15 @@ int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_ev
             snprintf(out->error, sizeof(out->error), "codex thread/start: no thread id");
          return -1;
       }
+   }
+
+   if (cli_codex_adopt_history(&c, thread_id, replay.history, &next_id, &deadline_ms,
+                               idle_timeout_ms) != 0)
+   {
+      if (out)
+         snprintf(out->error, sizeof(out->error), "codex canonical history adoption failed");
+      cli_codex_close(&c);
+      return -1;
    }
 
    if (out)
@@ -1650,152 +2052,23 @@ int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_ev
    return 0;
 }
 
-int cli_codex_compact_thread(const cli_codex_compact_request_t *req,
-                             cli_codex_compact_result_t *out)
+static int codex_execute_cfg(const provider_cli_cfg_t *cfg, agent_result_t *out)
 {
-   if (out)
-      memset(out, 0, sizeof(*out));
-   if (!req || !req->thread_id || !req->thread_id[0])
-   {
-      if (out)
-         snprintf(out->error, sizeof(out->error), "missing codex thread id");
+   if (!out)
       return -1;
-   }
-
-   long long start_ms = util_now_ms();
-   int idle_timeout_ms = cli_codex_request_idle_timeout_ms(req->timeout_ms);
-   long long deadline_ms = cli_codex_idle_deadline_ms(idle_timeout_ms);
-
-   cli_codex_t c = {0};
-   c.in_fd = -1;
-   c.out_fd = -1;
-   c.err_fd = -1;
-   c.err_log_fd = -1;
-   c.autonomous = req->autonomous;
-   const char *sandbox_config =
-       req->autonomous ? CLI_CODEX_SANDBOX_DANGER_CONFIG : CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG;
-   if (cli_codex_spawn(&c, NULL, req->cwd, sandbox_config) != 0)
-   {
-      if (out)
-         snprintf(out->error, sizeof(out->error), "failed to spawn `codex app-server`");
-      return -1;
-   }
-
-   int next_id = 1;
-   {
-      cJSON *params = cJSON_CreateObject();
-      cJSON *ci = cJSON_CreateObject();
-      cJSON_AddStringToObject(ci, "name", "aimee");
-      cJSON_AddStringToObject(ci, "version", AIMEE_VERSION);
-      cJSON_AddItemToObject(params, "clientInfo", ci);
-      cJSON *resp =
-          cli_codex_request(&c, "initialize", params, next_id++, &deadline_ms, idle_timeout_ms);
-      if (!resp || !cJSON_GetObjectItemCaseSensitive(resp, "result"))
-      {
-         cJSON_Delete(resp);
-         if (out)
-            cli_codex_set_context_error(&c, "codex initialize failed", c.last_read_status,
-                                        out->error, sizeof(out->error));
-         cli_codex_close(&c);
-         return -1;
-      }
-      cJSON_Delete(resp);
-   }
-
-   char thread_id[128] = {0};
-   {
-      cJSON *params = cJSON_CreateObject();
-      cJSON_AddStringToObject(params, "threadId", req->thread_id);
-      cJSON *resp =
-          cli_codex_request(&c, "thread/resume", params, next_id++, &deadline_ms, idle_timeout_ms);
-      if (!resp || !cJSON_GetObjectItemCaseSensitive(resp, "result"))
-      {
-         cJSON_Delete(resp);
-         if (out)
-            cli_codex_set_context_error(&c, "codex thread/resume failed", c.last_read_status,
-                                        out->error, sizeof(out->error));
-         cli_codex_close(&c);
-         return -1;
-      }
-      if (!cli_codex_response_thread_id(resp, thread_id, sizeof(thread_id)))
-         snprintf(thread_id, sizeof(thread_id), "%s", req->thread_id);
-      cJSON_Delete(resp);
-   }
-
-   if (out)
-      snprintf(out->thread_id, sizeof(out->thread_id), "%s", thread_id);
-
-   {
-      cJSON *params = cJSON_CreateObject();
-      cJSON_AddStringToObject(params, "threadId", thread_id);
-      cJSON *resp = cli_codex_request(&c, "thread/compact/start", params, next_id++, &deadline_ms,
-                                      idle_timeout_ms);
-      if (!resp || !cJSON_GetObjectItemCaseSensitive(resp, "result"))
-      {
-         cJSON_Delete(resp);
-         if (out)
-            cli_codex_set_context_error(&c, "codex thread/compact/start failed", c.last_read_status,
-                                        out->error, sizeof(out->error));
-         cli_codex_close(&c);
-         return -1;
-      }
-      cJSON_Delete(resp);
-   }
-
-   int saw_compaction = 0;
-   int saw_error = 0;
-   while (!saw_compaction)
-   {
-      cli_codex_read_status_t rstatus = CLI_CODEX_READ_OK;
-      char *line = cli_codex_read_line_until_deadline(&c, deadline_ms, &rstatus);
-      if (!line)
-      {
-         if (out)
-            cli_codex_set_stall_error(&c, rstatus, out->error, sizeof(out->error));
-         cli_codex_close(&c);
-         return -1;
-      }
-      deadline_ms = cli_codex_idle_deadline_ms(idle_timeout_ms);
-      cli_codex_drain_stderr(&c);
-      if (cli_codex_handle_server_request(&c, line))
-      {
-         free(line);
-         continue;
-      }
-
-      char *err_text = NULL;
-      if (cli_codex_parse_error_message(line, &err_text))
-      {
-         saw_error = 1;
-         if (out)
-            snprintf(out->error, sizeof(out->error), "%s", err_text ? err_text : "codex error");
-         free(err_text);
-         free(line);
-         break;
-      }
-
-      char method_buf[64];
-      if (cli_codex_parse_method(line, method_buf, sizeof(method_buf)))
-      {
-         if ((strcmp(method_buf, "item/completed") == 0 && strstr(line, "\"contextCompaction\"")) ||
-             strcmp(method_buf, "thread/compacted") == 0)
-            saw_compaction = 1;
-         else if (strcmp(method_buf, "turn/completed") == 0)
-            saw_compaction = 1;
-      }
-      free(line);
-   }
-
-   cli_codex_close(&c);
-   if (out)
-      out->latency_ms = (int)(util_now_ms() - start_ms);
-   return saw_error ? -1 : 0;
-}
-
-int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const char *system_prompt,
-                                   const char *user_prompt, agent_result_t *out)
-{
    memset(out, 0, sizeof(*out));
+   if (!cfg)
+   {
+      snprintf(out->error, sizeof(out->error), "missing Codex agent configuration");
+      return -1;
+   }
+   const agent_t *agent = cfg->agent;
+   const char *cwd = cfg->cwd, *system_prompt = cfg->system_prompt, *user_prompt = cfg->user_prompt;
+   if (!agent)
+   {
+      snprintf(out->error, sizeof(out->error), "missing agent");
+      return -1;
+   }
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
 
    if (!user_prompt || !user_prompt[0])
@@ -1814,6 +2087,20 @@ int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const 
    c.err_fd = -1;
    c.err_log_fd = -1;
    c.autonomous = agent->autonomous;
+   c.home = cfg->home;
+   c.host_launch = cfg->codex_host;
+   c.progress = cfg->native_progress;
+   c.progress_context = cfg->native_progress_context;
+   c.ir.host_model_capture = c.host_launch != NULL;
+   c.session_id = cfg->session_id;
+   c.ir.admitted_prompt = user_prompt;
+   if (codex_bind_dynamic_tools(&c, cfg->tool_catalog, cfg->tool_call, cfg->tool_context))
+   {
+      if (out)
+         snprintf(out->error, sizeof(out->error), "invalid typed host tool bridge");
+      cli_codex_close(&c);
+      return -1;
+   }
    const char *cli_cmd = agent->cli_cmd[0] ? agent->cli_cmd : "codex";
    const char *sandbox_config = agent->write_capable ? CLI_CODEX_SANDBOX_WORKSPACE_WRITE_CONFIG
                                                      : CLI_CODEX_SANDBOX_READ_ONLY_CONFIG;
@@ -1823,6 +2110,7 @@ int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const 
       return -1;
    }
 
+   int next_id = 1;
    /* 1. initialize */
    {
       cJSON *params = cJSON_CreateObject();
@@ -1830,7 +2118,8 @@ int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const 
       cJSON_AddStringToObject(ci, "name", "aimee");
       cJSON_AddStringToObject(ci, "version", AIMEE_VERSION);
       cJSON_AddItemToObject(params, "clientInfo", ci);
-      cJSON *resp = cli_codex_request(&c, "initialize", params, 1, &deadline_ms, idle_timeout_ms);
+      cJSON *resp =
+          cli_codex_request(&c, "initialize", params, next_id++, &deadline_ms, idle_timeout_ms);
       if (!resp || !cJSON_GetObjectItemCaseSensitive(resp, "result"))
       {
          cJSON_Delete(resp);
@@ -1842,32 +2131,47 @@ int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const 
       cJSON_Delete(resp);
    }
 
-   /* 2. thread/start */
-   char thread_id[64] = {0};
+   cli_codex_host_replay_t replay = {.history = cfg->history, .resume_id = cfg->resume_id};
+   if (cli_codex_host_ready(&c, &replay, &next_id, &deadline_ms, idle_timeout_ms))
    {
+      snprintf(out->error, sizeof out->error, "native SDK configuration could not be verified");
+      aimee_ir_session_fail_capture();
+      cli_codex_close(&c);
+      return AGENT_RC_CAPTURE_FAILED;
+   }
+   /* Resolve the native handle within this canonical execution scope. */
+   char thread_id[128] = {0};
+   {
+      int resume = replay.resume_id && replay.resume_id[0];
       cJSON *params = cJSON_CreateObject();
-      if (system_prompt && system_prompt[0])
+      if (resume)
+         cJSON_AddStringToObject(params, "threadId", replay.resume_id);
+      else if (system_prompt && system_prompt[0])
          cli_codex_add_utf8_string(params, "developerInstructions", system_prompt);
-      cJSON *resp = cli_codex_request(&c, "thread/start", params, 2, &deadline_ms, idle_timeout_ms);
-      if (!resp)
+      cJSON *resp = cli_codex_request(&c, resume ? "thread/resume" : "thread/start", params,
+                                      next_id++, &deadline_ms, idle_timeout_ms);
+      int got_id = resp && cli_codex_response_thread_id(resp, thread_id, sizeof thread_id);
+      if (!got_id && resume && resp && cJSON_GetObjectItemCaseSensitive(resp, "result"))
       {
-         cli_codex_set_context_error(&c, "codex thread/start failed", c.last_read_status,
-                                     out->error, sizeof(out->error));
-         cli_codex_close(&c);
-         return -1;
+         snprintf(thread_id, sizeof thread_id, "%s", replay.resume_id);
+         got_id = 1;
       }
-      cJSON *result = cJSON_GetObjectItemCaseSensitive(resp, "result");
-      cJSON *thread = cJSON_GetObjectItemCaseSensitive(result, "thread");
-      cJSON *tid = cJSON_GetObjectItemCaseSensitive(thread, "id");
-      if (cJSON_IsString(tid))
-         snprintf(thread_id, sizeof(thread_id), "%s", tid->valuestring);
       cJSON_Delete(resp);
-      if (!thread_id[0])
+      if (!got_id || (cfg->bind_session && cfg->bind_session(thread_id, cfg->bind_context) != 0))
       {
          cli_codex_close(&c);
-         snprintf(out->error, sizeof(out->error), "codex thread/start: no thread id");
-         return -1;
+         snprintf(out->error, sizeof(out->error), "codex native session could not be bound");
+         aimee_ir_session_fail_capture();
+         return AGENT_RC_CAPTURE_FAILED;
       }
+   }
+
+   if (cli_codex_adopt_history(&c, thread_id, replay.history, &next_id, &deadline_ms,
+                               idle_timeout_ms) != 0)
+   {
+      snprintf(out->error, sizeof(out->error), "codex canonical history adoption failed");
+      cli_codex_close(&c);
+      return -1;
    }
 
    /* 3. turn/start */
@@ -1878,7 +2182,8 @@ int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const 
          cJSON_AddStringToObject(params, "model", agent->model);
       cJSON *input = cli_codex_text_input_array(user_prompt);
       cJSON_AddItemToObject(params, "input", input);
-      cJSON *resp = cli_codex_request(&c, "turn/start", params, 3, &deadline_ms, idle_timeout_ms);
+      cJSON *resp =
+          cli_codex_request(&c, "turn/start", params, next_id++, &deadline_ms, idle_timeout_ms);
       if (!resp || !cJSON_GetObjectItemCaseSensitive(resp, "result"))
       {
          cJSON_Delete(resp);
@@ -1892,8 +2197,6 @@ int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const 
 
    /* 4. Drain notifications until turn/completed. Collect the final
     * agentMessage text and the latest tokenUsage along the way. */
-   char *response_buf = NULL;
-   size_t response_len = 0;
    for (;;)
    {
       /* The quiet poll keeps stderr drained while Codex is silent. Any
@@ -1903,7 +2206,6 @@ int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const 
       char *line = cli_codex_read_line_until_deadline(&c, deadline_ms, &rstatus);
       if (!line)
       {
-         free(response_buf);
          cli_codex_set_stall_error(&c, rstatus, out->error, sizeof(out->error));
          cli_codex_close(&c);
          return -1;
@@ -1916,13 +2218,6 @@ int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const 
          continue;
       if (cli_codex_parse_tool_action(line))
          out->tool_calls++;
-      char *msg_text = NULL;
-      if (cli_codex_parse_agent_message(line, &msg_text))
-      {
-         (void)cli_codex_append_message_text(&response_buf, &response_len, msg_text);
-         free(msg_text);
-         continue;
-      }
 
       int p = 0, cmpl = 0;
       if (cli_codex_parse_token_usage(line, &p, &cmpl))
@@ -1946,23 +2241,36 @@ int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const 
          break;
    }
 
+   /* The host factory validates its original response separately. Compatibility
+    * execution must retain the admitted observations, never reparse joined text. */
+   if (!c.host_launch)
+   {
+      aimee_response_t response = {0};
+      if (aimee_harness_ir_response(&c.ir, &response) ||
+          agent_result_adopt_response(out, &response))
+      {
+         aimee_response_free(&response);
+         cli_codex_close(&c);
+         snprintf(out->error, sizeof out->error, "Codex completed without canonical output");
+         aimee_ir_session_fail_capture();
+         return AGENT_RC_CAPTURE_FAILED;
+      }
+      out->canonical_response.usage_in = out->prompt_tokens;
+      out->canonical_response.usage_out = out->completion_tokens;
+   }
    cli_codex_close(&c);
    out->latency_ms = (int)(util_now_ms() - start_ms);
-   out->turns = 1; /* one delegate-side turn; codex internally may have done many */
-   if (response_buf && response_len > 0)
-   {
-      out->response = response_buf;
-      out->success = 1;
-   }
-   else
-   {
-      free(response_buf);
-      out->success = 0;
-      if (!out->error[0])
-         snprintf(out->error, sizeof(out->error), "codex returned no agentMessage");
-      return -1;
-   }
+   out->turns = 1;
+   out->success = 1;
    return 0;
+}
+
+int agent_execute_cli_codex_at_cwd(const agent_t *agent, const char *cwd, const char *system_prompt,
+                                   const char *user_prompt, agent_result_t *out)
+{
+   provider_cli_cfg_t cfg = {
+       .agent = agent, .cwd = cwd, .system_prompt = system_prompt, .user_prompt = user_prompt};
+   return codex_execute_cfg(&cfg, out);
 }
 
 int agent_execute_cli_codex(const agent_t *agent, const char *system_prompt,
@@ -1973,9 +2281,7 @@ int agent_execute_cli_codex(const agent_t *agent, const char *system_prompt,
 
 static int codex_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
 {
-   return agent_execute_cli_codex_at_cwd(cfg ? cfg->agent : NULL, cfg ? cfg->cwd : NULL,
-                                         cfg ? cfg->system_prompt : NULL,
-                                         cfg ? cfg->user_prompt : NULL, out);
+   return cfg && cfg->agent ? codex_execute_cfg(cfg, out) : -1;
 }
 
 const provider_cli_adapter_t codex_provider_cli_adapter = {

@@ -1,10 +1,11 @@
 #ifndef DEC_AGENT_TOOLS_H
 #define DEC_AGENT_TOOLS_H 1
 
-#include "agent_protocol.h"
+struct aimee_response;
 #include "agent_types.h"
 #include "cJSON.h"
 #include <stdint.h>
+#include <aimee/tools/module_api.h>
 
 /* Tool execution (Unix only) */
 char *tool_bash(const char *command, int timeout_ms);
@@ -64,9 +65,17 @@ char *dispatch_tool_call(const char *name, const char *arguments_json, int timeo
  * leaves the tool unclassified. */
 typedef int (*agent_tool_classifier_fn)(const char *name, int *classification);
 void agent_tools_register_classifier(agent_tool_classifier_fn classifier);
+/* Registration occurs with the existing supervised tools owner at startup.
+ * Missing/unknown metadata refuses; it never becomes an implicit read. */
+typedef int (*agent_tool_metadata_fn)(const char *name, aimee_tool_metadata_t *metadata);
+void agent_tools_register_metadata(agent_tool_metadata_fn provider);
+int agent_tools_metadata(const char *name, aimee_tool_metadata_t *metadata);
+
 typedef int (*agent_tool_action_begin_fn)(const char *, struct cJSON **, const char *, const char *,
                                           int);
-typedef char *(*agent_tool_action_finish_fn)(const char *, char *);
+/* The final flag starts with execution's classification. Only this trusted
+ * owner may update it from its durable receipt; it is not model-provided data. */
+typedef char *(*agent_tool_action_finish_fn)(const char *, char *, int *);
 void agent_tools_register_action_owner(agent_tool_action_begin_fn begin,
                                        agent_tool_action_finish_fn finish);
 
@@ -75,15 +84,37 @@ void agent_tools_register_action_owner(agent_tool_action_begin_fn begin,
  * this trusted caller signal; model-provided arguments cannot set it. */
 void agent_tools_set_effect_authorized(int authorized);
 
+/* Owned built-in canonical definitions, before role/policy projection. The
+ * caller frees each entry with aimee_tool_free, then frees the array. Unbound
+ * Git capabilities are omitted. No MCP-provider recursion or wire sidecars. */
+struct aimee_tool;
+/* Execute already canonical arguments using their exact admitted definition.
+ * Refuses arguments which would change under that schema. */
+char *dispatch_tool_call_ir_ctx_status(const struct aimee_tool *admitted,
+                                       const char *canonical_arguments_json, int timeout_ms,
+                                       int *is_error);
+int agent_tools_builtin_catalog(struct aimee_tool **out, int *count);
+/* Fresh owned definition from the current execution owner. Unregistered or
+ * unavailable capabilities refuse; no process-global schema cache is used. */
+int agent_tools_execution_definition(const char *name, struct aimee_tool *out);
+
+/* Host-only shell environment. Prepared/owned by the caller until the shell
+ * joins; only the forked child installs it. Never changes process environ.
+ * Container/detached providers do not inherit host transport capabilities. */
+char *const *agent_tools_bind_bash_environment(char *const environment[]);
+
 /* Tool definition builders */
 struct cJSON *build_tools_array(void);
 struct cJSON *build_tools_array_responses(void);
 struct cJSON *build_tools_array_anthropic(void);
 struct cJSON *delegate_respond_spec(void);
 int agent_tools_append_delegate_respond_tool(struct cJSON *tools);
-int agent_tools_strip_delegate_respond(parsed_response_t *parsed);
+int agent_ir_strip_delegate_respond(struct aimee_response *response);
 int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name);
 void agent_tools_filter_for_role(struct cJSON *tools, const char *role);
+/* Anthropic compatibility ingress; the OpenAI-family helper above accepts Chat
+ * and Responses catalogs. Both decide on translation-admitted IR identities. */
+void agent_tools_filter_anthropic_for_role(struct cJSON *tools, const char *role);
 
 /* Look up a tool's parameter schema (the `function.parameters` object) by
  * tool name. Returns a borrowed pointer into a process-lifetime cache; the
@@ -108,6 +139,12 @@ void agent_tools_sanitize_for_provider(struct cJSON *tools, const char *provider
 void agent_tools_sanitize_for_agent(struct cJSON *tools, const agent_t *agent);
 
 char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms);
+/* Same dispatch and owned text result, plus the tool owner's authoritative
+ * semantic failure flag, including refusals and unconfirmed action receipts.
+ * Consumers must not infer success by parsing or matching the result text. */
+char *dispatch_tool_call_ctx_status(const char *name, const char *arguments_json, int timeout_ms,
+                                    int *is_error);
+
 void agent_tools_set_dispatch_role(const char *role);
 
 /* The toolset THIS THREAD's turn resolves against, overriding the role. Thread-local
@@ -260,6 +297,27 @@ int agent_tools_get_turn(void);
 int64_t agent_tools_get_snap_id(void);
 void agent_tools_set_snap_id(int64_t id);
 
+/* Host execution handoff. A bookmark borrows the current deny list and stays
+ * on its originating call stack. An owned snapshot deep-copies it and may be
+ * shared read-only by joined native callback workers. No callbacks, credentials
+ * or per-call effect authorization are carried. Restore before destroying an
+ * owned snapshot; all bound workers must have joined first. */
+typedef struct
+{
+   char role[64], toolset[128], session[128];
+   char read_only_root[MAX_PATH_LEN], write_root[MAX_PATH_LEN];
+   int turn, write_capable, knowledge_write, shell, isolated;
+   int64_t snapshot_id;
+   const char *const *denied;
+   int denied_count;
+   char **owned_denied;
+} agent_tools_scope_snapshot_t;
+void agent_tools_scope_bookmark(agent_tools_scope_snapshot_t *out);
+int agent_tools_scope_capture_owned(agent_tools_scope_snapshot_t *out);
+void agent_tools_scope_restore(const agent_tools_scope_snapshot_t *scope);
+void agent_tools_scope_destroy_owned(agent_tools_scope_snapshot_t *scope);
+int agent_tools_scope_isolated(void);
+
 /* Delegate parent-worktree write guard.
  * read_only_root remains readable but must not be writable through local tools.
  * write_root is an optional exception, normally the delegate's isolated worktree. */
@@ -307,6 +365,20 @@ int agent_tools_shell_allowed(void);
 
 void agent_tools_knowledge_write_set(int allowed);
 int agent_tools_knowledge_write_allowed(void);
+
+/* Query the current captured role/toolset/deny-list and shell/knowledge ceiling.
+ * Call after resolving any family/bridge aliases to the actual callable name.
+ * This is permission admission only; callers still own path, effect and human
+ * approval enforcement. The error helper returns an owned string (NULL if allowed). */
+typedef enum
+{
+   AGENT_TOOL_PERMISSION_ALLOWED = 0,
+   AGENT_TOOL_PERMISSION_SHELL,
+   AGENT_TOOL_PERMISSION_ROLE,
+   AGENT_TOOL_PERMISSION_KNOWLEDGE
+} agent_tool_permission_t;
+agent_tool_permission_t agent_tools_permission_check(const char *name, const cJSON *args);
+char *agent_tools_permission_error(agent_tool_permission_t permission);
 
 /* Read-only-delegate gate (backend-agnostic write capability). A delegate that
  * is not write-capable (see the write_capable field, derived once at dispatch

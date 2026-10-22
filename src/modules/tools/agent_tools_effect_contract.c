@@ -1,9 +1,31 @@
 #include "aimee.h"
+#include <aimee/ir/aimee_ir.h>
+#include "tool_args_coerce.h"
 #include "agent_tools_internal.h"
 #include "modules/workspace/workspace_provider.h"
 #include <aimee/core/turn_integrity.h>
 #include <aimee/tools/agent_tools.h>
 #include <aimee/tools/module_api.h>
+
+static agent_tool_metadata_fn g_tool_metadata;
+
+void agent_tools_register_metadata(agent_tool_metadata_fn provider)
+{
+   g_tool_metadata = provider;
+}
+
+int agent_tools_metadata(const char *name, aimee_tool_metadata_t *metadata)
+{
+   if (!metadata)
+      return -1;
+   memset(metadata, 0, sizeof(*metadata));
+   aimee_tool_metadata_t value = {0};
+   if (!name || !name[0] || !g_tool_metadata || g_tool_metadata(name, &value) != 0 ||
+       !aimee_tool_metadata_valid(&value))
+      return -1;
+   *metadata = value;
+   return 0;
+}
 
 static __thread ti_effect_contract_t g_effect;
 static __thread int g_effect_active;
@@ -23,8 +45,9 @@ void agent_tools_effect_reset(void)
 int agent_tools_effect_classification(const char *name, int (*classifier)(const char *, int *))
 {
    int classification = AIMEE_TOOL_CLASS_UNKNOWN;
-   if (classifier)
-      (void)classifier(name, &classification);
+   if (!classifier || classifier(name, &classification) != 0 ||
+       classification < AIMEE_TOOL_CLASS_UNKNOWN || classification > AIMEE_TOOL_CLASS_REMOTE)
+      return AIMEE_TOOL_CLASS_UNKNOWN;
    return classification;
 }
 
@@ -224,6 +247,46 @@ void agent_tools_effect_record_postcondition(int passed, const char *detail)
       (void)ti_effect_contract_record_postcondition(&g_effect, passed, detail);
 }
 
+/* Exec envelopes report failures through exit_code/status rather than the text
+ * output. This native entry classification belongs to the tool/effect owner. */
+int agent_tools_effect_exec_failure(const char *result, const char **verdict, const char **reason)
+{
+   cJSON *root = cJSON_Parse(result);
+   if (!root)
+      return 0;
+   cJSON *stderr_value = cJSON_GetObjectItem(root, "stderr");
+   cJSON *exit_value = cJSON_GetObjectItem(root, "exit_code");
+   cJSON *status_value = cJSON_GetObjectItem(root, "status");
+   int failed = 1;
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "cancelled")))
+   {
+      /* Execution may already have produced effects; cancellation is not a
+       * pre-dispatch refusal. Keep its distinct reason on a failed execution. */
+      *verdict = "error";
+      *reason = "cancelled";
+   }
+   else if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "timed_out")))
+   {
+      *verdict = "timeout";
+      *reason = "timeout";
+   }
+   else if (cJSON_IsString(stderr_value) && !strncmp(stderr_value->valuestring, "refused:", 8))
+   {
+      *verdict = "refused";
+      *reason = "policy";
+   }
+   else if ((cJSON_IsNumber(exit_value) && exit_value->valuedouble != 0) ||
+            (cJSON_IsString(status_value) && !strcmp(status_value->valuestring, "failed")))
+   {
+      *verdict = "error";
+      *reason = "tool_error";
+   }
+   else
+      failed = 0;
+   cJSON_Delete(root);
+   return failed;
+}
+
 void agent_tools_effect_finish(const char *verdict, const char *reason)
 {
    if (g_effect_active)
@@ -261,7 +324,43 @@ int agent_tools_effect_admit(const char *name, cJSON **args, const char *cwd, co
    agent_tools_effect_propose(name, *args, classification);
    return agent_tools_effect_validate_and_execute(name, *args, classification);
 }
-char *agent_tools_effect_receipt(const char *verdict, char *result)
+char *agent_tools_effect_receipt(const char *verdict, char *result, int *is_error)
 {
-   return g_action_finish ? g_action_finish(verdict, result) : result;
+   return g_action_finish ? g_action_finish(verdict, result, is_error) : result;
+}
+
+static agent_tool_classifier_fn g_tool_classifier;
+
+void agent_tools_register_classifier(agent_tool_classifier_fn classifier)
+{
+   g_tool_classifier = classifier;
+}
+
+int agent_tools_classification(const char *name)
+{
+   return agent_tools_effect_classification(name, g_tool_classifier);
+}
+
+char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *admitted, const char *arguments_json,
+                                       int timeout_ms, int *is_error)
+{
+   if (is_error)
+      *is_error = 1;
+   if (!admitted || admitted->kind != AIMEE_TOOL_FUNCTION || !admitted->name ||
+       !admitted->name[0] || !cJSON_IsObject(admitted->schema) || !arguments_json)
+      return safe_strdup("error: invalid admitted tool definition");
+   cJSON *args = aimee_ir_json_parse_frame(arguments_json, strlen(arguments_json));
+   cJSON *canonical = cJSON_IsObject(args) ? tool_args_canonicalize(admitted->schema, args) : NULL;
+   char *before = args ? cJSON_PrintUnformatted(args) : NULL;
+   char *after = canonical ? cJSON_PrintUnformatted(canonical) : NULL;
+   int unchanged = before && after && strcmp(before, after) == 0;
+   free(before);
+   free(after);
+   cJSON_Delete(canonical);
+   if (!unchanged)
+   {
+      cJSON_Delete(args);
+      return safe_strdup("error: admitted tool arguments are not canonical");
+   }
+   return agent_tools_dispatch_owned(admitted->name, arguments_json, timeout_ms, is_error, args);
 }

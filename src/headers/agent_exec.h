@@ -2,10 +2,19 @@
 #define DEC_AGENT_EXEC_H 1
 
 #include "agent_types.h"
+#include <aimee/ir/aimee_ir.h>
+#include <aimee/tools/module_api.h>
 
 struct cJSON; /* forward declaration for gemini_prompt_cache_attach */
 
+/* Host startup installs the additional source-owned unknown-effect gate.
+ * This callback cannot override a denial by the ordinary policy owners. */
+typedef int (*policy_unknown_effect_gate_fn)(const char *, const char *, const char *, uint32_t,
+                                             int, char *, size_t);
+void policy_set_unknown_effect_gate(policy_unknown_effect_gate_fn gate);
+void policy_unknown_effect_clear(void);
 /* Execution */
+void agent_reject_degenerate_plain_response(agent_result_t *out, const char *agent_name);
 int agent_execute_with_tools(const agent_t *agent, const agent_network_t *network,
                              const char *system_prompt, const char *user_prompt, int max_tokens,
                              double temperature, agent_result_t *out);
@@ -20,6 +29,17 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
                                      int max_tokens, double temperature,
                                      struct cJSON *initial_messages,
                                      struct cJSON **updated_messages, agent_result_t *out);
+
+/* Complete canonical conversation for the server-owned tool loop. No user
+ * message is reconstructed from a text projection. The final response remains
+ * typed and owned by the caller; ordinary result text is compatibility only. */
+int agent_request_with_tools_supported(const aimee_request_t *request);
+int agent_execute_request_with_tools(const agent_t *agent, const agent_network_t *network,
+                                     const char *role, const aimee_request_t *request,
+                                     aimee_response_t *response, agent_result_t *out);
+int agent_run_request_with_tools(agent_config_t *config, const agent_t *selected,
+                                 const aimee_request_t *request, aimee_response_t *response,
+                                 agent_result_t *out);
 
 int agent_execute(const agent_t *agent, const char *system_prompt, const char *user_prompt,
                   int max_tokens, double temperature, agent_result_t *out);
@@ -123,6 +143,14 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
 /* Context assembly refused before the next provider request. Terminal for
  * routing/fallback and not a provider-health failure. */
 #define AGENT_RC_CONTEXT_REFUSED (-3)
+
+/* Durable capture failed. Execution may already have run tools, so retrying on
+ * another provider or credential is forbidden and must not affect health. */
+#define AGENT_RC_CAPTURE_FAILED (-4)
+static inline int agent_rc_is_local_refusal(int rc)
+{
+   return rc == AGENT_RC_CONTEXT_REFUSED || rc == AGENT_RC_CAPTURE_FAILED;
+}
 
 /* THE single per-agent turn executor: the one place that enforces the per-agent
  * max_parallel concurrency cap and records provider-health for a model turn.
@@ -237,9 +265,12 @@ void agent_ssh_cleanup(const agent_network_t *network, const char *key_path,
                        const char *session_id);
 
 /* Policy, trace, confidence */
-int tool_validate(const char *tool_name, const char *args_json, char *err_out, size_t err_len);
+/* Validate against the exact admitted IR function schema. Optional registry
+ * enable/disable state remains policy; registry/provider schemas cannot replace
+ * the advertised contract. Arguments are the same canonical bytes as dispatch. */
+int tool_validate_ir(const aimee_tool_t *tool, const char *args_json, char *err_out,
+                     size_t err_len);
 const char *tool_suggest(const char *name);
-const char *tool_side_effect(const char *tool_name);
 char *agent_collect_tool_prompts(void);
 void agent_trace_log(int plan_id, int turn, const char *direction, const char *content,
                      const char *tool_name, const char *tool_args, const char *tool_result,
@@ -249,6 +280,12 @@ int policy_check_tool(const char *tool_name, const char *side_effect, const char
                       char *reason_out, size_t reason_len);
 int policy_check_tool_attempt(const char *tool_name, const char *side_effect, const char *args_json,
                               const char *attempt_id, char *reason_out, size_t reason_len);
+int tool_policy_metadata(const char *tool, aimee_tool_metadata_t *metadata, char *effect,
+                         size_t effect_len, char *reason, size_t reason_len);
+int policy_check_tool_metadata_attempt(const char *tool, const aimee_tool_metadata_t *metadata,
+                                       const char *effect, const char *arguments,
+                                       const char *attempt, char *reason, size_t reason_len);
+
 int policy_check_session_tool(const char *session, const char *tool, const char *arguments,
                               const char *attempt, char *reason, size_t reason_len);
 char *policy_observe_indexed(const char *tool, const char *arguments, const char *attempt,
@@ -261,11 +298,14 @@ char *policy_annotate_indexed(const char *tool, const char *arguments, const cha
 int policy_load(void);
 void policy_action_attempt(const char *attempt);
 int policy_action_inherit(const char *session);
+int policy_recheck_action_tool_attempt(const char *tool, const char *effect, const char *arguments,
+                                       const char *attempt, uint32_t resource_categories,
+                                       char *reason, size_t reason_len);
 int policy_recheck_action_tool(const char *tool, const char *effect, const char *arguments,
                                char *reason, size_t reason_len);
 int policy_action_begin(const char *name, struct cJSON **args, const char *cwd, const char *sid,
                         int authorized);
-char *policy_action_finish(const char *verdict, char *result);
+char *policy_action_finish(const char *verdict, char *result, int *is_error);
 struct cJSON;
 int policy_prepare_exploration(const struct cJSON *offer, const char *session,
                                const char *workspace, const char *project);

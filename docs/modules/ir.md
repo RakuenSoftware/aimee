@@ -10,8 +10,8 @@ route work, or define a provider's external JSON contract.
 
 ## Public contracts
 
-`src/modules/ir/module.yaml` is the complete module-local ownership inventory: two production
-translation units, three canonical public headers, three direct contract tests, and
+`src/modules/ir/module.yaml` is the complete module-local ownership inventory: production
+translation units, canonical public headers, direct contract tests, and
 `docs/modules/ir.md`.
 `ownership_complete: true` makes unlisted module-local C or private-header files and omission of the
 canonical document fail descriptor validation. Canonical public-header placement remains enforced by
@@ -41,6 +41,78 @@ they mix canonical operations with translation or comparison behavior. A later b
 must split those responsibilities before assigning them to IR or translation. IR does not own provider
 ingress parsing, provider-specific body construction, response composition outside the typed result, or
 `shadow_mirror.c` lifecycle behavior.
+
+### Canonical session contract (migration in progress)
+
+`aimee/ir/session_event.h` serializes typed IR messages and deltas without native provider
+sidecars. Messages carry roles and stable message identities; opaque tool IDs correlate uses
+and results across message boundaries. Harness control requests/responses are distinct events,
+so serializing a control never grants a model authority to approve it. Host execution lifecycle
+is separate from each model response's `TURN_STOP`. Session identity, actor, sequence, and
+producer retry identity belong to the transport envelope owned by Server sessions.
+
+The `replay_proof` metadata event reserves the host's native replay evidence: a connection/account
+scope digest, exact canonical block digest, source wire and (for Anthropic) the actual sent-prefix
+binding. It contains no credentials or transcript. C, Go and browser consumers validate the same
+shape; history and browser projection advance past it without creating model messages. Parsing
+this event alone never establishes provenance or authorizes replay. The scoped native runtime captures evidence from actual upstream canonical responses and
+checks it at entry and after restored history/policy edits, before egress. SDK spawn-site
+activation and live cache/history adoption remain separate, unfinished work.
+
+The host-only `native_checkpoint` event commits an attested scope, current-context digest,
+canonical-prefix digest and message count (1–4096), harness (`codex` or `claude`), opaque native
+handle and random claim identity. It contains no prompt or credential. C, Go and browser validate
+its shape; model-history loading and browser projection advance past it without creating model
+content. The native cache controller additionally verifies the owner, source-log continuity,
+completed source turn and canonical history, and atomically consumes a versioned checkpoint before
+handing out a resume handle. Parsing metadata alone grants no replay authority. Production SDK
+callers have not selected this controller; native adoption/profile/compaction fidelity remains a
+separate qualification before activation.
+
+Thinking deltas can carry `thinking_id` and `encrypted_content` at `BLOCK_START` or
+`BLOCK_DELTA`, using the same field names as complete blocks. These are complete opaque values,
+not fragments: C assembly and browser replay retain late arrivals, accept identical repeats,
+and refuse replacement. The fields are invalid on other kinds or lifecycle events. A target
+stream renderer without an opaque-state representation must refuse the delta; any deliberate
+projection and its fidelity decision belong at the translation boundary.
+
+Unknown blocks fail serialization until an entry adapter models them; they are not silently
+flattened into text. The optional thread-bound sink is scoped by its caller, which must restore
+the previous sink before releasing its context or returning a pooled worker. Sink failures
+propagate to the producer. IR owns no sockets, database handles, authorization, or persistence.
+
+Browser chat uses this contract for live delivery and durable replay. Native delegate execution
+retains owned IR through governance and tool dispatch; its persisted history contains canonical
+`role`/`blocks` messages. Provider request histories are rendered at the egress boundary. Legacy
+provider arrays cross an explicit migration adapter before execution; mixed or unknown content
+fails admission rather than becoming an empty response.
+
+Buffered responses publish `TURN_START`, a complete message, and `TURN_STOP`, retaining canonical
+stop reasons and input/output, cache-read/write and reasoning usage. Provider failures publish
+`ERROR` with a typed error message. Streamed harness snapshots use the existing native stream's
+lifecycle and do not manufacture another turn. Canonical message decoding preserves opaque tool
+IDs, signatures, encrypted/redacted reasoning, media references and context metadata. MIME type
+is optional for URL media. Tool input is opaque JSON; completed API function calls additionally
+require an object at their entry adapter.
+
+The Responses backend now emits canonical text, refusal text, reasoning summaries and namespaced
+function-argument deltas while the provider connection is open. The entry adapter bounds framing
+and owned state, reconciles emitted prefixes and completed items against the existing full native
+decoder, and refuses conflicting identities, rewritten content, invalid arguments and truncation.
+`message_group` on a text `BLOCK_START` preserves authored message/part boundaries across C, Go and
+browser consumers; it is immutable after opening the block.
+
+The Responses frontend renders those deltas from canonical state. Full snapshots, policy completion
+and durable history precede item-done and client-completion events. No partial stream is retried.
+`/v1/responses` selects this transport for Responses-speaking providers when response governance
+and subagent prevention/completion repair do not require buffered admission; other upstream wires and those policy
+modes retain their existing buffered path. Incremental Responses-to-Anthropic projection remains
+unfinished. The decoder's native framing stays inside translation and never becomes core history.
+
+The migration remains incomplete: production SDK activation, full native tool effects and human
+controls, account-bound cache/history admission, credential custody, cross-wire incremental
+Responses ingress and remaining IR consumers still require cutover. The current
+[handoff](../IR_MIGRATION_HANDOFF.md) records the implemented and unfinished boundaries.
 
 ## Dependencies and consumers
 
@@ -149,7 +221,39 @@ discovery. It snapshots roles, tool names and last-user text, then validates eve
 step before invoking any supplied connection or editing the IR. Bindings and
 text resources are explicitly supplied by the host; plans cannot invoke arbitrary
 commands. Supported steps call a binding, append typed context or remove a
-validated descending list of tool indices. Context metadata follows the existing
+validated descending list of catalog paths. Context metadata follows the existing
 IR authority-promotion rule, revision epochs retain their full 64-bit value,
 and appended blocks preserve the existing cached prefix. Domain selection,
 rendering and policy belong to the Go module producing the plan.
+
+
+The Go public wire contract lives in `server-go/ir`, alongside the existing
+implementation-independent caller contracts. It contains typed canonical blocks,
+messages, requests and catalogs plus strict codecs; it owns no storage, I/O,
+module dispatch or policy. DB1 session admission consumes that shared contract.
+No peer-module implementation import or bus-boundary exemption is added.
+
+Request planning receives an explicitly marked `gateway_policy` projection of
+canonical roles, catalog kinds/namespaces/provider identity and bounded last-user
+text. Prompt bodies, tool schemas and opaque configuration stay with the host;
+the Go policy returns descending catalog paths, and the host validates the whole
+patch before changing owned IR. This keeps long transcripts out of the bounded
+bus frame without flattening a native request or losing nested tool identity.
+
+
+Native cache recovery only invalidates an exact abandoned claim after host proof
+that its child stopped and source proof of a terminal turn; it never reconstructs
+canonical history from vendor files. Finalization rejects interleaved later
+source turns. Runtime cache scope construction binds captured host permissions
+and source authority to separately attested SDK/launch/workspace digests, while
+opaque replay provenance keeps its existing account/model identity. Production
+SDK call-site activation and those concrete attestations remain unfinished.
+
+
+The `native_compaction` host event has exactly one payload field, `harness`
+(`codex` or `claude`). Native adapters publish it for SDK compaction boundaries;
+it advances replay cursors without replacing model messages with a vendor
+summary. A native cache cannot be checkpointed after this event in its source
+turn. Once the child is quiescent, abort/recovery discards the derived cache and
+the next execution adopts canonical history afresh. Durable capture refusal
+prevents accepting an unrecorded compaction observation.

@@ -21,6 +21,68 @@ static int tools_array_has_name(cJSON *tools, const char *name)
    return 0;
 }
 
+cJSON *mcp_tool_advert_from_list(const cJSON *list, const char *tool)
+{
+   if (!cJSON_IsArray(list) || !tool || !tool[0])
+      return NULL;
+   const cJSON *item, *git = NULL;
+   cJSON_ArrayForEach(item, list)
+   {
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "name"));
+      if (name && !strcmp(name, tool))
+         return cJSON_Duplicate(item, 1);
+      if (name && !strcmp(name, "git"))
+         git = item;
+   }
+   if (strncmp(tool, "git_", 4) || !tool[4] || !git)
+      return NULL;
+   const cJSON *schema = cJSON_GetObjectItemCaseSensitive(git, "inputSchema");
+   const cJSON *properties = cJSON_GetObjectItemCaseSensitive(schema, "properties");
+   const cJSON *command = cJSON_GetObjectItemCaseSensitive(properties, "command");
+   const cJSON *values = cJSON_GetObjectItemCaseSensitive(command, "enum");
+   const cJSON *required = cJSON_GetObjectItemCaseSensitive(schema, "required");
+   const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(schema, "type"));
+   const char *command_type =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(command, "type"));
+   if (!cJSON_IsString(cJSON_GetObjectItemCaseSensitive(git, "description")) ||
+       !cJSON_IsObject(schema) || !cJSON_IsObject(properties) || !type || strcmp(type, "object") ||
+       !command_type || strcmp(command_type, "string") || !cJSON_IsArray(values) ||
+       (required && !cJSON_IsArray(required)))
+      return NULL;
+   int declared = 0;
+   const cJSON *value;
+   cJSON_ArrayForEach(value, values) if (cJSON_IsString(value) &&
+                                         !strcmp(value->valuestring, tool + 4)) declared = 1;
+   if (!declared)
+      return NULL;
+   cJSON_ArrayForEach(value, required) if (!cJSON_IsString(value)) return NULL;
+   cJSON *advert = cJSON_Duplicate(git, 1);
+   if (!advert)
+      return NULL;
+   cJSON *projected_schema = cJSON_GetObjectItemCaseSensitive(advert, "inputSchema");
+   cJSON *projected_properties = cJSON_GetObjectItemCaseSensitive(projected_schema, "properties");
+   cJSON_DeleteItemFromObjectCaseSensitive(projected_properties, "command");
+   cJSON *projected_required = cJSON_GetObjectItemCaseSensitive(projected_schema, "required");
+   for (int i = cJSON_GetArraySize(projected_required) - 1; i >= 0; --i)
+   {
+      const cJSON *entry = cJSON_GetArrayItem(projected_required, i);
+      if (!strcmp(entry->valuestring, "command"))
+         cJSON_DeleteItemFromArray(projected_required, i);
+   }
+   char description[256];
+   int length = snprintf(description, sizeof description,
+                         "Run Git command '%s'. The command is fixed by this tool name.", tool + 4);
+   if (length < 0 || (size_t)length >= sizeof description ||
+       !cJSON_ReplaceItemInObjectCaseSensitive(advert, "name", cJSON_CreateString(tool)) ||
+       !cJSON_ReplaceItemInObjectCaseSensitive(advert, "description",
+                                               cJSON_CreateString(description)))
+   {
+      cJSON_Delete(advert);
+      return NULL;
+   }
+   return advert;
+}
+
 static void mcp_add_memory_store_property(cJSON *properties)
 {
    cJSON *store = cJSON_AddObjectToObject(properties, "store");

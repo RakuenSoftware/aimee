@@ -1684,6 +1684,29 @@ static void test_known_subagent_tools_blocked(void)
    guardrails_close_test_sqlite();
 }
 
+static void test_registered_aimee_delegation(void)
+{
+   guardrails_open_test_sqlite();
+   session_state_t state = {0};
+   strcpy(state.session_mode, MODE_IMPLEMENT);
+   char message[512];
+   const char *arguments = "{\"role\":\"diagnose\",\"prompt\":\"Inspect the source\"}";
+   int rc =
+       pre_tool_check("delegate", arguments, &state, MODE_APPROVE, "/tmp", message, sizeof message);
+   assert(rc == 2 && strstr(message, "aimee delegate"));
+   rc = pre_tool_check_registered_tool("delegate", arguments, &state, MODE_APPROVE, "/tmp", message,
+                                       sizeof message);
+   assert(rc == 0);
+   const char *external[] = {"Task", "Agent", "spawn_agent", "launch_remote_agent"};
+   for (size_t i = 0; i < sizeof external / sizeof external[0]; i++)
+   {
+      rc = pre_tool_check_registered_tool(external[i], arguments, &state, MODE_APPROVE, "/tmp",
+                                          message, sizeof message);
+      assert(rc == 2 && strstr(message, "aimee delegate"));
+   }
+   guardrails_close_test_sqlite();
+}
+
 static void test_unknown_subagent_surface_blocked(void)
 {
    guardrails_open_test_sqlite();
@@ -2072,6 +2095,35 @@ static void test_shell_in_main_checkout_forced_to_worktree(void)
 
    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
    system(cmd);
+}
+
+static void test_read_file_in_arbitrary_linked_worktree(void)
+{
+   char root[256], command[2048], checkout[512], input[1024], message[1024] = {0};
+   snprintf(root, sizeof root, "%s/aimee-linked-read-XXXXXX", platform_tmpdir());
+   char *created = mkdtemp(root);
+   assert(created);
+   snprintf(checkout, sizeof checkout, "%s/checkout", root);
+   snprintf(command, sizeof command,
+            "git init -q '%s/source' && git -C '%s/source' config user.email t@t && "
+            "git -C '%s/source' config user.name t && echo x > '%s/source/f' && "
+            "git -C '%s/source' add f && git -C '%s/source' commit -q -m fixture && "
+            "git clone -q --bare '%s/source' '%s/mirror' && "
+            "git --git-dir='%s/mirror' worktree add -q '%s' HEAD",
+            root, root, root, root, root, root, root, root, root, checkout);
+   int rc = system(command);
+   assert(!rc);
+   guardrails_open_test_sqlite();
+   session_state_t state = {0};
+   strcpy(state.session_mode, MODE_IMPLEMENT);
+   strcpy(state.guardrail_mode, MODE_APPROVE);
+   snprintf(input, sizeof input, "{\"file_path\":\"%s/f\"}", checkout);
+   rc = pre_tool_check("Read", input, &state, MODE_APPROVE, checkout, message, sizeof message);
+   assert(!rc);
+   guardrails_close_test_sqlite();
+   snprintf(command, sizeof command, "rm -rf '%s'", root);
+   rc = system(command);
+   assert(!rc);
 }
 
 static void test_path_tool_redirect_is_cwd_independent(void)
@@ -4040,6 +4092,7 @@ int main(void)
    test_anti_pattern_no_match_no_warning();
    test_known_subagent_tools_blocked();
    test_unknown_subagent_surface_blocked();
+   test_registered_aimee_delegation();
    test_hook_call_count_increments();
    test_unknown_workspace_blocks_writes();
    test_container_delegate_exempt_from_worktree_guard();
@@ -4049,6 +4102,7 @@ int main(void)
    test_external_default_checkout_blocks_writes();
    test_non_git_work_and_worktree_opt_out();
    test_shell_in_main_checkout_forced_to_worktree();
+   test_read_file_in_arbitrary_linked_worktree();
    test_path_tool_redirect_is_cwd_independent();
    test_git_commands_allowed_by_default();
    test_c_source_has_bare_string_newline();

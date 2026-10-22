@@ -638,7 +638,7 @@ static int run_aggregator(agent_config_t *acfg, const ensemble_panel_t *panel,
          continue;
       if (fallbacks_tried++ >= 1)
          break;
-      free(out->response);
+      agent_result_clear_response(out);
       memset(out, 0, sizeof(*out));
       if (delegate_run_inline(&agg_cfg, cand, "review", NULL, synthesis_prompt, 0, 0.3, out) == 0 &&
           out->response && out->response[0])
@@ -853,7 +853,7 @@ static int run_quality_scorer(agent_config_t *acfg, const char *task, const char
    if (!full)
       return artifact ? (int)strlen(artifact) : 0;
 
-   agent_result_t score_result;
+   agent_result_t score_result = {0};
    memset(&score_result, 0, sizeof(score_result));
    int score = artifact ? (int)strlen(artifact) : 0;
    if (agent_run_with_tools_write_enforce(acfg, "reason", NULL, full, 512, 0, &score_result) == 0 &&
@@ -866,7 +866,7 @@ static int run_quality_scorer(agent_config_t *acfg, const char *task, const char
       if (end && end != score_result.response && parsed >= 0 && parsed <= 100)
          score = (int)parsed;
    }
-   free(score_result.response);
+   agent_result_clear_response(&score_result);
    free(full);
    return score;
 }
@@ -884,7 +884,7 @@ static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, cons
    free(p2);
    if (!full)
       return 0;
-   agent_result_t res;
+   agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
    int completion = 0;
    if (agent_run_with_tools_write_enforce(acfg, "reason", NULL, full, 512, 0, &res) == 0 &&
@@ -900,7 +900,7 @@ static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, cons
          completion = atoi(res.response);
       cJSON_Delete(j);
    }
-   free(res.response);
+   agent_result_clear_response(&res);
    free(full);
    return completion >= 90;
 }
@@ -927,13 +927,13 @@ static int summarize_forward(agent_config_t *acfg, const ensemble_panel_t *panel
    free(p2);
    if (!full)
       return -1;
-   agent_result_t res;
+   agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
    int rc = run_aggregator(acfg, panel, full, 0, &res);
    free(full);
    if (rc != 0 || !res.response || !res.response[0])
    {
-      free(res.response);
+      agent_result_clear_response(&res);
       return -1;
    }
    if (cost_usd)
@@ -945,7 +945,7 @@ static int summarize_forward(agent_config_t *acfg, const ensemble_panel_t *panel
       free(*artifact);
       *artifact = xstrdup0(res.response);
    }
-   free(res.response);
+   agent_result_clear_response(&res);
    return (*artifact && *peer_notes) ? 0 : -1;
 }
 
@@ -1062,7 +1062,7 @@ static void answer_roundtable_questions(agent_config_t *acfg, const char *task,
    snprintf(prompt, n, "%s%s\n\nQUESTIONS:\n%s\n\nCONSOLIDATED REVIEW:\n%s\n", prefix,
             task ? task : "", qjson, out->artifact);
    free(qjson);
-   agent_result_t res;
+   agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
    if (agent_run_with_tools_write_enforce(acfg, "reason", NULL, prompt, 1024, 0, &res) == 0 &&
        res.response && res.response[0])
@@ -1072,12 +1072,12 @@ static void answer_roundtable_questions(agent_config_t *acfg, const char *task,
    }
    else
       mark_question_gaps(opts, out);
-   free(res.response);
+   agent_result_clear_response(&res);
    free(prompt);
 }
 
 static int repair_review_json(agent_config_t *acfg, const ensemble_panel_t *panel, int participant,
-                              const char *bad_text, char **fixed, double *cost_usd)
+                              const char *bad_text, agent_result_t *fixed, double *cost_usd)
 {
    if (!acfg || !panel || participant < 0 || participant >= panel->reference_count || !fixed)
       return -1;
@@ -1092,19 +1092,19 @@ static int repair_review_json(agent_config_t *acfg, const ensemble_panel_t *pane
        bad_text ? bad_text : "", "\n");
    if (!prompt)
       return -1;
-   agent_result_t res;
+   agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
    int rc = agent_run_named(acfg, panel->reference_models[participant], "review", NULL, prompt, 512,
                             0.2, &res);
    free(prompt);
    if (rc != 0 || !res.response || !res.response[0])
    {
-      free(res.response);
+      agent_result_clear_response(&res);
       return -1;
    }
    if (cost_usd)
       *cost_usd += result_token_cost(acfg, &res, panel->reference_models[participant]);
-   *fixed = res.response;
+   agent_result_move_response(fixed, &res);
    return 0;
 }
 
@@ -1792,7 +1792,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, c
          out->success = 1;
       }
       for (int i = 0; i < ref_count; i++)
-         free(results[i].response);
+         agent_result_clear_response(&results[i]);
       return 0;
    }
 
@@ -1811,7 +1811,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, c
          out->success = 1;
       }
       for (int i = 0; i < ref_count; i++)
-         free(results[i].response);
+         agent_result_clear_response(&results[i]);
       return 0;
    }
 
@@ -1835,14 +1835,14 @@ int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, c
       aimee_log(LOG_ERROR, "delegate_ensemble", "failed to build synthesis prompt");
       free(synthesis_buf);
       for (int i = 0; i < ref_count; i++)
-         free(results[i].response);
+         agent_result_clear_response(&results[i]);
       return -1;
    }
 
    for (int i = 0; i < ref_count; i++)
-      free(results[i].response);
+      agent_result_clear_response(&results[i]);
 
-   agent_result_t agg_result;
+   agent_result_t agg_result = {0};
    int agg_rc = run_aggregator(acfg, panel, synthesis_buf, 0, &agg_result);
    free(synthesis_buf);
 
@@ -1858,7 +1858,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, c
       out->degraded = 1;
    }
 
-   free(agg_result.response);
+   agent_result_clear_response(&agg_result);
    return 0;
 }
 
@@ -2064,7 +2064,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
       if (rc != 0)
       {
          for (int i = 0; i < ref_count; i++)
-            free(results[i].response);
+            agent_result_clear_response(&results[i]);
          goto fail;
       }
       int required_count =
@@ -2073,7 +2073,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
       {
          out->cancelled = 1;
          for (int i = 0; i < ref_count; i++)
-            free(results[i].response);
+            agent_result_clear_response(&results[i]);
          break;
       }
 
@@ -2089,7 +2089,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
             if (parse_review_issue_keys(results[i].response, cur_review_keys, &cur_review_key_count,
                                         64) != 0)
             {
-               char *fixed = NULL;
+               agent_result_t fixed = {0};
                if (local.cancel_requested && local.cancel_requested(local.cancel_ctx))
                {
                   out->cancelled = 1;
@@ -2097,15 +2097,15 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
                }
                if (repair_review_json(acfg, panel, i, results[i].response, &fixed,
                                       &out->cost_usd) == 0 &&
-                   parse_review_issue_keys(fixed, cur_review_keys, &cur_review_key_count, 64) == 0)
+                   parse_review_issue_keys(fixed.response, cur_review_keys, &cur_review_key_count,
+                                           64) == 0)
                {
-                  free(results[i].response);
-                  results[i].response = fixed;
+                  agent_result_move_response(&results[i], &fixed);
                }
                else
                {
-                  free(fixed);
-                  free(results[i].response);
+                  agent_result_clear_response(&fixed);
+                  agent_result_clear_response(&results[i]);
                   results[i].response = NULL;
                   snprintf(results[i].error, sizeof(results[i].error), "%s",
                            "malformed review JSON");
@@ -2120,7 +2120,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
          if (out->cancelled)
          {
             for (int i = 0; i < ref_count; i++)
-               free(results[i].response);
+               agent_result_clear_response(&results[i]);
             break;
          }
          capture_round_review_items(results, ref_count, out, round);
@@ -2171,7 +2171,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
             record_adopted_round(out, round, round_failed, round_required_failed);
          }
          for (int i = 0; i < ref_count; i++)
-            free(results[i].response);
+            agent_result_clear_response(&results[i]);
          break;
       }
 
@@ -2186,7 +2186,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
             {
                out->cancelled = 1;
                for (int i = 0; i < ref_count; i++)
-                  free(results[i].response);
+                  agent_result_clear_response(&results[i]);
                break;
             }
             /* Single-round: no cross-round comparison, so skip the scorer call. */
@@ -2202,7 +2202,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
             }
          }
          for (int i = 0; i < ref_count; i++)
-            free(results[i].response);
+            agent_result_clear_response(&results[i]);
          continue;
       }
 
@@ -2241,7 +2241,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
             char *chair_prompt = roundtable_chair_build_prompt(out);
             if (chair_prompt)
             {
-               agent_result_t chair_res;
+               agent_result_t chair_res = {0};
                memset(&chair_res, 0, sizeof(chair_res));
                long chair_deadline = local.deadline_ms > 0 ? start_ms + local.deadline_ms : 0;
                if (run_aggregator(acfg, panel, chair_prompt, chair_deadline, &chair_res) == 0 &&
@@ -2250,7 +2250,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
                   int chair_changed = 0;
                   chair_adj = roundtable_chair_apply(out, chair_res.response, &chair_changed);
                }
-               free(chair_res.response);
+               agent_result_clear_response(&chair_res);
                free(chair_prompt);
             }
          }
@@ -2270,7 +2270,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
             roundtable_artifact_append_rejected(&best_artifact, out);
          record_adopted_round(out, round, round_failed, round_required_failed);
          for (int i = 0; i < ref_count; i++)
-            free(results[i].response);
+            agent_result_clear_response(&results[i]);
          break;
       }
 
@@ -2281,7 +2281,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
       char *synthesis_prompt = build_round_synthesis_prompt(
           task, artifact, results, order, panel->reference_models, ref_count, local.mode);
       for (int i = 0; i < ref_count; i++)
-         free(results[i].response);
+         agent_result_clear_response(&results[i]);
       if (!synthesis_prompt)
          goto fail;
 
@@ -2291,7 +2291,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
          free(synthesis_prompt);
          break;
       }
-      agent_result_t agg_result;
+      agent_result_t agg_result = {0};
       /* Bound synthesis by the roundtable's own deadline so the fallback loop
        * cannot run long past it (the panel already respects this deadline). */
       long agg_deadline_abs = local.deadline_ms > 0 ? start_ms + local.deadline_ms : 0;
@@ -2300,7 +2300,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
       if (agg_rc != 0 || !agg_result.response || !agg_result.response[0])
       {
          out->degraded = 1;
-         free(agg_result.response);
+         agent_result_clear_response(&agg_result);
          continue;
       }
       out->cost_usd += result_token_cost(acfg, &agg_result, panel->aggregator);
@@ -2311,7 +2311,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
       artifact = xstrdup0(agg_result.response);
       if (!artifact)
       {
-         free(agg_result.response);
+         agent_result_clear_response(&agg_result);
          free(prev_artifact_for_judge);
          goto fail;
       }
@@ -2319,7 +2319,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
       peer_notes = xstrdup0(agg_result.response);
       if (!peer_notes)
       {
-         free(agg_result.response);
+         agent_result_clear_response(&agg_result);
          free(prev_artifact_for_judge);
          goto fail;
       }
@@ -2327,7 +2327,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
       if (local.cancel_requested && local.cancel_requested(local.cancel_ctx))
       {
          out->cancelled = 1;
-         free(agg_result.response);
+         agent_result_clear_response(&agg_result);
          free(prev_artifact_for_judge);
          break;
       }
@@ -2346,7 +2346,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
          best_score = score;
          record_adopted_round(out, round, round_failed, round_required_failed);
       }
-      free(agg_result.response);
+      agent_result_clear_response(&agg_result);
 
       if (panel->max_cost_usd > 0.0 && out->cost_usd > panel->max_cost_usd)
       {
@@ -2401,7 +2401,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
       free(apply_prompt);
       if (full)
       {
-         agent_result_t apply_result;
+         agent_result_t apply_result = {0};
          memset(&apply_result, 0, sizeof(apply_result));
          if (agent_run_with_tools_write_enforce(acfg, "draft", NULL, full, 4096, 0,
                                                 &apply_result) == 0 &&
@@ -2411,7 +2411,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
             best_artifact = xstrdup0(apply_result.response);
             out->cost_usd += result_token_cost(acfg, &apply_result, "draft");
          }
-         free(apply_result.response);
+         agent_result_clear_response(&apply_result);
          free(full);
       }
    }

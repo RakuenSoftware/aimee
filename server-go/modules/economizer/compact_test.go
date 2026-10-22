@@ -6,7 +6,9 @@ import (
 	"testing"
 )
 
-// DIFFERENTIAL test against the C implementation.
+// Historical differential fixtures against the retired C compactor.
+// Decimal tokens are now deliberately retained instead of the old lossy %g
+// projection; depth/string truncation fixtures continue to pin their behavior.
 //
 // The golden strings below are the VERBATIM stdout of src/compact.c's
 // compact_body() for these fixtures, captured by compiling the real C against a
@@ -23,14 +25,14 @@ func compactCfg() *CompactConfig {
 	return &CompactConfig{Enabled: true, Threshold: 64, HeadBytes: 20, TailBytes: 20}
 }
 
-func TestCompactMatchesCNumbers(t *testing.T) {
+func TestCompactPreservesParsedDecimalTokens(t *testing.T) {
 	raw := `{"a":3.0,"b":0.000001234567,"c":1234567.0,"d":0.5,"e":100000000.0,` +
 		`"f":1e300,"g":-0.0000001,"pad":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}`
 	want := "[compacted JSON summary]\n" +
-		`{"a": 3, "b": 1.23457e-06, "c": 1.23457e+06, "d": 0.5, "e": 1e+08, "f": 1e+300, "g": -1e-07, "pad": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"} /* 8 keys */` +
+		`{"a": 3.0, "b": 0.000001234567, "c": 1234567.0, "d": 0.5, "e": 100000000.0, "f": 1e300, "g": -0.0000001, "pad": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"} /* 8 keys */` +
 		fmt.Sprintf("\n[original: %d bytes]", len(raw))
 	if got := CompactBody(raw, "", compactCfg()); got != want {
-		t.Errorf("float spelling drifted from C:\n got: %q\nwant: %q", got, want)
+		t.Errorf("parsed decimal changed in summary:\n got: %q\nwant: %q", got, want)
 	}
 }
 
@@ -128,5 +130,15 @@ func TestCompactInvalidJSONFallsBack(t *testing.T) {
 	got := CompactBody(raw, "", compactCfg())
 	if !strings.Contains(got, "bytes omitted") {
 		t.Errorf("invalid JSON should fall back to head+tail, got %q", got)
+	}
+}
+
+func TestCompactRetainsOpaqueNumericIdentifiers(t *testing.T) {
+	raw := `{"id":9007199254740993,"ratio":0.12345678901234567890123456789,"n":1e9000}`
+	out := CompactBody(raw, "", compactCfg())
+	for _, token := range []string{"9007199254740993", "0.12345678901234567890123456789", "1e9000"} {
+		if !strings.Contains(out, token) {
+			t.Fatalf("numeric value changed in summary: %s", out)
+		}
 	}
 }

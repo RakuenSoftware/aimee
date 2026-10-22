@@ -1,6 +1,7 @@
 #include "modules/kb_client/kb_client_pii.h"
 /* server_mcp.c: handle mcp.call -- dispatches MCP tool calls within the server */
 #include "server_mcp_internal.h"
+#include "server_native_tool_admission.h"
 #include "server.h"
 #include "server_state_internal.h"
 #include "module_stage_adapters.h"
@@ -1743,8 +1744,8 @@ static const struct
     {"git_checkout", handle_git_checkout, 1},
 };
 
-static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const char *tool,
-                                cJSON *args, const char *sid)
+static cJSON *dispatch_git_tool_inner(server_ctx_t *ctx, server_conn_t *conn, const char *tool,
+                                      cJSON *args, const char *sid)
 {
    char verify_sid_buf[SERVER_SESSION_ID_MAX] = "";
    const char *verify_sid = sid;
@@ -1759,12 +1760,10 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
    if (sid && sid[0])
       session_id_set_override(sid);
 
-   /* A `mirror`-workspace target points at the CLIENT's path, which does not exist
-    * server-side; remap it to the reconstructed server-side worktree (driving the
-    * mirror lifecycle: ensure + reconstruct) so the git tool — e.g. `/pr` from the
-    * gateway — operates on the real tree. `path` is authoritative for every git
-    * operation except clone, whose path is a destination. No-op for
-    * shared/detached workspaces. */
+   /* Acquire using the registered client identity before replacing any path.
+    * Resolving first loses the mirror's retained directory capability and makes
+    * a failed reconstruction look like an ordinary server-local fallback.
+    * Clone's path is a destination, not the source workspace identity. */
    cJSON *jpath = cJSON_GetObjectItemCaseSensitive(args, "path");
    cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
    const char *path_arg = cJSON_IsString(jpath) ? jpath->valuestring : NULL;
@@ -1773,23 +1772,45 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
    int target_is_path = git_target && path_arg && git_target == path_arg;
    int clone_has_destination = strcmp(tool, "git_clone") == 0 && path_arg && path_arg[0];
    const char *git_target_key = target_is_path ? "path" : "cwd";
+   workspace_turn_scope_t *workspace_scope = NULL;
+   int workspace_bound = git_target ? workspace_turn_scope_begin(git_target, &workspace_scope) : 0;
+   if (workspace_bound < 0)
+   {
+      if (is_verify)
+         conn_active_verify(conn, verify_sid, 0);
+      return text_content("error: cannot retain nested Git workspace context");
+   }
    char mirror_target[MAX_PATH_LEN] = "";
    int mirror_target_authorized = 0;
-   if (git_target &&
-       workspace_turn_resolve_mirror_cwd(git_target, mirror_target, sizeof(mirror_target)))
+   const char *resolved_workspace = workspace_bound > 0 ? workspace_turn_active_cwd() : NULL;
+   if (resolved_workspace && resolved_workspace[0])
    {
-      cJSON_ReplaceItemInObject(args, git_target_key, cJSON_CreateString(mirror_target));
-      git_target = mirror_target;
+      snprintf(mirror_target, sizeof mirror_target, "%s", resolved_workspace);
+      cJSON *replacement = cJSON_CreateString(mirror_target);
+      if (!replacement || !cJSON_ReplaceItemInObject(args, git_target_key, replacement))
+      {
+         cJSON_Delete(replacement);
+         (void)workspace_turn_scope_end(workspace_scope);
+         if (is_verify)
+            conn_active_verify(conn, verify_sid, 0);
+         return text_content("error: cannot retain reconstructed Git workspace path");
+      }
       mirror_target_authorized = target_is_path;
+      /* A reconstructed cwd is the selected source, never a hint below an old
+       * session tracking file. Explicit path already has this behavior. */
+      if (!target_is_path)
+      {
+         while (cJSON_HasObjectItem(args, "no_session_redirect"))
+            cJSON_DeleteItemFromObjectCaseSensitive(args, "no_session_redirect");
+         if (!cJSON_AddBoolToObject(args, "no_session_redirect", 1))
+         {
+            (void)workspace_turn_scope_end(workspace_scope);
+            if (is_verify)
+               conn_active_verify(conn, verify_sid, 0);
+            return text_content("error: cannot retain reconstructed Git workspace routing");
+         }
+      }
    }
-
-   /* A `detached`-workspace target ALSO points at the CLIENT's path (the workspace
-    * lives on the serving client), so there is nothing to chdir into locally.
-    * Bind the detached provider for this target's workspace — exactly as the
-    * chat-turn boundary does — so the git tool's rev-parse / exec marshal over
-    * the runner channel to the serving client, which holds the real tree (and
-    * its own creds). No-op for shared/mirror/unregistered targets (returns 0). */
-   int detached_bound = git_target ? workspace_turn_bind_active(git_target) : 0;
 
    char *mismatch_err = NULL;
    cJSON *resolve_args = args;
@@ -1809,12 +1830,12 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
    if (resolved < 0)
    {
       run_cmd_set_cwd(NULL);
-      if (detached_bound)
-         workspace_turn_unbind_active();
+      (void)workspace_turn_scope_end(workspace_scope);
       if (sid && sid[0])
          session_id_clear_override();
       if (is_verify)
          conn_active_verify(conn, verify_sid, 0);
+      free(mismatch_err);
       if (resolved == -2)
          return text_content(
              "error: requested git path is outside the session checkout or unavailable through "
@@ -1838,8 +1859,7 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
    if (mismatch_err && is_mutating)
    {
       run_cmd_set_cwd(NULL);
-      if (detached_bound)
-         workspace_turn_unbind_active();
+      (void)workspace_turn_scope_end(workspace_scope);
       if (sid && sid[0])
          session_id_clear_override();
       cJSON *err_resp = text_content(mismatch_err);
@@ -1854,8 +1874,7 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
       content = git_fn(args);
 
    run_cmd_set_cwd(NULL);
-   if (detached_bound)
-      workspace_turn_unbind_active();
+   (void)workspace_turn_scope_end(workspace_scope);
    if (sid && sid[0])
       session_id_clear_override();
    if (is_verify)
@@ -1887,18 +1906,43 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
    return content;
 }
 
+/* Git resolution may temporarily replace legacy ownership context. Restore the
+ * caller rather than assuming that this tool is the outermost request. */
+static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const char *tool,
+                                cJSON *args, const char *sid)
+{
+   char previous_cwd[MAX_PATH_LEN], previous_session[128] = "";
+   const char *cwd = run_cmd_get_cwd();
+   snprintf(previous_cwd, sizeof previous_cwd, "%s", cwd ? cwd : "");
+   int previous_override = session_id_override_active();
+   if (previous_override)
+      snprintf(previous_session, sizeof previous_session, "%s", session_id());
+   int previous_worktree = mcp_git_get_worktree();
+   /* sid can itself borrow the caller's TLS override, which resolution changes. */
+   char *operation_session = sid ? strdup(sid) : NULL;
+   if (sid && !operation_session)
+      return text_content("error: cannot retain Git session context");
+   cJSON *content = dispatch_git_tool_inner(ctx, conn, tool, args, operation_session);
+   free(operation_session);
+   run_cmd_set_cwd(previous_cwd[0] ? previous_cwd : NULL);
+   mcp_git_set_worktree(previous_worktree);
+   if (previous_override)
+      session_id_set_override(previous_session);
+   else
+      session_id_clear_override();
+   return content;
+}
+
 /* See mcp_git.h. The native agent surface's door into the git tools: one dispatch
  * path, so a delegate committing through git_commit gets byte-for-byte the same
  * chdir/worktree refusal, mutating-context guard, branch-ownership check and
- * attribution strip an external MCP client gets. ctx/conn are NULL-safe here
- * because every use of them sits behind the git_verify branch, which this refuses. */
+ * attribution strip an external MCP client gets. Without a server pool, configured
+ * verification uses its synchronous owner and the same session cancellation ledger. */
 cJSON *mcp_git_run_tool(const char *tool, cJSON *args, const char *sid)
 {
    if (!tool || !tool[0])
       return NULL;
-   if (strcmp(tool, "git_verify") == 0)
-      return NULL; /* needs the server ctx/conn; native agents use their own `verify` */
-   int known = 0;
+   int known = strcmp(tool, "git_verify") == 0;
    for (size_t i = 0; i < sizeof(git_tool_table) / sizeof(git_tool_table[0]); i++)
       if (strcmp(tool, git_tool_table[i].name) == 0)
       {
@@ -2034,23 +2078,6 @@ void server_mcp_served_outcome(const char *verdict, const char *reason)
 
 static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
-/* Resolve cwd transport metadata to the same stable project identity used by
- * ingest.  Tool helpers must never fall back to a checkout basename: two moved
- * or linked worktrees can share that label while representing different stable
- * projects (or the reverse). */
-static void mcp_inject_active_project(cJSON *args)
-{
-   if (!cJSON_IsObject(args) || cJSON_GetObjectItemCaseSensitive(args, "project"))
-      return;
-   const cJSON *cwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
-   if (!cJSON_IsString(cwd) || !cwd->valuestring[0])
-      return;
-   char project[MAX_PATH_LEN] = "";
-   if (server_active_project_from_cwd(cwd->valuestring, project, sizeof(project)) == 0 &&
-       project[0])
-      cJSON_AddStringToObject(args, "project", project);
-}
-
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    g_served_verdict = "ok";
@@ -2112,7 +2139,8 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    if (cJSON_IsString(jcwd) && jcwd->valuestring[0] && cJSON_IsObject(jargs) &&
        !cJSON_GetObjectItemCaseSensitive(jargs, "cwd"))
       cJSON_AddStringToObject(jargs, "cwd", jcwd->valuestring);
-   mcp_inject_active_project(jargs);
+   server_mcp_inject_active_project(
+       jargs, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(jargs, "cwd")));
 
    const char *tool = jtool->valuestring;
    snprintf(g_served_tool, sizeof g_served_tool, "%s", tool); /* served audit identity */
@@ -2143,7 +2171,8 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
          if (cJSON_IsString(jcwd) && jcwd->valuestring[0] &&
              !cJSON_GetObjectItemCaseSensitive(jargs, "cwd"))
             cJSON_AddStringToObject(jargs, "cwd", jcwd->valuestring);
-         mcp_inject_active_project(jargs);
+         server_mcp_inject_active_project(
+             jargs, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(jargs, "cwd")));
          snprintf(g_served_tool, sizeof g_served_tool, "%s", tool);
       }
    }
@@ -2177,6 +2206,25 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
       {
          tool = fam_tool;
          snprintf(g_served_tool, sizeof g_served_tool, "%s", tool); /* expanded family name */
+      }
+   }
+
+   /* Native SDK callbacks carry an isolated host-owned permission snapshot.
+    * Admit the resolved callable, including call_tool -> family -> member, before
+    * any early handler or gateway branch, then apply directive/execution policy.
+    * Ordinary authenticated MCP clients keep their capability-based admission.
+    * Effects/approvals remain separate. */
+   if (agent_tools_scope_isolated())
+   {
+      char error[512];
+      const char *reason = server_native_tool_admit(tool, jargs, sid, error, sizeof error);
+      if (reason)
+      {
+         served_outcome("refused", reason);
+         int rc = server_send_error(conn, error, NULL);
+         if (owns_jargs)
+            cJSON_Delete(jargs);
+         return rc;
       }
    }
 
@@ -2312,23 +2360,6 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    else if (strncmp(tool, "git_", 4) == 0)
    {
       content = dispatch_git_tool(ctx, conn, tool, jargs, sid);
-   }
-   else if (strcmp(tool, "git") == 0)
-   {
-      /* Single multiplexed git tool: `command` selects the subcommand, which maps
-       * to the existing git_<command> dispatch (the git_* names stay callable). */
-      cJSON *jc = cJSON_GetObjectItemCaseSensitive(jargs, "command");
-      if (!cJSON_IsString(jc) || !jc->valuestring[0])
-      {
-         served_outcome("error", "bad_args");
-         if (owns_jargs)
-            cJSON_Delete(jargs);
-         return server_send_error(conn, "git requires a 'command' (status, commit, branch, pr, …)",
-                                  NULL);
-      }
-      char gtool[64];
-      snprintf(gtool, sizeof(gtool), "git_%s", jc->valuestring);
-      content = dispatch_git_tool(ctx, conn, gtool, jargs, sid);
    }
    if (!content)
       content = mcp_gateway_tool_dispatch(tool, jargs);

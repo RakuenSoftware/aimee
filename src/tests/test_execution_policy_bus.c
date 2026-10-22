@@ -26,6 +26,30 @@ static int g_available;
 static const char *g_reply;
 static aimee_module_call_result_t g_result;
 static int g_calls;
+static uint32_t expected_categories;
+static void check_categories(const cJSON *request)
+{
+   const cJSON *array = cJSON_GetObjectItemCaseSensitive(request, "policy_categories");
+   if (!expected_categories)
+   {
+      assert(!array);
+      return;
+   }
+   assert(cJSON_IsArray(array));
+   uint32_t mask = 0;
+   const cJSON *label = NULL;
+   cJSON_ArrayForEach(label, array)
+   {
+      assert(cJSON_IsString(label));
+      uint32_t found = 0;
+      for (uint32_t bit = 1; bit <= AIMEE_TOOL_POLICY_CONTROL; bit <<= 1)
+         if (!strcmp(label->valuestring, aimee_tool_policy_name(bit)))
+            found = bit;
+      assert(found && !(mask & found));
+      mask |= found;
+   }
+   assert(mask == expected_categories);
+}
 
 int obs_bus_module_available(uint32_t event_kind)
 {
@@ -53,6 +77,7 @@ cJSON *aimee_module_json_call(uint32_t event_kind, uint32_t stage_id, cJSON *req
 {
    assert(event_kind == 8449u && stage_id == 1u);
    assert(max_body == AIMEE_MODULE_MESSAGE_MAX_BODY && timeout_ms == 5000);
+   check_categories(request);
    assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(request, "tool")));
    assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(request, "arguments")));
    assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(request, "computer_use")));
@@ -100,7 +125,7 @@ size_t agent_tool_output_cap(void)
 int db1_session_exploration_apply(const char *principal, const char *sid, const char *request,
                                   char *reply, size_t reply_len)
 {
-   assert(strcmp(principal, "alice") == 0 && strcmp(sid, "session") == 0);
+   assert(strcmp(principal, "webuser:alice") == 0 && strcmp(sid, "session") == 0);
    cJSON *body = cJSON_Parse(request);
    assert(cJSON_IsObject(body));
    const char *operation =
@@ -146,6 +171,7 @@ int db1_session_exploration_apply(const char *principal, const char *sid, const 
       else
          assert(!index && !owner);
    }
+   check_categories(body);
    cJSON_Delete(body);
    owner_calls++;
    if (!owner_reply)
@@ -178,6 +204,24 @@ int aimee_module_commands_dispatch_internal_timeout(const char *method, const cJ
    return test_freshness ? 1 : 0;
 }
 
+static int gate_calls, gate_stage, gate_clears;
+static int source_gate_probe(const char *tool, const char *args, const char *attempt,
+                             uint32_t categories, int stage, char *reason, size_t cap)
+{
+   (void)categories;
+   (void)reason;
+   (void)cap;
+   if (stage == 2)
+   {
+      gate_clears++;
+      return 0;
+   }
+   assert(!strcmp(tool, "write_file") && !strcmp(args, "{\"path\":\"/workspace/target\"}") &&
+          !strcmp(attempt, "host-attempt"));
+   gate_calls++;
+   gate_stage = stage;
+   return 0;
+}
 int main(void)
 {
    char reason[256];
@@ -199,6 +243,18 @@ int main(void)
    g_reply = "{\"allowed\":true,\"reason\":\"policy permits\"}";
    assert(policy_check_tool("read_file", "filesystem", "{}", reason, sizeof reason) == 0);
    assert(strcmp(reason, "policy permits") == 0);
+   aimee_tool_metadata_t metadata = {AIMEE_TOOL_CLASS_READ, AIMEE_TOOL_POLICY_READ,
+                                     AIMEE_TOOL_POLICY_READ | AIMEE_TOOL_POLICY_FILESYSTEM};
+   expected_categories = metadata.categories;
+   assert(policy_check_tool_metadata_attempt("read_file", &metadata, "operator_label", "{}",
+                                             "metadata-attempt", reason, sizeof reason) == 0);
+   int before = g_calls;
+   metadata.categories |= 1u << 8;
+   assert(policy_check_tool_metadata_attempt("read_file", &metadata, "read", "{}",
+                                             "invalid-metadata", reason, sizeof reason) == -1);
+   assert(g_calls == before);
+   metadata.categories = expected_categories;
+   expected_categories = 0;
 
    g_reply = "{\"allowed\":false,\"reason\":\"policy denies\"}";
    assert(policy_check_tool("write_file", "filesystem", "{}", reason, sizeof reason) == -1);
@@ -210,6 +266,8 @@ int main(void)
 
    context_active = 1;
    snprintf(test_context.principal, sizeof(test_context.principal), "alice");
+   test_context.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+   snprintf(test_context.vault_principal, sizeof(test_context.vault_principal), "webuser:alice");
    snprintf(test_context.request_id, sizeof(test_context.request_id), "request");
    cJSON *offer = cJSON_Parse("{\"memory_owner\":\"m1\",\"index_generation\":\"i1\"}");
    assert(policy_prepare_exploration(offer, "session", "/project", "project") == 0);
@@ -245,6 +303,10 @@ int main(void)
    owner_reply = "{\"allowed\":true,\"reason\":\"observed\"}";
    assert(policy_check_tool_attempt("bash", "filesystem", "{\"command\":\"rg foo\"}", "b", reason,
                                     sizeof reason) == 0);
+   expected_categories = metadata.categories;
+   assert(policy_check_tool_metadata_attempt("read_file", &metadata, "operator_label", "{}",
+                                             "adaptive-metadata", reason, sizeof reason) == 0);
+   expected_categories = 0;
    owner_reply = NULL;
    assert(policy_check_tool_attempt("bash", "filesystem", "{\"command\":\"rg foo\"}", "c", reason,
                                     sizeof reason) == -1);
@@ -276,6 +338,21 @@ int main(void)
    assert(policy_check_session_tool("session", "bash", "{\"command\":\"rg foo\"}", "hook-detached",
                                     reason, sizeof(reason)) == 0);
    assert(check_session_calls == 3);
+   policy_set_unknown_effect_gate(source_gate_probe);
+   g_reply = "{\"allowed\":true,\"reason\":\"baseline allows\"}";
+   assert(!policy_check_tool_attempt("write_file", "filesystem", "{\"path\":\"/workspace/target\"}",
+                                     "host-attempt", reason, sizeof reason));
+   assert(gate_calls == 1 && gate_stage == 0 && gate_clears > 0);
+   assert(!policy_recheck_action_tool_attempt("write_file", "filesystem",
+                                              "{\"path\":\"/workspace/target\"}", "host-attempt", 0,
+                                              reason, sizeof reason));
+   assert(gate_calls == 2 && gate_stage == 1);
+   g_reply = "{\"allowed\":false,\"reason\":\"baseline refuses\"}";
+   assert(policy_recheck_action_tool_attempt("write_file", "filesystem",
+                                             "{\"path\":\"/workspace/target\"}", "host-attempt", 0,
+                                             reason, sizeof reason) < 0);
+   assert(gate_calls == 2);
+   policy_set_unknown_effect_gate(NULL);
    puts("test_execution_policy_bus: OK");
    return 0;
 }

@@ -122,8 +122,10 @@ static void *pump_main(void *arg)
    return NULL;
 }
 
-/* Consumer: poll the reference frame, read the leased span in place (a table read
- * from THIS thread), verify the bytes are self-consistent, and release. */
+/* Consumer: poll the reference frame and read the leased span in place through
+ * the lease view (D12), on THIS thread, while the producer allocates and the pump
+ * publishes and reclaims. The next poll returns the ref, so the pump thread
+ * consumes releases concurrently too. The bytes must be self-consistent. */
 static void *consumer_main(void *arg)
 {
    (void)arg;
@@ -139,21 +141,21 @@ static void *consumer_main(void *arg)
       if (!(ev.frame.hdr_flags & BUS_F_ARENA))
          continue; /* only arena frames in this harness */
 
-      const uint8_t *p = NULL;
-      must(bus_arena_read_ptr(&g_host.arena, (uint32_t)ev.frame.payload_ref, ev.frame.generation,
-                              g_consumer.reply.handle_id, &p) == BUS_ARENA_OK,
-           "read_ptr");
+      const uint8_t *p = ev.payload;
+      must(p != NULL && ev.payload_len == ev.frame.payload_len, "arena payload resolved");
       /* Every byte of the span must equal the first: a torn write or a bled-in
        * neighbouring lease would break this. */
       uint8_t v = p[0];
       for (uint32_t j = 1; j < ev.frame.payload_len; j++)
          must(p[j] == v, "span self-consistent (no torn write, no cross-lease bleed)");
-
-      must(bus_arena_release(&g_host.arena, (uint32_t)ev.frame.payload_ref, ev.frame.generation,
-                             g_consumer.reply.handle_id) == BUS_ARENA_OK,
-           "release");
       atomic_fetch_add_explicit(&g_consumed, 1, memory_order_relaxed);
    }
+   /* The last event's ref goes back on the next poll; then drain the backlog. */
+   bus_event_t last;
+   while (bus_client_poll(&g_consumer, &last) == BUS_CLIENT_OK)
+      ;
+   while (bus_client_flush_releases(&g_consumer) == BUS_CLIENT_WOULD_BLOCK)
+      sched_yield();
    return NULL;
 }
 
@@ -190,6 +192,8 @@ int main(void)
    /* The arena drained back to empty: no leaked span, no stranded lease. */
    must(bus_arena_bytes_in_use(&g_host.arena) == 0, "arena fully drained (no leak)");
    must(bus_arena_live_leases(&g_host.arena, g_producer.reply.handle_id) == 0, "no live leases");
+   /* Every release was the consumer's own, accepted by the holder check. */
+   must(g_host.slots[g_consumer.reply.handle_id].dropped == 0, "no release refused");
 
    bus_client_detach(&g_producer);
    bus_client_detach(&g_consumer);

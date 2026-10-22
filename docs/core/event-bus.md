@@ -1,7 +1,7 @@
 # Core C event bus
 
 **Owner:** runtime core
-**Paths:** `src/core/event_bus/`, `server-go/bus/`
+**Paths:** `src/core/event_bus/`, `server-go/bus/`, `rust/aimee-bus/`
 
 `libaimee-core-event-bus.a` is the single POSIX implementation consumed by
 `aimee-server` and `aimee-kb`. Each daemon hosts an independent local bus for
@@ -43,7 +43,7 @@ transport through the resource planes.
 - host sequence, observer routing, and full-stream tap;
 - capture format and observational replay;
 - local `SOCK_SEQPACKET` module attachment and descriptor grant;
-- C/Go vectors and conformance.
+- C/Go/Rust wire and layout vectors and conformance.
 
 ## Does not own
 
@@ -60,7 +60,10 @@ transport through the resource planes.
 Per-source FIFO is guaranteed. The host stamps global accepted order before routing. `publish` success
 means accepted into the producer ring, not consumed or durable. Backpressure is bounded and declared
 per kind. Arena references use generation and holder checks and are released on consumer completion
-or reap.
+or reap. A client in another process reads an arena payload through the read-only lease view the
+host mirrors after the control header, and returns its reference with a holder-checked
+`LEASE_RELEASE` control notification (D12 in `docs/dev/EVENT_BUS_DECISIONS.md`); arena production
+stays co-located.
 
 The tap is the only core full-stream observer. Ordinary clients receive only authorized kinds.
 
@@ -75,7 +78,14 @@ External C module repositories consume the host-free
 `aimee-core-event-bus-client` target. Go modules use the pure-Go client and
 process runtime under `server-go/bus`; it mirrors authenticated attach, AMOD
 fragmentation, deadlines, cancellation, bounded concurrent handlers,
-heartbeats, and host-epoch shutdown without cgo. The shared host runtime in `bus_runtime.c`
+heartbeats, and host-epoch shutdown without cgo. Rust modules use the Rust
+reference client and process runtime under `rust/aimee-bus`, which mirrors the
+same contract and links nothing from the C or Go implementations. It is the
+third independent client of the one C host, and provides both halves of the
+module contract: the process runtime and a module caller with the C core
+caller's outcomes. `make -C src rust-bus-tests` holds it to the wire and layout
+vectors, to interop with the C host, to the C module-runtime caller, and runs
+the Rust caller as its own admitted process against both C and Rust modules. The shared host runtime in `bus_runtime.c`
 owns the listener, peer admission, heartbeat, and reap lifecycle. Server and KB
 configure separate endpoints at `<config>/<daemon>-module-bus.sock` and separate
 policies at `<config>/modules.d/<daemon>`; the environment can override those
@@ -151,7 +161,8 @@ server-to-KB bus and no cross-machine shared memory.
 ## Required checks
 
 - wire unit tests and corrupt-frame rejection;
-- C/Go golden vectors and live conformance;
+- C/Go/Rust golden wire and layout vectors, held to their generators, and live conformance;
+- cross-process arena reads and reference release (D12) in all three clients;
 - ring/arena ASAN and TSAN lanes;
 - admission and cross-client isolation;
 - flow control, overflow, cancellation, and reap;

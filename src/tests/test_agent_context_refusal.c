@@ -3,6 +3,11 @@
  * as Go-owner protocol replies; this test does not reimplement memory policy. */
 #include "aimee.h"
 #include "agent_exec.h"
+#include "util.h"
+#include <aimee/tools/agent_tools.h>
+#include "modules/tools/tool_catalog_data.h"
+#include <aimee/module-runtime/pre_llm_hook.h>
+#include <aimee/ir/session_event.h>
 #include "config.h"
 #include "cJSON.h"
 #include "platform_test_util.h"
@@ -16,13 +21,97 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int metadata_available = 1;
+static int fixture_metadata(const char *name, aimee_tool_metadata_t *out)
+{
+   if (!metadata_available)
+      return -1;
+   *out = aimee_tools_catalog_metadata(name);
+   return 0;
+}
+
+static int wide_parallel, wide_uses, wide_results;
+static int identity_case, identity_results;
+static char identity_path[4096];
+static int capture_identity_result(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   if (event->kind != AIMEE_SESSION_MESSAGE)
+      return 0;
+   for (int i = 0; i < event->message->n_blocks; i++)
+   {
+      const aimee_block_t *block = &event->message->blocks[i];
+      if (block->type != AIMEE_BLK_TOOL_RESULT)
+         continue;
+      assert(!strcmp(block->tool_id, "identity-call"));
+      char *result = cJSON_PrintUnformatted(block->tool_result);
+      assert(result);
+      /* This fixture intentionally has no execution-policy owner. The exact
+       * advertised control reaches that independent gate; foreign/unknown calls
+       * must be refused earlier, before policy or tool execution. */
+      if (identity_case == 2)
+         assert(block->tool_is_error && strstr(result, "blocked by policy") &&
+                strstr(result, metadata_available ? "CAPABILITY_ABSENT" : "metadata unavailable"));
+      else
+         assert(block->tool_is_error && strstr(result, "not advertised") &&
+                !strstr(result, "IDENTITY_READ_CONTROL"));
+      free(result);
+      identity_results++;
+   }
+   return 0;
+}
+static int wide_capture(const aimee_session_event_t *event, void *context)
+{
+   if (event->kind != AIMEE_SESSION_MESSAGE)
+      return 0;
+   cJSON *pending = context;
+   for (int i = 0; i < event->message->n_blocks; i++)
+   {
+      const aimee_block_t *block = &event->message->blocks[i];
+      if (block->type == AIMEE_BLK_TOOL_USE)
+      {
+         assert(strlen(block->tool_id) > 64 &&
+                !cJSON_GetObjectItemCaseSensitive(pending, block->tool_id));
+         assert(cJSON_AddTrueToObject(pending, block->tool_id));
+         wide_uses++;
+      }
+      else if (block->type == AIMEE_BLK_TOOL_RESULT)
+      {
+         assert(cJSON_GetObjectItemCaseSensitive(pending, block->tool_id));
+         cJSON_DeleteItemFromObjectCaseSensitive(pending, block->tool_id);
+         wide_results++;
+      }
+   }
+   return 0;
+}
+
+static int capture_failure_mode, capture_events;
+static int refusing_capture(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   capture_events++;
+   if (capture_failure_mode == 1)
+      return -1;
+   return event->kind == AIMEE_SESSION_MESSAGE && !strcmp(event->message->role, "tool") ? -1 : 0;
+}
+
 static const char *recall_reply;
 static int recalls;
 static int refuse_after;
 static int provider_calls;
 static int final_response;
+static int bootstrap_case, bootstrap_evidence_seen;
 static int malformed_projection;
 static int transport_refuse;
+static int expect_hook_prompt, hook_calls;
+static int fallback_hook_context(const char *user, char *out, size_t capacity, void *context)
+{
+   (void)context;
+   assert(!strcmp(user, "original prompt"));
+   hook_calls++;
+   snprintf(out, capacity, "single-hook-context");
+   return 0;
+}
 
 int http_retry_post_context_bytes(const char *url, const char *auth_header, const void *body,
                                   size_t body_len, char **response_buf, int timeout_ms,
@@ -43,6 +132,83 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
    (void)model;
    (void)session_id;
    provider_calls++;
+   if (bootstrap_case)
+   {
+      char *request = strndup(body, body_len);
+      assert(request);
+      if (strstr(request, "[AIMEE REPOSITORY EVIDENCE FALLBACK]"))
+         bootstrap_evidence_seen = 1;
+      free(request);
+      *response_buf = strdup("{\"id\":\"bootstrap-response\",\"object\":\"response\","
+                             "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
+                             "\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\","
+                             "\"text\":\"Fixture final without repository evidence.\"}]}]}");
+      assert(*response_buf);
+      return 200;
+   }
+   if (identity_case)
+   {
+      cJSON *reply = cJSON_Parse("{\"id\":\"identity-response\",\"object\":\"response\","
+                                 "\"status\":\"completed\",\"output\":[]}");
+      assert(reply);
+      cJSON *output = cJSON_GetObjectItemCaseSensitive(reply, "output");
+      if (provider_calls == 1)
+      {
+         cJSON *call = cJSON_CreateObject(), *args = cJSON_CreateObject();
+         assert(call && args);
+         assert(cJSON_AddStringToObject(args, "path", identity_path));
+         char *arguments = cJSON_PrintUnformatted(args);
+         assert(arguments);
+         assert(cJSON_AddStringToObject(call, "type", "function_call"));
+         assert(cJSON_AddStringToObject(call, "call_id", "identity-call"));
+         assert(cJSON_AddStringToObject(call, "name",
+                                        identity_case == 3 ? "unadvertised" : "read_file"));
+         if (identity_case == 1)
+            assert(cJSON_AddStringToObject(call, "namespace", "foreign"));
+         assert(cJSON_AddStringToObject(call, "arguments", arguments));
+         assert(cJSON_AddItemToArray(output, call));
+         free(arguments);
+         cJSON_Delete(args);
+      }
+      else
+      {
+         assert(provider_calls == 2);
+         cJSON *message =
+             cJSON_Parse("{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{"
+                         "\"type\":\"output_text\",\"text\":\"Identity fixture completed.\"}]}");
+         assert(message && cJSON_AddItemToArray(output, message));
+      }
+      *response_buf = cJSON_PrintUnformatted(reply);
+      cJSON_Delete(reply);
+      assert(*response_buf);
+      return 200;
+   }
+   if (wide_parallel && provider_calls == 1)
+   {
+      cJSON *reply = cJSON_Parse("{\"choices\":[{\"finish_reason\":\"tool_calls\",\"message\":{"
+                                 "\"role\":\"assistant\",\"tool_calls\":[]}}]}");
+      assert(reply);
+      cJSON *message = cJSON_GetObjectItem(
+          cJSON_GetArrayItem(cJSON_GetObjectItem(reply, "choices"), 0), "message");
+      for (int i = 0; i < 17; i++)
+      {
+         cJSON *call = cJSON_CreateObject();
+         char id[280], arguments[96];
+         memset(id, 'x', 256);
+         snprintf(id + 256, sizeof id - 256, "-%d", i);
+         snprintf(arguments, sizeof arguments, "{\"path\":\"absent-wide-fixture-%d\"}", i);
+         cJSON_AddStringToObject(call, "id", id);
+         cJSON_AddStringToObject(call, "type", "function");
+         cJSON *function = cJSON_AddObjectToObject(call, "function");
+         cJSON_AddStringToObject(function, "name", "read_file");
+         cJSON_AddStringToObject(function, "arguments", arguments);
+         cJSON_AddItemToArray(cJSON_GetObjectItem(message, "tool_calls"), call);
+      }
+      *response_buf = cJSON_PrintUnformatted(reply);
+      cJSON_Delete(reply);
+      assert(*response_buf);
+      return 200;
+   }
    if (final_response)
    {
       *response_buf = strdup("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{"
@@ -98,6 +264,8 @@ int http_retry_post_observed_bytes(const char *url, const char *auth_header, con
                                    const http_retry_observer_t *observer)
 {
    assert(!admit_retry && observer && observer->before && observer->after);
+   if (expect_hook_prompt)
+      assert(body && body_len == strlen(body) && strstr(body, "single-hook-context"));
    assert(observer->before(observer->context, body, body_len) == 0);
    if (transport_refuse)
    {
@@ -223,9 +391,16 @@ int aimee_module_commands_dispatch(const char *method, const cJSON *args, cJSON 
    return aimee_module_commands_dispatch_internal(method, args, result);
 }
 
+static int fixture_classifier(const char *name, int *classification)
+{
+   *classification = (int)aimee_tools_catalog_metadata(name).classification;
+   return 0;
+}
+
 int main(void)
 {
    delegate_role_seam_install();
+   agent_tools_register_metadata(fixture_metadata);
    char home[4096];
    snprintf(home, sizeof(home), "%s/aimee-context-refusal-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(home));
@@ -256,7 +431,7 @@ int main(void)
       assert(strstr(error, "memory context refused"));
       assert(agent_build_exec_context_for_role(&agent, &network, "review", "original prompt", 0) ==
              NULL);
-      agent_result_t result;
+      agent_result_t result = {0};
       int rc = agent_execute_with_tools_for_role(&agent, &network, "review", "original prompt",
                                                  "task", 128, 0, &result);
       assert(rc == AGENT_RC_CONTEXT_REFUSED);
@@ -264,7 +439,7 @@ int main(void)
       assert(strcmp(result.stop_reason, "context_refused") == 0);
       assert(strstr(result.error, "memory context refused"));
       assert(!agent_rc_should_try_another(rc, result.error));
-      free(result.response);
+      agent_result_clear_response(&result);
    }
    assert(recalls == 9 && provider_calls == 0);
    /* Reusing the same thread after a refusal must not poison a successful
@@ -281,12 +456,12 @@ int main(void)
     * In particular, one valid ID must not hide a later malformed identity. */
    for (malformed_projection = 1; malformed_projection <= 8; malformed_projection++)
    {
-      agent_result_t invalid_result;
+      agent_result_t invalid_result = {0};
       int invalid_rc = agent_execute_with_tools_for_role(
           &agent, &network, "review", "original prompt", "task", 128, 0, &invalid_result);
       assert(invalid_rc == AGENT_RC_CONTEXT_REFUSED && provider_calls == 0);
       assert(strstr(invalid_result.error, "invalid_projection"));
-      free(invalid_result.response);
+      agent_result_clear_response(&invalid_result);
    }
    malformed_projection = 0;
    /* An unconfigured standalone server has an empty mode, not necessarily
@@ -324,7 +499,7 @@ int main(void)
    snprintf(agent.endpoint, sizeof(agent.endpoint), "http://context-refusal.invalid/v1");
    agent.max_turns = 8;
    agent.timeout_ms = 10000;
-   agent_result_t result;
+   agent_result_t result = {0};
    int rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task",
                                               128, 0, &result);
    if (rc != AGENT_RC_CONTEXT_REFUSED)
@@ -335,7 +510,7 @@ int main(void)
    assert(strcmp(result.stop_reason, "context_refused") == 0);
    assert(strstr(result.error, "protected_context_overflow"));
    assert(!agent_rc_should_try_another(rc, result.error));
-   free(result.response);
+   agent_result_clear_response(&result);
    recalls = provider_calls = refuse_after = 0;
    final_response = 1;
    recall_reply = "{\"status\":\"ok\",\"recall\":{}}";
@@ -350,7 +525,7 @@ int main(void)
    assert(strcmp(result.stop_reason, "context_refused") == 0);
    assert(strcmp(result.error, "protected_context_overflow") == 0);
    assert(!agent_rc_should_try_another(rc, result.error));
-   free(result.response);
+   agent_result_clear_response(&result);
    request_context_clear();
    recalls = 0;
    rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
@@ -358,7 +533,7 @@ int main(void)
    assert(rc == 0 && result.success && !result.error[0]);
    assert(recalls == 1 && provider_calls == 1);
    assert(result.response && strstr(result.response, "Fixture completed."));
-   free(result.response);
+   agent_result_clear_response(&result);
    for (int fallback = 0; fallback <= 1; fallback++)
    {
       request_context_t retry_context = {0};
@@ -374,19 +549,104 @@ int main(void)
       assert(strcmp(result.stop_reason, "context_refused") == 0);
       assert(strcmp(result.error, "stale_context") == 0);
       assert(!agent_rc_should_try_another(rc, result.error));
-      free(result.response);
+      agent_result_clear_response(&result);
       /* The non-tool execution path must preserve the same refusal contract. */
       request_context_set(&retry_context);
-      provider_calls = 0;
+      provider_calls = hook_calls = 0;
+      expect_hook_prompt = 1;
+      plugin_chook_reset();
+      int hook_registered = plugin_chook_register_pre_llm(fallback_hook_context, NULL);
+      assert(hook_registered == 0);
       rc = agent_execute(&agent, NULL, "original prompt", 128, 0, &result);
+      assert(hook_calls == 1);
+      plugin_chook_reset();
+      expect_hook_prompt = 0;
       assert(rc == AGENT_RC_CONTEXT_REFUSED && !result.success);
       assert(provider_calls == (fallback ? 2 : 1));
       assert(strcmp(result.stop_reason, "context_refused") == 0);
       assert(strcmp(result.error, "stale_context") == 0);
       assert(!agent_rc_should_try_another(rc, result.error));
-      free(result.response);
+      agent_result_clear_response(&result);
       request_context_clear();
    }
+   /* A durable capture loss is local and terminal, including after dispatch.
+    * The attempted tool must still be counted when publishing its result fails. */
+   for (int mode = 1; mode <= 2; mode++)
+   {
+      recalls = provider_calls = capture_events = 0;
+      refuse_after = transport_refuse = 0;
+      final_response = mode == 1;
+      capture_failure_mode = mode;
+      aimee_ir_session_set_sink(refusing_capture, NULL);
+      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
+                                             0, &result);
+      assert(rc == AGENT_RC_CAPTURE_FAILED && !result.success);
+      assert(provider_calls == 1 && capture_events == (mode == 1 ? 1 : 4));
+      assert(result.tool_calls == (mode == 1 ? 0 : 1));
+      assert(!strcmp(result.stop_reason, "capture_failed"));
+      assert(!agent_rc_should_try_another(rc, "quota exhausted"));
+      assert(aimee_ir_session_capture_failed());
+      agent_result_clear_response(&result);
+      aimee_ir_session_set_sink(NULL, NULL);
+      assert(!aimee_ir_session_capture_failed());
+   }
+   recalls = provider_calls = refuse_after = transport_refuse = 0;
+   final_response = wide_parallel = 1;
+   wide_uses = wide_results = 0;
+   cJSON *pending = cJSON_CreateObject();
+   assert(pending);
+   aimee_ir_session_set_sink(wide_capture, pending);
+   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                          &result);
+   assert(result.tool_calls == 17 && wide_uses == 17 && wide_results == 17);
+   assert(pending->child == NULL && provider_calls <= 2);
+   agent_result_clear_response(&result);
+   aimee_ir_session_set_sink(NULL, NULL);
+   cJSON_Delete(pending);
+   wide_parallel = 0;
+   snprintf(identity_path, sizeof identity_path, "%s/identity-read.txt", home);
+   FILE *identity_file = fopen(identity_path, "w");
+   assert(identity_file);
+   assert(fputs("IDENTITY_READ_CONTROL", identity_file) >= 0);
+   assert(fclose(identity_file) == 0);
+   snprintf(agent.provider, sizeof agent.provider, "%s", "chatgpt");
+   for (identity_case = 1; identity_case <= 3; identity_case++)
+   {
+      recalls = provider_calls = identity_results = 0;
+      aimee_ir_session_set_sink(capture_identity_result, NULL);
+      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
+                                             0, &result);
+      assert(rc == 0 && result.success && provider_calls == 2 && identity_results == 1);
+      assert(result.tool_calls == 1 && result.successful_tool_calls == 0);
+      agent_result_clear_response(&result);
+      aimee_ir_session_set_sink(NULL, NULL);
+   }
+   identity_case = 2;
+   metadata_available = 0;
+   recalls = provider_calls = identity_results = 0;
+   aimee_ir_session_set_sink(capture_identity_result, NULL);
+   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                          &result);
+   assert(rc == 0 && result.success && provider_calls == 2 && identity_results == 1);
+   assert(result.tool_calls == 1 && result.successful_tool_calls == 0);
+   agent_result_clear_response(&result);
+   aimee_ir_session_set_sink(NULL, NULL);
+   identity_case = 0;
+   metadata_available = 1;
+   bootstrap_case = 1;
+   agent.require_initial_tool_call = 1;
+   agent.max_turns = 1;
+   provider_calls = recalls = bootstrap_evidence_seen = 0;
+   agent_tools_register_classifier(fixture_classifier);
+   run_cmd_set_cwd(home);
+   rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128, 0,
+                                          &result);
+   assert(result.successful_tool_calls == 0 && !bootstrap_evidence_seen);
+   agent_result_clear_response(&result);
+   run_cmd_set_cwd(NULL);
+   agent_tools_register_classifier(NULL);
+   agent_tools_register_metadata(NULL);
+   identity_case = 0;
    puts("agent context refusal: passed");
    return 0;
 }

@@ -1,13 +1,19 @@
 /* server_compute.c: POSIX chat.send_stream worker for primary-agent streaming. */
 #include "aimee.h"
+#include "aimee_home.h"
 #include "agent_adapter.h"
-#include "ingress_preinject.h"    /* S2 binding: publish primary session id per turn */
-#include "primary_cli_ingestor.h" /* S2 binding: enforce-before-send on the tmux CLI TUI turn */
+#include "ingress_preinject.h" /* S2 binding: publish primary session id per turn */
 #include "agent_config.h"
 #include "agent_exec.h"
 #include <aimee/tools/agent_tools.h> /* agent_tools_set_tool_event_cb — stream tool events */
 #include "router_advise.h"           /* S1 advisory request->workflow router hook */
 #include "cli_codex.h"
+#include "server_native_execution.h"
+#include "claude_headless.h"
+#include "provider_cli_adapter.h"
+#include "platform_path.h"
+#include <aimee/translation/harness_ir.h>
+#include <poll.h>
 #include "cli_session.h" /* cli_session_set_stream_cb — incremental tmux CLI streaming */
 #include "config.h"
 #include "db1_client/db1.h"
@@ -17,12 +23,6 @@
 #include <aimee/workspace/workspace.h> /* session_isolation_target — per-session worktree redirect */
 #include "modules/workspace/workspace_provider.h"
 
-/* Defined in agent_runtime_tmux.c (no shared header; agent_runtime.c forward-
- * declares it the same way). Drives the standard CLI agent over a tmux session,
- * which runs on the client over the reverse channel for a detached workspace. */
-int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
-                              const char *system_prompt, const char *user_prompt, int max_tokens,
-                              double temperature, agent_result_t *out);
 #include "prompts.h"
 #include "persona.h"
 #include "server_http.h"
@@ -213,6 +213,20 @@ static void live_mirror_locked(compute_ctx_t *cctx, const char *event, const cha
  * connection is alive, -1 once it has dropped (callers that care; most ignore). */
 static int stream_event(compute_ctx_t *cctx, const char *event, const char *key, const char *value)
 {
+   if (cctx->ir_enabled)
+   {
+      if (!cctx->ir_native_owned && event && !strcmp(event, "session") && value && value[0] &&
+          cctx->ir_harness[0] &&
+          db1_session_harness_bind(cctx->ir_session, cctx->ir_harness, value,
+                                   cctx->vault_principal) != 0)
+      {
+         cctx->ir_failed = 1;
+         aimee_ir_session_fail_capture();
+         return -1;
+      }
+      if (cctx->ir_delivery || cctx->ir_failed)
+         return cctx->ir_failed ? -1 : 0;
+   }
    pthread_mutex_lock(cctx->write_mutex);
 
    /* 0) Live-turn db1 mirror — the browser's polling source of truth. */
@@ -391,20 +405,6 @@ static char *read_webchat_system_prompt(const compute_ctx_t *cctx)
    return result ? result : safe_strdup("");
 }
 
-static int codex_stream_event_cb(const char *event, const char *value, void *userdata)
-{
-   compute_ctx_t *cctx = (compute_ctx_t *)userdata;
-   if (!event)
-      return 0;
-   if (strcmp(event, "text") == 0 || strcmp(event, "thinking") == 0)
-      return stream_event(cctx, event, "content", value ? value : "");
-   if (strcmp(event, "session") == 0)
-      return stream_event(cctx, "session", "id", value ? value : "");
-   if (strcmp(event, "error") == 0)
-      return stream_event(cctx, "error", "message", value ? value : "server error");
-   return stream_event(cctx, event, NULL, NULL);
-}
-
 static int chat_model_passthrough_allowed(const char *model)
 {
    return model && model[0] && strcmp(model, "aimee") != 0 && strncmp(model, "aimee:", 6) != 0;
@@ -429,115 +429,12 @@ static void chat_session_register(const char *aimee_sid, const char *client_type
                                    principal ? principal : "");
 }
 
-/* Append one user/assistant turn to the durable `primary_sessions` transcript so
- * chats served by the agent (tmux CLI) worker — which otherwise persists nothing
- * to DB1 — are logged and survive a crash. The direct primary-session adapter
- * already writes its own full provider-formatted transcript, so this is only
- * needed for the agent path. Best-effort; keyed by the aimee session id so
- * db1_primary_session_get_latest can recover it. */
-static void chat_log_turn_transcript(const char *aimee_sid, const char *agent_name,
-                                     const char *provider, const char *user_msg,
-                                     const char *assistant_reply)
-{
-   if (!aimee_sid || !aimee_sid[0] || !assistant_reply || !assistant_reply[0])
-      return;
-   char *existing = db1_primary_session_load(aimee_sid, agent_name, provider);
-   cJSON *messages = existing ? cJSON_Parse(existing) : NULL;
-   free(existing);
-   if (!messages || !cJSON_IsArray(messages))
-   {
-      cJSON_Delete(messages);
-      messages = cJSON_CreateArray();
-   }
-   if (!messages)
-      return;
-   cJSON *um = cJSON_CreateObject();
-   cJSON_AddStringToObject(um, "role", "user");
-   cJSON_AddStringToObject(um, "content", user_msg ? user_msg : "");
-   cJSON_AddItemToArray(messages, um);
-   cJSON *am = cJSON_CreateObject();
-   cJSON_AddStringToObject(am, "role", "assistant");
-   cJSON_AddStringToObject(am, "content", assistant_reply);
-   cJSON_AddItemToArray(messages, am);
-   char *json = cJSON_PrintUnformatted(messages);
-   cJSON_Delete(messages);
-   if (json)
-      (void)db1_primary_session_save(aimee_sid, agent_name, provider, json);
-   free(json);
-}
-
-static int chat_codex_effort_allowed(const char *effort)
-{
-   return effort && (strcmp(effort, "low") == 0 || strcmp(effort, "medium") == 0 ||
-                     strcmp(effort, "high") == 0 || strcmp(effort, "xhigh") == 0);
-}
-
-static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
-                                     const char *thread_id, const char *cwd, const char *model,
-                                     const char *effort)
-{
-   compute_pool_set_job(POOL_JOB_CHAT, "provider=codex thread=%s",
-                        thread_id && thread_id[0] ? thread_id : "new");
-
-   char *system_prompt = read_webchat_system_prompt(cctx);
-
-   cli_codex_chat_request_t creq;
-   memset(&creq, 0, sizeof(creq));
-   creq.thread_id = thread_id && thread_id[0] ? thread_id : NULL;
-   creq.cwd = cwd && cwd[0] ? cwd : NULL;
-   creq.system_prompt = system_prompt;
-   creq.user_prompt = message;
-   /* Both are copied out: creq holds them across the blocking Codex stream
-    * below, far past the point an accessor's thread-local buffer is reclaimed. */
-   char codex_model_buf[CONFIG_COPY_MAX] = "";
-   char codex_effort_buf[CONFIG_COPY_MAX] = "";
-   if (chat_model_passthrough_allowed(model))
-      snprintf(codex_model_buf, sizeof(codex_model_buf), "%s", model);
-   else
-      config_codex_model_copy(codex_model_buf, sizeof(codex_model_buf));
-   creq.model = codex_model_buf[0] ? codex_model_buf : NULL;
-
-   int codex_effort_explicit = chat_codex_effort_allowed(effort);
-   if (codex_effort_explicit)
-      snprintf(codex_effort_buf, sizeof(codex_effort_buf), "%s", effort);
-   else
-      config_model_reasoning_effort_copy(codex_effort_buf, sizeof(codex_effort_buf));
-   const char *codex_effort = codex_effort_buf;
-   /* §5: cap (only lower) the config-derived effort by turn complexity. An
-    * explicit per-request override is left untouched. */
-   if (config_reasoning_cap_enabled() && !codex_effort_explicit)
-   {
-      int score = reasoning_complexity_score(1, message ? strlen(message) : 0, 1);
-      codex_effort = reasoning_effort_capped(codex_effort, score);
-   }
-   creq.reasoning_effort = chat_codex_effort_allowed(codex_effort) ? codex_effort : NULL;
-   creq.timeout_ms = -1;
-   creq.autonomous = config_autonomous();
-
-   /* Release the compute budget slot before entering the blocking Codex
-    * app-server stream. Codex may call back into aimee MCP tools, and those
-    * tool workers also need compute budget; holding it here can deadlock the
-    * chat worker against its own nested tool call. */
-   compute_ctx_release_budget(cctx);
-
-   cli_codex_chat_result_t result;
-   int rc = cli_codex_chat_stream(&creq, codex_stream_event_cb, cctx, &result);
-   free(system_prompt);
-
-   if (rc != 0)
-   {
-      compute_error(cctx, result.error[0] ? result.error : "codex app-server failed");
-      compute_ctx_free(cctx);
-      return;
-   }
-
-   if (result.thread_id[0])
-      stream_event(cctx, "session", "id", result.thread_id);
-   stream_event(cctx, "done", NULL, NULL);
-   compute_ok(cctx);
-   compute_ctx_free(cctx);
-}
-
+static void chat_agent_add_builtin_provider(agent_config_t *acfg, const char *provider);
+static int chat_agent_select_provider(agent_config_t *acfg, const char *provider, char *selected,
+                                      size_t selected_len);
+static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, const char *cwd,
+                                     const char *aimee_sid, const char *provider,
+                                     const char *model_override);
 static void chat_agent_add_default_roles(agent_t *ag)
 {
    /* These agents are synthesized from legacy provider settings, not from an
@@ -588,13 +485,11 @@ static int chat_agent_has_provider(const agent_config_t *acfg, const char *provi
    return 0;
 }
 
-/* Register a built-in tmux-CLI agent (claude/codex driven as a persistent TUI
- * over tmux) for an OAuth/CLI provider so webchat can resolve it even when no
- * agent was explicitly configured. `name`==`provider` so it is selectable by
- * either. cli_kind drives the response parser; cli_cmd is the launch command. */
-static void chat_agent_add_builtin_tmux_cli(agent_config_t *acfg, const char *name,
-                                            const char *cli_kind, const char *cli_cmd,
-                                            const char *model)
+/* Register a structured native harness for an OAuth provider when no explicit
+ * agent record exists. Native handles remain private to the canonical scope. */
+static void chat_agent_add_builtin_provider_cli(agent_config_t *acfg, const char *name,
+                                                const char *cli_kind, const char *cli_cmd,
+                                                const char *model)
 {
    if (!acfg || acfg->agent_count >= MAX_AGENTS || agent_find(acfg, name) ||
        chat_agent_has_provider(acfg, name))
@@ -605,13 +500,32 @@ static void chat_agent_add_builtin_tmux_cli(agent_config_t *acfg, const char *na
    snprintf(ag->name, sizeof(ag->name), "%s", name);
    snprintf(ag->auth_type, sizeof(ag->auth_type), "bearer");
    snprintf(ag->provider, sizeof(ag->provider), "%s", name);
-   snprintf(ag->backend, sizeof(ag->backend), "%s", AGENT_BACKEND_TMUX_CLI);
+   if (!strcmp(cli_kind, "claude"))
+   {
+      const agent_adapter_t *adapter = agent_adapter_for_name("anthropic");
+      if (adapter)
+      {
+         snprintf(ag->provider, sizeof ag->provider, "%s", adapter->provider);
+         snprintf(ag->endpoint, sizeof ag->endpoint, "%s", adapter->default_endpoint);
+         snprintf(ag->auth_type, sizeof ag->auth_type, "%s", "claude-oauth");
+         snprintf(ag->registration, sizeof ag->registration, "%s", "claude");
+      }
+   }
+   else if (!strcmp(cli_kind, "codex"))
+   {
+      const agent_adapter_t *adapter = agent_adapter_for_name("codex");
+      if (adapter)
+      {
+         snprintf(ag->provider, sizeof ag->provider, "%s", adapter->provider);
+         snprintf(ag->endpoint, sizeof ag->endpoint, "%s", adapter->default_endpoint);
+         snprintf(ag->auth_type, sizeof ag->auth_type, "%s", adapter->auth_type);
+         snprintf(ag->registration, sizeof ag->registration, "%s", "codex");
+      }
+   }
+   snprintf(ag->backend, sizeof(ag->backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
    snprintf(ag->cli_kind, sizeof(ag->cli_kind), "%s", cli_kind);
    snprintf(ag->cli_cmd, sizeof(ag->cli_cmd), "%s", cli_cmd);
-   /* The configured default model; agent_execute_cli_session appends it as
-    * `--model` (claude/codex both accept it). A per-request model_override
-    * replaces this in chat_stream_worker_agent before the turn runs. Without
-    * this, the CLI launched with its own default, silently ignoring config. */
+   /* The selected model is passed at the native harness output boundary. */
    if (model && model[0])
       snprintf(ag->model, sizeof(ag->model), "%s", model);
    ag->cost_tier = 1;
@@ -636,11 +550,11 @@ static void chat_agent_add_builtin_provider(agent_config_t *acfg, const char *pr
    if (strcmp(provider, "openai") == 0)
       chat_agent_add_legacy_openai(acfg);
    else if (strcmp(provider, "claude-code") == 0)
-      chat_agent_add_builtin_tmux_cli(acfg, "claude-code", "claude-code", "claude", claude_model);
+      chat_agent_add_builtin_provider_cli(acfg, "claude-code", "claude", "claude", claude_model);
    else if (strcmp(provider, "claude") == 0 || strcmp(provider, "claude-oauth") == 0)
-      chat_agent_add_builtin_tmux_cli(acfg, provider, "claude", "claude", claude_model);
+      chat_agent_add_builtin_provider_cli(acfg, provider, "claude", "claude", claude_model);
    else if (strcmp(provider, "codex-oauth") == 0)
-      chat_agent_add_builtin_tmux_cli(acfg, "codex-oauth", "codex", "codex", codex_model);
+      chat_agent_add_builtin_provider_cli(acfg, "codex-oauth", "codex", "codex", codex_model);
 }
 
 static int chat_agent_select_provider(agent_config_t *acfg, const char *provider, char *selected,
@@ -732,34 +646,56 @@ static void chat_tool_event_cb(const char *phase, const char *name, void *ud)
    stream_event(cctx, ev, "name", name ? name : "");
 }
 
-/* Incremental stream sink for tmux CLI turns: cli_session_recv calls this with
- * each newly produced chunk of the clean reply, which we forward as a `text`
- * SSE event so the webchat streams the answer as it is produced (instead of one
- * blob at turn end). `emitted` records that streaming delivered the reply, so
- * the worker skips the trailing full-text emit and avoids duplicating it. */
-typedef struct
+static int chat_native_progress(void *context)
 {
-   compute_ctx_t *cctx;
-   int emitted;
-} chat_cli_stream_ctx_t;
-
-static void chat_cli_stream_cb(const char *delta, void *ud)
-{
-   chat_cli_stream_ctx_t *c = (chat_cli_stream_ctx_t *)ud;
-   if (!c || !delta || !delta[0])
-      return;
-   stream_event(c->cctx, "text", "content", delta);
-   c->emitted = 1;
+   return server_chat_ir_progress(context);
 }
-
-/* Cancel predicate for the tmux CLI driver: reflects this turn's registry cancel
- * flag (set by chat.interrupt / graceful_cancel / session close). Lets
- * cli_session_recv abort a wedged or steered generation promptly without
- * coupling cli_session.c to the turn registry. */
-static int chat_cli_cancel_check(void *ud)
+/* The original task stays with the canonical host request; the native process
+ * only schedules model/tool exchanges through its scoped local capability. */
+static int chat_native_print(compute_ctx_t *c, const agent_t *agent, const agent_network_t *network,
+                             const char *cwd, const char *system, const char *prompt,
+                             agent_result_t *out)
 {
-   (void)ud;
-   return agent_request_cancelled();
+   agent_t selected = *agent;
+   if (!strcmp(selected.cli_kind, "claude-code"))
+      snprintf(selected.cli_kind, sizeof selected.cli_kind, "%s", "claude");
+   provider_cli_cfg_t cfg = {.agent = &selected,
+                             .network = network,
+                             .cwd = cwd,
+                             .system_prompt = system,
+                             .user_prompt = prompt,
+                             .primary = 1,
+                             .control_channel = c->ir_delivery,
+                             .session_id = c->ir_session,
+                             .native_progress = chat_native_progress,
+                             .native_progress_context = c};
+   const cJSON *effort = cJSON_GetObjectItemCaseSensitive(c->req, "reasoning_effort");
+   if (!effort)
+      effort = cJSON_GetObjectItemCaseSensitive(c->req, "effort");
+   if (!effort)
+      effort = cJSON_GetObjectItemCaseSensitive(c->req, "model_reasoning_effort");
+   if (effort && !cJSON_IsString(effort))
+   {
+      out->success = 0;
+      snprintf(out->error, sizeof out->error, "reasoning_effort must be a string");
+      aimee_ir_session_fail_capture();
+      return AGENT_RC_CAPTURE_FAILED;
+   }
+   cfg.reasoning_effort = cJSON_GetStringValue(effort);
+   c->ir_native_owned = 1;
+   if (!c->ir_delivery)
+      c->ir_legacy_emit = stream_event;
+   int rc = provider_cli_adapter_host_execute(&cfg, out);
+   if (rc == 1)
+   {
+      out->success = 0;
+      snprintf(out->error, sizeof out->error, "canonical native scheduler is unavailable");
+      aimee_ir_session_fail_capture();
+      rc = AGENT_RC_CAPTURE_FAILED;
+   }
+   if (server_chat_ir_progress(c))
+      rc = AGENT_RC_CAPTURE_FAILED;
+   return rc;
 }
 
 static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, const char *cwd,
@@ -855,52 +791,32 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    if (drift)
       stream_event(cctx, "text", "content", drift);
    agent_tools_set_tool_event_cb(chat_tool_event_cb, cctx);
-   /* Stream a tmux CLI turn's reply incrementally (no-op for non-tmux agents,
-    * whose runtime never drives a cli_session). Save/restore any outer cb so a
-    * nested turn on this thread can't leave a dangling context behind. */
-   chat_cli_stream_ctx_t sctx = {cctx, 0};
-   void *prev_stream_ud = NULL;
-   cli_session_stream_cb_t prev_stream_cb = cli_session_get_stream_cb(&prev_stream_ud);
-   cli_session_set_stream_cb(chat_cli_stream_cb, &sctx);
-   /* Let the tmux CLI driver observe this turn's cancel flag so a steer/interrupt
-    * stops the running generation promptly. Save/restore around any outer turn. */
-   void *prev_cancel_ud = NULL;
-   cli_session_cancel_cb_t prev_cancel_cb = cli_session_get_cancel_check(&prev_cancel_ud);
-   cli_session_set_cancel_check(chat_cli_cancel_check, NULL);
-   /* Bound a tmux CLI parked in a provider error/retry state so a concurrent-
-    * collision blip surfaces a clear error fast instead of a multi-minute silent
-    * "Working" spinner. Thread-local, like the stream/cancel callbacks above:
-    * agent_run_with_tools dispatches the tmux agent (-> cli_session_recv)
-    * synchronously on THIS worker thread, so the bound is in force for the turn.
-    * Save/restore around any outer turn on this thread. */
-   int prev_error_grace = cli_session_get_error_grace_ms();
-   cli_session_set_error_grace_ms(CLI_SESSION_DEFAULT_ERROR_GRACE_MS);
-
-   /* Primary-as-manager S2 (primary-CLI-ingestor): the Claude primary runs as a
-    * per-session tmux CLI TUI whose model call reaches the gateway OUT-OF-BAND, so
-    * the router never binds it. Enforce HERE -- on the worker thread, where the
-    * aimee session id is in scope and agent_run_with_tools dispatches the tmux turn
-    * synchronously -- BEFORE the turn is sent to the pane, so S1 route + S2
-    * bind/guard are preventive for the turn. Behind the ingestor opt-in flag AND
-    * the enforce dial (both default-off), so the hot path is untouched by default.
-    * A missing sid is a no-op (never a silent pretend-enforced). */
-   if (primary_cli_ingestor_enabled() && aimee_sid && aimee_sid[0])
-      primary_cli_ingestor_enforce_preturn(aimee_sid, message, use_cwd);
-
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    /* This is the PRIMARY turn: the provider-named agent must be routable for
     * its own chat even though the delegate-policy filter excludes it as a
     * delegation target (see agent_routing_set_primary_turn). Thread-local, so
     * any delegation the turn spawns (other worker threads) stays policed. */
    agent_routing_set_primary_turn(1);
-   int rc = agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
-                                 AGENT_DEFAULT_MAX_TOKENS, &result);
+   agent_t *selected_agent = agent_find(&acfg, selected);
+   int native = selected_agent && (!strcmp(selected_agent->cli_kind, "claude") ||
+                                   !strcmp(selected_agent->cli_kind, "claude-code") ||
+                                   !strcmp(selected_agent->cli_kind, "codex"));
+   int rc;
+   if (native && !cctx->ir_enabled)
+   {
+      snprintf(result.error, sizeof result.error,
+               "native execution requires canonical history ownership");
+      rc = AGENT_RC_CAPTURE_FAILED;
+   }
+   else if (native)
+      rc = chat_native_print(cctx, selected_agent, &acfg.network, use_cwd,
+                             system_prompt ? system_prompt : "", message, &result);
+   else
+      rc = agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
+                                AGENT_DEFAULT_MAX_TOKENS, &result);
    agent_routing_set_primary_turn(0);
 
-   cli_session_set_error_grace_ms(prev_error_grace);
-   cli_session_set_cancel_check(prev_cancel_cb, prev_cancel_ud);
-   cli_session_set_stream_cb(prev_stream_cb, prev_stream_ud);
    agent_tools_set_tool_event_cb(NULL, NULL);
    session_id_clear_override();
    ingress_preinject_set_session_id(""); /* don't leak this turn's session id */
@@ -921,11 +837,9 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
           * steer continuation follows as the next turn). Only when some text was
           * actually streamed — otherwise a cancel before any output would show a
           * stray marker with no content. */
-         if (sctx.emitted)
-            stream_event(cctx, "text", "content", "\n\n_(interrupted)_");
          stream_event(cctx, "turn_end", NULL, NULL);
          stream_event(cctx, "done", NULL, NULL);
-         free(result.response);
+         agent_result_clear_response(&result);
          /* compute_ok is a no-op for a server-initiated turn (compute_respond
           * early-returns on conn_fd < 0); the pooled wrapper still emits the
           * presence-ring turn_done that the webchat events stream listens for. */
@@ -934,22 +848,17 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
          return;
       }
       compute_error(cctx, result.error[0] ? result.error : "agent provider failed");
-      free(result.response);
+      agent_result_clear_response(&result);
       compute_ctx_free(cctx);
       return;
    }
 
-   /* Log this turn to the durable DB1 transcript. The agent (tmux CLI) worker is
-    * the one chat path that otherwise persists nothing, so a session started here
-    * (e.g. over inbound ACP/MCP) was previously unrecoverable after a crash. */
-   chat_log_turn_transcript(aimee_sid, selected, provider, message, result.response);
-
    /* If the reply already streamed incrementally, don't re-emit it whole. */
-   if (!sctx.emitted && result.response && result.response[0])
+   if (!cctx->ir_native_owned && result.response && result.response[0])
       stream_event(cctx, "text", "content", result.response);
    stream_event(cctx, "turn_end", NULL, NULL);
    stream_event(cctx, "done", NULL, NULL);
-   free(result.response);
+   agent_result_clear_response(&result);
    compute_ok(cctx);
    compute_ctx_free(cctx);
 }
@@ -1048,6 +957,7 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    preq.network = &acfg.network;
    preq.provider_session_id = provider_sid;
    preq.aimee_session_id = aimee_sid;
+   preq.active_turn_id = cctx->ir_enabled ? cctx->ir_turn : NULL;
    preq.cwd = use_cwd;
    preq.system_prompt = system_prompt ? system_prompt : "";
    preq.user_prompt = message;
@@ -1056,9 +966,11 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    preq.temperature = 0.3;
 
    char session_id[128];
-   agent_result_t result;
+   agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
+   agent_tools_set_tool_event_cb(chat_tool_event_cb, cctx);
    int rc = primary_session_adapter_turn(&preq, &result, session_id, sizeof(session_id));
+   agent_tools_set_tool_event_cb(NULL, NULL);
    if (result.clean_retry_attempt[0])
       stream_event(cctx, "retry_attempt", "id", result.clean_retry_attempt);
    workspace_turn_unbind_active();
@@ -1067,7 +979,7 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    if (rc != 0)
    {
       compute_error(cctx, result.error[0] ? result.error : "primary session adapter failed");
-      free(result.response);
+      agent_result_clear_response(&result);
       compute_ctx_free(cctx);
       return;
    }
@@ -1078,29 +990,9 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
       stream_event(cctx, "text", "content", result.response);
    stream_event(cctx, "turn_end", NULL, NULL);
    stream_event(cctx, "done", NULL, NULL);
-   free(result.response);
+   agent_result_clear_response(&result);
    compute_ok(cctx);
    compute_ctx_free(cctx);
-}
-
-static int chat_provider_uses_codex_cli(const char *provider)
-{
-   if (!provider)
-      return 0;
-   /* codex-oauth runs the codex CLI as a persistent TUI over tmux (1:1 per aimee
-    * session) via the agent worker — NOT the one-shot app-server stream — so it
-    * must NOT be claimed here. */
-   if (strcmp(provider, "codex-oauth") == 0)
-      return 0;
-   if (strcmp(provider, "codex-cli") == 0)
-      return 1;
-   if (strcmp(provider, "codex") != 0)
-      return 0;
-
-   agent_t ag;
-   if (agent_registry_find("codex", &ag) != 0)
-      return 1;
-   return !agent_adapter_agent_is_direct(&ag);
 }
 
 static int chat_provider_uses_primary_session(const char *provider)
@@ -1116,46 +1008,6 @@ static int chat_provider_uses_primary_session(const char *provider)
       return 0;
    agent_t *ag = agent_find(&acfg, selected);
    return primary_session_adapter_can_handle(ag);
-}
-
-static void chat_stream_worker_codex_compact(compute_ctx_t *cctx, const char *thread_id,
-                                             const char *cwd)
-{
-   if (!thread_id || !thread_id[0])
-   {
-      compute_error(cctx, "no active codex thread to compact");
-      compute_ctx_free(cctx);
-      return;
-   }
-
-   compute_pool_set_job(POOL_JOB_CHAT, "provider=codex compact thread=%s", thread_id);
-
-   cli_codex_compact_request_t creq;
-   memset(&creq, 0, sizeof(creq));
-   creq.thread_id = thread_id;
-   creq.cwd = cwd && cwd[0] ? cwd : NULL;
-   creq.timeout_ms = -1;
-   creq.autonomous = config_autonomous();
-
-   compute_ctx_release_budget(cctx);
-
-   stream_event(cctx, "turn_start", NULL, NULL);
-   cli_codex_compact_result_t result;
-   int rc = cli_codex_compact_thread(&creq, &result);
-   if (rc != 0)
-   {
-      compute_error(cctx, result.error[0] ? result.error : "codex compaction failed");
-      compute_ctx_free(cctx);
-      return;
-   }
-
-   if (result.thread_id[0])
-      stream_event(cctx, "session", "id", result.thread_id);
-   stream_event(cctx, "text", "content", "Context compacted.");
-   stream_event(cctx, "turn_end", NULL, NULL);
-   stream_event(cctx, "done", NULL, NULL);
-   compute_ok(cctx);
-   compute_ctx_free(cctx);
 }
 
 static void chat_stream_worker_primary_session_compact(compute_ctx_t *cctx,
@@ -1185,10 +1037,10 @@ static void chat_stream_worker_primary_session_compact(compute_ctx_t *cctx,
    }
 
    agent_t *ag = agent_find(&acfg, selected);
-   if (!ag || !primary_session_adapter_can_handle(ag))
+   if (!ag)
    {
       char err[256];
-      snprintf(err, sizeof(err), "provider '%s' is not a direct primary session adapter",
+      snprintf(err, sizeof(err), "provider '%s' is not configured for primary history",
                lookup_provider && lookup_provider[0] ? lookup_provider : "default");
       compute_error(cctx, err);
       compute_ctx_free(cctx);
@@ -1202,6 +1054,7 @@ static void chat_stream_worker_primary_session_compact(compute_ctx_t *cctx,
    preq.agent = ag;
    preq.provider_session_id = provider_sid;
    preq.aimee_session_id = aimee_sid;
+   preq.active_turn_id = cctx->ir_enabled ? cctx->ir_turn : NULL;
 
    char session_id[128];
    char err[256];
@@ -1216,6 +1069,7 @@ static void chat_stream_worker_primary_session_compact(compute_ctx_t *cctx,
       return;
    }
 
+   cctx->ir_history_checkpointed = 1;
    if (session_id[0])
       stream_event(cctx, "session", "id", session_id);
    if (result.compacted)
@@ -1245,12 +1099,7 @@ void chat_stream_worker(void *arg)
    cJSON *jcsid = cJSON_GetObjectItemCaseSensitive(req, "claude_session_id");
    cJSON *jasid = cJSON_GetObjectItemCaseSensitive(req, "aimee_session_id");
    cJSON *jmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
-   cJSON *jeffort = cJSON_GetObjectItemCaseSensitive(req, "reasoning_effort");
    cJSON *jcompact = cJSON_GetObjectItemCaseSensitive(req, "compact");
-   if (!cJSON_IsString(jeffort))
-      jeffort = cJSON_GetObjectItemCaseSensitive(req, "effort");
-   if (!cJSON_IsString(jeffort))
-      jeffort = cJSON_GetObjectItemCaseSensitive(req, "model_reasoning_effort");
 
    const char *message = cJSON_IsString(jmsg) ? jmsg->valuestring : "";
    const char *cwd = cJSON_IsString(jcwd) ? jcwd->valuestring : "";
@@ -1259,7 +1108,6 @@ void chat_stream_worker(void *arg)
       provider_sid = jcsid->valuestring;
    const char *aimee_sid = cJSON_IsString(jasid) ? jasid->valuestring : "";
    const char *model_override = cJSON_IsString(jmodel) ? jmodel->valuestring : "";
-   const char *effort_override = cJSON_IsString(jeffort) ? jeffort->valuestring : "";
    int compact = cJSON_IsTrue(jcompact);
 
    if (!message[0] && !compact)
@@ -1268,6 +1116,19 @@ void chat_stream_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
+
+   cJSON *ir_version = cJSON_GetObjectItemCaseSensitive(req, "ir_version");
+   cctx->ir_delivery = cJSON_IsNumber(ir_version) && ir_version->valueint == 1;
+   /* Capture ownership follows the admitted host turn, independently of the
+    * subscriber's transport version. Legacy consumers retain their projection. */
+   if (server_chat_ir_begin(cctx, aimee_sid, compact ? NULL : message) != 0)
+   {
+      compute_error(cctx, "cannot initialize canonical session");
+      compute_ctx_free(cctx);
+      return;
+   }
+   /* Native handles are resolved by the selected harness, never the client. */
+   provider_sid = "";
 
    /* Register the session in DB1 up front so it is locatable in `server_sessions`
     * regardless of which provider path serves the turn below (codex / primary-
@@ -1290,11 +1151,20 @@ void chat_stream_worker(void *arg)
    const char *provider = provider_buf[0] ? provider_buf : "claude";
    /* A session-pinned primary agent (set via POST /v1/sessions/<id>/primary)
     * overrides the global default provider for this session, so the active
-    * primary can be switched at runtime without touching durable config. */
+    * primary can be switched at runtime using durable owner-bound session metadata. */
    char primary_buf[MAX_AGENT_NAME];
-   if (aimee_sid && aimee_sid[0] &&
-       session_primary_get(aimee_sid, primary_buf, sizeof(primary_buf)) && primary_buf[0])
-      provider = primary_buf;
+   if (aimee_sid && aimee_sid[0])
+   {
+      int selected = session_primary_get(aimee_sid, primary_buf, sizeof(primary_buf));
+      if (selected < 0)
+      {
+         compute_error(cctx, "session primary selection unavailable");
+         compute_ctx_free(cctx);
+         return;
+      }
+      if (selected > 0)
+         provider = primary_buf;
+   }
    if (cJSON_GetObjectItemCaseSensitive(req, "clean_retry") &&
        (compact || !chat_provider_uses_primary_session(provider)))
    {
@@ -1303,36 +1173,23 @@ void chat_stream_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
-   if (chat_provider_uses_codex_cli(provider))
+   if (compact)
    {
+      /* The canonical checkpoint is the only compaction source. A private SDK
+       * handle cannot select history or be rebound by this host operation. */
+      cctx->ir_native_owned = 1;
       compute_ctx_release_budget(cctx);
-      if (compact)
-         chat_stream_worker_codex_compact(cctx, provider_sid, cwd);
-      else
-         chat_stream_worker_codex(cctx, message, provider_sid, cwd, model_override,
-                                  effort_override);
+      chat_stream_worker_primary_session_compact(cctx, provider_sid, aimee_sid, provider,
+                                                 model_override);
       return;
    }
-   /* Everything else — claude-oauth / codex-oauth / claude / claude-code (the
-    * persistent CLI TUIs, driven over tmux 1:1 per aimee session through the
-    * agent worker -> agent_execute_cli_session) and the in-process HTTP API
-    * providers (primary-session adapters). NEVER `claude -p`: a one-shot print
-    * process cannot multiplex concurrent sessions into isolated persistent
-    * panes, which is the whole point of a per-session tmux CLI session. */
+   /* Native API primaries retain their session adapter. Canonical Claude
+    * browser turns use structured print mode in the agent worker below. */
    compute_ctx_release_budget(cctx);
    if (chat_provider_uses_primary_session(provider))
    {
-      if (compact)
-         chat_stream_worker_primary_session_compact(cctx, provider_sid, aimee_sid, provider,
-                                                    model_override);
-      else
-         chat_stream_worker_primary_session(cctx, message, provider_sid, cwd, aimee_sid, provider,
-                                            model_override);
-   }
-   else if (compact)
-   {
-      compute_error(cctx, "conversation compaction is not supported for this provider");
-      compute_ctx_free(cctx);
+      chat_stream_worker_primary_session(cctx, message, provider_sid, cwd, aimee_sid, provider,
+                                         model_override);
    }
    else
       chat_stream_worker_agent(cctx, message, cwd, aimee_sid, provider, model_override);

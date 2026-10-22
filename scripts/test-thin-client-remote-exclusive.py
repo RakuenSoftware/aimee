@@ -9,6 +9,7 @@ import json
 import os
 import pathlib
 import socket
+import ssl
 import subprocess
 import tempfile
 import threading
@@ -200,9 +201,170 @@ def unused_tcp_port() -> int:
         return int(sock.getsockname()[1])
 
 
+class NativeHandler(http.server.BaseHTTPRequestHandler):
+    paths: list[str] = []
+    requests: list[dict] = []
+    error = False
+
+    def respond(self) -> None:
+        type(self).paths.append(self.path)
+        assert self.headers.get("Authorization") == "Bearer exact-child-grant"
+        assert self.headers.get("Host") == f"127.0.0.1:{self.server.server_port}"
+        if self.command == "GET":
+            assert self.path == "/v1/cli/manifest"
+            body = {"manifest_version": 1, "marshal": [], "routes": [
+                {"op": "index.investigate", "verb": "POST", "path": "/v1/index/investigate"}
+            ]}
+        else:
+            assert self.path == "/v1/native/cli"
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            type(self).requests.append(request)
+            nonce = request["_cli_request_id"]
+            assert len(nonce) == 32 and all(c in "0123456789abcdef" for c in nonce)
+            body = {"content": [{"type": "text", "text": "owned result"}],
+                    "isError": type(self).error}
+        raw = json.dumps(body).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    do_GET = respond
+    do_POST = respond
+
+    def log_message(self, _format: str, *_args: object) -> None:
+        pass
+
+
+def native_main_check(binary: pathlib.Path) -> None:
+    """Run actual main(), including bootstrap, with only a child capability."""
+    with tempfile.TemporaryDirectory(prefix="aimee-native-main-") as tmp:
+        home = pathlib.Path(tmp)
+        (home / ".claude").mkdir()
+        (home / "remote.conf").write_text("tcp:127.0.0.1:1\noperator-secret\n")
+        (home / "private-auth.json").write_text('{"access_token":"never-export-this"}')
+        original = {p.name: p.read_bytes() for p in home.iterdir() if p.is_file()}
+        sentinel = LocalUdsSentinel(home / "aimee-http.sock")
+        sentinel.start()
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), NativeHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        env = dict(os.environ, HOME=tmp, AIMEE_HOME=tmp, AIMEE_NATIVE_CLI="1",
+                   AIMEE_API_ENDPOINT=f"http://127.0.0.1:{server.server_port}",
+                   AIMEE_API_BEARER="exact-child-grant",
+                   AIMEE_SERVER_TOKEN="wrong-global-token",
+                   AIMEE_CONFIGURE_CLIENT_INTEGRATIONS_ONLY="1")
+        def run(command: list[str], changes: dict | None = None) -> subprocess.CompletedProcess:
+            return subprocess.run([str(binary), *command], env=env | (changes or {}),
+                                  capture_output=True, text=True, timeout=20)
+        try:
+            result = run(["--json", "index", "investigate", "actual main query"])
+            assert result.returncode == 0, (result.stdout, result.stderr)
+            assert json.loads(result.stdout)["isError"] is False
+            assert NativeHandler.requests[-1]["query"] == "actual main query"
+            assert NativeHandler.paths == ["/v1/cli/manifest", "/v1/native/cli"]
+            NativeHandler.error = True
+            result = run(["index", "investigate", "tool refusal"])
+            assert result.returncode != 0, (result.stdout, result.stderr)
+            before = len(NativeHandler.paths)
+            for command in (["agent", "token", "private"], ["remote", "set", "tcp:127.0.0.1:1"],
+                            ["--profile", "foreign", "agent", "token", "private"],
+                            ["mcp-serve"]):
+                result = run(command)
+                assert result.returncode != 0 and "never-export-this" not in result.stdout
+            result = run(["index", "investigate", "no grant"], {"AIMEE_API_BEARER": ""})
+            assert result.returncode != 0
+            result = run(["index", "investigate", "no endpoint"], {"AIMEE_API_ENDPOINT": ""})
+            assert result.returncode != 0
+            assert all(p == "/v1/cli/manifest" for p in NativeHandler.paths[before:])
+            assert sentinel.contacts_after_settle() == 0
+            assert {p.name: p.read_bytes() for p in home.iterdir() if p.is_file()} == original
+            assert sorted(p.name for p in home.iterdir()) == [
+                ".claude", "aimee-http.sock", "private-auth.json", "remote.conf"]
+            assert not list((home / ".claude").iterdir())
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+            sentinel.close()
+
+
+def network_authority_check(binary: pathlib.Path) -> None:
+    """Real TLS verifies the bare hostname while HTTP retains its authority."""
+    class AuthorityHandler(RemoteHandler):
+        seen: list[str] = []
+        authority = ""
+
+        def _respond(self) -> None:
+            assert self.headers.get("Host") == type(self).authority
+            type(self).seen.append(self.path)
+            super()._respond()
+
+        do_GET = _respond
+        do_POST = _respond
+
+    with tempfile.TemporaryDirectory(prefix="aimee-http-authority-") as tmp:
+        home = pathlib.Path(tmp)
+        cert, key = home / "server.crt", home / "server.key"
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                        "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost",
+                        "-days", "1", "-keyout", str(key), "-out", str(cert)],
+                       check=True, capture_output=True, timeout=20)
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), AuthorityHandler)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(cert, key)
+        names: list[str | None] = []
+        context.set_servername_callback(lambda _ssl, name, _context: names.append(name))
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        AuthorityHandler.authority = f"localhost:{server.server_port}"
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        env = dict(os.environ, HOME=tmp, AIMEE_HOME=tmp, SSL_CERT_FILE=str(cert),
+                   AIMEE_API_ENDPOINT=f"tls:localhost:{server.server_port}",
+                   AIMEE_API_BEARER="test-transport")
+        for key_name in ("AIMEE_TLS_INSECURE", "AIMEE_NATIVE_CLI"):
+            env.pop(key_name, None)
+        try:
+            good = subprocess.run([str(binary), "--json", "agent", "list"], env=env,
+                                  capture_output=True, text=True, timeout=20)
+            assert good.returncode == 0, (good.stdout, good.stderr)
+            assert names and all(name == "localhost" for name in names), names
+            assert "/v1/models" in AuthorityHandler.seen
+            before = len(AuthorityHandler.seen)
+            # Same trusted certificate, wrong IP identity: no request may pass.
+            wrong = env | {"AIMEE_API_ENDPOINT": f"tls:127.0.0.1:{server.server_port}"}
+            bad = subprocess.run([str(binary), "--json", "agent", "list"], env=wrong,
+                                 capture_output=True, text=True, timeout=20)
+            assert bad.returncode != 0 and len(AuthorityHandler.seen) == before
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+
+        class IPv6Server(http.server.ThreadingHTTPServer):
+            address_family = socket.AF_INET6
+
+        ipv6 = IPv6Server(("::1", 0), AuthorityHandler)
+        AuthorityHandler.authority = f"[::1]:{ipv6.server_port}"
+        AuthorityHandler.seen = []
+        thread = threading.Thread(target=ipv6.serve_forever, daemon=True)
+        thread.start()
+        try:
+            env["AIMEE_API_ENDPOINT"] = f"tcp:[::1]:{ipv6.server_port}"
+            result = subprocess.run([str(binary), "--json", "agent", "list"], env=env,
+                                    capture_output=True, text=True, timeout=20)
+            assert result.returncode == 0, (result.stdout, result.stderr)
+            assert "/v1/models" in AuthorityHandler.seen
+        finally:
+            ipv6.shutdown()
+            ipv6.server_close()
+            thread.join(timeout=1)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=pathlib.Path)
+    parser.add_argument("--native-proxy-fixture", type=pathlib.Path)
     args = parser.parse_args()
     binary = args.binary.resolve()
 
@@ -276,6 +438,11 @@ def main() -> int:
             server_thread.join(timeout=1)
             sentinel.close()
 
+    native_main_check(binary)
+    network_authority_check(binary)
+    if args.native_proxy_fixture:
+        subprocess.run([str(args.native_proxy_fixture.resolve()), str(binary)],
+                       check=True, timeout=30)
     print("thin-client-remote-exclusive: ok")
     return 0
 

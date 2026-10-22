@@ -310,8 +310,16 @@ extern "C"
     * body may be NULL. */
    int server_http_route(const char *method, const char *path, const char *body, int body_len,
                          char *resp, int resp_cap);
+   /* Synchronous host-native handoff through the existing HTTP handlers. Caller
+    * must bind its copied authenticated request owner; child headers establish
+    * no identity. Output uses the listener's existing response FD. */
+   int server_http_native_forward(int fd, const char *method, const char *path, const char *body,
+                                  int body_len);
 
 #if AIMEE_WITH_ROUNDTABLE
+   struct server_conn;
+   int server_http_submit_op_run_owned(const char *op_method, const char *body_json,
+                                       const struct server_conn *conn, char *resp, int resp_cap);
    /* Submit an existing dispatch method through the HTTP async op-run machinery
     * without going through a /v1 route. `body_json` is the method body before
     * method/__run_id injection. `conn_caps` are the caller capabilities to use
@@ -408,6 +416,8 @@ extern "C"
     * once per request from the HTTP dispatch; `raw_request` is the full request
     * buffer (NULL clears). Defined in server/anthropic_http.c. */
    void anthropic_http_capture_request_headers(const char *raw_request);
+   int anthropic_http_capture_native_request_headers(const char *headers);
+   int anthropic_http_capture_native_request_path(const char *path);
 
    /* Retry-After (seconds) the parity passthrough relays on its own response when
     * it forwarded an upstream 429/529 that carried one (0 = none). Read by
@@ -540,19 +550,20 @@ extern "C"
 
    /* --- Per-session active primary agent (set via POST
     *     /v1/sessions/<id>/primary, used as the chat fallback agent when a
-    *     request names no explicit provider). In-memory, bounded, thread-safe. */
+    *     request names no explicit provider). Durable and owner-bound; database failure refuses
+    * selection. */
 
    /* Record the active primary agent name for session_id (overwrites).
-    * No-op on NULL/empty args. */
-   void session_primary_set(const char *session_id, const char *agent);
+    * Returns 0 on durable acknowledgment, -1 on failure. */
+   int session_primary_set(const char *session_id, const char *agent);
 
    /* Look up the active primary agent for session_id. Writes it to out (n
-    * bytes) and returns 1 if set, 0 otherwise (out gets ""). */
+    * bytes) and returns 1 if set, 0 if unset, -1 on authority/store failure. */
    int session_primary_get(const char *session_id, char *out, size_t n);
 
    /* Clear any pinned primary for session_id (the session reverts to the
-    * default provider). No-op on NULL/empty/unknown session. */
-   void session_primary_clear(const char *session_id);
+    * default provider). Returns 0 on durable acknowledgment, -1 on failure. */
+   int session_primary_clear(const char *session_id);
 
    /* Delegation admission check: reject an empty/too-short prompt, then enforce
     * the active persona's delegate policy (session's persona, else the durable

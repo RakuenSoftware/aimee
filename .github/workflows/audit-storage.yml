@@ -1,5 +1,8 @@
 name: Audit storage regressions
 on:
+  merge_group:
+    types: [checks_requested]
+    branches: [testing]
   push:
     branches: [main, testing]
   pull_request:

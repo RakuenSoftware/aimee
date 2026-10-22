@@ -18,31 +18,26 @@ accepted algorithms, and namespaced claim mappings. GitHub may be configured if 
 
 ### Go process stage
 
-The supervised governance process uses the shared pure-Go module runtime for the
-bounded response tool-policy decision. Its GOVQ/GOVR wire contract accepts at
-most 16 fixed-width tool names, the already-resolved policy-active flag, and the
-provider stop reason. It returns the survivor mask, intervention count, and the
-same stop-reason finalization used by the legacy response policing path. Exact
-`Agent`, `spawn_agent`, `RemoteTrigger`, and `Task` names are denied; matching is
-case-sensitive and intentionally mirrors the existing canonical-name boundary.
-The C adapter is a wire-parity fixture. Parsed-response compaction and memory
-ownership, policy/config resolution, request-side policing, OIDC, identity, and
-control-plane orchestration remain in their current C owners.
+The supervised Go governance process owns response tool-policy decisions. Its v2
+request carries canonical tool identity views (complete name and optional namespace),
+the resolved policy-active flag, and the canonical stop reason. Each request covers
+at most 16 calls so the survivor mask remains bounded; the host processes every
+chunk of a dynamic response. Names and namespaces have no separate fixed-width cap.
+The existing module message bound applies. Strict shared IR admission refuses
+malformed, duplicate, unknown or retired v1 request framing.
 
-The descriptor's ownership fields describe what lives under `src/modules/governance/` today, which is
-the response-governance stage alone: `gw_stage_governance.c`, its private header
-`gw_stage_governance.h`, and the process wire-parity adapter, tested by
-`src/tests/test_response_governance_stage.c` plus cross-language conformance. That is narrower than
-the governance plane this document describes. The OIDC, identity, policy-distribution, and console
-surfaces remain distributed across the KB, KB_STORE, management, and console layers and are not yet
-module-local. The descriptor declares its sources, private header, test, and this document and sets
-`ownership_complete: true`. The latch asserts that those declarations exhaustively cover the module
-root as it stands (one source and one private header), not that the broader governance plane has been
-migrated. `docs/validation/core-modularization-slice-40.md` records the declaration audit and
-`docs/validation/core-modularization-slice-41.md` the completeness audit; the two were split so the
-latch reviews declarations that were merged on their own first. Because the module owns exactly what it
-declares today, adding a new module-local source or private header without declaring it now fails CI on
-`rule=ownership-complete`.
+Exact `Agent`, `spawn_agent`, `RemoteTrigger`, and `Task` names are denied. Matching
+remains case-sensitive. Namespace metadata survives transport without changing this
+policy. The v2 GOVR reply carries the survivor mask and intervention count. The host
+mutates owned canonical response blocks and preserves native stop metadata unless
+it changes the canonical terminal state. An unavailable owner denies the governed
+calls. There is no native C duplicate policy handler or compatibility fallback.
+Core and the governance process must be upgraded together for v2.
+
+The module descriptor covers response governance and completion stages, their
+public/private headers, Go policy owner and tests. The broader OIDC, identity,
+policy-distribution and console surfaces described here remain distributed across
+other owners; `ownership_complete` describes this directory's declared files.
 
 ## Dependencies and consumers
 

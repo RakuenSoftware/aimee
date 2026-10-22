@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "aimee.h"
+#include "util.h"
 
 /* text_trim_partial_utf8: undo a byte-wise truncation that split a character.
  *
@@ -576,8 +577,51 @@ static void test_parse_utc_ts_is_timezone_independent(void)
    printf("  parse_utc_ts reads UTC regardless of host timezone\n");
 }
 
+static void test_read_complete_bounded_frame(void)
+{
+   FILE *stream = tmpfile();
+   assert(stream);
+   for (size_t i = 0; i < 131072; i++)
+      assert(fputc((int)(i % 251), stream) != EOF);
+   rewind(stream);
+   size_t length = 999;
+   char *frame = read_stream_limited(stream, 131072, &length);
+   assert(frame && length == 131072 && !frame[length]);
+   for (size_t i = 0; i < length; i++)
+      assert((unsigned char)frame[i] == i % 251);
+   free(frame);
+   rewind(stream);
+   frame = read_stream_limited(stream, 131071, &length);
+   assert(!frame && !length);
+   fclose(stream);
+   stream = tmpfile();
+   assert(stream);
+   frame = read_stream_limited(stream, 32, &length);
+   assert(frame && !length && !frame[0]);
+   free(frame);
+   fclose(stream);
+   puts("  PASS: complete bounded binary frames never return a truncated prefix");
+}
+
+#ifndef AIMEE_WINDOWS
+static void test_exec_capture_refuses_missing_output(void)
+{
+   const char *argv[] = {"/bin/echo", "capture fixture", NULL};
+   assert(safe_exec_capture(argv, NULL, 64) == -1);
+   assert(safe_exec_capture_cwd_env_fd_timeout(argv, NULL, NULL, NULL, 64, 1000, -1, -1) == -1);
+   char sentinel[] = "not allocated";
+   char *output = sentinel;
+   assert(safe_exec_capture(NULL, &output, 64) == -1 && !output);
+   assert(safe_exec_capture(argv, &output, 64) == 0 && output);
+   assert(!strcmp(output, "capture fixture\n"));
+   free(output);
+   puts("  PASS: exec capture refuses a missing output receiver and retains valid capture");
+}
+#endif
+
 int main(void)
 {
+   test_read_complete_bounded_frame();
    test_parse_utc_ts_accepts_both_spellings();
    test_parse_utc_ts_is_timezone_independent();
    test_normalize_key();
@@ -595,6 +639,7 @@ int main(void)
    test_shell_quote_injection_payloads();
    test_strip_ai_attribution();
 #ifndef AIMEE_WINDOWS
+   test_exec_capture_refuses_missing_output();
    test_run_cmd();
    test_run_cmd_scoped_executor();
    test_run_cmd_env();

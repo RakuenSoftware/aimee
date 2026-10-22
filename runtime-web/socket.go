@@ -95,6 +95,11 @@ type streamEvent struct {
 	// text/thinking/session events
 	Content string `json:"content,omitempty"`
 	ID      string `json:"id,omitempty"`
+	// Tool lifecycle events contain a name; legacy rich events may also carry
+	// arguments/results. Preserve these fields on the browser transport.
+	Name   string `json:"name,omitempty"`
+	Args   string `json:"args,omitempty"`
+	Result string `json:"result,omitempty"`
 	// status (final message)
 	Status  string `json:"status,omitempty"`
 	Error   string `json:"error,omitempty"`
@@ -114,7 +119,7 @@ type streamEvent struct {
 // newline-delimited JSON event stream (application/x-ndjson), calling cb for each
 // intermediate event. The public config still calls its historical socket field
 // `socketPath`; the HTTP UDS lives beside that path.
-func chatStreamHTTP(ctx context.Context, socketPath, message, aimeeSessionID, claudeSessionID, cwd, attachID string, cb func(streamEvent)) error {
+func chatStreamHTTP(ctx context.Context, socketPath, username, message, aimeeSessionID, claudeSessionID, cwd, attachID string, cb func(streamEvent)) error {
 	sock := filepath.Join(filepath.Dir(socketPath), "aimee-http.sock")
 
 	reqBody := map[string]string{"message": message}
@@ -151,6 +156,9 @@ func chatStreamHTTP(ctx context.Context, socketPath, message, aimeeSessionID, cl
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// The authenticated browser actor crosses only the kernel-attested local
+	// socket, just as it does for the other Runtime web requests.
+	req.Header.Set("X-Aimee-Webuser", username)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -187,4 +195,43 @@ func chatStreamHTTP(ctx context.Context, socketPath, message, aimeeSessionID, cl
 		return err
 	}
 	return nil
+}
+
+// The browser transport does not interpret conversation events. Native adapters
+// have already produced and persisted canonical IR before these bytes arrive.
+func chatIRHTTP(ctx context.Context, socketPath, username, message, sid, cwd, attachID string, cb func([]byte) error) error {
+	payload, err := json.Marshal(map[string]any{"message": message, "aimee_session_id": sid, "cwd": cwd, "attach_id": attachID, "ir_version": 1,"queue":true,"queue_wait_ms":30000})
+	if err != nil {
+		return err
+	}
+	sock := filepath.Join(filepath.Dir(socketPath), "aimee-http.sock")
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", sock)
+	}}
+	defer transport.CloseIdleConnections()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://aimee/v1/chat/stream", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Aimee-Webuser", username)
+	response, err := (&http.Client{Transport: transport}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("chat stream HTTP %d", response.StatusCode)
+	}
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 65536), 4*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(bytes.TrimSpace(line)) != 0 {
+			if err = cb(line); err != nil {
+				return err
+			}
+		}
+	}
+	return scanner.Err()
 }

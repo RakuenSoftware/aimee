@@ -8,7 +8,7 @@
 #include "aimee.h"
 #include "kb_store.h"
 #include "db_postgres.h"
-#include "../support/kb_store_log.h"
+#include "log.h"
 
 #include <ctype.h>
 #include <stdio.h>

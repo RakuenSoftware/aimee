@@ -17,11 +17,18 @@ typedef struct
    } flags[V1_MAX_FLAGS];
    int flag_count;
 } cli_args_t;
+/* Consumes marshalled request; returns only a complete typed MCP receipt.
+ * Native child credentials only; no alternate/global transport fallback. */
+int cli_native_bridge_enabled(void);
+char *cli_native_bridge_endpoint(void); /* Owned, explicit loopback only. */
+typedef int (*cli_native_finish_fn)(const cli_v1_route_t *, cJSON *, int, int, int, char **);
+int cli_native_bridge_forward(cJSON *request, int json_output, int argc, char **argv,
+                              cli_native_finish_fn finish);
 int cli_v1_args_request_json(int argc, char **argv);
 int cli_agent_probe_response_is_failure(cJSON *resp);
 int cli_index_investigate_response_is_failure(cJSON *resp);
 char *cli_index_worktree_root(const char *method, const cJSON *req);
-void cli_index_apply_worktree_project(cJSON *req, const char *root, const cJSON *response);
+int cli_index_apply_worktree_project(cJSON *req, const char *root, const cJSON *response);
 void cli_ws_project_identity(const char *remote, const char *bearer, const char *abs_root,
                              char *out, size_t out_len);
 void __attribute__((unused)) cli_v1_sleep_ms(int ms);

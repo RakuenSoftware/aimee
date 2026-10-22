@@ -102,7 +102,7 @@ INFRASTRUCTURE = {
     # program another script drives rather than a test that runs itself. The
     # script that drives it is named, so "who runs this" has an answer that can
     # be checked instead of assumed.
-    "bus-conformance-host": "the C half; test_bus_conformance.sh, run by make go-unit-tests",
+    "bus-conformance-host": "the C half; test_bus_conformance.sh (make go-unit-tests) and test_bus_rust_conformance.sh (make rust-bus-tests)",
     "bus-bench": "a measurement; scripts/check_bus_perf_gate.sh drives it",
     "kb-store-test-template": "builds the Postgres test template; unit-tests-pg drives it",
     "aimee-witness-boot-tpm-harness": "needs swtpm; scripts/run-p7-witness-boot-tpm.sh drives it",
@@ -135,6 +135,20 @@ SANITIZE = re.compile(r"^unit-test-kb-store-[a-z-]+-support-sanitize$")
 def fail(message: str) -> int:
     print(f"check_tests_are_run: error: {message}", file=sys.stderr)
     return 1
+
+
+def selected_tests(text: str) -> set[str]:
+    joined = re.sub(r"\\\n", " ", text)
+    frozen = re.search(r"^UNIT_TEST_TARGETS\s*:=.*\$\(TEST_TARGETS\)", joined, re.M)
+    if frozen is None:
+        raise ValueError("cannot locate the unit-suite selection of TEST_TARGETS")
+    run: set[str] = set()
+    for match in re.finditer(r"^TEST_TARGETS\s*[:+]?=(.*)$", joined, re.M):
+        if match.start() > frozen.start():
+            raise ValueError("TEST_TARGETS changes after UNIT_TEST_TARGETS is frozen; "
+                             "move registrations before suite/shard selection")
+        run.update(re.findall(r"unit-test-[a-z0-9-]+", match.group(1)))
+    return run
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -190,9 +204,10 @@ def main(argv: list[str] | None = None) -> int:
     # run list -- it exists to order an archive dependency -- which is exactly
     # the confusion that let these hide: they were named in a variable, so they
     # looked listed.
-    run: set[str] = set()
-    for match in re.finditer(r"^TEST_TARGETS\s*[:+]?=(.*)$", joined, re.M):
-        run.update(re.findall(r"unit-test-[a-z0-9-]+", match.group(1)))
+    try:
+        run = selected_tests(joined)
+    except ValueError as error:
+        return fail(str(error))
 
     unrun = sorted(
         name for name in defined - run

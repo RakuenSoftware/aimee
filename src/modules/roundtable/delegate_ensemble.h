@@ -18,17 +18,7 @@
  * stack, which is 32 MB — so 32 panelists (~50KB frame) is well within budget. */
 #define ENSEMBLE_MAX_REFS 32
 
-typedef struct
-{
-   char response[8192];
-   int success;
-   double cost_usd;
-   int degraded;            /* 1 = returned best single candidate, not synthesized */
-   int cost_capped;         /* 1 = aborted before aggregation due to cost cap */
-   int participants_total;  /* reference models fanned out this run */
-   int participants_failed; /* participants that returned no usable response (partial failure) */
-} delegate_ensemble_result_t;
-
+typedef aimee_panel_aggregate_result_t delegate_ensemble_result_t;
 
 /* Fill *out from the live config. */
 void ensemble_panel_from_config(ensemble_panel_t *out);
@@ -63,8 +53,8 @@ int ensemble_panelist_eligible(const agent_t *ag);
 /* Validate explicit positive pins before any filter can remove them. A concrete
  * pin is a hard must-use requirement: missing, unauthorized, or unavailable
  * returns -1 and describes the pin in err. "$random" is not a concrete pin. */
-int ensemble_validate_panel_pins(const ensemble_panel_t *panel, const agent_config_t *acfg, char *err,
-                                 size_t err_n);
+int ensemble_validate_panel_pins(const ensemble_panel_t *panel, const agent_config_t *acfg,
+                                 char *err, size_t err_n);
 
 /* Replace each "$random" seat in ensemble.reference_models with a concretely
  * picked review-capable agent (excluding already-seated models for diversity);
@@ -95,8 +85,7 @@ void ensemble_fill_implicit_panel(ensemble_panel_t *panel, const agent_config_t 
  * named/default saved preset as an exact panel, or construct the bounded
  * two-seat fallback when no preset exists. */
 int ensemble_prepare_runtime_panel(const char *requested, ensemble_panel_t *panel,
-                                   const agent_config_t *acfg,
-                                   char *err, size_t err_n);
+                                   const agent_config_t *acfg, char *err, size_t err_n);
 
 /* Persona name for panelist `model_index`: a configured
  * ensemble.reference_personas[model_index] if set (any mode), else a mode default

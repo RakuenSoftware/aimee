@@ -96,6 +96,10 @@ int agent_registry_default_primary(agent_t *out);
  * registered agent name and never silently falls back. The selected agent must
  * be enabled. This is the shared ingress contract for all client wire formats. */
 int agent_registry_resolve_ingress_model(const char *model, agent_t *out);
+/* Host-owned native execution scope. The selected registration snapshot must
+ * outlive the synchronous request; restore the returned scope before reuse.
+ * This is never populated from an HTTP/model field. */
+const agent_t *agent_registry_bind_ingress_model(const agent_t *selected);
 /* Select the default "primary" agent for ingress paths that don't name a model:
  * an explicitly configured default when it is enabled, else the first enabled
  * agent, else NULL. Never returns a disabled agent. */
@@ -112,7 +116,7 @@ typedef int (*agent_route_selection_fn)(int randomized, uint32_t candidate_count
 void agent_set_route_selection_provider(agent_route_selection_fn provider);
 /* Rank a qualified pool using request-size pricing; negative return fails closed. */
 typedef int (*agent_route_cost_fn)(const agent_config_t *cfg, const char *role,
-                                  agent_t *const candidates[], int count, int min_context);
+                                   agent_t *const candidates[], int count, int min_context);
 void agent_set_route_cost_provider(agent_route_cost_fn provider);
 int agent_role_competence(const agent_t *agent, const char *role);
 int agent_role_meets_competence(const agent_t *agent, const char *role);
@@ -288,8 +292,11 @@ void agent_expand_env(const char *src, char *dst, size_t dst_len);
  * empty). Callers own the copy and should runtime_secret_wipe() it when done. */
 int agent_api_key_secret(const agent_t *agent, char *out, size_t out_len);
 
-int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len);
-/* An explicit, actionable reason the LAST agent_resolve_auth call failed (e.g.
+/* One credential resolution produces both native HTTP header sets. Token and
+ * account can never be resolved by different calls while Vault changes. */
+int agent_resolve_auth_headers(const agent_t *agent, char *auth, size_t auth_capacity,
+                               char *headers, size_t headers_capacity);
+/* An explicit, actionable reason the last agent_resolve_auth_headers call failed (e.g.
  * codex REAUTH_REQUIRED), or NULL. Lets the delegate/chat error path surface a
  * remedy instead of a generic provider 401 (D6). Thread-local to the turn. */
 const char *agent_request_auth_error(void);
@@ -310,20 +317,60 @@ int agent_has_resolvable_credentials(const agent_t *agent);
  * failure to read reads as "not configured" rather than a false positive. */
 int vault_provider_has_credential(const char *provider_name);
 
-void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len);
+/* Server Codex connection only: resolve the canonical Vault token, refreshing
+ * through the same store as serving. Never reads client files or another named
+ * connection. The caller must keep the returned credential off the module bus. */
+int agent_codex_oauth_current_token(char *buf, size_t len);
 
-/* Per-turn Codex OAuth creds supplied by the thin client (its ~/.codex/auth.json
- * is the live, refreshed source; the server has no such file). Set at the start
- * of a chat/delegate turn and cleared at the end. When set, agent_resolve_auth
- * uses `token` for a codex-oauth agent in preference to the server's file, and
- * agent_build_extra_headers injects ChatGPT-Account-ID from `account_id`. Pass
- * NULL/empty to clear. Thread-local (each turn runs on its own worker thread). */
+typedef struct
+{
+   char token[MAX_API_KEY_LEN];
+   char account_id[128];
+   char source_digest[65]; /* non-secret original credential lineage, stable across refresh */
+} agent_codex_credentials_t;
+/* Selected Vault connection only; no actor/client-file/default-account fallback.
+ * The returned secret must stay off the module bus and be cleansed by its owner. */
+int agent_codex_connection_credentials(const char *registration, agent_codex_credentials_t *out);
+
+typedef struct
+{
+   char token[MAX_API_KEY_LEN];
+   char source_digest[65]; /* original selected login lineage, stable across refresh */
+} agent_claude_credentials_t;
+/* Exact selected Vault-native Claude login only. Uses the shared registration
+ * refresh lock, persisted client/scopes and server-owned endpoint; no HOME or
+ * default-account fallback. The host must cleanse the returned secret. */
+int agent_claude_connection_credentials(const char *registration, agent_claude_credentials_t *out);
+/* Merge the required subscription beta capability without losing other beta
+ * tokens. Non-Claude profiles are unchanged; duplicates/overflow refuse. */
+int agent_claude_oauth_headers(const agent_t *agent, char *headers, size_t capacity);
+/* Host-only exact request binding; NULL clears. Snapshot carries the selected
+ * registration/target so another connection cannot borrow this bearer. */
+int agent_set_request_claude_creds_for(const agent_t *agent,
+                                       const agent_claude_credentials_t *credentials);
+
+typedef struct
+{
+   char api_key[MAX_API_KEY_LEN];
+   char target_digest[65]; /* selected registration/provider/endpoint/header profile */
+   char source_digest[65]; /* target + actual selected Vault key; not a credential */
+} agent_api_credentials_t;
+/* Exact selected Vault connection under the current attested principal. No
+ * config/env/name-alias fallback. Secrets remain on the host and must be cleansed. */
+int agent_api_connection_credentials(const agent_t *agent, agent_api_credentials_t *out);
+/* Bind the already resolved credential to this exact connection for one host
+ * request. NULL clears. Target edits within that registration refuse; other
+ * registrations resolve their own credential and never borrow this key. */
+int agent_set_request_api_credentials_for(const agent_t *agent,
+                                          const agent_api_credentials_t *credentials);
+
+/* Host-owned per-turn Codex credentials. The legacy setter binds the server
+ * codex connection. The explicit setter binds the selected registration; token
+ * and account may only serve that connection. NULL/empty clears both. */
 void agent_set_request_codex_creds(const char *token, const char *account_id);
-
-/* 1 when a per-turn Codex OAuth token is currently bound. Set by the vault
- * delegate path (delegate_credential_retry, from the vault); the legacy client
- * push was retired in P4b. */
-int agent_request_codex_token_present(void);
+void agent_set_request_codex_creds_for(const agent_t *agent, const char *token,
+                                       const char *account_id);
+int agent_request_codex_token_matches(const agent_t *agent);
 
 /* Per-turn session id, set at the start of a chat/delegate turn from the request
  * and carried in the creds snapshot so a fan-out worker inherits the originating
@@ -331,6 +378,8 @@ int agent_request_codex_token_present(void);
  * single source (the session-scoped client keyring was retired in P4b).
  * Thread-local. */
 void agent_set_request_session(const char *session_id);
+/* Attested turn session, empty for non-session internal work; never reads env. */
+const char *agent_get_request_session(void);
 
 /* The attested vault principal (WP-C) for the in-flight chat turn, thread-local.
  * The chat worker sets it from its compute_ctx around the agent loop and clears
@@ -347,11 +396,24 @@ const char *agent_get_request_vault_principal(void);
  * agent loop polls agent_request_cancelled() at safe points to abort a detached
  * turn whose session was closed / the server is shutting down. Thread-local. */
 void agent_set_request_cancel(atomic_int *flag);
+/* Borrow only inside the current host execution; every child worker must join
+ * before its owner releases this cancellation flag. Never model authority. */
+atomic_int *agent_get_request_cancel(void);
+/* Additional host-owned cancellation leases. Nodes/links are immutable while
+ * bound; flags are atomic. Every child must join before its enclosing owner's
+ * nodes or flags are released. A local timeout never changes a parent flag. */
+typedef struct agent_request_cancel_scope
+{
+   const atomic_int *flag;
+   const struct agent_request_cancel_scope *parent;
+} agent_request_cancel_scope_t;
+const agent_request_cancel_scope_t *agent_request_cancel_scope_current(void);
+const agent_request_cancel_scope_t *
+agent_request_cancel_scope_bind(const agent_request_cancel_scope_t *scope);
 int agent_request_cancelled(void);
 
-/* Snapshot of the per-turn, thread-local credential context (session id + Codex
- * creds + WP-C vault principal). agent_set_request_session /
- * agent_set_request_codex_creds / agent_set_request_vault_principal bind these
+/* Snapshot of the per-turn, thread-local credential context (session id, selected
+ * Codex/API-key credentials and WP-C vault principal). The host credential setters bind these
  * on the dispatching thread, but a parallel fan-out (agent_run_parallel) runs
  * each agent on a fresh worker thread that does NOT inherit thread-locals — so
  * the dispatcher snapshots its context and each worker restores it, or the
@@ -362,6 +424,13 @@ typedef struct
    char session_id[128];
    char codex_token[MAX_API_KEY_LEN];
    char codex_account_id[128];
+   char codex_registration[128];
+   char claude_token[MAX_API_KEY_LEN];
+   char claude_registration[128];
+   char claude_target[65];
+   char api_key[MAX_API_KEY_LEN];
+   char api_key_registration[128];
+   char api_key_target[65];
    char vault_principal[VAULT_PRINCIPAL_MAX];
 } agent_request_creds_t;
 

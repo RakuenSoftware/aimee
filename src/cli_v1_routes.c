@@ -1,3 +1,4 @@
+#include "cli_dispatch_defs.h"
 /* ===================================================================
  * /v1 thin-client routing: route CLI subcommands through the server's native /v1 HTTP endpoints.
  * Unported commands fail in cli_main before reaching the server.
@@ -130,15 +131,7 @@ static const char *resolve_session_env(const cli_args_t *opts);
 
 /* --- /v1 route table --- */
 
-typedef struct
-{
-   const char *cmd;
-   const char *subcmd; /* NULL = match any (first arg is NOT a subcmd) */
-   const char *method;
-   const char *server_method; /* NULL = same as method */
-   const char *extract;       /* response array field to extract, or NULL */
-   int timeout_ms;            /* 0 = CLIENT_DEFAULT_TIMEOUT_MS */
-} cli_dispatch_row_t;
+typedef cli_dispatch_def_t cli_dispatch_row_t;
 
 static const cli_dispatch_row_t cli_command_routes[] = {
 /* Rows live in server/cli_dispatch_defs_data.h: the server serves them, and
@@ -978,12 +971,13 @@ cJSON *marshal_trajectory_batch(int argc, char **argv)
    if (!tasks || !tasks[0])
    {
       fprintf(stderr, "aimee: usage: aimee trajectory batch --tasks corpus.jsonl|suite_dir "
-                      "[--toolset-dist research] [--out dir]\n");
+                      "[--session ID] [--toolset-dist research] [--out dir]\n");
       return NULL;
    }
 
    cJSON *req = marshal_no_args("trajectory.batch");
    cJSON_AddStringToObject(req, "tasks_path", tasks);
+   cJSON_AddStringToObject(req, "session_id", resolve_session_env(&opts));
    const char *dist = cli_args_get(&opts, "toolset-dist");
    if (dist && dist[0])
       cJSON_AddStringToObject(req, "toolset_dist", dist);

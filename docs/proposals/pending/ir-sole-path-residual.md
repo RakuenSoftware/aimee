@@ -1,17 +1,40 @@
-# IR sole path: response and legacy-path residual
+# IR sole path: implementation and qualification residual
 
-- **State:** PENDING. Residual scope only.
+- **State:** PENDING. Implementation is complete for the supported browser/Linux
+  runtime; final exact-head qualification and production promotion remain pending.
 
 **Archived parent:** [`ir-sole-path-and-pluggable-stages.md`](../done/ir-sole-path-and-pluggable-stages.md)
 
-## Shipped baseline
+## Implemented continuation
 
-The request stage registry, response registry, orchestration seam, governance response stage, and delegate/workflow hooks are present and tested.
+Supported provider ingress, response parsing and streaming use canonical IR and
+registered stages. Canonical streaming is enabled; no default-off relay switch
+remains. Paths requiring policy/completion repair buffer before canonical delivery.
+The retired `raw_responses`, `anthropic_stream_feed_openai`,
+`build_provider_body` and `translate_request` bypasses are removed. Native-format
+handling remains at explicit translation boundaries. Mutation-aware replay
+preserves untouched native request/cache data and rebuilds edited requests.
 
-## Remaining deliverables
+The IR bypass checker prevents reintroduction of retired paths and guards the
+migrated consumers; its exception ledger is empty. Canonical primary/delegate
+history, model switching, browser controls, source-bound native replay and honest
+legacy-import fidelity are implemented. Pinned SDK/provider fixtures and actual
+store/kernel journeys establish the recorded supported-path behavior; they do
+not establish live upstream vendor acceptance.
 
-- Route every provider response through the response IR and registered stages.
-- Replace `raw_responses` and `anthropic_stream_feed_openai` compatibility paths with explicit IR adapters.
-- Retire direct `build_provider_body` / `translate_request` construction once parity is proven.
-- Promote the relay from default-off only after streaming, tool-call, error, and cancellation parity gates pass.
-- Add live-provider equivalence tests and a checker preventing new bypasses.
+## Remaining qualification and promotion
+
+- Qualify the final integrated commit with the local regression gates, fresh CI
+  and every configured deployment tier. Earlier green commits do not qualify
+  subsequent changes.
+- Retain the explicit distinction between pinned fixture coverage and live
+  upstream/subscription acceptance, which remains separately unqualified.
+- Obtain the recorded independent approving identity and live-control evidence
+  required by `OWNERS.md` before production promotion; then verify actual KB-free
+  capture and reuse on `.100` through the supported deployment path.
+
+macOS/Windows thin-client builds do not establish native server execution on
+those platforms. Unsupported native/credential profiles remain explicitly
+refused. The [current handoff](../../IR_MIGRATION_HANDOFF.md) records qualification,
+platform limits and promotion obligations. This proposal does not claim a
+completed production rollout.

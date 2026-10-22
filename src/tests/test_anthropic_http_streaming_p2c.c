@@ -4,7 +4,7 @@
  * so the production police function runs end-to-end. The two streaming
  * paths (Anthropic-native raw-byte relay, OpenAI-via-translator per-block)
  * both bypass their incremental paths when the policy is ON, fall through
- * to a buffered upstream fetch + police + emit_message_as_sse replay.
+ * to a buffered upstream fetch + police + canonical response SSE renderer replay.
  *
  * Scope: covers the policy-ON path (drops + replays) AND the policy-OFF
  * regression canary (today's incremental paths are unchanged). */
@@ -25,6 +25,8 @@
 #include "../vendor/headers/cJSON.h"
 
 #define PASS(name) printf("  PASS: %s\n", (name))
+
+#include "support/native_response_fixture.h"
 
 /* anthropic_http.c's write_error now logs aimee-internal error codes; this
  * minimal link stubs the logger like the other production deps below. */
@@ -47,6 +49,7 @@ static char *g_last_body;
 static char *g_last_extra;
 static int g_stream_status;
 static const char *g_stream_payload;
+static size_t g_stream_payload_length;
 /* Fake upstream response body for the BUFFERED fetch on the policy-ON path.
  * The streaming path uses agent_http_post (not the streaming variant) when
  * the policy is on, so we hook the same `g_response_body` machinery as the
@@ -62,7 +65,7 @@ static const char *g_tool_uses_json;
 static const char *g_upstream_stop_reason;
 static const char *g_response_content;
 
-static int governance_event_bus_provider(int policy_active, const char *const *tool_names,
+static int governance_event_bus_provider(int policy_active, const aimee_tool_identity_view_t *tools,
                                          uint32_t tool_count, const char *stop_reason,
                                          aimee_governance_decision_t *decision)
 {
@@ -76,8 +79,8 @@ static int governance_event_bus_provider(int policy_active, const char *const *t
    for (uint32_t i = 0; i < tool_count; ++i)
    {
       int denied =
-          strcmp(tool_names[i], "Agent") == 0 || strcmp(tool_names[i], "spawn_agent") == 0 ||
-          strcmp(tool_names[i], "RemoteTrigger") == 0 || strcmp(tool_names[i], "Task") == 0;
+          strcmp(tools[i].name, "Agent") == 0 || strcmp(tools[i].name, "spawn_agent") == 0 ||
+          strcmp(tools[i].name, "RemoteTrigger") == 0 || strcmp(tools[i].name, "Task") == 0;
       if (denied)
          decision->drop_count++;
       else
@@ -99,6 +102,7 @@ static void reset_capture(void)
    g_last_extra = NULL;
    g_stream_status = 200;
    g_stream_payload = NULL;
+   g_stream_payload_length = 0;
    g_response_body = NULL;
    g_response_status = 200;
    g_prevent = 0;
@@ -195,18 +199,14 @@ int delegate_build_url(const delegate_driver_t *driver, const agent_t *agent, ch
    return 0;
 }
 
-int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
+int agent_resolve_auth_headers(const agent_t *agent, char *buf, size_t buf_len, char *headers,
+                               size_t headers_capacity)
 {
    (void)agent;
+   if (headers_capacity)
+      headers[0] = 0;
    snprintf(buf, buf_len, "Bearer test");
    return 0;
-}
-
-void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len)
-{
-   (void)agent;
-   if (buf_len)
-      buf[0] = '\0';
 }
 
 cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *tools,
@@ -239,7 +239,10 @@ int agent_http_post(const char *url, const char *auth_header, const char *body, 
    assert(g_last_body != NULL);
    free(g_last_extra);
    g_last_extra = strdup(extra_headers ? extra_headers : "");
-   *response_buf = strdup(g_response_body ? g_response_body : "{}");
+   *response_buf = g_response_body ? strdup(g_response_body)
+                                   : native_response_fixture(g_driver ? g_driver->name : NULL,
+                                                             g_response_content, g_tool_uses_json,
+                                                             g_upstream_stop_reason);
    return g_response_status;
 }
 
@@ -254,30 +257,12 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
    free(g_last_body);
    g_last_body = strdup(body ? body : "");
    assert(g_last_body != NULL);
-   if (g_stream_payload && callback)
-      assert(callback(g_stream_payload, strlen(g_stream_payload), userdata) == 0);
+   if (g_stream_payload && callback &&
+       callback(g_stream_payload,
+                g_stream_payload_length ? g_stream_payload_length : strlen(g_stream_payload),
+                userdata))
+      return -1;
    return g_stream_status;
-}
-
-int agent_ir_parse_json_response(cJSON *root, int anthropic, int rescue_mode, int *n_rescued,
-                                 parsed_response_t *out)
-{
-   (void)root;
-   (void)anthropic;
-   (void)rescue_mode;
-   if (n_rescued)
-      *n_rescued = 0;
-   memset(out, 0, sizeof(*out));
-   return 0;
-}
-
-void agent_free_parsed_response(parsed_response_t *p)
-{
-   if (!p)
-      return;
-   free(p->content);
-   for (int i = 0; i < p->call_count; i++)
-      free(p->calls[i].arguments);
 }
 
 int session_compact_estimate_tokens(cJSON *messages)
@@ -345,42 +330,6 @@ int agent_http_last_retry_after(void)
 /* Driver parse stub (mirrors test_anthropic_http_p2c.c): populates
  * parsed.calls[] from g_tool_uses_json, leaves content empty, and copies
  * g_upstream_stop_reason into parsed.stop_reason. */
-static void parsed_with_tool_uses(cJSON *root, const char *body, parsed_response_t *out)
-{
-   cJSON *arr;
-   int i;
-   int cap;
-   (void)root;
-   (void)body;
-   memset(out, 0, sizeof(*out));
-   if (g_upstream_stop_reason)
-      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", g_upstream_stop_reason);
-   if (g_response_content)
-      out->content = strdup(g_response_content);
-   arr = g_tool_uses_json ? cJSON_Parse(g_tool_uses_json) : NULL;
-   if (!cJSON_IsArray(arr))
-   {
-      cJSON_Delete(arr);
-      return;
-   }
-   cap = cJSON_GetArraySize(arr);
-   if (cap > AGENT_MAX_TOOL_CALLS)
-      cap = AGENT_MAX_TOOL_CALLS;
-   for (i = 0; i < cap; i++)
-   {
-      cJSON *t = cJSON_GetArrayItem(arr, i);
-      const cJSON *id = cJSON_GetObjectItemCaseSensitive(t, "id");
-      const cJSON *name = cJSON_GetObjectItemCaseSensitive(t, "name");
-      const cJSON *args = cJSON_GetObjectItemCaseSensitive(t, "arguments");
-      snprintf(out->calls[i].id, sizeof(out->calls[i].id), "%s",
-               cJSON_IsString(id) ? id->valuestring : "");
-      snprintf(out->calls[i].name, sizeof(out->calls[i].name), "%s",
-               cJSON_IsString(name) ? name->valuestring : "");
-      out->calls[i].arguments = cJSON_IsString(args) ? strdup(args->valuestring) : strdup("{}");
-   }
-   out->call_count = cap;
-   cJSON_Delete(arr);
-}
 
 /* Accessor stubs mirror this fixture's policy — prevent_subagents
  * tracks g_prevent, pin_model was left zeroed — so assertions are unchanged. */
@@ -414,10 +363,6 @@ const char *guardrails_canonical_tool_name(const char *n)
 /* Pre-injection stubs (the real ones depend on KB clients + config; this
  * test is minimal-link). Mirrors test_anthropic_http_p2c.c. */
 static char *g_stub_preinject_env = NULL;
-char *ingress_preinject_query_from_messages(const cJSON *messages)
-{
-   return messages ? strdup("q") : NULL;
-}
 char *ingress_preinject_build(const char *query, int request_disabled)
 {
    (void)query;
@@ -452,11 +397,13 @@ static void replay_capture(void *ctx, const char *event, const char *data)
  * tool_use. The streaming path takes the buffered-and-replay branch: the
  * raw byte relay is bypassed, the upstream reply is fetched as a single
  * agent_http_post, the police function drops the subagent call, and
- * emit_message_as_sse replays the surviving sequence. No tool_use block
+ * canonical response SSE renderer replays the surviving sequence. No tool_use block
  * on the wire; stop_reason "end_turn" (all-dropped rewrite). */
 static void test_streaming_anthropic_police_drops_subagent_tool_use(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    replay_cap_t cap;
    const char *names[] = {"Task"};
    const char *ids[] = {"t1"};
@@ -473,9 +420,11 @@ static void test_streaming_anthropic_police_drops_subagent_tool_use(void)
                    "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
                    replay_capture, &cap);
 
-   /* Replay emits message_start, [text_start, text_stop], message_delta,
-    * message_stop (no tool_use blocks survived). */
-   assert(cap.count >= 5);
+   /* No content survived; emit a complete empty turn without inventing a
+    * model-authored text block. */
+   assert(cap.count == 3);
+   assert(!strcmp(cap.events[0], "message_start"));
+   assert(!strcmp(cap.events[2], "message_stop"));
    int seen_tool_use = 0;
    const char *stop_reason = NULL;
    for (int i = 0; i < cap.count; i++)
@@ -501,12 +450,15 @@ static void test_streaming_anthropic_police_drops_subagent_tool_use(void)
  * emits the text block + an end_turn message_delta. */
 static void test_streaming_anthropic_police_on_no_tool_use_passthrough(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    replay_cap_t cap;
 
    reset_capture();
    g_driver = &driver;
    g_tool_uses_json = "[]";
+   g_response_content = "plain native answer";
    g_upstream_stop_reason = "end_turn";
    g_prevent = 1;
 
@@ -517,7 +469,8 @@ static void test_streaming_anthropic_police_on_no_tool_use_passthrough(void)
                    replay_capture, &cap);
 
    /* message_start, [text_start, text_stop], message_delta, message_stop. */
-   assert(cap.count >= 4);
+   assert(cap.count == 6);
+   assert(strstr(cap.data[2], "plain native answer"));
    int seen_tool_use = 0;
    const char *stop_reason = NULL;
    for (int i = 0; i < cap.count; i++)
@@ -541,7 +494,9 @@ static void test_streaming_anthropic_police_on_no_tool_use_passthrough(void)
  * partial SSE events). */
 static void test_streaming_anthropic_policy_on_upstream_error_returns_error(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    replay_cap_t cap;
 
    reset_capture();
@@ -567,22 +522,22 @@ static void test_streaming_anthropic_policy_on_upstream_error_returns_error(void
    PASS("streaming_anthropic_policy_on_upstream_error_returns_error");
 }
 
-/* Policy OFF regression canary: today's incremental raw byte relay runs
- * unchanged. We send a fake Anthropic SSE upstream payload and assert
- * the events pass through verbatim (the relay emits the parsed data
- * payload as a "message" event — its event name is the SSE `event:` line
- * or "message" by default). */
-static void test_streaming_anthropic_policy_off_is_byte_neutral(void)
+/* Policy OFF still admits native frames through canonical IR. */
+static void test_streaming_anthropic_policy_off_uses_ir(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    replay_cap_t cap;
 
    reset_capture();
    g_driver = &driver;
    g_prevent = 0;
-   g_stream_payload = "event: message_start\ndata: "
-                      "{\"type\":\"message_start\",\"message\":{\"id\":\"m1\"}}\n\n"
-                      "event: message_stop\ndata: {}\n\n";
+   g_stream_payload =
+       "event: message_start\ndata: "
+       "{\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"role\":\"assistant\"}}\n\n"
+       "event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+       "event: message_stop\ndata: {}\n\n";
 
    memset(&cap, 0, sizeof(cap));
    messages_stream("{\"model\":\"ignored\",\"max_tokens\":16,"
@@ -590,7 +545,7 @@ static void test_streaming_anthropic_policy_off_is_byte_neutral(void)
                    "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
                    replay_capture, &cap);
 
-   /* Today the relay emits at least message_start + message_stop verbatim. */
+   /* Native identity and the admitted completion survive client rendering. */
    int saw_start = 0, saw_stop = 0;
    for (int i = 0; i < cap.count; i++)
    {
@@ -600,6 +555,7 @@ static void test_streaming_anthropic_policy_off_is_byte_neutral(void)
          saw_stop = 1;
    }
    assert(saw_start);
+   assert(!strcmp(cap.events[cap.count - 1], "message_stop"));
    assert(saw_stop);
 
    reset_capture();
@@ -615,7 +571,9 @@ static void test_streaming_anthropic_policy_off_is_byte_neutral(void)
  * `tool_use` block named `web_search`. Pins the B2 fix end-to-end. */
 static void test_streaming_anthropic_partial_drop_preserves_max_tokens(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    replay_cap_t cap;
 
    reset_capture();
@@ -665,7 +623,9 @@ static void test_streaming_anthropic_partial_drop_preserves_max_tokens(void)
  * no tool_use on the wire, end_turn. */
 static void test_streaming_openai_police_drops_subagent_tool_use(void)
 {
-   const delegate_driver_t driver = {.name = "openai", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "openai",
+   };
    replay_cap_t cap;
    const char *names[] = {"Task"};
    const char *ids[] = {"t1"};
@@ -705,7 +665,9 @@ static void test_streaming_openai_police_drops_subagent_tool_use(void)
 /* Policy ON, OpenAI-via-translator primary, text-only upstream reply. */
 static void test_streaming_openai_police_on_no_tool_use_passthrough(void)
 {
-   const delegate_driver_t driver = {.name = "openai", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "openai",
+   };
    replay_cap_t cap;
 
    reset_capture();
@@ -738,12 +700,13 @@ static void test_streaming_openai_police_on_no_tool_use_passthrough(void)
    PASS("streaming_openai_police_on_no_tool_use_passthrough");
 }
 
-/* Policy OFF regression canary: today's OpenAI-via-translator per-block
- * translator runs unchanged (we send a synthetic OpenAI chunk payload and
- * assert the translator emits message_start + message_stop). */
+/* Policy OFF still runs the canonical incremental relay. A native completion
+ * event must precede [DONE], so EOF cannot invent a successful turn. */
 static void test_streaming_openai_policy_off_is_byte_neutral(void)
 {
-   const delegate_driver_t driver = {.name = "openai", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "openai",
+   };
    replay_cap_t cap;
 
    reset_capture();
@@ -751,6 +714,7 @@ static void test_streaming_openai_policy_off_is_byte_neutral(void)
    g_prevent = 0;
    g_stream_payload = "data: "
                       "{\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+                      "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
                       "data: [DONE]\n\n";
 
    memset(&cap, 0, sizeof(cap));
@@ -778,7 +742,9 @@ static void test_streaming_openai_policy_off_is_byte_neutral(void)
  * an armed turn is buffered even when subagent policing is off. */
 static void assert_streaming_armed_completion_is_buffered(const char *driver_name)
 {
-   const delegate_driver_t driver = {.name = driver_name, .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = driver_name,
+   };
    replay_cap_t cap;
 
    reset_capture();
@@ -825,12 +791,17 @@ static void test_streaming_armed_completion_is_provider_neutral(void)
 
 static void test_native_completion_followup_reaches_provider_system(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    replay_cap_t cap;
 
    reset_capture();
    g_driver = &driver;
-   g_stream_payload = "event: message_stop\ndata: {}\n\n";
+   g_stream_payload =
+       "event: message_start\ndata: {\"message\":{\"id\":\"m1\",\"role\":\"assistant\"}}\n\n"
+       "event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+       "event: message_stop\ndata: {}\n\n";
    memset(&cap, 0, sizeof(cap));
    messages_stream("{\"model\":\"ignored\",\"max_tokens\":16,\"stream\":true,"
                    "\"system\":\"existing system\","
@@ -848,13 +819,144 @@ static void test_native_completion_followup_reaches_provider_system(void)
    PASS("native_completion_followup_reaches_provider_system");
 }
 
+static cJSON *signed_snapshot;
+static int reject_signed_snapshot;
+static int signed_capture(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   if (event->kind != AIMEE_SESSION_MESSAGE)
+      return 0;
+   cJSON_Delete(signed_snapshot);
+   signed_snapshot = aimee_ir_message_json(event->message);
+   assert(signed_snapshot);
+   assert(event->message->n_blocks == 1);
+   assert(event->message->blocks[0].thinking_binding);
+   return reject_signed_snapshot ? -1 : 0;
+}
+static void test_signed_stream_snapshot_before_completion(void)
+{
+   const delegate_driver_t driver = {.name = "anthropic"};
+   for (int reject = 0; reject < 2; reject++)
+   {
+      reset_capture();
+      aimee_ir_session_set_sink(NULL, NULL);
+      reject_signed_snapshot = reject;
+      g_driver = &driver;
+      g_stream_payload =
+          "event: message_start\ndata: {\"message\":{\"id\":\"signed\",\"role\":\"assistant\"}}\n\n"
+          "event: content_block_start\ndata: "
+          "{\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n"
+          "event: content_block_delta\ndata: "
+          "{\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"reason\"}}\n\n"
+          "event: content_block_delta\ndata: "
+          "{\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"opaque-signature\"}"
+          "}\n\n"
+          "event: content_block_stop\ndata: {\"index\":0}\n\n"
+          "event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+          "event: message_stop\ndata: {}\n\n";
+      aimee_ir_session_set_sink(signed_capture, NULL);
+      replay_cap_t cap = {0};
+      messages_stream("{\"model\":\"ignored\",\"max_tokens\":64,\"stream\":true,"
+                      "\"messages\":[{\"role\":\"user\",\"content\":\"original\"}]}",
+                      replay_capture, &cap);
+      assert(signed_snapshot && g_last_body);
+      int stopped = 0;
+      for (int i = 0; i < cap.count; i++)
+         stopped += !strcmp(cap.events[i], "message_stop");
+      assert(stopped == !reject);
+      if (!reject)
+      {
+         aimee_request_t request = {0};
+         char error[128];
+         assert(!aimee_frontend_parse_wire(g_last_body, strlen(g_last_body), AIMEE_WIRE_ANTHROPIC,
+                                           &request, error, sizeof error));
+         request.messages = realloc(request.messages, 2 * sizeof *request.messages);
+         assert(request.messages);
+         memset(&request.messages[1], 0, sizeof request.messages[1]);
+         assert(!aimee_ir_message_parse(signed_snapshot, &request.messages[1]));
+         request.n_messages = 2;
+         cJSON *native = anthropic_backend_build(&request);
+         char *json = cJSON_PrintUnformatted(native);
+         assert(json && strstr(json, "opaque-signature"));
+         free(json);
+         cJSON_Delete(native);
+         aimee_request_free(&request);
+      }
+      aimee_ir_session_set_sink(NULL, NULL);
+      cJSON_Delete(signed_snapshot);
+      signed_snapshot = NULL;
+   }
+   reset_capture();
+   PASS("signed_native_stream_persists_prefix_bound_snapshot_before_client_completion");
+}
+
+static void test_strict_provider_stream_frames(void)
+{
+   static const char native_nul[] =
+       "event: message_start\ndata: "
+       "{\"message\":{\"id\":\"before\\u0000after\",\"role\":\"assistant\"}}\n\n";
+   static const char native_raw_nul[] =
+       "event: message_start\ndata: "
+       "{\"message\":{\"id\":\"prefix\",\"role\":\"assistant\"}}\0{}\n\n";
+   static const char native_trailing[] =
+       "event: message_start\ndata: {\"message\":{\"id\":\"prefix\",\"role\":\"assistant\"}} "
+       "{}\n\n";
+   static const char chat_nul[] =
+       "data: {\"choices\":[{\"delta\":{\"content\":\"before\\u0000after\"}}]}\n\n";
+   static const char chat_raw_nul[] =
+       "data: {\"choices\":[{\"delta\":{\"content\":\"prefix\"}}]}\0{}\n\n";
+   static const char chat_duplicate[] =
+       "data: {\"choices\":[],\"choices\":[{\"delta\":{\"content\":\"prefix\"}}]}\n\n";
+   struct
+   {
+      const char *driver, *bytes;
+      size_t length;
+   } cases[] = {{"anthropic", native_nul, sizeof native_nul - 1},
+                {"anthropic", native_raw_nul, sizeof native_raw_nul - 1},
+                {"anthropic", native_trailing, sizeof native_trailing - 1},
+                {"openai", chat_nul, sizeof chat_nul - 1},
+                {"openai", chat_raw_nul, sizeof chat_raw_nul - 1},
+                {"openai", chat_duplicate, sizeof chat_duplicate - 1}};
+   for (unsigned i = 0; i < sizeof cases / sizeof *cases; i++)
+   {
+      reset_capture();
+      aimee_ir_session_set_sink(NULL, NULL);
+      delegate_driver_t driver = {.name = cases[i].driver};
+      g_driver = &driver;
+      g_stream_payload = cases[i].bytes;
+      g_stream_payload_length = cases[i].length;
+      assert(memchr(cases[i].bytes, '\n', cases[i].length));
+      if (i == 1 || i == 4)
+         assert(strlen(cases[i].bytes) < cases[i].length); /* Exercise the full byte frame. */
+      else
+         assert(strlen(cases[i].bytes) == cases[i].length);
+      replay_cap_t cap = {0};
+      messages_stream("{\"model\":\"ignored\",\"max_tokens\":64,\"stream\":true,\"messages\":[{"
+                      "\"role\":\"user\",\"content\":\"original\"}]}",
+                      replay_capture, &cap);
+      int errors = 0;
+      for (int j = 0; j < cap.count; j++)
+      {
+         errors += !strcmp(cap.events[j], "error");
+         assert(strcmp(cap.events[j], "message_stop"));
+         assert(strcmp(cap.events[j], "content_block_start"));
+      }
+      assert(errors == 1);
+   }
+   reset_capture();
+   aimee_ir_session_set_sink(NULL, NULL);
+   PASS("strict_provider_stream_frames");
+}
+
 int main(void)
 {
    printf("test_anthropic_http_streaming_p2c:\n");
    test_streaming_anthropic_police_drops_subagent_tool_use();
    test_streaming_anthropic_police_on_no_tool_use_passthrough();
    test_streaming_anthropic_policy_on_upstream_error_returns_error();
-   test_streaming_anthropic_policy_off_is_byte_neutral();
+   test_streaming_anthropic_policy_off_uses_ir();
+   test_signed_stream_snapshot_before_completion();
+   test_strict_provider_stream_frames();
    test_streaming_anthropic_partial_drop_preserves_max_tokens();
    test_streaming_openai_police_drops_subagent_tool_use();
    test_streaming_openai_police_on_no_tool_use_passthrough();

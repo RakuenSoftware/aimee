@@ -20,6 +20,7 @@
     "server-go/modules/memory/commands.go",
     "server-go/modules/memory/content_gate.go",
     "server-go/modules/memory/data.go",
+    "server-go/modules/memory/data_retry.go",
     "server-go/modules/memory/directives.go",
     "server-go/modules/memory/domain.go",
     "server-go/modules/memory/domain_graph.go",
@@ -249,7 +250,9 @@
     "server-go/modules/memory/height_facts.go",
     "server-go/modules/memory/lifting_facts.go",
     "server-go/modules/memory/spatial_facts.go",
-    "server-go/modules/memory/tools/transfer/main.go"
+    "server-go/modules/memory/execution_grade_context.go",
+    "server-go/modules/memory/execution_grade_release.go",
+    "server-go/modules/memory/source_release_fork.go"
   ],
   "go_tests": [
     "server-go/modules/memory/process_test.go",
@@ -257,6 +260,7 @@
     "server-go/modules/memory/content_gate_test.go",
     "server-go/modules/memory/creation_retry_test.go",
     "server-go/modules/memory/data_test.go",
+    "server-go/modules/memory/data_retry_test.go",
     "server-go/modules/memory/embed_egress_test.go",
     "server-go/modules/memory/embed_test.go",
     "server-go/modules/memory/embedding_identity_test.go",
@@ -278,6 +282,7 @@
     "server-go/modules/memory/retrieval_eval_test.go",
     "server-go/modules/memory/runtime_role_test.go",
     "server-go/modules/memory/code_index_test.go",
+    "server-go/modules/memory/code_index_owner_test.go",
     "server-go/modules/memory/client_test.go",
     "server-go/modules/memory/fact_write_test.go",
     "server-go/modules/memory/public_commands_test.go",
@@ -447,7 +452,10 @@
     "server-go/modules/memory/discord_alias_facts_test.go",
     "server-go/modules/memory/height_facts_test.go",
     "server-go/modules/memory/lifting_facts_test.go",
-    "server-go/modules/memory/spatial_facts_test.go"
+    "server-go/modules/memory/spatial_facts_test.go",
+    "server-go/modules/memory/execution_grade_context_test.go",
+    "server-go/modules/memory/execution_grade_release_test.go",
+    "server-go/modules/memory/source_release_fork_test.go"
   ],
   "public_headers": [],
   "private_headers": [],

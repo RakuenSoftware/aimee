@@ -23,8 +23,8 @@ extern "C"
     * to every gate, to the executor, and to the audit record. Authorizing one
     * shape and executing another is the defect this exists to prevent.
     *
-    * Idempotent: canonicalizing an already-canonical object is a no-op, so a
-    * second call on a deeper layer is safe.
+    * Idempotent only against the same admitted schema. A deeper layer must
+    * never substitute a cached or subsequently changed schema.
     *
     * Both return a NEWLY-ALLOCATED value the caller frees (cJSON_Delete /
     * free). tool_args_canonicalize_json returns NULL when raw_args_json is not

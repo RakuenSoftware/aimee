@@ -23,10 +23,10 @@ static void test_determinism(void)
    assert(vault_witness_signer_identity_from_kek(kek, p2, id2) == 0);
    assert(memcmp(p1, p2, 32) == 0 && memcmp(id1, id2, 16) == 0);
 
-   uint8_t msg[19] = "witness-signer-test";
+   const uint8_t msg[] = "witness-signer-test";
    uint8_t s1[64], s2[64];
-   assert(vault_witness_signer_sign_from_kek(kek, msg, sizeof msg, s1) == 0);
-   assert(vault_witness_signer_sign_from_kek(kek, msg, sizeof msg, s2) == 0);
+   assert(vault_witness_signer_sign_from_kek(kek, msg, sizeof msg - 1, s1) == 0);
+   assert(vault_witness_signer_sign_from_kek(kek, msg, sizeof msg - 1, s2) == 0);
    assert(memcmp(s1, s2, 64) == 0);
 }
 

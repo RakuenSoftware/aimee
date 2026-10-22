@@ -1,4 +1,4 @@
-/* delegate_learning.h — automated delegate failure → learning feedback loop */
+/* Delegate exit observations; independent task grading belongs to Learning. */
 #ifndef DELEGATE_LEARNING_H
 #define DELEGATE_LEARNING_H
 
@@ -7,7 +7,7 @@
 /* Failure modes a delegate can exit with */
 typedef enum
 {
-   DL_MODE_SUCCESS,           /* delegate completed successfully */
+   DL_MODE_SUCCESS,           /* process completed; task correctness is ungraded */
    DL_MODE_STALL_NO_WRITES,   /* write_enforce fired, 0 writes */
    DL_MODE_STALL_SLOW_WRITES, /* write_enforce fired but eventually wrote */
    DL_MODE_MAX_TURNS,         /* max-turn budget exhausted */
@@ -15,6 +15,7 @@ typedef enum
    DL_MODE_DRIFT_PREFLIGHT,   /* pre-flight drift detected */
    DL_MODE_DRIFT_BRANCH,      /* branch drift detected */
    DL_MODE_CANCELLED,         /* delegate was cancelled */
+   DL_MODE_UNKNOWN,           /* an exit without a specific host observation */
 } dl_failure_mode_t;
 
 /* Metrics captured at delegate exit for classification */
@@ -25,7 +26,7 @@ typedef struct
    int turns;
    int tool_calls;
    int success;             /* 1 if rc==0, 0 otherwise */
-   int had_writes;          /* 1 if any files were written */
+   int had_writes;          /* -1 unknown, 0 observed none, 1 observed writes */
    int write_enforce_fired; /* 1 if write_enforce triggered */
    int max_turns_limit;     /* the max_turns cap that was set */
    const char *error;       /* error string if failure */
@@ -37,7 +38,7 @@ typedef struct
    dl_failure_mode_t failure_mode;
    double confidence;
    char lesson[512];    /* human-readable lesson */
-   char evidence[1024]; /* compact evidence JSON string */
+   char evidence[4096]; /* compact JSON, including worst-case escaping of a 512-byte error */
 } dl_classification_t;
 
 /*
@@ -50,16 +51,11 @@ void classify_delegate_exit(const dl_exit_metrics_t *metrics, dl_classification_
  * delegate_learning_record — insert a learning record into DB1.
  * Returns 0 on success, -1 on failure.
  */
-int db1_delegate_learning_record(const char *session_id, const char *role,
-                                 const char *failure_mode, const char *lesson,
-                                 const char *evidence_json, double confidence);
+int db1_delegate_learning_record(const char *session_id, const char *role, const char *failure_mode,
+                                 const char *lesson, const char *evidence_json, double confidence);
 
-/*
- * delegate_learning_inject_prompt — retrieve top-N highest-confidence learnings
- * for the given role and prepend them to the system prompt.
- * Returns a newly allocated string (caller frees) or NULL on error.
- * The original system_prompt is preserved; learnings are prepended.
- */
+/* Legacy wire tombstone: role-wide unqualified injection is retired. Returns
+ * NULL; reviewed procedure reuse uses canonical memory context instead. */
 char *db1_delegate_learning_inject_prompt(const char *role, const char *system_prompt, int top_n);
 
 /*

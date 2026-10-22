@@ -51,15 +51,16 @@ The module owns `aimee_ir_rescue_tool_calls` in
 `src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h`. This recovery layer handles a delegate
 model capability gap: models without reliable native tool calling may emit XML, Qwen, harmony, Mistral,
 or policy-enabled JSON calls as prose. It reuses the delegate-owned
-`delegate_rescue_parse_tool_calls` dialect parser and converts eligible `AIMEE_BLK_TEXT` content into
+`delegate_rescue_message` entry adapter and converts eligible `AIMEE_BLK_TEXT` content into
 canonical `AIMEE_BLK_TOOL_USE` blocks.
 
 The rescue scans only `AIMEE_BLK_TEXT`. If the response already contains an `AIMEE_BLK_TOOL_USE` block,
-it leaves the entire response unchanged to avoid duplicate dispatch. For a rewritten response, malformed
-or non-object arguments become an empty JSON object, the stop reason becomes `AIMEE_STOP_TOOL_USE`, and
+it leaves the entire response unchanged to avoid duplicate dispatch. Malformed/non-object JSON arguments and overflow refuse recovery without changing the original response. Successful recovery sets `AIMEE_STOP_TOOL_USE`, and
 `ir_rescue_recoveries` is incremented once regardless of the number of calls recovered. Preparation and
 final block-array allocation happen before source content is consumed, so a pre-commit allocation failure
-returns `0` with the response unchanged.
+returns `-1` with the response unchanged. No match or an absent optional capability returns `0`.
+
+Stage 6 request framing is version 2. Its strict JSON response carries a matched flag and an optional canonical owned assistant message. The fixed-width binary reply and `parsed_response_t` bridge are retired; core and the delegates module must be upgraded together. Complete tool names, IDs, exact numeric arguments and bounded dynamic call groups are preserved. Prefix scanning can locate JSON in prose, while selected tool arguments require complete object framing, unique members and native-representable Unicode scalars.
 
 Provider wire parsing remains owned by `translation`; final-answer assembly remains owned by
 `response-composition`; server IR rollout, transport, and shadow controls remain outside this bounded
@@ -104,6 +105,7 @@ is a dependency-design concern, not an exception to canonical include ownership.
 
 - `audit`: records delegate decisions, actions, evidence, and terminal outcomes.
 - `config`: supplies agents, roles, providers, limits, backends, and delegate policy inputs.
+- `egress`: owns private-worker Docker execution, resource observations, and joined cleanup.
 - `execution-policy`: authorizes delegation, tools, egress, credentials, and sandbox actions.
 - `ir`: supplies canonical turn, response, tool-call, usage, and streaming structures.
 - `module-runtime`: supplies required lifecycle and extension contracts for delegation.
@@ -162,6 +164,11 @@ the run; a provider driver and execution/workspace backend conduct bounded turns
 evidence are recorded; liveness drives a terminal result; and the result returns through CLI/API, mailbox,
 workflow, gateway, or roundtable. Retries remain within the same identity, policy, vault scope, workspace,
 and audit boundaries while reacquiring credentials through the authorized vault path when required.
+
+Post-run delegate learning and the structured exit event are written before terminal completion is
+published. The capture API reports incomplete writes and logs them separately from the execution
+result. No-progress exits also report failed-approach persistence when a goal is available. These
+observations do not constitute an independently graded task outcome.
 
 ## Tests and failure behavior
 

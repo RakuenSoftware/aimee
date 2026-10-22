@@ -250,6 +250,7 @@ static void test_absent_module_fails_closed(const char *repo)
    must(read_verify_entries(repo, entries, VERIFY_STATE_MAX) == 0,
         "an absent module reports no verified trees");
    must(verify_compute_file_hash(repo) == NULL, "an absent module yields no tree hash");
+   must(verify_worktree_has_changes(repo) == 1, "an absent module cannot attest a clean tree");
    must(write_verify_state(repo, 1, "3333333333333333333333333333333333333333", 0, 1, "") == -1,
         "an absent module fails the write rather than losing it silently");
 }

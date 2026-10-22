@@ -219,6 +219,9 @@ typedef struct
 
 /* Returns 1 if a matching /v1 route was found, 0 otherwise.
  * Tries compound sub-commands first (e.g. "ingest status") before single ones. */
+int cli_native_bridge_enabled(void);
+int cli_native_bridge_main(int argc, char **argv);
+
 int cli_v1_lookup(const char *cmd, int sub_argc, char **sub_argv, cli_v1_route_t *route);
 /* Comma-separated list of the subcommands registered for `cmd`; returns how many
  * exist. Lets a failed lookup distinguish "unknown subcommand" from "this command

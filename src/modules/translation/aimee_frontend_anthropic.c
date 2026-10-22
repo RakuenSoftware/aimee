@@ -1,6 +1,7 @@
 /* aimee_frontend_anthropic.c -- Anthropic Messages API (/v1/messages) <-> IR.
  * Parse only in this slice; render lands with the response path. See aimee_frontend.h. */
 #include <aimee/translation/aimee_frontend.h>
+#include <aimee/translation/aimee_backend.h>
 
 #include "cJSON.h"
 
@@ -19,8 +20,8 @@ static const char *ostr(const cJSON *o, const char *k)
    return (it && cJSON_IsString(it)) ? it->valuestring : NULL;
 }
 
-/* Anthropic cache_control is {"type":"ephemeral"}; keep the type string as the
- * opaque marker (full fidelity lives in the block's raw sidecar). */
+/* Cache mode and lifetime enter IR explicitly; the original block retains
+ * native extensions for verified same-protocol replay. */
 static char *parse_cache_control(const cJSON *block)
 {
    const cJSON *cc = cJSON_GetObjectItemCaseSensitive((cJSON *)block, "cache_control");
@@ -30,12 +31,53 @@ static char *parse_cache_control(const cJSON *block)
    return dupstr(t ? t : "");
 }
 
+int anthropic_ir_parse_tool(const cJSON *t, aimee_tool_t *out)
+{
+   if (!cJSON_IsObject(t) || !out)
+      return -1;
+   out->name = dupstr(ostr(t, "name"));
+   out->description = dupstr(ostr(t, "description"));
+   out->cache_control = parse_cache_control(t);
+   out->cache_ttl = dupstr(ostr(cJSON_GetObjectItemCaseSensitive(t, "cache_control"), "ttl"));
+   out->raw = cJSON_Duplicate(t, 1);
+   const cJSON *schema = cJSON_GetObjectItemCaseSensitive((cJSON *)t, "input_schema");
+   out->schema = schema ? cJSON_Duplicate(schema, 1) : NULL;
+   const char *native_type = ostr(t, "type");
+   if (native_type && strcmp(native_type, "custom"))
+   {
+      out->kind = AIMEE_TOOL_HOSTED;
+      out->provider_wire = AIMEE_WIRE_ANTHROPIC;
+      out->native_type = dupstr(native_type);
+      out->native_options = cJSON_Duplicate(t, 1);
+      if (!out->native_type || !out->native_options)
+         return -1;
+      const char *fields[] = {"type", "name", "description", "input_schema", "cache_control"};
+      for (size_t j = 0; j < sizeof fields / sizeof fields[0]; j++)
+         cJSON_DeleteItemFromObjectCaseSensitive(out->native_options, fields[j]);
+   }
+   const cJSON *strict = cJSON_GetObjectItemCaseSensitive(t, "strict");
+   const cJSON *defer = cJSON_GetObjectItemCaseSensitive(t, "defer_loading");
+   if ((strict && !cJSON_IsBool(strict)) || (defer && !cJSON_IsBool(defer)))
+   {
+      return -1;
+   }
+   out->strict = !strict                ? AIMEE_STRICT_UNSET
+                 : cJSON_IsTrue(strict) ? AIMEE_STRICT_TRUE
+                                        : AIMEE_STRICT_FALSE;
+   out->has_defer_loading = defer != NULL;
+   out->defer_loading = cJSON_IsTrue(defer);
+   if (!out->raw || (schema && !out->schema))
+      return -1;
+   return aimee_ir_tool_valid(out) ? 0 : -1;
+}
+
 /* Parse one Anthropic content block into `b`. */
-static void parse_block(const cJSON *el, aimee_block_t *b)
+void anthropic_ir_parse_block(const cJSON *el, aimee_block_t *b)
 {
    memset(b, 0, sizeof *b);
    b->raw = cJSON_Duplicate(el, 1);
    b->cache_control = parse_cache_control(el);
+   b->cache_ttl = dupstr(ostr(cJSON_GetObjectItemCaseSensitive(el, "cache_control"), "ttl"));
    const char *type = ostr(el, "type");
    if (!type)
    {
@@ -52,6 +94,11 @@ static void parse_block(const cJSON *el, aimee_block_t *b)
       b->type = AIMEE_BLK_THINKING;
       b->text = dupstr(ostr(el, "thinking"));
       b->thinking_signature = dupstr(ostr(el, "signature"));
+   }
+   else if (strcmp(type, "redacted_thinking") == 0)
+   {
+      b->type = AIMEE_BLK_THINKING;
+      b->thinking_redacted = dupstr(ostr(el, "data"));
    }
    else if (strcmp(type, "tool_use") == 0)
    {
@@ -118,7 +165,7 @@ static int parse_content(const cJSON *content, aimee_block_t **out, int *n)
    const cJSON *el = NULL;
    cJSON_ArrayForEach(el, content)
    {
-      parse_block(el, &arr[i++]);
+      anthropic_ir_parse_block(el, &arr[i++]);
    }
    *out = arr;
    *n = cnt;
@@ -196,6 +243,8 @@ int anthropic_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
          cJSON_ArrayForEach(m, msgs)
          {
             out->messages[i].role = dupstr(ostr(m, "role"));
+            out->messages[i].content_scalar =
+                cJSON_IsString(cJSON_GetObjectItemCaseSensitive(m, "content"));
             out->messages[i].raw = cJSON_Duplicate(m, 1);
             const cJSON *content = cJSON_GetObjectItemCaseSensitive((cJSON *)m, "content");
             if (parse_content(content, &out->messages[i].blocks, &out->messages[i].n_blocks) != 0)
@@ -220,18 +269,78 @@ int anthropic_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
          const cJSON *t = NULL;
          cJSON_ArrayForEach(t, tools)
          {
-            out->tools[i].name = dupstr(ostr(t, "name"));
-            out->tools[i].description = dupstr(ostr(t, "description"));
-            out->tools[i].cache_control = parse_cache_control(t);
-            const cJSON *schema = cJSON_GetObjectItemCaseSensitive((cJSON *)t, "input_schema");
-            out->tools[i].schema = schema ? cJSON_Duplicate(schema, 1) : NULL;
+            if (anthropic_ir_parse_tool(t, &out->tools[i]) != 0)
+            {
+               if (err && errn)
+                  snprintf(err, errn, "invalid Anthropic tool definition");
+               aimee_request_free(out);
+               return -1;
+            }
             i++;
          }
       }
    }
 
+   /* tool_choice: {type:auto|any|tool|none, name?, disable_parallel_tool_use?} */
    const cJSON *tc = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "tool_choice");
-   out->tool_choice = tc ? cJSON_Duplicate(tc, 1) : NULL;
+   if (tc && !cJSON_IsNull(tc))
+   {
+      const char *type = cJSON_IsObject(tc) ? ostr(tc, "type") : NULL;
+      if (type && strcmp(type, "auto") == 0)
+         out->tool_choice = AIMEE_TOOL_CHOICE_AUTO;
+      else if (type && strcmp(type, "any") == 0)
+         out->tool_choice = AIMEE_TOOL_CHOICE_ANY;
+      else if (type && strcmp(type, "none") == 0)
+         out->tool_choice = AIMEE_TOOL_CHOICE_NONE;
+      else if (type && strcmp(type, "tool") == 0 && ostr(tc, "name") && ostr(tc, "name")[0])
+      {
+         out->tool_choice = AIMEE_TOOL_CHOICE_TOOL;
+         out->tool_choice_name = dupstr(ostr(tc, "name"));
+         if (!out->tool_choice_name)
+            goto oom;
+      }
+      else
+      {
+         if (err && errn)
+            snprintf(err, errn, "anthropic_frontend_parse: unsupported tool_choice");
+         aimee_request_free(out);
+         return -1;
+      }
+      const cJSON *dp = cJSON_GetObjectItemCaseSensitive((cJSON *)tc, "disable_parallel_tool_use");
+      if (cJSON_IsBool(dp))
+      {
+         out->has_parallel_tool_calls = 1;
+         out->parallel_tool_calls = !cJSON_IsTrue(dp);
+      }
+   }
+
+   const cJSON *effort = cJSON_GetObjectItemCaseSensitive(
+       cJSON_GetObjectItemCaseSensitive(req, "output_config"), "effort");
+   if (effort && (!cJSON_IsString(effort) ||
+                  aimee_ir_effort_parse(effort->valuestring, &out->reasoning_effort)))
+   {
+      aimee_request_free(out);
+      return -1;
+   }
+   const cJSON *format = cJSON_GetObjectItemCaseSensitive(
+       cJSON_GetObjectItemCaseSensitive(req, "output_config"), "format");
+   if (format && !cJSON_IsNull(format))
+   {
+      const char *type = ostr(format, "type");
+      const cJSON *schema = cJSON_GetObjectItemCaseSensitive(format, "schema");
+      if (!type || strcmp(type, "json_schema") || !cJSON_IsObject(schema))
+      {
+         if (err && errn)
+            snprintf(err, errn, "invalid or unsupported Anthropic output format");
+         aimee_request_free(out);
+         return -1;
+      }
+      out->output_format.kind = AIMEE_OUTPUT_JSON_SCHEMA;
+      out->output_format.strict = AIMEE_STRICT_TRUE;
+      out->output_format.schema = cJSON_Duplicate(schema, 1);
+      if (!out->output_format.schema)
+         goto oom;
+   }
 
    /* stop_sequences */
    const cJSON *stop = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "stop_sequences");
@@ -252,6 +361,13 @@ int anthropic_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
             (void)i;
          }
       }
+   }
+   if (aimee_anthropic_bind_request(req, out))
+   {
+      aimee_request_free(out);
+      if (err && errn)
+         snprintf(err, errn, "cannot bind native thinking replay prefix");
+      return -1;
    }
    return 0;
 
@@ -285,6 +401,18 @@ cJSON *anthropic_frontend_render(const aimee_response_t *r)
 {
    if (!r)
       return NULL;
+   if (r->error_message)
+   {
+      cJSON *failure = cJSON_CreateObject();
+      cJSON *error = cJSON_AddObjectToObject(failure, "error");
+      if (!failure || !error || !cJSON_AddStringToObject(error, "type", "upstream_error") ||
+          !cJSON_AddStringToObject(error, "message", r->error_message))
+      {
+         cJSON_Delete(failure);
+         return NULL;
+      }
+      return failure;
+   }
    cJSON *out = cJSON_CreateObject();
    cJSON_AddStringToObject(out, "id", r->id ? r->id : "");
    cJSON_AddStringToObject(out, "type", "message");
@@ -295,41 +423,24 @@ cJSON *anthropic_frontend_render(const aimee_response_t *r)
    for (int i = 0; i < r->n_content; i++)
    {
       const aimee_block_t *b = &r->content[i];
-      cJSON *el = cJSON_CreateObject();
-      if (b->type == AIMEE_BLK_TEXT)
-      {
-         cJSON_AddStringToObject(el, "type", "text");
-         cJSON_AddStringToObject(el, "text", b->text ? b->text : "");
-      }
-      else if (b->type == AIMEE_BLK_THINKING)
-      {
-         cJSON_AddStringToObject(el, "type", "thinking");
-         cJSON_AddStringToObject(el, "thinking", b->text ? b->text : "");
-         /* Without the signature the client cannot echo the block back on the next
-          * turn, so rendering thinking without it produces an unusable turn. Omitted
-          * (not emitted empty) when absent, matching block_to_anthropic. */
-         if (b->thinking_signature)
-            cJSON_AddStringToObject(el, "signature", b->thinking_signature);
-      }
-      else if (b->type == AIMEE_BLK_TOOL_USE)
-      {
-         cJSON_AddStringToObject(el, "type", "tool_use");
-         cJSON_AddStringToObject(el, "id", b->tool_id ? b->tool_id : "");
-         cJSON_AddStringToObject(el, "name", b->tool_name ? b->tool_name : "");
-         cJSON_AddItemToObject(
-             el, "input", b->tool_input ? cJSON_Duplicate(b->tool_input, 1) : cJSON_CreateObject());
-      }
-      else
-      {
-         cJSON_Delete(el); /* drop non-renderable blocks (e.g. UNKNOWN) */
+      if (!anthropic_ir_block_replayable(b))
          continue;
+      cJSON *el = anthropic_ir_render_block(b);
+      if (!el || !cJSON_AddItemToArray(content, el))
+      {
+         cJSON_Delete(el);
+         cJSON_Delete(out);
+         return NULL;
       }
-      cJSON_AddItemToArray(content, el);
    }
    cJSON_AddStringToObject(out, "stop_reason", anthropic_stop(r));
    cJSON_AddNullToObject(out, "stop_sequence");
    cJSON *usage = cJSON_AddObjectToObject(out, "usage");
    cJSON_AddNumberToObject(usage, "input_tokens", (double)r->usage_in);
    cJSON_AddNumberToObject(usage, "output_tokens", (double)r->usage_out);
+   if (r->usage_cache_read)
+      cJSON_AddNumberToObject(usage, "cache_read_input_tokens", (double)r->usage_cache_read);
+   if (r->usage_cache_write)
+      cJSON_AddNumberToObject(usage, "cache_creation_input_tokens", (double)r->usage_cache_write);
    return out;
 }

@@ -5,13 +5,13 @@
 #include "kb_payload.h"
 #include "aimee.h"
 #include "artifacts.h"
-#include "../support/kb_store_runtime_config.h"
+#include "config.h"
 #include "pgvec_transport.h"
 
 #include "db_postgres.h"
 #include "cJSON.h"
 #include "kb_store_internal.h"
-#include "../support/kb_store_log.h"
+#include "log.h"
 
 #include <ctype.h>
 #include <math.h>

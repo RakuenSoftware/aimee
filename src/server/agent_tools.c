@@ -11,6 +11,8 @@
 #include "worktree_scope.h"
 #include "util.h"
 #include <aimee/tools/agent_tools.h>
+#include <aimee/translation/aimee_frontend.h>
+#include <aimee/ir/aimee_ir.h>
 #include "agent_exec.h"
 #include <aimee/workspace/workspace.h>
 #include "modules/workspace/workspace_provider.h"
@@ -37,9 +39,9 @@
  * The agent runtime calls agent_tools_begin_turn() at the start of each
  * tool-call round so that all write_file / edit_file calls within that round
  * share a single fsnap snapshot (visible in `aimee rewind list`). */
-_Thread_local static int g_aturn_turn = -1;      /* current turn (-1 = unknown) */
-_Thread_local static int64_t g_aturn_snapid = 0; /* cached snap id for this turn */
-_Thread_local static char g_aturn_sid[64] = {0}; /* session_id copy */
+_Thread_local static int g_aturn_turn = -1;       /* current turn (-1 = unknown) */
+_Thread_local static int64_t g_aturn_snapid = 0;  /* cached snap id for this turn */
+_Thread_local static char g_aturn_sid[128] = {0}; /* session_id copy */
 
 void agent_tools_begin_turn(int turn)
 {
@@ -86,6 +88,7 @@ _Thread_local static int g_write_capable = 1;
  * code that resolves against it belong together. The env var is still honoured (it
  * is how the single-process CLI passes --toolset); this takes precedence. */
 _Thread_local static char g_active_toolset[128];
+_Thread_local static int g_scope_isolated;
 
 void agent_tools_set_active_toolset(const char *toolset)
 {
@@ -445,63 +448,76 @@ int agent_tools_append_delegate_respond_tool(cJSON *tools)
    return 1;
 }
 
-static char *delegate_respond_message(const char *arguments_json)
+int agent_ir_strip_delegate_respond(aimee_response_t *response)
 {
-   cJSON *root = arguments_json ? cJSON_Parse(arguments_json) : NULL;
-   cJSON *msg = root ? cJSON_GetObjectItemCaseSensitive(root, "message") : NULL;
-   char *out = safe_strdup(cJSON_IsString(msg) ? msg->valuestring : "");
-   cJSON_Delete(root);
-   return out;
-}
-
-int agent_tools_strip_delegate_respond(parsed_response_t *parsed)
-{
-   if (!parsed || !parsed->is_tool_call || parsed->call_count <= 0)
-      return 0;
-
-   int respond_count = 0;
-   for (int i = 0; i < parsed->call_count; i++)
+   int count = aimee_ir_response_tool_count(response), responds = 0;
+   aimee_block_t *first = NULL;
+   for (int i = 0; i < count; i++)
    {
-      if (strcmp(parsed->calls[i].name, "respond") == 0)
-         respond_count++;
-   }
-   if (respond_count == 0)
-      return 0;
-
-   if (respond_count == parsed->call_count)
-   {
-      char *message = delegate_respond_message(parsed->calls[0].arguments);
-      for (int i = 0; i < parsed->call_count; i++)
+      aimee_block_t *tool = aimee_ir_response_tool(response, i);
+      if (tool->tool_name && !strcmp(tool->tool_name, "respond") &&
+          (!tool->tool_namespace || !tool->tool_namespace[0]))
       {
-         free(parsed->calls[i].arguments);
-         memset(&parsed->calls[i], 0, sizeof(parsed->calls[i]));
+         if (!first)
+            first = tool;
+         responds++;
       }
-      free(parsed->content);
-      parsed->content = message ? message : safe_strdup("");
-      parsed->call_count = 0;
-      parsed->is_tool_call = 0;
-      return 1;
    }
-
-   int dst = 0;
-   for (int i = 0; i < parsed->call_count; i++)
+   if (!responds)
+      return 0;
+   if (responds != count)
    {
-      if (strcmp(parsed->calls[i].name, "respond") == 0)
+      for (int i = count - 1; i >= 0; i--)
       {
-         free(parsed->calls[i].arguments);
-         memset(&parsed->calls[i], 0, sizeof(parsed->calls[i]));
+         aimee_block_t *tool = aimee_ir_response_tool(response, i);
+         if (tool->tool_name && !strcmp(tool->tool_name, "respond") &&
+             (!tool->tool_namespace || !tool->tool_namespace[0]))
+            aimee_ir_response_drop_tool(response, i);
+      }
+      return 2;
+   }
+   const cJSON *value = cJSON_GetObjectItemCaseSensitive(first->tool_input, "message");
+   char *text = safe_strdup(cJSON_IsString(value) ? value->valuestring : "");
+   if (!text)
+      return -1;
+   /* Preserve reasoning/media while replacing the synthetic respond calls and
+    * their preamble text with the actual final answer. */
+   aimee_context_meta_t context = first->context;
+   int write_index = 0, added = 0;
+   for (int i = 0; i < response->n_content; i++)
+   {
+      aimee_block_t *block = &response->content[i];
+      if (block->type == AIMEE_BLK_TOOL_USE || block->type == AIMEE_BLK_TEXT)
+      {
+         int place = block == first;
+         aimee_block_free_contents(block);
+         if (place)
+         {
+            response->content[write_index++] =
+                (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = text, .context = context};
+            added = 1;
+         }
          continue;
       }
-      if (dst != i)
+      if (write_index != i)
       {
-         parsed->calls[dst] = parsed->calls[i];
-         memset(&parsed->calls[i], 0, sizeof(parsed->calls[i]));
+         response->content[write_index] = *block;
+         memset(block, 0, sizeof(*block));
       }
-      dst++;
+      write_index++;
    }
-   parsed->call_count = dst;
-   parsed->is_tool_call = parsed->call_count > 0;
-   return 2;
+   if (!added)
+      free(text);
+   response->n_content = write_index;
+   if (response->stop_reason == AIMEE_STOP_TOOL_USE)
+   {
+      response->stop_reason = AIMEE_STOP_END_TURN;
+      free(response->raw_stop_reason);
+      response->raw_stop_reason = NULL;
+   }
+   cJSON_Delete(response->raw);
+   response->raw = NULL;
+   return 1;
 }
 
 /* --- Tool execution (Unix only) --- */
@@ -564,6 +580,86 @@ void agent_tools_knowledge_write_set(int allowed)
 int agent_tools_knowledge_write_allowed(void)
 {
    return g_knowledge_write;
+}
+
+/* The state owner captures permissions once; a native callback cannot borrow
+ * another worker's deny-list storage or process-global toolset fallback. */
+void agent_tools_scope_bookmark(agent_tools_scope_snapshot_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof *out);
+   const char *role = agent_tools_dispatch_role();
+   snprintf(out->role, sizeof out->role, "%s", role ? role : "");
+   memcpy(out->toolset, g_active_toolset, sizeof out->toolset);
+   memcpy(out->session, g_aturn_sid, sizeof out->session);
+   memcpy(out->read_only_root, g_parent_ro_root, sizeof out->read_only_root);
+   memcpy(out->write_root, g_parent_write_root, sizeof out->write_root);
+   out->turn = g_aturn_turn;
+   out->snapshot_id = g_aturn_snapid;
+   out->write_capable = g_write_capable;
+   out->knowledge_write = g_knowledge_write;
+   out->shell = g_shell;
+   out->isolated = g_scope_isolated;
+   out->denied = g_denied;
+   out->denied_count = g_denied ? g_denied_count : 0;
+}
+void agent_tools_scope_destroy_owned(agent_tools_scope_snapshot_t *scope)
+{
+   if (!scope)
+      return;
+   if (scope->owned_denied)
+   {
+      for (int i = 0; i < scope->denied_count; i++)
+         free(scope->owned_denied[i]);
+      free(scope->owned_denied);
+   }
+   memset(scope, 0, sizeof *scope);
+}
+int agent_tools_scope_capture_owned(agent_tools_scope_snapshot_t *out)
+{
+   if (!out)
+      return -1;
+   agent_tools_scope_bookmark(out);
+   out->isolated = 1;
+   if (out->denied_count > 0)
+   {
+      if ((size_t)out->denied_count > SIZE_MAX / sizeof *out->owned_denied)
+         goto failed;
+      out->owned_denied = calloc((size_t)out->denied_count, sizeof *out->owned_denied);
+      if (!out->owned_denied)
+         goto failed;
+      for (int i = 0; i < out->denied_count; i++)
+         if (out->denied[i] && !(out->owned_denied[i] = strdup(out->denied[i])))
+            goto failed;
+      out->denied = (const char *const *)out->owned_denied;
+   }
+   return 0;
+failed:
+   agent_tools_scope_destroy_owned(out);
+   return -1;
+}
+void agent_tools_scope_restore(const agent_tools_scope_snapshot_t *scope)
+{
+   if (!scope)
+      return;
+   agent_tools_set_dispatch_role(scope->role);
+   memcpy(g_active_toolset, scope->toolset, sizeof g_active_toolset);
+   memcpy(g_aturn_sid, scope->session, sizeof g_aturn_sid);
+   memcpy(g_parent_ro_root, scope->read_only_root, sizeof g_parent_ro_root);
+   memcpy(g_parent_write_root, scope->write_root, sizeof g_parent_write_root);
+   g_aturn_turn = scope->turn;
+   g_aturn_snapid = scope->snapshot_id;
+   g_write_capable = scope->write_capable;
+   g_knowledge_write = scope->knowledge_write;
+   g_shell = scope->shell;
+   g_scope_isolated = scope->isolated;
+   g_denied = scope->denied;
+   g_denied_count = scope->denied_count;
+}
+int agent_tools_scope_isolated(void)
+{
+   return g_scope_isolated;
 }
 
 /* Which toolset a delegate runs with.
@@ -642,7 +738,7 @@ int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
     * concurrent delegate's value would otherwise decide what THIS one may call. The
     * env var stays as the single-process CLI's --toolset channel. */
    const char *toolset_name = agent_tools_active_toolset();
-   if (!toolset_name || !toolset_name[0])
+   if ((!toolset_name || !toolset_name[0]) && !g_scope_isolated)
       toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
    if (!toolset_name || !toolset_name[0])
       toolset_name = delegate_toolset_for_role(role);
@@ -717,31 +813,14 @@ int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
    return 1;
 }
 
-static const char *tool_def_name(cJSON *tool)
-{
-   if (!tool)
-      return NULL;
-   cJSON *name = cJSON_GetObjectItemCaseSensitive(tool, "name");
-   if (cJSON_IsString(name))
-      return name->valuestring;
-   cJSON *fn = cJSON_GetObjectItemCaseSensitive(tool, "function");
-   if (cJSON_IsObject(fn))
-   {
-      name = cJSON_GetObjectItemCaseSensitive(fn, "name");
-      if (cJSON_IsString(name))
-         return name->valuestring;
-   }
-   return NULL;
-}
-
-void agent_tools_filter_for_role(cJSON *tools, const char *role)
+static void filter_catalog_for_role(cJSON *tools, const char *role, int anthropic)
 {
    /* This turn's toolset first (thread-local, panel-safe per #1374), then the
     * single-process CLI's env channel — matching agent_tools_tool_allowed_for_role
     * so what we advertise and what we enforce never disagree (e.g. a panel sets its
     * toolset thread-locally, not via the env). */
    const char *toolset_name = agent_tools_active_toolset();
-   if (!toolset_name || !toolset_name[0])
+   if ((!toolset_name || !toolset_name[0]) && !g_scope_isolated)
       toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
    char resolved[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
    int resolved_count = -1;
@@ -767,15 +846,31 @@ void agent_tools_filter_for_role(cJSON *tools, const char *role)
    for (int i = 0; i < cJSON_GetArraySize(tools);)
    {
       cJSON *tool = cJSON_GetArrayItem(tools, i);
-      const char *name = tool_def_name(tool);
+      /* Compatibility ingress ends at translation. Permission decisions read
+       * the admitted canonical identity, never a name from an invalid wire row. */
+      aimee_tool_t canonical = {0};
+      int valid = anthropic ? anthropic_ir_parse_tool(tool, &canonical) == 0
+                            : openai_ir_parse_tool(tool, &canonical, 0) == 0;
+      const char *name = valid ? canonical.name : NULL;
       int in_toolset = resolved_count < 0;
       for (int j = 0; !in_toolset && name && j < resolved_count; j++)
          in_toolset = strcmp(name, resolved[j]) == 0;
-      if (!in_toolset || !agent_tools_tool_allowed_for_role(role, name))
+      int allowed = valid && in_toolset && agent_tools_tool_allowed_for_role(role, name);
+      aimee_tool_free(&canonical);
+      if (!allowed)
          cJSON_DeleteItemFromArray(tools, i);
       else
          i++;
    }
+}
+
+void agent_tools_filter_for_role(cJSON *tools, const char *role)
+{
+   filter_catalog_for_role(tools, role, 0);
+}
+void agent_tools_filter_anthropic_for_role(cJSON *tools, const char *role)
+{
+   filter_catalog_for_role(tools, role, 1);
 }
 
 /* ================================================================
@@ -845,6 +940,18 @@ static void tp_prop_str_array(cJSON *props, const char *name, const char *desc)
    cJSON_AddStringToObject(items, "type", "string");
    cJSON_AddItemToObject(p, "items", items);
    cJSON_AddItemToObject(props, name, p);
+}
+
+static cJSON *tp_request_input(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "question", "string", "The question for the current session operator or parent");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *required = cJSON_CreateArray();
+   cJSON_AddItemToArray(required, cJSON_CreateString("question"));
+   cJSON_AddItemToObject(params, "required", required);
+   return params;
 }
 
 static cJSON *tp_bash(void)
@@ -1424,6 +1531,9 @@ static cJSON *tp_search_docs(void)
  * Chat; search_docs before find_symbol for Responses). Emitting in this order,
  * filtered by surface, reproduces each builder's prior output exactly. */
 static const builtin_tool_def_t g_builtin_tools[] = {
+    {"request_input",
+     "Ask the current session operator or parent for input and wait for its reply.",
+     tp_request_input, TSURF_ALL},
     {"bash", "Run a shell command. Returns JSON with stdout, stderr, exit_code.", tp_bash,
      TSURF_ALL},
     {"execute_script",
@@ -1786,44 +1896,145 @@ int agent_tools_validate_egress_table(char *err, size_t err_len)
    return 0;
 }
 
-static void emit_builtin_tools(cJSON *tools, unsigned surface)
+static int builtin_ir_definition(const builtin_tool_def_t *definition, aimee_tool_t *out)
+{
+   memset(out, 0, sizeof *out);
+   out->name = strdup(definition->name);
+   out->description = strdup(definition->description);
+   out->schema = definition->params();
+   if (!out->name || !out->description || !out->schema || !aimee_ir_tool_valid(out))
+   {
+      aimee_tool_free(out);
+      return -1;
+   }
+   return 0;
+}
+
+int agent_tools_builtin_catalog(aimee_tool_t **out, int *count)
+{
+   if (!out || !count)
+      return -1;
+   *out = NULL;
+   *count = 0;
+   size_t n = sizeof(g_builtin_tools) / sizeof(g_builtin_tools[0]);
+   aimee_tool_t *catalog = calloc(n, sizeof *catalog);
+   if (!catalog)
+      return -1;
+   for (size_t i = 0; i < n; i++)
+   {
+      const builtin_tool_def_t *definition = &g_builtin_tools[i];
+      if (agent_tools_is_git_write(definition->name) && !g_git_write_fn)
+         continue;
+      if (builtin_ir_definition(definition, catalog + *count))
+      {
+         for (int j = 0; j < *count; j++)
+            aimee_tool_free(catalog + j);
+         free(catalog);
+         *count = 0;
+         return -1;
+      }
+      (*count)++;
+   }
+   *out = catalog;
+   return 0;
+}
+
+int agent_tools_execution_definition(const char *name, aimee_tool_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof *out);
+   if (!name || !name[0])
+      return -1;
+   for (size_t i = 0; i < sizeof g_builtin_tools / sizeof *g_builtin_tools; i++)
+      if (!strcmp(name, g_builtin_tools[i].name))
+         return agent_tools_is_git_write(name) && !g_git_write_fn
+                    ? -1
+                    : builtin_ir_definition(g_builtin_tools + i, out);
+   if (agent_tools_is_mcp_derived(name) && g_mcp_call_fn && g_mcp_advert_fn)
+   {
+      cJSON *advert = g_mcp_advert_fn(name);
+      out->name = strdup(name);
+      out->schema = cJSON_DetachItemFromObjectCaseSensitive(advert, "inputSchema");
+      const char *description =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(advert, "description"));
+      out->description = description ? strdup(description) : NULL;
+      cJSON_Delete(advert);
+      if (out->name && out->description && aimee_ir_tool_valid(out))
+         return 0;
+      aimee_tool_free(out);
+      return -1;
+   }
+   /* Qualified plugins enter from their current explicit compatibility catalog,
+    * including configured federation. Unqualified names cannot invent a tool. */
+   if (!strchr(name, ':'))
+      return -1;
+   cJSON *catalog = build_tools_array(), *entry;
+   int found = 0, invalid = 0;
+   cJSON_ArrayForEach(entry, catalog)
+   {
+      const cJSON *function = cJSON_GetObjectItemCaseSensitive(entry, "function");
+      const char *identity =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(function, "name"));
+      if (!identity || strcmp(identity, name))
+         continue;
+      aimee_tool_t candidate = {0};
+      if (openai_ir_parse_tool(entry, &candidate, 1))
+      {
+         aimee_tool_free(&candidate);
+         invalid = 1;
+         break;
+      }
+      if (candidate.kind == AIMEE_TOOL_FUNCTION && !strcmp(candidate.name, name))
+      {
+         if (++found == 1)
+         {
+            *out = candidate;
+            candidate = (aimee_tool_t){0};
+         }
+      }
+      aimee_tool_free(&candidate);
+   }
+   cJSON_Delete(catalog);
+   if (found == 1 && !invalid)
+      return 0;
+   aimee_tool_free(out);
+   return -1;
+}
+
+static int emit_builtin_tools(cJSON *tools, unsigned surface)
 {
    size_t n = sizeof(g_builtin_tools) / sizeof(g_builtin_tools[0]);
    for (size_t i = 0; i < n; i++)
    {
-      const builtin_tool_def_t *d = &g_builtin_tools[i];
-      if (!(d->surfaces & surface))
+      const builtin_tool_def_t *definition = &g_builtin_tools[i];
+      if (!(definition->surfaces & surface))
          continue;
-      /* Never advertise a tool that cannot run: without the server's git dispatcher
-       * the git-write tools have no implementation behind them. Offering them anyway
-       * would teach an agent to call a tool that always errors — and, worse, would
-       * let require_aimee_git point at tools that do not exist. */
-      if (agent_tools_is_git_write(d->name) && !g_git_write_fn)
+      /* A missing git dispatcher means the capability is unavailable. */
+      if (agent_tools_is_git_write(definition->name) && !g_git_write_fn)
          continue;
-      cJSON *tool = cJSON_CreateObject();
-      cJSON_AddStringToObject(tool, "type", "function");
-      if (surface == TSURF_CHAT)
+      aimee_tool_t canonical = {0};
+      if (builtin_ir_definition(definition, &canonical))
+         return -1;
+      cJSON *tool = openai_ir_render_tool(&canonical, surface == TSURF_RESP);
+      aimee_tool_free(&canonical);
+      if (!tool || !cJSON_AddItemToArray(tools, tool))
       {
-         cJSON *fn = cJSON_CreateObject();
-         cJSON_AddStringToObject(fn, "name", d->name);
-         cJSON_AddStringToObject(fn, "description", d->description);
-         cJSON_AddItemToObject(fn, "parameters", d->params());
-         cJSON_AddItemToObject(tool, "function", fn);
+         cJSON_Delete(tool);
+         return -1;
       }
-      else
-      {
-         cJSON_AddStringToObject(tool, "name", d->name);
-         cJSON_AddStringToObject(tool, "description", d->description);
-         cJSON_AddItemToObject(tool, "parameters", d->params());
-      }
-      cJSON_AddItemToArray(tools, tool);
    }
+   return 0;
 }
 
 cJSON *build_tools_array(void)
 {
    cJSON *tools = cJSON_CreateArray();
-   emit_builtin_tools(tools, TSURF_CHAT);
+   if (!tools || emit_builtin_tools(tools, TSURF_CHAT))
+   {
+      cJSON_Delete(tools);
+      return NULL;
+   }
    emit_mcp_tools(tools, TSURF_CHAT);
    append_remote_tools(tools, 1);
    return tools;
@@ -1833,7 +2044,11 @@ cJSON *build_tools_array(void)
 cJSON *build_tools_array_responses(void)
 {
    cJSON *tools = cJSON_CreateArray();
-   emit_builtin_tools(tools, TSURF_RESP);
+   if (!tools || emit_builtin_tools(tools, TSURF_RESP))
+   {
+      cJSON_Delete(tools);
+      return NULL;
+   }
    emit_mcp_tools(tools, TSURF_RESP);
    append_remote_tools(tools, 0);
    return tools;
@@ -1966,6 +2181,12 @@ cJSON *build_tools_array_anthropic(void)
 {
    cJSON *openai_tools = build_tools_array();
    cJSON *tools = cJSON_CreateArray();
+   if (!openai_tools || !tools)
+   {
+      cJSON_Delete(openai_tools);
+      cJSON_Delete(tools);
+      return NULL;
+   }
 
    int n = cJSON_GetArraySize(openai_tools);
    for (int i = 0; i < n; i++)

@@ -1,0 +1,168 @@
+/** @vitest-environment jsdom */
+import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach } from 'vitest';
+import ControlCard from './ControlCard';
+afterEach(cleanup);
+const permission = { kind: 'permission', request: { title: 'Run command', input: { command: 'make test' } }, requestedBy: 'alice', turn: 't' };
+describe('canonical browser controls', () => {
+  it('presents the real unknown-effect action without exposing custody metadata or changing its reply binding', async () => {
+    const onReply = vi.fn().mockResolvedValue(undefined);
+    const id = 'host-turn:unknown-effect:' + 'f'.repeat(64);
+    const control = { ...permission, request: { tool: 'write_file', description: 'Earlier effects are unknown; authorize only this new action.', input: {
+      session_id: 'private-session', turn_id: 'private-turn', actor: 'private-actor', request_id: 'private-request', attempt_id: 'private-attempt',
+      tool: 'write_file', arguments: { path: 'new.txt', content: '<script>Preserve all requested content</script>', options: { overwrite: false } },
+      unknown_receipts: { sha256: 'b'.repeat(64), count: 9, displayed: 1, sources: [{
+        event_id: 'private-receipt', session_id: 'private-session', turn_id: 'private-old-turn', sequence: '9', tool_id: 'private-call', name: 'old_tool',
+      }] },
+    } } };
+    const before = JSON.stringify(control);
+    const view = render(<ControlCard id={id} control={control} onReply={onReply} />);
+    expect(screen.getByText('9 earlier tool outcomes remain unknown.')).toBeTruthy();
+    expect(screen.getByText('write_file', { exact: true })).toBeTruthy();
+    expect(view.container.querySelector('pre')?.textContent).toBe(JSON.stringify(control.request.input.arguments, null, 2));
+    expect(view.container.querySelector('script')).toBeNull();
+    for (const hidden of ['private-session', 'private-actor', 'private-turn', 'private-request', 'private-attempt', 'private-receipt', 'private-call', 'b'.repeat(64), 'unknown_receipts', 'sha256'])
+      expect(view.container.textContent).not.toContain(hidden);
+    expect(onReply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
+    await waitFor(() => expect(onReply).toHaveBeenCalledWith(id, { decision: 'deny' }));
+    expect(JSON.stringify(control)).toBe(before);
+    view.rerender(<ControlCard id={id} control={{ ...control, response: { decision: 'deny' } }} onReply={onReply} />);
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(onReply).toHaveBeenCalledTimes(1);
+  });
+  it('shows unknown-effect permission explanation beside the exact new action without sending on replay', () => {
+    const onReply = vi.fn();
+    const description = "An earlier tool's effects are unknown. Allow this requested action once?";
+    const control = { ...permission, request: { tool: 'write_file', description,
+      input: { tool: 'write_file', arguments: { path: 'new.txt', content: 'new action' }, unknown_receipts: [{ outcome: 'unknown' }] } } };
+    const view = render(<ControlCard id="t:unknown" control={control} onReply={onReply} />);
+    expect(screen.getByText(description)).toBeTruthy();
+    expect(screen.getByText(/new.txt/)).toBeTruthy();
+    expect(onReply).not.toHaveBeenCalled();
+    view.rerender(<ControlCard id="t:unknown" control={{ ...control, response: { decision: 'deny' } }} onReply={onReply} />);
+    expect(screen.getByText(description)).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(onReply).not.toHaveBeenCalled();
+  });
+  it('sends a single correlated decision and waits for the native response', async () => {
+    const onReply = vi.fn().mockResolvedValue(undefined);
+    render(<ControlCard id="t:p" control={permission} onReply={onReply} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
+    await waitFor(() => expect(onReply).toHaveBeenCalledWith('t:p', { decision: 'allow' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
+    expect(onReply).toHaveBeenCalledTimes(1);
+  });
+  it('answers the common question schema with selected and free-form text', async () => {
+    const onReply = vi.fn().mockResolvedValue(undefined);
+    render(<ControlCard id="t:q" control={{ ...permission, kind: 'question', request: { questions: [
+      { id: 'q1', question: 'Which model?', multiple: false, options: [{ label: 'A' }, { label: 'B' }] },
+    ] } }} onReply={onReply} />);
+    expect(screen.getByRole('button', { name: 'Send answers' }).hasAttribute('disabled')).toBe(true);
+    fireEvent.click(screen.getByRole('radio', { name: 'B' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answers' }));
+    await waitFor(() => expect(onReply).toHaveBeenCalledWith('t:q', { decision: 'allow', answers: { q1: ['B'] } }));
+  });
+  it.each([false, true])('keeps a single-choice answer exclusive when switching to custom text or back (option last=%s)', async optionLast => {
+    const onReply = vi.fn().mockResolvedValue(undefined);
+    render(<ControlCard id="t:q" control={{ ...permission, kind: 'question', request: { questions: [
+      { id: 'q1', question: 'Which model?', multiple: false, options: [{ label: 'A' }] },
+    ] } }} onReply={onReply} />);
+    const option = () => fireEvent.click(screen.getByRole('radio', { name: 'A' }));
+    const custom = () => fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Custom model' } });
+    if (optionLast) { custom(); option(); } else { option(); custom(); }
+    fireEvent.click(screen.getByRole('button', { name: 'Send answers' }));
+    await waitFor(() => expect(onReply).toHaveBeenCalledWith('t:q', { decision: 'allow', answers: { q1: [optionLast ? 'A' : 'Custom model'] } }));
+  });
+
+  it('surfaces stale/refused responses and allows a retry', async () => {
+    const onReply = vi.fn().mockRejectedValue(new Error('Control request is stale'));
+    render(<ControlCard id="t:p" control={permission} onReply={onReply} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Control request is stale');
+  });
+  it('does not offer decisions for resolved or cancelled requests', () => {
+    render(<ControlCard id="t:p" control={{ ...permission, closed: true }} onReply={vi.fn()} />);
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+  it('submits typed MCP form values and selected enum constants', async () => {
+    const onReply = vi.fn().mockResolvedValue(undefined);
+    render(<ControlCard id="t:form" control={{ ...permission, kind: 'elicitation', request: { form: {
+      message: 'Configure the job', server: 'inventory', schema: { type: 'object', required: ['name', 'count', 'enabled', 'tags'], properties: {
+        name: { type: 'string', title: 'Job name', minLength: 1 },
+        count: { type: 'integer', title: 'Count', minimum: 1, maximum: 5 },
+        enabled: { type: 'boolean', title: 'Enabled' },
+        tags: { type: 'array', title: 'Tags', minItems: 1, items: { anyOf: [{ const: 'fast', title: 'Fast mode' }, { const: 'slow', title: 'Slow mode' }] } },
+      } },
+    } } }} onReply={onReply} />);
+    expect(screen.getByText('Configure the job')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Send form' })).toHaveProperty('disabled', true);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Job name' }), { target: { value: 'build' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Count' }), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Fast mode' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send form' }));
+    await waitFor(() => expect(onReply).toHaveBeenCalledWith('t:form', { decision: 'allow', content: { name: 'build', count: 2, enabled: false, tags: ['fast'] } }));
+    expect(screen.getByRole('button', { name: 'Send form' })).toHaveProperty('disabled', true);
+  });
+  it('keeps incomplete and invalid numeric forms unsent', () => {
+    const onReply = vi.fn();
+    render(<ControlCard id="t:form" control={{ ...permission, kind: 'elicitation', request: { form: { schema: {
+      type: 'object', required: ['count'], properties: { count: { type: 'integer', title: 'Count', minimum: 1, maximum: 3 } },
+    } } } }} onReply={onReply} />);
+    for (const value of ['0', '4', '1.5']) {
+      fireEvent.change(screen.getByRole('spinbutton', { name: 'Count' }), { target: { value } });
+      expect(screen.getByRole('button', { name: 'Send form' })).toHaveProperty('disabled', true);
+    }
+    expect(onReply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onReply).toHaveBeenCalledWith('t:form', { decision: 'cancel' });
+  });
+  it('offers decline for unsupported nested forms without fabricating accepted content', () => {
+    render(<ControlCard id="t:form" control={{ ...permission, kind: 'elicitation', request: { form: { schema: {
+      type: 'object', properties: { nested: { type: 'object', properties: {} } },
+    } } } }} onReply={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Send form' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Decline' })).toBeTruthy();
+  });
+
+  it('preserves an empty enum constant and a Unicode character in form content', async () => {
+    const onReply = vi.fn().mockResolvedValue(undefined);
+    render(<ControlCard id="t:form" control={{ ...permission, kind: 'elicitation', request: { form: { schema: {
+      type: 'object', required: ['choice', 'name'], properties: {
+        choice: { type: 'string', title: 'Choice', oneOf: [{ const: '', title: 'None' }, { const: 'x', title: 'X' }] },
+        name: { type: 'string', title: 'Name', minLength: 1, maxLength: 1 },
+      },
+    } } } }} onReply={onReply} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Choice' }), { target: { value: '0' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'é' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send form' }));
+    await waitFor(() => expect(onReply).toHaveBeenCalledWith('t:form', { decision: 'allow', content: { choice: '', name: 'é' } }));
+  });
+
+});
+
+ it('records URL consent once, displays the requesting server/host and never claims completion', async () => {
+  const onReply = vi.fn().mockResolvedValue(undefined);
+  render(<ControlCard id="t:url" control={{ ...permission, kind: 'elicitation', request: { url: {
+    href: 'https://accounts.example.test/authorize?state=opaque', server: 'inventory', message: 'Authorize access', elicitation_id: 'el-1',
+  } } }} onReply={onReply} />);
+  expect(onReply).not.toHaveBeenCalled();
+  expect(screen.getByText('inventory: Authorize access')).toBeTruthy();
+  const link = screen.getByRole('link', { name: 'Allow and open accounts.example.test' });
+  expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  fireEvent.click(link);
+  await waitFor(() => expect(onReply).toHaveBeenCalledWith('t:url', { decision: 'allow' }));
+  fireEvent.click(link);
+  expect(onReply).toHaveBeenCalledTimes(1);
+ });
+ it('keeps unsupported URL schemes and userinfo unavailable while retaining decline/cancel', () => {
+  for (const href of ['javascript:alert(1)', 'data:text/html,secret', 'file:///etc/passwd', 'https://user:password@example.test/', 'https://', 'https://x\\@attacker/']) {
+    const { unmount } = render(<ControlCard id="t:url" control={{ ...permission, kind: 'elicitation', request: { url: {
+      href, server: 'inventory', message: 'Authorize access', elicitation_id: 'el-1',
+    } } }} onReply={vi.fn()} />);
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Decline' })).toBeTruthy();
+    unmount();
+  }
+ });

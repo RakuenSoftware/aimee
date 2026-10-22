@@ -363,28 +363,40 @@ static int request_preflight(const aimee_request_t *ir, int *oom)
       return 0;
    if (ir->n_tools && node_budget_add(&nodes, 2) != 0)
       return 0;
-   if (ir->tool_choice)
+   if (ir->has_parallel_tool_calls)
+      return 0; /* Converse cannot express parallel-tool-use control */
+   if (ir->tool_choice != AIMEE_TOOL_CHOICE_UNSET)
    {
-      if (!ir->n_tools || !cJSON_IsObject(ir->tool_choice))
+      int tool = ir->tool_choice == AIMEE_TOOL_CHOICE_TOOL;
+      if (!ir->n_tools || (ir->tool_choice != AIMEE_TOOL_CHOICE_AUTO &&
+                           ir->tool_choice != AIMEE_TOOL_CHOICE_ANY && !tool))
          return 0;
-      if (json_budget(ir->tool_choice, 1, &nodes, &strings, oom) != 0)
+      /* Budget the same object the request would carry, so a typed choice costs
+       * exactly what the wire object it renders to does. */
+      cJSON *choice = cJSON_CreateObject();
+      if (!choice ||
+          !cJSON_AddStringToObject(choice, "type",
+                                   tool                                       ? "tool"
+                                   : ir->tool_choice == AIMEE_TOOL_CHOICE_ANY ? "any"
+                                                                              : "auto") ||
+          (tool && !cJSON_AddStringToObject(choice, "name",
+                                            ir->tool_choice_name ? ir->tool_choice_name : "")))
+      {
+         cJSON_Delete(choice);
+         *oom = 1;
          return 0;
-      cJSON *type = cJSON_GetObjectItemCaseSensitive(ir->tool_choice, "type");
-      int tool = cJSON_IsString(type) && strcmp(type->valuestring, "tool") == 0;
-      if (!cJSON_IsString(type) ||
-          (strcmp(type->valuestring, "auto") != 0 && strcmp(type->valuestring, "any") != 0 &&
-           strcmp(type->valuestring, "tool") != 0) ||
-          cJSON_GetArraySize(ir->tool_choice) != (tool ? 2 : 1) ||
-          node_budget_add(&nodes, (tool ? 3U : 2U) + !ir->n_tools) != 0)
+      }
+      int over = json_budget(choice, 1, &nodes, &strings, oom) != 0;
+      cJSON_Delete(choice);
+      if (over || node_budget_add(&nodes, (tool ? 3U : 2U) + !ir->n_tools) != 0)
          return 0;
       if (tool)
       {
-         cJSON *name = cJSON_GetObjectItemCaseSensitive(ir->tool_choice, "name");
-         if (!cJSON_IsString(name) || !bedrock_identifier(name->valuestring))
+         if (!ir->tool_choice_name || !bedrock_identifier(ir->tool_choice_name))
             return 0;
          int found = 0;
          for (int i = 0; i < ir->n_tools; i++)
-            found |= strcmp(ir->tools[i].name, name->valuestring) == 0;
+            found |= strcmp(ir->tools[i].name, ir->tool_choice_name) == 0;
          if (!found)
             return 0;
       }

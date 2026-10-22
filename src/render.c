@@ -273,6 +273,7 @@ cJSON *agent_result_to_json(const agent_result_t *result)
    cJSON *obj = cJSON_CreateObject();
    cJSON_AddStringToObject(obj, "status", result->success ? "success" : "error");
    cJSON_AddStringToObject(obj, "response", result->response ? result->response : "");
+   cJSON_AddBoolToObject(obj, "cache_hit", result->cache_hit);
    cJSON_AddNumberToObject(obj, "turns", result->turns);
    cJSON_AddNumberToObject(obj, "tool_calls", result->tool_calls);
    cJSON_AddNumberToObject(obj, "rescue_recoveries", result->rescue_recoveries);

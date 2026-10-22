@@ -102,6 +102,37 @@ def build_files_match(candidate_commit: str) -> bool:
     # a platform-specific -L directory as well as -lpq. Do not discard other
     # linker directories or libraries from either expanded command.
     candidate[0] = candidate[0].replace(" $(PQ_LIB)", "")
+    # Oct 18 cleanup: the platform facade moved byte-for-byte, and the probe's
+    # existing util wrappers now link the portable Base64 archive. Model the
+    # exact added include paths, archive rule and dependency in the frozen build;
+    # compare every other command/flag/input as before (no Makefile exemption).
+    candidate[0] = candidate[0].replace("posix/platform_net.c", "shared/platform_net.c").replace(
+        "windows/platform_net.c", "shared/platform_net.c")
+    candidate[0] = candidate[0].replace(
+        " -Icore/connection/include", " -Icore/codec/include -Icore/types/include -Icore/connection/include")
+    codec = """CORE_CODEC_SRCS = core/codec/base64.c
+CORE_CODEC_OBJS = $(CORE_CODEC_SRCS:%.c=$(OBJDIR)/%.o)
+CORE_CODEC_LIB = $(OBJDIR)/libaimee-core-codec.a
+$(CORE_CODEC_LIB): $(CORE_CODEC_OBJS)
+\t$(AR) rcs $@ $^
+"""
+    candidate[0] = candidate[0].replace("include tests/Rules.mk", codec + "\ninclude tests/Rules.mk")
+    candidate[0] = re.sub(
+        r"^(L_MINIMAL|L_CORE)(\s*=.*)$",
+        lambda match: match[0] + " $(CORE_CODEC_LIB)", candidate[0], flags=re.MULTILINE)
+    candidate[1] = candidate[1].replace(
+        "$(TEST_TARGETS): | $(CORE_CONNECTION_LIB)",
+        "$(TEST_TARGETS): $(CORE_CODEC_LIB) | $(CORE_CONNECTION_LIB)")
+    # The eight accessor shards are now one table-expanded implementation;
+    # all 1,122 preprocessed function bodies were checked against their originals.
+    for index in range(8):
+        for suffix in (".c", ".o"):
+            old = f"config_client_accessors_{index}{suffix}"
+            replacement = f"config_client_accessors{suffix}" if index == 0 else ""
+            for file in range(2):
+                candidate[file] = candidate[file].replace(
+                    "$(OBJDIR)/" + old, "$(OBJDIR)/" + replacement if replacement else "")
+                candidate[file] = candidate[file].replace(old, replacement)
     frozen_plan = build_plan(*candidate)
     return [line.rstrip() for line in frozen_plan] == [line.rstrip() for line in build_plan(*current)]
 # The proxy adds a thin-client source and a separate test prerequisite. Neither
@@ -153,6 +184,35 @@ def reviewed_memory_equivalent(path: str, frozen: str, current: str) -> bool:
             return False
         current = current.replace(release_text, frozen_text, 1)
     return current.strip() == frozen.strip()
+
+
+# Exact IR host integrations after the reviewed testing release: Git family
+# resolution before tool admission and its catalog-test regressions/scratch
+# initialization, tools-owner metadata assertions and primary orchestration
+# wrappers over the same MCP catalog.
+# No LSP implementation, schema, golden signature, or probe input
+# is excluded. Reverse these blocks, then retain the complete frozen comparison.
+REVIEWED_HOST_INTEGRATIONS = json.loads(
+    Path(__file__).with_name("s1-host-integration.json").read_text()
+)
+
+
+def host_integration_base(path: str, current: str) -> str | None:
+    blocks = REVIEWED_HOST_INTEGRATIONS.get(path)
+    if not blocks:
+        return None
+    for block in blocks:
+        if current.count(block["release_text"]) != 1:
+            return None
+        current = current.replace(block["release_text"], block["frozen_text"], 1)
+    return current
+
+
+def reviewed_host_equivalent(path: str, frozen: str, current: str) -> bool:
+    base = host_integration_base(path, current)
+    return base is not None and (
+        base.strip() == frozen.strip() or reviewed_memory_equivalent(path, frozen, base)
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -230,6 +290,13 @@ def validate(
                 changed = [path for path in changed if path not in BUILD_PATHS]
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             errors.append(f"could not verify semantic-context build contract: {exc}")
+    reviewed_host_paths = [
+        path for path in changed if reviewed_host_equivalent(
+            path, git_output("show", f"{candidate_commit}:{path}"),
+            (ROOT / path).read_text(),
+        )
+    ]
+    changed = [path for path in changed if path not in reviewed_host_paths]
     reviewed_memory_paths = [
         path for path in changed if reviewed_memory_equivalent(
             path, git_output("show", f"{candidate_commit}:{path}"),
@@ -277,6 +344,7 @@ def validate(
         "changed_protected_paths": changed,
         "reviewed_build_integration_paths": reviewed_build_paths,
         "reviewed_memory_integration_paths": reviewed_memory_paths,
+        "reviewed_host_integration_paths": reviewed_host_paths,
         "untracked_protected_paths": untracked,
         "cold_starts_per_provider": cold_starts,
         "release_candidate_matched": not errors,

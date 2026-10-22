@@ -24,6 +24,30 @@ aborts before signal persistence when the process is absent or its response is
 invalid. Proposal persistence, evidence assembly, and the broader learning
 engine are still C migration work.
 
+The host-only canonical execution stage uses event `6147`, stage `3`. Browser and private execution
+capture owners invoke it after persisting a typed terminal event. Go Learning validates the host
+context, terminal status and exact source reference, and returns an explicitly `ungraded` observation.
+The host writes that projection to the existing server-local interaction ledger as `task_outcome`.
+This path requires no KB connection. Its source is the canonical session log; a missing observer or
+failed projection write leaves that source intact and logs incomplete capture. It does not create an
+independently verified grade or replace receipt-bound procedure application policy.
+
+The same stage's private `grade` verb accepts only the host isolated-verification context.
+It binds a completed canonical terminal to an independently held source snapshot, exact commit/tree,
+configuration and image-profile digests, and normal machine-observed exits for every configured
+step. The worker has no parent-control socket or network; prerequisites run inside that same
+worker. Skips, cached passes, incomplete receipts, cancellation or unacknowledged cleanup cannot
+grant a grade. DB1's host-only operation 61 records immutable `tests_passed`/`tests_failed` rows
+beside the original observation; retries cannot change an existing receipt.
+Host-only session operation 36 binds proofs to the durable terminal atomically; ordinary append
+cannot carry them. Replay repairs a lost derived grade from that exact retained proof. These are
+`configured_tests_only` results, not semantic task correctness or proof a procedure caused success.
+Operation 62 recalls bounded whole receipts for the authenticated actor and registered project,
+rechecking the live canonical source. Primary and delegate context retain these as historical data,
+with source revalidation through the existing provider-send release fence. This path remains
+server-local with no KB endpoint or synthesis dependency.
+
+
 The descriptor declares the module-owned C implementation and parity adapter, the Go process handler
 and tests, its headers, direct C tests, and this document; it sets `ownership_complete: true`.
 `learning.h` and `module_api.h` are canonical public headers under
@@ -120,3 +144,28 @@ Add a detector or sink by extending the typed router, evidence rules, caps, revi
 tests together. Self-contained experiments with no production caller should be deleted rather than
 declared as learning. The core `learning` module cannot be removed; model-heavy candidate generation can
 remain provider-gated without splitting the user-learning contract into a second optional subsystem.
+
+Delegate exits retain process completion separately from task correctness. A successful exit
+cannot establish writes, validate a prompt pattern or provide an independent grade. Missing effect
+receipts remain unknown. Exit observations await review with automatic application disabled.
+The legacy role-only prompt-injection operation is a wire tombstone and never reads storage; the
+canonical memory owner supplies scoped reviewed procedure context.
+
+Source-bound delegate experience uses a protected canonical parent reference carrying the actual
+selected registration, durable job and locally resolved project. Host-only telemetry operations 63/64
+resolve the exact owned child terminal and existing admitted grades; replay can recover missing grades
+from inline proofs before projecting observations for review. A retained proof with a missing grade cannot
+be frozen as an ungraded result. A completed child without verifier evidence remains explicitly
+ungraded. Observations have zero inferred confidence and automatic application disabled; child
+completion does not establish final job completion, semantic correctness or causal procedure success.
+Approved workspace custody and repository identity provide project scope without a KB/index service.
+
+
+`learning.approaches` requires `CAP_MEMORY_READ` and an authenticated actor in an approved
+registered project workspace. Its existing goal and approaches response fields now expose bounded
+canonical delegate tool-call sequences with whole configured-test receipts. The goal is echoed;
+task similarity, task correctness and causal procedure success are not inferred. Legacy goal-only
+failed-approach rows are excluded. A targeted second receipt read refuses changed or erased sources.
+The CLI supplies its workspace cwd and labels both passing and failing configured-test observations.
+This read-only surface does not grant provider-send authority; automatic context still uses canonical
+memory assembly and its source-release fence. Empty eligible history remains an empty successful result.

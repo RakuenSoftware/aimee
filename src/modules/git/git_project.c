@@ -302,6 +302,89 @@ static int is_published_project_at(int dirfd, const char *name)
    return has_git;
 }
 
+int git_project_open_workspace(const char *principal, const char *cwd)
+{
+   char root[GP_PATH_MAX], canonical[GP_PATH_MAX], actual[GP_PATH_MAX];
+   if (!cwd || cwd[0] != '/' || !ws_scope_openat2_available() ||
+       ws_scope_user_root(principal, 0, root, sizeof root) || !realpath(root, canonical) ||
+       !realpath(cwd, actual) || strcmp(cwd, actual) || !ws_reg_ready())
+      return -1;
+   size_t base = strlen(canonical);
+   if (strncmp(actual, canonical, base) || actual[base] != '/' || !actual[base + 1])
+      return -1;
+   const char *relative = actual + base + 1;
+   size_t first = strcspn(relative, "/");
+   if (!first || first > WS_REF_COMP_MAX)
+      return -1;
+   char ref[WS_REF_MAX + 1];
+   memcpy(ref, relative, first);
+   ref[first] = 0;
+   if (!ws_scope_project_ref_valid(ref, first))
+      return -1;
+   int lock = ws_reg_lock(ref);
+   if (lock < 0)
+      return -1;
+   int result = -1, project = -1, git = -1, metadata = -1, remote_fd = -1;
+   size_t consumed = first;
+   char remote[GP_PATH_MAX], sidecar[GP_PATH_MAX + 2];
+   int found = ws_reg_lookup(ref, remote, sizeof remote);
+   if (found == 0 && relative[first] == '/')
+   {
+      size_t second = strcspn(relative + first + 1, "/");
+      if (!second || second > WS_REF_COMP_MAX)
+         goto done;
+      consumed = first + 1 + second;
+      memcpy(ref, relative, consumed);
+      ref[consumed] = 0;
+      if (!ws_scope_project_ref_valid(ref, consumed))
+         goto done;
+      found = ws_reg_lookup(ref, remote, sizeof remote);
+   }
+   if (found != 1 || !remote[0])
+      goto done;
+   project = ws_scope_open_project(principal, ref, 0);
+   if (project < 0)
+      goto done;
+   git = ws_scope_openat2_dir(project, ".git");
+   metadata = ws_scope_openat2_dir(project, ".aimee");
+   if (git < 0 || metadata < 0)
+      goto done;
+   remote_fd = openat(metadata, "remote", O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+   struct stat status;
+   if (remote_fd < 0 || fstat(remote_fd, &status) || !S_ISREG(status.st_mode) ||
+       status.st_size <= 0 || status.st_size >= (off_t)sizeof sidecar)
+      goto done;
+   ssize_t length = read(remote_fd, sidecar, sizeof sidecar - 1);
+   if (length != status.st_size)
+      goto done;
+   sidecar[length] = 0;
+   size_t remote_length = strlen(remote);
+   if ((size_t)length != remote_length + 1 || memcmp(sidecar, remote, remote_length) ||
+       sidecar[remote_length] != '\n')
+      goto done;
+   result = ws_scope_openat2_dir(project, relative[consumed] ? relative + consumed + 1 : ".");
+   /* The caller's path must still name the held inode. Replacement cannot turn
+    * this descriptor capability into approval of a different directory. */
+   struct stat named, held;
+   if (result >= 0 && (stat(actual, &named) || fstat(result, &held) ||
+                       named.st_dev != held.st_dev || named.st_ino != held.st_ino))
+   {
+      close(result);
+      result = -1;
+   }
+done:
+   if (remote_fd >= 0)
+      close(remote_fd);
+   if (metadata >= 0)
+      close(metadata);
+   if (git >= 0)
+      close(git);
+   if (project >= 0)
+      close(project);
+   close(lock);
+   return result;
+}
+
 /* True if `envp` carries an SSH_AUTH_SOCK entry — i.e. git_cred_inject wired up
  * the user's in-memory ssh-agent because they have a vaulted SSH key. */
 static int env_has_ssh_sock(char *const *envp)

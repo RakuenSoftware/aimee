@@ -27,10 +27,11 @@ type computerUsePolicy struct {
 }
 
 type request struct {
-	Tool        string            `json:"tool"`
-	SideEffect  string            `json:"side_effect"`
-	Arguments   json.RawMessage   `json:"arguments"`
-	ComputerUse computerUsePolicy `json:"computer_use"`
+	PolicyCategories []string          `json:"policy_categories,omitempty"`
+	Tool             string            `json:"tool"`
+	SideEffect       string            `json:"side_effect"`
+	Arguments        json.RawMessage   `json:"arguments"`
+	ComputerUse      computerUsePolicy `json:"computer_use"`
 }
 
 type response struct {
@@ -280,6 +281,26 @@ func evaluate(req request, policy *operatorPolicy) response {
 }
 
 func evaluateBaseline(req request, policy *operatorPolicy) response {
+	// Evaluate every owned category against one loaded operator policy. Calling
+	// the owner once per label could combine permissions from different files.
+	if len(req.PolicyCategories) > 0 && req.SideEffect == "" {
+		return response{Reason: "tool policy label is missing"}
+	}
+	if len(req.PolicyCategories) > 7 {
+		return response{Reason: "invalid tool policy categories"}
+	}
+	seen := map[string]bool{}
+	for _, category := range req.PolicyCategories {
+		switch category {
+		case "read", "write", "filesystem", "network", "external", "execution", "control":
+		default:
+			return response{Reason: "invalid tool policy category"}
+		}
+		if seen[category] {
+			return response{Reason: "duplicate tool policy category"}
+		}
+		seen[category] = true
+	}
 	var arguments map[string]any
 	if err := json.Unmarshal(req.Arguments, &arguments); err != nil || arguments == nil {
 		return response{Reason: "tool arguments are invalid JSON"}
@@ -310,6 +331,11 @@ func evaluateBaseline(req request, policy *operatorPolicy) response {
 		}
 	}
 approval:
+	for _, category := range req.PolicyCategories {
+		if policy.ApprovalLevels[category] == "block" {
+			return response{Reason: "policy blocks " + category + " operations"}
+		}
+	}
 	if policy.ApprovalLevels[req.SideEffect] == "block" {
 		return response{Reason: "policy blocks " + req.SideEffect + " operations"}
 	}

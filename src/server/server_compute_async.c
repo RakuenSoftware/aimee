@@ -2,6 +2,7 @@
 #include "server_compute_impl.h"
 #include "aimee.h"
 #include "agent_exec.h"
+#include "agent_coord.h"
 #include "agent_config.h" /* agent_set_request_codex_creds */
 #include "json_fluent.h"  /* jo_ok, jo_str */
 #include <aimee/tools/agent_tools.h>
@@ -12,6 +13,8 @@
 #include "log.h"
 #include "modules/workspace/workspace_turn.h"
 #include "cJSON.h"
+#include "tool_args_coerce.h"
+#include "platform_random.h"
 #include <ctype.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -140,6 +143,16 @@ static void async_slot_release(int slot)
 
 /* --- tool.execute worker --- */
 
+static char *tool_execute_arguments(const aimee_tool_t *definition, const char *wire)
+{
+   cJSON *raw = aimee_ir_json_parse_frame(wire, strlen(wire));
+   cJSON *canonical = cJSON_IsObject(raw) ? tool_args_canonicalize(definition->schema, raw) : NULL;
+   char *result = canonical ? cJSON_PrintUnformatted(canonical) : NULL;
+   cJSON_Delete(canonical);
+   cJSON_Delete(raw);
+   return result;
+}
+
 static void tool_execute_worker(void *arg)
 {
    compute_ctx_t *cctx = (compute_ctx_t *)arg;
@@ -153,7 +166,7 @@ static void tool_execute_worker(void *arg)
    cJSON *jtimeout = cJSON_GetObjectItemCaseSensitive(req, "timeout_ms");
 
    const char *tool = cJSON_IsString(jtool) ? jtool->valuestring : "";
-   const char *args = cJSON_IsString(jargs) ? jargs->valuestring : "{}";
+   const char *args = cJSON_GetStringValue(jargs);
    const char *cwd = cJSON_IsString(jcwd) ? jcwd->valuestring : "";
    const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : "unknown";
    int timeout_ms = cJSON_IsNumber(jtimeout) ? (int)jtimeout->valuedouble : 30000;
@@ -174,6 +187,44 @@ static void tool_execute_worker(void *arg)
       return;
    }
 
+   if (jargs && !cJSON_IsString(jargs))
+   {
+      compute_error(cctx, "tool arguments must be a JSON string");
+      compute_ctx_free(cctx);
+      return;
+   }
+   if (!args)
+      args = "{}";
+   aimee_tool_t admitted = {0};
+   char admission_error[256] = {0}, attempt[33];
+   char *canonical = NULL;
+   if (agent_tools_execution_definition(tool, &admitted) != 0 ||
+       !(canonical = tool_execute_arguments(&admitted, args)) ||
+       tool_validate_ir(&admitted, canonical, admission_error, sizeof admission_error) != 0 ||
+       directive_check_tool(tool, canonical, admission_error, sizeof admission_error) != 0 ||
+       platform_random_hex(attempt, 32) != 0)
+   {
+      free(canonical);
+      aimee_tool_free(&admitted);
+      compute_error(cctx, admission_error[0]
+                              ? admission_error
+                              : "tool is not in current execution catalog or admission failed");
+      compute_ctx_free(cctx);
+      return;
+   }
+   cJSON *canonical_value = cJSON_CreateString(canonical);
+   free(canonical);
+   cJSON_DeleteItemFromObjectCaseSensitive(req, "arguments");
+   if (!canonical_value || !cJSON_AddItemToObject(req, "arguments", canonical_value))
+   {
+      cJSON_Delete(canonical_value);
+      aimee_tool_free(&admitted);
+      compute_error(cctx, "cannot retain admitted tool arguments");
+      compute_ctx_free(cctx);
+      return;
+   }
+   args = canonical_value->valuestring;
+
    /* If the tool's cwd is a registered `detached` workspace, bind that workspace's
     * provider so the tool's file/exec ops marshal to the serving client (just as
     * a chat turn does). AC #6: a remote peer with a raw foreign cwd that binds no
@@ -183,6 +234,7 @@ static void tool_execute_worker(void *arg)
    if (workspace_turn_reject_foreign_cwd(detached_bound, trusted_local, cwd))
    {
       workspace_turn_unbind_active();
+      aimee_tool_free(&admitted);
       compute_error(cctx, "workspace: a remote session must act within a registered `detached` "
                           "workspace; raw server-side path not accepted");
       compute_ctx_free(cctx);
@@ -201,7 +253,10 @@ static void tool_execute_worker(void *arg)
    session_state_load(&state, sid);
 
    char msg[1024] = "";
-   int rc = pre_tool_check(tool, args, &state, config_guardrail_mode(), cwd, msg, sizeof(msg));
+   int rc = agent_tools_is_mcp_derived(tool)
+                ? pre_tool_check_registered_tool(tool, args, &state, config_guardrail_mode(), cwd,
+                                                 msg, sizeof msg)
+                : pre_tool_check(tool, args, &state, config_guardrail_mode(), cwd, msg, sizeof msg);
    session_state_save(&state, sid);
 
    /* 1 and 3 are ALLOW-with-rewrite verdicts, not refusals: 1 carries a rewritten
@@ -222,14 +277,19 @@ static void tool_execute_worker(void *arg)
       compute_respond(cctx, resp);
       run_cmd_set_cwd(NULL);
       workspace_turn_unbind_active();
+      aimee_tool_free(&admitted);
       compute_ctx_free(cctx);
       return;
    }
 
    (void)policy_bind_session_exploration(sid);
    char policy_reason[256] = "";
-   if (policy_check_tool_attempt(tool, tool_side_effect(tool), args, "external-tool", policy_reason,
-                                 sizeof(policy_reason)) != 0)
+   aimee_tool_metadata_t metadata;
+   char effect[32];
+   if (tool_policy_metadata(tool, &metadata, effect, sizeof effect, policy_reason,
+                            sizeof policy_reason) != 0 ||
+       policy_check_tool_metadata_attempt(tool, &metadata, effect, args, attempt, policy_reason,
+                                          sizeof policy_reason) != 0)
    {
       cJSON *blocked = cJSON_CreateObject();
       cJSON_AddStringToObject(blocked, "status", "blocked");
@@ -237,6 +297,7 @@ static void tool_execute_worker(void *arg)
       compute_respond(cctx, blocked);
       run_cmd_set_cwd(NULL);
       workspace_turn_unbind_active();
+      aimee_tool_free(&admitted);
       compute_ctx_free(cctx);
       return;
    }
@@ -246,17 +307,20 @@ static void tool_execute_worker(void *arg)
     * arrives with CAPS_ALL and is the trusted execution-policy boundary for this
     * first-class API; capability-limited remote callers do not inherit it. */
    agent_tools_set_effect_authorized(trusted_local);
-   char *result = dispatch_tool_call(tool, args, timeout_ms);
+   int is_error = 1;
+   char *result = dispatch_tool_call_ir_ctx_status(&admitted, args, timeout_ms, &is_error);
    agent_tools_set_effect_authorized(0);
-   result = policy_annotate_indexed(tool, args, "external-tool", result);
+   result = policy_annotate_indexed(tool, args, attempt, result);
 
    /* Clear thread-local CWD + the detached provider binding */
    run_cmd_set_cwd(NULL);
    workspace_turn_unbind_active();
 
    cJSON *resp = jo_ok();
+   cJSON_AddBoolToObject(resp, "is_error", is_error);
    cJSON_AddStringToObject(resp, "result", result ? result : "");
    free(result);
+   aimee_tool_free(&admitted);
    compute_respond(cctx, resp);
    compute_ctx_free(cctx);
 }
@@ -295,12 +359,20 @@ static void tool_thread_drain(void)
 
 static void tool_execute_worker_pooled(void *arg)
 {
+   aimee_ir_session_begin_task();
    int async_slot = ((compute_ctx_t *)arg)->async_slot;
+   const workspace_turn_mirror_lease_t *previous =
+       workspace_turn_mirror_bind(((compute_ctx_t *)arg)->source_mirror);
+   compute_ctx_bind_request_context(arg);
    /* The same authenticated session must reach both the pre-check and native
     * dispatch. A worker's process-derived session is not this request's owner. */
    const char *sid = json_string(((compute_ctx_t *)arg)->req, "session_id");
    session_id_set_override(sid);
+   agent_set_request_session(sid);
+   agent_set_request_codex_creds(NULL, NULL);
    tool_execute_worker(arg);
+   compute_ctx_clear_request_context();
+   workspace_turn_mirror_bind(previous);
    session_id_clear_override();
    async_slot_release(async_slot);
    tool_thread_release();
@@ -439,6 +511,7 @@ static char *chat_sanitize_message_transcript_tail(const char *message);
 
 static void chat_stream_worker_pooled(void *arg)
 {
+   aimee_ir_session_begin_task();
    compute_ctx_t *cctx = (compute_ctx_t *)arg;
    int async_slot = cctx->async_slot;
 
@@ -447,6 +520,7 @@ static void chat_stream_worker_pooled(void *arg)
     * session's attested principal, and the server ctx. Cheap clone per turn;
     * freed below unless a steer is dispatched. */
    cJSON *steer_tmpl = cJSON_Duplicate(cctx->req, 1);
+   request_context_snapshot_t steer_request = cctx->request_context;
    char steer_principal[128];
    snprintf(steer_principal, sizeof(steer_principal), "%s", cctx->vault_principal);
    server_ctx_t *steer_ctx = cctx->server;
@@ -558,9 +632,11 @@ static void chat_stream_worker_pooled(void *arg)
     * turn's value; (2) we clear it after the worker. chat_stream_worker is a plain
     * call with no longjmp/pthread_exit/cancellation in its tree, so the post-call
     * clear always runs on return; together the two make the guard robust. */
-   agent_set_request_vault_principal(cctx->vault_principal);
+   const workspace_turn_mirror_lease_t *previous = workspace_turn_mirror_bind(cctx->source_mirror);
+   compute_ctx_bind_request_context(cctx);
    chat_stream_worker(arg);
-   agent_set_request_vault_principal(NULL);
+   compute_ctx_clear_request_context();
+   workspace_turn_mirror_bind(previous);
    agent_set_request_cancel(NULL);
    if (locked)
       presence_turn_release(lock_session, lock_turn);
@@ -580,34 +656,43 @@ static void chat_stream_worker_pooled(void *arg)
     * this is not a use-after-free. */
    turn_registry_clear(cancel_entry);
 
-   /* Steering auto-continue: if chat.interrupt queued a follow-up for this
-    * session (it only does so when it cancelled an in-flight turn), dispatch it
-    * now as a server-initiated turn. It reuses the cancelled turn's request
-    * (same session / cwd / provider) with the steer message swapped in, runs with
-    * no client connection (streams to the presence-event ring), and — for a tmux
-    * CLI provider — reuses the same pane, so the conversation continues from where
-    * the interrupt stopped it. */
+   /* Accepted steering is either dispatched once with its actual message or
+    * retained as an explicit failed admission. It must never resend the old
+    * request after a clone/replacement failure, nor vanish on a busy handoff. */
    char *steer_msg = NULL;
-   if (sid[0] && steer_tmpl && chat_steer_take(sid, &steer_msg) && steer_msg)
+   if (sid[0] && chat_steer_take(sid, &steer_msg) && steer_msg)
    {
+      int dispatched = 0;
       char *clean = chat_sanitize_message_transcript_tail(steer_msg);
-      cJSON *m = cJSON_CreateString(clean ? clean : steer_msg);
+      if (steer_tmpl && !server_chat_ir_replace_steer(steer_tmpl, clean ? clean : steer_msg))
+      {
+         /* Only the saved attested request context can authorize this input. */
+         request_context_restore(&steer_request);
+         agent_set_request_vault_principal(steer_principal);
+         compute_ctx_t *nctx = create_compute_ctx(steer_ctx, NULL, steer_tmpl);
+         compute_ctx_clear_request_context();
+         if (nctx)
+         {
+            dispatched = chat_stream_dispatch(steer_ctx, nctx) == 0;
+            if (!dispatched)
+               compute_ctx_free(nctx);
+         }
+      }
       free(clean);
-      if (m)
-         cJSON_ReplaceItemInObjectCaseSensitive(steer_tmpl, "message", m);
-      /* Carry the session's principal into create_compute_ctx's thread-local
-       * fallback (the NULL-conn path reads it for vault identity). */
-      agent_set_request_vault_principal(steer_principal);
-      /* create_compute_ctx DUPLICATES req (cJSON_Duplicate) — it does not adopt
-       * steer_tmpl — so steer_tmpl remains ours to free below, and the new ctx
-       * owns its own copy that its worker frees. */
-      compute_ctx_t *nctx = create_compute_ctx(steer_ctx, NULL, steer_tmpl);
-      agent_set_request_vault_principal(NULL);
-      if (nctx && chat_stream_dispatch(steer_ctx, nctx) != 0)
-         compute_ctx_free(nctx);
+      if (!dispatched)
+      {
+         int recorded = !server_chat_ir_reject_steer(sid, steer_principal, steer_msg);
+         LOG_WARN("chat", "steering continuation not dispatched for session %s; durable failure=%d",
+                  sid, recorded);
+         if (!recorded)
+            presence_publish(sid, PRESENCE_EV_TURN, "steer_failed",
+                             "{\"status\":\"failed\",\"durable\":false,\"reason\":\"continuation_"
+                             "not_dispatched\"}");
+      }
       free(steer_msg);
    }
    cJSON_Delete(steer_tmpl);
+   request_context_snapshot_clear(&steer_request);
 
    async_slot_release(async_slot);
    chat_thread_release();
@@ -752,26 +837,67 @@ static char *chat_sanitize_message_transcript_tail(const char *message)
 
 static int chat_stream_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx)
 {
+   /* All subscriber versions share one canonical producer. No-attachment callers
+    * receive a real host turn rather than an unowned legacy transcript path. */
+   const char *sid = json_string(cctx->req, "aimee_session_id");
+   const char *alias = json_string(cctx->req, "session_id");
+   if (!sid[0])
+      sid = alias;
+   if (!cctx->vault_principal[0] || !sid[0] || (alias[0] && strcmp(sid, alias)))
+      goto fail;
+   if (!json_string(cctx->req, "aimee_session_id")[0])
+   {
+      cJSON *canonical_id = cJSON_CreateString(sid);
+      int added =
+          canonical_id &&
+          (cJSON_GetObjectItemCaseSensitive(cctx->req, "aimee_session_id")
+               ? cJSON_ReplaceItemInObjectCaseSensitive(cctx->req, "aimee_session_id", canonical_id)
+               : cJSON_AddItemToObject(cctx->req, "aimee_session_id", canonical_id));
+      if (!added)
+      {
+         cJSON_Delete(canonical_id);
+         goto fail;
+      }
+      sid = json_string(cctx->req, "aimee_session_id");
+   }
+   if (!cctx->presence_locked)
+   {
+      if (presence_turn_acquire_host(sid, cctx->vault_principal, cctx->presence_turn_id,
+                                     sizeof cctx->presence_turn_id, NULL,
+                                     0) != PRESENCE_TURN_ACQUIRED)
+         goto fail;
+      cctx->presence_locked = 1;
+      snprintf(cctx->presence_session, sizeof cctx->presence_session, "%s", sid);
+   }
+   if (strcmp(cctx->presence_session, sid) || !presence_turn_host_own(sid, cctx->presence_turn_id))
+      goto fail;
    if (g_chat_dispatch_override)
-      return g_chat_dispatch_override(cctx);
-
-   char fallback[64];
-   const char *sid = async_request_session_id(cctx->req, fallback, sizeof(fallback));
+   {
+      if (g_chat_dispatch_override(cctx))
+         goto fail;
+      return 0;
+   }
    cctx->compute_executor_threads = chat_thread_limit(ctx);
    if (chat_thread_reserve(ctx) != 0)
-      return -1;
+      goto fail;
 
    async_slot_claim("chat", cctx);
-
    if (server_session_pool_submit(ctx, sid, chat_stream_worker_pooled, cctx, NULL) != 0)
    {
       async_slot_release(cctx->async_slot);
       cctx->async_slot = -1;
       chat_thread_release();
       cctx->compute_executor_threads = 0;
-      return -1;
+      goto fail;
    }
    return 0;
+fail:
+   if (cctx->presence_locked)
+   {
+      presence_turn_release(cctx->presence_session, cctx->presence_turn_id);
+      cctx->presence_locked = 0;
+   }
+   return -1;
 }
 
 /* How long an in-flight turn may go without a worker owning it before it is
@@ -862,13 +988,18 @@ int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    /* (see retry_after_reclaiming_abandoned_turn above)
     *
-    * Unified-presence turn arbitration (opt-in). When the request identifies
-    * its attachment and a presence exists for the session, serialize turns:
+    * An identified attachment uses its existing arbitration/queueing contract.
+    * No-attachment callers acquire a temporary host turn in dispatch. Serialize turns:
     * acquire the per-session turn lock before dispatch and decline with
-    * presence_busy if another surface holds it. Requests without an attach_id
-    * fall straight through and run as before (the pooled worker then emits the
-    * synthesized turn boundary events instead). */
+    * presence_busy if another surface holds it. Invalid attachments cannot
+    * silently bypass arbitration. */
+   const cJSON *attachment = cJSON_GetObjectItemCaseSensitive(req, "attach_id");
    const char *attach_id = json_string(req, "attach_id");
+   if (attachment && (!cJSON_IsString(attachment) || !attach_id[0]))
+   {
+      compute_ctx_free(cctx);
+      return server_send_error(conn, "invalid chat attachment", NULL);
+   }
    if (attach_id[0])
    {
       char fb[64];
@@ -918,8 +1049,11 @@ int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          snprintf(cctx->presence_session, sizeof(cctx->presence_session), "%s", sid ? sid : "");
          snprintf(cctx->presence_turn_id, sizeof(cctx->presence_turn_id), "%s", turn_id);
       }
-      /* PRESENCE_TURN_ERR (no presence for the session / bad args): no lock —
-       * proceed unarbitrated, exactly as a request without an attach_id. */
+      if (tr != PRESENCE_TURN_ACQUIRED)
+      {
+         compute_ctx_free(cctx);
+         return server_send_error(conn, "invalid chat attachment", NULL);
+      }
    }
 
    if (chat_stream_dispatch(ctx, cctx) != 0)

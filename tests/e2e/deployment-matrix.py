@@ -114,10 +114,14 @@ class Stack:
         deadline = time.monotonic() + 240
         while time.monotonic() < deadline:
             status = command('docker', 'inspect', '--format', '{{.State.Health.Status}}', self.application)
-            if status == 'healthy':
+            # Application health proves the store and module owners, while the
+            # embedder starts independently after the application. Index setup
+            # requires its loaded model; the image health check verifies that.
+            embedding = command('docker', 'inspect', '--format', '{{.State.Health.Status}}', self.embedder)
+            if status == 'healthy' and embedding == 'healthy':
                 return
             time.sleep(2)
-        raise RuntimeError(self.role + ' did not become healthy')
+        raise RuntimeError(self.role + ' application and embedder did not become healthy')
 
     def kb_request(self, path, body=None, authenticated=True):
         code = '''import http.client,json,sys
@@ -583,6 +587,58 @@ def locked_episode_fixture_parent(kb, parent_id):
                 proc.communicate()
 
 
+def activate_embedding_generation(kb, check, version):
+    """Give each isolated KB a verified dense arm before evidence coverage."""
+    # Coverage requires an available dense arm as well as the lexical hit.
+    # Fresh installations have no active generation. Initialize it through
+    # the real owner, including any exact fixture assertion revisions.
+    # The ordinary fixture bearer remains service-scoped. Only the local
+    # disposable instance owner may run cross-scope index maintenance.
+    service_token = kb.env['AIMEE_KB_API_BEARER_TOKEN']
+    def install_bearer(token):
+        command('docker', 'exec', '-i', '-u', '1000',
+                '-e', 'AIMEE_VAULT_ENV_OVERWRITE=1', kb.application,
+                'aimee-kb', '--bootstrap-vault-stdin',
+                data='AIMEE_KB_API_BEARER_TOKEN=' + token + '\0')
+        command('docker', 'restart', kb.application)
+        deadline = time.monotonic() + 120
+        while command('docker', 'inspect', '--format', '{{.State.Health.Status}}', kb.application) != 'healthy':
+            if time.monotonic() >= deadline:
+                raise RuntimeError('typed fixture owner restart did not become healthy')
+            time.sleep(1)
+        kb.env['AIMEE_KB_API_BEARER_TOKEN'] = token
+    try:
+        install_bearer(secrets.token_hex(32))
+        deadline = time.monotonic() + 180
+        while True:
+            code, indexed = kb.kb_request('/v1/actions/memory.reembed_start', dict(
+                version=version, embedding_command=kb.env['EMBEDDER_URL'], scope='all'))
+            # Retain only fixed diagnostic fields. Never export response text,
+            # provider URLs, caller input or enrollment credentials.
+            diagnostic = dict(http_status=code,
+                status=indexed.get('status') if indexed.get('status') in ('ok', 'error') else 'other')
+            for field in ('failed', 'embedded', 'total', 'done', 'last_id'):
+                value = indexed.get(field)
+                if type(value) is int and value >= 0:
+                    diagnostic[field] = value
+            for field in ('ready', 'more'):
+                if type(indexed.get(field)) is bool:
+                    diagnostic[field] = indexed[field]
+            (kb.output / 'typed-index-state.json').write_text(json.dumps(diagnostic, indent=2) + '\n')
+            check('Typed fixture indexing succeeds', code == 200 and indexed.get('status') == 'ok'
+                  and not indexed.get('failed', 0))
+            if indexed.get('ready') is True:
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError('typed fixture indexing did not become ready')
+            time.sleep(1)
+        code, activated = kb.kb_request('/v1/actions/memory.reembed_cutover', dict(scope='all'))
+        check('Typed fixture activates its verified embedding generation', code == 200 and
+              activated.get('status') == 'ok')
+    finally:
+        install_bearer(service_token)
+
+
 def typed_source_version_gate(kb, check):
     """Observe real assertion versions through the authenticated KB/Go path."""
     key = 'typed-version-' + uuid.uuid4().hex
@@ -628,42 +684,7 @@ def typed_source_version_gate(kb, check):
         raw = json.dumps(identity, ensure_ascii=False, separators=(',', ':')).encode()
         return result.get('selection_digest') == 'sha256:' + hashlib.sha256(raw).hexdigest()
     try:
-        # Coverage requires an available dense arm as well as the lexical hit.
-        # Fresh installations have no active generation. Initialize it through
-        # the real owner, including this fixture's exact assertion revision.
-        # The ordinary fixture bearer remains service-scoped. Only the local
-        # disposable instance owner may run cross-scope index maintenance.
-        service_token = kb.env['AIMEE_KB_API_BEARER_TOKEN']
-        def install_bearer(token):
-            command('docker', 'exec', '-i', '-u', '1000',
-                    '-e', 'AIMEE_VAULT_ENV_OVERWRITE=1', kb.application,
-                    'aimee-kb', '--bootstrap-vault-stdin',
-                    data='AIMEE_KB_API_BEARER_TOKEN=' + token + '\0')
-            command('docker', 'restart', kb.application)
-            deadline = time.monotonic() + 120
-            while command('docker', 'inspect', '--format', '{{.State.Health.Status}}', kb.application) != 'healthy':
-                if time.monotonic() >= deadline:
-                    raise RuntimeError('typed fixture owner restart did not become healthy')
-                time.sleep(1)
-            kb.env['AIMEE_KB_API_BEARER_TOKEN'] = token
-        try:
-            install_bearer(secrets.token_hex(32))
-            deadline = time.monotonic() + 180
-            while True:
-                code, indexed = kb.kb_request('/v1/actions/memory.reembed_start', dict(
-                    version=key, embedding_command=kb.env['EMBEDDER_URL'], scope='all'))
-                check('Typed fixture indexing succeeds', code == 200 and indexed.get('status') == 'ok'
-                      and not indexed.get('failed', 0))
-                if indexed.get('ready') is True:
-                    break
-                if time.monotonic() >= deadline:
-                    raise RuntimeError('typed fixture indexing did not become ready')
-                time.sleep(1)
-            code, activated = kb.kb_request('/v1/actions/memory.reembed_cutover', dict(scope='all'))
-            check('Typed fixture activates its verified embedding generation', code == 200 and
-                  activated.get('status') == 'ok')
-        finally:
-            install_bearer(service_token)
+        activate_embedding_generation(kb, check, key)
         code, before = call()
         source = selected(before).get('source_version', {})
         expected = dict(schema_version=1, **{k:fixture[k] for k in ('owner_id','record_id','record_revision')})
@@ -1227,7 +1248,10 @@ with tempfile.TemporaryDirectory() as directory:
             f"SELECT count(*) FROM memories WHERE scope_type='project' AND scope_value='{scope}'") == '2')
         check('rejected draft never enters recall storage', gate.sql(
             f"SELECT count(*) FROM memories WHERE scope_value='{scope}' AND content='rejected model follow-up'") == '0')
-        check('explicit erasure removes original proposal parent', action('delete', dict(id=old_id, authority='user')).get('status') == 'ok')
+        erasure = action('delete', dict(id=old_id, authority='user'))
+        if erasure.get('status') != 'ok':
+            print('Explicit parent erasure response: ' + json.dumps(erasure, sort_keys=True), flush=True)
+        check('explicit erasure removes original proposal parent', erasure.get('status') == 'ok')
         check('parent erasure removes draft payload', action('correction_proposals', dict(proposal_id=pid)).get('proposals') == [])
         erased = gate.mcp_document('MCP erased proposal retry', 'mutate', correction)
         check('erasure does not free a committed proposal retry key', erased.get('reason') == 'idempotent_result_unavailable')
@@ -1240,6 +1264,20 @@ def main():
     parser.add_argument('--topology', choices=('T1', 'T2', 'T3'), required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--keep', action='store_true')
+    # Each storage-agnostic gate runs in exactly one CI leg. These two switches
+    # are how a leg declines a gate another leg owns; neither is a fast mode for
+    # a single local run, which should run everything.
+    parser.add_argument('--boot-only', action='store_true',
+                        help='start every role and prove it boots on this storage (the KB '
+                             'also stores a record), then stop: the application gates do not '
+                             'depend on how PostgreSQL storage is backed and run in the '
+                             'plain-storage legs')
+    parser.add_argument('--skip-kb-gates', action='store_true',
+                        help='boot the KB and prove it stores a record, but leave its direct '
+                             'gates to the T1 leg, which runs them on the identical KB stack')
+    parser.add_argument('--skip-kb-free-gate', action='store_true',
+                        help='omit the KB-free personal memory gate on the standalone Server; '
+                             'T3 runs that gate against the identical composition')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, AIMEE_RUNTIME_WEB_ENABLED='0', AIMEE_POSTGRES_VOLUME_MIB='512',
@@ -1273,6 +1311,7 @@ def main():
             code, body = kb.kb_request('/v1/actions/memory.store', dict(key='shared-e2e-' + uuid.uuid4().hex,
                 content='Synthetic shared deployment fixture'))
             check('KB shared memory module stores a record', code == 200 and body.get('status') == 'ok')
+        if kb and not (args.boot_only or args.skip_kb_gates):
             code, preview = kb.kb_request('/v1/actions/memory.hygiene', dict(
                 dry_run=True, scope=dict(type='global', value='_global'), max_rows=16))
             check('Direct KB hygiene accepts its authenticated action envelope',
@@ -1310,16 +1349,23 @@ def main():
             preview_source_version_gate(kb, check)
             evidence_exact_identity_gate(kb, check)
             lineage_release_gate(kb, check)
+        if kb and args.skip_kb_gates and not args.boot_only:
+            # The direct T1 assertion gate initializes its own generation. T2
+            # owns a different fresh KB, so skipping those assertions must not
+            # skip the setup required by authenticated recovery below.
+            activate_embedding_generation(kb, check, 'recovery-' + uuid.uuid4().hex)
         if args.topology in ('T2', 'T3'):
             server = Stack('server', env, args.output)
             stacks.append(server)
             server.start()
             check('Server boots without a KB connection', True)
             check('Server application metadata contains no database or enrollment credential', application_metadata_is_private(server))
+        if args.topology in ('T2', 'T3') and not args.boot_only:
             gate_script = ROOT / 'tests/e2e/memory-placement-e2e.py'
             common = ['--server', server.application, '--store-db', server.postgres]
-            command('python3', str(gate_script), *common, '--output', str(args.output / 'local-memory.json'), timeout=900)
-            check('KB-free personal memory regression gate', True)
+            if not args.skip_kb_free_gate:
+                command('python3', str(gate_script), *common, '--output', str(args.output / 'local-memory.json'), timeout=900)
+                check('KB-free personal memory regression gate', True)
             if kb:
                 # The two projects retain separate stores, model identities and
                 # Vaults. Only the optional KB application joins the API network.

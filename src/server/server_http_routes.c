@@ -5,6 +5,8 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
+#include <aimee/ir/session_event.h>
+#include <aimee/translation/hook_ir.h>
 #include "server_http_routes_workspace.h"
 #include "server_http.h"
 #include "shadow_mirror.h"
@@ -29,6 +31,9 @@
 #include "openai_runs_store.h"
 #include "roundtable_pipeline_capture.h" /* pipeline op-run capture seam (#18/#20) */
 #include "presence.h"
+#include "turn_registry.h"
+#include "db1_client/primary_sessions.h"
+#include "db1_client/server_sessions.h"
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
 #include "server_mgmt_status.h"
@@ -77,6 +82,7 @@ __attribute__((weak)) int server_agent_management_set_enabled(const char *name, 
 #include "modules/git/git_org_repos.h" /* git_org_repos_list for /v1/workspace/org-repos */
 #include "webuser_editor.h"            /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
 #include "modules/workspace/workspace_scope.h" /* ws_scope_user_root — project workspace root */
+#include "server_session_control.h"
 #include "webchat_live.h" /* db1_webchat_live_get — the browser's live-turn poll */
 #include "index.h"        /* index_scan_project after a webuser clone (WP-D) */
 #include "kb_client.h"    /* kb_client_index_scan — push webuser clones into aimee-kb */
@@ -1238,7 +1244,12 @@ int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
 {
    if (!rq->op || !rq->op[0])
       return err_json(resp, cap, 500, "route has no dispatch method");
-   cJSON *req = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : cJSON_CreateObject();
+   int tool_hook = !strcmp(rq->op, "hooks.pre") || !strcmp(rq->op, "hooks.post");
+   cJSON *req = tool_hook
+                    ? (rq->body_len > 0 && (size_t)rq->body_len <= AIMEE_HOOK_FRAME_MAX
+                           ? aimee_ir_json_parse_frame(rq->body, (size_t)rq->body_len)
+                           : NULL)
+                    : ((rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : cJSON_CreateObject());
    if (!req || !cJSON_IsObject(req))
    {
       cJSON_Delete(req);
@@ -1272,246 +1283,7 @@ int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
    return rc;
 }
 
-/* ── async op runner ──────────────────────────────────────────────────────────
- * Long-running / LLM methods (kb.build, graph.sync_code, memory.benchmark,
- * curator.synthesize, …) cannot use rh_dispatch_op: the inline bridge would run
- * them on the single listener thread and stall all /v1 serving. rh_dispatch_op_async
- * instead enqueues the dispatch onto a detached worker, returns a `queued` run
- * handle immediately, and the worker drives the loopback RPC to completion and
- * finalizes the record. Status/result are polled via GET /v1/runs/{id} (the run
- * store is generic — it holds whatever JSON snapshot we store). Capability is the
- * row's op-derived cap, gated before we enqueue. */
-typedef struct
-{
-   char run_id[128];
-   char op[64];
-   char *line;         /* dispatch body with method injected; owned by worker */
-   uint32_t conn_caps; /* caps captured at enqueue time */
-   long created;
-} op_run_job_t;
-
-/* Build the run snapshot object stored for GET /v1/runs/{id}. `result` is an
- * already-serialized JSON value (object/array/string) or NULL while queued. */
-static char *op_run_snapshot(const char *run_id, const char *op, const char *status, long created,
-                             const char *result)
-{
-   cJSON *o = cJSON_CreateObject();
-   if (!o)
-      return NULL;
-   cJSON_AddStringToObject(o, "id", run_id);
-   cJSON_AddStringToObject(o, "object", "op.run");
-   cJSON_AddStringToObject(o, "method", op);
-   cJSON_AddStringToObject(o, "status", status);
-   cJSON_AddNumberToObject(o, "created", (double)created);
-   if (result)
-   {
-      cJSON *r = cJSON_Parse(result);
-      cJSON_AddItemToObject(o, "result", r ? r : cJSON_CreateString(result));
-   }
-   char *s = cJSON_PrintUnformatted(o);
-   cJSON_Delete(o);
-   return s;
-}
-
-/* Orchestration workers are pooled. Every field below is thread-local, but that
- * only prevents cross-thread races: without an explicit turn boundary, the next
- * op scheduled on the same worker inherits the previous op's checkout and
- * credential context. In particular, an interactive roundtable could make a
- * server-hosted Codex seat `cd` into another client's nonexistent checkout and
- * return no content. Clear on both sides of every op dispatch so request-local
- * panel/preset/artifact state cannot bleed through worker reuse. */
-static void op_run_clear_thread_context(void)
-{
-   run_cmd_set_cwd(NULL);
-   agent_set_request_session(NULL);
-   agent_set_request_codex_creds(NULL, NULL);
-   agent_set_request_vault_principal(NULL);
-   agent_set_request_cancel(NULL);
-}
-
-static void op_run_worker_run(void *arg)
-{
-   op_run_job_t *j = (op_run_job_t *)arg;
-   op_run_clear_thread_context();
-   compute_pool_set_job(POOL_JOB_DELEGATE, "op=%s run=%s", j->op, j->run_id);
-   openai_runs_store_set_status(j->run_id, OPENAI_RUN_IN_PROGRESS);
-   char *started = op_run_snapshot(j->run_id, j->op, "in_progress", j->created, NULL);
-   if (started)
-   {
-      openai_runs_store_update_json(j->run_id, started);
-      free(started);
-   }
-
-   char *buf = (char *)malloc(SHTTP_RESP_MAX);
-   if (!buf)
-   {
-      char *snap =
-          op_run_snapshot(j->run_id, j->op, "failed", j->created, "{\"error\":\"out of memory\"}");
-      openai_runs_store_finalize(j->run_id, OPENAI_RUN_FAILED, snap ? snap : "{}");
-      free(snap);
-      free(j->line);
-      free(j);
-      compute_pool_clear_job();
-      return;
-   }
-
-   int rc = loopback_rpc(j->line, (int)strlen(j->line), buf, SHTTP_RESP_MAX, j->conn_caps);
-   op_run_clear_thread_context();
-   /* A dispatch returning a JSON object with "error" (or a non-2xx rc) is a
-    * failed run; anything else is the completed result payload. */
-   int ok = (rc >= 200 && rc < 300);
-   openai_run_status_t terminal_status = OPENAI_RUN_COMPLETED;
-   if (ok)
-   {
-      cJSON *parsed = cJSON_Parse(buf);
-      if (parsed)
-      {
-         if (cJSON_GetObjectItemCaseSensitive(parsed, "error"))
-            ok = 0;
-         cJSON *dispatch_status = cJSON_GetObjectItemCaseSensitive(parsed, "status");
-         if (cJSON_IsString(dispatch_status) && strcmp(dispatch_status->valuestring, "error") == 0)
-            ok = 0;
-         cJSON *cancelled = cJSON_GetObjectItemCaseSensitive(parsed, "cancelled");
-         if (cJSON_IsTrue(cancelled))
-            terminal_status = OPENAI_RUN_CANCELLED;
-         cJSON_Delete(parsed);
-      }
-   }
-   const char *status_str =
-       terminal_status == OPENAI_RUN_CANCELLED ? "cancelled" : (ok ? "completed" : "failed");
-   char *snap = op_run_snapshot(j->run_id, j->op, status_str, j->created, buf);
-   openai_runs_store_finalize(j->run_id, ok ? terminal_status : OPENAI_RUN_FAILED,
-                              snap ? snap : buf);
-   /* Pipeline-owned result capture (#18): persist the terminal attempt into the
-    * durable DB1 ledger before the bounded /v1/runs record can be evicted. This
-    * no-ops for ordinary (non-pipeline) op-runs. */
-   rtp_seam_finalize(j->run_id, ok, terminal_status == OPENAI_RUN_CANCELLED, buf);
-   free(snap);
-   free(buf);
-   free(j->line);
-   free(j);
-   compute_pool_clear_job();
-}
-
-static int submit_op_run_internal(const char *op_method, const char *body_json, uint32_t conn_caps,
-                                  int preflight_caps, char *resp, int cap)
-{
-   if (!op_method || !op_method[0])
-      return err_json(resp, cap, 500, "route has no dispatch method");
-   uint32_t required = server_capability_for_method(op_method);
-   if (preflight_caps && required && (conn_caps & required) == 0)
-      return err_json(resp, cap, 403, "forbidden: insufficient capabilities");
-   cJSON *req = (body_json && body_json[0]) ? cJSON_Parse(body_json) : cJSON_CreateObject();
-   if (!req || !cJSON_IsObject(req))
-   {
-      cJSON_Delete(req);
-      return err_json(resp, cap, 400, "invalid JSON body");
-   }
-   cJSON_DeleteItemFromObjectCaseSensitive(req, "method");
-   cJSON_AddStringToObject(req, "method", op_method);
-
-   long created = (long)time(NULL);
-   static atomic_ulong g_op_run_seq = 0;
-   char id[128];
-   unsigned long seq = atomic_fetch_add_explicit(&g_op_run_seq, 1, memory_order_relaxed) + 1;
-   snprintf(id, sizeof(id), "oprun_%s_%ld_%lu", openai_runs_store_generation(), created, seq);
-
-   cJSON_DeleteItemFromObjectCaseSensitive(req, "__run_id");
-   cJSON_AddStringToObject(req, "__run_id", id);
-
-   /* Pipeline-owned submission seam (#20/#21): a validated `pipeline_pass_id`
-    * registers an attempt row keyed to this run id and is forwarded internally
-    * as the private `__pipeline_pass_id`. A caller-supplied double-underscore id
-    * is never honored. An unknown / non-owned pass id is rejected. */
-   cJSON_DeleteItemFromObjectCaseSensitive(req, "__pipeline_pass_id");
-   cJSON *ppid = cJSON_GetObjectItemCaseSensitive(req, "pipeline_pass_id");
-   if (ppid && cJSON_IsNumber(ppid))
-   {
-      int pass_id = (int)ppid->valuedouble;
-      cJSON_DeleteItemFromObjectCaseSensitive(req, "pipeline_pass_id");
-      if (rtp_seam_register_attempt(pass_id, id) < 0)
-      {
-         cJSON_Delete(req);
-         return err_json(resp, cap, 403, "invalid or non-owned pipeline_pass_id");
-      }
-      cJSON_AddNumberToObject(req, "__pipeline_pass_id", pass_id);
-   }
-
-   char *line = cJSON_PrintUnformatted(req);
-   cJSON_Delete(req);
-   if (!line)
-      return err_json(resp, cap, 500, "out of memory");
-
-   char *queued = op_run_snapshot(id, op_method, "queued", created, NULL);
-   if (!queued || !openai_runs_store_create(id, queued))
-   {
-      free(queued);
-      free(line);
-      return err_json(resp, cap, 500, "could not create run");
-   }
-
-   op_run_job_t *j = (op_run_job_t *)calloc(1, sizeof(*j));
-   if (!j)
-   {
-      free(queued);
-      free(line);
-      return err_json(resp, cap, 500, "out of memory");
-   }
-   snprintf(j->run_id, sizeof(j->run_id), "%s", id);
-   snprintf(j->op, sizeof(j->op), "%s", op_method);
-   j->line = line; /* ownership moves to the worker */
-   j->conn_caps = conn_caps;
-   j->created = created;
-
-   server_ctx_t *ctx = server_active_ctx();
-   /* Every async operation has the same server-owned lifecycle. Keeping them in
-    * one dedicated pool prevents a newly registered coordinator from silently
-    * falling back to the generic compute lane, and makes shutdown authoritative. */
-   if (ctx && ctx->orchestration_pool_initialized)
-   {
-      int submit_rc = compute_pool_submit(&ctx->orchestration_pool, op_run_worker_run, j);
-      if (submit_rc != COMPUTE_POOL_SUBMIT_OK)
-      {
-         const char *message = submit_rc == COMPUTE_POOL_SUBMIT_CLOSED ? "orchestration unavailable"
-                                                                       : "orchestration queue full";
-         char detail[96];
-         snprintf(detail, sizeof(detail), "{\"error\":\"%s\"}", message);
-         char *failed = op_run_snapshot(id, op_method, "failed", created, detail);
-         openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
-         free(failed);
-         free(j->line);
-         free(j);
-         free(queued);
-         return err_json(resp, cap, 503, message);
-      }
-   }
-   else
-   {
-      char *failed = op_run_snapshot(id, op_method, "failed", created,
-                                     "{\"error\":\"orchestration unavailable\"}");
-      openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
-      free(failed);
-      free(j->line);
-      free(j);
-      free(queued);
-      return err_json(resp, cap, 503, "orchestration unavailable");
-   }
-
-   int n = snprintf(resp, (size_t)cap, "%s", queued);
-   free(queued);
-   return (n > 0 && n < cap) ? 200 : 200;
-}
-
-int server_http_submit_op_run(const char *op_method, const char *body_json, uint32_t conn_caps,
-                              char *resp, int cap)
-{
-   return submit_op_run_internal(op_method, body_json, conn_caps, 1, resp, cap);
-}
-
-int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
-{
-   return submit_op_run_internal(rq->op, rq->body, g_rpc_conn_caps, 0, resp, cap);
-}
+/* Async dispatch-backed operation lifetime lives in server_http_op_runs.c. */
 
 /* ── workspace resource plane (workspace-resource-plane §1) ───────────────────
  * The instance-scoped workspace registry over /v1. The backing RPCs
@@ -1519,6 +1291,103 @@ int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
  * (REST body) and the {id}-bearing get/remove need bespoke shaping rather than
  * rh_dispatch_op. The {id} segment is the workspace's absolute path, carried
  * percent-encoded so its '/'s survive as one path segment. */
+
+/* Only the root-UDS-attested web backend may deliver an operator decision.
+ * An agent's own MCP/ingress bearer cannot approve its pending tool request. */
+static int rh_chat_control_reply(const route_req_t *rq, char *resp, int cap)
+{
+   server_conn_t identity = {0};
+   server_http_identity_apply(&identity);
+   if (!server_http_identity_browser_operator() || !identity.vault_principal[0])
+      return err_json(resp, cap, 403, "control replies require an authenticated browser user");
+   cJSON *body = rq->body && rq->body_len > 0
+                     ? aimee_ir_json_parse_frame(rq->body, (size_t)rq->body_len)
+                     : NULL;
+   const char *session = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "session_id"));
+   const char *request = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "request_id"));
+   const cJSON *reply = cJSON_GetObjectItemCaseSensitive(body, "reply");
+   if (!session || !request || !cJSON_IsObject(reply))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "session_id, request_id and reply are required");
+   }
+   int rc = server_control_reply(session, request, identity.vault_principal, reply);
+   cJSON_Delete(body);
+   if (rc != 0)
+      return err_json(resp, cap, rc == 1 ? 409 : 403,
+                      "control request is stale, invalid or belongs to another user");
+   snprintf(resp, cap, "{\"status\":\"ok\",\"queued\":true}");
+   return 200;
+}
+
+/* Exact browser stop never queues a historical or replacement user message.
+ * Legacy callers without turn_id retain the dispatch-backed operation. */
+static int rh_chat_graceful_cancel(const route_req_t *rq, char *resp, int cap)
+{
+   cJSON *body = rq->body && rq->body_len > 0
+                     ? aimee_ir_json_parse_frame(rq->body, (size_t)rq->body_len)
+                     : NULL;
+   if (!cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "invalid cancellation frame");
+   }
+   const cJSON *turn_value = cJSON_GetObjectItemCaseSensitive(body, "turn_id");
+   if (!turn_value)
+   {
+      cJSON_Delete(body);
+      return rh_dispatch_op(rq, resp, cap);
+   }
+   server_conn_t identity = {0};
+   server_http_identity_apply(&identity);
+   if (!server_http_identity_browser_operator() || !identity.vault_principal[0])
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 403, "cancellation requires an authenticated browser user");
+   }
+   const char *session = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "session_id"));
+   const char *turn = cJSON_GetStringValue(turn_value);
+   if (!session || !session[0] || strlen(session) > 128 || !turn || !turn[0] ||
+       strlen(turn) > 128 || cJSON_GetArraySize(body) != 2)
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "exact session_id and turn_id required");
+   }
+   db1_server_session_t owner;
+   if (db1_server_session_get(session, &owner))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 503, "session ownership unavailable");
+   }
+   if (strcmp(owner.principal, identity.vault_principal))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 403, "session ownership mismatched");
+   }
+   int local = turn_registry_cancel_exact(session, turn);
+   char sequence[32] = "";
+   int rc = local ? local < 0 ? 1 : 0
+                  : db1_session_ir_cancel(identity.vault_principal, session, turn, sequence);
+   if (rc)
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, rc == 1 ? 409 : 503,
+                      "exact turn cancellation refused or unavailable");
+   }
+   cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "status", "ok");
+   cJSON_AddStringToObject(result, "session_id", session);
+   cJSON_AddStringToObject(result, "turn_id", turn);
+   cJSON_AddStringToObject(result, "disposition", local ? "stopping" : "cancelled");
+   if (!local)
+      cJSON_AddStringToObject(result, "terminal_sequence", sequence);
+   char *wire = cJSON_PrintUnformatted(result);
+   int n = wire ? snprintf(resp, (size_t)cap, "%s", wire) : -1;
+   free(wire);
+   cJSON_Delete(result);
+   cJSON_Delete(body);
+   return n > 0 && n < cap ? 200 : err_json(resp, cap, 500, "cancellation reply unavailable");
+}
 
 /* POST /v1/chat/live {session_id, since_rev} — the browser's polling source of
  * truth for an in-flight turn. The server mirrors the tmux pane scrape into the
@@ -2042,7 +1911,8 @@ const http_route_t g_v1_routes[] = {
     {"GET", "/v1/eval/candidates", NULL, RM_EXACT, "eval.candidates", 0, rh_dispatch_op},
     {"POST", "/v1/eval/candidates", NULL, RM_EXACT, "eval.candidates-update", 0, rh_dispatch_op},
     /* Learning surfaces: advisory recall, measured credit, bounded drain. */
-    {"POST", "/v1/learning/approaches", NULL, RM_EXACT, "learning.approaches", 0, rh_dispatch_op},
+    {"POST", "/v1/learning/approaches", NULL, RM_EXACT, "learning.approaches", CAP_MEMORY_READ,
+     rh_dispatch_op},
     {"GET", "/v1/learning/attribution", NULL, RM_EXACT, "learning.attribution", 0, rh_dispatch_op},
     {"POST", "/v1/learning/resolve", NULL, RM_EXACT, "learning.resolve", 0, rh_dispatch_op},
     {"POST", "/v1/learning/fate", NULL, RM_EXACT, "learning.fate", 0, rh_dispatch_op},
@@ -2115,7 +1985,10 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/chat/stream", NULL, RM_EXACT, "chat.send_stream", 0, NULL},
     /* Steering: stop the in-flight turn + queue a follow-up the server
      * auto-continues (streamed to the session's /events). */
+    {"POST", "/v1/chat/graceful_cancel", NULL, RM_EXACT, "chat.graceful_cancel", 0,
+     rh_chat_graceful_cancel},
     {"POST", "/v1/chat/interrupt", NULL, RM_EXACT, "chat.interrupt", 0, rh_dispatch_op},
+    {"POST", "/v1/chat/control-reply", NULL, RM_EXACT, NULL, CAP_CHAT, rh_chat_control_reply},
     /* The browser's fixed-timer poll for the live turn (db1 webchat_live mirror),
      * replacing client-side SSE reconciliation. */
     {"POST", "/v1/chat/live", NULL, RM_EXACT, NULL, CAP_SESSION_READ, rh_chat_live},

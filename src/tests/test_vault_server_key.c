@@ -77,8 +77,8 @@ static void test_bad_master_key_not_overwritten(void)
    /* Clobber the (valid) key with a wrong-size file. */
    FILE *f = fopen(path, "wb");
    assert(f);
-   const char junk[10] = "BADKEYDATA";
-   assert(fwrite(junk, 1, sizeof(junk), f) == sizeof(junk));
+   const char junk[] = "BADKEYDATA";
+   assert(fwrite(junk, 1, sizeof(junk) - 1, f) == sizeof(junk) - 1);
    fclose(f);
 
    vault_server_key_reset_for_test();
@@ -87,7 +87,7 @@ static void test_bad_master_key_not_overwritten(void)
 
    /* The bad file must be untouched (not overwritten with a fresh 32-byte key). */
    struct stat st;
-   assert(stat(path, &st) == 0 && st.st_size == (off_t)sizeof(junk));
+   assert(stat(path, &st) == 0 && st.st_size == (off_t)(sizeof(junk) - 1));
    printf("  PASS: test_bad_master_key_not_overwritten\n");
 }
 

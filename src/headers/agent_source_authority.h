@@ -23,6 +23,11 @@ typedef struct
 
 void agent_source_authority_tls_set(int authority, const char *worktree_root, const char *paths);
 void agent_source_authority_tls_capture(agent_source_authority_snapshot_t *snap);
+/* Checked handoff refuses allocation failure rather than widening source scope. */
+int agent_source_authority_tls_capture_checked(agent_source_authority_snapshot_t *snap);
+int agent_source_authority_snapshot_clone(const agent_source_authority_snapshot_t *source,
+                                          agent_source_authority_snapshot_t *out);
+void agent_source_authority_snapshot_destroy(agent_source_authority_snapshot_t *snap);
 void agent_source_authority_tls_restore(agent_source_authority_snapshot_t *snap);
 
 /* Export this thread's source-authority TLS to the process env. Call ONLY in a

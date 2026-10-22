@@ -1,33 +1,10 @@
-/* db1_client/guardrail_state.c: the guardrail_state family, reached over the bus.
- *
- * WAS GENERATED from the store catalog by scripts/gen_db1_contract.py. Both
- * moved on: the catalog is now server-go/modules/aimee/operations.json, and the
- * generator was deleted with the C module.
- *
- * So this is maintained BY HAND now, and the header used to say "Do not edit"
- * while pointing at a generator that no longer exists and a path that no longer
- * resolves -- which is a dead end at exactly the moment someone needs to change
- * something. Edit it, and keep it agreeing with the catalog:
- * scripts/check-db1-client-contract.py matches every call site here against the
- * catalog by arity and reply width, and runs in lint on every pull request.
- * That check is what replaced the generator.
- *
- * Same functions, same contract, different side of the boundary: the daemon
- * links this instead of the DB1 domain, so nothing that calls these had to
- * change.
- *
- * It lives OUTSIDE modules/db1 deliberately. The module's descriptor owns every
- * .c beside it and compiles them into the DB1 process, so a client with these
- * names in that directory would be linked twice into the one binary that must
- * not have it -- once as the caller and once as the implementation.
- *
- * clang-format is off for the body below: its canonical form is whatever this
- * generator emits, and reflowing generated output would put the file and the
- * catalog permanently one reformat apart. */
+/* guardrail_state.c: typed DB1 operations over the shared bus transport.
+ * Wire operations are owned by server-go/modules/aimee/operations.json. */
 /* clang-format off */
 #include "session_state.h"
 
 #include "db1_module_api.h"
+#include "transport.h"
 
 #include <aimee/audit/obs_bus.h>
 #include <aimee/core/event_bus/module_client.h>
@@ -40,185 +17,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define DB1_GUARDRAIL_STATE_CALL_TIMEOUT_MS 2000
 
-static void warn_unreachable(int reason)
-{
-   static int warned;
-   if (warned)
-      return;
-   warned = 1;
-   /* Said once per process: enough to tell a store that is down from one that
-      is quiet, without one line per call. The numeric
-      aimee_module_call_result_t, not its name, so this does not pull the whole
-      event-bus library in behind the client for one string. */
-   LOG_WARN("db1.guardrail_state", "DB1 %s is unreachable (module call result %d)", "guardrail state",
-            reason);
-}
+static db1_family_t family = {"db1.guardrail_state", "guardrail state", AIMEE_DB1_EVENT_GUARDRAIL_STATE, AIMEE_DB1_STAGE_GUARDRAIL_STATE, 2000, 0};
 
-/* Size the frame from the arguments themselves.
-
-   These carry prompts, results and JSON documents, not just identifiers, and
-   in-process callers have always passed them whole. A fixed cap here would
-   refuse exactly those calls and return the same -1 as a broken store -- fine
-   in a test with short strings, wrong the first time a real prompt arrives. The
-   bus bounds the message instead. */
-static int frame_size(const char *const *fields, uint32_t count, size_t *need_out)
-{
-   /* Zero fields is a legal request: an operation that takes no arguments
-      sends the header alone. The upper bound still applies. */
-   if (count > AIMEE_DB1_FIELDS_MAX)
-      return -1;
-   size_t need = 8u;
-   for (uint32_t i = 0; i < count; ++i)
-   {
-      /* Empty is legal on the wire: an optional field the caller left out
-         travels as zero length. Which fields may be empty is the operation's
-         business, checked before the frame is built. */
-      if (!fields[i])
-         return -1;
-      size_t n = strlen(fields[i]);
-      if (n > AIMEE_MODULE_MESSAGE_MAX_BODY - need - 4u)
-         return -1;
-      need += 4u + n;
-   }
-   *need_out = need;
-   return 0;
-}
-
-/* op(u32) | field_count(u32) | (len(u32) | bytes) * count, per db1_module_api.h. */
-static void encode(uint8_t *out, uint32_t op, const char *const *fields, uint32_t count)
-{
-   uint32_t at = 0;
-   aimee_db1_put_u32(out + at, op);
-   at += 4u;
-   aimee_db1_put_u32(out + at, count);
-   at += 4u;
-   for (uint32_t i = 0; i < count; ++i)
-   {
-      uint32_t n = (uint32_t)strlen(fields[i]);
-      aimee_db1_put_u32(out + at, n);
-      at += 4u;
-      memcpy(out + at, fields[i], n);
-      at += n;
-   }
-}
-
-/* Returns the module's status, or -1 when the call never produced one. */
-/* Fills up to `slots` reply values, each into the buffer and capacity the
-   caller supplied. A write passes none; a read passes one; a row passes one per
-   member; a list passes one per member per row it is willing to accept.
-
-   `filled_out` reports how many values the reply actually carried, which is how
-   a list learns its length: the rows are not counted separately on the wire
-   because an operation already knows how wide its rows are. Callers that expect
-   a fixed shape pass NULL. */
-static int call_stage(uint32_t op, const char *const *fields, uint32_t count, char *const *values,
-                      const size_t *caps, uint32_t slots, uint32_t *filled_out)
-{
-   if (filled_out)
-      *filled_out = 0u;
-   for (uint32_t i = 0; i < slots; ++i)
-      if (values[i] && caps[i])
-         values[i][0] = '\0';
-   /* A local check, not a probe: with nothing serving the stage there is no
-      call to make, and saying so beats waiting out a deadline. */
-   if (!obs_bus_module_available(AIMEE_DB1_EVENT_GUARDRAIL_STATE))
-   {
-      warn_unreachable(AIMEE_MODULE_CALL_CAPABILITY_ABSENT);
-      return -1;
-   }
-
-   size_t request_len = 0;
-   if (frame_size(fields, count, &request_len) != 0)
-      return -1;
-   /* The reply is bounded by the caller's own buffer: it asked for at most
-      value_len bytes, so there is no reason to hold more than that. */
-   size_t response_cap = 8u;
-   for (uint32_t i = 0; i < slots; ++i)
-      response_cap += 4u + caps[i];
-   uint8_t *request = malloc(request_len);
-   uint8_t *response = malloc(response_cap);
-   if (!request || !response)
-   {
-      free(request);
-      free(response);
-      return -1;
-   }
-   encode(request, op, fields, count);
-
-   uint32_t response_len = 0;
-   uint64_t deadline = aimee_module_call_deadline_ns(DB1_GUARDRAIL_STATE_CALL_TIMEOUT_MS);
-   aimee_module_call_result_t rc =
-       obs_bus_module_call(AIMEE_DB1_EVENT_GUARDRAIL_STATE, AIMEE_DB1_STAGE_GUARDRAIL_STATE, 0, deadline,
-                           request, (uint32_t)request_len, response, (uint32_t)response_cap,
-                           &response_len, NULL, NULL);
-   free(request);
-
-   int result = -1;
-   if (rc != AIMEE_MODULE_CALL_OK || response_len < 8u)
-      warn_unreachable((int)rc);
-   else
-   {
-      uint32_t status = aimee_db1_get_u32(response);
-      uint32_t fields_in = aimee_db1_get_u32(response + 4u);
-      /* Read the reply's own count rather than assuming an arity: a status with
-         no values is how a write answers, one value is a read, and a member
-         apiece is a row. */
-      result = (int)status;
-      /* More values than the caller has room for is a contract mismatch, not
-         something to read the first few of: the caller asked for at most this
-         many rows, and a stage answering with more is not answering this call. */
-      if (fields_in > slots)
-         result = -1;
-      else if (filled_out)
-         *filled_out = fields_in;
-      /* Fewer values than the caller has slots for is the same contract
-         mismatch read from the other side, and it used to pass: the unfilled
-         slots keep the empty string cleared above, so the caller reads a row
-         whose last members are blank and cannot tell that from a row that is
-         blank. A list says how many rows it found through filled_out and is
-         variable by construction; every other shape has one arity, and a stage
-         answering with a different one is a stage built against a different
-         version of this contract. Two processes, two binaries, two deployment
-         times -- so say it rather than zero-fill. */
-      else if (status == (uint32_t)AIMEE_DB1_STATUS_OK && fields_in != slots)
-         result = -1;
-      uint32_t at = 8u;
-      for (uint32_t i = 0; i < fields_in && result != -1; ++i)
-      {
-         if (at + 4u > response_len)
-         {
-            result = -1;
-            break;
-         }
-         uint32_t n = aimee_db1_get_u32(response + at);
-         at += 4u;
-         /* A reply whose declared length runs past what arrived is not a reply
-            to read part of. */
-         if (at + n > response_len)
-         {
-            result = -1;
-            break;
-         }
-         if (i < slots && values[i] && caps[i])
-         {
-            /* No room for the terminator is no room: writing it would land one
-               byte past the buffer the caller owns. */
-            if (n >= caps[i])
-               result = -1;
-            else
-            {
-               memcpy(values[i], response + at, n);
-               values[i][n] = '\0';
-            }
-         }
-         at += n;
-      }
-   }
-   free(response);
-   return result;
-}
 
 /* A write answers 0 or -1; the store either took it or it did not. */
 static int write_result(int status)
@@ -386,7 +187,7 @@ int db1_session_state_load(const char *sid, session_state_t *out)
    memset(out, 0, sizeof *out);
    char *const values[] = {out->seen_paths[0], out->seen_paths[1], out->seen_paths[2], out->seen_paths[3], out->seen_paths[4], out->seen_paths[5], out->seen_paths[6], out->seen_paths[7], out->seen_paths[8], out->seen_paths[9], out->seen_paths[10], out->seen_paths[11], out->seen_paths[12], out->seen_paths[13], out->seen_paths[14], out->seen_paths[15], out->seen_paths[16], out->seen_paths[17], out->seen_paths[18], out->seen_paths[19], out->seen_paths[20], out->seen_paths[21], out->seen_paths[22], out->seen_paths[23], out->seen_paths[24], out->seen_paths[25], out->seen_paths[26], out->seen_paths[27], out->seen_paths[28], out->seen_paths[29], out->seen_paths[30], out->seen_paths[31], out->seen_paths[32], out->seen_paths[33], out->seen_paths[34], out->seen_paths[35], out->seen_paths[36], out->seen_paths[37], out->seen_paths[38], out->seen_paths[39], out->seen_paths[40], out->seen_paths[41], out->seen_paths[42], out->seen_paths[43], out->seen_paths[44], out->seen_paths[45], out->seen_paths[46], out->seen_paths[47], out->seen_paths[48], out->seen_paths[49], out->seen_paths[50], out->seen_paths[51], out->seen_paths[52], out->seen_paths[53], out->seen_paths[54], out->seen_paths[55], out->seen_paths[56], out->seen_paths[57], out->seen_paths[58], out->seen_paths[59], out->seen_paths[60], out->seen_paths[61], out->seen_paths[62], out->seen_paths[63], slot64, out->session_mode, out->guardrail_mode, slot67, slot68, slot69, out->worktrees[0].git_root, out->worktrees[0].worktree_path, out->worktrees[1].git_root, out->worktrees[1].worktree_path, out->worktrees[2].git_root, out->worktrees[2].worktree_path, out->worktrees[3].git_root, out->worktrees[3].worktree_path, out->worktrees[4].git_root, out->worktrees[4].worktree_path, out->worktrees[5].git_root, out->worktrees[5].worktree_path, out->worktrees[6].git_root, out->worktrees[6].worktree_path, out->worktrees[7].git_root, out->worktrees[7].worktree_path, out->worktrees[8].git_root, out->worktrees[8].worktree_path, out->worktrees[9].git_root, out->worktrees[9].worktree_path, out->worktrees[10].git_root, out->worktrees[10].worktree_path, out->worktrees[11].git_root, out->worktrees[11].worktree_path, out->worktrees[12].git_root, out->worktrees[12].worktree_path, out->worktrees[13].git_root, out->worktrees[13].worktree_path, out->worktrees[14].git_root, out->worktrees[14].worktree_path, out->worktrees[15].git_root, out->worktrees[15].worktree_path, slot102, slot103, slot104, slot105, slot106, slot107, slot108, out->tdd_mode, out->tdd_writes[0].stem, slot111, out->tdd_writes[1].stem, slot113, out->tdd_writes[2].stem, slot115, out->tdd_writes[3].stem, slot117, out->tdd_writes[4].stem, slot119, out->tdd_writes[5].stem, slot121, out->tdd_writes[6].stem, slot123, out->tdd_writes[7].stem, slot125, slot126, out->read_paths[0], out->read_paths[1], out->read_paths[2], out->read_paths[3], out->read_paths[4], out->read_paths[5], out->read_paths[6], out->read_paths[7], out->read_paths[8], out->read_paths[9], out->read_paths[10], out->read_paths[11], out->read_paths[12], out->read_paths[13], out->read_paths[14], out->read_paths[15], out->read_paths[16], out->read_paths[17], out->read_paths[18], out->read_paths[19], out->read_paths[20], out->read_paths[21], out->read_paths[22], out->read_paths[23], out->read_paths[24], out->read_paths[25], out->read_paths[26], out->read_paths[27], out->read_paths[28], out->read_paths[29], out->read_paths[30], out->read_paths[31], out->read_paths[32], out->read_paths[33], out->read_paths[34], out->read_paths[35], out->read_paths[36], out->read_paths[37], out->read_paths[38], out->read_paths[39], out->read_paths[40], out->read_paths[41], out->read_paths[42], out->read_paths[43], out->read_paths[44], out->read_paths[45], out->read_paths[46], out->read_paths[47], out->read_paths[48], out->read_paths[49], out->read_paths[50], out->read_paths[51], out->read_paths[52], out->read_paths[53], out->read_paths[54], out->read_paths[55], out->read_paths[56], out->read_paths[57], out->read_paths[58], out->read_paths[59], out->read_paths[60], out->read_paths[61], out->read_paths[62], out->read_paths[63], slot191, out->file_hashes[0].path, slot193, out->file_hashes[1].path, slot195, out->file_hashes[2].path, slot197, out->file_hashes[3].path, slot199, out->file_hashes[4].path, slot201, out->file_hashes[5].path, slot203, out->file_hashes[6].path, slot205, out->file_hashes[7].path, slot207, out->file_hashes[8].path, slot209, out->file_hashes[9].path, slot211, out->file_hashes[10].path, slot213, out->file_hashes[11].path, slot215, out->file_hashes[12].path, slot217, out->file_hashes[13].path, slot219, out->file_hashes[14].path, slot221, out->file_hashes[15].path, slot223, out->file_hashes[16].path, slot225, out->file_hashes[17].path, slot227, out->file_hashes[18].path, slot229, out->file_hashes[19].path, slot231, out->file_hashes[20].path, slot233, out->file_hashes[21].path, slot235, out->file_hashes[22].path, slot237, out->file_hashes[23].path, slot239, out->file_hashes[24].path, slot241, out->file_hashes[25].path, slot243, out->file_hashes[26].path, slot245, out->file_hashes[27].path, slot247, out->file_hashes[28].path, slot249, out->file_hashes[29].path, slot251, out->file_hashes[30].path, slot253, out->file_hashes[31].path, slot255, out->file_hashes[32].path, slot257, out->file_hashes[33].path, slot259, out->file_hashes[34].path, slot261, out->file_hashes[35].path, slot263, out->file_hashes[36].path, slot265, out->file_hashes[37].path, slot267, out->file_hashes[38].path, slot269, out->file_hashes[39].path, slot271, out->file_hashes[40].path, slot273, out->file_hashes[41].path, slot275, out->file_hashes[42].path, slot277, out->file_hashes[43].path, slot279, out->file_hashes[44].path, slot281, out->file_hashes[45].path, slot283, out->file_hashes[46].path, slot285, out->file_hashes[47].path, slot287, out->file_hashes[48].path, slot289, out->file_hashes[49].path, slot291, out->file_hashes[50].path, slot293, out->file_hashes[51].path, slot295, out->file_hashes[52].path, slot297, out->file_hashes[53].path, slot299, out->file_hashes[54].path, slot301, out->file_hashes[55].path, slot303, out->file_hashes[56].path, slot305, out->file_hashes[57].path, slot307, out->file_hashes[58].path, slot309, out->file_hashes[59].path, slot311, out->file_hashes[60].path, slot313, out->file_hashes[61].path, slot315, out->file_hashes[62].path, slot317, out->file_hashes[63].path, slot319, slot320, slot321, slot322, slot323, slot324, slot325, slot326, slot327, slot328, slot329, slot330, slot331, slot332, slot333, slot334, slot335, slot336, slot337, slot338, slot339, slot340, slot341, slot342, slot343, slot344, slot345, slot346, slot347, slot348, slot349, slot350, slot351, slot352, slot353, slot354, slot355, slot356, slot357, slot358, slot359, slot360, slot361, slot362, slot363, slot364, slot365, slot366, slot367, slot368, slot369, slot370, slot371, slot372, slot373, slot374, slot375, slot376, slot377, slot378, slot379, slot380, slot381, slot382, slot383, slot384, slot385};
    const size_t caps[] = {sizeof out->seen_paths[0], sizeof out->seen_paths[1], sizeof out->seen_paths[2], sizeof out->seen_paths[3], sizeof out->seen_paths[4], sizeof out->seen_paths[5], sizeof out->seen_paths[6], sizeof out->seen_paths[7], sizeof out->seen_paths[8], sizeof out->seen_paths[9], sizeof out->seen_paths[10], sizeof out->seen_paths[11], sizeof out->seen_paths[12], sizeof out->seen_paths[13], sizeof out->seen_paths[14], sizeof out->seen_paths[15], sizeof out->seen_paths[16], sizeof out->seen_paths[17], sizeof out->seen_paths[18], sizeof out->seen_paths[19], sizeof out->seen_paths[20], sizeof out->seen_paths[21], sizeof out->seen_paths[22], sizeof out->seen_paths[23], sizeof out->seen_paths[24], sizeof out->seen_paths[25], sizeof out->seen_paths[26], sizeof out->seen_paths[27], sizeof out->seen_paths[28], sizeof out->seen_paths[29], sizeof out->seen_paths[30], sizeof out->seen_paths[31], sizeof out->seen_paths[32], sizeof out->seen_paths[33], sizeof out->seen_paths[34], sizeof out->seen_paths[35], sizeof out->seen_paths[36], sizeof out->seen_paths[37], sizeof out->seen_paths[38], sizeof out->seen_paths[39], sizeof out->seen_paths[40], sizeof out->seen_paths[41], sizeof out->seen_paths[42], sizeof out->seen_paths[43], sizeof out->seen_paths[44], sizeof out->seen_paths[45], sizeof out->seen_paths[46], sizeof out->seen_paths[47], sizeof out->seen_paths[48], sizeof out->seen_paths[49], sizeof out->seen_paths[50], sizeof out->seen_paths[51], sizeof out->seen_paths[52], sizeof out->seen_paths[53], sizeof out->seen_paths[54], sizeof out->seen_paths[55], sizeof out->seen_paths[56], sizeof out->seen_paths[57], sizeof out->seen_paths[58], sizeof out->seen_paths[59], sizeof out->seen_paths[60], sizeof out->seen_paths[61], sizeof out->seen_paths[62], sizeof out->seen_paths[63], sizeof slot64, sizeof out->session_mode, sizeof out->guardrail_mode, sizeof slot67, sizeof slot68, sizeof slot69, sizeof out->worktrees[0].git_root, sizeof out->worktrees[0].worktree_path, sizeof out->worktrees[1].git_root, sizeof out->worktrees[1].worktree_path, sizeof out->worktrees[2].git_root, sizeof out->worktrees[2].worktree_path, sizeof out->worktrees[3].git_root, sizeof out->worktrees[3].worktree_path, sizeof out->worktrees[4].git_root, sizeof out->worktrees[4].worktree_path, sizeof out->worktrees[5].git_root, sizeof out->worktrees[5].worktree_path, sizeof out->worktrees[6].git_root, sizeof out->worktrees[6].worktree_path, sizeof out->worktrees[7].git_root, sizeof out->worktrees[7].worktree_path, sizeof out->worktrees[8].git_root, sizeof out->worktrees[8].worktree_path, sizeof out->worktrees[9].git_root, sizeof out->worktrees[9].worktree_path, sizeof out->worktrees[10].git_root, sizeof out->worktrees[10].worktree_path, sizeof out->worktrees[11].git_root, sizeof out->worktrees[11].worktree_path, sizeof out->worktrees[12].git_root, sizeof out->worktrees[12].worktree_path, sizeof out->worktrees[13].git_root, sizeof out->worktrees[13].worktree_path, sizeof out->worktrees[14].git_root, sizeof out->worktrees[14].worktree_path, sizeof out->worktrees[15].git_root, sizeof out->worktrees[15].worktree_path, sizeof slot102, sizeof slot103, sizeof slot104, sizeof slot105, sizeof slot106, sizeof slot107, sizeof slot108, sizeof out->tdd_mode, sizeof out->tdd_writes[0].stem, sizeof slot111, sizeof out->tdd_writes[1].stem, sizeof slot113, sizeof out->tdd_writes[2].stem, sizeof slot115, sizeof out->tdd_writes[3].stem, sizeof slot117, sizeof out->tdd_writes[4].stem, sizeof slot119, sizeof out->tdd_writes[5].stem, sizeof slot121, sizeof out->tdd_writes[6].stem, sizeof slot123, sizeof out->tdd_writes[7].stem, sizeof slot125, sizeof slot126, sizeof out->read_paths[0], sizeof out->read_paths[1], sizeof out->read_paths[2], sizeof out->read_paths[3], sizeof out->read_paths[4], sizeof out->read_paths[5], sizeof out->read_paths[6], sizeof out->read_paths[7], sizeof out->read_paths[8], sizeof out->read_paths[9], sizeof out->read_paths[10], sizeof out->read_paths[11], sizeof out->read_paths[12], sizeof out->read_paths[13], sizeof out->read_paths[14], sizeof out->read_paths[15], sizeof out->read_paths[16], sizeof out->read_paths[17], sizeof out->read_paths[18], sizeof out->read_paths[19], sizeof out->read_paths[20], sizeof out->read_paths[21], sizeof out->read_paths[22], sizeof out->read_paths[23], sizeof out->read_paths[24], sizeof out->read_paths[25], sizeof out->read_paths[26], sizeof out->read_paths[27], sizeof out->read_paths[28], sizeof out->read_paths[29], sizeof out->read_paths[30], sizeof out->read_paths[31], sizeof out->read_paths[32], sizeof out->read_paths[33], sizeof out->read_paths[34], sizeof out->read_paths[35], sizeof out->read_paths[36], sizeof out->read_paths[37], sizeof out->read_paths[38], sizeof out->read_paths[39], sizeof out->read_paths[40], sizeof out->read_paths[41], sizeof out->read_paths[42], sizeof out->read_paths[43], sizeof out->read_paths[44], sizeof out->read_paths[45], sizeof out->read_paths[46], sizeof out->read_paths[47], sizeof out->read_paths[48], sizeof out->read_paths[49], sizeof out->read_paths[50], sizeof out->read_paths[51], sizeof out->read_paths[52], sizeof out->read_paths[53], sizeof out->read_paths[54], sizeof out->read_paths[55], sizeof out->read_paths[56], sizeof out->read_paths[57], sizeof out->read_paths[58], sizeof out->read_paths[59], sizeof out->read_paths[60], sizeof out->read_paths[61], sizeof out->read_paths[62], sizeof out->read_paths[63], sizeof slot191, sizeof out->file_hashes[0].path, sizeof slot193, sizeof out->file_hashes[1].path, sizeof slot195, sizeof out->file_hashes[2].path, sizeof slot197, sizeof out->file_hashes[3].path, sizeof slot199, sizeof out->file_hashes[4].path, sizeof slot201, sizeof out->file_hashes[5].path, sizeof slot203, sizeof out->file_hashes[6].path, sizeof slot205, sizeof out->file_hashes[7].path, sizeof slot207, sizeof out->file_hashes[8].path, sizeof slot209, sizeof out->file_hashes[9].path, sizeof slot211, sizeof out->file_hashes[10].path, sizeof slot213, sizeof out->file_hashes[11].path, sizeof slot215, sizeof out->file_hashes[12].path, sizeof slot217, sizeof out->file_hashes[13].path, sizeof slot219, sizeof out->file_hashes[14].path, sizeof slot221, sizeof out->file_hashes[15].path, sizeof slot223, sizeof out->file_hashes[16].path, sizeof slot225, sizeof out->file_hashes[17].path, sizeof slot227, sizeof out->file_hashes[18].path, sizeof slot229, sizeof out->file_hashes[19].path, sizeof slot231, sizeof out->file_hashes[20].path, sizeof slot233, sizeof out->file_hashes[21].path, sizeof slot235, sizeof out->file_hashes[22].path, sizeof slot237, sizeof out->file_hashes[23].path, sizeof slot239, sizeof out->file_hashes[24].path, sizeof slot241, sizeof out->file_hashes[25].path, sizeof slot243, sizeof out->file_hashes[26].path, sizeof slot245, sizeof out->file_hashes[27].path, sizeof slot247, sizeof out->file_hashes[28].path, sizeof slot249, sizeof out->file_hashes[29].path, sizeof slot251, sizeof out->file_hashes[30].path, sizeof slot253, sizeof out->file_hashes[31].path, sizeof slot255, sizeof out->file_hashes[32].path, sizeof slot257, sizeof out->file_hashes[33].path, sizeof slot259, sizeof out->file_hashes[34].path, sizeof slot261, sizeof out->file_hashes[35].path, sizeof slot263, sizeof out->file_hashes[36].path, sizeof slot265, sizeof out->file_hashes[37].path, sizeof slot267, sizeof out->file_hashes[38].path, sizeof slot269, sizeof out->file_hashes[39].path, sizeof slot271, sizeof out->file_hashes[40].path, sizeof slot273, sizeof out->file_hashes[41].path, sizeof slot275, sizeof out->file_hashes[42].path, sizeof slot277, sizeof out->file_hashes[43].path, sizeof slot279, sizeof out->file_hashes[44].path, sizeof slot281, sizeof out->file_hashes[45].path, sizeof slot283, sizeof out->file_hashes[46].path, sizeof slot285, sizeof out->file_hashes[47].path, sizeof slot287, sizeof out->file_hashes[48].path, sizeof slot289, sizeof out->file_hashes[49].path, sizeof slot291, sizeof out->file_hashes[50].path, sizeof slot293, sizeof out->file_hashes[51].path, sizeof slot295, sizeof out->file_hashes[52].path, sizeof slot297, sizeof out->file_hashes[53].path, sizeof slot299, sizeof out->file_hashes[54].path, sizeof slot301, sizeof out->file_hashes[55].path, sizeof slot303, sizeof out->file_hashes[56].path, sizeof slot305, sizeof out->file_hashes[57].path, sizeof slot307, sizeof out->file_hashes[58].path, sizeof slot309, sizeof out->file_hashes[59].path, sizeof slot311, sizeof out->file_hashes[60].path, sizeof slot313, sizeof out->file_hashes[61].path, sizeof slot315, sizeof out->file_hashes[62].path, sizeof slot317, sizeof out->file_hashes[63].path, sizeof slot319, sizeof slot320, sizeof slot321, sizeof slot322, sizeof slot323, sizeof slot324, sizeof slot325, sizeof slot326, sizeof slot327, sizeof slot328, sizeof slot329, sizeof slot330, sizeof slot331, sizeof slot332, sizeof slot333, sizeof slot334, sizeof slot335, sizeof slot336, sizeof slot337, sizeof slot338, sizeof slot339, sizeof slot340, sizeof slot341, sizeof slot342, sizeof slot343, sizeof slot344, sizeof slot345, sizeof slot346, sizeof slot347, sizeof slot348, sizeof slot349, sizeof slot350, sizeof slot351, sizeof slot352, sizeof slot353, sizeof slot354, sizeof slot355, sizeof slot356, sizeof slot357, sizeof slot358, sizeof slot359, sizeof slot360, sizeof slot361, sizeof slot362, sizeof slot363, sizeof slot364, sizeof slot365, sizeof slot366, sizeof slot367, sizeof slot368, sizeof slot369, sizeof slot370, sizeof slot371, sizeof slot372, sizeof slot373, sizeof slot374, sizeof slot375, sizeof slot376, sizeof slot377, sizeof slot378, sizeof slot379, sizeof slot380, sizeof slot381, sizeof slot382, sizeof slot383, sizeof slot384, sizeof slot385};
-   int wire_status = call_stage(AIMEE_DB1_OP_SESSION_STATE_LOAD, fields, 1, values, caps, 386, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_SESSION_STATE_LOAD, fields, 1, values, caps, 386, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
       return -1;
@@ -852,7 +653,7 @@ int db1_session_state_save(const char *sid, const session_state_t *in)
    char arg386[32];
    snprintf(arg386, sizeof arg386, "%d", in->ap_hit_count);
    const char *fields[] = {sid, in->seen_paths[0], in->seen_paths[1], in->seen_paths[2], in->seen_paths[3], in->seen_paths[4], in->seen_paths[5], in->seen_paths[6], in->seen_paths[7], in->seen_paths[8], in->seen_paths[9], in->seen_paths[10], in->seen_paths[11], in->seen_paths[12], in->seen_paths[13], in->seen_paths[14], in->seen_paths[15], in->seen_paths[16], in->seen_paths[17], in->seen_paths[18], in->seen_paths[19], in->seen_paths[20], in->seen_paths[21], in->seen_paths[22], in->seen_paths[23], in->seen_paths[24], in->seen_paths[25], in->seen_paths[26], in->seen_paths[27], in->seen_paths[28], in->seen_paths[29], in->seen_paths[30], in->seen_paths[31], in->seen_paths[32], in->seen_paths[33], in->seen_paths[34], in->seen_paths[35], in->seen_paths[36], in->seen_paths[37], in->seen_paths[38], in->seen_paths[39], in->seen_paths[40], in->seen_paths[41], in->seen_paths[42], in->seen_paths[43], in->seen_paths[44], in->seen_paths[45], in->seen_paths[46], in->seen_paths[47], in->seen_paths[48], in->seen_paths[49], in->seen_paths[50], in->seen_paths[51], in->seen_paths[52], in->seen_paths[53], in->seen_paths[54], in->seen_paths[55], in->seen_paths[56], in->seen_paths[57], in->seen_paths[58], in->seen_paths[59], in->seen_paths[60], in->seen_paths[61], in->seen_paths[62], in->seen_paths[63], arg65, in->session_mode, in->guardrail_mode, arg68, arg69, arg70, in->worktrees[0].git_root, in->worktrees[0].worktree_path, in->worktrees[1].git_root, in->worktrees[1].worktree_path, in->worktrees[2].git_root, in->worktrees[2].worktree_path, in->worktrees[3].git_root, in->worktrees[3].worktree_path, in->worktrees[4].git_root, in->worktrees[4].worktree_path, in->worktrees[5].git_root, in->worktrees[5].worktree_path, in->worktrees[6].git_root, in->worktrees[6].worktree_path, in->worktrees[7].git_root, in->worktrees[7].worktree_path, in->worktrees[8].git_root, in->worktrees[8].worktree_path, in->worktrees[9].git_root, in->worktrees[9].worktree_path, in->worktrees[10].git_root, in->worktrees[10].worktree_path, in->worktrees[11].git_root, in->worktrees[11].worktree_path, in->worktrees[12].git_root, in->worktrees[12].worktree_path, in->worktrees[13].git_root, in->worktrees[13].worktree_path, in->worktrees[14].git_root, in->worktrees[14].worktree_path, in->worktrees[15].git_root, in->worktrees[15].worktree_path, arg103, arg104, arg105, arg106, arg107, arg108, arg109, in->tdd_mode, in->tdd_writes[0].stem, arg112, in->tdd_writes[1].stem, arg114, in->tdd_writes[2].stem, arg116, in->tdd_writes[3].stem, arg118, in->tdd_writes[4].stem, arg120, in->tdd_writes[5].stem, arg122, in->tdd_writes[6].stem, arg124, in->tdd_writes[7].stem, arg126, arg127, in->read_paths[0], in->read_paths[1], in->read_paths[2], in->read_paths[3], in->read_paths[4], in->read_paths[5], in->read_paths[6], in->read_paths[7], in->read_paths[8], in->read_paths[9], in->read_paths[10], in->read_paths[11], in->read_paths[12], in->read_paths[13], in->read_paths[14], in->read_paths[15], in->read_paths[16], in->read_paths[17], in->read_paths[18], in->read_paths[19], in->read_paths[20], in->read_paths[21], in->read_paths[22], in->read_paths[23], in->read_paths[24], in->read_paths[25], in->read_paths[26], in->read_paths[27], in->read_paths[28], in->read_paths[29], in->read_paths[30], in->read_paths[31], in->read_paths[32], in->read_paths[33], in->read_paths[34], in->read_paths[35], in->read_paths[36], in->read_paths[37], in->read_paths[38], in->read_paths[39], in->read_paths[40], in->read_paths[41], in->read_paths[42], in->read_paths[43], in->read_paths[44], in->read_paths[45], in->read_paths[46], in->read_paths[47], in->read_paths[48], in->read_paths[49], in->read_paths[50], in->read_paths[51], in->read_paths[52], in->read_paths[53], in->read_paths[54], in->read_paths[55], in->read_paths[56], in->read_paths[57], in->read_paths[58], in->read_paths[59], in->read_paths[60], in->read_paths[61], in->read_paths[62], in->read_paths[63], arg192, in->file_hashes[0].path, arg194, in->file_hashes[1].path, arg196, in->file_hashes[2].path, arg198, in->file_hashes[3].path, arg200, in->file_hashes[4].path, arg202, in->file_hashes[5].path, arg204, in->file_hashes[6].path, arg206, in->file_hashes[7].path, arg208, in->file_hashes[8].path, arg210, in->file_hashes[9].path, arg212, in->file_hashes[10].path, arg214, in->file_hashes[11].path, arg216, in->file_hashes[12].path, arg218, in->file_hashes[13].path, arg220, in->file_hashes[14].path, arg222, in->file_hashes[15].path, arg224, in->file_hashes[16].path, arg226, in->file_hashes[17].path, arg228, in->file_hashes[18].path, arg230, in->file_hashes[19].path, arg232, in->file_hashes[20].path, arg234, in->file_hashes[21].path, arg236, in->file_hashes[22].path, arg238, in->file_hashes[23].path, arg240, in->file_hashes[24].path, arg242, in->file_hashes[25].path, arg244, in->file_hashes[26].path, arg246, in->file_hashes[27].path, arg248, in->file_hashes[28].path, arg250, in->file_hashes[29].path, arg252, in->file_hashes[30].path, arg254, in->file_hashes[31].path, arg256, in->file_hashes[32].path, arg258, in->file_hashes[33].path, arg260, in->file_hashes[34].path, arg262, in->file_hashes[35].path, arg264, in->file_hashes[36].path, arg266, in->file_hashes[37].path, arg268, in->file_hashes[38].path, arg270, in->file_hashes[39].path, arg272, in->file_hashes[40].path, arg274, in->file_hashes[41].path, arg276, in->file_hashes[42].path, arg278, in->file_hashes[43].path, arg280, in->file_hashes[44].path, arg282, in->file_hashes[45].path, arg284, in->file_hashes[46].path, arg286, in->file_hashes[47].path, arg288, in->file_hashes[48].path, arg290, in->file_hashes[49].path, arg292, in->file_hashes[50].path, arg294, in->file_hashes[51].path, arg296, in->file_hashes[52].path, arg298, in->file_hashes[53].path, arg300, in->file_hashes[54].path, arg302, in->file_hashes[55].path, arg304, in->file_hashes[56].path, arg306, in->file_hashes[57].path, arg308, in->file_hashes[58].path, arg310, in->file_hashes[59].path, arg312, in->file_hashes[60].path, arg314, in->file_hashes[61].path, arg316, in->file_hashes[62].path, arg318, in->file_hashes[63].path, arg320, arg321, arg322, arg323, arg324, arg325, arg326, arg327, arg328, arg329, arg330, arg331, arg332, arg333, arg334, arg335, arg336, arg337, arg338, arg339, arg340, arg341, arg342, arg343, arg344, arg345, arg346, arg347, arg348, arg349, arg350, arg351, arg352, arg353, arg354, arg355, arg356, arg357, arg358, arg359, arg360, arg361, arg362, arg363, arg364, arg365, arg366, arg367, arg368, arg369, arg370, arg371, arg372, arg373, arg374, arg375, arg376, arg377, arg378, arg379, arg380, arg381, arg382, arg383, arg384, arg385, arg386};
-   return write_result(call_stage(AIMEE_DB1_OP_SESSION_STATE_SAVE, fields, 387, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_STATE_SAVE, fields, 387, NULL, NULL, 0, NULL));
 }
 
 int db1_session_state_delete(const char *sid)
@@ -860,7 +661,7 @@ int db1_session_state_delete(const char *sid)
    if (!sid || !sid[0])
       return -1;
    const char *fields[] = {sid};
-   return write_result(call_stage(AIMEE_DB1_OP_SESSION_STATE_DELETE, fields, 1, NULL, NULL, 0, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_STATE_DELETE, fields, 1, NULL, NULL, 0, NULL));
 }
 
 int db1_session_state_exists(const char *sid)
@@ -871,7 +672,7 @@ int db1_session_state_exists(const char *sid)
    char slot0[32];
    char *const values[] = {slot0};
    const size_t caps[] = {sizeof slot0};
-   int wire_status = call_stage(AIMEE_DB1_OP_SESSION_STATE_EXISTS, fields, 1, values, caps, 1, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_SESSION_STATE_EXISTS, fields, 1, values, caps, 1, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
       return -1;
    return (int)strtoll(slot0, NULL, 10);
@@ -907,7 +708,7 @@ int db1_session_state_list(db1_session_state_summary_t *out, int max)
       wire_caps[wire_row * 3u + 2u] = sizeof wire_scratch[wire_row * 1u + 0u];
    }
    uint32_t wire_filled = 0;
-   int wire_status = call_stage(AIMEE_DB1_OP_SESSION_STATE_LIST, fields, 1, wire_values, wire_caps,
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_SESSION_STATE_LIST, fields, 1, wire_values, wire_caps,
                            (uint32_t)(max * 3), &wire_filled);
    free(wire_values);
    free(wire_caps);
@@ -934,7 +735,7 @@ int db1_session_state_get_summary(const char *sid, db1_session_state_summary_t *
    memset(out, 0, sizeof *out);
    char *const values[] = {out->session_id, out->updated_at, slot2};
    const size_t caps[] = {sizeof out->session_id, sizeof out->updated_at, sizeof slot2};
-   int wire_status = call_stage(AIMEE_DB1_OP_SESSION_STATE_GET_SUMMARY, fields, 1, values, caps, 3, NULL);
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_SESSION_STATE_GET_SUMMARY, fields, 1, values, caps, 3, NULL);
    if (wire_status != (int)AIMEE_DB1_STATUS_OK)
    {
       return -1;
@@ -969,7 +770,7 @@ int db1_session_state_list_expired(int threshold_seconds, char (*out_ids)[DB1_SS
       wire_caps[wire_row * 1u + 0u] = sizeof out_ids[wire_row];
    }
    uint32_t wire_filled = 0;
-   int wire_status = call_stage(AIMEE_DB1_OP_SESSION_STATE_LIST_EXPIRED, fields, 2, wire_values, wire_caps,
+   int wire_status = db1_call(&family, AIMEE_DB1_OP_SESSION_STATE_LIST_EXPIRED, fields, 2, wire_values, wire_caps,
                            (uint32_t)(max * 1), &wire_filled);
    free(wire_values);
    free(wire_caps);
@@ -994,7 +795,7 @@ int db1_session_exploration_apply(const char *principal, const char *sid, const 
    size_t caps[] = {reply_len};
    reply[0] = '\0';
    return write_result(
-       call_stage(AIMEE_DB1_OP_SESSION_EXPLORATION_APPLY, fields, 3, values, caps, 1, NULL));
+       db1_call(&family, AIMEE_DB1_OP_SESSION_EXPLORATION_APPLY, fields, 3, values, caps, 1, NULL));
 }
 
 int db1_session_task_projection_apply(const char *principal, const char *sid, const char *request,
@@ -1007,8 +808,8 @@ int db1_session_task_projection_apply(const char *principal, const char *sid, co
    char *values[] = {reply};
    size_t caps[] = {reply_len};
    reply[0] = '\0';
-   return write_result(
-       call_stage(AIMEE_DB1_OP_SESSION_TASK_PROJECTION_APPLY, fields, 3, values, caps, 1, NULL));
+   return write_result(db1_call(&family, AIMEE_DB1_OP_SESSION_TASK_PROJECTION_APPLY, fields, 3,
+                                values, caps, 1, NULL));
 }
 
 int db1_governed_action_apply(const char *principal, const char *sid, const char *request,
@@ -1022,5 +823,5 @@ int db1_governed_action_apply(const char *principal, const char *sid, const char
    size_t caps[] = {reply_len};
    reply[0] = '\0';
    return write_result(
-       call_stage(AIMEE_DB1_OP_GOVERNED_ACTION_APPLY, fields, 3, values, caps, 1, NULL));
+       db1_call(&family, AIMEE_DB1_OP_GOVERNED_ACTION_APPLY, fields, 3, values, caps, 1, NULL));
 }

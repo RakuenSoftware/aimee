@@ -7,6 +7,37 @@ and injection, sealing, rotation, and custody-provider binding. It does not own 
 Git or forge protocols, optional OIDC governance, tool execution, workspace selection, or the policy
 that decides whether a caller may request a credential.
 
+Selected native API-key connections use `agent_api_connection_credentials` under the captured
+Vault principal. It resolves only the selected registration, commits the actual key and connection
+profile to opaque lineage, and refuses competing credential headers. A host binds that exact
+credential with `agent_set_request_api_credentials_for` for one request; target edits in that
+registration refuse. Other registrations resolve their own credentials without borrowing the key. These values stay off the module bus and child environment, and are
+cleansed with the per-request credential snapshot. Existing unscoped compatibility resolution is
+unchanged.
+
+Selected Claude subscription connections use `agent_claude_connection_credentials`. The source is
+only the selected registration's sealed native login document. The adapter preserves its persisted
+client ID and exact granted scopes, normalizes expiry from milliseconds, and refreshes through a
+fixed server-owned endpoint using a JSON body on stdin. Missing/removed or ambiguous source
+fields refuse; neither client files nor another registration supply a fallback. Codex and Claude
+share the registration's refresh lock and normalized-source fence, preventing a vendor switch from
+reusing the other vendor's rotated token. Successful refresh retains original source lineage.
+
+The native runtime checks that lineage on callbacks and binds the selected bearer only to model
+requests. Request snapshots retain the registration/target binding; endpoint/profile edits refuse,
+and MCP tools/delegates resolve their own credentials. OAuth beta admission preserves the other
+Anthropic beta capabilities. Source/refresh fixtures and loopback broker tests do not qualify a live
+Claude subscription or activate production SDK spawning.
+
+OAuth refresh and native-source seeding now use `vault_service_write_server_batch`: access,
+refresh, expiry, rejection state and the selected source fence commit through one encrypted Vault
+file replacement. The existing field layout is retained. Missing refresh in a normal refresh
+response preserves the existing refresh credential; a newly selected source requires its own
+refresh credential. Token validity reads access/expiry/rejection from one immutable snapshot.
+Batch updates reject duplicate fields and unsupported backends, with no sequential fallback. Each
+field emits only non-secret audit metadata. Production native activation and live subscription
+qualification remain outstanding.
+
 ## Public contracts
 
 Canonical implementation lives in `src/modules/vault`: the server-wrap retrieval path begins at

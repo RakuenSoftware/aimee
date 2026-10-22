@@ -1,6 +1,6 @@
 /* kb_store/rules.c: agent rules — Postgres via libpq. */
 
-#include "../support/kb_store_runtime_config.h"
+#include "config.h"
 #include "rules.h"
 #include "kb_store_internal.h"
 #include "db_postgres.h"

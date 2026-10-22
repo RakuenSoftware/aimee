@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
-OUTPUTS = ["src/modules/kb/c/schema_sqlite.sql", "src/rel_types.c", "src/modules/kb/c/schema.sql", "src/modules/kb/support/rel_seed_primitives.c", "server-go/modules/memory/testdata/ontology_seed.tsv"]
+OUTPUTS = ["src/modules/kb/c/schema_sqlite.sql", "src/rel_types.c", "src/modules/kb/c/schema.sql", "server-go/modules/memory/testdata/ontology_seed.tsv"]
 
 class OntologySeedGeneratorTests(unittest.TestCase):
     @classmethod
@@ -60,16 +60,6 @@ class OntologySeedGeneratorTests(unittest.TestCase):
             self.assertEqual(result.returncode,1)
             for p in OUTPUTS:
                 self.assertEqual(before[p],(root/p).read_bytes())
-    def test_standalone_kb_store_output_and_failure(self):
-        with tempfile.TemporaryDirectory() as raw:
-            path = Path(raw)/"seed.c"
-            result = self.run_generator("--kb-store-output",path)
-            self.assertEqual(result.returncode,0,result.stderr)
-            self.assertEqual(path.read_bytes(),(REPO/"src/modules/kb/support/rel_seed_primitives.c").read_bytes())
-            result = self.run_generator("--kb-store-output",Path(raw)/"missing"/"seed.c")
-            self.assertEqual(result.returncode,1)
-            result = self.run_generator("unexpected")
-            self.assertEqual(result.returncode,2)
 
 if __name__ == "__main__":
     unittest.main()

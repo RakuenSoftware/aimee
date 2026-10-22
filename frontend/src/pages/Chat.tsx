@@ -1,9 +1,18 @@
+import { parseJSON, stringifyJSON } from '../ir/json';
+import './chat.css';
+import { mergeChannelMessages, type ChannelMessage } from './chat/channelMessages';
+import { useSessionPreference } from './chat/useSessionPreference';
 import { useEffect, useRef, useState, useCallback, memo } from 'react';
-import { AutoGrowTextarea, Button, Drawer, Spinner, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
+import { AutoGrowTextarea, Button, Drawer, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
 import { renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
 import { useSessions } from '../SessionContext';
+import IRTranscript from '../ir/Transcript';
+import { emptySession, reduceSession } from '../ir/session';
+import { operatorCancelError } from '../ir/interruption';
+import type { Envelope, SessionState } from '../ir/session';
+import type { ControlReply } from '../ir/ControlCard';
 import { reconcileSessionMessages } from '../sessionPersistence';
 
 /* ---- Types ---- */
@@ -73,12 +82,6 @@ interface ChannelInfo {
   created_at?: string;
 }
 
-interface ChannelMessage {
-  sender: string;
-  text: string;
-  created_at?: string;
-}
-
 interface PluginInfo {
   name: string;
   version: string;
@@ -128,11 +131,6 @@ const STREAM_PERSIST_DEBOUNCE_MS = 1000;
 // window, not the whole conversation. Scrolling/"show earlier" reveals the rest.
 const TRANSCRIPT_WINDOW = 150;
 const TRANSCRIPT_WINDOW_STEP = 150;
-// Cap how often streamed deltas trigger a React re-render. Each flush reconciles
-// the whole message list and re-parses the streaming message's markdown, so a
-// per-token (or per-frame) cadence pegs a CPU core during long/continuous turns.
-// ~100 ms (≈10 fps) is visually smooth for text while cutting render work ~6×.
-const STREAM_FLUSH_THROTTLE_MS = 100;
 
 function loadActiveChannel(): string | null {
   try { return localStorage.getItem(CHANNEL_KEY); } catch { return null; }
@@ -181,7 +179,8 @@ function normalizeTab(tab: Partial<TabData> | null | undefined, index: number): 
     messages,
     sid: typeof tab?.sid === 'string' ? tab.sid : '',
     aimeeSid: typeof tab?.aimeeSid === 'string' && tab.aimeeSid ? tab.aimeeSid : newAimeeSessionId(),
-    attachId: typeof tab?.attachId === 'string' ? tab.attachId : undefined,
+    // Presence attachments belong to this live browser page, never its cache.
+    attachId: undefined,
     workflowChannel: tab?.workflowChannel,
     threads: tab?.threads,
     activeThreadId: tab?.activeThreadId,
@@ -1129,13 +1128,13 @@ function ChannelView({ channelName, messages, agents, onSend }: ChannelViewProps
           <div style={{ color: tokens.textPale, fontSize: '13px' }}>No messages yet.</div>
         )}
         {messages.map((m, i) => (
-          <div key={i} style={{ fontSize: '13px' }}>
+          <div key={m.id ?? i} style={{ fontSize: '13px' }}>
             <span style={{ fontWeight: 600, color: tokens.primary, marginRight: '6px' }}>
               {m.sender}
             </span>
             {m.created_at && (
               <span style={{ fontSize: '11px', color: tokens.textPale, marginRight: '8px' }}>
-                {new Date(m.created_at + 'Z').toLocaleTimeString()}
+                {new Date(/(?:Z|[+-]\d\d:\d\d)$/.test(m.created_at) ? m.created_at : m.created_at + 'Z').toLocaleTimeString()}
               </span>
             )}
             <span
@@ -1306,6 +1305,40 @@ export default function Chat() {
   const matchedIdx = tabs.findIndex(tab => tab.sessionId === activeSessionId);
   const activeIdx = matchedIdx >= 0 ? matchedIdx : 0;
   const [streamMsgs, setStreamMsgs] = useState<StreamMsg[]>([]);
+  const irSessions = useRef<Record<string, SessionState>>({});
+  const irPending = useRef<Record<string, Map<string, Envelope>>>({});
+  const irFlush = useRef<number | null>(null);
+  const [, setIRRevision] = useState(0);
+  const [irTransportErrors, setIRTransportErrors] = useState<Record<string, string>>({});
+  const [sendErrors, setSendErrors] = useState<Record<string, string>>({});
+  const [irReady, setIRReady] = useState<Record<string, boolean>>({});
+  const [irReconnect, setIRReconnect] = useState(0);
+  function ingestIR(owner: string, raw: Record<string, unknown>) {
+    if (raw.status === 'error') throw new Error(String(raw.message || 'Session capture failed'));
+    const envelope = raw as unknown as Envelope;
+    if (envelope.version !== 1 || envelope.session_id !== owner || typeof envelope.sequence !== 'string' || !/^[1-9][0-9]*$/.test(envelope.sequence))
+      throw new Error('Invalid canonical session envelope');
+    let state = irSessions.current[owner] ?? emptySession(owner);
+    if (BigInt(envelope.sequence) <= BigInt(state.sequence)) return;
+    const pending = irPending.current[owner] ?? new Map<string, Envelope>();
+    const previous = pending.get(envelope.sequence);
+    if (previous && previous.event_id !== envelope.event_id) throw new Error('Conflicting session sequence');
+    pending.set(envelope.sequence, envelope);
+    if (pending.size > 4096) throw new Error('Session replay gap exceeds buffer limit');
+    for (;;) {
+      const next = String(BigInt(state.sequence) + 1n);
+      const event = pending.get(next);
+      if (!event) break;
+      state = reduceSession(state, event); pending.delete(next);
+    }
+    irPending.current[owner] = pending;
+    irSessions.current[owner] = state;
+    if (irFlush.current === null) irFlush.current = window.setTimeout(() => {
+      irFlush.current = null; setIRRevision(n => n + 1);
+    }, 50);
+  }
+  useEffect(() => () => { if (irFlush.current !== null) window.clearTimeout(irFlush.current); }, []);
+
   // Work (in-flight/queued sends + iteration progress) keyed by the owning tab's
   // aimeeSid, so the busy indicator reflects the ACTIVE tab alone — sending on one
   // tab no longer shows "working" on every other tab. Derived values below.
@@ -1314,19 +1347,12 @@ export default function Chat() {
   const working = !!activeWork && (activeWork.pending > 0 || activeWork.queued > 0);
   const iterCur = activeWork?.iterCur ?? 0;
   const iterMax = activeWork?.iterMax ?? 0;
-  // True while a turn is in flight on this tab's session driven by *another*
-  // surface (CLI/TUI, another tab). Fed by the presence-event stream; shown only
-  // when this tab isn't itself working (see render).
-  const [remoteTurnActive, setRemoteTurnActive] = useState(false);
-  // Live text of the other surface's in-flight turn, accumulated from
-  // turn_delta events (emitted by the server when >1 surface shares a session).
-  const [remoteTurnText, setRemoteTurnText] = useState('');
   const [inputText, setInputText] = useState('');
+  const stoppingSessions = useRef(new Set<string>());
   const [banner, setBanner] = useState<{ stacks: BootstrapStack[] } | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
-  const [lastUsage, setLastUsage] = useState<{ in: number; out: number; cost: number } | null>(null);
   const [sessionUsage, setSessionUsage] = useState<{ in: number; out: number; cost: number; kind: string }>({ in: 0, out: 0, cost: 0, kind: 'realized' });
   const [allTimeMetrics, setAllTimeMetrics] = useState<MetricRow[]>([]);
   const [promptTier, setPromptTier] = useState<'MINIMAL' | 'STANDARD' | 'EXTENDED'>('STANDARD');
@@ -1351,7 +1377,8 @@ export default function Chat() {
         const existing = byId.get(s.id) ?? byAimeeId.get(s.aimeeSid);
         if (existing) {
           const messages = existing.aimeeSid === s.aimeeSid
-            ? reconcileSessionMessages(existing.messages, s.messages) : s.messages;
+            ? irSessions.current[s.aimeeSid]?.messages.length ? existing.messages
+              : reconcileSessionMessages(existing.messages, s.messages) : s.messages;
           if (existing.sessionId === s.id && existing.title === s.name &&
               existing.aimeeSid === s.aimeeSid && messages === existing.messages &&
               (!s.claudeSid || existing.sid === s.claudeSid)) return existing;
@@ -1397,13 +1424,11 @@ export default function Chat() {
   const [availableSkills, setAvailableSkills] = useState<string[]>([]);
   const [activeSkill, setActiveSkill] = useState<string>('');
   const [availablePersonas, setAvailablePersonas] = useState<PersonaInfo[]>([]);
-  const [activePersona, setActivePersona] = useState<string>('');
   /* The agent serving this tab's turns. `activeAgent` is the SESSION PIN (empty
    * = not pinned); `defaultAgent` is what an unpinned turn actually lands on,
    * reported by /api/models (server-side agent_default_primary). The selector
    * shows the pin when there is one, else the default, so it always names the
    * agent you are really talking to. */
-  const [activeAgent, setActiveAgent] = useState<string>('');
   const [defaultAgent, setDefaultAgent] = useState<string>('');
   const [lspDiag, setLspDiag] = useState<{ errors: number; warnings: number; active_servers: number } | null>(null);
   const [workflowInfo, setWorkflowInfo] = useState<WorkflowSessionInfo | null>(null);
@@ -1415,15 +1440,17 @@ export default function Chat() {
   const [pluginsLoading, setPluginsLoading] = useState(false);
   const [pluginsError, setPluginsError] = useState<string | null>(null);
   const [agents, setAgents] = useState<ModelInfo[]>([]);
+  const [branchingSupported, setBranchingSupported] = useState(false);
+  const [threadError, setThreadError] = useState('');
 
   /* Channel state */
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [activeChannel, setActiveChannel] = useState<string | null>(loadActiveChannel);
+  const [channelsOpen, setChannelsOpen] = useState(() => !!loadActiveChannel());
   const [channelMsgs, setChannelMsgs] = useState<Record<string, ChannelMessage[]>>({});
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const channelSseRef = useRef<EventSource | null>(null);
   const presenceSseRef = useRef<EventSource | null>(null);
-  const activeChannelRef = useRef<string | null>(activeChannel);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1452,21 +1479,10 @@ export default function Chat() {
   }
   const tabsRef = useRef<TabData[]>(tabs);
   const activeIdxRef = useRef(activeIdx);
-  // Live mirror of remoteTurnActive so sendMessage can synchronously tell whether
-  // a server/foreign turn (e.g. a steer auto-continue) is in flight for the tab.
-  const remoteTurnActiveRef = useRef(false);
-  // Holds the aimeeSid we just sent a steer for (chat.interrupt). The next
-  // turn_started on THAT session's events stream is the server-initiated
-  // continuation — render it even though this surface may still look "working"
-  // while the cancelled turn's stream closes (otherwise the wasWorking self-echo
-  // guard would drop the steered reply). Keyed by sid so switching tabs can't
-  // make a different tab's turn consume it. '' = none.
-  const expectSteerRef = useRef<string>('');
   // turn_ids already committed to history from the presence ring this session.
   // The ring replays turn_started→deltas→turn_done from cursor 0 on EVERY new
   // subscription (reconnect / tab switch back), so dedup is required to avoid
   // re-appending the same observed turn. Survives effect re-runs (component ref).
-  const persistedTurnsRef = useRef<Set<string>>(new Set());
   /* Stream-token batching: text/thinking deltas arrive far faster than the
    * screen refreshes. Rather than a setStreamMsgs (→ full re-render) per token,
    * we accumulate deltas here and flush them in a single state update per
@@ -1488,6 +1504,95 @@ export default function Chat() {
   const renderedSidRef = useRef<string>('');
   const queueActive = working;
   const activePersonaSid = tabs[activeIdx]?.aimeeSid ?? '';
+  const activeSessionMatched = !!activeSession && tabs[activeIdx]?.sessionId === activeSession.id && activePersonaSid === activeSession.aimeeSid;
+  const attached = useRef(new Map<string, string>());
+  const attaching = useRef(new Map<string, Promise<string>>());
+  const attachmentMounted = useRef(false);
+  const [attachmentReady, setAttachmentReady] = useState<Record<string, boolean>>({});
+  const detachAttachment = useCallback((sid: string, attachId: string) => {
+    void fetch('/api/chat/detach', {
+      method: 'POST', keepalive: true,
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
+      body: JSON.stringify({ sid, attach_id: attachId }),
+    }).catch(() => {});
+  }, []);
+  useEffect(() => {
+    attachmentMounted.current = true;
+    return () => {
+      attachmentMounted.current = false;
+      // React's development StrictMode immediately remounts effects. Keep its
+      // one in-flight admission; a genuine navigation releases the surface.
+      queueMicrotask(() => {
+        if (attachmentMounted.current) return;
+        for (const [sid, id] of attached.current) detachAttachment(sid, id);
+        attached.current.clear();
+      });
+    };
+  }, [detachAttachment]);
+  const ensureAttachment = useCallback((sid: string): Promise<string> => {
+    if (!sid) return Promise.reject(new Error('Conversation has no session identity'));
+    const existing = attached.current.get(sid);
+    if (existing) return Promise.resolve(existing);
+    const pending = attaching.current.get(sid);
+    if (pending) return pending;
+    const request = fetch('/api/chat/attach', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
+      body: JSON.stringify({ sid }),
+    }).then(async response => {
+      if (!response.ok) throw new Error('Could not attach conversation. Please reconnect.');
+      const body = await response.json() as { session_id?: unknown; attach_id?: unknown };
+      if (body.session_id !== sid || typeof body.attach_id !== 'string' || !body.attach_id ||
+          body.attach_id.length > 128 || /[\u0000-\u0020\u007f]/.test(body.attach_id))
+        throw new Error('Invalid conversation attachment');
+      const id = body.attach_id;
+      if (!attachmentMounted.current || !tabsRef.current.some(tab => tab.aimeeSid === sid)) {
+        detachAttachment(sid, id);
+        throw new Error('Conversation was closed before attachment completed');
+      }
+      attached.current.set(sid, id);
+      setTabs(prev => {
+        const next = prev.map(tab => tab.aimeeSid === sid ? { ...tab, attachId: id } : tab);
+        tabsRef.current = next;
+        return next;
+      });
+      setAttachmentReady(prev => ({ ...prev, [sid]: true }));
+      return id;
+    }).finally(() => { attaching.current.delete(sid); });
+    attaching.current.set(sid, request);
+    return request;
+  }, [detachAttachment]);
+  const invalidateAttachment = useCallback((sid: string) => {
+    const old = attached.current.get(sid);
+    attached.current.delete(sid);
+    if (old) detachAttachment(sid, old);
+    setAttachmentReady(prev => ({ ...prev, [sid]: false }));
+    setTabs(prev => {
+      const next = prev.map(tab => tab.aimeeSid === sid ? { ...tab, attachId: undefined } : tab);
+      tabsRef.current = next;
+      return next;
+    });
+  }, [detachAttachment]);
+  useEffect(() => {
+    let disposed = false;
+    if (activeSessionMatched && activePersonaSid) void ensureAttachment(activePersonaSid).catch(error => {
+      if (!disposed) setIRTransportErrors(prev => ({ ...prev, [activePersonaSid]: error instanceof Error ? error.message : 'Could not attach conversation' }));
+    });
+    return () => { disposed = true; };
+  }, [activePersonaSid, activeSessionMatched, ensureAttachment, irReconnect]);
+  useEffect(() => {
+    for (const [sid, id] of attached.current) {
+      if (tabs.some(tab => tab.aimeeSid === sid)) continue;
+      detachAttachment(sid, id);
+      attached.current.delete(sid);
+      setAttachmentReady(prev => ({ ...prev, [sid]: false }));
+    }
+  }, [tabs, detachAttachment]);
+  const activeAttached = !!attachmentReady[activePersonaSid];
+  const persona = useSessionPreference(activePersonaSid, '/api/chat/persona', 'name', activeAttached);
+  const primary = useSessionPreference(activePersonaSid, '/api/chat/primary', 'agent', activeAttached);
+  const activePersona = persona.value;
+  const activeAgent = primary.value;
 
   /* Auto-scroll. Instant, not smooth: this runs ~10×/s during a stream, and a
    * smooth scrollIntoView restarts an animated scroll on every call — the
@@ -1511,8 +1616,8 @@ export default function Chat() {
   // tab opens windowed, not expanded from a previous one.
   const [visibleCount, setVisibleCount] = useState(TRANSCRIPT_WINDOW);
   useEffect(() => { setVisibleCount(TRANSCRIPT_WINDOW); }, [activePersonaSid]);
-  const hiddenCount = Math.max(0, streamMsgs.length - visibleCount);
-  const windowedMsgs = hiddenCount > 0 ? streamMsgs.slice(hiddenCount) : streamMsgs;
+  const hiddenLegacyCount = Math.max(0, streamMsgs.length - visibleCount);
+  const windowedMsgs = hiddenLegacyCount > 0 ? streamMsgs.slice(hiddenLegacyCount) : streamMsgs;
 
   useEffect(() => { scrollToBottom(); }, [streamMsgs, working, scrollToBottom]);
   useEffect(() => { streamMsgsRef.current = streamMsgs; }, [streamMsgs]);
@@ -1553,7 +1658,9 @@ export default function Chat() {
     // Detach presence only on a GENUINE unload: a tab going to the background — or
     // entering bfcache (pagehide persisted=true, restored without re-mounting) —
     // is still an active session and must stay attached.
-    const onBeforeUnload = () => { flushPendingTabs(); detachAll(); };
+    // beforeunload also fires for BFcache entry or a cancelled navigation.
+    // Only pagehide can tell whether this document is actually being discarded.
+    const onBeforeUnload = () => { flushPendingTabs(); };
     const onPageHide = (e: PageTransitionEvent) => { flushPendingTabs(); if (!e.persisted) detachAll(); };
     const onVisibility = () => { if (document.visibilityState === 'hidden') flushPendingTabs(); };
     window.addEventListener('beforeunload', onBeforeUnload);
@@ -1570,143 +1677,82 @@ export default function Chat() {
    * can show when aimee is responding on another surface (CLI/TUI, another
    * tab). Only meaningful once the tab has attached (presence exists). */
   const activeAimeeSid = tabs[activeIdx]?.aimeeSid ?? '';
-  const activeAttachId = tabs[activeIdx]?.attachId ?? '';
   useEffect(() => {
-    if (presenceSseRef.current) { presenceSseRef.current.close(); presenceSseRef.current = null; }
-    setRemoteTurnActive(false);
-    setRemoteTurnText('');
-    if (!activeAimeeSid || !activeAttachId) return;
-
-    // Resume from the last cursor this surface persisted for the session so a
-    // fresh mount (hard refresh / nav back) does NOT replay the ring from 0
-    // (which would re-surface already-seen turns). EventSource handles its own
-    // auto-reconnect resume via Last-Event-ID; this covers the remount case.
-    const cursorKey = `aimeeCursor:${activeAimeeSid}`;
-    const savedCursor = (() => { try { return localStorage.getItem(cursorKey) || ''; } catch { return ''; } })();
-    // Persist the cursor MONOTONICALLY: only ever advance it. Two tabs sharing a
-    // session write the same key, so a stale writer must not move it backward
-    // (which would replay already-seen events). Compare as integers.
-    const saveCursor = (ev: MessageEvent<string>) => {
-      if (!ev.lastEventId) return;
-      try {
-        const next = Number(ev.lastEventId);
-        if (!Number.isFinite(next)) return;
-        const cur = Number(localStorage.getItem(cursorKey) || '0');
-        if (!Number.isFinite(cur) || next > cur) localStorage.setItem(cursorKey, String(next));
-      } catch { /* quota / private browsing → degrade to cold-start replay */ }
-    };
-    const url = `/api/chat/session-events?sid=${encodeURIComponent(activeAimeeSid)}` +
-      (savedCursor ? `&cursor=${encodeURIComponent(savedCursor)}` : '');
-    const es = new EventSource(url);
+    if (!activeAimeeSid || !activeAttached) return;
+    let disposed = false;
+    setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+    const state = irSessions.current[activeAimeeSid] ?? emptySession(activeAimeeSid);
+    const es = new EventSource(`/api/chat/session-events?format=ir&sid=${encodeURIComponent(activeAimeeSid)}&cursor=${state.sequence}`);
     presenceSseRef.current = es;
-    // Full text of the turn observed on the stream this subscription, used to
-    // persist a turn that ran/completed while this tab was detached (the live
-    // ring replays turn_started→deltas→turn_done from the start on reconnect).
-    // Per-turn observation state for this subscription. turn_id drives dedup;
-    // wasWorking is captured ONCE at turn_started (whether THIS surface
-    // originated the turn) and is immutable for the turn, so a new local send
-    // mid-observation can't make us drop a foreign turn.
-    let observed = '';
-    let curTurnId = '';
-    let wasWorking = false;
-    // Throttle the live remote-turn preview: deltas accumulate into `observed`
-    // (a cheap string) and the visible text is flushed to React state at most
-    // ~10×/s, not per delta — a per-token setState here forces a whole-Chat
-    // re-render at provider token rate and pegs a core during long remote turns.
-    let remoteFlushTimer: number | null = null;
-    const scheduleRemoteFlush = () => {
-      if (remoteFlushTimer !== null) return;
-      remoteFlushTimer = window.setTimeout(() => {
-        remoteFlushTimer = null;
-        setRemoteTurnText(observed.slice(-2000));
-      }, STREAM_FLUSH_THROTTLE_MS);
-    };
-    const clearRemoteFlush = () => {
-      if (remoteFlushTimer !== null) { window.clearTimeout(remoteFlushTimer); remoteFlushTimer = null; }
-    };
-    const turnIdOf = (raw: string): string => {
-      try { return (JSON.parse(raw) as { turn_id?: string }).turn_id || ''; } catch { return ''; }
-    };
-    // Did THIS surface originate the turn? Read the send refs directly rather
-    // than the `working` render state: `working` is derived from workBySid
-    // (recomputeWorkCounts -> setWorkBySid -> re-render), so a ref synced to it
-    // in a useEffect lags the POST by a render + effect flush. turn_started
-    // routinely arrives inside that window, the surface's OWN turn was then
-    // classified as foreign, and turn_done appended a SECOND assistant message
-    // beside the one the POST stream was already rendering — the doubled replies.
-    // activeSendAbortRefs is populated synchronously before the POST, so it is
-    // already accurate when the first ring event lands.
-    const hasLocalSendFor = (sid: string): boolean => {
-      for (const owner of activeSendAbortRefs.current.values())
-        if (owner === sid) return true;
-      for (const q of sendQueuesRef.current.values())
-        for (const it of q) if (it.originSid === sid) return true;
-      return false;
-    };
-    es.addEventListener('turn_started', (ev: MessageEvent<string>) => {
-      saveCursor(ev);
-      curTurnId = turnIdOf(ev.data); observed = ''; wasWorking = hasLocalSendFor(activeAimeeSid);
-      // A steer continuation is server-initiated: render it even if this surface
-      // still looks "working" from the just-cancelled turn's closing stream. Only
-      // for the session this events stream is bound to (the one we steered).
-      if (expectSteerRef.current && expectSteerRef.current === activeAimeeSid) {
-        wasWorking = false; expectSteerRef.current = '';
-      }
-      // Self-echo suppression: the server now ALWAYS mirrors the full turn to the
-      // presence ring (durable source of truth for detached recovery), so the
-      // surface that ORIGINATED the turn receives an echo of its own stream here.
-      // Driving remoteTurn* from that echo is pure wasted work — the indicator is
-      // hidden while `working` (see render: remoteTurnActive && !working) and the
-      // native POST stream already renders the turn — and one full re-render per
-      // token, on top of the native one, pegs a core during every response. Only
-      // touch the live UI for a turn THIS surface did not originate.
-      if (!wasWorking) { clearRemoteFlush(); remoteTurnActiveRef.current = true; setRemoteTurnActive(true); setRemoteTurnText(''); }
+    es.addEventListener('error', () => {
+      if (!disposed) setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
     });
-    es.addEventListener('turn_delta', (ev: MessageEvent<string>) => {
-      saveCursor(ev);
-      if (wasWorking) return; // own turn echo: don't accumulate or re-render (see turn_started)
+    es.addEventListener('replay_complete', (event: MessageEvent<string>) => {
+      if (disposed) return;
       try {
-        // Phase 1 ring schema: { turn_id, kind, content? }. Only text kinds feed
-        // the visible turn body; thinking/tool_call/usage are not shown here.
-        const d = JSON.parse(ev.data) as { kind?: string; content?: string };
-        if ((d.kind === undefined || d.kind === 'text') && d.content) {
-          observed += d.content;
-          scheduleRemoteFlush();
-        }
-      } catch { /* ignore malformed frame */ }
-    });
-    es.addEventListener('turn_done', (ev: MessageEvent<string>) => {
-      saveCursor(ev);
-      const tid = turnIdOf(ev.data) || curTurnId; // turn_started always carries turn_id
-      const text = observed;
-      // Persist a turn observed-while-detached EXACTLY ONCE. Gates:
-      //  - wasWorking: snapshot at turn_started (see hasLocalSendFor) — THIS
-      //    surface originated the turn, and its own send path already renders and
-      //    stores the assistant message. This is the sole "did I originate it"
-      //    gate, and it is snapshotted, not re-read: a NEW local send mid-
-      //    observation must NOT make us drop a foreign turn.
-      //  - cursor resume (above) means a fresh mount / auto-reconnect does NOT
-      //    replay already-seen turns, so the ring no longer re-emits a completed
-      //    turn. persistedTurnsRef (turn_id dedup) + the content-tail guard remain
-      //    as belt-and-suspenders for the cursor-0 cold-start case. The dedup
-      //    add/has stays OUTSIDE the updater so it stays pure (React strict-mode
-      //    double-invokes updaters; turn_done events are sequential so it is race-free).
-      if (tid && text.trim() && !wasWorking && !persistedTurnsRef.current.has(tid)) {
-        persistedTurnsRef.current.add(tid);
-        setStreamMsgs(prev => {
-          const last = prev[prev.length - 1];
-          if (last && last.type === 'assistant' && last.text === text) return prev;
-          return [...prev, { id: nextId(), type: 'assistant', text }];
-        });
+        const ready = parseJSON(event.data) as { session_id?: string; cursor?: string };
+        const cursor = irSessions.current[activeAimeeSid]?.sequence ?? '0';
+        if (ready.session_id !== activeAimeeSid || typeof ready.cursor !== 'string' ||
+            !/^(0|[1-9][0-9]*)$/.test(ready.cursor) || BigInt(ready.cursor) > BigInt(cursor))
+          throw new Error('Invalid conversation replay boundary');
+        setIRReady(prev => prev[activeAimeeSid] ? prev : { ...prev, [activeAimeeSid]: true });
+        setIRTransportErrors(prev => prev[activeAimeeSid] ? { ...prev, [activeAimeeSid]: '' } : prev);
+      } catch (error) {
+        disposed = true;
+        setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+        setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: error instanceof Error ? error.message : 'Session replay failed' }));
+        es.close();
       }
-      observed = ''; curTurnId = ''; wasWorking = false;
-      clearRemoteFlush();
-      remoteTurnActiveRef.current = false;
-      setRemoteTurnActive(false); setRemoteTurnText('');
     });
-    es.onerror = () => { clearRemoteFlush(); remoteTurnActiveRef.current = false; setRemoteTurnActive(false); setRemoteTurnText(''); };
-    return () => { clearRemoteFlush(); es.close(); presenceSseRef.current = null; };
-  }, [activeAimeeSid, activeAttachId]);
+    es.addEventListener('ir', (event: MessageEvent<string>) => {
+      if (disposed) return;
+      try {
+        ingestIR(activeAimeeSid, parseJSON(event.data) as Record<string, unknown>);
+        setIRTransportErrors(prev => prev[activeAimeeSid] ? { ...prev, [activeAimeeSid]: '' } : prev);
+      } catch (error) {
+        disposed = true;
+        setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+        setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: error instanceof Error ? error.message : 'Session replay failed' }));
+        es.close();
+      }
+    });
+    return () => { disposed = true; es.close(); if (presenceSseRef.current === es) presenceSseRef.current = null; };
+  }, [activeAimeeSid, activeAttached, irReconnect]);
+  const canonicalState = irSessions.current[activeAimeeSid];
+  // Execution activity is a canonical projection, not separately copied UI state.
+  // Keeping a second state/effect pair can lag a replayed running turn.
+  const remoteTurnActive = !!irReady[activeAimeeSid] && !!canonicalState?.activeTurns.length;
+  const hiddenCount = canonicalState?.messages.length
+    ? Math.max(0, canonicalState.messages.length - visibleCount) : hiddenLegacyCount;
+  const submittedControls = useRef(new Set<string>());
+  const [pendingReplies, setPendingReplies] = useState<Record<string, ReadonlySet<string>>>({});
+  const replyControl = useCallback(async (requestId: string, reply: ControlReply, sessionId = activeAimeeSid) => {
+    const key = `${sessionId}\0${requestId}`;
+    if (submittedControls.current.has(key)) return;
+    submittedControls.current.add(key);
+    setPendingReplies(prev => ({ ...prev, [sessionId]: new Set([...(prev[sessionId] ?? []), requestId]) }));
+    try {
+      const response = await fetch('/api/chat/control-reply', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: stringifyJSON({ session_id: sessionId, request_id: requestId, reply }),
+      });
+      const body = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(body.error || 'Could not send the reply');
+    } catch (error) {
+      submittedControls.current.delete(key);
+      setPendingReplies(prev => {
+        const remaining = new Set(prev[sessionId]); remaining.delete(requestId);
+        return { ...prev, [sessionId]: remaining };
+      });
+      throw error;
+    }
+  }, [activeAimeeSid]);
+
+  const usage = canonicalState?.messages.slice().reverse().find(m => m.usage)?.usage;
+  const lastUsage = usage ? { in: usage.input, out: usage.output, cost: 0 } : null;
+  useEffect(() => {
+    scrollToBottom();
+  }, [canonicalState, irReady, activeAimeeSid, scrollToBottom]);
   useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
 
   /* Rebuild per-sid pending/queued counts from the live send refs. Iteration
@@ -1740,14 +1786,6 @@ export default function Chat() {
           a.iterCur === b.iterCur && a.iterMax === b.iterMax;
       })) return prev;
       return next;
-    });
-  }
-
-  function setSidIter(sid: string, iterCur: number, iterMax: number): void {
-    if (!sid) return;
-    setWorkBySid(prev => {
-      const cur = prev[sid] ?? { pending: 0, queued: 0, iterCur: 0, iterMax: 0 };
-      return { ...prev, [sid]: { ...cur, iterCur, iterMax } };
     });
   }
 
@@ -1839,20 +1877,6 @@ export default function Chat() {
       .catch(() => {});
   }, []);
 
-  /* Reflect the active tab's current persona (per-session, else durable default).
-     A tab that has not sent its first message yet has NO aimee session id — it
-     used to be left blank here, so the <select> fell back to whatever option
-     happened to be first rather than the persona the turn would actually use.
-     Ask without a sid in that case: the server answers with the durable default,
-     which is engineer unless the operator changed it. */
-  useEffect(() => {
-    const q = activePersonaSid ? `?sid=${encodeURIComponent(activePersonaSid)}` : '';
-    fetch(`/api/chat/persona${q}`)
-      .then(r => r.json())
-      .then((d: { name?: string }) => setActivePersona(d.name ?? ''))
-      .catch(() => {});
-  }, [activePersonaSid]);
-
   const refreshPlugins = useCallback(async () => {
     setPluginsLoading(true);
     try {
@@ -1884,6 +1908,16 @@ export default function Chat() {
     if (pluginsOpen) void refreshPlugins();
   }, [pluginsOpen, refreshPlugins]);
 
+  // Unsupported controls stay hidden until the backend advertises their capability.
+  useEffect(() => {
+    let disposed = false;
+    void fetch('/api/chat/threads').then(response => response.ok ? response.json() : {})
+      .then((body: { capabilities?: { branching?: boolean } }) => {
+        if (!disposed) setBranchingSupported(body.capabilities?.branching === true);
+      }).catch(() => {});
+    return () => { disposed = true; };
+  }, []);
+
   /* Fetch channel list on mount */
   useEffect(() => {
     fetch('/api/channels')
@@ -1902,15 +1936,6 @@ export default function Chat() {
       .catch(() => {});
   }, []);
 
-  /* Reflect this tab's pinned agent (empty = following the configured default) */
-  useEffect(() => {
-    if (!activePersonaSid) { setActiveAgent(''); return; }
-    fetch(`/api/chat/primary?sid=${encodeURIComponent(activePersonaSid)}`)
-      .then(r => r.json())
-      .then((d: { agent?: string }) => setActiveAgent(d.agent ?? ''))
-      .catch(() => {});
-  }, [activePersonaSid]);
-
   useEffect(() => {
     fetch('/api/metrics')
       .then(r => r.json())
@@ -1922,9 +1947,6 @@ export default function Chat() {
     setSessionUsage({ in: 0, out: 0, cost: 0, kind: 'realized' });
   }, [activeIdx]);
 
-  /* Keep activeChannelRef in sync for SSE handler closure */
-  useEffect(() => { activeChannelRef.current = activeChannel; }, [activeChannel]);
-
   /* Persist active channel to localStorage */
   useEffect(() => { saveActiveChannel(activeChannel); }, [activeChannel]);
 
@@ -1933,38 +1955,38 @@ export default function Chat() {
     if (channelSseRef.current) { channelSseRef.current.close(); channelSseRef.current = null; }
     if (!activeChannel) return;
 
-    /* Fetch existing messages first */
-    fetch(`/api/channels/${encodeURIComponent(activeChannel)}/messages`)
-      .then(r => r.json())
-      .then((d: { messages?: ChannelMessage[] }) => {
-        setChannelMsgs(prev => ({ ...prev, [activeChannel]: d.messages ?? [] }));
-        setUnreadCounts(prev => ({ ...prev, [activeChannel]: 0 }));
-      })
-      .catch(() => {});
-
+    let disposed = false;
+    const abort = new AbortController();
+    const refresh = () => {
+      void fetch(`/api/channels/${encodeURIComponent(activeChannel)}/messages`, { signal: abort.signal })
+        .then(r => { if (!r.ok) throw new Error('Channel history unavailable'); return r.json(); })
+        .then((d: { messages?: ChannelMessage[] }) => {
+          if (disposed) return;
+          setChannelMsgs(prev => ({ ...prev, [activeChannel]: mergeChannelMessages(d.messages ?? [], prev[activeChannel] ?? []) }));
+          setUnreadCounts(prev => ({ ...prev, [activeChannel]: 0 }));
+        }).catch(() => {});
+    };
     const es = new EventSource(`/api/channels/${encodeURIComponent(activeChannel)}/events`);
     channelSseRef.current = es;
-
+    // Refresh after every successful connection, including reconnects. Merge
+    // the snapshot with live arrivals instead of replacing the live timeline.
+    es.addEventListener('open', refresh);
+    refresh();
     es.addEventListener('message', (ev: MessageEvent<string>) => {
+      if (disposed) return;
       try {
         const msg = JSON.parse(ev.data) as ChannelMessage;
-        const ch = activeChannelRef.current;
-        setChannelMsgs(prev => ({
-          ...prev,
-          [activeChannel]: [...(prev[activeChannel] ?? []), msg],
-        }));
-        if (ch !== activeChannel) {
-          setUnreadCounts(prev => ({ ...prev, [activeChannel]: (prev[activeChannel] ?? 0) + 1 }));
-        }
-      } catch { /* ignore */ }
+        if (typeof msg.sender !== 'string' || typeof msg.text !== 'string') return;
+        setChannelMsgs(prev => ({ ...prev, [activeChannel]: mergeChannelMessages(prev[activeChannel] ?? [], [msg]) }));
+      } catch { /* ignore malformed frames */ }
     });
-
-    return () => { es.close(); channelSseRef.current = null; };
+    return () => { disposed = true; abort.abort(); es.close(); channelSseRef.current = null; };
   }, [activeChannel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function selectChannel(name: string): void {
     abortActiveSends();
     setActiveChannel(name);
+    setChannelsOpen(false);
     setUnreadCounts(prev => ({ ...prev, [name]: 0 }));
     /* Ensure channel exists in message map */
     setChannelMsgs(prev => prev[name] ? prev : { ...prev, [name]: [] });
@@ -2014,41 +2036,6 @@ export default function Chat() {
       });
       setActiveSkill(skill);
     } catch { /* ignore */ }
-  }
-
-  /* Set the active tab's persona server-side. It is sticky per session, so the
-     chat system prompt and delegate policy both follow it. */
-  async function changePersona(name: string) {
-    const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid;
-    if (!sid || !name) return;
-    const prev = activePersona;
-    setActivePersona(name);
-    try {
-      const resp = await fetch('/api/chat/persona', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-        body: JSON.stringify({ sid, name }),
-      });
-      if (!resp.ok) setActivePersona(prev);
-    } catch { setActivePersona(prev); }
-  }
-
-  /* Pin the agent that serves this tab's turns. Per session (like the persona),
-     so other tabs and the durable config are untouched; it takes effect on the
-     next turn (chat_stream_worker reads the pin before cfg.provider). */
-  async function changeAgent(name: string) {
-    const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid;
-    if (!sid || !name) return;
-    const prev = activeAgent;
-    setActiveAgent(name);
-    try {
-      const resp = await fetch('/api/chat/primary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-        body: JSON.stringify({ sid, agent: name }),
-      });
-      if (!resp.ok) setActiveAgent(prev);
-    } catch { setActiveAgent(prev); }
   }
 
   async function togglePlugin(name: string) {
@@ -2112,7 +2099,7 @@ export default function Chat() {
     const serverMessages = activeSession?.messages;
     if (!serverMessages) return;
     const tab = tabsRef.current.find(candidate => candidate.sessionId === activeSessionId);
-    if (!tab || tab.aimeeSid !== renderedSidRef.current) return;
+    if (!tab || tab.aimeeSid !== renderedSidRef.current || irSessions.current[tab.aimeeSid]?.messages.length) return;
     // A live reply owns its message ids. Replacing it with a snapshot would
     // orphan the stream's ids, causing later deltas to lose their target.
     for (const owner of activeSendAbortRefs.current.values()) {
@@ -2311,6 +2298,7 @@ export default function Chat() {
 
   /* Thread operations */
   async function branchThread() {
+    setThreadError('');
     try {
       const label = `branch-${(tabs[activeIdx]?.threads?.length ?? 0) + 1}`;
       const r = await fetch('/api/chat/branch', {
@@ -2318,11 +2306,12 @@ export default function Chat() {
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
         body: JSON.stringify({ label }),
       });
-      const d = await r.json() as { ok?: boolean; thread_id?: number };
+      const d = await r.json() as { ok?: boolean; thread_id?: number; error?: string };
+      if (!r.ok || !d.ok) throw new Error(d.error || 'Could not branch conversation');
       if (d.ok) {
         await refreshThreads();
       }
-    } catch { /* ignore */ }
+    } catch (error) { setThreadError(error instanceof Error ? error.message : 'Could not branch conversation'); }
   }
 
   async function switchThread(threadId: number) {
@@ -2412,58 +2401,70 @@ export default function Chat() {
   /* Send message */
   async function sendMessage() {
     const text = inputText.trim();
-    if (!text) return;
+    if (!text || primary.pending || persona.pending) return;
 
-    setInputText('');
-    // AutoGrowTextarea reflows its own height when inputText clears.
-
-    // Steering: if a turn is already in flight for the active tab — a local send
-    // (client stream open) or a server/foreign turn (events stream) — sending
-    // INTERRUPTS the running turn and submits this message as the steer, which the
-    // server auto-continues as the next turn (it arrives on the events stream).
+    // A new message during a turn explicitly stops that exact canonical turn.
+    // The browser submits the new text only after its terminal is replayed.
     const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid ?? '';
     let clientInflight = false;
     activeSendAbortRefs.current.forEach(s => { if (s === sid) clientInflight = true; });
-    if (sid && (clientInflight || remoteTurnActiveRef.current)) {
-      // Optimistically show the steer in the transcript and re-stick to bottom.
+    if (sid && (clientInflight || (!!irReady[sid] && !!irSessions.current[sid]?.activeTurns.length))) {
       atBottomRef.current = true;
-      setStreamMsgs(prev => [...prev, { id: nextId(), type: 'user', text }]);
+      // The eventual admitted user message comes from the canonical session log.
       void steerInterrupt(sid, text);
       return;
     }
 
+    setInputText('');
     enqueueChatMessage(text);
   }
 
-  // Stop the in-flight turn for `sid` and queue `text` as the steer continuation.
-  // The server only honours the steer when a turn was actually in flight; on the
-  // race where it just finished (interrupted:false), fall back to a normal send.
+  // Explicitly stop the exact canonical turn, then send this new text once.
+  // Cancellation acknowledgement alone is not a claim that effects have stopped.
   async function steerInterrupt(sid: string, text: string) {
+    if (stoppingSessions.current.has(sid)) return;
+    const turnIds = irSessions.current[sid]?.activeTurns ?? [];
+    if (!irReady[sid] || turnIds.length !== 1) {
+      setSendErrors(prev => ({ ...prev, [sid]: 'Wait for the running turn to appear in conversation history before stopping it. Your message is retained.' }));
+      return;
+    }
+    const turnId = turnIds[0];
+    const version = sendQueueVersionRef.current;
     const projectRoot = activeSession?.projectRoot ?? '';
-    expectSteerRef.current = sid;
-    // Safety net: if the server continuation never starts (dispatch failed), clear
-    // the one-shot so it can't force-render a later turn on this session.
-    window.setTimeout(() => { if (expectSteerRef.current === sid) expectSteerRef.current = ''; }, 12000);
-    const sendNormally = () => {
-      if (expectSteerRef.current === sid) expectSteerRef.current = '';
-      pushToSendQueue(sid, { text, version: sendQueueVersionRef.current, originSid: sid, projectRoot });
-      recomputeWorkCounts();
-      void drainSendQueue(sid);
-    };
+    stoppingSessions.current.add(sid);
+    setSendErrors(prev => ({ ...prev, [sid]: '' }));
     try {
-      const resp = await fetch('/api/chat/interrupt', {
+      const resp = await fetch('/api/chat/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-        body: JSON.stringify({ aimee_session_id: sid, message: text }),
+        body: JSON.stringify({ session_id: sid, turn_id: turnId }),
       });
       if (resp.status === 401) { window.location.href = '/login'; return; }
-      const j = resp.ok ? (await resp.json().catch(() => ({})) as { interrupted?: boolean }) : {};
-      // No turn was actually in flight (or the steer couldn't be queued): send it
-      // as an ordinary turn instead so the message is never lost.
-      if (!j.interrupted) sendNormally();
-    } catch {
-      sendNormally();
-    }
+      if (!resp.ok) throw new Error('Could not stop the selected turn. Your message is retained.');
+      const reply = await resp.json() as { status?: string; session_id?: string; turn_id?: string; disposition?: string; terminal_sequence?: string };
+      if (reply.status !== 'ok' || reply.session_id !== sid || reply.turn_id !== turnId ||
+          !['stopping', 'cancelled'].includes(reply.disposition ?? '') ||
+          (reply.disposition === 'cancelled' && (typeof reply.terminal_sequence !== 'string' || !/^[1-9][0-9]*$/.test(reply.terminal_sequence))))
+        throw new Error('Cancellation was not confirmed for this turn. Your message is retained.');
+      const deadline = Date.now() + 30000;
+      while (!irSessions.current[sid]?.terminalSources[turnId]) {
+        if (Date.now() >= deadline) throw new Error('The turn is still stopping. Your message is retained; wait for its terminal status before continuing.');
+        await new Promise(resolve => window.setTimeout(resolve, 100));
+      }
+      const terminal = irSessions.current[sid].terminalSources[turnId];
+      if (reply.disposition === 'cancelled' && (terminal.sequence !== reply.terminal_sequence ||
+          terminal.event_id !== `operator-cancel:${turnId}` || terminal.status !== 'cancelled' || terminal.error !== operatorCancelError))
+        throw new Error('The exact operator cancellation is not present in history. Your message is retained.');
+      if (version !== sendQueueVersionRef.current || tabsRef.current[activeIdxRef.current]?.aimeeSid !== sid ||
+          (irSessions.current[sid]?.activeTurns.length ?? 0) !== 0)
+        throw new Error('Conversation changed while stopping. Your message is retained; select the conversation before continuing.');
+      setInputText(current => current.trim() === text ? '' : current);
+      pushToSendQueue(sid, { text, version, originSid: sid, projectRoot });
+      recomputeWorkCounts();
+      void drainSendQueue(sid);
+    } catch (error) {
+      setSendErrors(prev => ({ ...prev, [sid]: error instanceof Error ? error.message : 'Could not stop this turn. Your message is retained.' }));
+    } finally { stoppingSessions.current.delete(sid); }
   }
 
   function enqueueChatMessage(text: string) {
@@ -2489,7 +2490,7 @@ export default function Chat() {
     // Sending is an explicit intent to follow the conversation: re-stick to the
     // bottom even if the user had scrolled up to read back.
     atBottomRef.current = true;
-    setStreamMsgs(prev => [...prev, { id: userMsgId, type: 'user', text }]);
+    void userMsgId; // canonical admission owns the user message
 
     const originSid = tabsRef.current[idx]?.aimeeSid ?? '';
     pushToSendQueue(originSid, { text, version: sendQueueVersionRef.current, originSid,
@@ -2545,35 +2546,11 @@ export default function Chat() {
     recomputeWorkCounts();
 
     try {
-      const tabIdx = tabsRef.current.findIndex(t => t.aimeeSid === aimeeSid);
-      const activeTab = tabIdx >= 0 ? tabsRef.current[tabIdx] : undefined;
-      // Unified-presence: attach a "webchat" surface once per tab/session so this
-      // turn is arbitrated (a racing surface on the same session is declined with
-      // presence_busy) and other surfaces see the live turn on the events stream.
-      // Best-effort: on failure the turn just proceeds unarbitrated, as before.
-      let attachId = activeTab?.attachId ?? '';
-      if (aimeeSid && !attachId) {
-        try {
-          const ar = await fetch('/api/chat/attach', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-            body: JSON.stringify({ sid: aimeeSid }),
-          });
-          if (ar.ok) {
-            const ad = await ar.json() as { attach_id?: string };
-            if (ad.attach_id) {
-              attachId = ad.attach_id;
-              setTabs(prev => {
-                const i = prev.findIndex(t => t.aimeeSid === aimeeSid);
-                if (i < 0) return prev;
-                const next = [...prev];
-                next[i] = { ...next[i], attachId };
-                return next;
-              });
-            }
-          }
-        } catch { /* best-effort: proceed unarbitrated */ }
-      }
+      setSendErrors(prev => prev[aimeeSid] ? { ...prev, [aimeeSid]: '' } : prev);
+      // The same admitted surface owns preferences, replay and sends. Never
+      // reuse a persisted/dead attachment or dispatch after admission failed.
+      const attachId = await ensureAttachment(aimeeSid);
+      if (item.version !== sendQueueVersionRef.current) return;
       const resp = await fetch('/api/chat/send', {
         method: 'POST',
         signal: controller.signal,
@@ -2622,12 +2599,20 @@ export default function Chat() {
             evtType = line.slice(7).trim();
           } else if (line.startsWith('data: ') && evtType) {
             try {
-              const data = JSON.parse(line.slice(6)) as Record<string, unknown>;
+              const data = parseJSON(line.slice(6)) as Record<string, unknown>;
+              if (evtType === 'ir') {
+                ingestIR(streamRefs.originSid, data);
+                evtType = null;
+                continue;
+              }
+
               if (controller.signal.aborted || !activeSendAbortRefs.current.has(controller)) {
                 return false;
               }
-              handleSseEvent(evtType, data, streamRefs);
-            } catch { /* ignore */ }
+              throw new Error(evtType === 'error' ? String(data.message || 'Chat transport failed') : `Unsupported chat event: ${evtType}`);
+            } catch (error) {
+              throw error instanceof Error ? error : new Error('Invalid session event');
+            }
             evtType = null;
           }
         }
@@ -2648,19 +2633,12 @@ export default function Chat() {
     } catch (e) {
       if (isAbortError(e)) return;
       const errMsg = e instanceof Error ? e.message : 'Unknown error';
-      flushStreamAppends(); // land buffered text before appending the error
-      applyToOwnerStream(streamRefs.originSid, prev => {
-        const aid = streamRefs.assistantId;
-        if (aid !== null) {
-          return prev.map(m =>
-            m.id === aid ? { ...m, text: m.text + `\n\n**Connection error:** ${errMsg}` } : m
-          );
-        }
-        return [...prev, { id: nextId(), type: 'assistant', text: `**Connection error:** ${errMsg}` }];
-      });
+      setSendErrors(prev => ({ ...prev, [aimeeSid]: errMsg }));
     } finally {
-      // The POST stream owns the transcript. Flush even on EOF/error so the
-      // last batch is visible without waiting for another event or a live row.
+      // The durable IR log owns the transcript; keep local tab metadata current.
+      fetch('/api/lsp/diagnostics/summary').then(r => r.json()).then((d: { errors: number; warnings: number; active_servers: number }) => {
+        setLspDiag(d.active_servers > 0 ? d : null);
+      }).catch(() => {});
       if (!controller.signal.aborted) saveOwnerStream(streamRefs.originSid);
       flushStreamAppends();
       activeSendAbortRefs.current.delete(controller);
@@ -2724,179 +2702,6 @@ export default function Chat() {
     }
   }
 
-  function handleSseEvent(type: string, data: Record<string, unknown>, streamRefs: ActiveStreamRefs) {
-    switch (type) {
-      case 'turn_start': {
-        flushStreamAppends();
-        // Defer creating the assistant bubble until real text arrives (the
-        // 'text' case creates it lazily). A turn that emits only tool calls,
-        // only thinking, or nothing at all then leaves no empty message box.
-        streamRefs.assistantId = null;
-        streamRefs.thinkId = null;
-        streamRefs.toolId = null;
-        break;
-      }
-      case 'tool_start': {
-        flushStreamAppends();
-        streamRefs.assistantId = null;
-        streamRefs.thinkId = null;
-        const toolName = String(data.name ?? '');
-        const toolArgs = String(data.args ?? '');
-        const tid = nextId();
-        streamRefs.toolId = tid;
-        applyToOwnerStream(streamRefs.originSid, prev => [...prev, {
-          id: tid, type: 'tool', text: '',
-          toolName, toolArgs, toolResult: undefined,
-        }]);
-        break;
-      }
-      case 'tool_result': {
-        const tid = streamRefs.toolId;
-        if (tid !== null) {
-          const toolResult = String(data.result ?? '');
-          applyToOwnerStream(streamRefs.originSid, prev => prev.map(m =>
-            m.id === tid ? { ...m, toolResult } : m
-          ));
-          streamRefs.toolId = null;
-        }
-        break;
-      }
-      case 'thinking':
-      case 'text': {
-        const delta = String(data.content ?? '');
-        if (!delta) break;
-        const thinking = type === 'thinking';
-        const field = thinking ? 'thinkText' : 'text';
-        let id = thinking ? streamRefs.thinkId : streamRefs.assistantId;
-        if (id === null) {
-          // Assign ids outside React's updater: multiple events can arrive in
-          // one read, and StrictMode may replay state updaters.
-          flushStreamAppends();
-          id = nextId();
-          if (thinking) {
-            streamRefs.thinkId = id;
-            streamRefs.assistantId = null;
-          } else {
-            streamRefs.assistantId = id;
-            streamRefs.thinkId = null;
-          }
-          const msg: StreamMsg = thinking
-            ? { id, type: 'thinking', text: '', thinkText: delta }
-            : { id, type: 'assistant', text: delta };
-          applyToOwnerStream(streamRefs.originSid, prev => [...prev, msg]);
-        } else {
-          pendingAppendsRef.current.push({ owner: streamRefs.originSid, id, field, delta });
-          if (flushTimerRef.current === null) {
-            flushTimerRef.current = window.setTimeout(flushStreamAppends, STREAM_FLUSH_THROTTLE_MS);
-          }
-        }
-        break;
-      }
-      case 'turn_end': {
-        // Commit to the stream's OWNING tab (saveOwnerStream flushes first), never
-        // whatever tab is active now if the user switched tabs mid-turn.
-        saveOwnerStream(streamRefs.originSid);
-        // Keep the reply id until the next message starts so any trailing
-        // text events append to the same bubble.
-        streamRefs.thinkId = null;
-        streamRefs.toolId = null;
-        break;
-      }
-      case 'error': {
-        flushStreamAppends(); // land buffered text before appending the error
-        const msg = String(data.message ?? 'Unknown error');
-        applyToOwnerStream(streamRefs.originSid, prev => {
-          const aid = streamRefs.assistantId;
-          if (aid !== null) {
-            return prev.map(m =>
-              m.id === aid ? { ...m, text: m.text + `\n\n**Error:** ${msg}` } : m
-            );
-          }
-          return [...prev, { id: nextId(), type: 'assistant', text: `**Error:** ${msg}` }];
-        });
-        break;
-      }
-      case 'session': {
-        const sid = String(data.id ?? '');
-        // Apply the provider session id to the tab that OWNS this stream, located
-        // by its stable aimeeSid — not activeIdxRef, which may have moved if the
-        // user switched tabs mid-turn. This is display/cache metadata only; the
-        // backend resumes from its authenticated server-side binding.
-        const owner = streamRefs.originSid;
-        if (owner) {
-          const sessionId = tabsRef.current.find(t => t.aimeeSid === owner)?.sessionId;
-          setTabs(prev => {
-            const idx = prev.findIndex(t => t.aimeeSid === owner);
-            if (idx < 0) return prev;
-            const next = [...prev];
-            next[idx] = { ...next[idx], sid };
-            tabsRef.current = next;
-            return next;
-          });
-          if (sessionId && sid) patchSession(sessionId, { claudeSid: sid });
-        }
-        break;
-      }
-      case 'iteration': {
-        setSidIter(streamRefs.originSid, Number(data.iteration ?? 0), Number(data.max ?? 0));
-        break;
-      }
-      case 'usage': {
-        const u = {
-          in: Number(data.in ?? 0),
-          out: Number(data.out ?? 0),
-          cost: Number(data.cost ?? 0),
-        };
-        // usage_kind distinguishes realized (provider-reported, billable) spend
-        // from estimated/avoided/partial; default realized for the chat path.
-        const kind = typeof data.usage_kind === 'string' && data.usage_kind ? data.usage_kind : 'realized';
-        setLastUsage(u);
-        setSessionUsage(prev => ({ in: prev.in + u.in, out: prev.out + u.out, cost: prev.cost + u.cost, kind }));
-        break;
-      }
-      case 'turn_summary': {
-        const text = String(data.text ?? '');
-        if (text) {
-          applyToOwnerStream(streamRefs.originSid, prev => [...prev, { id: nextId(), type: 'narration', text }]);
-        }
-        break;
-      }
-      case 'diff_output': {
-        const path = String(data.path ?? '');
-        const diff = String(data.diff ?? '');
-        if (diff) {
-          applyToOwnerStream(streamRefs.originSid, prev => [...prev, {
-            id: nextId(), type: 'diff', text: '',
-            diffPath: path || undefined, diffContent: diff,
-          }]);
-        }
-        break;
-      }
-      case 'checkpoint': {
-        const snapshotId = Number(data.snapshot_id ?? 0);
-        if (snapshotId > 0) {
-          applyToOwnerStream(streamRefs.originSid, prev => [...prev, {
-            id: nextId(), type: 'checkpoint', text: '', snapshotId,
-          }]);
-        }
-        break;
-      }
-      case 'done': {
-        saveOwnerStream(streamRefs.originSid);
-        void refreshWorkflow();
-        /* Refresh LSP diagnostic badge after each completed turn */
-        fetch('/api/lsp/diagnostics/summary')
-          .then(r => r.json())
-          .then((d: { errors: number; warnings: number; active_servers: number }) => {
-            if (d.active_servers > 0) setLspDiag(d);
-            else setLspDiag(null);
-          })
-          .catch(() => {});
-        break;
-      }
-    }
-  }
-
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -2905,7 +2710,7 @@ export default function Chat() {
   }
 
   return (
-    <div style={{
+    <div className="chat-shell" style={{
       display: 'flex', flexDirection: 'column', height: '100%',
       overflow: 'hidden', background: tokens.surface,
     }}>
@@ -2914,7 +2719,7 @@ export default function Chat() {
           button resets this conversation (fresh provider session). */}
       {/* Reserve the tutorial launcher's top-right corner. Without this padding,
           its absolute "?" button sits directly over Clear and steals clicks. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 48, boxSizing: 'border-box' }}>
+      <div className="chat-session-toolbar" style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 48, boxSizing: 'border-box' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <ProjectPicker
             key={activeSessionId}
@@ -2926,6 +2731,8 @@ export default function Chat() {
             }}
           />
         </div>
+        <Button size="md" aria-expanded={channelsOpen} aria-controls="chat-channels"
+          onClick={() => setChannelsOpen(open => !open)}>Channels{channels.length ? ` (${channels.length})` : ''}</Button>
         <Button
           variant="default"
           size="md"
@@ -2938,16 +2745,18 @@ export default function Chat() {
       </div>
 
       {/* Thread bar (conversation branching) */}
-      <ThreadBar
+      {branchingSupported && <ThreadBar
         threads={tabs[activeIdx]?.threads ?? []}
         activeThreadId={tabs[activeIdx]?.activeThreadId ?? 0}
         onSwitch={switchThread}
         onBranch={branchThread}
-      />
+      />}
+      {threadError && <p role="alert">{threadError}</p>}
 
       {/* Main content area: channel sidebar + chat + optional rules panel */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
         {/* Channel sidebar */}
+        {channelsOpen && <aside id="chat-channels" className="chat-channels" aria-label="Channels">
         <ChannelSidebar
           channels={channels}
           activeChannel={activeChannel}
@@ -2955,10 +2764,10 @@ export default function Chat() {
           onSelect={selectChannel}
           onDeselect={() => setActiveChannel(null)}
           onCreateChannel={name => { void createChannel(name); }}
-        />
+        /></aside>}
 
         {/* Chat column — shows channel view when a channel is active */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="chat-column" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {activeChannel ? (
           <ChannelView
@@ -2969,6 +2778,8 @@ export default function Chat() {
           />
         ) : (<>
 
+      <details className="chat-workflow" open={workflowInfo ? true : undefined}>
+      <summary>{workflowInfo ? `Workflow · ${workflowInfo.status}` : 'Workflow options'}</summary>
       <WorkflowStatusCard
         channel={workflowChannel}
         session={workflowInfo}
@@ -2978,7 +2789,7 @@ export default function Chat() {
         onChannelChange={setCurrentWorkflowChannel}
         onRefresh={() => { void refreshWorkflow(); }}
         onPause={() => { void pauseWorkflow(); }}
-      />
+      /></details>
 
       {/* Bootstrap banner */}
       {banner && (
@@ -2991,6 +2802,7 @@ export default function Chat() {
 
       {/* Messages */}
       <div
+        className="chat-messages" role="log" aria-label="Conversation" aria-live="off"
         onScroll={handleMessagesScroll}
         style={{
           flex: 1, overflowY: 'auto', padding: '16px',
@@ -3007,7 +2819,20 @@ export default function Chat() {
             Show earlier messages ({hiddenCount})
           </Button>
         )}
-        <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />
+        {canonicalState && (canonicalState.messages.length > 0 || Object.keys(canonicalState.children ?? {}).length > 0 || Object.keys(canonicalState.controls).length > 0) ? <>
+          <IRTranscript state={canonicalState} onReply={replyControl} controlsReady={!!irReady[activeAimeeSid]} messageLimit={visibleCount} pendingReplies={pendingReplies[activeAimeeSid]} pendingRepliesBySession={pendingReplies} /></> :
+          <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />}
+        {(sendErrors[activeAimeeSid] || irTransportErrors[activeAimeeSid]) ? <div role="alert">
+          {sendErrors[activeAimeeSid] || irTransportErrors[activeAimeeSid]}{' '}
+          <button type="button" onClick={() => {
+            invalidateAttachment(activeAimeeSid);
+            setSendErrors(prev => ({ ...prev, [activeAimeeSid]: '' }));
+            setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: '' }));
+            irPending.current[activeAimeeSid] = new Map();
+            setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+            setIRReconnect(value => value + 1);
+          }}>Reconnect conversation</button>
+        </div> : !irReady[activeAimeeSid] && <p role="status">Synchronizing conversation…</p>}
         {working && <div style={{ alignSelf: 'flex-start' }}><TypingIndicator /></div>}
         {remoteTurnActive && !working && (
           <div style={{
@@ -3016,14 +2841,7 @@ export default function Chat() {
             borderRadius: '10px', color: tokens.textFaint, fontSize: '11px', fontFamily: 'system-ui',
           }}>
             <div>● aimee is active on another surface…</div>
-            {remoteTurnText && (
-              <div style={{
-                marginTop: '4px', color: tokens.textSecondary, whiteSpace: 'pre-wrap',
-                maxHeight: '8em', overflowY: 'auto', fontSize: '12px',
-              }}>
-                {remoteTurnText}
-              </div>
-            )}
+
           </div>
         )}
         {iterCur > 0 && (
@@ -3077,42 +2895,44 @@ export default function Chat() {
       )}
 
       {/* Prompt tier selector */}
-      <div style={{
+      <div role="group" aria-label="Session preferences" style={{
         padding: '4px 16px', background: tokens.surfaceAlt,
         borderTop: `1px solid ${tokens.borderLight}`,
-        display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0,
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 12px', flexShrink: 0,
       }}>
         {/* The project is set in ONE place — the session ProjectPicker at the top
             of the chat (bound to the active session). No per-prompt project
             selector here. */}
-        <span
-          style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}
-          title="How much context Aimee assembles for this turn: Minimal is fastest and cheapest, Extended packs in the most background."
-        >
-          Prompt:
-        </span>
-        <Tabs
-          size="sm"
-          ariaLabel="Prompt tier"
-          value={promptTier}
-          onChange={(v) => changePromptTier(v as 'MINIMAL' | 'STANDARD' | 'EXTENDED')}
-          options={(['MINIMAL', 'STANDARD', 'EXTENDED'] as const).map(tier => ({
-            value: tier,
-            label: tier.charAt(0) + tier.slice(1).toLowerCase(),
-          }))}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+          <span
+            style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}
+            title="How much context Aimee assembles for this turn: Minimal is fastest and cheapest, Extended packs in the most background."
+          >
+            Prompt:
+          </span>
+          <Tabs
+            size="sm"
+            ariaLabel="Prompt tier"
+            value={promptTier}
+            onChange={(v) => changePromptTier(v as 'MINIMAL' | 'STANDARD' | 'EXTENDED')}
+            options={(['MINIMAL', 'STANDARD', 'EXTENDED'] as const).map(tier => ({
+              value: tier,
+              label: tier.charAt(0) + tier.slice(1).toLowerCase(),
+            }))}
+          />
+        </div>
         {availableSkills.length > 0 && (
-          <>
-            <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
-            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, maxWidth: '100%' }}>
+            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui', flexShrink: 0 }}>
               Skill:
             </span>
             <select
+              aria-label="Skill"
               value={activeSkill}
               onChange={e => changeSkill(e.target.value)}
               title="Load a packaged skill for this session — its instructions steer how Aimee handles the turn. None runs the default behaviour."
               style={{
-                fontSize: '11px', fontFamily: 'system-ui',
+                fontSize: '11px', fontFamily: 'system-ui', minWidth: 0, maxWidth: '100%',
                 background: activeSkill ? tokens.primary : tokens.surface,
                 color: activeSkill ? tokens.surface : tokens.textFaint,
                 border: `1px solid ${activeSkill ? tokens.primary : tokens.borderLight}`,
@@ -3125,22 +2945,22 @@ export default function Chat() {
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
-          </>
+          </div>
         )}
         {agents.length > 0 && (
-          <>
-            <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
-            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, maxWidth: '100%' }}>
+            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui', flexShrink: 0 }}>
               Agent:
             </span>
             <select
-              value={activeAgent || defaultAgent}
-              onChange={e => changeAgent(e.target.value)}
+              value={primary.known ? activeAgent || defaultAgent : ''}
+              onChange={e => primary.change(e.target.value)}
+              aria-label="Agent" aria-busy={primary.pending} disabled={!activeAttached}
               title={activeAgent
                 ? 'The agent serving this tab (pinned for this session)'
                 : `Following the configured primary${defaultAgent ? ` (${defaultAgent})` : ''} — pick one to pin it for this session`}
               style={{
-                fontSize: '11px', fontFamily: 'system-ui',
+                fontSize: '11px', fontFamily: 'system-ui', minWidth: 0, maxWidth: '100%',
                 // Unpinned (following the default) reads as the muted state, the
                 // same way an unset persona does.
                 background: activeAgent ? tokens.primary : tokens.surface,
@@ -3150,26 +2970,29 @@ export default function Chat() {
                 outline: 'none',
               }}
             >
+              {!primary.known && <option value="" disabled>{primary.error ? 'Agent unavailable' : 'Loading agent…'}</option>}
+              {primary.known && !agents.some(a => a.name === (activeAgent || defaultAgent)) &&
+                <option value={activeAgent || defaultAgent} disabled>{activeAgent || defaultAgent ? `${activeAgent || defaultAgent} (not in current catalog)` : 'Configured primary'}</option>}
               {agents.map(a => (
                 <option key={a.name} value={a.name}>
                   {a.name}{a.name === defaultAgent ? ' (primary)' : ''}
                 </option>
               ))}
             </select>
-          </>
+          </div>
         )}
         {availablePersonas.length > 0 && (
-          <>
-            <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
-            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, maxWidth: '100%' }}>
+            <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui', flexShrink: 0 }}>
               Persona:
             </span>
             <select
-              value={activePersona}
-              onChange={e => changePersona(e.target.value)}
+              value={persona.known ? activePersona : ''}
+              onChange={e => persona.change(e.target.value)}
+              aria-label="Persona" aria-busy={persona.pending} disabled={!activeAttached}
               title="Steers Aimee's role and delegate policy for this session"
               style={{
-                fontSize: '11px', fontFamily: 'system-ui',
+                fontSize: '11px', fontFamily: 'system-ui', minWidth: 0, maxWidth: '100%',
                 background: activePersona ? tokens.primary : tokens.surface,
                 color: activePersona ? tokens.surface : tokens.textFaint,
                 border: `1px solid ${activePersona ? tokens.primary : tokens.borderLight}`,
@@ -3177,13 +3000,18 @@ export default function Chat() {
                 outline: 'none',
               }}
             >
+              {!persona.known && <option value="" disabled>{persona.error ? 'Persona unavailable' : 'Loading persona…'}</option>}
+              {persona.known && !availablePersonas.some(p => p.name === activePersona) &&
+                <option value={activePersona} disabled>{activePersona ? `${activePersona} (not in current catalog)` : 'Session default'}</option>}
               {availablePersonas.map(p => (
                 <option key={p.name} value={p.name} title={p.description}>{p.name}</option>
               ))}
             </select>
-          </>
+          </div>
         )}
       </div>
+      {(primary.error || persona.error) && <p role="alert">{primary.error || persona.error}</p>}
+      {(primary.pending || persona.pending) && <p role="status">Saving session selection…</p>}
 
       {/* Input area */}
       <div style={{
@@ -3197,7 +3025,7 @@ export default function Chat() {
           onKeyDown={handleKeyDown}
           maxHeight={200}
           placeholder={(working || remoteTurnActive)
-            ? 'Steer the running turn — Enter interrupts and continues'
+            ? 'Steer the running turn…'
             : 'Type a message… (Shift+Enter for newline)'}
           style={{ flex: 1, minHeight: '44px' }}
           onFocus={e => (e.target.style.borderColor = tokens.primary)}
@@ -3215,17 +3043,18 @@ export default function Chat() {
             <Button
               variant="primary"
               busy={busy}
+              disabled={primary.pending || persona.pending}
               onClick={sendMessage}
               title={steering ? 'Interrupt the running turn and continue with this message' : 'Send'}
               style={{
-                padding: '10px 20px', background: tokens.primary,
+                padding: '10px 12px', minHeight: 44, alignSelf: 'flex-end', flexShrink: 0, background: tokens.primary,
                 color: tokens.surface, border: 'none', borderRadius: '6px',
                 cursor: 'pointer', fontSize: '14px', whiteSpace: 'nowrap',
               }}
             >
               {busy ? (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                  <Spinner loading text="" />
+                  <span className="chat-send-spinner" aria-hidden="true" />
                   {label}
                 </span>
               ) : label}

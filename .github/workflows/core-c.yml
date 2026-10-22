@@ -1,6 +1,10 @@
 name: core-c-package
 
 on:
+  # Test GitHub's queued integration commit without updating the PR branch.
+  merge_group:
+    types: [checks_requested]
+    branches: [testing]
   push:
     paths:
       - "src/core/**"

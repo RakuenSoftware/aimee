@@ -4,6 +4,8 @@
 
 #include "agent_config.h"
 #include "trajectory.h"
+#include "db1_client/server_sessions.h"
+#include <openssl/crypto.h>
 #include "cJSON.h"
 
 #include <stdlib.h>
@@ -27,7 +29,7 @@ int handle_trajectory_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       opts.max_tool_result_bytes = jmax->valueint;
 
    char *json = NULL;
-   if (trajectory_export(sid, &opts, &json) != 0 || !json)
+   if (trajectory_export(sid, conn->vault_principal, &opts, &json) != 0 || !json)
    {
       free(json);
       return server_send_error(conn, "trajectory export failed", NULL);
@@ -78,11 +80,23 @@ int handle_trajectory_batch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       opts.export_opts.max_tool_result_bytes = jmax->valueint;
 
    agent_config_t agents;
-   if (agent_load_config(&agents) != 0)
-      return server_send_error(conn, "failed to load agents", NULL);
-
+   const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "session_id"));
+   db1_server_session_t session;
+   if (!sid || !sid[0] || !conn->vault_principal[0] || db1_server_session_get(sid, &session) ||
+       strcmp(session.principal, conn->vault_principal))
+      return server_send_error(conn, "trajectory batch requires an owned session_id", NULL);
+   agent_request_creds_t previous;
+   agent_request_creds_snapshot(&previous);
+   agent_set_request_session(sid);
+   agent_set_request_vault_principal(conn->vault_principal);
+   agent_set_request_codex_creds(NULL, NULL);
    char *summary_json = NULL;
-   if (trajectory_batch_run(&agents, &opts, &summary_json) != 0 || !summary_json)
+   int rc =
+       agent_load_config(&agents) == 0 ? trajectory_batch_run(&agents, &opts, &summary_json) : -1;
+   OPENSSL_cleanse(&agents, sizeof agents);
+   agent_request_creds_restore(&previous);
+   OPENSSL_cleanse(&previous, sizeof previous);
+   if (rc != 0 || !summary_json)
    {
       free(summary_json);
       return server_send_error(conn, "trajectory batch failed", NULL);

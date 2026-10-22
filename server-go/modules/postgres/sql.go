@@ -23,9 +23,11 @@ package postgres
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"slices"
 	"strings"
@@ -119,6 +121,7 @@ const (
 type txRegistry struct {
 	mu      sync.Mutex
 	next    uint64
+	initErr error
 	open    map[uint64]*openTx
 	maxOpen int
 	ttl     time.Duration
@@ -141,24 +144,38 @@ const (
 	txIdleTTL = 5 * time.Minute
 )
 
-func newTxRegistry() *txRegistry {
-	return &txRegistry{open: map[uint64]*openTx{}, maxOpen: maxOpenTx, ttl: txIdleTTL}
+func newTxRegistry() *txRegistry { return newTxRegistryWithEntropy(rand.Reader) }
+
+// A restarted provider must not deterministically reuse an old client's handle.
+// Keep the existing u64 wire: seed each registry from cryptographic entropy,
+// then allocate monotonically without wrapping. No entropy means no new lease.
+func newTxRegistryWithEntropy(entropy io.Reader) *txRegistry {
+	r := &txRegistry{open: map[uint64]*openTx{}, maxOpen: maxOpenTx, ttl: txIdleTTL}
+	var seed [8]byte
+	if _, err := io.ReadFull(entropy, seed[:]); err != nil {
+		r.initErr = fmt.Errorf("transaction handle entropy unavailable: %w", err)
+		return r
+	}
+	r.next = binary.LittleEndian.Uint64(seed[:])
+	return r
 }
 
 // add registers a live transaction, reaping idle ones first.
 func (r *txRegistry) add(tx pgx.Tx, conn *pgxpool.Conn) (uint64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.initErr != nil {
+		return 0, r.initErr
+	}
+	if r.next == ^uint64(0) {
+		return 0, fmt.Errorf("transaction handle space exhausted")
+	}
 	r.reapLocked()
 	if len(r.open) >= r.maxOpen {
 		return 0, fmt.Errorf("the store holds %d open transactions, its ceiling; "+
 			"a caller is beginning transactions it never ends", r.maxOpen)
 	}
 	r.next++
-	// Handle 0 is "no transaction" on the wire, so it can never name one.
-	if r.next == 0 {
-		r.next = 1
-	}
 	id := r.next
 	r.open[id] = &openTx{tx: tx, conn: conn, lastUsed: time.Now()}
 	return id, nil

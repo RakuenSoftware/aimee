@@ -166,7 +166,7 @@ func describeJSON(node *JSONValue, b *boundBuf, depth int) {
 			b.appendf("\"%s...\"", node.Str[:60]) // C's %.60s is a BYTE precision
 		}
 	case JSONNumber:
-		b.appendf("%s", cFormatG(node.Num))
+		b.appendf("%s", node.numberText())
 	case JSONTrue:
 		b.appendf("true")
 	case JSONFalse:

@@ -5,7 +5,10 @@
 #include "log.h"
 #include "platform_process.h"
 #include "cJSON.h"
-#include "json_fluent.h"     /* jo_ok */
+#include "json_fluent.h" /* jo_ok */
+#include <aimee/translation/aimee_frontend.h>
+#include "aimee_sha256.h"
+#include "db1_client/primary_sessions.h"
 #include "request_context.h" /* request_context_caller_subject: the account ingress proved */
 #include <aimee/core/connection/auth.h>
 #include <sys/stat.h>
@@ -77,6 +80,7 @@ const method_policy_t method_registry[] = {
     {"entities.merge", CAP_MEMORY_WRITE, "merge two entities"},
     {"entities.unmerge", CAP_MEMORY_WRITE, "reverse an entity merge"},
     {"memory.user_capture", CAP_MEMORY_WRITE, "capture per-user memory"},
+    {"learning.approaches", CAP_MEMORY_READ, "read scoped canonical approach observations"},
     {"learning.task_cost", CAP_MEMORY_READ, "report declared task costs without policy promotion"},
     {"action.receipt", CAP_TOOL_EXECUTE, "inspect and reconcile owned action receipts"},
     {"learning.application", CAP_MEMORY_WRITE, "record receipt-bound user procedure feedback"},
@@ -332,6 +336,17 @@ static int generate_uuid(char *buf, size_t len)
    return 0;
 }
 
+/* Use the account the ingress authenticated. Root web backends and certificate
+ * clients share process UIDs, which are not their session ownership identity. */
+static const char *session_caller_principal(const server_conn_t *conn, char fallback[32])
+{
+   if (conn->attested_transport > ATTEST_NONE && conn->attested_transport <= ATTEST_MTLS_CLIENT &&
+       conn->vault_principal[0])
+      return conn->vault_principal;
+   snprintf(fallback, 32, "uid:%d", (int)conn->peer_uid);
+   return fallback;
+}
+
 int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    cJSON *jct = cJSON_GetObjectItemCaseSensitive(req, "client_type");
@@ -344,9 +359,8 @@ int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (generate_uuid(sid, sizeof(sid)) != 0)
       return server_send_error(conn, "secure entropy unavailable; session not created", NULL);
 
-   /* Build principal from peer UID */
-   char principal[32];
-   snprintf(principal, sizeof(principal), "uid:%d", (int)conn->peer_uid);
+   char fallback[32];
+   const char *principal = session_caller_principal(conn, fallback);
 
    char ts[32];
    now_utc(ts, sizeof(ts));
@@ -360,12 +374,9 @@ int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
-/* session.record_transcript: persist a session's conversation to DB1 under its
- * real host id. The hook-driven primary (e.g. Claude Code) posts the transcript
- * it already keeps on disk (transcript_path) here each turn, so a session driven
- * through the anonymous /v1/messages gateway — which stores no conversation — is
- * still logged and recoverable after a crash. `messages` is the transcript JSON
- * (array preferred; any JSON value is stored verbatim). Idempotent upsert. */
+/* External SDK archive only. This scope never replaces host primary history or
+ * introduces execution/proof/control events. Repeated equal snapshots reuse an
+ * exact content-bound checkpoint; old compatibility transcripts are not merged. */
 int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -374,27 +385,48 @@ int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJS
    if (!sid || !sid[0])
       return server_send_error(conn, "session_id required", NULL);
    /* Enforce the same id invariant as handle_hooks_session_start: this route
-    * makes durable server_sessions + primary_sessions writes keyed by sid, so it
+    * makes durable canonical session writes keyed by sid, so it
     * must not admit ids the other session entry points would reject. */
    if (!is_safe_id(sid))
       return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
                                NULL);
 
    cJSON *jmsgs = cJSON_GetObjectItemCaseSensitive(req, "messages");
-   if (!jmsgs)
-      return server_send_error(conn, "messages required", NULL);
+   if (!cJSON_IsArray(jmsgs) || !aimee_ir_json_unique(req))
+      return server_send_error(conn, "unique transcript array required", NULL);
 
-   /* Optional host metadata; the defaults suit the Claude Code hook, but a
-    * non-Claude host may identify itself. */
-   cJSON *jct = cJSON_GetObjectItemCaseSensitive(req, "client_type");
-   const char *client_type =
-       (cJSON_IsString(jct) && jct->valuestring[0]) ? jct->valuestring : "claude-code";
-   cJSON *jprov = cJSON_GetObjectItemCaseSensitive(req, "provider");
-   const char *provider =
-       (cJSON_IsString(jprov) && jprov->valuestring[0]) ? jprov->valuestring : "claude-code";
-
-   char caller[DB1_SS_PRINCIPAL_LEN];
-   snprintf(caller, sizeof(caller), "uid:%d", (int)conn->peer_uid);
+   const char *client_type = "claude-code";
+   const cJSON *jct = cJSON_GetObjectItemCaseSensitive(req, "client_type");
+   const cJSON *provider = cJSON_GetObjectItemCaseSensitive(req, "provider");
+   if ((jct && (!cJSON_IsString(jct) || strcmp(jct->valuestring, client_type))) ||
+       (provider && (!cJSON_IsString(provider) || strcmp(provider->valuestring, client_type))))
+      return server_send_error(conn, "unsupported external transcript source", NULL);
+   cJSON *observations = aimee_frontend_claude_transcript_import(jmsgs, sid);
+   if (!observations)
+      return server_send_error(conn, "unsupported or invalid external transcript", NULL);
+   char *messages_json = cJSON_PrintUnformatted(observations);
+   cJSON_Delete(observations);
+   if (!messages_json)
+      return server_send_error(conn, "failed to serialize canonical observations", NULL);
+   /* Include the exact parsed source (including SDK IDs/bookkeeping), fixed
+    * import scope and session. Equal display text is not equal source custody. */
+   cJSON *source = cJSON_CreateObject();
+   char *source_json = NULL;
+   if (source && cJSON_AddStringToObject(source, "scope", "external-sdk:claude-code") &&
+       cJSON_AddStringToObject(source, "session_id", sid) &&
+       cJSON_AddItemReferenceToObject(source, "records", jmsgs))
+      source_json = cJSON_PrintUnformatted(source);
+   cJSON_Delete(source);
+   char checkpoint[65];
+   int bound = source_json && !aimee_sha256_hex(source_json, strlen(source_json), checkpoint);
+   free(source_json);
+   if (!bound)
+   {
+      free(messages_json);
+      return server_send_error(conn, "failed to bind external transcript", NULL);
+   }
+   char fallback[32];
+   const char *caller = session_caller_principal(conn, fallback);
 
    /* Register (idempotent) so the session is locatable even if SessionStart never
     * ran, then enforce ownership on the FINAL row before any durable write. When
@@ -409,21 +441,27 @@ int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJS
    {
       (void)db1_server_session_create(sid, client_type, caller);
       if (db1_server_session_get(sid, &existing) != 0)
+      {
+         free(messages_json);
          return server_send_error(conn, "failed to register session", NULL);
+      }
    }
-   if (existing.principal[0] && strcmp(existing.principal, caller) != 0)
+   if (strcmp(existing.principal, caller) != 0)
+   {
+      free(messages_json);
       return server_send_error(conn, "session_id owned by another principal", NULL);
+   }
 
-   char *messages_json = cJSON_PrintUnformatted(jmsgs);
-   if (!messages_json)
-      return server_send_error(conn, "failed to serialize transcript", NULL);
-   int rc = db1_primary_session_save(sid, client_type, provider, messages_json);
+   int rc = db1_session_ir_history_save(sid, checkpoint, "external-sdk:claude-code", caller,
+                                        messages_json);
    free(messages_json);
    if (rc != 0)
-      return server_send_error(conn, "failed to persist transcript", NULL);
+      return server_send_error(conn, "failed to persist canonical external observations", NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "session_id", sid);
+   cJSON_AddStringToObject(resp, "view", "external_sdk");
+   cJSON_AddStringToObject(resp, "snapshot_digest", checkpoint);
    return server_send_ok(conn, resp);
 }
 
@@ -507,7 +545,10 @@ int server_account_is_person(const char *account)
 
 memory_authority_t server_account_memory_authority(const char *account)
 {
-   return server_account_is_person(account) ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL;
+   const request_context_t *owner = request_context_get();
+   return server_account_is_person(account) && !(owner && owner->model_execution)
+              ? MEMORY_AUTHORITY_USER
+              : MEMORY_AUTHORITY_MODEL;
 }
 
 const char *server_request_account(void)

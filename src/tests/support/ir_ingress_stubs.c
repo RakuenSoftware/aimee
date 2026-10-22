@@ -156,29 +156,10 @@ __attribute__((weak)) const char *server_http_identity_principal(void)
    return "";
 }
 
-__attribute__((weak)) int gw_stage_router(void *r, void *ud)
-{
-   (void)r;
-   (void)ud;
-   return 0;
-}
-
 __attribute__((weak)) void aimee_ir_shadow_observe_request(const void *req, int frontend)
 {
    (void)req;
    (void)frontend;
-}
-
-/* Slice 2-wire: the response-side shadow. anthropic_http.o now calls this on the
- * live buffered paths; the minimal shape/p2c test links do not pull the real
- * aimee_ir_shadow.o (+ backend parsers), so a weak inert stub resolves the link.
- * Real aimee_ir_shadow.o wins when linked. */
-__attribute__((weak)) void aimee_ir_shadow_compare_response(const void *legacy,
-                                                            const void *resp_json, int wire)
-{
-   (void)legacy;
-   (void)resp_json;
-   (void)wire;
 }
 
 __attribute__((weak)) int aimee_ir_path_enabled(void)
@@ -242,48 +223,6 @@ __attribute__((weak)) void aimee_ir_metric_inc(int metric, int frontend)
    (void)frontend;
 }
 
-__attribute__((weak)) int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
-                                                     char **instructions_out, void **messages_out,
-                                                     void **tools_out, int *stream_out)
-{
-   (void)body;
-   (void)model;
-   (void)model_n;
-   (void)instructions_out;
-   (void)messages_out;
-   (void)tools_out;
-   (void)stream_out;
-   return -1;
-}
-
-__attribute__((weak)) void *aimee_ir_build_from_chat(const char *agent_model, const void *messages,
-                                                     const void *tools, const char *system,
-                                                     const char *driver_name, int max_tokens,
-                                                     double temperature)
-{
-   (void)agent_model;
-   (void)messages;
-   (void)tools;
-   (void)system;
-   (void)driver_name;
-   (void)max_tokens;
-   (void)temperature;
-   return NULL;
-}
-
-/* Slice 3: the OPENAI-WIRE IR response path. The anthropic_http shape/p2c tests
- * #include anthropic_http.c and link minimally; these inert weak stubs resolve the
- * link. aimee_ir_resp_path_enabled()->0 keeps the legacy parse on the test path, so
- * the other three are never actually called. Real objects win when linked. */
-__attribute__((weak)) int aimee_ir_resp_path_enabled(void)
-{
-   return 0;
-}
-__attribute__((weak)) void aimee_ir_response_to_parsed(const void *r, void *out)
-{
-   (void)r;
-   (void)out;
-}
 __attribute__((weak)) int openai_backend_parse(const void *resp, void *out, char *err,
                                                unsigned long errn)
 {
@@ -293,21 +232,9 @@ __attribute__((weak)) int openai_backend_parse(const void *resp, void *out, char
    (void)errn;
    return -1;
 }
-__attribute__((weak)) void aimee_response_free(void *r)
+__attribute__((weak)) void aimee_response_free(aimee_response_t *r)
 {
    (void)r;
-}
-
-/* Response seam Slice 2: the plain anthropic_http shape test #includes anthropic_http.c
- * (which now calls gw_response_run_governance) but links no policing graph. Inert weak
- * stub -> no policing, which the shape test does not exercise. The p2c tests link the real
- * gw_stage_governance.o + gateway_policy.o, so the strong symbol wins there. */
-__attribute__((weak)) int gw_response_run_governance(void *parsed, int enabled, int policy_active)
-{
-   (void)parsed;
-   (void)enabled;
-   (void)policy_active;
-   return 0;
 }
 
 /* The ingress governance resolver (anthropic_governance_enabled) reads this env default; the
@@ -325,4 +252,36 @@ __attribute__((weak)) int config_module_enabled(int config_tristate, int env_def
    if (config_tristate == 0 || config_tristate == 1)
       return config_tristate;
    return env_default ? 1 : 0;
+}
+
+__attribute__((weak)) int openai_stream_finish(void *state, void *out, int max)
+{
+   (void)state;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
+/* Minimal ingress fixtures do not start module-owned request stages. The real
+ * host implementation overrides this when linked into the server. */
+__attribute__((weak)) void aimee_ir_apply_native_request_stages(void *request)
+{
+   (void)request;
+}
+
+/* Advisory routing is independent of the ingress codec fixtures. */
+__attribute__((weak)) void router_advise_ir(const void *request)
+{
+   (void)request;
+}
+
+/* Minimal ingress fixtures use synthetic API-key authentication. Claude OAuth
+ * header custody is exercised against the real owner in test_agent; an OAuth
+ * profile must not silently pass this unrelated fake-auth seam. */
+__attribute__((weak)) int agent_claude_oauth_headers(const agent_t *agent, char *headers,
+                                                     size_t capacity)
+{
+   (void)headers;
+   (void)capacity;
+   return agent && !strcmp(agent->auth_type, "claude-oauth") ? -1 : 0;
 }

@@ -13,6 +13,10 @@ import (
 // carries no deadline of its own.
 const DefaultTimeout = 2 * time.Second
 
+// CanonicalHistoryTimeout bounds source-complete history projections/imports.
+// Transport deadlines remain authoritative and may shorten this budget.
+const CanonicalHistoryTimeout = 30 * time.Second
+
 // OpFunc runs one operation. It returns the status the caller sees plus the
 // reply fields. A returned error is the module's own failure -- a broken query,
 // a lost connection -- and becomes StatusFailed; a refusal the caller should
@@ -31,6 +35,8 @@ type OpDBFunc func(ctx context.Context, db DB, fields []string) (uint32, []strin
 
 // Op is one operation in a family.
 type Op struct {
+	// Timeout is an explicitly selected operation budget; zero uses DefaultTimeout.
+	Timeout time.Duration
 	// HostOnly restricts private state mutation to the authenticated C host bus principal.
 	HostOnly bool
 	// Name is the catalog's name for this op, used only in logs.
@@ -106,7 +112,11 @@ func (f Family) Handler(db DB) bus.ModuleHandler {
 		if invocation.Cancelled() {
 			return nil, bus.ModuleStatusCancelled
 		}
-		timeout := invocation.Remaining(DefaultTimeout)
+		limit := spec.Timeout
+		if limit <= 0 {
+			limit = DefaultTimeout
+		}
+		timeout := invocation.Remaining(limit)
 		if timeout <= 0 {
 			return nil, bus.ModuleStatusCancelled
 		}

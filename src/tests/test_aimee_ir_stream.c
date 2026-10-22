@@ -151,9 +151,34 @@ int main(void)
       cJSON *c4 = cJSON_Parse("{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}");
       assert(c4);
       n = openai_chunk_to_deltas(c4, &r2, d, 8);
-      assert(n == 2 && d[0].type == AIMEE_DELTA_BLOCK_STOP && d[0].kind == AIMEE_BLK_THINKING);
-      assert(d[1].type == AIMEE_DELTA_TURN_STOP);
+      assert(n == 1 && d[0].type == AIMEE_DELTA_BLOCK_STOP && d[0].kind == AIMEE_BLK_THINKING);
+      assert(openai_stream_finish(&r2, d, 8) == 1 && d[0].type == AIMEE_DELTA_TURN_STOP);
       cJSON_Delete(c4);
+   }
+
+   /* Providers may send usage only after finish_reason, before [DONE]. */
+   {
+      openai_stream_state_t late;
+      openai_stream_state_init(&late);
+      aimee_delta_t d[8];
+      cJSON *chunk = cJSON_Parse(
+          "{\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}");
+      assert(openai_chunk_to_deltas(chunk, &late, d, 8) == 4);
+      assert(!late.stopped);
+      cJSON_Delete(chunk);
+      chunk = cJSON_Parse("{\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":9,"
+                          "\"prompt_tokens_details\":{\"cached_tokens\":12},\"completion_tokens_"
+                          "details\":{\"reasoning_tokens\":4}}}");
+      assert(openai_chunk_to_deltas(chunk, &late, d, 8) == 1);
+      assert(d[0].type == AIMEE_DELTA_TURN_STOP && d[0].usage_in == 20 && d[0].usage_out == 9 &&
+             d[0].usage_cache_read == 12 && d[0].usage_reasoning == 4);
+      assert(openai_stream_finish(&late, d, 8) == 0);
+      cJSON_Delete(chunk);
+      openai_stream_state_init(&late);
+      assert(openai_stream_finish(&late, d, 8) == -1);
+      chunk = cJSON_Parse("{\"choices\":[{\"delta\":{\"content\":\"too many deltas\"}}]}");
+      assert(openai_chunk_to_deltas(chunk, &late, d, 1) == -1);
+      cJSON_Delete(chunk);
    }
 
    /* --- Anthropic SSE -> IR deltas (the backend cell that was missing) --------- */
@@ -190,11 +215,11 @@ int main(void)
              strcmp(d[0].text_delta, "I need a test env") == 0);
       A_DONE();
 
-      /* signature_delta is DROPPED, openly (see the header's KNOWN GAPS) -- it must
-       * neither surface as text nor drop the stream. */
+      /* Signatures remain opaque thinking state, separate from visible text. */
       A_FEED("content_block_delta",
              "{\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"abc\"}}");
-      assert(n == 0);
+      assert(n == 1 && d[0].kind == AIMEE_BLK_THINKING && !d[0].text_delta &&
+             strcmp(d[0].signature_delta, "abc") == 0);
       A_DONE();
 
       A_FEED("content_block_stop", "{\"index\":0}");
@@ -214,9 +239,13 @@ int main(void)
       assert(n == 1 && strcmp(d[0].tool_args_delta, "{\"a\":") == 0);
       A_DONE();
 
-      /* a future delta variant is ignored rather than dropping the stream */
+      /* Unsupported content variants fail instead of losing model output. */
       A_FEED("content_block_delta", "{\"index\":1,\"delta\":{\"type\":\"future_delta\"}}");
-      assert(n == 0);
+      assert(n == -1);
+      A_DONE();
+
+      A_FEED("content_block_stop", "{\"index\":1}");
+      assert(n == 1);
       A_DONE();
 
       A_FEED("message_delta",
@@ -227,6 +256,7 @@ int main(void)
       A_FEED("message_stop", "{}");
       assert(n == 1 && d[0].type == AIMEE_DELTA_TURN_STOP);
       assert(d[0].stop_reason == AIMEE_STOP_TOOL_USE);
+      assert(!strcmp(d[0].raw_stop_reason, "tool_use"));
       assert(d[0].usage_in == 7 && d[0].usage_out == 42);
       A_DONE();
 
@@ -266,6 +296,8 @@ int main(void)
 
       /* a delta whose variant contradicts the block's declared kind */
       anthropic_backend_stream_state_init(&st);
+      A_FEED("message_start", "{\"message\":{\"role\":\"assistant\"}}");
+      A_DONE();
       A_FEED("content_block_start", "{\"index\":0,\"content_block\":{\"type\":\"text\"}}");
       assert(n == 1);
       A_DONE();
@@ -276,6 +308,8 @@ int main(void)
 
       /* a KNOWN variant missing its own payload field */
       anthropic_backend_stream_state_init(&st);
+      A_FEED("message_start", "{\"message\":{\"role\":\"assistant\"}}");
+      A_DONE();
       A_FEED("content_block_start", "{\"index\":0,\"content_block\":{\"type\":\"text\"}}");
       assert(n == 1);
       A_DONE();
@@ -308,6 +342,7 @@ int main(void)
       assert(n == 1 && d[0].type == AIMEE_DELTA_ERROR &&
              strcmp(d[0].error_message, "overloaded") == 0);
       A_DONE();
+      anthropic_backend_stream_state_init(&st);
       A_FEED("error", "{}");
       assert(n == 1 && d[0].type == AIMEE_DELTA_ERROR && d[0].error_message);
       A_DONE();
@@ -348,6 +383,17 @@ int main(void)
       assert(strcmp(thought, "need a test env; which one?") == 0);
 #undef A_FEED
 #undef A_DONE
+   }
+
+   /* A wire without a representation must refuse opaque Responses state. */
+   {
+      anthropic_stream_state_t state = {0};
+      aimee_delta_t delta = {.type = AIMEE_DELTA_BLOCK_START,
+                             .kind = AIMEE_BLK_THINKING,
+                             .thinking_id = "rs_1",
+                             .thinking_encrypted_content = "cipher"};
+      assert(!anthropic_delta_render(&delta, &state, "m", "model"));
+      assert(anthropic_delta_emit(&delta, &state, "m", "model", NULL, NULL) < 0);
    }
 
    printf("ok\n");

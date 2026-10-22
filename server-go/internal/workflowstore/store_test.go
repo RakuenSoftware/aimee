@@ -56,12 +56,30 @@ func TestTerminalDelegateJobsReturnsBoundedBatch(t *testing.T) {
 	if len(mappings) != terminalCancellationBatchSize {
 		t.Fatalf("mappings=%d want bounded batch %d", len(mappings), terminalCancellationBatchSize)
 	}
+	for i, mapping := range mappings {
+		if mapping.JobID != i+1 {
+			t.Fatalf("first batch lost or reordered a fresh job: %+v", mappings)
+		}
+	}
 	second, err := store.TerminalDelegateJobs(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(second) != terminalCancellationBatchSize || second[0].JobID != terminalCancellationBatchSize+1 || second[1].JobID != terminalCancellationBatchSize+2 {
 		t.Fatalf("second batch did not rotate past failed jobs: %+v", second)
+	}
+	third, err := store.TerminalDelegateJobs(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []int{7, 8, 9, 10, 1, 2, 3, 4}
+	if len(third) != len(want) {
+		t.Fatalf("third batch size=%d", len(third))
+	}
+	for i, mapping := range third {
+		if mapping.JobID != want[i] {
+			t.Fatalf("third batch did not rotate fairly: %+v", third)
+		}
 	}
 }
 

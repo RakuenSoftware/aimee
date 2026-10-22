@@ -694,6 +694,7 @@ ENV_GROUP_ORDER = [
 ]
 
 ENV_DESC = {
+    "AIMEE_NATIVE_CONTAINMENT_ROOT": ("Delegates & backends", "Optional delegated Linux cgroup-v2 root for native Codex/Claude subprocess custody and crash recovery. Qualified launches require exact kernel-boundary admission and quiescence; an absent root does not qualify whole-tree recovery. See [native containment](../NATIVE_CACHE_CONTAINMENT.md)."),
     # Paths & assets
     "AIMEE_HOME": ("Paths & assets", "Root of the per-user config and runtime-asset store (`aimee.yaml`, workflows, keys). DB1 is PostgreSQL and lives outside this directory."),
     "AIMEE_CAPTURE_DIR": ("Paths & assets", "Directory for best-effort event-bus capture sessions. Defaults to `AIMEE_HOME`; capture failure is exposed in health and recorded in the WORM ledger."),

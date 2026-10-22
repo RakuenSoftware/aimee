@@ -5,8 +5,6 @@
 
 #include "gw_stage_governance.h"
 
-#include "aimee.h" /* size macros for agent_types.h */
-#include "agent_protocol.h"
 #include "gw_response_registry.h"
 
 static gw_governance_decision_provider_fn g_decision_provider;
@@ -41,89 +39,75 @@ static int decision_valid(const aimee_governance_decision_t *decision, uint32_t 
           aimee_governance_popcount(decision->keep_mask) + decision->drop_count == call_count;
 }
 
-static int apply_decision(parsed_response_t *parsed, const aimee_governance_decision_t *decision)
+static int apply_ir_governance(aimee_response_t *response, int policy_active)
 {
-   int original_count = parsed->call_count;
-   int write_index = 0;
-   for (int i = 0; i < original_count; ++i)
+   if (!response)
+      return 0;
+   int count = aimee_ir_response_tool_count(response);
+   if (!count)
+      return 0;
+   int removed = 0;
+   /* The policy wire carries a bounded mask; it does not limit the IR response.
+    * Decide and remove backwards so later chunks cannot shift earlier ordinals. */
+   for (int end = count; end > 0;)
    {
-      if ((decision->keep_mask & (1u << (unsigned)i)) == 0)
+      int size =
+          end > (int)AIMEE_GOVERNANCE_TOOL_COUNT_MAX ? (int)AIMEE_GOVERNANCE_TOOL_COUNT_MAX : end;
+      int start = end - size;
+      aimee_tool_identity_view_t tools[AIMEE_GOVERNANCE_TOOL_COUNT_MAX];
+      for (int i = 0; i < size; i++)
       {
-         free(parsed->calls[i].arguments);
-         parsed->calls[i].arguments = NULL;
-         continue;
+         const aimee_block_t *block = aimee_ir_response_tool(response, start + i);
+         tools[i] = (aimee_tool_identity_view_t){block->tool_name, block->tool_namespace};
       }
-      if (write_index != i)
-         parsed->calls[write_index] = parsed->calls[i];
-      write_index++;
+      aimee_governance_decision_t decision = {0};
+      /* Policy consumes the canonical state. Opaque native metadata belongs
+       * to replay/audit and must not overflow the bounded policy vocabulary. */
+      const char *reason = aimee_stop_reason_name(response->stop_reason);
+      int valid =
+          g_decision_provider &&
+          g_decision_provider(policy_active, tools, (uint32_t)size, reason, &decision) == 0 &&
+          decision_valid(&decision, (uint32_t)size);
+      for (int i = size - 1; i >= 0; i--)
+         if (!valid || !(decision.keep_mask & (1u << (unsigned)i)))
+         {
+            aimee_ir_response_drop_tool(response, start + i);
+            removed++;
+         }
+      end = start;
    }
-   parsed->call_count = write_index;
-   snprintf(parsed->stop_reason, sizeof(parsed->stop_reason), "%s", decision->stop_reason);
-   return original_count - write_index;
+   if (removed && response->stop_reason == AIMEE_STOP_TOOL_USE &&
+       !aimee_ir_response_has_tool_use(response))
+   {
+      response->stop_reason = AIMEE_STOP_END_TURN;
+      /* This is a host terminal transition, not a new provider spelling.
+       * Otherwise retain the original opaque reason, including truncation. */
+      free(response->raw_stop_reason);
+      response->raw_stop_reason = NULL;
+   }
+   return removed;
 }
 
-static int fail_closed(parsed_response_t *parsed)
-{
-   aimee_governance_decision_t decision;
-   memset(&decision, 0, sizeof(decision));
-   decision.drop_count = (uint32_t)parsed->call_count;
-   snprintf(decision.stop_reason, sizeof(decision.stop_reason), "%s", "end_turn");
-   return apply_decision(parsed, &decision);
-}
-
-/* The governance response stage applies a decision returned by the event-bus
- * module. Parsed-response compaction and ownership stay local, but policy
- * evaluation has no in-process fallback. */
 static gw_response_stage_result_t governance_stage(gw_response_ctx_t *ctx, void *ud)
 {
+   if (!ctx || !ctx->resp || !ud)
+      return (gw_response_stage_result_t){GW_RSTAGE_ERROR, 0};
    governance_stage_ctx_t *stage = ud;
-   parsed_response_t *parsed = ctx->resp;
-   if (parsed->call_count < 0)
-      parsed->call_count = 0;
-   uint32_t call_count = parsed->call_count > 0 ? (uint32_t)parsed->call_count : 0;
-   const char *tool_names[AIMEE_GOVERNANCE_TOOL_COUNT_MAX];
-   aimee_governance_decision_t decision;
-   memset(&decision, 0, sizeof(decision));
-
-   if (call_count > AIMEE_GOVERNANCE_TOOL_COUNT_MAX)
-   {
-      parsed->call_count = AIMEE_GOVERNANCE_TOOL_COUNT_MAX;
-      int drops = fail_closed(parsed);
-      gw_response_stage_result_t r = {GW_RSTAGE_OK, drops};
-      return r;
-   }
-   for (uint32_t i = 0; i < call_count; ++i)
-      tool_names[i] = parsed->calls[i].name;
-
-   if (!g_decision_provider ||
-       g_decision_provider(stage->policy_active, tool_names, call_count, parsed->stop_reason,
-                           &decision) != 0 ||
-       !decision_valid(&decision, call_count))
-   {
-      int drops = call_count > 0 ? fail_closed(parsed) : 0;
-      gw_response_stage_result_t r = {GW_RSTAGE_OK, drops};
-      return r;
-   }
-
-   int drops = apply_decision(parsed, &decision);
-   gw_response_stage_result_t r = {GW_RSTAGE_OK, drops > 0 ? drops : 0};
-   return r;
+   int removed = apply_ir_governance(ctx->resp, stage->policy_active);
+   return (gw_response_stage_result_t){GW_RSTAGE_OK, removed};
 }
 
-int gw_response_run_governance(struct parsed_response *parsed, int enabled, int policy_active)
+int gw_ir_response_run_governance(aimee_response_t *response, int enabled, int policy_active)
 {
-   if (!parsed)
+   if (!response || !enabled)
       return 0;
    governance_stage_ctx_t stage = {.policy_active = policy_active ? 1 : 0};
-   gw_response_ctx_t ctx;
-   ctx.resp = parsed;
-   gw_response_stage_slot_t slots[] = {
-       {"governance", governance_stage, &stage, enabled},
-   };
-   gw_response_stage_t stages[2];
-   int n = gw_response_registry_build(slots, sizeof(slots) / sizeof(slots[0]), stages, 2);
+   gw_response_ctx_t ctx = {.resp = response};
+   gw_response_stage_slot_t slots[] = {{"governance", governance_stage, &stage, enabled}};
+   gw_response_stage_t stages[1];
+   int n = gw_response_registry_build(slots, 1, stages, 1);
    if (n < 0)
-      return 0; /* static 1-slot catalog cannot fail; fail-safe: no governance */
-   gw_response_stage_result_t res = gw_response_pipeline_run(&ctx, stages, (size_t)n);
-   return res.interventions;
+      return -1;
+   gw_response_stage_result_t result = gw_response_pipeline_run(&ctx, stages, (size_t)n);
+   return result.status == GW_RSTAGE_OK ? result.interventions : -1;
 }

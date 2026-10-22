@@ -352,11 +352,13 @@ int cli_http_build_request(const char *method, const char *path, const char *hos
  * CLIENT_DEFAULT_TIMEOUT_MS) so an unreachable/filtered host fails fast instead
  * of blocking on the kernel default (~2 min). Writes the HTTP Host header value
  * into host_out. */
-static int cli_http_connect(const char *endpoint, char *host_out, size_t host_n,
-                            int connect_timeout_ms)
+static int cli_http_connect(const char *endpoint, char *host_out, size_t host_n, char *peer_out,
+                            size_t peer_n, int connect_timeout_ms)
 {
    if (host_out && host_n)
       snprintf(host_out, host_n, "localhost");
+   if (peer_out && peer_n)
+      snprintf(peer_out, peer_n, "localhost");
    if (!endpoint || !endpoint[0])
       return -1;
    if (connect_timeout_ms <= 0)
@@ -398,10 +400,22 @@ static int cli_http_connect(const char *endpoint, char *host_out, size_t host_n,
    const char *host = parsed.host;
    const char *port_str = parsed.port;
 
-   int out_fd = aimee_core_socket_connect(host, port_str, connect_timeout_ms);
-   if (out_fd >= 0 && host_out && host_n)
-      snprintf(host_out, host_n, "%s", host);
-   return out_fd;
+   /* HTTP authority includes the actual port and IPv6 brackets. TLS peer
+    * verification/SNI uses the independent bare DNS/IP name, never authority. */
+   if (host_out && host_n)
+   {
+      int n = strchr(host, ':') ? snprintf(host_out, host_n, "[%s]:%s", host, port_str)
+                                : snprintf(host_out, host_n, "%s:%s", host, port_str);
+      if (n < 0 || (size_t)n >= host_n)
+         return -1;
+   }
+   if (peer_out && peer_n)
+   {
+      int n = snprintf(peer_out, peer_n, "%s", host);
+      if (n < 0 || (size_t)n >= peer_n)
+         return -1;
+   }
+   return aimee_core_socket_connect(host, port_str, connect_timeout_ms);
 }
 
 /* Transport write/read over either a plaintext fd or a TLS session (tlsp set).
@@ -492,9 +506,10 @@ cJSON *cli_http_request(const char *endpoint, const char *method, const char *pa
    if (timeout_ms <= 0)
       timeout_ms = CLIENT_DEFAULT_TIMEOUT_MS;
 
-   char host[256];
+   char host[AIMEE_COMM_HOST_MAX + AIMEE_COMM_PORT_MAX + 5];
    int is_tls = (strncmp(endpoint, "tls:", 4) == 0);
-   int fd = cli_http_connect(endpoint, host, sizeof(host), timeout_ms);
+   char peer[AIMEE_COMM_HOST_MAX + 1];
+   int fd = cli_http_connect(endpoint, host, sizeof(host), peer, sizeof peer, timeout_ms);
    if (fd < 0)
       return NULL;
 
@@ -505,7 +520,7 @@ cJSON *cli_http_request(const char *endpoint, const char *method, const char *pa
    if (is_tls)
    {
 #ifdef WITH_TLS
-      tls = aimee_tls_connect(fd, host);
+      tls = aimee_tls_connect(fd, peer);
       if (!tls)
       {
          close(fd);
@@ -563,8 +578,8 @@ cJSON *cli_http_request_stream(const char *endpoint, const char *method, const c
    if (timeout_ms <= 0)
       timeout_ms = CLIENT_DEFAULT_TIMEOUT_MS;
 
-   char host[256];
-   int fd = cli_http_connect(endpoint, host, sizeof(host), timeout_ms);
+   char host[AIMEE_COMM_HOST_MAX + AIMEE_COMM_PORT_MAX + 5];
+   int fd = cli_http_connect(endpoint, host, sizeof(host), NULL, 0, timeout_ms);
    if (fd < 0)
       return NULL;
 
@@ -721,8 +736,8 @@ cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, 
    if (timeout_ms == 0)
       timeout_ms = CLIENT_DEFAULT_TIMEOUT_MS;
 
-   char host[256];
-   int fd = cli_http_connect(endpoint, host, sizeof(host), connect_timeout_ms);
+   char host[AIMEE_COMM_HOST_MAX + AIMEE_COMM_PORT_MAX + 5];
+   int fd = cli_http_connect(endpoint, host, sizeof(host), NULL, 0, connect_timeout_ms);
    if (fd < 0)
       return NULL;
    if (on_open)

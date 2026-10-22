@@ -17,7 +17,10 @@
     "server-go/modules/egress/secret_resolver.go",
     "server-go/modules/egress/sse.go",
     "server-go/modules/egress/model_tls.go",
-    "server-go/modules/egress/vault_pipe.go"
+    "server-go/modules/egress/vault_pipe.go",
+    "server-go/modules/egress/docker_engine.go",
+    "server-go/modules/egress/docker_engine_linux.go",
+    "server-go/modules/egress/docker_engine_unsupported.go"
   ],
   "go_tests": [
     "server-go/modules/egress/credential_test.go",
@@ -29,7 +32,8 @@
     "server-go/modules/egress/ssrf_test.go",
     "server-go/modules/egress/model_tls_test.go",
     "server-go/modules/egress/memory_backend_test.go",
-    "server-go/modules/egress/vault_pipe_test.go"
+    "server-go/modules/egress/vault_pipe_test.go",
+    "server-go/modules/egress/docker_engine_linux_test.go"
   ],
   "public_headers": [
     "src/modules/egress/include/aimee/egress/module_api.h"

@@ -3,6 +3,8 @@
 #define _GNU_SOURCE
 #endif
 #include "aimee.h"
+#include "aimee_home.h"
+#include <ctype.h>
 #include "cJSON.h"
 #include "cli_session.h"
 #include "platform_path.h"
@@ -1672,4 +1674,90 @@ char *cli_session_delta(const char *previous, const char *current)
       return strdup(current + prev_len);
 
    return strdup(current);
+}
+
+/* Credential homes are ephemeral; only native conversation files persist.
+ * These are harness runtime state, never the browser's transcript. */
+int cli_session_harness_home(const char *vendor, const char *cwd, const char *sid, char *home,
+                             size_t capacity, cli_session_t *cleanup)
+{
+   if (!vendor || (strcmp(vendor, "claude") && strcmp(vendor, "codex")) || !sid || !sid[0] ||
+       !home || !capacity || !cleanup)
+      return -1;
+   for (const char *p = sid; *p; p++)
+      if (!isalnum((unsigned char)*p) && *p != '-' && *p != '_')
+         return -1;
+   int claude = !strcmp(vendor, "claude");
+   if ((claude ? cli_session_isolated_claude_home(cwd, home, capacity)
+               : cli_session_isolated_codex_home(home, capacity)) != 0)
+      return -1;
+   cli_session_set_isolated_home(cleanup, home);
+   char history[4096], link[4096];
+   const char *directory = claude ? "projects" : "sessions";
+   if (snprintf(history, sizeof(history), "%s/browser-%s/%s/%s", aimee_home(), vendor, sid,
+                directory) >= (int)sizeof(history) ||
+       platform_mkdir_p(history, 0700) != 0 ||
+       snprintf(link, sizeof(link), "%s/.%s/%s", home, vendor, directory) >= (int)sizeof(link) ||
+       symlink(history, link) != 0)
+   {
+      cli_session_destroy(cleanup);
+      home[0] = '\0';
+      return -1;
+   }
+   return 0;
+}
+
+int cli_session_native_home(const char *vendor, const char *cwd, const char *sid,
+                            const char *binding, char *home, size_t capacity,
+                            cli_session_t *cleanup)
+{
+   if (!vendor || (strcmp(vendor, "claude") && strcmp(vendor, "codex")) || !sid || !sid[0] ||
+       strlen(sid) >= 128 ||
+       strspn(sid, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") !=
+           strlen(sid) ||
+       !binding || strlen(binding) != 64 || strspn(binding, "0123456789abcdef") != 64 || !home ||
+       !capacity || !cleanup)
+      return -1;
+   home[0] = 0;
+   char base[PATH_MAX], candidate[PATH_MAX], directory[PATH_MAX], history[PATH_MAX], link[PATH_MAX];
+   if (cli_runtime_vendor_base(vendor, base, sizeof base) ||
+       snprintf(candidate, sizeof candidate, "%s/n.XXXXXX", base) >= (int)sizeof candidate ||
+       strlen(candidate) >= capacity || !mkdtemp(candidate))
+      return -1;
+   snprintf(home, capacity, "%s", candidate);
+   cli_session_set_isolated_home(cleanup, home);
+   const char *state = !strcmp(vendor, "claude") ? "projects" : "sessions";
+   if (snprintf(directory, sizeof directory, "%s/.%s", home, vendor) >= (int)sizeof directory ||
+       mkdir(directory, 0700) ||
+       snprintf(history, sizeof history, "%s/browser-%s/%s/%s/%s", aimee_home(), vendor, sid,
+                binding, state) >= (int)sizeof history ||
+       platform_mkdir_p(history, 0700) ||
+       snprintf(link, sizeof link, "%s/%s", directory, state) >= (int)sizeof link ||
+       symlink(history, link))
+      goto failed;
+   if (!strcmp(vendor, "claude"))
+   {
+      cJSON *root = cJSON_CreateObject();
+      cJSON *projects = root ? cJSON_AddObjectToObject(root, "projects") : NULL;
+      cJSON *project = projects && cwd && cwd[0] ? cJSON_AddObjectToObject(projects, cwd) : NULL;
+      if (!root || !projects || !cJSON_AddBoolToObject(root, "hasCompletedOnboarding", 1) ||
+          (cwd && cwd[0] &&
+           (!project || !cJSON_AddBoolToObject(project, "hasTrustDialogAccepted", 1))))
+      {
+         cJSON_Delete(root);
+         goto failed;
+      }
+      char *json = cJSON_PrintUnformatted(root);
+      cJSON_Delete(root);
+      int rc = snprintf(link, sizeof link, "%s/.claude.json", home) >= (int)sizeof link || !json ||
+               cli_write_file_atomic(link, json);
+      free(json);
+      if (rc)
+         goto failed;
+   }
+   return 0;
+failed:
+   cli_session_destroy(cleanup);
+   home[0] = 0;
+   return -1;
 }

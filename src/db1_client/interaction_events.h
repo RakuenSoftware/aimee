@@ -19,6 +19,7 @@ extern "C"
       IE_USER_CORRECTION,
       IE_FAILOVER_EVENT,
       IE_MCP_PACKAGE_CHECK,
+      IE_TASK_OUTCOME,
    } ie_event_type_t;
 
    typedef struct
@@ -37,6 +38,18 @@ extern "C"
    int db1_interaction_event_record(const char *session_id, const char *type_name,
                                     const char *actor, const char *payload_json,
                                     const char *outcome);
+   /* Host-only immutable Learning result, checked against its durable terminal.
+    * Generic interaction recording cannot publish a test grade. */
+   char *db1_delegate_execution_terminal_lookup(const char *principal,
+                                                const char *parent_source_json);
+   int db1_delegate_execution_experience_record(const char *principal,
+                                                const char *parent_source_json);
+   char *db1_learning_projection_claim(void);
+   int db1_learning_projection_ack(const char *lease, const char *result);
+   int db1_execution_test_grade_record(const char *principal, const char *grade_json);
+   /* Caller frees the complete bounded JSON; NULL means unavailable. */
+   char *db1_execution_test_grade_recall(const char *principal, const char *project,
+                                         const char *sources_json);
 
    int db1_interaction_event_list_unreflected(const char *session_id, ie_event_row_t *out, int max);
    int db1_interaction_event_list_for_session(const char *session_id, ie_event_row_t *out, int max);

@@ -1,4 +1,5 @@
 #include <assert.h>
+#include "modules/tools/tool_catalog_data.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -9,7 +10,6 @@
 #include <aimee/control-web/module_api.h>
 #include <aimee/delegates/module_api.h>
 #include <aimee/git/module_api.h>
-#include <aimee/governance/module_api.h>
 #include <aimee/kb-synthesis/module_api.h>
 #include <aimee/learning/module_api.h>
 #include <aimee/postgres/module_api.h>
@@ -31,7 +31,6 @@ DECLARE_HANDLER(aimee_tools_module_handler);
 DECLARE_HANDLER(aimee_workspace_module_handler);
 DECLARE_HANDLER(aimee_git_module_handler);
 DECLARE_HANDLER(aimee_skills_module_handler);
-DECLARE_HANDLER(aimee_governance_module_handler);
 DECLARE_HANDLER(aimee_workflows_module_handler);
 DECLARE_HANDLER(aimee_roundtable_module_handler);
 DECLARE_HANDLER(aimee_kb_synthesis_module_handler);
@@ -185,8 +184,68 @@ static void test_tools(void)
    assert(tool_class("read_file") == AIMEE_TOOL_CLASS_READ);
    assert(tool_class("web_search") == AIMEE_TOOL_CLASS_REMOTE);
    assert(tool_class("git_pr") == AIMEE_TOOL_CLASS_REMOTE);
+   assert(tool_class("git_push") == AIMEE_TOOL_CLASS_REMOTE);
+   assert(tool_class("web_read") == AIMEE_TOOL_CLASS_REMOTE);
+   assert(tool_class("context_contract_expand") == AIMEE_TOOL_CLASS_CONTROL);
+   assert(tool_class("git_commit") == AIMEE_TOOL_CLASS_WRITE);
    assert(tool_class("mcp:remote") == AIMEE_TOOL_CLASS_REMOTE);
    assert(tool_class("not_registered") == AIMEE_TOOL_CLASS_UNKNOWN);
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_TOOLS_STAGE_DISPATCH};
+   uint8_t request[AIMEE_TOOLS_METADATA_REQUEST_MAX], response[AIMEE_TOOLS_METADATA_LEN];
+   size_t request_len;
+   uint32_t response_len = 0;
+   for (size_t i = 0; i < sizeof(aimee_tool_catalog) / sizeof(aimee_tool_catalog[0]); ++i)
+   {
+      const aimee_tool_catalog_entry_t *entry = &aimee_tool_catalog[i];
+      request_len = aimee_tools_metadata_request_encode(entry->name, request, sizeof request);
+      assert(request_len > 0);
+      assert(aimee_tools_module_handler(&invocation, request, (uint32_t)request_len, response,
+                                        sizeof response, &response_len,
+                                        NULL) == AIMEE_MODULE_STATUS_OK);
+      aimee_tool_metadata_t actual;
+      assert(aimee_tools_metadata_response_decode(response, response_len, &actual) == 0);
+      assert(actual.classification == entry->metadata.classification);
+      assert(actual.primary == entry->metadata.primary &&
+             actual.categories == entry->metadata.categories);
+   }
+   request_len = aimee_tools_metadata_request_encode("read_file", request, sizeof request);
+   assert(request_len > 0);
+   request[8] = 0;
+   assert(aimee_tools_module_handler(&invocation, request, (uint32_t)request_len, response,
+                                     sizeof response, &response_len,
+                                     NULL) == AIMEE_MODULE_STATUS_INVALID_REQUEST);
+   request_len = aimee_tools_metadata_request_encode("not_registered", request, sizeof request);
+   assert(request_len > 0);
+   assert(aimee_tools_module_handler(&invocation, request, (uint32_t)request_len, response,
+                                     sizeof response, &response_len,
+                                     NULL) == AIMEE_MODULE_STATUS_OK);
+   aimee_tool_metadata_t actual = {AIMEE_TOOL_CLASS_READ, 1, 1};
+   assert(aimee_tools_metadata_response_decode(response, response_len, &actual) == -1);
+   assert(!actual.classification && !actual.primary && !actual.categories);
+   aimee_tools_put_u32(response + 4, AIMEE_TOOL_CLASS_READ);
+   aimee_tools_put_u32(response + 8, AIMEE_TOOL_POLICY_READ);
+   aimee_tools_put_u32(response + 12, AIMEE_TOOL_POLICY_READ | (1u << 8));
+   assert(aimee_tools_metadata_response_decode(response, response_len, &actual) == -1);
+   assert(!actual.categories);
+   char long_name[308], decoded[AIMEE_TOOLS_METADATA_NAME_MAX + 1];
+   memcpy(long_name, "remote:", 7);
+   memset(long_name + 7, 'x', 300);
+   long_name[307] = 0;
+   request_len = aimee_tools_metadata_request_encode(long_name, request, sizeof request);
+   assert(request_len > AIMEE_TOOLS_REQUEST_LEN);
+   assert(aimee_tools_metadata_request_decode(request, request_len, decoded, sizeof decoded) == 0);
+   assert(!strcmp(decoded, long_name));
+   assert(aimee_tools_module_handler(&invocation, request, (uint32_t)request_len, response,
+                                     sizeof response, &response_len,
+                                     NULL) == AIMEE_MODULE_STATUS_OK);
+   assert(aimee_tools_metadata_response_decode(response, response_len, &actual) == 0);
+   assert(actual.classification == AIMEE_TOOL_CLASS_REMOTE);
+   assert(aimee_tools_metadata_request_decode(request, request_len + 1, decoded, sizeof decoded) ==
+          -1);
+   char over_limit[AIMEE_TOOLS_METADATA_NAME_MAX + 2];
+   memset(over_limit, 'x', sizeof over_limit - 1);
+   over_limit[sizeof over_limit - 1] = 0;
+   assert(aimee_tools_metadata_request_encode(over_limit, request, sizeof request) == 0);
 }
 
 static void test_workspace(void)
@@ -470,49 +529,6 @@ static void test_skills(void)
    assert(aimee_skills_trigger_response_decode(response, response_len, &match) == 0 && match);
 }
 
-static void test_governance(void)
-{
-   static const char *inactive_tools[] = {"Agent", "read_file"};
-   static const char *denied_tools[] = {"spawn_agent", "Task"};
-   static const char *partial_tools[] = {"read_file", "RemoteTrigger", "write_file"};
-   static const char *derived_tools[] = {"Agent", "bash"};
-   static const char *allowed_tools[] = {"agent", "delegate"};
-   static const struct
-   {
-      int active;
-      const char *const *tools;
-      uint32_t tool_count;
-      const char *stop_reason;
-      uint32_t keep_mask;
-      uint32_t drop_count;
-      const char *final_reason;
-   } cases[] = {
-       {0, inactive_tools, 2, "", 3, 0, ""},
-       {1, NULL, 0, "", 0, 0, ""},
-       {1, denied_tools, 2, "tool_use", 0, 2, "end_turn"},
-       {1, partial_tools, 3, "max_tokens", 5, 1, "max_tokens"},
-       {1, derived_tools, 2, "", 2, 1, "tool_use"},
-       {1, allowed_tools, 2, "refusal", 3, 0, "refusal"},
-   };
-   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
-   {
-      uint8_t request[AIMEE_GOVERNANCE_REQUEST_LEN], response[AIMEE_GOVERNANCE_RESPONSE_LEN];
-      uint32_t response_len = 0;
-      aimee_governance_decision_t decision;
-      aimee_module_invocation_t invocation = {.stage_id = AIMEE_GOVERNANCE_STAGE_EVALUATE};
-      assert(aimee_governance_request_encode(cases[i].active, cases[i].tools, cases[i].tool_count,
-                                             cases[i].stop_reason, request, sizeof(request)) == 0);
-      assert(aimee_governance_module_handler(&invocation, request, sizeof(request), response,
-                                             sizeof(response), &response_len,
-                                             NULL) == AIMEE_MODULE_STATUS_OK);
-      assert(aimee_governance_response_decode(response, response_len, cases[i].tool_count,
-                                              &decision) == 0);
-      assert(decision.keep_mask == cases[i].keep_mask);
-      assert(decision.drop_count == cases[i].drop_count);
-      assert(strcmp(decision.stop_reason, cases[i].final_reason) == 0);
-   }
-}
-
 static void test_workflows(void)
 {
    static const struct
@@ -781,7 +797,6 @@ int main(void)
    test_delegates_chain_depth();
    test_git();
    test_skills();
-   test_governance();
    test_workflows();
    test_roundtable();
    test_kb_synthesis();

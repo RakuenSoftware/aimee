@@ -66,14 +66,17 @@ static memory_redirect_verdict_t memory_redirect_bus(const char *operation, cons
 /* Server-side central agent-memory interception. Classification and storage
  * both cross the Go memory data stage; the retired .md is never materialized.
  * Returns 2 (deny, with msg) when intercepted/rejected, else 0. */
-int server_memory_intercept(const char *tool, const char *tool_input, const char *cwd, cJSON *req,
+int server_memory_intercept(const aimee_block_t *call, const char *cwd, cJSON *req,
                             const char *client, char *msg, size_t msg_len)
 {
    const char *home = getenv("HOME");
-   if (!client || !client[0] || !home || !home[0] || !hmem_scope_for_client(client))
+   if (!call || call->type != AIMEE_BLK_TOOL_USE || !call->tool_name ||
+       (call->tool_namespace && call->tool_namespace[0]) || !client || !client[0] || !home ||
+       !home[0] || !hmem_scope_for_client(client))
       return 0;
-   cJSON *ti = tool_input ? cJSON_Parse(tool_input) : NULL;
-   if (!ti)
+   const char *tool = call->tool_name;
+   const cJSON *ti = call->tool_input;
+   if (!cJSON_IsObject(ti))
       return 0;
 
    if (strcmp(tool, "Bash") == 0)
@@ -90,7 +93,6 @@ int server_memory_intercept(const char *tool, const char *tool_input, const char
          hmem_audit("reject", NULL, NULL, "bash-write-memory");
          verdict = 2;
       }
-      cJSON_Delete(ti);
       return verdict;
    }
 
@@ -100,7 +102,6 @@ int server_memory_intercept(const char *tool, const char *tool_input, const char
    const char *path = cJSON_IsString(jp) ? jp->valuestring : NULL;
    if (!path)
    {
-      cJSON_Delete(ti);
       return 0;
    }
 
@@ -111,14 +112,12 @@ int server_memory_intercept(const char *tool, const char *tool_input, const char
                            reason, sizeof(reason));
    if (verdict == MEMORY_REDIRECT_ALLOW)
    {
-      cJSON_Delete(ti);
       return 0;
    }
    if (verdict == MEMORY_REDIRECT_REJECT)
    {
       snprintf(msg, msg_len, "%s", reason[0] ? reason : "memory write rejected");
       hmem_audit("reject", NULL, NULL, reason[0] ? reason : NULL);
-      cJSON_Delete(ti);
       return 2;
    }
 
@@ -127,7 +126,6 @@ int server_memory_intercept(const char *tool, const char *tool_input, const char
    if (!content)
    {
       snprintf(msg, msg_len, "Memory Write needs a string 'content' field.");
-      cJSON_Delete(ti);
       return 2;
    }
 
@@ -138,7 +136,6 @@ int server_memory_intercept(const char *tool, const char *tool_input, const char
       snprintf(project, sizeof(project), "%s", hint);
    else if (hmem_resolve_project(cwd, project, sizeof(project), rootdir, sizeof(rootdir)) != 0)
    {
-      cJSON_Delete(ti);
       return 0;
    }
 
@@ -160,7 +157,6 @@ int server_memory_intercept(const char *tool, const char *tool_input, const char
    {
       int sp = hmem_spill_write(project, name, "archive", content);
       hmem_audit(sp == 0 ? "spill" : "spill-failed", project, name, "db1 store unreachable");
-      cJSON_Delete(ti);
       return 0;
    }
    cJSON_Delete(stored);
@@ -168,7 +164,6 @@ int server_memory_intercept(const char *tool, const char *tool_input, const char
    snprintf(msg, msg_len,
             "Saved to aimee memory. Memory files are retired — retrieve with "
             "`aimee memory search` and use `aimee memory store` going forward.");
-   cJSON_Delete(ti);
    return 2;
 }
 

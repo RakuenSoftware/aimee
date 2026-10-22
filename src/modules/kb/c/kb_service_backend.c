@@ -3,7 +3,7 @@
 #include "kb_service_backend.h"
 
 #include "aimee.h"
-#include "../support/kb_store_runtime_config.h"
+#include "config.h"
 #include "curiosity.h"
 #include "notes.h"
 #include "kb_store_internal.h"

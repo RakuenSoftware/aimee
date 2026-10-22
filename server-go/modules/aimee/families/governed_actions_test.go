@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -39,7 +40,7 @@ func TestGovernedActionLiveAtomicOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	for _, name := range []string{"schema_sessions.sql", "schema_governed_actions.sql"} {
+	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql", "schema_governed_actions.sql"} {
 		body, e := schemaFS.ReadFile(name)
 		if e != nil {
 			t.Fatal(e)
@@ -77,6 +78,39 @@ func TestGovernedActionLiveAtomicOwner(t *testing.T) {
 		}
 		return d, code
 	}
+	t.Run("canonical actor bounds and exact ownership", func(t *testing.T) {
+		defer func() {
+			if _, err := pool.Exec(ctx, `DELETE FROM governed_action_sessions WHERE session_id IN ('long-actor','web-actor','overlong-actor')`); err != nil {
+				t.Error(err)
+			}
+			if _, err := pool.Exec(ctx, `DELETE FROM governed_action_roots WHERE root_id IN ('session:long-actor','session:web-actor','session:overlong-actor')`); err != nil {
+				t.Error(err)
+			}
+		}()
+		longActor := "webuser:" + strings.Repeat("a", 151) // 159 bytes, matching the native actor buffer.
+		for _, row := range []struct{ sid, actor string }{{"long-actor", longActor}, {"web-actor", "webuser:operator"}, {"overlong-actor", longActor + "a"}} {
+			if _, err := pool.Exec(ctx, `INSERT INTO server_sessions(id,principal) VALUES($1,$2)`, row.sid, row.actor); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, actor := range []string{"uid:1000", "webchat:operator", "webuser:mallory"} {
+			if _, status := call(actor, "web-actor", governedActionRequest{Operation: "root"}); status != store.StatusInvalid {
+				t.Fatalf("foreign or legacy actor %q admitted: %v", actor, status)
+			}
+		}
+		for _, row := range []struct{ sid, actor string }{{"long-actor", longActor}, {"web-actor", "webuser:operator"}} {
+			if d, status := call(row.actor, row.sid, governedActionRequest{Operation: "root"}); status != store.StatusOK || !d.Allowed {
+				t.Fatalf("valid canonical actor refused: %v %+v", status, d)
+			}
+		}
+		if _, status := call(longActor+"a", "overlong-actor", governedActionRequest{Operation: "root"}); status != store.StatusInvalid {
+			t.Fatal("160-byte actor admitted")
+		}
+		var count int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM governed_action_sessions WHERE session_id IN ('long-actor','web-actor','overlong-actor')`).Scan(&count); err != nil || count != 2 {
+			t.Fatal("unexpected owner projections", count, err)
+		}
+	})
 	if d, status := call("alice", "child", governedActionRequest{Operation: "fork", ParentSession: "parent"}); status != store.StatusOK || !d.Allowed {
 		t.Fatal("fork", status, d)
 	}

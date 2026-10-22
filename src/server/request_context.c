@@ -9,6 +9,30 @@
 static _Thread_local request_context_t g_req_ctx;
 static _Thread_local int g_req_ctx_set;
 
+void request_context_snapshot(request_context_snapshot_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof *out);
+   out->active = g_req_ctx_set;
+   if (g_req_ctx_set)
+      out->value = g_req_ctx;
+}
+void request_context_restore(const request_context_snapshot_t *snapshot)
+{
+   request_context_set(snapshot && snapshot->active ? &snapshot->value : NULL);
+}
+void request_context_snapshot_clear(request_context_snapshot_t *snapshot)
+{
+   if (!snapshot)
+      return;
+   /* Copies may contain the verified caller JWT. Wipe even when the compiler
+    * can prove this snapshot is never read again after a worker joins. */
+   volatile unsigned char *p = (volatile unsigned char *)snapshot;
+   for (size_t i = 0; i < sizeof *snapshot; i++)
+      p[i] = 0;
+}
+
 void request_context_set(const request_context_t *ctx)
 {
    if (!ctx)
@@ -23,6 +47,26 @@ void request_context_set(const request_context_t *ctx)
 const request_context_t *request_context_get(void)
 {
    return g_req_ctx_set ? &g_req_ctx : NULL;
+}
+
+int request_context_set_model_execution(int active)
+{
+   if (!g_req_ctx_set)
+      return -1;
+   int previous = g_req_ctx.model_execution;
+   g_req_ctx.model_execution = active != 0;
+   if (active)
+      g_req_ctx.operator_script_origin = 0;
+   return previous;
+}
+
+int request_context_set_operator_script_origin(int active)
+{
+   if (!g_req_ctx_set)
+      return -1;
+   int previous = g_req_ctx.operator_script_origin;
+   g_req_ctx.operator_script_origin = active != 0;
+   return previous;
 }
 
 int request_context_refuse_assembly(const char *kind)

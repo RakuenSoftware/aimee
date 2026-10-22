@@ -26,6 +26,10 @@ cJSON *mcp_build_tools_list(void);
  * discriminator instead of N. aimee's own agents need the individual names, because
  * a toolset grants tools one at a time. See mcp_collapse_families. */
 cJSON *mcp_build_tools_list_flat(void);
+/* Owned native advert from a canonical list. Exact names are copied unchanged;
+ * absent git_* names project only enum-declared operations from the Git schema,
+ * with the command discriminator supplied by the name. Never mutates list. */
+cJSON *mcp_tool_advert_from_list(const cJSON *list, const char *tool);
 
 /* Resolve the active MCP presentation profile: the explicit argument if set,
  * else AIMEE_MCP_TOOL_PROFILE, else "core" (the lean default). Not owned. */
@@ -93,9 +97,13 @@ void mcp_add_extended_tools(cJSON *tools);
  * action discriminator. Called by mcp_build_tools_list after all members exist. */
 void mcp_collapse_families(cJSON *tools);
 
-/* If `tool` is a collapsed family name, resolve args[command|action] to the
+/* Borrowed canonical discriminator key for a declared family, or NULL.
+ * Presentation/projection metadata only; no tool admission or authority. */
+const char *mcp_family_discriminator(const char *tool);
+
+/* If `tool` is a collapsed family name (or git), resolve args[command|action] to the
  * legacy member tool name into `out`. Returns 1 (rewritten), 0 (not a family),
- * or -1 (family but missing/unknown command). */
+ * or -1 (family but missing/unknown command or insufficient output capacity). */
 int mcp_family_demux(const char *tool, cJSON *args, char *out, size_t n);
 
 #endif /* DEC_MCP_TOOLS_H */

@@ -6,16 +6,13 @@
 /* agent_policy.c: validation, policy, trace, metrics, env, manifest, contract */
 #include "aimee.h"
 #include "db1_client/db1.h"
-#include "modules/kb/c/tool_registry.h"
 #include "agent.h"
 #include <aimee/tools/agent_tools.h>
 #include "kb_client.h"
 #include "headers/memory.h"
 #include "headers/agent_exec.h"
-#include "compact.h"
 #include "computer_use.h"
 #include "config.h"
-#include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "log.h"
 #include "dstr.h"
 #include "otel.h"
@@ -51,7 +48,7 @@ static const char *tool_prompts_lookup_embedded(const char *name)
    return NULL;
 }
 
-static int validate_against_schema(const char *args_json, cJSON *schema, char *err_out,
+static int validate_against_schema(const char *args_json, const cJSON *schema, char *err_out,
                                    size_t err_len)
 {
    if (!schema)
@@ -198,81 +195,79 @@ const char *tool_suggest(const char *name)
 
 /* --- Tool registry validation --- */
 
-int tool_validate(const char *tool_name, const char *args_json, char *err_out, size_t err_len)
+/* Execution validates the exact post-policy IR catalog that was advertised.
+ * Registry state may still disable a tool, but cannot replace that schema with
+ * a stale or differently shaped KB copy after the model has answered. */
+int tool_validate_ir(const aimee_tool_t *tool, const char *args_json, char *err_out, size_t err_len)
 {
-   if (!tool_name || !args_json)
-      return 0;
-
-   if (strchr(tool_name, ':') != NULL)
+   if (!err_out || !err_len)
+      return -1;
+   err_out[0] = 0;
+   if (!tool || tool->kind != AIMEE_TOOL_FUNCTION || !tool->name || !tool->name[0] ||
+       !cJSON_IsObject(tool->schema) || !args_json)
    {
-      cJSON *remote_tool = NULL;
-      if (mcp_client_registry_get_tool_schema(tool_name, 1000, &remote_tool, err_out, err_len) == 0)
+      snprintf(err_out, err_len, "canonical function/schema is unavailable");
+      return -1;
+   }
+   if (!strchr(tool->name, ':'))
+   {
+      int found = 0, enabled = 0;
+      if (!kb_client_tool_registry_lookup(tool->name, NULL, 0, NULL, 0, &enabled, &found) &&
+          found && !enabled)
       {
-         cJSON *schema = cJSON_GetObjectItemCaseSensitive(remote_tool, "inputSchema");
-         int rc = validate_against_schema(args_json, schema, err_out, err_len);
-         cJSON_Delete(remote_tool);
-         return rc;
+         snprintf(err_out, err_len, "tool '%s' is disabled", tool->name);
+         return -1;
       }
-      /* Not a plugin THIS server hosts: it may be federated from aimee-kb (config
-       * install: kb), whose schema we do not hold locally. Defer validation to the
-       * kb, which owns the plugin and validates on tools/call; dispatch routes the
-       * call there (agent_tools_dispatch.c) and surfaces any error. */
-      if (err_out && err_len)
-         err_out[0] = '\0';
-      return 0;
    }
-
-   tool_registry_entry_t entry;
-   memset(&entry, 0, sizeof(entry));
-   int found = 0;
-   if (kb_client_tool_registry_lookup(tool_name, entry.input_schema, sizeof(entry.input_schema),
-                                      entry.side_effect, sizeof(entry.side_effect), &entry.enabled,
-                                      &found) != 0 ||
-       !found)
-   {
-      cJSON *builtin_schema = agent_tool_get_schema_cached(tool_name);
-      if (builtin_schema)
-         return validate_against_schema(args_json, builtin_schema, err_out, err_len);
-
-      const char *suggestion = tool_suggest(tool_name);
-      if (suggestion)
-         snprintf(err_out, err_len, "unknown tool '%s'. Did you mean '%s'?", tool_name, suggestion);
-      else
-         snprintf(err_out, err_len, "unknown tool '%s'", tool_name);
-      return -1;
-   }
-
-   if (!entry.enabled)
-   {
-      snprintf(err_out, err_len, "tool '%s' is disabled", tool_name);
-      return -1;
-   }
-
-   if (!entry.input_schema[0])
-      return 0;
-
-   cJSON *schema = cJSON_Parse(entry.input_schema);
-   if (!schema)
-      return 0;
-   int rc = validate_against_schema(args_json, schema, err_out, err_len);
-   cJSON_Delete(schema);
-   return rc;
+   return validate_against_schema(args_json, tool->schema, err_out, err_len);
 }
 
-const char *tool_side_effect(const char *tool_name)
+int tool_policy_metadata(const char *tool, aimee_tool_metadata_t *metadata, char *effect,
+                         size_t effect_len, char *reason, size_t reason_len)
 {
-   /* Fall through aimee-kb so the lookup works in the daemon (KB_STORE-less)
-    * process.  Thread-local buffer mirrors kb_store_tool_registry_side_effect's
-    * legacy contract — caller can treat the pointer as valid until the
-    * next tool_side_effect() call on this thread. */
-   static __thread char buf[32];
-   buf[0] = '\0';
-   int found = 0;
-   if (kb_client_tool_registry_lookup(tool_name ? tool_name : "", NULL, 0, buf, sizeof(buf), NULL,
-                                      &found) != 0 ||
-       !found || !buf[0])
-      snprintf(buf, sizeof(buf), "%s", "read");
-   return buf;
+   if (reason && reason_len)
+      reason[0] = 0;
+   if (metadata)
+      memset(metadata, 0, sizeof(*metadata));
+   if (effect && effect_len)
+      effect[0] = 0;
+   if (!effect || !effect_len || agent_tools_metadata(tool, metadata) != 0)
+   {
+      if (reason && reason_len)
+         snprintf(reason, reason_len, "tool policy metadata unavailable");
+      return -1;
+   }
+   /* Optional operator metadata can add a policy label or disable a tool. It
+    * cannot replace the tools owner's classification or remove its categories.
+    * No KB is required for built-in policy metadata. */
+   char configured[32] = "";
+   int found = 0, enabled = 1;
+   if (!strchr(tool, ':') &&
+       !kb_client_tool_registry_lookup(tool, NULL, 0, configured, sizeof(configured), &enabled,
+                                       &found) &&
+       found)
+   {
+      if (!enabled)
+      {
+         if (reason && reason_len)
+            snprintf(reason, reason_len, "tool '%s' is disabled", tool);
+         memset(metadata, 0, sizeof(*metadata));
+         return -1;
+      }
+   }
+   else
+      configured[0] = 0;
+   const char *label = configured[0] ? configured : aimee_tool_policy_name(metadata->primary);
+   int n = snprintf(effect, effect_len, "%s", label);
+   if (n < 0 || (size_t)n >= effect_len)
+   {
+      effect[0] = 0;
+      memset(metadata, 0, sizeof(*metadata));
+      if (reason && reason_len)
+         snprintf(reason, reason_len, "tool policy label exceeds capacity");
+      return -1;
+   }
+   return 0;
 }
 
 /* --- Tool prompt collection --- */

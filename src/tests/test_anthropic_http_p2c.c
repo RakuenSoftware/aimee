@@ -20,6 +20,8 @@
 #include "../headers/server_http.h"
 #include "../vendor/headers/cJSON.h"
 
+#include "support/native_response_fixture.h"
+
 /* anthropic_http.c's write_error now logs aimee-internal error codes; this
  * minimal link stubs the logger like the other production deps below. */
 void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
@@ -53,12 +55,12 @@ static int g_response_status = 200;
 static int g_prevent = 0;
 /* Tool-use fixtures for parsed_with_tool_uses. The JSON is a cJSON array of
  * {id, name, arguments} objects; the parser translates it into a populated
- * parsed_response_t.calls[] so messages_buffered's parse step has real
+ * owned IR tool blocks so messages_buffered's parse step has real
  * tool_use blocks to feed the police function. */
 static const char *g_tool_uses_json;
 static const char *g_upstream_stop_reason;
 
-static int governance_event_bus_provider(int policy_active, const char *const *tool_names,
+static int governance_event_bus_provider(int policy_active, const aimee_tool_identity_view_t *tools,
                                          uint32_t tool_count, const char *stop_reason,
                                          aimee_governance_decision_t *decision)
 {
@@ -72,8 +74,8 @@ static int governance_event_bus_provider(int policy_active, const char *const *t
    for (uint32_t i = 0; i < tool_count; ++i)
    {
       int denied =
-          strcmp(tool_names[i], "Agent") == 0 || strcmp(tool_names[i], "spawn_agent") == 0 ||
-          strcmp(tool_names[i], "RemoteTrigger") == 0 || strcmp(tool_names[i], "Task") == 0;
+          strcmp(tools[i].name, "Agent") == 0 || strcmp(tools[i].name, "spawn_agent") == 0 ||
+          strcmp(tools[i].name, "RemoteTrigger") == 0 || strcmp(tools[i].name, "Task") == 0;
       if (denied)
          decision->drop_count++;
       else
@@ -194,18 +196,14 @@ int delegate_build_url(const delegate_driver_t *driver, const agent_t *agent, ch
    return 0;
 }
 
-int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
+int agent_resolve_auth_headers(const agent_t *agent, char *buf, size_t buf_len, char *headers,
+                               size_t headers_capacity)
 {
    (void)agent;
+   if (headers_capacity)
+      headers[0] = 0;
    snprintf(buf, buf_len, "Bearer test");
    return 0;
-}
-
-void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len)
-{
-   (void)agent;
-   if (buf_len)
-      buf[0] = '\0';
 }
 
 cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *tools,
@@ -240,7 +238,10 @@ int agent_http_post(const char *url, const char *auth_header, const char *body, 
    assert(g_last_body != NULL);
    free(g_last_extra);
    g_last_extra = strdup(extra_headers ? extra_headers : "");
-   *response_buf = strdup(g_response_body ? g_response_body : "{}");
+   *response_buf = g_response_body
+                       ? strdup(g_response_body)
+                       : native_response_fixture(g_driver ? g_driver->name : NULL, NULL,
+                                                 g_tool_uses_json, g_upstream_stop_reason);
    return g_response_status;
 }
 
@@ -258,28 +259,6 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
    if (g_stream_payload && callback)
       assert(callback(g_stream_payload, strlen(g_stream_payload), userdata) == 0);
    return g_stream_status;
-}
-
-int agent_ir_parse_json_response(cJSON *root, int anthropic, int rescue_mode, int *n_rescued,
-                                 parsed_response_t *out)
-{
-   (void)root;
-   (void)anthropic;
-   (void)rescue_mode;
-   if (n_rescued)
-      *n_rescued = 0;
-   memset(out, 0, sizeof(*out));
-   return 0;
-}
-
-void agent_free_parsed_response(parsed_response_t *p)
-{
-   if (!p)
-      return;
-   free(p->content);
-   for (int i = 0; i < p->call_count; i++)
-      free(p->calls[i].arguments);
-   cJSON_Delete(p->assistant_message);
 }
 
 int session_compact_estimate_tokens(cJSON *messages)
@@ -342,15 +321,10 @@ int agent_ingress_accounting_enabled(void)
    return 1;
 }
 
-/* Pre-injection stubs. query_from_messages returns a non-NULL query when a turn
- * is present so pre-injection proceeds; build returns the per-test
- * envelope (default NULL = no-op, so the passthrough/shape tests are unaffected).
+/* Pre-injection build returns the per-test envelope
+ * (default NULL = no-op, so the passthrough/shape tests are unaffected).
  * The injection-coverage test sets g_stub_preinject_env. */
 static char *g_stub_preinject_env = NULL;
-char *ingress_preinject_query_from_messages(const cJSON *messages)
-{
-   return messages ? strdup("q") : NULL;
-}
 char *ingress_preinject_build(const char *query, int request_disabled)
 {
    (void)query;
@@ -417,48 +391,12 @@ static const cJSON *obj(const cJSON *parent, const char *key)
    return v;
 }
 
-/* P2c parser: populates parsed_response_t.calls[] from the JSON list in
+/* P2c parser: populates owned IR tool blocks from the JSON list in
  * g_tool_uses_json, leaves content empty, and copies g_upstream_stop_reason
  * into parsed.stop_reason. The fake event-bus provider returns the same
  * decision as the real Go module; the production C seam applies it before
- * anthropic_response_from_parsed reads
+ * anthropic_frontend_render reads
  * call_count to render the wire. */
-static void parsed_with_tool_uses(cJSON *root, const char *body, parsed_response_t *out)
-{
-   cJSON *arr;
-   int i;
-   int cap;
-   (void)root;
-   (void)body;
-   memset(out, 0, sizeof(*out));
-   if (g_upstream_stop_reason)
-   {
-      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", g_upstream_stop_reason);
-   }
-   arr = g_tool_uses_json ? cJSON_Parse(g_tool_uses_json) : NULL;
-   if (!cJSON_IsArray(arr))
-   {
-      cJSON_Delete(arr);
-      return;
-   }
-   cap = cJSON_GetArraySize(arr);
-   if (cap > AGENT_MAX_TOOL_CALLS)
-      cap = AGENT_MAX_TOOL_CALLS;
-   for (i = 0; i < cap; i++)
-   {
-      cJSON *t = cJSON_GetArrayItem(arr, i);
-      const cJSON *id = cJSON_GetObjectItemCaseSensitive(t, "id");
-      const cJSON *name = cJSON_GetObjectItemCaseSensitive(t, "name");
-      const cJSON *args = cJSON_GetObjectItemCaseSensitive(t, "arguments");
-      snprintf(out->calls[i].id, sizeof(out->calls[i].id), "%s",
-               cJSON_IsString(id) ? id->valuestring : "");
-      snprintf(out->calls[i].name, sizeof(out->calls[i].name), "%s",
-               cJSON_IsString(name) ? name->valuestring : "");
-      out->calls[i].arguments = cJSON_IsString(args) ? strdup(args->valuestring) : strdup("{}");
-   }
-   out->call_count = cap;
-   cJSON_Delete(arr);
-}
 
 /* P2c (response-side tool policing, buffered) integration tests. The real
  * `gateway_policy.o` is linked into this test target so the production police
@@ -471,7 +409,9 @@ static void parsed_with_tool_uses(cJSON *root, const char *body, parsed_response
  * block. */
 static void test_messages_buffered_anthropic_police_drops_subagent_tool_use(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    char resp[8192];
    cJSON *sent;
    cJSON *content;
@@ -512,7 +452,9 @@ static void test_messages_buffered_anthropic_police_drops_subagent_tool_use(void
  * the wire stop_reason == "tool_use" matches the surviving call. */
 static void test_messages_buffered_anthropic_police_keeps_non_subagent_tool_use(void)
 {
-   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   const delegate_driver_t driver = {
+       .name = "anthropic",
+   };
    char resp[8192];
    cJSON *sent;
    cJSON *content;
@@ -557,21 +499,15 @@ static void test_messages_buffered_anthropic_police_keeps_non_subagent_tool_use(
 /* parse_response stub for the codex/Responses buffered path: invoked with
  * (NULL, raw_sse_body) — the same contract the chatgpt driver honors — and
  * renders a text reply. Asserts it received the RAW body, not a cJSON tree. */
-static void parsed_text_pong(cJSON *root, const char *body, parsed_response_t *out)
-{
-   memset(out, 0, sizeof(*out));
-   assert(root == NULL);
-   assert(body != NULL && strstr(body, "response.completed") != NULL);
-   out->content = strdup("PONG");
-   snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", "end_turn");
-}
 
 /* Codex/Responses (chatgpt wire) replies with raw SSE even to a buffered fetch, so
  * the ingress must parse it via the driver. Regression guard: before the fix,
  * messages_buffered cJSON_Parse'd the SSE (failed) and returned an EMPTY reply. */
 static void test_messages_buffered_responses_wire_parses_sse(void)
 {
-   const delegate_driver_t driver = {.name = "chatgpt", .parse_response = parsed_text_pong};
+   const delegate_driver_t driver = {
+       .name = "chatgpt",
+   };
    char resp[8192];
    cJSON *sent;
    const cJSON *content;
@@ -581,7 +517,10 @@ static void test_messages_buffered_responses_wire_parses_sse(void)
    reset_capture();
    g_driver = &driver;
    /* Raw SSE — invalid JSON on purpose, so the old cJSON_Parse path yields empty. */
-   g_response_body = "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n";
+   g_response_body = "event: response.completed\ndata: "
+                     "{\"type\":\"response.completed\",\"response\":{\"status\":\"completed\","
+                     "\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{"
+                     "\"type\":\"output_text\",\"text\":\"PONG\"}]}]}}\n\n";
 
    assert(messages_buffered("{\"model\":\"ignored\",\"max_tokens\":16,"
                             "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
@@ -603,8 +542,50 @@ static void test_messages_buffered_responses_wire_parses_sse(void)
    PASS("messages_buffered_responses_wire_parses_sse");
 }
 
+static void test_request_policy_uses_admitted_catalog(void)
+{
+   const delegate_driver_t driver = {.name = "anthropic"};
+   reset_capture();
+   g_driver = &driver;
+   g_prevent = 1;
+   char response[8192];
+   assert(messages_buffered("{\"model\":\"ignored\",\"max_tokens\":16,"
+                            "\"system\":[{\"type\":\"text\",\"text\":\"stable\","
+                            "\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"}}],"
+                            "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],"
+                            "\"tools\":[{\"name\":\"Task\",\"input_schema\":{\"type\":\"object\"}},"
+                            "{\"name\":\"Read\",\"input_schema\":{\"type\":\"object\"}}],"
+                            "\"tool_choice\":{\"type\":\"tool\",\"name\":\"Task\"}}",
+                            response, sizeof response) == 200);
+   cJSON *sent = parse(g_last_body);
+   const cJSON *tools = obj(sent, "tools");
+   assert(cJSON_GetArraySize(tools) == 1);
+   assert(!strcmp(cJSON_GetStringValue(obj(cJSON_GetArrayItem(tools, 0), "name")), "Read"));
+   assert(!strcmp(cJSON_GetStringValue(obj(obj(sent, "tool_choice"), "type")), "auto"));
+   const cJSON *cache = obj(cJSON_GetArrayItem(obj(sent, "system"), 0), "cache_control");
+   assert(!strcmp(cJSON_GetStringValue(obj(cache, "ttl")), "1h"));
+   cJSON_Delete(sent);
+   reset_capture();
+   g_driver = &driver;
+   g_prevent = 1;
+   assert(
+       messages_buffered("{\"model\":\"ignored\",\"max_tokens\":16,"
+                         "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],"
+                         "\"tools\":[{\"name\":\"Task\",\"input_schema\":{\"type\":\"object\"}}],"
+                         "\"tool_choice\":{\"type\":\"any\",\"disable_parallel_tool_use\":true}}",
+                         response, sizeof response) == 200);
+   sent = parse(g_last_body);
+   assert(!cJSON_GetObjectItemCaseSensitive(sent, "tools") &&
+          !cJSON_GetObjectItemCaseSensitive(sent, "tool_choice"));
+   cJSON_Delete(sent);
+   reset_capture();
+   PASS("typed request policing removes denied catalog/choice while retaining native cache "
+        "metadata");
+}
+
 int main(void)
 {
+   test_request_policy_uses_admitted_catalog();
    test_messages_buffered_responses_wire_parses_sse();
    test_messages_buffered_anthropic_police_drops_subagent_tool_use();
    test_messages_buffered_anthropic_police_keeps_non_subagent_tool_use();

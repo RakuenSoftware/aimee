@@ -16,9 +16,11 @@
 
 static char g_claude_vault_oauth[512];
 static char g_codex_vault_oauth[512];
+static int g_credential_reads;
 
 int cli_oauth_vault_materialize_get(const char *agent, char *out, size_t out_len)
 {
+   g_credential_reads++;
    const char *value = strcmp(agent, "claude") == 0  ? g_claude_vault_oauth
                        : strcmp(agent, "codex") == 0 ? g_codex_vault_oauth
                                                      : "";
@@ -1252,6 +1254,34 @@ static void test_isolated_codex_home(void)
    cli_session_destroy(&cleanup);
    assert(access(home, F_OK) != 0);
 
+   /* Recreating credentials must retain only this execution's native resume
+    * files. A sibling delegate sees a distinct directory, never its history. */
+   char first_home[PATH_MAX], second_home[PATH_MAX], resumed_home[PATH_MAX];
+   cli_session_t first = {0}, second = {0}, resumed = {0};
+   assert(!cli_session_harness_home("codex", ".", "delegate-private-a", first_home,
+                                    sizeof first_home, &first));
+   snprintf(path, sizeof path, "%s/.codex/sessions/resume.jsonl", first_home);
+   FILE *history = fopen(path, "w");
+   assert(history);
+   fputs("private native continuation", history);
+   fclose(history);
+   cli_session_destroy(&first);
+   assert(access(first_home, F_OK) != 0);
+   assert(!cli_session_harness_home("codex", ".", "delegate-private-b", second_home,
+                                    sizeof second_home, &second));
+   snprintf(path, sizeof path, "%s/.codex/sessions/resume.jsonl", second_home);
+   assert(access(path, F_OK) != 0);
+   cli_session_destroy(&second);
+   assert(!cli_session_harness_home("codex", ".", "delegate-private-a", resumed_home,
+                                    sizeof resumed_home, &resumed));
+   snprintf(path, sizeof path, "%s/.codex/sessions/resume.jsonl", resumed_home);
+   char *retained = slurp(path);
+   assert(retained && !strcmp(retained, "private native continuation"));
+   free(retained);
+   unlink(path);
+   cli_session_destroy(&resumed);
+   assert(cli_session_harness_home("codex", ".", "../foreign", home, sizeof home, &cleanup) < 0);
+
    g_codex_vault_oauth[0] = '\0';
    assert(cli_session_isolated_codex_home(home, sizeof(home)) == -1);
    unlink(config);
@@ -1260,8 +1290,57 @@ static void test_isolated_codex_home(void)
    printf("  PASS: test_isolated_codex_home\n");
 }
 
+static void test_native_home_has_no_credentials_and_partitions_state(void)
+{
+   char a[65], b[65];
+   memset(a, 'a', 64);
+   memset(b, 'b', 64);
+   a[64] = b[64] = 0;
+   int reads = g_credential_reads;
+   const char *vendors[] = {"codex", "claude"};
+   for (size_t i = 0; i < 2; i++)
+   {
+      char first[PATH_MAX], other[PATH_MAX], resumed[PATH_MAX], path[PATH_MAX];
+      cli_session_t one = {0}, two = {0}, again = {0};
+      assert(!cli_session_native_home(vendors[i], "/native/project", "native-source", a, first,
+                                      sizeof first, &one));
+      const char *state = i ? "projects" : "sessions";
+      snprintf(path, sizeof path, "%s/.%s/%s/retained", first, vendors[i], state);
+      FILE *file = fopen(path, "w");
+      assert(file);
+      fputs("owned native conversation", file);
+      fclose(file);
+      assert(!cli_session_native_home(vendors[i], "/native/project", "native-source", b, other,
+                                      sizeof other, &two));
+      snprintf(path, sizeof path, "%s/.%s/%s/retained", other, vendors[i], state);
+      assert(access(path, F_OK) != 0);
+      snprintf(path, sizeof path, "%s/.%s/%s", first, vendors[i],
+               i ? ".credentials.json" : "auth.json");
+      assert(access(path, F_OK) != 0);
+      snprintf(path, sizeof path, "%s/.%s/%s", first, vendors[i],
+               i ? "settings.json" : "config.toml");
+      assert(access(path, F_OK) != 0);
+      cli_session_destroy(&one);
+      assert(access(first, F_OK) != 0);
+      assert(!cli_session_native_home(vendors[i], "/native/project", "native-source", a, resumed,
+                                      sizeof resumed, &again));
+      snprintf(path, sizeof path, "%s/.%s/%s/retained", resumed, vendors[i], state);
+      assert(access(path, F_OK) == 0);
+      unlink(path);
+      cli_session_destroy(&again);
+      cli_session_destroy(&two);
+      assert(cli_session_native_home(vendors[i], ".", "../other", a, first, sizeof first, &one) <
+             0);
+      assert(cli_session_native_home(vendors[i], ".", "native-source", "../other", first,
+                                     sizeof first, &one) < 0);
+   }
+   assert(reads == g_credential_reads);
+   puts("  PASS: credential-free native homes retain only session/connection-owned state");
+}
+
 int main(void)
 {
+   test_native_home_has_no_credentials_and_partitions_state();
    test_isolated_claude_home();
    test_isolated_home_reclaimed_on_destroy();
    test_isolated_codex_home();

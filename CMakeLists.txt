@@ -71,6 +71,9 @@ set(AIMEE_DELEGATES_INCLUDE_DIR
 set(AIMEE_PROTOCOLS_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/modules/protocols/include")
 set(AIMEE_CORE_CONNECTION_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/core/codec/include"
+
+    "${AIMEE_SRC_DIR}/core/types/include"
     "${AIMEE_SRC_DIR}/core/connection/include")
 set(AIMEE_CORE_EVENT_BUS_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/core/event_bus/include")
@@ -106,6 +109,10 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/runtime-web/include"
     "${AIMEE_SRC_DIR}/modules/control-web/include"
     "${AIMEE_SRC_DIR}/modules/postgres/include"
+    "${AIMEE_SRC_DIR}/modules/providers/include"
+    "${AIMEE_SRC_DIR}/modules/sandbox/include"
+    "${AIMEE_SRC_DIR}/core/types/include"
+    "${AIMEE_SRC_DIR}/core/turn_integrity/include"
     # MODULES THAT KEEP THEIR HEADERS FLAT, beside their sources, rather than
     # under an include/ subdir. src/Makefile has carried -I for every one of
     # these all along; CMake had only the include/-style modules, so the
@@ -194,7 +201,7 @@ if(WIN32)
     set(PLATFORM_CORE_SRCS
         ${AIMEE_SRC_DIR}/windows/platform_event.c
         ${AIMEE_SRC_DIR}/windows/platform_ipc.c
-        ${AIMEE_SRC_DIR}/windows/platform_net.c
+        ${AIMEE_SRC_DIR}/shared/platform_net.c
         ${AIMEE_SRC_DIR}/windows/platform_path.c
         ${AIMEE_SRC_DIR}/windows/platform_process.c
         ${AIMEE_SRC_DIR}/windows/platform_random.c
@@ -234,7 +241,7 @@ if(WIN32)
 elseif(APPLE)
     set(PLATFORM_CORE_SRCS
         ${AIMEE_SRC_DIR}/posix/platform_ipc.c
-        ${AIMEE_SRC_DIR}/posix/platform_net.c
+        ${AIMEE_SRC_DIR}/shared/platform_net.c
         ${AIMEE_SRC_DIR}/posix/platform_path.c
         ${AIMEE_SRC_DIR}/posix/platform_process.c
         ${AIMEE_SRC_DIR}/posix/platform_random.c
@@ -254,7 +261,6 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/agent_max_turns.c
         ${AIMEE_SRC_DIR}/posix/agent_runtime_messages.c
         ${AIMEE_SRC_DIR}/posix/agent_runtime_support.c
-        ${AIMEE_SRC_DIR}/posix/agent_runtime_tmux.c
         ${AIMEE_SRC_DIR}/posix/agent_bridge.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools.c
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
@@ -266,9 +272,6 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/sandbox.c
     )
     list(APPEND PLATFORM_AGENT_SRCS
-        ${AIMEE_SRC_DIR}/posix/agent_shell_claude.c
-        ${AIMEE_SRC_DIR}/posix/agent_shell_claude_pty.c
-        ${AIMEE_SRC_DIR}/posix/agent_shell_codex.c
 
     )
     set(PLATFORM_CMD_SRCS
@@ -294,7 +297,7 @@ elseif(APPLE)
 else()
     set(PLATFORM_CORE_SRCS
         ${AIMEE_SRC_DIR}/posix/platform_ipc.c
-        ${AIMEE_SRC_DIR}/posix/platform_net.c
+        ${AIMEE_SRC_DIR}/shared/platform_net.c
         ${AIMEE_SRC_DIR}/posix/platform_path.c
         ${AIMEE_SRC_DIR}/posix/platform_process.c
         ${AIMEE_SRC_DIR}/posix/platform_random.c
@@ -314,7 +317,6 @@ else()
         ${AIMEE_SRC_DIR}/posix/agent_max_turns.c
         ${AIMEE_SRC_DIR}/posix/agent_runtime_messages.c
         ${AIMEE_SRC_DIR}/posix/agent_runtime_support.c
-        ${AIMEE_SRC_DIR}/posix/agent_runtime_tmux.c
         ${AIMEE_SRC_DIR}/posix/agent_bridge.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools.c
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
@@ -326,9 +328,6 @@ else()
         ${AIMEE_SRC_DIR}/posix/sandbox.c
     )
     list(APPEND PLATFORM_AGENT_SRCS
-        ${AIMEE_SRC_DIR}/posix/agent_shell_claude.c
-        ${AIMEE_SRC_DIR}/posix/agent_shell_claude_pty.c
-        ${AIMEE_SRC_DIR}/posix/agent_shell_codex.c
 
     )
     set(PLATFORM_CMD_SRCS
@@ -356,7 +355,7 @@ endif()
 if(WIN32)
     set(CLIENT_SUPPORT_SRCS
         ${AIMEE_SRC_DIR}/windows/platform_ipc.c
-        ${AIMEE_SRC_DIR}/windows/platform_net.c
+        ${AIMEE_SRC_DIR}/shared/platform_net.c
         ${AIMEE_SRC_DIR}/windows/platform_path.c
         ${AIMEE_SRC_DIR}/windows/platform_process.c
         # cli_mcp_serve mints the session id when none is published yet.
@@ -383,7 +382,7 @@ elseif(APPLE)
     set(CLIENT_SUPPORT_SRCS
         ${AIMEE_SRC_DIR}/posix/platform_path.c
         ${AIMEE_SRC_DIR}/posix/platform_process.c
-        ${AIMEE_SRC_DIR}/posix/platform_net.c
+        ${AIMEE_SRC_DIR}/shared/platform_net.c
         ${AIMEE_SRC_DIR}/mac/platform_process.c
         # cli_mcp_serve mints the session id when none is published yet.
         ${AIMEE_SRC_DIR}/posix/platform_random.c
@@ -405,7 +404,7 @@ else()
     set(CLIENT_SUPPORT_SRCS
         ${AIMEE_SRC_DIR}/posix/platform_path.c
         ${AIMEE_SRC_DIR}/posix/platform_process.c
-        ${AIMEE_SRC_DIR}/posix/platform_net.c
+        ${AIMEE_SRC_DIR}/shared/platform_net.c
         ${AIMEE_SRC_DIR}/linux/platform_process.c
         # cli_mcp_serve mints the session id when none is published yet.
         ${AIMEE_SRC_DIR}/posix/platform_random.c
@@ -521,17 +520,20 @@ set(KB_STORE_HOST_ADAPTER_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_store_adapters/kb_service_backend_runtime.c
 )
 
+set(IR_BASE_SRCS
+    ${AIMEE_SRC_DIR}/modules/ir/aimee_ir.c
+    ${AIMEE_SRC_DIR}/modules/ir/session_event.c
+    ${AIMEE_SRC_DIR}/modules/ir/response_codec.c
+)
+set(HOOK_IR_SRCS
+    ${AIMEE_SRC_DIR}/modules/translation/hook_ir.c
+)
 set(CORE_SRCS
+    ${HOOK_IR_SRCS}
+    ${IR_BASE_SRCS}
     ${AIMEE_SRC_DIR}/config_client.c
     ${AIMEE_SRC_DIR}/config_client_contract.c
-    ${AIMEE_SRC_DIR}/config_client_accessors_0.c
-    ${AIMEE_SRC_DIR}/config_client_accessors_1.c
-    ${AIMEE_SRC_DIR}/config_client_accessors_2.c
-    ${AIMEE_SRC_DIR}/config_client_accessors_3.c
-    ${AIMEE_SRC_DIR}/config_client_accessors_4.c
-    ${AIMEE_SRC_DIR}/config_client_accessors_5.c
-    ${AIMEE_SRC_DIR}/config_client_accessors_6.c
-    ${AIMEE_SRC_DIR}/config_client_accessors_7.c
+    ${AIMEE_SRC_DIR}/config_client_accessors.c
     ${AIMEE_SRC_DIR}/module_json_call.c
     ${AIMEE_SRC_DIR}/session_id.c
     ${AIMEE_SRC_DIR}/modules/kb/c/db_postgres.c
@@ -561,7 +563,6 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/sse_parser.c
     ${AIMEE_SRC_DIR}/aimee_home.c
     ${AIMEE_SRC_DIR}/shared/kb_paths.c
-    ${AIMEE_SRC_DIR}/compact.c
     ${AIMEE_SRC_DIR}/platform_random.c
     ${AIMEE_SRC_DIR}/artifact_trust.c
     ${AIMEE_SRC_DIR}/hook_session_token.c
@@ -625,7 +626,6 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_action_audit.c
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_tdd.c
-   _learn.c
     ${AIMEE_SRC_DIR}/session_state.c
     ${AIMEE_SRC_DIR}/session_briefing.c
     ${AIMEE_SRC_DIR}/file_safety.c
@@ -672,12 +672,12 @@ set(DATA_SRCS
 
 set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/agent_runtime.c
+    ${AIMEE_SRC_DIR}/server/agent_result_cache.c
     ${AIMEE_SRC_DIR}/server/agent_parallel.c
     ${AIMEE_SRC_DIR}/server/agent_runtime_liveness.c
     ${AIMEE_SRC_DIR}/server/agent_fallback.c
     ${AIMEE_SRC_DIR}/server/agent_context_budget.c
     ${AIMEE_SRC_DIR}/server/agent_bridge.c
-    ${AIMEE_SRC_DIR}/server/tool_call_args.c
     ${AIMEE_SRC_DIR}/server/agent_request_shaping.c
     ${AIMEE_SRC_DIR}/server/model_sampling.c
     ${AIMEE_SRC_DIR}/server/agent_adapter.c
@@ -699,6 +699,7 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/tool_schema_sanitizer.c
     ${AIMEE_SRC_DIR}/server/script_runner.c
     ${AIMEE_SRC_DIR}/server/script_rpc.c
+    ${AIMEE_SRC_DIR}/server/script_tool_execution.c
     ${AIMEE_SRC_DIR}/server/osv_check.c
     ${AIMEE_SRC_DIR}/server/failover.c
     ${AIMEE_SRC_DIR}/server/http_retry.c
@@ -712,7 +713,15 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/cli_session.c
     ${AIMEE_SRC_DIR}/server/cli_session_pty.c
     ${AIMEE_SRC_DIR}/server/cli_codex.c
+    ${AIMEE_SRC_DIR}/server/cli_codex_profile.c
     ${AIMEE_SRC_DIR}/server/cli_claude.c
+    ${AIMEE_SRC_DIR}/server/cli_claude_native.c
+    ${AIMEE_SRC_DIR}/server/claude_headless.c
+    ${AIMEE_SRC_DIR}/server/server_session_control.c
+    ${AIMEE_SRC_DIR}/server/server_session_capture.c
+    ${AIMEE_SRC_DIR}/server/server_session_question.c
+    ${AIMEE_SRC_DIR}/server/server_session_log.c
+    ${AIMEE_SRC_DIR}/server/agent_response_projection.c
 
     ${AIMEE_SRC_DIR}/server/cli_mistral.c
     ${AIMEE_SRC_DIR}/server/cli_acp.c
@@ -733,8 +742,6 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/oauth_pkce.c
     ${AIMEE_SRC_DIR}/server/oauth_tokens.c
     ${AIMEE_SRC_DIR}/working_profile.c
-    ${AIMEE_SRC_DIR}/server/agent_shell.c
-    ${AIMEE_SRC_DIR}/server/agent_cli_shell.c
     ${AIMEE_SRC_DIR}/server/provider_cli_adapter.c
     ${PLATFORM_AGENT_SRCS}
 )
@@ -755,68 +762,9 @@ set(GIT_SRCS
     ${AIMEE_SRC_DIR}/modules/git/git_verify_step.c
 )
 
-set(CMD_SRCS
-    ${AIMEE_SRC_DIR}/prompts.c
-    ${AIMEE_SRC_DIR}/cmd_core.c
-    ${AIMEE_SRC_DIR}/cmd_init.c
-    ${AIMEE_SRC_DIR}/cmd_data.c
-    ${AIMEE_SRC_DIR}/cmd_infra.c
-    ${AIMEE_SRC_DIR}/cmd_session_history.c
-    ${AIMEE_SRC_DIR}/cmd_capabilities.c
-    ${AIMEE_SRC_DIR}/cmd_session_lifecycle.c
-    ${AIMEE_SRC_DIR}/cmd_ensemble.c
-    ${AIMEE_SRC_DIR}/cmd_index.c
-    ${AIMEE_SRC_DIR}/cmd_rules.c
-    ${AIMEE_SRC_DIR}/cmd_learning.c
-    ${AIMEE_SRC_DIR}/cmd_dogfood.c
-    ${AIMEE_SRC_DIR}/cmd_identity.c
-    ${AIMEE_SRC_DIR}/cmd_onboard.c
-    ${AIMEE_SRC_DIR}/cmd_diagnose.c
-    ${AIMEE_SRC_DIR}/cmd_hooks.c
-    ${AIMEE_SRC_DIR}/cmd_hooks_scope.c
-    ${AIMEE_SRC_DIR}/cmd_agent.c
-    ${AIMEE_SRC_DIR}/cmd_agent_setup.c
-    ${AIMEE_SRC_DIR}/cmd_agent_trace.c
-    ${AIMEE_SRC_DIR}/cmd_agent_delegate.c
-    ${AIMEE_SRC_DIR}/cmd_agent_delegate_toolset.c
-    ${AIMEE_SRC_DIR}/modules/delegates/delegate_depth.c
-    ${AIMEE_SRC_DIR}/modules/delegates/delegate_plan.c
-    ${AIMEE_SRC_DIR}/modules/delegates/delegate_prompt.c
-    ${AIMEE_SRC_DIR}/modules/delegates/delegate_run_phases.c
-    ${AIMEE_SRC_DIR}/modules/delegates/delegate_routing.c
-    ${AIMEE_SRC_DIR}/modules/delegates/delegate_role.c
-    ${AIMEE_SRC_DIR}/modules/delegates/delegate_economics.c
-    ${AIMEE_SRC_DIR}/cmd_wm.c
-    ${AIMEE_SRC_DIR}/cmd_cancel.c
-    ${AIMEE_SRC_DIR}/cmd_rewind.c
-    ${AIMEE_SRC_DIR}/cmd_branch.c
-    ${AIMEE_SRC_DIR}/cmd_util.c
-    ${AIMEE_SRC_DIR}/cmd_table.c
-    ${AIMEE_SRC_DIR}/cmd_doctor.c
-    ${AIMEE_SRC_DIR}/cmd_toolset.c
-    ${AIMEE_SRC_DIR}/cmd_slop.c
-    ${AIMEE_SRC_DIR}/cmd_job.c
-    ${AIMEE_SRC_DIR}/cmd_roles.c
-    ${AIMEE_SRC_DIR}/cmd_skill.c
-    ${AIMEE_SRC_DIR}/cmd_autopilot.c
-    ${AIMEE_SRC_DIR}/cmd_run.c
-    ${AIMEE_SRC_DIR}/cmd_kb.c
-    ${AIMEE_SRC_DIR}/hud.c
-    ${AIMEE_SRC_DIR}/turn_narration.c
-    ${AIMEE_SRC_DIR}/dashboard.c
-    ${AIMEE_SRC_DIR}/aimee_client.c
-    ${PLATFORM_CMD_SRCS}
-)
-# The transport's local Unix-socket path (http_uds_client.c) is POSIX-only;
-# aimee_client.c only references it under AIMEE_POSIX, so Windows omits it.
-if(NOT WIN32)
-    list(APPEND CMD_SRCS ${AIMEE_SRC_DIR}/http_uds_client.c)
-endif()
-if(NOT WITH_UI)
-    list(APPEND CMD_SRCS ${AIMEE_SRC_DIR}/dashboard_stub.c)
-endif()
-
 set(CLI_SRCS
+    ${HOOK_IR_SRCS}
+    ${IR_BASE_SRCS}
     ${AIMEE_SRC_DIR}/cli_main.c
     ${AIMEE_SRC_DIR}/cli_agent_setup.c
     ${AIMEE_SRC_DIR}/cli_session_start.c
@@ -828,7 +776,7 @@ set(CLI_SRCS
     # CLI links it directly, so it must be listed in BOTH build systems.
     ${AIMEE_SRC_DIR}/session_degraded_notice.c
     # Thin-client self-update (cli_main dispatch + cli_session_start drift notice
-    # both call these; the CLI does not link aimee-cmd, so they build in here).
+    # both call these; the CLI links these directly, so they build in here).
     ${AIMEE_SRC_DIR}/cmd_self_update.c
     ${AIMEE_SRC_DIR}/self_update_util.c
     # Hook project resolution is still performed client-side so a remote server
@@ -852,6 +800,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_kb_smoke.c
     ${AIMEE_SRC_DIR}/cli_v1_routes.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_d.c
+    ${AIMEE_SRC_DIR}/cli_native_bridge.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_e.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_c.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_b.c
@@ -860,6 +809,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_index_bootstrap.c
     ${AIMEE_SRC_DIR}/cli_launch.c
     ${AIMEE_SRC_DIR}/cli_proxy.c
+    ${AIMEE_SRC_DIR}/cli_proxy_cmd.c
     ${AIMEE_SRC_DIR}/cli_mcp_serve.c
     # handle_tools_list calls mcp_tool_prose_lean/mcp_compact_tool_prose to build
     # the lean catalog. The client does not
@@ -891,8 +841,11 @@ set(CLI_SRCS
 # it is compiled on every platform — no per-OS exclusion.
 
 set(SERVER_SRCS
+    ${AIMEE_SRC_DIR}/cli_proxy.c
     ${AIMEE_SRC_DIR}/server/server_native_primitive.c
     ${AIMEE_SRC_DIR}/server/server_main.c
+    ${AIMEE_SRC_DIR}/modules/translation/harness_ir.c
+    ${AIMEE_SRC_DIR}/modules/translation/history_ir.c
     ${AIMEE_SRC_DIR}/modules/ir/aimee_ir_module_plan.c
     ${AIMEE_SRC_DIR}/server/ir_host_bindings.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval_memory_transport.c
@@ -956,6 +909,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_coord_dispatcher.c
     ${AIMEE_SRC_DIR}/server/server_agent.c
     ${AIMEE_SRC_DIR}/server/server_compute.c
+    ${AIMEE_SRC_DIR}/server/server_chat_ir.c
     ${AIMEE_SRC_DIR}/server/server_compute_roundtable.c
     ${AIMEE_SRC_DIR}/server/server_compute_mailbox.c
     ${AIMEE_SRC_DIR}/server_compute_episodes.c
@@ -967,6 +921,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_skill_jobs.c
     ${AIMEE_SRC_DIR}/server/server_mcp.c
     ${AIMEE_SRC_DIR}/server/server_mcp_call_table.c
+    ${AIMEE_SRC_DIR}/server/server_mcp_project.c
     ${AIMEE_SRC_DIR}/server/server_mcp_ast_grep.c
     ${AIMEE_SRC_DIR}/server/server_mcp_tools.c
     ${AIMEE_SRC_DIR}/server/server_mcp_delegate.c
@@ -981,6 +936,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/cli_client.c
     ${AIMEE_SRC_DIR}/cli_v1_routes.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_d.c
+    ${AIMEE_SRC_DIR}/cli_native_bridge.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_e.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_c.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_b.c
@@ -1041,6 +997,26 @@ set(SERVER_SRCS
 set(SERVER_DATA_SRCS ${DATA_SRCS})
 list(REMOVE_ITEM SERVER_DATA_SRCS ${SERVER_SRCS} ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c)
 list(APPEND SERVER_DATA_SRCS ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c)
+list(APPEND SERVER_SRCS
+    ${AIMEE_SRC_DIR}/server/server_http_op_runs.c
+    ${AIMEE_SRC_DIR}/server/server_compute_owner.c
+    ${AIMEE_SRC_DIR}/server/server_native_history.c
+    ${AIMEE_SRC_DIR}/server/server_unknown_effect_policy.c
+    ${AIMEE_SRC_DIR}/server/server_native_runtime.c
+    ${AIMEE_SRC_DIR}/server/server_native_cli.c
+    ${AIMEE_SRC_DIR}/server/server_native_execution.c
+    ${AIMEE_SRC_DIR}/server/server_native_cache_lease.c
+    ${AIMEE_SRC_DIR}/server/server_native_containment.c
+    ${AIMEE_SRC_DIR}/server/server_native_launch.c
+    ${AIMEE_SRC_DIR}/server/server_native_tool_admission.c
+    ${AIMEE_SRC_DIR}/server/server_native_replay.c
+    ${AIMEE_SRC_DIR}/server/server_learning_outcome.c
+    ${AIMEE_SRC_DIR}/server/server_learning_recovery.c
+    ${AIMEE_SRC_DIR}/server/server_verification.c
+    ${AIMEE_SRC_DIR}/server/server_learning_application.c
+    ${AIMEE_SRC_DIR}/server/server_learning_approaches.c
+)
+
 set(SERVER_CORE_SRCS ${CORE_SRCS})
 list(REMOVE_ITEM SERVER_CORE_SRCS ${AIMEE_SRC_DIR}/modules/kb/c/db_postgres.c)
 
@@ -1103,6 +1079,7 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/http/kb_http_entry.c
     # kb_http.c reads request bodies through these scanners; both build systems
     # must compile them or the kb target links an undefined symbol.
+    ${AIMEE_SRC_DIR}/kb/http/kb_http_common.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_json.c
     ${AIMEE_SRC_DIR}/kb/http/kb_ingress.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_team.c
@@ -1167,9 +1144,16 @@ else()
     find_package(OpenSSL REQUIRED)
 endif()
 
+# The thin client also consumes the portable codec. Declare its real CMake
+# target outside the full-runtime dependency guard on every native platform.
+add_library(aimee-core-codec STATIC ${AIMEE_SRC_DIR}/core/codec/base64.c)
+target_compile_features(aimee-core-codec PUBLIC c_std_11)
+target_include_directories(aimee-core-codec PUBLIC ${AIMEE_SRC_DIR}/core/codec/include)
+
 # --- Full-build static libraries + their native dependencies ----------------
 # The thin `aimee` CLI target (defined below) links none of these; it needs
-# only Threads (+ OpenSSL for https). Skipping them under -DAIMEE_THIN_CLIENT=ON
+# only the shared codec, connection transport, Threads and OpenSSL. Skipping
+# full-runtime dependencies under -DAIMEE_THIN_CLIENT=ON
 # means a packaging box needs no SQLite/libpq/zstd/PAM/libsecret toolchain.
 if(NOT AIMEE_THIN_CLIENT)
 
@@ -1216,6 +1200,7 @@ target_include_directories(aimee-core PUBLIC
     ${AIMEE_SRC_DIR}/modules/kb/c
 )
 target_compile_options(aimee-core PRIVATE ${AIMEE_COMMON_WARNINGS})
+target_link_libraries(aimee-core PUBLIC aimee-core-codec)
 target_link_libraries(aimee-core PUBLIC Threads::Threads)
 
 add_library(aimee-data STATIC ${DATA_SRCS})
@@ -1237,13 +1222,6 @@ target_include_directories(aimee-git PUBLIC ${AIMEE_PROJECT_INCLUDE_DIRS})
 target_compile_options(aimee-git PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-git PUBLIC aimee-agent aimee-data aimee-core)
 
-add_library(aimee-cmd STATIC ${CMD_SRCS})
-target_include_directories(aimee-cmd PUBLIC ${AIMEE_PROJECT_INCLUDE_DIRS})
-target_compile_options(aimee-cmd PRIVATE ${AIMEE_COMMON_WARNINGS})
-target_link_libraries(aimee-cmd PUBLIC aimee-git aimee-agent aimee-data aimee-core)
-if(WITH_UI)
-    target_compile_definitions(aimee-cmd PUBLIC WITH_UI)
-endif()
 
 if(WIN32)
     set(WITH_PAM OFF CACHE BOOL "Enable PAM authentication support" FORCE)
@@ -1300,8 +1278,8 @@ if(UNIX AND NOT APPLE AND NOT WIN32)
         check_include_file(security/pam_appl.h HAVE_PAM_HEADER)
         check_library_exists(pam pam_start "" HAVE_PAM_LIBRARY)
         if(HAVE_PAM_HEADER AND HAVE_PAM_LIBRARY)
-            target_compile_definitions(aimee-cmd PUBLIC WITH_PAM)
-            target_link_libraries(aimee-cmd PUBLIC pam)
+            target_compile_definitions(aimee-core PUBLIC WITH_PAM)
+            target_link_libraries(aimee-core PUBLIC pam)
         else()
             message(STATUS "PAM not found; disabling WITH_PAM")
         endif()
@@ -1313,11 +1291,11 @@ if(UNIX AND NOT APPLE AND NOT WIN32)
             pkg_check_modules(LIBSECRET libsecret-1)
         endif()
         if(LIBSECRET_FOUND)
-            target_compile_definitions(aimee-cmd PUBLIC WITH_LIBSECRET)
-            target_include_directories(aimee-cmd PUBLIC ${LIBSECRET_INCLUDE_DIRS})
-            target_link_directories(aimee-cmd PUBLIC ${LIBSECRET_LIBRARY_DIRS})
-            target_link_libraries(aimee-cmd PUBLIC ${LIBSECRET_LIBRARIES})
-            target_compile_options(aimee-cmd PRIVATE ${LIBSECRET_CFLAGS_OTHER})
+            target_compile_definitions(aimee-core PUBLIC WITH_LIBSECRET)
+            target_include_directories(aimee-core PUBLIC ${LIBSECRET_INCLUDE_DIRS})
+            target_link_directories(aimee-core PUBLIC ${LIBSECRET_LIBRARY_DIRS})
+            target_link_libraries(aimee-core PUBLIC ${LIBSECRET_LIBRARIES})
+            target_compile_options(aimee-core PRIVATE ${LIBSECRET_CFLAGS_OTHER})
         else()
             message(STATUS "libsecret not found; disabling WITH_LIBSECRET")
         endif()
@@ -1436,7 +1414,7 @@ target_include_directories(aimee PRIVATE
     ${AIMEE_SRC_DIR}/modules/kb/c)
 target_compile_definitions(aimee PRIVATE AIMEE_ARTIFACT_TRUST_NO_AUDIT=1)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
-target_link_libraries(aimee PRIVATE aimee-core-connection OpenSSL::Crypto)
+target_link_libraries(aimee PRIVATE aimee-core-connection aimee-core-codec OpenSSL::Crypto)
 find_package(ZLIB QUIET)
 if(ZLIB_FOUND)
     target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/http_content_encoding.c)

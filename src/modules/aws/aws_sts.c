@@ -1,3 +1,4 @@
+#include <aimee/core/codec/base64.h>
 /* modules/aws/aws_sts.c: STS request construction + parse + web-identity verify.
  * See aws_sts.h. Pure/offline — no dispatch, no network, no clock. */
 
@@ -17,42 +18,15 @@
 #include <string.h>
 
 /* --- base64url decode (no padding), strict (mirrors kb/auth_oidc.c) --- */
-static int b64url_val(char c)
-{
-   if (c >= 'A' && c <= 'Z')
-      return c - 'A';
-   if (c >= 'a' && c <= 'z')
-      return c - 'a' + 26;
-   if (c >= '0' && c <= '9')
-      return c - '0' + 52;
-   if (c == '-')
-      return 62;
-   if (c == '_')
-      return 63;
-   return -1;
-}
 
 static size_t b64url_decode(const char *in, size_t in_len, unsigned char *out, size_t out_cap)
 {
-   size_t o = 0;
-   unsigned int buf = 0;
-   int bits = 0;
-   for (size_t i = 0; i < in_len; i++)
-   {
-      int v = b64url_val(in[i]);
-      if (v < 0)
-         return (size_t)-1;
-      buf = (buf << 6) | (unsigned int)v;
-      bits += 6;
-      if (bits >= 8)
-      {
-         bits -= 8;
-         if (o >= out_cap)
-            return (size_t)-1;
-         out[o++] = (unsigned char)((buf >> bits) & 0xFF);
-      }
-   }
-   return o;
+   if (!in_len)
+      return 0;
+   size_t written = 0;
+   return aimee_codec_base64_decode(in, in_len, out, out_cap, AIMEE_BASE64_URL_COMPAT, &written)
+              ? written
+              : (size_t)-1;
 }
 
 static int b64url_decode_str(const char *in, size_t in_len, char *out, size_t out_cap,

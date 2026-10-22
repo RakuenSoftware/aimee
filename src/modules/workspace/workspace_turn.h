@@ -14,9 +14,57 @@
  * For a `shared` (co-located) workspace, or an unregistered cwd, the turn stays
  * on the shared provider and nothing changes. */
 
-/* Returns 1 if a non-shared provider was bound for this thread (the caller must
- * pair it with workspace_turn_unbind_active after the turn), 0 otherwise. */
+/* Returns 1 if a registered provider or mirror was bound for this thread,
+ * 0 for shared/unregistered cwd, or -1 when reconstruction fails. A negative
+ * result must refuse the turn. Pair binding with workspace_turn_unbind_active. */
 int workspace_turn_bind_active(const char *cwd);
+
+/* Nested operations own separate provider storage and leave the enclosing turn's
+ * resource leases intact. A non-NULL scope must be ended even when begin returns
+ * 0 (shared/unresolved cwd). -1 leaves the caller untouched. End is LIFO and
+ * returns -1 without changing state for an out-of-order scope. Join callbacks
+ * borrowing a nested provider before ending its scope. */
+typedef struct workspace_turn_scope workspace_turn_scope_t;
+int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out);
+/* A background worker cannot depend on a client runner. Explicit mirror and
+ * detached registrations use their recorded source/head under an owned local
+ * scope; failed reconstruction refuses without exposing the foreign cwd. */
+int workspace_turn_scope_begin_background(const char *cwd, workspace_turn_scope_t **out);
+/* Host creation result only: call immediately after the worktree owner creates
+ * this turn's dedicated child. Retains that exact directory under the held
+ * reconstruction, never a prefix grant or a model-supplied mount path. */
+int workspace_turn_scope_hold_created_worktree(workspace_turn_scope_t *scope, const char *cwd);
+int workspace_turn_scope_end(workspace_turn_scope_t *scope);
+
+/* An owned mirror directory capability for retained callbacks. Capture duplicates
+ * the owner's held descriptor. Bind borrows an immutable capability until restore;
+ * release only after every callback has joined. No path/JSON input creates one. */
+typedef struct workspace_turn_mirror_lease workspace_turn_mirror_lease_t;
+int workspace_turn_mirror_capture(const char *cwd, workspace_turn_mirror_lease_t **out);
+int workspace_turn_mirror_valid(const workspace_turn_mirror_lease_t *lease, const char *cwd);
+const workspace_turn_mirror_lease_t *
+workspace_turn_mirror_bind(const workspace_turn_mirror_lease_t *lease);
+void workspace_turn_mirror_release(workspace_turn_mirror_lease_t *lease);
+
+/* The host may supply a held directory from its authenticated, registered
+ * project owner. A path alone cannot create this capability; missing callbacks
+ * and refused ownership keep the existing explicit-registration requirements. */
+typedef int (*workspace_turn_project_open_fn)(const char *cwd);
+void workspace_turn_register_project_owner(workspace_turn_project_open_fn owner);
+
+/* Identity-only attestation of the currently held tool resource. Shared/mirror
+ * directories return an owned fd pinning the measured inode; container/detached
+ * identities include this owner's live acquisition epoch, never a pointer.
+ * The caller retains its turn lease and closes any returned fd. No access grant
+ * or path/provider fallback is created. Failure leaves fd=-1 and digest empty. */
+int workspace_turn_resource_identity(const char *cwd, int *directory_fd, char digest[65]);
+/* Approved local source custody, independent of the active execution namespace.
+ * A container turn returns a duplicate of the exact directory retained when its
+ * approved source was bound; the pathname must still name that held inode.
+ * Shared/mirror sources retain their existing local owner rules. Detached-only,
+ * sibling, replaced, unbound and unapproved sources refuse. This API grants no
+ * host tool execution or provider fallback; caller closes the returned fd. */
+int workspace_turn_source_identity(const char *cwd, int *directory_fd, char digest[65]);
 
 /* Select the client-side repository location that a git MCP call names.
  * `path` is authoritative for every operation except clone, where it is the
@@ -47,7 +95,8 @@ const char *workspace_turn_git_target(const char *tool, const char *path, const 
  * needs a live container handle, so the caller that owns the delegate decides. */
 /* Is `workspace` a tree aimee may hand a delegate? Canonicalizes into `out` (which
  * is what the caller must then mount — the check and the mount must be the same
- * path) and returns 1 if it lives inside a REGISTERED workspace root. Refusals are
+ * path) and returns 1 for a REGISTERED root or the exact actively held mirror
+ * reconstruction of one. Refusals are
  * logged. Repository-ness is not authorization; the registered roots are the bound.
  * Exposed so every path that can hand a workspace to the backend shares ONE bound —
  * a second copy is a second thing to forget. */

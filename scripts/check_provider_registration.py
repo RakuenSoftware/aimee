@@ -65,6 +65,12 @@ UNREACHABLE = {
         "kb_curator_grounding.c is reached only from kb_curator_extract_code.c, which is absent "
         "from the linked aimee-server binary: 'sidecar temp path too long to quote safely' appears "
         "in aimee-kb and not in aimee-server.",
+    ("kb", "agent_tools_register_metadata"):
+        "The metadata getter serves native MCP admission, the async tool worker and agent runtime. "
+        "The shipping Make KB target does not link the tools effect-contract/dispatcher execution "
+        "surface. Its CMake common source list retains the same unreachable agent runtime as the "
+        "classifier seam below; a shared source list does not enable tool execution in KB. "
+        "An absent metadata provider still refuses rather than granting a default read.",
     ("kb", "agent_tools_register_action_owner"):
         "The action callback has the same native-dispatch consumer as agent_tools_register_classifier. "
         "The Make KB target does not link its owner, and the deployed CT109 KB binary lacks both "

@@ -27,12 +27,17 @@
   ],
   "go_sources": [
     "server-go/modules/learning/learning.go",
-    "server-go/modules/learning/procedure_experience.go"
+    "server-go/modules/learning/procedure_experience.go",
+    "server-go/modules/learning/execution_outcome.go",
+    "server-go/modules/learning/execution_verification.go"
   ],
   "go_tests": [
     "server-go/modules/learning/learning_test.go",
     "server-go/modules/learning/procedure_experience_test.go",
-    "server-go/modules/learning/procedure_experience_postgres_test.go"
+    "server-go/modules/learning/procedure_experience_postgres_test.go",
+    "server-go/modules/learning/execution_outcome_test.go",
+    "server-go/modules/learning/execution_outcome_live_test.go",
+    "server-go/modules/learning/execution_verification_test.go"
   ],
   "public_headers": [
     "src/modules/learning/include/aimee/learning/approach_memory.h",

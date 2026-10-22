@@ -16,7 +16,7 @@ void agent_reject_degenerate_plain_response(agent_result_t *out, const char *age
    if (!liveness_is_degenerate_response(out->response) && !unexecuted_tool_plan)
       return;
 
-   free(out->response);
+   agent_result_clear_response(out);
    out->response = NULL;
    out->success = 0;
    out->abstained = 1;

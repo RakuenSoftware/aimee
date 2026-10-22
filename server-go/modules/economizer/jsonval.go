@@ -143,7 +143,7 @@ func (v *JSONValue) Clone() *JSONValue {
 	if v == nil {
 		return nil
 	}
-	out := &JSONValue{Kind: v.Kind, Str: v.Str, Num: v.Num, Bool: v.Bool}
+	out := &JSONValue{Kind: v.Kind, Str: v.Str, Num: v.Num, Bool: v.Bool, numberLexeme: v.numberLexeme, numberValue: v.numberValue}
 	if len(v.Keys) > 0 {
 		out.Keys = append([]string(nil), v.Keys...)
 		out.Vals = make([]*JSONValue, len(v.Vals))

@@ -1,15 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	canonical "github.com/JBailes/aimee/server-go/ir"
 )
 
 // pathWithin reports whether child is parent or a descendant of it (both cleaned).
@@ -115,8 +118,7 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	}
 	// cwd containment: the agent runs server-side with file/exec tools, and cwd
 	// comes from the browser — so it MUST stay within the caller's own scoped
-	// workspace. aimee-server can't enforce this (the chat stream carries no
-	// webuser identity), so webchat (the trust boundary) does it. Default to the
+	// workspace. The attested web user is also forwarded to aimee-server. Default to the
 	// user's workspace when no project is selected; refuse anything outside it
 	// (fail closed: a selected cwd we can't verify is also refused).
 	if root, rerr := s.webuserWorkspaceRoot(r.Context(), currentUser(r)); rerr == nil && root != "" {
@@ -133,14 +135,11 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 
 	username := currentUser(r)
 	stableSID := strings.TrimSpace(req.AimeeSessionID)
-	providerSessionID := ""
-	// Bind the stable aimee session handle to the authenticated user before it
-	// crosses the trusted UDS boundary. A provider-native session event is a
-	// different id and must never replace this ownership key. The browser's
-	// claude_session_id field is retained for wire compatibility but is never a
-	// source of authority: resume metadata is loaded only from this user's
-	// server-side stable-session record.
-	if s.db != nil && stableSID != "" {
+	if stableSID == "" {
+		writeJSONError(w, http.StatusBadRequest, "aimee_session_id required")
+		return
+	}
+	if s.db != nil {
 		owned, exists, oerr := s.chatSessionOwned(username, stableSID)
 		if oerr != nil {
 			writeJSONError(w, http.StatusInternalServerError, "failed to verify session")
@@ -150,17 +149,8 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusForbidden, "session belongs to another user")
 			return
 		}
-		if err := s.touchChatSession(username, stableSID, cwd, req.Message); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to persist session")
-			return
-		}
-		providerSessionID, err = s.chatSessionProviderID(username, stableSID)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to load session runtime")
-			return
-		}
-		if err := s.appendChatMessage(username, stableSID, "user", req.Message); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "failed to persist message")
+		if err = s.touchChatSession(username, stableSID, cwd, req.Message); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "failed to persist session metadata")
 			return
 		}
 	}
@@ -170,88 +160,26 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	doneSent := false
-	var runtimePersistErr error
-	var assistantText strings.Builder
-	// Stream the chat over aimee-server's /v1 HTTP transport (native
-	// POST /v1/chat/stream); the legacy NDJSON socket helper (chatStream)
-	// remains available as a fallback.
-	err = chatStreamHTTP(r.Context(), s.cfg.socketPath, req.Message, stableSID,
-		providerSessionID, cwd, req.AttachID, func(evt streamEvent) {
-			switch evt.Event {
-			case "turn_start":
-				sseWrite(w, "turn_start", map[string]any{})
-			case "text":
-				assistantText.WriteString(evt.Content)
-				sseWrite(w, "text", map[string]string{"content": evt.Content})
-			case "thinking":
-				sseWrite(w, "thinking", map[string]string{"content": evt.Content})
-			case "turn_end":
-				sseWrite(w, "turn_end", map[string]any{})
-			case "session":
-				if evt.ID != "" {
-					// The streamed id is trusted server output. Bind it before
-					// exposing the session event (and therefore before `done`) so
-					// an immediately queued next turn cannot race into a fresh
-					// provider conversation.
-					if stableSID != "" {
-						if uerr := s.setChatSessionRuntime(username, stableSID, evt.ID); uerr != nil {
-							runtimePersistErr = uerr
-							log.Printf("aimee-webchat: persist runtime for %q: %v", stableSID, uerr)
-							sseWrite(w, "error", map[string]string{"message": "failed to persist session runtime"})
-							return
-						}
-					}
-					providerSessionID = evt.ID
-				}
-				sseWrite(w, "session", map[string]string{"id": evt.ID})
-			case "usage":
-				kind := evt.Kind
-				if kind == "" {
-					kind = "realized"
-				}
-				sseWrite(w, "usage", map[string]any{
-					"in":         evt.In,
-					"out":        evt.Out,
-					"cost":       evt.Cost,
-					"usage_kind": kind,
-				})
-			case "done":
-				if runtimePersistErr == nil {
-					doneSent = true
-					sseWrite(w, "done", map[string]any{})
-				}
-			case "error":
-				msg := evt.Message
-				if msg == "" {
-					msg = evt.Error
-				}
-				if msg == "" {
-					msg = "server error"
-				}
-				sseWrite(w, "error", map[string]string{"message": msg})
-			}
-		})
-
-	// Store the visible assistant turn and the provider-native resume id under
-	// the stable, user-owned aimee session id. This is best-effort because the
-	// response may already have streamed, but failures are visible in logs.
-	if stableSID != "" {
-		if text := assistantText.String(); text != "" {
-			if uerr := s.appendChatMessage(username, stableSID, "assistant", text); uerr != nil {
-				log.Printf("aimee-webchat: persist reply for %q: %v", stableSID, uerr)
-			}
+	err = chatIRHTTP(r.Context(), s.cfg.socketPath, username, req.Message, stableSID, cwd, req.AttachID, func(line []byte) error {
+		if _, err := w.Write([]byte("event: ir\ndata: ")); err != nil {
+			return err
 		}
-	}
-	if r.Context().Err() != nil {
-		return
-	}
-	if err != nil {
+		if _, err := w.Write(line); err != nil {
+			return err
+		}
+		if _, err := w.Write([]byte("\n\n")); err != nil {
+			return err
+		}
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		return nil
+	})
+	if err != nil && r.Context().Err() == nil {
+		// Transport failures are not model content and are never persisted as IR.
 		sseWrite(w, "error", map[string]string{"message": err.Error()})
 	}
-	if !doneSent && runtimePersistErr == nil {
-		sseWrite(w, "done", map[string]any{})
-	}
+
 }
 
 // handleChatProjects returns indexed projects plus the webchat process cwd fallback.
@@ -436,6 +364,45 @@ func (s *server) handleChatClear(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"status":"ok"}`)
 }
 
+// handleChatCancel requests an exact turn stop. It never submits user text.
+func (s *server) handleChatCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !sameOriginRequest(r) {
+		http.Error(w, "cross-origin cancellation refused", http.StatusForbidden)
+		return
+	}
+	if currentUser(r) == "" {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+	if err != nil || !canonical.ValidJSON(body) {
+		http.Error(w, "invalid cancellation frame", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		SessionID string `json:"session_id"`
+		TurnID    string `json:"turn_id"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil || req.SessionID == "" || len(req.SessionID) > 128 || req.TurnID == "" || len(req.TurnID) > 128 {
+		http.Error(w, "exact session_id and turn_id required", http.StatusBadRequest)
+		return
+	}
+	status, data, err := s.v1RequestWebuser(r.Context(), currentUser(r), http.MethodPost, "/v1/chat/graceful_cancel", body)
+	if err != nil {
+		http.Error(w, "cancellation service unavailable", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write(data)
+}
+
 // handleChatInterrupt handles POST /api/chat/interrupt: stop the in-flight turn
 // for a session and queue a steering message the server auto-continues as the
 // next turn (streamed to the session's /events). The reply is small JSON
@@ -478,7 +445,7 @@ func (s *server) handleChatInterrupt(w http.ResponseWriter, r *http.Request) {
 // GET /api/chat/sessions (handleChatSessionsList), not here.
 func (s *server) handleChatThreads(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"threads":[],"active_id":0}`)
+	fmt.Fprintf(w, `{"threads":[],"active_id":0,"capabilities":{"branching":false}}`)
 }
 
 // notImplementedMutation answers a chat mutation that is not built yet.
@@ -556,4 +523,48 @@ func isAPIPath(path string) bool {
 func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"username": currentUser(r)})
+}
+
+// A browser decision is forwarded with the verified webuser identity. Runtime
+// owns pending IDs and checks the session/turn owner again before enqueueing it.
+func (s *server) handleChatControlReply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !sameOriginRequest(r) {
+		http.Error(w, "cross-origin control reply refused", http.StatusForbidden)
+		return
+	}
+	if currentUser(r) == "" {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 128<<10))
+	if err != nil || !canonical.ValidJSON(body) {
+		http.Error(w, "invalid control reply frame", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		SessionID string          `json:"session_id"`
+		RequestID string          `json:"request_id"`
+		Reply     json.RawMessage `json:"reply"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil || req.SessionID == "" || req.RequestID == "" || len(req.Reply) == 0 {
+		http.Error(w, "session_id, request_id and reply required", http.StatusBadRequest)
+		return
+	}
+	// Preserve the validated frame, including opaque answer numbers and Unicode.
+	// The canonical runtime owner validates its pending control schema; this
+	// transport must not collapse duplicate keys or discard trailing documents.
+	status, data, err := s.v1RequestWebuser(r.Context(), currentUser(r), http.MethodPost, "/v1/chat/control-reply", body)
+	if err != nil {
+		http.Error(w, "control reply service unavailable", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write(data)
 }

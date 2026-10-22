@@ -7,17 +7,22 @@
  * that is a MODEL served over the OpenAI shape, not a Gemini protocol. */
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "aimee.h"
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "agent_protocol.h"
+#include <aimee/gateway/gateway_policy.h>
 #include <aimee/delegates/delegate_driver.h>
 #include <aimee/delegates/delegate_xml_fallback.h>
 #include "model_provider.h"
 #include "model_sampling.h"
 #include "platform_test_util.h"
 #include "cJSON.h"
+#include "support/ir_response_fixture.h"
+#include <aimee/ir/session_event.h>
+#include <aimee/translation/aimee_backend.h>
 
 static cJSON *make_dummy_tool(void)
 {
@@ -437,7 +442,7 @@ static void test_agent_config_recommended_sampling_roundtrip(void)
    printf("agent_config_recommended_sampling_roundtrip OK\n");
 }
 
-static void test_parse_response_openai_sanitizes_invalid_tool_arguments(void)
+static void test_parse_response_openai_rejects_invalid_tool_arguments(void)
 {
    const char *json = "{"
                       "  \"choices\": [{"
@@ -460,24 +465,14 @@ static void test_parse_response_openai_sanitizes_invalid_tool_arguments(void)
    cJSON *root = cJSON_Parse(json);
    assert(root != NULL);
 
-   parsed_response_t out;
-   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
+   aimee_response_t out;
+   assert(agent_ir_decode_json_response(root, 0, -1, NULL, &out) != 0);
+   assert(aimee_ir_response_has_tool_use(&out) == 0 && aimee_ir_response_tool_count(&out) == 0);
+   assert(out.n_content == 0 && out.content == NULL);
 
-   assert(out.is_tool_call == 1);
-   assert(out.call_count == 1);
-   assert(strcmp(out.calls[0].name, "bash") == 0);
-   assert(strcmp(out.calls[0].arguments, "{}") == 0);
-
-   cJSON *tool_calls = cJSON_GetObjectItem(out.assistant_message, "tool_calls");
-   cJSON *tc = cJSON_GetArrayItem(tool_calls, 0);
-   cJSON *fn = cJSON_GetObjectItem(tc, "function");
-   cJSON *args = cJSON_GetObjectItem(fn, "arguments");
-   assert(cJSON_IsString(args));
-   assert(strcmp(args->valuestring, "{}") == 0);
-
-   agent_free_parsed_response(&out);
+   aimee_response_free(&out);
    cJSON_Delete(root);
-   printf("parse_response_openai_sanitizes_invalid_tool_arguments OK\n");
+   printf("parse_response_openai_rejects_invalid_tool_arguments OK\n");
 }
 
 static void test_parse_response_captures_provider_model(void)
@@ -488,19 +483,19 @@ static void test_parse_response_captures_provider_model(void)
                      "\"completion_tokens\":1},\"choices\":[{\"message\":{\"content\":\"hi\"}}]}";
    cJSON *root = cJSON_Parse(oai);
    assert(root != NULL);
-   parsed_response_t p;
-   agent_ir_parse_json_response(root, 0, -1, NULL, &p);
+   aimee_response_t p;
+   agent_ir_decode_json_response(root, 0, -1, NULL, &p);
    assert(strcmp(p.model, "gpt-4o-2024-11-20") == 0);
-   agent_free_parsed_response(&p);
+   aimee_response_free(&p);
    cJSON_Delete(root);
 
    const char *ant = "{\"model\":\"claude-3-5-sonnet-20241022\",\"content\":[{\"type\":\"text\","
                      "\"text\":\"hi\"}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}";
    root = cJSON_Parse(ant);
    assert(root != NULL);
-   agent_ir_parse_json_response(root, 1, -1, NULL, &p);
+   agent_ir_decode_json_response(root, 1, -1, NULL, &p);
    assert(strcmp(p.model, "claude-3-5-sonnet-20241022") == 0);
-   agent_free_parsed_response(&p);
+   aimee_response_free(&p);
    cJSON_Delete(root);
    printf("parse_response_captures_provider_model OK\n");
 }
@@ -518,13 +513,14 @@ static void test_parse_response_keeps_text_with_tool_use(void)
        "{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"grep\",\"input\":{\"q\":\"x\"}}]}";
    cJSON *root = cJSON_Parse(ant);
    assert(root != NULL);
-   parsed_response_t p;
+   aimee_response_t p;
    memset(&p, 0, sizeof(p));
-   agent_ir_parse_json_response(root, 1, -1, NULL, &p);
-   assert(p.is_tool_call == 1);
-   assert(p.call_count == 1 && strcmp(p.calls[0].name, "grep") == 0);
-   assert(p.content && strcmp(p.content, "Let me check that.") == 0); /* text NOT dropped */
-   agent_free_parsed_response(&p);
+   agent_ir_decode_json_response(root, 1, -1, NULL, &p);
+   assert(aimee_ir_response_has_tool_use(&p) == 1);
+   assert(aimee_ir_response_tool_count(&p) == 1 &&
+          strcmp(aimee_ir_response_tool(&p, 0)->tool_name, "grep") == 0);
+   assert_ir_text(&p, "Let me check that."); /* text NOT dropped */
+   aimee_response_free(&p);
    cJSON_Delete(root);
    printf("parse_response_keeps_text_with_tool_use OK\n");
 }
@@ -548,14 +544,13 @@ static void test_parse_response_openai_mistral_content_array(void)
    cJSON *root = cJSON_Parse(json);
    assert(root != NULL);
 
-   parsed_response_t out;
-   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
+   aimee_response_t out;
+   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
 
-   assert(out.is_tool_call == 0);
-   assert(out.content != NULL);
-   assert(strcmp(out.content, "CMAKE_DEP: schema_data_header") == 0);
+   assert(aimee_ir_response_has_tool_use(&out) == 0);
+   assert_ir_text(&out, "CMAKE_DEP: schema_data_header");
 
-   agent_free_parsed_response(&out);
+   aimee_response_free(&out);
    cJSON_Delete(root);
    printf("parse_response_openai_mistral_content_array OK\n");
 }
@@ -575,14 +570,13 @@ static void test_parse_response_openai_stray_think_close(void)
    cJSON *root = cJSON_Parse(json);
    assert(root != NULL);
 
-   parsed_response_t out;
-   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
+   aimee_response_t out;
+   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
 
-   assert(out.is_tool_call == 0);
-   assert(out.content != NULL);
-   assert(strcmp(out.content, "Final answer") == 0);
+   assert(aimee_ir_response_has_tool_use(&out) == 0);
+   assert_ir_text(&out, "Final answer");
 
-   agent_free_parsed_response(&out);
+   aimee_response_free(&out);
    cJSON_Delete(root);
    printf("parse_response_openai_stray_think_close OK\n");
 }
@@ -603,16 +597,15 @@ static void test_parse_response_openai_strips_thinking_block(void)
    cJSON *root = cJSON_Parse(json);
    assert(root != NULL);
 
-   parsed_response_t out;
-   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
+   aimee_response_t out;
+   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
 
-   assert(out.is_tool_call == 0);
-   assert(out.content != NULL);
-   assert(strcmp(out.content, "LOCAL254_OK") == 0);
-   assert(out.prompt_tokens == 3);
-   assert(out.completion_tokens == 4);
+   assert(aimee_ir_response_has_tool_use(&out) == 0);
+   assert_ir_text(&out, "LOCAL254_OK");
+   assert(out.usage_in == 3);
+   assert(out.usage_out == 4);
 
-   agent_free_parsed_response(&out);
+   aimee_response_free(&out);
    cJSON_Delete(root);
    printf("parse_response_openai_strips_thinking_block OK\n");
 }
@@ -633,14 +626,13 @@ static void test_parse_response_openai_strips_thinking_process_scaffold(void)
    cJSON *root = cJSON_Parse(json);
    assert(root != NULL);
 
-   parsed_response_t out;
-   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
+   aimee_response_t out;
+   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
 
-   assert(out.is_tool_call == 0);
-   assert(out.content != NULL);
-   assert(strcmp(out.content, "Bundle is insufficient.") == 0);
+   assert(aimee_ir_response_has_tool_use(&out) == 0);
+   assert_ir_text(&out, "Bundle is insufficient.");
 
-   agent_free_parsed_response(&out);
+   aimee_response_free(&out);
    cJSON_Delete(root);
    printf("parse_response_openai_strips_thinking_process_scaffold OK\n");
 }
@@ -662,14 +654,13 @@ static void test_parse_response_openai_strips_self_correction_scaffold(void)
    cJSON *root = cJSON_Parse(json);
    assert(root != NULL);
 
-   parsed_response_t out;
-   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
+   aimee_response_t out;
+   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
 
-   assert(out.is_tool_call == 0);
-   assert(out.content != NULL);
-   assert(strcmp(out.content, "local delegate ok") == 0);
+   assert(aimee_ir_response_has_tool_use(&out) == 0);
+   assert_ir_text(&out, "local delegate ok");
 
-   agent_free_parsed_response(&out);
+   aimee_response_free(&out);
    cJSON_Delete(root);
    printf("parse_response_openai_strips_self_correction_scaffold OK\n");
 }
@@ -690,15 +681,14 @@ static void test_parse_response_openai_discards_private_scaffold_without_final(v
    cJSON *root = cJSON_Parse(json);
    assert(root != NULL);
 
-   parsed_response_t out;
-   agent_ir_parse_json_response(root, 0, -1, NULL, &out);
+   aimee_response_t out;
+   agent_ir_decode_json_response(root, 0, -1, NULL, &out);
 
-   assert(out.is_tool_call == 0);
-   /* All scaffold, no final answer -> empty content. The IR represents "no text" as
-    * NULL content (legacy used an empty string); both are empty downstream. */
-   assert(out.content == NULL || out.content[0] == '\0');
+   assert(aimee_ir_response_has_tool_use(&out) == 0);
+   /* No visible final text; the private scaffold remains separate. */
+   assert_ir_text(&out, "");
 
-   agent_free_parsed_response(&out);
+   aimee_response_free(&out);
    cJSON_Delete(root);
    printf("parse_response_openai_discards_private_scaffold_without_final OK\n");
 }
@@ -930,10 +920,307 @@ static void test_connect_timeout_caps_below_request_budget(void)
    printf("connect_timeout_caps_below_request_budget OK\n");
 }
 
+static int delegates_available_for_policy(void)
+{
+   return 1;
+}
+
+static void test_canonical_delegate_policy_before_native_egress(void)
+{
+   const char *tool_wires[] = {
+       "[{\"type\":\"function\",\"function\":{\"name\":\"Read\",\"parameters\":{\"type\":"
+       "\"object\"}}},"
+       "{\"type\":\"function\",\"function\":{\"name\":\"Task\",\"parameters\":{\"type\":\"object\"}"
+       "}}]",
+       "[{\"name\":\"Read\",\"input_schema\":{\"type\":\"object\"}},"
+       "{\"name\":\"Task\",\"input_schema\":{\"type\":\"object\"}}]",
+       "[{\"type\":\"function\",\"name\":\"Read\",\"parameters\":{\"type\":\"object\"}},"
+       "{\"type\":\"function\",\"name\":\"Task\",\"parameters\":{\"type\":\"object\"}}]"};
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_ANTHROPIC,
+                                 AIMEE_WIRE_RESPONSES};
+   cJSON *messages = cJSON_Parse(
+       "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"inspect the project\"}]}]");
+   assert(messages);
+   gateway_policy_set_delegates_available_provider(delegates_available_for_policy);
+   for (size_t w = 0; w < sizeof wires / sizeof *wires; w++)
+   {
+      cJSON *tools = cJSON_Parse(tool_wires[w]);
+      assert(tools);
+      aimee_request_t dispatch = {0};
+      for (int delegate = 0; delegate < 2; delegate++)
+      {
+         for (int fallback = 0; fallback < 2; fallback++)
+         {
+            agent_t agent = {0};
+            snprintf(agent.model, sizeof agent.model, "%s", fallback ? "fallback" : "selected");
+            agent.require_initial_tool_call = 1;
+            cJSON *native = agent_build_request_ir(&agent, messages, tools, "host", 128, 0,
+                                                   wires[w], delegate, &dispatch);
+            assert(native);
+            assert(!strcmp(cJSON_GetObjectItemCaseSensitive(native, "model")->valuestring,
+                           agent.model));
+            cJSON *catalog = cJSON_GetObjectItemCaseSensitive(native, "tools");
+            assert(cJSON_GetArraySize(catalog) == (delegate ? 1 : 2));
+            assert(dispatch.n_tools == (delegate ? 1 : 2) && !dispatch.n_messages &&
+                   !dispatch.messages && !dispatch.system);
+            const aimee_tool_t *read = aimee_ir_find_function(&dispatch, NULL, "Read");
+            assert(read && cJSON_IsObject(read->schema));
+            assert(!aimee_ir_find_function(&dispatch, "foreign", "Read"));
+            assert(!!aimee_ir_find_function(&dispatch, NULL, "Task") == !delegate);
+            assert(cJSON_GetObjectItemCaseSensitive(native, "tool_choice"));
+            cJSON_Delete(native);
+         }
+      }
+      assert(cJSON_GetArraySize(tools) == 2); /* Shared source is never modified. */
+      /* Removing the last tool also clears the forced choice at real egress. */
+      cJSON_DeleteItemFromArray(tools, 0);
+      agent_t agent = {0};
+      snprintf(agent.model, sizeof agent.model, "%s", "selected");
+      agent.require_initial_tool_call = 1;
+      cJSON *native =
+          agent_build_request_ir(&agent, messages, tools, "host", 128, 0, wires[w], 1, &dispatch);
+      assert(native && !cJSON_GetObjectItemCaseSensitive(native, "tools"));
+      assert(!cJSON_GetObjectItemCaseSensitive(native, "tool_choice"));
+      assert(!cJSON_GetObjectItemCaseSensitive(native, "parallel_tool_calls"));
+      assert(!dispatch.n_tools && !aimee_ir_find_function(&dispatch, NULL, "Task"));
+      aimee_request_free(&dispatch);
+      cJSON_Delete(native);
+      cJSON_Delete(tools);
+   }
+   gateway_policy_set_delegates_available_provider(NULL);
+   cJSON_Delete(messages);
+   puts("canonical delegate policy before all native outputs/fallback models OK");
+}
+
+static void test_owned_canonical_request_preparation(void)
+{
+   const aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_ANTHROPIC,
+                                 AIMEE_WIRE_RESPONSES};
+   const char *catalogs[] = {
+       "[{\"type\":\"function\",\"function\":{\"name\":\"Read\",\"parameters\":{\"type\":"
+       "\"object\"}}}]",
+       "[{\"name\":\"Read\",\"input_schema\":{\"type\":\"object\"}}]",
+       "[{\"type\":\"function\",\"name\":\"Read\",\"parameters\":{\"type\":\"object\"}}]"};
+   aimee_request_t owned = {0};
+   for (size_t w = 0; w < sizeof wires / sizeof *wires; w++)
+   {
+      agent_t agent = {0};
+      snprintf(agent.model, sizeof agent.model, "host-model-%zu", w);
+      agent.require_initial_tool_call = 1;
+      cJSON *messages = cJSON_Parse(
+          "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"owned context\"}]},"
+          "{\"role\":\"assistant\",\"blocks\":[{\"type\":\"tool_use\",\"tool_id\":\"original-"
+          "call\","
+          "\"name\":\"Read\",\"input\":{\"exact\":0.123456789012345678901234567890}}]}]");
+      cJSON *tools = cJSON_Parse(catalogs[w]);
+      assert(messages && tools);
+      int rc = agent_prepare_request_ir(&agent, messages, tools, "host system", 321, 0.25, wires[w],
+                                        0, &owned);
+      cJSON_Delete(messages);
+      cJSON_Delete(tools);
+      assert(!rc && !aimee_ir_request_admit(&owned));
+      assert(!strcmp(owned.model, agent.model) && owned.frontend == wires[w]);
+      assert(owned.n_system == 1 && !strcmp(owned.system[0].text, "host system"));
+      assert(owned.n_messages == 2 && owned.n_tools == 1);
+      assert(!strcmp(owned.messages[0].blocks[0].text, "owned context"));
+      const aimee_block_t *call = &owned.messages[1].blocks[0];
+      assert(!strcmp(call->tool_id, "original-call") && !strcmp(call->tool_name, "Read"));
+      char *input = cJSON_PrintUnformatted(call->tool_input);
+      assert(input && !strcmp(input, "{\"exact\":0.123456789012345678901234567890}"));
+      free(input);
+      assert(aimee_ir_find_function(&owned, NULL, "Read"));
+      assert(owned.tool_choice != AIMEE_TOOL_CHOICE_UNSET && owned.mutated);
+      /* The Chat profile may carry its host-owned extension sidecar; it never
+       * receives SDK prompt/catalog bytes or whole-request native replay. */
+      assert(!owned.raw_bytes && !owned.raw_length);
+      assert(!cJSON_GetObjectItemCaseSensitive(owned.raw, "messages"));
+      assert(!cJSON_GetObjectItemCaseSensitive(owned.raw, "tools"));
+      if (wires[w] != AIMEE_WIRE_RESPONSES)
+         assert(owned.has_max_tokens && owned.max_tokens == 321);
+      /* Failed replacement cannot erase the last admitted context/catalog. */
+      char *model = owned.model;
+      aimee_message_t *history = owned.messages;
+      cJSON *invalid = cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"unknown\"}]}]");
+      rc =
+          agent_prepare_request_ir(&agent, invalid, NULL, "replacement", 1, 0, wires[w], 0, &owned);
+      assert(rc < 0 && owned.model == model && owned.messages == history);
+      cJSON_Delete(invalid);
+   }
+   aimee_request_free(&owned);
+   puts("owned canonical host context/catalog survives source release and failed replacement OK");
+}
+
+static void test_canonical_request_profiles(void)
+{
+   const char *providers[] = {"ollama", "openrouter", "minimax", "mistral", "openai"};
+   const char *models[] = {"qwen3.gguf", "selected", "MiniMax-M2.7", "mistral-vibe-cli", "gpt-4o"};
+   cJSON *history =
+       cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"inspect\"}]}]");
+   cJSON *native_history = cJSON_Parse("[{\"role\":\"user\",\"content\":\"inspect\"}]");
+   assert(history && native_history);
+   for (size_t i = 0; i < sizeof providers / sizeof *providers; i++)
+   {
+      agent_t agent = {0};
+      snprintf(agent.provider, sizeof agent.provider, "%s", providers[i]);
+      snprintf(agent.model, sizeof agent.model, "%s", models[i]);
+      agent.recommended_sampling = 1;
+      cJSON *legacy = agent_build_request_openai(&agent, native_history, NULL, 128, 0.5);
+      cJSON *actual = agent_build_request_ir(&agent, history, NULL, NULL, 128, 0.5,
+                                             AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
+      assert(legacy && actual);
+      assert(cJSON_Compare(legacy, actual, 1));
+      cJSON_Delete(legacy);
+      cJSON_Delete(actual);
+   }
+   agent_t qwen = {0};
+   snprintf(qwen.provider, sizeof qwen.provider, "%s", "ollama");
+   snprintf(qwen.model, sizeof qwen.model, "%s", "qwen.gguf");
+   const char *shaping_cases[] = {
+       "[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\" \"},"
+       "{\"type\":\"text\",\"text\":\"/no_think\\ninspect\"}]}]",
+       "[{\"role\":\"user\",\"blocks\":[]}]"};
+   const char *expected[] = {" /no_think\ninspect", "/no_think\n"};
+   for (size_t i = 0; i < sizeof shaping_cases / sizeof *shaping_cases; i++)
+   {
+      cJSON *source = cJSON_Parse(shaping_cases[i]);
+      cJSON *before = cJSON_Duplicate(source, 1);
+      cJSON *actual = agent_build_request_ir(&qwen, source, NULL, NULL, 128, 0.5,
+                                             AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
+      assert(actual && cJSON_Compare(source, before, 1));
+      const cJSON *message =
+          cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(actual, "messages"), 0);
+      assert(
+          !strcmp(cJSON_GetObjectItemCaseSensitive(message, "content")->valuestring, expected[i]));
+      cJSON_Delete(actual);
+      cJSON_Delete(before);
+      cJSON_Delete(source);
+   }
+   /* Shaping is idempotent and never edits durable canonical source content. */
+   const cJSON *block = cJSON_GetArrayItem(
+       cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(history, 0), "blocks"), 0);
+   assert(!strcmp(cJSON_GetObjectItemCaseSensitive(block, "text")->valuestring, "inspect"));
+   cJSON_Delete(history);
+   cJSON_Delete(native_history);
+   puts("canonical request profile provider settings and source isolation OK");
+}
+
+static void test_canonical_responses_profile(void)
+{
+   agent_t agent = {0};
+   snprintf(agent.model, sizeof agent.model, "%s", "selected");
+   agent.require_initial_tool_call = 1;
+   cJSON *history =
+       cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"inspect\"}]}]");
+   cJSON *tools = cJSON_Parse(
+       "[{\"type\":\"function\",\"name\":\"other\",\"parameters\":{\"type\":\"object\"}},"
+       "{\"type\":\"function\",\"name\":\"read_file\",\"parameters\":{\"type\":\"object\"}},"
+       "{\"type\":\"function\",\"name\":\"code_search\",\"parameters\":{\"type\":\"object\"}}]");
+   assert(history && tools);
+   for (int fallback = 0; fallback < 2; fallback++)
+   {
+      cJSON *actual = agent_build_request_ir(&agent, history, tools, NULL, 777, 0.5,
+                                             AIMEE_WIRE_RESPONSES, 0, NULL);
+      assert(actual && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(actual, "store")));
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(actual, "stream")));
+      assert(!strcmp(cJSON_GetObjectItemCaseSensitive(actual, "instructions")->valuestring,
+                     "You are an execution agent."));
+      const cJSON *choice = cJSON_GetObjectItemCaseSensitive(actual, "tool_choice");
+      assert(choice && !strcmp(cJSON_GetObjectItemCaseSensitive(choice, "name")->valuestring,
+                               fallback ? "other" : "code_search"));
+      assert(!cJSON_GetObjectItemCaseSensitive(actual, "max_output_tokens"));
+      assert(!cJSON_GetObjectItemCaseSensitive(actual, "temperature"));
+      cJSON_Delete(actual);
+      cJSON_DeleteItemFromArray(tools, 2);
+      cJSON_DeleteItemFromArray(tools, 1);
+   }
+   /* Malformed catalog ingress still refuses before any provider dispatch. */
+   cJSON_DeleteItemFromObjectCaseSensitive(cJSON_GetArrayItem(tools, 0), "parameters");
+   cJSON_AddStringToObject(cJSON_GetArrayItem(tools, 0), "parameters", "malformed");
+   cJSON *actual = agent_build_request_ir(&agent, history, tools, "host", 777, 0.5,
+                                          AIMEE_WIRE_RESPONSES, 0, NULL);
+   assert(!actual);
+   cJSON_Delete(history);
+   cJSON_Delete(tools);
+   puts("typed Responses host profile, forced evidence choice and catalog refusal OK");
+}
+
+static void test_typed_anthropic_system_cache_parity(void)
+{
+   const char *systems[] = {NULL,
+                            "",
+                            "stable",
+                            "stable<aimee-context>volatile",
+                            " <aimee-context>volatile",
+                            "x<aimee-context>long volatile"};
+   for (size_t i = 0; i < sizeof systems / sizeof *systems; i++)
+      for (int cache = 0; cache < 2; cache++)
+         for (int floor = 0; floor <= 8; floor += 8)
+         {
+            cJSON *expected = cJSON_CreateObject();
+            agent_anthropic_set_system(expected, systems[i], cache, floor);
+            aimee_request_t ir = {.model = strdup("selected"),
+                                  .frontend = AIMEE_WIRE_ANTHROPIC,
+                                  .max_tokens = 128,
+                                  .has_max_tokens = 1};
+            assert(!anthropic_ir_set_host_system(&ir, systems[i], cache, floor));
+            cJSON *actual = anthropic_backend_build(&ir);
+            assert(actual);
+            const cJSON *left = cJSON_GetObjectItemCaseSensitive(expected, "system");
+            const cJSON *right = cJSON_GetObjectItemCaseSensitive(actual, "system");
+            assert((!left && !right) || cJSON_Compare(left, right, 1));
+            if (left && right)
+            {
+               char *left_wire = cJSON_PrintUnformatted(left);
+               char *right_wire = cJSON_PrintUnformatted(right);
+               assert(left_wire && right_wire && !strcmp(left_wire, right_wire));
+               free(left_wire);
+               free(right_wire);
+            }
+            cJSON_Delete(actual);
+            cJSON_Delete(expected);
+            aimee_request_free(&ir);
+         }
+   aimee_request_t edited = {.model = strdup("selected"),
+                             .frontend = AIMEE_WIRE_ANTHROPIC,
+                             .max_tokens = 128,
+                             .has_max_tokens = 1};
+   assert(!anthropic_ir_set_host_system(&edited, "old<aimee-context>volatile", 1, 0));
+   cJSON *entry = edited.raw;
+   assert(anthropic_ir_set_host_system(&edited, "replacement", 0, 0) == -1 && edited.raw == entry);
+   free(edited.system[0].text);
+   edited.system[0].text = strdup("policy changed");
+   cJSON *changed = anthropic_backend_build(&edited);
+   assert(changed);
+   const cJSON *blocks = cJSON_GetObjectItemCaseSensitive(changed, "system");
+   assert(cJSON_IsArray(blocks) && cJSON_GetArraySize(blocks) == 2);
+   assert(
+       !strcmp(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(blocks, 0), "text")->valuestring,
+               "policy changed"));
+   assert(
+       !strcmp(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(blocks, 1), "text")->valuestring,
+               "<aimee-context>volatile"));
+   cJSON_Delete(changed);
+   aimee_request_free(&edited);
+   puts("typed Anthropic system/cache scalar and block byte parity OK");
+}
+
+static void test_missing_response_output(void)
+{
+   assert(agent_http_get("http://127.0.0.1:9", NULL, NULL, 1) == -1);
+   assert(agent_http_post_content_type("http://127.0.0.1:9", NULL, "application/json", "{}", NULL,
+                                       1, NULL) == -1);
+}
+
 int main(void)
 {
+   test_typed_anthropic_system_cache_parity();
+   test_canonical_responses_profile();
+   test_canonical_request_profiles();
+   test_owned_canonical_request_preparation();
+   test_missing_response_output();
    printf("test_agent_http: ");
 
+   test_canonical_delegate_policy_before_native_egress();
    test_connect_timeout_caps_below_request_budget();
    test_build_request_openai_omits_empty_tools();
    test_openai_request_strips_private_message_fields();
@@ -952,7 +1239,7 @@ int main(void)
    test_openai_provider_fixed_temperature_fallback();
    test_openai_required_temperature_overrides_caller();
    test_agent_config_recommended_sampling_roundtrip();
-   test_parse_response_openai_sanitizes_invalid_tool_arguments();
+   test_parse_response_openai_rejects_invalid_tool_arguments();
    test_parse_response_captures_provider_model();
    test_parse_response_keeps_text_with_tool_use();
    test_parse_response_openai_mistral_content_array();

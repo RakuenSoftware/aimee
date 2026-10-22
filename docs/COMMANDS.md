@@ -40,6 +40,18 @@ fields follow the operation contract.
 The event bus has no general remote shell command. Its audit results appear through `aimee audit`,
 logs, metrics, and capture tooling. See [Event bus](EVENT_BUS.md).
 
+Trajectory exports use the owner-checked durable canonical session log. `trajectory export`
+returns `aimee.trajectory.v2` with typed `messages`, the source session and explicit export
+fidelity. It preserves native tool IDs, structured results and opaque reasoning state. Screening
+may redact ordinary text/arguments/results; an unsafe structural identity or signature refuses
+export. Sensitive structured assignments also refuse rather than changing opaque value types.
+Result compression reports omitted content by message/block position and a digest of the
+screened export value. `--no-compress` keeps complete results. Exports do not infer success/reward
+from missing errors or include other sessions' audit rows. Batch output references each actual
+private execution session and requires an attested user/session (`--session ID` or the active CLI
+session); it does not rebuild history from
+flat task/result interaction events.
+
 ## Integrations
 
 - `mcp-serve` runs the local MCP stdio bridge.

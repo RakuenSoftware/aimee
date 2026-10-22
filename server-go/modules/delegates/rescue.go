@@ -17,14 +17,10 @@ import (
 // wins; a response is written in one dialect, so a later parser matching too is
 // a coincidence, not a second call.
 
-const (
-	// Mirrors AGENT_MAX_TOOL_CALLS.
-	rescueMaxToolCalls = 16
-	// Mirrors parsed_tool_call_t.name (char[32]): 31 usable bytes.
-	rescueNameMax = 31
-)
+// One extra call detects overflow without dispatching a truncated prefix.
+const rescueMaxToolCalls = 4097
 
-// RescueToolCall mirrors parsed_tool_call_t.
+// RescueToolCall is an owned dialect parse, converted to canonical IR at entry.
 type RescueToolCall struct {
 	ID        string
 	Name      string
@@ -32,7 +28,7 @@ type RescueToolCall struct {
 }
 
 // RescueResult carries the fields the rescue parser fills in
-// parsed_response_t. Content is empty when there was no leading prose.
+// canonical message. Content is empty when there was no leading prose.
 type RescueResult struct {
 	IsToolCall bool
 	Content    string
@@ -76,15 +72,6 @@ func trimC(s string) string {
 		end--
 	}
 	return s[start:end]
-}
-
-// truncName mirrors the fixed-width name field: the copy is bounded before the
-// trim, so trailing space inside the limit still counts against it.
-func truncName(s string) string {
-	if len(s) > rescueNameMax {
-		s = s[:rescueNameMax]
-	}
-	return s
 }
 
 // normalizeToolName folds the spellings models emit onto the registered name.

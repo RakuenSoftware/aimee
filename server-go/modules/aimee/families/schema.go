@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"strings"
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
@@ -60,12 +61,28 @@ func ApplySchema(ctx context.Context, m SchemaMigrator) error {
 		return err
 	}
 	for _, migration := range history {
+		original := migration
+		if migration.Version == 20 && applied < 20 {
+			migration, err = deferredPrimaryCellLimit(migration)
+			if err != nil {
+				return err
+			}
+		}
 		err := m.Migrate(ctx, store.MigrationRequest{
 			Owner:      migration.Owner,
 			Version:    migration.Version,
 			Checksum:   migration.Checksum,
 			Statements: migration.Statements,
 		})
+		if err != nil && original.Version == 20 && applied >= 20 {
+			// Only these two exact historical plans are known. The store recomputes
+			// each actual SQL checksum; unknown recorded plans still fail closed.
+			alternate, planErr := deferredPrimaryCellLimit(original)
+			if planErr != nil {
+				return planErr
+			}
+			err = m.Migrate(ctx, store.MigrationRequest{Owner: alternate.Owner, Version: alternate.Version, Checksum: alternate.Checksum, Statements: alternate.Statements})
+		}
 		if err != nil {
 			// The version and the file, because the store's own message names
 			// neither and "migration failed" sends the reader to the wrong file.
@@ -107,5 +124,25 @@ func SchemaFileCount() int {
 func ReplayErasureIntents(ctx context.Context, q store.Queryer) (int64, error) {
 	var removed int64
 	err := q.QueryRow(ctx, `SELECT user_memory_replay_erasure_intents()`).Scan(&removed)
-	return removed, err
+	if err != nil {
+		return removed, err
+	}
+	var procedures int64
+	err = q.QueryRow(ctx, `SELECT local_procedure_replay_erasure_intents()`).Scan(&procedures)
+	return removed + procedures, err
+}
+
+// Keep the original migration20 bytes/checksum immutable. Pending installations
+// defer validation of only this legacy-source check until migration50, allowing
+// retained rows to survive the upgrade. Existing original20 plans remain valid.
+func deferredPrimaryCellLimit(original Migration) (Migration, error) {
+	const before = "ADD CONSTRAINT primary_sessions_messages_json_fits_wire\n  CHECK (octet_length(messages_json) <= 1048576);"
+	const after = "ADD CONSTRAINT primary_sessions_messages_json_fits_wire\n  CHECK (octet_length(messages_json) <= 1048576) NOT VALID;"
+	if original.Version != 20 || len(original.Statements) != 1 || strings.Count(original.Statements[0], before) != 1 {
+		return Migration{}, fmt.Errorf("invalid legacy-source compatibility migration plan")
+	}
+	alternate := original
+	alternate.Statements = []string{strings.Replace(original.Statements[0], before, after, 1)}
+	alternate.Checksum = checksum(alternate.Statements)
+	return alternate, nil
 }

@@ -1,0 +1,56 @@
+name: PR attribution
+
+on:
+  merge_group:
+    types: [checks_requested]
+    branches: [testing]
+  push:
+    branches: [main, testing, feature/core-modularization]
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Full base commit SHA to compare
+        required: true
+        type: string
+      head_sha:
+        description: Full incoming commit SHA to verify
+        required: true
+        type: string
+
+# Metadata must be checked promptly, independently of the long source suite.
+concurrency:
+  group: pr-attribution-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  no-coauthor-trailers:
+    # One policy for PRs, queue integration, pushes, and Aimee's merge executor.
+    # No historical SHA exemptions and no event that silently skips enforcement.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      checks: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
+          cache: false
+      - name: Test attribution API failure handling
+        working-directory: server-go
+        run: go test ../scripts/check-pr-attribution.go ../scripts/check-pr-attribution_test.go
+      - name: Enforce attribution across incoming commits and PR history
+        working-directory: server-go
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: go run ../scripts/check-pr-attribution.go

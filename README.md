@@ -61,8 +61,19 @@ negative tests and limits.
 Aimee's state belongs to your runtime, independent of the harness that calls it. A coding client
 can use MCP tools over stdio; an agent UI can use the ACP bridge; a model-facing application can
 connect through OpenAI Chat Completions or Responses, or Anthropic Messages ingress. A custom
-application can call the named HTTP API or use a generated SDK. The browser is another client of
-that same runtime.
+application can call the named HTTP API or use a generated SDK. Browser chat carries the signed-in
+actor to Runtime and displays tool start/completion activity; provider credentials stay in Vault.
+The browser is another client of that same runtime. Direct primary model changes retain
+canonical conversation history through the owner-checked session log.
+The ongoing IR migration also runs qualified Linux Codex and Claude schedulers against the
+Server's selected model and supervised tool registry. Their private launch homes carry a local
+capability; Vault credentials and original model/tool history remain with the Server. See the
+[current migration status](docs/IR_MIGRATION_HANDOFF.md) for qualification and remaining work.
+Session-selected models persist across restarts. Canonical child controls and source-bound
+unknown-outcome permissions use the same authenticated browser reply path; reconnecting does
+not reopen declined requests or repeat effects.
+Internal HTTP and host-owned native results retain their complete canonical response through
+selection and repair; optional pure-text result reuse binds the exact request and authenticated owner.
 
 This is the basis of compatibility with any harness or UI that implements one of those contracts.
 It does not require a particular vendor's agent loop. Claude Code, Codex, VS Code, GitHub Copilot,

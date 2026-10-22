@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import errno
 import importlib.util
@@ -87,6 +88,47 @@ class DescriptorTests(unittest.TestCase):
 
     def production_repo(self) -> tempfile.TemporaryDirectory[str]:
         return production_repo()
+
+    # Mutation tests below used to build a fresh ~22 MB production copy for
+    # every case: 230+ copies, about two thirds of this file's runtime. The
+    # validator only reads the tree, so the cases share one copy and each
+    # mutation is undone byte-for-byte before the next one runs.
+    _shared: tempfile.TemporaryDirectory[str] | None = None
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        if cls._shared is not None:
+            cls._shared.cleanup()
+            cls._shared = None
+        super().tearDownClass()
+
+    def shared_repo(self) -> Path:
+        cls = type(self)
+        if cls._shared is None:
+            cls._shared = production_repo()
+        return Path(cls._shared.name)
+
+    @contextlib.contextmanager
+    def shared_mutation(self, identifier: str, mutate):
+        repo = self.shared_repo()
+        path = repo / "src/modules" / identifier / "module.yaml"
+        original = path.read_bytes()
+        try:
+            self.mutate_descriptor(repo, identifier, mutate)
+            yield repo
+        finally:
+            path.write_bytes(original)
+
+    @contextlib.contextmanager
+    def shared_plant(self, relative: str, text: str):
+        repo = self.shared_repo()
+        path = repo / relative
+        self.assertFalse(path.exists(), f"planted file already exists: {relative}")
+        path.write_text(text, encoding="utf-8")
+        try:
+            yield repo
+        finally:
+            path.unlink()
 
     def mutate_descriptor(self, repo: Path, identifier: str, mutate) -> None:
         path = repo / "src/modules" / identifier / "module.yaml"
@@ -369,7 +411,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(
             {field: len(report["ownership"][field]) for field in validator.OWNERSHIP_FIELDS},
             {"sources": 1, "private_headers": 0, "public_headers": 1, "tests": 1,
-             "contracts": 0, "docs": 1, "go_sources": 4, "go_tests": 2, "go_assets": 0},
+             "contracts": 0, "docs": 1, "go_sources": 5, "go_tests": 2, "go_assets": 0},
         )
 
     def test_contract_ownership_is_scoped_and_complete(self) -> None:
@@ -520,7 +562,7 @@ class DescriptorTests(unittest.TestCase):
             ("benchmarks", "sources", "src/modules/benchmarks/module_adapter.c"),
             ("benchmarks", "go_sources", "server-go/modules/benchmarks/benchmarks.go"),
             ("benchmarks", "go_tests", "server-go/modules/benchmarks/benchmarks_test.go"),
-            ("governance", "sources", "src/modules/governance/module_adapter.c"),
+            ("governance", "sources", "src/modules/governance/gw_stage_governance.c"),
             ("governance", "go_sources", "server-go/modules/governance/governance.go"),
             ("governance", "go_tests", "server-go/modules/governance/governance_test.go"),
             ("workflows", "sources", "src/modules/workflows/module_adapter.c"),
@@ -546,42 +588,28 @@ class DescriptorTests(unittest.TestCase):
              "server-go/modules/control-web/control_web_test.go"),
         )
         for identifier, field, relative in cases:
-            tmp = self.production_repo()
-            try:
-                repo = Path(tmp.name)
-                self.mutate_descriptor(
-                    repo, identifier,
-                    lambda value, field=field, relative=relative:
-                        value[field].remove(relative),
-                )
-                with self.subTest(identifier=identifier, field=field), self.assertRaisesRegex(
-                    validator.DescriptorError,
-                    rf"rule=ownership-complete pointer=/{field}.*missing=.*{Path(relative).name}",
-                ):
-                    validator.validate_roots(repo, [Path("src/modules")])
-            finally:
-                tmp.cleanup()
+            with self.shared_mutation(
+                identifier,
+                lambda value, field=field, relative=relative: value[field].remove(relative),
+            ) as repo, self.subTest(identifier=identifier, field=field), self.assertRaisesRegex(
+                validator.DescriptorError,
+                rf"rule=ownership-complete pointer=/{field}.*missing=.*{Path(relative).name}",
+            ):
+                validator.validate_roots(repo, [Path("src/modules")])
 
         for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "runtime-web", "control-web", "roundtable", "protocols", "ir", "translation", "skills",
                            "audit", "module-runtime", "gateway", "governance",
                            "learning", "workspace", "vault", "config", "git", "delegates",
                            "workflows", "memory"):
             for name in ("undeclared.c", "undeclared.h"):
-                tmp = self.production_repo()
-                try:
-                    repo = Path(tmp.name)
-                    (repo / "src/modules" / identifier / name).write_text(
-                        "/* planted */\n", encoding="utf-8"
-                    )
-                    role = "sources" if name.endswith(".c") else "private_headers"
-                    with self.subTest(identifier=identifier, name=name), \
-                            self.assertRaisesRegex(
-                                validator.DescriptorError,
-                                rf"rule=ownership-complete pointer=/{role}.*missing=.*{name}",
-                            ):
-                        validator.validate_roots(repo, [Path("src/modules")])
-                finally:
-                    tmp.cleanup()
+                role = "sources" if name.endswith(".c") else "private_headers"
+                with self.shared_plant(f"src/modules/{identifier}/{name}", "/* planted */\n") as repo, \
+                        self.subTest(identifier=identifier, name=name), \
+                        self.assertRaisesRegex(
+                            validator.DescriptorError,
+                            rf"rule=ownership-complete pointer=/{role}.*missing=.*{name}",
+                        ):
+                    validator.validate_roots(repo, [Path("src/modules")])
 
     def test_latched_descriptors_declare_complete_ownership(self) -> None:
         """The latch itself is the control; mutation coverage below assumes it stays set.
@@ -681,17 +709,11 @@ class DescriptorTests(unittest.TestCase):
             if descriptor.get("ownership_complete") is True:
                 identifiers.append(path.parent.name)
         for identifier in identifiers:
-            tmp = self.production_repo()
-            try:
-                repo = Path(tmp.name)
-                self.mutate_descriptor(repo, identifier,
-                                       lambda value: value.__setitem__("docs", []))
-                with self.subTest(identifier=identifier), self.assertRaisesRegex(
-                    validator.DescriptorError, r"rule=ownership-complete pointer=/docs"
-                ):
-                    validator.validate_roots(repo, [Path("src/modules")])
-            finally:
-                tmp.cleanup()
+            with self.shared_mutation(identifier, lambda value: value.__setitem__("docs", [])) as repo, \
+                    self.subTest(identifier=identifier), self.assertRaisesRegex(
+                        validator.DescriptorError, r"rule=ownership-complete pointer=/docs"
+                    ):
+                validator.validate_roots(repo, [Path("src/modules")])
 
     def test_complete_ownership_excludes_undeclared_public_headers(self) -> None:
         tmp = self.production_repo()
@@ -963,41 +985,27 @@ class DescriptorTests(unittest.TestCase):
     def test_production_selection_policy_mutations(self) -> None:
         required, optional = self.taxonomy()
         for identifier in sorted(optional):
-            tmp = self.production_repo()
-            try:
-                repo = Path(tmp.name)
-                self.mutate_descriptor(
-                    repo, identifier,
-                    lambda value: value.__setitem__(
-                        "enabled_by_default", not value["enabled_by_default"]
-                    ),
-                )
-                with self.subTest(identifier=identifier, field="enabled_by_default"), \
-                        self.assertRaisesRegex(validator.DescriptorError, "rule=production-default"):
-                    validator.validate_roots(repo, [Path("src/modules")])
-            finally:
-                tmp.cleanup()
+            with self.shared_mutation(
+                identifier,
+                lambda value: value.__setitem__("enabled_by_default", not value["enabled_by_default"]),
+            ) as repo, self.subTest(identifier=identifier, field="enabled_by_default"), \
+                    self.assertRaisesRegex(validator.DescriptorError, "rule=production-default"):
+                validator.validate_roots(repo, [Path("src/modules")])
 
         for identifier in sorted(required | optional):
-            tmp = self.production_repo()
-            try:
-                repo = Path(tmp.name)
-                self.mutate_descriptor(
-                    repo, identifier,
-                    lambda value: value["runtime_toggle"].__setitem__(
-                        "supported", not value["runtime_toggle"]["supported"]
-                    ),
-                )
-                rule = (
-                    "required-runtime-toggle"
-                    if identifier in required
-                    else "production-runtime-toggle"
-                )
-                with self.subTest(identifier=identifier, field="runtime_toggle"), \
-                        self.assertRaisesRegex(validator.DescriptorError, f"rule={rule}"):
-                    validator.validate_roots(repo, [Path("src/modules")])
-            finally:
-                tmp.cleanup()
+            rule = (
+                "required-runtime-toggle"
+                if identifier in required
+                else "production-runtime-toggle"
+            )
+            with self.shared_mutation(
+                identifier,
+                lambda value: value["runtime_toggle"].__setitem__(
+                    "supported", not value["runtime_toggle"]["supported"]
+                ),
+            ) as repo, self.subTest(identifier=identifier, field="runtime_toggle"), \
+                    self.assertRaisesRegex(validator.DescriptorError, f"rule={rule}"):
+                validator.validate_roots(repo, [Path("src/modules")])
 
     def test_production_graph_mutations(self) -> None:
         tmp = self.production_repo()

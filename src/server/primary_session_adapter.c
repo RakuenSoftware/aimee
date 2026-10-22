@@ -4,12 +4,18 @@
 
 #include "agent_adapter.h"
 #include "agent_exec.h"
+#include "agent_config.h"
+#include "db1_client/server_sessions.h"
+#include <openssl/rand.h>
 #include "config.h"
 #include "db1_client/db1.h"
 #include "headers/context_engine.h"
 #include "log.h"
 #include "model_registry.h"
 #include "provider_cli_adapter.h"
+#include <aimee/translation/aimee_frontend.h>
+#include <aimee/ir/session_event.h>
+#include "db1_client/primary_sessions.h"
 #include "session_compact.h"
 #include "util.h"
 #include "cJSON.h"
@@ -47,8 +53,10 @@ static int primary_compact(cJSON *messages, session_compact_result_t *result)
 typedef struct primary_session_state
 {
    char id[128];
+   char scope_id[128];
+   int history_failed;
    char agent_name[MAX_AGENT_NAME];
-   char provider[64];
+   char provider[sizeof(((agent_t *)0)->provider)];
    cJSON *messages;
    int busy;
    time_t last_used;
@@ -58,6 +66,40 @@ typedef struct primary_session_state
 static pthread_mutex_t g_primary_sessions_lock = PTHREAD_MUTEX_INITIALIZER;
 static primary_session_state_t *g_primary_sessions;
 static unsigned long g_primary_session_seq;
+static primary_session_native_reconcile_fn g_primary_native_reconcile;
+static primary_session_native_browse_reconcile_fn g_primary_native_browse_reconcile;
+static primary_session_native_history_load_fn g_primary_native_history_load;
+void primary_session_adapter_set_native_history_load(primary_session_native_history_load_fn fn)
+{
+   pthread_mutex_lock(&g_primary_sessions_lock);
+   g_primary_native_history_load = fn;
+   pthread_mutex_unlock(&g_primary_sessions_lock);
+}
+void primary_session_adapter_set_native_reconcile(primary_session_native_reconcile_fn fn)
+{
+   pthread_mutex_lock(&g_primary_sessions_lock);
+   g_primary_native_reconcile = fn;
+   pthread_mutex_unlock(&g_primary_sessions_lock);
+}
+void primary_session_adapter_set_native_browse_reconcile(
+    primary_session_native_browse_reconcile_fn fn)
+{
+   pthread_mutex_lock(&g_primary_sessions_lock);
+   g_primary_native_browse_reconcile = fn;
+   pthread_mutex_unlock(&g_primary_sessions_lock);
+}
+static int primary_native_owners_empty(const char *session, const char *actor)
+{
+   char *wire = NULL;
+   int rc = db1_session_native_active_owned(actor, session, &wire);
+   cJSON *owners = !rc && wire && strlen(wire) <= 512 * 1024
+                       ? aimee_ir_json_parse_frame(wire, strlen(wire))
+                       : NULL;
+   int empty = cJSON_IsArray(owners) && cJSON_GetArraySize(owners) == 0;
+   free(wire);
+   cJSON_Delete(owners);
+   return empty ? 0 : -1;
+}
 
 static void primary_session_generate_id(char *out, size_t out_len)
 {
@@ -100,6 +142,7 @@ static primary_session_state_t *primary_session_create_with_id_locked(const agen
       snprintf(s->id, sizeof(s->id), "%s", id);
    else
       primary_session_generate_id(s->id, sizeof(s->id));
+   snprintf(s->scope_id, sizeof(s->scope_id), "%s", s->id);
    snprintf(s->agent_name, sizeof(s->agent_name), "%s", agent->name);
    snprintf(s->provider, sizeof(s->provider), "%s", agent->provider);
    s->last_used = time(NULL);
@@ -113,37 +156,193 @@ static primary_session_state_t *primary_session_create_locked(const agent_t *age
    return primary_session_create_with_id_locked(agent, NULL);
 }
 
-static int primary_session_load_messages_for_id(primary_session_state_t *state, const char *id)
+/* A one-time import is acknowledged only after its exact legacy source and
+ * fidelity report/checkpoint have committed atomically under the durable owner. */
+static int primary_history_import_source(const char *target, const char *id, const char *actor,
+                                         cJSON **imported, int browse)
+{
+   *imported = NULL;
+   db1_primary_session_row_t row;
+   int status = db1_primary_session_get_latest(id, &row);
+   if (status != 0)
+      return status == 1 ? 1 : -1;
+   cJSON *report = NULL;
+   cJSON *messages = aimee_frontend_history_import_report(row.messages_json, row.provider, id,
+                                                          row.agent_name, &report);
+   char *metadata = report ? cJSON_PrintUnformatted(report) : NULL;
+   char *history = messages ? cJSON_PrintUnformatted(messages) : strdup("[]");
+   const char *digest =
+       report ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(report, "source_sha256"))
+              : NULL;
+   int acknowledged =
+       metadata && history && digest && actor && actor[0] &&
+       (browse ? db1_session_ir_history_import_browse(target, actor, row.agent_name, digest,
+                                                      history, metadata) >= 0
+               : !db1_session_ir_history_import(target, "primary", actor, id, row.agent_name,
+                                                digest, history, metadata));
+   free(metadata);
+   free(history);
+   cJSON_Delete(report);
+   db1_primary_session_row_clear(&row);
+   if (!acknowledged)
+   {
+      cJSON_Delete(messages);
+      LOG_WARN("primary.session", "legacy source has no acknowledged resumable canonical import");
+      return -1;
+   }
+   *imported = messages;
+   return 0;
+}
+
+int primary_session_history_open(const char *session, const char *actor)
+{
+   const char *attested = agent_get_request_vault_principal();
+   db1_server_session_t owner;
+   if (!session || !session[0] || !actor || !actor[0] || !attested || strcmp(actor, attested) ||
+       db1_server_session_get(session, &owner) || strcmp(owner.principal, actor))
+      return -1;
+   pthread_mutex_lock(&g_primary_sessions_lock);
+   primary_session_native_browse_reconcile_fn reconcile = g_primary_native_browse_reconcile;
+   pthread_mutex_unlock(&g_primary_sessions_lock);
+   char error[512] = {0};
+   if (reconcile ? reconcile(session, actor, error) : primary_native_owners_empty(session, actor))
+      return -1;
+   cJSON *messages = NULL;
+   int status = primary_history_import_source(session, session, actor, &messages, 1);
+   cJSON_Delete(messages);
+   /* Archived/refused sources are browseable metadata, never model admission.
+    * Host50 rechecks exact source/hash/owner under its atomic append locks. */
+   return status < 0 ? -1 : 0;
+}
+
+static int primary_session_adopt_latest_for_id(primary_session_state_t *state, const char *id)
 {
    if (!state || !id || !id[0])
       return 0;
-
-   char *json = db1_primary_session_load(id, state->agent_name, state->provider);
-   if (!json)
+   cJSON *messages = NULL;
+   int status = primary_history_import_source(state->scope_id, id,
+                                              agent_get_request_vault_principal(), &messages, 0);
+   if (status == 1)
       return 0;
-
-   cJSON *messages = cJSON_Parse(json);
-   free(json);
-   if (!messages || !cJSON_IsArray(messages))
+   if (status < 0 || !messages)
    {
       cJSON_Delete(messages);
-      return 0;
+      return -1;
    }
-
    cJSON_Delete(state->messages);
    state->messages = messages;
    return 1;
 }
 
-static void primary_session_load_messages_locked(primary_session_state_t *state,
-                                                 const char *alternate_id)
+static int primary_session_store_history(primary_session_state_t *state, const char *json)
 {
-   if (!state || state->messages)
-      return;
-   if (primary_session_load_messages_for_id(state, state->id))
-      return;
-   if (alternate_id && alternate_id[0] && strcmp(alternate_id, state->id) != 0)
-      (void)primary_session_load_messages_for_id(state, alternate_id);
+   unsigned char random[16];
+   char checkpoint[33];
+   const char *principal = agent_get_request_vault_principal();
+   if (!principal || !principal[0] || !json || RAND_bytes(random, sizeof random) != 1)
+      return -1;
+   for (int i = 0; i < 16; i++)
+      snprintf(checkpoint + 2 * i, 3, "%02x", random[i]);
+   return db1_session_ir_history_save(state->scope_id, checkpoint, "primary", principal, json);
+}
+
+static int primary_session_load_messages_locked(primary_session_state_t *state,
+                                                const char *alternate_id, const char *active_turn)
+{
+   const char *principal = agent_get_request_vault_principal();
+   if (state->history_failed || !principal || !principal[0])
+   {
+      LOG_WARN("primary.session", "canonical history refused: failed=%d attested=%d",
+               state->history_failed, principal && principal[0] ? 1 : 0);
+      return -1;
+   }
+   snprintf(state->scope_id, sizeof state->scope_id, "%s",
+            alternate_id && alternate_id[0] ? alternate_id : state->id);
+   db1_server_session_t owner;
+   if (db1_server_session_get(state->scope_id, &owner) != 0)
+   {
+      if (db1_server_session_create(state->scope_id, "primary", principal) != 0 ||
+          db1_server_session_get(state->scope_id, &owner) != 0)
+         return -1;
+   }
+   if (strcmp(owner.principal, principal))
+   {
+      LOG_WARN("primary.session", "canonical history owner mismatch");
+      return -1;
+   }
+   /* Keep this state alive/busy, but do not hold every primary session behind
+    * an old native process boundary's bounded quiescence wait. */
+   char recovery_error[512];
+   state->busy = 1;
+   primary_session_native_reconcile_fn reconcile = g_primary_native_reconcile;
+   pthread_mutex_unlock(&g_primary_sessions_lock);
+   int recovered = reconcile ? reconcile(state->scope_id, principal, active_turn, recovery_error)
+                             : primary_native_owners_empty(state->scope_id, principal);
+   pthread_mutex_lock(&g_primary_sessions_lock);
+   state->busy = 0;
+   if (recovered)
+   {
+      LOG_WARN("primary.session", "canonical history ownership recovery refused");
+      return -1;
+   }
+   char *json = NULL;
+   int rc = db1_session_ir_history_load(state->scope_id, "primary", principal, active_turn, &json);
+   if (rc < 0)
+   {
+      LOG_WARN("primary.session", "canonical history read unavailable");
+      return -1;
+   }
+   if (rc == 0)
+   {
+      cJSON *history = NULL, *receipts = NULL;
+      int admitted;
+      if (g_primary_native_history_load)
+      {
+         /*28 preserves the definitive Missing/import distinction. Protected
+          * diagnostics come exclusively from the authenticated45 projection. */
+         admitted = !g_primary_native_history_load(state->scope_id, principal, active_turn, 0,
+                                                   &history, &receipts) &&
+                    cJSON_IsArray(history) && cJSON_IsArray(receipts);
+      }
+      else
+      {
+         history = json ? aimee_ir_json_parse_frame(json, strlen(json)) : NULL;
+         admitted = history && !aimee_ir_history_admit(history);
+      }
+      cJSON_Delete(receipts);
+      free(json);
+      if (!admitted)
+      {
+         cJSON_Delete(history);
+         return -1;
+      }
+      cJSON_Delete(state->messages);
+      state->messages = history;
+      return 0;
+   }
+   /* Only a log with no completed history may import the old provider rows.
+    * Every later turn reads the log, including A -> B -> A and process reload. */
+   cJSON_Delete(state->messages);
+   state->messages = NULL;
+   rc = primary_session_adopt_latest_for_id(state, state->scope_id);
+   if (rc != 0)
+      return rc < 0 ? -1 : 0;
+   if (strcmp(state->scope_id, state->id))
+   {
+      rc = primary_session_adopt_latest_for_id(state, state->id);
+      if (rc != 0)
+         return rc < 0 ? -1 : 0;
+   }
+   return 0;
+}
+
+static int primary_session_busy_locked(const primary_session_state_t *state, const char *alternate)
+{
+   const char *scope = alternate && alternate[0] ? alternate : state->id;
+   for (const primary_session_state_t *s = g_primary_sessions; s; s = s->next)
+      if (s->busy && (!strcmp(s->id, state->id) || !strcmp(s->scope_id, scope)))
+         return 1;
+   return 0;
 }
 
 int primary_session_adapter_can_handle(const agent_t *agent)
@@ -213,12 +412,17 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
       snprintf(out->error, sizeof(out->error), "failed to create primary session");
       return -1;
    }
-   primary_session_load_messages_locked(state, req->aimee_session_id);
-   if (state->busy)
+   if (primary_session_busy_locked(state, req->aimee_session_id))
    {
       pthread_mutex_unlock(&g_primary_sessions_lock);
       snprintf(out->error, sizeof(out->error), "primary session '%s' already has an active turn",
                state->id);
+      return -1;
+   }
+   if (primary_session_load_messages_locked(state, req->aimee_session_id, req->active_turn_id) != 0)
+   {
+      pthread_mutex_unlock(&g_primary_sessions_lock);
+      snprintf(out->error, sizeof(out->error), "failed to import primary session history");
       return -1;
    }
    state->busy = 1;
@@ -338,6 +542,16 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
    if (rc == 0 && updated_messages)
       persist_json = cJSON_PrintUnformatted(updated_messages);
 
+   if (rc == 0 && updated_messages &&
+       (!persist_json || primary_session_store_history(state, persist_json) != 0))
+   {
+      state->history_failed = 1;
+      rc = AGENT_RC_CAPTURE_FAILED;
+      out->success = 0;
+      snprintf(out->error, sizeof out->error,
+               "canonical history checkpoint failed; reconciliation required");
+      snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
+   }
    pthread_mutex_lock(&g_primary_sessions_lock);
    state = primary_session_find_locked(session_id, req->agent);
    if (state)
@@ -354,14 +568,6 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
    pthread_mutex_unlock(&g_primary_sessions_lock);
    cJSON_Delete(updated_messages);
 
-   if (rc == 0 && persist_json)
-   {
-      (void)db1_primary_session_save(session_id, req->agent->name, req->agent->provider,
-                                     persist_json);
-      if (effective_aimee_session_id[0] && strcmp(effective_aimee_session_id, session_id) != 0)
-         (void)db1_primary_session_save(effective_aimee_session_id, req->agent->name,
-                                        req->agent->provider, persist_json);
-   }
    free(persist_json);
 
    return rc;
@@ -384,19 +590,13 @@ int primary_session_adapter_compact(const primary_session_request_t *req,
          snprintf(error_out, error_len, "invalid primary session compact request");
       return -1;
    }
-   if (!primary_session_adapter_can_handle(req->agent))
-   {
-      if (error_out && error_len > 0)
-         snprintf(error_out, error_len, "agent '%s' is not a direct primary session adapter",
-                  req->agent->name);
-      return -1;
-   }
-
+   /* Compaction belongs to canonical history; it does not launch the selected
+    * model or require a provider-specific primary execution adapter. */
    const char *requested_id = "";
-   if (req->provider_session_id && req->provider_session_id[0])
-      requested_id = req->provider_session_id;
-   else if (req->aimee_session_id && req->aimee_session_id[0])
+   if (req->aimee_session_id && req->aimee_session_id[0])
       requested_id = req->aimee_session_id;
+   else if (req->provider_session_id && req->provider_session_id[0])
+      requested_id = req->provider_session_id;
    if (!requested_id[0])
    {
       if (error_out && error_len > 0)
@@ -419,13 +619,19 @@ int primary_session_adapter_compact(const primary_session_request_t *req,
          snprintf(error_out, error_len, "failed to create primary session");
       return -1;
    }
-   primary_session_load_messages_locked(state, req->aimee_session_id);
-   if (state->busy)
+   if (primary_session_busy_locked(state, req->aimee_session_id))
    {
       pthread_mutex_unlock(&g_primary_sessions_lock);
       if (error_out && error_len > 0)
          snprintf(error_out, error_len, "primary session '%s' already has an active turn",
                   state->id);
+      return -1;
+   }
+   if (primary_session_load_messages_locked(state, req->aimee_session_id, req->active_turn_id) != 0)
+   {
+      pthread_mutex_unlock(&g_primary_sessions_lock);
+      if (error_out && error_len > 0)
+         snprintf(error_out, error_len, "failed to import primary session history");
       return -1;
    }
    if (!state->messages || !cJSON_IsArray(state->messages))
@@ -467,6 +673,9 @@ int primary_session_adapter_compact(const primary_session_request_t *req,
             (req->aimee_session_id && req->aimee_session_id[0]) ? req->aimee_session_id
                                                                 : session_id);
 
+   if (rc == 0 && (!persist_json || primary_session_store_history(state, persist_json) != 0))
+      rc = -1;
+
    pthread_mutex_lock(&g_primary_sessions_lock);
    state = primary_session_find_locked(session_id, req->agent);
    if (state)
@@ -491,10 +700,6 @@ int primary_session_adapter_compact(const primary_session_request_t *req,
       return -1;
    }
 
-   (void)db1_primary_session_save(session_id, req->agent->name, req->agent->provider, persist_json);
-   if (effective_aimee_session_id[0] && strcmp(effective_aimee_session_id, session_id) != 0)
-      (void)db1_primary_session_save(effective_aimee_session_id, req->agent->name,
-                                     req->agent->provider, persist_json);
    free(persist_json);
 
    if (session_id_out && session_id_len > 0)
@@ -515,91 +720,46 @@ int primary_session_adapter_compact_by_session_id(const char *session_id,
       return -1;
    }
 
-   char agent_name[MAX_AGENT_NAME] = {0};
-   char provider[64] = {0};
-   cJSON *messages = NULL;
-
+   agent_t agent = {0};
+   char id[128] = "", scope[128] = "";
    pthread_mutex_lock(&g_primary_sessions_lock);
    for (primary_session_state_t *s = g_primary_sessions; s; s = s->next)
    {
-      if (strcmp(s->id, session_id) != 0)
+      if (strcmp(s->id, session_id) && strcmp(s->scope_id, session_id))
          continue;
-      if (s->busy)
-      {
-         pthread_mutex_unlock(&g_primary_sessions_lock);
-         if (error_out && error_len > 0)
-            snprintf(error_out, error_len, "session '%s' is busy", session_id);
-         return -1;
-      }
-      if (!s->messages || !cJSON_IsArray(s->messages))
-         break;
-      s->busy = 1;
-      snprintf(agent_name, sizeof(agent_name), "%s", s->agent_name);
-      snprintf(provider, sizeof(provider), "%s", s->provider);
-      messages = cJSON_Duplicate(s->messages, 1);
+      snprintf(agent.name, sizeof agent.name, "%s", s->agent_name);
+      snprintf(agent.provider, sizeof agent.provider, "%s", s->provider);
+      snprintf(id, sizeof id, "%s", s->id);
+      snprintf(scope, sizeof scope, "%s", s->scope_id);
       break;
    }
    pthread_mutex_unlock(&g_primary_sessions_lock);
-
-   if (!messages)
+   if (!id[0])
    {
-      if (error_out && error_len > 0)
+      if (error_out && error_len)
          snprintf(error_out, error_len, "no active session '%s' to compact", session_id);
       return -1;
    }
-
-   session_compact_result_t local_result;
-   int rc = primary_compact(messages, &local_result);
-   if (result_out && rc == 0)
-      *result_out = local_result;
-
-   char *persist_json =
-       (rc == 0 && local_result.compacted) ? cJSON_PrintUnformatted(messages) : NULL;
-
-   pthread_mutex_lock(&g_primary_sessions_lock);
-   for (primary_session_state_t *s = g_primary_sessions; s; s = s->next)
-   {
-      if (strcmp(s->id, session_id) != 0)
-         continue;
-      if (rc == 0 && local_result.compacted)
-      {
-         cJSON_Delete(s->messages);
-         s->messages = messages;
-         messages = NULL;
-      }
-      s->busy = 0;
-      s->last_used = time(NULL);
-      break;
-   }
-   pthread_mutex_unlock(&g_primary_sessions_lock);
-   cJSON_Delete(messages);
-
-   if (persist_json)
-   {
-      (void)db1_primary_session_save(session_id, agent_name, provider, persist_json);
-      free(persist_json);
-   }
-
-   if (rc != 0)
-   {
-      if (error_out && error_len > 0)
-         snprintf(error_out, error_len, "failed to compact session '%s'", session_id);
-      return -1;
-   }
-   return 0;
+   primary_session_request_t req = {
+       .agent = &agent, .provider_session_id = id, .aimee_session_id = scope};
+   return primary_session_adapter_compact(&req, result_out, NULL, 0, error_out, error_len);
 }
 
 void primary_session_adapter_reset(void)
 {
    pthread_mutex_lock(&g_primary_sessions_lock);
-   primary_session_state_t *s = g_primary_sessions;
-   g_primary_sessions = NULL;
-   while (s)
+   primary_session_state_t **slot = &g_primary_sessions;
+   while (*slot)
    {
-      primary_session_state_t *next = s->next;
+      primary_session_state_t *s = *slot;
+      if (s->busy)
+      {
+         slot = &s->next;
+         continue;
+      }
+      *slot = s->next;
       cJSON_Delete(s->messages);
       free(s);
-      s = next;
    }
    pthread_mutex_unlock(&g_primary_sessions_lock);
 }

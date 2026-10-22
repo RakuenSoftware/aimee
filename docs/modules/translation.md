@@ -9,8 +9,8 @@ HTTP retries, authorize tool calls, or own the external protocol listener.
 
 ## Public contracts
 
-`src/modules/translation/module.yaml` is the complete module-local ownership inventory: eight shipping
-translation units, three canonical public headers, five direct tests, and this module document.
+`src/modules/translation/module.yaml` is the complete module-local ownership inventory for shipping
+translation units, canonical public headers, direct tests, and this module document.
 `ownership_complete: true` rejects an unlisted module-local C or private-header file and omission of the
 canonical document. Canonical public-header placement remains enforced by the descriptor-derived
 header-layout gate. This physical ownership claim does not imply that every exported adapter helper is
@@ -37,10 +37,27 @@ coverage lives in `src/tests/test_aimee_backend.c` and `src/tests/test_aimee_bac
 
 Canonical streaming conversion lives in `src/modules/translation/aimee_ir_stream.c`, with the public
 contract at `src/modules/translation/include/aimee/translation/aimee_ir_stream.h`. Its bounded state
-machines convert OpenAI Chat chunks and decoded Bedrock ConverseStream event JSON into IR deltas, then
+machines convert Anthropic events, OpenAI Chat chunks and decoded Bedrock ConverseStream event JSON into IR deltas, then
 render IR deltas as Anthropic stream events. They do not decode Bedrock binary framing, write HTTP/SSE
 responses, or select the live relay. Direct coverage lives in `src/tests/test_aimee_ir_stream.c` and
 `src/tests/test_aimee_converse_stream.c`.
+
+Incremental Responses conversion lives in `aimee_responses_stream.c` and
+`aimee_responses_frontend_stream.c` under this module. The backend emits canonical text,
+reasoning and function-argument deltas before completion, then reconciles prefixes and item
+snapshots through the existing full Responses decoder. The frontend preserves authored message
+groups and opaque reasoning and defers item-done/completion to the host's durable-history boundary.
+Native framing remains bounded inside the entry adapter; transport, policy and persistence stay
+with their existing owners. `test_aimee_responses_stream.c` and
+`test_server_responses_stream.c` cover conversion and fragmented host transport.
+
+Native harness conversion lives in `src/modules/translation/harness_ir.c`, exposed by
+`src/modules/translation/include/aimee/translation/harness_ir.h`. Claude stream-json, Codex
+app-server and ACP session/update frames are converted at their reader boundaries, before legacy execution callbacks.
+The adapter emits canonical typed session events synchronously; it does not load credentials,
+choose a session owner, persist, or deliver browser events. Host execution code owns those steps.
+`src/tests/test_harness_ir.c` covers typed tools/results, thinking signatures, streamed text,
+control correlation, unknown items, and sink failure propagation.
 
 Remaining translation seams include the `aimee_ir_build_provider_body` entry point in
 `src/headers/aimee_ir_serve.h`.
@@ -50,6 +67,35 @@ contains legacy `translate_request` and `build_provider_body` paths beside the t
 `openai_chat.c` has its own builder. The mixed `aimee_ir_serve.c` implementation remains explicitly
 deferred: it owns rollout gates, memory-stage configuration and registration, and a transitional legacy
 response bridge. `router_advise.c` is workflow-owned despite its name and is outside translation.
+
+### Native runtime entry boundaries
+
+Native tool execution and simple completions use owned IR response decoders. Anthropic request
+and response parsing share one block adapter, including signed and redacted thinking. Responses
+SSE framing lives in `aimee_backend_responses.c`; it preserves completed output items, native item
+order, encrypted reasoning and full opaque tool IDs when the terminal response omits streamed
+items. Incomplete/error terminal events become typed IR outcomes. Unknown content and unfinished
+streams fail admission; execution does not re-parse provider JSON or recover calls from text.
+
+`history_ir.c` owns legacy-history entry conversion through the three frontend adapters.
+Canonical persisted histories decode through the IR message codec and are rendered only when
+building an outbound request. Media and reasoning remain in that history even where a target
+wire cannot replay foreign opaque reasoning state. Native Responses requests request encrypted
+reasoning so stateless continuation can retain it. Tool results retain structured content through
+the canonical history; protocol-specific representation limits apply at egress.
+
+### Host-observed native replay state
+
+The native request codec exposes a borrowed, thread-bound state guard. A server scope may
+restore opaque replay bindings from independently observed canonical responses; the translation
+module itself performs no I/O or authorization. Hosts recheck the owned request immediately
+before provider rendering, after restored history and policy edits. A guard refusal releases and
+zeros that request. Scoped callbacks must be restored before their context is released.
+
+Raw-sidecar equality checks parse the immutable reference without invoking this guard. Guarding
+both the transformed request and its comparison reference could make removed opaque state look
+unchanged and accidentally replay the original bytes. The canonical equality and actual native
+prefix fences still decide whether a byte-preserving fast path is admissible.
 
 ## Dependencies and consumers
 
@@ -132,13 +178,69 @@ definition/caller inventory proving no supported journey still selects it.
 
 ## Extension and removal
 
-Add an adapter through the shared IR conversion interface and capability contract rather than copying an
-ingress handler. The parallel legacy and typed builders in `anthropic_http.c` and `openai_chat.c` are
-consolidation candidates, not automatically dead code; parity and mutation branches must be traced first.
-Translation cannot be removed while Aimee supports more than one external/provider wire.
+Extend the owned adapters in `aimee_frontend_openai.c`, `aimee_frontend_anthropic.c`
+and the matching `aimee_backend_*.c` through the public `aimee_frontend.h` and
+`aimee_backend.h` contracts. Admit native frames once, preserve unchanged wire bytes
+at egress, and qualify cache markers, tool identity and streaming parity before
+adding a provider capability. Translation remains required while Aimee supports
+multiple external/provider wires; removing an adapter requires retiring its live
+ingress and egress consumers first.
 
 The [slice 32 liveness audit](../validation/core-modularization-slice-32.md) proves that every owned source
 ships and that each translation unit contains a production path. It separately records seven helpers
 whose exact current-worktree callers are tests only. Removing, privatizing, or activating those intended
 egress and Bedrock-streaming contracts requires focused compatibility/readiness slices; they are not
 silently treated as live merely because their source files ship.
+
+Native request framing is owned by `wire_codec.c`. Unchanged same-protocol requests can retain
+exact original bytes; typed comparison also checks edits whose mutation flag was missed. Native
+Anthropic edits retain unchanged content forms, client cache markers and TTLs. Explicit stable-prefix
+policy normalizes translated requests. Authored Responses message groups are stored independently of
+presentation separators, so rendering a transcript does not change replay text.
+
+The live Chat-to-Anthropic incremental ingress uses canonical deltas unconditionally. Late usage,
+thinking signatures, redacted content and initial tool input survive this boundary. Missing completion
+fails with a typed error; an EOF cannot manufacture a successful end-of-turn. Other request/response
+bypasses described above still require cutover.
+
+The Anthropic HTTP native builder attaches its original body with
+`aimee_frontend_parse_native_frame` before rendering. Its existing context-injection option selects
+the shared canonical stage runner; disabling injection does not bypass canonical admission. Exact
+body replay is selected only after comparing the host-adjusted typed request with the original.
+
+Opaque JSON numeric values survive native entry, canonical ownership and explicit egress without a double roundtrip. The shared C JSON codec retains decimal tokens, including tool arguments and schemas; numeric mutation invalidates that token. Completed argument strings require full JSON framing. Browser canonical parsing/rendering likewise preserves decimals outside JavaScript's roundtrip range rather than displaying a rounded tool argument. Embedded NUL strings are refused because the C string contract cannot represent them faithfully.
+
+Codex URL-mode MCP elicitation enters as a canonical external-interaction request containing the server, message, destination and opaque elicitation identity. The browser displays the host and requests explicit navigation consent; accepted URL replies contain no form data. HTTP(S), authority and length checks reject unsafe schemes, userinfo and controls. Consent records acceptance, not completion of the external flow. Unsupported device-verification and custom form modes remain decline/cancel only. See the [Codex protocol](https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs) and [MCP URL elicitation contract](https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation).
+
+Browser-owned Claude and Codex controls persist the admitted canonical operator decision before native delivery. Native serialization does not become a second history source: the adapter resolves its registered control identity before sending the generated native response. This retains cancel intent and complete answer arrays even when the native protocol uses a coarser denial or joined answer string. A capture failure prevents approval bytes reaching the child.
+
+### Native tool hook entry
+
+`hook_ir.c` admits complete bounded native hook frames into owned canonical tool-use/result values. CLI forwarding carries a versioned hook intent; marked intents cannot fall back to native fields. Legacy installed clients convert once at the server entry. Scope and authenticated harness metadata remain separate transport fields, and policy/storage authority stays with its existing owner. Missing legacy tool IDs are retained as missing: hook intents are control inputs and cannot be published as model history without real identity. Unknown namespaces are preserved by admission and refused by the current flat hook policy catalog before routing or policy side effects.
+
+### Native Codex history adoption
+
+`aimee_codex_history_items` renders admitted canonical messages through the existing
+Responses output owner. Both native Codex entry points accept an optional typed
+history request and adopt its items with the stable `thread/inject_items` method
+after thread start/resume and before `turn/start`. Roles, block order, opaque
+reasoning and full tool call/result IDs remain typed until this output boundary.
+Unsupported SDKs and invalid history refuse before model execution. The host must
+prove account/connection scope and supply only an unseen canonical tail on resume;
+the migration has not yet activated this option at the browser/session callers.
+The selected-model gateway still owns opaque replay verification.
+
+The real SDK qualification runs in CI against the pinned SDK, using the compiled
+adapter, an empty native HOME and a loopback Responses provider. Run it locally:
+
+```sh
+python3 src/tests/test_codex_native_adoption.py \
+  --adapter-binary /path/to/unit-test-cli-codex --codex-binary /path/to/codex
+```
+
+It checks the actual provider input, then starts a second adapter/SDK process and
+resumes the native thread. This proves history adoption and native persistence,
+not upstream cache billing. Mock subprocess fixtures also cover both native entry
+points, resumed/fresh threads, malformed history and method refusal without a
+subsequent model turn. Codex startup uses the supported `on-request` approval
+policy; the installed 0.160.1 SDK refuses the old `untrusted` policy.

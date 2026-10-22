@@ -7,6 +7,13 @@
 #define BUS_ATTACH_REQ_MAGIC   0x51524241u /* "ABRQ" */
 #define BUS_ATTACH_REPLY_MAGIC 0x50524241u /* "ABRP" */
 
+/* A successful attach carries exactly these descriptors, in this order, in one
+ * SCM_RIGHTS message (D1): control (read-only), arena, the client's queue pair. */
+#define BUS_ATTACH_FDS        3
+#define BUS_ATTACH_FD_CONTROL 0
+#define BUS_ATTACH_FD_ARENA   1
+#define BUS_ATTACH_FD_QPAIR   2
+
 typedef enum
 {
    BUS_ATTACH_OK = 0,

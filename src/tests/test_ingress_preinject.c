@@ -21,6 +21,37 @@
 #include "support/module_runtime_fixture.h"
 
 static int g_runtime_failure;
+static int g_grade_history_mode, g_grade_history_checks, g_grade_history_reads;
+static int g_scope_resolve_failure;
+char *db1_execution_test_grade_recall(const char *principal, const char *project,
+                                      const char *sources_json)
+{
+   if (!g_grade_history_mode)
+      return NULL;
+   assert(!strcmp(principal, "grade-actor") && !strcmp(project, "active-project"));
+   if (sources_json)
+   {
+      g_grade_history_checks++;
+      cJSON *reply = cJSON_Parse(sources_json);
+      assert(reply && cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reply, "check_id")));
+      if (g_grade_history_mode == 2)
+         cJSON_ReplaceItemInObjectCaseSensitive(reply, "items", cJSON_CreateArray());
+      char *raw = cJSON_PrintUnformatted(reply);
+      cJSON_Delete(reply);
+      return raw;
+   }
+   g_grade_history_reads++;
+   if (g_grade_history_mode == 3)
+      return strdup(
+          "{\"schema_version\":1,\"principal\":\"grade-actor\",\"scope_kind\":\"project\",\"scope_"
+          "id\":\"active-project\",\"coverage\":\"recent_bounded\",\"items\":[]}");
+   return strdup(
+       "{\"schema_version\":1,\"principal\":\"grade-actor\",\"scope_kind\":\"project\",\"scope_"
+       "id\":\"active-project\",\"coverage\":\"recent_bounded\",\"items\":[{\"schema_version\":1,"
+       "\"source\":{\"actor\":\"grade-actor\",\"event_id\":\"terminal\"},\"qualification\":"
+       "\"configured_tests_only\",\"verification\":\"tests_bound_revision\",\"verdict\":\"passed\","
+       "\"proof\":{\"scope_kind\":\"project\",\"scope_id\":\"active-project\"}}]}");
+}
 static int g_private_source_fixture;
 static int g_private_source_calls;
 static int g_scope_active;
@@ -326,6 +357,8 @@ char *kb_client_memory_assemble_typed_context_requirements_json(
 int ingress_preinject_resolve_active_scope(char *workspace, size_t workspace_len, char *project,
                                            size_t project_len)
 {
+   if (g_scope_resolve_failure)
+      return -1;
    snprintf(workspace, workspace_len, "active-workspace");
    snprintf(project, project_len, "active-project");
    return 0;
@@ -694,35 +727,6 @@ static void test_unavailable_task_context_retries_after_recovery(void)
    g_context_mode = "observe";
    g_context_result = KB_CLIENT_RESULT_OK;
    printf("unavailable_task_context_retries_after_recovery OK\n");
-}
-
-static void test_query_from_messages(void)
-{
-   /* String content; last user message wins over an earlier one. */
-   cJSON *m = cJSON_Parse("[{\"role\":\"user\",\"content\":\"first\"},"
-                          "{\"role\":\"assistant\",\"content\":\"mid\"},"
-                          "{\"role\":\"user\",\"content\":\"second ask\"}]");
-   char *q = ingress_preinject_query_from_messages(m);
-   assert(q && strcmp(q, "second ask") == 0);
-   free(q);
-   cJSON_Delete(m);
-
-   /* Array-of-parts content. */
-   cJSON *m2 =
-       cJSON_Parse("[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"hello \"},"
-                   "{\"type\":\"input_text\",\"text\":\"world\"}]}]");
-   char *q2 = ingress_preinject_query_from_messages(m2);
-   assert(q2 && strcmp(q2, "hello world") == 0);
-   free(q2);
-   cJSON_Delete(m2);
-
-   /* No user message -> NULL. */
-   cJSON *m3 = cJSON_Parse("[{\"role\":\"assistant\",\"content\":\"hi\"}]");
-   assert(ingress_preinject_query_from_messages(m3) == NULL);
-   cJSON_Delete(m3);
-
-   assert(ingress_preinject_query_from_messages(NULL) == NULL);
-   printf("query_from_messages OK\n");
 }
 
 static void test_apply(void)
@@ -1285,6 +1289,150 @@ static void test_required_assembly_refusal_reaches_dispatch(void)
    request_context_clear();
    puts("required assembly failure reaches provider fence and clears on new request");
 }
+static void test_configured_test_history_at_provider_fence(void)
+{
+   request_context_t context = {0};
+   strcpy(context.request_id, "grade-history-request");
+   strcpy(context.principal, "grade-caller");
+   strcpy(context.vault_principal, "grade-actor");
+   context.vault_transport = ATTEST_UDS_PEERCRED;
+   request_context_set(&context);
+   int saved_budget = g_assembly_budget;
+   g_assembly_budget = 4096;
+   g_grade_history_mode = 1;
+   char *envelope = ingress_preinject_build("deployment matrix", 0);
+   assert(envelope && strstr(envelope, "configured-test-history"));
+   assert(strlen(request_context_get()->memory_source_release) == 32);
+   free(envelope);
+   context = *request_context_get();
+   assert(ingress_preinject_revalidate_sources() == 0 && g_grade_history_checks > 0);
+   request_context_set(&context);
+   g_grade_history_mode = 2; /* source erased after context was retained */
+   assert(ingress_preinject_revalidate_sources() == -1);
+   assert(request_context_get()->context_refused);
+   g_grade_history_mode = 0;
+   g_assembly_budget = saved_budget;
+   request_context_clear();
+   puts("configured-test source history is scoped and rechecked at provider fence");
+}
+
+/* Native callbacks keep distinct transport IDs. Provenance must be revalidated
+ * and forked by its owner, rather than copying or clearing the parent ticket. */
+static void test_native_source_request_handoff(void)
+{
+   request_context_t parent = {0};
+   strcpy(parent.request_id, "native-parent-request");
+   strcpy(parent.principal, "grade-caller");
+   strcpy(parent.caller_subject, "native-subject");
+   strcpy(parent.vault_principal, "grade-actor");
+   parent.vault_transport = ATTEST_UDS_PEERCRED;
+   request_context_set(&parent);
+   int saved_budget = g_assembly_budget;
+   g_assembly_budget = 4096;
+   g_grade_history_mode = 1;
+   char *envelope = ingress_preinject_build("deployment matrix", 0);
+   assert(envelope && request_context_get()->memory_source_release[0]);
+   free(envelope);
+   parent = *request_context_get();
+   request_context_t child = parent;
+   strcpy(child.request_id, "native-callback-request");
+   request_context_set(&child);
+   assert(ingress_preinject_revalidate_sources() == -1);
+   request_context_set(&child);
+   int checks = g_grade_history_checks;
+   assert(ingress_preinject_fork_sources(&parent) == 0);
+   assert(g_grade_history_checks > checks);
+   assert(!request_context_get()->context_refused);
+   assert(strcmp(request_context_get()->memory_source_release, parent.memory_source_release));
+   assert(!strcmp(request_context_get()->request_id, child.request_id));
+   assert(ingress_preinject_revalidate_sources() == 0);
+   ingress_preinject_finish_sources();
+   request_context_set(&parent);
+   assert(ingress_preinject_revalidate_sources() == 0);
+   strcpy(child.request_id, "native-revoked-callback");
+   request_context_set(&child);
+   g_grade_history_mode = 2;
+   assert(ingress_preinject_fork_sources(&parent) == -1);
+   assert(request_context_get()->context_refused);
+   assert(!strcmp(request_context_get()->memory_source_release, parent.memory_source_release));
+   g_grade_history_mode = 1;
+   strcpy(child.request_id, "native-foreign-callback");
+   strcpy(child.principal, "other-caller");
+   request_context_set(&child);
+   checks = g_grade_history_checks;
+   assert(ingress_preinject_fork_sources(&parent) == -1);
+   assert(g_grade_history_checks == checks && request_context_get()->context_refused);
+   request_context_set(&parent);
+   assert(ingress_preinject_fork_sources(&parent) == -1);
+   request_context_set(&parent);
+   ingress_preinject_finish_sources();
+   memset(&parent, 0, sizeof parent);
+   request_context_set(&parent);
+   assert(ingress_preinject_fork_sources(&parent) == 0);
+   g_grade_history_mode = 0;
+   g_assembly_budget = saved_budget;
+   request_context_clear();
+   puts("native callback source handoff revalidates fresh identity and preserves parent ownership");
+}
+
+/* Ordinary browser/primary tasks do not set evidence_requirements. Grade
+ * history must still use the real Go assembler and provider freshness fence,
+ * without accidentally enabling optional KB preview/typed/fact retrieval. */
+static void test_default_primary_grade_only_context(void)
+{
+   ingress_preinject_set_session_id("primary-without-requirements");
+   request_context_t context = {0};
+   strcpy(context.request_id, "default-primary-grade-request");
+   strcpy(context.principal, "grade-caller");
+   strcpy(context.vault_principal, "grade-actor");
+   context.vault_transport = ATTEST_UDS_PEERCRED;
+   request_context_set(&context);
+   int code = g_code_count, typed = g_typed_count, facts = g_fact_count;
+   int previews = g_preview_count, task = g_context_calls;
+   g_grade_history_mode = 1;
+   int checks = g_grade_history_checks;
+   char *instructions =
+       ingress_preinject_task_instructions("CURRENT_PRIMARY_SYSTEM", "deployment matrix");
+   assert(instructions && strstr(instructions, "CURRENT_PRIMARY_SYSTEM") &&
+          strstr(instructions, "configured-test-history"));
+   assert(strlen(request_context_get()->memory_source_release) == 32);
+   assert(ingress_preinject_revalidate_sources() == 0 && g_grade_history_checks > checks);
+   g_grade_history_mode = 2;
+   assert(ingress_preinject_revalidate_sources() == -1);
+   assert(request_context_get()->context_refused);
+   free(instructions);
+   ingress_preinject_finish_sources();
+
+   /* Empty and unavailable history preserve the ordinary instructions path. */
+   for (int mode = 0; mode <= 3; mode += 3)
+   {
+      request_context_set(&context);
+      g_grade_history_mode = mode;
+      assert(!ingress_preinject_task_instructions("UNCHANGED_SYSTEM", "no available history"));
+      assert(!request_context_get()->context_refused &&
+             !request_context_get()->memory_source_release[0]);
+   }
+   g_grade_history_mode = 1;
+   int reads = g_grade_history_reads;
+   context.vault_transport = ATTEST_NONE;
+   request_context_set(&context);
+   assert(!ingress_preinject_task_instructions("UNCHANGED_SYSTEM", "unattested actor"));
+   assert(g_grade_history_reads == reads);
+   context.vault_transport = ATTEST_UDS_PEERCRED;
+   request_context_set(&context);
+   g_scope_resolve_failure = 1;
+   assert(!ingress_preinject_task_instructions("UNCHANGED_SYSTEM", "unresolved project"));
+   assert(g_grade_history_reads == reads);
+   g_scope_resolve_failure = 0;
+   assert(g_code_count == code && g_typed_count == typed && g_fact_count == facts &&
+          g_preview_count == previews && g_context_calls == task && !g_scope_active);
+   g_grade_history_mode = 0;
+   request_context_clear();
+   ingress_preinject_set_session_id("");
+   puts("default primary grade-only context: no requirements, no KB, exact source freshness and "
+        "empty noop passed");
+}
+
 static void test_source_revalidation_at_provider_fence(void)
 {
    request_context_t context = {0};
@@ -1744,6 +1892,9 @@ int main(void)
    test_replayable_provider_receipt();
    test_durable_provider_attempt();
    test_unversioned_provider_body_receipt();
+   test_configured_test_history_at_provider_fence();
+   test_native_source_request_handoff();
+   test_default_primary_grade_only_context();
    test_source_revalidation_at_provider_fence();
    test_preview_sources_at_provider_fence();
    test_required_assembly_refusal_reaches_dispatch();
@@ -1759,7 +1910,6 @@ int main(void)
    test_task_context_mode_and_first_turn_gate();
    test_unavailable_task_context_retries_after_recovery();
    test_recall_unavailable_is_counted_apart_from_empty();
-   test_query_from_messages();
    test_apply();
    test_append();
    test_budgeted_build_uses_memory_previews();

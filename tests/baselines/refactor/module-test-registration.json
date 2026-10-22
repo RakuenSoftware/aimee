@@ -197,6 +197,12 @@
       "ctest": false,
       "make": true,
       "module": "git",
+      "test": "src/tests/test_git_pr_stage.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
       "test": "src/tests/test_git_project.c"
     },
     {
@@ -227,6 +233,12 @@
       "ctest": false,
       "make": true,
       "module": "governance",
+      "test": "src/tests/test_governance_bus_bridge.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "governance",
       "test": "src/tests/test_response_governance_stage.c"
     },
     {
@@ -249,117 +261,15 @@
     },
     {
       "ctest": false,
+      "make": true,
+      "module": "ir",
+      "test": "src/tests/test_ir_session_event.c"
+    },
+    {
+      "ctest": false,
       "make": false,
       "module": "ir",
       "test": "src/tests/test_panel_ir_contract.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_cert_serial_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_cjson_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_cochange_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_code_audit_graph_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_code_import_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_code_match_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_dstr_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_extractor_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_log_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_management_read_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_model_validation_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_random_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_rel_seed_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_rel_type_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_runtime_config_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_sketch_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_text_support.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "kb",
-      "test": "src/tests/test_kb_store_time_support.c"
     },
     {
       "ctest": false,
@@ -654,6 +564,42 @@
       "make": true,
       "module": "translation",
       "test": "src/tests/test_aimee_ir_stream.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_responses_stream.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_tool_choice.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_cmd_hooks_scope.c"
+    },
+    {
+      "ctest": false,
+      "make": false,
+      "module": "translation",
+      "test": "src/tests/test_codex_native_adoption.py"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_harness_ir.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_server_responses_stream.c"
     },
     {
       "ctest": false,

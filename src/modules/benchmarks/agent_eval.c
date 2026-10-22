@@ -363,7 +363,7 @@ int agent_eval_run_with_options(agent_config_t *cfg, const char *suite_dir,
          cfg->ablation = flags;
          for (int i = 0; i < task_count; i++)
          {
-            agent_result_t ar;
+            agent_result_t ar = {0};
             int rc = agent_run(cfg, tasks[i].role, NULL, tasks[i].prompt, 0, &ar);
 
             int passed = (rc == 0) && eval_check_success(&tasks[i], &ar);
@@ -401,7 +401,7 @@ int agent_eval_run_with_options(agent_config_t *cfg, const char *suite_dir,
 
             if (passed)
                passes++;
-            free(ar.response);
+            agent_result_clear_response(&ar);
          }
       }
    }

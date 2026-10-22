@@ -290,22 +290,29 @@ static const builtin_template_t g_defaults[] = {
 
 int role_template_path(const char *project_root, const char *role, char *buf, size_t bufsz)
 {
-   if (!role || !buf || bufsz == 0)
+   if (!buf || bufsz == 0)
       return -1;
+   if (!role_template_name_valid(role))
+   {
+      buf[0] = '\0';
+      return -1;
+   }
 
    struct stat st;
+   int length;
 
    /* 1. Project-level: .aimee/role_templates/<role>.md */
    if (project_root && project_root[0])
    {
-      snprintf(buf, bufsz, "%s/.aimee/role_templates/%s.md", project_root, role);
-      if (stat(buf, &st) == 0 && S_ISREG(st.st_mode))
+      length = snprintf(buf, bufsz, "%s/.aimee/role_templates/%s.md", project_root, role);
+      if (length >= 0 && (size_t)length < bufsz && stat(buf, &st) == 0 && S_ISREG(st.st_mode) &&
+          platform_path_is_beneath(project_root, buf))
          return 0;
    }
 
    /* 2. User-level: ~/.config/aimee/role_templates/<role>.md */
-   snprintf(buf, bufsz, "%s/role_templates/%s.md", config_default_dir(), role);
-   if (stat(buf, &st) == 0 && S_ISREG(st.st_mode))
+   length = snprintf(buf, bufsz, "%s/role_templates/%s.md", config_default_dir(), role);
+   if (length >= 0 && (size_t)length < bufsz && stat(buf, &st) == 0 && S_ISREG(st.st_mode))
       return 0;
 
    buf[0] = '\0';

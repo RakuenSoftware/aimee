@@ -1,20 +1,34 @@
+#include "modules/tools/tool_catalog_data.h"
 #include "support/delegate_role_seam_stub.h"
+#include <aimee/ir/session_event.h>
 #include <assert.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/file.h>
+#include <sys/wait.h>
+#include <poll.h>
 #include <fcntl.h>
 #include <unistd.h>
 
 extern char test_vault_server_codex_oauth[4096];
+extern char test_vault_codex_connection[128], test_vault_codex_token[4096],
+    test_vault_codex_account[128];
 void test_oauth_tokens_reset(void);
+extern char test_vault_api_key_agent[64], test_vault_api_key[4096];
+extern int test_oauth_stores, test_oauth_removes, test_oauth_get_fail;
 #include "aimee.h"
 #include "db1_client/db1.h"
 #include "support/store_module_fixture.h"
 #include "db1_client/execution_trace.h"
 #include "agent.h"
+#include "request_context.h"
 #include "agent_config.h"
+#include "oauth_flow.h"
+#include "vault_service.h"
 #include "runtime_secret.h"
 #include <aimee/delegates/delegate_role.h>
 #include <aimee/tools/agent_tools.h>
@@ -26,7 +40,6 @@ void test_oauth_tokens_reset(void);
 #include "agent_adapter.h"
 #include "provider_cli_adapter.h"
 #include "agent_protocol.h"
-#include "agent_shell.h"
 #include "cJSON.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -34,6 +47,7 @@ void test_oauth_tokens_reset(void);
 #include <aimee/audit/audit_worm.h>
 
 void test_agent_route_with_caps_honors_tools_enabled(void);
+void test_agent_ingress_selected_connection_scope(void);
 void test_agent_route_with_caps_honors_context_override(void);
 void test_tools_enabled_capability_default(void);
 void test_agent_default_primary_skips_disabled(void);
@@ -100,12 +114,14 @@ char *tool_edit_file(const char *path, const char *old_string, const char *new_s
 char *tool_list_files(const char *path, const char *pattern);
 char *tool_grep(const char *path, const char *pattern, int max_results);
 char *dispatch_tool_call(const char *name, const char *arguments_json, int timeout_ms);
-int agent_execute_cli_shell_driver(const agent_t *agent, const char *driver_name,
-                                   const char *display_name, const char *default_cli_cmd,
-                                   const char *system_prompt, const char *user_prompt,
-                                   agent_result_t *out);
 void test_cancelled_durable_job_blocks_tool_dispatch(void);
+void test_native_mcp_permission_admission(void);
+void test_script_rpc_keeps_permission_scope(void);
+void test_script_rpc_keeps_host_context(void);
+int script_rpc_admission_fixture_main(void);
+void test_script_rpc_admission_process(const char *executable);
 void test_delegate_bash_cancel_kills_running_tool(void);
+void test_bash_host_cancellation_and_closed_output_deadline(void);
 void test_parent_write_guard_readonly_pipeline(void);
 void test_stale_parent_guard_blocks_other_worktree_then_clear_unblocks(void);
 void test_parent_write_guard_readonly_large_find(void);
@@ -130,11 +146,6 @@ void otel_on_trace(const char *direction, const char *tool_name, const char *too
    (void)tool_args;
    (void)tool_result;
    (void)turn;
-}
-const agent_shell_driver_t *agent_shell_driver_get(const char *name)
-{
-   (void)name;
-   return NULL;
 }
 static cJSON *parse_json_or_die(const char *text)
 {
@@ -672,10 +683,46 @@ static int tools_has(cJSON *arr, const char *name, int chat)
    return tools_find(arr, name, chat) != NULL;
 }
 
+static int catalog_metadata(const char *name, aimee_tool_metadata_t *out)
+{
+   *out = aimee_tools_catalog_metadata(name);
+   return 0;
+}
+
 static void test_tool_surface_single_source(void)
 {
+   aimee_tool_t *canonical = NULL, *independent = NULL;
+   int count = 0, independent_count = 0;
+   int status = agent_tools_builtin_catalog(&canonical, &count);
+   assert(status == 0 && count > 20);
+   aimee_tool_metadata_t metadata = {0};
+   assert(agent_tools_metadata("read_file", &metadata) == -1);
+   agent_tools_register_metadata(catalog_metadata);
+   for (int i = 0; i < count; ++i)
+   {
+      int classified = agent_tools_metadata(canonical[i].name, &metadata);
+      if (classified)
+         fprintf(stderr, "missing built-in policy metadata: %s\n", canonical[i].name);
+      assert(classified == 0 && aimee_tool_metadata_valid(&metadata));
+   }
+   metadata = (aimee_tool_metadata_t){AIMEE_TOOL_CLASS_READ, 1, 1};
+   assert(agent_tools_metadata("unregistered_tool", &metadata) == -1);
+   assert(!metadata.classification && !metadata.primary && !metadata.categories);
+   assert(agent_tools_metadata("remote:unknown", &metadata) == 0);
+   assert(metadata.classification == AIMEE_TOOL_CLASS_REMOTE);
+   assert(metadata.categories & AIMEE_TOOL_POLICY_EXTERNAL);
+   agent_tools_register_metadata(NULL);
+
+   status = agent_tools_builtin_catalog(&independent, &independent_count);
+   assert(status == 0 && independent_count == count);
    cJSON *chat = build_tools_array();
    cJSON *resp = build_tools_array_responses();
+   assert(tools_has(chat, "request_input", 1) && tools_has(resp, "request_input", 0));
+   cJSON *question = tools_find(chat, "request_input", 1);
+   cJSON *parameters = cJSON_GetObjectItemCaseSensitive(question, "parameters");
+   cJSON *required = cJSON_GetObjectItemCaseSensitive(parameters, "required");
+   assert(cJSON_GetArraySize(required) == 1 &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetArrayItem(required, 0)), "question"));
 
    /* Chat tools nest {name,description,parameters} under "function"; Responses
     * tools carry them flat. Both tag type:function. */
@@ -711,6 +758,30 @@ static void test_tool_surface_single_source(void)
                            cJSON_GetObjectItem(rbody, "parameters"), 1));
    }
    assert(shared >= 20); /* the bulk of the surface is shared and now consistent */
+   for (int i = 0; i < count; i++)
+   {
+      assert(aimee_ir_tool_valid(canonical + i));
+      assert(canonical[i].kind == AIMEE_TOOL_FUNCTION && !canonical[i].raw &&
+             !canonical[i].native_options);
+      cJSON *rendered = tools_find(chat, canonical[i].name, 1);
+      if (!rendered)
+         rendered = tools_find(resp, canonical[i].name, 0);
+      assert(rendered);
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(rendered, "description")),
+                     canonical[i].description));
+      assert(cJSON_Compare(cJSON_GetObjectItem(rendered, "parameters"), canonical[i].schema, 1));
+   }
+   canonical[0].name[0] = '!';
+   cJSON_AddBoolToObject(canonical[0].schema, "fixture_mutation", 1);
+   assert(independent[0].name[0] != '!');
+   assert(!cJSON_GetObjectItem(independent[0].schema, "fixture_mutation"));
+   for (int i = 0; i < count; i++)
+   {
+      aimee_tool_free(canonical + i);
+      aimee_tool_free(independent + i);
+   }
+   free(canonical);
+   free(independent);
 
    cJSON_Delete(chat);
    cJSON_Delete(resp);
@@ -745,7 +816,7 @@ static void test_knowledge_write_gates_the_tool_policy(void)
    assert(agent_tools_tool_allowed_for_role("diagnose", "find_symbol") == 0);
    cJSON_Delete(tools);
    tools = build_tools_array_anthropic();
-   agent_tools_filter_for_role(tools, "diagnose");
+   agent_tools_filter_anthropic_for_role(tools, "diagnose");
    assert(tools_array_has_name(tools, "read_file") && !tools_array_has_name(tools, "find_symbol"));
    cJSON_Delete(tools);
    tools = build_tools_array();
@@ -830,6 +901,23 @@ static void test_permissions_clamp_the_toolset(void)
    /* And what the permission does NOT withhold survives the same filter. */
    assert(tools_array_has_name(tools, "read_file"));
    cJSON_Delete(tools);
+   for (int surface = 0; surface < 3; surface++)
+   {
+      tools = surface == 2 ? build_tools_array_anthropic()
+              : surface    ? build_tools_array_responses()
+                           : build_tools_array();
+      cJSON *definition = tools_find(tools, "read_file", surface == 0);
+      assert(definition);
+      cJSON_ReplaceItemInObjectCaseSensitive(
+          definition, surface == 2 ? "input_schema" : "parameters", cJSON_CreateArray());
+      if (surface == 2)
+         agent_tools_filter_anthropic_for_role(tools, "code");
+      else
+         agent_tools_filter_for_role(tools, "code");
+      assert(!tools_has(tools, "read_file", surface == 0));
+      assert(cJSON_GetArraySize(tools) > 0);
+      cJSON_Delete(tools);
+   }
 
    /* Allowed: and the same answer at the gate that runs it. */
    assert(agent_tools_tool_allowed_for_role("code", "write_file") == 0);
@@ -901,6 +989,18 @@ static void restore_env(const char *name, const char *value)
       unsetenv(name);
 }
 
+/* Header-only assertions still use the one production resolution boundary. */
+static int test_auth_header(const agent_t *agent, char *auth, size_t capacity)
+{
+   char headers[512];
+   return agent_resolve_auth_headers(agent, auth, capacity, headers, sizeof headers);
+}
+static void test_extra_headers(const agent_t *agent, char *headers, size_t capacity)
+{
+   char auth[MAX_API_KEY_LEN + 32];
+   (void)agent_resolve_auth_headers(agent, auth, sizeof auth, headers, capacity);
+}
+
 static void test_provider_env_credentials_and_headers(void)
 {
    char old_gemini_mechanism[256] = "";
@@ -921,9 +1021,9 @@ static void test_provider_env_credentials_and_headers(void)
    assert(agent_is_available_for_routing(&ag) == 0);
    assert(runtime_secret_store("OPENROUTER_API_KEY", "or-test-key") == 0);
    assert(agent_has_resolvable_credentials(&ag) == 1);
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer or-test-key") == 0);
-   agent_build_extra_headers(&ag, headers, sizeof(headers));
+   test_extra_headers(&ag, headers, sizeof(headers));
    assert(strstr(headers, "HTTP-Referer: https://github.com/JBailes/aimee") != NULL);
    assert(strstr(headers, "X-Title: aimee") != NULL);
 
@@ -931,9 +1031,9 @@ static void test_provider_env_credentials_and_headers(void)
    snprintf(ag.provider, sizeof(ag.provider), "%s", "anthropic");
    snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "api_key");
    assert(runtime_secret_store("ANTHROPIC_API_KEY", "anth-test-key") == 0);
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "x-api-key: anth-test-key") == 0);
-   agent_build_extra_headers(&ag, headers, sizeof(headers));
+   test_extra_headers(&ag, headers, sizeof(headers));
    assert(strstr(headers, "anthropic-version: 2023-06-01") != NULL);
 
    memset(&ag, 0, sizeof(ag));
@@ -942,11 +1042,11 @@ static void test_provider_env_credentials_and_headers(void)
    runtime_secret_remove("GEMINI_API_KEY");
    unsetenv("GEMINI_API_KEY_AUTH_MECHANISM");
    assert(runtime_secret_store("GOOGLE_API_KEY", "google-test-key") == 0);
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "x-goog-api-key: google-test-key") == 0);
 
    snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "bearer");
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer google-test-key") == 0);
 
    runtime_secret_remove("OPENROUTER_API_KEY");
@@ -960,6 +1060,37 @@ static void test_provider_env_credentials_and_headers(void)
 /* A thin-client-supplied per-turn Codex OAuth token takes precedence over any
  * server-side file, and the account id is injected as the ChatGPT-Account-ID
  * header; clearing removes both. */
+
+static int refuse_exact_resource(const char *name, cJSON **args, const char *cwd, const char *sid,
+                                 int authorized)
+{
+   (void)args;
+   (void)cwd;
+   (void)sid;
+   (void)authorized;
+   assert(!strcmp(name, "read_file"));
+   return -1;
+}
+static char *structured_resource_refusal(const char *verdict, char *result, int *is_error)
+{
+   assert(!strcmp(verdict, "refused"));
+   free(result);
+   *is_error = 1;
+   return strdup("{\"status\":\"refused\",\"reason\":\"fixture_resource_unavailable\","
+                 "\"dispatch_allowed\":false}");
+}
+static void test_dispatch_carries_owner_failure_status(void)
+{
+   agent_tools_register_action_owner(refuse_exact_resource, structured_resource_refusal);
+   int is_error = 0;
+   char *result = dispatch_tool_call_ctx_status("read_file", "{\"path\":\"unopened-fixture\"}",
+                                                1000, &is_error);
+   assert(result && is_error && !strncmp(result, "{", 1));
+   assert(strstr(result, "fixture_resource_unavailable"));
+   free(result);
+   agent_tools_register_action_owner(NULL, NULL);
+}
+
 static void test_codex_oauth_request_creds(void)
 {
    agent_t ag;
@@ -970,16 +1101,88 @@ static void test_codex_oauth_request_creds(void)
    snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "codex-oauth");
 
    agent_set_request_codex_creds("REQ-TOKEN", "acct-1");
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer REQ-TOKEN") == 0);
-   agent_build_extra_headers(&ag, headers, sizeof(headers));
+   test_extra_headers(&ag, headers, sizeof(headers));
    assert(strstr(headers, "ChatGPT-Account-ID: acct-1") != NULL);
    assert(strstr(headers, "originator: codex_cli_rs") != NULL);
 
    /* Clearing the per-turn creds removes the token path + header injection. */
    agent_set_request_codex_creds(NULL, NULL);
-   agent_build_extra_headers(&ag, headers, sizeof(headers));
+   test_extra_headers(&ag, headers, sizeof(headers));
    assert(strstr(headers, "ChatGPT-Account-ID:") == NULL);
+}
+
+static void test_codex_credentials_follow_selected_registration(void)
+{
+   agent_t work = {0}, personal = {0}, server = {0};
+   snprintf(work.name, sizeof work.name, "%s", "work:gpt");
+   snprintf(work.registration, sizeof work.registration, "%s", "work");
+   snprintf(work.auth_type, sizeof work.auth_type, "%s", "codex-oauth");
+   snprintf(work.provider, sizeof work.provider, "%s", "chatgpt");
+   personal = work;
+   snprintf(personal.name, sizeof personal.name, "%s", "personal:gpt");
+   snprintf(personal.registration, sizeof personal.registration, "%s", "personal");
+   server = work;
+   snprintf(server.name, sizeof server.name, "%s", "codex");
+   snprintf(server.registration, sizeof server.registration, "%s", "codex");
+   test_oauth_tokens_reset();
+   snprintf(
+       test_vault_server_codex_oauth, sizeof test_vault_server_codex_oauth,
+       "{\"tokens\":{\"access_token\":\"SERVER-VAULT\",\"refresh_token\":\"SERVER-REFRESH\"}}");
+   char auth[512], headers[512];
+   agent_set_request_codex_creds("SERVER-TURN", "server-account");
+   assert(test_auth_header(&server, auth, sizeof auth) == 0);
+   assert(!strcmp(auth, "Authorization: Bearer SERVER-TURN"));
+   assert(test_auth_header(&work, auth, sizeof auth) == -1 && !auth[0]);
+   test_extra_headers(&work, headers, sizeof headers);
+   assert(!strstr(headers, "ChatGPT-Account-ID:"));
+   agent_set_request_codex_creds_for(&work, "WORK-TURN", "work-account");
+   assert(agent_request_codex_token_matches(&work));
+   assert(!agent_request_codex_token_matches(&personal));
+   assert(test_auth_header(&work, auth, sizeof auth) == 0);
+   assert(!strcmp(auth, "Authorization: Bearer WORK-TURN"));
+   test_extra_headers(&work, headers, sizeof headers);
+   assert(strstr(headers, "ChatGPT-Account-ID: work-account"));
+   assert(test_auth_header(&personal, auth, sizeof auth) == -1 && !auth[0]);
+   assert(strstr(agent_request_auth_error(), "personal"));
+   test_extra_headers(&personal, headers, sizeof headers);
+   assert(!strstr(headers, "ChatGPT-Account-ID:"));
+   assert(test_auth_header(&server, auth, sizeof auth) == 0);
+   assert(!strcmp(auth, "Authorization: Bearer SERVER-VAULT"));
+   agent_request_creds_t snapshot;
+   agent_request_creds_snapshot(&snapshot);
+   assert(!strcmp(snapshot.codex_registration, "work"));
+   agent_set_request_codex_creds(NULL, NULL);
+   agent_request_creds_restore(&snapshot);
+   assert(test_auth_header(&work, auth, sizeof auth) == 0);
+   assert(!strcmp(auth, "Authorization: Bearer WORK-TURN"));
+   assert(test_auth_header(&personal, auth, sizeof auth) == -1);
+   agent_set_request_codex_creds(NULL, NULL);
+   snprintf(test_vault_codex_connection, sizeof test_vault_codex_connection, "%s", "work");
+   snprintf(test_vault_codex_token, sizeof test_vault_codex_token, "%s", "WORK-VAULT");
+   snprintf(test_vault_codex_account, sizeof test_vault_codex_account, "%s", "work-vault-account");
+   assert(test_auth_header(&work, auth, sizeof auth) == 0);
+   assert(!strcmp(auth, "Authorization: Bearer WORK-VAULT"));
+   test_extra_headers(&work, headers, sizeof headers);
+   assert(strstr(headers, "ChatGPT-Account-ID: work-vault-account"));
+   assert(test_auth_header(&personal, auth, sizeof auth) == -1);
+   /* A model label cannot select another registration's credential slot. */
+   snprintf(personal.name, sizeof personal.name, "%s", "work");
+   assert(test_auth_header(&personal, auth, sizeof auth) == -1 && !auth[0]);
+   test_extra_headers(&personal, headers, sizeof headers);
+   assert(!strstr(headers, "ChatGPT-Account-ID:"));
+   /* A bound bearer without an account must not borrow the Vault account. */
+   agent_set_request_codex_creds_for(&work, "WORK-NO-ACCOUNT", NULL);
+   assert(test_auth_header(&work, auth, sizeof auth) == 0);
+   assert(!strcmp(auth, "Authorization: Bearer WORK-NO-ACCOUNT"));
+   test_extra_headers(&work, headers, sizeof headers);
+   assert(!strstr(headers, "ChatGPT-Account-ID:"));
+   agent_set_request_codex_creds(NULL, NULL);
+   test_vault_codex_connection[0] = test_vault_codex_token[0] = test_vault_codex_account[0] = 0;
+   test_vault_server_codex_oauth[0] = 0;
+   test_oauth_tokens_reset();
+   printf("  PASS: Codex token/account/snapshot stay with selected registration\n");
 }
 
 /* Server-side Codex auth is Vault-only. A legacy auth.json that survives outside
@@ -1016,15 +1219,58 @@ static void test_codex_oauth_reads_vault_only(void)
             "{\"tokens\":{\"access_token\":\"VAULT-ACCESS-3f9c1\",\"refresh_token\":\"VAULT-"
             "REFRESH\"}}");
    auth[0] = '\0';
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strstr(auth, "Bearer VAULT-ACCESS-3f9c1") != NULL);
    assert(strstr(auth, "DISK-MUST-NOT-WIN") == NULL);
+
+   /* Diagnostics must read the same refreshed canonical token as serving,
+    * even when the original imported document still contains an old token. */
+   oauth_token_response_t refreshed = {0};
+   snprintf(refreshed.access_token, sizeof(refreshed.access_token), "%s", "REFRESHED-ACCESS");
+   assert(oauth_token_store("codex", &refreshed) == 0);
+   char current[4096];
+   assert(agent_codex_oauth_current_token(current, sizeof(current)) == 0);
+   assert(strcmp(current, "REFRESHED-ACCESS") == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
+   assert(strcmp(auth, "Authorization: Bearer REFRESHED-ACCESS") == 0);
+
+   /* Another process must wait for a refresh already owned by serving. */
+   char lock_path[1024];
+   snprintf(lock_path, sizeof(lock_path), "%s/.vault/.codex-oauth.lock", config_default_dir());
+   int lock_fd = open(lock_path, O_RDWR);
+   assert(lock_fd >= 0 && flock(lock_fd, LOCK_EX) == 0);
+   int result_pipe[2];
+   assert(pipe(result_pipe) == 0);
+   pid_t reader = fork();
+   assert(reader >= 0);
+   if (reader == 0)
+   {
+      close(lock_fd);
+      close(result_pipe[0]);
+      char child_token[4096];
+      int rc = agent_codex_oauth_current_token(child_token, sizeof(child_token));
+      char result = rc == 0 && strcmp(child_token, "REFRESHED-ACCESS") == 0 ? 'Y' : 'N';
+      (void)write(result_pipe[1], &result, 1);
+      _exit(0);
+   }
+   close(result_pipe[1]);
+   struct pollfd pending = {.fd = result_pipe[0], .events = POLLIN};
+   assert(poll(&pending, 1, 100) == 0);
+   assert(flock(lock_fd, LOCK_UN) == 0);
+   close(lock_fd);
+   assert(poll(&pending, 1, 5000) == 1);
+   char child_result = 'N';
+   assert(read(result_pipe[0], &child_result, 1) == 1 && child_result == 'Y');
+   close(result_pipe[0]);
+   int child_status;
+   assert(waitpid(reader, &child_status, 0) == reader && WIFEXITED(child_status) &&
+          WEXITSTATUS(child_status) == 0);
 
    /* With Vault cleared, even an otherwise valid HOME credential is ignored. */
    test_oauth_tokens_reset();
    test_vault_server_codex_oauth[0] = '\0';
    auth[0] = '\0';
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) != 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) != 0);
    if (old_home)
       setenv("HOME", saved_home, 1);
    else
@@ -1040,21 +1286,81 @@ static void test_codex_oauth_reads_vault_only(void)
  * reaches the user's vault like a same-thread one; empty restores to empty. */
 static void test_request_creds_snapshot_carries_vault_principal(void)
 {
+   agent_set_request_session("owner-session");
    agent_set_request_vault_principal("webuser:dave");
    agent_request_creds_t snap;
    agent_request_creds_snapshot(&snap);
+   assert(!strcmp(agent_get_request_session(), snap.session_id));
    assert(strcmp(snap.vault_principal, "webuser:dave") == 0);
+   agent_set_request_session(NULL);
+   assert(!agent_get_request_session()[0]);
    agent_set_request_vault_principal(NULL); /* fresh fan-out worker starts clear */
    agent_request_creds_restore(&snap);
    assert(strcmp(agent_get_request_vault_principal(), "webuser:dave") == 0);
+   assert(!strcmp(agent_get_request_session(), "owner-session"));
    agent_set_request_vault_principal(NULL);
    agent_request_creds_snapshot(&snap);
    agent_set_request_vault_principal("webuser:eve");
    agent_request_creds_restore(&snap);
    assert(agent_get_request_vault_principal()[0] == '\0');
    agent_set_request_session(NULL); /* restore re-bound session+codex; clear all */
+   assert(!agent_get_request_session()[0]);
    agent_set_request_codex_creds(NULL, NULL);
    agent_set_request_vault_principal(NULL);
+}
+
+static int headless_legacy_capture(const aimee_session_event_t *event, void *context)
+{
+   int *messages = context;
+   if (event->kind == AIMEE_SESSION_MESSAGE && event->message &&
+       !strcmp(event->message->role, "assistant"))
+   {
+      assert(event->message->n_blocks == 1);
+      assert(event->message->blocks[0].type == AIMEE_BLK_TEXT);
+      assert(!strcmp(event->message->blocks[0].text, "structured legacy runtime"));
+      (*messages)++;
+   }
+   return 0;
+}
+
+static void test_legacy_tmux_executes_structured_headless(void)
+{
+   char path[512];
+   snprintf(path, sizeof path, "%s/aimee-headless-legacy-XXXXXX", platform_tmpdir());
+   int fd = mkstemp(path);
+   assert(fd >= 0);
+   FILE *f = fdopen(fd, "w");
+   assert(f);
+   fputs("#!/bin/sh\n"
+         "case \" $* \" in *' --output-format stream-json '*) ;; *) exit 91;; esac\n"
+         "cat >/dev/null\n"
+         "printf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"id\":\"legacy-frame\","
+         "\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"structured legacy "
+         "runtime\"}]}}'\n"
+         "printf '%s\\n' '{\"type\":\"result\",\"is_error\":false,\"result\":\"structured legacy "
+         "runtime\"}'\n",
+         f);
+   fclose(f);
+   assert(!chmod(path, 0700));
+   agent_t agent = {0};
+   snprintf(agent.name, sizeof agent.name, "legacy-claude");
+   snprintf(agent.backend, sizeof agent.backend, "%s", AGENT_BACKEND_TMUX_CLI);
+   snprintf(agent.provider, sizeof agent.provider, "claude");
+   snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s", path);
+   agent.timeout_ms = 5000;
+   agent_request_creds_t previous, empty = {0};
+   agent_request_creds_snapshot(&previous);
+   agent_request_creds_restore(&empty);
+   int messages = 0;
+   aimee_ir_session_set_sink(headless_legacy_capture, &messages);
+   agent_result_t out = {0};
+   assert(!agent_execute_with_tools(&agent, NULL, "system", "user", 100, 0.1, &out));
+   assert(out.success && out.response && !strcmp(out.response, "structured legacy runtime"));
+   assert(messages == 1);
+   agent_result_clear_response(&out);
+   aimee_ir_session_set_sink(NULL, NULL);
+   agent_request_creds_restore(&previous);
+   unlink(path);
 }
 
 static void test_agent_config_provider_cli_roundtrip(void)
@@ -1118,10 +1424,10 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(strcmp(loaded.agents[0].cli_cmd, "codex") == 0);
    assert(loaded.agents[0].cli_idle_timeout_ms == 1234);
    assert(loaded.agents[0].session_reuse == 1);
-   assert(strcmp(loaded.agents[1].backend, AGENT_BACKEND_TMUX_CLI) == 0);
+   assert(strcmp(loaded.agents[1].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(loaded.agents[1].provider, "claude") == 0);
    assert(strcmp(loaded.agents[1].auth_type, "none") == 0);
-   assert(loaded.agents[1].cli_kind[0] == '\0');
+   assert(strcmp(loaded.agents[1].cli_kind, "claude") == 0);
    assert(strcmp(loaded.agents[1].cli_cmd, "claude") == 0);
    assert(strcmp(loaded.agents[2].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(loaded.agents[2].provider, "mistral") == 0);
@@ -1145,8 +1451,8 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(strcmp(loaded.agents[4].cli_cmd, "mistral") == 0);
    assert(strcmp(loaded.agents[5].name, "claude-code") == 0);
    assert(strcmp(loaded.agents[5].provider, "claude-code") == 0);
-   assert(strcmp(loaded.agents[5].backend, AGENT_BACKEND_TMUX_CLI) == 0);
-   assert(strcmp(loaded.agents[5].cli_kind, "claude-code") == 0);
+   assert(strcmp(loaded.agents[5].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
+   assert(strcmp(loaded.agents[5].cli_kind, "claude") == 0);
    assert(strcmp(loaded.agents[5].cli_cmd, "/bin/echo") == 0);
    assert(loaded.agents[5].session_reuse == 1);
    /* A claude-CLI agent that is NOT server-hosted (no `is_server_hosted` in its
@@ -1166,10 +1472,10 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(strcmp(reloaded.agents[0].cli_cmd, "codex") == 0);
    assert(reloaded.agents[0].cli_idle_timeout_ms == 1234);
    assert(reloaded.agents[0].session_reuse == 1);
-   assert(strcmp(reloaded.agents[1].backend, AGENT_BACKEND_TMUX_CLI) == 0);
+   assert(strcmp(reloaded.agents[1].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(reloaded.agents[1].provider, "claude") == 0);
    assert(strcmp(reloaded.agents[1].auth_type, "none") == 0);
-   assert(reloaded.agents[1].cli_kind[0] == '\0');
+   assert(strcmp(reloaded.agents[1].cli_kind, "claude") == 0);
    assert(strcmp(reloaded.agents[1].cli_cmd, "claude") == 0);
    assert(strcmp(reloaded.agents[2].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(reloaded.agents[2].provider, "mistral") == 0);
@@ -1189,8 +1495,8 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(strcmp(reloaded.agents[4].cli_cmd, "mistral") == 0);
    assert(strcmp(reloaded.agents[5].name, "claude-code") == 0);
    assert(strcmp(reloaded.agents[5].provider, "claude-code") == 0);
-   assert(strcmp(reloaded.agents[5].backend, AGENT_BACKEND_TMUX_CLI) == 0);
-   assert(strcmp(reloaded.agents[5].cli_kind, "claude-code") == 0);
+   assert(strcmp(reloaded.agents[5].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
+   assert(strcmp(reloaded.agents[5].cli_kind, "claude") == 0);
    assert(strcmp(reloaded.agents[5].cli_cmd, "/bin/echo") == 0);
    assert(reloaded.agents[5].session_reuse == 1);
    /* Still excluded after the save/reload roundtrip (see the load-side assert). */
@@ -1241,15 +1547,25 @@ static void test_agent_adapter_registry(void)
 
    snprintf(ag.backend, sizeof(ag.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
    assert(agent_adapter_agent_is_direct(&ag) == 0);
+
+   /* Configured HTTP primaries must not fall into the role-confined delegate
+    * route merely because their model name is not a built-in product name. */
+   const char *providers[] = {"openai", "anthropic", "openrouter", "ollama"};
+   for (size_t i = 0; i < sizeof providers / sizeof providers[0]; i++)
+   {
+      memset(&ag, 0, sizeof ag);
+      snprintf(ag.name, sizeof ag.name, "configured-fixture");
+      snprintf(ag.provider, sizeof ag.provider, "%s", providers[i]);
+      assert(agent_adapter_agent_is_direct(&ag));
+      assert(
+          agent_adapter_supports(agent_adapter_for_agent(&ag), AGENT_ADAPTER_CAP_PRIMARY_SESSION));
+      snprintf(ag.backend, sizeof ag.backend, "%s", AGENT_BACKEND_PROVIDER_CLI);
+      assert(!agent_adapter_agent_is_direct(&ag));
+   }
 }
 
-/* Regression guard for the codex-tmux misregistration that hid the local synth
- * delegate. agent_route() prefers a tmux-CLI backend over HTTP peers at the
- * cheapest tier (the "has_tmux" filter, mirrored in agent_route_with_caps_inner).
- * When codex was wrongly filed as a tmux-CLI agent at cost_tier 0, that filter
- * excluded the local HTTP synth delegate (gpu-mid) from every default route, so
- * it was never used. Case A reproduces the mask; Case B proves that codex in its
- * correct HTTP (chatgpt) shape leaves the local synth routable. */
+/* Legacy backend spelling cannot mask HTTP peers now that canonical history
+ * owns continuation and every native CLI executes a structured adapter. */
 static void test_local_synth_not_masked_by_tmux_codex(void)
 {
    /* Fake `tmux` and `codex` on PATH so a codex tmux-CLI agent is genuinely
@@ -1257,7 +1573,7 @@ static void test_local_synth_not_masked_by_tmux_codex(void)
    char fake_bin[MAX_PATH_LEN];
    snprintf(fake_bin, sizeof(fake_bin), "%s/aimee-test-route-bin-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(fake_bin) != NULL);
-   const char *fakes[] = {"tmux", "codex"};
+   const char *fakes[] = {"codex"};
    for (size_t i = 0; i < sizeof(fakes) / sizeof(fakes[0]); i++)
    {
       char p[MAX_PATH_LEN];
@@ -1308,9 +1624,14 @@ static void test_local_synth_not_masked_by_tmux_codex(void)
    snprintf(codex->cli_cmd, sizeof(codex->cli_cmd), "codex");
    assert(agent_is_available_for_routing(synth) == 1);
    assert(agent_is_available_for_routing(codex) == 1); /* tmux + codex on PATH */
-   agent_t *routed_a = agent_route(&cfg, "execute");
-   assert(routed_a == codex); /* synth masked by the tmux peer */
-   assert(routed_a != synth);
+   int legacy_synth = 0, legacy_codex = 0;
+   for (int i = 0; i < 8; i++)
+   {
+      agent_t *picked = agent_route(&cfg, "execute");
+      legacy_synth |= picked == synth;
+      legacy_codex |= picked == codex;
+   }
+   assert(legacy_synth && legacy_codex);
 
    /* Case B — the fix: codex in its correct HTTP (chatgpt) shape. No tmux backend
     * at the cheapest tier, so the local synth is ROUTABLE again.
@@ -1350,52 +1671,360 @@ static void test_local_synth_not_masked_by_tmux_codex(void)
    printf("  PASS: test_local_synth_not_masked_by_tmux_codex\n");
 }
 
-static void test_provider_cli_shell_exec_uses_argv_not_shell(void)
+typedef struct
 {
-   agent_t ag;
-   memset(&ag, 0, sizeof(ag));
-   snprintf(ag.name, sizeof(ag.name), "cat-cli");
-   snprintf(ag.cli_cmd, sizeof(ag.cli_cmd), "/bin/cat");
-   ag.cli_idle_timeout_ms = 5000;
+   const agent_t *agent;
+   agent_request_creds_t credentials;
+   const char *expected;
+   atomic_int *ready, *start;
+} api_credential_thread_t;
 
-   agent_result_t result;
-   memset(&result, 0, sizeof(result));
-   assert(agent_execute_cli_shell_driver(&ag, "missing", "Cat CLI", NULL, "system", "user",
-                                         &result) == 0);
-   assert(result.success == 1);
-   assert(result.response != NULL);
-   assert(strcmp(result.response, "system\n\nuser") == 0);
-   free(result.response);
-
-   memset(&ag, 0, sizeof(ag));
-   snprintf(ag.name, sizeof(ag.name), "bad-cli");
-   snprintf(ag.cli_cmd, sizeof(ag.cli_cmd), "/bin/cat ; /bin/echo injected");
-   ag.cli_idle_timeout_ms = 5000;
-   memset(&result, 0, sizeof(result));
-   assert(agent_execute_cli_shell_driver(&ag, "missing", "Bad CLI", NULL, NULL, "user", &result) !=
-          0);
-   assert(strstr(result.error, "shell operators") != NULL);
+static void *api_credential_thread(void *context)
+{
+   api_credential_thread_t *request = context;
+   agent_request_creds_restore(&request->credentials);
+   atomic_fetch_add(request->ready, 1);
+   while (!atomic_load(request->start))
+      usleep(1000);
+   for (int i = 0; i < 50; i++)
+   {
+      char auth[4096], headers[1024];
+      assert(
+          !agent_resolve_auth_headers(request->agent, auth, sizeof auth, headers, sizeof headers));
+      assert(!strcmp(auth, request->expected));
+      runtime_secret_wipe(auth, sizeof auth);
+      usleep(1000);
+   }
+   agent_request_creds_t empty = {0};
+   agent_request_creds_restore(&empty);
+   return NULL;
 }
 
-static void test_provider_cli_shell_timeout_covers_prompt_write(void)
+static void test_vault_api_key_lineage_and_request_binding(void)
 {
-   agent_t ag;
-   memset(&ag, 0, sizeof(ag));
-   snprintf(ag.name, sizeof(ag.name), "sleep-cli");
-   snprintf(ag.cli_cmd, sizeof(ag.cli_cmd), "/bin/sleep 2");
-   ag.cli_idle_timeout_ms = 100;
+   agent_request_creds_t previous, empty = {0}, bound;
+   agent_request_creds_snapshot(&previous);
+   agent_request_creds_restore(&empty);
+   agent_set_request_vault_principal("webuser:alice");
+   agent_t agent = {0};
+   snprintf(agent.name, sizeof agent.name, "%s", "api-agent");
+   snprintf(agent.registration, sizeof agent.registration, "%s", "api-selected");
+   snprintf(agent.provider, sizeof agent.provider, "%s", "openai");
+   snprintf(agent.endpoint, sizeof agent.endpoint, "%s",
+            "https://provider.invalid/v1/chat/completions");
+   snprintf(agent.auth_type, sizeof agent.auth_type, "%s", "api_key");
+   snprintf(agent.extra_headers, sizeof agent.extra_headers, "%s", "OpenAI-Project: project-one");
+   snprintf(test_vault_api_key_agent, sizeof test_vault_api_key_agent, "%s", agent.registration);
+   snprintf(test_vault_api_key, sizeof test_vault_api_key, "%s", "vault-one");
+   agent_api_credentials_t original, same, rotated;
+   assert(!agent_api_connection_credentials(&agent, &original));
+   assert(!agent_api_connection_credentials(&agent, &same));
+   assert(!strcmp(original.api_key, "vault-one") && strlen(original.source_digest) == 64 &&
+          strlen(original.target_digest) == 64 && !memcmp(&original, &same, sizeof same));
+   assert(!agent_set_request_api_credentials_for(&agent, &original));
+   agent_request_creds_snapshot(&bound);
+   char auth[4096], headers[1024];
+   snprintf(test_vault_api_key, sizeof test_vault_api_key, "%s", "rotated-key");
+   assert(!agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   assert(!strcmp(auth, "Authorization: Bearer vault-one"));
+   assert(!agent_api_connection_credentials(&agent, &rotated));
+   assert(strcmp(original.source_digest, rotated.source_digest) &&
+          !strcmp(original.target_digest, rotated.target_digest));
+   atomic_int ready = 0, start = 0;
+   api_credential_thread_t requests[2] = {{.agent = &agent,
+                                           .credentials = bound,
+                                           .expected = "Authorization: Bearer vault-one",
+                                           .ready = &ready,
+                                           .start = &start},
+                                          {.agent = &agent,
+                                           .expected = "Authorization: Bearer rotated-key",
+                                           .ready = &ready,
+                                           .start = &start}};
+   assert(!agent_set_request_api_credentials_for(&agent, &rotated));
+   agent_request_creds_snapshot(&requests[1].credentials);
+   agent_request_creds_restore(&bound);
+   pthread_t workers[2];
+   for (int i = 0; i < 2; i++)
+      assert(!pthread_create(&workers[i], NULL, api_credential_thread, &requests[i]));
+   while (atomic_load(&ready) != 2)
+      usleep(1000);
+   atomic_store(&start, 1);
+   for (int i = 0; i < 2; i++)
+      assert(!pthread_join(workers[i], NULL));
+   runtime_secret_wipe(requests, sizeof requests);
 
-   char *large_prompt = malloc(256 * 1024);
-   assert(large_prompt != NULL);
-   memset(large_prompt, 'x', (256 * 1024) - 1);
-   large_prompt[(256 * 1024) - 1] = '\0';
+   agent_t foreign = agent;
+   snprintf(foreign.registration, sizeof foreign.registration, "%s", "other-slot");
+   snprintf(test_vault_api_key_agent, sizeof test_vault_api_key_agent, "%s", foreign.registration);
+   snprintf(test_vault_api_key, sizeof test_vault_api_key, "%s", "other-connection-key");
+   assert(!agent_resolve_auth_headers(&foreign, auth, sizeof auth, headers, sizeof headers));
+   assert(!strcmp(auth, "Authorization: Bearer other-connection-key"));
+   snprintf(test_vault_api_key_agent, sizeof test_vault_api_key_agent, "%s", agent.registration);
+   snprintf(test_vault_api_key, sizeof test_vault_api_key, "%s", "rotated-key");
+   foreign = agent;
+   snprintf(foreign.endpoint, sizeof foreign.endpoint, "%s", "https://other.invalid");
+   assert(agent_resolve_auth_headers(&foreign, auth, sizeof auth, headers, sizeof headers) &&
+          !auth[0]);
+   foreign = agent;
+   snprintf(foreign.extra_headers, sizeof foreign.extra_headers, "%s",
+            "OpenAI-Project: project-two");
+   assert(agent_resolve_auth_headers(&foreign, auth, sizeof auth, headers, sizeof headers) &&
+          !auth[0]);
+   assert(!agent_api_connection_credentials(&foreign, &same));
+   assert(strcmp(original.target_digest, same.target_digest));
+   assert(agent_set_request_api_credentials_for(&foreign, &original));
+   agent_request_creds_restore(&empty);
+   agent_request_creds_restore(&bound);
+   assert(!agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   assert(!strcmp(auth, "Authorization: Bearer vault-one"));
+   assert(agent_resolve_auth_headers(&agent, auth, 8, headers, sizeof headers) && !auth[0]);
+   assert(agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, 8) && !auth[0] &&
+          !headers[0]);
+   agent_set_request_api_credentials_for(NULL, NULL);
+   agent_set_request_vault_principal("webuser:alice");
+   const char *conflicts[] = {"Authorization: secret", " X-Api-Key : secret",
+                              "x-goog-api-key: secret"};
+   for (size_t i = 0; i < sizeof conflicts / sizeof *conflicts; i++)
+   {
+      foreign = agent;
+      snprintf(foreign.extra_headers, sizeof foreign.extra_headers, "%s", conflicts[i]);
+      assert(agent_api_connection_credentials(&foreign, &same));
+      assert(!same.api_key[0] && !same.source_digest[0]);
+   }
+   snprintf(test_vault_api_key_agent, sizeof test_vault_api_key_agent, "%s", agent.name);
+   assert(agent_api_connection_credentials(&agent, &same)); /* No alias fallback. */
+   snprintf(test_vault_api_key_agent, sizeof test_vault_api_key_agent, "%s", agent.registration);
+   agent_set_request_vault_principal(NULL);
+   assert(agent_api_connection_credentials(&agent, &same));
+   agent_request_creds_restore(&previous);
+   runtime_secret_wipe(&previous, sizeof previous);
+   runtime_secret_wipe(&bound, sizeof bound);
+   runtime_secret_wipe(&original, sizeof original);
+   runtime_secret_wipe(&same, sizeof same);
+   runtime_secret_wipe(&rotated, sizeof rotated);
+   test_vault_api_key_agent[0] = test_vault_api_key[0] = 0;
+   puts("  PASS: selected Vault API-key lineage, rotation and exact request binding");
+}
 
-   agent_result_t result;
-   memset(&result, 0, sizeof(result));
-   assert(agent_execute_cli_shell_driver(&ag, "missing", "Sleep CLI", NULL, NULL, large_prompt,
-                                         &result) != 0);
-   assert(strstr(result.error, "timed out") != NULL);
-   free(large_prompt);
+static void test_codex_source_lineage_and_paired_headers(void)
+{
+   agent_t agent = {0};
+   snprintf(agent.registration, sizeof agent.registration, "lineage-fixture");
+   snprintf(agent.auth_type, sizeof agent.auth_type, "codex-oauth");
+   agent_set_request_codex_creds(NULL, NULL);
+   test_oauth_tokens_reset();
+   const char *source_a = "{\"tokens\":{\"access_token\":\"access-a\","
+                          "\"refresh_token\":\"refresh-a\",\"account_id\":\"account-a\"}}";
+   const char *source_b = "{\"tokens\":{\"access_token\":\"access-b\","
+                          "\"refresh_token\":\"refresh-b\",\"account_id\":\"account-b\"}}";
+   assert(vault_service_set_server(agent.registration, "oauth", source_a) == VAULT_OK);
+   agent_codex_credentials_t pair, original;
+   assert(!agent_codex_connection_credentials(agent.registration, &original));
+   assert(!strcmp(original.token, "access-a") && !strcmp(original.account_id, "account-a"));
+   assert(strlen(original.source_digest) == 64);
+   oauth_token_response_t refreshed = {0};
+   snprintf(refreshed.access_token, sizeof refreshed.access_token, "rotated-a");
+   assert(!oauth_token_store(agent.registration, &refreshed));
+   int stores = test_oauth_stores, removes = test_oauth_removes;
+   /* Metadata/formatting changes are not a new login or refresh lineage. */
+   assert(vault_service_set_server(
+              agent.registration, "oauth",
+              "{\"metadata\":42,\"tokens\":{\"account_id\":\"account-a\","
+              "\"refresh_token\":\"refresh-a\",\"access_token\":\"access-a\"}}") == VAULT_OK);
+   assert(!agent_codex_connection_credentials(agent.registration, &pair));
+   assert(!strcmp(pair.token, "rotated-a") && !strcmp(pair.account_id, "account-a"));
+   assert(!strcmp(pair.source_digest, original.source_digest));
+   assert(test_oauth_stores == stores && test_oauth_removes == removes);
+   test_oauth_get_fail = 1;
+   memset(&pair, 'x', sizeof pair);
+   assert(agent_codex_connection_credentials(agent.registration, &pair));
+   for (size_t i = 0; i < sizeof pair; i++)
+      assert(((unsigned char *)&pair)[i] == 0);
+   assert(test_oauth_stores == stores && test_oauth_removes == removes);
+   test_oauth_get_fail = 0;
+   assert(vault_service_set_server(agent.registration, "oauth", source_b) == VAULT_OK);
+   char auth[MAX_API_KEY_LEN + 32], headers[512];
+   assert(!agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   assert(!strcmp(auth, "Authorization: Bearer access-b"));
+   assert(strstr(headers, "ChatGPT-Account-ID: account-b"));
+   assert(!strstr(headers, "account-a"));
+   assert(test_oauth_stores == stores + 1 && test_oauth_removes == removes);
+   assert(!agent_codex_connection_credentials(agent.registration, &pair));
+   assert(strcmp(pair.source_digest, original.source_digest));
+   assert(vault_service_set_server(agent.registration, "oauth", "") == VAULT_OK);
+   assert(agent_codex_connection_credentials(agent.registration, &pair));
+   /* A cached normalized token cannot resurrect a removed login source. */
+   assert(vault_service_set_server(agent.registration, "oauth", source_b) == VAULT_OK);
+   assert(!agent_codex_connection_credentials(agent.registration, &pair));
+   const char *invalid[] = {
+       "{\"tokens\":{\"access_token\":\"a\",\"refresh_token\":\"r\"},\"tokens\":{}}",
+       "{\"access_token\":\"a\",\"access_token\":\"b\",\"refresh_token\":\"r\"}",
+       "{\"tokens\":{\"access_token\":\"a\",\"refresh_token\":\"r\"},\"access_token\":\"b\"}",
+       "{\"access_token\":\"a\\u0000suffix\",\"refresh_token\":\"r\"}",
+       "{\"access_token\":\"a\",\"refresh_token\":\"r\",\"account_id\":\"bad\\r\\nheader\"}",
+       "{\"access_token\":\"a\"}",
+       "[]",
+       "{} trailing"};
+   stores = test_oauth_stores;
+   for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+   {
+      assert(vault_service_set_server(agent.registration, "oauth", invalid[i]) == VAULT_OK);
+      assert(agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+      assert(!auth[0] && test_oauth_stores == stores);
+   }
+   assert(vault_service_set_server(agent.registration, "oauth", source_b) == VAULT_OK);
+   /* Per-turn account custody is equally strict and does not consult Vault. */
+   agent_set_request_codex_creds_for(&agent, "bound-token", "bound-account");
+   snprintf(agent.extra_headers, sizeof agent.extra_headers, "chatgpt-account-id: bound-account");
+   assert(!agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   assert(strstr(headers, "originator: codex_cli_rs"));
+   snprintf(agent.extra_headers, sizeof agent.extra_headers, "ChatGPT-Account-ID: other-account");
+   assert(agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   snprintf(agent.extra_headers, sizeof agent.extra_headers,
+            "ChatGPT-Account-ID: bound-account\nchatgpt-account-id: bound-account");
+   assert(agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   agent.extra_headers[0] = 0;
+   agent_set_request_codex_creds_for(&agent, "bound-token", NULL);
+   assert(!agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   assert(!strstr(headers, "ChatGPT-Account-ID"));
+   assert(strstr(headers, "originator: codex_cli_rs"));
+   agent_set_request_codex_creds(NULL, NULL);
+   test_oauth_tokens_reset();
+   printf("  PASS: test_codex_source_lineage_and_paired_headers\n");
+}
+
+extern char test_oauth_profile_client[256], test_oauth_profile_scope[4096],
+    test_oauth_profile_endpoint[256];
+extern int test_oauth_profile_format;
+static void test_claude_selected_vault_lineage(void)
+{
+   const char *registration = "claude-lineage-fixture";
+   const char *source =
+       "{\"claudeAiOauth\":{\"accessToken\":\"claude-access\","
+       "\"refreshToken\":\"claude-refresh\",\"expiresAt\":4102444800000,"
+       "\"clientId\":\"persisted-client\",\"scopes\":[\"user:profile\",\"user:inference\"]}}";
+   assert(vault_service_set_server(registration, "oauth", source) == VAULT_OK);
+   agent_claude_credentials_t original, current;
+   assert(!agent_claude_connection_credentials(registration, &original));
+   assert(!strcmp(original.token, "claude-access") && strlen(original.source_digest) == 64);
+   assert(!strcmp(test_oauth_profile_client, "persisted-client"));
+   assert(!strcmp(test_oauth_profile_scope, "user:profile user:inference"));
+   assert(!strcmp(test_oauth_profile_endpoint, "https://platform.claude.com/v1/oauth/token"));
+   assert(test_oauth_profile_format == OAUTH_REFRESH_JSON);
+   oauth_token_response_t rotated = {0};
+   snprintf(rotated.access_token, sizeof rotated.access_token, "refreshed-claude");
+   assert(!oauth_token_store(registration, &rotated));
+   int stores = test_oauth_stores, removes = test_oauth_removes;
+   assert(!agent_claude_connection_credentials(registration, &current));
+   assert(!strcmp(current.token, "refreshed-claude"));
+   assert(!strcmp(original.source_digest, current.source_digest));
+   assert(test_oauth_stores == stores && test_oauth_removes == removes);
+   test_oauth_get_fail = 1;
+   memset(&current, 'x', sizeof current);
+   assert(agent_claude_connection_credentials(registration, &current));
+   for (size_t i = 0; i < sizeof current; i++)
+      assert(!((unsigned char *)&current)[i]);
+   assert(test_oauth_stores == stores && test_oauth_removes == removes);
+   test_oauth_get_fail = 0;
+   assert(agent_claude_connection_credentials("missing-claude-registration", &current));
+   assert(vault_service_set_server(registration, "oauth", "") == VAULT_OK);
+   assert(agent_claude_connection_credentials(registration, &current));
+
+   /* Both adapters fence the same normalized store. Switching back must seed
+    * the original vendor again rather than use the other vendor's access. */
+   const char *codex =
+       "{\"tokens\":{\"access_token\":\"codex-in-same-slot\",\"refresh_token\":\"codex-refresh\"}}";
+   assert(vault_service_set_server(registration, "oauth", codex) == VAULT_OK);
+   agent_codex_credentials_t codex_credentials;
+   assert(!agent_codex_connection_credentials(registration, &codex_credentials));
+   assert(!strcmp(codex_credentials.token, "codex-in-same-slot"));
+   assert(vault_service_set_server(registration, "oauth", source) == VAULT_OK);
+   assert(!agent_claude_connection_credentials(registration, &current));
+   assert(!strcmp(current.token, "claude-access"));
+   assert(!strcmp(current.source_digest, original.source_digest));
+   assert(test_oauth_stores == stores + 2 && test_oauth_removes == removes);
+
+   const char *legacy = "{\"claudeAiOauth\":{\"accessToken\":\"legacy-claude\","
+                        "\"refreshToken\":\"legacy-refresh\",\"expiresAt\":4102444800000,"
+                        "\"scopes\":[\"user:inference\"]}}";
+   assert(vault_service_set_server(registration, "oauth", legacy) == VAULT_OK);
+   assert(!agent_claude_connection_credentials(registration, &current));
+   assert(!strcmp(test_oauth_profile_client, "9d1c250a-e61b-44d9-88ed-5944d1962f5e"));
+   assert(!strcmp(test_oauth_profile_scope, "user:inference"));
+   assert(strcmp(current.source_digest, original.source_digest));
+   agent_t agent = {0};
+   snprintf(agent.name, sizeof agent.name, "claude");
+   snprintf(agent.registration, sizeof agent.registration, "%s", registration);
+   snprintf(agent.provider, sizeof agent.provider, "anthropic");
+   snprintf(agent.auth_type, sizeof agent.auth_type, "claude-oauth");
+   snprintf(agent.endpoint, sizeof agent.endpoint, "https://api.anthropic.com/v1");
+   char auth[8192], headers[1024];
+   agent_request_creds_t previous, bound;
+   agent_request_creds_snapshot(&previous);
+   assert(!agent_set_request_claude_creds_for(&agent, &current));
+   agent_request_creds_snapshot(&bound);
+   test_oauth_get_fail = 1;
+   assert(!agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   assert(!strcmp(auth, "Authorization: Bearer legacy-claude"));
+   assert(strstr(headers, "anthropic-beta: oauth-2025-04-20"));
+   assert(agent_resolve_auth_headers(&agent, auth, 8, headers, sizeof headers) && !auth[0]);
+   snprintf(agent.endpoint, sizeof agent.endpoint, "https://other.invalid");
+   assert(agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers) &&
+          !auth[0]);
+   snprintf(agent.endpoint, sizeof agent.endpoint, "https://api.anthropic.com/v1");
+   assert(!agent_set_request_claude_creds_for(NULL, NULL));
+   assert(agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   agent_request_creds_restore(&bound);
+   assert(!agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   snprintf(agent.registration, sizeof agent.registration, "other-claude-slot");
+   assert(agent_resolve_auth_headers(&agent, auth, sizeof auth, headers, sizeof headers));
+   agent_request_creds_restore(&previous);
+   runtime_secret_wipe(&previous, sizeof previous);
+   runtime_secret_wipe(&bound, sizeof bound);
+   test_oauth_get_fail = 0;
+   snprintf(headers, sizeof headers, "Anthropic-Beta: fixture-beta\nX-Other: value");
+   assert(!agent_claude_oauth_headers(&agent, headers, sizeof headers));
+   assert(!strcmp(headers, "Anthropic-Beta: fixture-beta,oauth-2025-04-20\nX-Other: value"));
+   assert(!agent_claude_oauth_headers(&agent, headers, sizeof headers));
+   assert(!strstr(strstr(headers, "oauth-2025-04-20") + 1, "oauth-2025-04-20"));
+   snprintf(headers, sizeof headers, "anthropic-beta: ");
+   assert(!agent_claude_oauth_headers(&agent, headers, sizeof headers));
+   assert(strstr(headers, "anthropic-beta:oauth-2025-04-20") ||
+          strstr(headers, "anthropic-beta: oauth-2025-04-20"));
+   snprintf(headers, sizeof headers, "anthropic-beta: oauth-2025-04-20,oauth-2025-04-20");
+   assert(agent_claude_oauth_headers(&agent, headers, sizeof headers));
+   snprintf(headers, sizeof headers, "anthropic-beta: x\nanthropic-beta: y");
+   assert(agent_claude_oauth_headers(&agent, headers, sizeof headers));
+   headers[0] = 0;
+   assert(agent_claude_oauth_headers(&agent, headers, 8));
+
+   const char *invalid[] = {
+       "{\"claudeAiOauth\":{},\"claudeAiOauth\":{}}",
+       "{\"claudeAiOauth\":{\"accessToken\":\"a\",\"accessToken\":\"b\"}}",
+       "{\"claudeAiOauth\":{\"accessToken\":\"a\",\"refreshToken\":\"r\",\"expiresAt\":\"bad\","
+       "\"scopes\":[\"user:inference\"]}}",
+       "{\"claudeAiOauth\":{\"accessToken\":\"a\",\"refreshToken\":\"r\",\"expiresAt\":"
+       "4102444800000,\"scopes\":[\"user:inference\"],\"scopes\":[]}}",
+       "{\"claudeAiOauth\":{\"accessToken\":\"a\\r\\nInjected: "
+       "x\",\"refreshToken\":\"r\",\"expiresAt\":4102444800000,\"scopes\":[\"user:inference\"]}}",
+       "{\"claudeAiOauth\":{\"accessToken\":\"a\\u0000hidden\",\"refreshToken\":\"r\","
+       "\"expiresAt\":4102444800000,\"scopes\":[\"user:inference\"]}}",
+       "{\"claudeAiOauth\":{\"accessToken\":\"a\",\"refreshToken\":\"r\",\"expiresAt\":"
+       "4102444800000,\"scopes\":[\"broaden scope\"]}}",
+       "[]",
+       "{} trailing"};
+   stores = test_oauth_stores;
+   for (size_t i = 0; i < sizeof invalid / sizeof *invalid; i++)
+   {
+      assert(vault_service_set_server(registration, "oauth", invalid[i]) == VAULT_OK);
+      assert(agent_claude_connection_credentials(registration, &current));
+      assert(!current.token[0] && !current.source_digest[0] && test_oauth_stores == stores);
+   }
+   test_oauth_tokens_reset();
+   runtime_secret_wipe(&original, sizeof original);
+   runtime_secret_wipe(&current, sizeof current);
+   runtime_secret_wipe(&codex_credentials, sizeof codex_credentials);
+   puts("  PASS: selected Vault Claude lineage, exact refresh profile and vendor switching");
 }
 
 static void test_codex_oauth_auth_resolution(void)
@@ -1408,14 +2037,14 @@ static void test_codex_oauth_auth_resolution(void)
    test_oauth_tokens_reset();
    snprintf(test_vault_server_codex_oauth, sizeof(test_vault_server_codex_oauth),
             "{\"access_token\":\"codex-test-token\",\"refresh_token\":\"codex-refresh\"}");
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer codex-test-token") == 0);
 
    test_oauth_tokens_reset();
    snprintf(test_vault_server_codex_oauth, sizeof(test_vault_server_codex_oauth),
             "{\"tokens\":{\"access_token\":\"codex-cli-token\",\"refresh_token\":\"codex-cli-"
             "refresh\"}}");
-   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(test_auth_header(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer codex-cli-token") == 0);
    test_oauth_tokens_reset();
    test_vault_server_codex_oauth[0] = '\0';
@@ -1468,6 +2097,24 @@ static void test_agent_is_exec_role(void)
 
 static void test_tool_bash(void)
 {
+   /* The native CLI bridge overlays only the actual shell child; pooled host
+    * threads and subsequent ordinary commands retain their environment. */
+   setenv("AIMEE_ENV_SCOPE_TEST", "parent-only", 1);
+   char *environment[] = {"AIMEE_ENV_SCOPE_TEST=child-private", NULL};
+   char *const *previous = agent_tools_bind_bash_environment(environment);
+   char *scoped = tool_bash("printf '%s' \"$AIMEE_ENV_SCOPE_TEST\"", 5000);
+   agent_tools_bind_bash_environment(previous);
+   assert(scoped);
+   cJSON *private_reply = cJSON_Parse(scoped);
+   assert(private_reply);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(private_reply, "stdout")),
+                  "child-private"));
+   assert(cJSON_GetObjectItem(private_reply, "exit_code")->valueint == 0);
+   assert(!strcmp(getenv("AIMEE_ENV_SCOPE_TEST"), "parent-only"));
+   cJSON_Delete(private_reply);
+   free(scoped);
+   unsetenv("AIMEE_ENV_SCOPE_TEST");
+
    /* Basic echo */
    char *result = tool_bash("echo hello", 5000);
    assert(result != NULL);
@@ -1727,7 +2374,8 @@ static void test_tool_read_file(void)
    free(result);
 
    unsigned char binary_content[] = {0x7f, 'E', 'L', 'F', '\0', 0x01, 0x02, 0x03};
-   assert((fd = open(tmppath, O_WRONLY | O_TRUNC)) >= 0);
+   fd = open(tmppath, O_WRONLY | O_TRUNC);
+   assert(fd >= 0);
    assert(write(fd, binary_content, sizeof(binary_content)) == (ssize_t)sizeof(binary_content));
    close(fd);
    result = tool_read_file(tmppath, 0, 0, 1);
@@ -1737,7 +2385,8 @@ static void test_tool_read_file(void)
    free(result);
 
    /* Anchored mode (default): lines prefixed LINE:HASH| and a snapshot header. */
-   assert((fd = open(tmppath, O_WRONLY | O_TRUNC)) >= 0);
+   fd = open(tmppath, O_WRONLY | O_TRUNC);
+   assert(fd >= 0);
    assert(write(fd, content, strlen(content)) == (ssize_t)strlen(content));
    close(fd);
    result = tool_read_file(tmppath, 0, 0, 0);
@@ -2513,7 +3162,8 @@ static void test_parent_write_guard_blocks_parent_writes(void)
    free(result);
 
    const char *home = getenv("HOME");
-   assert(home && home[0]);
+   if (!home || !home[0])
+      abort();
    char external_bin[512];
    char external_aimee[512];
    snprintf(external_bin, sizeof(external_bin), "%s/.aimee-test-external-bin-XXXXXX", home);
@@ -3195,175 +3845,6 @@ static void test_symlink_escape_rejected(void)
    rmdir(tmpdir);
 }
 
-/* --- messages_compact_consecutive tests --- */
-
-static cJSON *make_msg(const char *role, const char *content)
-{
-   cJSON *msg = cJSON_CreateObject();
-   cJSON_AddStringToObject(msg, "role", role);
-   cJSON_AddStringToObject(msg, "content", content);
-   return msg;
-}
-
-static void test_compact_empty(void)
-{
-   assert(messages_compact_consecutive(NULL) == 0);
-   cJSON *arr = cJSON_CreateArray();
-   assert(messages_compact_consecutive(arr) == 0);
-   assert(cJSON_GetArraySize(arr) == 0);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_single(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "hello"));
-   assert(messages_compact_consecutive(arr) == 0);
-   assert(cJSON_GetArraySize(arr) == 1);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_two_same_role(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "hello"));
-   cJSON_AddItemToArray(arr, make_msg("user", "world"));
-   assert(messages_compact_consecutive(arr) == 1);
-   assert(cJSON_GetArraySize(arr) == 1);
-   const char *content =
-       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 0), "content"));
-   assert(strcmp(content, "hello\n\nworld") == 0);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_five_same_role(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "a"));
-   cJSON_AddItemToArray(arr, make_msg("user", "b"));
-   cJSON_AddItemToArray(arr, make_msg("user", "c"));
-   cJSON_AddItemToArray(arr, make_msg("user", "d"));
-   cJSON_AddItemToArray(arr, make_msg("user", "e"));
-   assert(messages_compact_consecutive(arr) == 4);
-   assert(cJSON_GetArraySize(arr) == 1);
-   const char *content =
-       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 0), "content"));
-   assert(strcmp(content, "a\n\nb\n\nc\n\nd\n\ne") == 0);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_mixed_roles(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "u1"));
-   cJSON_AddItemToArray(arr, make_msg("user", "u2"));
-   cJSON_AddItemToArray(arr, make_msg("assistant", "a1"));
-   cJSON_AddItemToArray(arr, make_msg("user", "u3"));
-   cJSON_AddItemToArray(arr, make_msg("user", "u4"));
-   assert(messages_compact_consecutive(arr) == 2);
-   assert(cJSON_GetArraySize(arr) == 3);
-   const char *c0 =
-       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 0), "content"));
-   const char *r1 = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 1), "role"));
-   const char *c2 =
-       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 2), "content"));
-   assert(strcmp(c0, "u1\n\nu2") == 0);
-   assert(strcmp(r1, "assistant") == 0);
-   assert(strcmp(c2, "u3\n\nu4") == 0);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_no_consecutive(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "u1"));
-   cJSON_AddItemToArray(arr, make_msg("assistant", "a1"));
-   cJSON_AddItemToArray(arr, make_msg("user", "u2"));
-   assert(messages_compact_consecutive(arr) == 0);
-   assert(cJSON_GetArraySize(arr) == 3);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_idempotent(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "a"));
-   cJSON_AddItemToArray(arr, make_msg("user", "b"));
-   messages_compact_consecutive(arr);
-   assert(cJSON_GetArraySize(arr) == 1);
-   assert(messages_compact_consecutive(arr) == 0);
-   assert(cJSON_GetArraySize(arr) == 1);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_skips_structured_content(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON *msg1 = cJSON_CreateObject();
-   cJSON_AddStringToObject(msg1, "role", "assistant");
-   cJSON_AddNullToObject(msg1, "content");
-   cJSON_AddItemToArray(arr, msg1);
-   cJSON_AddItemToArray(arr, make_msg("assistant", "text response"));
-   assert(messages_compact_consecutive(arr) == 0);
-   assert(cJSON_GetArraySize(arr) == 2);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_skips_openai_tool_results(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("user", "run two tools"));
-   cJSON *assistant = cJSON_CreateObject();
-   cJSON_AddStringToObject(assistant, "role", "assistant");
-   cJSON_AddNullToObject(assistant, "content");
-   cJSON *tool_calls = cJSON_AddArrayToObject(assistant, "tool_calls");
-   for (int i = 0; i < 2; i++)
-   {
-      char id[16];
-      snprintf(id, sizeof(id), "call_%d", i + 1);
-      cJSON *tc = cJSON_CreateObject();
-      cJSON_AddStringToObject(tc, "id", id);
-      cJSON_AddStringToObject(tc, "type", "function");
-      cJSON *fn = cJSON_AddObjectToObject(tc, "function");
-      cJSON_AddStringToObject(fn, "name", "bash");
-      cJSON_AddStringToObject(fn, "arguments", "{}");
-      cJSON_AddItemToArray(tool_calls, tc);
-   }
-   cJSON_AddItemToArray(arr, assistant);
-   for (int i = 0; i < 2; i++)
-   {
-      char id[16];
-      char content[16];
-      snprintf(id, sizeof(id), "call_%d", i + 1);
-      snprintf(content, sizeof(content), "result_%d", i + 1);
-      cJSON *tool = cJSON_CreateObject();
-      cJSON_AddStringToObject(tool, "role", "tool");
-      cJSON_AddStringToObject(tool, "tool_call_id", id);
-      cJSON_AddStringToObject(tool, "content", content);
-      cJSON_AddItemToArray(arr, tool);
-   }
-   assert(messages_compact_consecutive(arr) == 0);
-   assert(cJSON_GetArraySize(arr) == 4);
-   cJSON *tool1 = cJSON_GetArrayItem(arr, 2);
-   cJSON *tool2 = cJSON_GetArrayItem(arr, 3);
-   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(tool1, "tool_call_id")), "call_1") == 0);
-   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(tool2, "tool_call_id")), "call_2") == 0);
-   cJSON_Delete(arr);
-}
-
-static void test_compact_system_role(void)
-{
-   cJSON *arr = cJSON_CreateArray();
-   cJSON_AddItemToArray(arr, make_msg("system", "rule1"));
-   cJSON_AddItemToArray(arr, make_msg("system", "rule2"));
-   assert(messages_compact_consecutive(arr) == 1);
-   assert(cJSON_GetArraySize(arr) == 1);
-   const char *content =
-       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(arr, 0), "content"));
-   assert(strcmp(content, "rule1\n\nrule2") == 0);
-   cJSON_Delete(arr);
-}
-
 static void test_delegation_error_guidance(void)
 {
    char buf[512];
@@ -3777,8 +4258,136 @@ static void test_agent_save_config_does_not_cache_underived_agents(void)
 void test_competence_contract_roundtrip_and_routing(void);
 void test_cost_selection_filters_before_learning(void);
 
-int main(void)
+static void test_canonical_external_run_preserves_budget_refusal(void)
 {
+   request_context_snapshot_t previous;
+   request_context_snapshot(&previous);
+   request_context_t owner = {.request_budget_present = 1};
+   snprintf(owner.request_budget_limits, sizeof owner.request_budget_limits,
+            "{\"schema_version\":1,\"max_request_bytes\":0}");
+   request_context_set(&owner);
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "canonical run"};
+   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+   aimee_request_t request = {.messages = &message, .n_messages = 1};
+   const char *backends[] = {AGENT_BACKEND_TMUX_CLI, AGENT_BACKEND_PROVIDER_CLI};
+   const char *kinds[] = {"claude", "acp"};
+   for (int i = 0; i < 2; i++)
+   {
+      agent_t agent = {0};
+      snprintf(agent.name, sizeof agent.name, "external");
+      snprintf(agent.provider, sizeof agent.provider, "anthropic");
+      snprintf(agent.backend, sizeof agent.backend, "%s", backends[i]);
+      snprintf(agent.cli_kind, sizeof agent.cli_kind, "%s", kinds[i]);
+      snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "/bin/false");
+      aimee_response_t response = {0};
+      agent_result_t result = {0};
+      assert(agent_execute_request_with_tools(&agent, NULL, "execute", &request, &response,
+                                              &result) != 0);
+      assert(!strcmp(result.error, "request_budget_unavailable"));
+      assert(!response.n_content && !result.response);
+      aimee_response_free(&response);
+      for (int control = 0; control < 3; control++)
+      {
+         request.prompt_cache_key = control == 0 ? "" : NULL;
+         request.prompt_cache_retention = control == 1 ? "24h" : NULL;
+         request.prompt_cache_options = control == 2 ? cJSON_CreateObject() : NULL;
+         assert(!agent_request_with_tools_supported(&request));
+         assert(agent_execute_request_with_tools(&agent, NULL, "execute", &request, &response,
+                                                 &result) == AGENT_RC_CONTEXT_REFUSED);
+         assert(!strcmp(result.error, "run request contains unsupported execution controls"));
+         assert(!response.n_content && !result.response);
+         cJSON_Delete(request.prompt_cache_options);
+         request.prompt_cache_key = request.prompt_cache_retention = NULL;
+         request.prompt_cache_options = NULL;
+      }
+   }
+   request_context_restore(&previous);
+   request_context_snapshot_clear(&previous);
+   puts("canonical external runs retain the existing accounting refusal");
+}
+
+static void test_owned_tool_and_source_handoff(void)
+{
+   agent_tools_scope_snapshot_t previous, owned;
+   agent_tools_scope_bookmark(&previous);
+   char previous_session[128] = "";
+   if (session_id_override_active())
+      snprintf(previous_session, sizeof previous_session, "%s", session_id());
+   char long_session[128];
+   memset(long_session, 's', sizeof long_session - 1);
+   long_session[sizeof long_session - 1] = 0;
+   session_id_set_override(long_session);
+   assert(!strcmp(session_id(), long_session));
+   agent_tools_begin_turn(17);
+   agent_tools_set_snap_id(701);
+   agent_tools_set_dispatch_role(NULL);
+   agent_tools_set_active_toolset(NULL);
+   agent_tools_knowledge_write_set(1);
+   agent_tools_shell_set(1);
+   agent_tools_write_capable_set(1);
+   char denied_name[64] = "deny_original";
+   const char *denied[] = {denied_name};
+   agent_tools_denied_set(denied, 1);
+   assert(!agent_tools_scope_capture_owned(&owned));
+   assert(!strcmp(owned.session, long_session));
+   strcpy(denied_name, "changed_after_capture");
+   agent_tools_set_dispatch_role("reviewer");
+   agent_tools_set_active_toolset("review_indexed");
+   agent_tools_knowledge_write_set(0);
+   agent_tools_shell_set(0);
+   agent_tools_write_capable_set(0);
+   char *old_env = getenv("AIMEE_ACTIVE_TOOLSET") ? strdup(getenv("AIMEE_ACTIVE_TOOLSET")) : NULL;
+   assert(!setenv("AIMEE_ACTIVE_TOOLSET", "readonly", 1));
+   agent_tools_scope_restore(&owned);
+   assert(agent_tools_scope_isolated() && !agent_tools_dispatch_role());
+   assert(!agent_tools_active_toolset());
+   assert(agent_tools_get_turn() == 17 && agent_tools_get_snap_id() == 701);
+   assert(!agent_tools_readonly_delegate_blocks());
+   assert(agent_tools_shell_allowed() && agent_tools_knowledge_write_allowed());
+   assert(agent_tools_tool_denied("deny_original"));
+   assert(!agent_tools_tool_denied("changed_after_capture"));
+   /* Both admission and advertisement must ignore another turn's global env. */
+   assert(agent_tools_tool_allowed_for_role(NULL, "write_file"));
+   cJSON *tools = build_tools_array();
+   agent_tools_filter_for_role(tools, NULL);
+   assert(tools_array_has_name(tools, "write_file"));
+   cJSON_Delete(tools);
+   agent_tools_scope_restore(&previous);
+   agent_tools_scope_destroy_owned(&owned);
+   session_id_set_override(previous_session);
+   if (old_env)
+      setenv("AIMEE_ACTIVE_TOOLSET", old_env, 1);
+   else
+      unsetenv("AIMEE_ACTIVE_TOOLSET");
+   free(old_env);
+
+   agent_source_authority_snapshot_t before = {0}, first = {0}, clone = {0}, observed = {0};
+   assert(!agent_source_authority_tls_capture_checked(&before));
+   agent_source_authority_tls_set(1, "/source/owner", "src/owner.c");
+   assert(!agent_source_authority_tls_capture_checked(&first));
+   assert(!agent_source_authority_snapshot_clone(&first, &clone));
+   assert(agent_source_authority_snapshot_clone(&first, &first) < 0);
+   assert(!strcmp(first.paths, "src/owner.c"));
+   agent_source_authority_tls_set(0, "/other", "other.c");
+   agent_source_authority_snapshot_destroy(&first);
+   agent_source_authority_tls_restore(&clone);
+   assert(!clone.paths);
+   assert(!agent_source_authority_tls_capture_checked(&observed));
+   assert(observed.active && observed.authority && !strcmp(observed.root, "/source/owner"));
+   assert(!strcmp(observed.paths, "src/owner.c"));
+   agent_source_authority_snapshot_destroy(&observed);
+   agent_source_authority_tls_restore(&before);
+   puts("  PASS: owned native tool/source scopes, full session identity and environment "
+        "isolation");
+}
+
+int main(int argc, char **argv)
+{
+   if (argc == 2 && !strcmp(argv[1], "--script-rpc-admission"))
+      return script_rpc_admission_fixture_main();
+   char test_executable[MAX_PATH_LEN];
+   char *self = realpath(argv[0], test_executable);
+   assert(self);
    /* BEFORE ANYTHING ELSE, because the fixture configures the module runtime and
       starts the bus, and obs_bus refuses to be configured once it is running.
       Several tests below bring the bus up as a side effect, so a fixture started
@@ -3812,6 +4421,7 @@ int main(void)
     * here rather than silently deleting it. */
    assert(strncmp(agent_config_path(), tmp_home, strlen(tmp_home)) == 0);
    session_id_set_override("unit-test-agent");
+   test_canonical_external_run_preserves_budget_refusal();
    test_tool_surface_single_source();
    test_agent_endpoint_valid();
    test_agent_name_valid();
@@ -3827,6 +4437,7 @@ int main(void)
    test_agent_route_primary_turn_marker();
    test_agent_route_client_only_claude_excluded();
    test_agent_routing_block_reason();
+   test_agent_ingress_selected_connection_scope();
    test_agent_route_with_caps_honors_tools_enabled();
    test_agent_route_with_caps_honors_context_override();
    test_knowledge_write_gates_the_tool_policy();
@@ -3834,10 +4445,16 @@ int main(void)
    test_a_delegate_without_shell_cannot_run_commands();
    test_permissions_clamp_the_toolset();
    test_one_delegates_permissions_are_not_anothers();
+   test_owned_tool_and_source_handoff();
+   test_native_mcp_permission_admission();
+   test_script_rpc_admission_process(test_executable);
    test_provider_env_credentials_and_headers();
+   test_dispatch_carries_owner_failure_status();
    test_codex_oauth_request_creds();
+   test_codex_credentials_follow_selected_registration();
    test_codex_oauth_reads_vault_only();
    test_request_creds_snapshot_carries_vault_principal();
+   test_legacy_tmux_executes_structured_headless();
    test_agent_config_provider_cli_roundtrip();
    test_tools_enabled_capability_default();
    test_agent_default_primary_skips_disabled();
@@ -3877,8 +4494,9 @@ int main(void)
    test_agent_adapter_registry();
    test_agent_config_deletion_guard();
    test_local_synth_not_masked_by_tmux_codex();
-   test_provider_cli_shell_exec_uses_argv_not_shell();
-   test_provider_cli_shell_timeout_covers_prompt_write();
+   test_vault_api_key_lineage_and_request_binding();
+   test_codex_source_lineage_and_paired_headers();
+   test_claude_selected_vault_lineage();
    test_codex_oauth_auth_resolution();
    test_responses_parser_keeps_all_output_text_parts();
    test_responses_parser_accumulates_output_text_deltas();
@@ -3924,20 +4542,11 @@ int main(void)
    test_path_traversal_rejected();
    test_sensitive_path_rejected();
    test_symlink_escape_rejected();
-   test_compact_empty();
-   test_compact_single();
-   test_compact_two_same_role();
-   test_compact_five_same_role();
-   test_compact_mixed_roles();
-   test_compact_no_consecutive();
-   test_compact_idempotent();
-   test_compact_skips_structured_content();
-   test_compact_skips_openai_tool_results();
-   test_compact_system_role();
    test_delegation_error_guidance();
    test_cancelled_durable_job_blocks_tool_dispatch();
    test_shell_worktree_rewrite_is_applied_not_refused();
    test_delegate_bash_cancel_kills_running_tool();
+   test_bash_host_cancellation_and_closed_output_deadline();
    test_parent_write_guard_readonly_large_find();
    test_agent_trace_log_uses_db1_execution_trace();
 

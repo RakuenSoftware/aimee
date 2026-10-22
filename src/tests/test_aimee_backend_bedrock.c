@@ -53,9 +53,8 @@ static void test_build_allocation_atomicity(void)
    cJSON *tool_result = cJSON_Parse("{\"ok\":true}");
    cJSON *schema =
        cJSON_Parse("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"}}}");
-   cJSON *choice = cJSON_Parse("{\"type\":\"tool\",\"name\":\"tool\"}");
    cJSON *raw = cJSON_Parse("{\"text\":\"raw\"}");
-   assert(tool_input && tool_result && schema && choice && raw);
+   assert(tool_input && tool_result && schema && raw);
    aimee_block_t blocks[] = {
        {.type = AIMEE_BLK_TEXT, .text = "text"},
        {.type = AIMEE_BLK_TOOL_USE, .tool_id = "id", .tool_name = "tool", .tool_input = tool_input},
@@ -72,7 +71,8 @@ static void test_build_allocation_atomicity(void)
                          .n_messages = 1,
                          .tools = &tool,
                          .n_tools = 1,
-                         .tool_choice = choice,
+                         .tool_choice = AIMEE_TOOL_CHOICE_TOOL,
+                         .tool_choice_name = "tool",
                          .has_max_tokens = 1,
                          .max_tokens = 10,
                          .has_temperature = 1,
@@ -99,7 +99,6 @@ static void test_build_allocation_atomicity(void)
    cJSON_Delete(tool_input);
    cJSON_Delete(tool_result);
    cJSON_Delete(schema);
-   cJSON_Delete(choice);
    cJSON_Delete(raw);
 }
 
@@ -288,8 +287,8 @@ static void test_tool_choice(void)
    ir.tools = &tool;
    ir.n_tools = 1;
 
-   /* {type:auto} -> toolChoice == {"auto":{}} (object, NOT a bare string) */
-   ir.tool_choice = cJSON_Parse("{\"type\":\"auto\"}");
+   /* AUTO -> toolChoice == {"auto":{}} (object, NOT a bare string) */
+   ir.tool_choice = AIMEE_TOOL_CHOICE_AUTO;
    cJSON *j = bedrock_converse_build(&ir);
    cJSON *choice = obj(obj(j, "toolConfig"), "toolChoice");
    assert(choice && cJSON_IsObject(choice));
@@ -297,10 +296,17 @@ static void test_tool_choice(void)
    cJSON *autoo = obj(choice, "auto");
    assert(autoo && cJSON_IsObject(autoo));
    cJSON_Delete(j);
-   cJSON_Delete(ir.tool_choice);
 
-   /* {type:tool,name:X} -> {"tool":{"name":X}} */
-   ir.tool_choice = cJSON_Parse("{\"type\":\"tool\",\"name\":\"Read\"}");
+   /* ANY (OpenAI "required" parses to the same value) -> {"any":{}} */
+   ir.tool_choice = AIMEE_TOOL_CHOICE_ANY;
+   j = bedrock_converse_build(&ir);
+   choice = obj(obj(j, "toolConfig"), "toolChoice");
+   assert(choice && cJSON_IsObject(obj(choice, "any")));
+   cJSON_Delete(j);
+
+   /* TOOL X -> {"tool":{"name":X}} */
+   ir.tool_choice = AIMEE_TOOL_CHOICE_TOOL;
+   ir.tool_choice_name = "Read";
    j = bedrock_converse_build(&ir);
    choice = obj(obj(j, "toolConfig"), "toolChoice");
    assert(choice && cJSON_IsObject(choice));
@@ -308,15 +314,14 @@ static void test_tool_choice(void)
    assert(toolo && cJSON_IsObject(toolo));
    assert(strcmp(str(toolo, "name"), "Read") == 0);
    cJSON_Delete(j);
-   cJSON_Delete(ir.tool_choice);
+   ir.tool_choice_name = NULL;
 
-   /* unrecognized -> toolChoice OMITTED (tools still present) */
-   ir.tool_choice = cJSON_Parse("{\"type\":\"weird\"}");
+   /* NONE has no Converse spelling -> toolChoice OMITTED (tools still present) */
+   ir.tool_choice = AIMEE_TOOL_CHOICE_NONE;
    j = bedrock_converse_build(&ir);
    assert(obj(j, "toolConfig"));
    assert(!obj(obj(j, "toolConfig"), "toolChoice"));
    cJSON_Delete(j);
-   cJSON_Delete(ir.tool_choice);
 }
 
 static void test_thinking_roundtrip(void)

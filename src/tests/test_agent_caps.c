@@ -7,7 +7,54 @@
 #include "aimee.h"
 #include "agent.h"
 #include "agent_config.h"
+#include "agent_protocol.h"
 #include "model_registry.h"
+#include <pthread.h>
+
+static void *check_independent_ingress_scope(void *context)
+{
+   const agent_t *selected = context;
+   assert(agent_registry_bind_ingress_model(selected) == NULL);
+   agent_t resolved;
+   assert(!agent_registry_resolve_ingress_model(selected->model, &resolved));
+   assert(!strcmp(resolved.registration, selected->registration));
+   assert(agent_registry_resolve_ingress_model("other-account", &resolved) < 0);
+   assert(agent_registry_bind_ingress_model(NULL) == selected);
+   return NULL;
+}
+
+void test_agent_ingress_selected_connection_scope(void)
+{
+   agent_t selected = {.enabled = 1}, nested = {.enabled = 1}, resolved;
+   strcpy(selected.name, "personal");
+   strcpy(selected.registration, "personal-connection");
+   strcpy(selected.model, "native-model-id");
+   nested = selected;
+   strcpy(nested.name, "work");
+   strcpy(nested.registration, "work-connection");
+   assert(agent_registry_bind_ingress_model(&selected) == NULL);
+   const char *aliases[] = {NULL, "", "aimee", "personal", "native-model-id"};
+   for (size_t i = 0; i < sizeof aliases / sizeof aliases[0]; i++)
+   {
+      assert(!agent_registry_resolve_ingress_model(aliases[i], &resolved));
+      assert(!strcmp(resolved.registration, "personal-connection"));
+   }
+   assert(agent_registry_resolve_ingress_model("work", &resolved) < 0);
+   const agent_t *previous = agent_registry_bind_ingress_model(&nested);
+   assert(previous == &selected);
+   assert(!agent_registry_resolve_ingress_model("native-model-id", &resolved));
+   assert(!strcmp(resolved.registration, "work-connection"));
+   assert(agent_registry_resolve_ingress_model("personal", &resolved) < 0);
+   assert(agent_registry_bind_ingress_model(previous) == &nested);
+   pthread_t worker;
+   assert(!pthread_create(&worker, NULL, check_independent_ingress_scope, &nested));
+   assert(!pthread_join(worker, NULL));
+   assert(!agent_registry_resolve_ingress_model("native-model-id", &resolved));
+   assert(!strcmp(resolved.registration, "personal-connection"));
+   selected.enabled = 0;
+   assert(agent_registry_resolve_ingress_model("aimee", &resolved) < 0);
+   assert(agent_registry_bind_ingress_model(NULL) == &selected);
+}
 
 void test_agent_route_with_caps_honors_tools_enabled(void)
 {
@@ -632,31 +679,17 @@ void test_primary_turn_reaches_default_above_min_tier(void)
    strcpy(cfg.agents[0].roles[0], "explain");
    assert(agent_route(&cfg, "review") == NULL);
 
-   /* Session affinity outranks the default: a tmux agent holds a STATEFUL
-    * session, so a primary turn must not be yanked to an HTTP default and
-    * abandon it. Only cost_tier is bypassed, never the tmux preference.
-    *
-    * A tmux agent is only ROUTABLE when tmux is actually installed
-    * (agent_routing_block_reason returns MISSING_COMMAND otherwise), so this
-    * assertion is environment-dependent and is skipped rather than weakened
-    * into something that passes for the wrong reason. */
-   if (access("/usr/bin/tmux", X_OK) == 0 || access("/bin/tmux", X_OK) == 0)
-   {
-      strcpy(cfg.agents[0].roles[0], "review");
-      strcpy(cfg.agents[1].roles[0], "review");
-      strcpy(cfg.agents[1].backend, AGENT_BACKEND_TMUX_CLI);
-      strcpy(cfg.agents[1].cli_cmd, "sh"); /* on PATH so only tmux gates it */
-      assert(agent_route(&cfg, "review") == &cfg.agents[1]);
-
-      /* With no tmux peer the default wins again. */
-      cfg.agents[1].backend[0] = '\0';
-      cfg.agents[1].cli_cmd[0] = '\0';
-      assert(agent_route(&cfg, "review") == &cfg.agents[0]);
-   }
-   else
-   {
-      printf("  SKIP: tmux session-affinity assertion (tmux not installed)\n");
-   }
+   /* Canonical history owns continuity, so a historical backend spelling
+    * cannot override the selected primary. This holds without tmux installed. */
+   strcpy(cfg.agents[0].roles[0], "review");
+   strcpy(cfg.agents[1].roles[0], "review");
+   strcpy(cfg.agents[1].backend, AGENT_BACKEND_TMUX_CLI);
+   strcpy(cfg.agents[1].cli_kind, "codex");
+   strcpy(cfg.agents[1].cli_cmd, "sh");
+   assert(agent_route(&cfg, "review") == &cfg.agents[0]);
+   cfg.agents[1].backend[0] = '\0';
+   cfg.agents[1].cli_cmd[0] = '\0';
+   assert(agent_route(&cfg, "review") == &cfg.agents[0]);
 
    agent_routing_set_primary_turn(0);
    printf("  PASS: test_primary_turn_reaches_default_above_min_tier\n");

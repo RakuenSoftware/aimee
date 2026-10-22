@@ -24,6 +24,35 @@ int db1_agent_job_classify_stale(int job_id, int idle_threshold_secs, int in_too
 int db1_agent_job_cancel_by_id(int job_id, const char *reason);
 void db1_agent_job_heartbeat(int job_id);
 
+/* Bulk restart reconciliation must finish before admitting any new durable job.
+ * Keep the lock across the typed owner call: an unavailable store or lost ACK
+ * leaves admission closed, and only a confirmed success latches it open. */
+int db1_agent_job_cancel_nonterminal_on_restart(const char *reason);
+static pthread_mutex_t g_startup_lock = PTHREAD_MUTEX_INITIALIZER;
+static int g_startup_reconciled;
+
+int server_delegate_startup_reconcile(void)
+{
+   pthread_mutex_lock(&g_startup_lock);
+   int rc = 0;
+   if (!g_startup_reconciled)
+   {
+      int cancelled = db1_agent_job_cancel_nonterminal_on_restart("orphaned by server restart");
+      if (cancelled < 0)
+         rc = -1;
+      else
+      {
+         g_startup_reconciled = 1;
+         LOG_INFO("server", "delegate startup reconciliation complete");
+         if (cancelled > 0)
+            LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process",
+                     cancelled);
+      }
+   }
+   pthread_mutex_unlock(&g_startup_lock);
+   return rc;
+}
+
 /* The id of the delegation running on this thread (== the admission context handle for a
  * delegate turn). Weak so unit binaries that don't link the runtime resolve it to NULL and
  * simply skip the admission touch; the server always provides the strong definition. */

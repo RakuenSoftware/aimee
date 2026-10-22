@@ -1,8 +1,12 @@
 name: CI
 
 on:
-  # Re-run the gate on each integration tip; PR checks alone only cover the
-  # merge preview that existed when the PR ran.
+  # Test GitHub's queued integration commit without updating the PR branch.
+  merge_group:
+    types: [checks_requested]
+    branches: [testing]
+  # Push checks validate the integrated branch. merge_group checks validate
+  # the candidate that the queue will merge, using the same complete suite.
   push:
     branches: [main, testing, feature/core-modularization]
   pull_request:
@@ -21,14 +25,20 @@ on:
     # testing already matched on its base. This only adds PRs whose base is an
     # agent branch, which previously matched nothing.
     #
-    # `edited` re-runs the gate when a PR title/body is edited after open, so
-    # attribution can't be added post-hoc without failing CI.
+    # Keep retargeted PRs covered. Metadata-only edits queue without cancelling
+    # running source checks; PR attribution runs independently on every edit.
     types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  # A title/body edit must not discard a running source qualification. Unknown
+  # edits and base changes still restart it. Attribution has its own concurrency
+  # group, so live metadata is checked immediately while source CI continues.
+  cancel-in-progress: >-
+    ${{ github.event_name != 'pull_request' || github.event.action != 'edited' ||
+        github.event.changes.base != null ||
+        (github.event.changes.title == null && github.event.changes.body == null) }}
 
 permissions:
   # Every CI job is deliberately read-only: jobs only check out, build, and
@@ -49,10 +59,18 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install cppcheck dependencies
         run: sudo apt-get update && sudo apt-get install -y cppcheck build-essential pkg-config libpq-dev libssl-dev libpam0g-dev zlib1g-dev libzstd-dev libp11-kit-dev python3-yaml
+      - name: Restore cppcheck analysis cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/cppcheck-build
+          key: cppcheck-build-v1-${{ matrix.shard }}-${{ github.sha }}
+          restore-keys: |
+            cppcheck-build-v1-${{ matrix.shard }}-
       - name: Analyze source batch
         working-directory: src
         env:
           SHARD: ${{ matrix.shard }}
+          CPPCHECK_BUILD_DIR: ${{ runner.temp }}/cppcheck-build
         run: make cppcheck STATIC_ANALYSIS_STRICT=1 CPPCHECK_ARGS="--shard-index $SHARD --shard-count 8 --report build/cppcheck/cppcheck-$SHARD.xml"
       - name: Retain diagnostics for the combined ratchet
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -154,31 +172,11 @@ jobs:
         uses: ./.github/actions/install-audit-sqlite
       - name: Install script test dependencies
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential pkg-config libssl-dev zlib1g-dev python3-yaml openssh-client
-      - name: Build the thin client required by proxy regression tests
-        run: make -C src -j2 ../aimee
+      # The thin-client proxy suite is the only script test that needs a built
+      # client, and `build` runs it with real Codex required, so it is skipped
+      # here and this job builds nothing.
       - name: Run every discovered script regression test
-        run: make -C src script-tests
-
-  sanitizer-gate:
-    name: Address and undefined-behavior sanitizers
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Install fixed audit runtime
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/install-audit-sqlite
-      - name: Install native build dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q gcc make libsqlite3-dev libcurl4-openssl-dev \
-            libpam0g-dev libssl-dev libp11-kit-dev libpq-dev
-      - name: Run the complete native test registry under ASan and UBSan
-        working-directory: src
-        env:
-          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
-          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-        run: make sanitizers
+        run: make -C src script-tests SCRIPT_TESTS_SKIP=test_thin_client_proxy.py
 
   # Keep the workflow itself unfiltered: GitHub leaves required checks pending
   # when an entire workflow is skipped by a path filter. Job-level skips report
@@ -262,107 +260,6 @@ jobs:
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
           echo "docs_changed=$docs_changed" >> "$GITHUB_OUTPUT"
           echo "docs_only=$docs_only ($file_count changed file(s))"
-
-  no-coauthor-trailers:
-    # Standing directive: commits/PRs must never carry AI co-authorship trailers.
-    # Scans only the PR's NEW commits (base..head), so existing history is
-    # grandfathered while any newly introduced trailer fails the PR.
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-      - name: Reject AI co-authorship trailers in new commits
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: |
-          range="${BASE_SHA}..${HEAD_SHA}"
-          # Match the actual trailer forms only (anchored), not prose that happens
-          # to mention them: a co-authorship trailer line, or the markdown-link
-          # generated-with attribution line.
-          #
-          # Every alternative is line-anchored, which the generated-with one was
-          # NOT until now -- so a commit message describing this check tripped
-          # it, which is exactly how this was found. Anchoring costs nothing:
-          # both are trailer lines by construction, and the leading
-          # [[:space:]]* still allows an indented one.
-          #
-          # Session back-links are the same thing wearing a different hat, and
-          # they were getting through: assistant harnesses append a
-          # "<tool>-Session: <url>" trailer, or a bare session permalink on its
-          # own line, and neither matches the two forms above. A PR landed here
-          # carrying one in all three commits AND the body before this was
-          # widened. The URL alternative is anchored to the session path rather
-          # than the bare host so that citing a docs page is still fine, and the
-          # trailer alternative is line-anchored so prose naming the trailer (a
-          # commit that FIXES this check, for instance) does not trip it.
-          ATTRIBUTION_RE='^[[:space:]]*co-authored-by:'
-          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*generated with \[(claude|codex)'
-          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*(claude|codex|chatgpt|copilot)-session:'
-          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*https?://[^[:space:]]*/(code/)?session[_/-]'
-          export ATTRIBUTION_RE
-          # Immutable commits that entered testing carrying a trailer. They are
-          # grandfathered only for the testing -> main integration PR; exact SHAs
-          # keep the exception from hiding descendants or any newly introduced
-          # trailer.
-          #
-          # These are not ours to strip. The trailer is added by GITHUB, not by
-          # aimee: the WFE authors its commits as aimee-wfe <wfe@aimee.local>, so
-          # squash-merging a PR that mixes its commits with a human's produces a
-          # Co-authored-by line for the second author. Rewriting them would rewrite
-          # published history on testing to fix a message GitHub generated.
-          #
-          # This list grows once per promote until that is addressed at the source
-          # (have the WFE author as the operator, or strip the trailer from the
-          # squash message at merge time). Growth is the signal that it has not
-          # been.
-          hits=$(
-            for commit in $(git rev-list "$range"); do
-              if [ "$BASE_REF" = main ] && [ "$HEAD_REF" = testing ]; then
-                case "$commit" in
-                  9f327867cd62a14e50e9a41af9b871fc7792e4bd|003255217a10a8559e47bf0b6fedeb2c0faa6cce|\
-                  d173e054353a1069bd07a307477ad281a3d39d59|0b694e1970eab860b503b433bb69f708fc445abc|\
-                  d978a2d05356b6f6d8821f4230da5f1de9fe71c0|59d5d9e419fd64326961c5ce8086c43abc09a797|\
-                  af58300e9fd16858ad3195748f4da50bbdcd0e3c|ef9c722bab2b149dadd0fd13c3d3478a4cfda5cf|\
-                  41fe8fbae98386cc9c2895810d284bcf902f8c8e)
-                    continue
-                    ;;
-                esac
-              fi
-              git show -s --format='%H%n%B' "$commit" \
-                | grep -inE "$ATTRIBUTION_RE" || true
-            done
-          )
-          if [ -n "$hits" ]; then
-            echo "::error::New commit(s) in $range carry AI co-authorship trailers; remove them (standing directive)."
-            echo "$hits"
-            exit 1
-          fi
-          echo "no co-authorship trailers in $range — ok"
-      - name: Reject AI attribution in the PR title/body
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          # Same set as the commit scan above; kept in step with it deliberately,
-          # because a body-only session link is the easy way for one to land.
-          ATTRIBUTION_RE='^[[:space:]]*co-authored-by:'
-          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*generated with \[(claude|codex)'
-          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*(claude|codex|chatgpt|copilot)-session:'
-          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*https?://[^[:space:]]*/(code/)?session[_/-]'
-          hits=$(printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" \
-                 | grep -inE "$ATTRIBUTION_RE" || true)
-          if [ -n "$hits" ]; then
-            echo "::error::The PR title/body carries AI attribution; remove it (standing directive)."
-            echo "$hits"
-            exit 1
-          fi
-          echo "no AI attribution in PR title/body — ok"
 
   lint:
     needs: change-scope
@@ -456,24 +353,9 @@ jobs:
       - name: Confirm browser failures block the required gate
         run: python3 -I scripts/tests/test_frontend_release_gate.py
 
-  # Go unit tests, which until now ran in NO job that a pull request into testing
-  # could reach.
-  #
-  # The only CI invocation of `go test` over server-go is in c-repository-pins,
-  # and that workflow says so plainly: "main ONLY, on both triggers... Nothing
-  # here runs for a branch or a PR targeting testing." The `go-unit-tests` make
-  # target exists and covers all three Go modules, but its only caller is
-  # `verify-local`, a developer target that no workflow runs. So every Go package
-  # in server-go, runtime-web and control-web -- the bus, every Go module, the
-  # storage wire -- was gated by nothing on the ordinary PR path, and passed only
-  # because people ran it by hand.
-  #
-  # It uses the make target rather than a list of packages here. A list is the
-  # failure this job exists to fix, one level up: c-repository-pins enumerates
-  # `./bus ./modules/... ./cmd/aimee-module`, so a new top-level Go package in
-  # server-go falls outside it silently. `go-unit-tests` discovers module dirs by
-  # wildcard and runs `./...` in each, so a new package is covered by
-  # construction rather than by somebody remembering.
+  # The Go unit job runs ./... in every discovered module. The separate
+  # Module exports and runtime validation workflow also tests the CGO-free
+  # runtime bundle, whose narrower package list cannot replace this coverage.
   memory-backends:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
@@ -487,7 +369,10 @@ jobs:
           cache-dependency-path: server-go/go.sum
       - name: Contract, native bridge, external adapters and egress race tests
         working-directory: server-go
-        run: go test -race ./memory ./modules/memory ./modules/memory/backendstore ./modules/memory/cognee ./modules/memory/hillock ./modules/egress
+        # ./modules/memory is not listed: postgres-knowledge-replay runs that whole
+        # package with -race AND a real database, which this lane does not have,
+        # so running it here again only repeated the database-free subset.
+        run: go test -race ./memory ./modules/memory/backendstore ./modules/memory/cognee ./modules/memory/hillock ./modules/egress
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.13"
@@ -587,6 +472,37 @@ jobs:
       - name: Reject reachable Go vulnerabilities
         run: make -C src go-vulncheck GOVULNCHECK="$(go env GOPATH)/bin/govulncheck"
 
+  # The Rust reference bus client: the third independent client of the single
+  # C host. Its own job because it needs a toolchain no other job installs, and
+  # folded into the `unit-tests` aggregate below so it gates.
+  rust-bus-tests:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # Pinned in rust/rust-toolchain.toml so coverage cannot change with a
+      # runner image bump. rustup is preinstalled on the image; the toolchain
+      # it installs is the pinned one, not the image's.
+      - name: Install the pinned Rust toolchain
+        working-directory: rust
+        run: |
+          channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          test -n "$channel"
+          rustup toolchain install "$channel" --profile minimal --component rustfmt,clippy
+          cargo --version
+      - name: Fetch crates
+        working-directory: rust
+        run: |
+          for attempt in 1 2 3 4 5; do
+            cargo fetch --locked && break
+            test "$attempt" -lt 5 || exit 1
+            sleep $((attempt * 5))
+          done
+      - name: Rust bus client conformance
+        run: make -C src rust-bus-tests
+
   build:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
@@ -683,11 +599,14 @@ jobs:
       # A configured remote is an exclusive transport: no local probe, no local
       # execution, no local fallback. The test is black-box (temp HOME, a local
       # HTTP stand-in, and a unix-socket sentinel that must never be contacted),
-      # needs only the client this job already built, and runs in seconds. It
+      # uses the real client and strict native-proxy fixture, and runs in seconds. It
       # also lives in the `integration-tests` make target, which no workflow
       # invokes — without this step the guarantee is unenforced in CI.
       - name: Thin-client remote exclusivity
-        run: python3 scripts/test-thin-client-remote-exclusive.py ./aimee
+        run: |
+          make -C src -j2 build/obj/tests/unit-test-cli-native-bridge
+          python3 scripts/test-thin-client-remote-exclusive.py ./aimee \
+            --native-proxy-fixture src/build/obj/tests/unit-test-cli-native-bridge
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
@@ -697,6 +616,16 @@ jobs:
         env:
           AIMEE_TEST_REQUIRE_CODEX: '1'
         run: python3 scripts/tests/test_thin_client_proxy.py -v
+      - name: Native Codex canonical adoption, isolated launch and restart
+        run: |
+          make -C src -j2 build/obj/tests/unit-test-cli-codex
+          # The descriptor launcher attests the actual pinned executable, not
+          # npm's JavaScript dispatcher. Resolve the same platform package used
+          # by the installed Codex entry point before running all five modes.
+          codex_native=$(node -e 'const p=require("node:path"); const pkg=require.resolve("@openai/codex-linux-x64/package.json",{paths:[process.argv[1]]}); process.stdout.write(p.join(p.dirname(pkg),"vendor","x86_64-unknown-linux-musl","bin","codex"))' "$(npm root -g)/@openai/codex")
+          python3 src/tests/test_codex_native_adoption.py \
+            --adapter-binary src/build/obj/tests/unit-test-cli-codex \
+            --codex-binary "$codex_native"
 
   build-integrity:
     needs: change-scope
@@ -725,7 +654,7 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make \
+          timeout 240 sudo apt-get install -y -q gcc make cmake \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Build integrity
@@ -736,6 +665,14 @@ jobs:
       # because they were only ever run by hand — see scripts/validate-aimee-artifacts.sh.
       - name: Build the shipping set
         run: cd src && make -j"$(nproc)" all
+      - name: Native CMake canonical capture fixtures
+        run: |
+          cmake -S . -B build/native-ir-cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF
+          cmake --build build/native-ir-cmake --parallel "$(nproc)" \
+            --target test_server_chat_ir test_server_session_log test_server_native_runtime test_server_native_replay test_server_learning_application
+          ctest --test-dir build/native-ir-cmake \
+            -R '^test_server_(chat_ir|session_log|native_runtime|native_replay|learning_application)$' --output-on-failure
       - name: Artifact integrity (removed capabilities stay removed)
         run: bash scripts/validate-aimee-artifacts.sh
 
@@ -743,8 +680,14 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    name: unit-tests (${{ matrix.label }}/2)
+    timeout-minutes: 45
+    name: unit-tests (${{ matrix.label }}/4)
+    # The sqlite-shim registry runs ONCE, under ASan and UBSan. It used to run
+    # twice: plain here, then again unsharded in a separate sanitizer job that
+    # took ~20 minutes on its own. The real-Postgres shards below still run the
+    # same binaries at production optimization, so a defect that only shows
+    # without instrumentation is not left uncovered, and every shim-path test
+    # now also runs with leak, address and undefined-behavior detection.
     strategy:
       fail-fast: false
       matrix:
@@ -753,6 +696,10 @@ jobs:
             label: 1
           - shard_index: 1
             label: 2
+          - shard_index: 2
+            label: 3
+          - shard_index: 3
+            label: 4
     # Live Postgres sidecar so unit-test-aimee-db and unit-test-memory-postgres
     # exercise the real libpq path (placeholder rewriter, FTS5→tsvector
     # translation, ON CONFLICT targets, schema apply) instead of skipping
@@ -760,6 +707,8 @@ jobs:
     # memories_code_fts trigram index (see src/schema/postgres.sql).
     env:
       AIMEE_TEST_PG_URL: postgres://aimee:aimee@localhost:5432/aimee_test
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: "true"
     steps:
@@ -771,10 +720,10 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ~/.cache/ccache
-          key: unit-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-${{ github.run_id }}
+          key: unit-asan-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-${{ github.run_id }}
           restore-keys: |
-            unit-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-
-            unit-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-
+            unit-asan-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-
+            unit-asan-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -847,12 +796,15 @@ jobs:
           ccache --max-size=750M
           ccache --zero-stats
           cd src
+          # `sanitizers` is `unit-tests` in its own object tree with
+          # -fsanitize=address,undefined; the shard variables pass through.
           make -j"$(nproc)" CC="ccache gcc" \
             GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
-            UNIT_TEST_SHARD_COUNT=2 \
+            UNIT_TEST_SHARD_COUNT=4 \
             UNIT_TEST_SHARD_INDEX=${{ matrix.shard_index }} \
             UNIT_TEST_SKIP_P1=1 \
-            unit-tests
+            UNIT_TEST_SKIP_PROXY=1 \
+            sanitizers
           ccache --show-stats
 
   # The same unit-test binaries, linked against real libpq instead of the sqlite
@@ -878,17 +830,26 @@ jobs:
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    name: unit-tests-pg (${{ matrix.label }}/3)
+    name: unit-tests-pg (${{ matrix.label }})
+    # The live workflow database/API suite used to ride on shard 1, making it
+    # ~9 minutes against ~4 for the others and holding up the required
+    # unit-tests aggregate. It has its own leg now.
     strategy:
       fail-fast: false
       matrix:
         include:
           - shard_index: 0
-            label: 1
+            label: 1/3
+            part: unit
           - shard_index: 1
-            label: 2
+            label: 2/3
+            part: unit
           - shard_index: 2
-            label: 3
+            label: 3/3
+            part: unit
+          - shard_index: 0
+            label: workflow-db
+            part: workflow
     env:
       # The template the per-process clones are copied from. Every test binary
       # does CREATE DATABASE <template>_p<pid> TEMPLATE <template>, so this user
@@ -911,10 +872,10 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ~/.cache/ccache
-          key: unit-pg-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-${{ github.run_id }}
+          key: unit-pg-ccache-v1-${{ runner.os }}-${{ matrix.part }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-${{ github.run_id }}
           restore-keys: |
-            unit-pg-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-
-            unit-pg-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-
+            unit-pg-ccache-v1-${{ runner.os }}-${{ matrix.part }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-
+            unit-pg-ccache-v1-${{ runner.os }}-${{ matrix.part }}-${{ matrix.shard_index }}-
       - name: Start Postgres (pgvector) with pull retry
         # Same image and retry rationale as unit-tests: the runner pulls service
         # images with no retry, so a transient Docker Hub timeout would fail a
@@ -948,6 +909,7 @@ jobs:
           done
           echo "Postgres did not become ready in time"; docker logs aimee-pg-tpl || true; exit 1
       - name: Unit tests (real Postgres)
+        if: matrix.part == 'unit'
         run: |
           # Same deterministic root-owned helpers the sqlite shards install: the
           # trust-walk tests assert on ownership and mode, which runner image
@@ -976,10 +938,11 @@ jobs:
             UNIT_TEST_SHARD_COUNT=3 \
             UNIT_TEST_SHARD_INDEX=${{ matrix.shard_index }} \
             UNIT_TEST_SKIP_P1=1 \
+            UNIT_TEST_SKIP_PROXY=1 \
             unit-tests-pg
           ccache --show-stats
       - name: Live workflow database and API tests
-        if: matrix.shard_index == 0
+        if: matrix.part == 'workflow'
         env:
           AIMEE_TEST_STORE_URL: postgres://aimee:aimee@localhost:5432/aimee
         run: |
@@ -989,11 +952,19 @@ jobs:
         if: failure()
         run: docker logs --tail 200 aimee-pg-tpl || true
 
+  # Two halves on two runners against identical databases: the native replay
+  # (~4 min) and the Go memory owner/evaluator replay plus the frozen
+  # reliability check (~8 min) used to run back to back on one.
   postgres-knowledge-replay:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    name: postgres-knowledge-replay (${{ matrix.part }})
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [native, go]
     env:
       AIMEE_KB_STORE_REPLAY_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_postgres_ci
       AIMEE_MEMORY_RUNTIME_URL: postgres://aimee_store_runtime:runtime_fixture@127.0.0.1:5432/aimee_postgres_ci
@@ -1057,28 +1028,54 @@ jobs:
           sed 's/__EMBED_DIM__/384/g' src/modules/kb/c/schema.sql | psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f -
           psql -X -v ON_ERROR_STOP=1 "$AIMEE_KB_STORE_REPLAY_URL" -f src/modules/kb/c/schema_grants.sql
       - name: Verify persisted erasure state upgrade and idempotence
+        if: matrix.part == 'native'
         run: python3 tests/e2e/knowledge-schema-upgrade.py
+      - name: Replay canonical session log and harness resume ownership
+        working-directory: server-go
+        env:
+          AIMEE_TEST_PG_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_postgres_ci
+        run: go test -race -count=1 ./modules/aimee/families -run '^Test(SessionIR.*|LearningProjectionPostgres.*|SessionNativeLive.*|SessionPrimaryLive.*)$'
       - name: Replay memory ownership and PostgreSQL sessions
+        if: matrix.part == 'native'
         run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 postgres-knowledge-replay
       - name: Replay Go memory ownership and isolated evaluator contracts
-        # Report memory independently when an earlier PostgreSQL assertion fails.
-        # Failed setup still fails this required job; no checks are waived.
-        if: ${{ !cancelled() }}
-        run: make -C src GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 memory-owner-replay-check
+        if: matrix.part == 'go'
+        run: |
+          make -C src GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+            MEMORY_OWNER_REPLAY_JSON="$RUNNER_TEMP/memory-owner-replay.json" \
+            memory-owner-replay-check
+      # The frozen MR-18 reliability invariants. They used to run in a separate
+      # memory-retrieval-eval job that re-ran 144 of the cases the step above
+      # just executed (./modules/memory, aimee-memory-eval and aimee-module,
+      # all with -race and REQUIRED=1), plus a hand-picked subset of
+      # ./modules/memory a third time. The checker now verifies those packages
+      # from the recorded run and executes only the packages that run nowhere
+      # else with a database: execution-policy and aimee/families.
+      - name: Frozen memory reliability invariants (no skipped cases)
+        if: matrix.part == 'go'
+        env:
+          PGPASSWORD: aimee
+          AIMEE_TEST_PG_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_db1
+          AIMEE_DB_TEST_REQUIRED: '1'
+          AIMEE_MEMORY_REPLAY_REQUIRED: '1'
+        run: |
+          createdb -h 127.0.0.1 -U aimee memory_db1
+          python3 -m unittest benchmarks.tests.test_answerability benchmarks.tests.test_reliability_experiment
+          python3 scripts/check_memory_reliability_release.py \
+            --go-events "$RUNNER_TEMP/memory-owner-replay.json" \
+            --output "$RUNNER_TEMP/memory-reliability-release.json"
   # This is part of the protected unit-test aggregate below. The fake LSP peer
   # proves framing; these pinned providers prove what the shipping client can
   # and cannot do with real protocol implementations before a PR reaches main.
   lsp-real-providers:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    # The Linux leg runs everywhere. The macOS leg runs where the macOS thin
+    # client is gated: pull requests into main, pushes and the merge queue.
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-24.04
-            artifact: linux
-          - os: macos-latest
-            artifact: macos
+        include: ${{ fromJSON((github.event_name != 'pull_request' || github.base_ref == 'main') && '[{"os":"ubuntu-24.04","artifact":"linux"},{"os":"macos-latest","artifact":"macos"}]' || '[{"os":"ubuntu-24.04","artifact":"linux"}]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -1179,7 +1176,7 @@ jobs:
   # makes the already-separate real-Postgres RLS gate part of that required
   # result instead of running it redundantly in every unit build.
   unit-tests:
-    needs: [change-scope, unit-test-shards, unit-test-shards-pg, postgres-knowledge-replay, p1-rls-gate, go-unit-tests, memory-backends, frontend-tests, lsp-real-providers]
+    needs: [change-scope, unit-test-shards, unit-test-shards-pg, postgres-knowledge-replay, p1-rls-gate, go-unit-tests, rust-bus-tests, memory-backends, frontend-tests, lsp-real-providers]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1193,6 +1190,7 @@ jobs:
           POSTGRES_REPLAY_RESULT: ${{ needs.postgres-knowledge-replay.result }}
           P1_RESULT: ${{ needs.p1-rls-gate.result }}
           GO_RESULT: ${{ needs.go-unit-tests.result }}
+          RUST_BUS_RESULT: ${{ needs.rust-bus-tests.result }}
           MEMORY_BACKENDS_RESULT: ${{ needs.memory-backends.result }}
           FRONTEND_RESULT: ${{ needs.frontend-tests.result }}
           LSP_REAL_RESULT: ${{ needs.lsp-real-providers.result }}
@@ -1229,6 +1227,10 @@ jobs:
             echo "Go unit-test result: $GO_RESULT" >&2
             exit 1
           }
+          [ "$RUST_BUS_RESULT" = success ] || {
+            echo "Rust bus client result: $RUST_BUS_RESULT" >&2
+            exit 1
+          }
           [ "$FRONTEND_RESULT" = success ] || {
             echo "Frontend unit/browser result: $FRONTEND_RESULT" >&2
             exit 1
@@ -1237,7 +1239,7 @@ jobs:
             echo "Real-provider LSP result: $LSP_REAL_RESULT" >&2
             exit 1
           }
-          echo "All unit-test shards (sqlite and real Postgres), PostgreSQL session replay, the P1 RLS gate, the Go unit tests, frontend unit/browser tests, and the real-provider LSP baseline passed."
+          echo "All unit-test shards (sqlite and real Postgres), PostgreSQL session replay, the P1 RLS gate, the Go unit tests, the Rust bus client, frontend unit/browser tests, and the real-provider LSP baseline passed."
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.
@@ -1352,90 +1354,20 @@ jobs:
             -v "$PWD:/src" -v /tmp/mint-job.sh:/tmp/mint-job.sh:ro \
             ubuntu:24.04 bash /tmp/mint-job.sh
 
-  # BLOCKING. The OIDC relying-party login against a REAL identity provider.
+  # The live authorization rigs: write-tier enforcement, PAM login, the §11
+  # residual criteria, and the OIDC login against a real identity provider.
   #
-  # WHY A SEPARATE JOB FROM THE UNIT SUITE. Every unit test stubs the token-endpoint
-  # POST. That is right for them — a socket in a unit test is a flake — but it left a
-  # class of defect entirely uncovered, and one was found the first time this ran for
-  # real: kb's HTTP client discarded every non-2xx body, so the token exchange's DENIED
-  # result was UNREACHABLE and every identity-provider refusal surfaced as
-  # "unparseable response". A unit test cannot see that, because a stub returns
-  # whatever it is told to.
-  #
-  # It is also the ONLY thing covering `.deliver_error_body = 1` in the exchange:
-  # removing that line passes the entire unit suite, and is caught here.
-  #
-  # What this exercises that nothing else does: a real TLS handshake trusted via the
-  # system CA bundle only, the IdP echoing kb's state, a real client-secret-basic form
-  # POST, a real RS256 id_token verified by KID against a live JWKS that also carries
-  # an encryption key, the audience override, the nonce arriving inside a signed
-  # payload, and the IdP refusing both a replayed code and a wrong PKCE verifier.
-  oidc-login-live:
+  # They were four jobs, and each spent ~2.5 minutes on apt, a Postgres pull and
+  # `make all` to run 40-60 seconds of rig. They share one build and one Postgres
+  # here. Isolation is unchanged where it matters: each rig uses its own ports,
+  # database and AIMEE_HOME (scripts/lib/aimee-live-env.sh), and restores the
+  # host state it touches. Every rig runs even when an earlier one fails, so one
+  # run still reports all four verdicts.
+  live-auth-rigs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Install fixed audit runtime
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/install-audit-sqlite
-      - name: Install dependencies
-        # pkg-config, libzstd-dev and zlib1g-dev for the same reasons as the mint job:
-        # PQ_CFLAGS comes from pkg-config, and L_KB links -lzstd -lz.
-        run: |
-          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev libzstd-dev zlib1g-dev python3 curl ca-certificates
-      - name: Start the identity provider
-        id: idp
-        run: |
-          out=$(sudo bash scripts/oidc-live-idp-up.sh /tmp/aimee-oidc-idp)
-          echo "$out"
-          echo "$out" | grep '^CA_FILE=' >> "$GITHUB_OUTPUT"
-      - name: Trust the IdP's CA, and resolve its name
-        # kb's egress client anchors trust ONLY in the system bundle (it ignores
-        # SSL_CERT_FILE on purpose), so the CA goes into the bundle rather than an env
-        # var. /etc/hosts because the certificate names idp.aimee.test and the client
-        # verifies against that name.
-        run: |
-          sudo cp "${{ steps.idp.outputs.CA_FILE }}" /usr/local/share/ca-certificates/aimee-test-idp-ca.crt
-          sudo update-ca-certificates
-          echo "127.0.0.1 idp.aimee.test" | sudo tee -a /etc/hosts
-      - name: Build the live driver
-        # Out of `all` on purpose: a driver, not a shipped binary. It links the real
-        # token-exchange POST, which is why that call lives in its own translation unit
-        # — everything else links the codec without dragging in TLS.
-        run: cd src && make -j$(nproc) oidc-login-live
-      - name: The login, end to end, against the real IdP
-        run: sudo -E bash scripts/run-oidc-login-live.sh 127.0.0.1
-      - name: IdP logs on failure
-        if: failure()
-        run: docker logs aimee-oidc-idp 2>&1 | tail -60
-
-  # BLOCKING. Does a minted identity token's TIER actually gate a real write?
-  #
-  # WHY IT IS HERE. This is the sentence acceptance §11 opens with, and until this
-  # job nothing in CI asked it. identity-mint-e2e mints a token and checks its
-  # STRUCTURE, then discards it — it never presents one to a server. The unit tests
-  # verify tokens with the JWKS handed to them directly. The grant rigs drive the
-  # admin routes over UDS, which is structurally EXEMPT from the gate. So every
-  # green build so far proved grant ADMINISTRATION and left ENFORCEMENT — the point
-  # of the feature — untested.
-  #
-  # It is blocking because the failure it catches is silent: a gate that stops
-  # refusing still returns 200, and every other job stays green.
-  #
-  # Needs a real Postgres (kb will not boot without one) and root: the JWKS trust
-  # bundle must be a root-owned 0600 single-link file or the server refuses to load
-  # it, which is a property worth keeping rather than relaxing for CI.
-  write-tier-enforce-live:
-    needs: change-scope
-    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install fixed audit runtime
@@ -1449,81 +1381,13 @@ jobs:
             echo "docker pull $img failed (attempt $attempt/5); backing off"
             sleep $((attempt * 10))
           done
-          docker run -d --name aimee-enforce-pg --network host \
+          docker run -d --name aimee-live-pg --network host \
             -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_enforce_ci \
             "$img"
       - name: Install dependencies
-        # pkg-config, libzstd-dev and zlib1g-dev for the same reasons as the mint job:
-        # PQ_CFLAGS comes from pkg-config, and L_KB/L_SERVER link -lzstd -lz.
-        run: |
-          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates
-      - name: Wait for Postgres
-        run: |
-          for i in $(seq 1 40); do
-            docker exec aimee-enforce-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
-            sleep 2
-          done
-          echo "Postgres did not become ready in time"; docker logs aimee-enforce-pg || true; exit 1
-      - name: Build the stack and the enforcement driver
-        # aimee-kb FORKS aimee-kb-resolver from beside its own executable, so `all` is
-        # required rather than just the three obvious binaries — that omission is what
-        # broke oidc-login-live on its first real runner while passing locally.
-        # The driver target is a ../-prefixed PATH with a convenience alias; it is out
-        # of `all` on purpose, being a rig and not a shipped binary.
-        run: cd src && make -j"$(nproc)" all && make -j"$(nproc)" write-tier-enforce-live
-      - name: The tier gate, end to end
-        # Root for the trust bundle; -E so the build's environment survives sudo. The
-        # connecting role must be a superuser (the pgvector image's POSTGRES_USER is
-        # one) because the rig provisions its own throwaway database and extensions.
-        run: sudo -E bash scripts/run-write-tier-enforce-live.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_enforce_ci
-      - name: Postgres logs on failure
-        if: failure()
-        run: docker logs aimee-enforce-pg 2>&1 | tail -60
-
-  # BLOCKING. The PAM half of acceptance §11, against a real PAM stack.
-  #
-  # WHY IT IS HERE. §11 requires the happy path on BOTH identity paths. OIDC has a
-  # live rig and a blocking job; PAM had neither. Its only coverage is
-  # test_kb_http_identity_login.c, which cannot call PAM at all — so "does this
-  # authenticate a real OS user on a real host?" was never asked. §10 phase 5
-  # flagged precisely this ("a working pam_unix-backed service file and two known
-  # test users") and it was never closed.
-  #
-  # The failure modes are ones no unit test can see: wrong PAM service name, missing
-  # service file, or kb unable to read /etc/shadow. Each returns "authentication
-  # failed" for EVERY user — deliberately indistinguishable from a wrong password,
-  # which is exactly what makes it easy to ship broken and hard to notice.
-  #
-  # It needs no vault chain: post_login_pam checks the password BEFORE filing a mint
-  # intent, so a 401 (credential rejected) separates cleanly from a 403 (accepted,
-  # then refused for want of a grant). Runner-created throwaway accounts and a
-  # Postgres for kb to boot against are the whole fixture.
-  pam-login-live:
-    needs: change-scope
-    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Install fixed audit runtime
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/install-audit-sqlite
-      - name: Start Postgres (pgvector) with pull retry
-        run: |
-          img=pgvector/pgvector:pg18
-          for attempt in 1 2 3 4 5; do
-            docker pull "$img" && break
-            echo "docker pull $img failed (attempt $attempt/5); backing off"
-            sleep $((attempt * 10))
-          done
-          docker run -d --name aimee-pam-pg --network host \
-            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_pam_ci \
-            "$img"
-      - name: Install dependencies
+        # pkg-config, libzstd-dev and zlib1g-dev: PQ_CFLAGS comes from pkg-config,
+        # and L_KB/L_SERVER link -lzstd -lz. libpam-modules and passwd for the
+        # PAM rig's throwaway accounts.
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
@@ -1534,97 +1398,151 @@ jobs:
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 40); do
-            docker exec aimee-pam-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            docker exec aimee-live-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
             sleep 2
           done
-          echo "Postgres did not become ready in time"; docker logs aimee-pam-pg || true; exit 1
-      - name: Build the stack
-        # `all` rather than aimee-kb alone: kb forks aimee-kb-resolver from beside its
-        # own executable.
-        run: cd src && make -j"$(nproc)" all
+          echo "Postgres did not become ready in time"; docker logs aimee-live-pg || true; exit 1
+      - name: One database per rig
+        run: |
+          for db in aimee_pam_ci aimee_resid_ci; do
+            docker exec aimee-live-pg createdb -U aimee "$db"
+          done
+      - name: Build the stack and the rig drivers
+        id: build
+        # aimee-kb FORKS aimee-kb-resolver from beside its own executable, so `all`
+        # is required rather than just the obvious binaries. The drivers are
+        # ../-prefixed paths with convenience aliases, out of `all` on purpose:
+        # rigs, not shipped binaries. The OIDC driver links the real token-exchange
+        # POST, which is why that call lives in its own translation unit.
+        run: cd src && make -j"$(nproc)" all && make -j"$(nproc)" write-tier-enforce-live oidc-login-live
+
+      # Does a minted identity token's TIER actually gate a real write?
+      #
+      # WHY IT IS HERE. This is the sentence acceptance §11 opens with, and until this
+      # job nothing in CI asked it. identity-mint-e2e mints a token and checks its
+      # STRUCTURE, then discards it — it never presents one to a server. The unit tests
+      # verify tokens with the JWKS handed to them directly. The grant rigs drive the
+      # admin routes over UDS, which is structurally EXEMPT from the gate. So every
+      # green build so far proved grant ADMINISTRATION and left ENFORCEMENT — the point
+      # of the feature — untested.
+      #
+      # It is blocking because the failure it catches is silent: a gate that stops
+      # refusing still returns 200, and every other job stays green.
+      #
+      # Needs a real Postgres (kb will not boot without one) and root: the JWKS trust
+      # bundle must be a root-owned 0600 single-link file or the server refuses to load
+      # it, which is a property worth keeping rather than relaxing for CI.
+      #
+      # Root for the trust bundle (a root-owned 0600 single-link file); -E so the
+      # build's environment survives sudo. The rig provisions its own throwaway
+      # database, so the connecting role is the image's superuser.
+      - name: The tier gate, end to end
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: sudo -E bash scripts/run-write-tier-enforce-live.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_enforce_ci
+
+      # The PAM half of acceptance §11, against a real PAM stack.
+      #
+      # WHY IT IS HERE. §11 requires the happy path on BOTH identity paths. OIDC has a
+      # live rig and a blocking job; PAM had neither. Its only coverage is
+      # test_kb_http_identity_login.c, which cannot call PAM at all — so "does this
+      # authenticate a real OS user on a real host?" was never asked. §10 phase 5
+      # flagged precisely this ("a working pam_unix-backed service file and two known
+      # test users") and it was never closed.
+      #
+      # The failure modes are ones no unit test can see: wrong PAM service name, missing
+      # service file, or kb unable to read /etc/shadow. Each returns "authentication
+      # failed" for EVERY user — deliberately indistinguishable from a wrong password,
+      # which is exactly what makes it easy to ship broken and hard to notice.
+      #
+      # It needs no vault chain: post_login_pam checks the password BEFORE filing a mint
+      # intent, so a 401 (credential rejected) separates cleanly from a 403 (accepted,
+      # then refused for want of a grant). Runner-created throwaway accounts and a
+      # Postgres for kb to boot against are the whole fixture.
+      #
+      # Root because pam_unix reads /etc/shadow and the rig creates and deletes
+      # throwaway accounts. It restores every piece of host state it touches.
       - name: PAM login, end to end, against real host accounts
-        # Root because pam_unix reads /etc/shadow and the rig creates and deletes
-        # throwaway accounts. It restores every piece of host state it touches.
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: sudo -E bash scripts/run-pam-login-live.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_pam_ci
-      - name: Postgres logs on failure
-        if: failure()
-        run: docker logs aimee-pam-pg 2>&1 | tail -60
 
-  # BLOCKING. The three §11 criteria that were nearly shipped as "reviewer decides".
-  #
-  # WHY IT IS HERE. Revocation lag, CSRF on the PAM login, and the startup warning
-  # for a retired remote_writes were all filed as "not proven" and left to a
-  # reviewer. That was wrong: every one of them is measurable with the same
-  # environment the other live rigs stand up, and none needs the vault/KMS chain.
-  # Two of the three turned out to be MET all along — the startup warning existed
-  # and I had grepped the wrong file, because aimee-server logs to
-  # $AIMEE_HOME/server.log and not to stdout.
-  #
-  # It uses scripts/lib/aimee-live-env.sh, the shared environment, rather than a
-  # fourth private copy of the boot recipe.
-  authz-residual-live:
-    needs: change-scope
-    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Install fixed audit runtime
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/install-audit-sqlite
-      - name: Start Postgres (pgvector) with pull retry
-        run: |
-          img=pgvector/pgvector:pg18
-          for attempt in 1 2 3 4 5; do
-            docker pull "$img" && break
-            echo "docker pull $img failed (attempt $attempt/5); backing off"
-            sleep $((attempt * 10))
-          done
-          docker run -d --name aimee-resid-pg --network host \
-            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_resid_ci \
-            "$img"
-      - name: Install dependencies
-        run: |
-          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates
-      - name: Wait for Postgres
-        run: |
-          for i in $(seq 1 40); do
-            docker exec aimee-resid-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
-            sleep 2
-          done
-          echo "Postgres did not become ready in time"; docker logs aimee-resid-pg || true; exit 1
-      - name: Build the stack
-        run: cd src && make -j"$(nproc)" all
+      # The three §11 criteria that were nearly shipped as "reviewer decides".
+      #
+      # WHY IT IS HERE. Revocation lag, CSRF on the PAM login, and the startup warning
+      # for a retired remote_writes were all filed as "not proven" and left to a
+      # reviewer. That was wrong: every one of them is measurable with the same
+      # environment the other live rigs stand up, and none needs the vault/KMS chain.
+      # Two of the three turned out to be MET all along — the startup warning existed
+      # and I had grepped the wrong file, because aimee-server logs to
+      # $AIMEE_HOME/server.log and not to stdout.
+      #
+      # It uses scripts/lib/aimee-live-env.sh, the shared environment, rather than a
+      # fourth private copy of the boot recipe.
       - name: Revocation, CSRF and the startup warning, measured
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: sudo -E bash scripts/run-authz-residual-live.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
-
       # The kb route tests call kb_http_route_ex() directly, which bypasses the
-      # socket, the HTTP parse and kb_verifier_authenticate(). They prove route
-      # logic and cannot prove the chain. This drives four separately-configured
-      # aimee-kb instances over HTTP with real bearers — owner, project-scoped,
-      # service and console-admin — and is the only check that would notice an
-      # authorization regression between the verifier and a route.
+      # socket, the HTTP parse and kb_verifier_authenticate(). This drives four
+      # separately-configured aimee-kb instances over HTTP with real bearers --
+      # owner, project-scoped, service and console-admin -- and is the only check
+      # that would notice an authorization regression between verifier and route.
       - name: Live scope confinement over the wire
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           AIMEE_STORE_URL: postgresql://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
         run: sudo -E bash scripts/validate-kb-authz-live.sh
-      # The check above drives BEARER tokens. Production does not use one:
-      # aimee-server presents a client certificate and the mTLS seam synthesises
-      # a credential from its CN, which nothing else exercises. This enrols for
-      # real (mint -> CSR -> /v1/enroll/redeem) and then makes genuine mTLS
-      # requests, asserting both that the scoped service CN is refused on owner
-      # routes and that the old colon-free CN would have been allowed.
+      # Production presents a client certificate, not a bearer; the mTLS seam
+      # synthesises a credential from its CN. This enrols for real
+      # (mint -> CSR -> /v1/enroll/redeem) and makes genuine mTLS requests.
       - name: Live mTLS certificate scope
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           AIMEE_STORE_URL: postgresql://aimee:aimee@127.0.0.1:5432/aimee_resid_ci
         run: sudo -E bash scripts/validate-kb-mtls-scope-live.sh
+
+      # The OIDC relying-party login against a REAL identity provider.
+      #
+      # WHY A SEPARATE JOB FROM THE UNIT SUITE. Every unit test stubs the token-endpoint
+      # POST. That is right for them — a socket in a unit test is a flake — but it left a
+      # class of defect entirely uncovered, and one was found the first time this ran for
+      # real: kb's HTTP client discarded every non-2xx body, so the token exchange's DENIED
+      # result was UNREACHABLE and every identity-provider refusal surfaced as
+      # "unparseable response". A unit test cannot see that, because a stub returns
+      # whatever it is told to.
+      #
+      # It is also the ONLY thing covering `.deliver_error_body = 1` in the exchange:
+      # removing that line passes the entire unit suite, and is caught here.
+      #
+      # What this exercises that nothing else does: a real TLS handshake trusted via the
+      # system CA bundle only, the IdP echoing kb's state, a real client-secret-basic form
+      # POST, a real RS256 id_token verified by KID against a live JWKS that also carries
+      # an encryption key, the audience override, the nonce arriving inside a signed
+      # payload, and the IdP refusing both a replayed code and a wrong PKCE verifier.
+      #
+      # Last, because it adds the IdP's CA to the system bundle and an
+      # idp.aimee.test entry to /etc/hosts: kb's egress client anchors trust ONLY in
+      # the system bundle (it ignores SSL_CERT_FILE on purpose).
+      - name: Start the identity provider
+        id: idp
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          out=$(sudo bash scripts/oidc-live-idp-up.sh /tmp/aimee-oidc-idp)
+          echo "$out"
+          echo "$out" | grep '^CA_FILE=' >> "$GITHUB_OUTPUT"
+      - name: Trust the IdP's CA, and resolve its name
+        if: ${{ !cancelled() && steps.idp.outcome == 'success' }}
+        run: |
+          sudo cp "${{ steps.idp.outputs.CA_FILE }}" /usr/local/share/ca-certificates/aimee-test-idp-ca.crt
+          sudo update-ca-certificates
+          echo "127.0.0.1 idp.aimee.test" | sudo tee -a /etc/hosts
+      - name: The login, end to end, against the real IdP
+        if: ${{ !cancelled() && steps.idp.outcome == 'success' }}
+        run: sudo -E bash scripts/run-oidc-login-live.sh 127.0.0.1
+      - name: IdP logs on failure
+        if: failure()
+        run: docker logs aimee-oidc-idp 2>&1 | tail -60 || true
       - name: Postgres logs on failure
         if: failure()
-        run: docker logs aimee-resid-pg 2>&1 | tail -60
+        run: docker logs aimee-live-pg 2>&1 | tail -60
 
   # BLOCKING. The P1 DB-layer tenancy-isolation gate.
   #
@@ -1786,7 +1704,22 @@ jobs:
           git fetch --no-tags --depth=1 origin "$base"
           git remote set-head origin "$base"
           git symbolic-ref refs/remotes/origin/HEAD
-      - name: Client/server integration harness
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Install pinned native SDKs for canonical server integration
+        run: |
+          native_prefix="$RUNNER_TEMP/aimee-native-sdks"
+          npm install --prefix "$native_prefix" @openai/codex@0.153.4 @anthropic-ai/claude-code@2.1.227
+          codex_native="$native_prefix/node_modules/.bin/codex"
+          claude_native=$(node -e 'const p=require("node:path"); const pkg=require.resolve("@anthropic-ai/claude-code-linux-x64/package.json",{paths:[process.argv[1]]}); process.stdout.write(p.join(p.dirname(pkg),"claude"))' "$native_prefix")
+          test -x "$codex_native"
+          test -x "$claude_native"
+          printf 'AIMEE_TEST_NATIVE_CODEX=%s\nAIMEE_TEST_NATIVE_CLAUDE=%s\n' "$codex_native" "$claude_native" >> "$GITHUB_ENV"
+          # Exercise the real root-UDS browser operator boundary, without changing server authorization.
+          sudo -n true
+          echo 'AIMEE_TEST_NATIVE_BROWSER_OPERATOR=1' >> "$GITHUB_ENV"
+      - name: Client/server integration harness with actual native SDKs
         run: cd src && make -j$(nproc) integration-tests
 
   init-migrate-service-test:
@@ -1846,115 +1779,13 @@ jobs:
       - name: Workflow name resolution
         run: cd src && make workflow-name-resolution-test
 
-  windows-cmake:
-    needs: change-scope
-    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-
-      - name: Set up MinGW-w64
-        shell: pwsh
-        run: |
-          # Reliable MinGW setup. Two failure modes this avoids:
-          #  (1) bare `choco install mingw` flakes ~50% on the Chocolatey CDN;
-          #  (2) the choco package's gcc path changes between versions (v15.2.0
-          #      moved it), so a hardcoded `...\mingw64\bin` breaks.
-          # Prefer a complete pre-installed MSYS2 toolchain (no network). Runner
-          # images have moved between mingw64 and ucrt64, so probe both. If neither
-          # is complete, use MSYS2's own package manager before falling back to
-          # Chocolatey; a Chocolatey outage must not be the only installation path.
-          function Find-MingwBin {
-            foreach ($candidate in @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin")) {
-              if ((Test-Path "$candidate\gcc.exe") -and
-                  (Test-Path "$candidate\mingw32-make.exe")) { return $candidate }
-            }
-            $g = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\mingw","C:\ProgramData\mingw64" `
-                   -Recurse -Filter gcc.exe -ErrorAction SilentlyContinue |
-                 Where-Object { $_.FullName -match 'mingw64' } | Select-Object -First 1
-            if ($g) {
-              $candidate = Split-Path $g.FullName
-              if (Test-Path "$candidate\mingw32-make.exe") { return $candidate }
-            }
-            return $null
-          }
-          $bin = Find-MingwBin
-          $pacman = "C:\msys64\usr\bin\pacman.exe"
-          if (-not $bin -and (Test-Path $pacman)) {
-            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
-              & $pacman -Sy --noconfirm --needed `
-                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make `
-                mingw-w64-ucrt-x86_64-openssl
-              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
-              $bin = Find-MingwBin
-            }
-          }
-          if (-not $bin) {
-            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
-              choco install mingw -y --no-progress
-              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
-              $bin = Find-MingwBin
-            }
-          }
-          if (-not $bin) { Write-Error "MinGW gcc.exe not found after install"; exit 1 }
-          $prefix = Split-Path $bin
-          if (-not (Test-Path "$prefix\include\openssl\evp.h") -and (Test-Path $pacman)) {
-            $opensslPackage = if ($bin -like "*\ucrt64\*") {
-              "mingw-w64-ucrt-x86_64-openssl"
-            } else {
-              "mingw-w64-x86_64-openssl"
-            }
-            & $pacman -Sy --noconfirm --needed $opensslPackage
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-          if (-not (Test-Path "$prefix\include\openssl\evp.h")) {
-            Write-Error "MinGW OpenSSL headers not found after install"; exit 1
-          }
-          Write-Host "Using MinGW at $bin"
-          & "$bin\gcc.exe" --version
-          echo "$bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "OPENSSL_ROOT_DIR=$($prefix -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Download SQLite amalgamation
-        shell: powershell
-        run: |
-          $url = "https://www.sqlite.org/2024/sqlite-amalgamation-3470200.zip"
-          Invoke-WebRequest -Uri $url -OutFile sqlite.zip
-          Expand-Archive sqlite.zip -DestinationPath sqlite-tmp
-          New-Item -ItemType Directory -Force -Path src\vendor\sqlite3
-          Copy-Item sqlite-tmp\sqlite-amalgamation-3470200\sqlite3.c src\vendor\sqlite3\
-          Copy-Item sqlite-tmp\sqlite-amalgamation-3470200\sqlite3.h src\vendor\sqlite3\
-
-      - name: Configure with CMake
-        run: cmake -B build -G "MinGW Makefiles" -DAIMEE_THIN_CLIENT=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF
-
-      # Windows ships only the thin client (aimee.exe). aimee-server, aimee-kb,
-      # aimee-gateway, and aimee-runtime-web are Linux/Docker components and are not
-      # built here, so the MinGW runner needs no libpq/zstd. The thin client
-      # still links OpenSSL crypto for executable-artifact trust verification.
-      - name: Build the thin client
-        run: cmake --build build --parallel 2 --target aimee
-
-      - name: Smoke test the client
-        shell: powershell
-        run: |
-          .\build\aimee.exe version
-          # The new remote transport must parse on Windows (Winsock path).
-          .\build\aimee.exe --server http://127.0.0.1:9 version
-
-      - name: Thin-client smoke (selfcheck, Winsock transport)
-        shell: bash
-        run: |
-          # Beyond `version`: drive a real subcommand with the HTTP transport env
-          # set, so the Windows client exercises its Winsock connect path (a
-          # connection error is the expected selfcheck outcome; a usage/parse
-          # error is not). Mirrors the macOS/Linux thin-client smoke.
-          AIMEE_BIN='./build/aimee.exe' FORCE_MODE=selfcheck \
-            bash scripts/aimee-thin-client-smoke.sh
-
+  # The only Windows thin-client build. A second job, windows-cmake, built the
+  # same target with the same flags (its one difference, -DWITH_UI=OFF, is
+  # forced by -DAIMEE_THIN_CLIENT=ON in CMakeLists.txt), so it was removed.
   windows-build:
     needs: change-scope
+    # Shared native headers/build contracts also change on testing-target PRs.
+    # Qualify thin-client portability before merge on every executable change.
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: windows-latest
     timeout-minutes: 30
@@ -2047,6 +1878,8 @@ jobs:
 
   macos-build:
     needs: change-scope
+    # Shared native headers/build contracts also change on testing-target PRs.
+    # Qualify thin-client portability before merge on every executable change.
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: macos-latest
     timeout-minutes: 30
@@ -2152,81 +1985,6 @@ jobs:
             echo "FAIL: transient keychain leaked"; exit 1; fi
           echo "PASS: Secure Transport presented client cert; server verified CN=ci-macos-client; no keychain leak"
 
-  memory-retrieval-eval:
-    needs: change-scope
-    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    services:
-      postgres:
-        # Match the PostgreSQL 18 schema and Unicode rejection identity contract.
-        image: pgvector/pgvector:pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
-        env:
-          POSTGRES_USER: aimee
-          POSTGRES_PASSWORD: aimee
-          POSTGRES_DB: memory_eval
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U aimee -d memory_eval"
-          --health-interval 5s --health-timeout 5s --health-retries 12
-    env:
-      AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Install fixed audit runtime
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/install-audit-sqlite
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
-        with:
-          go-version-file: server-go/go.mod
-      - name: Runner diagnostics
-        run: |
-          echo "::group::Runner environment"
-          echo "ref: $GITHUB_REF  sha: $GITHUB_SHA  runner: $RUNNER_OS $RUNNER_ARCH"
-          uname -a
-          gcc --version 2>/dev/null || true
-          make --version 2>/dev/null | head -1 || true
-          df -h / | tail -1
-          echo "::endgroup::"
-      - name: Install dependencies
-        run: |
-          # GitHub runners preinstall third-party apt repos (e.g. packages.microsoft.com)
-          # that intermittently serve invalid/unsigned metadata and fail `apt-get update`
-          # hard — though none of our packages come from them. Drop them, then retry
-          # update with backoff so a transient mirror hiccup doesn't fail the job.
-          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          for attempt in 1 2 3; do
-            if timeout 240 sudo apt-get install -y -q gcc make \
-              libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-              libpq-dev postgresql-client; then
-              break
-            fi
-            test "$attempt" -lt 3 || exit 1
-            echo "apt-get install retry $attempt (transient mirror timeout)"
-            sleep $((attempt * 5))
-          done
-      - name: Memory retrieval eval (corpus + regression check)
-        run: cd src && make -j$(nproc) memory-retrieval-eval-check
-      - name: Frozen memory reliability invariants (no skipped cases)
-        env:
-          PGPASSWORD: aimee
-          AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
-          AIMEE_KB_STORE_REPLAY_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_replay
-          AIMEE_TEST_PG_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_db1
-          AIMEE_DB_TEST_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
-          AIMEE_DB_TEST_REQUIRED: '1'
-          AIMEE_MEMORY_REPLAY_REQUIRED: '1'
-          PGOPTIONS: '-c jit=off'
-        run: |
-          createdb -h 127.0.0.1 -U aimee memory_replay
-          createdb -h 127.0.0.1 -U aimee memory_db1
-          psql -h 127.0.0.1 -U aimee -d memory_replay -v ON_ERROR_STOP=1 -f scripts/postgres-hygiene-role.sql > /tmp/memory-replay-bootstrap.log
-          sed 's/__EMBED_DIM__/3/g' src/modules/kb/c/schema.sql | psql -h 127.0.0.1 -U aimee -d memory_replay --single-transaction -v ON_ERROR_STOP=1 >> /tmp/memory-replay-bootstrap.log
-          python3 -m unittest benchmarks.tests.test_answerability benchmarks.tests.test_reliability_experiment scripts.tests.test_memory_reliability_release
-          python3 scripts/check_memory_reliability_release.py --output /tmp/memory-reliability-release.json
-
   # Every role uses the candidate application and standardized encrypted store.
   e2e-docker:
     needs: change-scope
@@ -2239,10 +1997,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {topology: T1, storage: plain, suffix: ''}
-          - {topology: T2, storage: plain, suffix: ''}
-          - {topology: T3, storage: plain, suffix: ''}
-          - {topology: T2, storage: luks, suffix: '-luks'}
+          # Every storage-agnostic gate runs in exactly one leg, and the legs
+          # are cut so the slowest one (T2) carries only what needs a linked
+          # Server and KB:
+          #   T1  the KB's direct gates and the plain KB upgrade. T2 boots the
+          #       identical KB stack and skips these.
+          #   T2  enrollment, linked correction review, shared placement,
+          #       identities, and the provider/async gates on a linked Server.
+          #   T3  the KB-free personal memory gate (T2 skips its identical
+          #       copy), local semantic memory, egress Vault, plain storage.
+          #   T2-luks  both roles boot on encrypted storage, then the
+          #       LUKS-only recovery, migration and upgrade checks. The
+          #       application gates do not depend on how storage is backed.
+          - {topology: T1, storage: plain, suffix: '', matrix_args: ''}
+          - {topology: T2, storage: plain, suffix: '', matrix_args: '--skip-kb-gates --skip-kb-free-gate'}
+          - {topology: T3, storage: plain, suffix: '', matrix_args: ''}
+          - {topology: T2, storage: luks, suffix: '-luks', matrix_args: '--boot-only'}
     name: e2e-docker (${{ matrix.topology }}${{ matrix.suffix }})
     env:
       AIMEE_APPLICATION_IMAGE: aimee:e2e
@@ -2283,7 +2053,10 @@ jobs:
           sudo modprobe loop
           sudo modprobe dm_mod
           sudo modprobe dm_crypt
-          sudo apt-get update
+          # cryptsetup comes from Ubuntu; an unrelated runner-installed feed
+          # must not block this leg with a Microsoft metadata HTTP403.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list /etc/apt/sources.list.d/microsoft*.sources
+          timeout 240 sudo apt-get -o Acquire::Retries=3 update
           sudo apt-get install -y cryptsetup-bin
           test -c /dev/mapper/control
           test -c /dev/loop-control
@@ -2291,7 +2064,27 @@ jobs:
         if: matrix.storage == 'luks'
         run: echo "AIMEE_DEVICE_MAPPER_MAJOR=$(awk '$2 == "device-mapper" {print $1}' /proc/devices)" >> "$GITHUB_ENV"
       - name: Run the shipped deployment and regression gates
-        run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} --output /tmp/aimee-e2e-evidence
+        run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} ${{ matrix.matrix_args }} --output /tmp/aimee-e2e-evidence
+      - name: Set up Go for private configured-test execution
+        if: matrix.topology == 'T3'
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
+          cache-dependency-path: server-go/go.sum
+      - name: Private configured tests use actual Docker custody and joined cleanup
+        if: matrix.topology == 'T3'
+        working-directory: server-go
+        env:
+          AIMEE_PRIVATE_TEST_REQUIRE_DOCKER: '1'
+          AIMEE_PRIVATE_TEST_DOCKER_SOCKET: /var/run/docker.sock
+          AIMEE_PRIVATE_TEST_DOCKER_IMAGE: ubuntu:22.04
+        run: |
+          for attempt in 1 2 3 4 5; do
+            docker pull "$AIMEE_PRIVATE_TEST_DOCKER_IMAGE" && break
+            test "$attempt" -lt 5 || exit 1
+            sleep $((attempt * 5))
+          done
+          go test -race -count=1 -v ./modules/delegates -run '^TestPrivateVerifierRealDocker$'
       - name: Installed Vault helper under hardened egress (both roles)
         if: matrix.topology == 'T3'
         run: python3 tests/e2e/egress-vault-e2e.py --output /tmp/aimee-e2e-evidence

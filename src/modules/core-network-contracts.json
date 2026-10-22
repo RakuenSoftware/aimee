@@ -35,16 +35,6 @@
       "matches": [
         {
           "primitive": "http",
-          "path": "src/cmd_agent.c",
-          "count": 2
-        },
-        {
-          "primitive": "http",
-          "path": "src/cmd_agent_setup.c",
-          "count": 2
-        },
-        {
-          "primitive": "http",
           "path": "src/forge_app_token.c",
           "count": 3
         },

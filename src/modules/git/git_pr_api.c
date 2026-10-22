@@ -302,8 +302,9 @@ static int gh_get(const gh_ctx_t *cx, const char *path, char **resp)
  * was passed and the local origin/HEAD cache is unset/stale. Returns 0 with buf
  * filled, or -1 — callers must NOT fall back to guessing "main": a repo whose
  * default is e.g. "testing" would get its PR opened against the wrong branch. */
-#define FORGE_STAGE_MAX_BODY   (1024u * 1024u)
-#define FORGE_STAGE_TIMEOUT_MS 25000
+#define FORGE_STAGE_MAX_BODY         (1024u * 1024u)
+#define FORGE_STAGE_TIMEOUT_MS       25000
+#define FORGE_MERGE_STAGE_TIMEOUT_MS 60000
 
 /* Run one forge operation in the git module (bus stage 4,
  * server-go/modules/git/forge_request.go). Which endpoint, which method and
@@ -351,8 +352,9 @@ static cJSON *forge_stage(const gh_ctx_t *cx, const char *op, cJSON *extra)
       }
       cJSON_Delete(extra);
    }
-   return aimee_module_json_call(AIMEE_GIT_EVENT_FORGE_REQUEST, AIMEE_GIT_STAGE_FORGE_REQUEST,
-                                 request, FORGE_STAGE_MAX_BODY, FORGE_STAGE_TIMEOUT_MS, NULL);
+   return aimee_module_json_call(
+       AIMEE_GIT_EVENT_FORGE_REQUEST, AIMEE_GIT_STAGE_FORGE_REQUEST, request, FORGE_STAGE_MAX_BODY,
+       strcmp(op, "pr_merge") == 0 ? FORGE_MERGE_STAGE_TIMEOUT_MS : FORGE_STAGE_TIMEOUT_MS, NULL);
 }
 
 static int gh_default_branch(const gh_ctx_t *cx, char *buf, size_t n)
@@ -823,27 +825,6 @@ static void gh_elapsed(const char *started, const char *completed, int completed
       snprintf(out, cap, "%llds", d);
 }
 
-/* GitHub's conclusion vocabulary mapped to the four words gh printed. Anything
- * unrecognised reports "pending" rather than inventing a word: a caller polling
- * for completion keeps polling, which is the safe direction to be wrong in. */
-static const char *gh_check_word(const char *status, const char *conclusion)
-{
-   if (!status || strcmp(status, "completed") != 0)
-      return "pending";
-   if (!conclusion)
-      return "pending";
-   if (strcmp(conclusion, "success") == 0)
-      return "pass";
-   if (strcmp(conclusion, "failure") == 0 || strcmp(conclusion, "timed_out") == 0 ||
-       strcmp(conclusion, "action_required") == 0 || strcmp(conclusion, "startup_failure") == 0 ||
-       strcmp(conclusion, "cancelled") == 0)
-      return "fail";
-   if (strcmp(conclusion, "neutral") == 0 || strcmp(conclusion, "skipped") == 0 ||
-       strcmp(conclusion, "stale") == 0)
-      return "skipping";
-   return "pending";
-}
-
 /* By name, then by url.
  *
  * This is OUR order, not a reproduction of gh's. gh was observed grouping skipped
@@ -926,7 +907,7 @@ int git_pr_checks_via_api_slug(const char *principal, const char *slug, int numb
       memset(row, 0, sizeof(*row));
       snprintf(row->name, sizeof(row->name), "%s", name->valuestring);
       snprintf(row->status, sizeof(row->status), "%s",
-               gh_check_word(status_s, cJSON_IsString(concl) ? concl->valuestring : NULL));
+               git_pr_check_status(status_s, cJSON_IsString(concl) ? concl->valuestring : NULL));
       gh_elapsed(cJSON_IsString(started) ? started->valuestring : NULL,
                  cJSON_IsString(done) ? done->valuestring : NULL,
                  status_s && strcmp(status_s, "completed") == 0, row->elapsed,

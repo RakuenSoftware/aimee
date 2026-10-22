@@ -8,9 +8,39 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "agent_coord.h"
+#include "agent_exec.h"
+#include "cJSON.h"
 #include "model_registry.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
+
+/* Failed providers may still own admitted error blocks and opaque state. */
+int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agent_result_t *out,
+                       int deadline_ms)
+{
+   (void)cfg;
+   (void)tasks;
+   (void)deadline_ms;
+   for (int i = 0; i < count; i++)
+   {
+      memset(&out[i], 0, sizeof out[i]);
+      assert(aimee_ir_response_from_text(&out[i].canonical_response, "provider error", "fixture") ==
+             0);
+      out[i].canonical_response.raw = cJSON_Parse("{\"opaque_error\":true}");
+      out[i].response = strdup("provider error");
+   }
+   return 0;
+}
+
+static void test_failed_vote_releases_all_owned_responses(void)
+{
+   agent_config_t cfg = {0};
+   agent_result_t out = {0};
+   assert(agent_vote(&cfg, "review", "vote", 3, &out) == -1);
+   assert(strstr(out.error, "all voters failed"));
+   assert(!out.response && !out.canonical_response.content);
+   agent_result_clear_response(&out);
+}
 
 /* --- helpers --- */
 
@@ -481,6 +511,7 @@ int main(void)
    setup_tmpdir();
    dtb_setup_home();
 
+   test_failed_vote_releases_all_owned_responses();
    test_under_budget_passthrough();
    test_null_prompt_returns_null();
    test_over_budget_truncated();

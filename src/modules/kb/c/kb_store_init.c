@@ -9,7 +9,7 @@
 
 #include "db_postgres.h"
 #include "db_schema.h"
-#include "../support/kb_store_log.h" /* LOG_WARN */
+#include "log.h" /* LOG_WARN */
 #include "entity_edges.h"
 
 #include <pthread.h>

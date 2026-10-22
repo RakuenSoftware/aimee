@@ -296,6 +296,15 @@ static cJSON *command_call_timeout(uint32_t event_kind, uint32_t stage_id, const
    return parsed;
 }
 
+cJSON *aimee_module_command_call_context_timeout(uint32_t event_kind, uint32_t stage_id,
+                                                 const char *verb, const cJSON *args,
+                                                 const cJSON *context, int timeout_ms)
+{
+   return timeout_ms > 0
+              ? command_call_timeout(event_kind, stage_id, verb, args, context, timeout_ms, 0)
+              : NULL;
+}
+
 cJSON *aimee_module_command_call_context(uint32_t event_kind, uint32_t stage_id, const char *verb,
                                          const cJSON *args, const cJSON *context)
 {

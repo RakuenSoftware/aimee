@@ -10,6 +10,9 @@
 
 #include "agent_exec.h" /* agent_http_post */
 #include "cJSON.h"
+#include <aimee/translation/aimee_frontend.h>
+#include <aimee/translation/aimee_backend.h>
+#include <limits.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,168 +21,145 @@
 
 /* --- request building --- */
 
+static int provider_import_request(cJSON *messages, cJSON *schema, aimee_request_t *out)
+{
+   cJSON *native = cJSON_CreateObject();
+   if (!native || !cJSON_AddItemToObject(native, "messages", cJSON_Duplicate(messages, 1)))
+   {
+      cJSON_Delete(native);
+      return -1;
+   }
+   char error[128];
+   int rc = openai_frontend_parse(native, out, error, sizeof error);
+   cJSON_Delete(native);
+   if (rc)
+      return -1;
+   if (schema)
+   {
+      out->output_format = (aimee_output_format_t){.kind = AIMEE_OUTPUT_JSON_SCHEMA,
+                                                   .name = strdup("curator_output"),
+                                                   .schema = cJSON_Duplicate(schema, 1),
+                                                   .strict = AIMEE_STRICT_TRUE};
+      if (!out->output_format.name || !out->output_format.schema)
+      {
+         aimee_request_free(out);
+         return -1;
+      }
+   }
+   return 0;
+}
+static cJSON *provider_build_ir(const provider_def_t *def, const aimee_request_t *request)
+{
+   if (!def || !request || aimee_ir_request_admit(request))
+      return NULL;
+   aimee_request_t profile = *request; /* borrowed view; never free caller storage */
+   if (def->model && def->model[0])
+      profile.model = (char *)def->model;
+   if (def->temperature >= 0)
+   {
+      profile.temperature = def->temperature;
+      profile.has_temperature = 1;
+   }
+   if (def->max_tokens > 0)
+   {
+      profile.max_tokens = def->max_tokens;
+      profile.has_max_tokens = 1;
+   }
+   cJSON *native = openai_backend_build(&profile);
+   if (native && def->disable_thinking)
+   {
+      /* A provider-profile extension, added only at the native output boundary. */
+      cJSON *kwargs = cJSON_AddObjectToObject(native, "chat_template_kwargs");
+      if (!kwargs || !cJSON_AddBoolToObject(kwargs, "enable_thinking", 0))
+      {
+         cJSON_Delete(native);
+         return NULL;
+      }
+   }
+   return native;
+}
 struct cJSON *provider_client_build_openai(const provider_def_t *def, struct cJSON *messages,
                                            struct cJSON *json_schema)
 {
-   if (!def || !messages)
+   if (!def || !cJSON_IsArray(messages))
       return NULL;
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
+   aimee_request_t request = {0};
+   if (provider_import_request(messages, json_schema, &request))
       return NULL;
-   if (def->model && def->model[0])
-      cJSON_AddStringToObject(req, "model", def->model);
-
-   /* Deep-copy the caller's messages so ownership stays with them. */
-   cJSON *msgs = cJSON_Duplicate(messages, 1);
-   if (!msgs)
-   {
-      cJSON_Delete(req);
-      return NULL;
-   }
-   cJSON_AddItemToObject(req, "messages", msgs);
-
-   if (def->temperature >= 0.0)
-      cJSON_AddNumberToObject(req, "temperature", def->temperature);
-   if (def->max_tokens > 0)
-      cJSON_AddNumberToObject(req, "max_tokens", def->max_tokens);
-
-   /* Skip the model's reasoning pass for mechanical stages (see provider_def_t
-    * .disable_thinking). Sent as the jinja chat-template kwarg understood by
-    * llama.cpp (--jinja) / vLLM; other endpoints ignore the extra field. */
-   if (def->disable_thinking)
-   {
-      cJSON *ctk = cJSON_CreateObject();
-      if (ctk)
-      {
-         cJSON_AddBoolToObject(ctk, "enable_thinking", 0);
-         cJSON_AddItemToObject(req, "chat_template_kwargs", ctk);
-      }
-   }
-
-   if (json_schema)
-   {
-      cJSON *schema_copy = cJSON_Duplicate(json_schema, 1);
-      if (!schema_copy)
-      {
-         cJSON_Delete(req);
-         return NULL;
-      }
-      cJSON *rf = cJSON_CreateObject();
-      cJSON *js = cJSON_CreateObject();
-      if (!rf || !js)
-      {
-         cJSON_Delete(schema_copy);
-         cJSON_Delete(rf);
-         cJSON_Delete(js);
-         cJSON_Delete(req);
-         return NULL;
-      }
-      cJSON_AddStringToObject(rf, "type", "json_schema");
-      cJSON_AddStringToObject(js, "name", "curator_output");
-      cJSON_AddItemToObject(js, "schema", schema_copy);
-      cJSON_AddBoolToObject(js, "strict", 1);
-      cJSON_AddItemToObject(rf, "json_schema", js);
-      cJSON_AddItemToObject(req, "response_format", rf);
-   }
-   return req;
+   cJSON *native = provider_build_ir(def, &request);
+   aimee_request_free(&request);
+   return native;
 }
 
 /* --- response parsing --- */
 
+static char *provider_reasoning_text(const aimee_response_t *response)
+{
+   size_t length = 0;
+   int found = 0;
+   for (int i = 0; i < response->n_content; i++)
+      if (response->content[i].type == AIMEE_BLK_THINKING && response->content[i].text)
+      {
+         length += strlen(response->content[i].text);
+         found = 1;
+      }
+   if (!found)
+      return NULL;
+   char *text = calloc(length + 1, 1);
+   if (text)
+      for (int i = 0; i < response->n_content; i++)
+         if (response->content[i].type == AIMEE_BLK_THINKING && response->content[i].text)
+            strcat(text, response->content[i].text);
+   return text;
+}
 int provider_client_parse_openai(const char *body, provider_completion_t *out)
 {
-   if (out)
-      memset(out, 0, sizeof(*out));
-   if (!body || !out)
+   if (!out)
       return -1;
-
-   cJSON *root = cJSON_Parse(body);
-   if (!root)
+   memset(out, 0, sizeof *out);
+   if (!body)
       return -1;
-
-   int rc = -1;
-   cJSON *choices = cJSON_GetObjectItemCaseSensitive(root, "choices");
-   cJSON *choice0 = cJSON_IsArray(choices) ? cJSON_GetArrayItem(choices, 0) : NULL;
-   if (choice0)
-   {
-      cJSON *msg = cJSON_GetObjectItemCaseSensitive(choice0, "message");
-      cJSON *content = msg ? cJSON_GetObjectItemCaseSensitive(msg, "content") : NULL;
-      if (cJSON_IsString(content) && content->valuestring)
-      {
-         out->content = strdup(content->valuestring);
-         if (out->content)
-            rc = 0;
-      }
-
-      /* Reasoning models split their output in two, and BOTH halves matter.
-       *
-       * A compliant server (llama.cpp --jinja, the DeepSeek/Qwen APIs) returns
-       * the chain-of-thought in `reasoning_content` and leaves `content` clean.
-       * Reading only `content` was not merely lossy: these models routinely
-       * return content:null with the answer in reasoning_content, and the
-       * strdup above then never runs, rc stays -1, and the caller reports
-       * "unparseable provider response" — every curator stage on such a model
-       * failing with an error that names the wrong thing. agent_bridge.c:429
-       * has carried this exact fallback for the agent path all along; the
-       * curator's own provider path never got it. */
-      cJSON *reasoning = msg ? cJSON_GetObjectItemCaseSensitive(msg, "reasoning_content") : NULL;
-      if (cJSON_IsString(reasoning) && reasoning->valuestring && reasoning->valuestring[0])
-      {
-         out->reasoning = strdup(reasoning->valuestring);
-         if (!out->content || !out->content[0])
-         {
-            /* Answer arrived in reasoning_content: use it rather than failing. */
-            free(out->content);
-            out->content = strdup(reasoning->valuestring);
-            if (out->content)
-               rc = 0;
-         }
-      }
-      else if (out->content)
-      {
-         /* Inlining endpoint: normalise a <think> PREAMBLE to the same shape.
-          * Prefix-anchored on purpose — a tag anywhere else is content (a
-          * docstring may legitimately discuss it), and cutting there is what
-          * corrupted valid answers elsewhere in this tree. */
-         const char *rsn = NULL;
-         size_t rsn_len = 0;
-         const char *answer = text_split_reasoning_prefix(out->content, &rsn, &rsn_len);
-         if (answer != out->content)
-         {
-            if (rsn && rsn_len)
-            {
-               out->reasoning = strndup(rsn, rsn_len);
-            }
-            char *body = strdup(answer);
-            if (body)
-            {
-               free(out->content);
-               out->content = body;
-            }
-         }
-      }
-      cJSON *fr = cJSON_GetObjectItemCaseSensitive(choice0, "finish_reason");
-      if (cJSON_IsString(fr) && fr->valuestring)
-         snprintf(out->finish_reason, sizeof(out->finish_reason), "%s", fr->valuestring);
-   }
-
-   cJSON *usage = cJSON_GetObjectItemCaseSensitive(root, "usage");
-   if (usage)
-   {
-      cJSON *pt = cJSON_GetObjectItemCaseSensitive(usage, "prompt_tokens");
-      cJSON *ct = cJSON_GetObjectItemCaseSensitive(usage, "completion_tokens");
-      if (cJSON_IsNumber(pt))
-         out->prompt_tokens = pt->valueint;
-      if (cJSON_IsNumber(ct))
-         out->completion_tokens = ct->valueint;
-   }
-
-   cJSON *model = cJSON_GetObjectItemCaseSensitive(root, "model");
-   if (cJSON_IsString(model) && model->valuestring)
-      snprintf(out->model, sizeof(out->model), "%s", model->valuestring);
-
+   const char *end = NULL;
+   size_t length = strlen(body);
+   cJSON *root = cJSON_ParseWithLengthOpts(body, length, &end, 0);
+   if (end)
+      while (end < body + length && (*end == ' ' || *end == '\r' || *end == '\n' || *end == '\t'))
+         end++;
+   const cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(root, "choices"), 0);
+   const char *finish =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(choice, "finish_reason"));
+   char error[128];
+   const cJSON *failure = cJSON_GetObjectItemCaseSensitive(root, "error");
+   int rc = root && end == body + length &&
+                    ((finish && finish[0]) || (failure && !cJSON_IsNull(failure)))
+                ? openai_backend_parse(root, &out->ir, error, sizeof error)
+                : -1;
    cJSON_Delete(root);
-   return rc;
+   if (rc || aimee_ir_response_admit(&out->ir) || out->ir.error_message)
+      return -1;
+   int textual = 0;
+   for (int i = 0; i < out->ir.n_content; i++)
+      textual |= out->ir.content[i].type == AIMEE_BLK_TEXT ||
+                 out->ir.content[i].type == AIMEE_BLK_THINKING;
+   if (!textual)
+      return -1;
+   out->content = aimee_ir_response_text_alloc(&out->ir);
+   out->reasoning = provider_reasoning_text(&out->ir);
+   /* Curator JSON recovery may inspect a reasoning-only local-model reply.
+    * This application view does not reclassify the canonical THINKING block. */
+   if ((!out->content || !out->content[0]) && out->reasoning && out->reasoning[0])
+   {
+      free(out->content);
+      out->content = strdup(out->reasoning);
+   }
+   if (!out->content)
+      return -1;
+   out->prompt_tokens = out->ir.usage_in > INT_MAX ? INT_MAX : (int)out->ir.usage_in;
+   out->completion_tokens = out->ir.usage_out > INT_MAX ? INT_MAX : (int)out->ir.usage_out;
+   snprintf(out->model, sizeof out->model, "%s", out->ir.model ? out->ir.model : "");
+   snprintf(out->finish_reason, sizeof out->finish_reason, "%s",
+            out->ir.raw_stop_reason ? out->ir.raw_stop_reason : "");
+   return 0;
 }
 
 /* --- transport + retry --- */
@@ -221,15 +201,14 @@ static int wire_backoff_ms(int attempt, int base_ms, int max_ms)
    return d > max_ms ? max_ms : (int)d;
 }
 
-int provider_client_complete(const provider_def_t *def, struct cJSON *messages,
-                             struct cJSON *json_schema, provider_completion_t *out, char *errbuf,
-                             size_t errlen)
+int provider_client_complete_ir(const provider_def_t *def, const aimee_request_t *request,
+                                provider_completion_t *out, char *errbuf, size_t errlen)
 {
    if (out)
       memset(out, 0, sizeof(*out));
    if (errbuf && errlen)
       errbuf[0] = '\0';
-   if (!def || !def->base_url || !def->base_url[0] || !messages || !out)
+   if (!def || !def->base_url || !def->base_url[0] || !request || !out)
    {
       if (errbuf && errlen)
          snprintf(errbuf, errlen, "invalid arguments");
@@ -242,7 +221,7 @@ int provider_client_complete(const provider_def_t *def, struct cJSON *messages,
       return -1;
    }
 
-   cJSON *req = provider_client_build_openai(def, messages, json_schema);
+   cJSON *req = provider_build_ir(def, request);
    if (!req)
    {
       if (errbuf && errlen)
@@ -322,7 +301,27 @@ int provider_client_complete(const provider_def_t *def, struct cJSON *messages,
    free(resp);
    out->http_status = status;
    if (rc != 0 && errbuf && errlen)
-      snprintf(errbuf, errlen, "unparseable provider response");
+      snprintf(errbuf, errlen, "%s",
+               out->ir.error_message ? out->ir.error_message
+                                     : "provider response failed canonical admission");
+   return rc;
+}
+
+int provider_client_complete(const provider_def_t *def, struct cJSON *messages,
+                             struct cJSON *json_schema, provider_completion_t *out, char *errbuf,
+                             size_t errlen)
+{
+   if (out)
+      memset(out, 0, sizeof *out);
+   aimee_request_t request = {0};
+   if (!out || !cJSON_IsArray(messages) || provider_import_request(messages, json_schema, &request))
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen, "invalid provider request");
+      return -1;
+   }
+   int rc = provider_client_complete_ir(def, &request, out, errbuf, errlen);
+   aimee_request_free(&request);
    return rc;
 }
 
@@ -330,6 +329,7 @@ void provider_completion_free(provider_completion_t *out)
 {
    if (!out)
       return;
+   aimee_response_free(&out->ir);
    free(out->content);
    out->content = NULL;
    free(out->reasoning);

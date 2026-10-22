@@ -501,7 +501,7 @@ type postgresDataStore struct {
 	episodeCommand  func(context.Context, string, []byte) ([]byte, error)
 	settings        func() (map[string]any, error)
 	fusionEnabled   bool
-	code            codeIndexState
+	code            *codeIndexState
 	personal        *personalVectors
 	db              store.Queryer
 	placement       Placement
@@ -521,7 +521,7 @@ func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, err
 	if err != nil {
 		return nil, err
 	}
-	backend := &postgresDataStore{db: db, placement: placement, fusionEnabled: enabled, health: &healthOwnerState{}}
+	backend := &postgresDataStore{db: db, placement: placement, fusionEnabled: enabled, health: &healthOwnerState{}, code: &codeIndexState{}}
 	if publisher, ok := db.(interface {
 		MemoryAuditAction(context.Context, audit.Action) error
 	}); ok {
@@ -1094,7 +1094,7 @@ func decodeDataRequest(body []byte) (DataRequest, error) {
 	return request, nil
 }
 
-func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []byte) (result []byte, status bus.ModuleStatus) {
+func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, request DataRequest, failure *error) (result []byte, status bus.ModuleStatus) {
 	if backend, ok := options.data.(*postgresDataStore); ok {
 		bound := *backend
 		bound.recallExecutor = options.executor
@@ -1108,10 +1108,7 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		}()
 		options.data = &bound
 	}
-	request, err := decodeDataRequest(body)
-	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
-	}
+	var err error
 	// This is an internal lifecycle contract for the trusted connection host,
 	// not a model/user command. Existing owner routes admit subject erasure.
 	if request.Operation == "erase-backend" {
@@ -1405,6 +1402,9 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 		cause := err
 		if cause == nil {
 			cause = ctx.Err()
+		}
+		if failure != nil {
+			*failure = cause
 		}
 		// Never log the request, SQL, driver message or connection string.
 		log.Printf("memory data failure operation=%q trace=%d status=%d class=%s",
@@ -3402,7 +3402,8 @@ func memoryFailureOperation(operation string) string {
 	case "get", "store", "insert-epistemic", "supersede", "update-as", "delete", "delete-as",
 		"correction-review", "recall-bundle", "compose-recall", "typed-context", "assertion-search",
 		"episode-list", "episode-get", "relation-search", "entity-edges", "entity-profile",
-		"rebuild-derived", "code-index", "change-feed", "vector-search", "vector-rebuild":
+		"rebuild-derived", "code-index", "change-feed", "vector-search", "vector-rebuild",
+		"reembed-prepare", "reembed-next", "reembed-point", "reembed-status", "reembed-cutover":
 		return operation
 	default:
 		return "other"

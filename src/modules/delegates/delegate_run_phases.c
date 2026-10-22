@@ -4,7 +4,7 @@
  * session override) — those stay in server_compute.c's delegate_run_ctx.
  *
  *   delegate_file_snapshot / _changed - mtime+size snapshot of a named path
- *   delegate_record_exit_learning     - persist post-run learning + IE event
+ *   delegate_record_exit_metrics      - persist observational exit metrics
  *   delegate_detect_noop_write        - flag a write delegate that changed nothing
  */
 #include <aimee/delegates/delegate_run_phases.h>
@@ -12,7 +12,6 @@
 #include "aimee.h"
 #include "agent.h"
 #include "agent_config.h"
-#include "approach_store.h"
 #include "cmd_agent_delegate_impl.h"
 #include "db1_client/delegate_learning.h"
 #include "db1_client/interaction_events.h"
@@ -64,14 +63,13 @@ static int delegate_file_snapshot_changed(delegate_file_snapshot_t before,
           before.mtime_nsec != after.mtime_nsec || before.size != after.size;
 }
 
-/* Classify a finished delegate run and persist what we learned from it: a
- * delegate_learning row (failure mode / lesson / evidence, tagged with the
- * event agent's provider+model) and a structured IE_DELEGATE_EXIT interaction
- * event. Pure post-run side effect — does not alter rc/result. Extracted
- * verbatim from delegate_worker. */
-void delegate_record_exit_learning(const char *sid, const char *role, const agent_result_t *result,
-                                   int rc, int max_turns, agent_config_t *acfg,
-                                   agent_t *target_agent, const char *goal, const char *source_ref)
+/* Keep operational exit metrics separate from reusable experience. Canonical
+ * child terminals and their protected parent binding are the sole learning
+ * source; result text and process rc cannot create a second unbound learning
+ * or failed-approach record. This does not alter the execution result. */
+int delegate_record_exit_metrics(const char *sid, const char *role, const agent_result_t *result,
+                                 int rc, int max_turns, agent_config_t *acfg, agent_t *target_agent,
+                                 const char *source_ref)
 {
    dl_exit_metrics_t dlm;
    memset(&dlm, 0, sizeof(dlm));
@@ -81,57 +79,39 @@ void delegate_record_exit_learning(const char *sid, const char *role, const agen
    dlm.tool_calls = result->tool_calls;
    dlm.success = (rc == 0);
    dlm.error = result->error[0] ? result->error : NULL;
-   dlm.max_turns_limit = max_turns > 0 ? max_turns : 0; /* 0 = unlimited (default -1) */
-   dlm.write_enforce_fired = dlm.error && strstr(dlm.error, "write_enforce") ? 1 : 0;
-   dlm.had_writes = dlm.write_enforce_fired ? (strstr(dlm.error, "no Write or Edit") ? 0 : 1)
-                                            : (rc == 0 ? 1 : 0);
+   dlm.max_turns_limit = max_turns > 0 ? max_turns : 0;
+   dlm.had_writes = -1;
    dl_classification_t dlc;
    classify_delegate_exit(&dlm, &dlc);
    agent_t *event_agent =
        result->agent_name[0] ? agent_find(acfg, result->agent_name) : target_agent;
-   cJSON *evidence = cJSON_Parse(dlc.evidence);
-   char *evidence_json = NULL;
-   if (cJSON_IsObject(evidence))
-   {
-      cJSON_AddStringToObject(evidence, "provider", event_agent ? event_agent->provider : "");
-      cJSON_AddStringToObject(evidence, "model", event_agent ? event_agent->model : "");
-      evidence_json = cJSON_PrintUnformatted(evidence);
-   }
-   db1_delegate_learning_record(sid, role, dl_failure_mode_to_string(dlc.failure_mode), dlc.lesson,
-                                evidence_json ? evidence_json : dlc.evidence, dlc.confidence);
-   int approach_failure_recorded = -1;
-   if (dlc.failure_mode == DL_MODE_NO_PROGRESS && goal && goal[0])
-   {
-      approach_failure_recorded =
-          approach_store_record_no_progress(goal, result->error, source_ref) == 0;
-      aimee_log(approach_failure_recorded ? LOG_INFO : LOG_WARN, "delegate",
-                "delegate %s: no-progress failed approach %s for future similar goals",
-                source_ref ? source_ref : "",
-                approach_failure_recorded ? "recorded" : "not recorded");
-   }
-   free(evidence_json);
-   cJSON_Delete(evidence);
-
+   int exit_recorded = 0;
    cJSON *payload = cJSON_CreateObject();
    if (payload)
    {
-      cJSON_AddStringToObject(payload, "role", role ? role : "");
-      cJSON_AddStringToObject(payload, "failure_mode", dl_failure_mode_to_string(dlc.failure_mode));
-      cJSON_AddNumberToObject(payload, "turns", result->turns);
-      cJSON_AddNumberToObject(payload, "tool_calls", result->tool_calls);
-      cJSON_AddNumberToObject(payload, "confidence", dlc.confidence);
-      cJSON_AddStringToObject(payload, "agent", result->agent_name);
-      cJSON_AddStringToObject(payload, "provider", event_agent ? event_agent->provider : "");
-      cJSON_AddStringToObject(payload, "model", event_agent ? event_agent->model : "");
-      if (approach_failure_recorded >= 0)
-         cJSON_AddBoolToObject(payload, "approach_failure_recorded", approach_failure_recorded);
-      char *payload_json = cJSON_PrintUnformatted(payload);
-      (void)db1_interaction_event_record(sid, ie_event_type_name(IE_DELEGATE_EXIT), "system",
-                                         payload_json ? payload_json : "{}",
-                                         rc == 0 ? "ok" : "error");
+      int complete =
+          cJSON_AddStringToObject(payload, "role", role ? role : "") &&
+          cJSON_AddStringToObject(payload, "learning_owner", "canonical_session_log") &&
+          cJSON_AddStringToObject(payload, "failure_mode",
+                                  dl_failure_mode_to_string(dlc.failure_mode)) &&
+          cJSON_AddNumberToObject(payload, "turns", result->turns) &&
+          cJSON_AddNumberToObject(payload, "tool_calls", result->tool_calls) &&
+          cJSON_AddNumberToObject(payload, "confidence", dlc.confidence) &&
+          cJSON_AddStringToObject(payload, "agent", result->agent_name) &&
+          cJSON_AddStringToObject(payload, "provider", event_agent ? event_agent->provider : "") &&
+          cJSON_AddStringToObject(payload, "model", event_agent ? event_agent->model : "");
+      char *payload_json = complete ? cJSON_PrintUnformatted(payload) : NULL;
+      if (payload_json)
+         exit_recorded =
+             db1_interaction_event_record(sid, ie_event_type_name(IE_DELEGATE_EXIT), "system",
+                                          payload_json, rc == 0 ? "ok" : "error") >= 0;
       free(payload_json);
       cJSON_Delete(payload);
    }
+   if (!exit_recorded)
+      LOG_WARN("delegate", "delegate %s: exit event could not be persisted",
+               source_ref ? source_ref : "");
+   return exit_recorded ? 0 : -1;
 }
 
 /* Detect a no-op write delegate: a write role that reported success (rc==0) but

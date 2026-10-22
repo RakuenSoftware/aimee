@@ -317,13 +317,19 @@ static cJSON *system_to_converse(const aimee_block_t *blocks, int n, int *failed
    return arr;
 }
 
-/* Translate the opaque Anthropic-style ir->tool_choice ({type:auto|any|tool,name})
- * into Converse's object-wrapped toolChoice ({auto:{}}|{any:{}}|{tool:{name:X}}).
- * Returns NULL (=> OMIT toolChoice) for an absent/unrecognized shape -- never a bare
- * string, never a malformed object. */
-static cJSON *converse_tool_choice(const cJSON *tc, int *failed)
+/* Translate the typed IR tool choice into Converse's object-wrapped toolChoice
+ * ({auto:{}}|{any:{}}|{tool:{name:X}}). Returns NULL (=> OMIT toolChoice) when unset
+ * or NONE: Converse has no "none" choice, and omitting it is the provider default
+ * rather than a different forced tool. Never a bare string, never a malformed object. */
+static cJSON *converse_tool_choice(const aimee_request_t *ir, int *failed)
 {
-   const char *type = ostr(tc, "type");
+   const char *type = NULL;
+   if (ir->tool_choice == AIMEE_TOOL_CHOICE_AUTO)
+      type = "auto";
+   else if (ir->tool_choice == AIMEE_TOOL_CHOICE_ANY)
+      type = "any";
+   else if (ir->tool_choice == AIMEE_TOOL_CHOICE_TOOL)
+      type = "tool";
    if (!type)
       return NULL;
    if (strcmp(type, "auto") == 0)
@@ -348,8 +354,8 @@ static cJSON *converse_tool_choice(const cJSON *tc, int *failed)
    }
    if (strcmp(type, "tool") == 0)
    {
-      const char *name = ostr(tc, "name");
-      if (!name)
+      const char *name = ir->tool_choice_name;
+      if (!name || !name[0])
          return NULL;
       cJSON *o = json_new_object(failed);
       cJSON *t = o ? json_add_object(o, "tool", failed) : NULL;
@@ -365,8 +371,16 @@ static cJSON *converse_tool_choice(const cJSON *tc, int *failed)
 
 cJSON *bedrock_converse_build(const aimee_request_t *ir)
 {
-   if (!ir)
+   if (ir && ir->reasoning_effort != AIMEE_EFFORT_UNSET)
       return NULL;
+   for (int i = 0; ir && i < ir->n_tools; i++)
+      if (ir->tools[i].kind != AIMEE_TOOL_FUNCTION || ir->tools[i].strict == AIMEE_STRICT_TRUE ||
+          (ir->tools[i].has_defer_loading && ir->tools[i].defer_loading) ||
+          ir->tools[i].native_options)
+         return NULL;
+   if (!ir || (ir->output_format.kind != AIMEE_OUTPUT_UNSET &&
+               ir->output_format.kind != AIMEE_OUTPUT_TEXT))
+      return NULL; /* Refuse unsupported constraints instead of dropping them. */
    int failed = 0;
    cJSON *out = json_new_object(&failed);
    cJSON *choice = NULL;
@@ -448,7 +462,7 @@ cJSON *bedrock_converse_build(const aimee_request_t *ir)
    }
 
    /* toolConfig -- omit entirely if n_tools==0 AND no toolChoice is produced. */
-   choice = converse_tool_choice(ir->tool_choice, &failed);
+   choice = converse_tool_choice(ir, &failed);
    if (failed)
       goto fail;
    if (ir->n_tools > 0 || choice)
@@ -613,21 +627,16 @@ int bedrock_converse_parse(const cJSON *resp, aimee_response_t *out, char *err, 
       }
    }
 
-   const cJSON *usage = cJSON_GetObjectItemCaseSensitive((cJSON *)resp, "usage");
-   if (usage && cJSON_IsObject(usage))
+   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
+   if (aimee_ir_read_usage(usage, "inputTokens", &out->usage_in) ||
+       aimee_ir_read_usage(usage, "outputTokens", &out->usage_out) ||
+       aimee_ir_read_usage(usage, "cacheReadInputTokens", &out->usage_cache_read) ||
+       aimee_ir_read_usage(usage, "cacheWriteInputTokens", &out->usage_cache_write))
    {
-      const cJSON *in = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "inputTokens");
-      const cJSON *ou = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "outputTokens");
-      const cJSON *cr = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "cacheReadInputTokens");
-      const cJSON *cw = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "cacheWriteInputTokens");
-      if (in && cJSON_IsNumber(in))
-         out->usage_in = (long)in->valuedouble;
-      if (ou && cJSON_IsNumber(ou))
-         out->usage_out = (long)ou->valuedouble;
-      if (cr && cJSON_IsNumber(cr))
-         out->usage_cache_read = (long)cr->valuedouble;
-      if (cw && cJSON_IsNumber(cw))
-         out->usage_cache_write = (long)cw->valuedouble;
+      if (err && errn)
+         snprintf(err, errn, "invalid provider usage counter");
+      aimee_response_free(out);
+      return -1;
    }
    if (!out->raw || !out->role || !out->raw_stop_reason)
       goto allocation_failure;

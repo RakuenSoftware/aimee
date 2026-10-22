@@ -36,6 +36,8 @@ const char *ie_event_type_name(ie_event_type_t type)
       return "failover_event";
    case IE_MCP_PACKAGE_CHECK:
       return "mcp_package_check";
+   case IE_TASK_OUTCOME:
+      return "task_outcome";
    default:
       return "unknown";
    }

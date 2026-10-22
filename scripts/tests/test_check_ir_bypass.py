@@ -1,0 +1,275 @@
+import datetime as dt
+import importlib.util
+import json
+from pathlib import Path
+import tempfile
+import unittest
+
+SPEC = importlib.util.spec_from_file_location("ir_bypass", Path(__file__).resolve().parents[1] / "check_ir_bypass.py")
+checker = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(checker)
+
+
+class IRBypassTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.ledger = self.root / checker.LEDGER
+        self.ledger.parent.mkdir(parents=True)
+        self.write_ledger([])
+
+    def write_ledger(self, exceptions):
+        self.ledger.write_text(json.dumps({"version": 1, "exceptions": exceptions}))
+
+    def source(self, relative, text):
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        return path
+
+    def test_production_tree(self):
+        checker.check(checker.ROOT)
+
+    def test_session_search_cannot_restore_unscoped_legacy_transcript_reads(self):
+        self.source("src/db1_client/sessions.c", "db1_primary_session_alloc_search(query, rows, 4);")
+        checker.check(self.root)  # Existing administrative compatibility is separate.
+        for relative, text in [
+            ("src/server/session_search_tool.c", "db1_primary_session_alloc_search(query, rows, 4);"),
+            ("src/server/session_search_tool.c", "db1_primary_session_get_latest(id, row);"),
+            ("server-go/modules/aimee/families/session_ir_search.go", 'const sql = `SELECT messages_json FROM primary_sessions`'),
+        ]:
+            with self.subTest(relative=relative, text=text):
+                path = self.source(relative, text)
+                with self.assertRaisesRegex(ValueError, "legacy-session-search"):
+                    checker.check(self.root)
+                path.unlink()
+
+    def test_raw_router_and_ingress_history_readers_cannot_return(self):
+        self.source("src/server/router_advise.c", "void router_advise_ir(const aimee_request_t *request); ")
+        checker.check(self.root)
+        for symbol in ("gw_stage_router", "ingress_preinject_query_from_messages",
+                       "ingress_preinject_last_assistant_from_messages"):
+            for relative in ("src/server/new.c", "src/headers/new.h",
+                             "server-go/modules/rogue/rogue.go"):
+                with self.subTest(symbol=symbol, relative=relative):
+                    path = self.source(relative, symbol + "(request);")
+                    with self.assertRaisesRegex(ValueError, "retired-api"):
+                        checker.check(self.root)
+                    path.unlink()
+        self.source("src/server/router_advise.c", 'read(request, "tool_calls");')
+        with self.assertRaisesRegex(ValueError, "native-history-field"):
+            checker.check(self.root)
+
+    def test_hook_archive_cannot_restore_legacy_transcript_write(self):
+        self.source("src/db1_client/sessions.c", "int db1_primary_session_save(void);")
+        self.source("src/server/server_auth.c", "db1_session_ir_history_save(session, digest, scope, actor, json);")
+        checker.check(self.root)
+        self.source("src/server/server_auth.c", "db1_primary_session_save(session, client, provider, json);")
+        with self.assertRaisesRegex(ValueError, "legacy-transcript-write"):
+            checker.check(self.root)
+
+    def test_chat_workers_cannot_restore_provider_transcript_writer(self):
+        for relative in ("src/posix/server_compute.c", "src/windows/server_compute.c"):
+            with self.subTest(relative=relative):
+                path = self.source(relative, "db1_primary_session_save(session, agent, provider, json);")
+                with self.assertRaisesRegex(ValueError, "legacy-transcript-write"):
+                    checker.check(self.root)
+                path.unlink()
+
+    def test_chat_worker_cannot_rebuild_native_wire_history(self):
+        self.source("src/posix/server_compute.c", 'read(history, "tool_calls");')
+        with self.assertRaisesRegex(ValueError, "native-history-field"):
+            checker.check(self.root)
+
+    def test_retired_api_and_driver_calls_in_c_and_go(self):
+        for relative, source in [
+            ("src/server/rogue.c", "anthropic_stream_feed_openai(s, p);"),
+            ("server-go/modules/rogue/rogue.go", "raw_responses := x"),
+            ("src/server/rogue.c", "gateway_delegate_tool_shape(1, 0);"),
+            ("src/server/rogue.c", "agent_tool_result_usable(text);"),
+            ("src/server/rogue.c", "agent_resolve_auth(agent, token, capacity);"),
+            ("src/server/rogue.c", "parsed_response_t result;"),
+            ("src/server/rogue.c", "gateway_policy_police_parsed_response(result);"),
+            ("src/server/rogue.c", "aimee_ir_shadow_compare_response(result, native, wire);"),
+            ("src/server/rogue.c", "openai_responses_emit_policed(result, id, model, time, emit, ctx);"),
+            ("src/server/rogue.c", "agent_build_extra_headers(agent, headers, capacity);"),
+            ("src/server/rogue.c", "agent_execute_cli_shell_driver(agent, prompt);"),
+            ("src/server/rogue.c", "agent_shell_driver_get(name);"),
+            ("src/server/rogue.c", "acp_serve_client_request(frame, cwd);"),
+            ("src/server/rogue.c", "provider_cli_collect_child(config, result);"),
+            ("src/server/rogue.c", "agent_shell_driver_t terminal;"),
+            ("src/server/rogue.c", "tool_side_effect(name);"),
+            ("src/server/rogue.c", "emit(SHELL_EVENT_TEXT_DELTA);"),
+            ("src/server/rogue.c", "driver->parse_response(body);"),
+            ("src/server/rogue.c", "driver->build_request(input);"),
+        ]:
+            with self.subTest(relative=relative, source=source):
+                path = self.source(relative, source)
+                with self.assertRaisesRegex(ValueError, "IR bypasses"):
+                    checker.check(self.root)
+                path.unlink()
+
+    def test_legacy_learning_wire_tombstone_cannot_become_prompt_authority(self):
+        self.source("src/db1_client/delegation.c", "char *db1_delegate_learning_inject_prompt(void); ")
+        self.source("src/db1_client/delegate_learning.h", "char *db1_delegate_learning_inject_prompt(void); ")
+        checker.check(self.root)
+        self.source("src/server/new.c", "prompt = db1_delegate_learning_inject_prompt(role, prompt, 3);")
+        with self.assertRaisesRegex(ValueError, "unqualified-learning-prompt"):
+            checker.check(self.root)
+
+    def test_unscoped_approaches_cannot_enter_automatic_delegate_context(self):
+        self.source("src/approach_store.c", "char *approach_store_retry_context(const char *goal) { return 0; }")
+        self.source("src/headers/approach_store.h", "char *approach_store_retry_context(const char *goal);")
+        self.source("src/admin/legacy_approach_inspect.c", "approach_store_recall(goal, results, 5); approach_store_render(results, 5, out, 1024);")
+        self.source("src/server/server_compute.c", "db1_execution_test_grade_recall(owner, project, NULL);")
+        checker.check(self.root)
+        for relative in ("src/server/server_compute.c", "src/server_eval.c",
+                         "src/server/server_learning_approaches.c"):
+            for call in ("approach_store_retry_context(goal)", "approach_store_recall(goal, out, 5)",
+                         "approach_store_render(out, 5, prompt, 1024)"):
+                with self.subTest(relative=relative, call=call):
+                    path = self.source(relative, call + ";")
+                    with self.assertRaisesRegex(ValueError, "unscoped-approach-prompt"):
+                        checker.check(self.root)
+                    path.unlink()
+        self.source("src/server/server_compute.c", "db1_execution_test_grade_recall(owner, project, NULL);")
+        self.source("src/server/new.c", "approach_store_retry_context(goal);")
+        with self.assertRaisesRegex(ValueError, "unscoped-approach-prompt"):
+            checker.check(self.root)
+
+    def test_native_shapes_refused_in_migrated_c_and_go_consumers(self):
+        for relative in [*sorted(checker.CANONICAL_FILES),
+                         "server-go/modules/economizer/new.go", "server-go/modules/memory/new.go"]:
+            for field in ["tool_calls", "function_call", "tool_call_id", "reasoning_content"]:
+                path = self.source(relative, f'lookup(message, "{field}");')
+                with self.assertRaisesRegex(ValueError, "native-history-field"):
+                    checker.check(self.root)
+                path.unlink()
+
+    def test_migrated_dispatch_consumers_require_owner_status(self):
+        for relative in checker.CLASSIFIED_DISPATCH_FILES:
+            for name in ("dispatch_tool_call", "dispatch_tool_call_ctx"):
+                path = self.source(relative, name + '(tool, args, timeout);')
+                with self.assertRaisesRegex(ValueError, "unclassified-tool-dispatch"):
+                    checker.check(self.root)
+                path.unlink()
+            dispatch = ("dispatch_tool_call_ir_ctx_status" if relative in {"src/posix/agent_runtime.c", "src/server/server_compute_async.c", "src/server/script_rpc.c", "src/server/script_tool_execution.c"}
+                        else "dispatch_tool_call_ctx_status")
+            self.source(relative, dispatch + '(tool, args, timeout, &failed);')
+        checker.check(self.root)
+
+    def test_canonical_dispatch_cannot_recoerce_against_cached_schema(self):
+        self.source("src/posix/agent_runtime.c", 'dispatch_tool_call_ctx_status(name, args, timeout, &failed);')
+        with self.assertRaisesRegex(ValueError, "canonical-dispatch-cache"):
+            checker.check(self.root)
+        self.source("src/posix/agent_runtime.c", 'dispatch_tool_call_ir_ctx_status(admitted, args, timeout, &failed);')
+        checker.check(self.root)
+
+    def test_plain_consumer_cannot_patch_native_profiles(self):
+        for function in ("model_sampling_apply_openai", "model_sampling_apply_anthropic",
+                         "agent_anthropic_set_system", "agent_request_shape_openai_messages"):
+            self.source("src/server/agent_request_build.c", function + "(agent, request);")
+            with self.assertRaisesRegex(ValueError, "post-render-profile"):
+                checker.check(self.root)
+        self.source("src/server/agent_request_build.c", "sampling = model_sampling_resolve(agent, 0.5);")
+        checker.check(self.root)
+
+    def test_canonical_execution_cannot_reload_native_schema_authority(self):
+        for name in ("tool_validate", "kb_client_tool_registry_lookup"):
+            path = self.source("src/posix/agent_runtime.c", name + '(name, args);')
+            with self.assertRaisesRegex(ValueError, "retired-api|native-schema-lookup"):
+                checker.check(self.root)
+            path.unlink()
+        self.source("src/posix/agent_runtime.c", "tool_validate_ir(admitted, args, error, capacity);")
+        self.source("src/server/agent_policy.c", "kb_client_tool_registry_lookup(name, enabled);")
+        checker.check(self.root)
+
+    def test_native_mcp_cannot_reintroduce_kb_read_fallback(self):
+        self.source("src/server/server_native_tool_admission.c", "tool_side_effect(tool);")
+        with self.assertRaisesRegex(ValueError, "retired-api"):
+            checker.check(self.root)
+        self.source("src/server/server_native_tool_admission.c", "tool_policy_metadata(tool, metadata);")
+        checker.check(self.root)
+
+    def test_canonical_host_profiles_cannot_rebuild_native_requests(self):
+        for function in checker.CANONICAL_PROFILE_FUNCTIONS:
+            for wire in ("openai", "anthropic", "responses"):
+                with self.subTest(function=function, wire=wire):
+                    self.source("src/server/agent_bridge.c", f"""
+                    cJSON *{function}(void) {{
+                        if (condition) {{ log("literal close brace: }}"); }}
+                        /* }} */ return agent_build_request_{wire}(agent);
+                    }}
+                    """)
+                    with self.assertRaisesRegex(ValueError, "native-profile-rebuild"):
+                        checker.check(self.root)
+        self.source("src/server/agent_bridge.c", """
+            cJSON *agent_build_request_ir(void) { return render(ir); }
+            cJSON *compatibility_boundary(void) {
+                return agent_build_request_openai(agent);
+            }
+        """)
+        checker.check(self.root)
+
+    def test_core_repair_cannot_detect_provider_history(self):
+        for field in ("tool_calls", "function_call", "function_call_output", "tool_use_id"):
+            with self.subTest(field=field):
+                self.source("src/server/agent_bridge.c", f"""
+                    int message_history_repair(cJSON *history) {{
+                        return lookup(history, "{field}");
+                    }}
+                """)
+                with self.assertRaisesRegex(ValueError, "native-history-field"):
+                    checker.check(self.root)
+        self.source("src/server/agent_bridge.c", """
+            int message_history_repair(cJSON *history) { return repair_ir(history); }
+            cJSON *compatibility_output(void) { return lookup(native, "tool_calls"); }
+        """)
+        checker.check(self.root)
+        for symbol in ("tool_call_normalize_assistant_arguments", "tool_call_sanitize_assistant_arguments"):
+            self.source("src/server/rogue.c", symbol + "(message);")
+            with self.assertRaisesRegex(ValueError, "retired-api"):
+                checker.check(self.root)
+
+    def test_native_hook_envelopes_stop_at_entry_adapter(self):
+        for relative in checker.CANONICAL_HOOK_FILES:
+            path = self.source(relative, 'lookup(payload, "tool_input");')
+            with self.assertRaisesRegex(ValueError, "native-hook-field"):
+                checker.check(self.root)
+            path.unlink()
+        self.source("src/modules/translation/hook_ir.c", 'lookup(native, "tool_input");')
+        checker.check(self.root)
+
+    def test_explicit_native_adapters_and_fixture_data_remain_valid(self):
+        self.source("src/modules/translation/aimee_backend_openai.c", 'lookup(native, "tool_calls");')
+        self.source("src/tests/test_native.c", 'anthropic_stream_feed_openai(s, p);')
+        self.source("server-go/modules/memory/example_test.go", 'lookup(native, "tool_calls")')
+        checker.check(self.root)
+
+    def test_comments_and_literal_comment_markers(self):
+        self.source("src/server/session_compact.c", '// "tool_calls"\n/* raw_responses */\n"https://example.org";')
+        checker.check(self.root)
+        self.source("src/server/session_compact.c", '"/* literal */"; lookup(x, "tool_calls");')
+        with self.assertRaisesRegex(ValueError, "native-history-field"):
+            checker.check(self.root)
+
+    def test_exact_exception_expires_and_cannot_move_or_expand(self):
+        path = self.source("src/server/session_compact.c", 'lookup(x, "tool_calls");\n')
+        finding = checker.findings(self.root)[0]
+        exception = {**finding, "owner": "history", "reason": "bounded migration seam",
+                     "expires": "2026-11-01", "retirement": "replace this exact reader"}
+        self.write_ledger([exception])
+        checker.check(self.root, dt.date(2026, 10, 18))
+        with self.assertRaisesRegex(ValueError, "expired"):
+            checker.check(self.root, dt.date(2026, 11, 1))
+        path.write_text('\nlookup(x, "tool_calls");\n')
+        with self.assertRaisesRegex(ValueError, "unused or changed"):
+            checker.check(self.root, dt.date(2026, 10, 18))
+        path.write_text('lookup(x, "choices");\n')
+        with self.assertRaisesRegex(ValueError, "unused or changed"):
+            checker.check(self.root, dt.date(2026, 10, 18))
+
+
+if __name__ == "__main__":
+    unittest.main()

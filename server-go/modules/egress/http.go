@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -313,7 +314,30 @@ func forgeCredentialTargetAllowed(operation, resource, method, path string) bool
 	case "pr_edit":
 		return len(parts) == 5 && parts[3] == "pulls" && method == "PATCH"
 	case "pr_merge":
-		return len(parts) == 6 && parts[3] == "pulls" && parts[5] == "merge" && method == "PUT"
+		if len(parts) == 6 && parts[3] == "pulls" && parts[5] == "merge" && method == "PUT" {
+			return true
+		}
+		// Merge admission can read only this repository's attribution evidence.
+		// No extra write endpoint is granted by these checks.
+		if method != "GET" {
+			return false
+		}
+		positive := func(s string) bool { n, err := strconv.Atoi(s); return err == nil && n > 0 && strconv.Itoa(n) == s }
+		sha := func(s string) bool { return regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`).MatchString(s) }
+		if len(parts) == 4 && parts[3] == "issues" {
+			return true
+		}
+		if len(parts) == 5 && (parts[3] == "issues" || parts[3] == "pulls") {
+			return positive(parts[4])
+		}
+		if len(parts) == 6 && parts[3] == "commits" && (parts[5] == "pulls" || parts[5] == "check-runs") {
+			return sha(parts[4])
+		}
+		if len(parts) == 5 && parts[3] == "compare" {
+			refs := strings.Split(parts[4], "...")
+			return len(refs) == 2 && sha(refs[0]) && sha(refs[1])
+		}
+		return false
 	default:
 		return false
 	}

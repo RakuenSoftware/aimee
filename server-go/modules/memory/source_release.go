@@ -29,6 +29,8 @@ type sourceReleaseState struct {
 	healthBytes     int
 	mu              sync.Mutex
 	entries         map[string]*sourceReleaseEntry
+	forks           map[string]*sourceReleaseFork
+	forkBindings    map[string]time.Time
 	bytes           int
 	receipts        map[string]*providerReceiptEntry
 	receiptBytes    int
@@ -46,6 +48,7 @@ type sourceReleasePart struct {
 }
 
 type sourceReleaseEntry struct {
+	executionGrades                              json.RawMessage
 	healthAttempt                                string
 	guardedAdmission                             string
 	guardedAdmissionAt                           time.Time
@@ -89,6 +92,7 @@ func releaseBinding(args commandArgs) string {
 	return releaseDigest([]string{args.stringOr("request_id", ""), args.stringOr("principal", ""), args.stringOr("caller_subject", "")})
 }
 func (s *sourceReleaseState) expire(now time.Time) {
+	s.expireForks(now)
 	for token, receipt := range s.receipts {
 		if !now.Before(receipt.expires) {
 			delete(s.receipts, token)
@@ -98,13 +102,14 @@ func (s *sourceReleaseState) expire(now time.Time) {
 	for token, e := range s.entries {
 		if !now.Before(e.expires) {
 			delete(s.entries, token)
-			s.bytes -= len(e.sources) + len(e.assemblyMetadata)
+			s.bytes -= len(e.sources) + len(e.executionGrades) + len(e.assemblyMetadata)
 			s.healthBytes -= len(e.healthMetadata)
 		}
 	}
 }
 
 func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) (string, error) {
+	grades, _ := assembly["execution_test_grades"].(json.RawMessage)
 	refs := []typedProjectionRef{}
 	for _, name := range []string{"facts_projection", "typed_projection", "memory_projection", "native_projection"} {
 		if projection, ok := assembly[name].(map[string]any); ok {
@@ -120,7 +125,7 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	_, replaceNative := assembly["native_projection"]
 	appendNative, _ := assembly["append_native_sources"].(bool)
 	replaceNative = replaceNative && !appendNative
-	if len(refs) == 0 && !replaceNative {
+	if len(refs) == 0 && len(grades) == 0 && !replaceNative {
 		return previous, nil
 	}
 	token, err := releaseToken()
@@ -158,6 +163,11 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 			old = kept
 		}
 		refs = append(old, refs...)
+		var mergeErr error
+		grades, mergeErr = mergeExecutionGradeSources(prior.executionGrades, grades)
+		if mergeErr != nil {
+			return "", mergeErr
+		}
 	}
 	unique := make([]typedProjectionRef, 0, len(refs))
 	seen := map[string]bool{}
@@ -168,11 +178,11 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 			unique = append(unique, ref)
 		}
 	}
-	if len(unique) == 0 {
+	if len(unique) == 0 && len(grades) == 0 {
 		return "", nil
 	}
 	request := sourceRevalidation{SchemaVersion: 1, CheckID: token, Sources: unique}
-	if !request.valid() {
+	if len(unique) > 0 && !request.valid() {
 		return "", errors.New("unavailable source contract")
 	}
 	raw, err := json.Marshal(unique)
@@ -203,7 +213,7 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 			part.RequirementDigest = coverage.RequirementDigest
 		}
 	}
-	if prior != nil && bytes.Equal(raw, prior.sources) && len(prior.assemblyParts) > 0 && prior.assemblyParts[len(prior.assemblyParts)-1] == part {
+	if prior != nil && bytes.Equal(raw, prior.sources) && bytes.Equal(grades, prior.executionGrades) && len(prior.assemblyParts) > 0 && prior.assemblyParts[len(prior.assemblyParts)-1] == part {
 		return previous, nil
 	}
 	// The commitment covers every retained block, not just the last appended
@@ -266,7 +276,7 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	if len(metadata) > 12000 {
 		metadata, _ = json.Marshal(map[string]any{"projection_commitment": assemblyDigest, "truncated": true, "reason": "assembly_metadata_limit"})
 	}
-	if len(s.entries) >= sourceReleaseMaxEntries || s.bytes+len(metadata)+len(raw) > sourceReleaseMaxBytes || len(raw) > maxDataBody/2 {
+	if len(s.entries)+len(s.forks) >= sourceReleaseMaxEntries || s.bytes+len(metadata)+len(raw)+len(grades) > sourceReleaseMaxBytes || len(raw) > maxDataBody/2 {
 		return "", errors.New("source release capacity")
 	}
 	if s.entries == nil {
@@ -274,8 +284,8 @@ func (s *sourceReleaseState) prepare(args commandArgs, assembly map[string]any) 
 	}
 	// Assembly is not integrity acceptance. Keep the old handle immutable until
 	// the host either discards this candidate or uses it at the provider fence.
-	s.entries[token] = &sourceReleaseEntry{assemblyParts: parts, assemblyDigest: assemblyDigest, assemblyMetadata: metadata, healthMetadata: healthMetadata, sources: raw, workspace: workspace, project: project, binding: binding, digest: releaseDigest(unique), previous: previous, expires: now.Add(sourceReleaseTTL)}
-	s.bytes += len(raw) + len(metadata)
+	s.entries[token] = &sourceReleaseEntry{executionGrades: grades, assemblyParts: parts, assemblyDigest: assemblyDigest, assemblyMetadata: metadata, healthMetadata: healthMetadata, sources: raw, workspace: workspace, project: project, binding: binding, digest: releaseDigest(unique), previous: previous, expires: now.Add(sourceReleaseTTL)}
+	s.bytes += len(raw) + len(grades) + len(metadata)
 	s.healthBytes += len(healthMetadata)
 	return token, nil
 }
@@ -287,7 +297,7 @@ func (s *sourceReleaseState) drop(token, binding string, ancestors bool) {
 			return
 		}
 		delete(s.entries, token)
-		s.bytes -= len(entry.sources) + len(entry.assemblyMetadata)
+		s.bytes -= len(entry.sources) + len(entry.executionGrades) + len(entry.assemblyMetadata)
 		s.healthBytes -= len(entry.healthMetadata)
 		if !ancestors {
 			return
@@ -300,8 +310,17 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.expire(time.Now())
+	return s.handleSourceReleaseLocked(args, nil)
+}
+
+// Caller holds the owner mutex. Private fork candidates use the identical
+// challenge/result validation without becoming public source handles.
+func (s *sourceReleaseState) handleSourceReleaseLocked(args commandArgs, candidate *sourceReleaseEntry) ([]byte, bus.ModuleStatus) {
 	ticket := args.stringOr("source_release_ticket", "")
 	entry := s.entries[ticket]
+	if candidate != nil {
+		entry = candidate
+	}
 	operation := args.stringOr("operation", "")
 	if operation == "exploration-owner-generation" {
 		if s.receiptProducer == "" {
@@ -381,6 +400,14 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 		}
 		entry.pendingLocalDigest, entry.pendingSharedDigest = "", ""
 		result := map[string]any{"status": "ok"}
+		if len(entry.executionGrades) > 0 {
+			var gradeRequest executionGradeSnapshot
+			if json.Unmarshal(entry.executionGrades, &gradeRequest) != nil {
+				return commandResult(commandError("unavailable", "test receipt source unavailable"))
+			}
+			gradeRequest.CheckID = check
+			result["execution_grade_request"] = gradeRequest
+		}
 		revalidation := func(refs []typedProjectionRef) sourceRevalidation {
 			r := sourceRevalidation{SchemaVersion: 1, CheckID: check, Sources: refs}
 			if guarded {
@@ -418,10 +445,14 @@ func handleSourceRelease(s *sourceReleaseState, args commandArgs) ([]byte, bus.M
 	entry.pendingGuard = false
 	localDigest, sharedDigest := entry.pendingLocalDigest, entry.pendingSharedDigest
 	entry.pending, entry.pendingLocalDigest, entry.pendingSharedDigest = "", "", "" // one answer set per attempt
-	if check == "" || (localDigest == "" && sharedDigest == "") {
+	if check == "" || (localDigest == "" && sharedDigest == "" && len(entry.executionGrades) == 0) {
 		return commandResult(commandError("unavailable", "source owner answer unavailable"))
 	}
 	eligible := true
+	if len(entry.executionGrades) > 0 {
+		var answer executionGradeSnapshot
+		eligible = json.Unmarshal(args["execution_grade_response"], &answer) == nil && answer.CheckID == check && executionGradeSourcesEqual(entry.executionGrades, args["execution_grade_response"])
+	}
 	for _, part := range []struct{ field, digest string }{{"local_response", localDigest}, {"owner_response", sharedDigest}} {
 		if part.digest == "" {
 			continue

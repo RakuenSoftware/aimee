@@ -1,14 +1,10 @@
-/* Thin-client model ingress. Authentication and TLS stay in aimee_client;
- * response bytes (including SSE and HTTP error status) are never buffered. */
+/* Shared bounded model listener. The caller supplies its authenticated transport;
+ * this owner never reads global remote configuration, Vault or provider keys. */
 #include "cli_proxy.h"
-#include "aimee_client.h"
-#include "platform_path.h"
 #include "platform_process.h"
 #include <aimee/core/connection/auth.h>
 #include <aimee/core/connection/socket.h>
 #include <ctype.h>
-#include <errno.h>
-#include <signal.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,10 +20,7 @@ typedef CRITICAL_SECTION proxy_mutex_t;
 #define mutex_destroy(m) DeleteCriticalSection(m)
 #else
 #include <pthread.h>
-#include <spawn.h>
-#include <sys/wait.h>
 #include <unistd.h>
-extern char **environ;
 typedef pthread_t proxy_thread_t;
 typedef pthread_mutex_t proxy_mutex_t;
 #define mutex_init(m)    pthread_mutex_init(m, NULL)
@@ -53,6 +46,10 @@ struct cli_proxy
    int monitor_started;
    proxy_thread_t monitor;
    unsigned port;
+   cli_proxy_forward_fn forward;
+   cli_proxy_route_fn route;
+   cli_proxy_authorize_fn authorize;
+   void *forward_context;
    char token[256], session_id[128];
    atomic_int stopping;
    proxy_mutex_t mutex;
@@ -89,9 +86,16 @@ static int model_route(const char *method, const char *path)
 
 static int protocol_header(const char *name)
 {
-   static const char *const allowed[] = {
-       "content-type",   "content-encoding", "accept", "anthropic-version",
-       "anthropic-beta", "openai-beta",      NULL};
+   static const char *const allowed[] = {"content-type",
+                                         "content-encoding",
+                                         "accept",
+                                         "anthropic-version",
+                                         "anthropic-beta",
+                                         "openai-beta",
+                                         "mcp-protocol-version",
+                                         "user-agent",
+                                         "x-app",
+                                         NULL};
    for (int i = 0; allowed[i]; i++)
       if (strcasecmp(name, allowed[i]) == 0)
          return 1;
@@ -154,6 +158,19 @@ static int proxy_response(const void *data, unsigned long length, void *context)
    return aimee_core_socket_write_all(worker->downstream, data, length);
 }
 
+static void proxy_response_started(void *context)
+{
+   proxy_worker_t *worker = context;
+   worker->sent = 1;
+}
+
+static int proxy_cancelled(void *context)
+{
+   proxy_worker_t *worker = context;
+   return atomic_load(&worker->proxy->stopping) ||
+          aimee_core_socket_peer_closed(worker->downstream);
+}
+
 static void proxy_request(proxy_worker_t *worker)
 {
    cli_proxy_t *proxy = worker->proxy;
@@ -191,14 +208,17 @@ static void proxy_request(proxy_worker_t *worker)
    if (sscanf(buffer, "%15s %2047s %15s %c", method, path, version, &extra) != 3 ||
        strcmp(version, "HTTP/1.1") != 0)
       goto malformed;
-   if (!model_route(method, path))
+   if (!(proxy->route ? proxy->route(method, path, proxy->forward_context)
+                      : model_route(method, path)))
    {
-      proxy_error(fd, 404, "only model API routes are available through the local proxy");
+      proxy_error(fd, 404, "route unavailable in this local scope");
       goto done;
    }
    char forwarded[8192] = "", session[128] = "";
+   char authenticated[256] = "";
    size_t forwarded_len = 0, content_length = 0;
    int have_length = 0, have_auth = 0, have_host = 0, have_session = 0;
+   unsigned metadata_seen = 0;
    for (char *line = line_end + 2; line < buffer + header_len - 2; line = line_end + 2)
    {
       line_end = strstr(line, "\r\n");
@@ -225,11 +245,14 @@ static void proxy_request(proxy_worker_t *worker)
       {
          const char *token =
              strcasecmp(line, "Authorization") == 0 ? aimee_core_bearer_token(value) : value;
-         if (have_auth++ || !token || !aimee_core_credential_equal(token, proxy->token))
+         if (have_auth++ || !token || strlen(token) >= sizeof authenticated ||
+             (proxy->authorize ? !proxy->authorize(method, path, token, proxy->forward_context)
+                               : !aimee_core_credential_equal(token, proxy->token)))
          {
             proxy_error(fd, 401, "a valid local proxy token is required");
             goto done;
          }
+         snprintf(authenticated, sizeof authenticated, "%s", token);
       }
       else if (strcasecmp(line, "Host") == 0)
       {
@@ -254,8 +277,13 @@ static void proxy_request(proxy_worker_t *worker)
             }
          }
       }
+      else if (strcasecmp(line, "Origin") == 0)
+      {
+         proxy_error(fd, 403, "browser origins are not admitted by this native capability");
+         goto done;
+      }
       else if (strcasecmp(line, "Transfer-Encoding") == 0 || strcasecmp(line, "Expect") == 0 ||
-               strcasecmp(line, "Upgrade") == 0 || strcasecmp(line, "Origin") == 0)
+               strcasecmp(line, "Upgrade") == 0)
          goto malformed;
       else if (strcasecmp(line, "session_id") == 0)
       {
@@ -265,6 +293,18 @@ static void proxy_request(proxy_worker_t *worker)
       }
       else if (protocol_header(line))
       {
+         const char *bounded[] = {"user-agent", "x-app", "anthropic-version", "anthropic-beta"};
+         const size_t capacity[] = {256, 64, 64, 512};
+         for (unsigned i = 0; i < sizeof bounded / sizeof bounded[0]; i++)
+            if (!strcasecmp(line, bounded[i]))
+            {
+               if ((metadata_seen & (1u << i)) || !value[0] || strlen(value) >= capacity[i])
+                  goto malformed;
+               for (const unsigned char *p = (const unsigned char *)value; *p; p++)
+                  if (*p < 32 || *p > 126)
+                     goto malformed;
+               metadata_seen |= 1u << i;
+            }
          int n = snprintf(forwarded + forwarded_len, sizeof(forwarded) - forwarded_len,
                           "%s: %s\r\n", line, value);
          if (n < 0 || (size_t)n >= sizeof(forwarded) - forwarded_len)
@@ -295,9 +335,16 @@ static void proxy_request(proxy_worker_t *worker)
       }
       used += (size_t)n;
    }
-   int rc = aimee_client_proxy_request(method, path, forwarded, body, content_length,
-                                       proxy->session_id[0] ? proxy->session_id : session,
-                                       proxy_response, proxy_upstream, worker);
+   cli_proxy_io_t io = {.downstream_fd = fd,
+                        .local_credential = authenticated,
+                        .context = worker,
+                        .write_response = proxy_response,
+                        .on_upstream = proxy_upstream,
+                        .response_started = proxy_response_started,
+                        .cancelled = proxy_cancelled};
+   int rc = proxy->forward(method, path, forwarded, body, content_length,
+                           proxy->session_id[0] ? proxy->session_id : session, &io,
+                           proxy->forward_context);
    free(body);
    if ((rc != 0 || !worker->sent) && !worker->sent)
       proxy_error(fd, 502,
@@ -340,17 +387,23 @@ static void *proxy_worker(void *context)
    return 0;
 }
 
-cli_proxy_t *cli_proxy_start(unsigned port, const char *local_token, const char *session_id,
-                             unsigned *bound_port)
+cli_proxy_t *cli_proxy_start_authorized(unsigned port, const char *local_token,
+                                        const char *session_id, unsigned *bound_port,
+                                        cli_proxy_route_fn route, cli_proxy_authorize_fn authorize,
+                                        cli_proxy_forward_fn forward, void *forward_context)
 {
    char auth[272];
    if (!bound_port || !local_token || strlen(local_token) >= 256 ||
        aimee_core_bearer_value(auth, sizeof(auth), local_token) != 0 ||
-       (session_id && !session_valid(session_id)) || !aimee_client_has_remote())
+       (session_id && !session_valid(session_id)) || !forward)
       return NULL;
    cli_proxy_t *proxy = calloc(1, sizeof(*proxy));
    if (!proxy)
       return NULL;
+   proxy->forward = forward;
+   proxy->route = route;
+   proxy->authorize = authorize;
+   proxy->forward_context = forward_context;
    proxy->listener = aimee_core_socket_listen_loopback(port, &proxy->port);
    if (proxy->listener < 0)
    {
@@ -361,23 +414,53 @@ cli_proxy_t *cli_proxy_start(unsigned port, const char *local_token, const char 
    snprintf(proxy->session_id, sizeof(proxy->session_id), "%s", session_id ? session_id : "");
    atomic_init(&proxy->stopping, 0);
    mutex_init(&proxy->mutex);
+#ifndef AIMEE_WINDOWS
+   pthread_attr_t scoped_attributes;
+   pthread_attr_t *worker_attributes = NULL;
+   if (route)
+   {
+      /* Scoped server callbacks run the same deep RPC handlers as the server
+       * listener, whose explicit stack is 32 MiB. The thin proxy stays default. */
+      if (pthread_attr_init(&scoped_attributes))
+      {
+         cli_proxy_stop(proxy);
+         return NULL;
+      }
+      if (pthread_attr_setstacksize(&scoped_attributes, (size_t)32 * 1024 * 1024))
+      {
+         pthread_attr_destroy(&scoped_attributes);
+         cli_proxy_stop(proxy);
+         return NULL;
+      }
+      worker_attributes = &scoped_attributes;
+   }
+#endif
    for (int i = 0; i < PROXY_WORKERS; i++)
    {
       proxy_worker_t *worker = &proxy->workers[i];
       worker->proxy = proxy;
       worker->downstream = worker->upstream = -1;
 #ifdef AIMEE_WINDOWS
-      worker->thread = (HANDLE)_beginthreadex(NULL, 0, proxy_worker, worker, 0, NULL);
+      worker->thread = (HANDLE)_beginthreadex(NULL, route ? 32u * 1024u * 1024u : 0, proxy_worker,
+                                              worker, 0, NULL);
       if (!worker->thread)
 #else
-      if (pthread_create(&worker->thread, NULL, proxy_worker, worker) != 0)
+      if (pthread_create(&worker->thread, worker_attributes, proxy_worker, worker) != 0)
 #endif
       {
+#ifndef AIMEE_WINDOWS
+         if (worker_attributes)
+            pthread_attr_destroy(worker_attributes);
+#endif
          cli_proxy_stop(proxy);
          return NULL;
       }
       proxy->started++;
    }
+#ifndef AIMEE_WINDOWS
+   if (worker_attributes)
+      pthread_attr_destroy(worker_attributes);
+#endif
 #ifdef AIMEE_WINDOWS
    proxy->monitor = (HANDLE)_beginthreadex(NULL, 0, proxy_monitor, proxy, 0, NULL);
    if (!proxy->monitor)
@@ -393,7 +476,23 @@ cli_proxy_t *cli_proxy_start(unsigned port, const char *local_token, const char 
    return proxy;
 }
 
-void cli_proxy_stop(cli_proxy_t *proxy)
+cli_proxy_t *cli_proxy_start_scoped(unsigned port, const char *local_token, const char *session_id,
+                                    unsigned *bound_port, cli_proxy_route_fn route,
+                                    cli_proxy_forward_fn forward, void *context)
+{
+   return cli_proxy_start_authorized(port, local_token, session_id, bound_port, route, NULL,
+                                     forward, context);
+}
+
+cli_proxy_t *cli_proxy_start_bound(unsigned port, const char *local_token, const char *session_id,
+                                   unsigned *bound_port, cli_proxy_forward_fn forward,
+                                   void *host_context)
+{
+   return cli_proxy_start_scoped(port, local_token, session_id, bound_port, NULL, forward,
+                                 host_context);
+}
+
+void cli_proxy_deactivate_hold_port(cli_proxy_t *proxy)
 {
    if (!proxy)
       return;
@@ -407,6 +506,7 @@ void cli_proxy_stop(cli_proxy_t *proxy)
       pthread_join(proxy->monitor, NULL);
 #endif
    }
+   proxy->monitor_started = 0;
    mutex_lock(&proxy->mutex);
    for (int i = 0; i < proxy->started; i++)
    {
@@ -423,251 +523,19 @@ void cli_proxy_stop(cli_proxy_t *proxy)
       pthread_join(proxy->workers[i].thread, NULL);
 #endif
    }
+   proxy->started = 0;
+   proxy->forward = NULL;
+   proxy->route = NULL;
+   proxy->forward_context = NULL;
+   memset(proxy->token, 0, sizeof proxy->token);
+}
+void cli_proxy_stop(cli_proxy_t *proxy)
+{
+   if (!proxy)
+      return;
+   cli_proxy_deactivate_hold_port(proxy);
    aimee_core_socket_close(proxy->listener);
    mutex_destroy(&proxy->mutex);
    memset(proxy->token, 0, sizeof(proxy->token));
    free(proxy);
-}
-
-static volatile sig_atomic_t proxy_interrupted;
-static volatile sig_atomic_t proxy_child_pid;
-static void proxy_signal(int signum)
-{
-   proxy_interrupted = 1;
-   if (proxy_child_pid > 0)
-#ifdef AIMEE_WINDOWS
-      platform_signal_send_term(proxy_child_pid);
-#else
-      kill(proxy_child_pid, signum);
-#endif
-}
-
-int cli_proxy_cmd(int argc, char **argv)
-{
-   unsigned port = 8911;
-   if (argc == 2 && strcmp(argv[0], "--port") == 0 && *argv[1])
-   {
-      port = 0;
-      for (const char *p = argv[1]; *p; p++)
-      {
-         if (*p < '0' || *p > '9' || (port = port * 10 + (unsigned)(*p - '0')) > 65535)
-            goto usage;
-      }
-   }
-   else if (argc)
-      goto usage;
-   const char *token = getenv("AIMEE_PROXY_TOKEN");
-   if (!token || !*token)
-   {
-      fprintf(stderr, "aimee: set AIMEE_PROXY_TOKEN to a local-only credential, or use "
-                      "`aimee launch --gateway -- codex` for automatic setup\n");
-      return 1;
-   }
-   cli_proxy_t *proxy = cli_proxy_start(port, token, NULL, &port);
-   if (!proxy)
-   {
-      fprintf(stderr, "aimee: could not start local proxy; check remote configuration and port\n");
-      return 1;
-   }
-   platform_signal_term(proxy_signal);
-   platform_signal_int(proxy_signal);
-   fprintf(stderr, "aimee: model proxy listening at http://127.0.0.1:%u/v1\n", port);
-   while (!proxy_interrupted)
-#ifdef AIMEE_WINDOWS
-      Sleep(200);
-#else
-      usleep(200000);
-#endif
-   cli_proxy_stop(proxy);
-   return 0;
-usage:
-   fprintf(stderr, "usage: aimee proxy [--port 0..65535]\n");
-   return 2;
-}
-
-/* Hook discovery in Codex 0.153.4 reads plugin enablement from file layers,
- * not -c overrides. A private profile disables only Aimee's plugin without
- * changing the user's config, hook trust, credentials, or other plugins. */
-static int codex_proxy_profile(char *profile, size_t profile_size, char *path, size_t path_size)
-{
-   unsigned char random[16];
-   char hex[33], default_home[4096];
-   const char *config_home = getenv("CODEX_HOME");
-   if (!config_home || !*config_home)
-   {
-      const char *home = platform_home_dir();
-      if (!home || snprintf(default_home, sizeof(default_home), "%s/.codex", home) >=
-                       (int)sizeof(default_home))
-         return -1;
-      config_home = default_home;
-   }
-   if (platform_random_bytes(random, sizeof(random)) != 0 ||
-       platform_mkdir_p(config_home, 0700) != 0)
-      return -1;
-   for (size_t i = 0; i < sizeof(random); i++)
-      snprintf(hex + 2 * i, 3, "%02x", random[i]);
-   if (snprintf(profile, profile_size, "aimee-proxy-%s", hex) >= (int)profile_size ||
-       snprintf(path, path_size, "%s/%s.config.toml", config_home, profile) >= (int)path_size)
-   {
-      path[0] = '\0';
-      return -1;
-   }
-   FILE *file = fopen(path, "wx");
-   if (!file)
-   {
-      path[0] = '\0'; /* Never remove a file we did not create. */
-      return -1;
-   }
-   int ok = platform_set_permissions(path, 0600) == 0 &&
-            fputs("[plugins.\"aimee@local\"]\nenabled = false\n", file) >= 0;
-   if (fclose(file) != 0)
-      ok = 0;
-   return ok ? 0 : -1;
-}
-
-int cli_proxy_launch(char *const argv[], const char *session_id)
-{
-   unsigned char random[32];
-   char token[65], origin[80], base[sizeof(origin) + sizeof("/v1") - 1];
-   if (platform_random_bytes(random, sizeof(random)) != 0)
-      return 1;
-   for (size_t i = 0; i < sizeof(random); i++)
-      snprintf(token + 2 * i, 3, "%02x", random[i]);
-   unsigned port;
-   cli_proxy_t *proxy = cli_proxy_start(0, token, session_id, &port);
-   if (!proxy)
-   {
-      fprintf(stderr, "aimee: could not start the local model proxy; configure an Aimee remote\n");
-      return 1;
-   }
-   snprintf(origin, sizeof(origin), "http://127.0.0.1:%u", port);
-   snprintf(base, sizeof(base), "%s/v1", origin);
-   int status = 1;
-   char profile[64], profile_path[4096] = "";
-   if (platform_setenv("AIMEE_CONVERSATION_GATEWAY", base) != 0 ||
-       platform_setenv("OPENAI_BASE_URL", base) != 0 ||
-       platform_setenv("OPENAI_API_KEY", token) != 0 ||
-       platform_setenv("ANTHROPIC_BASE_URL", origin) != 0 ||
-       platform_setenv("ANTHROPIC_AUTH_TOKEN", token) != 0 ||
-       platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "1") != 0)
-      goto done;
-   /* Codex's ChatGPT login does not select an API-key provider just because
-    * OPENAI_BASE_URL is set. Explicitly select Responses + the local credential.
-    * Disable Aimee's CLI/MCP plugin for this invocation. */
-   const char *name = strrchr(argv[0], '/');
-   name = name ? name + 1 : argv[0];
-   const char *backslash = strrchr(name, '\\');
-   name = backslash ? backslash + 1 : name;
-   int codex = strcmp(name, "codex") == 0 || strcmp(name, "codex.exe") == 0;
-   int custom_profile = 0;
-   if (codex)
-   {
-      for (size_t i = 1; argv[i] && strcmp(argv[i], "--") != 0; i++)
-         if (strcmp(argv[i], "--profile") == 0 || strcmp(argv[i], "-p") == 0 ||
-             strncmp(argv[i], "--profile=", 10) == 0 ||
-             (strncmp(argv[i], "-p", 2) == 0 && argv[i][2]))
-            custom_profile = 1;
-      if (custom_profile)
-         fprintf(stderr, "aimee: using your Codex profile; disable plugins.\"aimee@local\" "
-                         "in that profile to keep its CLI hooks off\n");
-      else if (codex_proxy_profile(profile, sizeof(profile), profile_path, sizeof(profile_path)) !=
-               0)
-      {
-         fprintf(stderr, "aimee: could not create the temporary Codex proxy profile\n");
-         goto done;
-      }
-   }
-   char base_config[128];
-   snprintf(base_config, sizeof(base_config), "model_providers.aimee.base_url=\"%s\"", base);
-   /* The server's model IDs are agent bindings, not upstream provider IDs.
-    * Use its primary binding by default; the user's later -m/-c can select a
-    * named binding without changing their global Codex model preference. */
-   char *options[] = {"-c", "model_provider=\"aimee\"",
-                      "-c", "model=\"aimee\"",
-                      "-c", "model_providers.aimee.name=\"Aimee local proxy\"",
-                      "-c", base_config,
-                      "-c", "model_providers.aimee.wire_api=\"responses\"",
-                      "-c", "model_providers.aimee.env_key=\"OPENAI_API_KEY\"",
-                      "-c", "model_providers.aimee.requires_openai_auth=false",
-                      "-c", "model_providers.aimee.supports_websockets=false",
-                      "-c", "plugins.\"aimee@local\".enabled=false",
-                      "-c", "mcp_servers.aimee={command=\"aimee\",enabled=false}"};
-   size_t argc = 0, option_count = codex ? sizeof(options) / sizeof(options[0]) : 0;
-   while (argv[argc])
-      argc++;
-   size_t profile_args = codex && !custom_profile ? 2 : 0;
-   char **command = calloc(argc + option_count + profile_args + 1, sizeof(*command));
-   if (!command)
-      goto done;
-   command[0] = argv[0];
-   for (size_t i = 0; i < option_count; i++)
-      command[i + 1] = options[i];
-   if (profile_args)
-   {
-      command[option_count + 1] = "--profile";
-      command[option_count + 2] = profile;
-   }
-   for (size_t i = 1; i < argc; i++)
-      command[i + option_count + profile_args] = argv[i];
-   /* The provider child receives only the local proxy credential, even if the
-    * parent selected its upstream bearer through the environment. */
-#ifdef AIMEE_WINDOWS
-   char **parent_env = _environ;
-#else
-   char **parent_env = environ;
-#endif
-   size_t env_count = 0, copied = 0;
-   while (parent_env[env_count])
-      env_count++;
-   char **child_env = calloc(env_count + 1, sizeof(*child_env));
-   if (!child_env)
-   {
-      free(command);
-      goto done;
-   }
-   for (size_t i = 0; i < env_count; i++)
-      if (strncmp(parent_env[i], "AIMEE_SERVER_TOKEN=", 19) != 0 &&
-          strncmp(parent_env[i], "AIMEE_TLS_CLIENT_P12_PASS=", 26) != 0)
-         child_env[copied++] = parent_env[i];
-   platform_signal_term(proxy_signal);
-   platform_signal_int(proxy_signal);
-#ifdef AIMEE_WINDOWS
-   intptr_t child = _spawnvpe(_P_NOWAIT, command[0], (const char *const *)command,
-                              (const char *const *)child_env);
-   if (child == -1)
-      status = 127;
-   else
-   {
-      proxy_child_pid = (sig_atomic_t)GetProcessId((HANDLE)child);
-      if (proxy_interrupted)
-         platform_signal_send_term(proxy_child_pid);
-      int result;
-      status = _cwait(&result, child, 0) == -1 ? 1 : result;
-   }
-#else
-   pid_t pid;
-   if (posix_spawnp(&pid, command[0], NULL, NULL, command, child_env) != 0)
-      status = 127;
-   else
-   {
-      proxy_child_pid = pid;
-      if (proxy_interrupted)
-         kill(pid, SIGTERM);
-      int result;
-      pid_t waited;
-      do
-      {
-         waited = waitpid(pid, &result, 0);
-      } while (waited < 0 && errno == EINTR);
-      status = waited < 0 ? 1 : WIFEXITED(result) ? WEXITSTATUS(result) : 128 + WTERMSIG(result);
-   }
-#endif
-   proxy_child_pid = 0;
-   free(child_env);
-   free(command);
-done:
-   cli_proxy_stop(proxy);
-   if (profile_path[0] && platform_unlink(profile_path) != 0)
-      fprintf(stderr, "aimee: could not remove temporary Codex profile: %s\n", profile_path);
-   return status;
 }

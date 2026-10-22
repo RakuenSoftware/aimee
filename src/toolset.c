@@ -15,14 +15,16 @@ typedef struct
 } builtin_toolset_t;
 
 static const builtin_toolset_t BUILTINS[] = {
+    /* Orchestration is available to primaries; delegate role sets never inherit it. */
+    {"primary", {"code", NULL}, {NULL}},
     /* The code-intelligence tools (index_find_callers, index_blast_radius, ...) are
      * NOT listed here: they are declared native in the server's MCP table and land in
      * `core` and `review_indexed` by registration. One declaration, one schema, one
      * handler shared with external MCP clients. */
     {"core",
      {NULL},
-     {"read_file", "list_files", "grep", "code_search", "find_symbol", "context_contract_expand",
-      "search_memory",
+     {"request_input", "read_file", "list_files", "grep", "code_search", "find_symbol",
+      "context_contract_expand", "search_memory",
       /* aimee condenses long tool output and leaves a '[... ref "tc-..."]' pointer.
        * The tool that expands it was advertised to every agent (TSURF_ALL) and named
        * by no toolset, so agent_tools_filter_for_role stripped it from every role
@@ -44,8 +46,8 @@ static const builtin_toolset_t BUILTINS[] = {
     {"validate", {"readonly", NULL}, {"bash", "execute_script", NULL}},
     {"current_code",
      {"git", NULL},
-     {"bash", "execute_script", "read_file", "write_file", "edit_file", "list_files", "verify",
-      "grep", "env_get", "test", NULL}},
+     {"request_input", "bash", "execute_script", "read_file", "write_file", "edit_file",
+      "list_files", "verify", "grep", "env_get", "test", NULL}},
     {"code",
      {"core", "git", "git_write", "web", NULL},
      {"bash", "execute_script", "write_file", "edit_file", "verify", "env_get", "test",
@@ -62,8 +64,8 @@ static const builtin_toolset_t BUILTINS[] = {
      * never gains write_file/edit_file/bash: a reviewer must not edit what it judges. */
     {"review_indexed",
      {NULL},
-     {"read_file", "list_files", "grep", "code_search", "find_symbol", "context_contract_expand",
-      "search_memory", "search_docs", "record_attempt", NULL}},
+     {"request_input", "read_file", "list_files", "grep", "code_search", "find_symbol",
+      "context_contract_expand", "search_memory", "search_docs", "record_attempt", NULL}},
     {"script_rpc",
      {NULL},
      {"read_file", "list_files", "grep", "git_status", "git_log", "git_diff", "code_search",
@@ -74,6 +76,8 @@ static const builtin_toolset_t BUILTINS[] = {
 };
 
 static const char *const KNOWN_TOOLS[] = {
+    "delegate",
+    "delegate_status",
     "bash",
     "execute_script",
     "read_file",

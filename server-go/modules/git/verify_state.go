@@ -58,7 +58,7 @@ type VerifyStateRequest struct {
 type VerifyStateResponse struct {
 	OK      bool         `json:"ok"`
 	Hash    string       `json:"hash,omitempty"`
-	Dirty   bool         `json:"dirty,omitempty"`
+	Dirty   bool         `json:"dirty"`
 	Entries []StateEntry `json:"entries,omitempty"`
 }
 
@@ -234,6 +234,9 @@ func handleVerifyState(invocation bus.ModuleInvocation, request []byte) ([]byte,
 	var decoded VerifyStateRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
+	}
+	if strings.HasPrefix(decoded.Op, "snapshot-") {
+		return handleVerificationSnapshot(invocation, request)
 	}
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled

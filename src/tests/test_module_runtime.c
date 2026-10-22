@@ -27,6 +27,7 @@
 #include "config_client.h"
 #include <aimee/skills/module_api.h>
 #include <aimee/tools/module_api.h>
+#include "modules/tools/tool_catalog_data.h"
 #include <aimee/workspace/module_api.h>
 #include "economizer_module_client.h"
 
@@ -51,7 +52,12 @@
 #define TEST_STAGE 1U
 #define MODULE_REF 7U
 #define CALLER_REF 90U
-#define LARGE_BODY (128U * 1024U + 37U)
+/* AIMEE_TEST_MODULE_CALLER: an external caller process (the Rust reference
+ * caller's conformance binary) admitted as this principal. It may request the
+ * served kind and EMPTY_KIND. DENIED_KIND is in no caller's grant. */
+#define EXTERNAL_CALLER_REF 91U
+#define DENIED_KIND         5891U
+#define LARGE_BODY          (128U * 1024U + 37U)
 /* The largest stage count any component declares in
  * src/modules/process-contracts.json. `aimee` has twenty-three. */
 #define PRODUCTION_STAGE_MAX 32U
@@ -293,7 +299,14 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       return 0;
    }
    else if (strcmp(name, "delegates") == 0)
-      *kind = AIMEE_DELEGATES_EVENT_INVOKE, *principal_ref = 10;
+   {
+      *kind = AIMEE_DELEGATES_EVENT_INVOKE;
+      *principal_ref = 10;
+      served[0] = *kind;
+      served[1] = AIMEE_DELEGATES_EVENT_RESCUE;
+      *serve_count = 2;
+      return 0;
+   }
    else if (strcmp(name, "tools") == 0)
       *kind = AIMEE_TOOLS_EVENT_DISPATCH, *principal_ref = 11;
    else if (strcmp(name, "workspace") == 0)
@@ -492,6 +505,44 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(aimee_delegates_message_decode(response, response_len, AIMEE_DELEGATES_RESPONSE_MAGIC,
                                             role, sizeof(role)) == 0);
       assert(strcmp(role, "code") == 0);
+      /* Real C v2 framing -> Go dialect parser -> canonical owned message. */
+      char name_long[201];
+      memset(name_long, 'n', sizeof name_long - 1);
+      name_long[sizeof name_long - 1] = 0;
+      char prose[1024];
+      int prose_length = snprintf(
+          prose, sizeof prose,
+          "<tool_call><name>%s</name><arguments>{\"id\":9007199254740993}</arguments></tool_call>",
+          name_long);
+      assert(prose_length > 0 && (size_t)prose_length < sizeof prose);
+      const char *known[] = {name_long};
+      uint8_t rescue_request[2048];
+      size_t rescue_length = aimee_delegates_rescue_request_encode(
+          prose, (size_t)prose_length, known, 1, 0, AIMEE_DELEGATES_RESCUE_MODE_PARSE,
+          rescue_request, sizeof rescue_request);
+      assert(rescue_length && rescue_request[4] == 2);
+      assert(aimee_module_client_call(client, AIMEE_DELEGATES_EVENT_RESCUE,
+                                      AIMEE_DELEGATES_STAGE_RESCUE, 3119, 0, rescue_request,
+                                      (uint32_t)rescue_length, response, sizeof response,
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len && response_len < sizeof response);
+      response[response_len] = 0;
+      cJSON *rescued = cJSON_Parse((const char *)response);
+      assert(rescued);
+      assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(rescued, "matched")));
+      cJSON *message = cJSON_GetObjectItemCaseSensitive(rescued, "message");
+      cJSON *blocks = cJSON_GetObjectItemCaseSensitive(message, "blocks");
+      assert(cJSON_GetArraySize(blocks) == 1);
+      const char *name_value = cJSON_GetStringValue(
+          cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(blocks, 0), "name"));
+      assert(name_value && !strcmp(name_value, name_long));
+      assert(strstr((const char *)response, "9007199254740993"));
+      cJSON_Delete(rescued);
+      rescue_request[4] = 1;
+      assert(aimee_module_client_call(client, AIMEE_DELEGATES_EVENT_RESCUE,
+                                      AIMEE_DELEGATES_STAGE_RESCUE, 3120, 0, rescue_request,
+                                      (uint32_t)rescue_length, response, sizeof response,
+                                      &response_len, NULL, NULL) != AIMEE_MODULE_CALL_OK);
    }
    else if (strcmp(name, "tools") == 0)
    {
@@ -503,6 +554,42 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_tools_response_decode(response, response_len, &classification) == 0);
       assert(classification == AIMEE_TOOL_CLASS_EXEC);
+      for (size_t i = 0; i < sizeof(aimee_tool_catalog) / sizeof(aimee_tool_catalog[0]); ++i)
+      {
+         const aimee_tool_catalog_entry_t *entry = &aimee_tool_catalog[i];
+         request_len =
+             (uint32_t)aimee_tools_metadata_request_encode(entry->name, request, sizeof request);
+         assert(request_len > 0);
+         assert(aimee_module_client_call(client, kind, 1, 21000 + i, 0, request, request_len,
+                                         response, sizeof response, &response_len, NULL,
+                                         NULL) == AIMEE_MODULE_CALL_OK);
+         aimee_tool_metadata_t actual;
+         assert(aimee_tools_metadata_response_decode(response, response_len, &actual) == 0);
+         assert(actual.classification == entry->metadata.classification);
+         assert(actual.primary == entry->metadata.primary);
+         assert(actual.categories == entry->metadata.categories);
+      }
+      request_len = (uint32_t)aimee_tools_metadata_request_encode("unregistered_tool", request,
+                                                                  sizeof request);
+      assert(request_len > 0);
+      assert(aimee_module_client_call(client, kind, 1, 22000, 0, request, request_len, response,
+                                      sizeof response, &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      aimee_tool_metadata_t unknown;
+      assert(aimee_tools_metadata_response_decode(response, response_len, &unknown) == -1);
+      assert(!unknown.categories);
+      char long_name[308];
+      memcpy(long_name, "remote:", 7);
+      memset(long_name + 7, 'x', 300);
+      long_name[307] = 0;
+      request_len =
+          (uint32_t)aimee_tools_metadata_request_encode(long_name, request, sizeof request);
+      assert(request_len > AIMEE_TOOLS_REQUEST_LEN);
+      assert(aimee_module_client_call(client, kind, 1, 22001, 0, request, request_len, response,
+                                      sizeof response, &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_tools_metadata_response_decode(response, response_len, &unknown) == 0);
+      assert(unknown.classification == AIMEE_TOOL_CLASS_REMOTE);
    }
    else if (strcmp(name, "workspace") == 0)
    {
@@ -591,17 +678,26 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    }
    else if (strcmp(name, "governance") == 0)
    {
-      static const char *tools[] = {"read_file", "spawn_agent", "Task"};
+      const char *policy =
+          "{\"version\":2,\"policy_active\":true,\"stop_reason\":\"max_tokens\",\"tools\":["
+          "{\"name\":\"mcp__aimee__preview_blast_radius_with_complete_identity\","
+          "\"namespace\":\"tenant/project/namespace/longer-than-thirty-one-bytes\"},"
+          "{\"name\":\"spawn_agent\"},{\"name\":\"Task\"}]}";
       aimee_governance_decision_t decision;
-      assert(aimee_governance_request_encode(1, tools, 3, "max_tokens", request, sizeof(request)) ==
-             0);
-      request_len = AIMEE_GOVERNANCE_REQUEST_LEN;
+      request_len = (uint32_t)strlen(policy);
+      memcpy(request, policy, request_len);
       assert(aimee_module_client_call(client, kind, AIMEE_GOVERNANCE_STAGE_EVALUATE, 2009, 0,
                                       request, request_len, response, sizeof(response),
                                       &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
       assert(aimee_governance_response_decode(response, response_len, 3, &decision) == 0);
       assert(decision.keep_mask == 1 && decision.drop_count == 2);
       assert(strcmp(decision.stop_reason, "max_tokens") == 0);
+      uint8_t retired[632] = {0};
+      aimee_governance_put_u32(retired, 0x51564f47u);
+      aimee_governance_put_u32(retired + 4, 1);
+      assert(aimee_module_client_call(client, kind, AIMEE_GOVERNANCE_STAGE_EVALUATE, 2010, 0,
+                                      retired, sizeof(retired), response, sizeof(response),
+                                      &response_len, NULL, NULL) != AIMEE_MODULE_CALL_OK);
    }
    else if (strcmp(name, "roundtable") == 0)
    {
@@ -749,9 +845,9 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
                                       NULL) == AIMEE_MODULE_CALL_OK);
       assert(response_len == 72 && memcmp(response, "TSTA\1\0\0\0", 8) == 0);
 
-      const char record_request[] =
-          "{\"messages\":[{\"role\":\"assistant\",\"content\":\"[done] changed "
-          "src/server/session_compact.c\"}],\"start\":0,\"end\":1}";
+      const char record_request[] = "{\"messages\":[{\"role\":\"assistant\",\"blocks\":[{\"type\":"
+                                    "\"text\",\"text\":\"[done] changed "
+                                    "src/server/session_compact.c\"}]}],\"start\":0,\"end\":1}";
       assert(aimee_module_client_call(client, AIMEE_ECONOMIZER_EVENT_RECORD_BUILD,
                                       AIMEE_ECONOMIZER_STAGE_RECORD_BUILD, 2021, 0, record_request,
                                       sizeof(record_request) - 1, response, sizeof(response),
@@ -998,8 +1094,10 @@ static void smoke_host_gateway_plan(bus_client_t *host)
    assert(aimee_module_client_init(&client, host) == 0);
    cJSON *plan = host_plan(
        &client,
-       "{\"operation\":\"gateway-plan\",\"phase\":\"context\",\"roles\":[\"user\"],\"tools\":[],"
-       "\"provided_query\":\"deploy matrix\",\"last_user_text\":\"persona text\"}");
+       "{\"operation\":\"gateway-plan\",\"phase\":\"context\","
+       "\"request\":{\"version\":1,\"view\":\"gateway_policy\","
+       "\"messages\":[{\"role\":\"user\"}],\"tools\":[],\"last_user_text\":\"persona text\"},"
+       "\"provided_query\":\"deploy matrix\"}");
    cJSON *steps = cJSON_GetObjectItemCaseSensitive(plan, "steps");
    assert(cJSON_GetArraySize(steps) == 4);
    cJSON *retrieve = cJSON_GetArrayItem(steps, 0);
@@ -1013,13 +1111,19 @@ static void smoke_host_gateway_plan(bus_client_t *host)
    assert(strcmp(json_string(evidence, "origin"), "retrieval") == 0 &&
           strcmp(json_string(evidence, "authority"), "evidence") == 0);
    cJSON_Delete(plan);
-   plan = host_plan(&client, "{\"operation\":\"gateway-plan\",\"phase\":\"tools\",\"roles\":["
-                             "\"user\"],\"tools\":[\"exec_command\",\"apply_patch\",\"shell\"]}");
+   plan =
+       host_plan(&client, "{\"operation\":\"gateway-plan\",\"phase\":\"tools\","
+                          "\"request\":{\"version\":1,\"view\":\"gateway_policy\","
+                          "\"messages\":[{\"role\":\"user\"}],\"tools\":["
+                          "{\"kind\":\"function\",\"name\":\"exec_command\"},"
+                          "{\"kind\":\"function\",\"name\":\"apply_patch\"},"
+                          "{\"kind\":\"function\",\"name\":\"shell\"}],\"last_user_text\":\"\"}}");
    steps = cJSON_GetObjectItemCaseSensitive(plan, "steps");
    assert(cJSON_GetArraySize(steps) == 1);
-   cJSON *indices = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(steps, 0), "indices");
-   assert(cJSON_GetArraySize(indices) == 2 && cJSON_GetArrayItem(indices, 0)->valueint == 2 &&
-          cJSON_GetArrayItem(indices, 1)->valueint == 0);
+   cJSON *paths = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(steps, 0), "paths");
+   assert(cJSON_GetArraySize(paths) == 2 &&
+          cJSON_GetArrayItem(cJSON_GetArrayItem(paths, 0), 0)->valueint == 2 &&
+          cJSON_GetArrayItem(cJSON_GetArrayItem(paths, 1), 0)->valueint == 0);
    cJSON_Delete(plan);
    const char *claim = "{\"operation\":\"ingress-task-claim\",\"session\":\"live\",\"project\":"
                        "\"p\",\"query\":\"fix resolver\"}";
@@ -1087,7 +1191,11 @@ int main(int argc, char **argv)
    uint32_t served[PRODUCTION_STAGE_MAX] = {test_kind};
    size_t serve_count = 1;
    if (argc >= 3)
-      assert(production_contract(argv[2], &test_kind, &module_ref, served, &serve_count) == 0);
+   {
+      int contract_status =
+          production_contract(argv[2], &test_kind, &module_ref, served, &serve_count);
+      assert(contract_status == 0);
+   }
    const int memory_process = argc >= 3 && strcmp(argv[2], "memory") == 0;
    const int egress_process = argc >= 3 && strcmp(argv[2], "egress") == 0;
    const int config_process = memory_process || egress_process;
@@ -1207,6 +1315,27 @@ int main(int argc, char **argv)
                                                          : (memory_process || provider_process)
                                                              ? 3
                                                              : 2};
+   /* An external caller, when one is named, joins the plain fixture under its
+    * own grant: the served kind and EMPTY_KIND, and nothing else. */
+   const char *external_caller_env = argc < 3 ? getenv("AIMEE_TEST_MODULE_CALLER") : NULL;
+   char external_caller[PATH_MAX] = "";
+   const uint32_t external_request[] = {TEST_KIND, EMPTY_KIND};
+   bus_runtime_grant_t external_grants[3];
+   if (external_caller_env && *external_caller_env)
+   {
+      assert(realpath(external_caller_env, external_caller) != NULL);
+      assert(runtime_config.grant_count == 2);
+      external_grants[0] = grants[0];
+      external_grants[1] = grants[1];
+      external_grants[2] = (bus_runtime_grant_t){.principal_class = 1,
+                                                 .principal_ref = EXTERNAL_CALLER_REF,
+                                                 .uid = BUS_RUNTIME_SELF_UID,
+                                                 .executable = external_caller,
+                                                 .request = external_request,
+                                                 .request_count = 2};
+      runtime_config.grants = external_grants;
+      runtime_config.grant_count = 3;
+   }
    bus_runtime_t *runtime = bus_runtime_start(&host, &host_lock, &runtime_config);
    assert(runtime != NULL);
 
@@ -1235,7 +1364,10 @@ int main(int argc, char **argv)
    pthread_t startup_thread;
    atomic_init(&startup_replays, 0);
    if (memory_process)
-      assert(pthread_create(&startup_thread, NULL, run_process, &startup) == 0);
+   {
+      int started = pthread_create(&startup_thread, NULL, run_process, &startup);
+      assert(started == 0);
+   }
 
    static const aimee_module_stage_t config_stage[] = {{4609u, 1u}};
    process_thread_t configuration = {.config = {.socket_path = socket_path,
@@ -1248,7 +1380,10 @@ int main(int argc, char **argv)
    pthread_t configuration_thread;
    atomic_init(&startup_snapshots, 0);
    if (config_process)
-      assert(pthread_create(&configuration_thread, NULL, run_process, &configuration) == 0);
+   {
+      int started = pthread_create(&configuration_thread, NULL, run_process, &configuration);
+      assert(started == 0);
+   }
 
    pthread_t module_thread;
    pid_t module_pid = -1;
@@ -1257,7 +1392,10 @@ int main(int argc, char **argv)
       module_pid = spawn_module_child(module_executable, socket_path, NULL);
    }
    else
-      assert(pthread_create(&module_thread, NULL, run_process, &process) == 0);
+   {
+      int started = pthread_create(&module_thread, NULL, run_process, &process);
+      assert(started == 0);
+   }
 
    int caller_fd = -1;
    bus_client_t caller;
@@ -1357,6 +1495,33 @@ int main(int argc, char **argv)
                                    NULL) == AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE);
    assert(body_len == 8);
 
+   /* A kind outside the caller's grant is refused by the host at once, as
+    * CAPABILITY_DENIED, not waited out to a deadline. */
+   struct timespec denied_now;
+   assert(clock_gettime(CLOCK_MONOTONIC, &denied_now) == 0);
+   uint64_t denied_deadline =
+       (uint64_t)denied_now.tv_sec * 1000000000ULL + (uint64_t)denied_now.tv_nsec + 20000000000ULL;
+   assert(aimee_module_client_call(&module_client, DENIED_KIND, 3, 1009, denied_deadline, "x", 1,
+                                   body, sizeof body, &body_len, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_CAPABILITY_DENIED);
+   assert(body_len == 0);
+
+   if (*external_caller)
+   {
+      /* The same outcomes, from an independent caller in another process.
+       * Run after the C caller so its stale correlations are already behind
+       * it; the external caller leaves its own for nobody, which the host's
+       * reap of its departed slot collects. */
+      pid_t caller_pid = spawn_module_child(external_caller, socket_path, NULL);
+      int caller_status = 0;
+      while (waitpid(caller_pid, &caller_status, 0) < 0)
+         assert(errno == EINTR);
+      if (!WIFEXITED(caller_status) || WEXITSTATUS(caller_status) != 0)
+         fprintf(stderr, "external module caller failed (status %d)\n", caller_status);
+      assert(WIFEXITED(caller_status) && WEXITSTATUS(caller_status) == 0);
+      puts("module runtime: external caller matched the C caller's outcomes");
+   }
+
 finish:
    aimee_module_client_destroy(&module_client);
    if (module_pid > 0)
@@ -1414,6 +1579,6 @@ finish:
    else
       printf(
           "module runtime (%s): dispatch, fragmented payloads, deadline, and cancellation passed\n",
-          argc == 2 ? "Go process" : "C process");
+          argc == 2 ? "external process" : "C process");
    return 0;
 }
