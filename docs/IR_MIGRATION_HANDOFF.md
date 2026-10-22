@@ -15,106 +15,133 @@ implementation or local/live validation. Earlier follow-up-PR instructions below
 are historical. Do not investigate or change `.100`; validation uses the owned
 `.252` environment.
 
-Runtime candidate `64cce353b` passes all 76 lint gates, all three Go module
-race suites, all 478 frontend tests, type checking and both frontend builds.
-The complete native ASan/UBSan/leak lane passes 678 invocations of 675 distinct
-binaries. All 988 production C translation units complete static analysis; the
-advisory warning review retains existing warnings without suppressions. Rust/C
-and Go/C interoperability checks also pass on their unchanged inputs. These are
-local results, not fresh GitHub CI.
+### Latest runtime qualification: 23 October 2026
 
-Exact runtime `64cce353b` passes configured integration (170/170), all eight
-actual SDK profiles, and the new real Claude 2.1.177 refusal fixture. Integration
-retains 25 explicitly unconfigured KB/runtime-web checks; real Docker grading,
-learning, recovery and scoped reuse ran. T3 passes all seven topology gates and
-692 family assertions. Scoped fixture databases, roles, credentials, containers,
-volumes and networks are cleaned up. Private proof indices and exported evidence
-are retained outside the repository. This qualifies the locally built candidate,
-not a newly published registry image.
+Runtime candidate `252ee7707` is committed and pushed on the same branch. Its
+canonical Docker and HOST builds and normal upgrades pass. Docker matches all
+86 products and 19 server modules; HOST matches all 71 installed products and
+19 modules. Normal HOST shutdown completes in 2.357 seconds with zero pending
+audit or guardrail records, no dropped records and all threads exited. Normal
+recovery and 30-second stability pass. Earlier failures remain retained.
 
-Full canonical Docker and HOST builds and normal upgrades of `64cce353b` pass.
-The Docker upgrade preserves both earlier conversations (54 and 33 events), their
-full SDK files (20,454 and 7,048 bytes), original prefixes, UUIDs, cwd, models,
-native metadata and configuration authority. All 86 image products and 19 modules
-match. HOST upgrade preserves its 412 history events and all 71 installed products.
-A genuine quiet HOST stop completes in 1.949 seconds, without a timeout override
-or forced kill. Its fresh PID/inode/offset-bound receipt reports zero pending
-audit and guardrail records and no increase in dropped records. Normal recovery
-and 30-second stability pass. Earlier 90-second failures remain retained.
+The current candidate passes all 76 lint gates on a clean, unchanged tree.
+Combined OAuth parser/refresh regressions pass normally and under ASan, UBSan
+and leak checking. Oversized token responses now fail before they can replace
+stored credentials. Refresh failures log static categories and bounded numeric
+curl/HTTP codes without logging credentials, headers, endpoints or response bodies.
 
-The observed shutdown repairs join the interruptible readiness sampler before
-module teardown and atomically commit bounded queued audit batches. A subsequent
-full sanitizer run exposed a real flush race: the observation bus published its
-processed count before handing off the record. `64cce353b` publishes it after the
-handoff. The deterministic regression fails on the old code and passes normally,
-under ASan/UBSan/leak checks and ThreadSanitizer. SQLite FULL synchronization and
-synchronous action/idempotence contracts remain intact.
+The broader runtime qualification is bound to `64cce353b`: configured integration
+170/170, all eight actual SDK profiles, a real Claude 2.1.177 refusal fixture,
+T3's seven topology gates and 692 assertions, 678 native sanitizer invocations
+covering 675 distinct binaries, and static analysis of 988 production C units.
+Integration retains 25 explicitly unconfigured KB/runtime-web checks; real Docker
+grading, learning, recovery and scoped reuse ran. Scoped fixture databases, roles,
+credentials, containers, volumes and networks are cleaned up. All three Go module
+race suites, 478 frontend tests, type checking and both frontend builds pass on
+unchanged inputs. Rust/C and Go/C interoperability checks also pass on unchanged
+inputs. These are local results, not fresh GitHub CI or a newly published image.
 
-Corrected strict browser replay checks at 1280/390/320 run 15 seconds each with
-zero idle lifecycle, reconnect or mutation requests, closed controls, enabled
-Send, no page errors and no horizontal overflow. The browser uses
-`ignoreHTTPSErrors:false` and pins only the owned UI certificate SPKI. An earlier
-audit mistakenly ignored certificate errors: retain it as HTTP semantics evidence
-only, not TLS qualification. Independent checks after the corrected audit confirm
-the old histories, full SDK files, native tables and cache authority remain exact.
+A genuine ordinary release-planning conversation now passes all four live phases
+on `252ee7707`: native Claude A1, resumed A2, HTTP Codex B, then native Claude A
+return. A2 recalls the earlier release version; B recalls that version and target
+platform and adds the release channel; returning A correctly uses all three facts
+without their values being repeated in the final prompt. The return completes at
+event 40 with native checkpoint 41. Exactly four user Sends occurred, with zero
+tools, replies or retries in this workflow.
 
-Genuine HOST permission recovery previously passed: one permission, one human
-Allow, one governed dispatch and an independently verified filesystem effect.
-The HTTP Codex B continuation completed with correct prior-answer recall. Its
-subsequent native Claude A return used the original SDK UUID, stable cwd and
-unchanged cache prefix, but failed at event 54. A separate native A/A control
-passed both turns with the same SDK UUID, cwd and cache prefix; B then passed,
-but returning to native A failed at event 33. Both failures retain the SDK's
-locally constructed refusal diagnostic. Actual stdout and numeric HTTP status
-were not retained; upstream origin and root cause remain unestablished. Neither
-failed turn is retried. Do not reset caches or import SDK transcripts.
+The return uses the original SDK UUID, identity, cwd and inodes. The full original
+5,972-byte SDK prefix and the full pre-B 12,902-byte prefix remain exact; B launches
+no native SDK, and the final SDK file is 18,767 bytes. The final response reports
+17,355 cache-read tokens. All 147 prior canonical events and their full caches,
+original connection entries and authority remain exact. No SDK transcript was
+imported into model history. SDK and native execution processes are zero afterward.
 
-The refusal repair preserves bounded category/explanation through canonical
-responses, deltas, snapshots, durable events, caches and browser replay, including
-legacy raw refusal history. Provider fallback tokens and model recommendations
-are excluded. Refusals cannot trigger synthetic completion-policy tool
-continuations. Unsupported wire projections fail explicitly. The actual SDK
-fixture proves a local provider refusal is retained with exactly one request,
-no retry and no diagnostic text promoted to assistant observations. This fixes
-demonstrated fidelity and continuation defects; it does not prove the original
-live cross-vendor refusal is resolved.
+The first release turn completed successfully at event 8/checkpoint 9, but the test
+helper rejected a legitimate signed-thinking `replay_proof` with its own proof
+turn. The original harness failure remains retained. Production source and the
+frontend reducer confirm this is cursor metadata, not another execution. The
+narrow helper correction checks the exact proof schema, actor, session and proof
+ID; negative fixtures still reject foreign actions, controls, messages, deltas,
+executions and projections. Read-only validation recovered that same completed A1;
+only the three remaining turns were sent. A1 was not repeated or replaced.
 
-A further fresh four-turn live control stopped after its first genuine Send:
-three canonical events record failure before any SDK process or cache creation.
-The runtime constructor refused at `claude_source_lineage`; the outer error's
-"native tool registry" label is too broad to identify that cause. Vault audit
-records show successful credential reads and entry into OAuth refresh, followed
-by no usable token. The exact refresh failure was not retained. The stored token had expired at
-21:42 UTC; the local operator credential had separately rotated at 21:38 UTC.
-That failed attempt performed no credential write, later turn or retry. A new
-connection through normal provider enrollment is being prepared for a separate
-control; the original registration, failed conversations and caches are preserved.
-Secret-free refresh diagnostics now distinguish static failure categories and
-validated numeric curl/HTTP codes. A separate confirmed parser defect is repaired:
-oversized token responses are rejected before they can replace stored credentials.
-Normal and sanitizer regressions qualify these changes separately from `64cce353b`.
+Current-build governed tool execution also passes: one real `write_file`, one
+successful result, exactly one effect-confirmed dispatch, exact file bytes and
+ownership, completed event 10 and checkpoint 11. Normal policy authorized that
+write without an approval, so this test does not qualify the Allow UI. The earlier
+genuine HOST uncertain-effect recovery remains the permission proof: one
+permission, one human Allow, one governed dispatch and independently verified
+filesystem effect. Its permission code inputs are unchanged.
 
-The editor resolves hydrated display basenames through the owner's registry
-before requesting the session worktree. Actual worktree README rendering at
-desktop and 320px passes. The code-server proxy preserves encoded paths/queries
-and credential stripping while serving PWA and webview workers within `/vscode/`;
-both workers register successfully. Real HTTP worker-fetch, WebSocket and Go
-race regressions pass. No global trust or product TLS bypass changed.
+Current-build question/reply validation passes with one genuine `request_input`,
+a pending-question reload, one mobile-width UI answer, one control response, one
+successful tool result and an actual model acknowledgment. It completes at event
+12/checkpoint 13. After reload the answered control remains closed. The browser
+exits, SDK/native processes are zero, and all 134 preceding events and caches stay
+exact. No synthetic question or approval was inserted.
 
-SDK 2.1.177 flagless assistant error envelopes remain transport diagnostics;
-known typed codes select existing static messages, and session binding runs
-before decoding. The broad sanitizer fixture also supplies the missing disabled-
-OCR test double, which fails if invoked. The history secret scan admits only the
-verified public OpenAPI checksum's exact historical fingerprint. Automatic
-review, full-history scanning and strict attribution remain enabled.
+A separate high-entropy label/marker recall probe still fails on the native return
+at event 33. Its canonical stop now correctly retains `content_filter`, raw
+`refusal`, category `reasoning_extraction` and the provider's explanation. A1, A2
+and B in that probe passed with fresh valid credentials. Numeric HTTP status is
+unknown: its bounded WORM scan contained no admitted provider receipt. Local SSE
+200 and dispatch success must not be represented as upstream HTTP success.
 
-Keep implementing without requiring an open PR. Remaining work is qualification
-of the OAuth diagnostics and parser repair,
-successful fresh native cross-vendor acceptance with a valid test connection,
-final current-source CI and published fresh-install acceptance, and
-owned-resource cleanup. No completion or production promotion is claimed. The
-PR timeline below is historical; delivery remains one eventual PR, with no
-intermediate PRs or merges and no `.100` operations.
+Offline reconstruction with the actual production IR and Anthropic renderer
+finds seven alternating text messages, an exact native A2 prefix, and no foreign
+reasoning, encrypted blocks or provider extensions in that failed probe's history.
+Its final user prompt matches canonical history. Retained screenshots show Standard
+and engineer; current configuration has no webchat prompt override or explicit
+private-reasoning request. The full historic model-facing request was not retained,
+so the classifier's cause remains unproved. Do not call that refusal repaired,
+retry its failed turn, reset its cache or introduce an automatic fallback.
+
+The older 54-event and 33-event native-return failures also remain immutable.
+Actual stdout and numeric HTTP status were not retained. A further three-event
+attempt failed before SDK creation during Claude credential-lineage preparation.
+Its retained cloned credential was expired and the local operator credential had
+rotated; the old refresh failure cause was not retained. That failure is separate
+from the valid-auth provider refusal. A new connection was enrolled through supported routes without
+changing original entries; no failed session's auth or cache was rewritten.
+
+Refusal details remain bounded canonical diagnostics through responses, deltas,
+snapshots, durable history, caches and browser replay. Provider fallback tokens
+and model recommendations are excluded. Refusals cannot trigger synthetic tool
+continuations; unsupported wire projections fail explicitly. SDK assistant error
+envelopes remain transport diagnostics, and session binding precedes decoding.
+Cross-cutting review found no additional ingress bypass or IR consumer defect in
+scope. Interactive PTY/auth compatibility is separate from native model execution.
+
+The editor resolves hydrated basenames through the owner's registry to the actual
+session worktree. Desktop and 320px README rendering pass. The code-server proxy
+preserves encoded paths, queries and credential stripping while PWA and webview
+workers register within `/vscode/`; real HTTP, WebSocket and Go race checks pass.
+The observation-bus flush race is fixed by publishing processed work after queue
+handoff; deterministic old-code failure and normal, sanitizer and ThreadSanitizer
+regressions establish the repair. SQLite FULL synchronization remains intact.
+
+Corrected strict replay checks already pass at 1280/390/320 with 15 seconds of
+zero idle lifecycle, reconnect or mutation requests at each size. They use
+`ignoreHTTPSErrors:false` and only the owned UI certificate SPKI. An earlier audit
+ignored certificate errors; retain it as HTTP semantics evidence only. The final
+41-event release conversation also passes that audit: the latest release checklist
+renders at all three sizes, controls stay closed, Send stays enabled, and no page
+errors or horizontal overflow occur. Independent after-state preservation of all
+188 events, native metadata, full SDK caches and authority passes.
+
+Evidence exports are local and hash-verified. The exact owned test VM, its disks,
+scratch directory, cloud-init snippet and lease records are removed, and its
+controller has exited. Original user credentials remain unchanged. Remaining
+delivery work is one PR, fresh GitHub CI and postmerge
+published fresh-install acceptance. Git over SSH can push the branch; the local
+personal `gh` client currently has no authenticated GitHub account. Do not turn
+that delivery limitation into `.100` troubleshooting or a prerequisite for work. An open PR is
+not required for implementation or validation. Keep automatic reviews, full-history
+secret scanning and strict attribution enabled. The verified public OpenAPI
+checksum's exact historical fingerprint is the only admitted secret-scan finding.
+No production promotion or `.100` operation is authorized by this checkpoint.
+The PR timeline below is historical; delivery remains one eventual PR and no
+intermediate PRs or merges.
 
 [PR #3052](https://github.com/RakuenSoftware/aimee/pull/3052) merged into `testing`
 as `aa8c774edcc324f5defb6c5cea592f0e1dd5314d`. Its final premerge checks and
