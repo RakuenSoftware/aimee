@@ -21,6 +21,72 @@ to `main`. Its later promotion review is not a blocker for code review or the
 current IR acceptance work. Automatic reviews and strict attribution remain
 unchanged. No self-approval or production promotion is asserted.
 
+### Full-runtime startup and T2 readiness follow-up
+
+The corrected actual-SDK fixture passed CI on `aa77037f1`; 52 of 53 main
+jobs succeeded. T2 alone failed `Typed fixture indexing succeeds`, with
+`operation=other`, status 5, class `internal`. Its artifact did not establish
+an exact failing reembedding phase. The independent T1 and T2-luks legs passed.
+
+Source review found that the deployment harness admitted indexing after only
+application health, although the embedder starts independently after the
+application. It now requires both the application and the pinned image's
+loaded-model health check within the existing 240-second deadline, before any
+index mutation. The maintenance requests, failure assertions and cutover remain
+unchanged: no failed-index retry or waiver was added. Fixed diagnostic fields
+and literal reembedding phase categories expose future failures without response
+text, credentials, caller input or provider URLs. Ten Python readiness/privacy
+regressions and focused Go diagnostic tests pass; fresh T2 CI remains required.
+This barrier closes a demonstrated ordering gap without claiming that the
+previous sparse artifact proves it was the sole cause of that failure.
+
+The fresh owned `.252` VM 8164 built all six shipping C products (1,340 compiler
+commands, no warnings/errors), fresh Go services and the full 25-alias module
+manifest. It has actual PostgreSQL 18, restricted roles, encrypted Vault custody,
+normal PAM, pinned code-server, workflow service and browser, with no KB configured.
+Source checkout advanced from `f7ae75c23` to test-only `aa77037f1`; runtime inputs
+and the `60756abf` SPA remained unchanged. A separate isolated standard integration
+suite passed 171/171 applicable checks, all eight actual pinned SDK/provider-wire
+profiles, crash/permission/child-control journeys and configured-grade to durable
+pending learning to restart/scoped reuse. Its 25 configured-service skips are
+explicit; the fixture intentionally omits KB and runtime-web, while the separate
+shipping GUI stack includes runtime-web. Result SHA256 is
+`93e0544f33d44249bfa23a5d0c48f8ce62074d5affb3cd70949162542bad3e5c`.
+These results retain those producer revisions and do not qualify later changes.
+
+That full-runtime audit exposed a reachable startup defect: the coordination
+dispatcher attempted its durable boot claim before the database module attached,
+then returned permanently. A typed runtime-state lookup now distinguishes an
+explicit missing row from transport/store/malformed-reply failure. The worker
+retries boundedly, recovers prior claims, retains the same generated owner across
+lost write acknowledgements and persists it before any sweep. It never treats a
+failed read as permission to replace the owner. Normal, ASan/UBSan/leak and CMake
+fixtures pass; the old source fails the no-write-after-failed-read regression.
+Cold module-delay validation and final-source deployment remain required.
+
+The same audit found that the old one-shot delegate-job cleanup could miss
+attachment. Blindly retrying its bulk cancellation later would cancel new work.
+The shared process-local admission barrier now holds a mutex across the typed
+cleanup, latches only an acknowledged success, and gates the sole production
+background-job creation before writing a new row. Server initialization and the
+idle main tick use that same latch. No new job is admitted across a failed or
+lost acknowledgement, and later ticks cannot cancel this generation. Existing
+resume code has no reachable call site. Its production-helper regression covers
+unavailable-to-attached storage and twelve concurrent callers with a committed
+cleanup/lost acknowledgement. All three startup fixtures pass normal, ASan/UBSan/leak and CMake checks;
+affected production objects compile with warnings treated as errors. These
+results belong to the new source; the previous 171-check deployment does not
+stand in for them.
+
+The first combined lint pass caught test registrations after shard selection;
+they were moved before the suite snapshot. The test-execution gate now accounts
+for all three new fixtures. The memory ownership gate required fresh review of
+the changed server startup file; its memory symbols, disposition and typed calls
+are unchanged. Independent review completed, and only that reviewed hash was
+updated. All 76 lint gates now pass after the targeted ownership-gate rerun.
+Fresh CI and current-source live qualification remain required before declaring
+this follow-up complete.
+
 ### Native integration beta-route assertion follow-up
 
 Fresh final-head CI caught the actual-SDK synthetic provider fixture matching

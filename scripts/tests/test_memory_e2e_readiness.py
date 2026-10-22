@@ -25,6 +25,30 @@ def contains_fixture(body):
 
 
 class MemoryReadinessTests(unittest.TestCase):
+    def test_stack_waits_for_loaded_embedder_after_application_is_healthy(self):
+        spec = importlib.util.spec_from_file_location(
+            'deployment_matrix', Path(__file__).resolve().parents[2] / 'tests/e2e/deployment-matrix.py')
+        matrix = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(matrix)
+        with tempfile.TemporaryDirectory() as directory:
+            stack = matrix.Stack('kb', {}, Path(directory))
+            embedding = iter(['starting', 'healthy'])
+            def command(*args, **kwargs):
+                if args[1] != 'inspect':
+                    return ''
+                if args[-1] == stack.embedder:
+                    return next(embedding)
+                if '{{.State.Health.Status}}' in args:
+                    return 'healthy'
+                if '{{json .HostConfig.PortBindings}}' in args:
+                    return '{}'
+                if '{{json .Config.Env}}' in args:
+                    return json.dumps(['AIMEE_PROVIDER_CONTEXT_LIMITS=' + stack.env['AIMEE_PROVIDER_CONTEXT_LIMITS']])
+                return '{}'
+            with patch.object(matrix, 'command', side_effect=command), patch.object(matrix.time, 'sleep') as sleep:
+                stack.start()
+            sleep.assert_called_once_with(2)
+
     def test_split_t2_initializes_its_own_generation_before_server_enrollment(self):
         spec = importlib.util.spec_from_file_location(
             'deployment_matrix', Path(__file__).resolve().parents[2] / 'tests/e2e/deployment-matrix.py')
@@ -74,6 +98,29 @@ class MemoryReadinessTests(unittest.TestCase):
         self.assertEqual(len(bootstraps), 2)
         self.assertNotEqual(bootstraps[0], bootstraps[1])
         self.assertEqual(bootstraps[1], 'AIMEE_KB_API_BEARER_TOKEN=service\0')
+
+    def test_index_failure_keeps_only_fixed_diagnostics_and_still_fails(self):
+        spec = importlib.util.spec_from_file_location(
+            'deployment_matrix', Path(__file__).resolve().parents[2] / 'tests/e2e/deployment-matrix.py')
+        matrix = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(matrix)
+        with tempfile.TemporaryDirectory() as directory:
+            kb = Mock(application='kb', output=Path(directory), env=dict(
+                AIMEE_KB_API_BEARER_TOKEN='service', EMBEDDER_URL='private-provider'))
+            kb.kb_request.return_value = (503, dict(status='error', done=4, failed=True,
+                last_id=-1, ready=False, message='private credential', provider='private-provider'))
+            def command(*args, **kwargs):
+                return 'healthy' if args[1] == 'inspect' else ''
+            def check(name, passed):
+                if not passed:
+                    raise RuntimeError(name)
+            with patch.object(matrix, 'command', side_effect=command):
+                with self.assertRaisesRegex(RuntimeError, 'Typed fixture indexing succeeds'):
+                    matrix.activate_embedding_generation(kb, check, 'generation')
+            self.assertEqual(json.loads((Path(directory) / 'typed-index-state.json').read_text()),
+                             dict(http_status=503, status='error', done=4, ready=False))
+            self.assertEqual(kb.kb_request.call_count, 1)
+            self.assertEqual(kb.env['AIMEE_KB_API_BEARER_TOKEN'], 'service')
 
     def test_direct_stack_users_receive_provider_ceiling_and_preserve_override(self):
         spec = importlib.util.spec_from_file_location(

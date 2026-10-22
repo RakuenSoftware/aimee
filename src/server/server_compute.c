@@ -2204,6 +2204,14 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    cJSON *jvia = cJSON_GetObjectItemCaseSensitive(req, "via");
    const char *initial_agent =
        cJSON_IsString(jvia) && jvia->valuestring[0] ? jvia->valuestring : "";
+   if (server_delegate_startup_reconcile() != 0)
+   {
+      compute_ctx_free(cctx);
+      if (err)
+         snprintf(err, errn,
+                  "delegate startup reconciliation unavailable; retry after store attachment");
+      return -1;
+   }
    int job_id = db1_agent_job_create(role, prompt, initial_agent, lease_owner);
    if (job_id <= 0)
    {

@@ -1063,6 +1063,10 @@ $(TESTPREFIX)/unit-test-communication: $(OBJDIR)/tests/test_communication.o \
 # preserves process isolation -- every selected target is still the same binary
 # used by the full suite.
 
+TEST_TARGETS += $(TESTPREFIX)/unit-test-coord-dispatcher-startup \
+                $(TESTPREFIX)/unit-test-runtime-state-lookup \
+                $(TESTPREFIX)/unit-test-delegate-startup
+
 UNIT_TEST_SHARD_COUNT ?= 1
 UNIT_TEST_SHARD_INDEX ?= 0
 UNIT_TEST_SKIP_P1 ?= 0
@@ -7269,3 +7273,12 @@ $(TESTPREFIX)/unit-test-db1-source-deadlines: \
 $(TESTPREFIX)/unit-test-server-mcp-project: $(OBJDIR)/tests/test_server_mcp_project.o \
     $(OBJDIR)/server/server_mcp_project.o $(OBJDIR)/server/server_active_project.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+# Startup durability: an unattached typed store cannot silently disable coord work.
+$(TESTPREFIX)/unit-test-coord-dispatcher-startup: $(OBJDIR)/tests/test_coord_dispatcher_startup.o $(OBJDIR)/tests/support/log_stub.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lm
+$(TESTPREFIX)/unit-test-runtime-state-lookup: $(OBJDIR)/tests/test_runtime_state_lookup.o
+	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(EXTRA_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-delegate-startup: $(OBJDIR)/tests/test_delegate_startup.o $(OBJDIR)/tests/support/log_stub.o
+	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread

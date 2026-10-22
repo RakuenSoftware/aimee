@@ -114,10 +114,14 @@ class Stack:
         deadline = time.monotonic() + 240
         while time.monotonic() < deadline:
             status = command('docker', 'inspect', '--format', '{{.State.Health.Status}}', self.application)
-            if status == 'healthy':
+            # Application health proves the store and module owners, while the
+            # embedder starts independently after the application. Index setup
+            # requires its loaded model; the image health check verifies that.
+            embedding = command('docker', 'inspect', '--format', '{{.State.Health.Status}}', self.embedder)
+            if status == 'healthy' and embedding == 'healthy':
                 return
             time.sleep(2)
-        raise RuntimeError(self.role + ' did not become healthy')
+        raise RuntimeError(self.role + ' application and embedder did not become healthy')
 
     def kb_request(self, path, body=None, authenticated=True):
         code = '''import http.client,json,sys
@@ -609,6 +613,18 @@ def activate_embedding_generation(kb, check, version):
         while True:
             code, indexed = kb.kb_request('/v1/actions/memory.reembed_start', dict(
                 version=version, embedding_command=kb.env['EMBEDDER_URL'], scope='all'))
+            # Retain only fixed diagnostic fields. Never export response text,
+            # provider URLs, caller input or enrollment credentials.
+            diagnostic = dict(http_status=code,
+                status=indexed.get('status') if indexed.get('status') in ('ok', 'error') else 'other')
+            for field in ('failed', 'embedded', 'total', 'done', 'last_id'):
+                value = indexed.get(field)
+                if type(value) is int and value >= 0:
+                    diagnostic[field] = value
+            for field in ('ready', 'more'):
+                if type(indexed.get(field)) is bool:
+                    diagnostic[field] = indexed[field]
+            (kb.output / 'typed-index-state.json').write_text(json.dumps(diagnostic, indent=2) + '\n')
             check('Typed fixture indexing succeeds', code == 200 and indexed.get('status') == 'ok'
                   and not indexed.get('failed', 0))
             if indexed.get('ready') is True:

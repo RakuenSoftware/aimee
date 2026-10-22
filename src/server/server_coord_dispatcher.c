@@ -18,6 +18,7 @@
 #include "cJSON.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -151,8 +152,8 @@ int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const cha
 #define COORD_ROLE_MAX           DB1_COORD_ROLE_LEN
 
 static pthread_t g_thread;
-static volatile int g_running;
-static volatile int g_stop;
+static atomic_int g_running;
+static atomic_int g_stop;
 static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
 static server_ctx_t *g_ctx;
@@ -160,48 +161,82 @@ static char g_claim_owner[DB1_COORD_DELEGATE_LEN];
 
 #define COORD_BOOT_OWNER_KEY    "coord_dispatcher_boot_owner"
 #define COORD_CRASH_REQUEUE_MAX 3
+#ifndef COORD_STARTUP_RETRY_MSECS
+#define COORD_STARTUP_RETRY_MSECS 250
+#endif
+
+typedef struct
+{
+   int read, recovered;
+   char previous[DB1_COORD_DELEGATE_LEN];
+   char owner[DB1_COORD_DELEGATE_LEN];
+} coord_startup_t;
 
 /* Claims belong to a server incarnation, not the generic dispatcher name. The
  * previous incarnation's worker threads cannot survive process exit, so its
  * remaining claims are provably orphaned and safe to retry before this boot
  * starts dispatching. Persist the new owner only after recovery: if recovery is
  * interrupted, the next boot retries the same previous owner. */
-static int dispatcher_recover_previous_boot(void)
+static int dispatcher_recover_previous_boot(coord_startup_t *startup)
 {
-   char previous[DB1_COORD_DELEGATE_LEN] = "";
-   if (db1_runtime_state_get(COORD_BOOT_OWNER_KEY, previous, sizeof(previous)) == 0 && previous[0])
+   if (g_stop)
+      return -1;
+   if (!startup->read)
+   {
+      int found = db1_runtime_state_lookup(COORD_BOOT_OWNER_KEY, startup->previous,
+                                           sizeof startup->previous);
+      if (found < 0)
+         return -1;
+      startup->read = 1;
+   }
+   if (g_stop)
+      return -1;
+   if (!startup->recovered && startup->previous[0])
    {
       int requeued = 0, failed = 0;
-      if (db1_coord_job_recover_owner(previous, COORD_CRASH_REQUEUE_MAX, &requeued, &failed) != 0)
-      {
-         LOG_ERROR("coord_dispatcher", "failed to recover claims from previous boot owner %s",
-                   previous);
+      if (db1_coord_job_recover_owner(startup->previous, COORD_CRASH_REQUEUE_MAX, &requeued,
+                                      &failed) != 0)
          return -1;
-      }
       if (requeued || failed)
          LOG_WARN("coord_dispatcher",
-                  "recovered previous-boot claims owner=%s: requeued=%d failed_at_cap=%d", previous,
-                  requeued, failed);
+                  "recovered previous-boot claims owner=%s: requeued=%d failed_at_cap=%d",
+                  startup->previous, requeued, failed);
    }
-
-   unsigned char rnd[8];
-   if (platform_random_bytes(rnd, sizeof(rnd)) != 0)
-   {
-      LOG_ERROR("coord_dispatcher", "secure entropy unavailable; dispatcher not started");
+   startup->recovered = 1;
+   if (g_stop)
       return -1;
-   }
-   snprintf(g_claim_owner, sizeof(g_claim_owner), "coord-%ld-", (long)getpid());
-   size_t used = strlen(g_claim_owner);
-   for (size_t i = 0; i < sizeof(rnd) && used + 2 < sizeof(g_claim_owner); i++)
-      used += (size_t)snprintf(g_claim_owner + used, sizeof(g_claim_owner) - used, "%02x", rnd[i]);
-
-   if (db1_runtime_state_set(COORD_BOOT_OWNER_KEY, g_claim_owner) != 0)
+   if (!startup->owner[0])
    {
-      LOG_ERROR("coord_dispatcher", "failed to persist boot claim owner; dispatcher not started");
-      g_claim_owner[0] = '\0';
-      return -1;
+      unsigned char rnd[8];
+      if (platform_random_bytes(rnd, sizeof rnd) != 0)
+         return -1;
+      snprintf(startup->owner, sizeof startup->owner, "coord-%ld-", (long)getpid());
+      size_t used = strlen(startup->owner);
+      for (size_t i = 0; i < sizeof rnd && used + 2 < sizeof startup->owner; i++)
+         used +=
+             (size_t)snprintf(startup->owner + used, sizeof startup->owner - used, "%02x", rnd[i]);
    }
+   if (db1_runtime_state_set(COORD_BOOT_OWNER_KEY, startup->owner) != 0)
+      return -1;
+   snprintf(g_claim_owner, sizeof g_claim_owner, "%s", startup->owner);
    return 0;
+}
+
+static void dispatcher_wait(int milliseconds)
+{
+   struct timespec ts;
+   clock_gettime(CLOCK_REALTIME, &ts);
+   ts.tv_sec += milliseconds / 1000;
+   ts.tv_nsec += (milliseconds % 1000) * 1000000L;
+   if (ts.tv_nsec >= 1000000000L)
+   {
+      ts.tv_sec++;
+      ts.tv_nsec -= 1000000000L;
+   }
+   pthread_mutex_lock(&g_mutex);
+   if (!g_stop)
+      pthread_cond_timedwait(&g_cond, &g_mutex, &ts);
+   pthread_mutex_unlock(&g_mutex);
 }
 
 /* Sweep all coord jobs that have pending tasks and dispatch up to max_concurrent. */
@@ -289,19 +324,28 @@ static int dispatcher_sweep(void)
 static void *dispatcher_thread(void *arg)
 {
    (void)arg;
+   coord_startup_t startup = {0};
+   int ready = 0, warned = 0;
    while (!g_stop)
    {
+      if (!ready)
+      {
+         if (dispatcher_recover_previous_boot(&startup))
+         {
+            if (!warned && !g_stop)
+               LOG_WARN("coord_dispatcher",
+                        "waiting for durable boot ownership; no tasks dispatched");
+            warned = 1;
+            dispatcher_wait(COORD_STARTUP_RETRY_MSECS);
+            continue;
+         }
+         ready = 1;
+         if (g_stop)
+            break;
+         LOG_INFO("coord_dispatcher", "started (poll=%ds)", COORD_POLL_INTERVAL_SECS);
+      }
       dispatcher_sweep();
-
-      /* Wait for a notification or the fallback poll interval. */
-      struct timespec ts;
-      clock_gettime(CLOCK_REALTIME, &ts);
-      ts.tv_sec += COORD_POLL_INTERVAL_SECS;
-
-      pthread_mutex_lock(&g_mutex);
-      if (!g_stop)
-         pthread_cond_timedwait(&g_cond, &g_mutex, &ts);
-      pthread_mutex_unlock(&g_mutex);
+      dispatcher_wait(COORD_POLL_INTERVAL_SECS * 1000);
    }
    return NULL;
 }
@@ -310,17 +354,15 @@ void server_coord_dispatcher_init(server_ctx_t *ctx)
 {
    if (g_running)
       return;
-   if (dispatcher_recover_previous_boot() != 0)
-      return;
    g_ctx = ctx;
    g_stop = 0;
+   g_claim_owner[0] = 0;
    if (pthread_create(&g_thread, NULL, dispatcher_thread, NULL) != 0)
    {
       LOG_ERROR("coord_dispatcher", "failed to start dispatcher thread");
       return;
    }
    g_running = 1;
-   LOG_INFO("coord_dispatcher", "started (poll=%ds)", COORD_POLL_INTERVAL_SECS);
 }
 
 void server_coord_dispatcher_shutdown(void)
