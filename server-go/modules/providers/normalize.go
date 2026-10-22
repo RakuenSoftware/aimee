@@ -91,10 +91,10 @@ func normalizeModel(model object) error {
 	// falling through to HTTP with an intentionally empty SDK endpoint.
 	if provider := str(model, "provider"); provider == "claude" || provider == "claude-code" {
 		model["backend"], model["cli_kind"] = "provider-cli", "claude"
-		model["session_reuse"], model["endpoint"] = true, ""
+		model["session_reuse"] = true
 		// These SDK aliases use the registered Claude OAuth document. The UI's
 		// historical none/bearer defaults must not select API-key lineage instead.
-		if auth := str(model, "auth_type"); auth == "none" || auth == "bearer" {
+		if auth := str(model, "auth_type"); str(model, "endpoint") == "" && (auth == "none" || auth == "bearer") {
 			model["auth_type"] = "claude-oauth"
 		}
 	}
@@ -109,11 +109,15 @@ func normalizeModel(model object) error {
 	}
 	if str(model, "backend") == "provider-cli" && (str(model, "cli_kind") == "claude" || str(model, "cli_kind") == "claude-code" || str(model, "cli_kind") == "claude-oauth") {
 		model["cli_kind"] = "claude"
-		if str(model, "provider") == "openai" {
+		// Only the old empty-endpoint default denotes the native SDK alias.
+		// An explicit endpoint owns its upstream wire and authentication, even
+		// though Claude is the scheduler speaking to our local gateway.
+		if str(model, "provider") == "openai" && str(model, "endpoint") == "" {
 			model["provider"] = "claude"
-		}
-		if str(model, "auth_type") == "bearer" {
-			model["auth_type"] = "none"
+			model["session_reuse"] = true
+			if auth := str(model, "auth_type"); auth == "none" || auth == "bearer" {
+				model["auth_type"] = "claude-oauth"
+			}
 		}
 		// Older model commands embedded this exact model selection in the executable
 		// field. Native launches pass --model separately and never interpret shell text.

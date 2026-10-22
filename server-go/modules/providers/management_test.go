@@ -430,3 +430,34 @@ func TestCustomClaudeAdapterDoesNotAcquireSDKOAuthIdentity(t *testing.T) {
 		t.Fatal("custom adapter acquired a different credential identity")
 	}
 }
+
+func TestNativeClaudeExplicitWireSurvivesSnapshotAndReload(t *testing.T) {
+	for _, wire := range []string{"openai", "anthropic", "chatgpt", "claude", "claude-code"} {
+		for _, auth := range []string{"api_key", "bearer"} {
+			t.Run(wire+"/"+auth, func(t *testing.T) {
+				m, home, vault := manager(t)
+				endpoint := "http://127.0.0.1:19081/v1"
+				data, err := json.Marshal(object{"default_agent": "native", "default_delegate": "native", "models": []object{{"name": "native", "model": "native-claude-openai", "provider": wire, "auth_type": auth, "endpoint": endpoint, "backend": "provider-cli", "cli_kind": "claude", "cli_cmd": "/opt/owned-sdk/claude"}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = os.WriteFile(filepath.Join(home, "models.json"), data, 0600); err != nil {
+					t.Fatal(err)
+				}
+				for i := 0; i < 2; i++ {
+					store, err := NewStore(home)
+					if err != nil {
+						t.Fatal(err)
+					}
+					m = NewManager(store, vault)
+					cfg := call(t, m, "snapshot.load", nil)["config"].(map[string]any)
+					model := find(rows(cfg, "models"), "native")
+					if str(model, "provider") != wire || str(model, "endpoint") != endpoint || str(model, "auth_type") != auth || str(model, "cli_kind") != "claude" || str(model, "cli_cmd") != "/opt/owned-sdk/claude" {
+						t.Fatalf("explicit native host profile rewritten: %#v", model)
+					}
+					call(t, m, "model.set", object{"args": []string{"native", "--primary-only", "true"}})
+				}
+			})
+		}
+	}
+}
