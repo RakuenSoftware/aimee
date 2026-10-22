@@ -805,7 +805,7 @@ if(NOT WIN32)
   add_executable(test_coord_dispatcher_startup test_coord_dispatcher_startup.c
     support/log_stub.c ../vendor/cJSON.c)
   add_executable(test_runtime_state_lookup test_runtime_state_lookup.c)
-  add_executable(test_delegate_startup test_delegate_startup.c support/log_stub.c)
+  add_executable(test_delegate_startup test_delegate_startup.c)
   foreach(target test_coord_dispatcher_startup test_runtime_state_lookup test_delegate_startup)
     target_include_directories(${target} PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
       ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/vendor/headers

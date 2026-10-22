@@ -2053,7 +2053,10 @@ jobs:
           sudo modprobe loop
           sudo modprobe dm_mod
           sudo modprobe dm_crypt
-          sudo apt-get update
+          # cryptsetup comes from Ubuntu; an unrelated runner-installed feed
+          # must not block this leg with a Microsoft metadata HTTP403.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list /etc/apt/sources.list.d/microsoft*.sources
+          timeout 240 sudo apt-get -o Acquire::Retries=3 update
           sudo apt-get install -y cryptsetup-bin
           test -c /dev/mapper/control
           test -c /dev/loop-control

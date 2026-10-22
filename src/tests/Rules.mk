@@ -7280,5 +7280,5 @@ $(TESTPREFIX)/unit-test-coord-dispatcher-startup: $(OBJDIR)/tests/test_coord_dis
 $(TESTPREFIX)/unit-test-runtime-state-lookup: $(OBJDIR)/tests/test_runtime_state_lookup.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(EXTRA_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-delegate-startup: $(OBJDIR)/tests/test_delegate_startup.o $(OBJDIR)/tests/support/log_stub.o
+$(TESTPREFIX)/unit-test-delegate-startup: $(OBJDIR)/tests/test_delegate_startup.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread

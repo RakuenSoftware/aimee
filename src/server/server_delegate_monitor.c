@@ -43,6 +43,7 @@ int server_delegate_startup_reconcile(void)
       else
       {
          g_startup_reconciled = 1;
+         LOG_INFO("server", "delegate startup reconciliation complete");
          if (cancelled > 0)
             LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process",
                      cancelled);

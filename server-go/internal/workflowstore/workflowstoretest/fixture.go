@@ -348,9 +348,16 @@ func start(t testing.TB, path string) (*fixture, error) {
 	}
 	for f.client != nil && time.Now().Before(deadline) {
 		if _, callErr := f.client.WfeActiveRootCount(context.Background()); callErr == nil {
-			keepStore = true
-			keepHome = true
-			return f, nil
+			// Tests seed agent_jobs directly, bypassing normal delegate admission.
+			// A serving store alone does not prove the daemon acknowledged its
+			// one-time restart cleanup. Wait for its real success marker first,
+			// within the same deadline, or that cleanup can cancel fresh fixtures.
+			if startupReconciled(filepath.Join(aimeeHome, "server.log")) {
+				keepStore = true
+				keepHome = true
+				return f, nil
+			}
+			lastErr = fmt.Errorf("daemon delegate startup reconciliation not acknowledged")
 		} else {
 			lastErr = fmt.Errorf("call: %w", callErr)
 		}
@@ -384,6 +391,13 @@ func copyExecutable(source, destination string) error {
 		return fmt.Errorf("close module alias %s: %w", destination, err)
 	}
 	return nil
+}
+
+// The file is the native logger output of this fixture's own trusted daemon.
+// Neither a store row nor an earlier transport-ready event opens this barrier.
+func startupReconciled(logPath string) bool {
+	body, err := os.ReadFile(logPath)
+	return err == nil && strings.Contains(string(body), "INFO  server: delegate startup reconciliation complete\n")
 }
 
 func prepareStore(t testing.TB, baseURL, key string) (*pgxpool.Pool, *pgxpool.Pool, string, string, error) {

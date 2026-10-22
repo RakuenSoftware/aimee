@@ -56,6 +56,16 @@ int delegate_backend_docker_reap_aged(int seconds)
    abort();
 }
 
+static int ready_markers;
+void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
+{
+   if (!strcmp(fmt, "delegate startup reconciliation complete"))
+   {
+      assert(level == LOG_INFO && !strcmp(module, "server"));
+      ready_markers++;
+   }
+}
+
 static pthread_mutex_t fixture_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t fixture_changed = PTHREAD_COND_INITIALIZER;
 static int unavailable, lost_ack, cleanup_calls, old_jobs, new_jobs;
@@ -103,7 +113,7 @@ static void reset(void)
 {
    /* Each scenario represents a fresh daemon; no production reset API exists. */
    g_startup_reconciled = 0;
-   unavailable = lost_ack = cleanup_calls = new_jobs = 0;
+   unavailable = lost_ack = cleanup_calls = new_jobs = ready_markers = 0;
    hold_cleanup = entered_cleanup = 0;
    old_jobs = 3;
 }
@@ -116,6 +126,7 @@ static void test_unavailable_then_attach(void)
    admit(&rc);
    assert(rc == -1 && old_jobs == 3 && new_jobs == 0 && cleanup_calls == 1);
    assert(server_delegate_startup_reconcile() == -1);
+   assert(ready_markers == 0);
    unavailable = 0;
    admit(&rc);
    assert(rc == 0 && old_jobs == 0 && new_jobs == 1 && cleanup_calls == 3);
@@ -123,7 +134,7 @@ static void test_unavailable_then_attach(void)
    for (int i = 0; i < 20; i++)
       assert(server_delegate_startup_reconcile() == 0);
    admit(&rc);
-   assert(rc == 0 && new_jobs == 2 && cleanup_calls == 3);
+   assert(rc == 0 && new_jobs == 2 && cleanup_calls == 3 && ready_markers == 1);
 }
 
 static void test_concurrent_lost_ack(void)
@@ -144,7 +155,7 @@ static void test_concurrent_lost_ack(void)
    for (int i = 1; i < N; i++)
       assert(pthread_create(&threads[i], NULL, admit, &results[i]) == 0);
    pthread_mutex_lock(&fixture_lock);
-   assert(new_jobs == 0 && cleanup_calls == 1);
+   assert(new_jobs == 0 && cleanup_calls == 1 && ready_markers == 0);
    hold_cleanup = 0;
    pthread_cond_broadcast(&fixture_changed);
    pthread_mutex_unlock(&fixture_lock);
@@ -154,7 +165,7 @@ static void test_concurrent_lost_ack(void)
    for (int i = 1; i < N; i++)
       assert(results[i] == 0);
    assert(old_jobs == 0 && new_jobs == N - 1 && cleanup_calls == 2);
-   assert(server_delegate_startup_reconcile() == 0 && cleanup_calls == 2);
+   assert(server_delegate_startup_reconcile() == 0 && cleanup_calls == 2 && ready_markers == 1);
 }
 
 int main(void)

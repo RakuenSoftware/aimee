@@ -21,6 +21,58 @@ to `main`. Its later promotion review is not a blocker for code review or the
 current IR acceptance work. Automatic reviews and strict attribution remain
 unchanged. No self-approval or production promotion is asserted.
 
+### Current-source deployment and fixture-startup follow-up
+
+Fresh owned `.252` deployment of `60f0f9f4c` built all six C products and five Go
+services from clean output directories in 160.94 seconds: 1,341 compiler commands,
+zero warnings. Actual server SHA256 is
+`2cd4cd0fd24546500a4fb11a6cb133e6806ba518a25a639627d6a27c0560d7e2`.
+The canonical Server manifest has 19 module rows. All 25 distribution aliases
+are built; the other six belong to KB, which remains disabled. The unchanged
+qualified SPA is `60756abf`.
+
+The first fault setup withheld the entire module supervisor and therefore the
+required configuration owner. Core correctly failed configuration readiness
+before reaching the repaired path; that staging failure is retained, not counted
+as startup acceptance. The corrected targeted delay retained configuration and
+withheld only the database/families owner. Independent samples observed the same
+core PID 53612, no boot-owner mutation and no dispatch before attachment. Restoring
+the exact canonical manifest produced `coord-53612-0c27981fe3427d62`, exactly one
+dispatcher-start event and `/v1/ready` 200 with database/modules/retrieval ready.
+Jobs, canonical events and active native work stayed zero during this fault test;
+no fake live rows were seeded to claim cleanup coverage.
+
+A separate isolated standard integration run on those exact `60f0f9f4c` artifacts
+passed 171/171 applicable checks again, including all eight pinned SDK/wire profiles,
+interruption/denial/child controls and configured-grade to durable learning to
+restart/scoped reuse. Its 25 configured-service skips remain explicit. Shipping
+PIDs deliberately changed during the separately recorded cold-start test, so this
+packet records that concurrent owned qualification rather than claiming unchanged
+shipping PIDs. Genuine normal PAM/browser/model-catalog desktop/320 preflight also
+passed with zero send/reply/cancel/configuration actions; the single real provider
+journey remains held until the last source changes are installed.
+
+Fresh CI then exposed a fixture interaction with the new production admission
+fence: `workflowstoretest` writes `agent_jobs` directly for tests, bypassing normal
+job creation, and returned after store-family readiness but before the daemon's
+cleanup acknowledgement. A real PostgreSQL/daemon reproducer cancelled freshly
+seeded job 901 and failed the terminal-batch test. The SQL query itself returns
+correct ordered batches and is unchanged. Production now emits one fixed success
+marker only when cleanup is acknowledged. The isolated fixture waits for that
+actual daemon marker within its unchanged deadline before permitting SQL seeds.
+Normal/sanitizer marker assertions refuse unavailable, in-flight and lost-ACK
+states; the workflow test also strengthens first/third batch fairness checks.
+Five actual PostgreSQL race-test repetitions pass with the corrected owned native
+log path. An intermediate collector looked at captured stdout instead, waited
+fail-closed and seeded no jobs; that failed packet is retained. The production
+SQL query is unchanged. All 76 lint gates pass on the marker/harness repair.
+
+The encrypted T2 CI leg separately failed before executing deployment checks:
+Ubuntu's unrelated Microsoft feed returned HTTP403 during package refresh.
+The cryptsetup preparation now excludes only that unused third-party feed,
+retains signature verification and uses bounded package acquisition. Fresh CI,
+final-source installation and the genuine browser journey remain required.
+
 ### Full-runtime startup and T2 readiness follow-up
 
 The corrected actual-SDK fixture passed CI on `aa77037f1`; 52 of 53 main
@@ -41,8 +93,9 @@ This barrier closes a demonstrated ordering gap without claiming that the
 previous sparse artifact proves it was the sole cause of that failure.
 
 The fresh owned `.252` VM 8164 built all six shipping C products (1,340 compiler
-commands, no warnings/errors), fresh Go services and the full 25-alias module
-manifest. It has actual PostgreSQL 18, restricted roles, encrypted Vault custody,
+commands, no warnings/errors), fresh Go services and all 25 built module aliases. The canonical Server
+supervisor contains 19 rows; six KB-side aliases are build-only, with no KB
+service running. It has actual PostgreSQL 18, restricted roles, encrypted Vault custody,
 normal PAM, pinned code-server, workflow service and browser, with no KB configured.
 Source checkout advanced from `f7ae75c23` to test-only `aa77037f1`; runtime inputs
 and the `60756abf` SPA remained unchanged. A separate isolated standard integration
