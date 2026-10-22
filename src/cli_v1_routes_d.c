@@ -327,6 +327,8 @@ static char *cli_v1_normalize_endpoint(const char *ep)
 
 char *cli_v1_client_endpoint(void)
 {
+   if (cli_native_bridge_enabled())
+      return cli_native_bridge_endpoint();
    const char *env = getenv("AIMEE_API_ENDPOINT");
    if (env && env[0])
       return cli_v1_normalize_endpoint(env);
@@ -343,22 +345,6 @@ char *cli_v1_client_endpoint(void)
       snprintf(ep, sizeof(ep), "%s%s", is_https ? "tls:" : "tcp:", hostport);
       return strdup(ep);
    }
-   return NULL;
-}
-
-/* cli_v1_client_bearer: bearer token sent with the remote HTTP transport.
- * AIMEE_API_BEARER overrides; otherwise use the explicit remote credential.
- * Credentials are never read from public config storage. Caller frees. */
-char *cli_v1_client_bearer(void)
-{
-   const char *env = getenv("AIMEE_API_BEARER");
-   if (env && env[0])
-      return strdup(env);
-   /* Token for a synthesized aimee_client endpoint: --server-token /
-    * AIMEE_SERVER_TOKEN / remote.conf line 2. */
-   char tok[300];
-   if (aimee_client_remote_token(tok, sizeof(tok)) && tok[0])
-      return strdup(tok);
    return NULL;
 }
 
@@ -595,7 +581,7 @@ static const cJSON *cli_v1_manifest(void)
        * that no longer exists fails at the server with its own message, which is
        * strictly better than refusing to explain a command because the machine
        * that documents it is unreachable. */
-      cJSON *cached = manifest_cache_load(remote);
+      cJSON *cached = cli_native_bridge_enabled() ? NULL : manifest_cache_load(remote);
       if (cached)
       {
          free(remote);
@@ -637,7 +623,8 @@ static const cJSON *cli_v1_manifest(void)
       free(remote);
       return NULL;
    }
-   manifest_cache_store(remote, doc);
+   if (!cli_native_bridge_enabled())
+      manifest_cache_store(remote, doc);
    free(remote);
    g_cli_manifest = doc;
    return g_cli_manifest;
@@ -2253,6 +2240,10 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
                  route->method);
       return 2;
    }
+
+   if (cli_native_bridge_enabled())
+      return cli_native_bridge_forward(req, effective_json_output, fwd_argc, fwd_argv,
+                                       cli_v1_finish_response);
 
    int timeout = route->timeout_ms > 0 ? route->timeout_ms : CLIENT_DEFAULT_TIMEOUT_MS;
    if (strcmp(route->method, "workspace.mirror-sync") == 0)

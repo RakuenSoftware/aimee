@@ -50,13 +50,12 @@ typedef struct
 void delegate_resolve_worktree(const char *cwd, const char *deleg_id, const char *branch,
                                int allows_writes, int needs_worktree, delegate_worktree_t *out);
 
-/* Classify a finished delegate run and persist a delegate_learning row + a
- * structured IE_DELEGATE_EXIT event. Returns 0 only when both writes and any
- * applicable failed-approach write succeed; -1 reports incomplete capture.
- * Does not alter the execution result. Call before publishing completion. */
-int delegate_record_exit_learning(const char *sid, const char *role, const agent_result_t *result,
-                                  int rc, int max_turns, agent_config_t *acfg,
-                                  agent_t *target_agent, const char *goal, const char *source_ref);
+/* Persist operational IE_DELEGATE_EXIT metrics only. Reusable experience is
+ * derived exclusively from protected canonical child/parent source records.
+ * Returns -1 on metric persistence failure; never alters the execution result. */
+int delegate_record_exit_metrics(const char *sid, const char *role, const agent_result_t *result,
+                                 int rc, int max_turns, agent_config_t *acfg, agent_t *target_agent,
+                                 const char *source_ref);
 
 /* Detect a no-op write delegate (success reported but owned files / worktree /
  * HEAD unchanged). Returns 1 and fills err with the "treated as incomplete"

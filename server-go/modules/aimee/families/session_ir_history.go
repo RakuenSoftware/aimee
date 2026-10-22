@@ -210,6 +210,8 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 		Receipt canonical.ToolInterruption
 	}
 	terminals := map[string]string{}
+	operatorTerminals := map[string]string{}
+	apiLatest := map[string]map[string]string{}
 	appendPending := func(turn string) {
 		indices := make([]int, len(pending[turn]))
 		for i := range indices {
@@ -218,7 +220,10 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 		sort.SliceStable(indices, func(i, j int) bool { return pendingOrder[turn][indices[i]] < pendingOrder[turn][indices[j]] })
 		for _, index := range indices {
 			ref := pendingRefs[turn][index]
-			historyRefs[ref.Sequence] = nativeHistorySource{Index: len(history), Source: ref}
+			mapped := historyRefs[ref.Sequence]
+			mapped.Index = len(history)
+			mapped.Source = ref
+			historyRefs[ref.Sequence] = mapped
 			for sequence, ownedRef := range protectedRefs[turn][ref.MessageID] {
 				ownedRef.Index = len(history)
 				historyRefs[sequence] = ownedRef
@@ -389,6 +394,26 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 			if old, exists := protected[turn][event.MessageID]; exists && !nativeSnapshotExtends(old, snapshot) {
 				return 0, nil, fmt.Errorf("protected native snapshot replaced")
 			}
+			if snapshot.Owner == nil {
+				if apiLatest[turn] == nil {
+					apiLatest[turn] = map[string]string{}
+				}
+				if prior := apiLatest[turn][event.MessageID]; prior != "" {
+					old := historyRefs[prior]
+					old.Blocks = map[int]bool{}
+					historyRefs[prior] = old
+				}
+				apiLatest[turn][event.MessageID] = sequence
+				blocks := map[int]bool{}
+				calls := map[int]canonical.Block{}
+				for i, b := range snapshot.Payload.Blocks {
+					if b.Type == "tool_use" {
+						blocks[i] = true
+						calls[i] = b
+					}
+				}
+				historyRefs[sequence] = nativeHistorySource{Index: -1, Source: ref, Blocks: blocks, Calls: calls}
+			}
 			if snapshot.Owner != nil {
 				if protected[turn] == nil {
 					protected[turn] = map[string]nativeOwnedMessage{}
@@ -445,6 +470,9 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 			}
 			if execution.Status == "completed" || execution.Status == "failed" || execution.Status == "cancelled" {
 				terminals[turn] = sequence
+				if eventID == operatorCancelPrefix+turn && payload == operatorCancelPayload {
+					operatorTerminals[turn] = sequence
+				}
 				delete(open, turn)
 				if len(pending[turn]) > 0 {
 					appendPending(turn)
@@ -483,7 +511,7 @@ func sessionIRHistoryProject(ctx context.Context, q store.Queryer, f []string, r
 	}
 	if len(interruptions) > 0 {
 		var err error
-		history, err = projectNativeInterruptions(history, historyRefs, terminals, interruptions)
+		history, err = projectNativeInterruptions(history, historyRefs, terminals, interruptions, operatorTerminals)
 		if err != nil {
 			return 0, nil, err
 		}

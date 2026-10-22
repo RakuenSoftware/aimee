@@ -2287,19 +2287,6 @@ mcp_tool_handler_fn mcp_tool_lookup(const char *tool)
 
 /* ── the native surface, derived from the table above ────────────────────── */
 
-/* Run an MCP tool for one of aimee's own agents: the same handler an external MCP
- * client reaches, so there is no second implementation that can drift. ctx/conn are
- * NULL — see the table's header for why only ctx/conn-free tools may be native. */
-static cJSON *mcp_native_call(const char *tool, cJSON *args, const char *sid)
-{
-   mcp_tool_handler_fn fn = mcp_tool_lookup(tool);
-   if (!fn)
-      return NULL;
-   struct mcp_call c = {
-       .ctx = NULL, .conn = NULL, .jargs = args, .sid = sid, .tool = tool, .structured = NULL};
-   return fn(&c);
-}
-
 /* The tool's tools/list entry ({"description","inputSchema"}), so the native surface
  * advertises the tool's OWN schema instead of a hand-copied second one. Copying is
  * how git_commit came to advertise parameters its handler never accepted.
@@ -2325,7 +2312,7 @@ static cJSON *mcp_native_advert(const char *tool)
 
 void mcp_tool_register_native_surface(void)
 {
-   agent_tools_set_mcp_provider(mcp_native_call, mcp_native_advert);
+   agent_tools_set_mcp_provider(server_mcp_native_call, mcp_native_advert);
    for (size_t i = 0; i < sizeof(mcp_tool_table) / sizeof(mcp_tool_table[0]); i++)
    {
       if (!mcp_tool_table[i].native)

@@ -173,7 +173,7 @@ static int policy_check_exploration(const char *tool, const char *effect, const 
    const char *session = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(binding, "session"));
    const char *workspace =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(binding, "working_directory"));
-   if (!session || !workspace || !ctx->principal[0] || !attempt || !attempt[0])
+   if (!session || !workspace || !request_context_session_actor(ctx)[0] || !attempt || !attempt[0])
    {
       cJSON_Delete(binding);
       return 1; /* no adaptive state: use the required baseline policy module */
@@ -225,7 +225,8 @@ static int policy_check_exploration(const char *tool, const char *effect, const 
    char *reply = malloc(65536);
    cJSON *result = NULL;
    if (wire && reply &&
-       db1_session_exploration_apply(ctx->principal, session, wire, reply, 65536) == 0)
+       db1_session_exploration_apply(request_context_session_actor(ctx), session, wire, reply,
+                                     65536) == 0)
       result = cJSON_Parse(reply);
    const cJSON *allowed = cJSON_GetObjectItemCaseSensitive(result, "allowed");
    const char *why = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result, "reason"));
@@ -402,13 +403,14 @@ int policy_prepare_exploration(const cJSON *offer, const char *session, const ch
    if (!parent_task || !parent_task[0])
       parent_task = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(parent, "task"));
    if (ctx && session && parent_session && parent_principal && parent_task &&
-       strcmp(session, parent_session) == 0 && strcmp(ctx->principal, parent_principal) == 0 &&
+       strcmp(session, parent_session) == 0 &&
+       strcmp(request_context_session_actor(ctx), parent_principal) == 0 &&
        strlen(parent_task) < sizeof(budget_task))
       snprintf(budget_task, sizeof(budget_task), "%s", parent_task);
    cJSON_Delete(parent);
    (void)request_context_set_exploration_binding("");
-   if (!ctx || !ctx->principal[0] || !session || !session[0] || !workspace || !workspace[0] ||
-       !project || !project[0] || !cJSON_IsObject(offer))
+   if (!ctx || !request_context_session_actor(ctx)[0] || !session || !session[0] || !workspace ||
+       !workspace[0] || !project || !project[0] || !cJSON_IsObject(offer))
       return -1;
    const char *owner =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(offer, "memory_owner"));
@@ -417,7 +419,7 @@ int policy_prepare_exploration(const cJSON *offer, const char *session, const ch
    if (!owner || !generation)
       return -1;
    cJSON *binding = cJSON_CreateObject();
-   cJSON_AddStringToObject(binding, "principal", ctx->principal);
+   cJSON_AddStringToObject(binding, "principal", request_context_session_actor(ctx));
    cJSON_AddStringToObject(binding, "session", session);
    char task[64] = "session-task";
    int job = agent_get_durable_job_id();
@@ -456,7 +458,8 @@ int policy_prepare_exploration(const cJSON *offer, const char *session, const ch
    char *reply = malloc(65536);
    int rc = -1;
    if (wire && reply &&
-       db1_session_exploration_apply(ctx->principal, session, wire, reply, 65536) == 0)
+       db1_session_exploration_apply(request_context_session_actor(ctx), session, wire, reply,
+                                     65536) == 0)
    {
       cJSON *result = cJSON_Parse(reply);
       const cJSON *contract = cJSON_GetObjectItemCaseSensitive(result, "contract");
@@ -486,7 +489,8 @@ int policy_check_session_tool(const char *session, const char *tool, const char 
    if (!discovery)
       return policy_unknown_effect_check(tool, arguments, attempt, 0, 0, reason, reason_len);
    const request_context_t *ctx = request_context_get();
-   if (!ctx || !ctx->principal[0] || !session || !session[0] || !attempt || !attempt[0])
+   if (!ctx || !request_context_session_actor(ctx)[0] || !session || !session[0] || !attempt ||
+       !attempt[0])
    {
       if (discovery == 2)
       {
@@ -514,7 +518,8 @@ int policy_check_session_tool(const char *session, const char *tool, const char 
    char *reply = malloc(65536);
    cJSON *result = NULL;
    if (wire && reply &&
-       db1_session_exploration_apply(ctx->principal, session, wire, reply, 65536) == 0)
+       db1_session_exploration_apply(request_context_session_actor(ctx), session, wire, reply,
+                                     65536) == 0)
       result = cJSON_Parse(reply);
    /* A hook may precede the first context plan. No adaptive contract is not
     * an authorization bypass: the baseline verdict above remains required. */
@@ -552,14 +557,15 @@ static char *policy_session_operation(cJSON *request)
    cJSON *binding = ctx ? cJSON_Parse(ctx->exploration_binding) : NULL;
    const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(binding, "session"));
    char *reply = NULL;
-   if (sid && ctx->principal[0])
+   if (sid && request_context_session_actor(ctx)[0])
    {
       cJSON_AddItemToObject(request, "binding", binding);
       binding = NULL;
       char *wire = cJSON_PrintUnformatted(request);
       reply = malloc(65536);
       if (!wire || !reply ||
-          db1_session_exploration_apply(ctx->principal, sid, wire, reply, 65536) != 0)
+          db1_session_exploration_apply(request_context_session_actor(ctx), sid, wire, reply,
+                                        65536) != 0)
       {
          free(reply);
          reply = NULL;
@@ -627,7 +633,8 @@ int policy_bind_session_exploration(const char *session)
       return -1;
    (void)request_context_set_exploration_binding("");
    const request_context_t *ctx = request_context_get();
-   if (!ctx || !ctx->principal[0] || !session || !session[0] || !policy_worktree_on_host())
+   if (!ctx || !request_context_session_actor(ctx)[0] || !session || !session[0] ||
+       !policy_worktree_on_host())
       return -1;
    char cwd[PATH_MAX], canonical[PATH_MAX];
    const char *effective = run_cmd_get_cwd();
@@ -642,7 +649,8 @@ int policy_bind_session_exploration(const char *session)
    char *reply = malloc(65536);
    int rc = -1;
    if (wire && reply &&
-       db1_session_exploration_apply(ctx->principal, session, wire, reply, 65536) == 0)
+       db1_session_exploration_apply(request_context_session_actor(ctx), session, wire, reply,
+                                     65536) == 0)
    {
       cJSON *result = cJSON_Parse(reply);
       cJSON *binding = cJSON_GetObjectItemCaseSensitive(result, "binding");

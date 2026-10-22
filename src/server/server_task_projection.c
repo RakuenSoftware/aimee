@@ -22,7 +22,7 @@ static cJSON *task_projection_call(const char *principal, const char *sid, cJSON
 
 cJSON *task_projection_command(cJSON *input)
 {
-   const char *principal = request_context_principal();
+   const char *principal = request_context_session_actor(request_context_get());
    const char *sid = jo_cstr(input, "session_id");
    if (!principal || !principal[0] || !sid[0])
       return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,

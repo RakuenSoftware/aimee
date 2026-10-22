@@ -66,6 +66,11 @@ extern "C"
     * flagged, 0 if no such turn, -1 if refused on authz. */
    int turn_registry_cancel(const char *session_id, const char *owner_principal);
 
+   /* Host-only exact-turn cancellation, after authenticated durable owner
+    * admission. Returns1 requested,0 no local session,−1 different/invalid turn.
+    * Requesting cancellation does not prove effects have stopped. */
+   int turn_registry_cancel_exact(const char *session_id, const char *turn_id);
+
    /* Look up the entry for a session (NULL if none). */
    turn_entry_t *turn_registry_find(const char *session_id);
 

@@ -1157,8 +1157,8 @@
     "scripts/check_memory_reliability_release.py": "7ea2d569093a502126c6381e7eea563292b081f26936685da4403e55aadcbf51",
     "scripts/tests/test_memory_reliability_release.py": "87d274cd97df617bfe0ecd396ad4a3f36bd18659d801b7a07cdc0e54af794cf9",
     "server-go/cmd/aimee-module/main_test.go": "68436f9adb2a670b2be302f0017d94154ef8f3b8274c0217eef36c87b272a314",
-    "server-go/modules/aimee/families/clean_retry_test.go": "c36bb39955455877a2bafbe1a3ed43155de6d91463a68239ac845207fe33036d",
-    "server-go/modules/aimee/families/governed_actions_test.go": "91d4342d17f6b1739e43374b3651a7bb43e51ba682d4abc17e3146cea9237459",
+    "server-go/modules/aimee/families/clean_retry_test.go": "19872ddc156590ae612ba9b3e6ebcddf0cf9d411f4eb30fcfe797d1c2d7f56d2",
+    "server-go/modules/aimee/families/governed_actions_test.go": "023f580ad77ad4b703dad5b36902d25e57e2e36a3f5f9d11dee8e43aecf0c500",
     "server-go/modules/aimee/families/runtime_caches_test.go": "e0539e0b54f1c03729e2d072d2c78c7efc6fd426fcda4fcbb58bc9b8bb13ea7f",
     "server-go/modules/aimee/families/task_projection_test.go": "f5450b32f37eb36b5997e83a2406153a48158a8a0aa6d1a857c1d6a541dcf1d2",
     "server-go/modules/execution-policy/clean_retry_test.go": "8dd8a57a2a85d97b250e6c012afcc1b47afc0a053a9ca791048c23e57fe52531",
@@ -1246,7 +1246,7 @@
       ]
     },
     "ci_lane_merge_3038": {
-      "reason": "Combine testing CI event-record reuse with PR #3038 canonical execution-observation registration. Recorded events still require a finished package and every required test to pass. Removing only Learning event 6147 from main_test.go reproduces testing’s frozen digest. Groups, cases, Python test references, thresholds and denominators are unchanged.",
+      "reason": "Combine testing CI event-record reuse with PR #3038 canonical execution-observation registration. Recorded events still require a finished package and every required test to pass. Removing only Learning event 6147 from main_test.go reproduces testing\u2019s frozen digest. Groups, cases, Python test references, thresholds and denominators are unchanged.",
       "reviewed_inputs": [
         "scripts/check_memory_reliability_release.py",
         "scripts/tests/test_memory_reliability_release.py",
@@ -1261,6 +1261,22 @@
       "server-go/modules/memory/client_test.go",
       "server-go/modules/memory/validity_test.go",
       "server-go/modules/memory/version_contract_test.go"
-    ]
+    ],
+    "canonical_actor_3057": {
+      "base_commit": "b8c7670a60fb7e3af7f503acb2929143079d18ef",
+      "file": "server-go/modules/aimee/families/governed_actions_test.go",
+      "previous_sha256": "91d4342d17f6b1739e43374b3651a7bb43e51ba682d4abc17e3146cea9237459",
+      "reason": "Adds one actual-PostgreSQL canonical-actor subtest to the existing atomic-owner invariant: valid 159-byte and webuser actors, foreign uid/webchat/webuser refusals, 160-byte refusal and exact projection count. All pre-existing cases and assertions are retained. The new rows use distinct session ids and their governed-action roots/projections are removed before the original cases continue. No adversarial group, required case, denominator, threshold or release predicate is removed or relaxed.",
+      "evidence": "The expanded original TestGovernedActionLiveAtomicOwner passed against actual PostgreSQL under the race detector; the new long-actor positive case fails against the previous 128-byte production bound. This records fixture source review, not independent production-promotion approval."
+    },
+    "operator_cancel_3057": {
+      "base_commit": "4ad4843b2c7013d8fc37d1c70453bf8bd261ba3c",
+      "previous_sha256": {
+        "server-go/modules/aimee/families/governed_actions_test.go": "fc5197d6c8ce9a103eeda7236bc66d319abf38d8d5be3219d6458d6e04c4bfae",
+        "server-go/modules/aimee/families/clean_retry_test.go": "c36bb39955455877a2bafbe1a3ed43155de6d91463a68239ac845207fe33036d"
+      },
+      "reason": "Adds only schema_session_ir_events.sql to the two existing actual-PostgreSQL fixture setup lists because governed-action admission now checks the exact canonical turn and operator cancellation fence. Existing test cases and assertions, groups, required outcomes, denominators, thresholds and release predicates are retained.",
+      "evidence": "Both original governed-action and clean-retry cases pass against actual PostgreSQL under the race detector with the new canonical schema. This records fixture-source review, not independent production-promotion approval."
+    }
   }
 }

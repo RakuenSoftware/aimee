@@ -13,10 +13,17 @@
 
 #define SOURCE_LIMIT 4096
 #define SOURCE_BYTES (16u * 1024u * 1024u)
+typedef struct source_catalog
+{
+   struct source_catalog *next;
+   aimee_request_t view;
+   char digest[65];
+} source_catalog_t;
 typedef struct source_call
 {
    struct source_call *next;
    aimee_request_t original;
+   const source_catalog_t *catalog;
    char *message_id;
    char first[32], last[32], digest[65];
    int index, claimed;
@@ -30,6 +37,8 @@ struct server_native_tool_source
    size_t bytes;
    unsigned count;
    source_call_t *calls;
+   source_catalog_t *catalogs;
+   size_t catalog_bytes;
 };
 static const char *field(const cJSON *object, const char *key)
 {
@@ -163,13 +172,53 @@ void server_native_tool_source_close(server_native_tool_source_t *source)
       free(call);
       call = next;
    }
+   source_catalog_t *catalog = source->catalogs;
+   while (catalog)
+   {
+      source_catalog_t *next = catalog->next;
+      aimee_request_free(&catalog->view);
+      free(catalog);
+      catalog = next;
+   }
    pthread_mutex_destroy(&source->lock);
    free(source);
 }
-int server_native_tool_source_record(server_native_tool_source_t *source,
-                                     const aimee_request_t *catalog, const aimee_block_t *call,
-                                     const char *message_id, const char *first, const char *last,
-                                     const char *digest, int index)
+static const source_catalog_t *source_catalog_record(server_native_tool_source_t *source,
+                                                     const aimee_request_t *catalog)
+{
+   aimee_request_t view = {
+       .model = catalog->model, .tools = catalog->tools, .n_tools = catalog->n_tools, .mutated = 1};
+   cJSON *json = aimee_ir_request_json(&view);
+   char *wire = json ? cJSON_PrintUnformatted(json) : NULL;
+   cJSON_Delete(json);
+   size_t bytes = wire ? strlen(wire) : 0;
+   char digest[65];
+   int invalid = !bytes || bytes > SOURCE_BYTES || aimee_sha256_hex(wire, bytes, digest);
+   free(wire);
+   if (invalid)
+      return NULL;
+   for (source_catalog_t *old = source->catalogs; old; old = old->next)
+      if (!strcmp(old->digest, digest))
+         return old;
+   if (source->catalog_bytes > SOURCE_BYTES - bytes)
+      return NULL;
+   source_catalog_t *entry = calloc(1, sizeof *entry);
+   if (!entry)
+      return NULL;
+   if (aimee_ir_request_clone(&view, &entry->view))
+   {
+      free(entry);
+      return NULL;
+   }
+   snprintf(entry->digest, sizeof entry->digest, "%s", digest);
+   entry->next = source->catalogs;
+   source->catalogs = entry;
+   source->catalog_bytes += bytes;
+   return entry;
+}
+static int source_record(server_native_tool_source_t *source, const aimee_request_t *catalog,
+                         const aimee_block_t *call, const char *message_id, const char *first,
+                         const char *last, const char *digest, int index, int retain_catalog)
 {
    unsigned long long start, stop;
    if (!source || !call || !aimee_ir_block_valid(call) || call->type != AIMEE_BLK_TOOL_USE ||
@@ -226,6 +275,13 @@ int server_native_tool_source_record(server_native_tool_source_t *source,
       free(entry);
       goto done;
    }
+   if (retain_catalog && !(entry->catalog = source_catalog_record(source, catalog)))
+   {
+      aimee_request_free(&entry->original);
+      free(entry->message_id);
+      free(entry);
+      goto done;
+   }
    snprintf(entry->first, sizeof entry->first, "%s", first);
    snprintf(entry->last, sizeof entry->last, "%s", last);
    snprintf(entry->digest, sizeof entry->digest, "%s", digest);
@@ -238,6 +294,21 @@ int server_native_tool_source_record(server_native_tool_source_t *source,
 done:
    pthread_mutex_unlock(&source->lock);
    return rc;
+}
+int server_native_tool_source_record(server_native_tool_source_t *source,
+                                     const aimee_request_t *catalog, const aimee_block_t *call,
+                                     const char *message_id, const char *first, const char *last,
+                                     const char *digest, int index)
+{
+   return source_record(source, catalog, call, message_id, first, last, digest, index, 0);
+}
+int server_native_tool_source_record_with_catalog(server_native_tool_source_t *source,
+                                                  const aimee_request_t *catalog,
+                                                  const aimee_block_t *call, const char *message_id,
+                                                  const char *first, const char *last,
+                                                  const char *digest, int index)
+{
+   return source_record(source, catalog, call, message_id, first, last, digest, index, 1);
 }
 static int verify(server_native_tool_source_t *source, const source_call_t *call)
 {
@@ -307,6 +378,7 @@ void server_native_tool_claim_free(server_native_tool_claim_t *claim)
    if (claim)
    {
       aimee_request_free(&claim->original);
+      aimee_request_free(&claim->catalog);
       memset(claim, 0, sizeof *claim);
    }
 }
@@ -347,6 +419,7 @@ static int source_claim(server_native_tool_source_t *source, const aimee_block_t
       goto done;
    if (!match || verify(source, match) || !fresh(source) ||
        aimee_ir_request_clone(&match->original, &result.original) ||
+       (match->catalog && aimee_ir_request_clone(&match->catalog->view, &result.catalog)) ||
        server_session_capture_claim_call(source->capture, match->last, match->index))
       goto done;
    match->claimed = 1;

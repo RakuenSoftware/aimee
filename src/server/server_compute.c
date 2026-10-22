@@ -767,7 +767,6 @@ static void delegate_worker_run(void *arg)
    const char *role =
        delegate_role_canonicalize(cJSON_IsString(jrole) ? jrole->valuestring : "execute");
    const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
-   const char *learning_goal = prompt; /* Preserve before worktree/evidence rewrites. */
    int max_tokens = cJSON_IsNumber(jmax) ? (int)jmax->valuedouble : 0; /* 0 => model-derived */
    double max_cost_usd = cJSON_IsNumber(jmaxcost) ? jmaxcost->valuedouble : 0.0;
    const char *system_prompt = cJSON_IsString(jsystem) ? jsystem->valuestring : NULL;
@@ -1904,12 +1903,11 @@ static void delegate_worker_run(void *arg)
    delegate_checkout_add_result_ex(resp, launch_worktree_path, launch_head, parent_worktree_path,
                                    parent_worktree_head, parent_worktree_fingerprint);
 
-   /* Persist observed learning before clients can observe terminal completion.
-    * Capture failure is explicit and does not rewrite the task's execution result. */
-   if (delegate_record_exit_learning(sid, role, &result, rc, max_turns, &acfg, target_agent,
-                                     learning_goal, deleg_id) != 0)
-      LOG_WARN("delegate", "delegate %s: terminal execution has incomplete learning capture",
-               deleg_id);
+   /* Canonical child capture publishes source-bound experience. Preserve exit
+    * metrics without duplicating it from flat response/error classification. */
+   if (delegate_record_exit_metrics(sid, role, &result, rc, max_turns, &acfg, target_agent,
+                                    deleg_id) != 0)
+      LOG_WARN("delegate", "delegate %s: terminal execution has incomplete exit metrics", deleg_id);
 
    agent_result_clear_response(&result);
    free(handoff_prompt);
@@ -2206,6 +2204,14 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    cJSON *jvia = cJSON_GetObjectItemCaseSensitive(req, "via");
    const char *initial_agent =
        cJSON_IsString(jvia) && jvia->valuestring[0] ? jvia->valuestring : "";
+   if (server_delegate_startup_reconcile() != 0)
+   {
+      compute_ctx_free(cctx);
+      if (err)
+         snprintf(err, errn,
+                  "delegate startup reconciliation unavailable; retry after store attachment");
+      return -1;
+   }
    int job_id = db1_agent_job_create(role, prompt, initial_agent, lease_owner);
    if (job_id <= 0)
    {

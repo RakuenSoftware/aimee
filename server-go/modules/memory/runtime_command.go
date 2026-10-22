@@ -121,6 +121,8 @@ func handleRuntimeView(options handlerOptions, invocation bus.ModuleInvocation, 
 	case "ingress-assemble":
 		prepareHealthQueryCapture(options, invocation, args, operation)
 		return handleIngressAssembly(options.gateway, args)
+	case "source-release-fork-plan", "source-release-fork-result":
+		return handleSourceReleaseFork(&options.gateway.releases, args)
 	case "native-source-release":
 		prepareHealthQueryCapture(options, invocation, args, operation)
 		return handleNativeSourceRelease(&options.gateway.releases, args)

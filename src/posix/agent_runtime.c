@@ -499,6 +499,8 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
                                              const aimee_request_t *seed,
                                              aimee_response_t *canonical_out)
 {
+   const request_context_t *previous_context = request_context_get();
+   int previous_script_origin = previous_context ? previous_context->operator_script_origin : 0;
    int previous = request_context_set_model_execution(1);
    aimee_response_t final = {0};
    int rc = agent_execute_with_tools_impl(agent, network, role, system_prompt, user_prompt,
@@ -523,7 +525,10 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
    }
    aimee_response_free(&final);
    if (previous >= 0)
+   {
       (void)request_context_set_model_execution(previous);
+      (void)request_context_set_operator_script_origin(previous_script_origin);
+   }
    return rc;
 }
 

@@ -2,6 +2,7 @@
  * executable descriptors, launch configuration and cleanup use production code.
  * Actual SDK/config protocol fidelity is covered by test_codex_native_adoption.py. */
 #include "server_native_execution.h"
+#include "server_native_sdk_profile.h"
 #include "cli_claude_native.h"
 #include "claude_headless.h"
 #include "server_native_runtime.h"
@@ -25,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <stdatomic.h>
 
@@ -66,9 +68,23 @@ static char observed_epoch[33] = "0";
 static cJSON *durable_reservation;
 static const char *active_override;
 static int lookup_changed, lookup_missing, old_completed;
+static const char *local_live_session, *local_live_actor, *local_live_turn;
+static int local_owner_queries;
+int server_session_capture_has_owner(const char *session, const char *actor, const char *turn)
+{
+   local_owner_queries++;
+   return local_live_session && !strcmp(session, local_live_session) && local_live_actor &&
+          !strcmp(actor, local_live_actor) && local_live_turn && !strcmp(turn, local_live_turn);
+}
 int db1_session_native_active_owned(const char *actor, const char *session, char **out)
 {
    *out = NULL;
+   if (!strcmp(session, "destination") && strlen(actor) == VAULT_PRINCIPAL_MAX - 1 &&
+       strspn(actor, "L") == strlen(actor))
+   {
+      *out = strdup("[]");
+      return *out ? 0 : -1;
+   }
    if (strcmp(actor, "actor") || strcmp(session, "destination"))
       return -1;
    if (active_override)
@@ -447,6 +463,11 @@ server_native_runtime_t *server_native_runtime_open_bound_request(
 {
    assert(request_owner == &owner && !strcmp(source, "transport"));
    assert(!strcmp(selected->model, "selected-model") && profile->n_messages == 0);
+   if (!strcmp(active_sdk, "claude"))
+      assert(profile->n_system > 0 &&
+             !strcmp(profile->system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY));
+   else
+      assert(!profile->n_system || strcmp(profile->system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY));
    assert(!strcmp(selected->provider, "chatgpt"));
    assert(!durable_reservation); /* Session recovery precedes current profile. */
    assert(profile->n_tools == 1 && profile->tools[0].kind == AIMEE_TOOL_FUNCTION);
@@ -666,6 +687,56 @@ int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_f
    const cli_claude_host_launch_t *host = cfg->claude_host;
    char proof[65];
    assert(!cli_claude_native_launch_digest(cfg, proof) && !strcmp(proof, host->expected_profile));
+   /* The exact fixed gateway setting is covered by the launch proof, not
+    * inherited from the operator or inferred from SDK initialization. */
+   int attribution_index = -1;
+   char *changed_environment[17] = {0};
+   for (int i = 0; host->environment[i]; i++)
+   {
+      assert(i < 16);
+      changed_environment[i] = host->environment[i];
+      if (!strncmp(host->environment[i], "CLAUDE_CODE_ATTRIBUTION_HEADER=", 31))
+      {
+         assert(!strcmp(host->environment[i], "CLAUDE_CODE_ATTRIBUTION_HEADER=0"));
+         assert(attribution_index == -1);
+         attribution_index = i;
+      }
+   }
+   assert(attribution_index >= 0);
+   cli_claude_host_launch_t changed_host = *host;
+   provider_cli_cfg_t changed_cfg = *cfg;
+   changed_host.environment = changed_environment;
+   changed_cfg.claude_host = &changed_host;
+   changed_environment[attribution_index] = "CLAUDE_CODE_ATTRIBUTION_HEADER=1";
+   assert(cli_claude_native_launch_digest(&changed_cfg, proof));
+   changed_environment[attribution_index] = NULL;
+   assert(cli_claude_native_launch_digest(&changed_cfg, proof));
+   changed_environment[attribution_index] = host->environment[attribution_index];
+   int environment_count = 0;
+   while (host->environment[environment_count])
+      environment_count++;
+   changed_environment[environment_count] = host->environment[attribution_index];
+   assert(cli_claude_native_launch_digest(&changed_cfg, proof));
+#if defined(__linux__)
+   /* Run the real descriptor-based spawn and inspect its actual child env.
+    * This is a probe executable, not a simulated provider response. */
+   cli_claude_host_launch_t probe_host = *host;
+   provider_cli_cfg_t probe_cfg = *cfg;
+   probe_host.executable_fd = open("/proc/self/exe", O_RDONLY | O_CLOEXEC);
+   assert(probe_host.executable_fd >= 0);
+   probe_host.spawn_guard = NULL;
+   probe_cfg.claude_host = &probe_host;
+   int input = -1, output = -1, status = -1;
+   pid_t probe;
+   assert(!cli_claude_native_spawn(&probe_cfg, &input, &output, &probe));
+   close(input);
+   char observed[128] = {0};
+   ssize_t bytes = read(output, observed, sizeof observed - 1);
+   assert(bytes > 0 && !strcmp(observed, "native Claude gateway environment verified\n"));
+   close(output);
+   assert(waitpid(probe, &status, 0) == probe && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+   close(probe_host.executable_fd);
+#endif
    snprintf(private_home, sizeof private_home, "%s", host->home);
    child_executable = host->executable_fd;
    child_directory = host->cwd_fd;
@@ -749,6 +820,8 @@ static void reset(int next)
    runtime_closed = 0;
    active_override = NULL;
    lookup_changed = lookup_missing = old_completed = 0;
+   local_live_session = local_live_actor = local_live_turn = NULL;
+   local_owner_queries = 0;
    recovered = lookup_failure = quiescence_failure = finish_failure = preclaim_drop = 0;
    snprintf(observed_epoch, sizeof observed_epoch, "0");
    opened = joined = child_closed = began = completed = aborted = closed = 0;
@@ -768,8 +841,18 @@ static void finish(int success)
    action(success, terminal_resource);
    terminal_resource = NULL;
 }
-int main(void)
+int main(int argc, char **argv)
 {
+   if (argc > 1 && !strcmp(argv[1], "--bare"))
+   {
+      const char *setting = getenv("CLAUDE_CODE_ATTRIBUTION_HEADER");
+      assert(setting && !strcmp(setting, "0"));
+      assert(!getenv("PARENT_SECRET") && !getenv("ANTHROPIC_AUTH_TOKEN"));
+      assert(getenv("ANTHROPIC_API_KEY") &&
+             !strcmp(getenv("ANTHROPIC_API_KEY"), "local-capability-fixture"));
+      puts("native Claude gateway environment verified");
+      return 0;
+   }
    char temporary[4096];
    assert(snprintf(temporary, sizeof temporary, "%s/native-factory-XXXXXX", platform_tmpdir()) <
           (int)sizeof temporary);
@@ -779,6 +862,7 @@ int main(void)
    setenv("AIMEE_OAUTH_RUNTIME_DIR", temporary, 1);
    setenv("AIMEE_HOME", temporary, 1);
    setenv("PARENT_SECRET", "do-not-inherit", 1);
+   setenv("CLAUDE_CODE_ATTRIBUTION_HEADER", "1", 1);
    agent_t selected = {0};
    snprintf(selected.cli_kind, sizeof selected.cli_kind, "codex");
    snprintf(selected.cli_cmd, sizeof selected.cli_cmd, "/bin/true");
@@ -896,7 +980,52 @@ int main(void)
    assert(live);
    assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0);
    assert(!quiesced && !recovered);
+   /* Browsing a live writer is observational: the exact actor/session/turn
+    * remains registered until its retained terminal resources are released. */
+   local_live_session = "destination";
+   local_live_actor = "actor";
+   local_live_turn = "old-turn";
+   assert(!server_native_session_reconcile_browse("destination", "actor", recovery_error));
+   assert(local_owner_queries == 1 && !quiesced && !recovered && durable_reservation);
+   /* Strict prehistory retains its refusal even for a process-local writer. */
+   assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0);
+   assert(local_owner_queries == 1 && !quiesced && !recovered);
+   local_live_turn = "different-turn";
+   assert(server_native_session_reconcile_browse("destination", "actor", recovery_error) < 0);
+   assert(!quiesced && !recovered);
+   local_live_turn = "old-turn";
+   local_live_actor = "different-actor";
+   assert(server_native_session_reconcile_browse("destination", "actor", recovery_error) < 0);
+   local_live_actor = "actor";
+   local_live_session = "different-session";
+   assert(server_native_session_reconcile_browse("destination", "actor", recovery_error) < 0);
+   local_live_session = "destination";
+   /* Validate all records before any liveness query: a valid live first entry
+    * cannot mask a malformed or foreign second entry. */
+   cJSON *invalid_records = cJSON_CreateArray();
+   cJSON_AddItemToArray(invalid_records, cJSON_Duplicate(durable_reservation, 1));
+   cJSON_AddItemToArray(invalid_records, cJSON_CreateObject());
+   char *invalid_wire = cJSON_PrintUnformatted(invalid_records);
+   cJSON_Delete(invalid_records);
+   active_override = invalid_wire;
+   local_owner_queries = 0;
+   assert(server_native_session_reconcile_browse("destination", "actor", recovery_error) < 0);
+   assert(!local_owner_queries && !quiesced && !recovered);
+   free(invalid_wire);
+   active_override = NULL;
+   assert(server_native_session_reconcile_browse("destination", "foreign-actor", recovery_error) <
+          0);
+   assert(server_native_session_reconcile_browse("foreign-session", "actor", recovery_error) < 0);
+   assert(!local_owner_queries && !quiesced && !recovered);
+   local_live_session = local_live_actor = local_live_turn = NULL;
    assert(!server_native_cache_lease_close(live, 1));
+   /* With no process-local writer or live physical lease, browse follows the
+    * unchanged source-bound orphan recovery path and starts no SDK/HOME. */
+   assert(!server_native_session_reconcile_browse("destination", "actor", recovery_error));
+   assert(recovered == 1 && quiesced == 1 && !durable_reservation && !sdk_calls &&
+          !private_home[0]);
+   reset(0);
+   seed_abandoned("actor");
    cJSON_ReplaceItemInObjectCaseSensitive(durable_reservation, "turn_id",
                                           cJSON_CreateString("turn"));
    assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0);
@@ -907,6 +1036,17 @@ int main(void)
    assert(server_native_session_reconcile("destination", "foreign-actor", "turn", recovery_error) <
           0);
    assert(server_native_session_reconcile("foreign-session", "actor", "turn", recovery_error) < 0);
+   char long_actor[VAULT_PRINCIPAL_MAX + 1];
+   memset(long_actor, 'L', sizeof long_actor);
+   long_actor[VAULT_PRINCIPAL_MAX - 1] = 0;
+   assert(!server_native_session_reconcile_browse("destination", long_actor, recovery_error));
+   /* Ordinary browsing adds no narrower actor precondition, while the existing
+    * strict native profile's supported bound remains unchanged. */
+   assert(server_native_session_reconcile("destination", long_actor, "turn", recovery_error) < 0);
+   long_actor[VAULT_PRINCIPAL_MAX - 1] = 'L';
+   long_actor[VAULT_PRINCIPAL_MAX] = 0;
+   assert(server_native_session_reconcile_browse("destination", long_actor, recovery_error) < 0);
+   assert(!local_owner_queries && !quiesced);
    active_override = "[{}]";
    assert(server_native_session_reconcile("destination", "actor", "turn", recovery_error) < 0 &&
           !quiesced);

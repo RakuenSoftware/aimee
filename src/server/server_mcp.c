@@ -2078,23 +2078,6 @@ void server_mcp_served_outcome(const char *verdict, const char *reason)
 
 static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
-/* Resolve cwd transport metadata to the same stable project identity used by
- * ingest.  Tool helpers must never fall back to a checkout basename: two moved
- * or linked worktrees can share that label while representing different stable
- * projects (or the reverse). */
-static void mcp_inject_active_project(cJSON *args)
-{
-   if (!cJSON_IsObject(args) || cJSON_GetObjectItemCaseSensitive(args, "project"))
-      return;
-   const cJSON *cwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
-   if (!cJSON_IsString(cwd) || !cwd->valuestring[0])
-      return;
-   char project[MAX_PATH_LEN] = "";
-   if (server_active_project_from_cwd(cwd->valuestring, project, sizeof(project)) == 0 &&
-       project[0])
-      cJSON_AddStringToObject(args, "project", project);
-}
-
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    g_served_verdict = "ok";
@@ -2156,7 +2139,8 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
    if (cJSON_IsString(jcwd) && jcwd->valuestring[0] && cJSON_IsObject(jargs) &&
        !cJSON_GetObjectItemCaseSensitive(jargs, "cwd"))
       cJSON_AddStringToObject(jargs, "cwd", jcwd->valuestring);
-   mcp_inject_active_project(jargs);
+   server_mcp_inject_active_project(
+       jargs, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(jargs, "cwd")));
 
    const char *tool = jtool->valuestring;
    snprintf(g_served_tool, sizeof g_served_tool, "%s", tool); /* served audit identity */
@@ -2187,7 +2171,8 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
          if (cJSON_IsString(jcwd) && jcwd->valuestring[0] &&
              !cJSON_GetObjectItemCaseSensitive(jargs, "cwd"))
             cJSON_AddStringToObject(jargs, "cwd", jcwd->valuestring);
-         mcp_inject_active_project(jargs);
+         server_mcp_inject_active_project(
+             jargs, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(jargs, "cwd")));
          snprintf(g_served_tool, sizeof g_served_tool, "%s", tool);
       }
    }

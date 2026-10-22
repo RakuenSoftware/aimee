@@ -1,6 +1,9 @@
 /* Native children hold only a lifetime-scoped local capability. Existing HTTP
  * owners admit model/tool requests under the captured actor and registration. */
 #include "server_native_runtime.h"
+#include "ingress_preinject.h"
+#include "server_native_cli.h"
+#include <aimee/core/connection/auth.h>
 #include "log.h"
 #include "server_native_tool_admission.h"
 #include "agent_exec.h"
@@ -39,6 +42,12 @@
 struct server_native_runtime
 {
    pthread_t producer;
+   pthread_mutex_t cli_lock;
+   struct
+   {
+      server_native_cli_t *grant;
+      const aimee_request_t *catalog; /* Borrowed from retained exact shell claim. */
+   } cli_grants[4];
    server_control_scope_t *controls;
    server_session_capture_t *capture;
    cli_proxy_t *listener;
@@ -67,6 +76,10 @@ struct server_native_runtime
    int job_id, api_key_source, claude_source;
    char session[128], token[65], url[64], binding[65], lineage[65];
 };
+
+static const server_native_tool_binding_t *
+native_tool_binding(const server_native_runtime_t *runtime, const char *space, const char *name,
+                    int mcp);
 
 typedef struct
 {
@@ -153,6 +166,11 @@ static int native_capture_admit(native_model_capture_t *capture, const aimee_ses
       return 0;
    if (!event->delta || !event->message_id || !event->role || strcmp(event->role, "assistant"))
       return -1;
+   /* Transport/admission can fail before the provider starts a message. This
+    * typed diagnostic has a host correlation ID, not an original assistant
+    * message or a tool source. Do not manufacture TURN_START to admit it. */
+   if (event->delta->type == AIMEE_DELTA_ERROR && !capture->builder.started)
+      return 0;
    if (event->delta->type == AIMEE_DELTA_TURN_START)
    {
       if (capture->builder.started && !capture->builder.complete)
@@ -177,6 +195,9 @@ static int native_record_source(native_model_capture_t *capture, const aimee_ses
    if (!capture->runtime->owns_request ||
        (event->kind != AIMEE_SESSION_DELTA && event->kind != AIMEE_SESSION_MESSAGE))
       return 0;
+   if (event->kind == AIMEE_SESSION_DELTA && event->delta->type == AIMEE_DELTA_ERROR &&
+       !capture->builder.started)
+      return 0; /* A pre-message failure cannot establish original tool provenance. */
    cJSON *row = wire ? aimee_ir_json_parse_frame(wire, strlen(wire)) : NULL;
    const cJSON *payload = cJSON_GetObjectItemCaseSensitive(row, "event");
    const char *message_id =
@@ -212,9 +233,18 @@ static int native_record_source(native_model_capture_t *capture, const aimee_ses
    }
    for (int i = first; i < count && !rc; i++)
       if (blocks[i].type == AIMEE_BLK_TOOL_USE)
-         rc = server_native_tool_source_record(
+      {
+         const server_native_tool_binding_t *binding = native_tool_binding(
+             capture->runtime, blocks[i].tool_namespace, blocks[i].tool_name, 0);
+         int shell = binding ? !strcmp(binding->registry_name, "bash")
+                             : !capture->runtime->bound_registry && blocks[i].tool_namespace &&
+                                   !strcmp(blocks[i].tool_namespace, "aimee") &&
+                                   !strcmp(blocks[i].tool_name, "bash");
+         rc = (shell ? server_native_tool_source_record_with_catalog
+                     : server_native_tool_source_record)(
              capture->runtime->tool_source, &capture->owner->admitted, &blocks[i], message_id,
              capture->source_first, sequence, capture->source_digest, i);
+      }
 done:
    cJSON_Delete(row);
    return rc;
@@ -374,10 +404,75 @@ static int native_digest_valid(const char *digest)
    return 1;
 }
 
+/* SDK correlation metadata is transport data, never account/session authority.
+ * Keep only the provider's bounded user_id contract through canonical ownership;
+ * the SDK's model, system, transcript, tools and raw extensions stay excluded. */
+static int native_sdk_metadata_copy(const aimee_request_t *request, cJSON **out)
+{
+   *out = NULL;
+   if (request->frontend != AIMEE_WIRE_ANTHROPIC || !request->metadata)
+      return 0;
+   const cJSON *metadata = request->metadata;
+   if (!cJSON_IsObject(metadata) || !aimee_ir_json_unique(metadata))
+      return -1;
+   const cJSON *id = NULL;
+   for (const cJSON *field = metadata->child; field; field = field->next)
+   {
+      if (!field->string || strcmp(field->string, "user_id"))
+         return -1;
+      id = field;
+   }
+   if (id && !cJSON_IsNull(id) && !cJSON_IsString(id))
+      return -1;
+   if (cJSON_IsString(id))
+   {
+      size_t bytes = strnlen(id->valuestring, 2049), characters = 0;
+      if (bytes > 2048)
+         return -1;
+      for (size_t i = 0; i < bytes; i++)
+         characters += ((unsigned char)id->valuestring[i] & 0xc0) != 0x80;
+      if (characters > 512)
+         return -1;
+   }
+   char encoded[4096];
+   if (!cJSON_PrintPreallocated((cJSON *)metadata, encoded, sizeof encoded, 0))
+      return -1;
+   *out = aimee_ir_json_parse_frame(encoded, strlen(encoded));
+   return *out ? 0 : -1;
+}
+static int native_sdk_metadata_merge(aimee_request_t *request, cJSON *sdk)
+{
+   if (!sdk)
+      return 0;
+   if (!request->metadata)
+   {
+      request->metadata = cJSON_Duplicate(sdk, 1);
+      return request->metadata ? 0 : -1;
+   }
+   if (!cJSON_IsObject(request->metadata) || !aimee_ir_json_unique(request->metadata))
+      return -1;
+   const cJSON *id = cJSON_GetObjectItemCaseSensitive(sdk, "user_id");
+   if (!id)
+      return 0;
+   const cJSON *host = cJSON_GetObjectItemCaseSensitive(request->metadata, "user_id");
+   if (host)
+      return cJSON_Compare(host, id, 1) ? 0 : -1;
+   cJSON *copy = cJSON_Duplicate(id, 1);
+   if (!copy || !cJSON_AddItemToObject(request->metadata, "user_id", copy))
+   {
+      cJSON_Delete(copy);
+      return -1;
+   }
+   return 0;
+}
+
 static int native_owned_request(aimee_request_t *request, void *context)
 {
    native_request_owner_t *owner = context;
    server_native_runtime_t *runtime = owner->runtime;
+   cJSON *sdk_metadata = NULL;
+   if (native_sdk_metadata_copy(request, &sdk_metadata))
+      goto failed;
    if (!owner->prepared)
    {
       cJSON *history = NULL;
@@ -415,9 +510,14 @@ static int native_owned_request(aimee_request_t *request, void *context)
          goto failed;
       owner->prepared = 1;
    }
-   if (!aimee_ir_request_clone(&owner->request, request))
+   if (!aimee_ir_request_clone(&owner->request, request) &&
+       !native_sdk_metadata_merge(request, sdk_metadata))
+   {
+      cJSON_Delete(sdk_metadata);
       return 0;
+   }
 failed:
+   cJSON_Delete(sdk_metadata);
    server_session_capture_fail(runtime->capture);
    return -1;
 }
@@ -426,6 +526,7 @@ typedef struct
 {
    const cli_proxy_io_t *io;
    atomic_int finished, cancelled;
+   server_native_cli_t *cli;
 } native_cancellation_t;
 
 static void *native_cancel_watch(void *context)
@@ -434,7 +535,8 @@ static void *native_cancel_watch(void *context)
    const struct timespec tick = {.tv_nsec = 20000000};
    while (!atomic_load(&watch->finished))
    {
-      if (watch->io->cancelled(watch->io->context))
+      if (watch->io->cancelled(watch->io->context) ||
+          (watch->cli && server_native_cli_cancelled(watch->cli)))
       {
          atomic_store(&watch->cancelled, 1);
          break;
@@ -467,6 +569,78 @@ static const char *native_model_path(const char *path, const server_native_runti
    return path;
 }
 
+static int native_cli_route(const char *method, const char *path)
+{
+   return (!strcmp(method, "GET") && !strcmp(path, "/v1/cli/manifest")) ||
+          (!strcmp(method, "POST") && !strcmp(path, "/v1/native/cli"));
+}
+static server_native_cli_t *native_cli_find(server_native_runtime_t *runtime, const char *token,
+                                            int retain, const aimee_request_t **catalog)
+{
+   server_native_cli_t *found = NULL;
+   pthread_mutex_lock(&runtime->cli_lock);
+   for (unsigned i = 0; i < 4; i++)
+      if (server_native_cli_matches(runtime->cli_grants[i].grant, token) &&
+          (!retain || !server_native_cli_retain(runtime->cli_grants[i].grant)))
+      {
+         found = runtime->cli_grants[i].grant;
+         if (catalog)
+            *catalog = runtime->cli_grants[i].catalog;
+         break;
+      }
+   pthread_mutex_unlock(&runtime->cli_lock);
+   return found;
+}
+static int native_authorize(const char *method, const char *path, const char *token, void *context)
+{
+   server_native_runtime_t *runtime = context;
+   if (!strcmp(path, "/v1/native/cli"))
+      return native_cli_route(method, path) && native_cli_find(runtime, token, 0, NULL) != NULL;
+   if (native_cli_route(method, path) && native_cli_find(runtime, token, 0, NULL))
+      return 1;
+   return aimee_core_credential_equal(token, runtime->token);
+}
+static server_native_cli_t *native_cli_shell_open(server_native_runtime_t *runtime,
+                                                  const char *attempt,
+                                                  const aimee_request_t *catalog)
+{
+   /* A remote/client or network-none container does not gain host connectivity.
+    * Only the existing co-located host shell shares this loopback transport. */
+   if (!runtime->workspace || runtime->workspace->kind != WS_PROVIDER_SHARED || !catalog ||
+       !catalog->n_tools)
+      return NULL;
+   server_native_cli_t *grant = server_native_cli_open(
+       runtime->url, runtime->session, runtime->owner.vault_principal, runtime->cwd, attempt, 0);
+   if (!grant)
+      return NULL;
+   pthread_mutex_lock(&runtime->cli_lock);
+   for (unsigned i = 0; i < 4; i++)
+      if (!runtime->cli_grants[i].grant)
+      {
+         runtime->cli_grants[i].grant = grant;
+         runtime->cli_grants[i].catalog = catalog;
+         pthread_mutex_unlock(&runtime->cli_lock);
+         return grant;
+      }
+   pthread_mutex_unlock(&runtime->cli_lock);
+   server_native_cli_close(grant);
+   return NULL;
+}
+static void native_cli_shell_close(server_native_runtime_t *runtime, server_native_cli_t *grant)
+{
+   if (!grant)
+      return;
+   pthread_mutex_lock(&runtime->cli_lock);
+   for (unsigned i = 0; i < 4; i++)
+      if (runtime->cli_grants[i].grant == grant)
+      {
+         runtime->cli_grants[i].grant = NULL;
+         runtime->cli_grants[i].catalog = NULL;
+      }
+   pthread_mutex_unlock(&runtime->cli_lock);
+   server_native_cli_close(grant);
+}
+
 static int native_route(const char *method, const char *path, void *context)
 {
    const server_native_runtime_t *runtime = context;
@@ -476,6 +650,8 @@ static int native_route(const char *method, const char *path, void *context)
     * native model authority, even when the parent transport is an operator. */
    if (!method || !path || strchr(path, '?') || strchr(path, '#'))
       return 0;
+   if (runtime->owns_request && native_cli_route(method, path))
+      return 1; /* The independent token validator selects a live shell grant. */
    /* The canonical host callback is the sole tool ingress for owned profiles.
     * A child must not bypass original-source claims through legacy MCP routes. */
    if (runtime->owns_request && !strncmp(path, "/v1/mcp/", 8))
@@ -502,6 +678,10 @@ typedef struct
    aimee_block_t *result;
    int reference;
    const cJSON *rpc;
+   server_native_cli_t *cli;
+   const aimee_request_t *cli_catalog;
+   const cJSON *cli_request;
+   int cli_manifest;
 } native_tool_work_t;
 
 static const server_native_tool_binding_t *
@@ -586,9 +766,26 @@ static int native_execute_claimed(server_native_runtime_t *runtime, native_tool_
          text = strdup(detail[0] ? detail : "tool policy refused execution");
       else
       {
+         server_native_cli_t *shell = NULL;
+         char *const *previous_environment = NULL;
+         int local_shell = !strcmp(function->name, "bash") && runtime->workspace &&
+                           runtime->workspace->kind == WS_PROVIDER_SHARED;
+         if (local_shell)
+         {
+            shell = native_cli_shell_open(runtime, attempt, &claim.catalog);
+            if (!shell)
+               goto done;
+            previous_environment =
+                agent_tools_bind_bash_environment(server_native_cli_environment(shell));
+         }
          agent_tools_set_effect_authorized(1);
          text = dispatch_tool_call_ir_ctx_status(function, arguments, 120000, &is_error);
          agent_tools_set_effect_authorized(0);
+         if (local_shell)
+         {
+            agent_tools_bind_bash_environment(previous_environment);
+            native_cli_shell_close(runtime, shell);
+         }
          text = policy_annotate_indexed(function->name, arguments, attempt, text);
       }
    }
@@ -809,12 +1006,126 @@ static int native_mcp_dispatch(server_native_runtime_t *runtime, native_tool_wor
    return rc;
 }
 
+static int native_cli_dispatch(server_native_runtime_t *runtime, native_tool_work_t *work,
+                               const cli_proxy_io_t *io)
+{
+   const request_context_t *owner = request_context_get();
+   if (!owner || !server_native_cli_owner(work->cli, runtime->session, owner->vault_principal,
+                                          run_cmd_get_cwd()))
+      return -1;
+   if (work->cli_manifest)
+   {
+      io->response_started(io->context);
+      return server_http_native_forward(io->downstream_fd, "GET", "/v1/cli/manifest", "", 0);
+   }
+   char tool[128], nonce[33], attempt[128], detail[512] = "";
+   cJSON *arguments = NULL, *response = NULL;
+   aimee_tool_t definition = {0};
+   char *wire = NULL, *text = NULL;
+   int reserved = 0, is_error = 1, rc = -1;
+   if (server_native_cli_project(work->cli_request, tool, &arguments, nonce))
+      goto done;
+   const char *submitted_session =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(work->cli_request, "session_id"));
+   const char *submitted_cwd =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(work->cli_request, "cwd"));
+   if ((submitted_session && strcmp(submitted_session, runtime->session)) ||
+       (submitted_cwd && strcmp(submitted_cwd, runtime->cwd)))
+      goto done;
+   /* Project only an exact advertised registry identity. Neither a family
+    * spelling nor the CLI manifest can introduce an unadvertised operation. */
+   const server_native_tool_binding_t *binding = NULL;
+   for (int i = 0; i < runtime->n_bindings; i++)
+      if (!strcmp(runtime->bindings[i].registry_name, tool))
+      {
+         binding = &runtime->bindings[i];
+         break;
+      }
+   const aimee_tool_t *advertised =
+       binding ? aimee_ir_find_function(work->cli_catalog, binding->space, binding->name) : NULL;
+   if (!advertised || agent_tools_execution_definition(tool, &definition) ||
+       !(wire = cJSON_PrintUnformatted(arguments)) ||
+       tool_validate_ir(advertised, wire, detail, sizeof detail) ||
+       tool_validate_ir(&definition, wire, detail, sizeof detail))
+      goto done;
+   int begun = server_native_cli_begin(work->cli, work->cli_request, nonce, attempt, &response);
+   if (begun < 0)
+      goto done;
+   if (begun == 1)
+   {
+      rc = native_mcp_write(io, 200, response);
+      goto done;
+   }
+   reserved = 1;
+   const char *refusal = server_native_tool_admit_attempt(tool, arguments, runtime->session,
+                                                          attempt, detail, sizeof detail);
+   if (agent_request_cancelled() || server_native_cli_cancelled(work->cli) ||
+       owner->context_refused || !server_session_capture_accepting(runtime->capture))
+      goto done;
+   if (refusal)
+      text = strdup(detail[0] ? detail : "tool policy refused execution");
+   else
+   {
+      /* Independent callback TLS/action state: the producer remains inside the
+       * real outer Bash call. No producer queue, borrowed sink or fake model ID. */
+      agent_tools_set_effect_authorized(1);
+      text = dispatch_tool_call_ir_ctx_status(&definition, wire, 120000, &is_error);
+      agent_tools_set_effect_authorized(0);
+      text = policy_annotate_indexed(tool, wire, attempt, text);
+   }
+   if (!text)
+      goto done;
+   /* This is the advertised tool contract, not an operator REST handler
+    * with a different batch envelope. Return complete owned text unchanged. */
+   response = cJSON_CreateObject();
+   cJSON *content = response ? cJSON_AddArrayToObject(response, "content") : NULL;
+   cJSON *item = content ? cJSON_CreateObject() : NULL;
+   if (!item || !cJSON_AddStringToObject(item, "type", "text") ||
+       !cJSON_AddStringToObject(item, "text", text) ||
+       !cJSON_AddBoolToObject(response, "isError", is_error))
+   {
+      cJSON_Delete(item);
+      goto done;
+   }
+   if (!cJSON_AddItemToArray(content, item))
+   {
+      cJSON_Delete(item);
+      goto done;
+   }
+   if (!response)
+      goto done;
+   int complete = server_native_cli_finish(work->cli, response);
+   reserved = 0;
+   if (complete)
+   {
+      server_session_capture_fail(runtime->capture);
+      goto done;
+   }
+   rc = native_mcp_write(io, 200, response);
+done:
+   if (reserved)
+   {
+      server_native_cli_finish(work->cli, NULL);
+      server_session_capture_fail(runtime->capture);
+   }
+   agent_tools_set_effect_authorized(0);
+   cJSON_Delete(arguments);
+   cJSON_Delete(response);
+   free(wire);
+   free(text);
+   aimee_tool_free(&definition);
+   return rc;
+}
+
 static int native_perform(const char *method, const char *path, const char *headers,
                           const void *body, unsigned long length, const char *session,
                           const cli_proxy_io_t *io, void *context, native_tool_work_t *work)
 {
    /* The listener admits protocol headers only, never identity or credentials. */
+   if (!work)
+      anthropic_http_capture_request_headers(NULL);
    server_native_runtime_t *runtime = context;
+   const char *native_path = path;
    path = native_model_path(path, runtime);
    if (!session || strcmp(session, runtime->session) || length > 4u * 1024u * 1024u ||
        (!work && !native_route(method, path, runtime)) ||
@@ -958,6 +1269,7 @@ static int native_perform(const char *method, const char *path, const char *head
    agent_codex_credentials_t current = {0};
    agent_api_credentials_t current_api = {0};
    agent_claude_credentials_t current_claude = {0};
+   int forked_sources = 0;
    request_context_t admitted = runtime->owner;
    unsigned char request_nonce[16];
    if (platform_random_bytes(request_nonce, sizeof request_nonce))
@@ -970,6 +1282,9 @@ static int native_perform(const char *method, const char *path, const char *head
    admitted.idempotency_key[0] = 0;
    request_context_set(&admitted);
    server_http_identity_bind_request_owner(&admitted);
+   if (ingress_preinject_fork_sources(&runtime->owner))
+      goto restore;
+   forked_sources = runtime->owner.memory_source_release[0] != 0;
    agent_request_creds_restore(&runtime->credentials);
    agent_set_request_session(runtime->session);
    if (runtime->lineage[0])
@@ -1002,14 +1317,29 @@ static int native_perform(const char *method, const char *path, const char *head
                                               current.account_id);
       }
    }
+   if (!work)
+   {
+      if (model_request)
+      {
+         if (anthropic_http_capture_native_request_headers(headers) ||
+             anthropic_http_capture_native_request_path(native_path))
+            goto restore;
+      }
+      else
+         anthropic_http_capture_request_headers(headers);
+   }
    atomic_int *previous_cancel = agent_get_request_cancel();
-   native_cancellation_t watch = {.io = io};
+   native_cancellation_t watch = {.io = io, .cli = work ? work->cli : NULL};
    pthread_t monitor;
    if (pthread_create(&monitor, NULL, native_cancel_watch, &watch))
       goto restore;
    agent_set_request_cancel(&watch.cancelled);
-   if (!work)
-      anthropic_http_capture_request_headers(headers);
+   const agent_request_cancel_scope_t *previous_cli_cancel = agent_request_cancel_scope_current();
+   agent_request_cancel_scope_t cli_cancel = {
+       .flag = work && work->cli ? server_native_cli_cancel_flag(work->cli) : NULL,
+       .parent = previous_cli_cancel};
+   if (work && work->cli)
+      agent_request_cancel_scope_bind(&cli_cancel);
    void *previous_sink_context = NULL;
    aimee_ir_session_sink_fn previous_sink = aimee_ir_session_get_sink(&previous_sink_context);
    int previous_failed = aimee_ir_session_capture_failed();
@@ -1029,8 +1359,9 @@ static int native_perform(const char *method, const char *path, const char *head
    if (retained_writer)
       aimee_ir_session_set_sink(server_session_capture_sink, runtime->capture);
    if (work)
-      rc = work->rpc ? native_mcp_dispatch(runtime, work, io)
-                     : native_execute_claimed(runtime, work);
+      rc = work->cli   ? native_cli_dispatch(runtime, work, io)
+           : work->rpc ? native_mcp_dispatch(runtime, work, io)
+                       : native_execute_claimed(runtime, work);
    else
    {
       io->response_started(io->context);
@@ -1055,9 +1386,13 @@ static int native_perform(const char *method, const char *path, const char *head
    atomic_store(&watch.finished, 1);
    pthread_join(monitor, NULL);
    agent_set_request_cancel(previous_cancel);
+   if (work && work->cli)
+      agent_request_cancel_scope_bind(previous_cli_cancel);
+restore:
    if (!work)
       anthropic_http_capture_request_headers(NULL);
-restore:
+   if (forked_sources)
+      ingress_preinject_finish_sources();
    OPENSSL_cleanse(&current_claude, sizeof current_claude);
    OPENSSL_cleanse(&current_api, sizeof current_api);
    OPENSSL_cleanse(&current, sizeof current);
@@ -1091,6 +1426,26 @@ static int native_forward(const char *method, const char *path, const char *head
                           const cli_proxy_io_t *io, void *context)
 {
    server_native_runtime_t *runtime = context;
+   if (runtime->owns_request && native_cli_route(method, path) &&
+       !aimee_core_credential_equal(io->local_credential, runtime->token))
+   {
+      const aimee_request_t *catalog = NULL;
+      server_native_cli_t *grant = native_cli_find(runtime, io->local_credential, 1, &catalog);
+      if (!grant)
+         return native_mcp_write(io, 403, NULL);
+      cJSON *request =
+          !strcmp(method, "POST") && body ? aimee_ir_json_parse_frame(body, (size_t)length) : NULL;
+      native_tool_work_t work = {.cli = grant,
+                                 .cli_catalog = catalog,
+                                 .cli_request = request,
+                                 .cli_manifest = !strcmp(method, "GET")};
+      int rc = (!work.cli_manifest && !cJSON_IsObject(request))
+                   ? -1
+                   : native_perform(method, path, headers, NULL, 0, session, io, runtime, &work);
+      cJSON_Delete(request);
+      server_native_cli_release(grant);
+      return rc;
+   }
    if (runtime->owns_request && native_mcp_enabled(runtime) && !strcmp(path, "/v1/mcp/call"))
    {
       if (!strcmp(method, "GET"))
@@ -1204,10 +1559,16 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
    }
    const char *stage = "tools_scope";
    int binding_index = -1;
+   if (pthread_mutex_init(&runtime->cli_lock, NULL))
+   {
+      free(runtime);
+      return NULL;
+   }
    runtime->producer = pthread_self();
    runtime->selected = *selected;
    runtime->owner = *owner;
    runtime->owner.model_execution = 1;
+   runtime->owner.operator_script_origin = 0;
    /* A model/tool capability never carries independent operator authority:
     * human gates, grant/credential administration and cross-user audit views
     * remain with the original authenticated operator transport. */
@@ -1385,6 +1746,16 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
          goto failed;
       used += (size_t)n;
    }
+   /* Invalidate only the old owned Anthropic transport contract. The marker
+    * itself is callback metadata, not a provider/identity choice known here. */
+   if (runtime->owns_request && runtime->request_profile.frontend == AIMEE_WIRE_ANTHROPIC)
+   {
+      const char contract[] = "native-anthropic-beta-query-v1";
+      int n = snprintf(binding + used, sizeof binding - used, "%zu:%s", strlen(contract), contract);
+      if (n < 0 || (size_t)n >= sizeof binding - used)
+         goto failed;
+      used += (size_t)n;
+   }
    if (aimee_sha256_hex(binding, used, runtime->binding))
       goto failed;
    if (runtime->lineage[0])
@@ -1409,8 +1780,9 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
    OPENSSL_cleanse(random, sizeof random);
    unsigned port = 0;
    stage = "private_listener";
-   runtime->listener = cli_proxy_start_scoped(0, runtime->token, session_id, &port, native_route,
-                                              native_forward, runtime);
+   runtime->listener =
+       cli_proxy_start_authorized(0, runtime->token, session_id, &port, native_route,
+                                  native_authorize, native_forward, runtime);
    if (!runtime->listener)
       goto failed;
    snprintf(runtime->url, sizeof runtime->url, "http://127.0.0.1:%u", port);
@@ -1743,6 +2115,9 @@ void server_native_runtime_close(server_native_runtime_t *runtime)
    if (!runtime)
       return;
    server_native_runtime_quiesce(runtime);
+   for (unsigned i = 0; i < 4; i++)
+      server_native_cli_close(runtime->cli_grants[i].grant);
+   pthread_mutex_destroy(&runtime->cli_lock);
    for (int i = 0; i < runtime->n_bindings; i++)
    {
       free((void *)runtime->bindings[i].space);

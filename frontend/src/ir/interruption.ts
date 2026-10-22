@@ -4,7 +4,7 @@ export type ToolInterruption = {
   version: 1;
   source: { session_id: string; turn_id: string; sequence: string; event_id: string;
     actor: string; message_id: string; block_index: number; tool_id: string; name: string };
-  owner: { owner_id: string; binding_sha256: string; epoch: string; containment_sha256: string };
+  owner: { owner_id: string; binding_sha256: string; epoch: string; containment_sha256: string } | { operator_cancel_event_id: string };
   terminal_sequence: string; outcome: 'unknown'; retry: 'explicit_permission_required';
 };
 export const toolInterruptionText = "The host lost this tool's completion result. Its effects are unknown; interruption does not prove that it failed or was cancelled. Do not repeat an effect without explicit user authorization.";
@@ -26,15 +26,17 @@ export function validToolInterruption(value: unknown): value is ToolInterruption
   if (!object(value, ['version', 'source', 'owner', 'terminal_sequence', 'outcome', 'retry']) ||
       value.version !== 1 || value.outcome !== 'unknown' || value.retry !== 'explicit_permission_required' ||
       !positiveSequence(value.terminal_sequence) ||
-      !object(value.source, ['session_id', 'turn_id', 'sequence', 'event_id', 'actor', 'message_id', 'block_index', 'tool_id', 'name']) ||
-      !object(value.owner, ['owner_id', 'binding_sha256', 'epoch', 'containment_sha256'])) return false;
+      !object(value.source, ['session_id', 'turn_id', 'sequence', 'event_id', 'actor', 'message_id', 'block_index', 'tool_id', 'name'])) return false;
   const source = value.source, owner = value.owner;
-  if (!['session_id', 'turn_id', 'actor'].every(key => text(source[key], 128)) ||
+  const operator = object(owner, ['operator_cancel_event_id']);
+  if (!(operator ? owner.operator_cancel_event_id === `operator-cancel:${source.turn_id}` :
+      object(owner, ['owner_id', 'binding_sha256', 'epoch', 'containment_sha256']) &&
+      hex(owner.owner_id, 32) && hex(owner.binding_sha256, 64) && hex(owner.containment_sha256, 64) &&
+      (owner.epoch === '0' || hex(owner.epoch, 32)))) return false;
+  if (!['session_id', 'turn_id'].every(key => text(source[key], 128)) || !text(source.actor, operator ? 159 : 128) ||
       !['event_id', 'message_id', 'tool_id', 'name'].every(key => text(source[key], 1024)) ||
       !positiveSequence(source.sequence) || !Number.isInteger(source.block_index) ||
-      typeof source.block_index !== 'number' || source.block_index < 0 || source.block_index > 4095 ||
-      !hex(owner.owner_id, 32) || !hex(owner.binding_sha256, 64) || !hex(owner.containment_sha256, 64) ||
-      !(owner.epoch === '0' || hex(owner.epoch, 32))) return false;
+      typeof source.block_index !== 'number' || source.block_index < 0 || source.block_index > 4095) return false;
   return new TextEncoder().encode(JSON.stringify(value)).length <= 8192;
 }
 
@@ -49,3 +51,5 @@ export function validNativeOwner(value: unknown): value is NativeOwner {
     hex(value.owner_id, 32) && hex(value.binding_sha256, 64) && hex(value.containment_sha256, 64) &&
     (value.epoch === '0' || hex(value.epoch, 32));
 }
+
+export const operatorCancelError = "Operator cancelled continuation; any in-flight tool effects remain unresolved until independently reconciled.";

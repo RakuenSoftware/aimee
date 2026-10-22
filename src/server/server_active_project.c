@@ -97,14 +97,10 @@ int server_active_project_from_cwd(const char *cwd, char *out, size_t outlen)
    project_info_t projects[128];
    int count = kb_client_index_list(projects, (int)(sizeof(projects) / sizeof(projects[0])));
 
-   /* An identity is only useful if it NAMES SOMETHING INDEXED. `index scan <name>
-    * <root>` lets a caller name the project, while this resolution returns the
-    * repo's persisted identity — a UUID for a repo with no remote. The two need
-    * not agree, and when they disagree every cwd-scoped query silently addressed
-    * a project that does not exist: a freshly scanned workspace answered
-    * "code index lookup failed" while the same lookup with an explicit project
-    * name returned hits. Verify before trusting it, and otherwise fall back to
-    * the registered root, which by construction names a real project. */
+   /* An indexed display label may differ from the repository's durable
+    * identity. Preserve that existing lookup contract when either the name or
+    * a registered root matches. An unrelated indexed repository, however, must
+    * not erase the caller's active identity before its own first scan. */
    if (have_identity && count > 0)
    {
       for (int i = 0; i < count; i++)
@@ -115,18 +111,18 @@ int server_active_project_from_cwd(const char *cwd, char *out, size_t outlen)
          return 0;
       }
    }
-   else if (have_identity && count <= 0)
+   if (count > 0 && server_active_project_match(cwd, projects, count, out, outlen) == 0)
+      return 0;
+   if (have_identity)
    {
-      /* An empty or unavailable index has no alternate indexed label. The
-       * repository still has an active identity before its first index scan. */
+      /* Index availability and other projects' scan state do not determine
+       * whether this working tree has a stable active project. Retrieval can
+       * report missing evidence separately, without broadening its scope. */
       snprintf(out, outlen, "%s", identity);
       return 0;
    }
-
    out[0] = '\0';
-   if (count <= 0)
-      return -1;
-   return server_active_project_match(cwd, projects, count, out, outlen);
+   return -1;
 }
 
 /* Learning scopes name the approved repository, independently of whether an

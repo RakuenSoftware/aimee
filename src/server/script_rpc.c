@@ -5,6 +5,7 @@
 #include "script_rpc.h"
 #include "script_tool_execution.h"
 #include "server_session_control.h"
+#include "server_session_capture.h"
 #include <aimee/ir/aimee_ir.h>
 #include <aimee/tools/agent_tools.h>
 #include "aimee.h"
@@ -37,6 +38,7 @@
 struct script_rpc_execution
 {
    server_control_scope_t *controls;
+   server_session_capture_t *capture;
    agent_tools_scope_snapshot_t tools;
    request_context_snapshot_t request;
    agent_source_authority_snapshot_t source;
@@ -64,13 +66,27 @@ static int script_rpc_capture(script_rpc_server_t *srv, const char *cwd)
    request_context_snapshot(&scope->request);
    if (scope->request.active)
    {
-      scope->request.value.model_execution = 1;
       scope->request.value.capabilities &= CAPS_AUTHENTICATED;
    }
    const char *session = session_id(), *principal = agent_get_request_vault_principal();
    snprintf(scope->cwd, sizeof scope->cwd, "%s", cwd ? cwd : "");
    snprintf(scope->session, sizeof scope->session, "%s", session ? session : "");
    snprintf(scope->principal, sizeof scope->principal, "%s", principal ? principal : "");
+   const char *actor =
+       scope->request.active ? request_context_session_actor(&scope->request.value) : "";
+   if (server_session_capture_retain_current(scope->session, actor, &scope->capture))
+      return -1;
+   if (scope->request.active)
+   {
+      request_context_t *owner = &scope->request.value;
+      int direct_operator =
+          !owner->model_execution && actor[0] && (owner->capabilities & CAP_TOOL_EXECUTE);
+      owner->operator_script_origin =
+          !scope->capture && (direct_operator || owner->operator_script_origin);
+      if (owner->model_execution && !owner->operator_script_origin && !scope->capture)
+         return -1;
+      owner->model_execution = 1;
+   }
    if (server_control_scope_capture(scope->session, scope->principal, &scope->controls))
       return -1;
    scope->workspace = workspace_provider_active();
@@ -90,6 +106,7 @@ static void script_rpc_release(script_rpc_server_t *srv)
    agent_source_authority_snapshot_destroy(&scope->source);
    request_context_snapshot_clear(&scope->request);
    server_control_scope_release(scope->controls);
+   server_session_capture_release(scope->capture);
    free(scope);
    srv->execution = NULL;
 }
@@ -404,6 +421,7 @@ static void *script_rpc_thread(void *arg)
    script_rpc_server_t *srv = arg;
    struct script_rpc_execution *scope = srv->execution;
    server_control_scope_t *previous_controls = server_control_scope_bind(scope->controls);
+   server_session_capture_t *previous_capture = server_session_capture_bind(scope->capture);
    agent_tools_scope_restore(&scope->tools);
    request_context_restore(&scope->request);
    agent_source_authority_tls_restore(&scope->source);
@@ -431,6 +449,7 @@ static void *script_rpc_thread(void *arg)
    agent_set_durable_job(0);
    request_context_clear();
    server_control_scope_bind(previous_controls);
+   server_session_capture_bind(previous_capture);
    return NULL;
 }
 

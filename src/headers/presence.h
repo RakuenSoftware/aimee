@@ -60,8 +60,8 @@ extern "C"
 #define PRESENCE_EVENT_RING 64 /* presence-event ring slots per session     */
 
 #define PRESENCE_SESSION_ID_MAX 128
-#define PRESENCE_OWNER_MAX      64
-#define PRESENCE_SURFACE_MAX    32 /* "cli" / "webchat" / "telegram" / "acp" …  */
+#define PRESENCE_OWNER_MAX      160 /* full host-attested vault principal, including NUL */
+#define PRESENCE_SURFACE_MAX    32  /* "cli" / "webchat" / "telegram" / "acp" …  */
 #define PRESENCE_TURN_ID_MAX    64
 #define PRESENCE_WORKSPACE_MAX  128
 #define PRESENCE_EVENT_NAME_MAX 64

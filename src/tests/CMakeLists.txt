@@ -35,6 +35,8 @@ endfunction()
 # Portable unit tests that build cleanly under both POSIX and the current
 # Windows CMake target set.
 aimee_add_test(test_roundtable_brief test_roundtable_brief.c)
+aimee_add_test(test_server_mcp_project test_server_mcp_project.c
+               ../server/server_mcp_project.c ../server/server_active_project.c)
 aimee_add_test(test_server_active_project test_server_active_project.c
                ../server/server_active_project.c)
 aimee_add_test(test_harness_memory_scope test_harness_memory_scope.c)
@@ -576,9 +578,42 @@ if(NOT WIN32)
     aimee_enable_test_asserts(test_server_verification)
     add_test(NAME test_server_verification COMMAND test_server_verification)
   endif()
+  # The fixture includes all cli_v1_routes_*.c directly to test static marshallers;
+  # link their extracted native client owner without duplicating those sources.
+  add_executable(test_cli_v1_delegate test_cli_v1_delegate.c
+    ../cli_native_bridge.c ../code_collect.c ../modules/workspace/workspace_client_diff.c
+    ../vendor/cJSON.c ../cli_argspec.c ../posix/util.c ../aimee_client.c ../http_uds_client.c
+    ../codex_auth.c ../posix/platform_path.c ../posix/platform_random.c
+    ../posix/cli_client.c ../cli_client.c ../aimee_tls.c)
+  target_include_directories(test_cli_v1_delegate PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${AIMEE_SRC_DIR}/db1_client ${AIMEE_SRC_DIR}/modules/kb/c)
+  target_compile_options(test_cli_v1_delegate PRIVATE -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(test_cli_v1_delegate PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(test_cli_v1_delegate PRIVATE -Wl,--gc-sections)
+  endif()
+  target_link_libraries(test_cli_v1_delegate PRIVATE aimee-core-connection
+    Threads::Threads OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB m)
+  aimee_enable_test_asserts(test_cli_v1_delegate)
+  add_test(NAME test_cli_v1_delegate COMMAND test_cli_v1_delegate)
+  add_executable(test_server_native_cli test_server_native_cli.c ../server/server_native_cli.c
+    ../modules/protocols/mcp/mcp_tools_extended.c ../aimee_sha256.c ../platform_random.c
+    ../posix/platform_random.c ../vendor/cJSON.c)
+  target_include_directories(test_server_native_cli PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../headers)
+  target_compile_options(test_server_native_cli PRIVATE -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(test_server_native_cli PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(test_server_native_cli PRIVATE -Wl,--gc-sections)
+  endif()
+  target_link_libraries(test_server_native_cli PRIVATE aimee-core-connection Threads::Threads OpenSSL::Crypto)
+  aimee_enable_test_asserts(test_server_native_cli)
+  add_test(NAME test_server_native_cli COMMAND test_server_native_cli)
   add_executable(test_server_native_runtime test_server_native_runtime.c support/log_stub.c
     ../server/agent_tools.c ../posix/agent_source_authority.c ../modules/ir/aimee_ir.c
-    ../server/server_native_runtime.c ../server/server_native_history.c ../server/server_native_tool_admission.c ../server/server_session_question.c ../server/server_native_tool_source.c ../server/server_session_capture.c ../server/server_session_control.c
+    ../server/server_native_runtime.c ../server/server_native_cli.c ../modules/protocols/mcp/mcp_tools_extended.c ../server/server_native_history.c ../server/server_native_tool_admission.c ../server/server_session_question.c ../server/server_native_tool_source.c ../server/server_session_capture.c ../server/server_session_control.c
     ../modules/ir/session_event.c ../cli_proxy.c ../server/request_context.c
     ../modules/translation/wire_codec.c
     ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c
@@ -591,6 +626,12 @@ if(NOT WIN32)
     ${CMAKE_CURRENT_SOURCE_DIR}/../db1_client ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
   target_link_libraries(test_server_native_runtime PRIVATE
     aimee-core-connection Threads::Threads OpenSSL::Crypto)
+  target_compile_options(test_server_native_runtime PRIVATE -ffunction-sections -fdata-sections)
+  if(APPLE)
+    target_link_options(test_server_native_runtime PRIVATE -Wl,-dead_strip)
+  else()
+    target_link_options(test_server_native_runtime PRIVATE -Wl,--gc-sections)
+  endif()
   aimee_enable_test_asserts(test_server_native_runtime)
   add_test(NAME test_server_native_runtime COMMAND test_server_native_runtime)
 endif()
@@ -758,4 +799,26 @@ if(NOT WIN32)
     ../server/server_unknown_effect_policy.c ../server/server_governed_action.c ../server/server_session_control.c
     ../modules/ir/session_event.c ../modules/ir/aimee_ir.c ../aimee_sha256.c)
   target_link_libraries(test_server_unknown_effect_action PRIVATE OpenSSL::Crypto Threads::Threads)
+endif()
+
+if(NOT WIN32)
+  add_executable(test_coord_dispatcher_startup test_coord_dispatcher_startup.c
+    support/log_stub.c ../vendor/cJSON.c)
+  add_executable(test_runtime_state_lookup test_runtime_state_lookup.c)
+  add_executable(test_delegate_startup test_delegate_startup.c)
+  foreach(target test_coord_dispatcher_startup test_runtime_state_lookup test_delegate_startup)
+    target_include_directories(${target} PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
+      ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/vendor/headers
+      ${AIMEE_SRC_DIR}/db1_client ${AIMEE_SRC_DIR}/modules/kb/c)
+    target_compile_options(${target} PRIVATE -ffunction-sections -fdata-sections)
+    if(APPLE)
+      target_link_options(${target} PRIVATE -Wl,-dead_strip)
+    else()
+      target_link_options(${target} PRIVATE -Wl,--gc-sections)
+    endif()
+    aimee_enable_test_asserts(${target})
+    add_test(NAME ${target} COMMAND ${target})
+  endforeach()
+  target_link_libraries(test_coord_dispatcher_startup PRIVATE Threads::Threads m)
+  target_link_libraries(test_delegate_startup PRIVATE Threads::Threads)
 endif()

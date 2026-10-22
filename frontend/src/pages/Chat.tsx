@@ -10,6 +10,7 @@ import ProjectPicker from '../components/ProjectPicker';
 import { useSessions } from '../SessionContext';
 import IRTranscript from '../ir/Transcript';
 import { emptySession, reduceSession } from '../ir/session';
+import { operatorCancelError } from '../ir/interruption';
 import type { Envelope, SessionState } from '../ir/session';
 import type { ControlReply } from '../ir/ControlCard';
 import { reconcileSessionMessages } from '../sessionPersistence';
@@ -178,7 +179,8 @@ function normalizeTab(tab: Partial<TabData> | null | undefined, index: number): 
     messages,
     sid: typeof tab?.sid === 'string' ? tab.sid : '',
     aimeeSid: typeof tab?.aimeeSid === 'string' && tab.aimeeSid ? tab.aimeeSid : newAimeeSessionId(),
-    attachId: typeof tab?.attachId === 'string' ? tab.attachId : undefined,
+    // Presence attachments belong to this live browser page, never its cache.
+    attachId: undefined,
     workflowChannel: tab?.workflowChannel,
     threads: tab?.threads,
     activeThreadId: tab?.activeThreadId,
@@ -1308,6 +1310,7 @@ export default function Chat() {
   const irFlush = useRef<number | null>(null);
   const [, setIRRevision] = useState(0);
   const [irTransportErrors, setIRTransportErrors] = useState<Record<string, string>>({});
+  const [sendErrors, setSendErrors] = useState<Record<string, string>>({});
   const [irReady, setIRReady] = useState<Record<string, boolean>>({});
   const [irReconnect, setIRReconnect] = useState(0);
   function ingestIR(owner: string, raw: Record<string, unknown>) {
@@ -1345,6 +1348,7 @@ export default function Chat() {
   const iterCur = activeWork?.iterCur ?? 0;
   const iterMax = activeWork?.iterMax ?? 0;
   const [inputText, setInputText] = useState('');
+  const stoppingSessions = useRef(new Set<string>());
   const [banner, setBanner] = useState<{ stacks: BootstrapStack[] } | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
@@ -1475,13 +1479,6 @@ export default function Chat() {
   }
   const tabsRef = useRef<TabData[]>(tabs);
   const activeIdxRef = useRef(activeIdx);
-  // Holds the aimeeSid we just sent a steer for (chat.interrupt). The next
-  // turn_started on THAT session's events stream is the server-initiated
-  // continuation — render it even though this surface may still look "working"
-  // while the cancelled turn's stream closes (otherwise the wasWorking self-echo
-  // guard would drop the steered reply). Keyed by sid so switching tabs can't
-  // make a different tab's turn consume it. '' = none.
-  const expectSteerRef = useRef<string>('');
   // turn_ids already committed to history from the presence ring this session.
   // The ring replays turn_started→deltas→turn_done from cursor 0 on EVERY new
   // subscription (reconnect / tab switch back), so dedup is required to avoid
@@ -1507,8 +1504,93 @@ export default function Chat() {
   const renderedSidRef = useRef<string>('');
   const queueActive = working;
   const activePersonaSid = tabs[activeIdx]?.aimeeSid ?? '';
-  const persona = useSessionPreference(activePersonaSid, '/api/chat/persona', 'name');
-  const primary = useSessionPreference(activePersonaSid, '/api/chat/primary', 'agent');
+  const activeSessionMatched = !!activeSession && tabs[activeIdx]?.sessionId === activeSession.id && activePersonaSid === activeSession.aimeeSid;
+  const attached = useRef(new Map<string, string>());
+  const attaching = useRef(new Map<string, Promise<string>>());
+  const attachmentMounted = useRef(false);
+  const [attachmentReady, setAttachmentReady] = useState<Record<string, boolean>>({});
+  const detachAttachment = useCallback((sid: string, attachId: string) => {
+    void fetch('/api/chat/detach', {
+      method: 'POST', keepalive: true,
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
+      body: JSON.stringify({ sid, attach_id: attachId }),
+    }).catch(() => {});
+  }, []);
+  useEffect(() => {
+    attachmentMounted.current = true;
+    return () => {
+      attachmentMounted.current = false;
+      // React's development StrictMode immediately remounts effects. Keep its
+      // one in-flight admission; a genuine navigation releases the surface.
+      queueMicrotask(() => {
+        if (attachmentMounted.current) return;
+        for (const [sid, id] of attached.current) detachAttachment(sid, id);
+        attached.current.clear();
+      });
+    };
+  }, [detachAttachment]);
+  const ensureAttachment = useCallback((sid: string): Promise<string> => {
+    if (!sid) return Promise.reject(new Error('Conversation has no session identity'));
+    const existing = attached.current.get(sid);
+    if (existing) return Promise.resolve(existing);
+    const pending = attaching.current.get(sid);
+    if (pending) return pending;
+    const request = fetch('/api/chat/attach', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
+      body: JSON.stringify({ sid }),
+    }).then(async response => {
+      if (!response.ok) throw new Error('Could not attach conversation. Please reconnect.');
+      const body = await response.json() as { session_id?: unknown; attach_id?: unknown };
+      if (body.session_id !== sid || typeof body.attach_id !== 'string' || !body.attach_id ||
+          body.attach_id.length > 128 || /[\u0000-\u0020\u007f]/.test(body.attach_id))
+        throw new Error('Invalid conversation attachment');
+      const id = body.attach_id;
+      if (!attachmentMounted.current || !tabsRef.current.some(tab => tab.aimeeSid === sid)) {
+        detachAttachment(sid, id);
+        throw new Error('Conversation was closed before attachment completed');
+      }
+      attached.current.set(sid, id);
+      setTabs(prev => {
+        const next = prev.map(tab => tab.aimeeSid === sid ? { ...tab, attachId: id } : tab);
+        tabsRef.current = next;
+        return next;
+      });
+      setAttachmentReady(prev => ({ ...prev, [sid]: true }));
+      return id;
+    }).finally(() => { attaching.current.delete(sid); });
+    attaching.current.set(sid, request);
+    return request;
+  }, [detachAttachment]);
+  const invalidateAttachment = useCallback((sid: string) => {
+    const old = attached.current.get(sid);
+    attached.current.delete(sid);
+    if (old) detachAttachment(sid, old);
+    setAttachmentReady(prev => ({ ...prev, [sid]: false }));
+    setTabs(prev => {
+      const next = prev.map(tab => tab.aimeeSid === sid ? { ...tab, attachId: undefined } : tab);
+      tabsRef.current = next;
+      return next;
+    });
+  }, [detachAttachment]);
+  useEffect(() => {
+    let disposed = false;
+    if (activeSessionMatched && activePersonaSid) void ensureAttachment(activePersonaSid).catch(error => {
+      if (!disposed) setIRTransportErrors(prev => ({ ...prev, [activePersonaSid]: error instanceof Error ? error.message : 'Could not attach conversation' }));
+    });
+    return () => { disposed = true; };
+  }, [activePersonaSid, activeSessionMatched, ensureAttachment, irReconnect]);
+  useEffect(() => {
+    for (const [sid, id] of attached.current) {
+      if (tabs.some(tab => tab.aimeeSid === sid)) continue;
+      detachAttachment(sid, id);
+      attached.current.delete(sid);
+      setAttachmentReady(prev => ({ ...prev, [sid]: false }));
+    }
+  }, [tabs, detachAttachment]);
+  const activeAttached = !!attachmentReady[activePersonaSid];
+  const persona = useSessionPreference(activePersonaSid, '/api/chat/persona', 'name', activeAttached);
+  const primary = useSessionPreference(activePersonaSid, '/api/chat/primary', 'agent', activeAttached);
   const activePersona = persona.value;
   const activeAgent = primary.value;
 
@@ -1576,7 +1658,9 @@ export default function Chat() {
     // Detach presence only on a GENUINE unload: a tab going to the background — or
     // entering bfcache (pagehide persisted=true, restored without re-mounting) —
     // is still an active session and must stay attached.
-    const onBeforeUnload = () => { flushPendingTabs(); detachAll(); };
+    // beforeunload also fires for BFcache entry or a cancelled navigation.
+    // Only pagehide can tell whether this document is actually being discarded.
+    const onBeforeUnload = () => { flushPendingTabs(); };
     const onPageHide = (e: PageTransitionEvent) => { flushPendingTabs(); if (!e.persisted) detachAll(); };
     const onVisibility = () => { if (document.visibilityState === 'hidden') flushPendingTabs(); };
     window.addEventListener('beforeunload', onBeforeUnload);
@@ -1594,7 +1678,7 @@ export default function Chat() {
    * tab). Only meaningful once the tab has attached (presence exists). */
   const activeAimeeSid = tabs[activeIdx]?.aimeeSid ?? '';
   useEffect(() => {
-    if (!activeAimeeSid) return;
+    if (!activeAimeeSid || !activeAttached) return;
     let disposed = false;
     setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
     const state = irSessions.current[activeAimeeSid] ?? emptySession(activeAimeeSid);
@@ -1633,7 +1717,7 @@ export default function Chat() {
       }
     });
     return () => { disposed = true; es.close(); if (presenceSseRef.current === es) presenceSseRef.current = null; };
-  }, [activeAimeeSid, irReconnect]);
+  }, [activeAimeeSid, activeAttached, irReconnect]);
   const canonicalState = irSessions.current[activeAimeeSid];
   // Execution activity is a canonical projection, not separately copied UI state.
   // Keeping a second state/effect pair can lag a replayed running turn.
@@ -2319,56 +2403,68 @@ export default function Chat() {
     const text = inputText.trim();
     if (!text || primary.pending || persona.pending) return;
 
-    setInputText('');
-    // AutoGrowTextarea reflows its own height when inputText clears.
-
-    // Steering: if a turn is already in flight for the active tab — a local send
-    // (client stream open) or a server/foreign turn (events stream) — sending
-    // INTERRUPTS the running turn and submits this message as the steer, which the
-    // server auto-continues as the next turn (it arrives on the events stream).
+    // A new message during a turn explicitly stops that exact canonical turn.
+    // The browser submits the new text only after its terminal is replayed.
     const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid ?? '';
     let clientInflight = false;
     activeSendAbortRefs.current.forEach(s => { if (s === sid) clientInflight = true; });
     if (sid && (clientInflight || (!!irReady[sid] && !!irSessions.current[sid]?.activeTurns.length))) {
-      // Optimistically show the steer in the transcript and re-stick to bottom.
       atBottomRef.current = true;
-      // The admitted user message arrives through the canonical session log.
+      // The eventual admitted user message comes from the canonical session log.
       void steerInterrupt(sid, text);
       return;
     }
 
+    setInputText('');
     enqueueChatMessage(text);
   }
 
-  // Stop the in-flight turn for `sid` and queue `text` as the steer continuation.
-  // The server only honours the steer when a turn was actually in flight; on the
-  // race where it just finished (interrupted:false), fall back to a normal send.
+  // Explicitly stop the exact canonical turn, then send this new text once.
+  // Cancellation acknowledgement alone is not a claim that effects have stopped.
   async function steerInterrupt(sid: string, text: string) {
+    if (stoppingSessions.current.has(sid)) return;
+    const turnIds = irSessions.current[sid]?.activeTurns ?? [];
+    if (!irReady[sid] || turnIds.length !== 1) {
+      setSendErrors(prev => ({ ...prev, [sid]: 'Wait for the running turn to appear in conversation history before stopping it. Your message is retained.' }));
+      return;
+    }
+    const turnId = turnIds[0];
+    const version = sendQueueVersionRef.current;
     const projectRoot = activeSession?.projectRoot ?? '';
-    expectSteerRef.current = sid;
-    // Safety net: if the server continuation never starts (dispatch failed), clear
-    // the one-shot so it can't force-render a later turn on this session.
-    window.setTimeout(() => { if (expectSteerRef.current === sid) expectSteerRef.current = ''; }, 12000);
-    const sendNormally = () => {
-      if (expectSteerRef.current === sid) expectSteerRef.current = '';
-      pushToSendQueue(sid, { text, version: sendQueueVersionRef.current, originSid: sid, projectRoot });
-      recomputeWorkCounts();
-      void drainSendQueue(sid);
-    };
+    stoppingSessions.current.add(sid);
+    setSendErrors(prev => ({ ...prev, [sid]: '' }));
     try {
-      const resp = await fetch('/api/chat/interrupt', {
+      const resp = await fetch('/api/chat/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-        body: JSON.stringify({ aimee_session_id: sid }),
+        body: JSON.stringify({ session_id: sid, turn_id: turnId }),
       });
       if (resp.status === 401) { window.location.href = '/login'; return; }
-      const j = resp.ok ? (await resp.json().catch(() => ({})) as { interrupted?: boolean }) : {};
-      // No turn was actually in flight (or the steer couldn't be queued): send it
-      // as an ordinary turn instead so the message is never lost.
-      void j; sendNormally();
-    } catch {
-      sendNormally();
-    }
+      if (!resp.ok) throw new Error('Could not stop the selected turn. Your message is retained.');
+      const reply = await resp.json() as { status?: string; session_id?: string; turn_id?: string; disposition?: string; terminal_sequence?: string };
+      if (reply.status !== 'ok' || reply.session_id !== sid || reply.turn_id !== turnId ||
+          !['stopping', 'cancelled'].includes(reply.disposition ?? '') ||
+          (reply.disposition === 'cancelled' && (typeof reply.terminal_sequence !== 'string' || !/^[1-9][0-9]*$/.test(reply.terminal_sequence))))
+        throw new Error('Cancellation was not confirmed for this turn. Your message is retained.');
+      const deadline = Date.now() + 30000;
+      while (!irSessions.current[sid]?.terminalSources[turnId]) {
+        if (Date.now() >= deadline) throw new Error('The turn is still stopping. Your message is retained; wait for its terminal status before continuing.');
+        await new Promise(resolve => window.setTimeout(resolve, 100));
+      }
+      const terminal = irSessions.current[sid].terminalSources[turnId];
+      if (reply.disposition === 'cancelled' && (terminal.sequence !== reply.terminal_sequence ||
+          terminal.event_id !== `operator-cancel:${turnId}` || terminal.status !== 'cancelled' || terminal.error !== operatorCancelError))
+        throw new Error('The exact operator cancellation is not present in history. Your message is retained.');
+      if (version !== sendQueueVersionRef.current || tabsRef.current[activeIdxRef.current]?.aimeeSid !== sid ||
+          (irSessions.current[sid]?.activeTurns.length ?? 0) !== 0)
+        throw new Error('Conversation changed while stopping. Your message is retained; select the conversation before continuing.');
+      setInputText(current => current.trim() === text ? '' : current);
+      pushToSendQueue(sid, { text, version, originSid: sid, projectRoot });
+      recomputeWorkCounts();
+      void drainSendQueue(sid);
+    } catch (error) {
+      setSendErrors(prev => ({ ...prev, [sid]: error instanceof Error ? error.message : 'Could not stop this turn. Your message is retained.' }));
+    } finally { stoppingSessions.current.delete(sid); }
   }
 
   function enqueueChatMessage(text: string) {
@@ -2450,35 +2546,11 @@ export default function Chat() {
     recomputeWorkCounts();
 
     try {
-      const tabIdx = tabsRef.current.findIndex(t => t.aimeeSid === aimeeSid);
-      const activeTab = tabIdx >= 0 ? tabsRef.current[tabIdx] : undefined;
-      // Unified-presence: attach a "webchat" surface once per tab/session so this
-      // turn is arbitrated (a racing surface on the same session is declined with
-      // presence_busy) and other surfaces see the live turn on the events stream.
-      // Best-effort: on failure the turn just proceeds unarbitrated, as before.
-      let attachId = activeTab?.attachId ?? '';
-      if (aimeeSid && !attachId) {
-        try {
-          const ar = await fetch('/api/chat/attach', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-            body: JSON.stringify({ sid: aimeeSid }),
-          });
-          if (ar.ok) {
-            const ad = await ar.json() as { attach_id?: string };
-            if (ad.attach_id) {
-              attachId = ad.attach_id;
-              setTabs(prev => {
-                const i = prev.findIndex(t => t.aimeeSid === aimeeSid);
-                if (i < 0) return prev;
-                const next = [...prev];
-                next[i] = { ...next[i], attachId };
-                return next;
-              });
-            }
-          }
-        } catch { /* best-effort: proceed unarbitrated */ }
-      }
+      setSendErrors(prev => prev[aimeeSid] ? { ...prev, [aimeeSid]: '' } : prev);
+      // The same admitted surface owns preferences, replay and sends. Never
+      // reuse a persisted/dead attachment or dispatch after admission failed.
+      const attachId = await ensureAttachment(aimeeSid);
+      if (item.version !== sendQueueVersionRef.current) return;
       const resp = await fetch('/api/chat/send', {
         method: 'POST',
         signal: controller.signal,
@@ -2561,7 +2633,7 @@ export default function Chat() {
     } catch (e) {
       if (isAbortError(e)) return;
       const errMsg = e instanceof Error ? e.message : 'Unknown error';
-      setIRTransportErrors(prev => ({ ...prev, [aimeeSid]: errMsg }));
+      setSendErrors(prev => ({ ...prev, [aimeeSid]: errMsg }));
     } finally {
       // The durable IR log owns the transcript; keep local tab metadata current.
       fetch('/api/lsp/diagnostics/summary').then(r => r.json()).then((d: { errors: number; warnings: number; active_servers: number }) => {
@@ -2750,9 +2822,12 @@ export default function Chat() {
         {canonicalState && (canonicalState.messages.length > 0 || Object.keys(canonicalState.children ?? {}).length > 0 || Object.keys(canonicalState.controls).length > 0) ? <>
           <IRTranscript state={canonicalState} onReply={replyControl} controlsReady={!!irReady[activeAimeeSid]} messageLimit={visibleCount} pendingReplies={pendingReplies[activeAimeeSid]} pendingRepliesBySession={pendingReplies} /></> :
           <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />}
-        {irTransportErrors[activeAimeeSid] ? <div role="alert">
-          {irTransportErrors[activeAimeeSid]}{' '}
+        {(sendErrors[activeAimeeSid] || irTransportErrors[activeAimeeSid]) ? <div role="alert">
+          {sendErrors[activeAimeeSid] || irTransportErrors[activeAimeeSid]}{' '}
           <button type="button" onClick={() => {
+            invalidateAttachment(activeAimeeSid);
+            setSendErrors(prev => ({ ...prev, [activeAimeeSid]: '' }));
+            setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: '' }));
             irPending.current[activeAimeeSid] = new Map();
             setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
             setIRReconnect(value => value + 1);
@@ -2880,7 +2955,7 @@ export default function Chat() {
             <select
               value={primary.known ? activeAgent || defaultAgent : ''}
               onChange={e => primary.change(e.target.value)}
-              aria-label="Agent" aria-busy={primary.pending}
+              aria-label="Agent" aria-busy={primary.pending} disabled={!activeAttached}
               title={activeAgent
                 ? 'The agent serving this tab (pinned for this session)'
                 : `Following the configured primary${defaultAgent ? ` (${defaultAgent})` : ''} — pick one to pin it for this session`}
@@ -2914,7 +2989,7 @@ export default function Chat() {
             <select
               value={persona.known ? activePersona : ''}
               onChange={e => persona.change(e.target.value)}
-              aria-label="Persona" aria-busy={persona.pending}
+              aria-label="Persona" aria-busy={persona.pending} disabled={!activeAttached}
               title="Steers Aimee's role and delegate policy for this session"
               style={{
                 fontSize: '11px', fontFamily: 'system-ui', minWidth: 0, maxWidth: '100%',

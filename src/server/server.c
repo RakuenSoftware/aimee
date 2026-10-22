@@ -70,6 +70,7 @@
 #include <aimee/workspace/workspace.h>
 #include "worktree_gc.h"
 #include "modules/git/git_verify.h"
+#include "server_project_workspace.h"
 #include "toolset.h"
 #include "cJSON.h"
 #include "s2_native_gate_hook.h" /* S2 native-tool gate (server-side, tracks 2+3) */
@@ -1931,6 +1932,11 @@ static void server_shell_git_gate_log_posture(void)
              "ARMED: git/gh in a delegate shell is refused; delegates use the git_* tools");
 }
 
+static int server_project_workspace_open(const char *cwd)
+{
+   return server_project_workspace_open_owned(request_context_get(), cwd);
+}
+
 int server_init(server_ctx_t *ctx, const char *socket_path)
 {
    memset(ctx, 0, sizeof(*ctx));
@@ -1948,7 +1954,9 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* Install host custody/policy before any background worker starts. Detached
     * delegates can outlive a bounded shutdown drain, so these fail-closed hooks
     * remain installed for the process lifetime, including store teardown. */
+   workspace_turn_register_project_owner(server_project_workspace_open);
    primary_session_adapter_set_native_reconcile(server_native_session_reconcile);
+   primary_session_adapter_set_native_browse_reconcile(server_native_session_reconcile_browse);
    primary_session_adapter_set_native_history_load(server_native_history_load);
    aimee_ir_history_set_host_admission(server_native_history_admit_current);
    policy_set_unknown_effect_gate(server_unknown_effect_policy_stage);
@@ -1994,14 +2002,12 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * tuning that went with it was being applied to the one process where it
     * could not matter. The module applies it now.
     *
-    * The three restart chores below reach the store over the bus. Each already
-    * warns when it cannot, which is also what happens when the module has not
-    * attached yet: nothing in this process launches it. */
-   int orphaned = db1_agent_job_cancel_nonterminal_on_restart("orphaned by server restart");
-   if (orphaned < 0)
-      LOG_WARN("server", "failed to reconcile delegate jobs from the prior process");
-   else if (orphaned > 0)
-      LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process", orphaned);
+    * Restart chores reach the store over the bus. Delegate cleanup retries
+    * after attachment and gates new durable job admission until acknowledged;
+    * the nonce cleanup below warns if its typed owner is not yet attached. */
+   if (server_delegate_startup_reconcile() != 0)
+      LOG_WARN("server",
+               "delegate startup reconciliation pending store attachment; new jobs blocked");
    if (server_mgmt_status_init() != 0)
       LOG_WARN("server", "management status nonce initialization failed");
    const char *trust_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
@@ -2229,6 +2235,7 @@ int server_run(server_ctx_t *ctx)
       struct timespec ts = {.tv_sec = 1, .tv_nsec = 0};
       nanosleep(&ts, NULL);
       webuser_editor_reap_tick();
+      (void)server_delegate_startup_reconcile();
       /* SIGHUP requested a config reload (live-config-reload P1b): do it here, off the
        * signal path, since config_reload takes a mutex and does file I/O. */
       if (g_config_reload_requested)

@@ -682,6 +682,16 @@ int primary_session_history_open(const char *session, const char *actor)
    assert(0 && "unexpected browser history opening in dispatch-only fixture");
    return -1;
 }
+int db1_session_ir_cancel(const char *actor, const char *session, const char *turn,
+                          char sequence[32])
+{
+   (void)actor;
+   (void)session;
+   (void)turn;
+   (void)sequence;
+   assert(0 && "unexpected browser cancellation in dispatch-only fixture");
+   return -1;
+}
 int db1_server_session_get(const char *id, db1_server_session_t *out)
 {
    (void)id;

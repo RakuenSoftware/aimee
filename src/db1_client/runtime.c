@@ -62,6 +62,24 @@ int db1_runtime_state_get(const char *key, char *out, size_t out_len)
    return (int)strtol(slot_rc, NULL, 10);
 }
 
+int db1_runtime_state_lookup(const char *key, char *out, size_t out_len)
+{
+   if (!out || !out_len)
+      return -1;
+   out[0] = 0;
+   if (!key || !key[0])
+      return -1;
+   const char *fields[] = {key};
+   char slot_rc[32] = "";
+   char *const values[] = {out, slot_rc};
+   const size_t caps[] = {out_len, sizeof slot_rc};
+   int status = db1_call(&family, AIMEE_DB1_OP_RUNTIME_STATE_GET, fields, 1, values, caps, 2, NULL);
+   if (status == (int)AIMEE_DB1_STATUS_OK && !strcmp(slot_rc, "0"))
+      return 0;
+   out[0] = 0;
+   return status == (int)AIMEE_DB1_STATUS_MISSING ? 1 : -1;
+}
+
 int db1_runtime_state_add_int(const char *key, int delta, int *new_value_out)
 {
    if (!key || !key[0] || !new_value_out)

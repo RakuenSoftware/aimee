@@ -8,6 +8,7 @@ typedef struct server_native_tool_source server_native_tool_source_t;
 typedef struct
 {
    aimee_request_t original; /* One original assistant call and its advertised function. */
+   aimee_request_t catalog;  /* Optional exact guarded shell generation, definitions only. */
    char sequence[32], digest[65];
    int block_index;
 } server_native_tool_claim_t;
@@ -31,6 +32,16 @@ int server_native_tool_source_record(server_native_tool_source_t *source,
                                      const char *message_id, const char *first_sequence,
                                      const char *last_sequence, const char *digest,
                                      int block_index);
+/* Shell-only extension: retain the exact post-policy generation's complete
+ * advertised catalog as bounded deduplicated derived state. The source prefix,
+ * original call and once-only effect admission remain unchanged. Capacity
+ * failure refuses; an initial/pre-policy catalog is never a fallback. */
+int server_native_tool_source_record_with_catalog(server_native_tool_source_t *source,
+                                                  const aimee_request_t *catalog,
+                                                  const aimee_block_t *call, const char *message_id,
+                                                  const char *first_sequence,
+                                                  const char *last_sequence, const char *digest,
+                                                  int block_index);
 /* Match exactly one unclaimed original call, read back its entire committed
  * source prefix, recheck session incarnations, then claim once on the retained
  * host turn. Output owns the original arguments, never the SDK's proposed copy.

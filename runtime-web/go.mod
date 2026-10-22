@@ -1,6 +1,6 @@
 module github.com/JBailes/aimee/runtime-web
 
-go 1.26.9
+go 1.26.10
 
 require (
 	github.com/JBailes/aimee/server-go v0.0.0

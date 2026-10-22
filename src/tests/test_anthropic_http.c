@@ -38,6 +38,7 @@ const char *agent_request_auth_error(void)
 #define PASS(name) printf("  PASS: %s\n", (name))
 
 static const delegate_driver_t *g_driver;
+static char g_last_url[2048];
 static char *g_last_body;
 static char *g_last_extra; /* upstream extra-header block from the last post */
 static int g_stream_status = 200;
@@ -213,7 +214,7 @@ int agent_request_max_tokens(const agent_t *agent, int requested)
 int agent_http_post(const char *url, const char *auth_header, const char *body, char **response_buf,
                     int timeout_ms, const char *extra_headers)
 {
-   (void)url;
+   snprintf(g_last_url, sizeof g_last_url, "%s", url);
    (void)auth_header;
    (void)timeout_ms;
    free(g_last_body);
@@ -238,7 +239,7 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
                            agent_http_stream_cb callback, void *userdata, int timeout_ms,
                            const char *extra_headers)
 {
-   (void)url;
+   snprintf(g_last_url, sizeof g_last_url, "%s", url);
    (void)auth_header;
    (void)timeout_ms;
    (void)extra_headers;
@@ -568,6 +569,35 @@ static void test_native_ir_fragmentation_and_persistence(void)
    PASS("native IR fragmentation preserves signed state and persists before rendering");
 }
 
+static int preframe_error_sink(const aimee_session_event_t *event, void *context)
+{
+   int *count = context;
+   assert(event->kind == AIMEE_SESSION_DELTA && event->delta &&
+          event->delta->type == AIMEE_DELTA_ERROR);
+   assert(!strcmp(event->message_id, "native")); /* host correlation, no provider message */
+   assert(!strcmp(event->delta->error_message,
+                  "Provider stream failed canonical admission or ended before completion"));
+   (*count)++;
+   return 0;
+}
+static void test_native_ir_preframe_transport_error(void)
+{
+   reset_capture();
+   g_stream_status = 503;
+   g_stream_payload = NULL;
+   emit_capture_t cap = {0};
+   agent_t agent = {0};
+   int diagnostics = 0;
+   aimee_ir_session_set_sink(preframe_error_sink, &diagnostics);
+   assert(messages_stream_native_ir("fixture", "", native_stream_request,
+                                    strlen(native_stream_request), "", &agent, "model", cap_emit,
+                                    &cap, NULL) < 0);
+   aimee_ir_session_set_sink(NULL, NULL);
+   assert(diagnostics == 1 && cap.count == 1 && !strcmp(cap.events[0], "error"));
+   reset_capture();
+   PASS("pre-frame transport failure emits only its typed error diagnostic");
+}
+
 static void test_native_ir_refuses_incomplete_and_invalid_streams(void)
 {
    const char *bad[] = {
@@ -786,6 +816,110 @@ static void test_messages_buffered_anthropic_parity_passthrough(void)
    g_stub_preinject_env = NULL;
    reset_capture();
    PASS("messages_buffered_anthropic_parity_passthrough");
+}
+
+/* The connection parser is a peer of this isolated ingress fixture. Native
+ * duplicate/length/control checks are exercised in the production helper. */
+int http_header(const char *headers, const char *name, char *out, size_t capacity)
+{
+   out[0] = 0;
+   for (const char *line = headers ? headers : ""; *line;)
+   {
+      const char *end = strstr(line, "\r\n");
+      if (!end)
+         end = line + strlen(line);
+      size_t n = strlen(name);
+      if ((size_t)(end - line) > n && !strncasecmp(line, name, n) && line[n] == ':')
+      {
+         const char *value = line + n + 1;
+         while (value < end && *value == ' ')
+            value++;
+         size_t length = (size_t)(end - value);
+         if (length >= capacity)
+            length = capacity - 1;
+         memcpy(out, value, length);
+         out[length] = 0;
+         return 1;
+      }
+      line = *end ? end + 2 : end;
+   }
+   return 0;
+}
+
+static void test_native_beta_query(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic"};
+   const char *body = "{\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+   char response[4096], url[128];
+   reset_capture();
+   g_driver = &anthropic;
+   assert(!anthropic_http_capture_native_request_headers(NULL));
+   assert(!anthropic_http_capture_native_request_path("/v1/messages?beta=true"));
+   assert(messages_buffered(body, response, sizeof response) == 200);
+   assert(!strcmp(g_last_url, "https://example.invalid/v1/messages?beta=true"));
+   emit_capture_t capture = {0};
+   assert(!messages_stream(body, cap_emit, &capture));
+   assert(!strcmp(g_last_url, "https://example.invalid/v1/messages?beta=true"));
+   assert(messages_buffered(body, response, sizeof response) == 200);
+   assert(!strcmp(g_last_url, "https://example.invalid/v1/messages?beta=true"));
+   assert(!anthropic_http_capture_native_request_path("/v1/messages/count_tokens?beta=true"));
+   assert(count_tokens(body, response, sizeof response) == 200);
+   assert(!strcmp(g_last_url, "https://example.invalid/v1/messages/count_tokens?beta=true"));
+   strcpy(url, "https://example.invalid/v1/chat/completions");
+   assert(!native_beta_url(url, sizeof url, 0) && !strchr(url, '?'));
+   const char *invalid[] = {"/v1/messages?beta=false", "/v1/messages?beta=true&model=other",
+                            "/v1/responses?beta=true", "/v1/messages?beta=true#fragment"};
+   for (unsigned i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+   {
+      assert(anthropic_http_capture_native_request_path(invalid[i]));
+      strcpy(url, "https://example.invalid/v1/messages");
+      assert(!native_beta_url(url, sizeof url, 1) && !strchr(url, '?'));
+   }
+   assert(!anthropic_http_capture_native_request_path("/v1/messages?beta=true"));
+   strcpy(url, "https://example.invalid/v1/messages?other=1");
+   assert(native_beta_url(url, sizeof url, 1));
+   strcpy(url, "https://example.invalid/v1/messages");
+   assert(native_beta_url(url, strlen(url) + 1, 1));
+   anthropic_http_capture_request_headers(NULL);
+   assert(messages_buffered(body, response, sizeof response) == 200);
+   assert(!strcmp(g_last_url, "https://example.invalid/v1/messages"));
+   assert(!anthropic_http_capture_native_request_path("/v1/messages"));
+   assert(messages_buffered(body, response, sizeof response) == 200);
+   assert(!strcmp(g_last_url, "https://example.invalid/v1/messages"));
+   reset_capture();
+   PASS("native beta surface is exact, host-routed and request-scoped");
+}
+
+static void test_native_transport_headers(void)
+{
+   agent_t agent = {0};
+   char headers[2048];
+   const char *original = "claude-cli/2.1.227 (external, sdk-cli)";
+   assert(!anthropic_http_capture_native_request_headers(
+       "User-Agent: claude-cli/2.1.227 (external, sdk-cli)\r\nx-app: cli\r\n"
+       "Anthropic-Version: 2023-06-01\r\nAnthropic-Beta: original-beta\r\n"));
+   assert(!build_anthropic_parity_headers(headers, sizeof headers, &agent));
+   assert(strstr(headers, original) && strstr(headers, "x-app: cli") &&
+          strstr(headers, "original-beta"));
+   /* An ordinary request, and an exit/reset, cannot inherit the SDK profile. */
+   anthropic_http_capture_request_headers("User-Agent: foreign-client\r\n");
+   assert(!build_anthropic_parity_headers(headers, sizeof headers, &agent));
+   assert(!strstr(headers, "User-Agent") && !strstr(headers, "x-app"));
+   const char *bad[] = {"User-Agent: one\r\nuser-agent: two\r\n", "x-app: one\r\nX-App: two\r\n",
+                        "User-Agent: bad\tvalue\r\n", "User-Agent: \r\n", "x-app: value"};
+   for (unsigned i = 0; i < sizeof bad / sizeof bad[0]; i++)
+   {
+      assert(anthropic_http_capture_native_request_headers(bad[i]));
+      assert(!build_anthropic_parity_headers(headers, sizeof headers, &agent));
+      assert(!strstr(headers, "User-Agent") && !strstr(headers, "x-app"));
+   }
+   char oversized[300];
+   memset(oversized, 'a', sizeof oversized);
+   memcpy(oversized, "User-Agent: ", 12);
+   memcpy(oversized + sizeof oversized - 3, "\r\n", 3);
+   assert(anthropic_http_capture_native_request_headers(oversized));
+   anthropic_http_capture_request_headers(NULL);
+   PASS("native transport metadata is exact, bounded and cleared between requests");
 }
 
 static void test_native_admission_failure_sends_no_provider_request(void)
@@ -1566,11 +1700,14 @@ int main(void)
    test_explicit_unknown_model_is_rejected();
    test_messages_stream_anthropic_reasoning_metrics();
    test_native_ir_fragmentation_and_persistence();
+   test_native_ir_preframe_transport_error();
    test_native_ir_refuses_incomplete_and_invalid_streams();
    test_native_response_retains_all_typed_blocks_and_long_tools();
    test_invalid_native_response_never_uses_legacy_parser();
    test_messages_buffered_anthropic_preserves_request_shape();
    test_messages_buffered_anthropic_parity_passthrough();
+   test_native_beta_query();
+   test_native_transport_headers();
    test_native_admission_failure_sends_no_provider_request();
    test_native_host_guidance_retains_client_cache();
    test_messages_native_frame_retains_exact_bytes();

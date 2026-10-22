@@ -16,11 +16,11 @@ extern "C"
 {
 #endif
 
-#define DB1_AJ_ROLE_LEN   32
-#define DB1_AJ_AGENT_LEN  64
+#define DB1_AJ_ROLE_LEN        32
+#define DB1_AJ_AGENT_LEN       64
 #define DB1_AJ_PARTICIPANT_LEN 65
-#define DB1_AJ_STATUS_LEN 32
-#define DB1_AJ_TS_LEN     32
+#define DB1_AJ_STATUS_LEN      32
+#define DB1_AJ_TS_LEN          32
 
 #define DB1_AJ_TOOL_LEN 64
 
@@ -169,7 +169,8 @@ extern "C"
    int db1_agent_job_cancel_unassigned(int job_id, const char *reason, int min_age_secs);
 
    /* Cancel every pending/running delegate row left by an earlier server
-    * process. Call once during server startup, before any worker can exist.
+    * process. Require an acknowledged success before admitting any new durable
+    * job, then never repeat cleanup after that admission barrier opens.
     * Empty results receive the cancellation reason; existing results remain. */
    int db1_agent_job_cancel_nonterminal_on_restart(const char *reason);
 

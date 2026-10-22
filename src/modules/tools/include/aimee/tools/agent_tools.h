@@ -98,6 +98,11 @@ int agent_tools_builtin_catalog(struct aimee_tool **out, int *count);
  * unavailable capabilities refuse; no process-global schema cache is used. */
 int agent_tools_execution_definition(const char *name, struct aimee_tool *out);
 
+/* Host-only shell environment. Prepared/owned by the caller until the shell
+ * joins; only the forked child installs it. Never changes process environ.
+ * Container/detached providers do not inherit host transport capabilities. */
+char *const *agent_tools_bind_bash_environment(char *const environment[]);
+
 /* Tool definition builders */
 struct cJSON *build_tools_array(void);
 struct cJSON *build_tools_array_responses(void);

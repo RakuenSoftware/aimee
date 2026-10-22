@@ -17,6 +17,24 @@ static int fail_recovery, recovered_before_history, recovery_reset;
 static int standalone_active, standalone_unavailable;
 static int host_history_calls, host_history_failure;
 static int browse_open, browse_store_failure;
+static int browse_recovery_calls, browse_recovery_failure, browse_recovery_reset;
+static int legacy_reads, require_browse_recovery;
+static int mock_native_browse_reconcile(const char *session, const char *actor, char error[512])
+{
+   assert(!strcmp(session, "stable") && !strcmp(actor, "alice"));
+   browse_recovery_calls++;
+   if (browse_recovery_reset)
+   {
+      primary_session_adapter_set_native_browse_reconcile(NULL);
+      primary_session_adapter_reset(); /* Callback runs outside the adapter lock. */
+   }
+   if (browse_recovery_failure)
+   {
+      snprintf(error, 512, "abandoned native custody unresolved");
+      return -1;
+   }
+   return 0;
+}
 static int mock_native_history_load(const char *session, const char *actor, const char *active,
                                     int running, cJSON **messages, cJSON **receipts)
 {
@@ -136,6 +154,9 @@ static int expected_count, executions;
 int db1_primary_session_get_latest(const char *id, db1_primary_session_row_t *row)
 {
    assert(!strcmp(id, "stable"));
+   legacy_reads++;
+   if (require_browse_recovery)
+      assert(browse_recovery_calls == require_browse_recovery);
    memset(row, 0, sizeof(*row));
    if (!stored)
       return 1;
@@ -366,6 +387,51 @@ static void test_large_legacy_import_precedes_compaction(void)
    stored = NULL;
 }
 
+static void test_browser_native_recovery(void)
+{
+   int reads = legacy_reads, reports = import_reports, before = executions;
+   primary_session_adapter_set_native_browse_reconcile(NULL);
+   standalone_active = 1;
+   assert(primary_session_history_open("stable", "alice") == -1);
+   standalone_active = 0;
+   standalone_unavailable = 1;
+   assert(primary_session_history_open("stable", "alice") == -1);
+   standalone_unavailable = 0;
+   assert(legacy_reads == reads && import_reports == reports);
+   primary_session_adapter_set_native_browse_reconcile(mock_native_browse_reconcile);
+   assert(primary_session_history_open("stable", "mallory") == -1);
+   owner = "mallory";
+   assert(primary_session_history_open("stable", "alice") == -1);
+   owner = "alice";
+   assert(!browse_recovery_calls && legacy_reads == reads);
+   browse_recovery_failure = 1;
+   assert(primary_session_history_open("stable", "alice") == -1);
+   assert(browse_recovery_calls == 1 && legacy_reads == reads && import_reports == reports);
+   browse_recovery_failure = 0;
+   stored = strdup("[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"Recovered "
+                   "browsing input\"}]}]");
+   strcpy(stored_provider, "anthropic");
+   require_browse_recovery = 2;
+   browse_recovery_reset = 1;
+   assert(primary_session_history_open("stable", "alice") == 0);
+   assert(browse_recovery_calls == 2 && legacy_reads == reads + 1);
+   assert(import_reports == reports + 1 && canonical_stored &&
+          strstr(canonical_stored, "Recovered browsing input"));
+   browse_recovery_reset = 0;
+   primary_session_adapter_set_native_browse_reconcile(mock_native_browse_reconcile);
+   /* A healthy live-owner success must continue to import/replay normally. */
+   require_browse_recovery = 3;
+   assert(primary_session_history_open("stable", "alice") == 0);
+   assert(browse_recovery_calls == 3 && legacy_reads == reads + 2);
+   require_browse_recovery = 0;
+   primary_session_adapter_set_native_browse_reconcile(NULL);
+   assert(executions == before && import_reports == reports + 2);
+   free(stored);
+   stored = NULL;
+   free(canonical_stored);
+   canonical_stored = NULL;
+}
+
 static void test_browser_history_open(void)
 {
    browse_open = 1;
@@ -409,6 +475,7 @@ static void test_browser_history_open(void)
 
 int main(void)
 {
+   test_browser_native_recovery();
    test_browser_history_open();
    test_authenticated_history_loader();
    test_native_compaction_owns_canonical_session();

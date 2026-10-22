@@ -259,7 +259,7 @@ type nativeHistorySource struct {
 func projectNativeInterruptions(history []json.RawMessage, sources map[string]nativeHistorySource, terminals map[string]string, receipts []struct {
 	ID      string
 	Receipt canonical.ToolInterruption
-}) ([]json.RawMessage, error) {
+}, operatorTerminals ...map[string]string) ([]json.RawMessage, error) {
 	grouped := map[int][]json.RawMessage{}
 	seen := map[string]bool{}
 	for _, entry := range receipts {
@@ -267,7 +267,11 @@ func projectNativeInterruptions(history []json.RawMessage, sources map[string]na
 		s := r.Source
 		source, ok := sources[s.Sequence]
 		ref := source.Source
-		if !ok || ref.Session != s.Session || ref.Turn != s.Turn || ref.EventID != s.EventID || ref.Actor != s.Actor || ref.MessageID != s.MessageID || source.Owner == nil || source.Owner.ToolInterruptionOwner != r.Owner || !source.Blocks[s.BlockIndex] || terminals[s.Turn] != r.Terminal {
+		ownerValid := source.Owner != nil && source.Owner.ToolInterruptionOwner == r.Owner
+		if r.Owner.OperatorCancel != "" {
+			ownerValid = source.Owner == nil && len(operatorTerminals) == 1 && operatorTerminals[0][s.Turn] == r.Terminal && r.Owner.OperatorCancel == operatorCancelPrefix+s.Turn
+		}
+		if !ok || ref.Session != s.Session || ref.Turn != s.Turn || ref.EventID != s.EventID || ref.Actor != s.Actor || ref.MessageID != s.MessageID || !ownerValid || !source.Blocks[s.BlockIndex] || terminals[s.Turn] != r.Terminal {
 			return nil, fmt.Errorf("interrupted call immutable source missing")
 		}
 		if source.Index < 0 {
@@ -298,6 +302,9 @@ func projectNativeInterruptions(history []json.RawMessage, sources map[string]na
 						pending = nil
 					}
 				}
+			}
+			if r.Owner.OperatorCancel != "" && pending != nil && !found {
+				return nil, fmt.Errorf("operator checkpoint retains an unresolved call without its unknown diagnostic")
 			}
 			continue // omitted observations remain durable permission fences.
 		}
@@ -407,6 +414,7 @@ func sessionNativeHistory(ctx context.Context, q store.Queryer, f []string) (uin
 		return 0, nil, fmt.Errorf("native interruption sidecar capacity exceeded")
 	}
 	receipts := make([]entry, 0, len(wanted))
+	operatorCalls := map[string][]canonical.ToolInterruptionSource{}
 	for id := range wanted {
 		var raw, actor string
 		err := q.QueryRow(ctx, `SELECT payload,actor FROM session_ir_events WHERE session_id=$1 AND event_id=$2`, f[1], id).Scan(&raw, &actor)
@@ -421,7 +429,7 @@ func sessionNativeHistory(ctx context.Context, q store.Queryer, f []string) (uin
 			return 0, nil, fmt.Errorf("invalid native interruption authority")
 		}
 		var original string
-		if err := q.QueryRow(ctx, `SELECT payload FROM session_ir_events WHERE session_id=$1 AND sequence=$2::bigint AND event_id=$3 AND actor=$4`, f[1], e.Payload.Source.Sequence, e.Payload.Source.EventID, f[0]).Scan(&original); err != nil {
+		if err := q.QueryRow(ctx, `SELECT payload FROM session_ir_events WHERE session_id=$1 AND sequence=$2::bigint AND event_id=$3 AND actor=$4 AND turn_id=$5`, f[1], e.Payload.Source.Sequence, e.Payload.Source.EventID, f[0], e.Payload.Source.Turn).Scan(&original); err != nil {
 			return 0, nil, err
 		}
 		var sourceMessage struct {
@@ -433,8 +441,39 @@ func sessionNativeHistory(ctx context.Context, q store.Queryer, f []string) (uin
 			Partial   json.RawMessage                 `json:"partial,omitempty"`
 		}
 		var body canonical.Message
-		if !canonical.Decode([]byte(original), &sourceMessage) || sourceMessage.Kind != "message" || sourceMessage.Owner == nil || sourceMessage.Owner.ToolInterruptionOwner != e.Payload.Owner || sourceMessage.MessageID != e.Payload.Source.MessageID || !canonical.Decode(sourceMessage.Payload, &body) || body.Role != "assistant" || e.Payload.Source.BlockIndex >= len(body.Blocks) {
+		if !canonical.Decode([]byte(original), &sourceMessage) || sourceMessage.Kind != "message" || sourceMessage.MessageID != e.Payload.Source.MessageID || !canonical.Decode(sourceMessage.Payload, &body) || body.Role != "assistant" || e.Payload.Source.BlockIndex >= len(body.Blocks) {
 			return 0, nil, fmt.Errorf("native interruption call source disappeared")
+		}
+		operator := e.Payload.Owner.OperatorCancel != ""
+		if operator {
+			if sourceMessage.Owner != nil || id != fmt.Sprintf("operator-interruption:%s:%s:%d", e.Payload.Source.Turn, e.Payload.Source.Sequence, e.Payload.Source.BlockIndex) {
+				return 0, nil, fmt.Errorf("operator interruption source is not an API call")
+			}
+			if err := operatorReceiptAuthority(ctx, q, e.Payload); err != nil {
+				return 0, nil, err
+			}
+			calls, seen := operatorCalls[e.Payload.Source.Turn]
+			if !seen {
+				var err error
+				calls, err = operatorInterruptionSources(ctx, q, f[1], e.Payload.Source.Turn, f[0])
+				if err != nil {
+					return 0, nil, err
+				}
+				operatorCalls[e.Payload.Source.Turn] = calls
+			}
+			found := false
+			for _, call := range calls {
+				found = found || call == e.Payload.Source
+			}
+			if !found {
+				return 0, nil, fmt.Errorf("operator interruption no longer identifies an unanswered call")
+			}
+		} else if sourceMessage.Owner == nil || sourceMessage.Owner.ToolInterruptionOwner != e.Payload.Owner {
+			return 0, nil, fmt.Errorf("native interruption source owner disappeared")
+		}
+		block := body.Blocks[e.Payload.Source.BlockIndex]
+		if block.Type != "tool_use" || block.ToolID != e.Payload.Source.ToolID || block.Name != e.Payload.Source.Name {
+			return 0, nil, fmt.Errorf("interruption call identity changed")
 		}
 		var sourceBlocks struct {
 			Blocks []json.RawMessage `json:"blocks"`

@@ -31,6 +31,9 @@
 #include "openai_runs_store.h"
 #include "roundtable_pipeline_capture.h" /* pipeline op-run capture seam (#18/#20) */
 #include "presence.h"
+#include "turn_registry.h"
+#include "db1_client/primary_sessions.h"
+#include "db1_client/server_sessions.h"
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
 #include "server_mgmt_status.h"
@@ -1317,6 +1320,75 @@ static int rh_chat_control_reply(const route_req_t *rq, char *resp, int cap)
    return 200;
 }
 
+/* Exact browser stop never queues a historical or replacement user message.
+ * Legacy callers without turn_id retain the dispatch-backed operation. */
+static int rh_chat_graceful_cancel(const route_req_t *rq, char *resp, int cap)
+{
+   cJSON *body = rq->body && rq->body_len > 0
+                     ? aimee_ir_json_parse_frame(rq->body, (size_t)rq->body_len)
+                     : NULL;
+   if (!cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "invalid cancellation frame");
+   }
+   const cJSON *turn_value = cJSON_GetObjectItemCaseSensitive(body, "turn_id");
+   if (!turn_value)
+   {
+      cJSON_Delete(body);
+      return rh_dispatch_op(rq, resp, cap);
+   }
+   server_conn_t identity = {0};
+   server_http_identity_apply(&identity);
+   if (!server_http_identity_browser_operator() || !identity.vault_principal[0])
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 403, "cancellation requires an authenticated browser user");
+   }
+   const char *session = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(body, "session_id"));
+   const char *turn = cJSON_GetStringValue(turn_value);
+   if (!session || !session[0] || strlen(session) > 128 || !turn || !turn[0] ||
+       strlen(turn) > 128 || cJSON_GetArraySize(body) != 2)
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "exact session_id and turn_id required");
+   }
+   db1_server_session_t owner;
+   if (db1_server_session_get(session, &owner))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 503, "session ownership unavailable");
+   }
+   if (strcmp(owner.principal, identity.vault_principal))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 403, "session ownership mismatched");
+   }
+   int local = turn_registry_cancel_exact(session, turn);
+   char sequence[32] = "";
+   int rc = local ? local < 0 ? 1 : 0
+                  : db1_session_ir_cancel(identity.vault_principal, session, turn, sequence);
+   if (rc)
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, rc == 1 ? 409 : 503,
+                      "exact turn cancellation refused or unavailable");
+   }
+   cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "status", "ok");
+   cJSON_AddStringToObject(result, "session_id", session);
+   cJSON_AddStringToObject(result, "turn_id", turn);
+   cJSON_AddStringToObject(result, "disposition", local ? "stopping" : "cancelled");
+   if (!local)
+      cJSON_AddStringToObject(result, "terminal_sequence", sequence);
+   char *wire = cJSON_PrintUnformatted(result);
+   int n = wire ? snprintf(resp, (size_t)cap, "%s", wire) : -1;
+   free(wire);
+   cJSON_Delete(result);
+   cJSON_Delete(body);
+   return n > 0 && n < cap ? 200 : err_json(resp, cap, 500, "cancellation reply unavailable");
+}
+
 /* POST /v1/chat/live {session_id, since_rev} — the browser's polling source of
  * truth for an in-flight turn. The server mirrors the tmux pane scrape into the
  * db1 webchat_live row as the answer streams; the browser tails it on a fixed
@@ -1913,6 +1985,8 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/chat/stream", NULL, RM_EXACT, "chat.send_stream", 0, NULL},
     /* Steering: stop the in-flight turn + queue a follow-up the server
      * auto-continues (streamed to the session's /events). */
+    {"POST", "/v1/chat/graceful_cancel", NULL, RM_EXACT, "chat.graceful_cancel", 0,
+     rh_chat_graceful_cancel},
     {"POST", "/v1/chat/interrupt", NULL, RM_EXACT, "chat.interrupt", 0, rh_dispatch_op},
     {"POST", "/v1/chat/control-reply", NULL, RM_EXACT, NULL, CAP_CHAT, rh_chat_control_reply},
     /* The browser's fixed-timer poll for the live turn (db1 webchat_live mirror),

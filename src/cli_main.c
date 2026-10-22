@@ -1905,6 +1905,11 @@ int main(int argc, char **argv)
    signal(SIGPIPE, SIG_IGN); /* not defined on Windows; sockets there don't raise it */
 #endif
 
+   /* A model-owned child may only use its retained host capability. Dispatch
+    * before profile/remote files, integrations, local hooks or workspace upload. */
+   if (cli_native_bridge_enabled())
+      return cli_native_bridge_main(argc, argv);
+
    int json_output = 0;
    int debug = 0;
    int show_advanced = 0;

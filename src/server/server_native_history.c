@@ -39,6 +39,23 @@ static int positive(const cJSON *value, const char *name)
       return 0;
    return strlen(s) < 19 || strcmp(s, "9223372036854775807") <= 0;
 }
+/* Operator cancellation is a different lifecycle authority from native
+ * containment. The Go-owned loader rechecks its actual durable terminal. */
+static int operator_owner(const cJSON *entry, const cJSON *owner, const cJSON *source)
+{
+   if (!exact(owner, 1) || !bounded(source, "turn_id", 128) || !positive(source, "sequence"))
+      return 0;
+   const cJSON *index = cJSON_GetObjectItemCaseSensitive(source, "block_index");
+   if (!cJSON_IsNumber(index) || index->valuedouble < 0 || index->valuedouble >= 4096 ||
+       index->valuedouble != index->valueint)
+      return 0;
+   char marker[160], receipt[224];
+   snprintf(marker, sizeof marker, "operator-cancel:%s", text(source, "turn_id"));
+   snprintf(receipt, sizeof receipt, "operator-interruption:%s:%s:%d", text(source, "turn_id"),
+            text(source, "sequence"), index->valueint);
+   return equal(text(owner, "operator_cancel_event_id"), marker) &&
+          equal(text(entry, "event_id"), receipt);
+}
 static int valid_entry(const cJSON *entry)
 {
    const cJSON *r = cJSON_GetObjectItemCaseSensitive(entry, "receipt");
@@ -47,6 +64,10 @@ static int valid_entry(const cJSON *entry)
                *owner = cJSON_GetObjectItemCaseSensitive(r, "owner");
    const cJSON *version = cJSON_GetObjectItemCaseSensitive(r, "version"),
                *index = cJSON_GetObjectItemCaseSensitive(source, "block_index");
+   int operator= operator_owner(entry, owner, source);
+   int native = exact(owner, 4) && hex(owner, "owner_id", 32) && hex(owner, "binding_sha256", 64) &&
+                hex(owner, "containment_sha256", 64) &&
+                (equal(text(owner, "epoch"), "0") || hex(owner, "epoch", 32));
    return exact(entry, 3) && bounded(entry, "event_id", 1024) && cJSON_IsObject(call) &&
           aimee_ir_json_unique(call) && equal(text(call, "type"), "tool_use") &&
           equal(text(call, "tool_id"), text(source, "tool_id")) &&
@@ -54,14 +75,15 @@ static int valid_entry(const cJSON *entry)
           cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(call, "input")) && exact(r, 6) &&
           cJSON_IsNumber(version) && version->valuedouble == 1 && exact(source, 9) &&
           bounded(source, "session_id", 128) && bounded(source, "turn_id", 128) &&
-          bounded(source, "event_id", 1024) && bounded(source, "actor", 128) &&
+          bounded(source, "event_id", 1024) && bounded(source, "actor", operator? 159 : 128) &&
           bounded(source, "message_id", 1024) && bounded(source, "tool_id", 1024) &&
           bounded(source, "name", 1024) && positive(source, "sequence") && cJSON_IsNumber(index) &&
           index->valuedouble >= 0 && index->valuedouble < 4096 &&
-          index->valuedouble == index->valueint && exact(owner, 4) && hex(owner, "owner_id", 32) &&
-          hex(owner, "binding_sha256", 64) && hex(owner, "containment_sha256", 64) &&
-          (equal(text(owner, "epoch"), "0") || hex(owner, "epoch", 32)) &&
-          positive(r, "terminal_sequence") && equal(text(r, "outcome"), "unknown") &&
+          index->valuedouble == index->valueint && (operator|| native) &&
+          positive(r, "terminal_sequence") &&
+          (!operator|| strtoull(text(source, "sequence"), NULL, 10) <
+           strtoull(text(r, "terminal_sequence"), NULL, 10)) &&
+          equal(text(r, "outcome"), "unknown") &&
           equal(text(r, "retry"), "explicit_permission_required");
 }
 static int same_call(const cJSON *left, const cJSON *right)

@@ -1,5 +1,5 @@
 import { ExactJSONNumber, parseJSON, stringifyJSON } from './json';
-import { validNativeOwner, validToolInterruption, type NativeOwner, type ToolInterruption } from './interruption';
+import { validNativeOwner, validToolInterruption, operatorCancelError, type NativeOwner, type ToolInterruption } from './interruption';
 import { validVerificationProof, type VerificationProof } from './verification';
 import { validImportHistory, type ImportHistory, type ImportObservation } from './importReport';
 /** Canonical session projection. No native provider/harness protocol is accepted
@@ -66,7 +66,7 @@ export type SessionEvent =
   | { kind: 'child_execution'; payload: ChildExecution }
   | { kind: 'projection'; payload: ProjectionReport }
   | { kind: 'history'; payload: ImportHistory | { scope: string; phase: 'message' | 'commit'; index?: number; count?: number; message?: Message } }
-  | { kind: 'message'; message_id: string; payload: Message; native_owner?: NativeOwner; partial?: true }
+  | { kind: 'message'; message_id: string; payload: Message; role?: string; native_owner?: NativeOwner; partial?: true }
   | { kind: 'delta'; message_id: string; role: string; payload: Delta }
   | { kind: 'execution'; payload: { status: 'running' | 'completed' | 'failed' | 'cancelled'; error?: string; verification_proofs?: VerificationProof[] } }
   | { kind: 'control_request' | 'control_response'; request_id: string;
@@ -96,11 +96,12 @@ export type Control = {
 export type SessionState = {
   session: string; sequence: string; messages: ProjectedMessage[];
   controls: Record<string, Control>; activeTurns: string[]; errors: string[];
+  errorOrigins?: Record<number, { turn: string; sequence: string; terminal: boolean }>;
   projections: (ProjectionReport & { id: string; turn: string })[];
   children: Record<string, ChildExecution>;
   executions: Record<string, 'running' | 'completed' | 'failed' | 'cancelled'>;
-  toolSources: Record<string, { sequence: string; event_id: string; turn: string; actor: string; owner: NativeOwner }>;
-  terminalSources: Record<string, { sequence: string; actor: string }>;
+  toolSources: Record<string, { sequence: string; event_id: string; turn: string; actor: string; owner?: NativeOwner; call?: Block }>;
+  terminalSources: Record<string, { sequence: string; actor: string; event_id: string; status: string; error?: string }>;
   toolInterruptions: Record<string, ToolInterruption & { id: string }>;
   importReports: ImportObservation[];
   pendingArchives: Record<string, { actor: string; chunks: string[] }>;
@@ -207,10 +208,20 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       const terminal = state.terminalSources[source.turn_id];
       const message = state.messages.find(message => message.id === source.message_id);
       const block = message?.blocks[source.block_index];
+      const operatorOwner = 'operator_cancel_event_id' in receipt.owner ? receipt.owner : undefined;
+      const operator = !!operatorOwner;
+      const nativeReceiptOwner = 'owner_id' in receipt.owner ? receipt.owner : undefined;
+      const ownerMatches = operator
+        ? !recorded?.owner && !!recorded?.call && !!block && sameClosedBlock(recorded.call, block) &&
+          !!terminal && terminal.event_id === operatorOwner!.operator_cancel_event_id &&
+          terminal.status === 'cancelled' && terminal.error === operatorCancelError &&
+          envelope.event_id === `operator-interruption:${source.turn_id}:${source.sequence}:${source.block_index}`
+        : !!recorded?.owner && (['owner_id', 'binding_sha256', 'epoch', 'containment_sha256'] as const)
+          .every(field => recorded.owner![field] === nativeReceiptOwner?.[field]);
       if (source.session_id !== envelope.session_id || source.turn_id !== envelope.turn_id || source.actor !== envelope.actor ||
           !recorded || recorded.sequence !== source.sequence || recorded.event_id !== source.event_id ||
           recorded.turn !== source.turn_id || recorded.actor !== source.actor ||
-          !(['owner_id', 'binding_sha256', 'epoch', 'containment_sha256'] as const).every(field => recorded.owner[field] === receipt.owner[field]) ||
+          !ownerMatches ||
           !terminal || terminal.sequence !== receipt.terminal_sequence || terminal.actor !== source.actor ||
           sequence(source.sequence) >= sequence(receipt.terminal_sequence) || sequence(receipt.terminal_sequence) >= nextSequence ||
           message?.role !== 'assistant' || message.turn !== source.turn_id || block?.type !== 'tool_use' ||
@@ -357,9 +368,18 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       if (previous?.nativeOwner && (!owner || !sameJSON(owner, previous.nativeOwner)))
         throw new Error('Native snapshot owner changed');
       if (owner) {
-        if (!Object.keys(event).every(key => ['kind', 'message_id', 'payload', 'native_owner', 'partial'].includes(key)))
+        if (!Object.keys(event).every(key => ['kind', 'message_id', 'payload', 'role', 'native_owner', 'partial'].includes(key)))
           throw new Error('Invalid native snapshot owner');
-        if (event.payload.role !== 'assistant') throw new Error('Native snapshot requires an assistant message');
+        // The shared C/Go contract permits the redundant outer role only when
+        // it is omitted/empty or agrees with the typed payload. Keep original
+        // canonical source bytes and all custody checks intact.
+        if (Object.prototype.hasOwnProperty.call(event, 'role') &&
+            (typeof event.role !== 'string' || event.role !== '' && event.role !== event.payload.role))
+          throw new Error('Invalid native snapshot role');
+        if (event.payload.role !== 'assistant' && event.payload.role !== 'tool')
+          throw new Error('Native snapshot requires an assistant or tool message');
+        if (event.partial && (event.payload.role !== 'assistant' || event.payload.blocks.length === 0))
+          throw new Error('Invalid native partial snapshot');
         const protectedCount = previous?.ownedBlockCount ?? 0;
         if (event.payload.blocks.length < protectedCount || previous && event.payload.blocks.some((block, index) =>
           (index < protectedCount || previous.stoppedBlocks.includes(index)) && !sameClosedBlock(previous.blocks[index], block)))
@@ -368,8 +388,20 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
         event.payload.blocks.forEach((block, index) => {
           if (block.type !== 'tool_use') return;
           const key = toolBlockKey({ id: event.message_id }, index);
-          if (!next.toolSources[key]) next.toolSources[key] = { sequence: envelope.sequence, event_id: envelope.event_id,
+          if (!next.toolSources[key]?.owner) next.toolSources[key] = { sequence: envelope.sequence, event_id: envelope.event_id,
             turn: envelope.turn_id, actor: envelope.actor, owner: { ...owner } };
+        });
+      }
+      if (!owner && event.payload.role === 'assistant') {
+        next.toolSources = { ...state.toolSources };
+        for (const key of Object.keys(next.toolSources))
+          if (JSON.parse(key)[0] === event.message_id && !next.toolSources[key].owner) delete next.toolSources[key];
+        event.payload.blocks.forEach((block, index) => {
+          if (block.type !== 'tool_use') return;
+          next.toolSources[toolBlockKey({ id: event.message_id }, index)] = {
+            sequence: envelope.sequence, event_id: envelope.event_id, turn: envelope.turn_id, actor: envelope.actor,
+            call: parseJSON(stringifyJSON(block)!) as Block,
+          };
         });
       }
       const message: ProjectedMessage = { ...event.payload, id: event.message_id,
@@ -411,6 +443,7 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       if (d.type === 'ERROR') {
         const error = d.error_message || 'Runtime error';
         next.errors = [...state.errors, error];
+        next.errorOrigins = { ...state.errorOrigins, [state.errors.length]: { turn: envelope.turn_id, sequence: envelope.sequence, terminal: false } };
         if (index >= 0) {
           const message = state.messages[index];
           if (message.role !== event.role || message.turn !== envelope.turn_id)
@@ -526,9 +559,12 @@ export function reduceSession(state: SessionState, envelope: Envelope): SessionS
       next.executions = { ...state.executions, [envelope.turn_id]: status };
       next.activeTurns = status === 'running' ? [...state.activeTurns, envelope.turn_id] :
         state.activeTurns.filter(turn => turn !== envelope.turn_id);
-      if (event.payload.error) next.errors = [...state.errors, event.payload.error];
+      if (event.payload.error) {
+        next.errors = [...state.errors, event.payload.error];
+        next.errorOrigins = { ...state.errorOrigins, [state.errors.length]: { turn: envelope.turn_id, sequence: envelope.sequence, terminal: status !== 'running' } };
+      }
       if (status !== 'running') {
-        next.terminalSources = { ...state.terminalSources, [envelope.turn_id]: { sequence: envelope.sequence, actor: envelope.actor } };
+        next.terminalSources = { ...state.terminalSources, [envelope.turn_id]: { sequence: envelope.sequence, actor: envelope.actor, event_id: envelope.event_id, status, error: event.payload.error } };
         const open = state.messages.filter(m => m.turn === envelope.turn_id && !m.complete);
         if (status === 'completed' && open.length) throw new Error('Execution completed with open messages');
         next.messages = state.messages.map(m => m.turn === envelope.turn_id && !m.complete ?

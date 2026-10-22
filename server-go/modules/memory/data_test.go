@@ -394,7 +394,9 @@ func TestMemoryFailureOperationDoesNotLogUnknownInput(t *testing.T) {
 			t.Fatalf("unknown operation became diagnostic: %q", got)
 		}
 	}
-	if memoryFailureOperation("delete-as") != "delete-as" {
-		t.Fatal("known operation lost diagnostic category")
+	for _, value := range []string{"delete-as", "reembed-prepare", "reembed-next", "reembed-point", "reembed-status", "reembed-cutover"} {
+		if memoryFailureOperation(value) != value {
+			t.Fatal("known operation lost diagnostic category")
+		}
 	}
 }

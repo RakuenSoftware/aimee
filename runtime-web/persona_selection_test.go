@@ -18,7 +18,7 @@ func TestChatSelectionReadFailureNeverReportsDefault(t *testing.T) {
 				mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { http.Error(w, "upstream refused", status) })
 				s := &server{cfg: startFakeV1(t, mux)}
 				result := httptest.NewRecorder()
-				request := httptest.NewRequest(http.MethodGet, "/api/chat/"+kind+"?sid=web1", nil)
+				request := asUser(httptest.NewRequest(http.MethodGet, "/api/chat/"+kind+"?sid=web1", nil), "alice")
 				if kind == "primary" {
 					s.handleChatPrimary(result, request)
 				} else {
@@ -35,7 +35,7 @@ func TestChatSelectionUnavailableTransportIsAnError(t *testing.T) {
 	for _, kind := range []string{"primary", "persona"} {
 		s := &server{cfg: &config{socketPath: filepath.Join(t.TempDir(), "missing.sock")}}
 		result := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodGet, "/api/chat/"+kind+"?sid=web1", nil)
+		request := asUser(httptest.NewRequest(http.MethodGet, "/api/chat/"+kind+"?sid=web1", nil), "alice")
 		if kind == "primary" {
 			s.handleChatPrimary(result, request)
 		} else {
@@ -51,7 +51,7 @@ func TestChatPrimarySuccessfulUnpinnedReplyStaysDefault(t *testing.T) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"agent":""}`) })
 	s := &server{cfg: startFakeV1(t, mux)}
 	result := httptest.NewRecorder()
-	s.handleChatPrimary(result, httptest.NewRequest(http.MethodGet, "/api/chat/primary?sid=web1", nil))
+	s.handleChatPrimary(result, asUser(httptest.NewRequest(http.MethodGet, "/api/chat/primary?sid=web1", nil), "alice"))
 	if result.Code != http.StatusOK || result.Body.String() != `{"agent":""}` {
 		t.Fatalf("actual unpinned reply changed: %d %s", result.Code, result.Body.String())
 	}

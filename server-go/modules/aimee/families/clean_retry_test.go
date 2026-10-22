@@ -36,7 +36,7 @@ func TestCleanRetryLiveSharedRoot(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer pool.Close()
-	for _, name := range []string{"schema_sessions.sql", "schema_governed_actions.sql", "schema_clean_retry.sql"} {
+	for _, name := range []string{"schema_sessions.sql", "schema_session_ir_events.sql", "schema_governed_actions.sql", "schema_clean_retry.sql"} {
 		body, e := schemaFS.ReadFile(name)
 		if e != nil {
 			t.Fatal(e)

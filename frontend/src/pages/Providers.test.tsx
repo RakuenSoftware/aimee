@@ -83,6 +83,47 @@ it("shows load errors instead of claiming there are no providers", async () => {
   expect(screen.queryByText(/No providers configured/)).toBeNull();
 });
 
+it("lets a long discovered model keep its actual ID with a shorter local name", async () => {
+  const provider = { ...work, name: "gui-live-local-8162" };
+  const id = "unsloth/gemma-4-E2B-it-qat-GGUF:qat-UD-Q4_K_XL";
+  const fetcher = vi.fn(async (path: string) => reply(path === "/api/providers/models" ?
+    { details: [{ id }] } : { providers: [provider] }));
+  vi.stubGlobal("fetch", fetcher);
+  const onDone = vi.fn();
+  render(<AddProviderModel onDone={onDone} />);
+  fireEvent.click(await screen.findByText("Show models this provider offers"));
+  fireEvent.click(await screen.findByText(id));
+  expect(screen.getByRole("alert").textContent).toContain("Choose a shorter model name");
+  expect((screen.getByText("Add model") as HTMLButtonElement).disabled).toBe(true);
+  expect(fetcher.mock.calls.some(call => call[0] === "/api/models/add")).toBe(false);
+  fireEvent.change(screen.getByLabelText("Name in Aimee"), { target: { value: "Gemma E2B" } });
+  fireEvent.click(screen.getByText("Add model"));
+  await waitFor(() => expect(onDone).toHaveBeenCalledWith(`Added ${id}`, true));
+  const body = JSON.parse(fetcher.mock.calls.find(call => call[0] === "/api/models/add")![1].body);
+  expect(body.args).toEqual(["Gemma E2B", provider.endpoint, id, "--registration", provider.name]);
+});
+
+it.each([
+  ["a".repeat(63), true], ["a".repeat(64), false],
+  ["é".repeat(31) + "a", true], ["é".repeat(32), false],
+  ["🌿".repeat(15) + "abc", true], ["🌿".repeat(16), false],
+])("validates model names against the backend UTF-8 boundary: %s", async (name, valid) => {
+  const fetcher = vi.fn().mockResolvedValue(reply({ providers: [work] }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<AddProviderModel onDone={() => {}} />);
+  await screen.findByLabelText("Provider");
+  fireEvent.change(screen.getByLabelText("Model ID"), { target: { value: "example" } });
+  fireEvent.change(screen.getByLabelText("Name in Aimee"), { target: { value: name } });
+  expect((screen.getByText("Add model") as HTMLButtonElement).disabled).toBe(!valid);
+  if (valid) {
+    fireEvent.click(screen.getByText("Add model"));
+    await waitFor(() => expect(fetcher.mock.calls.some(call => call[0] === "/api/models/add")).toBe(true));
+  } else {
+    expect(screen.getByRole("alert").textContent).toContain("Choose a shorter model name");
+    expect(fetcher.mock.calls.some(call => call[0] === "/api/models/add")).toBe(false);
+  }
+});
+
 it("keeps model limits and price declarations on Models", async () => {
   const model = { name: "work:example", registration: "work", provider: "openai", model: "example", endpoint: work.endpoint, enabled: true,
     context_window: 10000, max_output: 2000, price_in_per_mtok: 0, price_in_declared: true };

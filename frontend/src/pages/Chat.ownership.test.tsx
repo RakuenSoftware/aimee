@@ -45,9 +45,9 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('EventSource', class { addEventListener() {} close() {} });
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/chat/send') return new Response(new ReadableStream({ start(controller) { stream = controller; } }));
-    if (url === '/api/chat/attach') return json({ attach_id: 'attachment' });
+    if (url === '/api/chat/attach') return json({ session_id: JSON.parse(String(init?.body)).sid, attach_id: 'attachment' });
     if (url === '/api/git/projects') return json({ root: '/work', projects: ['one', 'two'] });
     if (url.startsWith('/api/chat/bootstrap-status')) return json({ has_rules: true });
     if (url.startsWith('/api/sessions/workflows')) return json({}, 404);
@@ -168,10 +168,10 @@ describe('chat transcript ownership', () => {
   });
 
   it('sends to the originating project when the user switches sessions while attachment is pending', async () => {
-    let attached!: (response: Response) => void;
+    const attached = new Map<string, (response: Response) => void>();
     const originalFetch = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation((url, init) => String(url) === '/api/chat/attach'
-      ? new Promise(resolve => { attached = resolve; }) : originalFetch(url, init));
+      ? new Promise(resolve => { attached.set(JSON.parse(String(init?.body)).sid, resolve); }) : originalFetch(url, init));
     context.sessions = [session('one'), session('two')]; context.active = context.sessions[0];
     const view = render(<Chat />);
     await tick();
@@ -180,7 +180,7 @@ describe('chat transcript ownership', () => {
     context.active = context.sessions[1];
     view.rerender(<Chat />);
     await tick();
-    await act(async () => { attached(json({ attach_id: 'attachment' })); });
+    await act(async () => { attached.get('one')!(json({ session_id: 'one', attach_id: 'attachment' })); });
     const request = vi.mocked(fetch).mock.calls.find(([url]) => url === '/api/chat/send');
     expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ aimee_session_id: 'one', cwd: '/work/one' });
     await act(async () => {

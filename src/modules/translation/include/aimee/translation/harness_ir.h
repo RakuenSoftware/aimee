@@ -2,6 +2,12 @@
 #define AIMEE_TRANSLATION_HARNESS_IR_H
 #include <aimee/ir/session_event.h>
 #include <aimee/translation/aimee_ir_stream.h>
+/* Safe native diagnostic categories, never provider text or retry authority. */
+typedef enum
+{
+   AIMEE_HARNESS_FAILURE_NONE,
+   AIMEE_HARNESS_FAILURE_RATE_LIMIT
+} aimee_harness_failure_t;
 typedef struct
 {
    anthropic_backend_stream_state_t anthropic;
@@ -12,6 +18,7 @@ typedef struct
    struct cJSON *pending;
    struct cJSON *claude_message;
    int claude_open;
+   aimee_harness_failure_t failure;
    const char *admitted_prompt;
    int user_echo_seen;
    /* Original gateway capture owns model/tool observations. Native controls and

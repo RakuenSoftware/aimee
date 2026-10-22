@@ -454,6 +454,42 @@ int route_session_attach(const char *session_id, const char *body, char *resp, i
    const char *target = (cJSON_IsString(jt) && jt->valuestring[0]) ? jt->valuestring : NULL;
    const cJSON *jo = cJSON_GetObjectItemCaseSensitive(req, "owner");
    const char *owner = (cJSON_IsString(jo) && jo->valuestring[0]) ? jo->valuestring : NULL;
+   /* A browser's explicit attach precedes preferences/history and its first
+    * turn. Admit the canonical owner here, before acknowledging a live surface;
+    * the in-memory presence registry cannot establish durable ownership. */
+   const request_context_t *context = request_context_get();
+   if (!strcmp(surface, "webchat") && context && context->vault_transport == ATTEST_WEBCHAT_TRUSTED)
+   {
+      const char *actor = context->vault_principal;
+      if (!actor[0] || strlen(session_id) >= PRESENCE_SESSION_ID_MAX)
+      {
+         cJSON_Delete(req);
+         return err_json(resp, cap, 400, "invalid browser session owner or id");
+      }
+      if (owner && strcmp(owner, actor))
+      {
+         cJSON_Delete(req);
+         return err_json(resp, cap, 403, "browser session owner mismatch");
+      }
+      db1_server_session_t row;
+      if (db1_server_session_get(session_id, &row) != 0)
+      {
+         /* Creation never updates an existing owner. A concurrent creator or
+          * lost acknowledgement is resolved only by reading the durable row. */
+         (void)db1_server_session_create(session_id, "webchat", actor);
+         if (db1_server_session_get(session_id, &row) != 0)
+         {
+            cJSON_Delete(req);
+            return err_json(resp, cap, 503, "browser session admission unavailable");
+         }
+      }
+      if (strcmp(row.principal, actor))
+      {
+         cJSON_Delete(req);
+         return err_json(resp, cap, 403, "browser session owner mismatch");
+      }
+      owner = actor;
+   }
    const cJSON *jm = cJSON_GetObjectItemCaseSensitive(req, "subscribe_mask");
    unsigned mask = cJSON_IsNumber(jm) ? (unsigned)jm->valuedouble : (unsigned)PRESENCE_EV_ALL;
    const cJSON *jp = cJSON_GetObjectItemCaseSensitive(req, "persistent");

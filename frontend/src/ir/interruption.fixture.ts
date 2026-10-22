@@ -5,4 +5,4 @@ export const receipt = (): ToolInterruption => ({ version: 1,
   owner: { owner_id: 'a'.repeat(32), binding_sha256: 'b'.repeat(64), epoch: '0', containment_sha256: 'c'.repeat(64) },
   terminal_sequence: '4', outcome: 'unknown', retry: 'explicit_permission_required' });
 
-export const nativeOwner = (): NativeOwner => ({ version: 1, harness: 'codex', ...receipt().owner });
+export const nativeOwner = (): NativeOwner => ({ version: 1, harness: 'codex', ...(receipt().owner as Omit<NativeOwner, 'version' | 'harness'>) });

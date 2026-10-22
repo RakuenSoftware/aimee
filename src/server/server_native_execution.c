@@ -3,6 +3,7 @@
 #include "server_native_execution.h"
 #include "server_native_history.h"
 #include "server_native_launch.h"
+#include "server_native_sdk_profile.h"
 #include "cli_claude_native.h"
 #include "claude_headless.h"
 #include "server_native_runtime.h"
@@ -460,8 +461,12 @@ static int native_environment(native_execution_t *execution)
           snprintf(url, sizeof url, "ANTHROPIC_BASE_URL=%s",
                    server_native_runtime_url(execution->runtime)) >= (int)sizeof url)
          return -1;
+      /* The canonical gateway replaces SDK system content. Claude's gateway
+       * protocol requires client-side omission of its fingerprint block in
+       * this case; neither stripping nor moving that block is supported. */
       const char *extra[] = {key, url, "DISABLE_AUTOUPDATER=1",
-                             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"};
+                             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+                             "CLAUDE_CODE_ATTRIBUTION_HEADER=0"};
       for (unsigned i = 0; i < sizeof extra / sizeof extra[0]; i++)
       {
          execution->environment[9 + i] = strdup(extra[i]);
@@ -734,13 +739,13 @@ static int native_recovery_record_admit(const cJSON *record, const char *session
 /* Discovery is session/actor scoped and precedes model/account/SDK selection.
  * A physical lease plus re-read DB authority is required for every old owner;
  * neither a writable marker nor the new selected model nominates a boundary. */
-int server_native_session_reconcile(const char *session, const char *actor, const char *active_turn,
-                                    char error[512])
+static int native_session_reconcile(const char *session, const char *actor, const char *active_turn,
+                                    char error[512], int browse)
 {
    if (error)
       error[0] = 0;
    if (!session || !session[0] || strlen(session) > 128 || !actor || !actor[0] ||
-       strlen(actor) > 128)
+       strlen(actor) >= (browse ? VAULT_PRINCIPAL_MAX : 129))
       return -1;
    pthread_mutex_lock(&native_quarantine_lock);
    int stopping = native_quarantine_stopping;
@@ -776,6 +781,12 @@ int server_native_session_reconcile(const char *session, const char *actor, cons
    }
    cJSON_ArrayForEach(record, owners)
    {
+      /* A durable record alone does not establish liveness. Only the exact
+       * process-local retained writer can defer browse recovery; an arbitrary
+       * locked lease, PID or unavailable authority remains a refusal. */
+      if (browse &&
+          server_session_capture_has_owner(session, actor, native_string(record, "turn_id")))
+         continue;
       const char *sdk = native_string(record, "harness"),
                  *binding = native_string(record, "binding_sha256");
       cJSON *prior = NULL;
@@ -812,6 +823,15 @@ done:
    if (rc && error && !error[0])
       snprintf(error, 512, "native session ownership recovery refused");
    return rc;
+}
+int server_native_session_reconcile(const char *session, const char *actor, const char *active_turn,
+                                    char error[512])
+{
+   return native_session_reconcile(session, actor, active_turn, error, 0);
+}
+int server_native_session_reconcile_browse(const char *session, const char *actor, char error[512])
+{
+   return native_session_reconcile(session, actor, NULL, error, 1);
 }
 static int native_custody_open(native_execution_t *execution, char error[512])
 {
@@ -1168,10 +1188,18 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
       prepared = 0;
    if (!prepared)
       goto refused;
+   const char *sdk = execution->selected.cli_kind;
+   stage = "SDK executable";
+   execution->executable_fd = server_native_launch_open(
+       sdk, cfg->agent->cli_cmd[0] ? cfg->agent->cli_cmd : sdk, execution->build, error);
+   if (execution->executable_fd < 0)
+      goto refused;
+   stage = "owned SDK identity";
+   if (server_native_sdk_profile_prepare(&execution->profile, sdk, execution->executable_fd))
+      goto refused;
    stage = "native tool registry";
    if (native_registry_open(execution, owner))
       goto refused;
-   const char *sdk = execution->selected.cli_kind;
    stage = "native cache custody";
    if (native_custody_open(execution, error))
       goto refused;
@@ -1212,11 +1240,6 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    if (cli_session_native_home(sdk, cwd, server_session_capture_session(execution->capture),
                                execution->effective_binding, execution->home,
                                sizeof execution->home, &execution->home_cleanup))
-      goto refused;
-   stage = "SDK executable";
-   execution->executable_fd = server_native_launch_open(
-       sdk, cfg->agent->cli_cmd[0] ? cfg->agent->cli_cmd : sdk, execution->build, error);
-   if (execution->executable_fd < 0)
       goto refused;
    stage = "owned SDK configuration";
    if (!strcmp(sdk, "codex") ? native_write_config(execution, selected)

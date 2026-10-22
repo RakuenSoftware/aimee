@@ -18,6 +18,11 @@ extern "C"
 {
 #endif
 
+   /* Required before creating any durable delegate job. Retries typed restart
+    * cleanup until acknowledged; success is process-latched and never cancels
+    * subsequently admitted jobs. Independent of the heartbeat monitor gate. */
+   int server_delegate_startup_reconcile(void);
+
    /* Idempotent. If AIMEE_DELEGATE_HEARTBEAT_MONITOR=0, no thread starts
     * and this is a no-op. Safe to call from server_init unconditionally. */
    void server_delegate_monitor_init(void);

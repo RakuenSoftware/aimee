@@ -3402,7 +3402,8 @@ func memoryFailureOperation(operation string) string {
 	case "get", "store", "insert-epistemic", "supersede", "update-as", "delete", "delete-as",
 		"correction-review", "recall-bundle", "compose-recall", "typed-context", "assertion-search",
 		"episode-list", "episode-get", "relation-search", "entity-edges", "entity-profile",
-		"rebuild-derived", "code-index", "change-feed", "vector-search", "vector-rebuild":
+		"rebuild-derived", "code-index", "change-feed", "vector-search", "vector-rebuild",
+		"reembed-prepare", "reembed-next", "reembed-point", "reembed-status", "reembed-cutover":
 		return operation
 	default:
 		return "other"

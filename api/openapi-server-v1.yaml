@@ -5221,6 +5221,49 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /chat/graceful_cancel:
+    post:
+      summary: Stop an exact browser-owned chat turn
+      description: >
+        With session_id and turn_id, requires the root-UDS-attested browser operator
+        and matching durable session actor. A matching local turn is asked to stop;
+        stopping does not assert that effects are quiescent. If no local turn exists,
+        the canonical owner may cancel the exact abandoned non-native execution.
+        A different live turn, native custody, stale source or ownership mismatch
+        refuses. No message is queued. The browser waits for the canonical terminal
+        before submitting any new text. Bodies without turn_id retain the legacy
+        graceful-cancel RPC contract.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id: { type: string }
+                turn_id: { type: string }
+                aimee_session_id: { type: string, description: Legacy session selector without turn_id }
+      responses:
+        "200":
+          description: Exact stop requested or canonical cancellation committed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+                  session_id: { type: string }
+                  turn_id: { type: string }
+                  disposition: { type: string, enum: [stopping, cancelled] }
+                  terminal_sequence: { type: string, description: Present for committed canonical cancellation }
+        "400":
+          description: Invalid exact cancellation frame
+        "403":
+          description: Not an authenticated browser operator or durable owner
+        "409":
+          description: Stale turn or active native custody; no canonical cancellation committed
+        "503":
+          description: Durable ownership or cancellation unavailable
   /chat/interrupt:
     post:
       summary: Steer an in-flight chat turn

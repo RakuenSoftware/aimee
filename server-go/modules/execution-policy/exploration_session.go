@@ -26,7 +26,7 @@ func sessionExploration(principal, session string, state, operationJSON []byte, 
 	var req sessionExplorationRequest
 	dec := json.NewDecoder(bytes.NewReader(operationJSON))
 	dec.DisallowUnknownFields()
-	if len(operationJSON) > 65536 || decodeSingle(dec, &req) != nil || principal == "" || session == "" || len(principal) > 128 || len(session) > 128 {
+	if len(operationJSON) > 65536 || decodeSingle(dec, &req) != nil || principal == "" || session == "" || len(principal) >= 160 || len(session) > 128 {
 		return nil, nil, errors.New("invalid host exploration request")
 	}
 	if req.Operation == "check_session" || req.Operation == "bind_session" {

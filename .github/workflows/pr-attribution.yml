@@ -46,6 +46,9 @@ jobs:
         with:
           go-version-file: server-go/go.mod
           cache: false
+      - name: Test attribution API failure handling
+        working-directory: server-go
+        run: go test ../scripts/check-pr-attribution.go ../scripts/check-pr-attribution_test.go
       - name: Enforce attribution across incoming commits and PR history
         working-directory: server-go
         env:

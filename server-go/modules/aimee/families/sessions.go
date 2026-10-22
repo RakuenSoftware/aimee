@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
@@ -981,6 +982,7 @@ var Sessions = store.Family{
 		opServerSessionErasureReceipt:       {Name: "server_session_erasure_receipt", Args: 2, Run: serverSessionErasureReceipt},
 		opSessionIRAppend:                   {Name: "session_ir_append", Args: 5, Tx: true, Run: sessionIRAppend},
 		opSessionIRAppendVerified:           {Name: "session_ir_append_verified", Args: 5, Tx: true, HostOnly: true, Run: sessionIRAppendVerified},
+		opSessionIRCancel:                   {Name: "session_ir_cancel", Timeout: store.CanonicalHistoryTimeout, Args: 3, Cells: 1, Tx: true, HostOnly: true, Run: sessionIRCancel},
 		opSessionIRSearch:                   {Name: "session_ir_search", Timeout: store.CanonicalHistoryTimeout, Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionIRSearch},
 		opSessionNativeSourceAppend:         {Name: "session_native_source_append", Args: 5, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeSourceAppend},
 		opSessionNativeActiveOwned:          {Name: "session_native_active_owned", Args: 2, Cells: 1, Tx: true, HostOnly: true, Run: sessionNativeActiveOwned},
@@ -1093,7 +1095,7 @@ func sessionIRAppendImportAuthorized(ctx context.Context, q store.Queryer, f []s
 			return store.StatusInvalid, nil, nil
 		}
 	}
-	if !validSessionIREvent([]byte(f[4])) || !sessionIRProofBindings([]byte(f[4]), f[0], f[2], f[3], allowProof) {
+	if (strings.HasPrefix(f[1], operatorCancelPrefix) || strings.HasPrefix(f[1], "operator-interruption:")) || !validSessionIREvent([]byte(f[4])) || !sessionIRProofBindings([]byte(f[4]), f[0], f[2], f[3], allowProof) {
 		return store.StatusInvalid, nil, nil
 	}
 	var eventKind struct {

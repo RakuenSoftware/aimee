@@ -8,7 +8,9 @@ import ControlCard, { type ReplyControl } from './ControlCard';
 import ImportReportView from './ImportReportView';
 import ImportedCheckpointView from './ImportedCheckpointView';
 const pretty = (value: unknown) => typeof value === 'string' ? value : stringifyJSON(value, 2) ?? '';
+const incompleteResponse = 'Provider stream failed canonical admission or ended before completion';
 function ExecutionError({ error }: { error: string }) {
+  if (error === incompleteResponse) return <>The provider did not return a complete response.</>;
   try {
     const value = parseJSON(error) as Record<string, unknown>;
     const keys = ['reason', 'dispatched', 'submitted_input_sha256', 'submitted_input_bytes', 'submitted_input_preview', 'submitted_input_truncated'];
@@ -109,6 +111,27 @@ export default function IRTranscript({ state, onReply, ancestors = [], controlsR
   const pendingControls = controlsReady ? Object.entries(state.controls).filter(([, control]) => !control.response && !control.closed) : [];
   const resolvedControls = Object.entries(state.controls).filter(([, control]) =>
     (control.response || control.closed) && (messageLimit === undefined || visibleTurns.has(control.turn) || !messageTurns.has(control.turn)));
+  // A stream diagnostic and its failed terminal describe one turn. Retain both
+  // observations, but give the terminal's actionable explanation priority.
+  const secondary = new Map<number, number[]>();
+  const folded = new Set<number>();
+  const diagnosticsByTurn = new Map<string, number[]>();
+  state.errors.forEach((error, index) => {
+    const source = state.errorOrigins?.[index];
+    if (error !== incompleteResponse || !source?.turn || source.terminal) return;
+    const indices = diagnosticsByTurn.get(source.turn) ?? [];
+    indices.push(index);
+    diagnosticsByTurn.set(source.turn, indices);
+  });
+  state.errors.forEach((error, index) => {
+    const origin = state.errorOrigins?.[index];
+    const terminal = origin && state.terminalSources[origin.turn];
+    if (!origin?.turn || !origin.terminal || !error.trim() || terminal?.status !== 'failed' || terminal.sequence !== origin.sequence ||
+        terminal.error !== error || error === incompleteResponse) return;
+    const details = (diagnosticsByTurn.get(origin.turn) ?? []).filter(prior =>
+      BigInt(state.errorOrigins![prior].sequence) < BigInt(origin.sequence));
+    if (details.length) { secondary.set(index, details); details.forEach(prior => folded.add(prior)); }
+  });
   return <>
     {(state.importReports ?? []).map(observation => <section key={observation.id}>
       <ImportReportView observation={observation} />
@@ -163,6 +186,12 @@ export default function IRTranscript({ state, onReply, ancestors = [], controlsR
       </>}
       {(report.omitted_cache_controls ?? 0) > 0 && <> {report.omitted_cache_controls} requested cache {report.omitted_cache_controls === 1 ? 'setting was' : 'settings were'} not applied for {report.model}.</>}
     </p>)}
-    {state.errors.map((error, i) => <div role="alert" key={`error:${i}`}><ExecutionError error={error} /></div>)}
+    {state.errors.map((error, i) => folded.has(i) ? null : <div key={`error:${i}`}>
+      <div role="alert"><ExecutionError error={error} /></div>
+      {secondary.has(i) && <details className="ir-response-details">
+        <summary>Response details</summary>
+        {secondary.get(i)!.map(index => <p key={index}><ExecutionError error={state.errors[index]} /></p>)}
+      </details>}
+    </div>)}
   </>;
 }

@@ -946,13 +946,19 @@ func TestHandleChatPrimaryGetProxiesV1(t *testing.T) {
 	var gotMethod, gotPath string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/sessions/web1/primary", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Aimee-Webuser") != "alice" {
+			http.Error(w, "owner identity missing", http.StatusForbidden)
+			return
+		}
 		gotMethod, gotPath = r.Method, r.URL.Path
 		fmt.Fprint(w, `{"agent":"gpu-mid"}`)
 	})
 	s := &server{cfg: startFakeV1(t, mux)}
 
 	rr := httptest.NewRecorder()
-	s.handleChatPrimary(rr, httptest.NewRequest(http.MethodGet, "/api/chat/primary?sid=web1", nil))
+	req := asUser(httptest.NewRequest(http.MethodGet, "/api/chat/primary?sid=web1", nil), "alice")
+	req.Header.Set("X-Aimee-Webuser", "mallory")
+	s.handleChatPrimary(rr, req)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"gpu-mid"`) {
 		t.Fatalf("get: code=%d body=%q", rr.Code, rr.Body.String())
 	}
@@ -965,6 +971,10 @@ func TestHandleChatPrimarySetProxiesV1(t *testing.T) {
 	var gotMethod, gotPath, gotBody string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/sessions/web1/primary", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Aimee-Webuser") != "alice" {
+			http.Error(w, "owner identity missing", http.StatusForbidden)
+			return
+		}
 		gotMethod, gotPath = r.Method, r.URL.Path
 		b, _ := io.ReadAll(r.Body)
 		gotBody = string(b)
@@ -973,7 +983,8 @@ func TestHandleChatPrimarySetProxiesV1(t *testing.T) {
 	s := &server{cfg: startFakeV1(t, mux)}
 
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/chat/primary", strings.NewReader(`{"sid":"web1","agent":"gpu-mid"}`))
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/primary", strings.NewReader(`{"sid":"web1","agent":"gpu-mid"}`)), "alice")
+	req.Header.Set("X-Aimee-Webuser", "mallory")
 	s.handleChatPrimary(rr, req)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"gpu-mid"`) {
 		t.Fatalf("set: code=%d body=%q", rr.Code, rr.Body.String())

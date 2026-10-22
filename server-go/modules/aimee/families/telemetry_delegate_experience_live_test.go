@@ -2,6 +2,7 @@ package families
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -346,6 +347,40 @@ func TestDelegateExperiencePostgresNextRunReplayAndSourceFences(t *testing.T) {
 	if err = pool.QueryRow(ctx, `SELECT evidence_json FROM delegate_learnings WHERE session_id='delegate-8d13f23515d52e055d585cba72acf62aac1338219dc5c53109af1e663b006e0e'`).Scan(&observed); err != nil || !strings.Contains(observed, `"qualification":"ungraded"`) || strings.Contains(observed, `"verdict"`) {
 		t.Fatal("proof-less completion promoted", err, observed)
 	}
+	// Projection integrity only: one observed failed job has one protected
+	// canonical parent/child source and stays ungraded on every replay. The C
+	// exit-metric fixture independently prohibits the retired unbound writer.
+	failed := delegateBindingFixture()
+	failed.Session = fmt.Sprintf("delegate-%x", sha256.Sum256([]byte("parent:3:durable")))
+	failed.LearningBinding.JobID = "3"
+	exec(`INSERT INTO server_sessions(id,principal) VALUES($1,'operator')`, failed.Session)
+	exec(`INSERT INTO agent_jobs(id,role,agent_name,status) VALUES(3,'engineer','fixture','failed')`)
+	failedSource := executionGradeSource{Kind: "canonical_session_log", Session: "parent", Turn: "turn", Event: "failed-child-running", Actor: "operator"}
+	failedSource.Sequence = appendEvent("parent", failedSource.Event, mustJSON(map[string]any{"kind": "child_execution", "payload": failed}), true)
+	appendEvent(failed.Session, "failed-running", `{"kind":"execution","payload":{"status":"running"}}`, false)
+	appendEvent(failed.Session, "failed-terminal", `{"kind":"execution","payload":{"status":"failed","error":"proxy unavailable"}}`, false)
+	for replay := 0; replay < 3; replay++ {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, _, err := delegateExecutionExperienceRecord(ctx, sessionIRLiveTx{tx}, []string{"operator", mustJSON(failedSource)})
+		if err != nil || status != store.StatusOK {
+			_ = tx.Rollback(ctx)
+			t.Fatal("failed observation", status, err)
+		}
+		if err = tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var failedRows, unboundRows int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM delegate_learnings WHERE session_id=$1 AND evidence_json::jsonb->>'qualification'='ungraded' AND evidence_json::jsonb->>'observed_status'='failed' AND review_status='pending' AND confidence=0 AND auto_applied=0`, failed.Session).Scan(&failedRows); err != nil || failedRows != 1 {
+		t.Fatal("one failed job must project exactly one ungraded observation", failedRows, err)
+	}
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM delegate_learnings WHERE session_id='parent' OR evidence_json::jsonb->>'kind' IS DISTINCT FROM 'delegate_execution_experience'`).Scan(&unboundRows); err != nil || unboundRows != 0 {
+		t.Fatal("unbound legacy learning must not be a second publisher", unboundRows, err)
+	}
+
 	exec(`DELETE FROM session_ir_events WHERE session_id='delegate-78fd1d63652c1015a4c0273c7a7385f20d967b1cfdca0699cde6a010c820444c' AND event_id='terminal'`)
 	if got := recall("operator", "project-a", ""); strings.Contains(got, grade.VerificationID) {
 		t.Fatal("deleted terminal recalled", got)

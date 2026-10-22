@@ -77,6 +77,22 @@ static void mint_msg_id(char *buf, size_t n)
  * requests or onto a non-ingress route on a reused worker thread); read by
  * send_response in server_http_response.inc via anthropic_http_response_retry_after. */
 static __thread int g_response_retry_after = 0;
+static __thread int g_native_beta_query;
+static __thread char g_native_user_agent[256], g_native_x_app[64];
+
+/* Only the authenticated native callback can retain the SDK beta surface.
+ * The destination stays the host-selected endpoint; never copy an SDK URL. */
+static int native_beta_url(char *url, size_t capacity, int anthropic)
+{
+   if (!g_native_beta_query || !anthropic)
+      return 0;
+   size_t used = strlen(url);
+   const char suffix[] = "?beta=true";
+   if (strchr(url, '?') || strchr(url, '#') || used + sizeof suffix > capacity)
+      return -1;
+   memcpy(url + used, suffix, sizeof suffix);
+   return 0;
+}
 
 /* Append a header line to `buf`, inserting a '\n' separator (mirrors
  * agent_config.c's append_header_line; the upstream HTTP layer splits on '\n'). */
@@ -114,7 +130,23 @@ static int build_anthropic_parity_headers(char *buf, size_t n, const agent_t *ag
       snprintf(line, sizeof(line), "anthropic-beta: %s", cbeta);
       hdr_line(buf, n, line);
    }
-   return agent_claude_oauth_headers(agent, buf, n);
+   if (agent_claude_oauth_headers(agent, buf, n))
+      return -1;
+   if (g_native_user_agent[0])
+   {
+      int written = snprintf(line, sizeof line, "User-Agent: %s", g_native_user_agent);
+      if (written < 0 || (size_t)written + strlen(buf) + 2 > n)
+         return -1;
+      hdr_line(buf, n, line);
+   }
+   if (g_native_x_app[0])
+   {
+      int written = snprintf(line, sizeof line, "x-app: %s", g_native_x_app);
+      if (written < 0 || (size_t)written + strlen(buf) + 2 > n)
+         return -1;
+      hdr_line(buf, n, line);
+   }
+   return 0;
 }
 
 /* Serialize `obj` into resp (bounded by cap). Returns 200 on success, 500 if it
@@ -547,7 +579,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    char *prov_body = NULL, *response = NULL;
    char url[MAX_ENDPOINT_LEN + 64];
    char auth[MAX_API_KEY_LEN + 32];
-   char extra[512];
+   char extra[2048];
    char msg_id[48];
    const delegate_driver_t *driver;
    aimee_response_t parsed = {0};
@@ -624,6 +656,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
       goto cleanup;
    }
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
+       native_beta_url(url, sizeof url, parity) ||
        agent_resolve_auth_headers(ag, auth, sizeof auth, extra, sizeof extra) != 0)
    {
       /* Internal: we never reached the provider — the endpoint or credentials for
@@ -1214,7 +1247,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    char *prov_body = NULL;
    char url[MAX_ENDPOINT_LEN + 64];
    char auth[MAX_API_KEY_LEN + 32];
-   char extra[512];
+   char extra[2048];
    char msg_id[48];
    const delegate_driver_t *driver;
    int input_est;
@@ -1272,6 +1305,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       goto cleanup;
    }
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
+       native_beta_url(url, sizeof url, parity) ||
        agent_resolve_auth_headers(ag, auth, sizeof auth, extra, sizeof extra) != 0)
       goto cleanup;
    /* The Responses replay path is keyed off the actual upstream shape, not the
@@ -1428,14 +1462,15 @@ static int count_tokens(const char *body, char *resp, int cap)
          char url[MAX_ENDPOINT_LEN + 64];
          char ct_url[MAX_ENDPOINT_LEN + 96];
          char auth[MAX_API_KEY_LEN + 32];
-         char extra[640];
+         char extra[2048];
          char *response = NULL;
          if (delegate_build_url(driver, ag, url, sizeof(url)) == 0 &&
              agent_resolve_auth_headers(ag, auth, sizeof auth, extra, sizeof extra) == 0)
          {
             int hs;
             snprintf(ct_url, sizeof(ct_url), "%s/count_tokens", url); /* url ends in /messages */
-            if (build_anthropic_parity_headers(extra, sizeof extra, ag))
+            if (native_beta_url(ct_url, sizeof ct_url, 1) ||
+                build_anthropic_parity_headers(extra, sizeof extra, ag))
             {
                aimee_request_free(&policy);
                cJSON_Delete(req);
@@ -1502,6 +1537,8 @@ int anthropic_http_response_retry_after(void)
 void anthropic_http_capture_request_headers(const char *raw_request)
 {
    char a_ver[64] = "", a_beta[512] = "";
+   g_native_user_agent[0] = g_native_x_app[0] = 0;
+   g_native_beta_query = 0;
    if (raw_request)
    {
       http_header(raw_request, "Anthropic-Version", a_ver, sizeof(a_ver));
@@ -1509,6 +1546,64 @@ void anthropic_http_capture_request_headers(const char *raw_request)
    }
    anthropic_ingress_set_request_headers(a_ver, a_beta);
    g_response_retry_after = 0;
+}
+
+/* Called only by the authenticated, lifetime-bound native model transport.
+ * Ordinary HTTP ingress clears this data and cannot nominate SDK identity. */
+int anthropic_http_capture_native_request_headers(const char *headers)
+{
+   anthropic_http_capture_request_headers(NULL);
+   char version[64] = "", beta[512] = "";
+   const char *names[] = {"User-Agent", "x-app", "Anthropic-Version", "Anthropic-Beta"};
+   char *values[] = {g_native_user_agent, g_native_x_app, version, beta};
+   size_t capacities[] = {sizeof g_native_user_agent, sizeof g_native_x_app, sizeof version,
+                          sizeof beta};
+   unsigned seen = 0;
+   for (const char *line = headers ? headers : ""; *line;)
+   {
+      const char *end = strstr(line, "\r\n");
+      if (!end)
+         goto refused;
+      const char *colon = memchr(line, ':', (size_t)(end - line));
+      for (unsigned i = 0; colon && i < sizeof names / sizeof names[0]; i++)
+         if ((size_t)(colon - line) == strlen(names[i]) &&
+             !strncasecmp(line, names[i], strlen(names[i])))
+         {
+            const char *value = colon + 1;
+            while (value < end && (*value == ' ' || *value == '\t'))
+               value++;
+            size_t length = (size_t)(end - value);
+            if ((seen & (1u << i)) || !length || length >= capacities[i])
+               goto refused;
+            for (const unsigned char *p = (const unsigned char *)value;
+                 p < (const unsigned char *)end; p++)
+               if (*p < 32 || *p > 126)
+                  goto refused;
+            memcpy(values[i], value, length);
+            values[i][length] = 0;
+            seen |= 1u << i;
+         }
+      line = end + 2;
+   }
+   anthropic_ingress_set_request_headers(version, beta);
+   return 0;
+refused:
+   anthropic_http_capture_request_headers(NULL);
+   return -1;
+}
+
+int anthropic_http_capture_native_request_path(const char *path)
+{
+   g_native_beta_query = 0;
+   if (!path || strchr(path, '#'))
+      return -1;
+   if (!strcmp(path, "/v1/messages?beta=true") ||
+       !strcmp(path, "/v1/messages/count_tokens?beta=true"))
+   {
+      g_native_beta_query = 1;
+      return 0;
+   }
+   return strchr(path, '?') ? -1 : 0;
 }
 
 void anthropic_http_register(void)

@@ -48,6 +48,7 @@ struct cli_proxy
    unsigned port;
    cli_proxy_forward_fn forward;
    cli_proxy_route_fn route;
+   cli_proxy_authorize_fn authorize;
    void *forward_context;
    char token[256], session_id[128];
    atomic_int stopping;
@@ -85,9 +86,16 @@ static int model_route(const char *method, const char *path)
 
 static int protocol_header(const char *name)
 {
-   static const char *const allowed[] = {
-       "content-type", "content-encoding",     "accept", "anthropic-version", "anthropic-beta",
-       "openai-beta",  "mcp-protocol-version", NULL};
+   static const char *const allowed[] = {"content-type",
+                                         "content-encoding",
+                                         "accept",
+                                         "anthropic-version",
+                                         "anthropic-beta",
+                                         "openai-beta",
+                                         "mcp-protocol-version",
+                                         "user-agent",
+                                         "x-app",
+                                         NULL};
    for (int i = 0; allowed[i]; i++)
       if (strcasecmp(name, allowed[i]) == 0)
          return 1;
@@ -207,8 +215,10 @@ static void proxy_request(proxy_worker_t *worker)
       goto done;
    }
    char forwarded[8192] = "", session[128] = "";
+   char authenticated[256] = "";
    size_t forwarded_len = 0, content_length = 0;
    int have_length = 0, have_auth = 0, have_host = 0, have_session = 0;
+   unsigned metadata_seen = 0;
    for (char *line = line_end + 2; line < buffer + header_len - 2; line = line_end + 2)
    {
       line_end = strstr(line, "\r\n");
@@ -235,11 +245,14 @@ static void proxy_request(proxy_worker_t *worker)
       {
          const char *token =
              strcasecmp(line, "Authorization") == 0 ? aimee_core_bearer_token(value) : value;
-         if (have_auth++ || !token || !aimee_core_credential_equal(token, proxy->token))
+         if (have_auth++ || !token || strlen(token) >= sizeof authenticated ||
+             (proxy->authorize ? !proxy->authorize(method, path, token, proxy->forward_context)
+                               : !aimee_core_credential_equal(token, proxy->token)))
          {
             proxy_error(fd, 401, "a valid local proxy token is required");
             goto done;
          }
+         snprintf(authenticated, sizeof authenticated, "%s", token);
       }
       else if (strcasecmp(line, "Host") == 0)
       {
@@ -280,6 +293,18 @@ static void proxy_request(proxy_worker_t *worker)
       }
       else if (protocol_header(line))
       {
+         const char *bounded[] = {"user-agent", "x-app", "anthropic-version", "anthropic-beta"};
+         const size_t capacity[] = {256, 64, 64, 512};
+         for (unsigned i = 0; i < sizeof bounded / sizeof bounded[0]; i++)
+            if (!strcasecmp(line, bounded[i]))
+            {
+               if ((metadata_seen & (1u << i)) || !value[0] || strlen(value) >= capacity[i])
+                  goto malformed;
+               for (const unsigned char *p = (const unsigned char *)value; *p; p++)
+                  if (*p < 32 || *p > 126)
+                     goto malformed;
+               metadata_seen |= 1u << i;
+            }
          int n = snprintf(forwarded + forwarded_len, sizeof(forwarded) - forwarded_len,
                           "%s: %s\r\n", line, value);
          if (n < 0 || (size_t)n >= sizeof(forwarded) - forwarded_len)
@@ -311,6 +336,7 @@ static void proxy_request(proxy_worker_t *worker)
       used += (size_t)n;
    }
    cli_proxy_io_t io = {.downstream_fd = fd,
+                        .local_credential = authenticated,
                         .context = worker,
                         .write_response = proxy_response,
                         .on_upstream = proxy_upstream,
@@ -361,9 +387,10 @@ static void *proxy_worker(void *context)
    return 0;
 }
 
-cli_proxy_t *cli_proxy_start_scoped(unsigned port, const char *local_token, const char *session_id,
-                                    unsigned *bound_port, cli_proxy_route_fn route,
-                                    cli_proxy_forward_fn forward, void *forward_context)
+cli_proxy_t *cli_proxy_start_authorized(unsigned port, const char *local_token,
+                                        const char *session_id, unsigned *bound_port,
+                                        cli_proxy_route_fn route, cli_proxy_authorize_fn authorize,
+                                        cli_proxy_forward_fn forward, void *forward_context)
 {
    char auth[272];
    if (!bound_port || !local_token || strlen(local_token) >= 256 ||
@@ -375,6 +402,7 @@ cli_proxy_t *cli_proxy_start_scoped(unsigned port, const char *local_token, cons
       return NULL;
    proxy->forward = forward;
    proxy->route = route;
+   proxy->authorize = authorize;
    proxy->forward_context = forward_context;
    proxy->listener = aimee_core_socket_listen_loopback(port, &proxy->port);
    if (proxy->listener < 0)
@@ -446,6 +474,14 @@ cli_proxy_t *cli_proxy_start_scoped(unsigned port, const char *local_token, cons
    proxy->monitor_started = 1;
    *bound_port = proxy->port;
    return proxy;
+}
+
+cli_proxy_t *cli_proxy_start_scoped(unsigned port, const char *local_token, const char *session_id,
+                                    unsigned *bound_port, cli_proxy_route_fn route,
+                                    cli_proxy_forward_fn forward, void *context)
+{
+   return cli_proxy_start_authorized(port, local_token, session_id, bound_port, route, NULL,
+                                     forward, context);
 }
 
 cli_proxy_t *cli_proxy_start_bound(unsigned port, const char *local_token, const char *session_id,

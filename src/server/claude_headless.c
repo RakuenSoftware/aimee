@@ -425,7 +425,10 @@ stop:
    }
    else if (!out->error[0])
       snprintf(out->error, sizeof(out->error), "%s",
-               interrupted ? "Claude turn interrupted" : "Claude structured turn failed");
+               interrupted ? "Claude turn interrupted"
+               : !capture_failed && saw_result < 0 && ir.failure == AIMEE_HARNESS_FAILURE_RATE_LIMIT
+                   ? "Claude request was rate limited by the provider."
+                   : "Claude structured turn failed");
 finish:
 {
    uint64_t elapsed = mono_ms() - execution_started;

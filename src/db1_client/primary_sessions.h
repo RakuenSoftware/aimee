@@ -98,6 +98,12 @@ extern "C"
    int db1_session_ir_running_history_load(const char *session_id, const char *actor,
                                            const char *active_turn, char **out);
 
+   /* Privileged operator cancellation of an exact owned API turn. Native
+    * custody must already be resolved. This fences continuation, not effects.
+    * Returns 0 committed/idempotent, 1 stale/refused, -1 storage failure. */
+   int db1_session_ir_cancel(const char *actor, const char *session_id, const char *turn_id,
+                             char out_sequence[32]);
+
    /* Native resume metadata; get returns 0 found, 1 missing, -1 failure. */
    int db1_session_harness_get(const char *session_id, const char *harness, char *out_native_id,
                                size_t capacity, const char *principal);

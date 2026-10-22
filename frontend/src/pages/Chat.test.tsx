@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Chat from './Chat';
 import type { SessionEvent } from '../ir/session';
+import { operatorCancelError } from '../ir/interruption';
 
 const context = vi.hoisted(() => {
   const sessions = ['one', 'two'].map(id => ({
@@ -79,7 +80,7 @@ beforeEach(() => {
     disconnect() {}
   });
   Element.prototype.scrollIntoView = vi.fn();
-  fetchMock = vi.fn(async (url: string) => {
+  fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.startsWith('/api/chat/primary?')) return new Response(JSON.stringify({ agent: '' }));
     if (url.startsWith('/api/chat/persona?')) return new Response(JSON.stringify({ name: 'engineer' }));
     if (url === '/api/chat/send') {
@@ -87,7 +88,7 @@ beforeEach(() => {
         headers: { 'Content-Type': 'text/event-stream' },
       });
     }
-    return new Response(JSON.stringify(url === '/api/chat/attach' ? { attach_id: 'attach-1' } : {}));
+    return new Response(JSON.stringify(url === '/api/chat/attach' ? { session_id: JSON.parse(String(init?.body)).sid, attach_id: 'attach-1' } : {}));
   });
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -99,6 +100,128 @@ afterEach(() => {
 });
 
 describe('canonical browser chat', () => {
+  it('admits a fresh session before preferences or replay and reuses its surface for sending', async () => {
+    let resolveAttach!: (response: Response) => void;
+    const ordinary = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/attach'
+      ? new Promise<Response>(resolve => { resolveAttach = resolve; }) : ordinary(url, init));
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/chat/primary'))).toBe(false);
+    expect(sources).toHaveLength(0);
+    await act(async () => { resolveAttach(new Response(JSON.stringify({ session_id: 'web-one', attach_id: 'fresh-surface' }))); });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/chat/primary?sid=web-one'))).toBe(true);
+    expect(sources.filter(source => !source.closed)).toHaveLength(1);
+    fireEvent.change(screen.getByPlaceholderText(/^Type a message/), { target: { value: 'Fresh session first turn' } });
+    fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
+    await act(async () => {});
+    const sent = fetchMock.mock.calls.find(([url]) => url === '/api/chat/send');
+    expect(JSON.parse(String(sent?.[1]?.body))).toMatchObject({ aimee_session_id: 'web-one', attach_id: 'fresh-surface' });
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(1);
+    await close();
+  });
+
+  it('does not revive a cached attachment after a real page remount', async () => {
+    localStorage.setItem('aimee_chat_tabs', JSON.stringify([{ sessionId: 'one', aimeeSid: 'web-one', attachId: 'dead-surface', messages: [] }]));
+    let view = await start();
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/chat/send')?.[1]?.body)).attach_id).toBe('attach-1');
+    await close();
+    view.unmount();
+    await act(async () => {});
+    expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/chat/detach' && JSON.parse(String(init?.body)).attach_id === 'attach-1')).toBe(true);
+    fetchMock.mockClear();
+    view = await start();
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(1);
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/chat/send')?.[1]?.body)).attach_id).toBe('attach-1');
+    await close(); view.unmount();
+  });
+
+  it('releases a late attachment when its page has already closed', async () => {
+    let resolveAttach!: (response: Response) => void;
+    fetchMock.mockImplementation((url: string) => url === '/api/chat/attach'
+      ? new Promise<Response>(resolve => { resolveAttach = resolve; }) : Promise.resolve(new Response('{}')));
+    const view = render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    view.unmount();
+    await act(async () => { resolveAttach(new Response(JSON.stringify({ session_id: 'web-one', attach_id: 'late-surface' }))); });
+    const detaches = fetchMock.mock.calls.filter(([url]) => url === '/api/chat/detach');
+    expect(detaches).toHaveLength(1);
+    expect(JSON.parse(String(detaches[0][1]?.body))).toEqual({ sid: 'web-one', attach_id: 'late-surface' });
+    expect(sources).toHaveLength(0);
+  });
+
+  it('refuses foreign attachment replies and retries through the admitted owner route', async () => {
+    const ordinary = fetchMock.getMockImplementation()!;
+    let attempts = 0;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/attach'
+      ? Promise.resolve(new Response(JSON.stringify({ session_id: ++attempts === 1 ? 'foreign-session' : 'web-one', attach_id: 'owned-surface' }))) : ordinary(url, init));
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    expect(screen.getByRole('alert').textContent).toContain('Invalid conversation attachment');
+    expect(sources).toHaveLength(0);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/chat/primary'))).toBe(false);
+    fireEvent.click(screen.getByText('Reconnect conversation'));
+    await act(async () => {});
+    expect(attempts).toBe(2);
+    expect(sources.filter(source => !source.closed)).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/chat/primary?sid=web-one'))).toBe(true);
+  });
+
+  it('keeps a refused send visible through replay and reacquires its surface only on explicit reconnect', async () => {
+    await start();
+    const source = sources.filter(source => !source.closed).at(-1)!;
+    await emit(['ir', { status: 'error', message: 'invalid chat attachment', http_status: 502 }]);
+    await close();
+    expect(screen.getByRole('alert').textContent).toContain('invalid chat attachment');
+    await act(async () => {
+      source.emit(envelope(message('saved', 'A saved message arriving during reconnect')));
+      source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '1' }) });
+    });
+    expect(screen.getByRole('alert').textContent).toContain('invalid chat attachment');
+    const ordinary = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/attach'
+      ? Promise.resolve(new Response(JSON.stringify({ session_id: 'web-one', attach_id: 'replacement-surface' }))) : ordinary(url, init));
+    fireEvent.click(screen.getByText('Reconnect conversation'));
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(1);
+    expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/chat/detach' && JSON.parse(String(init?.body)).attach_id === 'attach-1')).toBe(true);
+    fireEvent.change(screen.getByPlaceholderText(/^Type a message/), { target: { value: 'An explicitly requested new turn' } });
+    fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
+    await act(async () => {});
+    const sends = fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send');
+    expect(sends).toHaveLength(2);
+    expect(JSON.parse(String(sends[1][1]?.body)).attach_id).toBe('replacement-surface');
+    await close();
+  });
+
+  it('keeps the live surface through BFcache navigation and detaches only on a genuine page discard', async () => {
+    render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(1);
+    await act(async () => {
+      window.dispatchEvent(new Event('beforeunload'));
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    });
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/detach')).toHaveLength(0);
+    fireEvent.change(screen.getByPlaceholderText(/^Type a message/), { target: { value: 'After a real Back navigation' } });
+    fireEvent.keyDown(screen.getByPlaceholderText(/^Type a message/), { key: 'Enter' });
+    await act(async () => {});
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/attach')).toHaveLength(1);
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/chat/send')?.[1]?.body)).attach_id).toBe('attach-1');
+    await close();
+    await act(async () => {
+      window.dispatchEvent(new Event('beforeunload'));
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }));
+    });
+    const detaches = fetchMock.mock.calls.filter(([url]) => url === '/api/chat/detach');
+    expect(detaches).toHaveLength(1);
+    expect(JSON.parse(String(detaches[0][1]?.body))).toEqual({ sid: 'web-one', attach_id: 'attach-1' });
+    expect(detaches[0][1]?.keepalive).toBe(true);
+  });
+
   it('merges delayed channel history with repeated live frames and reconnect snapshots', async () => {
     localStorage.setItem('aimee_active_channel', 'room');
     const ordinaryFetch = fetchMock.getMockImplementation()!;
@@ -203,6 +326,93 @@ describe('canonical browser chat', () => {
     await tick();
     expect(screen.getByRole('button', { name: 'Send', exact: true })).toBeTruthy();
     expect(screen.getByPlaceholderText(/^Type a message/)).toBeTruthy();
+  });
+
+  async function runningDraft(text: string) {
+    const view = render(<StrictMode><Chat /></StrictMode>);
+    await act(async () => {});
+    const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+    await act(async () => { source.emit(envelope({ kind: 'execution', payload: { status: 'running' } }));
+      source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '1' }) }); });
+    const box = screen.getByPlaceholderText('Steer the running turn…');
+    fireEvent.change(box, { target: { value: text } });
+    fireEvent.keyDown(box, { key: 'Enter', shiftKey: false });
+    await act(async () => {});
+    return { source, box, view };
+  }
+
+  it('stops the exact canonical turn and waits for its terminal before one continuation', async () => {
+    const ordinary = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/cancel'
+      ? Promise.resolve(new Response(JSON.stringify({ status: 'ok', session_id: 'web-one', turn_id: 'turn-one', disposition: 'stopping' })))
+      : ordinary(url, init));
+    const { source, box } = await runningDraft('New explicit continuation');
+    const stops = () => fetchMock.mock.calls.filter(([url]) => url === '/api/chat/cancel');
+    const sends = () => fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send');
+    expect(stops()).toHaveLength(1);
+    expect(JSON.parse(String(stops()[0][1]?.body))).toEqual({ session_id: 'web-one', turn_id: 'turn-one' });
+    expect(sends()).toHaveLength(0);
+    expect((box as HTMLTextAreaElement).value).toBe('New explicit continuation');
+    fireEvent.keyDown(box, { key: 'Enter', shiftKey: false });
+    await act(async () => { source.emit(envelope({ kind: 'execution', payload: { status: 'cancelled' } })); });
+    await tick(300);
+    expect(stops()).toHaveLength(1);
+    expect(sends()).toHaveLength(1);
+    await act(async () => { source.emit(envelope({ kind: 'execution', payload: { status: 'cancelled' } })); });
+    await tick(300);
+    expect(sends()).toHaveLength(1);
+  });
+
+  it.each(['http', 'network', 'malformed', 'wrong-turn'])('retains the stop draft and sends nothing after %s failure', async failure => {
+    const ordinary = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url !== '/api/chat/cancel') return ordinary(url, init);
+      if (failure === 'network') return Promise.reject(new Error('Network unavailable'));
+      return Promise.resolve(new Response(JSON.stringify(failure === 'wrong-turn'
+        ? { session_id: 'web-one', turn_id: 'another-turn', disposition: 'stopping' } : {}), { status: failure === 'http' ? 503 : 200 }));
+    });
+    const { box } = await runningDraft('Keep this draft');
+    await tick(300);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/interrupt')).toHaveLength(0);
+    expect((box as HTMLTextAreaElement).value).toBe('Keep this draft');
+    expect(screen.getByRole('alert').textContent).toMatch(/retained|Network unavailable/);
+  });
+
+  it('does not continue into another selected session after a successful stop', async () => {
+    const ordinary = fetchMock.getMockImplementation()!;
+    let acknowledge!: (response: Response) => void;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/cancel'
+      ? new Promise<Response>(resolve => { acknowledge = resolve; }) : ordinary(url, init));
+    const { source, view } = await runningDraft('Original session draft');
+    await act(async () => { source.emit(envelope({ kind: 'execution', payload: { status: 'cancelled' } })); });
+    context.active = context.sessions[1];
+    view.rerender(<StrictMode><Chat /></StrictMode>);
+    await act(async () => { acknowledge(new Response(JSON.stringify({ status: 'ok', session_id: 'web-one', turn_id: 'turn-one', disposition: 'stopping' }))); });
+    await tick(300);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+  });
+
+  it('keeps the draft when a stop is acknowledged but no canonical terminal arrives', async () => {
+    const ordinary = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/cancel'
+      ? Promise.resolve(new Response(JSON.stringify({ status: 'ok', session_id: 'web-one', turn_id: 'turn-one', disposition: 'stopping' }))) : ordinary(url, init));
+    const { box } = await runningDraft('Wait for a real terminal');
+    await tick(30100);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    expect((box as HTMLTextAreaElement).value).toBe('Wait for a real terminal');
+    expect(screen.getByRole('alert').textContent).toMatch(/still stopping/);
+  });
+
+  it.each(['exact', 'wrong-event', 'wrong-error', 'wrong-sequence'])('requires the exact committed cancellation marker before continuation: %s', async mode => {
+    const ordinary = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => url === '/api/chat/cancel'
+      ? Promise.resolve(new Response(JSON.stringify({ status: 'ok', session_id: 'web-one', turn_id: 'turn-one', disposition: 'cancelled', terminal_sequence: mode === 'wrong-sequence' ? '3' : '2' }))) : ordinary(url, init));
+    const { source, box } = await runningDraft('Continue only after the exact marker');
+    await act(async () => { source.emit({ ...envelope({ kind: 'execution', payload: { status: 'cancelled', error: mode === 'wrong-error' ? 'ordinary stop' : operatorCancelError } }), event_id: mode === 'wrong-event' ? 'unrelated-stop' : 'operator-cancel:turn-one' }); });
+    await tick(300);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(mode === 'exact' ? 1 : 0);
+    if (mode !== 'exact') expect((box as HTMLTextAreaElement).value).toBe('Continue only after the exact marker');
   });
 
   it('waits for the selected model to be saved before sending the retained draft', async () => {

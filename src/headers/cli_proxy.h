@@ -13,6 +13,8 @@ typedef struct cli_proxy cli_proxy_t;
 typedef struct
 {
    int downstream_fd;
+   /* Borrowed authenticated local capability, never forwarded upstream. */
+   const char *local_credential;
    void *context;
    int (*write_response)(const void *data, unsigned long length, void *context);
    void (*on_upstream)(int fd, void *context);
@@ -24,6 +26,9 @@ typedef int (*cli_proxy_forward_fn)(const char *method, const char *path, const 
                                     const void *body, unsigned long body_len,
                                     const char *session_id, const cli_proxy_io_t *io,
                                     void *host_context);
+typedef int (*cli_proxy_authorize_fn)(const char *method, const char *path, const char *token,
+                                      void *host_context);
+
 typedef int (*cli_proxy_route_fn)(const char *method, const char *path, void *host_context);
 
 /* Explicit host runtime policy, in addition to the listener's token/framing
@@ -32,6 +37,14 @@ typedef int (*cli_proxy_route_fn)(const char *method, const char *path, void *ho
 cli_proxy_t *cli_proxy_start_scoped(unsigned port, const char *local_token, const char *session_id,
                                     unsigned *bound_port, cli_proxy_route_fn route,
                                     cli_proxy_forward_fn forward, void *host_context);
+
+/* Optional host-owned alternate capabilities. The validator must verify the
+ * exact token and route, and callbacks must revalidate lifetime before effects.
+ * NULL retains fixed-token behavior. No caller header installs a validator. */
+cli_proxy_t *cli_proxy_start_authorized(unsigned port, const char *local_token,
+                                        const char *session_id, unsigned *bound_port,
+                                        cli_proxy_route_fn route, cli_proxy_authorize_fn authorize,
+                                        cli_proxy_forward_fn forward, void *host_context);
 
 /* Explicit transport for an already authorized host scope. No global CLI auth
  * is consulted. A nonempty bound session overrides client-supplied correlation.

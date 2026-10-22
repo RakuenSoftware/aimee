@@ -56,7 +56,7 @@ typedef struct primary_session_state
    char scope_id[128];
    int history_failed;
    char agent_name[MAX_AGENT_NAME];
-   char provider[64];
+   char provider[sizeof(((agent_t *)0)->provider)];
    cJSON *messages;
    int busy;
    time_t last_used;
@@ -67,6 +67,7 @@ static pthread_mutex_t g_primary_sessions_lock = PTHREAD_MUTEX_INITIALIZER;
 static primary_session_state_t *g_primary_sessions;
 static unsigned long g_primary_session_seq;
 static primary_session_native_reconcile_fn g_primary_native_reconcile;
+static primary_session_native_browse_reconcile_fn g_primary_native_browse_reconcile;
 static primary_session_native_history_load_fn g_primary_native_history_load;
 void primary_session_adapter_set_native_history_load(primary_session_native_history_load_fn fn)
 {
@@ -78,6 +79,13 @@ void primary_session_adapter_set_native_reconcile(primary_session_native_reconci
 {
    pthread_mutex_lock(&g_primary_sessions_lock);
    g_primary_native_reconcile = fn;
+   pthread_mutex_unlock(&g_primary_sessions_lock);
+}
+void primary_session_adapter_set_native_browse_reconcile(
+    primary_session_native_browse_reconcile_fn fn)
+{
+   pthread_mutex_lock(&g_primary_sessions_lock);
+   g_primary_native_browse_reconcile = fn;
    pthread_mutex_unlock(&g_primary_sessions_lock);
 }
 static int primary_native_owners_empty(const char *session, const char *actor)
@@ -192,6 +200,12 @@ int primary_session_history_open(const char *session, const char *actor)
    db1_server_session_t owner;
    if (!session || !session[0] || !actor || !actor[0] || !attested || strcmp(actor, attested) ||
        db1_server_session_get(session, &owner) || strcmp(owner.principal, actor))
+      return -1;
+   pthread_mutex_lock(&g_primary_sessions_lock);
+   primary_session_native_browse_reconcile_fn reconcile = g_primary_native_browse_reconcile;
+   pthread_mutex_unlock(&g_primary_sessions_lock);
+   char error[512] = {0};
+   if (reconcile ? reconcile(session, actor, error) : primary_native_owners_empty(session, actor))
       return -1;
    cJSON *messages = NULL;
    int status = primary_history_import_source(session, session, actor, &messages, 1);

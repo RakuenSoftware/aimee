@@ -601,6 +601,18 @@ void mcp_collapse_families(cJSON *tools)
    }
 }
 
+const char *mcp_family_discriminator(const char *tool)
+{
+   if (!tool)
+      return NULL;
+   if (!strcmp(tool, "git"))
+      return "command";
+   for (const struct fam_def *f = MCP_FAMILIES; f->name; f++)
+      if (!strcmp(tool, f->name))
+         return f->cmd_key;
+   return NULL;
+}
+
 int mcp_family_demux(const char *tool, cJSON *args, char *out, size_t n)
 {
    /* Git has its own advertised multiplexed schema. Resolve it at the same

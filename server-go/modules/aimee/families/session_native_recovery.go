@@ -8,10 +8,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	canonical "github.com/JBailes/aimee/server-go/ir"
-	store "github.com/JBailes/aimee/server-go/modules/aimee"
 	"strconv"
 	"strings"
+
+	canonical "github.com/JBailes/aimee/server-go/ir"
+	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
 
 const opSessionNativeOwnerClaim uint32 = 38
@@ -57,7 +58,11 @@ func (r nativeOwnerRequest) key() string {
 }
 func (r nativeOwnerRequest) token(phase string) string { return phase + ":" + r.Claim + ":" + r.Turn }
 
-const nativeRecoveryFenceSQL = `SELECT 1 FROM session_native_recovery_fences WHERE session_id=$1 AND turn_id=$2`
+// Operator cancellation fences continuation without asserting native quiescence.
+const nativeRecoveryFenceSQL = `SELECT 1 FROM session_native_recovery_fences WHERE session_id=$1 AND turn_id=$2
+ UNION ALL SELECT 1 FROM session_ir_events e JOIN server_sessions s ON s.id=e.session_id AND s.principal=e.actor
+ WHERE e.session_id=$1 AND e.turn_id=$2 AND e.event_id='operator-cancel:' || $2
+ AND e.payload='` + operatorCancelPayload + `' LIMIT 1`
 
 func nativeRecoveryFenced(ctx context.Context, q store.Queryer, session, turn string) (bool, error) {
 	var one int

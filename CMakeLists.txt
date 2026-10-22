@@ -800,6 +800,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_kb_smoke.c
     ${AIMEE_SRC_DIR}/cli_v1_routes.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_d.c
+    ${AIMEE_SRC_DIR}/cli_native_bridge.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_e.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_c.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_b.c
@@ -920,6 +921,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_skill_jobs.c
     ${AIMEE_SRC_DIR}/server/server_mcp.c
     ${AIMEE_SRC_DIR}/server/server_mcp_call_table.c
+    ${AIMEE_SRC_DIR}/server/server_mcp_project.c
     ${AIMEE_SRC_DIR}/server/server_mcp_ast_grep.c
     ${AIMEE_SRC_DIR}/server/server_mcp_tools.c
     ${AIMEE_SRC_DIR}/server/server_mcp_delegate.c
@@ -934,6 +936,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/cli_client.c
     ${AIMEE_SRC_DIR}/cli_v1_routes.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_d.c
+    ${AIMEE_SRC_DIR}/cli_native_bridge.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_e.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_c.c
     ${AIMEE_SRC_DIR}/cli_v1_routes_b.c
@@ -1000,6 +1003,7 @@ list(APPEND SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_native_history.c
     ${AIMEE_SRC_DIR}/server/server_unknown_effect_policy.c
     ${AIMEE_SRC_DIR}/server/server_native_runtime.c
+    ${AIMEE_SRC_DIR}/server/server_native_cli.c
     ${AIMEE_SRC_DIR}/server/server_native_execution.c
     ${AIMEE_SRC_DIR}/server/server_native_cache_lease.c
     ${AIMEE_SRC_DIR}/server/server_native_containment.c

@@ -1,4 +1,5 @@
 #include "server_native_runtime.h"
+#include "server_native_sdk_profile.h"
 #include "modules/workspace/workspace_turn.h"
 #include "computer_use.h"
 #include <aimee/translation/aimee_backend.h>
@@ -47,6 +48,13 @@ const char *agent_tools_dispatch_role(void)
 void agent_tools_set_dispatch_role(const char *role)
 {
    snprintf(tool_role, sizeof tool_role, "%s", role ? role : "");
+}
+static _Thread_local char *const *shell_environment;
+char *const *agent_tools_bind_bash_environment(char *const environment[])
+{
+   char *const *previous = shell_environment;
+   shell_environment = environment;
+   return previous;
 }
 void agent_tools_set_effect_authorized(int authorized)
 {
@@ -260,6 +268,13 @@ const agent_request_cancel_scope_t *agent_request_cancel_scope_current(void)
 {
    return current_cancel_scope;
 }
+const agent_request_cancel_scope_t *
+agent_request_cancel_scope_bind(const agent_request_cancel_scope_t *scope)
+{
+   const agent_request_cancel_scope_t *previous = current_cancel_scope;
+   current_cancel_scope = scope;
+   return previous;
+}
 int agent_request_cancelled(void)
 {
    if (current_cancel && atomic_load(current_cancel))
@@ -280,16 +295,23 @@ char *safe_strdup(const char *text)
 {
    return text ? strdup(text) : NULL;
 }
-static atomic_int execution_mode, dispatch_count, mcp_execution;
-static _Thread_local char execution_attempt[96];
+static atomic_int execution_mode, dispatch_count, mcp_execution, cli_shell_probe;
+static char revoked_cli_token[65], revoked_cli_url[64], outer_cli_attempt[128];
+static void exercise_nested_cli(void);
+static _Thread_local char execution_attempt[128];
 static void check_execution_owner(const char *name)
 {
    assert(current_mirror == &fixture_mirror);
    const request_context_t *owner = request_context_get();
-   assert(!strcmp(name, "read_file") && owner && owner->model_execution);
+   assert(
+       (!strcmp(name, "read_file") || (atomic_load(&cli_shell_probe) && !strcmp(name, "bash"))) &&
+       owner && owner->model_execution);
    assert(!strcmp(owner->vault_principal, "webuser:alice") && !strcmp(identity, "webuser:alice"));
-   assert(!strcmp(owner->method, atomic_load(&mcp_execution) ? "POST" : "CALL") &&
-          !strcmp(owner->path, atomic_load(&mcp_execution) ? "/v1/mcp/call" : "/native/tool"));
+   if (atomic_load(&cli_shell_probe) && !strcmp(owner->path, "/v1/native/cli"))
+      assert(!strcmp(owner->method, "POST"));
+   else
+      assert(!strcmp(owner->method, atomic_load(&mcp_execution) ? "POST" : "CALL") &&
+             !strcmp(owner->path, atomic_load(&mcp_execution) ? "/v1/mcp/call" : "/native/tool"));
    assert(!(owner->capabilities & (CAP_WORKFLOW_ADMIN | CAP_GRANT_ADMIN | CAP_SHADOW_ADMIN)));
    assert(current_model && !strcmp(current_model->model, "selected-model"));
    assert(agent_tools_scope_isolated() && !strcmp(agent_tools_dispatch_role(), "reviewer"));
@@ -304,7 +326,9 @@ int tool_validate_ir(const aimee_tool_t *function, const char *arguments, char *
                              ? "read_file"
                              : function->name);
    assert(cJSON_IsObject(function->schema) && function->description);
-   if (atomic_load(&mcp_execution) && strcmp(function->description, "admitted source schema"))
+   if (atomic_load(&cli_shell_probe))
+      assert(function->name && function->schema);
+   else if (atomic_load(&mcp_execution) && strcmp(function->description, "admitted source schema"))
    {
       aimee_tool_t current = {0};
       assert(!agent_tools_execution_definition("read_file", &current));
@@ -316,6 +340,12 @@ int tool_validate_ir(const aimee_tool_t *function, const char *arguments, char *
       assert(!strcmp(function->description, "admitted source schema"));
    assert(strstr(arguments, "123.123456789012345678901234567890"));
    assert(!effect_authorized);
+   if (atomic_load(&cli_shell_probe) == 3 && !strcmp(function->name, "read_file") &&
+       cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(
+           cJSON_GetObjectItemCaseSensitive(
+               cJSON_GetObjectItemCaseSensitive(function->schema, "properties"), "amount"),
+           "maximum")))
+      return -1;
    snprintf(error, size, "%s", "");
    return 0;
 }
@@ -354,9 +384,17 @@ int policy_check_tool_metadata_attempt(const char *name, const aimee_tool_metada
    check_execution_owner(name);
    assert(metadata->primary == AIMEE_TOOL_POLICY_READ && !strcmp(effect, "read"));
    assert(strstr(arguments, "123.123456789012345678901234567890") && !effect_authorized);
-   size_t prefix = strlen("native-ir:");
-   assert(!strncmp(attempt, "native-ir:", prefix) && strlen(attempt) == prefix + 64);
-   assert(strspn(attempt + prefix, "0123456789abcdef") == 64);
+   if (atomic_load(&cli_shell_probe) && !strcmp(request_context_get()->path, "/v1/native/cli"))
+   {
+      assert(!strncmp(attempt, "native-cli:", 11) && strlen(attempt) == 108);
+      assert(!strncmp(attempt + 11, outer_cli_attempt + 10, 64) && attempt[75] == ':');
+   }
+   else
+   {
+      size_t prefix = strlen("native-ir:");
+      assert(!strncmp(attempt, "native-ir:", prefix) && strlen(attempt) == prefix + 64);
+      assert(strspn(attempt + prefix, "0123456789abcdef") == 64);
+   }
    snprintf(execution_attempt, sizeof execution_attempt, "%s", attempt);
    snprintf(error, size, "%s", execution_mode == 2 ? "policy owner refused execution" : "");
    if (execution_mode == 7)
@@ -378,6 +416,8 @@ char *dispatch_tool_call_ir_ctx_status(const aimee_tool_t *function, const char 
    assert(effect_authorized && timeout == 120000);
    assert(strstr(arguments, "123.123456789012345678901234567890"));
    dispatch_count++;
+   if (atomic_load(&cli_shell_probe) && !strcmp(function->name, "bash"))
+      exercise_nested_cli();
    *is_error = execution_mode == 3;
    if (execution_mode == 4)
       atomic_store(&reject_durable, 1);
@@ -395,6 +435,24 @@ char *policy_annotate_indexed(const char *name, const char *arguments, const cha
       return NULL;
    }
    return text;
+}
+
+/* The real owner handshake is exercised by test_ingress_preinject. This runtime
+ * fixture verifies callbacks reach it under their distinct captured identity. */
+int ingress_preinject_fork_sources(const request_context_t *parent)
+{
+   const request_context_t *current = request_context_get();
+   assert(parent && current && strcmp(parent->request_id, current->request_id));
+   assert(!strcmp(parent->principal, current->principal));
+   assert(!strcmp(parent->vault_principal, current->vault_principal));
+   if (parent->memory_source_release[0])
+      return request_context_set_source_release("0123456789abcdef0123456789abcdef");
+   return 0;
+}
+void ingress_preinject_finish_sources(void)
+{
+   assert(request_context_get()->memory_source_release[0]);
+   assert(request_context_set_source_release("") == 0);
 }
 
 const agent_t *agent_registry_bind_ingress_model(const agent_t *selected)
@@ -523,6 +581,12 @@ void anthropic_http_capture_request_headers(const char *headers)
              !strstr(headers, "forged"));
    }
 }
+int anthropic_http_capture_native_request_headers(const char *headers)
+{
+   anthropic_http_capture_request_headers(headers);
+   return 0;
+}
+#include "support/native_beta_path_fixture.h"
 int server_http_native_forward(int fd, const char *method, const char *path, const char *body,
                                int length)
 {
@@ -648,7 +712,8 @@ struct server_native_replay
    char actor[VAULT_PRINCIPAL_MAX], session[128];
 };
 static atomic_int owned_profile_probe, snapshot_generation, tool_source_probe, postpolicy_gap,
-    flat_bound_probe;
+    flat_bound_probe, preframe_error_probe;
+#include "support/native_sdk_metadata_fixture.h"
 static cJSON *source_rows;
 server_native_replay_t *server_native_replay_open(const char *session, const char *actor,
                                                   const char *scope, const char *model)
@@ -705,7 +770,7 @@ static int probe_original_tool(void)
 {
    int mode = atomic_load(&tool_source_probe);
    int owned = atomic_load(&owned_profile_probe);
-   const char *name = owned ? "read_file" : "exec_command";
+   const char *name = atomic_load(&cli_shell_probe) ? "bash" : owned ? "read_file" : "exec_command";
    const char *space = owned ? "aimee" : NULL;
    if (atomic_load(&flat_bound_probe))
    {
@@ -770,11 +835,15 @@ static void probe_replay_scope(const char *path)
       {
          assert(request_owner_scope.guard);
          request.model = strdup("SDK model selector");
+         sdk_identity_incoming(&request);
+         int metadata_mode = atomic_load(&sdk_metadata_case);
+         request.frontend = metadata_mode == 12 ? AIMEE_WIRE_RESPONSES : AIMEE_WIRE_ANTHROPIC;
+         request.metadata = sdk_metadata_fixture(metadata_mode);
          request.raw = cJSON_Parse("{\"conversation\":\"SDK private history\"}");
          request.raw_bytes = strdup("SDK original bytes");
          request.raw_length = strlen(request.raw_bytes);
          int admitted = request_owner_scope.guard(&request, request_owner_scope.context);
-         if (atomic_load(&snapshot_fault) == 3)
+         if (atomic_load(&snapshot_fault) == 3 || sdk_metadata_refuses(metadata_mode))
          {
             assert(admitted == -1);
             aimee_request_free(&request);
@@ -782,7 +851,24 @@ static void probe_replay_scope(const char *path)
          }
          assert(!admitted && !strcmp(request.model, "selected-model") && request.mutated);
          assert(!request.raw && !request.raw_bytes && !request.raw_length);
-         assert(request.n_system == 1 && !strcmp(request.system[0].text, "host-owned system"));
+         const char *sdk_id =
+             cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(request.metadata, "user_id"));
+         if (metadata_mode == 1 || metadata_mode == 12)
+            assert(!sdk_id);
+         else if (metadata_mode == 2)
+            assert(cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(request.metadata, "user_id")));
+         else if (metadata_mode == 3)
+            assert(sdk_id && strlen(sdk_id) == 1536);
+         else
+            assert(sdk_id && !strcmp(sdk_id, sdk_metadata_value()));
+         if (atomic_load(&sdk_host_metadata))
+            assert(!strcmp(cJSON_GetStringValue(
+                               cJSON_GetObjectItemCaseSensitive(request.metadata, "host_marker")),
+                           "host-profile"));
+         int identity = atomic_load(&sdk_identity_probe);
+         assert(request.n_system == 1 + identity);
+         assert(!strcmp(request.system[identity].text, "host-owned system"));
+         assert(!identity || !strcmp(request.system[0].text, AIMEE_NATIVE_CLAUDE_IDENTITY));
          assert(request.n_messages == 1 && request.n_tools == 1);
          assert(!strcmp(request.messages[0].blocks[0].text, atomic_load(&snapshot_generation) == 1
                                                                 ? "fresh durable one"
@@ -811,6 +897,21 @@ static void probe_replay_scope(const char *path)
                assert(!parsed);
             }
             cJSON_Delete(gap);
+         }
+         if (atomic_load(&cli_shell_probe) == 2)
+         {
+            assert(request.tools[0].n_children == 2);
+            aimee_tool_free(&request.tools[0].children[1]);
+            request.tools[0].n_children = 1;
+         }
+         if (atomic_load(&cli_shell_probe) == 3)
+         {
+            free(request.tools[0].children[1].description);
+            request.tools[0].children[1].description = strdup("post-policy changed schema");
+            cJSON *amount = cJSON_GetObjectItemCaseSensitive(
+                cJSON_GetObjectItemCaseSensitive(request.tools[0].children[1].schema, "properties"),
+                "amount");
+            assert(amount && cJSON_AddNumberToObject(amount, "maximum", 0));
          }
          int mode = atomic_load(&tool_source_probe);
          if (mode == 5 || mode == 8)
@@ -847,6 +948,19 @@ static void probe_replay_scope(const char *path)
          }
       }
       aimee_request_free(&request);
+      if (atomic_load(&preframe_error_probe))
+      {
+         /* Actual ingress emits this host diagnostic when transport fails
+          * before any vendor message_start. It is not an assistant message. */
+         aimee_delta_t error = {.type = AIMEE_DELTA_ERROR,
+                                .error_message = "Provider transport failed before first frame"};
+         aimee_session_event_t diagnostic = {.kind = AIMEE_SESSION_DELTA,
+                                             .role = "assistant",
+                                             .message_id = "native",
+                                             .delta = &error};
+         assert(!aimee_ir_session_emit(&diagnostic));
+         return;
+      }
       aimee_session_event_t event = {.kind = AIMEE_SESSION_PROJECTION,
                                      .projection_model = "selected-model",
                                      .projection_boundary = "response",
@@ -1242,13 +1356,16 @@ static void test_source_claim(server_native_runtime_t *runtime, const char *name
 void server_learning_observe_terminal(const char *session, const char *turn, const char *sequence,
                                       const char *id, const char *actor, const cJSON *event)
 {
-   (void)session;
-   (void)turn;
-   (void)sequence;
    (void)id;
-   (void)actor;
-   (void)event;
-   assert(!"listener fixture must not invent a completed execution");
+   /* Only the explicit transport-failure regression owns a host terminal;
+    * model callbacks themselves still cannot manufacture completion. */
+   assert(atomic_load(&preframe_error_probe));
+   assert(!strcmp(session, "private-child") && !strcmp(turn, "native-turn") &&
+          !strcmp(actor, "webuser:alice") && !strcmp(sequence, "3"));
+   const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(event, "kind"));
+   const cJSON *payload = cJSON_GetObjectItemCaseSensitive(event, "payload");
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(payload, "status"));
+   assert(kind && !strcmp(kind, "execution") && status && !strcmp(status, "failed"));
 }
 static void test_retained_capture(const agent_t *selected, const request_context_t *owner)
 {
@@ -1314,6 +1431,64 @@ static void test_retained_capture(const agent_t *selected, const request_context
       cJSON_Delete(captured_rows);
       captured_rows = NULL;
    }
+}
+
+static void test_native_preframe_error(const agent_t *selected, const request_context_t *owner)
+{
+   owner_tools(1);
+   aimee_tool_t function = {.name = "read_file"};
+   aimee_tool_t space = {
+       .kind = AIMEE_TOOL_NAMESPACE, .name = "aimee", .children = &function, .n_children = 1};
+   aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
+   aimee_request_t profile = {.model = "selected-model",
+                              .frontend = AIMEE_WIRE_ANTHROPIC,
+                              .tools = &space,
+                              .n_tools = 1,
+                              .system = &system,
+                              .n_system = 1,
+                              .prompt_cache_key = "",
+                              .mutated = 1};
+   server_session_capture_t *capture =
+       server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+   assert(capture && !server_session_capture_bind(capture));
+   server_native_runtime_t *runtime =
+       server_native_runtime_open_request(selected, owner, "session-a", &profile);
+   assert(runtime && server_session_capture_bind(NULL) == capture);
+   atomic_store(&expected_capture, capture);
+   captured_rows = cJSON_CreateArray();
+   atomic_store(&owned_profile_probe, 1);
+   atomic_store(&snapshot_generation, 1);
+   atomic_store(&preframe_error_probe, 1);
+   aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
+   assert(!server_session_capture_append(capture, &started, NULL, NULL));
+   char response[1024];
+   request(runtime, "/v1/messages", server_native_runtime_token(runtime), response);
+   assert(!server_session_capture_failed(capture));
+   server_native_runtime_quiesce(runtime);
+   aimee_response_t original = {0};
+   assert(server_native_runtime_result(runtime, &original) < 0);
+   server_native_tool_claim_t claim = {0};
+   assert(server_native_runtime_claim_reference(runtime, "invented-call", "aimee", "read_file",
+                                                &claim) < 0);
+   aimee_session_event_t failed = {.kind = AIMEE_SESSION_EXECUTION,
+                                   .execution_status = "failed",
+                                   .execution_error =
+                                       "Provider transport failed before first frame"};
+   assert(!server_session_capture_append(capture, &failed, NULL, NULL));
+   assert(!server_session_capture_accepting(capture));
+   assert(cJSON_GetArraySize(captured_rows) == 3);
+   char *wire = cJSON_PrintUnformatted(captured_rows);
+   assert(wire && strstr(wire, "Provider transport failed before first frame") &&
+          strstr(wire, "failed") && !strstr(wire, "tool_use") && !strstr(wire, "\"message\""));
+   free(wire);
+   server_native_runtime_close(runtime);
+   server_session_capture_close(capture);
+   atomic_store(&expected_capture, NULL);
+   atomic_store(&owned_profile_probe, 0);
+   atomic_store(&snapshot_generation, 0);
+   atomic_store(&preframe_error_probe, 0);
+   cJSON_Delete(captured_rows);
+   captured_rows = NULL;
 }
 
 static void test_native_original_catalog(const agent_t *selected, const request_context_t *owner)
@@ -1499,11 +1674,88 @@ static void *reply_to_execution_question(void *unused)
    free(id);
    return NULL;
 }
+static const char *fixture_env(const char *key)
+{
+   size_t n = strlen(key);
+   for (char *const *p = shell_environment; p && *p; p++)
+      if (!strncmp(*p, key, n) && (*p)[n] == '=')
+         return *p + n + 1;
+   return NULL;
+}
+static int cli_child_request(const char *url, const char *token, const char *body)
+{
+   const char *port = strrchr(url, ':') + 1;
+   int fd = aimee_core_socket_connect("127.0.0.1", port, 2000);
+   assert(fd >= 0 && !aimee_core_socket_set_timeouts(fd, 5000, 2000));
+   char header[1024], response[4096];
+   int n =
+       snprintf(header, sizeof header,
+                "POST /v1/native/cli HTTP/1.1\r\nHost: 127.0.0.1:%s\r\nAuthorization: Bearer %s\r\n"
+                "X-Aimee-Webuser: spoofed-actor\r\nsession_id: foreign-session\r\n"
+                "Content-Length: %zu\r\n\r\n",
+                port, token, strlen(body));
+   assert(!aimee_core_socket_write_all(fd, header, (size_t)n));
+   assert(!aimee_core_socket_write_all(fd, body, strlen(body)));
+   size_t used = 0;
+   long got;
+   while ((got = aimee_core_socket_read(fd, response + used, sizeof response - used - 1)) > 0)
+      used += (size_t)got;
+   /* An early authentication refusal may close unread request bytes with RST.
+    * Require a complete HTTP response, rather than mistaking that for timeout. */
+   response[used] = 0;
+   assert(used && strstr(response, "\r\n\r\n"));
+   aimee_core_socket_close(fd);
+   int status = 0;
+   assert(sscanf(response, "HTTP/1.1 %d", &status) == 1);
+   return status;
+}
+static void exercise_nested_cli(void)
+{
+   snprintf(outer_cli_attempt, sizeof outer_cli_attempt, "%s", execution_attempt);
+   assert(!strncmp(outer_cli_attempt, "native-ir:", 10) && strlen(outer_cli_attempt) == 74);
+   const char *token = fixture_env("AIMEE_API_BEARER");
+   const char *url = fixture_env("AIMEE_API_ENDPOINT");
+   assert(token && url && !strcmp(fixture_env("AIMEE_NATIVE_CLI"), "1"));
+   snprintf(revoked_cli_token, sizeof revoked_cli_token, "%s", token);
+   snprintf(revoked_cli_url, sizeof revoked_cli_url, "%s", url);
+   const char *request = "{\"method\":\"mcp.call\",\"tool\":\"read_file\","
+                         "\"arguments\":{\"amount\":123.123456789012345678901234567890},"
+                         "\"_cli_request_id\":\"0123456789abcdef0123456789abcdef\"}";
+   int before = dispatch_count;
+   /* The producer really waits for its child HTTP request here. A producer
+    * queue implementation deadlocks rather than reaching these assertions. */
+   if (atomic_load(&cli_shell_probe) == 1)
+   {
+      assert(cli_child_request(url, token, request) == 200);
+      assert(dispatch_count == before + 1);
+      assert(cli_child_request(url, token, request) == 200);
+      assert(dispatch_count == before + 1); /* lost-ACK replay never repeats effect */
+   }
+   else
+   {
+      assert(cli_child_request(url, token, request) != 200);
+      assert(dispatch_count == before); /* final policy removed/changed definition */
+   }
+   const char *unadvertised =
+       "{\"method\":\"mcp.call\",\"tool\":\"git_push\","
+       "\"arguments\":{},\"_cli_request_id\":\"1123456789abcdef0123456789abcdef\"}";
+   assert(cli_child_request(url, token, unadvertised) != 200);
+   const char *foreign = "{\"method\":\"mcp.call\",\"tool\":\"read_file\","
+                         "\"arguments\":{},\"session_id\":\"foreign\","
+                         "\"_cli_request_id\":\"2123456789abcdef0123456789abcdef\"}";
+   assert(cli_child_request(url, token, foreign) != 200);
+   const char *foreign_cwd = "{\"method\":\"mcp.call\",\"tool\":\"read_file\","
+                             "\"arguments\":{},\"cwd\":\"/work/bob\","
+                             "\"_cli_request_id\":\"3123456789abcdef0123456789abcdef\"}";
+   assert(cli_child_request(url, token, foreign_cwd) != 200);
+   assert(dispatch_count == before + (atomic_load(&cli_shell_probe) == 1));
+}
 static void test_native_supervised_execution(const agent_t *selected,
                                              const request_context_t *owner)
 {
-   for (int mode = 0; mode <= 9; mode++)
+   for (int mode = 0; mode <= 12; mode++)
    {
+      atomic_store(&cli_shell_probe, mode >= 10 ? mode - 9 : 0);
       owner_tools(1);
       assert(!server_control_scope_bind(alice_controls));
       server_session_capture_t *capture =
@@ -1513,8 +1765,13 @@ static void test_native_supervised_execution(const agent_t *selected,
           cJSON_Parse("{\"type\":\"object\",\"properties\":{\"amount\":{\"type\":\"number\"}}}");
       aimee_tool_t function = {
           .name = "read_file", .description = "admitted source schema", .schema = schema};
-      aimee_tool_t space = {
-          .kind = AIMEE_TOOL_NAMESPACE, .name = "aimee", .children = &function, .n_children = 1};
+      aimee_tool_t children[2] = {function, function};
+      if (mode >= 10)
+         children[0].name = "bash";
+      aimee_tool_t space = {.kind = AIMEE_TOOL_NAMESPACE,
+                            .name = "aimee",
+                            .children = children,
+                            .n_children = mode >= 10 ? 2 : 1};
       aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
       aimee_request_t profile = {.model = "selected-model",
                                  .frontend = AIMEE_WIRE_RESPONSES,
@@ -1527,9 +1784,22 @@ static void test_native_supervised_execution(const agent_t *selected,
       request_context_t selected_owner = *owner;
       if (mode == 6)
          selected_owner.capabilities &= ~CAP_TOOL_EXECUTE;
+      const server_native_tool_binding_t bindings[] = {
+          {.space = "aimee", .name = "bash", .registry_name = "bash"},
+          {.space = "aimee", .name = "read_file", .registry_name = "read_file"}};
       server_native_runtime_t *runtime =
-          server_native_runtime_open_request(selected, &selected_owner, "session-a", &profile);
+          mode >= 10 ? server_native_runtime_open_bound_request(selected, &selected_owner,
+                                                                "session-a", &profile, bindings, 2)
+                     : server_native_runtime_open_request(selected, &selected_owner, "session-a",
+                                                          &profile);
       assert(runtime);
+      if (mode >= 10)
+      {
+         char launch[65];
+         memset(launch, 'a', 64);
+         launch[64] = 0;
+         assert(!server_native_runtime_attest_launch(runtime, launch));
+      }
       cJSON_Delete(schema);
       atomic_store(&expected_capture, capture);
       captured_rows = cJSON_CreateArray();
@@ -1542,7 +1812,7 @@ static void test_native_supervised_execution(const agent_t *selected,
       aimee_block_t call = {.type = AIMEE_BLK_TOOL_USE,
                             .tool_id = "wire-call:original",
                             .tool_namespace = "aimee",
-                            .tool_name = "read_file",
+                            .tool_name = mode >= 10 ? "bash" : "read_file",
                             .tool_input = input};
       execute_worker_t wrong_thread = {.runtime = runtime, .call = &call};
       pthread_t worker;
@@ -1584,13 +1854,13 @@ static void test_native_supervised_execution(const agent_t *selected,
       assert(!atomic_load(&parent_cancel) && !request_context_get()->context_refused);
       assert(!strcmp(request_context_get()->request_id, owner->request_id));
       int dispatched = mode != 1 && mode != 2 && mode != 6 && mode != 7 && mode != 8;
-      assert(dispatch_count == before + dispatched);
+      assert(dispatch_count == before + dispatched + (mode == 10));
       if (mode == 6)
       {
          assert(rc == -1 && !server_session_capture_failed(capture) && !result.tool_result);
          assert(cJSON_GetArraySize(captured_rows) == 2);
       }
-      else if (mode >= 4 && mode != 9)
+      else if (mode >= 4 && mode != 9 && mode < 10)
       {
          assert(rc == -1 && server_session_capture_failed(capture) && !result.tool_result);
          assert(cJSON_GetArraySize(captured_rows) == 2); /* No invented outcome after an effect. */
@@ -1606,8 +1876,17 @@ static void test_native_supervised_execution(const agent_t *selected,
          assert(wire && strstr(wire, "native-tool:") && strstr(wire, "wire-call:original"));
          free(wire);
       }
+      if (mode >= 10)
+      {
+         assert(!shell_environment);
+         assert(cli_child_request(revoked_cli_url, revoked_cli_token, "{}") == 401);
+         char *source = cJSON_PrintUnformatted(captured_rows);
+         assert(source && strstr(source, "\"name\":\"bash\"") &&
+                strstr(source, "wire-call:original") && !strstr(source, "\"name\":\"read_file\""));
+         free(source);
+      }
       rc = server_native_runtime_execute_tool(&call, &result, runtime);
-      assert(rc == -1 && dispatch_count == before + dispatched);
+      assert(rc == -1 && dispatch_count == before + dispatched + (mode == 10));
       aimee_block_free_contents(&result);
       cJSON_Delete(input);
       agent_set_request_cancel(NULL);
@@ -1625,6 +1904,7 @@ static void test_native_supervised_execution(const agent_t *selected,
       cJSON_Delete(captured_rows);
       captured_rows = NULL;
       scope_admitted = 0;
+      atomic_store(&cli_shell_probe, 0);
    }
 }
 
@@ -1745,9 +2025,11 @@ static void test_native_bound_mcp(const agent_t *selected, const request_context
       request(runtime, "/v1/messages?beta=true&model=foreign", server_native_runtime_token(runtime),
               response);
       assert(strstr(response, "404") && !cJSON_GetArraySize(captured_rows));
+      native_beta_captures = 0;
       request(runtime, variant ? "/v1/responses" : "/v1/messages?beta=true",
               server_native_runtime_token(runtime), response);
       assert(strstr(response, "200 OK") && cJSON_GetArraySize(captured_rows) == 2);
+      assert(native_beta_captures == !variant);
       owner_tools(0); /* Worker must bind the captured owner, not this producer. */
       atomic_store(&mcp_execution, 1);
       atomic_store(&execution_mode, mode);
@@ -1840,6 +2122,56 @@ static void test_native_bound_mcp(const agent_t *selected, const request_context
       captured_rows = NULL;
       scope_admitted = 0;
       owner_tools(1);
+   }
+}
+
+static void test_sdk_metadata(const agent_t *selected, const request_context_t *owner)
+{
+   for (int mode = 1; mode <= 12; mode++)
+   {
+      owner_tools(1);
+      aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
+      aimee_tool_t function = {.name = "read_file"};
+      aimee_tool_t tools = {
+          .kind = AIMEE_TOOL_NAMESPACE, .name = "aimee", .children = &function, .n_children = 1};
+      cJSON *host_metadata = cJSON_Parse("{\"host_marker\":\"host-profile\"}");
+      atomic_store(&snapshot_generation, 1);
+      if (mode == 9 || mode == 10)
+         cJSON_AddStringToObject(host_metadata, "user_id",
+                                 mode == 9 ? "host-conflicting-id" : sdk_metadata_value());
+      aimee_request_t profile = {.model = "selected-model",
+                                 .frontend = AIMEE_WIRE_RESPONSES,
+                                 .system = &system,
+                                 .n_system = 1,
+                                 .tools = &tools,
+                                 .n_tools = 1,
+                                 .metadata = host_metadata,
+                                 .prompt_cache_key = "",
+                                 .mutated = 1};
+      server_session_capture_t *capture =
+          server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+      assert(capture && !server_session_capture_bind(capture));
+      server_native_runtime_t *runtime =
+          server_native_runtime_open_request(selected, owner, "session-a", &profile);
+      assert(runtime && server_session_capture_bind(NULL) == capture);
+      cJSON_Delete(host_metadata); /* The runtime must own the original host fields. */
+      captured_rows = cJSON_CreateArray();
+      atomic_store(&expected_capture, capture);
+      atomic_store(&owned_profile_probe, 1);
+      atomic_store(&sdk_host_metadata, 1);
+      atomic_store(&sdk_metadata_case, mode);
+      char response[1024];
+      request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
+      assert(server_session_capture_failed(capture) == sdk_metadata_refuses(mode));
+      server_native_runtime_close(runtime);
+      server_session_capture_close(capture);
+      atomic_store(&expected_capture, NULL);
+      atomic_store(&owned_profile_probe, 0);
+      atomic_store(&sdk_host_metadata, 0);
+      atomic_store(&sdk_metadata_case, 0);
+      atomic_store(&snapshot_generation, 0);
+      cJSON_Delete(captured_rows);
+      captured_rows = NULL;
    }
 }
 
@@ -2002,6 +2334,8 @@ static void test_private_source_revocation(const agent_t *selected, const reques
    }
 }
 
+#include "support/native_sdk_identity_fixture.h"
+
 int main(void)
 {
    agent_t selected = {.enabled = 1};
@@ -2033,7 +2367,9 @@ int main(void)
    owner_tools(0);
    server_native_runtime_t *bob = server_native_runtime_open(&selected, &b, "session-b");
    assert(alice && bob);
+   test_unowned_beta_path(alice);
    test_cache_profile(&selected, &a, alice);
+   test_beta_contract_binding(&selected, &a);
    /* Destroy/change every original borrowed host value after the owner copy.
     * Callback workers must retain each captured policy and source independently. */
    owner_tools(1);
@@ -2138,10 +2474,13 @@ int main(void)
    server_native_runtime_close(claude);
    atomic_store(&source_changed, 0);
    test_retained_capture(&selected, &a);
+   test_native_preframe_error(&selected, &a);
    test_native_original_catalog(&selected, &a);
    test_native_supervised_execution(&selected, &a);
    test_native_bound_mcp(&selected, &a);
+   test_sdk_metadata(&selected, &a);
    test_owned_native_context(&selected, &a);
+   test_native_sdk_identity(&selected, &a);
    test_source_snapshot_refusal(&selected, &a);
    test_private_source_revocation(&selected, &a);
    unsetenv("AIMEE_ACTIVE_TOOLSET");

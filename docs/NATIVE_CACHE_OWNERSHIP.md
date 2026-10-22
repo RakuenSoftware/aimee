@@ -4,6 +4,24 @@ The canonical session log remains the history source. Native Codex and Claude
 conversation files are a derived cache and cannot establish a completed turn,
 tool effect, permission, or test grade.
 
+The canonical Claude gateway launches the SDK with the fixed environment setting
+`CLAUDE_CODE_ATTRIBUTION_HEADER=0`. The host prepares canonical system content,
+so it follows Claude's [gateway compatibility protocol](https://code.claude.com/docs/en/llm-gateway-protocol#system-prompt-attribution-block)
+by having the client omit its conversation-fingerprint block. The host does not
+synthesize, move, or strip a billing prefix. This setting is part of the verified
+launch-environment digest, checked again during SDK initialization; an absent,
+changed, duplicate, or extra environment entry fails admission. Existing cache
+profiles without this setting do not match the new launch profile. Git commit
+and pull-request attribution requirements are unrelated and remain unchanged.
+
+Claude's optional SDK `metadata.user_id` stays in the typed request metadata
+through host request ownership. Only a unique object containing that optional
+string/null field is accepted, with the provider's 512 Unicode-character bound.
+The host retains its own metadata, rejects a conflicting host identifier and
+copies SDK correlation afresh for each callback. This field establishes no
+account, actor, session or effect authority. SDK system content, transcripts,
+tool catalogs and raw request extensions do not replace their canonical owners.
+
 The host acquires an exclusive cache-directory lease before creating a native
 HOME, linking SDK conversation files, writing launch configuration, or spawning
 the SDK. Its key is the actual `browser-{sdk}/{session}/{binding}` directory;

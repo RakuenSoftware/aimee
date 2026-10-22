@@ -21,6 +21,21 @@ static void test_unset_defaults(void)
    PASS("context: unset -> empty, never NULL");
 }
 
+static void test_session_actor(void)
+{
+   request_context_t ctx = {0};
+   assert(!request_context_session_actor(NULL)[0]);
+   snprintf(ctx.principal, sizeof(ctx.principal), "webchat:alice");
+   snprintf(ctx.vault_principal, sizeof(ctx.vault_principal), "webuser:alice");
+   assert(!strcmp(request_context_session_actor(&ctx), "webchat:alice"));
+   ctx.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+   assert(!strcmp(request_context_session_actor(&ctx), "webuser:alice"));
+   assert(!strcmp(ctx.principal, "webchat:alice"));
+   ctx.vault_principal[0] = 0;
+   assert(!request_context_session_actor(&ctx)[0]);
+   PASS("context: canonical session actor preserves distinct account and fails closed");
+}
+
 static void test_set_get_roundtrip(void)
 {
    request_context_t ctx;
@@ -215,7 +230,10 @@ static void test_model_intent_scope(void)
    request_context_t owner = {.trusted = 1};
    strcpy(owner.principal, "alice");
    request_context_set(&owner);
+   assert(request_context_set_operator_script_origin(1) == 0);
+   assert(request_context_get()->operator_script_origin);
    int previous = request_context_set_model_execution(1);
+   assert(!request_context_get()->operator_script_origin);
    assert(previous == 0 && request_context_get()->model_execution);
    assert(request_context_set_model_execution(1) == 1);
    assert(!request_context_set_source_release("source-added-inside-model"));
@@ -242,6 +260,7 @@ int main(void)
    test_budget_header();
    printf("request_context: unit tests\n");
    test_unset_defaults();
+   test_session_actor();
    test_set_get_roundtrip();
    test_clear_and_null_set();
    printf("All request_context tests passed.\n");

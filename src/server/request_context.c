@@ -55,6 +55,17 @@ int request_context_set_model_execution(int active)
       return -1;
    int previous = g_req_ctx.model_execution;
    g_req_ctx.model_execution = active != 0;
+   if (active)
+      g_req_ctx.operator_script_origin = 0;
+   return previous;
+}
+
+int request_context_set_operator_script_origin(int active)
+{
+   if (!g_req_ctx_set)
+      return -1;
+   int previous = g_req_ctx.operator_script_origin;
+   g_req_ctx.operator_script_origin = active != 0;
    return previous;
 }
 

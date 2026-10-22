@@ -4,14 +4,835 @@ Prepared 17 October 2026, with subsequent continuation checkpoints. The current
 user instruction is to keep implementing the unfinished migration; the historical
 stop/handoff request below is superseded.
 
-## Current continuation status: PR #3052; final qualification in progress
+## Current continuation status: live `.252` acceptance follow-up
 
-Active work remains in [PR #3052](https://github.com/RakuenSoftware/aimee/pull/3052),
-targeting `testing`. Recovery baseline `a6bd31897` passed fresh CI, including
-all four configured deployment tiers. The continuation below includes later
-changes; the PR checks qualify its exact published head.
-Keep automatic review and the strict attribution gate enabled. No production
-promotion or final fresh-CI result is claimed.
+[PR #3052](https://github.com/RakuenSoftware/aimee/pull/3052) merged into `testing`
+as `aa8c774edcc324f5defb6c5cea592f0e1dd5314d`. Its final premerge checks and
+all 54 postmerge main CI jobs passed, including every configured deployment
+tier; the seven-job artifact publisher also passed. Those results qualify the
+merged baseline, not the subsequent browser repairs. Continue on
+`fix/browser-ir-live-acceptance` in [PR #3057](https://github.com/RakuenSoftware/aimee/pull/3057) for their fresh CI. Keep automatic review and
+the strict attribution gate enabled. No production promotion is claimed.
+
+### Current review and local Claude acceptance scope
+
+The user clarified that production `.100` must remain untouched until a merge
+to `main`. Its later promotion review is not a blocker for code review or the
+current IR acceptance work. Automatic reviews and strict attribution remain
+unchanged. No self-approval or production promotion is asserted.
+
+### Current-source deployment and fixture-startup follow-up
+
+Fresh owned `.252` deployment of `60f0f9f4c` built all six C products and five Go
+services from clean output directories in 160.94 seconds: 1,341 compiler commands,
+zero warnings. Actual server SHA256 is
+`2cd4cd0fd24546500a4fb11a6cb133e6806ba518a25a639627d6a27c0560d7e2`.
+The canonical Server manifest has 19 module rows. All 25 distribution aliases
+are built; the other six belong to KB, which remains disabled. The unchanged
+qualified SPA is `60756abf`.
+
+The first fault setup withheld the entire module supervisor and therefore the
+required configuration owner. Core correctly failed configuration readiness
+before reaching the repaired path; that staging failure is retained, not counted
+as startup acceptance. The corrected targeted delay retained configuration and
+withheld only the database/families owner. Independent samples observed the same
+core PID 53612, no boot-owner mutation and no dispatch before attachment. Restoring
+the exact canonical manifest produced `coord-53612-0c27981fe3427d62`, exactly one
+dispatcher-start event and `/v1/ready` 200 with database/modules/retrieval ready.
+Jobs, canonical events and active native work stayed zero during this fault test;
+no fake live rows were seeded to claim cleanup coverage.
+
+A separate isolated standard integration run on those exact `60f0f9f4c` artifacts
+passed 171/171 applicable checks again, including all eight pinned SDK/wire profiles,
+interruption/denial/child controls and configured-grade to durable learning to
+restart/scoped reuse. Its 25 configured-service skips remain explicit. Shipping
+PIDs deliberately changed during the separately recorded cold-start test, so this
+packet records that concurrent owned qualification rather than claiming unchanged
+shipping PIDs. Genuine normal PAM/browser/model-catalog desktop/320 preflight also
+passed with zero send/reply/cancel/configuration actions; the single real provider
+journey remains held until the last source changes are installed.
+
+Fresh CI then exposed a fixture interaction with the new production admission
+fence: `workflowstoretest` writes `agent_jobs` directly for tests, bypassing normal
+job creation, and returned after store-family readiness but before the daemon's
+cleanup acknowledgement. A real PostgreSQL/daemon reproducer cancelled freshly
+seeded job 901 and failed the terminal-batch test. The SQL query itself returns
+correct ordered batches and is unchanged. Production now emits one fixed success
+marker only when cleanup is acknowledged. The isolated fixture waits for that
+actual daemon marker within its unchanged deadline before permitting SQL seeds.
+Normal/sanitizer marker assertions refuse unavailable, in-flight and lost-ACK
+states; the workflow test also strengthens first/third batch fairness checks.
+Five actual PostgreSQL race-test repetitions pass with the corrected owned native
+log path. An intermediate collector looked at captured stdout instead, waited
+fail-closed and seeded no jobs; that failed packet is retained. The production
+SQL query is unchanged. All 76 lint gates pass on the marker/harness repair.
+
+The encrypted T2 CI leg separately failed before executing deployment checks:
+Ubuntu's unrelated Microsoft feed returned HTTP403 during package refresh.
+The cryptsetup preparation now excludes only that unused third-party feed,
+retains signature verification and uses bounded package acquisition. Fresh CI,
+final-source installation and the genuine browser journey remain required.
+
+### Full-runtime startup and T2 readiness follow-up
+
+The corrected actual-SDK fixture passed CI on `aa77037f1`; 52 of 53 main
+jobs succeeded. T2 alone failed `Typed fixture indexing succeeds`, with
+`operation=other`, status 5, class `internal`. Its artifact did not establish
+an exact failing reembedding phase. The independent T1 and T2-luks legs passed.
+
+Source review found that the deployment harness admitted indexing after only
+application health, although the embedder starts independently after the
+application. It now requires both the application and the pinned image's
+loaded-model health check within the existing 240-second deadline, before any
+index mutation. The maintenance requests, failure assertions and cutover remain
+unchanged: no failed-index retry or waiver was added. Fixed diagnostic fields
+and literal reembedding phase categories expose future failures without response
+text, credentials, caller input or provider URLs. Ten Python readiness/privacy
+regressions and focused Go diagnostic tests pass; fresh T2 CI remains required.
+This barrier closes a demonstrated ordering gap without claiming that the
+previous sparse artifact proves it was the sole cause of that failure.
+
+The fresh owned `.252` VM 8164 built all six shipping C products (1,340 compiler
+commands, no warnings/errors), fresh Go services and all 25 built module aliases. The canonical Server
+supervisor contains 19 rows; six KB-side aliases are build-only, with no KB
+service running. It has actual PostgreSQL 18, restricted roles, encrypted Vault custody,
+normal PAM, pinned code-server, workflow service and browser, with no KB configured.
+Source checkout advanced from `f7ae75c23` to test-only `aa77037f1`; runtime inputs
+and the `60756abf` SPA remained unchanged. A separate isolated standard integration
+suite passed 171/171 applicable checks, all eight actual pinned SDK/provider-wire
+profiles, crash/permission/child-control journeys and configured-grade to durable
+pending learning to restart/scoped reuse. Its 25 configured-service skips are
+explicit; the fixture intentionally omits KB and runtime-web, while the separate
+shipping GUI stack includes runtime-web. Result SHA256 is
+`93e0544f33d44249bfa23a5d0c48f8ce62074d5affb3cd70949162542bad3e5c`.
+These results retain those producer revisions and do not qualify later changes.
+
+That full-runtime audit exposed a reachable startup defect: the coordination
+dispatcher attempted its durable boot claim before the database module attached,
+then returned permanently. A typed runtime-state lookup now distinguishes an
+explicit missing row from transport/store/malformed-reply failure. The worker
+retries boundedly, recovers prior claims, retains the same generated owner across
+lost write acknowledgements and persists it before any sweep. It never treats a
+failed read as permission to replace the owner. Normal, ASan/UBSan/leak and CMake
+fixtures pass; the old source fails the no-write-after-failed-read regression.
+Cold module-delay validation and final-source deployment remain required.
+
+The same audit found that the old one-shot delegate-job cleanup could miss
+attachment. Blindly retrying its bulk cancellation later would cancel new work.
+The shared process-local admission barrier now holds a mutex across the typed
+cleanup, latches only an acknowledged success, and gates the sole production
+background-job creation before writing a new row. Server initialization and the
+idle main tick use that same latch. No new job is admitted across a failed or
+lost acknowledgement, and later ticks cannot cancel this generation. Existing
+resume code has no reachable call site. Its production-helper regression covers
+unavailable-to-attached storage and twelve concurrent callers with a committed
+cleanup/lost acknowledgement. All three startup fixtures pass normal, ASan/UBSan/leak and CMake checks;
+affected production objects compile with warnings treated as errors. These
+results belong to the new source; the previous 171-check deployment does not
+stand in for them.
+
+The first combined lint pass caught test registrations after shard selection;
+they were moved before the suite snapshot. The test-execution gate now accounts
+for all three new fixtures. The memory ownership gate required fresh review of
+the changed server startup file; its memory symbols, disposition and typed calls
+are unchanged. Independent review completed, and only that reviewed hash was
+updated. All 76 lint gates now pass after the targeted ownership-gate rerun.
+Fresh CI and current-source live qualification remain required before declaring
+this follow-up complete.
+
+### Native integration beta-route assertion follow-up
+
+Fresh final-head CI caught the actual-SDK synthetic provider fixture matching
+`self.path.endswith("/messages")`, rejecting the now-correct retained
+`?beta=true` marker and causing cascading provider retries. The fixture now
+splits path/query and requires exactly `beta=true` for Claude-to-Anthropic,
+including token counts, and an empty query for other host-selected wires.
+This changes tests only; the qualified C/Go/frontend products remain unchanged.
+Fresh CI must qualify the corrected fixture rather than waive the failed run.
+
+### Latest local Claude acceptance: source `384683799`
+
+The previously unqualified genuine local Claude path now passes. The clean,
+unmodified four-product build has 1,297 compile commands with no warnings/errors;
+only the owned server/CLI were installed, with KB/gateway build-only. Actual
+running server SHA256 is
+`eed11404a9d57624ffeedde7765566be6d6b70c21bd88086ff9995a55d20f935`.
+The unchanged qualified SPA is `60756abfa7c545434f2771c565c6dc798738c9c44693700cee8606ce8797016e`.
+
+Normal PAM and the actual Max-backed Opus5 profile executed README `read_file`,
+then `request_input`. Reload preserved the pending question; one real operator
+reply produced the matching tool result and completed at 80/checkpoint 81.
+Independent actor/project/call/result and acknowledged read-intent checks agree.
+The actual SDK child retained the exact fourteen-entry credential-free environment.
+Desktop/320 replay sent no duplicate actions. Session is
+`web-0079d51e-760c-43f1-802b-7c10a7978ed5`.
+
+A separate genuine permission journey continued that same session. The retained
+SDK session from checkpoint 81 produced the next actual question/source 105;
+its JSONL message ID matches the canonical original. Literal resume argv was not
+captured and is not claimed. A verified qualified leaf was frozen before killing
+only the owned daemon. Normal browser recovery retired the physically quiescent
+old execution, appended cancellation 109 and source-bound unknown outcome 110,
+and changed the ownership epoch. A real `write_file` call at 139 requested
+permission 142; one browser Decline produced DENY 143 and matching error result
+144. The target file is absent, completed 226/checkpoint 227 are durable and all
+native work/three leaves are gone. Refusal occurred before governed write issue
+or dispatch, so no fictional write-effect journal row is claimed.
+
+An ordinary idle restart, without freezing or inference, separately preserved
+all 227 canonical/source hashes, both cache-owner rows, four harness rows, three
+reservation rows and the valid cache's device/inode/bytes/hash exactly. Actual
+PAM desktop/320 replay also matched all 227 envelopes with zero send/reply/cancel
+or configuration mutations. Controlled crash recovery is not substituted for
+that ordinary restart check.
+
+Two proof-driver assertions were corrected read-only: one selected hidden folded
+tool arguments instead of the final assistant paragraph; another assumed a write
+call was block zero although thinking preceded it. Their failures remain in the
+packets; no model sends, replies, database seeding or product changes repeated
+those actions. Six combined normal/sanitizer fixtures and all 76 lint gates pass.
+The preceding `d3639f1dc` completed all 53 main CI jobs and all seven auxiliary
+workflows. Fresh final-head CI and fresh owned `.252` deployment qualification
+remain separate; prior VM 8163 no longer exists and must not be retaken.
+
+This checkpoint supersedes the older local-Claude-unqualified statements below.
+It qualifies this pinned Linux SDK/Max/Opus profile, not every subscription or
+native platform. Production `.100` remains untouched until a merge to `main`.
+
+Separate fresh reviews of `aa8c774..ff71e5d48` covered browser/history and
+cancellation races, execution/security and native grant lifetime, source forks,
+project custody, canonical learning ownership and the remaining C/build changes.
+No confirmed blocking regression was found. These are code audits, distinct
+from a later approving GitHub identity under `OWNERS.md`.
+
+The VM API profile's actual HTTP429 did not establish that local Claude was
+unavailable. The workstation already has an authenticated Max login and the
+pinned Claude 2.1.227 executable. Local qualification uses an owned user/mount
+namespace with an actual private PAM account, a delegated user service, a
+separate restricted PostgreSQL database and the exact `ff71e5d48` server/module
+build. The qualified SPA is retained with its identical frontend input tree.
+The existing local OAuth login is enrolled through the supported credential
+owner into an isolated test profile; permission mode remains `default`.
+No host accounts, unrelated databases or `.100` state are changed. Actual local
+question/reply and permission-denial results must be recorded separately from
+the earlier VM API failure; a bare CLI response alone is not integration proof.
+
+The first local browser request admitted the actual operator and pinned SDK but
+produced no model/tool/question output before a persistence failure and SDK
+shutdown. No upstream status was established. The SDK process tree was proved
+empty and its scoped token revoked; no reply or duplicate send occurred. A
+controlled replacement retained the original database, namespace and cgroup
+identity. Supported canonical browsing preserved running/user records 1/2,
+appended one restart cancellation at 3, reconciled the same reservation and
+returned replay completion with zero active native reservations. This qualifies
+recovery of that failed attempt, not successful Claude execution.
+
+A second normal-UI attempt, without extra replay observers, also failed capture
+before upstream HTTP. Supported settled recovery preserved its records 1/2 and
+appended exactly one cancellation at 3, with zero active native reservations.
+A transient directory-read timeout during its earlier browse exposed a separate
+bug: canonical SSE could send HTTP200 and replay without running history recovery.
+The route now requires successful owner lookup and history opening before any SSE
+headers. The regression reproduces the old bypass when the first lookup times
+out and a later lookup would succeed; the fixed full HTTP fixture and formatting
+check pass. Normal browser attachment already acknowledges the durable owned row.
+
+The third local request passed credential and canonical-history stages, but the
+attached debugger then crashed and terminated the isolated daemon. Its normal
+recovery is separately proved; it is diagnostic contamination, not a provider
+outcome. The fourth logging-only diagnostic run exposed the secondary defect:
+a typed transport ERROR before TURN_START was rejected by the native response
+builder, poisoning capture. The fix preserves that host diagnostic without
+manufacturing an assistant message, original response or tool source. The actual
+pre-frame-error fixture reproduces the old failure; native-runtime and Anthropic
+fixtures pass normally and under ASan/UBSan with leak checks.
+
+The fifth real normal-PAM local-Max request on the reviewed production changes
+plus a separately hashed logging overlay reached upstream HTTP429. Its original
+running/user records 1/2 remain intact, typed diagnostic 3 persisted, and failed
+terminal 4 reports the safe trusted SDK rate-limit classification. Independent
+readback proved FINISHED ownership, zero active reservations and removal of the
+exact native cgroup leaf without restart. Desktop/320 reload repeated no send,
+reply or cancellation and showed no stale controls or reconnect error. The SDK's
+internal error record is not raw stdout evidence; numeric HTTP429 is separately
+proved by the actual transport. No specific quota cause is established.
+
+A bounded pinned-SDK diagnostic with the actual operator's locally successful
+Opus5 model returned successfully in 4.7 seconds. This is not Aimee integration.
+The isolated model was then updated through the supported owner API to Opus5;
+its normal full-catalog browser request also reached upstream429. Question/reply
+and permission denial remain pending. Next diagnostics retain only allowlisted
+429 metadata and envelope counts, with strict TLS and source guards unchanged.
+
+The replay-fix revision `79b9f97df` completed all 53 main CI jobs. Six auxiliary
+workflows passed; attribution verification failed because GitHub returned HTTP503,
+not because a policy violation was reported. The read-only API helper now retries
+transient transport/500/502/503/504 failures at most three times, with cancellable
+backoff; authorization failures, incomplete metadata and exhausted reads still
+fail closed. Strict provenance/history checks and automatic review are unchanged.
+HTTP fixtures and existing policy/workflow regressions pass. Retain the original
+failed-run evidence when replacing the latest unmerged commit with the combined
+reviewed corrections; add no historical SHA or provenance exemption.
+
+### Claude gateway protocol compatibility follow-up
+
+The actual operator credential file did not change after supported enrollment;
+its expiry remained valid and the supported enrollment audit matched that source.
+A further real full-Opus request yielded a complete 114-byte HTTP429 error body
+with only `rate_limit_error` and a generic message, without a reset instruction.
+Its envelope was 46,911 bytes with 53 tools and one message; the successful direct
+SDK diagnostic used about 22K input/cache tokens. No specific quota or context-size
+cause is established. Every updated-runtime request failed durably and finished
+custody without a restart; successful question/reply/permission execution is pending.
+
+Official gateway guidance and pinned-SDK source exposed two concrete compatibility
+gaps. Because the host reshapes system content, its verified native launch now sets
+`CLAUDE_CODE_ATTRIBUTION_HEADER=0`, causing the SDK to omit its fingerprint block
+rather than having a gateway strip or relocate it. This is unrelated to Git/PR
+attribution policy. A real descriptor child and actual pinned SDK against a local
+synthetic provider verify omission; neither is live vendor acceptance.
+
+The original SDK's typed `metadata.user_id` was also lost when canonical host
+ownership replaced its parsed request. The gateway now preserves this bounded
+optional correlation field per callback, retaining host metadata and refusing
+conflicts. No SDK system/transcript/tools/raw sidecar or new identity authority
+is admitted. The baseline fixture reproduces the loss; twelve normal/sanitizer
+scenarios cover the contract, malformed values and unchanged non-Anthropic behavior.
+Combined fixtures retain the earlier pre-frame error fix. Independent reviews,
+clang-format19, documentation and IR bypass gates pass. Qualify the exact newly
+committed unmodified runtime through normal PAM/browser next; do not relabel the
+previous logging overlays as final-source vendor acceptance.
+
+The clean, unmodified `2c20c49ec` server and CLI were rebuilt in a fresh object
+directory (840 compile commands) and installed only in the owned local runtime.
+Independent `/proc` executable hashing matched the candidate, with the original
+namespace, delegated cgroup, PAM account and database retained. Unchanged Go,
+runtime-web and SPA components have separate input/hash lineage; they are not
+represented as newly built components. The actual SDK child had all fourteen
+expected environment entries, including fixed attribution-header value `0`, and
+no parent OAuth secret. Its single normal-PAM full-Opus browser request still
+failed before any tool or question, with the trusted SDK rate-limit classification.
+Canonical records 1/2/3/4 persisted, native ownership reached FINISHED at 4, all
+reservations became inactive and the exact execution leaf was removed naturally.
+Desktop and 320px reload repeated no send, reply, cancel or metadata mutation.
+This qualifies clean-source failure handling, not successful Claude execution.
+
+The supported interactive Claude `/usage` command performed no inference and
+reported about 2% weekly usage, with current session usage at 0%. Combined with
+the earlier successful direct pinned-SDK diagnostic, this does not support a
+blanket account-exhaustion explanation for Aimee's opaque upstream failure.
+Neither the two protocol corrections nor quota exhaustion is established as its
+cause. Continue the source/protocol comparison without blind provider retries,
+invented client identities or relaxed canonical ownership. Actual local Claude
+read/question/reply/completion and permission denial remain unqualified.
+
+The failed request also exposed presentation noise: the generic stream diagnostic
+and clearer terminal explanation appeared as two primary alerts. The browser now
+keeps both canonical observations, prioritizes the failed terminal's explanation
+and places only the exact generic diagnostic from that same turn under collapsed
+Response details. Custom errors, other turns, unknown origins and terminals with
+no explanation retain their diagnostics. The standalone generic message uses
+plain language. All 445 frontend tests and both SPA/console production builds
+pass; replay and closed controls remain unchanged. The newly built SPA has its
+own hash/input lineage and must be qualified separately from the previously
+deployed frontend.
+
+The native gateway also dropped the pinned SDK's actual User-Agent and x-app
+headers. Authenticated native callbacks now retain those original bounded
+singletons as transport metadata, without assigning identity or capability
+authority. Ordinary ingress and every native exit clear the thread-local values;
+ordinary Aimee requests keep their existing User-Agent. The socket writer emits
+one User-Agent and preserves complete bounded extra headers instead of its old
+512-byte truncation. Baseline socket fixtures reproduce both duplicate-header
+and lost-tail failures. Four focused normal and ASan/UBSan/leak fixtures pass,
+as do clang-format19 and an independent source review. The actual 53-tool SDK
+loopback probe's beta block fits the old limit, so that truncation is not a
+proved explanation for the observed rate-limit failure. Neither forwarding
+invented SDK identities nor bypassing canonical request ownership is permitted;
+live qualification of the exact combined revision remains required.
+
+Source `2c20c49ec` completed all 53 main CI jobs and all seven auxiliary
+workflows successfully. The next clean `91355fd35` build passed server/CLI and
+build-only KB/gateway compilation without enabling KB services. Its new SPA's
+137 tracked frontend inputs matched the tested build. Actual normal-PAM desktop
+and 320px replay of the retained failed turn showed one clear terminal alert and
+collapsed details, with no repeated actions. A composed actual-pinned-SDK to
+production proxy/header capture/C socket loopback test also passed; this is
+synthetic-provider protocol evidence, not vendor acceptance. A warning in that
+composed LTO context prompted a one-line valid-C-string length-check correction;
+normal/sanitizer socket tests and the warning-free composed probe pass again.
+Keep that corrected source distinct from the already installed `91355fd35`
+producer when rebuilding for the next live request. All 76 lint checks were run;
+the sole missing-clang-format19 tooling failure passed on explicit-binary recheck.
+
+The clean corrected `d3639f1dc` four-product build also passed without warnings.
+Its one actual full-Opus browser request still failed before tools/questions;
+independent readback confirmed failed terminal 4, FINISHED ownership, zero active
+reservations and natural removal of the execution leaf. New-SPA desktop/320
+replay showed one clear terminal error and repeated no actions. This is another
+retained failure, not question/reply or permission acceptance.
+
+Two further independently reviewed protocol losses are repaired in the next
+combined source. The actual pinned SDK deliberately prepends its fixed Agent SDK
+component identity even when given a custom system prompt. After measuring and
+holding that executable, the host now represents this truthful identity as typed
+profile evidence before registry/cache copies. Host policy, history, tools and
+per-block cache markers remain intact; arbitrary SDK system text is still ignored.
+The typed mutation is marked, and Codex profiles remain unchanged. Missing-identity
+baseline, malicious incoming-system and repeated-profile cache cases are covered.
+
+The exact admitted SDK `?beta=true` marker now reaches the host-selected Anthropic
+model/count endpoint. This is not arbitrary URL forwarding: the capability route
+still normalizes to the same owner, and only the fixed marker survives as transport
+metadata, cleared on every ordinary request and native exit. URL construction
+precedes wire fencing. Official SDK fallback code distinguishes the beta surface;
+ordinary beta headers alone do not prove the query irrelevant. A scoped cache
+contract revision prevents silent reuse of the earlier stripped-query policy.
+Baseline dispatch reproduces query loss; buffered/stream/count, reset, invalid
+query, unowned and non-Anthropic cases are covered. These corrections require
+fresh exact-source live acceptance; neither is asserted as the cause of the 429.
+
+### Final live qualification: 21 October 2026
+
+Source `230b490627b716b3aa41af30672e6c2b3269d19a` passed all 53 main CI
+jobs with no skips and all seven auxiliary workflows. The exact complete GUI
+image `sha256:c32b572c592d85032625ef136ae728d6e5a5390479915c5e00ecb5125d6d0f45`
+passed all 10,106 source-file comparisons, running artifact hashes, normal PAM
+login, managed model TLS discovery and desktop/390/320 replay/reload. The original
+28 API recovery records remain unchanged; no send, reply or cancellation was
+repeated. PostgreSQL, Vault, provider and TLS state were preserved. Matching
+fresh C consumers were deployed together on owned VM 8163; byte-identical Go,
+configuration, runtime-web and SPA components retain their explicit input proof.
+
+A genuine native Bash invocation of
+`aimee index investigate 'classify.sh zero boundary'` succeeded without project,
+endpoint or token overrides. Independent database and filesystem readback
+confirmed original call 153, successful result 155 and completion 159 in session
+`af360a42-2822-eca5-7332-863c1ed0b26a`, with the actual operator principal,
+workspace, local project UUID and checkout revision. The selected project is
+`local:92584937-94a1-48e0-84f5-2e7b2c384912`; the actual checkout is
+`d940c6640b38331491ce18bf38903f33141d1c31`. The result is a successful scoped
+read with empty retrieval, not evidence of corpus hits. Ordinary index reads are
+outside the governed-effect journal's eligibility contract; no fabricated nested
+model call, mutation receipt or indexed-outcome row is claimed.
+
+The KB-free real-service integration passed 171/171 applicable checks on the
+production component at `7138bf6e3`; final-source CI integration also passed.
+Five optional HTTP400 cases were qualified separately through actual C-over-UDS
+with the runtime-web status owner. The remaining 20 KB-dependent checks are
+intentionally excluded because production must not use a KB instance.
+
+One fresh normal-browser Claude request on the exact `230b49062` build reached
+Anthropic and received actual HTTP429/rate_limit. Its existing SDK backoff ran
+inside that single request; there were no agent retries or quota changes. Session
+`web-c766156a-883b-4b5e-84a7-8c33ce39cc5c` contains only running, user and failed
+terminal records. Independent database readback confirmed the finished
+reservation, zero active work and zero tool/question records. Read-only PAM reload
+sent nothing and left no pending controls. Successful genuine Claude questions
+and permission execution remain unqualified. The available SDK record does not
+establish which upstream quota or rate condition caused the 429.
+
+That actual failure also exposed a final usability gap: the generic canonical
+failure concealed the SDK's rate-limit classification. The follow-up
+translation admits only the exact SDK API-error marker and the allowlisted
+rate-limit category. It emits the static message "Claude request was rate limited
+by the provider." only after a failed terminal result; provider diagnostic text
+never becomes assistant output. Cancellation, capture failure and later success
+retain precedence. Normal, ASan/UBSan/leak fixtures and CMake tests cover this
+boundary. The saved SDK conversation log uses an internal camelCase marker;
+inspection of the pinned Claude 2.1.227 stdout mapper and its query-loop call site
+established the actual emitted marker, `is_api_error_message`. The parser and
+fixtures use this snake_case contract; a camelCase-only lookalike cannot classify
+an error. The initial log-shaped fixture did not qualify stdout handling and is
+superseded by that correction. Old history is unchanged. Fresh CI and the matching
+VM deployment qualify this follow-up separately from the green `230b49062`
+qualification above; the CT image remains exactly `230b49062`.
+Production `.100` remains unchanged, KB-free and unpromoted; the distinct reviewer
+and live-ruleset requirements in `OWNERS.md` remain outstanding.
+
+### Live native CLI authority repair
+
+The complete packaged GUI at `25e62c1e0f17c5455dd7b03d245c06d8c825a924`
+passed normal PAM, exact running artifact hashes, managed model TLS discovery,
+read-only replay/reload and desktop/390/320 screenshots. The Reasoning label no
+longer implies completed history is still running; no extra send/reply/cancel
+occurred and all 28 original API recovery records remained identical. The
+isolated real-PostgreSQL/Docker integration passed 171/171 checks. Five optional
+HTTP400 checks also passed separately through the actual C-over-UDS service with
+its runtime-web status owner; 20 KB-dependent checks remain intentionally
+excluded. Production still has no KB instance.
+
+A single genuine native Bash CLI invocation then exposed HTTP400 before index
+admission: the POSIX client omitted the listener port from HTTP Host, while the
+private proxy correctly required its exact authority. Its failed canonical turn
+and absence of nested index admission are preserved; no project-scope success is
+claimed for that attempt. The client repair separates HTTP authority (including
+port and IPv6 brackets) from the bare TLS verification/SNI hostname. Proxy checks
+are unchanged. The real thin client now passes against the real strict proxy;
+the pre-fix client fails the same regression. Actual TLS hostname acceptance,
+wrong-hostname refusal, IPv6, normal and sanitizer checks pass. The existing CI
+step now requires the whole-binary proxy regression. Fresh CI, matching deployment
+and one new genuine native CLI turn must still qualify this repair.
+
+### Live source-handoff result and remaining integration repair
+
+Executable source `38d55ba726e22e11e0a7cae8750200139ae0da87` is deployed on owned
+VM 8163 and in complete immutable CT image
+`sha256:18b9f69453dfc66b15cce1ca6d7724db6cfdbcc4f6b9289d1e179703f7b4de72`.
+The CT image includes runtime-web and code-server; clean-image artifact hashes,
+normal PAM login, the served SPA and managed-mTLS E4B probe passed. PostgreSQL
+identity/start time/volumes, provider configuration, login HMAC and TLS were
+preserved. The VM's first install rolled back when generated runtime composition
+was missing; regeneration from exact descriptors subsequently proved all 52
+composition files identical before successful installation. No app state was
+reconstructed or reset.
+
+A genuine Codex delegate now passed configured verification. Job 2's child
+`delegate-d4cd3fcd4dae947e822c4258c4fc1f208a3443b350bcdb6d9fe85fe8ed68de99`
+completed turn `bdd9a1c01eeb20e6acc60ed3cac64fbc` at sequence 18. Its actual
+git_verify ran once on original task commit
+`d940c6640b38331491ce18bf38903f33141d1c31`. Independent database readback
+confirmed the canonical inline proof equals stored test-grade event 127,
+source-bound delegate experience 128 equals the sole matching learning row 3,
+and actor/project/parent/job/child/revision bindings agree. The row remains
+pending review with zero confidence and no automatic application. This is a
+configured-test verification-only delegate, not a new causal repair grade or
+unrestricted semantic-quality claim. The previous failed job 1 remains intact.
+
+A fresh single Claude request on this source again reached Anthropic and failed
+canonically after actual HTTP 429/rate_limit, before assistant or tool output.
+Existing SDK retry/backoff occurred within that one outer request. No agent retry
+loop or quota override was used; successful Claude vendor acceptance remains
+blocked. The actual API-model pending-question/crash/continuation journey uses
+the full tool catalog. A real request_input became source 4/question 6; the owned
+app was killed without resetting PostgreSQL. Normal browser recovery produced
+exactly one operator-cancel terminal 7, authenticated unknown-outcome receipt 8,
+and one continuation 9/user 10. That continuation executed read_file on README,
+with canonical call 13/result 15 and independently confirmed actual file content.
+The real model then completed; the final marker was visible and reload showed
+no question, no Reconnect state and no retransmission. Exact totals were two
+sends, zero question replies and one explicit cancellation. The fixture first
+tripped over mount-array ordering after the crash; only that comparison was
+normalized, preserving the original failure packet and the same container,
+question, source and nonce. No provider response or history row was fabricated.
+The E4B validation alias explicitly uses 32768 context, 1800000 ms timeout and
+max_output 1024; max_output is capacity metadata, not the generation budget.
+The actual upstream generation limit was 8192; use max_tokens for future bounded
+CPU runs. Other aliases and the actual provider/model/endpoint remain unchanged.
+This is not a default responsiveness qualification.
+
+Scan-metadata-only follow-up `28fb5ca07c8d7c4200662645ed3a593935a1f3cb` records one
+exact public OpenAPI checksum false-positive fingerprint; recomputation and the
+complete-history secret scan passed. Fresh CI passed 52 of 53 main jobs; only
+integration failed. One failure expected the retired raw delegate-learning
+publisher; its repair requires positive actual canonical child observations and
+keeps historical compatibility in a separate PostgreSQL test. The other exposed
+that script RPC had marked direct operator scripts as model execution while
+omitting canonical capture handoff. The repair retains/binds/releases real
+captures for model-origin workers, keeps all scripts untrusted, and marks only
+the original authenticated direct-operator script path with host-only provenance.
+Actual model entry clears that provenance; the durable cancellation fence still
+applies. Real tools/policy-owner fixtures cover both paths and missing capture.
+
+The native shell CLI bridge uses lifetime-scoped child grants,
+normal actor/cwd/capture admission, exact registered family projection and nonce
+replay protection. It must use the actual generation's final post-policy catalog,
+not the initial request profile. No new model tool-call IDs or alternative
+conversation store are created. Container/detached shells do not receive a host
+loopback grant. The real thin-client binary dispatches native commands before
+operator profiles, remote credentials, local handlers and workspace bootstrap;
+it cannot fall back to those paths when its child grant is missing. Real-binary
+entry regressions, focused normal/sanitizer checks, CMake fixtures and all 76 lint
+gates passed before the final combined run. Fresh combined CI, isolated full
+integration and actual shell CLI validation remain required;
+production `.100` remains unchanged and KB-free.
+
+### Current qualification checkpoint, 21 October 2026
+
+Committed head `4ad4843b2c7013d8fc37d1c70453bf8bd261ba3c` passed all 53
+main CI jobs and all eight workflow runs. On owned `.252` VM 8163, its normal
+PAM browser recovered an actual interrupted Codex question produced by the
+previous `d0234bc8` build. Recovery proved the exact frozen SDK containment leaf
+empty before retiring it, appended canonical cancellation and a source-bound
+unknown-outcome receipt, and restored the composer. A subsequent real
+write_file request was declined once through the normal browser. The model
+completed, reload repeated neither send nor reply, and independent host
+inspection found no file and no active native reservation. Default systemd
+KillMode was restored. The packet records producer and recovery builds
+separately; this is genuine vendor execution, not seeded receipt validation.
+
+That same build's genuine delegate validation failed before producing a child
+tool result. The qualified child launched and finished custody, but the SDK
+reported an unavailable stream while ingress source assembly failed. This is
+retained failure evidence, not a successful delegate grade. Source inspection
+found the captured source-release ticket was still bound to the parent's
+request ID when the callback minted its required distinct transport ID.
+
+The next changes implement an explicit host-only Go source-release fork: the
+same actor/caller must prove the parent binding, and existing local/shared/grade
+owners freshly revalidate the sources before the new callback handle is
+published. Parent expiry is retained; provider send guards still run separately.
+No ticket is cleared to bypass validation. The duplicate legacy delegate-learning
+writer is retired; canonical source-bound execution observations remain the sole
+learning publisher, while operational exit metrics remain independent.
+
+Generic API execution also gains explicit exact-turn operator cancellation.
+This cancels continuation without asserting process or effect quiescence, fences
+late writes/action admission, and atomically records unknown-outcome receipts
+for actual unmatched API calls. History reload and native switching authenticate
+the immutable original calls and privileged cancellation. The browser retains
+text on failures and submits one continuation only after the exact canonical
+terminal. Actual PostgreSQL race tests and cross-language fixtures cover pending
+questions, repeated call IDs, compaction, forged receipts and ownership refusal.
+These newer changes require fresh CI and genuine API crash/replay acceptance;
+the previous head's green jobs and native recovery do not qualify them.
+
+At that earlier checkpoint, live delegate source-fork, API orphan recovery and
+native Bash CLI acceptance were outstanding. The first two have since passed
+as recorded above. Commit `606bf3db236a942d935410b56c3329f3b6935854` implements
+the child-scoped CLI bridge and both integration repairs; all 76 lint gates pass.
+Its exact-source isolated integration and packaged GUI qualification are running.
+GitHub has the new branch ref but reports delayed pull-request/webhook delivery;
+no new workflow run has started at this checkpoint. Actual native Bash CLI
+acceptance still must qualify the new matching server and client. The final
+browser display refinement labels retained reasoning as Reasoning, so completed
+history does not falsely appear to be thinking again; it changes no execution or
+replay state. Claude still reaches the actual vendor but returns HTTP 429;
+no successful Claude inference is claimed. Production remains KB-free and
+unmodified; independent production review and promotion are outstanding.
+
+### Genuine live-model continuation, 21 October 2026
+
+PR #3057 now includes executable-source commit `e9bde72c703c0b9e6569326d46063401f6ebe369`
+and the reviewed memory-boundary ledger follow-up
+`4eeee289ed3dd636de1664db4f63fe52d9fa6a86`. The latter changes no executable
+source. That head passed both Windows and macOS builds, frontend, lint and
+PostgreSQL test execution, but the reliability release gate detected the newly
+expanded governed-action fixture fingerprint. Its explicit fixture review now
+records the added canonical-actor cases, retaining every existing assertion,
+required case, group and release predicate. Fresh CI must qualify the subsequent
+combined head. The earlier 58 successful checks qualified `b8c7670a6`, not
+these subsequent live repairs.
+
+Actual model validation exposed failures beyond the owned provider fixtures:
+
+- Durable action and exploration consumers used the account principal
+  (`uid:0` or `webchat:<user>`) where canonical sessions require the attested
+  actor (`webuser:<user>`). Their typed store calls and task projection now
+  use the canonical actor; resource and memory-owner calls retain their
+  existing account identity. Actor mismatch remains refused, an empty
+  attested actor cannot fall back, and complete actors survive the finish
+  callback. Three Go bounds now match the native 159-byte actor capacity.
+- Normal GUI clones were absent from native workspace custody. The host now
+  obtains a held directory descriptor from the actual registered Git project
+  owner, requiring the PAM attestation, tool capability, published clone,
+  matching registered remote, lifecycle lock and no-symlink traversal.
+  Unregistered and foreign roots remain refused; the documented shared
+  environment namespace is preserved.
+- A real discovered model ID plus provider name exceeded the local alias
+  limit. Enrollment now provides an editable Name in Aimee, validates the
+  backend UTF-8 byte limit before sending, and preserves the actual model ID
+  and provider registration. All 426 frontend tests and the real API
+  enrollment check passed.
+
+The four actor C fixtures passed normally and under ASan/UBSan with leak
+checking. Actual PostgreSQL owner/race regressions and the execution-policy
+race suite passed; clone custody fixtures, their sanitizer runs and the
+production server object passed. All 76 local lint gates were exercised; the
+reviewed boundary record and explicit installed Go/clang-format tools resolved
+the three initial failures without disabling a gate.
+
+Genuine shipped E2B inference completed a full-catalog browser turn, persisted
+canonical deltas and its terminal assistant answer, and replayed after reload
+without a resend. This low-power CPU took about 599 seconds with explicitly
+configured 32768 context and 600000 ms timeout. The original 8192 context
+overflow and default-timeout failures are preserved. A sequential, separately
+identified E4B image passed actual mTLS discovery, UI enrollment and the normal
+Models probe; that probe is not full-tool Chat acceptance. Both use actual
+model weights and responses, not the external provider fixtures.
+
+The exact repaired source is deployed in owned VM 8163. A genuine Codex turn
+performed an acknowledged read_file and completed canonically; its native
+reservation finished under qualified user/mount/PID/cgroup/network/write
+containment. The VM uses proper systemd delegation rather than a manually
+chowned sibling cgroup. The normal PAM browser also passed actual Codex
+selection, streaming, completion and history replay, followed by a genuine
+acknowledged file read and request_input across reload: exactly three sends,
+one operator reply, final completion and resolved replay without a repeated
+send or question. The same session subsequently preserved its entire
+canonical prefix across Codex → Claude (HTTP 429 failure) → Codex, performed
+another acknowledged file read, recalled the actual operator answer and
+replayed without resending. This qualifies continuity through a failed model
+switch, not successful Claude inference. An initial genuine coding task produced a real local commit that passed sixteen
+independent signed boundary cases without changing the pinned existing tests or
+configuration. Its configured verification failed on a root-owned global lock;
+that failure remains recorded. After configuring the supported state-local lock,
+a fresh genuine Codex task repaired the code, made registered Git commit
+`d940c6640b38331491ce18bf38903f33141d1c31`, and ran the private configured tests
+successfully. Canonical session `af360a42-2822-eca5-7332-863c1ed0b26a` completed
+at sequence 72. Its inline verification proof equals the actual stored grade
+proof, bound to the same canonical actor, project, event, turn and revision.
+An independent sixteen-case semantic check also passed; trusted tests,
+configuration and instructions remained unchanged. This is a configured-test
+grade plus a separate independent task oracle, not an unrestricted quality claim.
+Actual scoped reuse and delegate learning still require their live checks.
+
+The actual native index_investigate call exposed two scope defects. Unlike HTTP
+dispatch, its direct MCP handler omitted active-project injection. The native
+context now shares the HTTP resolver on a private argument copy and uses only
+the host-installed cwd. Live retesting then revealed that an unrelated indexed
+repository prevented fallback to the selected checkout's valid persisted project
+identity. Resolution now preserves matching indexed identity/root precedence,
+then uses the actual checkout identity even when other repositories are indexed.
+Missing identity and unmatched roots still refuse; explicit project arguments
+remain unchanged. No KB instance is required or introduced. The combined wrapper
+and resolver regressions cover unavailable, empty and unrelated indexes, hostile
+model cwd, immutable admitted input and response lifetime. ASan reproduced a
+handler-response use-after-free before the independent response-copy repair;
+normal, sanitizer and the exact affected Cppcheck shard pass after repair.
+Genuine default-scope lookup on the combined new build remains required; the
+explicit-project diagnostic and successful file reads do not qualify it. The
+user's original regular CLI example was checked read-only from the real wol-lore
+checkout: it resolved only wol-lore hits without scope_required.
+
+The real CI LSP providers completed all twenty trials each for gopls and pyright.
+The frozen release guard then refused the reviewed extraction of the native MCP
+host wrapper. Two exact literal reversals now restore that host table to its
+previous reviewed bytes before the existing whole-file frozen comparison.
+Callback, advert, LSP, missing-block and duplicate-block mutations still refuse.
+All 22 benchmark tests and revalidation of the unchanged real CI artifact pass;
+no provider threshold, lineage, fixture or frozen-source exemption was added.
+Fresh CI must qualify the combined commit.
+
+Claude now passes GUI clone custody. Its first credential-source refusal was
+traced through existing safe Vault audit records: source parsing and atomic
+credential storage succeeded, but the enrolled access token had expired and
+the workstation login rotated after enrollment. The healthy current
+workstation document was a newer snapshot. Supported whole-document
+re-enrollment passed, and Claude acquired qualified native custody and
+reached the real Anthropic endpoint. The vendor currently returns HTTP 429,
+so its browser matrix remains unqualified; the bounded SDK turn failed canonically.
+No credential guard or vendor limit is bypassed, and no successful Claude
+vendor run is yet claimed. Production remains KB-free and unmodified. Do not call the migration
+or live acceptance complete while these cases remain outstanding.
+
+### Genuine interrupted-turn browser recovery follow-up
+
+Source commit `d0234bc8c430c6208a8c6d2d1d6644ad4b0d3c89` passed all
+53 main CI jobs, including four deployment tiers, both thin-client platforms,
+real-provider LSP, PostgreSQL replay and strict static analysis. Its complete
+immutable image `sha256:014a9877e81601128bf59914a82dd742454f09a4268bd99194b82198c4072b55`
+was built from the exact source archive and deployed on owned CT 8162. The
+image-only upgrade preserved PostgreSQL identity/start time/volumes, normal PAM
+login, provider configuration, Vault session HMAC and TLS. Running server,
+runtime-web, SPA and provider artifacts match the clean image; code-server is
+present. Normal PAM browser login, exact served SPA and actual managed-mTLS
+E4B inference probe passed. This is not full-tool E4B Chat acceptance.
+
+The combined project repair also passed genuine native default-scope lookup on
+VM 8163: one actual index_investigate call without an explicit project completed
+without scope_required. A same-actor HTTP call from the selected worktree also
+passed while the only indexed project remained an unrelated repository. The
+truthful result was empty/unavailable evidence, not fabricated hits or a KB.
+New-session genuine Codex recall reproduced the two actual configured-test
+records in the same project and exposed neither in a foreign project. An
+ordinary same-build service restart preserved the complete canonical prefix,
+completed a new registered file read and reused the exact Codex SDK session ID;
+reported cached-input tokens were zero. No vendor token-cache hit is claimed.
+
+A subsequent genuine interrupted-turn test exposed a remaining browser deadlock:
+recovery ran only before a new model turn, while stale canonical Running state
+left the composer offering only Steer. Browser opening now invokes a separate
+registered browse-recovery owner after exact attestation/durable-owner checks,
+before legacy import or SSE. It validates all native records, preserves exact
+process-local retained writers, and applies the unchanged physical lease,
+fresh database authority and whole-tree containment proof to abandoned owners.
+Arbitrary busy leases and malformed/foreign records still refuse; strict model
+admission is unchanged. Canonical actors up to 159 bytes can browse an empty
+owner set without inheriting the native execution profile's narrower bound.
+No model or tool turn is started by browsing. Focused regressions and sanitizer
+checks cover this seam; fresh CI and genuine same-source recovery/permission
+retesting must qualify this later repair.
+
+A separate source audit found the analogous generic API-provider crash gap:
+without a native reservation, browsing cannot reconcile the old Running turn,
+and process-local cancellation cannot recover a lost registry entry. Graceful
+shutdown drains and terminalizes workers; hard interruption is the unresolved
+case. This path is source-confirmed but not yet live reproduced. Do not weaken
+the existing unfinished-history guard or infer cross-process quiescence from
+absence of a local writer. A sound generic durable-owner/cancellation repair
+and meaningful regression remain required; the native repair does not cover it.
+
+The VM's separate core/module test services must restart together after killing
+the core; a stale module bus initially caused configuration bootstrap refusal.
+That test-orchestration correction is distinct from the confirmed browser bug.
+The original qualified native leaf/source remains preserved for retesting; no
+synthetic recovery, permission reply or effect was seeded. Production `.100`
+remains unchanged and KB-free; Claude successful vendor inference remains
+unqualified after actual HTTP 429.
+
+### Actual `.252` qualification, 21 October 2026
+
+Disposable CT 8162 and VM 8163 on `pvetest` were created for this work; existing
+guests were left alone. The immutable merged application and PostgreSQL images
+were used for KB-free T3 deployment. Its seven gates passed, with 217 personal
+memory, 15 semantic memory, 21 exploratory memory, 352 provider-boundary and 87
+native-async checks. Egress/Vault passed 18 checks. Plain storage passed all 11
+checks on an unchanged fresh retry; its initial startup timeout remains recorded
+with an undetermined cause. The CT's initial Docker memlock failure was resolved
+by raising only its own Docker/containerd limits to the shipped 1 GiB setting.
+
+The Proxmox host lacks Landlock, so native containment was qualified in VM 8163
+with its own supported Debian kernel rather than weakening the guard. Actual
+server integration passed **171/171**, including all eight pinned SDK profiles,
+both Codex/Claude crash recoveries and both interruption/denial journeys. The 25
+unconfigured-service skips remain explicit. The persisted-learning audit found
+79 ungraded canonical outcomes, two configured-test grades and nine delegate
+observations across four principals/project scopes, with no invalid source,
+proof, scope, pending-review or duplicate bindings. No learning rows were seeded.
+
+Real Chromium against the deployed GUI exposed defects that the earlier
+component fixtures did not: primary selection omitted the authenticated webuser,
+fresh presence did not establish its durable canonical owner, and a page reload
+could reuse an attachment that unload had detached. The follow-up forwards the
+actual actor, admits the exact durable browser owner before attachment success,
+and acquires a page-owned attachment before preferences, replay or sends.
+Explicit reconnect reacquires a lost surface without retrying the failed action;
+background replay no longer clears its send error. Cached Back navigation keeps its
+live surface; only a genuine page discard detaches it. Foreign owners remain refused.
+
+The combined derivative passed live first-open model pinning before any chat,
+reload with zero sends, real model switching and durable history, a real pending
+question across reload, exactly one browser reply and resolved replay, plus
+320/390 px layout checks. Visual inspection then found that the mobile project
+selector overlapped Channels despite fitting the viewport. Its flex wrapper now
+occupies a separate row, with actual control-overlap assertions at desktop,
+320 px and 390 px. The source passes 419 frontend tests, both frontend
+builds, the Chromium component harness, runtime-web race tests, normal HTTP and
+presence fixtures, HTTP ASan/UBSan/LSan, and all 76 lint gates. The published
+baseline and manually built test derivatives are separately identified; fresh
+follow-up CI and production `.100` promotion/verification are still required.
+A second real Chromium pass exercised actual Codex and Claude interruption
+permissions. Both deny replies reached the exact native waiter once, remained
+resolved after reload and produced no write or repeated prompt. Both final
+assistant messages also rendered without protocol/reconnect errors. Its focused
+recovery run passed 5/5, separately from the immutable 171-test baseline; the
+test-only browser handoff was restored byte-exact afterward. This exposed a
+remaining browser consumer mismatch: canonical owned assistant snapshots may
+carry a matching outer role, and owned tool-result messages use role `tool`.
+The browser now accepts those existing Go/C contracts while retaining exact
+owner validation, immutable source custody and assistant-only partial messages.
+Actual native snapshots and negative role/owner cases have regression coverage.
+
+The first follow-up CI head also failed the vulnerability gate on Go 1.26.9
+(GO-2026-6809). All three module directives and active Go build-image versions
+now use Go 1.26.10 with the official production image digest. Actual vulnerability
+checks passed across all three modules; affected image/build pin checks passed.
+Fresh CI must still qualify the combined follow-up head and rebuild its images;
+the previous published baseline is not the production promotion candidate.
+
+Owned provider fixtures establish runtime contracts, not live vendor acceptance
+or semantic model quality. Production `.100` must remain KB-free.
 
 The supported browser/Linux cutovers are implemented: canonical primary loading
 and model switching, durable session-log history, request/response streaming,
@@ -133,7 +954,7 @@ checks or the recorded independent review remain outstanding.
 | Browser controls and usability | Exact primary/child reply ownership, replay readiness, no duplicate/reconnect resend, denial suppression, readable tool output and responsive composer/preferences are implemented and tested. | Local automated checks pass; finish fresh exact-head CI. The browser is ready for manual validation; a later manual pass is not a reason to stop finishing automated work. |
 | KB-free project and learning | Approved held repository identity resolves without a KB index. Canonical terminal/outbox owners publish source-bound configured-test grades and observational delegate learning; next-context reuse is actor/project/source fenced. Actual Docker/restart journeys pass. | Finish fresh exact-head CI, then verify real `.100` capture/reuse after authorized promotion. Leave KB mode/endpoint unset; add no fabricated learning rows. |
 | Meaning of learned evidence | Observational tool sequences, configured-test results and ungraded outcomes keep distinct labels. No automatic causal/procedure promotion or semantic task-success claim is inferred. | Preserve those labels during production verification. Synthesis is not a prerequisite for the KB-free capture/reuse path. |
-| Linux native coverage | Qualified descriptor-based pinned Codex/Claude model/tool/resume and optional cgroup/Landlock crash recovery have actual SDK and kernel-backed evidence. Unqualified ordinary launches remain fail-closed for uncertain crash recovery. | Local integrated qualification passes; finish fresh exact-head CI. Live upstream/vendor subscription acceptance remains separately unqualified. |
+| Linux native coverage | Qualified descriptor-based pinned Codex/Claude model/tool/resume and cgroup/Landlock crash recovery have actual SDK and kernel-backed evidence. Genuine local Claude Max/Opus read/question/reply, permission denial, interrupted recovery and ordinary cache-preserving restart pass on `384683799`; owned `.252` Codex evidence retains its own producer revisions. Unqualified launches remain fail-closed. | Finish fresh final-head CI and current-source owned `.252` deployment qualification; do not generalize to untested profiles or native platforms. |
 | macOS, Windows and unsupported profiles | macOS/Windows thin clients are supported server-access build/test targets. They are not native server-execution coverage. Arbitrary daemon ACP profiles and non-Linux native tool runtimes remain explicitly unsupported/refused. | Report these boundaries honestly; do not convert thin-client passes into native-server claims. |
 | Production review and promotion | `.100` is KB-free and no promotion is claimed. `OWNERS.md` requires Governance to assign/record a second qualified GitHub identity in the live ruleset; the approving reviewer must differ from the author. Agent reviews do not satisfy it. | Obtain the recorded independent review for the final head, retain live-control evidence, deploy through the supported path and verify `.100` without adding a KB. |
 

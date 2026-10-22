@@ -2,6 +2,7 @@
  * resolution. Script handoff checks exercise the real joined RPC dispatcher. */
 #include <aimee/tools/agent_tools.h>
 #include "server_session_control.h"
+#include "server_session_capture.h"
 #include "../modules/tools/agent_tools_internal.h"
 #include <aimee/protocols/mcp/mcp_tools.h>
 #include <assert.h>
@@ -163,6 +164,7 @@ typedef struct
 {
    const char *directory;
    server_control_scope_t *controls;
+   server_session_capture_t *capture;
    atomic_int cancel, local_cancel;
    int seen, matches, inherited_scope;
 } script_context_fixture_t;
@@ -180,10 +182,12 @@ static int script_context_read(const workspace_provider_t *provider, const char 
    const char *cwd = run_cmd_get_cwd();
    fixture->seen++;
    fixture->matches =
-       server_control_scope_current() == fixture->controls && !captured && source.active &&
+       server_control_scope_current() == fixture->controls &&
+       server_session_capture_current() == fixture->capture && !captured && source.active &&
        source.authority == 1 && source.paths && !strcmp(source.paths, "evidence.txt") &&
        !strcmp(source.root, fixture->directory) && request &&
        !strcmp(request->principal, "script-context-fixture") && request->model_execution == 1 &&
+       request->operator_script_origin == (fixture->capture ? 0 : 1) &&
        request->capabilities == CAPS_AUTHENTICATED && cwd && !strcmp(cwd, fixture->directory) &&
        !strcmp(session_id(), "script-context-session") &&
        !strcmp(credentials.vault_principal, "webuser:script-context-fixture") &&
@@ -196,7 +200,7 @@ static int script_context_read(const workspace_provider_t *provider, const char 
    return result;
 }
 
-static void script_rpc_host_context(int inherited_scope)
+static void script_rpc_host_context(int inherited_scope, int canonical)
 {
    request_context_snapshot_t previous_request;
    request_context_snapshot(&previous_request);
@@ -231,6 +235,13 @@ static void script_rpc_host_context(int inherited_scope)
    workspace.read_all = script_context_read;
    workspace_provider_set_active(&workspace);
    request_context_t owner = {.capabilities = CAPS_ALL};
+   if (canonical)
+   {
+      owner.model_execution = 1;
+      owner.vault_transport = ATTEST_UDS_PEERCRED;
+      snprintf(owner.vault_principal, sizeof owner.vault_principal,
+               "webuser:script-context-fixture");
+   }
    snprintf(owner.principal, sizeof owner.principal, "%s", "script-context-fixture");
    snprintf(owner.request_id, sizeof owner.request_id, "%s", "script-context-request");
    request_context_set(&owner);
@@ -243,6 +254,24 @@ static void script_rpc_host_context(int inherited_scope)
                                                 "webuser:script-context-fixture");
    assert(fixture.controls);
    server_control_scope_t *previous_controls = server_control_scope_bind(fixture.controls);
+   server_session_capture_t *previous_capture = server_session_capture_current();
+   if (canonical)
+   {
+      fixture.capture =
+          server_session_capture_open("script-context-session", "script-turn",
+                                      "webuser:script-context-fixture", "script-context-session");
+      assert(fixture.capture);
+      server_session_capture_bind(fixture.capture);
+      /* Losing the real model capture must refuse before launching a script;
+       * it cannot turn into direct-operator provenance on the worker. */
+      server_session_capture_bind(NULL);
+      char *refused = tool_execute_script("python", "print('must-not-run')", 1, directory, NULL);
+      assert(refused && strstr(refused, "script RPC setup failed") &&
+             !strstr(refused, "must-not-run"));
+      free(refused);
+      assert(fixture.seen == 0);
+      server_session_capture_bind(fixture.capture);
+   }
    char *result =
        tool_execute_script("python",
                            "import json, aimee_tools\n"
@@ -257,12 +286,19 @@ static void script_rpc_host_context(int inherited_scope)
    assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(reply, "timed_out")));
    assert(fixture.seen == 1 && fixture.matches);
    assert(server_control_scope_current() == fixture.controls);
+   if (fixture.capture)
+   {
+      assert(server_session_capture_current() == fixture.capture);
+      server_session_capture_bind(previous_capture);
+      server_session_capture_close(fixture.capture);
+   }
    server_control_scope_close(fixture.controls);
    server_control_scope_bind(previous_controls);
    assert(atomic_load(&fixture.cancel) == !inherited_scope);
    assert(atomic_load(&fixture.local_cancel) == inherited_scope);
    const request_context_t *unchanged = request_context_get();
-   assert(unchanged && !unchanged->model_execution && unchanged->capabilities == CAPS_ALL);
+   assert(unchanged && unchanged->model_execution == canonical &&
+          !unchanged->operator_script_origin && unchanged->capabilities == CAPS_ALL);
    cJSON_Delete(reply);
    free(result);
    agent_set_request_cancel(previous_cancel);
@@ -285,6 +321,8 @@ static void script_rpc_host_context(int inherited_scope)
 
 void test_script_rpc_keeps_host_context(void)
 {
-   script_rpc_host_context(0);
-   script_rpc_host_context(1);
+   script_rpc_host_context(0, 0);
+   script_rpc_host_context(1, 0);
+   script_rpc_host_context(0, 1);
+   script_rpc_host_context(1, 1);
 }
