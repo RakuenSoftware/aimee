@@ -1391,27 +1391,29 @@ static void test_agent_config_provider_cli_roundtrip(void)
    {
       FILE *f = fopen(agent_config_path(), "w");
       assert(f != NULL);
-      fputs("{\"default_delegate\":\"codex-cli\",\"agents\":[{\"name\":\"codex-cli\",\"roles\":["
-            "\"code\"],"
-            "\"backend\":\"cli-stdio\",\"cli_kind\":\"codex\",\"cli_cmd\":\"codex\","
-            "\"cli_idle_timeout_ms\":1234,\"session_reuse\":true},"
-            "{\"name\":\"claude\",\"provider\":\"claude\",\"roles\":[\"code\"],"
-            "\"backend\":\"provider-cli\",\"cli_kind\":\"claude\",\"cli_cmd\":\"claude-p\"},"
-            "{\"name\":\"mistral-plan\",\"provider\":\"mistral\","
-            "\"roles\":[\"code\",\"review\",\"explain\",\"refactor\",\"draft\",\"execute\"],"
-            "\"backend\":\"provider-cli\",\"cli_kind\":\"mistral-plan\",\"cli_cmd\":\"vibe\","
-            "\"cost_tier\":2},"
-            "{\"name\":\"gemini-cli\",\"provider\":\"gemini\","
-            "\"roles\":[\"code\"],\"backend\":\"provider-cli\","
-            "\"cli_kind\":\"gemini\",\"cli_cmd\":\"gemini\",\"enabled\":0},"
-            "{\"name\":\"mistral-cli\",\"provider\":\"mistral\","
-            "\"roles\":[\"code\"],\"backend\":\"provider-cli\","
-            "\"cli_kind\":\"mistral\",\"cli_cmd\":\"mistral\",\"enabled\":1},"
-            "{\"name\":\"claude-code\",\"provider\":\"claude-code\","
-            "\"roles\":[\"code\"],\"backend\":\"tmux-cli\","
-            "\"cli_kind\":\"claude-code\",\"cli_cmd\":\"/bin/echo\","
-            "\"session_reuse\":true}]}\n",
-            f);
+      fputs(
+          "{\"default_delegate\":\"codex-cli\",\"agents\":[{\"name\":\"codex-cli\",\"roles\":["
+          "\"code\"],"
+          "\"backend\":\"cli-stdio\",\"cli_kind\":\"codex\",\"cli_cmd\":\"codex\",\"auth_type\":"
+          "\"none\","
+          "\"cli_idle_timeout_ms\":1234,\"session_reuse\":true},"
+          "{\"name\":\"claude\",\"provider\":\"claude\",\"roles\":[\"code\"],"
+          "\"backend\":\"provider-cli\",\"cli_kind\":\"claude\",\"cli_cmd\":\"claude-p\"},"
+          "{\"name\":\"mistral-plan\",\"provider\":\"mistral\","
+          "\"roles\":[\"code\",\"review\",\"explain\",\"refactor\",\"draft\",\"execute\"],"
+          "\"backend\":\"provider-cli\",\"cli_kind\":\"mistral-plan\",\"cli_cmd\":\"vibe\","
+          "\"cost_tier\":2,\"auth_type\":\"none\"},"
+          "{\"name\":\"gemini-cli\",\"provider\":\"gemini\","
+          "\"roles\":[\"code\"],\"backend\":\"provider-cli\","
+          "\"cli_kind\":\"gemini\",\"cli_cmd\":\"gemini\",\"auth_type\":\"none\",\"enabled\":0},"
+          "{\"name\":\"mistral-cli\",\"provider\":\"mistral\","
+          "\"roles\":[\"code\"],\"backend\":\"provider-cli\","
+          "\"cli_kind\":\"mistral\",\"cli_cmd\":\"mistral\",\"auth_type\":\"none\",\"enabled\":1},"
+          "{\"name\":\"claude-code\",\"provider\":\"claude-code\","
+          "\"roles\":[\"code\"],\"backend\":\"tmux-cli\","
+          "\"cli_kind\":\"claude-code\",\"cli_cmd\":\"/bin/echo\","
+          "\"session_reuse\":true}]}\n",
+          f);
       fclose(f);
    }
 
@@ -1426,7 +1428,7 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(loaded.agents[0].session_reuse == 1);
    assert(strcmp(loaded.agents[1].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(loaded.agents[1].provider, "claude") == 0);
-   assert(strcmp(loaded.agents[1].auth_type, "none") == 0);
+   assert(strcmp(loaded.agents[1].auth_type, "claude-oauth") == 0);
    assert(strcmp(loaded.agents[1].cli_kind, "claude") == 0);
    assert(strcmp(loaded.agents[1].cli_cmd, "claude") == 0);
    assert(strcmp(loaded.agents[2].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
@@ -1455,6 +1457,11 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(strcmp(loaded.agents[5].cli_kind, "claude") == 0);
    assert(strcmp(loaded.agents[5].cli_cmd, "/bin/echo") == 0);
    assert(loaded.agents[5].session_reuse == 1);
+   assert(strcmp(loaded.agents[5].auth_type, "claude-oauth") == 0);
+   /* Claude's effective OAuth lineage must not change unrelated explicit auth. */
+   for (int i = 0; i < loaded.agent_count; i++)
+      if (i != 1 && i != 5)
+         assert(strcmp(loaded.agents[i].auth_type, "none") == 0);
    /* A claude-CLI agent that is NOT server-hosted (no `is_server_hosted` in its
     * record) is structurally excluded from delegate routing: a client-only
     * claude has no server session to drive, so dispatch could only fail. This
@@ -1474,7 +1481,7 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(reloaded.agents[0].session_reuse == 1);
    assert(strcmp(reloaded.agents[1].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(reloaded.agents[1].provider, "claude") == 0);
-   assert(strcmp(reloaded.agents[1].auth_type, "none") == 0);
+   assert(strcmp(reloaded.agents[1].auth_type, "claude-oauth") == 0);
    assert(strcmp(reloaded.agents[1].cli_kind, "claude") == 0);
    assert(strcmp(reloaded.agents[1].cli_cmd, "claude") == 0);
    assert(strcmp(reloaded.agents[2].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
@@ -1499,6 +1506,10 @@ static void test_agent_config_provider_cli_roundtrip(void)
    assert(strcmp(reloaded.agents[5].cli_kind, "claude") == 0);
    assert(strcmp(reloaded.agents[5].cli_cmd, "/bin/echo") == 0);
    assert(reloaded.agents[5].session_reuse == 1);
+   assert(strcmp(reloaded.agents[5].auth_type, "claude-oauth") == 0);
+   for (int i = 0; i < reloaded.agent_count; i++)
+      if (i != 1 && i != 5)
+         assert(strcmp(reloaded.agents[i].auth_type, "none") == 0);
    /* Still excluded after the save/reload roundtrip (see the load-side assert). */
    assert(agent_is_available_for_routing(&reloaded.agents[5]) == 0);
 
