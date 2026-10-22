@@ -142,10 +142,6 @@ func normalizeRoot(root object) (object, error) {
 	if len(models) > maxModels {
 		return nil, errors.New("maximum number of models exceeded")
 	}
-	models, err = expandModels(models)
-	if err != nil {
-		return nil, err
-	}
 	connections, err := array(root, "providers")
 	if err != nil {
 		return nil, err
@@ -162,6 +158,27 @@ func normalizeRoot(root object) (object, error) {
 			return nil, errors.New("saved provider contains a literal credential")
 		}
 		byName[str(p, "name")] = p
+	}
+	// Older model commands also mirrored their generated command into the
+	// connection. Repair it only while the exact owning legacy model still
+	// proves both the selector and mirrored bytes, before model normalization.
+	for _, model := range models {
+		name := str(model, "registration")
+		if name == "" {
+			name = str(model, "name")
+		}
+		connection := byName[name]
+		provider, protocol := str(model, "provider"), str(connection, "provider")
+		generated := "claude --model " + str(model, "model")
+		if (provider == "claude" || provider == "claude-code") &&
+			(protocol == "claude" || protocol == "claude-code") &&
+			str(model, "cli_cmd") == generated && str(connection, "cli_cmd") == generated {
+			connection["cli_cmd"] = "claude"
+		}
+	}
+	models, err = expandModels(models)
+	if err != nil {
+		return nil, err
 	}
 	for _, m := range models {
 		name := str(m, "registration")

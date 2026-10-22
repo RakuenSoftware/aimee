@@ -568,13 +568,6 @@ func (m *Manager) modelCommand(ctx context.Context, req Request, root object) (o
 			model["auth_type"] = "codex-oauth"
 		}
 	}
-	if p := str(model, "provider"); p == "claude" || p == "claude-code" {
-		model["backend"] = "provider-cli"
-		model["cli_kind"] = "claude"
-		model["cli_cmd"] = "claude --model " + str(model, "model")
-		model["session_reuse"] = true
-		model["endpoint"] = ""
-	}
 	if opts["default"] == "true" {
 		root["default_agent"] = name
 	}

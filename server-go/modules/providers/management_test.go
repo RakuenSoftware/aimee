@@ -215,3 +215,168 @@ func TestProfileOperationsDistinguishMissingAndUnknownNames(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeModelCommandsKeepExecutableSeparate(t *testing.T) {
+	for _, provider := range []string{"claude", "claude-code"} {
+		t.Run(provider, func(t *testing.T) {
+			m, home, vault := manager(t)
+			call(t, m, "model.add", object{"args": []string{"native", "", "claude-opus-5", "--provider", provider}})
+			check := func(wantModel string) {
+				t.Helper()
+				raw, err := os.ReadFile(filepath.Join(home, "models.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var disk object
+				if json.Unmarshal(raw, &disk) != nil {
+					t.Fatal("invalid persisted roster")
+				}
+				model := find(rows(disk, "models"), "native")
+				if str(model, "cli_cmd") != "claude" || str(model, "model") != wantModel {
+					t.Fatalf("executable/model not separate: command=%q model=%q", str(model, "cli_cmd"), str(model, "model"))
+				}
+				if str(model, "backend") != "provider-cli" || str(model, "cli_kind") != "claude" {
+					t.Fatal("native adapter identity lost")
+				}
+			}
+			check("claude-opus-5")
+			for _, command := range []struct {
+				op    string
+				args  []string
+				model string
+			}{
+				{"model.set", []string{"native", "--primary-only", "true"}, "claude-opus-5"},
+				{"model.set", []string{"native", "--model", "claude-sonnet-5-5"}, "claude-sonnet-5-5"},
+				{"model.disable", []string{"native"}, "claude-sonnet-5-5"},
+				{"model.enable", []string{"native"}, "claude-sonnet-5-5"},
+				{"model.roles", []string{"native", "code,review"}, "claude-sonnet-5-5"},
+			} {
+				call(t, m, command.op, object{"args": command.args})
+				check(command.model)
+			}
+			store, err := NewStore(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m = NewManager(store, vault)
+			cfg := call(t, m, "snapshot.load", nil)["config"].(map[string]any)
+			if str(find(rows(cfg, "models"), "native"), "cli_cmd") != "claude" {
+				t.Fatal("executable changed on reload")
+			}
+		})
+	}
+}
+
+func TestClaudeLegacyGeneratedCommandAndExplicitPaths(t *testing.T) {
+	for _, tc := range []struct{ name, command, want string }{
+		{"generated", "claude --model claude-opus-5", "claude"},
+		{"custom-path", "/opt/owned-sdk/claude", "/opt/owned-sdk/claude"},
+		{"different-arguments", "claude --model another-model", "claude --model another-model"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, home, vault := manager(t)
+			data, err := json.Marshal(object{"models": []object{{"name": "native", "provider": "claude", "backend": "provider-cli", "cli_kind": "claude", "cli_cmd": tc.command, "model": "claude-opus-5"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(home, "models.json"), data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			cfg := call(t, m, "snapshot.load", nil)["config"].(map[string]any)
+			if got := str(find(rows(cfg, "models"), "native"), "cli_cmd"); got != tc.want {
+				t.Fatalf("loaded command=%q want=%q", got, tc.want)
+			}
+			// Model changes preserve explicit executable identity; only the exact old
+			// generated default is migrated, without parsing arbitrary command text.
+			call(t, m, "model.set", object{"args": []string{"native", "--model", "claude-sonnet-5-5"}})
+			store, err := NewStore(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m = NewManager(store, vault)
+			cfg = call(t, m, "snapshot.load", nil)["config"].(map[string]any)
+			model := find(rows(cfg, "models"), "native")
+			if str(model, "cli_cmd") != tc.want || str(model, "model") != "claude-sonnet-5-5" {
+				t.Fatal("model edit changed executable identity")
+			}
+		})
+	}
+}
+
+func TestClaudeConnectionOnlyEnrollmentRetainsNativeDispatch(t *testing.T) {
+	for _, provider := range []string{"claude", "claude-code"} {
+		t.Run(provider, func(t *testing.T) {
+			m, home, vault := manager(t)
+			call(t, m, "provider.save_connection", object{"name": "max", "provider": provider, "endpoint": "", "auth_type": "none", "create": true})
+			call(t, m, "model.add", object{"args": []string{"max:opus", "ignored", "claude-opus-5", "--registration", "max"}})
+			check := func() {
+				t.Helper()
+				cfg := call(t, m, "snapshot.load", nil)["config"].(map[string]any)
+				model := find(rows(cfg, "models"), "max:opus")
+				if str(model, "backend") != "provider-cli" || str(model, "cli_kind") != "claude" || str(model, "cli_cmd") != "claude" || str(model, "endpoint") != "" || !boolean(model, "session_reuse", false) {
+					t.Fatalf("native dispatch lost after applying connection: %#v", model)
+				}
+				if str(model, "registration") != "max" || str(model, "auth_type") != "none" || str(model, "model") != "claude-opus-5" {
+					t.Fatal("credential or model identity changed")
+				}
+			}
+			check()
+			call(t, m, "model.set", object{"args": []string{"max:opus", "--primary-only", "true"}})
+			check()
+			store, err := NewStore(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m = NewManager(store, vault)
+			check()
+			call(t, m, "provider.save_connection", object{"name": "max", "provider": provider, "endpoint": "", "auth_type": "none", "create": false})
+			check()
+		})
+	}
+}
+
+func TestAnthropicAPIConnectionDoesNotBecomeNativeClaude(t *testing.T) {
+	m, _, _ := manager(t)
+	call(t, m, "provider.save_connection", object{"name": "api", "provider": "anthropic", "endpoint": "https://api.anthropic.com/v1/messages", "auth_type": "bearer", "api_key": "$ANTHROPIC_API_KEY", "create": true})
+	call(t, m, "model.add", object{"args": []string{"api:opus", "ignored", "claude-opus-5", "--registration", "api"}})
+	cfg := call(t, m, "snapshot.load", nil)["config"].(map[string]any)
+	model := find(rows(cfg, "models"), "api:opus")
+	if str(model, "backend") == "provider-cli" || str(model, "cli_kind") != "" || str(model, "cli_cmd") != "" || str(model, "endpoint") != "https://api.anthropic.com/v1/messages" || str(model, "api_key") != "$ANTHROPIC_API_KEY" {
+		t.Fatal("API connection changed to native dispatch or lost credential authority")
+	}
+}
+
+func TestClaudeMirroredLegacyConnectionDoesNotPoisonNewRegisteredModel(t *testing.T) {
+	for _, command := range []string{"claude --model claude-opus-5", "/opt/owned-sdk/claude", "claude --model unrelated"} {
+		t.Run(command, func(t *testing.T) {
+			m, home, vault := manager(t)
+			data, err := json.Marshal(object{"providers": []object{{"name": "max", "provider": "claude", "endpoint": "", "auth_type": "none", "cli_cmd": command}}, "models": []object{{"name": "max:old", "registration": "max", "provider": "claude", "backend": "provider-cli", "cli_kind": "claude", "cli_cmd": command, "model": "claude-opus-5"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(home, "models.json"), data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			store, err := NewStore(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m = NewManager(store, vault)
+			call(t, m, "model.add", object{"args": []string{"max:new", "ignored", "claude-sonnet-5-5", "--registration", "max"}})
+			cfg := call(t, m, "snapshot.load", nil)["config"].(map[string]any)
+			want := command
+			if command == "claude --model claude-opus-5" {
+				want = "claude"
+			}
+			for _, name := range []string{"max:old", "max:new"} {
+				model := find(rows(cfg, "models"), name)
+				if str(model, "cli_cmd") != want || str(model, "backend") != "provider-cli" {
+					t.Fatalf("%s inherited command=%q want=%q", name, str(model, "cli_cmd"), want)
+				}
+			}
+			if str(find(rows(cfg, "providers"), "max"), "cli_cmd") != want {
+				t.Fatal("connection command lost exact migration scope")
+			}
+		})
+	}
+}

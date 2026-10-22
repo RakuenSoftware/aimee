@@ -86,6 +86,13 @@ func normalizeModel(model object) error {
 	if str(model, "auth_type") == "" {
 		model["auth_type"] = "bearer"
 	}
+	// A saved connection owns protocol and credentials, but need not repeat native
+	// adapter fields. Re-derive dispatch after applying that connection instead of
+	// falling through to HTTP with an intentionally empty SDK endpoint.
+	if provider := str(model, "provider"); provider == "claude" || provider == "claude-code" {
+		model["backend"], model["cli_kind"] = "provider-cli", "claude"
+		model["session_reuse"], model["endpoint"] = true, ""
+	}
 	if str(model, "backend") == "cli-stdio" {
 		model["backend"] = "provider-cli"
 	}
@@ -103,7 +110,9 @@ func normalizeModel(model object) error {
 		if str(model, "auth_type") == "bearer" {
 			model["auth_type"] = "none"
 		}
-		if cmd := str(model, "cli_cmd"); cmd == "" || cmd == "claude-p" {
+		// Older model commands embedded this exact model selection in the executable
+		// field. Native launches pass --model separately and never interpret shell text.
+		if cmd := str(model, "cli_cmd"); cmd == "" || cmd == "claude-p" || cmd == "claude --model "+str(model, "model") {
 			model["cli_cmd"] = "claude"
 		}
 	}
