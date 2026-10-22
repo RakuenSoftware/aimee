@@ -2282,7 +2282,7 @@ static void ensure_hermes_plugin_enabled(const char *config_path)
       free(text);
       return;
    }
-   char *section_end = strchr(plugins, '\n');
+   const char *section_end = strchr(plugins, '\n');
    if (!section_end)
       section_end = text + len;
    else
@@ -2291,7 +2291,7 @@ static void ensure_hermes_plugin_enabled(const char *config_path)
       while (*section_end && (*section_end == ' ' || *section_end == '\t' || *section_end == '\n' ||
                               *section_end == '\r'))
       {
-         char *next = strchr(section_end, '\n');
+         const char *next = strchr(section_end, '\n');
          if (!next)
          {
             section_end = text + len;
@@ -2303,21 +2303,21 @@ static void ensure_hermes_plugin_enabled(const char *config_path)
          section_end = next + 1;
       }
    }
-   char *enabled = strstr(plugins, "  enabled:");
+   const char *enabled = strstr(plugins, "  enabled:");
    if (!enabled || enabled >= section_end)
    {
-      char *after = strchr(plugins, '\n');
+      const char *after = strchr(plugins, '\n');
       size_t at = after ? (size_t)(after + 1 - text) : len;
       if (integration_insert(&text, &len, at, "  enabled:\n    - aimee-worktrees\n") == 0)
          (void)write_text_file(config_path, text, 0600);
       free(text);
       return;
    }
-   char *line_end = strchr(enabled, '\n');
+   const char *line_end = strchr(enabled, '\n');
    if (!line_end)
       line_end = text + len;
-   char *open = strchr(enabled, '[');
-   char *close = open && open < line_end ? strchr(open, ']') : NULL;
+   const char *open = strchr(enabled, '[');
+   const char *close = open && open < line_end ? strchr(open, ']') : NULL;
    if (close && close <= line_end)
    {
       const char *value = close == open + 1 ? "aimee-worktrees" : ", aimee-worktrees";
