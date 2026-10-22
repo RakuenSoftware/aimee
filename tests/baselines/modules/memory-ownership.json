@@ -2273,8 +2273,8 @@
       "symbols": [
         "AIMEE_MEMORY_EVENT_RERANK"
       ],
-      "sha256": "2d33e0887a6a2a1c6052a041d1d710c241b5024fcd9a23e7aa138f61dd923571",
-      "review": "2026-10-14: Audit capacity readiness only; memory rerank attachment and transport owner are unchanged. test_server_ready covers capacity failure and recovery."
+      "sha256": "97c638de73649f0d138a6410b2a98a8506fb7a36087b4bca73a8ddac4370fe10",
+      "review": "2026-10-22: Joined, interruptible readiness sampler lifecycle; stop wakes the worker, waits for its in-flight owner probes, clears the snapshot, and prevents post-stop re-polling. Memory rerank attachment, existing DB1/KB/module probe bodies, transport and owner authority are unchanged. src/tests/test_server_ready.c covers in-flight stop, no polling after stop, repeated/concurrent lifecycle and fail-closed stopped readiness."
     },
     "src/server/server_session.c": {
       "disposition": "host-transport",
