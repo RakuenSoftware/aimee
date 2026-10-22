@@ -686,6 +686,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-kb-oidc-login-flow \
                $(TESTPREFIX)/unit-test-kb-http-identity-login \
                $(TESTPREFIX)/unit-test-oauth-reauth \
+               $(TESTPREFIX)/unit-test-oauth-refresh-diagnostics \
                $(TESTPREFIX)/unit-test-mcp-client \
                $(TESTPREFIX)/unit-test-mcp-client-sse \
                $(TESTPREFIX)/unit-test-mcp-client-integration \
@@ -6048,6 +6049,22 @@ $(TESTPREFIX)/unit-test-oauth-pkce: $(OBJDIR)/tests/test_oauth_pkce.o \
 $(TESTPREFIX)/unit-test-oauth-reauth: $(OBJDIR)/tests/test_oauth_reauth.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/server/oauth_tokens.o \
+                     \
+                     $(OBJDIR)/modules/vault/vault_service.o \
+                     $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
+                     $(OBJDIR)/modules/vault/vault_crypto.o \
+                     $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                     $(OBJDIR)/modules/vault/vault_server_key.o \
+                     $(OBJDIR)/platform_random.o \
+                     $(TEST_CORE_OBJS) \
+                           $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
+                           $(OBJDIR)/modules/protocols/mcp/mcp_osv_gate.o \
+                           $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/jti_replay_consume.o $(OBJDIR)/remote_client_claim.o $(OBJDIR)/secrets.o \
+                           $(CORE_EVENT_BUS_LIB)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-oauth-refresh-diagnostics: $(OBJDIR)/tests/test_oauth_refresh_diagnostics.o \
+                     $(OBJDIR)/server/oauth_pkce.o \
                      \
                      $(OBJDIR)/modules/vault/vault_service.o \
                      $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \

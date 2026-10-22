@@ -15,109 +15,106 @@ implementation or local/live validation. Earlier follow-up-PR instructions below
 are historical. Do not investigate or change `.100`; validation uses the owned
 `.252` environment.
 
-Runtime candidate `2623e00a0` passes all 76 lint gates, all three Go module
-suites normally and with the race detector, and the real Rust/C and Go/C bus
-interoperability gates. The five editor regressions, all 473 frontend tests,
-type checking and both frontend builds pass; the frontend inputs are unchanged
-since that qualification. These are local results, not fresh GitHub CI.
+Runtime candidate `64cce353b` passes all 76 lint gates, all three Go module
+race suites, all 478 frontend tests, type checking and both frontend builds.
+The complete native ASan/UBSan/leak lane passes 678 invocations of 675 distinct
+binaries. All 988 production C translation units complete static analysis; the
+advisory warning review retains existing warnings without suppressions. Rust/C
+and Go/C interoperability checks also pass on their unchanged inputs. These are
+local results, not fresh GitHub CI.
 
-Exact runtime `2623e00a0` also passes configured Docker integration (170/170)
-and T3 deployment (7/7 topology gates, 692/692 family assertions). Integration
+Exact runtime `64cce353b` passes configured integration (170/170), all eight
+actual SDK profiles, and the new real Claude 2.1.177 refusal fixture. Integration
 retains 25 explicitly unconfigured KB/runtime-web checks; real Docker grading,
-recovery and scoped reuse ran. These fixtures and their temporary database roles,
-containers, volumes and networks are cleaned up. Their private evidence is retained.
-These results qualify that runtime, not the subsequent refusal-fidelity changes.
+learning, recovery and scoped reuse ran. T3 passes all seven topology gates and
+692 family assertions. Scoped fixture databases, roles, credentials, containers,
+volumes and networks are cleaned up. Private proof indices and exported evidence
+are retained outside the repository. This qualifies the locally built candidate,
+not a newly published registry image.
 
-Full canonical Docker and HOST builds and normal upgrades of `2623e00a0` pass.
-The normal three-service Docker restart preserves all 54 canonical events,
-the full 20,454-byte SDK file and its original 17,898-byte prefix, UUID, device,
-cwd, models, cache and configuration authority. All 86 image products and 19
-modules match. Strict 1280/390/320 replay checks run 15 seconds each with zero
-idle lifecycle or mutation requests; controls stay closed and the browser exits.
+Full canonical Docker and HOST builds and normal upgrades of `64cce353b` pass.
+The Docker upgrade preserves both earlier conversations (54 and 33 events), their
+full SDK files (20,454 and 7,048 bytes), original prefixes, UUIDs, cwd, models,
+native metadata and configuration authority. All 86 image products and 19 modules
+match. HOST upgrade preserves its 412 history events and all 71 installed products.
+A genuine quiet HOST stop completes in 1.949 seconds, without a timeout override
+or forced kill. Its fresh PID/inode/offset-bound receipt reports zero pending
+audit and guardrail records and no increase in dropped records. Normal recovery
+and 30-second stability pass. Earlier 90-second failures remain retained.
 
-The upgraded HOST server now passes a genuine normal quiet stop in 1.861 seconds,
-without a timeout override or forced kill. Its single fresh, PID/inode/offset-bound
-shutdown receipt reports zero durable unwritten records, zero guardrail pending
-records and zero dropped records (unchanged from the baseline). Normal recovery
-and 30-second stability pass; all canonical history, five native metadata tables,
-models and cache manifest remain exact, and the native execution cgroup is empty.
-Earlier 90-second failures remain retained as failures. Joining the interruptible
-readiness sampler before module teardown and atomically committing bounded queued
-audit batches fix that observed shutdown case. SQLite FULL synchronization and
-synchronous action/idempotent contracts remain intact. Lifecycle, batch, retry,
-FIFO and concurrency fixtures pass normally and under sanitizers; readiness also
-passes ThreadSanitizer. No general bus-quiesce mechanism was added.
+The observed shutdown repairs join the interruptible readiness sampler before
+module teardown and atomically commit bounded queued audit batches. A subsequent
+full sanitizer run exposed a real flush race: the observation bus published its
+processed count before handing off the record. `64cce353b` publishes it after the
+handoff. The deterministic regression fails on the old code and passes normally,
+under ASan/UBSan/leak checks and ThreadSanitizer. SQLite FULL synchronization and
+synchronous action/idempotence contracts remain intact.
+
+Corrected strict browser replay checks at 1280/390/320 run 15 seconds each with
+zero idle lifecycle, reconnect or mutation requests, closed controls, enabled
+Send, no page errors and no horizontal overflow. The browser uses
+`ignoreHTTPSErrors:false` and pins only the owned UI certificate SPKI. An earlier
+audit mistakenly ignored certificate errors: retain it as HTTP semantics evidence
+only, not TLS qualification. Independent checks after the corrected audit confirm
+the old histories, full SDK files, native tables and cache authority remain exact.
 
 Genuine HOST permission recovery previously passed: one permission, one human
 Allow, one governed dispatch and an independently verified filesystem effect.
-The HTTP Codex B continuation completed with correct prior-answer recall. The
-single subsequent native Claude A return used the original SDK UUID, stable cwd
-and unchanged cache prefix, but failed at canonical event 54. Its retained
-207-byte text exactly matches SDK 2.1.177's locally constructed refusal diagnostic.
-Actual stdout and numeric HTTP status were not retained; upstream origin and root
-cause remain unestablished. Do not retry that turn, reset its cache, import the
-SDK transcript or describe the original A/B/A as passing. A separate new native A/A control passed both turns using the same real SDK UUID,
-cwd and exact cache prefix. Its desktop/tablet/phone replay checks passed without
-idle lifecycle or mutation requests. The following supported HTTP B continuation
-also passed with correct recall. Returning to that same native A then failed at
-event 33 with canonical raw stop reason `refusal`, zero output tokens and the same
-SDK-generated diagnostic. All 33 events and the full 7,048-byte cache are retained;
-the original failed 54-event conversation remains unchanged. Neither failed turn
-is retried. There is no retained numeric provider HTTP status for either failure.
+The HTTP Codex B continuation completed with correct prior-answer recall. Its
+subsequent native Claude A return used the original SDK UUID, stable cwd and
+unchanged cache prefix, but failed at event 54. A separate native A/A control
+passed both turns with the same SDK UUID, cwd and cache prefix; B then passed,
+but returning to native A failed at event 33. Both failures retain the SDK's
+locally constructed refusal diagnostic. Actual stdout and numeric HTTP status
+were not retained; upstream origin and root cause remain unestablished. Neither
+failed turn is retried. Do not reset caches or import SDK transcripts.
 
-Offline inspection of the actual SDK requests and canonical history did not find
-an established request-structure defect: non-message SDK request fields matched,
-and the production canonical projector emitted the expected alternating history.
-Do not import SDK transcripts, reset cache identity, invent a provider HTTP error,
-or claim the cross-vendor acceptance passes.
+The refusal repair preserves bounded category/explanation through canonical
+responses, deltas, snapshots, durable events, caches and browser replay, including
+legacy raw refusal history. Provider fallback tokens and model recommendations
+are excluded. Refusals cannot trigger synthetic completion-policy tool
+continuations. Unsupported wire projections fail explicitly. The actual SDK
+fixture proves a local provider refusal is retained with exactly one request,
+no retry and no diagnostic text promoted to assistant observations. This fixes
+demonstrated fidelity and continuation defects; it does not prove the original
+live cross-vendor refusal is resolved.
 
-The current repair preserves bounded refusal category/explanation
-through canonical responses, stream deltas, snapshots, durable events and browser
-replay. Only diagnostic fields are projected; provider fallback tokens and model
-recommendations are excluded. Refusals cannot trigger completion-policy tool
-continuations. Unsupported wire projections fail explicitly rather than dropping
-these details. Focused normal/sanitizer and frontend/race regressions pass, including the
-compatibility accumulator, native buffered result and response cache consumers.
-Combined exact-source qualification and a real-SDK local provider refusal fixture
-are in progress. This repairs demonstrated diagnostic and
-continuation defects; it does not establish the cause of the live provider refusal.
+A further fresh four-turn live control stopped after its first genuine Send:
+three canonical events record failure before any SDK process or cache creation.
+The runtime constructor refused at `claude_source_lineage`; the outer error's
+"native tool registry" label is too broad to identify that cause. Vault audit
+records show successful credential reads and entry into OAuth refresh, followed
+by no usable token. The exact refresh failure was not retained. The stored token had expired at
+21:42 UTC; the local operator credential had separately rotated at 21:38 UTC.
+That failed attempt performed no credential write, later turn or retry. A new
+connection through normal provider enrollment is being prepared for a separate
+control; the original registration, failed conversations and caches are preserved.
+Secret-free refresh diagnostics now distinguish static failure categories and
+validated numeric curl/HTTP codes. A separate confirmed parser defect is repaired:
+oversized token responses are rejected before they can replace stored credentials.
+Normal and sanitizer regressions qualify these changes separately from `64cce353b`.
 
-The editor now resolves hydrated display basenames through the owner's registry
-before requesting the session worktree, and shows a refusal instead of silently
-opening the base checkout. Actual worktree README rendering at desktop and 320px
-passes. The code-server proxy preserves encoded paths/queries and credential
-stripping while serving both PWA and webview workers within `/vscode/`; both actual
-workers register successfully with HTTP 200. Browser-scoped pinning of the owned
-fixture certificate is explicit; no global trust or product TLS bypass changed.
-The real HTTP worker-fetch regression, WebSocket exchange and runtime-web race
-suite pass. No global asset route or vendor rewrite was added.
+The editor resolves hydrated display basenames through the owner's registry
+before requesting the session worktree. Actual worktree README rendering at
+desktop and 320px passes. The code-server proxy preserves encoded paths/queries
+and credential stripping while serving PWA and webview workers within `/vscode/`;
+both workers register successfully. Real HTTP worker-fetch, WebSocket and Go
+race regressions pass. No global trust or product TLS bypass changed.
 
-A separate SDK 2.1.177 compatibility repair suppresses flagless assistant error
-envelopes as transport diagnostics. Unknown codes retain generic failure; only
-known typed codes select existing static messages. The unchanged native session
-binding check runs before decoding, preventing observations from a refused foreign
-session. Baseline leakage regressions and focused translator/headless fixtures
-pass normally and under ASan/UBSan/leak checks. These fixtures do not resolve the
-original failed native resume.
+SDK 2.1.177 flagless assistant error envelopes remain transport diagnostics;
+known typed codes select existing static messages, and session binding runs
+before decoding. The broad sanitizer fixture also supplies the missing disabled-
+OCR test double, which fails if invoked. The history secret scan admits only the
+verified public OpenAPI checksum's exact historical fingerprint. Automatic
+review, full-history scanning and strict attribution remain enabled.
 
-The broad local sanitizer lane exposed a missing OCR test-double definition in
-the HTTP ingestion unit target before the suite could execute. The test explicitly
-disables OCR; its repaired double fails if invoked, rather than returning fabricated
-success. The focused target passes normally and under sanitizers. All 678 binaries in
-the broad ASan/UBSan/leak lane now complete successfully with this sole test-only
-delta; unconfigured optional fixtures retain explicit skips.
-The history secret scan also found one public OpenAPI input checksum in the
-ownership ledger. Its exact historical fingerprint is admitted only after checking
-it against the committed schema; full-history scanning remains enabled. Git's
-warnings about historical invalid-UTF-8 filenames are retained independently.
-
-Keep implementation and validation moving without requiring an open PR. Remaining
-work includes resolving the failed native-resume acceptance, completing current
-sanitizer/integration/deployment qualifications, final current-source CI and
-published fresh-install acceptance, and owned-resource cleanup. Keep automatic
-review and the strict attribution gate enabled. No completion or production
-promotion is claimed. The PR timeline below is historical; the current delivery
-constraint remains one eventual PR and no intermediate merges.
+Keep implementing without requiring an open PR. Remaining work is qualification
+of the OAuth diagnostics and parser repair,
+successful fresh native cross-vendor acceptance with a valid test connection,
+final current-source CI and published fresh-install acceptance, and
+owned-resource cleanup. No completion or production promotion is claimed. The
+PR timeline below is historical; delivery remains one eventual PR, with no
+intermediate PRs or merges and no `.100` operations.
 
 [PR #3052](https://github.com/RakuenSoftware/aimee/pull/3052) merged into `testing`
 as `aa8c774edcc324f5defb6c5cea592f0e1dd5314d`. Its final premerge checks and
