@@ -656,7 +656,6 @@ static uint32_t drain(void)
    bus_event_t ev;
    while (bus_client_poll(&g.consumer, &ev) == BUS_CLIENT_OK)
    {
-      atomic_fetch_add_explicit(&g.processed, 1, memory_order_relaxed); /* this event is handled */
       int wrote = 0;
       if (ev.frame.event_kind == KIND_AUDIT_ACTION)
       {
@@ -690,8 +689,10 @@ static uint32_t drain(void)
          else if (wrote < 0)
             n++; /* accepted into the durable retry queue */
       }
-      else
-         continue;
+      /* Publish completion only after the write or queue handoff. Flush's
+       * acquire must not observe a polled event before its writer can see it.
+       * As before, an unrecognized polled frame also completes its outcome. */
+      atomic_fetch_add_explicit(&g.processed, 1, memory_order_release);
    }
    return n;
 }

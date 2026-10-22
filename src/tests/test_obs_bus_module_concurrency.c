@@ -25,6 +25,7 @@
 #include <sys/wait.h>
 
 #include <aimee/audit/obs_bus.h>
+#include "log.h"
 #include <aimee/core/event_bus/module_client.h>
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
@@ -135,6 +136,111 @@ static int durable_module_sink(const char *role, const char *principal, const ch
    return 0;
 }
 
+/* Freeze the actual consumer between polling and dispatch. A flush must wait
+ * for this handoff, rather than treating a polled event as persisted work. */
+static pthread_mutex_t handoff_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t handoff_changed = PTHREAD_COND_INITIALIZER;
+static int handoff_armed, handoff_polled, handoff_release;
+static int flush_waiting, flush_returned;
+static atomic_int handoff_persisted;
+
+static _Thread_local int handoff_flush_thread;
+static int handoff_nanosleep(const struct timespec *request, struct timespec *remaining)
+{
+   if (handoff_flush_thread)
+   {
+      pthread_mutex_lock(&handoff_lock);
+      flush_waiting = 1;
+      pthread_cond_broadcast(&handoff_changed);
+      pthread_mutex_unlock(&handoff_lock);
+   }
+   return nanosleep(request, remaining);
+}
+
+static void handoff_audit_action_log(const char *actor, const char *tool, const char *hash,
+                                     const char *command, const char *mode, const char *reason,
+                                     const char *verdict, long long task_id)
+{
+   pthread_mutex_lock(&handoff_lock);
+   if (handoff_armed && !strcmp(tool, "test.handoff"))
+   {
+      handoff_polled = 1;
+      pthread_cond_broadcast(&handoff_changed);
+      while (!handoff_release)
+         pthread_cond_wait(&handoff_changed, &handoff_lock);
+   }
+   pthread_mutex_unlock(&handoff_lock);
+   audit_action_log(actor, tool, hash, command, mode, reason, verdict, task_id);
+   if (!strcmp(tool, "test.handoff"))
+      atomic_fetch_add(&handoff_persisted, 1);
+}
+
+/* Exercise the production consumer and flush with only its existing audit
+ * sink and wait primitive intercepted. No shipped test hooks are required. */
+#define audit_action_log handoff_audit_action_log
+#define nanosleep        handoff_nanosleep
+#include "../modules/audit/obs_bus.c"
+#undef nanosleep
+#undef audit_action_log
+
+static void wait_for_handoff(int *condition)
+{
+   struct timespec limit;
+   clock_gettime(CLOCK_REALTIME, &limit);
+   limit.tv_sec += 3;
+   while (!*condition)
+      assert(pthread_cond_timedwait(&handoff_changed, &handoff_lock, &limit) == 0);
+}
+
+static void *flush_handoff(void *unused)
+{
+   (void)unused;
+   pthread_mutex_lock(&handoff_lock);
+   handoff_flush_thread = 1;
+   pthread_mutex_unlock(&handoff_lock);
+   obs_bus_flush();
+   pthread_mutex_lock(&handoff_lock);
+   flush_returned = 1;
+   pthread_cond_broadcast(&handoff_changed);
+   pthread_mutex_unlock(&handoff_lock);
+   return NULL;
+}
+
+static void test_flush_waits_for_handoff(void)
+{
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-handoff-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(home) && !setenv("AIMEE_HOME", home, 1));
+   audit_log_open();
+   assert(!obs_bus_start());
+   obs_bus_flush();
+   pthread_mutex_lock(&handoff_lock);
+   handoff_armed = 1;
+   pthread_mutex_unlock(&handoff_lock);
+   obs_bus_emit("operator", "test.handoff", "args", "owned", "mode", "ok", "allow", 0);
+   pthread_mutex_lock(&handoff_lock);
+   wait_for_handoff(&handoff_polled);
+   pthread_mutex_unlock(&handoff_lock);
+   pthread_t thread;
+   assert(!pthread_create(&thread, NULL, flush_handoff, NULL));
+   pthread_mutex_lock(&handoff_lock);
+   struct timespec limit;
+   clock_gettime(CLOCK_REALTIME, &limit);
+   limit.tv_sec += 3;
+   while (!flush_waiting && !flush_returned)
+      assert(!pthread_cond_timedwait(&handoff_changed, &handoff_lock, &limit));
+   /* Old publication order returns here before the sink has seen the event. */
+   assert(flush_waiting && !flush_returned && !atomic_load(&handoff_persisted));
+   handoff_release = 1;
+   pthread_cond_broadcast(&handoff_changed);
+   pthread_mutex_unlock(&handoff_lock);
+   assert(!pthread_join(thread, NULL));
+   assert(flush_returned && atomic_load(&handoff_persisted) == 1);
+   assert(obs_bus_written() == 1 && !obs_bus_dropped());
+   obs_bus_stop();
+   puts("  flush waits for consumer handoff and persistence: ok");
+}
+
 static atomic_int batch_ready, batch_calls, batch_rows, batch_attempts, largest_batch;
 static char expected[139][32];
 static int batch_sink(const obs_bus_durable_record_t *rows, size_t count, void *ctx)
@@ -198,6 +304,16 @@ static void test_batch_retry(void)
 
 int main(void)
 {
+   pid_t handoff_child = fork();
+   assert(handoff_child >= 0);
+   if (!handoff_child)
+   {
+      test_flush_waits_for_handoff();
+      exit(0);
+   }
+   int handoff_status = 0;
+   assert(waitpid(handoff_child, &handoff_status, 0) == handoff_child &&
+          WIFEXITED(handoff_status) && WEXITSTATUS(handoff_status) == 0);
    pid_t child = fork();
    assert(child >= 0);
    if (!child)

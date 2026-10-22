@@ -3483,8 +3483,11 @@ $(TESTPREFIX)/unit-test-bus-audit-durability: $(OBJDIR)/tests/test_bus_audit_dur
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
 
+# The fixture includes this production source to control its existing sink seam.
+$(OBJDIR)/tests/test_obs_bus_module_concurrency.o: modules/audit/obs_bus.c
+
 $(TESTPREFIX)/unit-test-obs-bus-module-concurrency: $(OBJDIR)/tests/test_obs_bus_module_concurrency.o \
-                                              $(OBS_BUS_LINK_OBJS) \
+                                              $(filter-out $(OBJDIR)/modules/audit/obs_bus.o,$(OBS_BUS_LINK_OBJS)) \
                                               $(OBJDIR)/modules/audit/audit_ledger.o \
                                               $(OBJDIR)/aimee_home.o \
                                               $(OBJDIR)/core/event_bus/bus_client.o \
