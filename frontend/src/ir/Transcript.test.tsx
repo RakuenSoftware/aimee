@@ -388,3 +388,39 @@ it('keeps an expanded delegate stream for an interruption receipt after its real
   view.unmount();
   expect(close).toHaveBeenCalledTimes(1);
 });
+
+it('groups repeated compatibility notices in a compact disclosure without merging source observations', () => {
+  let state = emptySession('s');
+  const reports = [3, 0].map((opaque, index): Envelope => ({ version: 1, session_id: 's', sequence: String(index + 1),
+    event_id: `projection-${index}`, turn_id: `turn-${index}`, actor: 'alice', event: { kind: 'projection', payload: {
+      model: 'model-b', boundary: 'request', omitted_reasoning_blocks: 3, omitted_opaque_state_blocks: opaque,
+    } } }));
+  reports.forEach(report => { state = reduceSession(state, report); });
+  const preserved = JSON.stringify(state);
+  render(<IRTranscript state={state} />);
+  expect(screen.getAllByRole('status')).toHaveLength(1);
+  const summary = screen.getByText('Model compatibility details (2)');
+  const details = summary.closest('details')!;
+  expect(details.open).toBe(false);
+  fireEvent.click(summary);
+  expect(details.textContent).toContain('3 contain native opaque state.');
+  expect(details.querySelectorAll('p')).toHaveLength(2);
+  expect(JSON.stringify(state)).toBe(preserved);
+  expect(state.projections.map(report => report.turn)).toEqual(['turn-0', 'turn-1']);
+});
+
+it('displays the authenticated canonical provider-rejection category without classifying SDK text', () => {
+  const reason = 'Claude provider rejected the request.';
+  const running = reduceSession(emptySession('s'), { version: 1, session_id: 's', sequence: '1', event_id: 'running', turn_id: 't', actor: 'alice',
+    event: { kind: 'execution', payload: { status: 'running' } } });
+  const initial = reduceSession(running, { version: 1, session_id: 's', sequence: '2', event_id: 'diagnostic', turn_id: 't', actor: 'alice',
+    event: { kind: 'delta', message_id: 'pre-frame', role: 'assistant', payload: { type: 'ERROR', error_message: 'Provider stream failed canonical admission or ended before completion' } } });
+  const state = reduceSession(initial, { version: 1, session_id: 's', sequence: '3', event_id: 'terminal', turn_id: 't', actor: 'alice',
+    event: { kind: 'execution', payload: { status: 'failed', error: reason } } });
+  const retained = JSON.stringify(state);
+  render(<IRTranscript state={state} />);
+  expect(screen.getAllByRole('alert')).toHaveLength(1);
+  expect(screen.getByRole('alert').textContent).toBe(reason);
+  expect(screen.getByText('Response details').closest('details')?.open).toBe(false);
+  expect(JSON.stringify(state)).toBe(retained);
+});

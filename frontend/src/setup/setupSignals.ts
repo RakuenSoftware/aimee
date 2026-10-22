@@ -1,3 +1,4 @@
+import { resolveSetupDismissalScope } from './setupState';
 function csrf(): string {
   try {
     if (typeof window !== 'undefined') return (window as { _csrf?: string })._csrf || '';
@@ -18,9 +19,16 @@ async function getJSON(path: string): Promise<{ ok: boolean; data: Record<string
 }
 
 /** Runtime signals that are not part of GET /api/config but still drive setup. */
-export async function fetchSetupAccountReady(): Promise<boolean> {
+export type SetupAccountStatus = { complete: boolean; dismissal_scope?: string };
+export async function fetchSetupAccountStatus(): Promise<SetupAccountStatus> {
   const { ok, data } = await getJSON('/api/setup/account');
-  return ok && data.complete === true;
+  const scope = ok && typeof data.dismissal_scope === 'string' && /^[a-f0-9]{64}$/.test(data.dismissal_scope)
+    ? data.dismissal_scope : undefined;
+  resolveSetupDismissalScope(scope);
+  return { complete: ok && data.complete === true, dismissal_scope: scope };
+}
+export async function fetchSetupAccountReady(): Promise<boolean> {
+  return (await fetchSetupAccountStatus()).complete;
 }
 
 export async function fetchProjectCount(): Promise<number> {

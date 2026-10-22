@@ -100,6 +100,16 @@ function ChildExecutionView({ reference, ancestors, onReply, pendingRepliesBySes
   </details>;
 }
 
+function ProjectionNotice({ report }: { report: SessionState['projections'][number] }) {
+  return <>
+    {report.omitted_reasoning_blocks > 0 && <>
+        {report.omitted_reasoning_blocks} reasoning {report.omitted_reasoning_blocks === 1 ? 'block remains' : 'blocks remain'} in history and
+        {report.omitted_reasoning_blocks === 1 ? ' was' : ' were'} omitted from {report.boundary === 'request' ? `${report.model}'s input` : `the client response from ${report.model}`}.
+        {report.omitted_opaque_state_blocks > 0 && <> {report.omitted_opaque_state_blocks} {report.omitted_opaque_state_blocks === 1 ? 'contains' : 'contain'} native opaque state.</>}
+      </>}
+    {(report.omitted_cache_controls ?? 0) > 0 && <> {report.omitted_cache_controls} requested cache {report.omitted_cache_controls === 1 ? 'setting was' : 'settings were'} not applied for {report.model}.</>}
+  </>;
+}
 export default function IRTranscript({ state, onReply, ancestors = [], controlsReady = true, messageLimit, pendingReplies, pendingRepliesBySession, historicalRoles = false }: {
   state: SessionState; historicalRoles?: boolean; onReply?: ReplyControl; ancestors?: string[]; controlsReady?: boolean; messageLimit?: number; pendingReplies?: ReadonlySet<string>;
   pendingRepliesBySession?: Readonly<Record<string, ReadonlySet<string>>>;
@@ -178,14 +188,17 @@ export default function IRTranscript({ state, onReply, ancestors = [], controlsR
     {Object.values(state.children ?? {}).map(child => <ChildExecutionView
       key={`${child.session_id}:${child.turn_id}`} reference={child} ancestors={[...ancestors, state.session]}
       onReply={onReply} pendingRepliesBySession={pendingRepliesBySession} />)}
-    {(state.projections ?? []).map(report => <p role="status" key={report.id}>
-      {report.omitted_reasoning_blocks > 0 && <>
-        {report.omitted_reasoning_blocks} reasoning {report.omitted_reasoning_blocks === 1 ? 'block remains' : 'blocks remain'} in history and
-        {report.omitted_reasoning_blocks === 1 ? ' was' : ' were'} omitted from {report.boundary === 'request' ? `${report.model}'s input` : `the client response from ${report.model}`}.
-        {report.omitted_opaque_state_blocks > 0 && <> {report.omitted_opaque_state_blocks} {report.omitted_opaque_state_blocks === 1 ? 'contains' : 'contain'} native opaque state.</>}
-      </>}
-      {(report.omitted_cache_controls ?? 0) > 0 && <> {report.omitted_cache_controls} requested cache {report.omitted_cache_controls === 1 ? 'setting was' : 'settings were'} not applied for {report.model}.</>}
-    </p>)}
+    {(state.projections ?? []).length === 1 && <p role="status"><ProjectionNotice report={state.projections[0]} /></p>}
+    {(state.projections ?? []).length > 1 && <div className="ir-compatibility-notices">
+      <p role="status">
+        {state.projections.some(report => report.omitted_reasoning_blocks > 0) && <>Some model inputs or responses omit reasoning that remains in history.</>}
+        {state.projections.some(report => (report.omitted_cache_controls ?? 0) > 0) && <> Some requested cache settings were not applied.</>}
+      </p>
+      <details>
+        <summary>Model compatibility details ({state.projections.length})</summary>
+        {state.projections.map(report => <p key={report.id}><ProjectionNotice report={report} /></p>)}
+      </details>
+    </div>}
     {state.errors.map((error, i) => folded.has(i) ? null : <div key={`error:${i}`}>
       <div role="alert"><ExecutionError error={error} /></div>
       {secondary.has(i) && <details className="ir-response-details">

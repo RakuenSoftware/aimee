@@ -13,22 +13,18 @@ interface BannerProps {
 }
 
 export function BootstrapBanner({ onGenerate, onDismiss, stacks }: BannerProps) {
-  const stackText =
-    stacks.length > 0
-      ? 'Detected stack: ' + stacks.map(s => s.name).join(', ') + '.'
-      : 'No stack detected.';
-
   return (
-    <div style={{ margin: '8px 16px 0', padding: '10px 14px', background: 'var(--sg-success-bg)', border: '1px solid var(--sg-success-bg)', borderRadius: '6px', color: 'var(--sg-success)', flexShrink: 0 }}>
-      <div style={{ fontWeight: 'bold', fontSize: '13px', color: 'var(--sg-success)' }}>No .aimee-rules file found</div>
-      <div style={{ fontSize: '12px', color: 'var(--sg-text-pale)', margin: '3px 0' }}>{stackText}</div>
-      <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
-        <Button variant="primary" size="sm" onClick={onGenerate}>
-          Generate .aimee-rules
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onDismiss}>
-          Dismiss
-        </Button>
+    <div className="chat-bootstrap-banner" role="region" aria-label="Project rules notice">
+      <div className="chat-bootstrap-copy">
+        <strong>.aimee-rules not found</strong>
+        {stacks.length > 0 && <details className="chat-bootstrap-stack">
+          <summary>Detected stack</summary>
+          <span>{stacks.map(s => s.name).join(', ')}</span>
+        </details>}
+      </div>
+      <div className="chat-bootstrap-actions">
+        <Button variant="primary" size="sm" aria-label="Generate .aimee-rules" onClick={onGenerate}>Generate</Button>
+        <Button variant="ghost" size="sm" aria-label="Dismiss" title="Dismiss project rules notice" onClick={onDismiss}>×</Button>
       </div>
     </div>
   );
