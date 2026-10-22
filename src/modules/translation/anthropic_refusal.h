@@ -1,7 +1,7 @@
 #ifndef AIMEE_ANTHROPIC_REFUSAL_H
 #define AIMEE_ANTHROPIC_REFUSAL_H
 
-#include <aimee/ir/aimee_ir.h>
+#include <aimee/translation/aimee_backend.h>
 #include "cJSON.h"
 #include <string.h>
 
