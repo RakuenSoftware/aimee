@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -449,5 +450,66 @@ func TestSetupAccountPasswordMinimumBoundary(t *testing.T) {
 	s2.handleSetupAccount(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("exactly %d characters must be accepted: code=%d body=%s", len(exact), rr.Code, rr.Body.String())
+	}
+}
+
+func TestSetupDismissalScopeSurvivesReloadButNotReinstall(t *testing.T) {
+	s, _ := newSetupAccountTestServer(t)
+	read := func(s *server) string {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		s.handleSetupAccount(rr, withUser(httptest.NewRequest(http.MethodGet, "/api/setup/account", nil), defaultBootstrapUsername))
+		var status map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &status); err != nil {
+			t.Fatal(err)
+		}
+		if status["complete"] != false || status["required"] != true {
+			t.Fatalf("dismissal changed account readiness: %v", status)
+		}
+		scope, ok := status["dismissal_scope"].(string)
+		if !ok || len(scope) != 64 {
+			t.Fatalf("missing opaque install scope: %v", status)
+		}
+		return scope
+	}
+	first := read(s)
+	if got := read(s); got != first {
+		t.Fatal("scope changed on reload")
+	}
+	restarted := &server{cfg: s.cfg, accounts: s.accounts}
+	if got := read(restarted); got != first {
+		t.Fatal("scope changed on process restart")
+	}
+	other, _ := newSetupAccountTestServer(t)
+	if got := read(other); got == first {
+		t.Fatal("same bootstrap username hid a fresh installation")
+	}
+}
+
+func TestSetupDismissalScopeConcurrentFirstReads(t *testing.T) {
+	s, _ := newSetupAccountTestServer(t)
+	const count = 16
+	scopes := make(chan string, count)
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			value, _ := s.setupAccountStatus(defaultBootstrapUsername)["dismissal_scope"].(string)
+			scopes <- value
+		}()
+	}
+	wg.Wait()
+	close(scopes)
+	first := ""
+	for scope := range scopes {
+		if len(scope) != 64 {
+			t.Fatal("scope unavailable during concurrent first reads")
+		}
+		if first == "" {
+			first = scope
+		} else if scope != first {
+			t.Fatal("concurrent first reads published different scopes")
+		}
 	}
 }
