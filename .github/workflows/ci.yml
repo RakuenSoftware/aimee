@@ -92,7 +92,19 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install clang-tidy dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang-tidy build-essential pkg-config libpq-dev libssl-dev libpam0g-dev zlib1g-dev libzstd-dev libp11-kit-dev python3-yaml
+        run: |
+          # Keep Ubuntu's signed source configuration, but avoid the runner's
+          # Azure mirror selection and unrelated package feeds in this job.
+          apt_sources=$(mktemp -d "$RUNNER_TEMP/clang-apt-sources.XXXXXX")
+          cp /etc/apt/sources.list.d/ubuntu.sources "$apt_sources/ubuntu.sources"
+          sed -i \
+            -e 's|mirror+file:/etc/apt/apt-mirrors.txt|https://archive.ubuntu.com/ubuntu|g' \
+            -e 's|https\?://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+            "$apt_sources/ubuntu.sources"
+          apt_args=(-o Dir::Etc::sourcelist=/dev/null -o "Dir::Etc::sourceparts=$apt_sources"
+                    -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3)
+          timeout 240 sudo apt-get "${apt_args[@]}" update
+          timeout 300 sudo apt-get "${apt_args[@]}" install -y clang-tidy build-essential pkg-config libpq-dev libssl-dev libpam0g-dev zlib1g-dev libzstd-dev libp11-kit-dev python3-yaml
       - name: Analyze source batch
         working-directory: src
         env:
