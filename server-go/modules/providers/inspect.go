@@ -301,6 +301,19 @@ func validCatalogVersion(v string) bool {
 	return true
 }
 
+// Counts describe only the parsed selected-account response. Never retain or
+// format model IDs, arbitrary visibility text, instructions or credentials.
+type codexEmptyCatalogError struct {
+	RawRows, List, Hide, MissingVisibility, OtherVisibility int
+}
+
+func (e *codexEmptyCatalogError) catalogCounts() [5]int {
+	return [5]int{e.RawRows, e.List, e.Hide, e.MissingVisibility, e.OtherVisibility}
+}
+func (e *codexEmptyCatalogError) Error() string {
+	return fmt.Sprintf("Codex account catalog has no visible models (raw_rows=%d list=%d hide=%d missing_visibility=%d other_visibility=%d); no model was selected", e.RawRows, e.List, e.Hide, e.MissingVisibility, e.OtherVisibility)
+}
+
 func (m *Manager) discoverSnapshot(ctx context.Context, provider object) (object, string, error) {
 	source := ""
 	p := copyObject(provider)
@@ -317,6 +330,7 @@ func (m *Manager) discoverSnapshot(ctx context.Context, provider object) (object
 	details := []object{}
 	seen := map[string]bool{}
 	last := ""
+	counts := codexEmptyCatalogError{}
 	for page := 0; page < 100; page++ {
 		path := suffix
 		if last != "" {
@@ -351,6 +365,9 @@ func (m *Manager) discoverSnapshot(ctx context.Context, provider object) (object
 			return nil, "", errors.New("provider returned an invalid model list; enter a model ID manually")
 		}
 		for _, item := range listed {
+			if codexCatalog(p) {
+				counts.RawRows++
+			}
 			row, ok := item.(map[string]any)
 			if !ok {
 				if id, ok := item.(string); ok {
@@ -362,6 +379,19 @@ func (m *Manager) discoverSnapshot(ctx context.Context, provider object) (object
 				id = str(row, "slug")
 				if id == "" || !validText(id, 256) {
 					return nil, "", errors.New("Codex model catalog contains an invalid slug")
+				}
+				visibility, present := row["visibility"]
+				switch visibility {
+				case "list":
+					counts.List++
+				case "hide":
+					counts.Hide++
+				default:
+					if !present {
+						counts.MissingVisibility++
+					} else {
+						counts.OtherVisibility++
+					}
 				}
 				if str(row, "visibility") != "list" {
 					continue
@@ -392,6 +422,9 @@ func (m *Manager) discoverSnapshot(ctx context.Context, provider object) (object
 			ids = append(ids, id)
 		}
 		if !boolean(root, "has_more", false) {
+			if codexCatalog(p) && len(ids) == 0 {
+				return nil, "", &counts
+			}
 			return object{"status": "ok", "models": ids, "details": details, "count": len(ids)}, source, nil
 		}
 		next := str(root, "last_id")

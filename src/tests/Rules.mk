@@ -7260,9 +7260,9 @@ $(TESTPREFIX)/unit-test-server-unknown-effect-policy: $(OBJDIR)/tests/test_serve
 
 $(OBJDIR)/tests/test_server_unknown_effect_action.o: tests/test_server_governed_action.c
 $(TESTPREFIX)/unit-test-server-unknown-effect-action: $(OBJDIR)/tests/test_server_unknown_effect_action.o \
-    $(OBJDIR)/server/server_unknown_effect_policy.o $(OBJDIR)/server/server_governed_action.o $(OBJDIR)/server/server_session_control.o \
+    $(OBJDIR)/modules/tools/agent_tools_effect_contract.o $(OBJDIR)/server/server_unknown_effect_policy.o $(OBJDIR)/server/server_governed_action.o $(OBJDIR)/server/server_session_control.o \
     $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto -lpthread
+	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto -lpthread
 
 # Direct wrapper budget selection; unused generated client functions are removed.
 $(TESTPREFIX)/unit-test-db1-source-deadlines: \

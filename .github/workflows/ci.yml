@@ -623,7 +623,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install pinned Codex for proxy compatibility
-        run: npm install --global @openai/codex@0.153.4
+        run: npm install --global @openai/codex@0.163.0
       - name: Thin-client proxy regression suite (including real Codex config parser)
         env:
           AIMEE_TEST_REQUIRE_CODEX: '1'
@@ -1722,7 +1722,7 @@ jobs:
       - name: Install pinned native SDKs for canonical server integration
         run: |
           native_prefix="$RUNNER_TEMP/aimee-native-sdks"
-          npm install --prefix "$native_prefix" @openai/codex@0.153.4 @anthropic-ai/claude-code@2.1.227
+          npm install --prefix "$native_prefix" @openai/codex@0.163.0 @anthropic-ai/claude-code@2.1.227
           codex_native="$native_prefix/node_modules/.bin/codex"
           claude_native=$(node -e 'const p=require("node:path"); const pkg=require.resolve("@anthropic-ai/claude-code-linux-x64/package.json",{paths:[process.argv[1]]}); process.stdout.write(p.join(p.dirname(pkg),"claude"))' "$native_prefix")
           test -x "$codex_native"

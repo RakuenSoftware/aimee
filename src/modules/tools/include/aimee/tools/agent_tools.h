@@ -78,6 +78,9 @@ typedef int (*agent_tool_action_begin_fn)(const char *, struct cJSON **, const c
 typedef char *(*agent_tool_action_finish_fn)(const char *, char *, int *);
 void agent_tools_register_action_owner(agent_tool_action_begin_fn begin,
                                        agent_tool_action_finish_fn finish);
+/* True only when dispatch will enter the registered governed-action owner.
+ * Its final policy gate runs on owner-canonical arguments before any effect. */
+int agent_tools_action_managed(const char *name, const struct cJSON *arguments);
 
 /* Bind a successful execution-policy decision to the next dispatch on this
  * thread. External mutations and unknown remote tools refuse execution without

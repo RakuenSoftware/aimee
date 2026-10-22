@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -181,5 +185,92 @@ func TestCodexCatalogPreservesConfiguredOriginAndQuery(t *testing.T) {
 	call(t, m, "provider.connection_models", object{"name": "codex"})
 	if n.requests[0].TargetURL != "https://selected.example.invalid/account/models?client_version=0.139.0&region=one" || n.requests[0].Credential.Host != n.requests[0].TargetURL {
 		t.Fatal("configured origin/query or seal binding changed")
+	}
+}
+
+func TestCodexEmptyCatalogHasTypedSafeAggregate(t *testing.T) {
+	for _, tc := range []struct {
+		name, body                      string
+		raw, list, hide, missing, other int
+	}{
+		{"empty", `{"models":[]}`, 0, 0, 0, 0, 0},
+		{"hidden", `{"models":[{"slug":"PRIVATE_ONE","visibility":"hide"},{"slug":"PRIVATE_TWO","visibility":"hide"}]}`, 2, 0, 2, 0, 0},
+		{"missing-and-other", `{"models":[{"slug":"PRIVATE_ONE"},{"slug":"PRIVATE_TWO","visibility":null},{"slug":"PRIVATE_THREE","visibility":"PRIVATE_VISIBILITY","model_messages":{"instructions_template":"PRIVATE_PROMPT"}}]}`, 3, 0, 0, 1, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := codexCatalogManager(t)
+			m.SetEgress(&fixtureNetwork{replies: []egress.HTTPResponse{response(200, tc.body)}})
+			_, err := m.Manage(context.Background(), Request{Operation: "provider.connection_models", Arguments: object{"name": "codex"}})
+			var empty interface{ catalogCounts() [5]int }
+			if !errors.As(err, &empty) {
+				t.Fatalf("want typed empty catalog, got %v", err)
+			}
+			if got, want := empty.catalogCounts(), [5]int{tc.raw, tc.list, tc.hide, tc.missing, tc.other}; got != want {
+				t.Fatalf("wrong aggregates: %v want %v", got, want)
+			}
+			for _, private := range []string{"PRIVATE_", "selected-token", "selected-account", "source_digest"} {
+				if strings.Contains(err.Error(), private) {
+					t.Fatal("private response leaked")
+				}
+			}
+		})
+	}
+}
+func TestCodexDeclaredCompatibilityMatchesQualifiedInstallerAndCI(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("test source unavailable")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "../../.."))
+	header, err := os.ReadFile(filepath.Join(root, "src/headers/codex_client_version.h"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := regexp.MustCompile(`AIMEE_CODEX_CLIENT_VERSION "([0-9]+\.[0-9]+\.[0-9]+)"`).FindSubmatch(header)
+	if len(declared) != 2 {
+		t.Fatal("declared adapter release missing")
+	}
+	ci, err := os.ReadFile(filepath.Join(root, ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pins := regexp.MustCompile(`@openai/codex@([0-9]+\.[0-9]+\.[0-9]+)`).FindAllSubmatch(ci, -1)
+	if len(pins) == 0 {
+		t.Fatal("actual SDK qualification pin missing")
+	}
+	for _, pin := range pins {
+		if string(pin[1]) != string(declared[1]) {
+			t.Fatalf("declared/installer compatibility %s differs from qualified SDK %s", declared[1], pin[1])
+		}
+	}
+	for _, rel := range []string{"src/server/server_cli_oauth.c", "src/modules/vault/vault_env_bootstrap.c"} {
+		src, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(src), "AIMEE_CODEX_CLIENT_VERSION") {
+			t.Fatalf("shared release is not used by %s", rel)
+		}
+	}
+}
+
+func TestCodexEmptyCatalogAggregatesAllPages(t *testing.T) {
+	m, _ := codexCatalogManager(t)
+	m.SetEgress(&fixtureNetwork{replies: []egress.HTTPResponse{
+		response(200, `{"models":[{"slug":"PRIVATE_FIRST","visibility":"hide"}],"has_more":true,"last_id":"PRIVATE_CURSOR"}`),
+		response(200, `{"models":[{"slug":"PRIVATE_LAST"}]}`),
+	}})
+	_, err := m.Manage(context.Background(), Request{Operation: "provider.connection_models", Arguments: object{"name": "codex"}})
+	var empty interface{ catalogCounts() [5]int }
+	if !errors.As(err, &empty) || empty.catalogCounts() != [5]int{2, 0, 1, 1, 0} || strings.Contains(err.Error(), "PRIVATE_") {
+		t.Fatalf("invalid aggregate: %v", err)
+	}
+}
+func TestNonCodexEmptyCatalogContractIsUnchanged(t *testing.T) {
+	m, _ := codexCatalogManager(t)
+	m.SetEgress(&fixtureNetwork{replies: []egress.HTTPResponse{response(200, `{"data":[]}`)}})
+	out, err := m.discover(context.Background(), object{"name": "public", "provider": "openai", "auth_type": "none", "endpoint": "https://selected.example.invalid/v1"})
+	if err != nil || number(out, "count") != 0 {
+		t.Fatalf("generic empty catalog changed: %v %v", out, err)
 	}
 }

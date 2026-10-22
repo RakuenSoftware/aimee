@@ -5611,8 +5611,48 @@ HOST controller starts fresh module peers before requiring readiness and proves
 the replacement listener belongs to the actual new core. Fresh genuine Allow
 qualification remains open; neither failed harness attempt is an Allow pass.
 
-All remaining work stays on fix/native-mcp-startup-and-editor in one PR.
-Aimee's registered Git runner is currently blocked before Git dispatch by a
-server-side PKI 503. No connector writes, client-auth downgrade or host-trust
-bypass is permitted to work around that outage. Fresh PR CI, publication,
-released-image acceptance and owned-resource cleanup remain required.
+Keep the remaining work together on fix/native-mcp-startup-and-editor. Finish
+implementation and validation before PR handling; do not split repairs into
+intermediate PRs or merges. Production .100 is excluded from this work, including
+read-only investigation. Final CI, publication, released-image acceptance and
+owned-resource cleanup remain required.
+
+### Genuine Allow exposed duplicate authorization
+
+The corrected HOST restart controller completed actual kernel custody recovery:
+the original qualified leaf became empty before retirement, and normal browser
+recovery reconciled the canonical history. The following write nevertheless
+failed: one SDK invocation produced permission 61 for its relative path, an
+actual browser Allow at 62, and another permission at 63 after the tools owner
+resolved the absolute path. The latter was cancelled; result 65 reports refused
+dispatch. The file is absent and no governed dispatch exists. Completion 194 and
+checkpoint 195 describe the model turn, not a successful write. This is a product
+regression, separate from the preceding harness failures; no second Allow was sent.
+
+The tools owner now exposes the same registered-action predicate it uses during
+dispatch. For those actions only, the extra unknown-effect permission waits until
+the owner has resolved the exact final resource and arguments. Baseline policy,
+role/directive checks, source/liveness validation and sticky denial remain in
+place. The final gate still hashes the complete action and uncertain receipts;
+it does not reuse approval across changed arguments. Unmanaged tools and a
+missing final owner retain their initial gate.
+
+The composed fixture now links the actual tools-owner predicate. It fails on the
+old duplicate-prompt implementation and passes normally and under sanitizers,
+covering relative/absolute input, one permission and durable dispatch, changed
+payload/receipt, denial, replay, publication and liveness fences. This fixture
+is not an independent filesystem-effect proof; fresh genuine Allow remains required.
+
+The 504 candidate's actual account catalog returned HTTP 200 with no offered
+models. No model was guessed, saved or executed. The projection alone cannot
+distinguish an empty upstream list from filtered entries. Empty Codex catalogs
+now return a typed error with bounded counts of raw rows and visibility classes;
+provider bodies, model instructions, arbitrary visibility text and credentials
+are excluded. The declared adapter/installer and CI SDK pins now agree on
+[the published Codex 0.163.0 release](https://github.com/openai/codex/releases/tag/rust-v0.163.0).
+The next live call must establish account availability; an old-version filtering
+cause is still a hypothesis. The selected legacy credential origin is unchanged.
+
+The browser failure-state fix remains included. The next complete source build
+will contain it together with these permission and catalog repairs. Preserve
+all failed turns, previous native cache evidence and negative custody fixtures.

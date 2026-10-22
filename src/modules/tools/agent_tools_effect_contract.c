@@ -96,7 +96,7 @@ static const char *effect_target(const char *name, cJSON *args)
    return external_mutation(name) ? name : "";
 }
 
-static int known_reversible(const char *name, cJSON *args)
+static int known_reversible(const char *name, const cJSON *args)
 {
    if (!name || !args)
       return 0;
@@ -314,11 +314,16 @@ void agent_tools_register_action_owner(agent_tool_action_begin_fn begin,
    g_action_begin = begin;
    g_action_finish = finish;
 }
+int agent_tools_action_managed(const char *name, const cJSON *arguments)
+{
+   return name && arguments && g_action_begin &&
+          (known_reversible(name, arguments) || external_mutation(name) ||
+           !strcmp(name, "read_file"));
+}
 int agent_tools_effect_admit(const char *name, cJSON **args, const char *cwd, const char *sid,
                              int classification)
 {
-   if (g_action_begin &&
-       (known_reversible(name, *args) || external_mutation(name) || !strcmp(name, "read_file")))
+   if (agent_tools_action_managed(name, *args))
       if (g_action_begin(name, args, cwd, sid, g_effect_authorized) != 0)
          return -1;
    agent_tools_effect_propose(name, *args, classification);
