@@ -219,6 +219,73 @@ it('waits for child replay, routes its question to the child and retains a pendi
   expect(parent.messages).toEqual([]);
 });
 
+it('rejects a same-tick child stream failure click and permits one deliberate reply after reopening', async () => {
+  class Stream {
+    static instances: Stream[] = [];
+    listeners = new Map<string, (event: MessageEvent) => void>();
+    onerror?: () => void;
+    close = vi.fn();
+    constructor(public url: string) { Stream.instances.push(this); }
+    addEventListener(type: string, listener: (event: MessageEvent) => void) { this.listeners.set(type, listener); }
+    emit(type: string, value: unknown) { this.listeners.get(type)?.(new MessageEvent(type, { data: JSON.stringify(value) })); }
+  }
+  vi.stubGlobal('EventSource', Stream);
+  const onReply = vi.fn().mockResolvedValue(undefined);
+  const parent = reduceSession(emptySession('parent'), { version: 1, session_id: 'parent', sequence: '1', event_id: 'ref', turn_id: 'p', actor: 'alice',
+    event: { kind: 'child_execution', payload: { session_id: 'child', turn_id: 'c', role: 'review', status: 'running' } } });
+  render(<IRTranscript state={parent} onReply={onReply} />);
+  const details = screen.getByText('Delegate: review — running').closest('details')!;
+  act(() => { details.open = true; fireEvent(details, new Event('toggle')); });
+  const envelope = (sequence: string, event: Envelope['event']): Envelope => ({ version: 1, session_id: 'child', sequence, event_id: `child-${sequence}`, turn_id: 'c', actor: 'alice', event });
+  act(() => { Stream.instances[0].emit('ir', envelope('1', { kind: 'execution', payload: { status: 'running' } }));
+    Stream.instances[0].emit('ir', envelope('2', { kind: 'control_request', request_id: 'c:q', control_kind: 'question', payload: { questions: [
+      { id: 'answer', question: 'Child choice?', multiple: false, options: [] },
+    ] } })); Stream.instances[0].emit('replay_complete', { session_id: 'child', cursor: '2' }); });
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Child answer' } });
+  const stale = screen.getByRole('button', { name: 'Send answers' });
+  await act(async () => { Stream.instances[0].onerror?.(); fireEvent.click(stale); });
+  expect(onReply).toHaveBeenCalledTimes(0);
+  act(() => { details.open = false; fireEvent(details, new Event('toggle')); });
+  act(() => { details.open = true; fireEvent(details, new Event('toggle')); });
+  act(() => Stream.instances[1].emit('replay_complete', { session_id: 'child', cursor: '2' }));
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Child answer' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send answers' }));
+  await waitFor(() => expect(onReply).toHaveBeenCalledWith('c:q', { decision: 'allow', answers: { answer: ['Child answer'] } }, 'child'));
+  expect(onReply).toHaveBeenCalledTimes(1);
+});
+
+it('preserves legitimate grandchild replies through live canonical ancestor guards', async () => {
+  class Stream {
+    static instances: Stream[] = [];
+    listeners = new Map<string, (event: MessageEvent) => void>();
+    close = vi.fn();
+    constructor(public url: string) { Stream.instances.push(this); }
+    addEventListener(type: string, listener: (event: MessageEvent) => void) { this.listeners.set(type, listener); }
+    emit(type: string, value: unknown) { this.listeners.get(type)?.(new MessageEvent(type, { data: JSON.stringify(value) })); }
+  }
+  vi.stubGlobal('EventSource', Stream);
+  const onReply = vi.fn().mockResolvedValue(undefined);
+  const parent = reduceSession(emptySession('parent'), { version: 1, session_id: 'parent', sequence: '1', event_id: 'ref', turn_id: 'p', actor: 'alice',
+    event: { kind: 'child_execution', payload: { session_id: 'child', turn_id: 'c', role: 'draft', status: 'running' } } });
+  render(<IRTranscript state={parent} onReply={onReply} />);
+  const outer = screen.getByText('Delegate: draft — running').closest('details')!;
+  act(() => { outer.open = true; fireEvent(outer, new Event('toggle')); });
+  const envelope = (sid: string, turn: string, sequence: string, event: Envelope['event']): Envelope => ({ version: 1, session_id: sid, sequence, event_id: `${sid}-${sequence}`, turn_id: turn, actor: 'alice', event });
+  act(() => { Stream.instances[0].emit('ir', envelope('child', 'c', '1', { kind: 'execution', payload: { status: 'running' } }));
+    Stream.instances[0].emit('ir', envelope('child', 'c', '2', { kind: 'child_execution', payload: { session_id: 'grandchild', turn_id: 'g', role: 'review', status: 'running' } }));
+    Stream.instances[0].emit('replay_complete', { session_id: 'child', cursor: '2' }); });
+  const inner = screen.getByText('Delegate: review — running').closest('details')!;
+  act(() => { inner.open = true; fireEvent(inner, new Event('toggle')); });
+  act(() => { Stream.instances[1].emit('ir', envelope('grandchild', 'g', '1', { kind: 'execution', payload: { status: 'running' } }));
+    Stream.instances[1].emit('ir', envelope('grandchild', 'g', '2', { kind: 'control_request', request_id: 'g:q', control_kind: 'question', payload: { questions: [
+      { id: 'answer', question: 'Grandchild choice?', multiple: false, options: [] },
+    ] } })); Stream.instances[1].emit('replay_complete', { session_id: 'grandchild', cursor: '2' }); });
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Grandchild answer' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send answers' }));
+  await waitFor(() => expect(onReply).toHaveBeenCalledWith('g:q', { decision: 'allow', answers: { answer: ['Grandchild answer'] } }, 'grandchild'));
+  expect(onReply).toHaveBeenCalledTimes(1);
+});
+
 it('refuses a child stream that returns another session', () => {
   let receive: ((event: MessageEvent) => void) | undefined;
   const close = vi.fn();

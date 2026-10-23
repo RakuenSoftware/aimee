@@ -266,6 +266,8 @@ interface BootstrapStatus {
 }
 
 interface QueuedChatSend {
+  sessionId: string;
+  historyVersion: number;
   projectRoot: string;
   text: string;
   version: number;
@@ -1187,6 +1189,12 @@ export default function Chat() {
   const [tabs, setTabs] = useState<TabData[]>(initialChatState.tabs);
   const { sessions, active: activeSession, patchSession } = useSessions();
   const activeSessionId = activeSession?.id ?? '';
+  const activeContextSid = useRef(activeSession?.aimeeSid ?? '');
+  activeContextSid.current = activeSession?.aimeeSid ?? '';
+  const sessionOwners = useRef(sessions);
+  sessionOwners.current = sessions;
+  const ownsQueuedOrigin = (item: QueuedChatSend) => sessionOwners.current.some(session =>
+    session.id === item.sessionId && session.aimeeSid === item.originSid && session.projectRoot === item.projectRoot);
   const matchedIdx = tabs.findIndex(tab => tab.sessionId === activeSessionId);
   const activeIdx = matchedIdx >= 0 ? matchedIdx : 0;
   const [rulesStatus, setRulesStatus] = useState('');
@@ -1195,8 +1203,16 @@ export default function Chat() {
   const irFlush = useRef<number | null>(null);
   const [, setIRRevision] = useState(0);
   const [irTransportErrors, setIRTransportErrors] = useState<Record<string, string>>({});
+  const failedHistory = useRef(new Set<string>());
+  const historyGeneration = useRef(new Map<string, number>());
+  const [retainedSendDrafts, setRetainedSendDrafts] = useState<Record<string, string>>({});
   const [sendErrors, setSendErrors] = useState<Record<string, string>>({});
   const [irReady, setIRReady] = useState<Record<string, boolean>>({});
+  const irReadyRef = useRef<Record<string, boolean>>({});
+  const updateIRReady = useCallback((sid: string, ready: boolean) => {
+    irReadyRef.current[sid] = ready;
+    setIRReady(prev => prev[sid] === ready ? prev : { ...prev, [sid]: ready });
+  }, []);
   const [irReconnect, setIRReconnect] = useState(0);
   function ingestIR(owner: string, raw: Record<string, unknown>) {
     if (raw.status === 'error') throw new Error(String(raw.message || 'Session capture failed'));
@@ -1522,14 +1538,16 @@ export default function Chat() {
   useEffect(() => {
     if (!activeAimeeSid || !activeAttached) return;
     let disposed = false;
-    setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+    updateIRReady(activeAimeeSid, false);
     const state = irSessions.current[activeAimeeSid] ?? emptySession(activeAimeeSid);
     const es = new EventSource(`/api/chat/session-events?format=ir&sid=${encodeURIComponent(activeAimeeSid)}&cursor=${state.sequence}`);
     presenceSseRef.current = es;
     es.addEventListener('error', () => {
       if (disposed) return;
+      failedHistory.current.add(activeAimeeSid);
+      historyGeneration.current.set(activeAimeeSid, (historyGeneration.current.get(activeAimeeSid) ?? 0) + 1);
       disposed = true;
-      setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+      updateIRReady(activeAimeeSid, false);
       // EventSource hides HTTP refusal details. Keep history and drafts, but
       // withdraw controls until an explicit reconnect completes canonical replay.
       setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: 'Conversation connection failed. Reconnect to load the latest history.' }));
@@ -1543,11 +1561,14 @@ export default function Chat() {
         if (ready.session_id !== activeAimeeSid || typeof ready.cursor !== 'string' ||
             !/^(0|[1-9][0-9]*)$/.test(ready.cursor) || BigInt(ready.cursor) > BigInt(cursor))
           throw new Error('Invalid conversation replay boundary');
-        setIRReady(prev => prev[activeAimeeSid] ? prev : { ...prev, [activeAimeeSid]: true });
+        failedHistory.current.delete(activeAimeeSid);
+        updateIRReady(activeAimeeSid, true);
         setIRTransportErrors(prev => prev[activeAimeeSid] ? { ...prev, [activeAimeeSid]: '' } : prev);
       } catch (error) {
+        failedHistory.current.add(activeAimeeSid);
+        historyGeneration.current.set(activeAimeeSid, (historyGeneration.current.get(activeAimeeSid) ?? 0) + 1);
         disposed = true;
-        setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+        updateIRReady(activeAimeeSid, false);
         setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: error instanceof Error ? error.message : 'Session replay failed' }));
         es.close();
       }
@@ -1558,14 +1579,22 @@ export default function Chat() {
         ingestIR(activeAimeeSid, parseJSON(event.data) as Record<string, unknown>);
         setIRTransportErrors(prev => prev[activeAimeeSid] ? { ...prev, [activeAimeeSid]: '' } : prev);
       } catch (error) {
+        failedHistory.current.add(activeAimeeSid);
+        historyGeneration.current.set(activeAimeeSid, (historyGeneration.current.get(activeAimeeSid) ?? 0) + 1);
         disposed = true;
-        setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+        updateIRReady(activeAimeeSid, false);
         setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: error instanceof Error ? error.message : 'Session replay failed' }));
         es.close();
       }
     });
-    return () => { disposed = true; es.close(); if (presenceSseRef.current === es) presenceSseRef.current = null; };
-  }, [activeAimeeSid, activeAttached, irReconnect]);
+    return () => {
+      disposed = true;
+      updateIRReady(activeAimeeSid, false);
+      historyGeneration.current.set(activeAimeeSid, (historyGeneration.current.get(activeAimeeSid) ?? 0) + 1);
+      es.close();
+      if (presenceSseRef.current === es) presenceSseRef.current = null;
+    };
+  }, [activeAimeeSid, activeAttached, irReconnect, updateIRReady]);
   const canonicalState = irSessions.current[activeAimeeSid];
   // Execution activity is a canonical projection, not separately copied UI state.
   // Keeping a second state/effect pair can lag a replayed running turn.
@@ -1574,6 +1603,13 @@ export default function Chat() {
   const submittedControls = useRef(new Set<string>());
   const [pendingReplies, setPendingReplies] = useState<Record<string, ReadonlySet<string>>>({});
   const replyControl = useCallback(async (requestId: string, reply: ControlReply, sessionId = activeAimeeSid) => {
+    if (activeContextSid.current !== activeAimeeSid || !irReadyRef.current[activeAimeeSid] || failedHistory.current.has(activeAimeeSid))
+      throw new Error('Reconnect this conversation before replying.');
+    // Child views guard their own live canonical owner before forwarding here.
+    if (sessionId === activeAimeeSid) {
+      const control = irSessions.current[sessionId]?.controls[requestId];
+      if (!control || control.closed || control.response) throw new Error('This request is no longer awaiting a reply.');
+    }
     const key = `${sessionId}\0${requestId}`;
     if (submittedControls.current.has(key)) return;
     submittedControls.current.add(key);
@@ -2109,32 +2145,36 @@ export default function Chat() {
 
     // A new message during a turn explicitly stops that exact canonical turn.
     // The browser submits the new text only after its terminal is replayed.
-    const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid ?? '';
+    const owner = activeSession;
+    const sid = owner?.aimeeSid ?? '';
+    if (!owner || !activeSessionMatched || !sid || activeContextSid.current !== sid || !irReadyRef.current[sid] || failedHistory.current.has(sid)) return;
+    const origin: QueuedChatSend = { text, sessionId: owner.id, originSid: sid, projectRoot: owner.projectRoot,
+      version: sendQueueVersionRef.current, historyVersion: historyGeneration.current.get(sid) ?? 0 };
+    if (retainedSendDrafts[sid] === text) setRetainedSendDrafts(prev => { const next = { ...prev }; delete next[sid]; return next; });
     let clientInflight = false;
     activeSendAbortRefs.current.forEach(s => { if (s === sid) clientInflight = true; });
     if (sid && (clientInflight || (!!irReady[sid] && !!irSessions.current[sid]?.activeTurns.length))) {
       atBottomRef.current = true;
       // The eventual admitted user message comes from the canonical session log.
-      void steerInterrupt(sid, text);
+      void steerInterrupt(origin);
       return;
     }
 
     setInputText('');
-    enqueueChatMessage(text);
+    enqueueChatMessage(origin);
   }
 
   // Explicitly stop the exact canonical turn, then send this new text once.
   // Cancellation acknowledgement alone is not a claim that effects have stopped.
-  async function steerInterrupt(sid: string, text: string) {
+  async function steerInterrupt(origin: QueuedChatSend) {
+    const { originSid: sid, text, version, historyVersion } = origin;
     if (stoppingSessions.current.has(sid)) return;
     const turnIds = irSessions.current[sid]?.activeTurns ?? [];
-    if (!irReady[sid] || turnIds.length !== 1) {
+    if (!ownsQueuedOrigin(origin) || !irReadyRef.current[sid] || turnIds.length !== 1) {
       setSendErrors(prev => ({ ...prev, [sid]: 'Wait for the running turn to appear in conversation history before stopping it. Your message is retained.' }));
       return;
     }
     const turnId = turnIds[0];
-    const version = sendQueueVersionRef.current;
-    const projectRoot = activeSession?.projectRoot ?? '';
     stoppingSessions.current.add(sid);
     setSendErrors(prev => ({ ...prev, [sid]: '' }));
     try {
@@ -2162,41 +2202,33 @@ export default function Chat() {
       if (version !== sendQueueVersionRef.current || tabsRef.current[activeIdxRef.current]?.aimeeSid !== sid ||
           (irSessions.current[sid]?.activeTurns.length ?? 0) !== 0)
         throw new Error('Conversation changed while stopping. Your message is retained; select the conversation before continuing.');
+      if (activeContextSid.current !== sid || !ownsQueuedOrigin(origin) || !irReadyRef.current[sid] || failedHistory.current.has(sid) || historyVersion !== (historyGeneration.current.get(sid) ?? 0))
+        throw new Error('Conversation connection changed while stopping. Your message is retained; review it before sending.');
       setInputText(current => current.trim() === text ? '' : current);
-      pushToSendQueue(sid, { text, version, originSid: sid, projectRoot });
+      pushToSendQueue(sid, origin);
       recomputeWorkCounts();
       void drainSendQueue(sid);
     } catch (error) {
+      setRetainedSendDrafts(prev => ({ ...prev, [sid]: prev[sid] && prev[sid] !== text ? `${prev[sid]}\n\n${text}` : text }));
       setSendErrors(prev => ({ ...prev, [sid]: error instanceof Error ? error.message : 'Could not stop this turn. Your message is retained.' }));
     } finally { stoppingSessions.current.delete(sid); }
   }
 
-  function enqueueChatMessage(text: string) {
-    /* Auto-title from first message */
-    const idx = activeIdxRef.current;
-    const activeSidForTitle = tabsRef.current[idx]?.aimeeSid ?? '';
-    const hasExistingMessages = (irSessions.current[activeSidForTitle]?.messages.length ?? 0) > 0 ||
-      activeSendAbortRefs.current.size > 0 ||
-      (sendQueuesRef.current.get(activeSidForTitle)?.length ?? 0) > 0;
+  function enqueueChatMessage(origin: QueuedChatSend) {
+    const { text, originSid, sessionId } = origin;
+    const hasExistingMessages = (irSessions.current[originSid]?.messages.length ?? 0) > 0 ||
+      activeSendAbortRefs.current.size > 0 || (sendQueuesRef.current.get(originSid)?.length ?? 0) > 0;
     if (!hasExistingMessages) {
       const title = text.substring(0, 30) + (text.length > 30 ? '…' : '');
-      const sessionId = tabsRef.current[idx]?.sessionId;
       setTabs(prev => {
-        const next = [...prev];
-        if (next[idx]) next[idx] = { ...next[idx], title };
+        const next = prev.map(tab => tab.sessionId === sessionId && tab.aimeeSid === originSid ? { ...tab, title } : tab);
         tabsRef.current = next;
         return next;
       });
-      if (sessionId) patchSession(sessionId, { name: title });
+      patchSession(sessionId, { name: title });
     }
-
-    // Sending is an explicit intent to follow the conversation: re-stick to the
-    // bottom even if the user had scrolled up to read back.
     atBottomRef.current = true;
-
-    const originSid = tabsRef.current[idx]?.aimeeSid ?? '';
-    pushToSendQueue(originSid, { text, version: sendQueueVersionRef.current, originSid,
-      projectRoot: activeSession?.projectRoot ?? '' });
+    pushToSendQueue(originSid, origin);
     recomputeWorkCounts();
     void drainSendQueue(originSid);
   }
@@ -2246,12 +2278,17 @@ export default function Chat() {
     activeSendAbortRefs.current.set(controller, aimeeSid);
     recomputeWorkCounts();
 
+    let dispatchStarted = false;
     try {
       setSendErrors(prev => prev[aimeeSid] ? { ...prev, [aimeeSid]: '' } : prev);
       // The same admitted surface owns preferences, replay and sends. Never
       // reuse a persisted/dead attachment or dispatch after admission failed.
       const attachId = await ensureAttachment(aimeeSid);
       if (item.version !== sendQueueVersionRef.current) return;
+      if (activeContextSid.current !== aimeeSid || !ownsQueuedOrigin(item) || !irReadyRef.current[aimeeSid] || failedHistory.current.has(aimeeSid) || item.historyVersion !== (historyGeneration.current.get(aimeeSid) ?? 0)) {
+        throw new Error('Conversation connection changed before sending. Your unsent message is retained.');
+      }
+      dispatchStarted = true;
       const resp = await fetch('/api/chat/send', {
         method: 'POST',
         signal: controller.signal,
@@ -2332,6 +2369,12 @@ export default function Chat() {
         if (!processSseBuffer(false)) return;
       }
     } catch (e) {
+      // A rejected admission is definitely unsent; once fetch starts its outcome
+      // may be ambiguous, so never restore or automatically retry that request.
+      if (!dispatchStarted && item.version === sendQueueVersionRef.current) {
+        setRetainedSendDrafts(prev => ({ ...prev, [aimeeSid]: prev[aimeeSid] && prev[aimeeSid] !== text ? `${prev[aimeeSid]}\n\n${text}` : text }));
+        if (activeContextSid.current === aimeeSid) setInputText(current => current || text);
+      }
       if (isAbortError(e)) return;
       const errMsg = e instanceof Error ? e.message : 'Unknown error';
       setSendErrors(prev => ({ ...prev, [aimeeSid]: errMsg }));
@@ -2482,7 +2525,7 @@ export default function Chat() {
             setSendErrors(prev => ({ ...prev, [activeAimeeSid]: '' }));
             setIRTransportErrors(prev => ({ ...prev, [activeAimeeSid]: '' }));
             irPending.current[activeAimeeSid] = new Map();
-            setIRReady(prev => ({ ...prev, [activeAimeeSid]: false }));
+            updateIRReady(activeAimeeSid, false);
             setIRReconnect(value => value + 1);
           }}>Reconnect conversation</button>
         </div> : !irReady[activeAimeeSid] && <p role="status">Synchronizing conversation…</p>}
@@ -2546,6 +2589,16 @@ export default function Chat() {
           )}
         </div>
       )}
+
+      {activeSessionMatched && retainedSendDrafts[activeAimeeSid] && retainedSendDrafts[activeAimeeSid] !== inputText && <aside role="status" style={{ padding: '8px 16px', flexShrink: 0, minWidth: 0, maxHeight: 160, overflowY: 'auto', borderTop: `1px solid ${tokens.borderLight}` }}>
+        <span>Unsent message retained for this conversation.</span>
+        <details><summary>View unsent message</summary><pre style={{ maxHeight: 96, overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{retainedSendDrafts[activeAimeeSid]}</pre></details>
+        <button type="button" onClick={() => {
+          const text = retainedSendDrafts[activeAimeeSid];
+          setInputText(current => current ? `${text}\n\n${current}` : text);
+          setRetainedSendDrafts(prev => { const next = { ...prev }; delete next[activeAimeeSid]; return next; });
+        }}>Restore unsent message</button>
+      </aside>}
 
       {/* Prompt tier selector */}
       <div role="group" aria-label="Session preferences" style={{
@@ -2696,7 +2749,7 @@ export default function Chat() {
             <Button
               variant="primary"
               busy={busy}
-              disabled={primary.pending || persona.pending}
+              disabled={primary.pending || persona.pending || !activeSessionMatched || !irReady[activeAimeeSid] || failedHistory.current.has(activeAimeeSid)}
               onClick={sendMessage}
               title={steering ? 'Interrupt the running turn and continue with this message' : 'Send'}
               style={{

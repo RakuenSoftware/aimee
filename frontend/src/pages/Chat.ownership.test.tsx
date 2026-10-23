@@ -44,7 +44,14 @@ beforeEach(() => {
   context.patchSession.mockReset();
   Element.prototype.scrollIntoView = vi.fn();
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
-  vi.stubGlobal('EventSource', class { addEventListener() {} close() {} });
+  // The real owned stream admits the empty canonical prefix before sending.
+  vi.stubGlobal('EventSource', class {
+    constructor(public url: string) {}
+    addEventListener(type: string, listener: (event: { data: string }) => void) {
+      if (type === 'replay_complete') queueMicrotask(() => listener({ data: JSON.stringify({ session_id: new URL(this.url, 'http://fixture').searchParams.get('sid'), cursor: '0' }) }));
+    }
+    close() {}
+  });
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/chat/send') return new Response(new ReadableStream({ start(controller) { stream = controller; } }));
     if (url === '/api/chat/attach') return json({ session_id: JSON.parse(String(init?.body)).sid, attach_id: 'attachment' });
@@ -173,30 +180,25 @@ describe('chat transcript ownership', () => {
     expect(screen.queryByTestId('assistant')).toBeNull();
   });
 
-  it('sends to the originating project when the user switches sessions while attachment is pending', async () => {
+  it('keeps an unadmitted draft unsent when the user switches before initial attachment and replay', async () => {
     const attached = new Map<string, (response: Response) => void>();
     const originalFetch = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation((url, init) => String(url) === '/api/chat/attach'
       ? new Promise(resolve => { attached.set(JSON.parse(String(init?.body)).sid, resolve); }) : originalFetch(url, init));
     context.sessions = [session('one'), session('two')]; context.active = context.sessions[0];
-    const view = render(<Chat />);
-    await tick();
-    send('work on project one');
-    await tick();
-    context.active = context.sessions[1];
-    view.rerender(<Chat />);
-    await tick();
+    const view = render(<Chat />); await tick();
+    send('work on project one'); await tick();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    context.active = context.sessions[1]; view.rerender(<Chat />); await tick();
     await act(async () => { attached.get('one')!(json({ session_id: 'one', attach_id: 'attachment' })); });
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    expect(screen.getByPlaceholderText(/Type a message/)).toHaveProperty('value', 'work on project one');
+    context.active = context.sessions[0]; view.rerender(<Chat />); await tick();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    send('work on project one'); await tick();
     const request = vi.mocked(fetch).mock.calls.find(([url]) => url === '/api/chat/send');
     expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ aimee_session_id: 'one', cwd: '/work/one' });
-    await act(async () => {
-      emit('turn_start'); emit('text', { content: 'Finished project one' }); emit('turn_end'); stream.close();
-    });
-    await tick(500);
-    expect(screen.queryByTestId('assistant')).toBeNull();
-    context.active = context.sessions[0];
-    view.rerender(<Chat />);
-    await tick();
-    expect(screen.getByTestId('assistant').textContent).toBe('Finished project one');
+    await act(async () => { emit('turn_start'); emit('text', { content: 'Finished project one' }); emit('turn_end'); stream.close(); });
+    await tick(500); expect(screen.getByTestId('assistant').textContent).toBe('Finished project one');
   });
 });

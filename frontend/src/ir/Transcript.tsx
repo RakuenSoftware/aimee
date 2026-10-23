@@ -41,10 +41,15 @@ function ChildExecutionView({ reference, ancestors, onReply, pendingRepliesBySes
   const [state, setState] = useState(current.current);
   const [error, setError] = useState('');
   const [ready, setReady] = useState(false);
+  const readyRef = useRef(false);
+  const expandedRef = useRef(false);
+  const ownerRef = useRef(reference);
+  ownerRef.current = reference;
   const cyclic = ancestors.includes(reference.session_id);
   useEffect(() => {
     if (!expanded || cyclic) return;
     setError('');
+    readyRef.current = false;
     setReady(false);
     let disposed = false;
     const stream = new EventSource(`/api/chat/session-events?format=ir&sid=${encodeURIComponent(reference.session_id)}&cursor=${current.current.sequence}`);
@@ -59,6 +64,7 @@ function ChildExecutionView({ reference, ancestors, onReply, pendingRepliesBySes
         // The expanded view owns this read-only stream until collapse/unmount.
       } catch {
         disposed = true;
+        readyRef.current = false;
         setReady(false);
         setError('Delegate history could not be read. Close and reopen to retry.');
         stream.close();
@@ -71,9 +77,11 @@ function ChildExecutionView({ reference, ancestors, onReply, pendingRepliesBySes
         if (boundary.session_id !== reference.session_id || typeof boundary.cursor !== 'string' ||
             !/^(0|[1-9][0-9]*)$/.test(boundary.cursor) || BigInt(boundary.cursor) > BigInt(current.current.sequence))
           throw new Error('Invalid delegate replay boundary');
+        readyRef.current = true;
         setReady(true);
       } catch {
         disposed = true;
+        readyRef.current = false;
         setReady(false);
         setError('Delegate history could not be read. Close and reopen to retry.');
         stream.close();
@@ -82,18 +90,31 @@ function ChildExecutionView({ reference, ancestors, onReply, pendingRepliesBySes
     stream.onerror = () => {
       if (disposed) return;
       disposed = true;
+      readyRef.current = false;
       setReady(false);
       setError('Delegate history is unavailable. Close and reopen to retry.');
       stream.close();
     };
-    return () => { disposed = true; stream.close(); };
+    return () => { disposed = true; readyRef.current = false; stream.close(); };
   }, [expanded, cyclic, reference.session_id, reference.turn_id]);
-  return <details onToggle={event => setExpanded(event.currentTarget.open)}>
+  return <details onToggle={event => { expandedRef.current = event.currentTarget.open; setExpanded(event.currentTarget.open); }}>
     <summary>Delegate: {reference.role} — {reference.status}</summary>
     {expanded && (cyclic ? <p role="alert">This execution reference forms a cycle.</p> : <>
       {!state.messages.length && !error && <p role="status">Loading delegate history…</p>}
       <IRTranscript state={state} ancestors={ancestors} controlsReady={ready}
-        onReply={onReply ? (id, reply, session) => onReply(id, reply, session ?? reference.session_id) : undefined}
+        onReply={onReply ? async (id, reply, session = reference.session_id) => {
+          if (!expandedRef.current || !readyRef.current || ownerRef.current.session_id !== reference.session_id ||
+              ownerRef.current.turn_id !== reference.turn_id || current.current.session !== reference.session_id)
+            throw new Error('Reopen this delegate history before replying.');
+          // Each descendant validates its own pending control. Ancestors retain
+          // live ownership/readiness checks without looking it up in the wrong log.
+          if (session === reference.session_id) {
+            const control = current.current.controls[id];
+            if (!control || control.closed || control.response || control.turn !== reference.turn_id)
+              throw new Error('This delegate request is no longer awaiting a reply.');
+          }
+          return onReply(id, reply, session);
+        } : undefined}
         pendingReplies={pendingRepliesBySession?.[reference.session_id]} pendingRepliesBySession={pendingRepliesBySession} />
       {error && <p role="alert">{error}</p>}
     </>)}

@@ -307,8 +307,25 @@ failed question acceptance case. Current public and owner SSE reads return all
 13 events and valid replay completion; the original failing HTTP status was not
 retained, so a backend cause is not established. A reproducible frontend gap
 allows new model sends after a history failure despite hidden controls. Its
-repair must preserve the draft and block dispatch until explicit reconnect
-finishes validated canonical replay, without automatic resend or stale controls.
+repair now preserves the draft and blocks dispatch until canonical replay is
+validated, including initial history and explicit reconnect. Synchronous owner
+and readiness references fence queued sends, attachment failures and Steer
+continuations. A changed watch generation cannot revive old sending intent.
+Actual old-production regression also reproduces a separate custody race: a
+session switch before passive effects sends old SID `web-one` with new cwd
+`/work/two`. Dispatch now captures and rechecks the session/SID/workspace tuple.
+Confirmed undispatched text is retained for its own conversation, with bounded
+preview and explicit restore; uncertain dispatched requests are not retried.
+
+Primary and delegate reply callbacks synchronously check their actual canonical
+history owner, readiness and still-pending control before the shared submission
+latch or POST. Nested delegates retain their own log checks; stale buttons cannot
+bypass a disconnected or closed history. Four critical regressions fail against
+the old actual production components. The final frontend bytes pass 493 tests in
+51 files (81 focused), TypeScript and both production builds. A separate actual
+390-second unsent browser check receives replay completion and regular keepalives
+without UI errors or model calls. This does not explain or relabel the original
+failed question; fresh live reply acceptance remains required.
 
 The remaining-consumer audit also finds and repairs a live shadow ingress bypass:
 the old HTTP dispatcher copied raw completion bodies before canonical admission.
