@@ -317,8 +317,9 @@ static void test_unconfigured_provider_preserves_attempts(sqlite3 *db)
    seed(db, "UPDATE kb_async_jobs SET status='done' WHERE status='pending'");
    seed(db, "INSERT INTO kb_documents (id,project,file_path,file_hash,chunk_index,content,doc_kind)"
             " VALUES (9701,'p','unconfigured.md','uc',0,'t','')");
-   seed(db, "INSERT INTO kb_async_jobs (id,kind,document_id,project,status,attempts,next_attempt_at)"
-            " VALUES (9701,'extract_doc',9701,'p','pending',0,'')");
+   seed(db,
+        "INSERT INTO kb_async_jobs (id,kind,document_id,project,status,attempts,next_attempt_at)"
+        " VALUES (9701,'extract_doc',9701,'p','pending',0,'')");
    platform_unsetenv("SYNTHESIS_ENDPOINT");
    kb_curator_provider_backoff_recovered();
    kb_curator_extract_opts_t opts = {.max_attempts = 3};

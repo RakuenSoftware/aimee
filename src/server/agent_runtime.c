@@ -874,8 +874,7 @@ static void parse_response(const char *body, const agent_t *agent,
    out->response = text; /* Compatibility display may be empty for media-only IR. */
    out->success = text && !aimee_ir_response_complete_valid(&response);
    if (!out->success)
-      snprintf(out->error, sizeof out->error,
-               "model did not return a complete canonical answer");
+      snprintf(out->error, sizeof out->error, "model did not return a complete canonical answer");
    if (out->cache_read_tokens > 0)
       aimee_log(LOG_DEBUG, "agent_context", "prompt cache hit: %d tokens read from cache",
                 out->cache_read_tokens);
