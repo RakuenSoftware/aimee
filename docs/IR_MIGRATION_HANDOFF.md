@@ -245,9 +245,20 @@ repeat. Neither automation failure is relabeled green. Independent final seals
 prove the actual native behavior, stopped state, full canonical history/cache and
 quiescence.
 
+Current configured 936 integration passes 173/173, all eight SDK profiles,
+typed refusal, actual Docker grading, signed proof, KB-free learning, scoped
+reuse and restart recovery. Its mandatory Python primary case runs both the real
+C CLI and the real Go evaluator through that CLI, requiring four additional
+observed local-provider requests. The outer receipt initially searched for
+markers that the shell filtered from successful output; that false receipt is
+retained. Corrected evidence is explicitly source-flow inference from the exact
+unconditional assertions and later retained success marker, not a captured raw
+request transcript. The test-only shell follow-up forwards evaluation markers in
+future logs. Production/runtime provenance remains 936.
+
 Honest server-triggered native execution, ordinary model switching/replay,
-question/permission replies, native tool effects and current configured
-integration/deployment acceptance remain outstanding. Keep these checks separate
+question/permission replies, native tool effects and three standalone real-PG
+deployment validators remain outstanding. Keep these checks separate
 from the stock-SDK recall refusal. No current-branch GitHub CI or production
 promotion is claimed. Keep one eventual PR, automatic reviews and strict
 attribution; do not investigate or change `.100`.
