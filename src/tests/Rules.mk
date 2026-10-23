@@ -6296,7 +6296,7 @@ $(OBJDIR)/tests/support/router_advise_stub.o: tests/support/router_advise_stub.c
 $(OBJDIR)/tests/test_mcp_client_integration.o: C_FLAGS += -DMCP_MOCK_SERVER_PATH=\"$(TESTPREFIX)/mock-mcp-server\"
 $(OBJDIR)/tests/test_mcp_client_registry.o: C_FLAGS += -DMCP_MOCK_SERVER_PATH=\"$(TESTPREFIX)/mock-mcp-server\"
 
-$(TESTPREFIX)/mock-mcp-server: $(OBJDIR)/tests/support/mock_mcp_server.o
+$(TESTPREFIX)/mock-mcp-server: $(OBJDIR)/tests/support/mock_mcp_server.o | $(CORE_CODEC_LIB)
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-mcp-client-integration: $(OBJDIR)/tests/test_mcp_client_integration.o \

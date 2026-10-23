@@ -458,14 +458,58 @@ def main():
                 assert time.monotonic() < deadline, status
                 time.sleep(0.05)
 
+        sandbox_reason = (
+            "delegate could not be given a sandboxed container with a complete source tree; "
+            "refusing to run it un-sandboxed (see the delegate-sandbox log for the cause)"
+        )
+
+        def assert_pre_provider_failure(child, reason, provider_before):
+            # Host admission never authored a model message or a child terminal.
+            # The separately observed fake provider is the no-dispatch oracle.
+            assert child["job_status"] == "failed", child
+            assert child.get("diagnostic") == reason and reason, child
+            assert child["cursor_turn"] == 0 and child["api_call_count"] == 0, child
+            for field in ("result", "legacy_result", "output", "outputs", "canonical_source", "history", "events"):
+                assert field not in child, (field, child)
+            assert len(observed) == provider_before, "host/source refusal must precede every child provider call"
+
+        def assert_canonical_child(child, expected_text):
+            assert child["job_status"] == "done", child
+            output = child["output"]
+            assert output["role"] == "assistant", output
+            text = "".join(block["text"] for block in output["blocks"] if block["type"] == "text")
+            assert expected_text in text, output
+            assert "legacy_result" not in child and "diagnostic" not in child, child
+            source, events, history = child["canonical_source"], child["events"], child["history"]
+            actor = f"uid:{os.getuid()}"
+            assert source["schema"] == "aimee.agent-job-observation.v1", source
+            assert source["job_id"] == str(child["job_id"]), source
+            assert source["execution_status"] == "completed", source
+            assert source["parent_source"]["session_id"] == sid and source["parent_source"]["actor"] == actor, source
+            owner, terminal = source["child"], source["terminal_source"]
+            assert owner["role"] == child["role"] and owner["agent"] == child["agent_name"], source
+            assert terminal["session_id"] == owner["session_id"] and terminal["turn_id"] == owner["turn_id"], source
+            assert terminal["actor"] == actor and int(source["last_sequence"]) >= int(terminal["sequence"]), source
+            assert isinstance(history, list) and output in history, child
+            assert isinstance(events, list) and events, child
+            completed = [event for event in events if event["event_id"] == terminal["event_id"]]
+            assert len(completed) == 1, events
+            assert completed[0]["turn_id"] == owner["turn_id"] and completed[0]["actor"] == actor, completed
+            assert completed[0]["sequence"] == terminal["sequence"], completed
+            assert completed[0]["payload"]["kind"] == "execution" and completed[0]["payload"]["payload"]["status"] == "completed", completed
+            current = [event["payload"]["payload"] for event in events
+                       if event["turn_id"] == owner["turn_id"] and event["actor"] == actor
+                       and event["payload"]["kind"] == "message"
+                       and event["payload"]["payload"]["role"] == "assistant"]
+            assert child["outputs"] == current and current and output == current[-1], child
+
         docker = shutil.which("docker")
         sandbox_ready = docker and subprocess.run([docker, "version"], stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, timeout=15, check=False).returncode == 0
         if not sandbox_ready:
             before = len(observed)
             status = learning_task("sandbox-refusal")
-            assert status["job_status"] == "failed" and "could not be given a sandboxed container" in status["result"], status
-            assert len(observed) == before, "unavailable sandbox must not execute a model task"
+            assert_pre_provider_failure(status, sandbox_reason, before)
             print("delegate setup: registered workspace and dedicated worktree reach mandatory sandbox refusal")
             print("SKIP: delegate learning completion/readback (real Docker sandbox unavailable)")
         else:
@@ -474,7 +518,7 @@ def main():
             for run in range(2):
                 before = len(observed)
                 status = learning_task(run)
-                assert status["job_status"] == "done" and "PRIMARY_OK" in status["result"], status
+                assert_canonical_child(status, "PRIMARY_OK")
                 assert len(observed) > before, status
                 assert not any(lesson in json.dumps(observed[before]) for lesson in lessons), observed[before]
             verification = subprocess.run([os.environ.get("GO", "go"), "-C",
@@ -510,17 +554,16 @@ def main():
                     break
                 assert time.monotonic() < deadline, status
                 time.sleep(0.05)
-            assert status["job_status"] == "failed" and expected in status["result"], status
-            assert len(observed) == before, "source refusal must precede provider traffic"
-        source_refusal(mirror, "unknown persona", persona="ir-client-only")
+            assert_pre_provider_failure(status, expected, before)
+        source_refusal(mirror, "unknown persona 'ir-client-only' (see 'aimee persona list')", persona="ir-client-only")
         unregistered = home / "unregistered-delegate-source"
         subprocess.run(["git", "clone", "--quiet", str(workspace), str(unregistered)], check=True)
         (unregistered / "README.md").write_text("UNREGISTERED_SOURCE_MUST_NOT_BE_READ\n")
-        source_refusal(unregistered, "no held or registered authority")
+        source_refusal(unregistered, "workspace: background source has no held or registered authority")
         # A raw server mirror path cannot recreate the capability carried by a
         # live native callback. This also matches recovery without that lease.
         owned = next(path for path in (home / "workspaces").glob("*/work") if path.is_dir())
-        source_refusal(owned, "no held or registered authority")
+        source_refusal(owned, "workspace: background source has no held or registered authority")
         print("delegate source: dirty client templates ignored; unregistered and unleased sources refuse before file references")
         tracked_cwd = home / ("git-cwd-" + sid)
         previous_cwd = tracked_cwd.read_bytes() if tracked_cwd.exists() else None
@@ -550,12 +593,11 @@ def main():
             assert time.monotonic() < deadline, status
             time.sleep(0.05)
         if sandbox_ready:
-            assert status["job_status"] == "done" and "MIRROR_DELEGATE_OK" in status["result"], status
+            assert_canonical_child(status, "MIRROR_DELEGATE_OK")
             assert len(observed) == before + 2, observed[before:]
             print("delegate mirror: approved committed reconstruction, dedicated sandbox and real read pass")
         else:
-            assert status["job_status"] == "failed" and "could not be given a sandboxed container" in status["result"], status
-            assert len(observed) == before, "missing sandbox must not reach the model"
+            assert_pre_provider_failure(status, sandbox_reason, before)
             print("delegate mirror: registered reconstruction and dedicated child reach mandatory sandbox refusal")
 
         # The old subscriber wire has the same canonical producer, including
