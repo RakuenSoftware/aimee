@@ -129,12 +129,63 @@ fixture uses its own nonce-scoped verifier lock. No decoder, ownership rule or
 test was weakened. All eight SDK profiles and the refusal oracle passed that
 failed run; its receipt is retained as failed, not relabeled green.
 
-The combined registry/diagnostic repair still requires its new canonical image,
-fresh-install native workflow/server-trigger execution, current configured
-integration and final browser model-switch/control/replay acceptance. Keep these
-outstanding checks separate from the stock-SDK recall refusal. No current-branch
-GitHub CI or production promotion is claimed. Keep one eventual PR, automatic
-reviews and strict attribution; do not investigate or change `.100`.
+The registry/diagnostic repair is committed as `69d9ca7fd`. Its image matches
+all 87 products and 19 modules, and normal upgrade preserves all 89 canonical
+events and the full cache, native and authority state. Fresh setup again passes;
+model configuration created after startup is now discovered without a restart.
+However, the first real fresh native workflow fails before SDK launch because
+its stored execution scope is empty. It was stopped through the normal owner
+route before retry; its failed attempt and empty SDK/native observations remain
+retained. The cause is the web gateway's direct Go socket shortcut, which skipped
+the C source issuer. Repair routes workflow calls through the C facade and private
+bus, preserving existing bare-username workflow ownership while retaining the
+canonical actor in the sealed source. The obsolete direct Go HTTP listener is
+also removed; the workflow mux serves only its authenticated bus stage. Shutdown
+drains that stage before detaching the outbound store caller. Focused Go tests
+pass; the combined image and configured ingress/storage regressions remain due.
+
+Honest server-owned source scopes retain `ATTEST_NONE`; the native constructor
+previously rejected that transport. The repair composes the actual admitted
+private source with factory preparation through a one-shot, thread-local ticket.
+It binds the canonical seed, selected model and credentials, owner, actual owned
+child session and final native profile. Finite limits can only tighten. Failed
+or consumed preparation cannot issue another ticket without fresh source
+admission. Raw server strings, bearer transport, unadmitted/foreign scopes and
+changed requests remain refused. The real source/HMAC/admitter and constructor
+composition passes normal and sanitizer regressions; its positive fixture ends
+at an explicit database dependency seam, not a provider call. Fresh native and
+service-trigger execution are still required.
+
+Removing the raw control listener also exposed missing cancellation propagation
+inside the bus-to-HTTP-mux adapter. Control requests now derive their context from
+the process lifetime and bounded bus deadline, preserving the private execution
+scope. Active bus cancellation reaches the request and its subprocesses; canceled
+handlers return transport failure, never an empty HTTP success. Blocked-handler
+regressions reproduce the old failure and pass normally and under Go race.
+Standalone deployment validators now use this same C/bus ingress and the actual
+generated config/PostgreSQL/DB1 grants and processes. Their old placeholder paths,
+raw identity headers, empty-column comparisons and undefined table counts are
+replaced by actual registered workspaces and a read-only, schema-bound PostgreSQL
+metadata oracle. Fixture syntax and negative schema-oracle cases pass; real
+standalone deployment execution remains pending the combined products.
+
+The `69d9ca7fd` configured guest integration ends 170/171. All eight SDK profiles,
+typed refusal, real Docker grading, signed proof, KB-free learning, scoped reuse
+and daemon-restart recovery pass. The new actual CLI fixture receives the correct
+canonical success response, then wrongly expects a `status` field that the CLI
+intentionally strips on success. This also exposes the same assumption in the
+Go evaluator. The evaluator repair requires a successful process exit, admits the
+actual unwrapped canonical response, and strictly checks any explicit status;
+failed/partial/refused IR remains diagnostic. Its focused normal/race regressions
+pass. The failed integration receipt is retained; a new configured run must
+exercise the repaired actual CLI-to-evaluator contract.
+
+These repairs still require their combined image, fresh native workflow and
+server-trigger execution, configured integration and final browser
+model-switch/control/replay acceptance. Keep outstanding checks separate from the
+stock-SDK recall refusal. No current-branch GitHub CI or production promotion is
+claimed. Keep one eventual PR, automatic reviews and strict attribution; do not
+investigate or change `.100`.
 
 ### Earlier runtime qualification: 23 October 2026
 

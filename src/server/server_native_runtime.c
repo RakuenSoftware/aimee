@@ -1,6 +1,7 @@
 /* Native children hold only a lifetime-scoped local capability. Existing HTTP
  * owners admit model/tool requests under the captured actor and registration. */
 #include "server_native_runtime.h"
+#include "server_native_delegate_source.h"
 #include "ingress_preinject.h"
 #include "server_native_cli.h"
 #include <aimee/core/connection/auth.h>
@@ -1652,8 +1653,11 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
                     const aimee_request_t *profile, const server_native_tool_binding_t *bindings,
                     int binding_count, int bound_registry)
 {
+   int service_source =
+       server_native_delegate_source_runtime_consume(selected, owner, profile, session_id);
    if (!selected || !selected->enabled || !owner || !owner->vault_principal[0] ||
-       owner->vault_transport <= ATTEST_TCP_BEARER || owner->vault_transport > ATTEST_MTLS_CLIENT ||
+       (!service_source && (owner->vault_transport <= ATTEST_TCP_BEARER ||
+                            owner->vault_transport > ATTEST_MTLS_CLIENT)) ||
        !(owner->capabilities & CAP_CHAT) || !session_id || !session_id[0] ||
        strlen(session_id) >= 128)
    {

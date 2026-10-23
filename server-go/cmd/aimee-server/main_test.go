@@ -21,10 +21,9 @@ func TestConfiguredForgeHandlesURLAndSocketIndependently(t *testing.T) {
 	}
 }
 
-// The WFE is an internal control plane behind an owner-only Unix socket. Keep
-// credential material out of its long-lived argv/environment and do not grow a
-// second TCP authentication surface here.
-func TestControlPlaneRemainsUnixSocketOnlyAndCredentialFree(t *testing.T) {
+// Workflow control is admitted by the host and carried only by the private
+// module stage. No caller-controlled HTTP identity headers may bypass it.
+func TestControlPlaneUsesOnlyAuthenticatedModuleIngress(t *testing.T) {
 	_, testFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("locate test source")
@@ -41,15 +40,18 @@ func TestControlPlaneRemainsUnixSocketOnlyAndCredentialFree(t *testing.T) {
 		`observability-bearer-token",`,
 		`AIMEE_AGENT_SERVICE_BEARER`,
 		`AIMEE_API_BEARER_TOKEN`,
-		`net.Listen("tcp"`,
+		`net.Listen(`,
+		`http.Server{`,
+		`flag.String("socket"`,
 	} {
 		if strings.Contains(text, forbidden) {
-			t.Fatalf("WFE control plane reintroduced forbidden credential/TCP surface %q", forbidden)
+			t.Fatalf("WFE control plane reintroduced forbidden HTTP/credential surface %q", forbidden)
 		}
 	}
-	if !strings.Contains(text, `net.Listen("unix", *socket)`) ||
-		!strings.Contains(text, `os.Chmod(*socket, 0o600)`) {
-		t.Fatal("WFE control plane must bind an owner-only Unix socket")
+	if !strings.Contains(text, `err = bus.RunModuleProcess(rootCtx, bus.ModuleProcessConfig{`) ||
+		!strings.Contains(text, `Handler: workflows.NewHandlerContext(rootCtx, handler)`) ||
+		!strings.Contains(text, `signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)`) {
+		t.Fatal("workflow control must serve and drain on the signal-bound module lifecycle")
 	}
 	if strings.Contains(text, `Handle("GET /metrics"`) {
 		t.Fatal("metrics must not be mounted on the WFE control-plane socket")

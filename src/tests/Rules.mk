@@ -1079,7 +1079,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-coord-dispatcher-startup \
                 $(TESTPREFIX)/unit-test-delegate-startup
 
 TEST_TARGETS += $(TESTPREFIX)/unit-test-native-source-issuers \
-                $(TESTPREFIX)/unit-test-native-delegate-source
+                $(TESTPREFIX)/unit-test-native-delegate-source $(TESTPREFIX)/unit-test-native-service-runtime-source
 
 UNIT_TEST_SHARD_COUNT ?= 1
 UNIT_TEST_SHARD_INDEX ?= 0
@@ -7383,3 +7383,20 @@ $(TESTPREFIX)/unit-test-db1-agent-job-observation: $(OBJDIR)/tests/test_db1_agen
 
 $(TESTPREFIX)/unit-test-agent-generate-ir: $(OBJDIR)/tests/test_agent_generate_ir.o $(OBJDIR)/server/server_error_kind.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/json_fluent.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+# Preserve the actual credential TLS; provider getters remain explicit runtime-fixture seams.
+$(OBJDIR)/tests/source-runtime-real-credentials.o: modules/vault/agent_credentials.c
+	@mkdir -p $(dir $@)
+	$(CC) $(C_FLAGS) -Dagent_api_connection_credentials=unused_source_api_connection_credentials -Dagent_claude_connection_credentials=unused_source_claude_connection_credentials -Dagent_codex_connection_credentials=unused_source_codex_connection_credentials -c -o $@ $<
+
+$(TESTPREFIX)/unit-test-native-service-runtime-source: $(OBJDIR)/tests/test_native_service_runtime_source.o \
+    $(OBJDIR)/tests/support/log_stub.o \
+    $(OBJDIR)/server/agent_tools.o $(OBJDIR)/posix/agent_source_authority.o $(OBJDIR)/modules/ir/aimee_ir.o \
+    $(OBJDIR)/server/server_native_runtime.o $(OBJDIR)/server/server_native_cli.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o $(OBJDIR)/server/server_native_history.o $(OBJDIR)/server/server_native_tool_admission.o $(OBJDIR)/server/server_session_question.o $(OBJDIR)/server/server_native_tool_source.o $(OBJDIR)/server/server_session_capture.o $(OBJDIR)/server/server_session_control.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cli_proxy.o \
+    $(OBJDIR)/modules/translation/wire_codec.o \
+    $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o $(OBJDIR)/modules/translation/aimee_frontend_openai.o $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
+    $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_backend_openai.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
+    $(OBJDIR)/server/request_context.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o \
+    $(OBJDIR)/platform_random.o $(filter %/platform_random.o,$(PLATFORM_BASIC_OBJS)) $(CORE_CONNECTION_LIB) \
+    $(OBJDIR)/server/server_native_delegate_source.o $(OBJDIR)/tests/source-runtime-real-credentials.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto

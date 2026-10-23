@@ -2319,7 +2319,7 @@ int v1_route_dispatch(const char *method, const char *path, const char *body, in
       if (!server_http_json_body_is_single_value(body, body_len))
          return err_json(resp, resp_cap, 400, "invalid JSON body");
       return workflow_control_request(method, path, server_http_identity_query(), body, body_len,
-                                      server_http_identity_principal(),
+                                      server_http_identity_workflow_principal(),
                                       (g_rpc_conn_caps & CAP_WORKFLOW_ADMIN) != 0, resp, resp_cap);
    }
    char id[256];

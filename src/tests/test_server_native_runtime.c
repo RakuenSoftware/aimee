@@ -1,4 +1,5 @@
 #include "server_native_runtime.h"
+#include "server_native_delegate_source.h"
 #include "server_native_sdk_profile.h"
 #include "modules/workspace/workspace_turn.h"
 #include "computer_use.h"
@@ -28,6 +29,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+/* The standalone runtime suite has no source issuer. NONE never acquires a
+ * capability here; the source/runtime composition fixture links the real owner. */
+int server_native_delegate_source_runtime_consume(const agent_t *selected,
+                                                  const request_context_t *owner,
+                                                  const aimee_request_t *profile,
+                                                  const char *session)
+{
+   (void)selected;
+   (void)owner;
+   (void)profile;
+   (void)session;
+   return 0;
+}
 
 static _Thread_local char tool_role[64], tool_cwd[MAX_PATH_LEN], tool_session[128];
 static _Thread_local int job_id, effect_authorized, scope_admitted;

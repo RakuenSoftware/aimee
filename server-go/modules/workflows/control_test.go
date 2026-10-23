@@ -1,13 +1,17 @@
 package workflows
 
 import (
+	"context"
 	"encoding/json"
-	"github.com/JBailes/aimee/server-go/delegate"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/delegate"
+	"golang.org/x/sys/unix"
 )
 
 func controlCall(t *testing.T, mux http.Handler, request ControlRequest) ControlResponse {
@@ -238,5 +242,131 @@ func TestExecutionScopeComesOnlyFromTrustedOuterControl(t *testing.T) {
 	denied := controlCall(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("invalid scope reached mux") }), ControlRequest{Method: "GET", Path: "/v1/health", ExecutionScope: strings.Repeat("A", 64)})
 	if denied.Status != http.StatusBadRequest {
 		t.Fatalf("invalid scope status%d", denied.Status)
+	}
+}
+
+func TestControlLifecycleCancellationDrainsActiveMux(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entered, finished := make(chan struct{}), make(chan struct{})
+	fallback := make(chan struct{})
+	defer close(fallback)
+	scope := strings.Repeat("b", 64)
+	var scopeBefore, scopeAfter string
+	handler := NewHandlerContext(ctx, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		scopeBefore = delegate.ExecutionScopeFromContext(r.Context())
+		close(entered)
+		select {
+		case <-r.Context().Done():
+		case <-fallback:
+		}
+		scopeAfter = delegate.ExecutionScopeFromContext(r.Context())
+	}))
+	request, err := json.Marshal(ControlRequest{Method: "POST", Path: "/v1/dev/submit", ExecutionScope: scope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body []byte
+	var status bus.ModuleStatus
+	go func() { body, status = handler(bus.ModuleInvocation{StageID: StageControl}, request); close(finished) }()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("mux never entered")
+	}
+	cancel()
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("lifecycle cancellation did not drain active mux")
+	}
+	if status != bus.ModuleStatusCancelled || len(body) != 0 {
+		t.Fatalf("cancelled mux returned body/status %q/%v", body, status)
+	}
+	if scopeBefore != scope || scopeAfter != scope {
+		t.Fatal("lifecycle context lost private execution scope")
+	}
+}
+
+func TestControlAlreadyCancelledLifecycleDoesNotDispatch(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	handler := NewHandlerContext(ctx, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("cancelled lifecycle dispatched mux") }))
+	body, status := handler(bus.ModuleInvocation{StageID: StageControl}, []byte(`{"method":"GET","path":"/v1/workflow/items"}`))
+	if status != bus.ModuleStatusCancelled || len(body) != 0 {
+		t.Fatalf("cancelled dispatch returned %q/%v", body, status)
+	}
+}
+
+func TestControlInvocationDeadlineCancelsActiveMux(t *testing.T) {
+	var now unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &now); err != nil {
+		t.Fatal(err)
+	}
+	invocation := bus.ModuleInvocation{StageID: StageControl, DeadlineNS: uint64(now.Nano()) + uint64(500*time.Millisecond)}
+	entered, finished, fallback := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	defer close(fallback)
+	handler := NewControlHandler(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		close(entered)
+		select {
+		case <-r.Context().Done():
+		case <-fallback:
+		}
+	}))
+	var body []byte
+	var status bus.ModuleStatus
+	go func() {
+		body, status = handler(invocation, []byte(`{"method":"GET","path":"/v1/workflow/items"}`))
+		close(finished)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deadline mux never entered")
+	}
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("invocation deadline did not cancel active mux")
+	}
+	if status != bus.ModuleStatusDeadlineExceeded || len(body) != 0 {
+		t.Fatalf("expired mux returned %q/%v", body, status)
+	}
+}
+
+func TestControlExpiredInvocationDoesNotDispatch(t *testing.T) {
+	handler := NewControlHandler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("expired invocation dispatched mux") }))
+	body, status := handler(bus.ModuleInvocation{StageID: StageControl, DeadlineNS: 1}, []byte(`{"method":"GET","path":"/v1/workflow/items"}`))
+	if status != bus.ModuleStatusDeadlineExceeded || len(body) != 0 {
+		t.Fatalf("expired dispatch returned %q/%v", body, status)
+	}
+}
+
+// The runtime's real FCancel/atomic-flag behavior is tested in bus. This unit
+// seam changes the same predicate after dispatch without exposing bus internals.
+func TestControlContextObservesCancellationAfterDispatch(t *testing.T) {
+	var cancelled atomic.Bool
+	ctx, release := controlRequestContext(context.Background(), time.Hour, cancelled.Load)
+	defer release()
+	if ctx.Err() != nil {
+		t.Fatal("request cancelled before bus flag")
+	}
+	cancelled.Store(true)
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("in-flight bus cancellation not propagated")
+	}
+	if ctx.Err() != context.Canceled {
+		t.Fatalf("bus cancellation error %v", ctx.Err())
+	}
+}
+
+func TestControlContextAlwaysBoundsStandaloneWork(t *testing.T) {
+	ctx, release := controlRequestContext(context.Background(), (bus.ModuleInvocation{}).Remaining(30*time.Second), func() bool { return false })
+	defer release()
+	deadline, ok := ctx.Deadline()
+	if !ok || time.Until(deadline) > 30*time.Second {
+		t.Fatal("control request has no host-owned deadline bound")
 	}
 }

@@ -7,6 +7,7 @@
 #include "cli_claude_native.h"
 #include "claude_headless.h"
 #include "server_native_runtime.h"
+#include "server_native_delegate_source.h"
 #include "server_native_cache.h"
 #include "server_native_cache_lease.h"
 #include "server_native_containment.h"
@@ -1023,7 +1024,8 @@ done:
    cJSON_Delete(authority);
    return rc;
 }
-static int native_registry_open(native_execution_t *execution, const request_context_t *owner)
+static int native_registry_open(native_execution_t *execution, const request_context_t *owner,
+                                const provider_cli_cfg_t *cfg)
 {
    aimee_request_t *profile = &execution->profile;
    int claude = !strcmp(execution->selected.cli_kind, "claude");
@@ -1053,6 +1055,11 @@ static int native_registry_open(native_execution_t *execution, const request_con
       }
       bindings[i].name = tool->name;
    }
+   if (owner->vault_transport == ATTEST_NONE &&
+       server_native_delegate_source_runtime_prepare(cfg->role, cfg->agent, &execution->selected,
+                                                     cfg->canonical_request, profile,
+                                                     execution->source_session))
+      goto done;
    execution->runtime = server_native_runtime_open_bound_request(
        &execution->selected, owner, execution->source_session, profile, bindings, profile->n_tools);
    rc = execution->runtime ? 0 : -1;
@@ -1225,7 +1232,7 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    if (server_native_sdk_profile_prepare(&execution->profile, sdk, execution->executable_fd))
       goto refused;
    stage = "native runtime preparation";
-   if (native_registry_open(execution, owner))
+   if (native_registry_open(execution, owner, cfg))
       goto refused;
    if (server_native_runtime_set_turn_limit(execution->runtime, cfg->native_turn_limit))
       goto refused;

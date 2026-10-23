@@ -233,7 +233,7 @@ server_start_line=$(grep -nF 'log "starting aimee-server (socket=$SERVER_SOCK) a
     ../deploy/container/server-entrypoint.sh | cut -d: -f1)
 prewarm_line=$(grep -nF 'runuser -u aimee -- aimee-server --prewarm-cli-oauth' \
     ../deploy/container/server-entrypoint.sh | cut -d: -f1)
-wfe_start_line=$(grep -nF 'log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"' \
+wfe_start_line=$(grep -nF 'log "starting Go WFE control plane (bus=$AIMEE_MODULE_BUS_SOCKET)"' \
     ../deploy/container/server-entrypoint.sh | cut -d: -f1)
 if [ -n "$wfe_wait_tenths" ] && [ "$wfe_wait_tenths" -ge 1200 ] &&
    [ -n "$server_start_line" ] && [ -n "$wfe_start_line" ] && [ -n "$prewarm_line" ] &&

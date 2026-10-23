@@ -1,9 +1,11 @@
 package workflows
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/delegate"
@@ -109,7 +111,12 @@ func (r *controlRecorder) WriteHeader(status int) {
 // owns the control plane serves the advance decision too, rather than a second
 // process claiming the same identity.
 func NewHandler(mux http.Handler) bus.ModuleHandler {
-	control := NewControlHandler(mux)
+	return NewHandlerContext(context.Background(), mux)
+}
+
+// NewHandlerContext binds admitted control work to the process lifetime.
+func NewHandlerContext(ctx context.Context, mux http.Handler) bus.ModuleHandler {
+	control := NewControlHandlerContext(ctx, mux)
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 		switch invocation.StageID {
 		case StageAdvance:
@@ -131,8 +138,14 @@ func NewHandler(mux http.Handler) bus.ModuleHandler {
 // The mux is passed in rather than constructed here so the stage depends on the
 // routing surface alone, not on the store, engine and config that assemble it.
 func NewControlHandler(mux http.Handler) bus.ModuleHandler {
+	return NewControlHandlerContext(context.Background(), mux)
+}
+
+// NewControlHandlerContext propagates host cancellation and the bounded stage
+// deadline into synchronous HTTP handlers and their subprocesses.
+func NewControlHandlerContext(parent context.Context, mux http.Handler) bus.ModuleHandler {
 	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
-		if mux == nil {
+		if mux == nil || parent == nil {
 			return nil, bus.ModuleStatusInternal
 		}
 		// Advance and control share a module and are told apart only by stage id,
@@ -153,8 +166,10 @@ func NewControlHandler(mux http.Handler) bus.ModuleHandler {
 		if decoded.Path == "" || containsControlChars(decoded.Path, decoded.Query, decoded.Principal) || (decoded.ExecutionScope != "" && !delegate.ValidExecutionScope(decoded.ExecutionScope)) {
 			return controlError(http.StatusBadRequest, "invalid workflow control request")
 		}
-		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
+		requestContext, release := controlRequestContext(parent, invocation.Remaining(30*time.Second), invocation.Cancelled)
+		defer release()
+		if status := controlCancellationStatus(requestContext, invocation); status != bus.ModuleStatusOK {
+			return nil, status
 		}
 
 		target := decoded.Path
@@ -162,7 +177,7 @@ func NewControlHandler(mux http.Handler) bus.ModuleHandler {
 			target += "?" + decoded.Query
 		}
 		// http.NewRequest reports a bad target instead of panicking on it.
-		httpRequest, err := http.NewRequest(decoded.Method, target, strings.NewReader(decoded.Body))
+		httpRequest, err := http.NewRequestWithContext(requestContext, decoded.Method, target, strings.NewReader(decoded.Body))
 		if err != nil {
 			return controlError(http.StatusBadRequest, "invalid workflow control target")
 		}
@@ -180,6 +195,9 @@ func NewControlHandler(mux http.Handler) bus.ModuleHandler {
 
 		recorder := &controlRecorder{}
 		mux.ServeHTTP(recorder, httpRequest)
+		if status := controlCancellationStatus(requestContext, invocation); status != bus.ModuleStatusOK {
+			return nil, status
+		}
 		status := recorder.status
 		if status == 0 {
 			// A handler that wrote nothing at all still answered 200 over HTTP.
@@ -215,4 +233,41 @@ func containsControlChars(values ...string) bool {
 		}
 	}
 	return false
+}
+
+// The bus exposes cancellation as an atomic observation, not a context. Poll it
+// only while this request is active; release joins the watcher before returning.
+func controlRequestContext(parent context.Context, remaining time.Duration, cancelled func() bool) (context.Context, func()) {
+	ctx, cancel := context.WithTimeout(parent, remaining)
+	if cancelled() {
+		cancel()
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if cancelled() {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return ctx, func() { cancel(); <-done }
+}
+
+func controlCancellationStatus(ctx context.Context, invocation bus.ModuleInvocation) bus.ModuleStatus {
+	if ctx.Err() == context.DeadlineExceeded || invocation.Remaining(30*time.Second) == 0 {
+		return bus.ModuleStatusDeadlineExceeded
+	}
+	if ctx.Err() != nil || invocation.Cancelled() {
+		return bus.ModuleStatusCancelled
+	}
+	return bus.ModuleStatusOK
 }

@@ -203,7 +203,11 @@ func qaCLI(t *testing.T, wire []byte, strictArgs bool) string {
 }
 func qaWire(t *testing.T, status string, r *canonical.Response) []byte {
 	t.Helper()
-	wire, err := json.Marshal(map[string]any{"status": status, "ir": r, "response": "POISONED flat alias"})
+	envelope := map[string]any{"ir": r}
+	if status != "" {
+		envelope["status"] = status
+	}
+	wire, err := json.Marshal(envelope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +215,7 @@ func qaWire(t *testing.T, status string, r *canonical.Response) []byte {
 }
 func TestAgentModelUsesRegisteredCanonicalCLIWithoutShell(t *testing.T) {
 	response := qaFixtureReply("Orion", 4, 1)
-	script := qaCLI(t, qaWire(t, "ok", response.Output), true)
+	script := qaCLI(t, qaWire(t, "", response.Output), true)
 	prompt := "$(exit 9); " + string(rune(96)) + "exit 8" + string(rune(96))
 	reply, err := agentModel(script)(context.Background(), "system", prompt, 256)
 	if err != nil || reply.Response != "Orion" || reply.PromptTokens != 4 || reply.CompletionTokens != 1 || reply.Output == nil {
@@ -276,9 +280,10 @@ func TestAgentModelCanonicalTerminalAdmission(t *testing.T) {
 		t.Run(fmt.Sprint(stop), func(t *testing.T) {
 			r := *text
 			r.StopReason = stop
-			script := qaCLI(t, qaWire(t, "ok", &r), true)
-			if _, err := agentModel(script)(context.Background(), "system", "prompt", 256); err == nil {
-				t.Fatal("noncomplete canonical output accepted", stop)
+			script := qaCLI(t, qaWire(t, "", &r), true)
+			reply, err := agentModel(script)(context.Background(), "system", "prompt", 256)
+			if err == nil || reply.Output == nil || reply.Output.StopReason != stop || reply.Response != "" {
+				t.Fatal("noncomplete canonical output lost or promoted", stop, reply, err)
 			}
 		})
 	}
@@ -341,7 +346,7 @@ func TestAgentModelJudgeSamplingAndCanonicalProjection(t *testing.T) {
 	response := qaFixtureReply("ignored", 3, 1).Output
 	a, b, thinking := "Or", "ion", "private reasoning"
 	response.Blocks = []canonical.ResponseBlock{{Block: canonical.Block{Type: "text", Text: &a}}, {Block: canonical.Block{Type: "thinking", Text: &thinking}}, {Block: canonical.Block{Type: "text", Text: &b}}}
-	script := qaCLI(t, qaWire(t, "ok", response), true)
+	script := qaCLI(t, qaWire(t, "", response), true)
 	result, err := agentModel(script)(context.Background(), judgeSystem, "candidate evidence", 64)
 	if err != nil || result.Response != "Orion" {
 		t.Fatal(result, err)
@@ -373,7 +378,7 @@ func TestAgentModelNULRejectedBeforeCLI(t *testing.T) {
 
 func TestAgentModelRejectsContradictoryHostError(t *testing.T) {
 	for _, hostError := range []any{"host failed", map[string]any{"kind": "unavailable"}, false} {
-		wire, err := json.Marshal(map[string]any{"status": "ok", "ir": canonical.TextResponse("observed"), "error": hostError})
+		wire, err := json.Marshal(map[string]any{"ir": canonical.TextResponse("observed"), "error": hostError})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -384,5 +389,90 @@ func TestAgentModelRejectsContradictoryHostError(t *testing.T) {
 		if reply.Output == nil || reply.Response != "" {
 			t.Fatal("observed canonical output lost or projected as answer", reply)
 		}
+	}
+}
+
+func TestAgentModelCLISuccessEnvelopeAndFailureAuthority(t *testing.T) {
+	for _, status := range []string{"", "ok"} {
+		t.Run("success-status-"+status, func(t *testing.T) {
+			wire := qaWire(t, status, canonical.TextResponse("actual CLI answer"))
+			reply, err := agentModel(qaCLI(t, wire, true))(context.Background(), "system", "prompt", 32)
+			if err != nil || reply.Output == nil || reply.Response != "actual CLI answer" {
+				t.Fatal(reply, err)
+			}
+		})
+	}
+	for _, status := range []any{nil, false, true, 0, "", "error", "done"} {
+		t.Run(fmt.Sprintf("invalid-status-%v", status), func(t *testing.T) {
+			wire, err := json.Marshal(map[string]any{"ir": canonical.TextResponse("observed"), "status": status})
+			if err != nil {
+				t.Fatal(err)
+			}
+			reply, err := agentModel(qaCLI(t, wire, true))(context.Background(), "system", "prompt", 32)
+			if err == nil || reply.Output == nil || reply.Response != "" {
+				t.Fatal("invalid status granted answer authority", reply, err)
+			}
+		})
+	}
+	for _, status := range []string{"", "ok"} {
+		t.Run("nonzero-exit-status-"+status, func(t *testing.T) {
+			script := qaCLI(t, qaWire(t, status, canonical.TextResponse("observed")), true)
+			f, err := os.OpenFile(script, os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = f.WriteString("exit 1\n"); err != nil {
+				t.Fatal(err)
+			}
+			f.Close()
+			reply, err := agentModel(script)(context.Background(), "system", "prompt", 32)
+			if err == nil || reply.Output == nil || reply.Response != "" {
+				t.Fatal("failed transport promoted canonical diagnostic", reply, err)
+			}
+		})
+	}
+	for _, wire := range []string{`{}`, `{"ir":null}`, `{"status":"ok"}`, `{"ir":{"schema":"wrong"}}`} {
+		if reply, err := agentModel(qaCLI(t, []byte(wire), true))(context.Background(), "system", "prompt", 32); err == nil || reply.Response != "" {
+			t.Fatal("missing or malformed canonical observation accepted", reply, err)
+		}
+	}
+	wire, err := json.Marshal(map[string]any{"ir": canonical.TextResponse("no host error"), "error": nil})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply, err := agentModel(qaCLI(t, wire, true))(context.Background(), "system", "prompt", 32); err != nil || reply.Response != "no host error" {
+		t.Fatal(reply, err)
+	}
+}
+
+// The canonical primary integration supplies the genuine built CLI and checks
+// four actual local-provider requests, so a fake executable cannot satisfy it.
+func TestAgentModelLiveRegisteredCLI(t *testing.T) {
+	executable := os.Getenv("AIMEE_QA_LIVE_CLI")
+	if executable == "" {
+		t.Skip("requires the canonical primary local-provider integration")
+	}
+	for _, test := range []struct {
+		prompt string
+		stop   canonical.StopReason
+	}{
+		{"IR_QA_ANSWER", canonical.StopEndTurn},
+		{"IR_QA_PARTIAL", canonical.StopMaxTokens},
+		{"IR_QA_REFUSED", canonical.StopContentFilter},
+		{"IR_QA_TOOL", canonical.StopToolUse},
+	} {
+		t.Run(test.prompt, func(t *testing.T) {
+			reply, err := agentModel(executable)(context.Background(), "Use only the supplied evidence.", test.prompt, 256)
+			if reply.Output == nil || !reply.Output.Valid() || reply.Output.StopReason != test.stop || reply.Output.Usage.Input != "10" || reply.Output.Usage.Output != "2" {
+				t.Fatalf("actual CLI canonical observation lost: reply=%+v error=%v", reply, err)
+			}
+			if test.stop == canonical.StopEndTurn {
+				if err != nil || reply.Response != "PRIMARY_OK" || reply.PromptTokens != 10 || reply.CompletionTokens != 2 {
+					t.Fatal(reply, err)
+				}
+			} else if err == nil || reply.Response != "" || reply.PromptTokens != 0 || reply.CompletionTokens != 0 {
+				t.Fatal("declined/incomplete actual CLI observation promoted to QA answer", reply, err)
+			}
+		})
 	}
 }

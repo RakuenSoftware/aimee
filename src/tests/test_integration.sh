@@ -596,7 +596,7 @@ install_workflow_module() {
 start_workflow_module() {
     [ -x "$WFE_MODULE" ] || return 1
     stop_workflow_module
-    "$WFE_MODULE" --home "$AIMEE_HOME" --socket "$AIMEE_HOME/aimee-wfe.sock" \
+    "$WFE_MODULE" --home "$AIMEE_HOME" \
         --module-bus-socket "$MODULE_BUS_SOCK" >"$HOME/aimee-wfe.log" 2>&1 &
     WFE_MODULE_PID=$!
     # Attachment is what matters, not the process: poll the seam itself until it
@@ -2335,6 +2335,10 @@ else
 
 check_output "workflow defs list" '"defs"' echo "$(http_call GET /v1/workflow/defs)"
 check_output "the shipped definitions are served" 'build' echo "$(http_call GET /v1/workflow/defs)"
+# A live authenticated stage is required; absence of a process is not evidence
+# that the retired, unauthenticated workflow HTTP listeners stayed closed.
+check "workflow engine has no retired requested HTTP socket" test ! -S "$AIMEE_HOME/aimee-wfe.sock"
+check "workflow engine has no retired default HTTP socket" test ! -S "$AIMEE_HOME/aimee-server.sock"
 check_output "workflow items list answers" '200' echo "$(http_status GET /v1/workflow/items)"
 check_output "workflow triggers list answers" '200' echo "$(http_status GET /v1/workflow/triggers)"
 check_output "workflow blocks list answers" '200' echo "$(http_status GET /v1/workflow/blocks)"

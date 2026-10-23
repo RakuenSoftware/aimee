@@ -285,7 +285,10 @@ def main():
             assert result["ir"]["usage"]["input"] == "10" and result["ir"]["usage"]["output"] == "2", result
             assert "response" not in result and "result" not in result, result
             assert (completed.returncode == 0) == (marker == "IR_QA_ANSWER"), result
-            assert result["status"] == ("ok" if marker == "IR_QA_ANSWER" else "error"), result
+            if marker == "IR_QA_ANSWER":
+                assert "status" not in result, result  # Successful CLI JSON omits transport status.
+            else:
+                assert result["status"] == "error", result
             sent = observed[-1]
             assert sent["model"] == "ir-model-a" and sent["max_tokens"] == 256 and sent["temperature"] == 0.3, sent
             assert not sent.get("tools") and "IR_TURN_0" not in json.dumps(sent), sent
@@ -298,6 +301,26 @@ def main():
         assert refused.returncode != 0 and len(observed) == before, refused.stdout
         assert "ir" not in json.loads(refused.stdout), refused.stdout
         print("canonical evaluation: registered real CLI -> admitted tool-free owner -> actual HTTP fixture -> full canonical success/refusal/MAX/tool observations; no history/hints/effects")
+
+        # Exercise the shipped Go QA consumer through the same genuine CLI and
+        # local provider. Counting actual requests prevents a fake CLI envelope
+        # or an accidentally skipped Go integration case from passing this gate.
+        before = len(observed)
+        consumer = subprocess.run([os.environ.get("GO", "go"), "-C",
+            str(Path(__file__).resolve().parents[2] / "server-go"), "test",
+            "./modules/memory/cmd/aimee-memory-eval", "-run",
+            "^TestAgentModelLiveRegisteredCLI$", "-count=1", "-v"],
+            env={**os.environ, "AIMEE_QA_LIVE_CLI": cli},
+            capture_output=True, text=True, timeout=120)
+        assert consumer.returncode == 0, consumer.stdout + consumer.stderr
+        assert len(observed) == before + 4, consumer.stdout + consumer.stderr
+        for sent, marker in zip(observed[before:],
+                ["IR_QA_ANSWER", "IR_QA_PARTIAL", "IR_QA_REFUSED", "IR_QA_TOOL"]):
+            assert sent["model"] == "ir-model-a" and sent["max_tokens"] == 256 and sent["temperature"] == 0.3, sent
+            assert not sent.get("tools") and "IR_TURN_0" not in json.dumps(sent), sent
+            assert marker in json.dumps(sent), sent
+        assert not (home / "qa-must-not-exist").exists(), "QA consumer executed a returned tool"
+        print("canonical evaluation consumer: actual Go QA -> registered real CLI -> local HTTP canonical success/refusal/MAX/tool observations; no declined answer or effects")
 
         # Repeated cache-eligible prompts still produce private canonical
         # executions. A flat role-cache hit must not bypass the durable owner.

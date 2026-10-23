@@ -7,6 +7,7 @@
 #include "cli_claude_native.h"
 #include "claude_headless.h"
 #include "server_native_runtime.h"
+#include "server_native_delegate_source.h"
 #include "server_native_cache.h"
 #include "server_native_cache_lease.h"
 #include "server_native_containment.h"
@@ -479,6 +480,21 @@ int server_native_runtime_set_native_owner(server_native_runtime_t *value, const
    assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reservation, "owner_id")));
    assert(!cJSON_GetObjectItemCaseSensitive(reservation, "containment_json"));
    return 0;
+}
+int server_native_delegate_source_runtime_prepare(const char *role, const agent_t *original,
+                                                  const agent_t *selected,
+                                                  const aimee_request_t *seed,
+                                                  const aimee_request_t *profile,
+                                                  const char *session)
+{
+   (void)role;
+   (void)original;
+   (void)selected;
+   (void)seed;
+   (void)profile;
+   (void)session;
+   assert(!"normal attested factory fixture requested a service capability");
+   return -1;
 }
 server_native_runtime_t *server_native_runtime_open_bound_request(
     const agent_t *selected, const request_context_t *request_owner, const char *source,
@@ -1028,6 +1044,7 @@ static void reset(int next)
 {
    assert(!terminal && !retained);
    mode = next;
+   owner.vault_transport = ATTEST_WEBCHAT_TRUSTED;
    expected_wire = AIMEE_WIRE_RESPONSES;
    expected_provider = expected_endpoint = expected_auth = NULL;
    reserved = quiesced = finished_reservation = published_claim = 0;

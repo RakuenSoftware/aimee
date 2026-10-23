@@ -45,7 +45,71 @@ struct server_native_delegate_source_scope
    attested_transport_t transport;
    int tools, max_turns;
    long timeout_ms;
+   struct server_native_delegate_source_scope *previous_active;
+   int linked, service, admitted, runtime_ready, runtime_issued;
+   int bound_max_turns, bound_timeout_ms;
+   unsigned bound_capabilities;
+   char seed_digest[65], selection_digest[65], runtime_digest[65], profile_digest[65];
+   char runtime_session[128];
+   request_context_snapshot_t runtime_owner;
 };
+static _Thread_local server_native_delegate_source_scope_t *active_source;
+static void free_secret_json(cJSON *value);
+static void free_secret(char *value);
+
+static int request_digest(const aimee_request_t *request, char digest[65])
+{
+   if (aimee_ir_request_admit(request))
+      return -1;
+   cJSON *json = aimee_ir_request_json(request);
+   char *wire = json ? cJSON_PrintUnformatted(json) : NULL;
+   int rc = wire ? aimee_sha256_hex(wire, strlen(wire), digest) : -1;
+   free_secret(wire);
+   free_secret_json(json);
+   return rc;
+}
+/* Routing/connection identity is kept only as a private digest, never a public
+ * claim or credential copy. The factory alone normalizes the selected adapter. */
+static int selection_digest(const agent_t *selected, char digest[65], int limits)
+{
+   if (!selected)
+      return -1;
+   cJSON *json = cJSON_CreateObject();
+   if (!json)
+      return -1;
+#define FIELD(name)                                                                                \
+   do                                                                                              \
+   {                                                                                               \
+      if (!cJSON_AddStringToObject(json, #name, selected->name))                                   \
+         goto failed;                                                                              \
+   } while (0)
+   FIELD(name);
+   FIELD(registration);
+   FIELD(model);
+   FIELD(provider);
+   FIELD(endpoint);
+   FIELD(auth_type);
+   FIELD(cli_kind);
+   FIELD(cli_cmd);
+   FIELD(backend);
+   FIELD(api_key);
+   FIELD(api_key_disk);
+   FIELD(auth_cmd);
+#undef FIELD
+   if (!cJSON_AddNumberToObject(json, "enabled", selected->enabled) ||
+       !cJSON_AddNumberToObject(json, "primary_only", selected->primary_only) ||
+       (limits && (!cJSON_AddNumberToObject(json, "max_turns", selected->max_turns) ||
+                   !cJSON_AddNumberToObject(json, "timeout_ms", selected->timeout_ms))))
+      goto failed;
+   char *wire = cJSON_PrintUnformatted(json);
+   int rc = wire ? aimee_sha256_hex(wire, strlen(wire), digest) : -1;
+   free_secret(wire);
+   free_secret_json(json);
+   return rc;
+failed:
+   free_secret_json(json);
+   return -1;
+}
 
 static int refuse(char *error, size_t capacity, const char *reason)
 {
@@ -581,6 +645,15 @@ int server_native_delegate_source_bind(const char *handle, unsigned principal_re
       selected->max_turns = max_turns;
    if (selected->timeout_ms <= 0 || timeout_ms < selected->timeout_ms)
       selected->timeout_ms = (int)timeout_ms;
+   if (selection_digest(selected, scope->selection_digest, 0))
+      goto restore;
+   scope->service = service;
+   scope->bound_max_turns = selected->max_turns;
+   scope->bound_timeout_ms = selected->timeout_ms;
+   scope->bound_capabilities = request_context_get()->capabilities;
+   scope->previous_active = active_source;
+   scope->linked = 1;
+   active_source = scope;
    *out = scope;
    return 0;
 restore:
@@ -593,8 +666,13 @@ int server_native_delegate_source_admit(server_native_delegate_source_scope_t *s
                                         char *error, size_t capacity)
 {
    const request_context_t *context = request_context_get();
-   if (!scope || !persona || !persona[0] || strlen(persona) > 128 || !context ||
-       context->context_refused || context->model_execution != 1 ||
+   if (scope)
+   {
+      scope->admitted = scope->runtime_ready = 0;
+      OPENSSL_cleanse(&scope->runtime_owner, sizeof scope->runtime_owner);
+   }
+   if (!scope || active_source != scope || !persona || !persona[0] || strlen(persona) > 128 ||
+       !context || context->context_refused || context->model_execution != 1 ||
        context->operator_script_origin || context->vault_transport != scope->transport ||
        strcmp(context->principal, scope->account) ||
        strcmp(agent_get_request_vault_principal(), scope->actor) ||
@@ -604,12 +682,109 @@ int server_native_delegate_source_admit(server_native_delegate_source_scope_t *s
                     scope->registration, scope->workdir, request, scope->tools, scope->max_turns,
                     scope->timeout_ms, persona))
       return refuse(error, capacity, "effective native request lost its host-issued source");
+   if (request_digest(request, scope->seed_digest))
+      return refuse(error, capacity, "effective native request could not be retained");
+   scope->admitted = 1;
+   scope->runtime_issued = 0;
    return 0;
+}
+
+/* A finite admitted bound may only get tighter. Unset/unlimited values may
+ * stay identical or become finite; they never replace an admitted finite cap. */
+static int bound_tightened(int value, int bound)
+{
+   return bound > 0 ? value > 0 && value <= bound : value == bound || value > 0;
+}
+/* This producer is called only by the native factory after it has derived the
+ * actual host profile from the admitted canonical seed. Nothing on the wire can
+ * set this one-shot capability or select a different source scope. */
+int server_native_delegate_source_runtime_prepare(const char *role, const agent_t *original,
+                                                  const agent_t *selected,
+                                                  const aimee_request_t *seed,
+                                                  const aimee_request_t *profile,
+                                                  const char *session)
+{
+   server_native_delegate_source_scope_t *scope = active_source;
+   const request_context_t *owner = request_context_get();
+   int can_issue = scope && !scope->runtime_issued;
+   if (scope)
+   {
+      scope->runtime_issued = 1;
+      scope->runtime_ready = 0;
+      OPENSSL_cleanse(&scope->runtime_owner, sizeof scope->runtime_owner);
+   }
+   char seed_hash[65], original_hash[65];
+   db1_server_session_t child;
+   if (!can_issue || !scope || !scope->service || !scope->admitted || !owner || !role ||
+       strcmp(role, scope->role) || owner->capabilities != scope->bound_capabilities ||
+       owner->vault_transport != ATTEST_NONE || owner->trusted || owner->context_refused ||
+       owner->model_execution != 1 || owner->operator_script_origin ||
+       strcmp(owner->principal, scope->account) || strcmp(owner->vault_principal, scope->actor) ||
+       strcmp(agent_get_request_vault_principal(), scope->actor) || !session || !session[0] ||
+       strlen(session) >= sizeof scope->runtime_session ||
+       strcmp(agent_get_request_session(), session) || db1_server_session_get(session, &child) ||
+       strcmp(child.principal, scope->actor) || !original || !selected ||
+       strcmp(original->name, selected->name) ||
+       strcmp(original->registration, selected->registration) ||
+       strcmp(original->model, selected->model) ||
+       strcmp(original->auth_type, selected->auth_type) ||
+       strcmp(original->cli_kind, selected->cli_kind) ||
+       strcmp(original->cli_cmd, selected->cli_cmd) ||
+       strcmp(original->api_key, selected->api_key) ||
+       strcmp(original->api_key_disk, selected->api_key_disk) ||
+       strcmp(original->auth_cmd, selected->auth_cmd) || original->enabled != selected->enabled ||
+       original->primary_only != selected->primary_only ||
+       !bound_tightened(original->max_turns, scope->bound_max_turns) ||
+       !bound_tightened(original->timeout_ms, scope->bound_timeout_ms) ||
+       !bound_tightened(selected->max_turns, original->max_turns) ||
+       !bound_tightened(selected->timeout_ms, original->timeout_ms) || !profile ||
+       !profile->mutated || profile->raw_bytes || profile->raw_length ||
+       (!scope->tools && profile->n_tools) || !profile->model ||
+       strcmp(profile->model, selected->model) || selection_digest(original, original_hash, 0) ||
+       strcmp(original_hash, scope->selection_digest) || request_digest(seed, seed_hash) ||
+       strcmp(seed_hash, scope->seed_digest) ||
+       selection_digest(selected, scope->runtime_digest, 1) ||
+       request_digest(profile, scope->profile_digest))
+      return -1;
+   snprintf(scope->runtime_session, sizeof scope->runtime_session, "%s", session);
+   request_context_snapshot(&scope->runtime_owner);
+   scope->runtime_ready = 1;
+   return 0;
+}
+
+int server_native_delegate_source_runtime_consume(const agent_t *selected,
+                                                  const request_context_t *owner,
+                                                  const aimee_request_t *profile,
+                                                  const char *session)
+{
+   server_native_delegate_source_scope_t *scope = active_source;
+   if (!scope || !scope->runtime_ready)
+      return 0;
+   scope->runtime_ready = 0; /* Even a failed constructor consumes its attempt. */
+   request_context_snapshot_t now;
+   request_context_snapshot(&now);
+   char selected_hash[65], profile_hash[65];
+   int allowed =
+       scope->service && scope->admitted && owner && owner == request_context_get() &&
+       owner->vault_transport == ATTEST_NONE && !owner->trusted && !owner->context_refused &&
+       owner->model_execution == 1 && !owner->operator_script_origin && session &&
+       !strcmp(session, scope->runtime_session) &&
+       !memcmp(&now, &scope->runtime_owner, sizeof now) &&
+       !strcmp(agent_get_request_vault_principal(), scope->actor) &&
+       !strcmp(agent_get_request_session(), session) &&
+       !selection_digest(selected, selected_hash, 1) &&
+       !strcmp(selected_hash, scope->runtime_digest) && !request_digest(profile, profile_hash) &&
+       !strcmp(profile_hash, scope->profile_digest);
+   OPENSSL_cleanse(&now, sizeof now);
+   OPENSSL_cleanse(&scope->runtime_owner, sizeof scope->runtime_owner);
+   return allowed;
 }
 void server_native_delegate_source_unbind(server_native_delegate_source_scope_t *scope)
 {
-   if (!scope)
+   if (!scope || (scope->linked && active_source != scope))
       return;
+   if (scope->linked)
+      active_source = scope->previous_active;
    if (scope->directory >= 0)
       close(scope->directory);
    if (scope->workspace)

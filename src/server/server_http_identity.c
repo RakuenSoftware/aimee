@@ -211,6 +211,14 @@ const char *server_http_identity_principal(void)
    return tl_principal;
 }
 
+const char *server_http_identity_workflow_principal(void)
+{
+   static const char prefix[] = "webuser:";
+   if (tl_transport == ATTEST_WEBCHAT_TRUSTED && !strncmp(tl_principal, prefix, sizeof prefix - 1))
+      return tl_principal + sizeof prefix - 1;
+   return tl_principal;
+}
+
 attested_transport_t server_http_identity_transport(void)
 {
    return tl_transport;

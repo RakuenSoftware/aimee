@@ -119,9 +119,13 @@ func agentModel(executable string) evaluationModel {
 		if runErr != nil {
 			return reply, fmt.Errorf("evaluation agent failed: %w", runErr)
 		}
-		var status string
-		if !canonical.Decode(envelope["status"], &status) || status != "ok" {
-			return reply, errors.New("evaluation owner did not complete successfully")
+		// Successful --json CLI output omits the transport status. A zero
+		// process exit is required above; any explicit status remains strict.
+		if raw, present := envelope["status"]; present {
+			var status string
+			if !canonical.Decode(raw, &status) || status != "ok" {
+				return reply, errors.New("evaluation owner did not complete successfully")
+			}
 		}
 		if hostError := envelope["error"]; hostError != nil && !bytes.Equal(bytes.TrimSpace(hostError), []byte("null")) {
 			return reply, errors.New("evaluation owner returned contradictory host error")
