@@ -771,16 +771,6 @@ static int sdk_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
 }
 const provider_cli_adapter_t codex_provider_cli_adapter = {.cli_kind = "codex",
                                                            .execute = sdk_execute};
-int cli_codex_chat_stream(const cli_codex_chat_request_t *request, cli_codex_chat_event_cb cb,
-                          void *context, cli_codex_chat_result_t *out)
-{
-   (void)cb;
-   (void)context;
-   assert(!request->home && !request->thread_id && !request->history && request->host_launch);
-   int rc = sdk_peer(request->host_launch);
-   snprintf(out->thread_id, sizeof out->thread_id, "native-result");
-   return rc;
-}
 int claude_headless_run(const provider_cli_cfg_t *cfg, claude_headless_session_fn bind,
                         void *context, agent_result_t *out)
 {
@@ -1502,14 +1492,6 @@ int main(int argc, char **argv)
    agent_result_t denied = {0};
    assert(provider_cli_adapter_host_execute(&cfg, &denied) < 0);
    assert(!opened && !retained && !sdk_calls && !restored);
-   reset(0);
-   cli_codex_chat_request_t request = {.user_prompt = "primary task"};
-   cli_codex_chat_result_t result = {0};
-   assert(!server_native_codex_chat_stream(&selected, &request, NULL, NULL, &result));
-   assert(result.prompt_tokens == 73 && result.completion_tokens == 29 && terminal);
-   assert(!retained && restored == 1 && access(private_home, F_OK));
-   finish(1);
-   assert(completed == 1 && closed == 1);
    reset(11);
    aimee_block_t input = {.type = AIMEE_BLK_TEXT, .text = "seeded canonical task"};
    aimee_message_t message = {.role = "user", .blocks = &input, .n_blocks = 1};

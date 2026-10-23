@@ -31,6 +31,35 @@ class IRBypassTests(unittest.TestCase):
     def test_production_tree(self):
         checker.check(checker.ROOT)
 
+    def test_secondary_flat_cli_transport_cannot_be_reintroduced(self):
+        for text in (
+            "cli_event_t event;", "event.type = CLI_EVENT_TEXT_DELTA;",
+            "provider_cli_parse_json_line_common(line, &event);",
+            "provider_cli_format_json_tool_result(name, result, buffer, size);",
+            "cli_codex_chat_request_t request;", "cli_codex_chat_stream(&request, cb, ctx, out);",
+            "server_native_codex_chat_stream(agent, &request, cb, ctx, out);",
+            "cli_codex_parse_agent_message(line, &text);",
+        ):
+            with self.subTest(text=text):
+                path = self.source("src/server/retired_adapter.c", text)
+                with self.assertRaisesRegex(ValueError, "retired-api"):
+                    checker.check(self.root)
+                path.unlink()
+
+    def test_retired_request_builders_cannot_return_under_another_consumer(self):
+        symbols = ("agent_build_request_openai", "agent_build_request_responses",
+                   "agent_build_request_anthropic", "agent_anthropic_set_system",
+                   "model_sampling_apply_openai", "model_sampling_apply_anthropic",
+                   "agent_request_shape_openai_messages")
+        for symbol in symbols:
+            for relative in ("src/server/new.c", "src/headers/new.h",
+                             "server-go/modules/rogue/rogue.go"):
+                with self.subTest(symbol=symbol, relative=relative):
+                    path = self.source(relative, symbol + "(request);")
+                    with self.assertRaisesRegex(ValueError, "retired-api"):
+                        checker.check(self.root)
+                    path.unlink()
+
     def test_generic_model_stdout_adapters_stay_retired(self):
         for call in ("externalTextObservation(stdout)", "delegate.CLIText(request.Input)", "RunWatchdog(args)"):
             with self.subTest(call=call):
@@ -243,7 +272,8 @@ class IRBypassTests(unittest.TestCase):
                 return agent_build_request_openai(agent);
             }
         """)
-        checker.check(self.root)
+        with self.assertRaisesRegex(ValueError, "retired-api"):
+            checker.check(self.root)
 
     def test_core_repair_cannot_detect_provider_history(self):
         for field in ("tool_calls", "function_call", "function_call_output", "tool_use_id"):

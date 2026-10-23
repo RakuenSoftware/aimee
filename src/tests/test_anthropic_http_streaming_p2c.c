@@ -209,19 +209,6 @@ int agent_resolve_auth_headers(const agent_t *agent, char *buf, size_t buf_len, 
    return 0;
 }
 
-cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *tools,
-                                  int max_tokens, double temperature)
-{
-   cJSON *out = cJSON_CreateObject();
-   (void)agent;
-   (void)messages;
-   (void)tools;
-   (void)max_tokens;
-   (void)temperature;
-   cJSON_AddStringToObject(out, "model", "openai-test");
-   return out;
-}
-
 int agent_request_max_tokens(const agent_t *agent, int requested)
 {
    (void)agent;

@@ -16,6 +16,9 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "agent_build_request_openai", "agent_build_request_responses", "agent_build_request_anthropic",
+    "agent_anthropic_set_system", "model_sampling_apply_openai", "model_sampling_apply_anthropic",
+    "agent_request_shape_openai_messages",
     "externalTextObservation", "CLIText", "RunWatchdog",
     "shadow_mirror_dispatch",
     "kb_curator_sidecar_run", "kb_curator_shell_quote", "kb_curator_describe_wait_status",
@@ -27,6 +30,13 @@ RETIRED = (
     "agent_store_feedback",
     "provider_cli_collect_child",
     "provider_cli_parse_output",
+    "cli_event_t", "CLI_EVENT_NONE", "CLI_EVENT_TEXT_DELTA", "CLI_EVENT_TOOL_START",
+    "CLI_EVENT_TOOL_COMPLETE", "CLI_EVENT_TURN_COMPLETE", "CLI_EVENT_ERROR",
+    "provider_cli_default_build_prompt", "provider_cli_format_json_tool_result",
+    "provider_cli_event_is_write", "provider_cli_parse_json_line_common",
+    "cli_codex_chat_request_t", "cli_codex_chat_result_t", "cli_codex_chat_event_cb",
+    "cli_codex_chat_stream", "server_native_codex_chat_stream",
+    "cli_codex_parse_agent_message",
     "acp_serve_client_request",
     "acp_read_file_bounded",
     "acp_resolve_in_workdir",

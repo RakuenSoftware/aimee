@@ -33,8 +33,6 @@ extern "C"
                                       const char *system_prompt, const char *user_prompt,
                                       agent_result_t *out);
 
-   typedef int (*cli_codex_chat_event_cb)(const char *event, const char *value, void *userdata);
-
    /* Host-owned resources for the canonical native scheduler. Descriptor and
     * environment custody outlive the synchronous child. The adapter verifies
     * the actual effective SDK config before ready can consume a cache claim. */
@@ -54,50 +52,6 @@ extern "C"
       void *context;
    } cli_codex_host_launch_t;
 
-   typedef struct
-   {
-      const agent_network_t *network; /* borrowed host environment for native execution */
-      const char *thread_id;          /* optional: resume this Codex thread */
-      const char *home;               /* host-materialized Vault credential HOME */
-      const cli_codex_host_launch_t *host_launch; /* scoped canonical scheduler */
-      const char *session_id;                     /* host-owned Aimee session for MCP */
-      const char *cwd;                            /* optional: child process working directory */
-      const char *system_prompt; /* optional: developerInstructions on new threads */
-      const char *user_prompt;
-      /* Canonical items preceding this turn; resume callers supply only unseen tail.
-       * Host owns scope/prefix proof. Never a flattened system/user transcript. */
-      const aimee_request_t *history;
-      /* Optional typed host tool bridge. Both catalog and callback are required.
-       * Borrowed for this synchronous execution. The host callback must verify
-       * durable source identity and apply current policy/effect authorization;
-       * SDK parameters alone grant no execution authority. It returns an owned
-       * TOOL_RESULT with the same call ID and a string result, or fails closed. */
-      const aimee_request_t *tool_catalog;
-      int (*tool_call)(const aimee_block_t *call, aimee_block_t *result, void *context);
-      void *tool_context;
-      const char *model;            /* optional: turn-level model override */
-      const char *reasoning_effort; /* optional: low/medium/high/xhigh */
-      int timeout_ms;               /* idle timeout; <0 disables while caller stays attached */
-      int autonomous;               /* auto-approve Codex client approval requests */
-   } cli_codex_chat_request_t;
-
-   typedef struct
-   {
-      char thread_id[128];
-      int prompt_tokens;
-      int completion_tokens;
-      int tool_calls;
-      int latency_ms;
-      char error[512];
-   } cli_codex_chat_result_t;
-
-   /* Stream one primary chat turn through `codex app-server`. Starts a new
-    * thread when req->thread_id is empty, otherwise resumes that thread, then
-    * emits "turn_start", "text", and "turn_end" callbacks as Codex notifies.
-    * The resulting thread id is always copied into out->thread_id on success. */
-   int cli_codex_chat_stream(const cli_codex_chat_request_t *req, cli_codex_chat_event_cb cb,
-                             void *userdata, cli_codex_chat_result_t *out);
-
    /* Explicit Codex SDK tool boundaries. Output JSON/blocks are owned by caller.
     * Tool definitions come only from typed catalog fields. Calls require an
     * exact catalog namespace/name match; these helpers do not authorize effects. */
@@ -112,13 +66,6 @@ extern "C"
     * matched the expected shape and the out-params were populated, 0
     * otherwise. They never block, never touch the filesystem, and are
     * safe to call on partial / unrelated frames (returns 0). */
-
-   /* If `line` is an `item/completed` notification whose `params.item`
-    * has `type == "agentMessage"` and a non-empty `text` field, copy the
-    * text into a malloc'd buffer in *out_text (caller frees) and return
-    * 1. On no match or any cJSON parse error, returns 0 and leaves
-    * *out_text untouched. */
-   int cli_codex_parse_agent_message(const char *line, char **out_text);
 
    /* If `line` is an `item/completed` notification whose `params.item.type`
     * is anything OTHER than `agentMessage` (i.e. a tool action like a

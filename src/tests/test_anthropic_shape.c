@@ -4,15 +4,29 @@
 #include <stdlib.h>
 #include <string.h>
 #include "aimee.h" /* MAX_PATH_LEN, pulled in before agent_types.h */
-#include "agent_protocol.h"
+#include <aimee/translation/aimee_backend.h>
+#include <aimee/translation/aimee_frontend.h>
 #include "cJSON.h"
 
 #define PASS(name) printf("  %s: ok\n", name)
 
+static void set_system(cJSON *output, const char *text, int cache, int minimum)
+{
+   aimee_request_t request = {.frontend = AIMEE_WIRE_ANTHROPIC, .model = strdup("fixture")};
+   assert(!anthropic_ir_set_host_system(&request, text, cache, minimum));
+   cJSON *native = anthropic_backend_build(&request);
+   assert(native);
+   cJSON *system = cJSON_DetachItemFromObjectCaseSensitive(native, "system");
+   if (system)
+      assert(cJSON_AddItemToObject(output, "system", system));
+   cJSON_Delete(native);
+   aimee_request_free(&request);
+}
+
 static void test_plain_string_when_unmarked(void)
 {
    cJSON *req = cJSON_CreateObject();
-   agent_anthropic_set_system(req, "You are aimee.", 0, 0);
+   set_system(req, "You are aimee.", 0, 0);
    cJSON *sys = cJSON_GetObjectItem(req, "system");
    /* Unmarked -> a plain string, no cache_control anywhere. */
    assert(cJSON_IsString(sys));
@@ -27,7 +41,7 @@ static void test_plain_string_when_unmarked(void)
 static void test_cached_block_when_marked(void)
 {
    cJSON *req = cJSON_CreateObject();
-   agent_anthropic_set_system(req, "You are aimee.", 1, 0);
+   set_system(req, "You are aimee.", 1, 0);
    cJSON *sys = cJSON_GetObjectItem(req, "system");
    /* Marked -> a content-block array carrying cache_control: ephemeral. */
    assert(cJSON_IsArray(sys));
@@ -45,12 +59,10 @@ static void test_cached_block_when_marked(void)
 static void test_empty_system_adds_nothing(void)
 {
    cJSON *req = cJSON_CreateObject();
-   agent_anthropic_set_system(req, "", 1, 0);
+   set_system(req, "", 1, 0);
    assert(cJSON_GetObjectItem(req, "system") == NULL);
-   agent_anthropic_set_system(req, NULL, 1, 0);
+   set_system(req, NULL, 1, 0);
    assert(cJSON_GetObjectItem(req, "system") == NULL);
-   /* NULL req must not crash. */
-   agent_anthropic_set_system(NULL, "x", 1, 0);
    cJSON_Delete(req);
    PASS("shape: empty/NULL system adds nothing");
 }
@@ -69,7 +81,7 @@ static void test_volatile_context_not_cached(void)
     * marked cacheable (no cache_control), or the cache is busted every turn. */
    const char *vol = "<aimee-context confidence=\"high\">recent files: foo.c</aimee-context>";
    cJSON *req = cJSON_CreateObject();
-   agent_anthropic_set_system(req, vol, 1, 0);
+   set_system(req, vol, 1, 0);
    cJSON *sys = cJSON_GetObjectItem(req, "system");
    assert(cJSON_IsString(sys)); /* plain string, not a cache-marked block */
    assert(!json_has_substr(sys, "cache_control"));
@@ -84,7 +96,7 @@ static void test_stable_prefix_cached_volatile_not(void)
    const char *mixed = "You are aimee, a helpful agent.\n<aimee-context confidence=\"high\">files: "
                        "x</aimee-context>";
    cJSON *req = cJSON_CreateObject();
-   agent_anthropic_set_system(req, mixed, 1, 0);
+   set_system(req, mixed, 1, 0);
    cJSON *sys = cJSON_GetObjectItem(req, "system");
    assert(cJSON_IsArray(sys));
    assert(cJSON_GetArraySize(sys) == 2);
@@ -112,7 +124,7 @@ static void test_min_chars_applies_to_stable_prefix(void)
                        "</aimee-context>";
    cJSON *req = cJSON_CreateObject();
    /* Prefix "Hi.\n" is ~4 chars; floor 32 -> not cached despite the long whole. */
-   agent_anthropic_set_system(req, mixed, 1, 32);
+   set_system(req, mixed, 1, 32);
    cJSON *sys = cJSON_GetObjectItem(req, "system");
    assert(cJSON_IsString(sys));
    assert(!json_has_substr(sys, "cache_control"));
@@ -120,7 +132,7 @@ static void test_min_chars_applies_to_stable_prefix(void)
 
    /* The same prefix with a low floor does get cached (and split). */
    req = cJSON_CreateObject();
-   agent_anthropic_set_system(req, mixed, 1, 2);
+   set_system(req, mixed, 1, 2);
    sys = cJSON_GetObjectItem(req, "system");
    assert(cJSON_IsArray(sys));
    assert(json_has_substr(cJSON_GetArrayItem(sys, 0), "cache_control"));

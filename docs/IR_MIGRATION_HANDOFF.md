@@ -17,6 +17,19 @@ are historical. Do not investigate or change `.100`; validation uses the owned
 
 ### Full internal conversion in progress: 23 October 2026
 
+The user's completion criteria now include a significant reduction in production
+code. The first retirement pass deletes 1,439 production lines with no replacement
+production code: obsolete CLI event/callback transports and duplicate raw request,
+sampling and Anthropic system builders. Useful native history/resume/control and
+provider/cache tests now exercise the active canonical adapters. The CLI pass
+passes six normal and six ASan/UBSan/leak targets; the request-builder pass passes
+five of each. The integrated bypass gate passes 26 tests. Broad combined-source
+qualification remains pending; these focused results are not final acceptance.
+The full branch still has a net production-code increase, measured separately
+from tests and documentation. Further confirmed dead migration APIs are being
+retired, while active diagnostics, archives and native replay remain supported.
+
+
 Generic and unknown CLI registrations are no longer eligible for internal model
 planning or execution. The delegate registry accepts Claude/Codex native aliases
 only through the authenticated canonical host bridge; unsupported registrations

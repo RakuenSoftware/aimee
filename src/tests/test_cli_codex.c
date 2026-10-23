@@ -34,52 +34,6 @@ static void test_execute_rejects_missing_inputs(void)
    assert(codex_provider_cli_adapter.execute(&cfg, NULL) == -1);
 }
 
-static void test_parse_agent_message_extracts_text(void)
-{
-   const char *line = "{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{"
-                      "\"item\":{\"type\":\"agentMessage\",\"text\":\"hello world\"}}}";
-   char *out = NULL;
-   assert(cli_codex_parse_agent_message(line, &out) == 1);
-   assert(out != NULL);
-   assert(strcmp(out, "hello world") == 0);
-   free(out);
-}
-
-static void test_parse_agent_message_skips_other_item_types(void)
-{
-   const char *line = "{\"jsonrpc\":\"2.0\",\"method\":\"item/completed\",\"params\":{"
-                      "\"item\":{\"type\":\"toolCall\",\"text\":\"unused\"}}}";
-   char *out = NULL;
-   assert(cli_codex_parse_agent_message(line, &out) == 0);
-   assert(out == NULL);
-}
-
-static void test_parse_agent_message_skips_other_methods(void)
-{
-   const char *line = "{\"jsonrpc\":\"2.0\",\"method\":\"turn/started\",\"params\":{}}";
-   char *out = NULL;
-   assert(cli_codex_parse_agent_message(line, &out) == 0);
-   assert(out == NULL);
-}
-
-static void test_parse_agent_message_handles_invalid_json(void)
-{
-   char *out = NULL;
-   assert(cli_codex_parse_agent_message("not json {", &out) == 0);
-   assert(out == NULL);
-   assert(cli_codex_parse_agent_message("", &out) == 0);
-   assert(cli_codex_parse_agent_message(NULL, &out) == 0);
-}
-
-static void test_parse_agent_message_empty_text_is_skipped(void)
-{
-   const char *line = "{\"method\":\"item/completed\",\"params\":{"
-                      "\"item\":{\"type\":\"agentMessage\",\"text\":\"\"}}}";
-   char *out = NULL;
-   assert(cli_codex_parse_agent_message(line, &out) == 0);
-   assert(out == NULL);
-}
-
 static void test_parse_token_usage_extracts_input_output(void)
 {
    const char *line = "{\"method\":\"thread/tokenUsage/updated\",\"params\":{"
@@ -484,7 +438,113 @@ static int codex_capture_cb(const char *event, const char *value, void *userdata
    return 0;
 }
 
-static void test_chat_stream_splits_distinct_agent_message_items(void)
+/* Test-only request convenience: all vectors exercise the shipping canonical
+ * adapter, not the retired second callback transport. */
+typedef struct
+{
+   const agent_network_t *network;
+   const char *thread_id, *home, *session_id, *cwd, *system_prompt, *user_prompt;
+   const cli_codex_host_launch_t *host_launch;
+   const aimee_request_t *history, *tool_catalog;
+   int (*tool_call)(const aimee_block_t *, aimee_block_t *, void *);
+   void *tool_context;
+   const char *model, *reasoning_effort;
+   int timeout_ms, autonomous;
+} adapter_fixture_request_t;
+typedef struct
+{
+   char thread_id[128], error[512];
+} adapter_fixture_result_t;
+typedef struct
+{
+   int (*callback)(const char *, const char *, void *);
+   void *context;
+   aimee_ir_session_sink_fn previous;
+   void *previous_context;
+   char last_message_id[1024];
+   size_t observed_text;
+} adapter_fixture_capture_t;
+static int adapter_fixture_event(const aimee_session_event_t *event, void *context)
+{
+   adapter_fixture_capture_t *c = context;
+   if (c->previous && c->previous(event, c->previous_context))
+      return -1;
+   if (c->callback && event->kind == AIMEE_SESSION_MESSAGE && !event->message_partial &&
+       event->message && !strcmp(event->message->role, "assistant"))
+   {
+      if (strcmp(c->last_message_id, event->message_id))
+      {
+         snprintf(c->last_message_id, sizeof c->last_message_id, "%s", event->message_id);
+         c->observed_text = 0;
+         if (c->callback("turn_start", NULL, c->context))
+            return -1;
+      }
+      size_t offset = 0;
+      for (int i = 0; i < event->message->n_blocks; ++i)
+      {
+         const aimee_block_t *block = event->message->blocks + i;
+         if (block->type != AIMEE_BLK_TEXT || !block->text)
+            continue;
+         size_t length = strlen(block->text);
+         if (offset + length > c->observed_text &&
+             c->callback("text",
+                         block->text + (c->observed_text > offset ? c->observed_text - offset : 0),
+                         c->context))
+            return -1;
+         offset += length;
+      }
+      c->observed_text = offset;
+   }
+   return 0;
+}
+static int adapter_fixture_bind(const char *id, void *context)
+{
+   adapter_fixture_result_t *result = context;
+   snprintf(result->thread_id, sizeof result->thread_id, "%s", id);
+   return 0;
+}
+static int execute_adapter_fixture(const adapter_fixture_request_t *request,
+                                   int (*callback)(const char *, const char *, void *),
+                                   void *context, adapter_fixture_result_t *result)
+{
+   agent_t agent = {0};
+   snprintf(agent.model, sizeof agent.model, "%s", request->model ? request->model : "");
+   agent.autonomous = request->autonomous;
+   agent.cli_idle_timeout_ms = request->timeout_ms;
+   provider_cli_cfg_t cfg = {.agent = &agent,
+                             .network = request->network,
+                             .cwd = request->cwd,
+                             .home = request->home,
+                             .system_prompt = request->system_prompt,
+                             .user_prompt = request->user_prompt,
+                             .history = request->history,
+                             .resume_id = request->thread_id,
+                             .codex_host = request->host_launch,
+                             .session_id = request->session_id,
+                             .reasoning_effort = request->reasoning_effort,
+                             .tool_catalog = request->tool_catalog,
+                             .tool_call = request->tool_call,
+                             .tool_context = request->tool_context,
+                             .bind_session = adapter_fixture_bind,
+                             .bind_context = result};
+   memset(result, 0, sizeof *result);
+   if (request->thread_id)
+      snprintf(result->thread_id, sizeof result->thread_id, "%s", request->thread_id);
+   adapter_fixture_capture_t capture = {.callback = callback, .context = context};
+   capture.previous = aimee_ir_session_get_sink(&capture.previous_context);
+   aimee_ir_session_set_sink(adapter_fixture_event, &capture);
+   agent_result_t actual = {0};
+   int rc = codex_provider_cli_adapter.execute(&cfg, &actual);
+   snprintf(result->error, sizeof result->error, "%s", actual.error);
+   if (!rc && callback)
+      rc = callback("turn_end", NULL, context);
+   int failed = aimee_ir_session_capture_failed();
+   aimee_ir_session_restore_sink(capture.previous, capture.previous_context, failed);
+   agent_result_clear_response(&actual);
+   return rc;
+}
+
+static void test_adapter_preserves_distinct_message_groups(void)
 {
    char root[256];
    snprintf(root, sizeof root, "%s/aimee-codex-stream-XXXXXX", platform_tmpdir());
@@ -535,14 +595,14 @@ static void test_chat_stream_splits_distinct_agent_message_items(void)
    snprintf(new_path, sizeof(new_path), "%s:%s", root, old_path_env ? old_path_env : "");
    assert(setenv("PATH", new_path, 1) == 0);
 
-   cli_codex_chat_request_t req = {0};
+   adapter_fixture_request_t req = {0};
    req.cwd = root;
    req.user_prompt = "hello";
    req.timeout_ms = 5000;
 
-   cli_codex_chat_result_t out;
+   adapter_fixture_result_t out;
    codex_stream_capture_t cap = {0};
-   assert(cli_codex_chat_stream(&req, codex_capture_cb, &cap, &out) == 0);
+   assert(execute_adapter_fixture(&req, codex_capture_cb, &cap, &out) == 0);
    assert(strcmp(cap.buf, "<S>First.<S>Second.<E>") == 0);
 
    if (old_path_env)
@@ -553,7 +613,7 @@ static void test_chat_stream_splits_distinct_agent_message_items(void)
    rmdir(root);
 }
 
-static void test_chat_stream_rejects_completed_items_without_ids(void)
+static void test_adapter_rejects_completed_items_without_ids(void)
 {
    char root[256];
    snprintf(root, sizeof root, "%s/aimee-codex-stream-noids-XXXXXX", platform_tmpdir());
@@ -602,14 +662,14 @@ static void test_chat_stream_rejects_completed_items_without_ids(void)
    snprintf(new_path, sizeof(new_path), "%s:%s", root, old_path_env ? old_path_env : "");
    assert(setenv("PATH", new_path, 1) == 0);
 
-   cli_codex_chat_request_t req = {0};
+   adapter_fixture_request_t req = {0};
    req.cwd = root;
    req.user_prompt = "hello";
    req.timeout_ms = 5000;
 
-   cli_codex_chat_result_t out;
+   adapter_fixture_result_t out;
    codex_stream_capture_t cap = {0};
-   assert(cli_codex_chat_stream(&req, codex_capture_cb, &cap, &out) != 0);
+   assert(execute_adapter_fixture(&req, codex_capture_cb, &cap, &out) != 0);
    assert(aimee_ir_session_capture_failed());
    assert(!strstr(cap.buf, "<E>"));
    aimee_ir_session_set_sink(NULL, NULL); /* End this failed independent fixture. */
@@ -622,7 +682,7 @@ static void test_chat_stream_rejects_completed_items_without_ids(void)
    rmdir(root);
 }
 
-static void test_chat_stream_replaces_invalid_utf8_prompt_bytes(void)
+static void test_adapter_replaces_invalid_utf8_prompt_bytes(void)
 {
    char root[256];
    snprintf(root, sizeof root, "%s/aimee-codex-utf8-XXXXXX", platform_tmpdir());
@@ -668,14 +728,14 @@ static void test_chat_stream_replaces_invalid_utf8_prompt_bytes(void)
 
    const char bad_prompt[] = {'b',        'a',        'd',        ' ',        (char)0x80, ' ',
                               (char)0xf0, (char)0x28, (char)0x8c, (char)0x28, '\0'};
-   cli_codex_chat_request_t req = {0};
+   adapter_fixture_request_t req = {0};
    req.cwd = root;
    req.user_prompt = bad_prompt;
    req.timeout_ms = 5000;
 
-   cli_codex_chat_result_t out;
+   adapter_fixture_result_t out;
    codex_stream_capture_t cap = {0};
-   assert(cli_codex_chat_stream(&req, codex_capture_cb, &cap, &out) == 0);
+   assert(execute_adapter_fixture(&req, codex_capture_cb, &cap, &out) == 0);
    assert(strcmp(cap.buf, "<S>ok<E>") == 0);
 
    unsigned char buf[4096];
@@ -777,10 +837,10 @@ static void test_operator_replies_reach_native_child(void)
    assert(scope);
    server_control_scope_t *previous = server_control_scope_bind(scope);
    aimee_ir_session_set_sink(codex_operator_capture, NULL);
-   cli_codex_chat_request_t req = {.cwd = root, .user_prompt = "hello", .timeout_ms = 5000};
-   cli_codex_chat_result_t out;
+   adapter_fixture_request_t req = {.cwd = root, .user_prompt = "hello", .timeout_ms = 5000};
+   adapter_fixture_result_t out;
    codex_stream_capture_t cap = {0};
-   assert(cli_codex_chat_stream(&req, codex_capture_cb, &cap, &out) == 0);
+   assert(execute_adapter_fixture(&req, codex_capture_cb, &cap, &out) == 0);
    assert(strstr(cap.buf, "Operator replies received"));
    assert(operator_requests == 3 && operator_responses == 3);
    aimee_ir_session_set_sink(NULL, NULL);
@@ -868,58 +928,39 @@ static void test_canonical_history_adoption(void)
    snprintf(agent.name, sizeof agent.name, "history-fixture");
    snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s", script);
    agent.cli_idle_timeout_ms = 5000;
-   for (int provider = 0; provider < 2; provider++)
-      for (int resume = 0; resume < 2; resume++)
-         for (int refuse = 0; refuse < 3; refuse++)
-         {
-            unlink(marker);
-            setenv("AIMEE_TEST_HISTORY_SESSION", resume ? "thread/resume" : "thread/start", 1);
-            setenv("AIMEE_TEST_HISTORY_REFUSE", refuse == 1 ? "1" : "0", 1);
-            /* Invalid canonical content must refuse before injection/turn/start. */
-            blocks[0].type = refuse == 2 ? AIMEE_BLK_UNKNOWN : AIMEE_BLK_TEXT;
-            int rc;
-            if (provider)
-            {
-               provider_cli_cfg_t cfg = {.agent = &agent,
-                                         .cwd = root,
-                                         .history = &history,
-                                         .user_prompt = "current user",
-                                         .resume_id = resume ? "t-history" : NULL};
-               agent_result_t out = {0};
-               rc = codex_provider_cli_adapter.execute(&cfg, &out);
-               if (!refuse)
-                  assert(out.success && out.response && !strcmp(out.response, "history adopted"));
-               else
-                  assert(strstr(out.error, "canonical history adoption failed"));
-               agent_result_clear_response(&out);
-            }
-            else
-            {
-               cli_codex_chat_request_t req = {.cwd = root,
-                                               .history = &history,
-                                               .user_prompt = "current user",
-                                               .thread_id = resume ? "t-history" : NULL,
-                                               .timeout_ms = 5000};
-               cli_codex_chat_result_t out;
-               codex_stream_capture_t cap = {0};
-               rc = cli_codex_chat_stream(&req, codex_capture_cb, &cap, &out);
-               if (!refuse && rc)
-                  fprintf(stderr, "adoption rc=%d error=%s\n", rc, out.error);
-               if (!refuse)
-                  assert(strstr(cap.buf, "history adopted"));
-               else
-                  assert(strstr(out.error, "canonical history adoption failed"));
-            }
-            assert(refuse ? rc != 0 : rc == 0);
-            fp = fopen(marker, "r");
-            assert(fp);
-            char log[16384] = {0};
-            size_t n = fread(log, 1, sizeof log - 1, fp);
-            assert(n && !ferror(fp));
-            fclose(fp);
-            assert((strstr(log, "thread/inject_items") != NULL) == (refuse != 2));
-            assert((strstr(log, "turn/start") != NULL) == !refuse);
-         }
+   for (int resume = 0; resume < 2; resume++)
+      for (int refuse = 0; refuse < 3; refuse++)
+      {
+         unlink(marker);
+         setenv("AIMEE_TEST_HISTORY_SESSION", resume ? "thread/resume" : "thread/start", 1);
+         setenv("AIMEE_TEST_HISTORY_REFUSE", refuse == 1 ? "1" : "0", 1);
+         /* Invalid canonical content must refuse before injection/turn/start. */
+         blocks[0].type = refuse == 2 ? AIMEE_BLK_UNKNOWN : AIMEE_BLK_TEXT;
+         int rc;
+
+         provider_cli_cfg_t cfg = {.agent = &agent,
+                                   .cwd = root,
+                                   .history = &history,
+                                   .user_prompt = "current user",
+                                   .resume_id = resume ? "t-history" : NULL};
+         agent_result_t out = {0};
+         rc = codex_provider_cli_adapter.execute(&cfg, &out);
+         if (!refuse)
+            assert(out.success && out.response && !strcmp(out.response, "history adopted"));
+         else
+            assert(strstr(out.error, "canonical history adoption failed"));
+         agent_result_clear_response(&out);
+
+         assert(refuse ? rc != 0 : rc == 0);
+         fp = fopen(marker, "r");
+         assert(fp);
+         char log[16384] = {0};
+         size_t n = fread(log, 1, sizeof log - 1, fp);
+         assert(n && !ferror(fp));
+         fclose(fp);
+         assert((strstr(log, "thread/inject_items") != NULL) == (refuse != 2));
+         assert((strstr(log, "turn/start") != NULL) == !refuse);
+      }
    blocks[0].type = AIMEE_BLK_TEXT;
    assert(!strcmp(blocks[1].thinking_encrypted_content, "synthetic-opaque-history"));
    assert(!strcmp(blocks[2].tool_id, call_id));
@@ -1055,7 +1096,8 @@ static void test_dynamic_host_execution(void)
    FILE *file = fopen(script, "w");
    assert(file);
    fputs("#!/usr/bin/env python3\nimport "
-         "json,os,sys\nmode=int(os.environ['AIMEE_TEST_DYNAMIC_VARIANT'])\ndef send(v): "
+         "json,os,sys,signal\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nmode=int(os.environ['"
+         "AIMEE_TEST_DYNAMIC_VARIANT'])\ndef send(v): "
          "print(json.dumps(v),flush=True)\nfor line in sys.stdin:\n f=json.loads(line); "
          "m=f.get('method'); p=f.get('params',{})\n if m=='initialize':\n  assert "
          "p['capabilities']['experimentalApi'] is True\n  send({'id':f['id'],'result':{}})\n elif "
@@ -1118,74 +1160,54 @@ static void test_dynamic_host_execution(void)
    snprintf(agent.name, sizeof agent.name, "dynamic-fixture");
    snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s", script);
    agent.cli_idle_timeout_ms = 5000;
-   for (int provider = 0; provider < 2; provider++)
-      for (int variant = 0; variant < 18; variant++)
-      {
-         unlink(marker);
-         char mode[16];
-         snprintf(mode, sizeof mode, "%d", variant);
-         assert(!setenv("AIMEE_TEST_DYNAMIC_VARIANT", mode, 1));
-         aimee_ir_session_restore_sink(NULL, NULL, 0);
-         dynamic_host_fixture_t state = {.variant = variant};
-         int success = variant == 0 || variant == 9 || variant == 12;
-         int invalid_frame = variant == 8 || variant >= 13;
-         int rc;
-         if (provider)
-         {
-            provider_cli_cfg_t cfg = {.agent = &agent,
-                                      .cwd = root,
-                                      .user_prompt = "current",
-                                      .tool_catalog = &catalog,
-                                      .tool_call = dynamic_host_fixture,
-                                      .tool_context = &state};
-            agent_result_t out = {0};
-            rc = codex_provider_cli_adapter.execute(&cfg, &out);
-            if (invalid_frame)
-               assert(strstr(out.error, "invalid-json-rpc-frame"));
-            if (success)
-               assert(out.success && out.response && !strcmp(out.response, "host complete"));
-            agent_result_clear_response(&out);
-         }
-         else
-         {
-            cli_codex_chat_request_t req = {.cwd = root,
-                                            .user_prompt = "current",
-                                            .timeout_ms = 5000,
-                                            .tool_catalog = &catalog,
-                                            .tool_call = dynamic_host_fixture,
-                                            .tool_context = &state};
-            cli_codex_chat_result_t out;
-            codex_stream_capture_t captured = {0};
-            rc = cli_codex_chat_stream(&req, codex_capture_cb, &captured, &out);
-            if (invalid_frame)
-               assert(strstr(out.error, "invalid-json-rpc-frame"));
-            if (success && rc)
-               fprintf(stderr, "dynamic host error: %s\n", out.error);
-            if (success)
-               assert(strstr(captured.buf, "host complete"));
-         }
-         assert(success ? rc == 0 : rc != 0);
-         int calls_expected =
-             variant == 5 || variant == 9 || variant == 12                                    ? 2
-             : variant == 0 || variant == 6 || variant == 7 || variant == 10 || variant == 11 ? 1
-                                                                                              : 0;
-         int dispatches_expected =
-             variant == 9 || variant == 12                                                    ? 2
-             : variant == 0 || variant == 5 || variant == 7 || variant == 10 || variant == 11 ? 1
-                                                                                              : 0;
-         assert(state.calls == calls_expected && state.dispatches == dispatches_expected);
-         file = fopen(marker, "r");
-         assert(file);
-         char reply[4096] = {0};
-         assert(fread(reply, 1, sizeof reply - 1, file) && !ferror(file));
-         fclose(file);
-         if (success)
-            assert(strstr(reply, "host refused") && strstr(reply, "false"));
-         else if (invalid_frame)
-            assert(!strcmp(reply, "invalid-frame") && !state.calls && !state.dispatches);
-         else
-            assert(strstr(reply, "error") && strstr(reply, "-32602"));
-      }
+   for (int variant = 0; variant < 18; variant++)
+   {
+      unlink(marker);
+      char mode[16];
+      snprintf(mode, sizeof mode, "%d", variant);
+      assert(!setenv("AIMEE_TEST_DYNAMIC_VARIANT", mode, 1));
+      aimee_ir_session_restore_sink(NULL, NULL, 0);
+      dynamic_host_fixture_t state = {.variant = variant};
+      int success = variant == 0 || variant == 9 || variant == 12;
+      int invalid_frame = variant == 8 || variant >= 13;
+      int rc;
+
+      provider_cli_cfg_t cfg = {.agent = &agent,
+                                .cwd = root,
+                                .user_prompt = "current",
+                                .tool_catalog = &catalog,
+                                .tool_call = dynamic_host_fixture,
+                                .tool_context = &state};
+      agent_result_t out = {0};
+      rc = codex_provider_cli_adapter.execute(&cfg, &out);
+      if (invalid_frame)
+         assert(strstr(out.error, "invalid-json-rpc-frame"));
+      if (success)
+         assert(out.success && out.response && !strcmp(out.response, "host complete"));
+      agent_result_clear_response(&out);
+
+      assert(success ? rc == 0 : rc != 0);
+      int calls_expected =
+          variant == 5 || variant == 9 || variant == 12                                    ? 2
+          : variant == 0 || variant == 6 || variant == 7 || variant == 10 || variant == 11 ? 1
+                                                                                           : 0;
+      int dispatches_expected =
+          variant == 9 || variant == 12                                                    ? 2
+          : variant == 0 || variant == 5 || variant == 7 || variant == 10 || variant == 11 ? 1
+                                                                                           : 0;
+      assert(state.calls == calls_expected && state.dispatches == dispatches_expected);
+      file = fopen(marker, "r");
+      assert(file);
+      char reply[4096] = {0};
+      assert(fread(reply, 1, sizeof reply - 1, file) && !ferror(file));
+      fclose(file);
+      if (success)
+         assert(strstr(reply, "host refused") && strstr(reply, "false"));
+      else if (invalid_frame)
+         assert(!strcmp(reply, "invalid-frame") && !state.calls && !state.dispatches);
+      else
+         assert(strstr(reply, "error") && strstr(reply, "-32602"));
+   }
    aimee_ir_session_restore_sink(NULL, NULL, 0);
    cJSON_Delete(schema);
    if (old_path)
@@ -1280,14 +1302,14 @@ static int native_history_probe(const char *resume, const char *history_file, in
                          .n_children = 1};
    aimee_request_t catalog = {.tools = getenv("AIMEE_TEST_FLAT_HOST_TOOLS") ? &child : &space,
                               .n_tools = 1};
-   cli_codex_chat_request_t req = {.thread_id = resume,
-                                   .history = history_file ? &adopted
-                                              : resume     ? NULL
-                                                           : &history,
-                                   .user_prompt = resume ? "after restart" : "current user",
-                                   .model = "fixture-model",
-                                   .system_prompt = "Local native protocol fixture.",
-                                   .timeout_ms = 15000};
+   adapter_fixture_request_t req = {.thread_id = resume,
+                                    .history = history_file ? &adopted
+                                               : resume     ? NULL
+                                                            : &history,
+                                    .user_prompt = resume ? "after restart" : "current user",
+                                    .model = "fixture-model",
+                                    .system_prompt = "Local native protocol fixture.",
+                                    .timeout_ms = 15000};
    req.tool_catalog = host_tools ? &catalog : NULL;
    req.tool_call = host_tools ? native_probe_host_tool : NULL;
    req.tool_context = host_calls;
@@ -1341,11 +1363,11 @@ static int native_history_probe(const char *resume, const char *history_file, in
       assert(!munmap(image, (size_t)binary_status.st_size));
       req.host_launch = &launch;
    }
-   cli_codex_chat_result_t out;
+   adapter_fixture_result_t out;
    codex_stream_capture_t captured = {0};
    cJSON *events = cJSON_CreateArray();
    aimee_ir_session_set_sink(native_probe_capture, events);
-   int rc = cli_codex_chat_stream(&req, codex_capture_cb, &captured, &out);
+   int rc = execute_adapter_fixture(&req, codex_capture_cb, &captured, &out);
    aimee_ir_session_set_sink(NULL, NULL);
    cJSON *report = cJSON_CreateObject();
    cJSON_AddStringToObject(report, "host_launch_digest", probe_launch_digest);
@@ -1417,26 +1439,6 @@ int main(int argc, char **argv)
    test_canonical_history_adoption();
    puts("canonical history: typed adoption, resume protocol and refusal before model turn "
         "passed");
-
-   printf("test_parse_agent_message_extracts_text... ");
-   test_parse_agent_message_extracts_text();
-   printf("OK\n");
-
-   printf("test_parse_agent_message_skips_other_item_types... ");
-   test_parse_agent_message_skips_other_item_types();
-   printf("OK\n");
-
-   printf("test_parse_agent_message_skips_other_methods... ");
-   test_parse_agent_message_skips_other_methods();
-   printf("OK\n");
-
-   printf("test_parse_agent_message_handles_invalid_json... ");
-   test_parse_agent_message_handles_invalid_json();
-   printf("OK\n");
-
-   printf("test_parse_agent_message_empty_text_is_skipped... ");
-   test_parse_agent_message_empty_text_is_skipped();
-   printf("OK\n");
 
    printf("test_parse_token_usage_extracts_input_output... ");
    test_parse_token_usage_extracts_input_output();
@@ -1538,16 +1540,16 @@ int main(int argc, char **argv)
    test_agent_execute_cli_codex_uses_requested_cwd();
    printf("OK\n");
 
-   printf("test_chat_stream_splits_distinct_agent_message_items... ");
-   test_chat_stream_splits_distinct_agent_message_items();
+   printf("test_adapter_preserves_distinct_message_groups... ");
+   test_adapter_preserves_distinct_message_groups();
    printf("OK\n");
 
-   printf("test_chat_stream_rejects_completed_items_without_ids... ");
-   test_chat_stream_rejects_completed_items_without_ids();
+   printf("test_adapter_rejects_completed_items_without_ids... ");
+   test_adapter_rejects_completed_items_without_ids();
    printf("OK\n");
 
-   printf("test_chat_stream_replaces_invalid_utf8_prompt_bytes... ");
-   test_chat_stream_replaces_invalid_utf8_prompt_bytes();
+   printf("test_adapter_replaces_invalid_utf8_prompt_bytes... ");
+   test_adapter_replaces_invalid_utf8_prompt_bytes();
    printf("OK\n");
 
    test_operator_replies_reach_native_child();

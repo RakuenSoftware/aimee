@@ -97,7 +97,6 @@ static void test_registry_and_caps(void)
    /* Exact value (not a floor) so an accidental drift back toward 0 is caught. */
    assert(codex->caps.max_context_tokens == 272000);
    assert(claude->spawn != NULL);
-   assert(claude->parse_line != NULL);
    assert(claude->caps.proto_stability == PROVIDER_CLI_PROTO_STABLE);
    /* The gemini CLI adapter is gone: it pinned the NATIVE Google endpoint
     * (generativelanguage.googleapis.com/v1beta, GEMINI_API_KEY), which is exactly
@@ -112,62 +111,6 @@ static void test_registry_and_caps(void)
    assert(strcmp(mistral->native_default_endpoint, "https://api.mistral.ai/v1") == 0);
    assert(strcmp(mistral->native_default_model, "mistral-vibe-cli-latest") == 0);
    assert(strcmp(mistral->native_api_key_env, "MISTRAL_API_KEY") == 0);
-}
-
-static void test_common_json_parse_text_tool_and_error(void)
-{
-   cli_event_t ev;
-
-   assert(provider_cli_parse_json_line_common(
-              "{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"hello\"}", &ev) == 1);
-   assert(ev.type == CLI_EVENT_TEXT_DELTA);
-   assert(strcmp(ev.text, "hello") == 0);
-
-   assert(provider_cli_parse_json_line_common("{\"type\":\"tool_call\",\"name\":\"Write\"}", &ev) ==
-          1);
-   assert(ev.type == CLI_EVENT_TOOL_START);
-   assert(strcmp(ev.tool_name, "Write") == 0);
-   assert(provider_cli_event_is_write(&ev) == 1);
-
-   assert(provider_cli_parse_json_line_common("{\"type\":\"error\",\"message\":\"boom\"}", &ev) ==
-          1);
-   assert(ev.type == CLI_EVENT_ERROR);
-   assert(strcmp(ev.text, "boom") == 0);
-}
-
-static void test_claude_parse_stream_json(void)
-{
-   const provider_cli_adapter_t *claude = provider_cli_adapter_get("claude");
-   assert(claude != NULL);
-
-   cli_event_t ev;
-   const char *delta = "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\","
-                       "\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}}";
-   assert(claude->parse_line(delta, &ev) == 1);
-   assert(ev.type == CLI_EVENT_TEXT_DELTA);
-   assert(strcmp(ev.text, "hi") == 0);
-
-   const char *write = "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\","
-                       "\"content_block\":{\"type\":\"tool_use\",\"name\":\"Write\"}}}";
-   assert(claude->parse_line(write, &ev) == 1);
-   assert(ev.type == CLI_EVENT_TOOL_START);
-   assert(strcmp(ev.tool_name, "Write") == 0);
-   assert(claude->is_write_event(&ev) == 1);
-
-   const char *usage = "{\"type\":\"stream_event\",\"event\":{\"type\":\"message_delta\","
-                       "\"usage\":{\"input_tokens\":12,\"output_tokens\":7,"
-                       "\"cache_creation_input_tokens\":3,\"cache_read_input_tokens\":4}}}";
-   assert(claude->parse_line(usage, &ev) == 1);
-   assert(ev.prompt_tokens == 12);
-   assert(ev.completion_tokens == 7);
-   assert(ev.cache_write_tokens == 3);
-   assert(ev.cache_read_tokens == 4);
-
-   const char *result = "{\"type\":\"result\",\"result\":\"hi\",\"duration_ms\":23}";
-   assert(claude->parse_line(result, &ev) == 1);
-   assert(ev.type == CLI_EVENT_TURN_COMPLETE);
-   assert(strcmp(ev.text, "hi") == 0);
-   assert(ev.latency_ms == 23);
 }
 
 static void test_claude_stream_json_does_not_duplicate_final_result(void)
@@ -345,15 +288,6 @@ static void test_missing_and_invalid_cli_fail_cleanly(void)
    assert(provider_cli_check_available("/no/such/provider-cli", "codex") == 0);
 }
 
-static void test_tool_result_format(void)
-{
-   char buf[256];
-   assert(provider_cli_format_json_tool_result("Read", "{\"ok\":true}", buf, sizeof(buf)) == 0);
-   assert(strstr(buf, "\"type\":\"tool_result\"") != NULL);
-   assert(strstr(buf, "\"name\":\"Read\"") != NULL);
-   assert(strstr(buf, "\"ok\":true") != NULL);
-}
-
 static int forbidden_legacy_spawn(const provider_cli_cfg_t *cfg, const char *prompt, int *input,
                                   int *output, pid_t *pid)
 {
@@ -405,15 +339,12 @@ int main(void)
 {
    test_no_flat_child_fallback();
    test_registry_and_caps();
-   test_common_json_parse_text_tool_and_error();
-   test_claude_parse_stream_json();
    test_claude_stream_json_does_not_duplicate_final_result();
    test_provider_cli_captures_before_child_completion();
    test_provider_cli_honors_workflow_tool_loop_cap();
    test_mistral_native_adapter_execution();
    test_native_auth_cmd_uses_bearer_token_command();
    test_missing_and_invalid_cli_fail_cleanly();
-   test_tool_result_format();
    printf("provider CLI adapter tests passed\n");
    return 0;
 }

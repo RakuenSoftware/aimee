@@ -79,20 +79,6 @@ static double provider_fixed_temperature(const agent_t *agent)
    return (double)provider->fixed_temperature;
 }
 
-static void add_number_if_missing(struct cJSON *req, const char *name, double value)
-{
-   if (!req || !name || value < 0 || cJSON_GetObjectItem(req, name))
-      return;
-   cJSON_AddNumberToObject(req, name, value);
-}
-
-static void add_int_if_missing(struct cJSON *req, const char *name, int value)
-{
-   if (!req || !name || value < 0 || cJSON_GetObjectItem(req, name))
-      return;
-   cJSON_AddNumberToObject(req, name, value);
-}
-
 static int sampling_for_agent(const agent_t *agent, model_sampling_row_t *row)
 {
    if (!agent || !agent->recommended_sampling)
@@ -113,23 +99,4 @@ model_sampling_row_t model_sampling_resolve(const agent_t *agent, double caller_
    else if (row.temperature < 0)
       row.temperature = provider_fixed_temperature(agent);
    return row;
-}
-
-void model_sampling_apply_openai(const agent_t *agent, struct cJSON *req, double caller_temperature)
-{
-   model_sampling_row_t row = model_sampling_resolve(agent, caller_temperature);
-   add_number_if_missing(req, "temperature", row.temperature);
-   add_number_if_missing(req, "top_p", row.top_p);
-   add_int_if_missing(req, "top_k", row.top_k);
-   add_number_if_missing(req, "min_p", row.min_p);
-   add_number_if_missing(req, "repeat_penalty", row.repeat_penalty);
-}
-
-void model_sampling_apply_anthropic(const agent_t *agent, struct cJSON *req,
-                                    double caller_temperature)
-{
-   model_sampling_row_t row = model_sampling_resolve(agent, caller_temperature);
-   add_number_if_missing(req, "temperature", row.temperature);
-   add_number_if_missing(req, "top_p", row.top_p);
-   add_int_if_missing(req, "top_k", row.top_k);
 }
