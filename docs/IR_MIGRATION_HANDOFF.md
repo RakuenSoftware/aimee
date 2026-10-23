@@ -48,9 +48,11 @@ conversation. Configuration metadata and `--no-run` remain available; actual
 native execution still uses the managed factory. The UI shows a neutral result;
 CLI requested unsupported inference exits 2, failed HTTP inference 1, metadata 0.
 Focused provider normal/race, standalone export, CLI normal/sanitizers and UI
-regressions pass. The integrated bypass gate passes 31 tests.
+regressions pass. Independent review also closes explicit streamed refusal
+overwrite, duplicate closed-text aliases and nested response-identity conflicts;
+old-source failures and final focused normal/race results are retained. The integrated bypass gate passes 31 tests.
 
-Measured from `03d881e0e`, this continuation removes **2,065 net production lines**
+Measured from `03d881e0e`, this continuation removes **1950 net production lines**
 (excluding tests, documentation, generated locks and build tooling). It retires
 parallel implementations rather than compressing source. The combined C baseline
 `f74a037ae` passes all 693 normal invocations, 693 ASan/UBSan/leak invocations,

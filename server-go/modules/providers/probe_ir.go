@@ -297,13 +297,90 @@ func probeResponseOutput(r *canonical.Response, items []object) error {
 	}
 	return nil
 }
+
+// A stream may report the same closed content at several granularities.
+// Keep every observation for validation, but project only one closed level.
+type probeClosed struct {
+	items   []object
+	ids     map[string]string
+	indices map[string]string
+	text    string
+}
+
+func (g *probeClosed) add(event, item object, uniqueItem bool) error {
+	r := probeResponseBase(nil)
+	if probeResponseOutput(r, []object{item}) != nil || r.StopReason == canonical.StopContentFilter {
+		return errProbe
+	}
+	id := ""
+	for _, value := range []any{event["item_id"], item["id"]} {
+		if value == nil {
+			continue
+		}
+		next, ok := value.(string)
+		if !ok || next == "" || (id != "" && id != next) {
+			return errProbe
+		}
+		id = next
+	}
+	index := ""
+	if value := event["output_index"]; value != nil {
+		n, ok := value.(json.Number)
+		i, e := strconv.ParseInt(string(n), 10, 64)
+		if !ok || e != nil || i < 0 {
+			return errProbe
+		}
+		index = string(n)
+	}
+	text := ""
+	for _, b := range r.Blocks {
+		if b.Type == "text" && b.Text != nil {
+			text += *b.Text
+		}
+	}
+	if text != "" {
+		if g.ids == nil {
+			g.ids = map[string]string{}
+			g.indices = map[string]string{}
+		}
+		if uniqueItem && ((id != "" && g.ids[id] != "") || (index != "" && g.indices[index] != "")) {
+			return errProbe
+		}
+		if id != "" {
+			g.ids[id] += text
+		}
+		if index != "" {
+			g.indices[index] += text
+		}
+	}
+	g.items = append(g.items, item)
+	g.text += text
+	return nil
+}
+func probeKnownEqual(a, b map[string]string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return true
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if a[k] != b[k] {
+			return false
+		}
+	}
+	return true
+}
+func probeClosedEqual(a, b *probeClosed) bool {
+	return a.text == b.text && probeKnownEqual(a.ids, b.ids) && probeKnownEqual(a.indices, b.indices)
+}
 func probeResponsesStream(body []byte) (*canonical.Response, error) {
 	r := probeResponseBase(body)
 	scanner := bufio.NewScanner(bytes.NewReader(body))
 	scanner.Buffer(make([]byte, 4096), 1<<20)
 	done := false
 	seenID := ""
-	var parts []object
+	var closed [3]probeClosed
 	var completed object
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -332,6 +409,17 @@ func probeResponsesStream(body []byte) (*canonical.Response, error) {
 			return r, errProbe
 		}
 		eventType := str(event, "type")
+		if eventType == "response.created" || eventType == "response.in_progress" {
+			id, ok := probeMap(event["response"])["id"].(string)
+			if !ok || id == "" || (seenID != "" && id != seenID) {
+				return r, errProbe
+			}
+			seenID = id
+		}
+		if eventType == "response.refusal.delta" || eventType == "response.refusal.done" {
+			probeStop(r, "refusal", "responses")
+			return r, errProbe
+		}
 		if done && strings.HasPrefix(eventType, "response.") {
 			return r, errProbe
 		}
@@ -353,11 +441,17 @@ func probeResponsesStream(body []byte) (*canonical.Response, error) {
 				return r, errProbe
 			}
 		case "response.output_item.done":
-			parts = append(parts, probeMap(event["item"]))
+			if closed[0].add(event, probeMap(event["item"]), true) != nil {
+				return r, errProbe
+			}
 		case "response.output_text.done":
-			parts = append(parts, object{"type": "message", "role": "assistant", "content": []any{object{"type": "output_text", "text": event["text"]}}})
+			if closed[2].add(event, object{"type": "message", "role": "assistant", "content": []any{object{"type": "output_text", "text": event["text"]}}}, false) != nil {
+				return r, errProbe
+			}
 		case "response.content_part.done":
-			parts = append(parts, object{"type": "message", "role": "assistant", "content": []any{event["part"]}})
+			if closed[1].add(event, object{"type": "message", "role": "assistant", "content": []any{event["part"]}}, false) != nil {
+				return r, errProbe
+			}
 		case "response.completed":
 			if done {
 				return r, errProbe
@@ -370,10 +464,6 @@ func probeResponsesStream(body []byte) (*canonical.Response, error) {
 		return r, errProbe
 	}
 	if id := str(completed, "id"); seenID != "" && id != seenID {
-		return r, errProbe
-	}
-	observed := probeResponseBase(body)
-	if probeResponseOutput(observed, parts) != nil || observed.StopReason == canonical.StopContentFilter {
 		return r, errProbe
 	}
 	probeStop(r, "completed", "responses")
@@ -390,8 +480,33 @@ func probeResponsesStream(body []byte) (*canonical.Response, error) {
 			output = append(output, probeMap(item))
 		}
 	}
-	if len(output) == 0 {
-		output = parts
+	var selected *probeClosed
+	if len(output) > 0 {
+		final := &probeClosed{}
+		for _, item := range output {
+			if final.add(object{}, item, true) != nil {
+				return r, errProbe
+			}
+		}
+		selected = final
+	}
+	for i := range closed {
+		g := &closed[i]
+		if len(g.items) == 0 {
+			continue
+		}
+		if selected == nil {
+			selected = g
+		} else if !probeClosedEqual(selected, g) {
+			return r, errProbe
+		}
+	}
+	if selected != nil {
+		output = selected.items
+	}
+	// Multiple item records without any item identity cannot prove distinctness.
+	if len(closed[0].items) > 1 && len(closed[0].ids) == 0 && len(closed[0].indices) == 0 {
+		return r, errProbe
 	}
 	if probeResponseOutput(r, output) != nil || probeMetadata(r, completed) != nil || !r.Valid() {
 		return r, errProbe

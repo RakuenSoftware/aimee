@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 	"testing"
 )
@@ -126,6 +127,97 @@ func TestProbeRejectsMalformedKnownUsage(t *testing.T) {
 			}
 			if len(r.Raw) == 0 {
 				t.Fatal("lost original raw diagnostic")
+			}
+		}
+	}
+}
+
+func TestExplicitResponsesRefusalCannotBeOverwrittenByCompletion(t *testing.T) {
+	for _, event := range []string{"response.refusal.delta", "response.refusal.done"} {
+		for _, id := range []string{"owned", "foreign"} {
+			for _, output := range []string{`[]`, `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]`} {
+				for _, late := range []bool{false, true} {
+					refusal := "data: " + `{"type":"` + event + `","response_id":"` + id + `","delta":"declined","refusal":"declined"}` + "\n\n"
+					completion := "data: " + `{"type":"response.completed","response":{"id":"owned","status":"completed","output":` + output + `}}` + "\n\n"
+					body := refusal + completion
+					if late {
+						body = completion + refusal
+					}
+					r, e := probeHTTPResponse([]byte(body), "responses")
+					if e == nil || r.CompleteText() {
+						t.Fatalf("refusal granted health: %s id=%s late=%v output=%s", event, id, late, output)
+					}
+					if r.StopReason != canonical.StopContentFilter || r.RawStopReason == nil || *r.RawStopReason != "refusal" {
+						t.Fatalf("explicit refusal lost: %+v", r)
+					}
+					var sidecar struct {
+						Body string `json:"native_body_base64"`
+					}
+					if json.Unmarshal(r.Raw, &sidecar) != nil {
+						t.Fatal("missing raw")
+					}
+					raw, err := base64.StdEncoding.DecodeString(sidecar.Body)
+					if err != nil || !bytes.Equal(raw, []byte(body)) {
+						t.Fatal("refusal raw changed")
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestResponsesClosedAliasesProjectOnceAndRejectConflicts(t *testing.T) {
+	event := func(value string) string { return "data: " + value + "\n\n" }
+	complete := event(`{"type":"response.completed","response":{"status":"completed","output":[]}}`)
+	item := func(id, text string) string {
+		return event(`{"type":"response.output_item.done","item":{"id":"` + id + `","type":"message","role":"assistant","content":[{"type":"output_text","text":"` + text + `"}]}}`)
+	}
+	part := func(id, text string) string {
+		return event(`{"type":"response.content_part.done","item_id":"` + id + `","part":{"type":"output_text","text":"` + text + `"}}`)
+	}
+	text := func(id, text string) string {
+		return event(`{"type":"response.output_text.done","item_id":"` + id + `","text":"` + text + `"}`)
+	}
+	project := func(body string) (*canonical.Response, error) {
+		return probeHTTPResponse([]byte(body+complete), "responses")
+	}
+	r, e := project(text("a", "ok") + part("a", "ok") + item("a", "ok"))
+	if e != nil || !r.CompleteText() || len(r.Blocks) != 1 || *r.Blocks[0].Text != "ok" {
+		t.Fatalf("overlapping aliases duplicated or lost: %+v %v", r, e)
+	}
+	r, e = project(item("a", "first") + item("b", "second") + part("a", "first") + part("b", "second") + text("a", "first") + text("b", "second"))
+	if e != nil || !r.CompleteText() || len(r.Blocks) != 2 || *r.Blocks[0].Text != "first" || *r.Blocks[1].Text != "second" {
+		t.Fatalf("distinct items lost: %+v %v", r, e)
+	}
+	for _, body := range []string{
+		item("a", "ok") + part("a", "changed"), item("a", "ok") + text("foreign", "ok"),
+		item("a", "first") + item("b", "second") + part("a", "firstsecond") + part("b", ""),
+		item("a", "ok") + item("a", "ok"),
+		event(`{"type":"response.output_item.done","output_index":0,"item":{"id":"a","type":"message","content":[{"type":"output_text","text":"ok"}]}}`) + event(`{"type":"response.output_text.done","output_index":1,"item_id":"a","text":"ok"}`),
+		item("a", "ok") + event(`{"type":"response.output_text.done","item_id":"a","output_index":"bad","text":"ok"}`),
+		item("a", "ok") + event(`{"type":"response.content_part.done","item_id":"a","part":{"type":"refusal","refusal":"declined"}}`),
+		item("a", "ok") + event(`{"type":"response.output_item.done","item":{"type":"function_call","name":"write_file"}}`),
+	} {
+		r, e = project(body)
+		if e == nil || r.CompleteText() {
+			t.Fatal("conflicting or unsafe lower-level observation admitted", body)
+		}
+	}
+}
+
+func TestResponsesNestedCreatedIdentityMustMatchTerminal(t *testing.T) {
+	for _, kind := range []string{"response.created", "response.in_progress"} {
+		for _, terminal := range []string{"owned", "foreign"} {
+			body := "data: " + `{"type":"` + kind + `","response":{"id":"owned","status":"in_progress"}}` + "\n\n" +
+				"data: " + `{"type":"response.output_text.done","item_id":"message","output_index":0,"content_index":0,"text":"ok"}` + "\n\n" +
+				"data: " + `{"type":"response.completed","response":{"id":"` + terminal + `","status":"completed","output":[]}}` + "\n\n"
+			r, e := probeHTTPResponse([]byte(body), "responses")
+			if terminal == "owned" {
+				if e != nil || !r.CompleteText() {
+					t.Fatal("standard identity rejected", e)
+				}
+			} else if e == nil || r.CompleteText() {
+				t.Fatal("foreign nested terminal identity accepted")
 			}
 		}
 	}
