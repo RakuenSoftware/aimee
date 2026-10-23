@@ -20,6 +20,7 @@
 #include "../kb_curator_queue.h"
 #include "../kb_curator_extract.h"
 #include "config.h"
+#include "support/curator_model_fixture.h"
 
 /* An upstream outage must not be charged to the job. The gateway opens a circuit
  * breaker and 503s everything for its cooldown, so three claims inside one
@@ -236,7 +237,7 @@ static void test_reclaim_stale_running_extract_doc(sqlite3 *db)
    kb_curator_extract_opts_t opts;
    memset(&opts, 0, sizeof(opts));
    opts.max_attempts = 1;
-   snprintf(opts.extract_command, sizeof(opts.extract_command), "%s", "true");
+   curator_fixture_reply("malformed business JSON");
    (void)kb_curator_extract_one(&opts);
 
    assert(strcmp(job_status(db, 9001), "failed") == 0);  /* orphan reclaimed */
@@ -275,7 +276,7 @@ static void test_retry_backoff_defers_reclaim(sqlite3 *db)
    kb_curator_extract_opts_t opts;
    memset(&opts, 0, sizeof(opts));
    opts.max_attempts = 1;
-   snprintf(opts.extract_command, sizeof(opts.extract_command), "%s", "true");
+   curator_fixture_reply("malformed business JSON");
 
    (void)kb_curator_extract_one(&opts);
    assert(job_attempts(db, 9401) == 1); /* untouched: still deferred */
@@ -303,11 +304,33 @@ static void test_retry_backoff_ignores_fresh_jobs(sqlite3 *db)
    kb_curator_extract_opts_t opts;
    memset(&opts, 0, sizeof(opts));
    opts.max_attempts = 1;
-   snprintf(opts.extract_command, sizeof(opts.extract_command), "%s", "true");
+   curator_fixture_reply("malformed business JSON");
 
    (void)kb_curator_extract_one(&opts);
    assert(job_attempts(db, 9102) == 1); /* '' never defers */
    printf("  PASS: test_retry_backoff_ignores_fresh_jobs\n");
+}
+
+/* Missing model configuration is a global outage, not a poison document. */
+static void test_unconfigured_provider_preserves_attempts(sqlite3 *db)
+{
+   seed(db, "UPDATE kb_async_jobs SET status='done' WHERE status='pending'");
+   seed(db, "INSERT INTO kb_documents (id,project,file_path,file_hash,chunk_index,content,doc_kind)"
+            " VALUES (9701,'p','unconfigured.md','uc',0,'t','')");
+   seed(db, "INSERT INTO kb_async_jobs (id,kind,document_id,project,status,attempts,next_attempt_at)"
+            " VALUES (9701,'extract_doc',9701,'p','pending',0,'')");
+   platform_unsetenv("SYNTHESIS_ENDPOINT");
+   kb_curator_provider_backoff_recovered();
+   kb_curator_extract_opts_t opts = {.max_attempts = 3};
+   assert(kb_curator_extract_one(&opts) == -1);
+   assert(job_attempts(db, 9701) == 0);
+   assert(!strcmp(job_status(db, 9701), "pending"));
+   assert(kb_curator_provider_backoff_active());
+   assert(kb_curator_extract_one(&opts) == 0);
+   assert(job_attempts(db, 9701) == 0);
+   assert(!strcmp(job_status(db, 9701), "pending"));
+   kb_curator_provider_backoff_recovered();
+   printf("  PASS: unconfigured canonical provider preserves attempts and gates the queue\n");
 }
 
 /* The delay curve itself: exponential, clamped, never zero (a zero would
@@ -417,6 +440,7 @@ int main(void)
    test_provider_unavailable_is_not_a_job_failure();
    test_provider_outage_arms_global_backoff();
    test_provider_outage_requeues(db);
+   test_unconfigured_provider_preserves_attempts(db);
    test_only_current_document_generation_queues(db);
 
    assert(config_set_kb_curator_extract_docs_enabled(0) == 0);

@@ -488,12 +488,16 @@ static void review_tmp_template(char *out, size_t cap, const char *name)
 static unsigned g_review_verdict;
 static const char *g_review_message = "";
 static unsigned g_review_flags_seen;
+static int g_review_calls;
+static const char *g_review_expected_text;
 
 static int test_review_evidence_provider(const char *role, const char *response, unsigned flags,
                                          unsigned *verdict, char *message, size_t message_cap)
 {
    (void)role;
-   (void)response;
+   g_review_calls++;
+   if (g_review_expected_text)
+      assert(!strcmp(response, g_review_expected_text));
    g_review_flags_seen = flags;
    if (verdict)
       *verdict = g_review_verdict;
@@ -637,6 +641,25 @@ static void test_review_evidence_drift_ignores_inline_review_annotation(void)
    printf("  PASS: test_review_evidence_drift_ignores_inline_review_annotation\n");
 }
 
+static void review_model_result(agent_result_t *result, const char *text)
+{
+   result->success = 1;
+   assert(!aimee_ir_response_from_text(&result->canonical_response, text, NULL));
+   result->response = strdup("POISONED FLAT REVIEW MUST NOT CONTROL EVIDENCE");
+   assert(result->response);
+   g_review_expected_text = text;
+}
+static void test_review_evidence_requires_canonical_output(void)
+{
+   agent_result_t result = {.success = 1};
+   result.response = strdup("No uncommitted diff exists.");
+   int before = g_review_calls, rc = 0;
+   delegate_apply_review_evidence_guard("review", "/unused", &rc, &result, 0);
+   assert(rc == -1 && !strcmp(result.error, "delegate has no complete canonical text outcome"));
+   assert(g_review_calls == before);
+   agent_result_clear_response(&result);
+}
+
 /* The guard reports the module's contradiction verdict, in the module's words.
  *
  * This replaces a fixture that pinned the ROLE list and the claim keywords by
@@ -654,9 +677,7 @@ static void test_review_evidence_guard_reports_a_contradiction(void)
 
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup("No uncommitted diff exists.");
-   assert(result.response != NULL);
+   review_model_result(&result, "No uncommitted diff exists.");
 
    g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED | AIMEE_DELEGATES_REVIEW_CONTRADICTION;
    g_review_message = "delegate evidence drift: the wording the module chose";
@@ -668,9 +689,7 @@ static void test_review_evidence_guard_reports_a_contradiction(void)
 
    /* An unguarded verdict leaves the review alone, whatever it said. */
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup("No uncommitted diff exists.");
-   assert(result.response != NULL);
+   review_model_result(&result, "No uncommitted diff exists.");
    g_review_verdict = 0;
    g_review_message = "";
    rc = 0;
@@ -727,9 +746,7 @@ static void test_review_evidence_guard_runs_the_snippet_check_only_when_asked(vo
 
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup(response);
-   assert(result.response != NULL);
+   review_model_result(&result, response);
 
    g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED;
    g_review_message = "";
@@ -740,9 +757,7 @@ static void test_review_evidence_guard_runs_the_snippet_check_only_when_asked(vo
    agent_result_clear_response(&result);
 
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup(response);
-   assert(result.response != NULL);
+   review_model_result(&result, response);
 
    g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED | AIMEE_DELEGATES_REVIEW_CHECK_SNIPPETS;
    rc = 0;
@@ -771,9 +786,7 @@ static void test_review_evidence_guard_sends_the_facts_it_owns(void)
 
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup("a report");
-   assert(result.response != NULL);
+   review_model_result(&result, "a report");
 
    g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED;
    g_review_message = "";
@@ -792,9 +805,7 @@ static void test_review_evidence_guard_sends_the_facts_it_owns(void)
    fclose(f);
 
    memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup("a report");
-   assert(result.response != NULL);
+   review_model_result(&result, "a report");
    g_review_flags_seen = 0;
    rc = 0;
    delegate_apply_review_evidence_guard("review", root, &rc, &result, 1);
@@ -1358,6 +1369,7 @@ int main(void)
    test_review_evidence_drift_detects_reversed_snippet();
    test_review_evidence_drift_ignores_historical_diff_snippet();
    test_review_evidence_drift_ignores_inline_review_annotation();
+   test_review_evidence_requires_canonical_output();
    test_review_evidence_guard_reports_a_contradiction();
    test_review_evidence_guard_runs_the_snippet_check_only_when_asked();
    test_review_evidence_guard_sends_the_facts_it_owns();

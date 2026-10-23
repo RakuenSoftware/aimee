@@ -7,15 +7,20 @@
 
 static int unavailable;
 static const char *malformed;
+static int dispatch_calls;
+static const char *expected_answer;
 
 int aimee_module_commands_dispatch_internal(const char *method, const cJSON *args, cJSON **result)
 {
    assert(!strcmp(method, "memory.runtime"));
+   dispatch_calls++;
    const char *operation = jo_cstr(args, "operation");
    assert(!strcmp(operation, "benchmark-context") ||
           !strcmp(operation, "benchmark-hard-negative") || !strcmp(operation, "benchmark-miss") ||
           !strcmp(operation, "benchmark-score"));
    assert(!cJSON_HasObjectItem(args, "project"));
+   if (!strcmp(operation, "benchmark-hard-negative") && expected_answer)
+      assert(!strcmp(jo_cstr(args, "got"), expected_answer));
    if (unavailable)
    {
       *result = NULL;
@@ -46,7 +51,30 @@ static void test_diagnostics(void)
    snprintf(task.name, sizeof(task.name), "task");
    snprintf(task.prompt, sizeof(task.prompt), "fixture");
    snprintf(task.success_check_value, sizeof(task.success_check_value), "expected");
-   result.response = "answer\nquoted";
+   result.response = strdup("POISONED FLAT ANSWER");
+   result.success = 1;
+   FILE *invalid = tmpfile();
+   int calls = dispatch_calls;
+   assert(invalid && mem_eval_write_hard_negative(invalid, "suite", &task, &result) == -1);
+   assert(!ftell(invalid) && dispatch_calls == calls);
+   fclose(invalid);
+   expected_answer = "answer\nquoted";
+   assert(!aimee_ir_response_from_text(&result.canonical_response, expected_answer, NULL));
+   for (int negative = 0; negative < 3; negative++)
+   {
+      result.canonical_response.stop_reason = negative == 0   ? AIMEE_STOP_MAX_TOKENS
+                                              : negative == 1 ? AIMEE_STOP_CONTENT_FILTER
+                                                              : AIMEE_STOP_END_TURN;
+      if (negative == 2)
+         result.canonical_response.content[0].type = AIMEE_BLK_THINKING;
+      invalid = tmpfile();
+      calls = dispatch_calls;
+      assert(invalid && mem_eval_write_hard_negative(invalid, "suite", &task, &result) == -1);
+      assert(!ftell(invalid) && dispatch_calls == calls);
+      fclose(invalid);
+      result.canonical_response.content[0].type = AIMEE_BLK_TEXT;
+   }
+   result.canonical_response.stop_reason = AIMEE_STOP_END_TURN;
    FILE *fp = tmpfile();
    assert(fp && mem_eval_write_hard_negative(fp, "suite", &task, &result) == 0);
    char *text = read_file(fp);
@@ -55,7 +83,8 @@ static void test_diagnostics(void)
    const cJSON *candidate =
        cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(artifact, "top_candidates"), 0);
    assert(strlen(jo_cstr(candidate, "content")) == 6300);
-   assert(!strcmp(jo_cstr(artifact, "got"), result.response));
+   assert(!strcmp(jo_cstr(artifact, "got"), expected_answer));
+   assert(!strstr(text, "POISONED FLAT"));
    cJSON_Delete(artifact);
    free(text);
    fclose(fp);
@@ -88,6 +117,9 @@ static void test_diagnostics(void)
    fp = fopen("/dev/full", "w");
    assert(fp && mem_eval_write_hard_negative(fp, "suite", &task, &result) == -1);
    fclose(fp);
+
+   agent_result_clear_response(&result);
+   expected_answer = NULL;
 
    mem_eval_case_t ecase = {0};
    snprintf(ecase.query, sizeof(ecase.query), "fixture");

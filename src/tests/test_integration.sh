@@ -226,6 +226,9 @@ install_delegates_module() {
     cp "$DB1_MODULE_BUILT" "$DELEGATES_MODULE"
     chmod 0755 "$DELEGATES_MODULE"
     install_generated_grant delegates "$DELEGATES_MODULE"
+    # Native execution uses the same process's separate authenticated outbound
+    # identity; the serving grant does not imply permission to attach as76.
+    install_generated_grant delegates-host "$DELEGATES_MODULE"
 }
 start_delegates_module() {
     stop_delegates_module

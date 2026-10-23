@@ -221,6 +221,11 @@ void bus_host_destroy(bus_host_t *h);
  * error if the handshake itself failed. */
 bus_host_result_t bus_host_serve_attach(bus_host_t *h, int conn_fd);
 bus_host_result_t bus_host_serve_attach_ex(bus_host_t *h, int conn_fd, uint32_t *slot_out);
+/* Private daemon-owned unnamed socketpair only, kernel-verified same PID/UID,
+ * principal class0/ref0. External listener admission hooks remain installed.
+ * Caller MUST hold the same host lock used by the active external runtime.
+ * Platforms lacking same-process peer attestation fail closed. */
+bus_host_result_t bus_host_serve_attach_owned(bus_host_t *h, int conn_fd);
 
 /* Release one admitted slot immediately. Runtime owners use this only after an
  * OS-backed process handle proves the client has exited; ordinary liveness

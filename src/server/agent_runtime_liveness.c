@@ -11,12 +11,24 @@ void agent_reject_degenerate_plain_response(agent_result_t *out, const char *age
    if (!out || !out->success)
       return;
 
-   if (agent_result_project_complete_text(out))
+   if (aimee_ir_response_complete_valid(&out->canonical_response))
    {
       out->success = 0;
-      snprintf(out->error, sizeof out->error, "agent did not return complete canonical text");
+      snprintf(out->error, sizeof out->error, "agent did not return a complete canonical answer");
       return;
    }
+   char *display = aimee_ir_response_text_alloc(&out->canonical_response);
+   if (!display)
+   {
+      out->success = 0;
+      snprintf(out->error, sizeof out->error, "cannot project canonical answer display");
+      return;
+   }
+   agent_result_replace_display_text(out, display);
+   for (int i = 0; i < out->canonical_response.n_content; i++)
+      if (out->canonical_response.content[i].type == AIMEE_BLK_IMAGE ||
+          out->canonical_response.content[i].type == AIMEE_BLK_DOCUMENT)
+         return; /* Empty text does not make an authored media answer degenerate. */
    int unexecuted_tool_plan = out->tool_calls == 0 && out->turns == 0 &&
                               liveness_is_unexecuted_tool_plan_response(out->response);
    if (!liveness_is_degenerate_response(out->response) && !unexecuted_tool_plan)

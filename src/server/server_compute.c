@@ -597,15 +597,16 @@ static cJSON *delegate_build_result_response(
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "delegation_id", deleg_id);
    cJSON *canonical = aimee_ir_response_json(&result->canonical_response);
+   char *display = canonical ? aimee_ir_response_text_alloc(&result->canonical_response) : NULL;
    if (canonical)
       cJSON_AddItemToObject(resp, "ir", canonical);
-   if (rc == 0 && (!result->success ||
-                   aimee_ir_response_complete_text_valid(&result->canonical_response) != 0))
+   if (rc == 0 && (!result->success || !display ||
+                   aimee_ir_response_complete_valid(&result->canonical_response) != 0))
       rc = -1;
    if (rc == 0)
    {
       cJSON_AddStringToObject(resp, "status", "ok");
-      cJSON_AddStringToObject(resp, "response", result->response ? result->response : "");
+      cJSON_AddStringToObject(resp, "response", display);
       cJSON_AddNumberToObject(resp, "turns", result->turns);
       cJSON_AddNumberToObject(resp, "tool_calls", result->tool_calls);
       cJSON_AddNumberToObject(resp, "confidence", result->confidence);
@@ -639,13 +640,14 @@ static cJSON *delegate_build_result_response(
       cJSON_AddNumberToObject(resp, "completion_tokens", result->completion_tokens);
       delegate_economics_add_agent_result_json(resp, acfg, role, result, target_agent);
       delegate_add_measured_cost_json(resp, deleg_id);
-      if (result->response)
-         cJSON_AddStringToObject(resp, "response", result->response);
+      if (display)
+         cJSON_AddStringToObject(resp, "response", display);
       if (apply_error[0])
          cJSON_AddStringToObject(resp, "apply_error", apply_error);
       if (handoff_checked)
          delegate_handoff_add_validation_json(resp, handoff_validation);
    }
+   free(display);
    return resp;
 }
 

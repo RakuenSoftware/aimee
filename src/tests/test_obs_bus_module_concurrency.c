@@ -23,6 +23,9 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include <aimee/audit/obs_bus.h>
 #include "log.h"
@@ -456,8 +459,111 @@ static void test_scope_secrets_never_enter_capture(void)
         "capture retained: ok");
 }
 
+static aimee_module_status_t owned_service_echo(const aimee_module_invocation_t *invocation,
+                                                const uint8_t *body, uint32_t length,
+                                                uint8_t *output, uint32_t capacity,
+                                                uint32_t *out_len, void *context)
+{
+   (void)context;
+   assert(invocation->source_principal_ref == 76);
+   assert(length <= capacity);
+   memcpy(output, body, length);
+   *out_len = length;
+   return AIMEE_MODULE_STATUS_OK;
+}
+static int connect_owned_listener_fixture(const char *path, int *fd)
+{
+   struct sockaddr_un address = {.sun_family = AF_UNIX};
+   assert(strlen(path) < sizeof address.sun_path);
+   strcpy(address.sun_path, path);
+   *fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+   return *fd < 0 ? -1 : connect(*fd, (struct sockaddr *)&address, sizeof address);
+}
+static void test_owned_service_after_external_policy(void)
+{
+   char home[256], socket[108], policy[300], grant[340], executable[4096];
+   assert(snprintf(home, sizeof home, "%s/aimee-ownedbus-XXXXXX", platform_tmpdir()) <
+          (int)sizeof home);
+   assert(mkdtemp(home) && !setenv("AIMEE_HOME", home, 1));
+   assert(snprintf(socket, sizeof socket, "%s/module.sock", home) < (int)sizeof socket);
+   snprintf(policy, sizeof policy, "%s/policy", home);
+   assert(!mkdir(policy, 0700));
+   snprintf(grant, sizeof grant, "%s/requester.grant", policy);
+   ssize_t n = readlink("/proc/self/exe", executable, sizeof executable - 1);
+   assert(n > 0);
+   executable[n] = 0;
+   FILE *f = fopen(grant, "w");
+   assert(f);
+   fprintf(f,
+           "version=1\nprincipal_class=1\nprincipal_ref=76\nuid=self\nexecutable=%s\npublish="
+           "\nsubscribe=\nrequest=6679\nserve=\n",
+           executable);
+   assert(!fclose(f));
+   audit_log_open();
+   assert(!obs_bus_configure_module_runtime(socket, policy));
+   assert(!obs_bus_start());
+   static const aimee_module_stage_t stages[] = {{6679, 23}};
+   obs_bus_module_service_t *service = NULL;
+   assert(!obs_bus_module_service_start(stages, 1, owned_service_echo, NULL, &service));
+   assert(service && g.host.slots[service->bus.reply.handle_id].principal_class == 0 &&
+          g.host.slots[service->bus.reply.handle_id].principal_ref == 0);
+   /* Even a genuine private pair cannot mint an external requester identity. */
+   int pair[2];
+   assert(!socketpair(AF_UNIX, SOCK_SEQPACKET, 0, pair));
+   struct serve_arg argument = {.fd = pair[1], .owned = 1};
+   pthread_t thread;
+   bus_admit_fn admission = g.host.admit;
+   bus_attach_status_t (*hook)(void *, struct bus_host *, uint32_t, const bus_attach_request_t *) =
+       g.host.attach_hook;
+   pthread_mutex_lock(&g.host_lock);
+   assert(!pthread_create(&thread, NULL, serve_thread, &argument));
+   bus_client_t impersonator;
+   assert(bus_client_attach_as(pair[0], &impersonator, 1, 76) == BUS_CLIENT_DENIED);
+   assert(!pthread_join(thread, NULL));
+   assert(g.host.admit == admission && g.host.attach_hook == hook);
+   pthread_mutex_unlock(&g.host_lock);
+   close(pair[0]);
+   close(pair[1]);
+   int fd = -1;
+   bus_client_t external;
+   assert(!connect_owned_listener_fixture(socket, &fd));
+   assert(bus_client_attach_as(fd, &external, 0, 0) == BUS_CLIENT_DENIED);
+   close(fd);
+   assert(!connect_owned_listener_fixture(socket, &fd));
+   assert(bus_client_attach_as(fd, &external, 1, 77) == BUS_CLIENT_DENIED);
+   close(fd);
+   assert(!connect_owned_listener_fixture(socket, &fd));
+   assert(bus_client_attach_as(fd, &external, 1, 76) == BUS_CLIENT_OK);
+   close(fd);
+   aimee_module_client_t caller;
+   assert(!aimee_module_client_init(&caller, &external));
+   char output[32];
+   uint32_t length = 0;
+   assert(aimee_module_client_call(&caller, 6679, 23, 1, now_ns() + 2000000000ULL, "owned", 5,
+                                   output, sizeof output, &length, NULL,
+                                   NULL) == AIMEE_MODULE_CALL_OK);
+   assert(length == 5 && !memcmp(output, "owned", 5));
+   aimee_module_client_destroy(&caller);
+   bus_client_detach(&external);
+   obs_bus_module_service_stop(&service);
+   assert(!service);
+   obs_bus_stop();
+   puts("  configured external listener: private host service starts; external zero/forged "
+        "principals denied; granted requester works: ok");
+}
+
 int main(void)
 {
+   pid_t owned_child = fork();
+   assert(owned_child >= 0);
+   if (!owned_child)
+   {
+      test_owned_service_after_external_policy();
+      exit(0);
+   }
+   int owned_status = 0;
+   assert(waitpid(owned_child, &owned_status, 0) == owned_child && WIFEXITED(owned_status) &&
+          WEXITSTATUS(owned_status) == 0);
    pid_t capture_child = fork();
    assert(capture_child >= 0);
    if (!capture_child)

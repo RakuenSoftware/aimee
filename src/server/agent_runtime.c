@@ -870,17 +870,12 @@ static void parse_response(const char *body, const agent_t *agent,
             response.raw_stop_reason ? response.raw_stop_reason
                                      : aimee_stop_reason_name(response.stop_reason));
    char *text = aimee_ir_response_text_alloc(&response);
-   if (text && text[0])
-   {
-      agent_result_clear_response(out);
-      out->response = text;
-      out->success = !aimee_ir_response_complete_text_valid(&response);
-      if (!out->success)
-         snprintf(out->error, sizeof out->error,
-                  "model did not return a complete canonical text answer");
-   }
-   else
-      free(text);
+   agent_result_clear_response(out);
+   out->response = text; /* Compatibility display may be empty for media-only IR. */
+   out->success = text && !aimee_ir_response_complete_valid(&response);
+   if (!out->success)
+      snprintf(out->error, sizeof out->error,
+               "model did not return a complete canonical answer");
    if (out->cache_read_tokens > 0)
       aimee_log(LOG_DEBUG, "agent_context", "prompt cache hit: %d tokens read from cache",
                 out->cache_read_tokens);

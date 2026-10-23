@@ -127,7 +127,7 @@ static int refuse_after;
 static int provider_calls;
 static int final_response;
 static const char *simple_finish;
-static int simple_tools;
+static int simple_tools, simple_media;
 static int bootstrap_case, bootstrap_evidence_seen;
 static int malformed_projection;
 static int transport_refuse;
@@ -170,6 +170,23 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
                simple_finish);
       cJSON *root = cJSON_Parse(response);
       assert(root);
+      if (simple_media)
+      {
+         cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "choices"), 0);
+         cJSON *message = cJSON_GetObjectItem(choice, "message");
+         cJSON *content = cJSON_Parse(
+             "[{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,YQ==\"},"
+             "\"fixture_sidecar\":{\"opaque\":\"preserve\"}}]");
+         assert(content);
+         if (simple_media == 2)
+         {
+            cJSON *text = cJSON_CreateObject();
+            cJSON_AddStringToObject(text, "type", "text");
+            cJSON_AddStringToObject(text, "text", "Completed visual answer.");
+            cJSON_AddItemToArray(content, text);
+         }
+         cJSON_ReplaceItemInObject(message, "content", content);
+      }
       if (simple_tools)
       {
          cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "choices"), 0);
@@ -639,6 +656,36 @@ int main(void)
       assert(result.canonical_response.usage_out == 3);
       assert(!agent_result_take_text(&result));
    }
+   /* General HTTP completion retains multimedia; business projection refuses it. */
+   simple_finish = "stop";
+   for (simple_media = 1; simple_media <= 2; simple_media++)
+   {
+      simple_finish = "stop";
+      provider_calls = 0;
+      rc = agent_execute(&agent, NULL, "original prompt", 128, 0, &result);
+      if (rc || !result.success || result.error[0] || provider_calls != 1)
+         fprintf(stderr, "media fixture=%d rc=%d success=%d calls=%d error=%s blocks=%d stop=%d\n",
+                 simple_media, rc, result.success, provider_calls, result.error,
+                 result.canonical_response.n_content, result.canonical_response.stop_reason);
+      assert(rc == 0 && result.success && !result.error[0] && provider_calls == 1);
+      assert(!aimee_ir_response_complete_valid(&result.canonical_response));
+      assert(result.canonical_response.content[0].type == AIMEE_BLK_IMAGE);
+      assert(result.canonical_response.content[0].raw);
+      assert(cJSON_GetObjectItem(result.canonical_response.content[0].raw, "fixture_sidecar"));
+      assert(result.canonical_response.n_content == simple_media);
+      assert(!agent_result_take_text(&result));
+      const char *declined[] = {"length", "content_filter"};
+      for (size_t i = 0; i < sizeof declined / sizeof *declined; i++)
+      {
+         simple_finish = declined[i];
+         provider_calls = 0;
+         rc = agent_execute(&agent, NULL, "original prompt", 128, 0, &result);
+         assert(rc != 0 && !result.success && provider_calls == 1);
+         assert(result.canonical_response.n_content == simple_media);
+         assert(!agent_result_take_text(&result));
+      }
+   }
+   simple_media = 0;
    /* Even actual native tool-use blocks accompanying a refused, truncated or
     * contradictory terminal state cannot reach tool execution or a retry. */
    const char *denied_tool_stops[] = {"content_filter", "length", "unknown", "stop"};

@@ -1053,11 +1053,15 @@ static void *consumer_main(void *arg)
 struct serve_arg
 {
    int fd;
+   int owned;
 };
 static void *serve_thread(void *p)
 {
-   int fd = ((struct serve_arg *)p)->fd;
-   bus_host_serve_attach(&g.host, fd);
+   struct serve_arg *argument = p;
+   if (argument->owned)
+      bus_host_serve_attach_owned(&g.host, argument->fd);
+   else
+      bus_host_serve_attach(&g.host, argument->fd);
    return NULL;
 }
 
@@ -1127,12 +1131,31 @@ static void module_client_release(int index)
    pthread_mutex_unlock(&g.module_client_lock);
 }
 
-static int attach(bus_client_t *c)
+static int attach_mode(bus_client_t *c, int owned)
 {
    int sv[2];
-   if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) != 0)
+   int socket_type = SOCK_SEQPACKET;
+#ifdef SOCK_CLOEXEC
+   socket_type |= SOCK_CLOEXEC;
+#endif
+   if (socketpair(AF_UNIX, socket_type, 0, sv) != 0)
+   {
+#ifdef SOCK_CLOEXEC
+      if ((errno != EINVAL && errno != EPROTONOSUPPORT) ||
+          socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) != 0)
+         return -1;
+#else
       return -1;
-   struct serve_arg a = {.fd = sv[1]};
+#endif
+   }
+   /* Retain close-on-exec on POSIX platforms without atomic socket flags. */
+   if (fcntl(sv[0], F_SETFD, FD_CLOEXEC) < 0 || fcntl(sv[1], F_SETFD, FD_CLOEXEC) < 0)
+   {
+      close(sv[0]);
+      close(sv[1]);
+      return -1;
+   }
+   struct serve_arg a = {.fd = sv[1], .owned = owned};
    pthread_t t;
    if (pthread_create(&t, NULL, serve_thread, &a) != 0)
    {
@@ -1145,6 +1168,11 @@ static int attach(bus_client_t *c)
    close(sv[0]);
    close(sv[1]);
    return rc == BUS_CLIENT_OK ? 0 : -1;
+}
+
+static int attach(bus_client_t *client)
+{
+   return attach_mode(client, 0);
 }
 
 static int service_stopped(void *context)
@@ -1195,7 +1223,14 @@ int obs_bus_module_service_start(const aimee_module_stage_t *stages, size_t coun
        .stages = stages, .stage_count = count, .handler = handler, .user_data = user_data};
    atomic_init(&service->stop, 0);
    pthread_mutex_lock(&start_lock);
-   if (!g.started || g.terminated || !atomic_load(&g.accepting_calls) || attach(&service->bus))
+   if (!g.started || g.terminated || !atomic_load(&g.accepting_calls))
+      goto failed;
+   /* The external runtime owns admission callbacks now. A private same-process
+    * socketpair uses the host-only seam, serialized with all host mutation. */
+   pthread_mutex_lock(&g.host_lock);
+   int attach_result = attach_mode(&service->bus, 1);
+   pthread_mutex_unlock(&g.host_lock);
+   if (attach_result)
       goto failed;
    service->attached = 1;
    int registered = 1;
