@@ -10,7 +10,6 @@
 
 #include "agent_exec.h" /* agent_http_post */
 #include "cJSON.h"
-#include <aimee/translation/aimee_frontend.h>
 #include <aimee/translation/aimee_backend.h>
 
 #include <stdio.h>
@@ -20,33 +19,6 @@
 
 /* --- request building --- */
 
-static int provider_import_request(cJSON *messages, cJSON *schema, aimee_request_t *out)
-{
-   cJSON *native = cJSON_CreateObject();
-   if (!native || !cJSON_AddItemToObject(native, "messages", cJSON_Duplicate(messages, 1)))
-   {
-      cJSON_Delete(native);
-      return -1;
-   }
-   char error[128];
-   int rc = openai_frontend_parse(native, out, error, sizeof error);
-   cJSON_Delete(native);
-   if (rc)
-      return -1;
-   if (schema)
-   {
-      out->output_format = (aimee_output_format_t){.kind = AIMEE_OUTPUT_JSON_SCHEMA,
-                                                   .name = strdup("curator_output"),
-                                                   .schema = cJSON_Duplicate(schema, 1),
-                                                   .strict = AIMEE_STRICT_TRUE};
-      if (!out->output_format.name || !out->output_format.schema)
-      {
-         aimee_request_free(out);
-         return -1;
-      }
-   }
-   return 0;
-}
 static cJSON *provider_build_ir(const provider_def_t *def, const aimee_request_t *request)
 {
    if (!def || !request || aimee_ir_request_admit(request))
@@ -77,19 +49,6 @@ static cJSON *provider_build_ir(const provider_def_t *def, const aimee_request_t
    }
    return native;
 }
-struct cJSON *provider_client_build_openai(const provider_def_t *def, struct cJSON *messages,
-                                           struct cJSON *json_schema)
-{
-   if (!def || !cJSON_IsArray(messages))
-      return NULL;
-   aimee_request_t request = {0};
-   if (provider_import_request(messages, json_schema, &request))
-      return NULL;
-   cJSON *native = provider_build_ir(def, &request);
-   aimee_request_free(&request);
-   return native;
-}
-
 /* --- response parsing --- */
 
 int provider_client_parse_openai(const char *body, provider_completion_t *out)
@@ -271,24 +230,6 @@ int provider_client_complete_ir(const provider_def_t *def, const aimee_request_t
       snprintf(errbuf, errlen, "%s",
                out->ir.error_message ? out->ir.error_message
                                      : "provider response failed canonical admission");
-   return rc;
-}
-
-int provider_client_complete(const provider_def_t *def, struct cJSON *messages,
-                             struct cJSON *json_schema, provider_completion_t *out, char *errbuf,
-                             size_t errlen)
-{
-   if (out)
-      memset(out, 0, sizeof *out);
-   aimee_request_t request = {0};
-   if (!out || !cJSON_IsArray(messages) || provider_import_request(messages, json_schema, &request))
-   {
-      if (errbuf && errlen)
-         snprintf(errbuf, errlen, "invalid provider request");
-      return -1;
-   }
-   int rc = provider_client_complete_ir(def, &request, out, errbuf, errlen);
-   aimee_request_free(&request);
    return rc;
 }
 

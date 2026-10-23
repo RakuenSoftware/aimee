@@ -94,33 +94,17 @@ extern "C"
 #define PROVIDER_CLIENT_DEFAULT_TIMEOUT_MS 120000
 #define PROVIDER_CLIENT_DEFAULT_ATTEMPTS   3
 
-   /* Build the OpenAI chat-completions request body for `def` + `messages` (a
-    * cJSON array of {role, content}). When `json_schema` is non-NULL it is sent as
-    * response_format:{type:"json_schema", json_schema:{name, schema, strict:true}}
-    * so a grammar-capable endpoint (llama.cpp --jinja, OpenAI) returns constrained
-    * JSON. `messages`/`json_schema` are NOT taken over — the result references deep
-    * copies. Returns a new cJSON object (caller cJSON_Delete) or NULL on failure. */
-   struct cJSON *provider_client_build_openai(const provider_def_t *def, struct cJSON *messages,
-                                              struct cJSON *json_schema);
-
    /* Parse an OpenAI chat-completions response `body` into `out` (zeroed first).
     * Returns 0 for an admitted textual completion, -1 otherwise. The owned IR
     * retains reasoning/media/tool blocks; free the result after success or failure. All model
-    * metadata remains in IR. `http_status` is left 0 here — provider_client_complete sets it after
-    * the transport call. */
+    * metadata remains in IR. `http_status` is left 0 here — provider_client_complete_ir sets it
+    * after the transport call. */
    int provider_client_parse_openai(const char *body, provider_completion_t *out);
 
    /* Canonical entry for internal callers. The request is borrowed; provider
     * configuration controls model/sampling and serialization stays at egress. */
    int provider_client_complete_ir(const provider_def_t *def, const aimee_request_t *request,
                                    provider_completion_t *out, char *errbuf, size_t errlen);
-
-   /* Build + POST (with retry) + parse. Returns 0 on success; on failure returns
-    * -1 and writes a message into errbuf (when errlen > 0). `out` is zeroed on
-    * entry and is always safe to pass to provider_completion_free afterward. */
-   int provider_client_complete(const provider_def_t *def, struct cJSON *messages,
-                                struct cJSON *json_schema, provider_completion_t *out, char *errbuf,
-                                size_t errlen);
 
    /* Free heap-owned fields of `out` (idempotent; does not free `out` itself). */
    void provider_completion_free(provider_completion_t *out);

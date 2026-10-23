@@ -470,5 +470,14 @@ int provider_cli_adapter_execute_cfg(const provider_cli_adapter_t *adapter,
       aimee_ir_session_fail_capture();
       return AGENT_RC_CAPTURE_FAILED;
    }
+   if (!rc && out->success && !cfg.codex_host && !cfg.claude_host &&
+       aimee_ir_response_complete_valid(&out->canonical_response))
+   {
+      out->success = 0;
+      if (!out->error[0])
+         snprintf(out->error, sizeof out->error,
+                  "provider-cli: executor did not return a complete canonical answer");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
    return rc;
 }

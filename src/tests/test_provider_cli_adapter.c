@@ -125,7 +125,7 @@ static void test_claude_stream_json_does_not_duplicate_final_result(void)
          "cat >/dev/null\n"
          "printf '%s\\n' "
          "'{\"type\":\"assistant\",\"message\":{\"id\":\"fixture\",\"role\":\"assistant\","
-         "\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}'\n"
+         "\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"stop_reason\":\"end_turn\"}}'\n"
          "printf '%s\\n' "
          "'{\"type\":\"result\",\"is_error\":false,\"result\":\"ok\",\"duration_ms\":5}'\n",
          f);
@@ -307,6 +307,92 @@ static int flat_executor(const provider_cli_cfg_t *cfg, agent_result_t *result)
    result->success = 1;
    return 0;
 }
+static aimee_stop_reason_t claimed_stop;
+static aimee_block_type_t claimed_block = AIMEE_BLK_TEXT;
+static int terminal_executor(const provider_cli_cfg_t *cfg, agent_result_t *result)
+{
+   (void)cfg;
+   assert(!agent_result_from_host_text(result, "terminal diagnostic"));
+   aimee_block_t *block = &result->canonical_response.content[0];
+   block->type = claimed_block;
+   if (claimed_block == AIMEE_BLK_IMAGE || claimed_block == AIMEE_BLK_DOCUMENT)
+   {
+      free(block->text);
+      block->text = NULL;
+      block->media_type =
+          strdup(claimed_block == AIMEE_BLK_IMAGE ? "image/png" : "application/pdf");
+      block->media_ref = strdup("https://example.invalid/retained-media");
+   }
+   if (claimed_block == AIMEE_BLK_TOOL_USE)
+   {
+      free(block->text);
+      block->text = NULL;
+      block->tool_id = strdup("pending-tool");
+      block->tool_name = strdup("read_file");
+      block->tool_input = cJSON_Parse("{\"path\":\"README.md\"}");
+      assert(block->tool_input);
+   }
+   result->canonical_response.stop_reason = claimed_stop;
+   free(result->canonical_response.raw_stop_reason);
+   result->canonical_response.raw_stop_reason = strdup("provider-terminal");
+   result->canonical_response.usage_in = 11;
+   result->canonical_response.usage_out = 7;
+   if (claimed_stop == AIMEE_STOP_CONTENT_FILTER)
+   {
+      result->canonical_response.refusal = calloc(1, sizeof *result->canonical_response.refusal);
+      assert(result->canonical_response.refusal);
+      result->canonical_response.refusal->category = strdup("retained-category");
+   }
+   result->success = 1;
+   return 0;
+}
+static void test_incomplete_native_terminal_cannot_claim_success(void)
+{
+   provider_cli_adapter_t adapter = {.display_name = "terminal fixture",
+                                     .execute = terminal_executor};
+   provider_cli_cfg_t cfg = {.user_prompt = "task"};
+   aimee_ir_session_set_sink(NULL, NULL);
+   for (int i = 0; i < 4; ++i)
+   {
+      claimed_stop = (aimee_stop_reason_t[]){AIMEE_STOP_MAX_TOKENS, AIMEE_STOP_CONTENT_FILTER,
+                                             AIMEE_STOP_UNKNOWN, AIMEE_STOP_TOOL_USE}[i];
+      agent_result_t result = {0};
+      assert(provider_cli_adapter_execute_cfg(&adapter, &cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
+      assert(!result.success && result.canonical_response.stop_reason == claimed_stop);
+      assert(!strcmp(result.canonical_response.raw_stop_reason, "provider-terminal"));
+      assert(result.canonical_response.usage_in == 11 && result.canonical_response.usage_out == 7);
+      assert(!strcmp(result.response, "terminal diagnostic"));
+      if (claimed_stop == AIMEE_STOP_CONTENT_FILTER)
+         assert(!strcmp(result.canonical_response.refusal->category, "retained-category"));
+      assert(!aimee_ir_session_capture_failed());
+      agent_result_clear_response(&result);
+   }
+   claimed_stop = AIMEE_STOP_TOOL_USE;
+   claimed_block = AIMEE_BLK_TOOL_USE;
+   agent_result_t pending = {0};
+   assert(provider_cli_adapter_execute_cfg(&adapter, &cfg, &pending) == AGENT_RC_CONTEXT_REFUSED);
+   assert(!pending.success && pending.canonical_response.content[0].type == AIMEE_BLK_TOOL_USE);
+   assert(!strcmp(pending.canonical_response.content[0].tool_id, "pending-tool"));
+   assert(!aimee_ir_session_capture_failed());
+   agent_result_clear_response(&pending);
+   claimed_stop = AIMEE_STOP_END_TURN;
+   claimed_block = AIMEE_BLK_THINKING;
+   agent_result_t result = {0};
+   assert(provider_cli_adapter_execute_cfg(&adapter, &cfg, &result) == AGENT_RC_CONTEXT_REFUSED);
+   assert(!result.success && result.canonical_response.content[0].type == AIMEE_BLK_THINKING);
+   assert(!strcmp(result.canonical_response.content[0].text, "terminal diagnostic"));
+   agent_result_clear_response(&result);
+   for (int i = 0; i < 2; ++i)
+   {
+      claimed_block = i ? AIMEE_BLK_DOCUMENT : AIMEE_BLK_IMAGE;
+      assert(!provider_cli_adapter_execute_cfg(&adapter, &cfg, &result));
+      assert(result.success && result.canonical_response.content[0].type == claimed_block);
+      assert(!strcmp(result.canonical_response.content[0].media_ref,
+                     "https://example.invalid/retained-media"));
+      agent_result_clear_response(&result);
+   }
+   claimed_block = AIMEE_BLK_TEXT;
+}
 static int passive_capture(const aimee_session_event_t *event, void *context)
 {
    (void)event;
@@ -337,6 +423,7 @@ static void test_no_flat_child_fallback(void)
 
 int main(void)
 {
+   test_incomplete_native_terminal_cannot_claim_success();
    test_no_flat_child_fallback();
    test_registry_and_caps();
    test_claude_stream_json_does_not_duplicate_final_result();

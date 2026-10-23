@@ -730,18 +730,17 @@ static int acp_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *ou
       rc = AGENT_RC_CAPTURE_FAILED;
       goto done;
    }
-   if (out->canonical_response.stop_reason == AIMEE_STOP_ERROR)
-   {
-      snprintf(out->error, sizeof out->error, "ACP execution %s",
-               out->canonical_response.raw_stop_reason ? out->canonical_response.raw_stop_reason
-                                                       : "failed");
-      rc = AGENT_RC_CONTEXT_REFUSED;
-      goto done;
-   }
    snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
             out->canonical_response.raw_stop_reason
                 ? out->canonical_response.raw_stop_reason
                 : aimee_stop_reason_name(out->canonical_response.stop_reason));
+   if (aimee_ir_response_complete_valid(&out->canonical_response))
+   {
+      snprintf(out->error, sizeof out->error,
+               "ACP execution did not return a complete canonical answer");
+      rc = AGENT_RC_CONTEXT_REFUSED;
+      goto done;
+   }
    out->success = 1;
    out->confidence = 80;
    rc = 0;

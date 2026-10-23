@@ -28,10 +28,21 @@ ASan/UBSan/leak checking. This cutover removes 372 net production lines. Combine
 retirements remove 2,013 net production lines before the ACP terminal repair.
 Full combined qualification and actual updated SDK matrix remain pending.
 
-Independent review found a separate standalone ACP classification defect: admitted
-MAX/refusal/unknown output could be marked successful. Its repair and retirement
-of unused untyped provider-client entry points are being qualified separately;
-they are not part of the catalog patch.
+The standalone ACP classification defect is repaired: admitted MAX/refusal/
+unknown, unfinished-tool and reasoning-only responses retain their full canonical
+diagnostics but cannot become successful answers. The common standalone adapter
+guard uses the same completion owner; host scheduler staging remains intact.
+Three focused targets pass normally and under ASan/UBSan/leak checking, with
+actual old-code failing regressions. Unused untyped provider-client completion,
+build and import helpers are retired; their wire goldens now exercise the actual
+canonical completion transport. Together the cleanup removes 2,080 net production
+lines before the provider health-probe cutover.
+
+Provider health probes are the remaining semantic consumer being normalized:
+fixed tool-free requests and diagnostic completions must have canonical owners,
+with full native bytes retained as inert metadata and final-text admission shared
+with other consumers. Availability badges and CLI exit status must not treat
+truncated or refused output as healthy. This adapter work is isolated and pending.
 
 
 The user's completion criteria now include a significant reduction in production

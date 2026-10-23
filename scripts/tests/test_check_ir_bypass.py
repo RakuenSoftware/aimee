@@ -92,6 +92,14 @@ class IRBypassTests(unittest.TestCase):
                     checker.check(self.root)
                 path.unlink()
 
+    def test_untyped_provider_entries_stay_retired(self):
+        for symbol in ("provider_client_complete", "provider_client_build_openai", "provider_import_request"):
+            with self.subTest(symbol=symbol):
+                path = self.source("src/server/new_model.c", symbol + "(profile, messages, schema, output, err, cap);")
+                with self.assertRaisesRegex(ValueError, "retired-api"):
+                    checker.check(self.root)
+                path.unlink()
+
     def test_generic_model_stdout_adapters_stay_retired(self):
         for call in ("externalTextObservation(stdout)", "delegate.CLIText(request.Input)", "RunWatchdog(args)"):
             with self.subTest(call=call):

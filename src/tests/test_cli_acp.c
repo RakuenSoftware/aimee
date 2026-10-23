@@ -483,7 +483,8 @@ static void test_live_acp_ownership_and_budgets(void)
          "send({'method':'session/"
          "update','params':{'update':{'sessionUpdate':'agent_message_chunk','content':{'type':'"
          "text','text':'ACP done'}}}})\n"
-         "send({'id':3,'result':{'stopReason':'end_turn'}})\n",
+         "send({'id':3,'result':{'stopReason':mode if mode in "
+         "['max_tokens','refusal','unexpected'] else 'end_turn'}})\n",
          file);
    assert(!fclose(file) && !chmod(script, 0700));
    cJSON *schema = cJSON_Parse("{\"type\":\"object\"}");
@@ -537,6 +538,22 @@ static void test_live_acp_ownership_and_budgets(void)
    assert(!provider_cli_adapter_execute_cfg(provider_cli_adapter_get("acp"), &cfg, &result));
    assert(result.success && !strcmp(result.response, "ACP done"));
    agent_result_clear_response(&result);
+
+   const char *stops[] = {"max_tokens", "refusal", "unexpected"};
+   const aimee_stop_reason_t reasons[] = {AIMEE_STOP_MAX_TOKENS, AIMEE_STOP_CONTENT_FILTER,
+                                          AIMEE_STOP_UNKNOWN};
+   for (size_t i = 0; i < sizeof stops / sizeof stops[0]; ++i)
+   {
+      new_execution();
+      snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s %s", script, stops[i]);
+      status = provider_cli_adapter_execute_cfg(provider_cli_adapter_get("acp"), &cfg, &result);
+      assert(status == AGENT_RC_CONTEXT_REFUSED && !result.success);
+      assert(result.canonical_response.stop_reason == reasons[i]);
+      assert(!strcmp(result.canonical_response.raw_stop_reason, stops[i]));
+      assert(!strcmp(result.response, "ACP done"));
+      assert(!aimee_ir_session_capture_failed());
+      agent_result_clear_response(&result);
+   }
 
    new_execution();
    snprintf(agent.cli_cmd, sizeof agent.cli_cmd, "%s blocked %s", script, marker);
