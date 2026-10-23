@@ -35,6 +35,10 @@ def connection(environ):
         parts.append((uri, query))
     if settings[0] != settings[1]:
         raise ValueError("fixture runtime and migration schema settings disagree")
+    endpoints = [(uri.hostname, uri.port or 5432, urllib.parse.unquote(uri.path))
+                 for uri, _ in parts]
+    if endpoints[0] != endpoints[1]:
+        raise ValueError("fixture runtime and migration database endpoints disagree")
     path = settings[0]["search_path"]
     configured = environ.get("AIMEE_STORE_SCHEMA", "")
     for value in (path, configured):
@@ -50,8 +54,33 @@ def connection(environ):
     # URI setting, do not invent 'public': the actual role default remains in force.
     uri, query = parts[1]
     query = [(key, value) for key, value in query if key not in ("search_path", "options")]
+    # PGDATABASE is a literal default database name, not psql's -d conninfo
+    # parameter. Supply libpq components through the private child environment;
+    # never expose a credential-bearing URI in process arguments.
     env = dict(environ)
-    env["PGDATABASE"] = urllib.parse.urlunsplit(uri._replace(query=urllib.parse.urlencode(query)))
+    for key in ("PGHOST", "PGHOSTADDR", "PGPORT", "PGUSER", "PGPASSWORD",
+                "PGDATABASE", "PGSERVICE", "PGSERVICEFILE", "PGPASSFILE"):
+        env.pop(key, None)
+    env["PGDATABASE"] = urllib.parse.unquote(uri.path.removeprefix("/"))
+    if not env["PGDATABASE"]:
+        raise ValueError("fixture schema oracle requires an explicit database")
+    if uri.hostname:
+        env["PGHOST"] = uri.hostname
+    env["PGPORT"] = str(uri.port or 5432)
+    if uri.username is not None:
+        env["PGUSER"] = urllib.parse.unquote(uri.username)
+    if uri.password is not None:
+        env["PGPASSWORD"] = urllib.parse.unquote(uri.password)
+    mapped = {"sslmode": "PGSSLMODE", "sslrootcert": "PGSSLROOTCERT",
+              "sslcert": "PGSSLCERT", "sslkey": "PGSSLKEY",
+              "application_name": "PGAPPNAME", "channel_binding": "PGCHANNELBINDING",
+              "target_session_attrs": "PGTARGETSESSIONATTRS"}
+    seen = set()
+    for key, value in query:
+        if key not in mapped or key in seen:
+            raise ValueError("fixture schema oracle has unsupported or ambiguous libpq options")
+        seen.add(key)
+        env[mapped[key]] = value
     env["PGCONNECT_TIMEOUT"] = "5"
     env["PGOPTIONS"] = options + (f" -c search_path={path}" if path else "") + " -c default_transaction_read_only=on"
     return env, (path or configured).lower() or None

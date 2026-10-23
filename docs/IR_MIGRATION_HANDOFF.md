@@ -256,9 +256,37 @@ unconditional assertions and later retained success marker, not a captured raw
 request transcript. The test-only shell follow-up forwards evaluation markers in
 future logs. Production/runtime provenance remains 936.
 
-Honest server-triggered native execution, ordinary model switching/replay,
-question/permission replies, native tool effects and three standalone real-PG
-deployment validators remain outstanding. Keep these checks separate
+Actual ordinary native-to-HTTP-to-native switching now passes all three turns
+in one fresh SID. The HTTP turn leaves native cache bytes untouched; native return
+resumes the original SDK UUID with the exact first prefix, identity, cwd and inode,
+then appends valid history. Canonical terminal/checkpoint and business-fact gates
+pass; prior human-workflow history/cache stays exact. Final automation fails only
+a stale mutation allowlist: three session-metadata POSTs were ordered before the
+first send. Their original bodies were not retained; current source sends only
+metadata, and the server rejects flat transcript writes. This is source-flow
+classification, not a fabricated body observation. All three actual canonical
+USER inputs match their frozen prompt bytes. Failed automation and independent
+behavior proofs remain separate.
+
+Registered service-trigger configuration is blocked before any candidate/model:
+the pinned external config owner turns nested JSON numbers into YAML strings,
+rejecting numeric max_spend_usd. The owner repair is being developed against the
+exact pinned revision, retaining temporal-learning defaults; no budget omission,
+string workaround, module-cache patch, extra PR or default-branch mutation is
+used. Source/authority/cache seals confirm no service model ran.
+
+Standalone real-PG workflow control passes 32/32 and lifecycle passes 23/23.
+Coexistence exposes a test-oracle connection defect: libpq treats PGDATABASE's
+value as a literal database name, rather than expanding a whole URI. The test-only
+repair supplies URI components through the private child environment, verifies
+matching runtime/migration endpoints, retains schema/read-only checks, and rejects
+unknown options. Seven pure cases and an actual read of 1,010 columns/121 tables
+pass; a fresh committed-harness coexistence run remains required. Earlier fixture
+startup/path errors and oracle failure remain retained.
+
+Honest server-triggered native execution, question/permission replies, native
+tool effects and final coexistence deployment acceptance remain outstanding.
+Keep these checks separate
 from the stock-SDK recall refusal. No current-branch GitHub CI or production
 promotion is claimed. Keep one eventual PR, automatic reviews and strict
 attribution; do not investigate or change `.100`.

@@ -52,6 +52,28 @@ class WorkflowSchemaOracle(unittest.TestCase):
         with self.assertRaises(ValueError):
             module.connection(env)
 
+    def test_libpq_receives_components_not_uri_database(self):
+        env = self.environment("?sslmode=require&search_path=tenant")
+        env["AIMEE_STORE_MIGRATION_URL"] = "postgresql://migrator:p%40ss@127.0.0.1:55469/db%2Dname?sslmode=require&search_path=tenant"
+        env["AIMEE_STORE_URL"] = "postgresql://runtime:other@127.0.0.1:55469/db%2Dname?sslmode=require&search_path=tenant"
+        env.update(PGHOST="wrong", PGPORT="1", PGPASSWORD="unrelated", PGSERVICE="unrelated")
+        actual, _ = module.connection(env)
+        self.assertEqual(actual["PGDATABASE"], "db-name")
+        self.assertEqual(actual["PGHOST"], "127.0.0.1")
+        self.assertEqual(actual["PGPORT"], "55469")
+        self.assertEqual(actual["PGUSER"], "migrator")
+        self.assertEqual(actual["PGPASSWORD"], "p@ss")
+        self.assertEqual(actual["PGSSLMODE"], "require")
+        self.assertNotIn("PGSERVICE", actual)
+
+    def test_cross_database_or_unknown_query_never_proves_runtime_schema(self):
+        env = self.environment()
+        env["AIMEE_STORE_MIGRATION_URL"] += "-different"
+        with self.assertRaises(ValueError):
+            module.connection(env)
+        with self.assertRaises(ValueError):
+            module.connection(self.environment("?unknown_option=x"))
+
     def test_empty_or_unmigrated_snapshots_never_compare_as_proof(self):
         for value in [None, {}, {"schema": "tenant", "columns": []},
                       {"schema": "", "columns": self.snapshot()["columns"]},
