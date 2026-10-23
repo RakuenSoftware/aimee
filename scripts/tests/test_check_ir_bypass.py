@@ -31,6 +31,24 @@ class IRBypassTests(unittest.TestCase):
     def test_production_tree(self):
         checker.check(checker.ROOT)
 
+    def test_generic_model_stdout_adapters_stay_retired(self):
+        for call in ("externalTextObservation(stdout)", "delegate.CLIText(request.Input)", "RunWatchdog(args)"):
+            with self.subTest(call=call):
+                path = self.source("server-go/modules/delegates/rogue.go", "package delegates\nfunc rogue() { " + call + " }")
+                with self.assertRaisesRegex(ValueError, "retired-api"):
+                    checker.check(self.root)
+                path.unlink()
+
+    def test_renamed_delegate_model_bypass_is_rejected(self):
+        for call in ('exec.Command("model")', 'exec.CommandContext(ctx, "model")', 'canonical.TextResponse(stdout)', 'renamed.TextResponse(stdout)'):
+            with self.subTest(call=call):
+                path = self.source("server-go/modules/delegates/new_adapter.go", "package delegates\nfunc newAdapter() { " + call + " }")
+                with self.assertRaisesRegex(ValueError, "delegate-model-bypass"):
+                    checker.check(self.root)
+                path.unlink()
+        self.source("server-go/modules/tools/command.go", 'package tools\nfunc tool() { exec.Command("domain-tool") }')
+        checker.check(self.root)
+
     def test_model_consumers_cannot_trust_shell_output(self):
         # Deterministic solver/index adapters remain explicit non-model protocols.
         self.source("src/kb/kb_planner.c", "platform_exec_pipe(cmd, request, n, &out, &len);")

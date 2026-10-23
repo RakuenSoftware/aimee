@@ -8,58 +8,15 @@ import (
 	"fmt"
 	canonical "github.com/JBailes/aimee/server-go/ir"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 )
-
-const (
-	testDelegateCLIArgument = "__aimee_test_delegate_cli"
-	testDelegateCLIKindEnv  = "AIMEE_TEST_DELEGATE_CLI_KIND"
-	testDelegateCLIPIDsEnv  = "AIMEE_TEST_DELEGATE_CLI_PIDS"
-)
-
-func TestMain(m *testing.M) {
-	if len(os.Args) > 1 && os.Args[1] == testDelegateCLIArgument {
-		os.Exit(runTestDelegateCLI())
-	}
-	if handled, code := RunWatchdog(os.Args); handled {
-		os.Exit(code)
-	}
-	os.Exit(m.Run())
-}
-
-func runTestDelegateCLI() int {
-	child := exec.Command("sleep", "30")
-	if err := child.Start(); err != nil {
-		return 71
-	}
-	if err := os.WriteFile(os.Getenv(testDelegateCLIPIDsEnv),
-		[]byte(fmt.Sprintf("%d %d", os.Getpid(), child.Process.Pid)), 0o600); err != nil {
-		_ = child.Process.Kill()
-		return 72
-	}
-	time.Sleep(20 * time.Millisecond)
-	switch os.Getenv(testDelegateCLIKindEnv) {
-	case "claude":
-		fmt.Fprintln(os.Stdout, `{"type":"assistant","token":"stub-secret"}`)
-		fmt.Fprintln(os.Stdout, `{"type":"assistant","token":"stub-secret"}`)
-	case "codex":
-		fmt.Fprintln(os.Stdout, `{"type":"item.completed","item":{"type":"command_execution"},"token":"stub-secret"}`)
-	default:
-		_ = child.Process.Kill()
-		return 73
-	}
-	_ = child.Wait()
-	return 0
-}
 
 type fixedExecutor struct {
 	request delegatecontract.Invocation
@@ -202,140 +159,75 @@ func TestGroupPlanStageKeepsNonCapacityFailureAsTransportError(t *testing.T) {
 	}
 }
 
-func TestRegistryExecutorRunsArgvWithoutShell(t *testing.T) {
-	home := t.TempDir()
-	script := filepath.Join(home, "delegate-helper")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'answer:'\ncat\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	registry := map[string]any{"default_agent": "helper", "agents": []map[string]any{{
-		"name": "helper", "model": "test", "cli_kind": "generic", "cli_cmd": script, "enabled": true,
-		"roles": []string{"code"},
-	}}}
-	body, _ := json.Marshal(registry)
-	if err := os.WriteFile(filepath.Join(home, "models.json"), body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	executor, err := NewRegistryExecutor(home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	workdir := filepath.Join(home, "worktree")
-	if err := os.MkdirAll(filepath.Join(workdir, ".git"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	result := executor.Execute(t.Context(), delegatecontract.Invocation{Version: delegatecontract.WireVersion, Role: "code",
-		Persona: "security", Input: delegatecontract.TaskRequest("security", "inspect"), Workdir: workdir, Tools: true})
-	if result.Status != "done" || !strings.Contains(result.Response, "You are acting as security.") {
-		t.Fatalf("result = %+v", result)
-	}
-}
-
 func TestRegistryExecutorEnforcesMaxParallelWithoutPoisoningAgentHealth(t *testing.T) {
-	home := t.TempDir()
-	workdir := filepath.Join(home, "worktree")
-	if err := os.MkdirAll(filepath.Join(workdir, ".git"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	script := filepath.Join(home, "delegate-helper")
-	scriptBody := "#!/bin/sh\n" +
-		"touch '" + home + "/started.'$$\n" +
-		"while [ ! -f '" + home + "/release' ]; do sleep 0.01; done\n" +
-		"printf done\n"
-	if err := os.WriteFile(script, []byte(scriptBody), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	registry := map[string]any{"default_agent": "helper", "agents": []map[string]any{{
-		"name": "helper", "cli_kind": "generic", "cli_cmd": script, "roles": []string{"code"},
-		"max_parallel": 1, "delegate_available": true,
-	}}}
-	body, _ := json.Marshal(registry)
-	registryPath := filepath.Join(home, "models.json")
-	if err := os.WriteFile(registryPath, body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	executor, err := NewRegistryExecutor(home)
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	executor, _ := hostFixture(t, "claude", hostCallFunc(func(ctx context.Context, _, _ uint32, _ uint64, _ time.Duration, _ []byte) ([]byte, error) {
+		started <- struct{}{}
+		select {
+		case <-release:
+			return json.Marshal(hostResult("done"))
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}))
+	path := filepath.Join(executor.home, "models.json")
+	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := delegatecontract.Invocation{Version: delegatecontract.WireVersion, Role: "code", Persona: "engineer",
-		Input: delegatecontract.TaskRequest("fixture", "work"), Workdir: workdir, Tools: true}
+	var registry map[string]any
+	if err = json.Unmarshal(body, &registry); err != nil {
+		t.Fatal(err)
+	}
+	registry["agents"].([]any)[0].(map[string]any)["max_parallel"] = 1
+	body, _ = json.Marshal(registry)
+	if err = os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
 	results := make(chan delegatecontract.InvocationResult, 2)
 	for range 2 {
-		go func() { results <- executor.Execute(t.Context(), request) }()
+		go func() { results <- executor.Execute(t.Context(), nativeInvocation()) }()
 	}
-	deadline := time.Now().Add(time.Second)
-	for {
-		matches, _ := filepath.Glob(filepath.Join(home, "started.*"))
-		if len(matches) == 1 {
-			break
-		}
-		if len(matches) > 1 || time.Now().After(deadline) {
-			t.Fatalf("started %d delegates with max_parallel=1", len(matches))
-		}
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("canonical host did not start")
 	}
-	time.Sleep(50 * time.Millisecond)
-	if matches, _ := filepath.Glob(filepath.Join(home, "started.*")); len(matches) != 1 {
-		t.Fatalf("started %d delegates before the slot released", len(matches))
+	select {
+	case <-started:
+		t.Fatal("concurrent host calls exceeded max_parallel")
+	case <-time.After(50 * time.Millisecond):
 	}
-	if _, err := executor.PlanGroup(t.Context(), []delegatecontract.GroupPlanSeat{
-		{Role: "code", Persona: "engineer"},
-	}); !errors.Is(err, delegatecontract.ErrDelegateCapacity) || errors.Is(err, delegatecontract.ErrDelegateTerminal) {
-		t.Fatalf("occupied agent was not classified as retryable capacity: %v", err)
+	if _, err := executor.PlanGroup(t.Context(), []delegatecontract.GroupPlanSeat{{Role: "review", Persona: "reviewer"}}); !errors.Is(err, delegatecontract.ErrDelegateCapacity) || errors.Is(err, delegatecontract.ErrDelegateTerminal) {
+		t.Fatalf("occupied agent was not retryable capacity: %v", err)
 	}
-	healthAfter, err := os.ReadFile(registryPath)
-	if err != nil {
-		t.Fatal(err)
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(body, after) {
+		t.Fatal("capacity response mutated authoritative registry")
 	}
-	if !bytes.Equal(healthAfter, body) {
-		t.Fatalf("capacity response mutated authoritative health: before=%s after=%s", body, healthAfter)
-	}
-	if err := os.WriteFile(filepath.Join(home, "release"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	close(release)
 	for range 2 {
-		result := <-results
-		if result.Status != "done" {
-			t.Fatalf("delegate result = %+v", result)
+		if result := <-results; result.Status != "done" {
+			t.Fatalf("host result: %+v", result)
 		}
 	}
-	models, err := executor.PlanGroup(t.Context(), []delegatecontract.GroupPlanSeat{
-		{Role: "code", Persona: "engineer"},
-	})
-	if err != nil || !slices.Equal(models, []string{"helper"}) {
-		t.Fatalf("capacity response poisoned subsequent agent health: models=%v err=%v", models, err)
+	models, err := executor.PlanGroup(t.Context(), []delegatecontract.GroupPlanSeat{{Role: "review", Persona: "reviewer"}})
+	if err != nil || !slices.Equal(models, []string{"native"}) {
+		t.Fatalf("capacity poisoned registry: models=%v error=%v", models, err)
 	}
 }
 
 func TestRegistryExecutorTypesCallerDeadlineAsExecutionDeadline(t *testing.T) {
-	home := t.TempDir()
-	workdir := filepath.Join(home, "worktree")
-	if err := os.MkdirAll(filepath.Join(workdir, ".git"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	script := filepath.Join(home, "slow-delegate")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 2\nprintf done\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	registry := map[string]any{"agents": []map[string]any{{
-		"name": "helper", "cli_kind": "generic", "cli_cmd": script, "roles": []string{"code"},
-	}}}
-	body, _ := json.Marshal(registry)
-	if err := os.WriteFile(filepath.Join(home, "models.json"), body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	executor, err := NewRegistryExecutor(home)
-	if err != nil {
-		t.Fatal(err)
-	}
+	executor, _ := hostFixture(t, "claude", hostCallFunc(func(ctx context.Context, _, _ uint32, _ uint64, _ time.Duration, _ []byte) ([]byte, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}))
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
-	result := executor.Execute(ctx, delegatecontract.Invocation{Version: delegatecontract.WireVersion, Role: "code",
-		Persona: "engineer", Input: delegatecontract.TaskRequest("fixture", "work"), Workdir: workdir, Tools: true})
-	if result.Status != "failed" || !delegatecontract.IsExecutionDeadline(errors.New(result.Error)) ||
-		delegatecontract.IsCapacityDeadline(errors.New(result.Error)) {
-		t.Fatalf("caller deadline was not typed as an execution deadline: %+v", result)
+	result := executor.Execute(ctx, nativeInvocation())
+	if result.Status != "failed" || !delegatecontract.IsExecutionDeadline(errors.New(result.Error)) || delegatecontract.IsCapacityDeadline(errors.New(result.Error)) {
+		t.Fatalf("caller deadline was not execution deadline: %+v", result)
 	}
 }
 
@@ -461,12 +353,6 @@ func TestAgentLimiterPreservesCancellationWhileWaitingForCapacity(t *testing.T) 
 	}
 }
 
-func TestExecutorCommandRejectsShellOperators(t *testing.T) {
-	if _, err := splitCommand("delegate; touch /tmp/escaped"); err == nil {
-		t.Fatal("shell operator accepted")
-	}
-}
-
 func TestSelectAgentFallsBackFromHTTPDefaultButHonoursExplicitModel(t *testing.T) {
 	registry := agentRegistry{DefaultAgent: "remote", Agents: []agentEntry{
 		{Name: "remote", Model: "remote-model", Backend: "openai", Roles: []string{"review"}},
@@ -535,34 +421,22 @@ func TestRegistryRejectsNegativeMaxParallel(t *testing.T) {
 	}
 }
 
-func TestNativeSDKArgvCannotBypassCanonicalHost(t *testing.T) {
+func TestNativeModelsRequireCanonicalHost(t *testing.T) {
 	for _, kind := range []string{"claude", "claude-code", "codex"} {
-		if _, err := executorArgv(agentEntry{CLIKind: kind, CLICmd: kind}, delegatecontract.Invocation{Role: "review", Tools: true}); err == nil {
-			t.Fatal("direct native SDK argv admitted")
+		executor, marker := hostFixture(t, kind, nil)
+		result := executor.Execute(t.Context(), nativeInvocation())
+		if result.Status != "failed" || !strings.Contains(result.Error, "owner unavailable") {
+			t.Fatalf("missing canonical host did not fail closed: %+v", result)
+		}
+		if _, err := os.Stat(marker); !os.IsNotExist(err) {
+			t.Fatal("native SDK command ran")
 		}
 	}
 }
 
 func turnCapExecutorFixture(t *testing.T, kind string) (*RegistryExecutor, string) {
 	t.Helper()
-	home := t.TempDir()
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	pidFile := filepath.Join(home, "delegate-pids")
-	t.Setenv(testDelegateCLIKindEnv, kind)
-	t.Setenv(testDelegateCLIPIDsEnv, pidFile)
-	registry := map[string]any{"agents": []map[string]any{{
-		"name": "turn-cap-" + kind, "cli_kind": kind,
-		"cli_cmd": executable + " " + testDelegateCLIArgument,
-		"roles":   []string{"review"},
-	}}}
-	body, _ := json.Marshal(registry)
-	if err := os.WriteFile(filepath.Join(home, "models.json"), body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	executor, err := NewRegistryExecutorWithHost(home, hostCallFunc(func(_ context.Context, _ uint32, _ uint32, _ uint64, _ time.Duration, body []byte) ([]byte, error) {
+	return hostFixture(t, kind, hostCallFunc(func(_ context.Context, _, _ uint32, _ uint64, _ time.Duration, body []byte) ([]byte, error) {
 		var request delegatecontract.Invocation
 		if err := json.Unmarshal(body, &request); err != nil {
 			return nil, err
@@ -572,10 +446,6 @@ func turnCapExecutorFixture(t *testing.T, kind string) (*RegistryExecutor, strin
 		}
 		return json.Marshal(delegatecontract.InvocationResult{Version: delegatecontract.WireVersion, Agent: request.Model, Status: "failed", Error: delegatecontract.ErrDelegateTurnCap.Error(), Termination: &delegatecontract.TerminationDiagnostic{Kind: delegatecontract.TerminationTurnCap, MaxTurns: request.MaxTurns, ObservedTurns: 2, ExecutionTimeoutMS: request.ExecutionTimeoutMS, ElapsedMS: 1, Detail: "[REDACTED]"}})
 	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return executor, pidFile
 }
 
 func assertTurnCapResult(t *testing.T, result delegatecontract.InvocationResult) {
@@ -594,32 +464,6 @@ func assertTurnCapResult(t *testing.T, result delegatecontract.InvocationResult)
 		strings.Contains(diagnostic.Detail, "stub-secret") ||
 		!strings.Contains(diagnostic.Detail, "[REDACTED]") {
 		t.Fatalf("unsafe or unbounded diagnostic detail = %q", diagnostic.Detail)
-	}
-}
-
-func assertFixtureProcessesGone(t *testing.T, pidFile string) {
-	t.Helper()
-	body, err := os.ReadFile(pidFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var leader, child int
-	if _, err := fmt.Sscanf(string(body), "%d %d", &leader, &child); err != nil ||
-		leader <= 0 || child <= 0 || leader == child {
-		t.Fatalf("invalid fixture process tree %q: %v", body, err)
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for _, pid := range []int{leader, child} {
-		for {
-			err := syscall.Kill(pid, 0)
-			if errors.Is(err, syscall.ESRCH) {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("delegate fixture process %d survived turn-cap termination: %v", pid, err)
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
 	}
 }
 
@@ -663,148 +507,54 @@ func TestExecutionStagePreservesHostTurnCapWire(t *testing.T) {
 	}
 }
 
-func TestWatchdogKillsAndReapsDeepProcessTreeWhenProducerDies(t *testing.T) {
-	controlRead, controlWrite, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer controlRead.Close()
-	outputRead, outputWrite, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer outputRead.Close()
-	defer outputWrite.Close()
-	done := make(chan int, 1)
-	go func() {
-		done <- runWatchdog(controlRead,
-			[]string{"/bin/sh", "-c", `/bin/sh -c 'sleep 30 & child=$!; printf "%s %s %s\n" "$PPID" "$$" "$child"; wait' & wait`},
-			strings.NewReader(""), outputWrite, outputWrite)
-	}()
-	var leader, child, grandchild int
-	if _, err := fmt.Fscan(outputRead, &leader, &child, &grandchild); err != nil {
-		t.Fatal(err)
-	}
-	if leader <= 0 || child <= 0 || grandchild <= 0 || leader == child || child == grandchild {
-		t.Fatalf("invalid process tree %d -> %d -> %d", leader, child, grandchild)
-	}
-	if err := controlWrite.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if code := <-done; code != 125 {
-		t.Fatalf("watchdog exit = %d", code)
-	}
-	for _, pid := range []int{leader, child, grandchild} {
-		if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
-			t.Fatalf("delegate process %d survived producer death: %v", pid, err)
-		}
-	}
-}
-
-func TestExecutorCancellationTerminatesDelegateProcessGroup(t *testing.T) {
-	home := t.TempDir()
-	workdir := filepath.Join(home, "worktree")
-	if err := os.MkdirAll(filepath.Join(workdir, ".git"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	pidFile := filepath.Join(home, "delegate.pid")
-	script := filepath.Join(home, "delegate-helper")
-	scriptBody := "#!/bin/sh\nprintf '%s' \"$$\" > '" + pidFile + "'\nsleep 30 & wait\n"
-	if err := os.WriteFile(script, []byte(scriptBody), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	registry := map[string]any{"agents": []map[string]any{{
-		"name": "helper", "cli_kind": "generic", "cli_cmd": script,
-		"roles": []string{"code"},
-	}}}
-	body, _ := json.Marshal(registry)
-	if err := os.WriteFile(filepath.Join(home, "models.json"), body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	executor, err := NewRegistryExecutor(home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := delegatecontract.Invocation{Version: delegatecontract.WireVersion,
-		Role: "code", Persona: "engineer", Input: delegatecontract.TaskRequest("fixture", "work"), Workdir: workdir, Tools: true}
+func TestExecutorCancellationReachesCanonicalHost(t *testing.T) {
+	started := make(chan struct{})
+	executor, marker := hostFixture(t, "codex", hostCallFunc(func(ctx context.Context, _, _ uint32, _ uint64, _ time.Duration, _ []byte) ([]byte, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}))
 	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	done := make(chan delegatecontract.InvocationResult, 1)
-	go func() {
-		done <- executor.Execute(ctx, request)
-	}()
-	deadline := time.Now().Add(3 * time.Second)
-	var pid int
-	for pid == 0 && time.Now().Before(deadline) {
-		contents, readErr := os.ReadFile(pidFile)
-		if readErr == nil {
-			_, _ = fmt.Sscanf(string(contents), "%d", &pid)
-		}
-		if pid == 0 {
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	if pid == 0 {
-		t.Fatal("delegate process did not start")
+	go func() { done <- executor.Execute(ctx, nativeInvocation()) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("host did not start")
 	}
 	cancel()
 	select {
 	case result := <-done:
-		if result.Status != "failed" || strings.TrimSpace(result.Error) == "" ||
-			result.Termination == nil ||
-			result.Termination.Kind != delegatecontract.TerminationCancelled {
-			t.Fatalf("cancelled result = %+v", result)
+		if result.Status != "failed" || result.Termination == nil || result.Termination.Kind != delegatecontract.TerminationCancelled {
+			t.Fatalf("cancel result: %+v", result)
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("module call did not acknowledge cancellation")
+	case <-time.After(time.Second):
+		t.Fatal("host did not acknowledge cancellation")
 	}
-	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
-		t.Fatalf("delegate process %d survived module cancellation: %v", pid, err)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("cancellation launched a fallback process")
 	}
 }
 
 func TestRegistryExecutorExecutionDeadlineDiagnostic(t *testing.T) {
-	home := t.TempDir()
-	workdir := filepath.Join(home, "worktree")
-	if err := os.MkdirAll(filepath.Join(workdir, ".git"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	pidFile := filepath.Join(home, "deadline-pids")
-	script := filepath.Join(home, "deadline-helper")
-	scriptBody := "#!/bin/sh\nsleep 30 & child=$!\nprintf '%s %s' \"$$\" \"$child\" > '" +
-		pidFile + "'\nprintf '%s\\n' '{\"token\":\"deadline-secret\"}'\nwait\n"
-	if err := os.WriteFile(script, []byte(scriptBody), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	registry := map[string]any{"agents": []map[string]any{{
-		"name": "deadline", "cli_kind": "generic", "cli_cmd": script,
-		"roles": []string{"code"},
-	}}}
-	body, _ := json.Marshal(registry)
-	if err := os.WriteFile(filepath.Join(home, "models.json"), body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	executor, err := NewRegistryExecutor(home)
-	if err != nil {
-		t.Fatal(err)
-	}
+	executor, marker := hostFixture(t, "codex", hostCallFunc(func(ctx context.Context, _, _ uint32, _ uint64, _ time.Duration, _ []byte) ([]byte, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}))
 	ctx, cancel := context.WithTimeout(t.Context(), 75*time.Millisecond)
 	defer cancel()
-	result := executor.Execute(ctx, delegatecontract.Invocation{
-		Version: delegatecontract.WireVersion, Role: "code", Persona: "engineer",
-		Input: delegatecontract.TaskRequest("fixture", "wait"), Workdir: workdir, Tools: true, ExecutionTimeoutMS: 75,
-	})
-	if result.Status != "failed" || result.Termination == nil ||
-		result.Termination.Kind != delegatecontract.TerminationExecutionDeadline ||
-		result.Termination.ExecutionTimeoutMS != 75 || result.Termination.ElapsedMS <= 0 ||
-		!strings.Contains(result.Error, "aimee_err=execution_deadline") ||
-		strings.Contains(result.Termination.Detail, "deadline-secret") {
-		t.Fatalf("execution deadline result = %+v", result)
+	request := nativeInvocation()
+	request.ExecutionTimeoutMS = 75
+	result := executor.Execute(ctx, request)
+	if result.Status != "failed" || result.Termination == nil || result.Termination.Kind != delegatecontract.TerminationExecutionDeadline || result.Termination.ExecutionTimeoutMS != 75 || result.Termination.ElapsedMS <= 0 || !strings.Contains(result.Error, "aimee_err=execution_deadline") {
+		t.Fatalf("execution deadline result: %+v", result)
 	}
-	assertFixtureProcessesGone(t, pidFile)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("execution deadline launched a fallback process")
+	}
 }
 
-// A fresh normal server starts before any model is registered through setup.
-// The long-lived executor must discover that later authoritative registration.
 func TestRegistryExecutorFirstBootFindsNormalModelRegistration(t *testing.T) {
 	home := t.TempDir()
 	calls := 0

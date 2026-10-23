@@ -709,9 +709,6 @@ func main() {
 	if handled, code := providers.RunProbeWorker(os.Args); handled {
 		os.Exit(code)
 	}
-	if handled, code := delegates.RunWatchdog(os.Args); handled {
-		os.Exit(code)
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if len(os.Args) == 2 && os.Args[1] == "__aimee_postgres_local_session" {

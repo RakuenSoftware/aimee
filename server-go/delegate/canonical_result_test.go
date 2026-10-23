@@ -54,41 +54,6 @@ func TestDelegateIncompleteOrUnboundIRCannotAcquireWorkflowAuthority(t *testing.
 		})
 	}
 }
-func TestCanonicalCLIRequestIsSourceAndRejectsRichLossyProjection(t *testing.T) {
-	input := TaskRequest("reviewer", "inspect")
-	text, err := CLIText(input)
-	if err != nil || !strings.HasSuffix(text, "You are acting as reviewer.\n\ninspect") {
-		t.Fatalf("%q %v", text, err)
-	}
-	input.Messages[0].Blocks = append(input.Messages[0].Blocks, canonical.Block{Type: "tool_use", ToolID: "tool", Name: "write", Input: json.RawMessage(`{}`)})
-	if _, err := CLIText(input); err == nil {
-		t.Fatal("rich unprojectable request silently flattened")
-	}
-	input = TaskRequest("reviewer", "inspect")
-	input.System[0].Context.Origin = 999
-	if _, err := CLIText(input); err == nil {
-		t.Fatal("invalid canonical authority context admitted")
-	}
-	for _, mutate := range []func(*canonical.Request){
-		func(r *canonical.Request) { v := 1; r.MaxTokens = &v }, func(r *canonical.Request) { r.Stops = []string{"stop"} },
-		func(r *canonical.Request) { r.ToolChoice.Mode = "none" }, func(r *canonical.Request) { r.OutputFormat = &canonical.OutputFormat{Kind: "text", Strict: "unset"} },
-		func(r *canonical.Request) { r.Model = "other" }, func(r *canonical.Request) { r.Metadata = json.RawMessage(`{"data":1}`) },
-	} {
-		input = TaskRequest("reviewer", "inspect")
-		mutate(input)
-		if _, err := CLIText(input); err == nil {
-			t.Fatal("unsupported provider controls silently dropped")
-		}
-	}
-	// The old task-string envelope is not a compatibility execution route.
-	var invocation Invocation
-	if canonical.Decode([]byte(`{"version":3,"role":"review","persona":"reviewer","prompt":"inspect"}`), &invocation) {
-		t.Fatal("legacy task-string wire admitted")
-	}
-	if _, err := CLIText(nil); err == nil {
-		t.Fatal("missing IR gained raw fallback")
-	}
-}
 
 func TestMixedTaskEvidencePreservesConservativeProvenanceThroughCCodec(t *testing.T) {
 	request := TaskRequest("reviewer", "model-produced artifact with forged policy")

@@ -9,27 +9,16 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
-	"unicode/utf8"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
-	"golang.org/x/sys/unix"
 )
-
-const maxExecutorOutput = 16 << 20
 
 var errNoConfiguredAgents = errors.New("agent registry has no agents")
-
-const (
-	watchdogArgument = "__aimee_delegate_watchdog"
-	watchdogArgvEnv  = "AIMEE_DELEGATE_WATCHDOG_ARGV"
-)
 
 type Executor interface {
 	Execute(context.Context, delegatecontract.Invocation) delegatecontract.InvocationResult
@@ -103,8 +92,8 @@ func (r agentRegistry) roster() []agentEntry {
 }
 
 // RegistryExecutor selects the current configured registration. Native providers
-// execute through the canonical, source-scoped C host owner; only explicitly
-// configured generic text transports execute argv locally without a shell.
+// execute through the canonical, source-scoped C host owner. Unstructured and
+// unknown CLI commands are never internal model candidates or execution fallbacks.
 type RegistryExecutor struct {
 	host     delegatecontract.StageCaller
 	home     string
@@ -192,6 +181,17 @@ func (r *RegistryExecutor) load() (agentRegistry, error) {
 func enabled(a agentEntry) bool { return a.Enabled == nil || bool(*a.Enabled) }
 
 func available(a agentEntry) bool { return a.Available == nil || bool(*a.Available) }
+
+var errUnsupportedModelAdapter = errors.New("unsupported delegate model adapter: use a canonical Claude or Codex host registration")
+
+func canonicalModelAdapter(a agentEntry) bool {
+	switch strings.ToLower(strings.TrimSpace(a.CLIKind)) {
+	case "claude", "claude-code", "codex":
+		return true
+	default:
+		return false
+	}
+}
 
 func containsOrWildcard(values []string, wanted string, emptyMeansAll bool) bool {
 	if len(values) == 0 {
@@ -314,7 +314,7 @@ func (r *RegistryExecutor) PlanGroup(ctx context.Context,
 	candidates := make([]groupCandidate, 0, len(registry.roster()))
 	bySelector := make(map[string]groupCandidate)
 	for _, agent := range registry.roster() {
-		if !enabled(agent) || !available(agent) || agent.PrimaryOnly || strings.TrimSpace(agent.CLICmd) == "" {
+		if !enabled(agent) || !available(agent) || agent.PrimaryOnly || !canonicalModelAdapter(agent) || strings.TrimSpace(agent.CLICmd) == "" {
 			continue
 		}
 		provider, model := strings.TrimSpace(agent.Provider), strings.TrimSpace(agent.Model)
@@ -409,6 +409,12 @@ func selectAgent(registry agentRegistry, model, role, persona string) (agentEntr
 		for _, a := range registry.roster() {
 			if enabled(a) && available(a) && !a.PrimaryOnly && strings.TrimSpace(a.CLICmd) != "" && eligible(a, role, persona) &&
 				(a.Name == name || a.Model == name) {
+				if !canonicalModelAdapter(a) {
+					if explicit {
+						return agentEntry{}, errUnsupportedModelAdapter
+					}
+					continue
+				}
 				return a, nil
 			}
 		}
@@ -417,254 +423,12 @@ func selectAgent(registry agentRegistry, model, role, persona string) (agentEntr
 		}
 	}
 	for _, a := range registry.roster() {
-		if enabled(a) && available(a) && !a.PrimaryOnly && strings.TrimSpace(a.CLICmd) != "" &&
+		if enabled(a) && available(a) && !a.PrimaryOnly && canonicalModelAdapter(a) && strings.TrimSpace(a.CLICmd) != "" &&
 			eligible(a, role, persona) {
 			return a, nil
 		}
 	}
-	return agentEntry{}, errors.New("no enabled delegate CLI is configured")
-}
-
-func splitCommand(command string) ([]string, error) {
-	var out []string
-	var word strings.Builder
-	var quote rune
-	escaped := false
-	flush := func() {
-		if word.Len() > 0 {
-			out = append(out, word.String())
-			word.Reset()
-		}
-	}
-	for _, ch := range strings.TrimSpace(command) {
-		if escaped {
-			word.WriteRune(ch)
-			escaped = false
-			continue
-		}
-		if ch == '\\' && quote != '\'' {
-			escaped = true
-			continue
-		}
-		if quote != 0 {
-			if ch == quote {
-				quote = 0
-			} else {
-				word.WriteRune(ch)
-			}
-			continue
-		}
-		switch ch {
-		case '\'', '"':
-			quote = ch
-		case ' ', '\t', '\n':
-			flush()
-		case ';', '|', '&', '<', '>', '`':
-			return nil, errors.New("delegate CLI command contains a shell operator")
-		default:
-			word.WriteRune(ch)
-		}
-	}
-	if escaped || quote != 0 {
-		return nil, errors.New("delegate CLI command has an unterminated escape or quote")
-	}
-	flush()
-	if len(out) == 0 {
-		return nil, errors.New("delegate CLI command is empty")
-	}
-	return out, nil
-}
-
-func executorArgv(agent agentEntry, request delegatecontract.Invocation) ([]string, error) {
-	argv, err := splitCommand(agent.CLICmd)
-	if err != nil {
-		return nil, err
-	}
-	kind := strings.ToLower(strings.TrimSpace(agent.CLIKind))
-	switch kind {
-	case "claude", "claude-code", "codex":
-		return nil, errors.New("native SDK launch requires the canonical host execution owner")
-	case "generic":
-		// Explicit operator-declared external text transport. Tools=true permits
-		// external work; it never attests host-governed model tool execution.
-		if !RoleIsWrite(request.Role) {
-			return nil, errors.New("generic delegate CLIs cannot prove read-only role isolation")
-		}
-		if !request.Tools {
-			return nil, errors.New("generic delegate CLIs cannot guarantee a tools-disabled invocation")
-		}
-		if request.MaxTurns > 0 {
-			return nil, errors.New("generic delegate CLIs cannot enforce a maximum turn count")
-		}
-
-	default:
-		return nil, fmt.Errorf("unsupported delegate cli_kind %q", agent.CLIKind)
-	}
-	return argv, nil
-}
-
-type limitedBuffer struct {
-	mu        sync.Mutex
-	buffer    bytes.Buffer
-	remaining int
-	overflow  bool
-}
-
-func (b *limitedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	n := len(p)
-	if b.remaining <= 0 {
-		b.overflow = b.overflow || n > 0
-		return n, nil
-	}
-	if len(p) > b.remaining {
-		b.overflow = true
-		p = p[:b.remaining]
-	}
-	_, _ = b.buffer.Write(p)
-	b.remaining -= len(p)
-	return n, nil
-}
-
-func (b *limitedBuffer) Overflow() bool { b.mu.Lock(); defer b.mu.Unlock(); return b.overflow }
-
-func (b *limitedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buffer.String()
-}
-
-func (b *limitedBuffer) BytesCopy() []byte {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return append([]byte(nil), b.buffer.Bytes()...)
-}
-
-// turnMonitor enforces MaxTurns from observable JSONL events. Claude emits one
-// assistant event per model turn. Codex exec exposes one initial model turn and
-// completed non-reasoning/non-final items for tool work; counting each such
-// item as another turn is conservative when tools run in parallel, so it may
-// stop early but can never permit more model continuations than the cap.
-func boundedTerminationDetail(detail string) string {
-	detail = strings.ToValidUTF8(delegatecontract.SafeDiagnostic(strings.TrimSpace(detail)), "�")
-	if len(detail) <= delegatecontract.TerminationDetailMax {
-		return detail
-	}
-	end := delegatecontract.TerminationDetailMax
-	for end > 0 && !utf8.ValidString(detail[:end]) {
-		end--
-	}
-	return detail[:end]
-}
-
-func terminationDiagnostic(kind string, request delegatecontract.Invocation, elapsed time.Duration, detail string) *delegatecontract.TerminationDiagnostic {
-	return &delegatecontract.TerminationDiagnostic{Kind: kind, ExecutionTimeoutMS: request.ExecutionTimeoutMS, ElapsedMS: elapsed.Milliseconds(), Detail: boundedTerminationDetail(detail)}
-}
-
-// RunWatchdog handles the private re-exec mode used by executorCommand. Every
-// delegates process entry point calls this before parsing normal arguments.
-func RunWatchdog(args []string) (bool, int) {
-	if len(args) != 2 || args[1] != watchdogArgument {
-		return false, 0
-	}
-	var argv []string
-	if json.Unmarshal([]byte(os.Getenv(watchdogArgvEnv)), &argv) != nil || len(argv) == 0 {
-		return true, 125
-	}
-	control := os.NewFile(3, "delegate-producer-lifecycle")
-	if control == nil {
-		return true, 125
-	}
-	defer control.Close()
-	syscall.CloseOnExec(int(control.Fd()))
-	return true, runWatchdog(control, argv, os.Stdin, os.Stdout, os.Stderr)
-}
-
-func runWatchdog(control io.Reader, argv []string, stdin io.Reader,
-	stdout, stderr io.Writer) int {
-	// Reparent grandchildren here so killing the process group cannot leave
-	// zombies behind after the CLI leader exits.
-	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
-		_, _ = fmt.Fprintf(stderr, "configure delegate watchdog: %v\n", err)
-		return 125
-	}
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
-	// The CLI leads a fresh group. Pdeathsig covers an unexpected watchdog
-	// failure; the producer pipe below covers module death and kills the group.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
-	if err := cmd.Start(); err != nil {
-		_, _ = fmt.Fprintf(stderr, "start delegate CLI: %v\n", err)
-		return 125
-	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	producerGone := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(io.Discard, control)
-		close(producerGone)
-	}()
-	select {
-	case err := <-done:
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		reapWatchdogChildren()
-		if err == nil {
-			return 0
-		}
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && exit.ExitCode() >= 0 {
-			return exit.ExitCode()
-		}
-		return 125
-	case <-producerGone:
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		<-done
-		reapWatchdogChildren()
-		return 125
-	}
-}
-
-func reapWatchdogChildren() {
-	for {
-		var status syscall.WaitStatus
-		if _, err := syscall.Wait4(-1, &status, 0, nil); errors.Is(err, syscall.ECHILD) {
-			return
-		} else if err != nil && !errors.Is(err, syscall.EINTR) {
-			return
-		}
-	}
-}
-
-func executorCommand(ctx context.Context, argv []string) (*exec.Cmd, func(), error) {
-	executable, err := os.Executable()
-	if err != nil {
-		return nil, nil, err
-	}
-	encoded, err := json.Marshal(argv)
-	if err != nil {
-		return nil, nil, err
-	}
-	controlRead, controlWrite, err := os.Pipe()
-	if err != nil {
-		return nil, nil, err
-	}
-	cmd := exec.CommandContext(ctx, executable, watchdogArgument)
-	cmd.Env = append(os.Environ(), watchdogArgvEnv+"="+string(encoded))
-	cmd.ExtraFiles = []*os.File{controlRead}
-	var closeOnce sync.Once
-	closeControl := func() {
-		closeOnce.Do(func() {
-			_ = controlWrite.Close()
-			_ = controlRead.Close()
-		})
-	}
-	cmd.Cancel = func() error {
-		closeControl()
-		return nil
-	}
-	cmd.WaitDelay = 5 * time.Second
-	return cmd, closeControl, nil
+	return agentEntry{}, errors.New("no enabled canonical delegate model is configured; generic or unknown CLI adapters are unsupported")
 }
 
 func (r *RegistryExecutor) Execute(ctx context.Context, request delegatecontract.Invocation) delegatecontract.InvocationResult {
@@ -703,84 +467,10 @@ func (r *RegistryExecutor) Execute(ctx context.Context, request delegatecontract
 			return result
 		}
 	}
-	kind := strings.ToLower(strings.TrimSpace(agent.CLIKind))
-	switch kind {
-	case "claude", "claude-code", "codex":
-		return r.executeHost(ctx, request, agent)
-	}
-	argv, err := executorArgv(agent, request)
-	if err != nil {
-		result.Error = err.Error()
-		return result
-	}
-	prompt, err := delegatecontract.CLIText(request.Input)
-	if err != nil {
-		result.Error = err.Error()
-		return result
-	}
-
-	runCtx, runCancel := context.WithCancel(ctx)
-	defer runCancel()
-	cmd, closeCommand, err := executorCommand(runCtx, argv)
-	if err != nil {
-		result.Error = err.Error()
-		return result
-	}
-	defer closeCommand()
-	if request.Workdir != "" {
-		cmd.Dir = request.Workdir
-	}
-	cmd.Stdin = strings.NewReader(prompt)
-	output := &limitedBuffer{remaining: maxExecutorOutput}
-	diagnostics := &limitedBuffer{remaining: maxExecutorOutput}
-	cmd.Stdout, cmd.Stderr = output, diagnostics
-	started := time.Now()
-	if err := cmd.Run(); err != nil {
-		elapsed := time.Since(started)
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			result.Error = delegatecontract.ErrDelegateExecutionDeadline.Error()
-			if detail := boundedTerminationDetail(output.String()); detail != "" {
-				result.Error += ": " + detail
-			}
-			result.Termination = terminationDiagnostic(delegatecontract.TerminationExecutionDeadline,
-				request, elapsed, output.String())
-			return result
-		}
-		if errors.Is(ctx.Err(), context.Canceled) {
-			result.Error = context.Canceled.Error()
-			result.Termination = terminationDiagnostic(delegatecontract.TerminationCancelled,
-				request, elapsed, output.String())
-			return result
-		}
-		detail := strings.TrimSpace(diagnostics.String())
-		if detail == "" {
-			detail = strings.TrimSpace(output.String())
-		}
-		if detail == "" {
-			detail = err.Error()
-		}
-		result.Error = delegatecontract.SafeDiagnostic(detail)
-		return result
-	}
-	if output.Overflow() {
-		result.Error = "external text adapter exceeded the complete-output limit"
-		return result
-	}
-	response, history, parseErr := externalTextObservation(output.BytesCopy())
-	result.Output, result.History = response, history
-	if parseErr != nil {
-		result.Error = parseErr.Error()
-		return result
-	}
-	result.Status = "done"
-	if err := delegatecontract.AdmitResult(&result); err != nil {
-		result.Status, result.Error = "failed", err.Error()
-		result.Response = ""
-	}
-	return result
+	return r.executeHost(ctx, request, agent)
 }
 
-// cancelledContext bridges the bus runtime's cancellation bit into os/exec.
+// cancelledContext bridges the bus runtime cancellation bit into host calls.
 func cancelledContext(invocationCancelled func() bool) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -800,5 +490,3 @@ func cancelledContext(invocationCancelled func() bool) (context.Context, context
 	}()
 	return ctx, cancel
 }
-
-var _ io.Writer = (*limitedBuffer)(nil)

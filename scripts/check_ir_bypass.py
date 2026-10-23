@@ -16,6 +16,7 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "externalTextObservation", "CLIText", "RunWatchdog",
     "shadow_mirror_dispatch",
     "kb_curator_sidecar_run", "kb_curator_shell_quote", "kb_curator_describe_wait_status",
     "kb_curator_append_sidecar_error", "kb_curator_pick_sidecar_command",
@@ -56,6 +57,7 @@ RETIRED = (
     "anthropic_stream_get_usage", "anthropic_stream_free", "emit_message_as_sse",
 )
 RULES = {
+    "delegate-model-bypass": re.compile(r"\b(?:exec\.Command(?:Context)?|[A-Za-z_]\w*\.TextResponse)\s*\("),
     "model-command-bypass": re.compile(r"\b(?:platform_exec_pipe|kb_curator_sidecar_run|popen)\s*\("),
     "legacy-transcript-write": re.compile(r"\bdb1_primary_session_save\s*\("),
     "legacy-session-search": re.compile(r"\bdb1_primary_session_(?:alloc_search|alloc_recent|get_latest)\b|\b(?:FROM|JOIN)\s+primary_sessions\b", re.IGNORECASE),
@@ -158,6 +160,8 @@ def findings(root: Path) -> list[dict]:
         history_spans = (profile_function_spans(source, {"message_history_repair"})
                          if relative == "src/server/agent_bridge.c" else [])
         for rule, pattern in RULES.items():
+            if rule == "delegate-model-bypass" and Path(relative).parent.as_posix() != "server-go/modules/delegates":
+                continue
             if rule == "model-command-bypass" and relative not in CANONICAL_MODEL_FILES:
                 continue
             if rule == "legacy-transcript-write" and relative not in {

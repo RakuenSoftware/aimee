@@ -17,6 +17,19 @@ are historical. Do not investigate or change `.100`; validation uses the owned
 
 ### Full internal conversion in progress: 23 October 2026
 
+Generic and unknown CLI registrations are no longer eligible for internal model
+planning or execution. The delegate registry accepts Claude/Codex native aliases
+only through the authenticated canonical host bridge; unsupported registrations
+fail before command execution or workspace processing. Arbitrary stdout and exit
+status cannot manufacture a model response, terminal reason, or child history.
+The external-text adapter and its private command watchdog are retired. Existing
+classic C HTTP model delegation and explicit nonmodel domain/tool command
+protocols remain separate boundaries. Regression fixtures exercise the actual
+registry, including a write-role/tools-enabled/unbounded command that must never
+create its marker, and canonical-host capacity, deadline, cancellation and
+turn-cap handling.
+
+
 The active goal is **full internal canonical IR conversion**, including model
 requests, results, streams, histories, native execution, delegates, workflows,
 curation and learning synthesis. Browser acceptance alone does not complete it.
