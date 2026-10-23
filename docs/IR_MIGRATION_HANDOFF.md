@@ -280,6 +280,12 @@ patch, extra PR or default-branch mutation is used. Source/authority/cache seals
 confirm no service model ran. A new qualified image and actual service-trigger
 execution remain required.
 
+The complete server-Go race suite passes with this new config pin. Its first
+attempt failed while compiling in the local tmpfs quota; the retained retry uses
+an exclusive short filesystem-backed temporary root and passes. Public Go proxy
+resolution independently returns the exact immutable owner revision; neither
+result is a hosted-CI claim.
+
 Standalone real-PG workflow control passes 32/32 and lifecycle passes 23/23.
 Coexistence exposed a test-oracle connection defect: libpq treats PGDATABASE's
 value as a literal database name, rather than expanding a whole URI. The test-only
@@ -303,6 +309,24 @@ retained, so a backend cause is not established. A reproducible frontend gap
 allows new model sends after a history failure despite hidden controls. Its
 repair must preserve the draft and block dispatch until explicit reconnect
 finishes validated canonical replay, without automatic resend or stale controls.
+
+The remaining-consumer audit also finds and repairs a live shadow ingress bypass:
+the old HTTP dispatcher copied raw completion bodies before canonical admission.
+Runtime-armed shadow delivery now captures the real owner's admitted inbound IR
+once, before local policy mutation, and dispatches only after local preparation
+succeeds. The peer receives a faithful external rendering and applies its own
+ingress policy; local policy is not duplicated. Unsupported options, local
+checkpoint references and lossy opaque/cache projections drop the optional mirror
+instead of flattening or forwarding ignored fields. Disabled publishing has no
+clone/render cost. Scope cleanup covers every HTTP exit and keep-alive request;
+internal model calls cannot inherit or consume another request's snapshot.
+HTTP 2xx counts only successful delivery, never model or tool success. Atomic
+allocation failures cannot omit a model limit and dispatch a changed request.
+The old implementation reproduces the invalid-request delivery failure. Six
+registered native fixtures pass normally and under ASan/UBSan/leak checking,
+including actual OpenAI admission/preparation, three Anthropic paths and terminal
+handling; the bypass gate and 22 mutation tests pass. Full combined-source
+qualification remains required.
 
 Honest server-triggered native execution, question/permission replies, native
 tool effects and final browser acceptance remain outstanding.

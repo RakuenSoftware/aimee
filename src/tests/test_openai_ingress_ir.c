@@ -1,6 +1,85 @@
 /* Actual HTTP ingress request assembly cannot bypass canonical admission. */
 #include "../server/openai_chat.c"
 #include <assert.h>
+#include <stdatomic.h>
+static atomic_int shadow_deliveries;
+static char shadow_body[2048];
+int agent_http_post(const char *url, const char *auth, const char *body, char **response,
+                    int timeout, const char *headers)
+{
+   (void)url;
+   (void)auth;
+   (void)timeout;
+   assert(headers && strstr(headers, "X-Aimee-Shadow"));
+   snprintf(shadow_body, sizeof shadow_body, "%s", body);
+   *response = NULL;
+   atomic_fetch_add_explicit(&shadow_deliveries, 1, memory_order_release);
+   return 200;
+}
+int agent_request_max_tokens(const agent_t *agent, int requested)
+{
+   (void)agent;
+   return requested > 0 ? requested : 64;
+}
+int gateway_policy_apply_ir(aimee_request_t *request)
+{
+   (void)request;
+   return 0;
+}
+void router_advise_ir(const aimee_request_t *request)
+{
+   (void)request;
+}
+char *gw_ir_request_tool_system_prompt(const aimee_request_t *request, const char *base)
+{
+   (void)request;
+   (void)base;
+   return strdup("LOCAL_ONLY_POLICY");
+}
+char *gw_ir_request_completion_system_prompt(const aimee_request_t *request, const char *base)
+{
+   (void)request;
+   (void)base;
+   return NULL;
+}
+static void test_actual_admission_preparation_mirror(void)
+{
+   shadow_mirror_reset();
+   shadow_mirror_set_armed(1);
+   assert(!shadow_mirror_subscribe("https://shadow.invalid", "dummy"));
+   const char *bad[] = {"{}", "{\"model\":\"a\",\"model\":\"b\",\"messages\":[]}",
+                        "{\"messages\":[{\"role\":\"user\",\"content\":\"x\"}],\"tool_choice\":{"
+                        "\"type\":\"unknown\"}}"};
+   for (size_t i = 0; i < sizeof bad / sizeof *bad; i++)
+   {
+      shadow_mirror_begin_request("/v1/chat/completions", 0);
+      aimee_request_t request = {0};
+      char error[128];
+      assert(openai_admit_completion(bad[i], 1, &request, error, sizeof error));
+      shadow_mirror_dispatch_admitted(&request);
+      shadow_mirror_end_request();
+      aimee_request_free(&request);
+   }
+   assert(!atomic_load(&shadow_deliveries));
+   const char *body =
+       "{\"model\":\"incoming-alias\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+   shadow_mirror_begin_request("/v1/chat/completions", 0);
+   aimee_request_t request = {0};
+   char error[128];
+   assert(!openai_admit_completion(body, 1, &request, error, sizeof error));
+   agent_t selected = {0};
+   snprintf(selected.model, sizeof selected.model, "%s", "local-model");
+   assert(!openai_prepare_ir_request(&request, &selected, 64, .3, 0));
+   for (int i = 0; i < 200 && !atomic_load_explicit(&shadow_deliveries, memory_order_acquire); i++)
+      usleep(10000);
+   assert(atomic_load(&shadow_deliveries) == 1);
+   assert(!strcmp(shadow_body, body));
+   assert(request.n_system && strstr(request.system[0].text, "LOCAL_ONLY_POLICY"));
+   shadow_mirror_dispatch_admitted(&request);
+   shadow_mirror_end_request();
+   aimee_request_free(&request);
+   shadow_mirror_reset();
+}
 void ir_seam_test_memory(int enabled);
 int ir_seam_test_plan_calls(const char *phase);
 /* This fixture has no stored previous-response checkpoint. Owned profiles
@@ -215,7 +294,20 @@ static void test_tool_free_admission_and_text_entry(void)
        "{\"model\":\"named-agent\",\"prompt\":\"raw prompt\",\"max_tokens\":77,"
        "\"temperature\":0.2,\"top_p\":0.9,\"top_k\":7,\"stream\":true,\"stop\":[\"STOP\",\"END\"]}";
    assert(!openai_admit_completion(text, 0, &request, error, sizeof error));
-   assert(!request.raw && !request.raw_bytes && request.n_messages == 1 && request.n_system == 0);
+   assert(request.raw && !request.raw_bytes && request.frontend == AIMEE_WIRE_UNKNOWN &&
+          request.n_messages == 1 && request.n_system == 0);
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(request.raw, "prompt")), "raw prompt"));
+   aimee_request_t clone = {0}, decoded = {0};
+   assert(!aimee_ir_request_clone(&request, &clone));
+   assert(clone.raw != request.raw && cJSON_Compare(clone.raw, request.raw, 1));
+   cJSON *envelope = aimee_ir_request_json(&request);
+   assert(envelope && !aimee_ir_request_parse(envelope, &decoded));
+   /* Public canonical envelopes intentionally omit whole-wire private
+    * sidecars; every modeled legacy control still survives unchanged. */
+   assert(!decoded.raw && !decoded.raw_bytes && aimee_ir_request_wire_equal(&decoded, &request));
+   cJSON_Delete(envelope);
+   aimee_request_free(&decoded);
+   aimee_request_free(&clone);
    assert(!strcmp(request.messages[0].blocks[0].text, "raw prompt"));
    assert(request.stream && request.max_tokens == 77 && request.temperature == 0.2 &&
           request.top_p == 0.9 && request.top_k == 7);
@@ -439,6 +531,7 @@ static void test_cache_configuration_at_actual_ingress(void)
 
 int main(void)
 {
+   test_actual_admission_preparation_mirror();
    test_cache_configuration_at_actual_ingress();
    test_restored_history_rechecks_native_provenance();
    test_responses_run_input_controls();

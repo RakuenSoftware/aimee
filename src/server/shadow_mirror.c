@@ -3,6 +3,8 @@
 
 #include "shadow_mirror.h"
 
+#include <aimee/translation/aimee_backend.h>
+#include "cJSON.h"
 #include "agent_exec.h" /* agent_http_post */
 #include "log.h"
 
@@ -184,8 +186,8 @@ static void *mirror_send_thread(void *arg)
    int rc = agent_http_post(j->url, j->auth, j->body, &resp, SHADOW_MIRROR_TIMEOUT_MS,
                             "X-Aimee-Shadow: 1\r\n");
    free(resp); /* the subscriber's reply is deliberately discarded */
-   record_delivery(j->base_url, rc == 0);
-   if (rc != 0)
+   record_delivery(j->base_url, rc >= 200 && rc < 300);
+   if (rc < 200 || rc >= 300)
       LOG_DEBUG("shadow.mirror", "delivery to %s failed (rc=%d)", j->base_url, rc);
    mirror_job_free(j);
    __atomic_fetch_sub(&g_inflight, 1, __ATOMIC_RELAXED);
@@ -229,7 +231,7 @@ static void deliver_one(const shadow_sub_t *sub, const char *path, const char *b
       memcpy(j->body, body, (size_t)body_len);
       j->body[body_len] = '\0';
    }
-   if (!j->url || !j->body || !j->base_url)
+   if (!j->url || !j->body || !j->base_url || (sub->bearer[0] && !j->auth))
    {
       mirror_job_free(j);
       __atomic_fetch_sub(&g_inflight, 1, __ATOMIC_RELAXED);
@@ -251,18 +253,242 @@ static void deliver_one(const shadow_sub_t *sub, const char *path, const char *b
    __atomic_fetch_add(&g_sent, 1, __ATOMIC_RELAXED);
 }
 
-void shadow_mirror_dispatch(const char *path, const char *body, int body_len, int is_shadow_inbound)
+typedef struct
 {
-   /* Loop guard: never mirror a request that is itself a mirror. */
-   if (is_shadow_inbound)
-      return;
-   if (!shadow_mirror_is_mirrorable_path(path) || !body || body_len <= 0)
-      return;
-   if (!shadow_mirror_publish_enabled())
-      return;
+   const char *path; /* one of the constant endpoint names below */
+   int captured;
+   const aimee_request_t *owner; /* borrowed identity only, never dereferenced after capture */
+   aimee_request_t request;
+} mirror_scope_t;
+static _Thread_local mirror_scope_t g_scope;
 
-   /* Snapshot subscribers under the lock, then deliver outside it: a delivery
-    * blocks for the whole peer turn and must not hold the registry lock. */
+void shadow_mirror_end_request(void)
+{
+   aimee_request_free(&g_scope.request);
+   memset(&g_scope, 0, sizeof g_scope);
+}
+void shadow_mirror_begin_request(const char *path, int is_shadow_inbound)
+{
+   shadow_mirror_end_request();
+   if (!path || is_shadow_inbound || !shadow_mirror_publish_enabled() ||
+       !shadow_mirror_subscriber_count())
+      return;
+   static const char *const paths[] = {"/v1/messages", "/v1/chat/completions", "/v1/completions",
+                                       "/v1/responses"};
+   for (size_t i = 0; i < sizeof paths / sizeof *paths; i++)
+      if (!strcmp(path, paths[i]))
+         g_scope.path = paths[i];
+}
+void shadow_mirror_capture_request(const aimee_request_t *request)
+{
+   if (!g_scope.path || g_scope.captured || !shadow_mirror_publish_enabled() ||
+       !shadow_mirror_subscriber_count())
+      return;
+   /* A nested producer cannot replace the actual ingress snapshot. */
+   g_scope.captured = 1;
+   g_scope.owner = request;
+   if (!request || !request->n_messages || aimee_ir_request_admit(request) ||
+       aimee_ir_request_clone(request, &g_scope.request))
+   {
+      g_scope.path = NULL;
+      __atomic_fetch_add(&g_dropped, 1, __ATOMIC_RELAXED);
+   }
+}
+
+static char *mirror_text_request(const aimee_request_t *request);
+/* Unknown top-level native controls are not shadow execution authority. Native
+ * block/tool companions remain owned by the translation codec and raw sidecar;
+ * semantic replay comparison, not copying an incoming body, renders them. */
+static int mirror_fields_supported(const aimee_request_t *request, int legacy)
+{
+   static const char *const chat[] = {"model",
+                                      "messages",
+                                      "max_tokens",
+                                      "temperature",
+                                      "top_p",
+                                      "top_k",
+                                      "stream",
+                                      "stop",
+                                      "tools",
+                                      "tool_choice",
+                                      "parallel_tool_calls",
+                                      "metadata",
+                                      "reasoning_effort",
+                                      "response_format",
+                                      "prompt_cache_key",
+                                      "prompt_cache_retention",
+                                      "prompt_cache_options",
+                                      "min_p",
+                                      "repeat_penalty"};
+   static const char *const anthropic[] = {
+       "model",       "messages", "system",   "max_tokens",     "temperature",
+       "top_p",       "top_k",    "stream",   "stop_sequences", "tools",
+       "tool_choice", "metadata", "thinking", "service_tier",   "output_config"};
+   static const char *const responses[] = {"model",
+                                           "input",
+                                           "instructions",
+                                           "max_output_tokens",
+                                           "temperature",
+                                           "top_p",
+                                           "stream",
+                                           "tools",
+                                           "tool_choice",
+                                           "parallel_tool_calls",
+                                           "metadata",
+                                           "reasoning",
+                                           "text",
+                                           "prompt_cache_key",
+                                           "prompt_cache_retention",
+                                           "prompt_cache_options",
+                                           "store",
+                                           "include"};
+   static const char *const text[] = {"model",    "prompt", "max_tokens", "temperature",
+                                      "top_p",    "top_k",  "stream",     "stop",
+                                      "metadata", "n",      "best_of",    "echo"};
+   const char *const *keys = text;
+   size_t count = sizeof text / sizeof *text;
+   if (!legacy && request->frontend == AIMEE_WIRE_ANTHROPIC)
+   {
+      keys = anthropic;
+      count = sizeof anthropic / sizeof *anthropic;
+   }
+   else if (!legacy && request->frontend == AIMEE_WIRE_RESPONSES)
+   {
+      keys = responses;
+      count = sizeof responses / sizeof *responses;
+   }
+   else if (!legacy)
+   {
+      keys = chat;
+      count = sizeof chat / sizeof *chat;
+   }
+   if (!request->raw)
+      return 1;
+   if (!cJSON_IsObject(request->raw) || !aimee_ir_json_unique(request->raw))
+      return 0;
+   const cJSON *entry;
+   cJSON_ArrayForEach(entry, request->raw)
+   {
+      int known = 0;
+      for (size_t i = 0; entry->string && i < count; i++)
+         known |= !strcmp(entry->string, keys[i]);
+      if (!known)
+         return 0;
+   }
+   char *legacy_body = legacy ? mirror_text_request(request) : NULL;
+   cJSON *canonical = legacy                                      ? cJSON_Parse(legacy_body)
+                      : request->frontend == AIMEE_WIRE_ANTHROPIC ? anthropic_backend_build(request)
+                      : request->frontend == AIMEE_WIRE_RESPONSES ? responses_backend_build(request)
+                                                                  : openai_backend_build(request);
+   free(legacy_body);
+   if (!canonical)
+      return 0;
+   int faithful = 1;
+   cJSON_ArrayForEach(entry, request->raw)
+   {
+      /* Content is normalized by its codec; the IR owns its block structure and
+       * native companions. Scalars/options must not be silently ignored/coerced. */
+      if (!strcmp(entry->string, "messages") || !strcmp(entry->string, "tools") ||
+          !strcmp(entry->string, "input") || !strcmp(entry->string, "instructions") ||
+          !strcmp(entry->string, "system") || !strcmp(entry->string, "prompt"))
+         continue;
+      if (legacy && ((!strcmp(entry->string, "n") || !strcmp(entry->string, "best_of")) &&
+                     cJSON_IsNumber(entry) && entry->valuedouble == 1))
+         continue;
+      if (legacy && !strcmp(entry->string, "echo") && cJSON_IsFalse(entry))
+         continue;
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(canonical, entry->string);
+      if (cJSON_IsNull(entry) && (!value || cJSON_IsNull(value) ||
+                                  (!strcmp(entry->string, "stream") && cJSON_IsFalse(value))))
+         continue;
+      if (!strcmp(entry->string, "stop") && cJSON_IsString(entry) && cJSON_IsArray(value) &&
+          cJSON_GetArraySize(value) == 1 && cJSON_Compare(entry, cJSON_GetArrayItem(value, 0), 1))
+         continue;
+      if (!value && !strcmp(entry->string, "stream") && cJSON_IsFalse(entry))
+         continue;
+      if (!value || !cJSON_Compare(entry, value, 1))
+         faithful = 0;
+   }
+   cJSON_Delete(canonical);
+   return faithful;
+}
+static int mirror_add(cJSON *object, const char *key, cJSON *value)
+{
+   if (value && cJSON_AddItemToObject(object, key, value))
+      return 1;
+   cJSON_Delete(value);
+   return 0;
+}
+static char *mirror_text_request(const aimee_request_t *request)
+{
+   if (request->n_system || request->n_messages != 1 || request->n_tools ||
+       strcmp(request->messages[0].role, "user") || request->messages[0].n_blocks != 1 ||
+       request->messages[0].blocks[0].type != AIMEE_BLK_TEXT)
+      return NULL;
+   cJSON *out = cJSON_CreateObject();
+   if (!out || !cJSON_AddStringToObject(out, "prompt", request->messages[0].blocks[0].text) ||
+       (request->model && !cJSON_AddStringToObject(out, "model", request->model)) ||
+       (request->has_max_tokens &&
+        !cJSON_AddNumberToObject(out, "max_tokens", request->max_tokens)) ||
+       (request->has_temperature &&
+        !cJSON_AddNumberToObject(out, "temperature", request->temperature)) ||
+       (request->has_top_p && !cJSON_AddNumberToObject(out, "top_p", request->top_p)) ||
+       (request->has_top_k && !cJSON_AddNumberToObject(out, "top_k", request->top_k)) ||
+       !cJSON_AddBoolToObject(out, "stream", request->stream) ||
+       (request->metadata && !mirror_add(out, "metadata", cJSON_Duplicate(request->metadata, 1))))
+      goto failed;
+   if (request->n_stop)
+   {
+      cJSON *stop = cJSON_CreateArray();
+      if (!mirror_add(out, "stop", stop))
+         goto failed;
+      for (int i = 0; i < request->n_stop; i++)
+      {
+         cJSON *item = cJSON_CreateString(request->stop_sequences[i]);
+         if (!item || !cJSON_AddItemToArray(stop, item))
+         {
+            cJSON_Delete(item);
+            goto failed;
+         }
+      }
+   }
+   char *body = cJSON_PrintUnformatted(out);
+   cJSON_Delete(out);
+   return body;
+failed:
+   cJSON_Delete(out);
+   return NULL;
+}
+
+void shadow_mirror_dispatch_admitted(const aimee_request_t *owner)
+{
+   if (!g_scope.path || !g_scope.captured || owner != g_scope.owner ||
+       aimee_ir_request_admit(owner))
+      return;
+   const char *path = g_scope.path;
+   g_scope.path = NULL; /* once, before any nested producer or delivery */
+   aimee_request_t *request = &g_scope.request;
+   int legacy = !strcmp(path, "/v1/completions");
+   char *body = NULL;
+   if (shadow_mirror_publish_enabled() && !aimee_ir_request_admit(request) &&
+       mirror_fields_supported(request, legacy))
+   {
+      aimee_wire_t wire = !strcmp(path, "/v1/messages")    ? AIMEE_WIRE_ANTHROPIC
+                          : !strcmp(path, "/v1/responses") ? AIMEE_WIRE_RESPONSES
+                                                           : AIMEE_WIRE_OPENAI_CHAT;
+      aimee_wire_projection_report_t projection = {0};
+      if (!legacy)
+         aimee_backend_projection_report(request, wire, &projection);
+      if (!projection.omitted_reasoning_blocks && !projection.omitted_opaque_state_blocks &&
+          !projection.omitted_cache_controls)
+         body = legacy ? mirror_text_request(request) : aimee_backend_render_wire(request, wire);
+   }
+   if (!body)
+   {
+      __atomic_fetch_add(&g_dropped, 1, __ATOMIC_RELAXED);
+      aimee_request_free(request);
+      return;
+   }
    shadow_sub_t snap[SHADOW_MIRROR_MAX_SUBS];
    int n = 0;
    pthread_mutex_lock(&g_lock);
@@ -270,9 +496,10 @@ void shadow_mirror_dispatch(const char *path, const char *body, int body_len, in
       if (g_subs[i].used)
          snap[n++] = g_subs[i];
    pthread_mutex_unlock(&g_lock);
-
    for (int i = 0; i < n; i++)
-      deliver_one(&snap[i], path, body, body_len);
+      deliver_one(&snap[i], path, body, (int)strlen(body));
+   free(body);
+   aimee_request_free(request);
 }
 
 long shadow_mirror_sent_count(void)
@@ -290,6 +517,7 @@ long shadow_mirror_pruned_count(void)
 
 void shadow_mirror_reset(void)
 {
+   shadow_mirror_end_request();
    __atomic_store_n(&g_armed, 0, __ATOMIC_RELAXED);
    pthread_mutex_lock(&g_lock);
    memset(g_subs, 0, sizeof(g_subs));

@@ -744,6 +744,11 @@ int aimee_frontend_parse_text_completion(const char *body, size_t length, aimee_
             goto invalid;
       }
    }
+   /* Owned input sidecar for explicit external replay/representation checks.
+    * This legacy wire has no native-byte fast path and is never Chat history. */
+   out->raw = cJSON_Duplicate(root, 1);
+   if (!out->raw)
+      goto invalid;
    cJSON_Delete(root);
    return 0;
 invalid:

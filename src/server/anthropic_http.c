@@ -15,6 +15,7 @@
  * reply back into Anthropic shape. The client owns system/messages/tools and
  * executes tools itself. */
 #include "aimee.h" /* size macros for agent_types.h */
+#include "shadow_mirror.h"
 #include "agent_config.h"
 #include "aimee_errors.h"
 #include "agent_exec.h"
@@ -484,6 +485,7 @@ static int messages_prepare_request(const char *frame, const agent_t *agent, int
                                  error, capacity) ||
        aimee_ir_request_admit(request))
       return -1;
+   shadow_mirror_capture_request(request);
    if (messages_resolve_model(request, agent, parity))
       return -1;
    if (!parity)
@@ -672,6 +674,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
       status = write_error(resp, cap, 500, "api_error", "invalid canonical economizer history", 0);
       goto cleanup;
    }
+   shadow_mirror_dispatch_admitted(&policy);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        native_beta_url(url, sizeof url, parity) ||
        agent_resolve_auth_headers(ag, auth, sizeof auth, extra, sizeof extra) != 0)
@@ -1321,6 +1324,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       stream_status = 400;
       goto cleanup;
    }
+   shadow_mirror_dispatch_admitted(&policy);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        native_beta_url(url, sizeof url, parity) ||
        agent_resolve_auth_headers(ag, auth, sizeof auth, extra, sizeof extra) != 0)

@@ -1363,7 +1363,7 @@ int http_header(const char *buf, const char *name, char *out, size_t n)
    return 0;
 }
 
-void handle_conn(int fd, int is_tcp, int is_management)
+static void handle_conn_impl(int fd, int is_tcp, int is_management)
 {
    server_http_keepalive_set(0);
    server_http_gzip_set(0);
@@ -1968,7 +1968,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
    {
       char shadow_hdr[8] = "";
       int inbound_is_shadow = http_header(buf, "X-Aimee-Shadow", shadow_hdr, sizeof shadow_hdr);
-      shadow_mirror_dispatch(path, body, body_len, inbound_is_shadow);
+      shadow_mirror_begin_request(path, inbound_is_shadow);
    }
 
    /* Native streaming chat over HTTP — hands off to the async chat worker, which
@@ -2080,6 +2080,14 @@ void handle_conn(int fd, int is_tcp, int is_management)
    free(resp);
    free(body);
 }
+/* Scope teardown also covers streaming and every early refusal/keep-alive exit. */
+void handle_conn(int fd, int is_tcp, int is_management)
+{
+   shadow_mirror_end_request();
+   handle_conn_impl(fd, is_tcp, is_management);
+   shadow_mirror_end_request();
+}
+
 /* Per-connection worker: each accepted connection is handled on its own
  * detached thread, so a slow request (e.g. a synchronous chat completion) or an
  * SSE stream cannot block the accept loop, and independent /v1 requests run

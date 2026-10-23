@@ -99,6 +99,7 @@ class IRBypassTests(unittest.TestCase):
     def test_retired_api_and_driver_calls_in_c_and_go(self):
         for relative, source in [
             ("src/server/rogue.c", "anthropic_stream_feed_openai(s, p);"),
+            ("src/server/rogue.c", "shadow_mirror_dispatch(path, raw, length, 0);"),
             ("server-go/modules/rogue/rogue.go", "raw_responses := x"),
             ("src/server/rogue.c", "gateway_delegate_tool_shape(1, 0);"),
             ("src/server/rogue.c", "agent_tool_result_usable(text);"),

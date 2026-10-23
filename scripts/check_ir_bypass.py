@@ -16,6 +16,7 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "shadow_mirror_dispatch",
     "kb_curator_sidecar_run", "kb_curator_shell_quote", "kb_curator_describe_wait_status",
     "kb_curator_append_sidecar_error", "kb_curator_pick_sidecar_command",
     "kb_curator_resolve_sidecar_command",

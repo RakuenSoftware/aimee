@@ -269,3 +269,16 @@ summary. A native cache cannot be checkpointed after this event in its source
 turn. Once the child is quiescent, abort/recovery discards the derived cache and
 the next execution adopts canonical history afresh. Durable capture refusal
 prevents accepting an unrecorded compaction observation.
+
+
+Runtime-armed shadow publishing is an explicit external delivery boundary. HTTP
+scopes capture the actual owner-admitted canonical inbound request once, before
+local policy or KB augmentation, and release it on every exit. Successful local
+preparation may mirror that snapshot; nested internal calls cannot substitute or
+consume it. Translation alone renders native bytes after semantic replay checks;
+legacy text completion has a canonical request renderer. Unknown controls,
+unfaithful nested options, local continuation IDs and incompatible opaque state
+refuse only the best-effort mirror, with a counted drop. Opaque companions that
+the selected codec can faithfully represent remain intact. Disarmed publishing
+and absent subscribers cause no clone or rendering. Subscriber responses are
+discarded: HTTP 2xx means delivery, never canonical model or business success.

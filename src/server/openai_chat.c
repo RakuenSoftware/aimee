@@ -26,7 +26,8 @@
 #include "retrieval_outcome_bridge.h"           /* retrieval_outcome_bridge_on_autolabel */
 #include "openai_runs_store.h"                  /* GET /v1/runs/{id} record store */
 #include "aimee.h" /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
-#include "log.h"   /* LOG_WARN: name the provider's error instead of discarding it */
+#include "shadow_mirror.h"
+#include "log.h" /* LOG_WARN: name the provider's error instead of discarding it */
 #include "aimee_errors.h"
 #include "config.h" /* legacy_config_record, legacy_config_read */
 #include "agent_config.h"
@@ -206,6 +207,7 @@ static int openai_admit_completion(const char *body, int chat, aimee_request_t *
       snprintf(error, capacity, "messages must be a non-empty array");
       return -1;
    }
+   shadow_mirror_capture_request(request);
    return 0;
 }
 
@@ -679,6 +681,7 @@ static int responses_admit_request(const char *body, aimee_request_t *request, c
       return -1;
    if (responses_restore_history(request, error, capacity) || aimee_ir_request_admit(request))
       return -1;
+   shadow_mirror_capture_request(request);
    return 0;
 }
 static void responses_account(const agent_t *agent, const char *model,
@@ -1014,7 +1017,10 @@ static int openai_prepare_ir_request(aimee_request_t *request, const agent_t *ag
          return -1;
       aimee_ir_apply_gateway_request_stages(request);
    }
-   return aimee_ir_request_admit(request);
+   int status = aimee_ir_request_admit(request);
+   if (!status)
+      shadow_mirror_dispatch_admitted(request);
+   return status;
 }
 static int openai_post_ir(const agent_t *agent, aimee_request_t *request, aimee_wire_t wire,
                           const char *url, const char *auth, const char *headers, char **reply,
