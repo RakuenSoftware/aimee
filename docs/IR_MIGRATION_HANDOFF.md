@@ -162,6 +162,13 @@ the process lifetime and bounded bus deadline, preserving the private execution
 scope. Active bus cancellation reaches the request and its subprocesses; canceled
 handlers return transport failure, never an empty HTTP success. Blocked-handler
 regressions reproduce the old failure and pass normally and under Go race.
+Supported CMake qualification builds the thin client and the two affected
+native runtime/factory fixtures. Their actual Debug/LTO links exposed missing
+math-library linkage and section flags at final LTO compilation; both target-local
+test-build repairs pass CTest 2/2. CMake intentionally does not build the server;
+production server registration and image qualification use Make. No dormant
+server source table was revived or claimed as a supported server build.
+
 Standalone deployment validators now use this same C/bus ingress and the actual
 generated config/PostgreSQL/DB1 grants and processes. Their old placeholder paths,
 raw identity headers, empty-column comparisons and undefined table counts are

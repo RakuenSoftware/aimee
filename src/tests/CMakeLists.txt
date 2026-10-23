@@ -558,13 +558,15 @@ if(NOT WIN32)
   target_include_directories(test_server_native_execution PRIVATE ${AIMEE_PROJECT_INCLUDE_DIRS}
     ${AIMEE_SRC_DIR}/modules/kb/c ${AIMEE_SRC_DIR}/db1_client)
   target_compile_options(test_server_native_execution PRIVATE -ffunction-sections -fdata-sections)
+  # LTO must retain the same per-function sections at its final compile/link.
+  target_link_options(test_server_native_execution PRIVATE -ffunction-sections -fdata-sections)
   if(APPLE)
     target_link_options(test_server_native_execution PRIVATE -Wl,-dead_strip)
   else()
     target_link_options(test_server_native_execution PRIVATE -Wl,--gc-sections)
   endif()
   target_link_libraries(test_server_native_execution PRIVATE
-    aimee-core-connection Threads::Threads OpenSSL::Crypto)
+    aimee-core-connection Threads::Threads OpenSSL::Crypto m)
   aimee_enable_test_asserts(test_server_native_execution)
   add_test(NAME test_server_native_execution COMMAND test_server_native_execution)
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -625,8 +627,10 @@ if(NOT WIN32)
     ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../db1_client ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
   target_link_libraries(test_server_native_runtime PRIVATE
-    aimee-core-connection Threads::Threads OpenSSL::Crypto)
+    aimee-core-connection Threads::Threads OpenSSL::Crypto m)
   target_compile_options(test_server_native_runtime PRIVATE -ffunction-sections -fdata-sections)
+  # LTO must retain the same per-function sections at its final compile/link.
+  target_link_options(test_server_native_runtime PRIVATE -ffunction-sections -fdata-sections)
   if(APPLE)
     target_link_options(test_server_native_runtime PRIVATE -Wl,-dead_strip)
   else()
