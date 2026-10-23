@@ -1604,7 +1604,7 @@ static void delegate_worker_run(void *arg)
     * agent_run_parallel). The old save/restore around a process-wide setenv looked
     * scoped but was not — a concurrent delegate's value decided what this one could
     * call, so a reviewer could resolve a coder's toolset. That is the boundary
-    * agent_tools_filter_for_role exists to enforce. */
+    * agent_tools_catalog_filter exists to enforce. */
    agent_tools_set_active_toolset(toolset_override);
    /* Bind detached workspace: delegate reads the client's live files (no-op if shared).
     *

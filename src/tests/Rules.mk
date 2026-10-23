@@ -5905,10 +5905,9 @@ $(TESTPREFIX)/unit-test-mcp-native-surface: $(OBJDIR)/tests/test_mcp_native_surf
                                 $(OBJDIR)/modules/delegates/delegate_openai.o \
                                 $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                 $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o \
-                                $(OBJDIR)/server/agent_tools.o \
                                 $(OBJDIR)/modules/delegates/delegate_role.o \
                                 $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $(filter-out $(OBJDIR)/server/agent_tools.o,$^) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-middleware: $(OBJDIR)/tests/test_middleware.o $(OBJDIR)/log.o \
                                     $(OBJDIR)/model_registry.o $(OBJDIR)/tests/support/providers_module_stub.o $(OBJDIR)/aimee_home.o $(OBJDIR)/vendor/cJSON.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \

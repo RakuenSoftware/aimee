@@ -25,6 +25,31 @@
 #include <aimee/translation/aimee_backend.h>
 #include <aimee/translation/aimee_frontend.h>
 
+#include "support/typed_catalog_fixture.h"
+static cJSON *fixture_build_request(const agent_t *agent, const cJSON *messages, cJSON *tools,
+                                    const char *system, int maximum, double temperature,
+                                    aimee_wire_t wire, int delegate, aimee_request_t *dispatch)
+{
+   aimee_request_t catalog = {0};
+   if (fixture_catalog_import(tools, wire, &catalog))
+      return NULL;
+   cJSON *result = agent_build_request_ir(agent, messages, &catalog, system, maximum, temperature,
+                                          wire, delegate, dispatch);
+   aimee_request_free(&catalog);
+   return result;
+}
+static int fixture_prepare_request(const agent_t *agent, const cJSON *messages, cJSON *tools,
+                                   const char *system, int maximum, double temperature,
+                                   aimee_wire_t wire, int delegate, aimee_request_t *out)
+{
+   aimee_request_t catalog = {0};
+   if (fixture_catalog_import(tools, wire, &catalog))
+      return -1;
+   int result = agent_prepare_request_ir(agent, messages, &catalog, system, maximum, temperature,
+                                         wire, delegate, out);
+   aimee_request_free(&catalog);
+   return result;
+}
 /* Native fixture data enters the same explicit history adapter as external clients. */
 static cJSON *build_profile(const agent_t *agent, cJSON *messages, cJSON *tools, const char *system,
                             int maximum, double temperature, aimee_wire_t wire)
@@ -32,7 +57,7 @@ static cJSON *build_profile(const agent_t *agent, cJSON *messages, cJSON *tools,
    cJSON *history = aimee_frontend_history_import(messages, wire);
    assert(history);
    cJSON *request =
-       agent_build_request_ir(agent, history, tools, system, maximum, temperature, wire, 0, NULL);
+       fixture_build_request(agent, history, tools, system, maximum, temperature, wire, 0, NULL);
    cJSON_Delete(history);
    return request;
 }
@@ -986,8 +1011,8 @@ static void test_canonical_delegate_policy_before_native_egress(void)
             agent_t agent = {0};
             snprintf(agent.model, sizeof agent.model, "%s", fallback ? "fallback" : "selected");
             agent.require_initial_tool_call = 1;
-            cJSON *native = agent_build_request_ir(&agent, messages, tools, "host", 128, 0,
-                                                   wires[w], delegate, &dispatch);
+            cJSON *native = fixture_build_request(&agent, messages, tools, "host", 128, 0, wires[w],
+                                                  delegate, &dispatch);
             assert(native);
             assert(!strcmp(cJSON_GetObjectItemCaseSensitive(native, "model")->valuestring,
                            agent.model));
@@ -1010,7 +1035,7 @@ static void test_canonical_delegate_policy_before_native_egress(void)
       snprintf(agent.model, sizeof agent.model, "%s", "selected");
       agent.require_initial_tool_call = 1;
       cJSON *native =
-          agent_build_request_ir(&agent, messages, tools, "host", 128, 0, wires[w], 1, &dispatch);
+          fixture_build_request(&agent, messages, tools, "host", 128, 0, wires[w], 1, &dispatch);
       assert(native && !cJSON_GetObjectItemCaseSensitive(native, "tools"));
       assert(!cJSON_GetObjectItemCaseSensitive(native, "tool_choice"));
       assert(!cJSON_GetObjectItemCaseSensitive(native, "parallel_tool_calls"));
@@ -1032,8 +1057,8 @@ static void test_canonical_delegate_policy_before_native_egress(void)
       agent_t agent = {0};
       snprintf(agent.model, sizeof agent.model, "selected");
       aimee_request_t owned = {0};
-      assert(agent_prepare_request_ir(&agent, messages, oversized, "host", 128, 0, wires[w], 1,
-                                      &owned) < 0);
+      assert(fixture_prepare_request(&agent, messages, oversized, "host", 128, 0, wires[w], 1,
+                                     &owned) < 0);
       assert(!owned.model && !owned.n_tools && !owned.messages);
       assert(cJSON_GetArraySize(oversized) == AIMEE_IR_MAX_BLOCKS + 1);
       aimee_request_free(&owned);
@@ -1067,8 +1092,8 @@ static void test_owned_canonical_request_preparation(void)
           "\"name\":\"Read\",\"input\":{\"exact\":0.123456789012345678901234567890}}]}]");
       cJSON *tools = cJSON_Parse(catalogs[w]);
       assert(messages && tools);
-      int rc = agent_prepare_request_ir(&agent, messages, tools, "host system", 321, 0.25, wires[w],
-                                        0, &owned);
+      int rc = fixture_prepare_request(&agent, messages, tools, "host system", 321, 0.25, wires[w],
+                                       0, &owned);
       cJSON_Delete(messages);
       cJSON_Delete(tools);
       assert(!rc && !aimee_ir_request_admit(&owned));
@@ -1094,8 +1119,7 @@ static void test_owned_canonical_request_preparation(void)
       char *model = owned.model;
       aimee_message_t *history = owned.messages;
       cJSON *invalid = cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"unknown\"}]}]");
-      rc =
-          agent_prepare_request_ir(&agent, invalid, NULL, "replacement", 1, 0, wires[w], 0, &owned);
+      rc = fixture_prepare_request(&agent, invalid, NULL, "replacement", 1, 0, wires[w], 0, &owned);
       assert(rc < 0 && owned.model == model && owned.messages == history);
       cJSON_Delete(invalid);
    }
@@ -1116,8 +1140,8 @@ static void test_canonical_request_profiles(void)
       snprintf(agent.provider, sizeof agent.provider, "%s", providers[i]);
       snprintf(agent.model, sizeof agent.model, "%s", models[i]);
       agent.recommended_sampling = 1;
-      cJSON *actual = agent_build_request_ir(&agent, history, NULL, NULL, 128, 0.5,
-                                             AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
+      cJSON *actual = fixture_build_request(&agent, history, NULL, NULL, 128, 0.5,
+                                            AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
       assert(actual);
       assert(!strcmp(cJSON_GetObjectItemCaseSensitive(actual, "model")->valuestring, models[i]));
       assert(cJSON_GetObjectItemCaseSensitive(actual, "max_tokens")->valueint == 128);
@@ -1139,8 +1163,8 @@ static void test_canonical_request_profiles(void)
    {
       cJSON *source = cJSON_Parse(shaping_cases[i]);
       cJSON *before = cJSON_Duplicate(source, 1);
-      cJSON *actual = agent_build_request_ir(&qwen, source, NULL, NULL, 128, 0.5,
-                                             AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
+      cJSON *actual = fixture_build_request(&qwen, source, NULL, NULL, 128, 0.5,
+                                            AIMEE_WIRE_OPENAI_CHAT, 0, NULL);
       assert(actual && cJSON_Compare(source, before, 1));
       const cJSON *message =
           cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(actual, "messages"), 0);
@@ -1172,8 +1196,8 @@ static void test_canonical_responses_profile(void)
    assert(history && tools);
    for (int fallback = 0; fallback < 2; fallback++)
    {
-      cJSON *actual = agent_build_request_ir(&agent, history, tools, NULL, 777, 0.5,
-                                             AIMEE_WIRE_RESPONSES, 0, NULL);
+      cJSON *actual = fixture_build_request(&agent, history, tools, NULL, 777, 0.5,
+                                            AIMEE_WIRE_RESPONSES, 0, NULL);
       assert(actual && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(actual, "store")));
       assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(actual, "stream")));
       assert(!strcmp(cJSON_GetObjectItemCaseSensitive(actual, "instructions")->valuestring,
@@ -1190,8 +1214,8 @@ static void test_canonical_responses_profile(void)
    /* Malformed catalog ingress still refuses before any provider dispatch. */
    cJSON_DeleteItemFromObjectCaseSensitive(cJSON_GetArrayItem(tools, 0), "parameters");
    cJSON_AddStringToObject(cJSON_GetArrayItem(tools, 0), "parameters", "malformed");
-   cJSON *actual = agent_build_request_ir(&agent, history, tools, "host", 777, 0.5,
-                                          AIMEE_WIRE_RESPONSES, 0, NULL);
+   cJSON *actual = fixture_build_request(&agent, history, tools, "host", 777, 0.5,
+                                         AIMEE_WIRE_RESPONSES, 0, NULL);
    assert(!actual);
    cJSON_Delete(history);
    cJSON_Delete(tools);
@@ -1276,8 +1300,60 @@ static void test_missing_response_output(void)
                                        1, NULL) == -1);
 }
 
+static void test_canonical_catalog_only_projection(void)
+{
+   cJSON *history =
+       cJSON_Parse("[{\"role\":\"user\",\"blocks\":[{\"type\":\"text\",\"text\":\"inspect\"}]}]");
+   aimee_wire_t wires[] = {AIMEE_WIRE_OPENAI_CHAT, AIMEE_WIRE_RESPONSES, AIMEE_WIRE_ANTHROPIC};
+   for (int w = 0; w < 3; ++w)
+   {
+      aimee_request_t catalog = {0}, expected = {0}, actual = {0};
+      agent_t agent = {0};
+      snprintf(agent.model, sizeof agent.model, "selected");
+      assert(!agent_tools_catalog(wires[w], &catalog));
+      assert(agent_tools_catalog_respond(&catalog) == 1);
+      assert(!agent_prepare_request_ir(&agent, history, &catalog, "host", 128, 0.2, wires[w], 0,
+                                       &expected));
+      catalog.stream = 1;
+      catalog.tool_choice = AIMEE_TOOL_CHOICE_NONE;
+      catalog.has_temperature = 1;
+      catalog.temperature = 0.9;
+      catalog.has_max_tokens = 1;
+      catalog.max_tokens = 1;
+      catalog.output_format.kind = AIMEE_OUTPUT_JSON_OBJECT;
+      catalog.has_parallel_tool_calls = 1;
+      catalog.parallel_tool_calls = 0;
+      assert(!aimee_ir_request_admit(&catalog));
+      assert(!agent_prepare_request_ir(&agent, history, &catalog, "host", 128, 0.2, wires[w], 0,
+                                       &actual));
+      assert(actual.stream == expected.stream && actual.tool_choice == expected.tool_choice &&
+             actual.output_format.kind == expected.output_format.kind);
+      assert(actual.max_tokens == expected.max_tokens &&
+             actual.temperature == expected.temperature);
+      assert(actual.has_parallel_tool_calls == expected.has_parallel_tool_calls &&
+             actual.parallel_tool_calls == expected.parallel_tool_calls);
+      assert(actual.n_tools == expected.n_tools && actual.tools != catalog.tools);
+      const aimee_tool_t *respond = aimee_ir_find_function(&actual, NULL, "respond");
+      assert(respond);
+      cJSON *wire =
+          agent_build_request_ir(&agent, history, &catalog, "host", 128, 0.2, wires[w], 0, NULL);
+      assert(wire && cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(wire, "tools")) ==
+                         catalog.n_tools);
+      /* Typed respond is valid on Anthropic too; the retired wrapped-Chat append
+       * was invalid input to that old profile, not a wire-preservation case. */
+      cJSON_Delete(wire);
+      aimee_request_free(&catalog);
+      aimee_request_free(&expected);
+      aimee_request_free(&actual);
+   }
+   cJSON_Delete(history);
+   puts("tools-only profile clone rejects metadata contamination; all profiles render typed "
+        "respond OK");
+}
+
 int main(void)
 {
+   test_canonical_catalog_only_projection();
    test_typed_anthropic_system_cache_parity();
    test_canonical_responses_profile();
    test_canonical_request_profiles();

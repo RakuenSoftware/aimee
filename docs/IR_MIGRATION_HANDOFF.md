@@ -17,14 +17,21 @@ are historical. Do not investigate or change `.100`; validation uses the owned
 
 ### Full internal conversion in progress: 23 October 2026
 
-Remaining structural cutover: the HTTP loop and native factory still construct
-provider-shaped tool catalogs, filter them and parse them back into typed IR.
-The execution-definition plugin fallback and schema caches also rebuild that
-catalog. These are internal round trips, not external translation boundaries.
-The follow-up replaces them with one admitted canonical catalog owner and removes
-unused driver tool-builder callbacks. Completion requires preserving tool order,
-surface masks, full SDK catalogs, roles, plugin precedence and schema policy.
-This work is in an isolated checkout; it is not implemented in this commit.
+The internal tool-catalog cutover now uses one admitted canonical owner for
+HTTP/native execution, role filtering, respond, schema normalization and current
+execution definitions. Provider-shaped builders and unused driver callbacks are
+retired; the common model profile clones only tools, so catalog metadata cannot
+override host controls. Three valid prior catalog byte vectors remain exact;
+canonical respond also repairs the formerly invalid Anthropic wrapped-tool case.
+Seven focused targets and the three-profile driver checks pass normally and under
+ASan/UBSan/leak checking. This cutover removes 372 net production lines. Combined
+retirements remove 2,013 net production lines before the ACP terminal repair.
+Full combined qualification and actual updated SDK matrix remain pending.
+
+Independent review found a separate standalone ACP classification defect: admitted
+MAX/refusal/unknown output could be marked successful. Its repair and retirement
+of unused untyped provider-client entry points are being qualified separately;
+they are not part of the catalog patch.
 
 
 The user's completion criteria now include a significant reduction in production

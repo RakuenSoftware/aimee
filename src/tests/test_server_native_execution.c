@@ -382,27 +382,21 @@ int agent_tools_knowledge_write_allowed(void)
 {
    return 0;
 }
-cJSON *build_tools_array_responses(void)
+int agent_tools_catalog(aimee_wire_t wire, aimee_request_t *out)
 {
-   return cJSON_Parse("[{\"name\":\"read_file\"}]");
+   assert(wire == expected_wire);
+   out->n_tools = 1;
+   out->tools = calloc(1, sizeof *out->tools);
+   assert(out->tools);
+   out->tools[0].name = strdup("read_file");
+   out->tools[0].schema = cJSON_Parse("{\"type\":\"object\"}");
+   return 0;
 }
-cJSON *build_tools_array(void)
+int agent_tools_catalog_filter(aimee_request_t *tools, const char *role)
 {
-   return cJSON_Parse("[{\"name\":\"read_file\"}]");
-}
-cJSON *build_tools_array_anthropic(void)
-{
-   return cJSON_Parse("[{\"name\":\"read_file\"}]");
-}
-
-void agent_tools_filter_for_role(cJSON *tools, const char *role)
-{
-   assert(cJSON_IsArray(tools));
+   assert(tools && tools->n_tools >= 0 && tools->n_tools <= 1);
    assert(!strcmp(parent_role, role ? role : "primary"));
-}
-void agent_tools_filter_anthropic_for_role(cJSON *tools, const char *role)
-{
-   agent_tools_filter_for_role(tools, role);
+   return 0;
 }
 char *agent_build_exec_context_checked(const agent_t *agent, const agent_network_t *network,
                                        const char *role, const char *custom, int skip, char *error,
@@ -417,14 +411,15 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
    return strdup("host environment");
 }
 static int expected_no_tools;
-int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
-                             const char *system, int max_tokens, double temperature,
-                             aimee_wire_t wire, int delegate, aimee_request_t *out)
+int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages,
+                             const aimee_request_t *tools, const char *system, int max_tokens,
+                             double temperature, aimee_wire_t wire, int delegate,
+                             aimee_request_t *out)
 {
    assert(max_tokens == 0 && temperature == -1);
    (void)delegate;
-   assert(cJSON_GetArraySize(messages) == 0 && cJSON_IsArray(tools));
-   assert(cJSON_GetArraySize(tools) == (expected_no_tools ? 0 : 1));
+   assert(cJSON_GetArraySize(messages) == 0 && tools);
+   assert(tools->n_tools == (expected_no_tools ? 0 : 1));
    assert(!strcmp(system, "host environment") && wire == expected_wire);
    if (expected_provider)
       assert(!strcmp(agent->provider, expected_provider));

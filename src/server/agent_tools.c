@@ -263,191 +263,6 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
    return 1;
 }
 
-static int tools_array_has_name(cJSON *tools, const char *name, int openai_format)
-{
-   cJSON *tool = NULL;
-   cJSON_ArrayForEach(tool, tools)
-   {
-      cJSON *name_item = openai_format
-                             ? cJSON_GetObjectItem(cJSON_GetObjectItem(tool, "function"), "name")
-                             : cJSON_GetObjectItem(tool, "name");
-      if (cJSON_IsString(name_item) && strcmp(name_item->valuestring, name) == 0)
-         return 1;
-   }
-   return 0;
-}
-
-/* Emit one MCP tool DEF into |tools| in the caller's wire format. |fullname| is
- * the namespaced "<client>:<tool>". |schema_src| is borrowed (deep-copied); a
- * missing schema becomes an empty object schema. */
-static void emit_remote_tool_def(cJSON *tools, const char *fullname, const cJSON *desc,
-                                 const cJSON *schema_src, int openai_format)
-{
-   cJSON *schema;
-   if (!schema_src)
-   {
-      schema = cJSON_CreateObject();
-      if (schema)
-      {
-         cJSON_AddStringToObject(schema, "type", "object");
-         cJSON_AddObjectToObject(schema, "properties");
-      }
-   }
-   else
-   {
-      schema = cJSON_Duplicate(schema_src, 1);
-   }
-   if (!schema)
-      return;
-
-   const char *desc_str = cJSON_IsString((cJSON *)desc) ? desc->valuestring : "";
-   cJSON *tool = cJSON_CreateObject();
-   if (!tool)
-   {
-      cJSON_Delete(schema);
-      return;
-   }
-   if (openai_format)
-   {
-      cJSON *fn = cJSON_CreateObject();
-      cJSON_AddStringToObject(tool, "type", "function");
-      cJSON_AddStringToObject(fn, "name", fullname);
-      cJSON_AddStringToObject(fn, "description", desc_str);
-      cJSON_AddItemToObject(fn, "parameters", schema);
-      cJSON_AddItemToObject(tool, "function", fn);
-   }
-   else
-   {
-      cJSON_AddStringToObject(tool, "type", "function");
-      cJSON_AddStringToObject(tool, "name", fullname);
-      cJSON_AddStringToObject(tool, "description", desc_str);
-      cJSON_AddItemToObject(tool, "parameters", schema);
-   }
-   cJSON_AddItemToArray(tools, tool);
-}
-
-/* Federate the tool DEFS of MCP plugins aimee-kb HOSTS (config install: kb) into
- * this server's tools/list, so a session reaches them exactly like a locally
- * hosted plugin. Defs ride the tool_registry.snapshot RPC ("mcp_tools" array).
- * Server-hosted plugins already added to |tools| take precedence: a kb def whose
- * namespaced name is already present is skipped. Invocation of these names routes
- * back to the kb (agent_tools_dispatch.c). Best-effort — kb unreachable => no
- * federated tools, never an error. */
-static void append_federated_kb_tools(cJSON *tools, int openai_format,
-                                      const computer_use_policy_t *cu_policy)
-{
-   char *envelope = kb_client_tool_registry_snapshot_json();
-   if (!envelope)
-      return;
-   cJSON *resp = cJSON_Parse(envelope);
-   free(envelope);
-   if (!resp)
-      return;
-
-   cJSON *mcp_tools = cJSON_GetObjectItemCaseSensitive(resp, "mcp_tools");
-   cJSON *entry = NULL;
-   cJSON_ArrayForEach(entry, mcp_tools)
-   {
-      cJSON *name = cJSON_GetObjectItemCaseSensitive(entry, "name");
-      if (!cJSON_IsString(name) || !name->valuestring[0])
-         continue;
-      if (computer_use_is_tool_name(name->valuestring) && !cu_policy->enabled)
-         continue;
-      /* Local (server-hosted) precedence: skip a kb def that collides. */
-      if (tools_array_has_name(tools, name->valuestring, openai_format))
-         continue;
-      cJSON *desc = cJSON_GetObjectItemCaseSensitive(entry, "description");
-      cJSON *schema = cJSON_GetObjectItemCaseSensitive(entry, "inputSchema");
-      emit_remote_tool_def(tools, name->valuestring, desc, schema, openai_format);
-   }
-
-   cJSON_Delete(resp);
-}
-
-static void append_remote_tools(cJSON *tools, int openai_format)
-{
-   computer_use_policy_t cu_policy;
-   computer_use_policy_from_config(&cu_policy);
-
-   cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
-   if (cJSON_IsArray(remote_tools))
-   {
-      cJSON *remote_tool = NULL;
-      cJSON_ArrayForEach(remote_tool, remote_tools)
-      {
-         cJSON *name = cJSON_GetObjectItemCaseSensitive(remote_tool, "name");
-         if (!cJSON_IsString(name) || !name->valuestring[0])
-            continue;
-         if (computer_use_is_tool_name(name->valuestring) && !cu_policy.enabled)
-            continue;
-
-         const char *raw_name = strchr(name->valuestring, ':');
-         if (raw_name && raw_name[1] && tools_array_has_name(tools, raw_name + 1, openai_format))
-            LOG_WARN("mcp-tools", "remote tool name collides with builtin, namespaced as %s",
-                     name->valuestring);
-
-         cJSON *desc = cJSON_GetObjectItemCaseSensitive(remote_tool, "description");
-         cJSON *schema = cJSON_GetObjectItemCaseSensitive(remote_tool, "inputSchema");
-         emit_remote_tool_def(tools, name->valuestring, desc, schema, openai_format);
-      }
-   }
-   cJSON_Delete(remote_tools);
-
-   /* After local (server-hosted) plugins, federate aimee-kb-hosted plugin defs. */
-   append_federated_kb_tools(tools, openai_format, &cu_policy);
-}
-
-cJSON *delegate_respond_spec(void)
-{
-   cJSON *tool = cJSON_CreateObject();
-   cJSON *fn = cJSON_CreateObject();
-   cJSON *params = cJSON_CreateObject();
-   cJSON *props = cJSON_CreateObject();
-   cJSON *message = cJSON_CreateObject();
-   cJSON *required = cJSON_CreateArray();
-
-   if (!tool || !fn || !params || !props || !message || !required)
-   {
-      cJSON_Delete(tool);
-      cJSON_Delete(fn);
-      cJSON_Delete(params);
-      cJSON_Delete(props);
-      cJSON_Delete(message);
-      cJSON_Delete(required);
-      return NULL;
-   }
-
-   cJSON_AddStringToObject(tool, "type", "function");
-   cJSON_AddStringToObject(fn, "name", "respond");
-   cJSON_AddStringToObject(fn, "description",
-                           "Respond to the user with a message. Use this when chatting, asking a "
-                           "clarifying question, or reporting the final result, whenever no other "
-                           "tool action is needed.");
-   cJSON_AddStringToObject(params, "type", "object");
-   cJSON_AddStringToObject(message, "type", "string");
-   cJSON_AddStringToObject(message, "description", "The message to return to the user");
-   cJSON_AddItemToObject(props, "message", message);
-   cJSON_AddItemToObject(params, "properties", props);
-   cJSON_AddItemToArray(required, cJSON_CreateString("message"));
-   cJSON_AddItemToObject(params, "required", required);
-   cJSON_AddItemToObject(fn, "parameters", params);
-   cJSON_AddItemToObject(tool, "function", fn);
-   return tool;
-}
-
-int agent_tools_append_delegate_respond_tool(cJSON *tools)
-{
-   if (!cJSON_IsArray(tools))
-      return 0;
-   if (tools_array_has_name(tools, "respond", 1))
-      return 0;
-   cJSON *respond = delegate_respond_spec();
-   if (!respond)
-      return 0;
-   cJSON_AddItemToArray(tools, respond);
-   return 1;
-}
-
 int agent_ir_strip_delegate_respond(aimee_response_t *response)
 {
    int count = aimee_ir_response_tool_count(response), responds = 0;
@@ -813,7 +628,7 @@ int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
    return 1;
 }
 
-static void filter_catalog_for_role(cJSON *tools, const char *role, int anthropic)
+int agent_tools_catalog_filter(aimee_request_t *catalog, const char *role)
 {
    /* This turn's toolset first (thread-local, panel-safe per #1374), then the
     * single-process CLI's env channel — matching agent_tools_tool_allowed_for_role
@@ -829,8 +644,10 @@ static void filter_catalog_for_role(cJSON *tools, const char *role, int anthropi
    /* No toolset and nothing withheld means no role: an ordinary turn, which is
       not a delegate and is not filtered. Every delegate role now resolves to a
       toolset, so this is no longer the custom-role path it used to be. */
-   if (!cJSON_IsArray(tools) || (!toolset_name && agent_tools_knowledge_write_allowed()))
-      return;
+   if (!catalog || aimee_ir_request_admit(catalog))
+      return -1;
+   if (!toolset_name && agent_tools_knowledge_write_allowed())
+      return 0;
    if (toolset_name)
    {
       char err[TOOLSET_ERROR_MAX] = "";
@@ -843,34 +660,22 @@ static void filter_catalog_for_role(cJSON *tools, const char *role, int anthropi
          resolved_count = 0;
       }
    }
-   for (int i = 0; i < cJSON_GetArraySize(tools);)
+   for (int i = 0; i < catalog->n_tools;)
    {
-      cJSON *tool = cJSON_GetArrayItem(tools, i);
-      /* Compatibility ingress ends at translation. Permission decisions read
-       * the admitted canonical identity, never a name from an invalid wire row. */
-      aimee_tool_t canonical = {0};
-      int valid = anthropic ? anthropic_ir_parse_tool(tool, &canonical) == 0
-                            : openai_ir_parse_tool(tool, &canonical, 0) == 0;
-      const char *name = valid ? canonical.name : NULL;
+      const char *name = catalog->tools[i].name;
       int in_toolset = resolved_count < 0;
       for (int j = 0; !in_toolset && name && j < resolved_count; j++)
          in_toolset = strcmp(name, resolved[j]) == 0;
-      int allowed = valid && in_toolset && agent_tools_tool_allowed_for_role(role, name);
-      aimee_tool_free(&canonical);
-      if (!allowed)
-         cJSON_DeleteItemFromArray(tools, i);
-      else
+      if (in_toolset && agent_tools_tool_allowed_for_role(role, name))
          i++;
+      else
+      {
+         aimee_tool_free(catalog->tools + i);
+         memmove(catalog->tools + i, catalog->tools + i + 1,
+                 (size_t)(--catalog->n_tools - i) * sizeof *catalog->tools);
+      }
    }
-}
-
-void agent_tools_filter_for_role(cJSON *tools, const char *role)
-{
-   filter_catalog_for_role(tools, role, 0);
-}
-void agent_tools_filter_anthropic_for_role(cJSON *tools, const char *role)
-{
-   filter_catalog_for_role(tools, role, 1);
+   return 0;
 }
 
 /* ================================================================
@@ -893,11 +698,11 @@ void agent_tools_filter_anthropic_for_role(cJSON *tools, const char *role)
  * code search vs. doc search — not a rename), tracked in
  * aimee-code-health-solid-dry-refactor.md.
  *
- * Anthropic format is still derived from build_tools_array() below.
+ * Anthropic and Chat share the same declared exposure mask.
  * ================================================================ */
 
-#define TSURF_CHAT 0x1u /* build_tools_array — OpenAI Chat Completions */
-#define TSURF_RESP 0x2u /* build_tools_array_responses — OpenAI Responses API */
+#define TSURF_CHAT 0x1u /* Chat and Anthropic exposure */
+#define TSURF_RESP 0x2u /* Responses exposure */
 #define TSURF_ALL  (TSURF_CHAT | TSURF_RESP)
 
 typedef cJSON *(*tool_params_fn)(void);
@@ -1673,10 +1478,6 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      tp_search_memory, TSURF_ALL},
 };
 
-/* Emit the builtin tools selected by `surface` into `tools`, in table order,
- * using that surface's JSON shape:
- *   TSURF_CHAT: {"type":"function","function":{name,description,parameters}}
- *   TSURF_RESP: {"type":"function",name,description,parameters}            */
 /* The git-write seam. Registered by the server at startup; NULL everywhere else
  * (thin client, unit tests), where the git-write tools are simply not offered. */
 static agent_git_write_fn g_git_write_fn = NULL;
@@ -1745,44 +1546,6 @@ int agent_tools_is_mcp_derived(const char *name)
 /* Advertise the MCP-derived tools, reusing each tool's own MCP schema. A tool whose
  * advert the provider cannot produce is skipped rather than offered with an empty
  * schema: an agent handed a parameterless git_commit will call it wrong. */
-static void emit_mcp_tools(cJSON *tools, unsigned surface)
-{
-   if (!g_mcp_call_fn || !g_mcp_advert_fn)
-      return;
-   for (int i = 0; i < g_mcp_tool_count; i++)
-   {
-      cJSON *advert = g_mcp_advert_fn(g_mcp_tools[i]);
-      cJSON *schema = cJSON_DetachItemFromObjectCaseSensitive(advert, "inputSchema");
-      cJSON *desc = cJSON_GetObjectItemCaseSensitive(advert, "description");
-      if (!schema || !cJSON_IsString(desc))
-      {
-         LOG_WARN("agent_tools", "MCP tool '%s' has no usable advert; not offered natively",
-                  g_mcp_tools[i]);
-         cJSON_Delete(advert);
-         cJSON_Delete(schema);
-         continue;
-      }
-      cJSON *tool = cJSON_CreateObject();
-      cJSON_AddStringToObject(tool, "type", "function");
-      if (surface == TSURF_CHAT)
-      {
-         cJSON *fn = cJSON_CreateObject();
-         cJSON_AddStringToObject(fn, "name", g_mcp_tools[i]);
-         cJSON_AddStringToObject(fn, "description", desc->valuestring);
-         cJSON_AddItemToObject(fn, "parameters", schema);
-         cJSON_AddItemToObject(tool, "function", fn);
-      }
-      else
-      {
-         cJSON_AddStringToObject(tool, "name", g_mcp_tools[i]);
-         cJSON_AddStringToObject(tool, "description", desc->valuestring);
-         cJSON_AddItemToObject(tool, "parameters", schema);
-      }
-      cJSON_AddItemToArray(tools, tool);
-      cJSON_Delete(advert);
-   }
-}
-
 static agent_shell_git_gate_fn g_shell_git_gate = NULL;
 
 void agent_tools_set_shell_git_gate(agent_shell_git_gate_fn fn)
@@ -1939,194 +1702,10 @@ int agent_tools_builtin_catalog(aimee_tool_t **out, int *count)
    return 0;
 }
 
-int agent_tools_execution_definition(const char *name, aimee_tool_t *out)
-{
-   if (!out)
-      return -1;
-   memset(out, 0, sizeof *out);
-   if (!name || !name[0])
-      return -1;
-   for (size_t i = 0; i < sizeof g_builtin_tools / sizeof *g_builtin_tools; i++)
-      if (!strcmp(name, g_builtin_tools[i].name))
-         return agent_tools_is_git_write(name) && !g_git_write_fn
-                    ? -1
-                    : builtin_ir_definition(g_builtin_tools + i, out);
-   if (agent_tools_is_mcp_derived(name) && g_mcp_call_fn && g_mcp_advert_fn)
-   {
-      cJSON *advert = g_mcp_advert_fn(name);
-      out->name = strdup(name);
-      out->schema = cJSON_DetachItemFromObjectCaseSensitive(advert, "inputSchema");
-      const char *description =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(advert, "description"));
-      out->description = description ? strdup(description) : NULL;
-      cJSON_Delete(advert);
-      if (out->name && out->description && aimee_ir_tool_valid(out))
-         return 0;
-      aimee_tool_free(out);
-      return -1;
-   }
-   /* Qualified plugins enter from their current explicit compatibility catalog,
-    * including configured federation. Unqualified names cannot invent a tool. */
-   if (!strchr(name, ':'))
-      return -1;
-   cJSON *catalog = build_tools_array(), *entry;
-   int found = 0, invalid = 0;
-   cJSON_ArrayForEach(entry, catalog)
-   {
-      const cJSON *function = cJSON_GetObjectItemCaseSensitive(entry, "function");
-      const char *identity =
-          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(function, "name"));
-      if (!identity || strcmp(identity, name))
-         continue;
-      aimee_tool_t candidate = {0};
-      if (openai_ir_parse_tool(entry, &candidate, 1))
-      {
-         aimee_tool_free(&candidate);
-         invalid = 1;
-         break;
-      }
-      if (candidate.kind == AIMEE_TOOL_FUNCTION && !strcmp(candidate.name, name))
-      {
-         if (++found == 1)
-         {
-            *out = candidate;
-            candidate = (aimee_tool_t){0};
-         }
-      }
-      aimee_tool_free(&candidate);
-   }
-   cJSON_Delete(catalog);
-   if (found == 1 && !invalid)
-      return 0;
-   aimee_tool_free(out);
-   return -1;
-}
-
-static int emit_builtin_tools(cJSON *tools, unsigned surface)
-{
-   size_t n = sizeof(g_builtin_tools) / sizeof(g_builtin_tools[0]);
-   for (size_t i = 0; i < n; i++)
-   {
-      const builtin_tool_def_t *definition = &g_builtin_tools[i];
-      if (!(definition->surfaces & surface))
-         continue;
-      /* A missing git dispatcher means the capability is unavailable. */
-      if (agent_tools_is_git_write(definition->name) && !g_git_write_fn)
-         continue;
-      aimee_tool_t canonical = {0};
-      if (builtin_ir_definition(definition, &canonical))
-         return -1;
-      cJSON *tool = openai_ir_render_tool(&canonical, surface == TSURF_RESP);
-      aimee_tool_free(&canonical);
-      if (!tool || !cJSON_AddItemToArray(tools, tool))
-      {
-         cJSON_Delete(tool);
-         return -1;
-      }
-   }
-   return 0;
-}
-
-cJSON *build_tools_array(void)
-{
-   cJSON *tools = cJSON_CreateArray();
-   if (!tools || emit_builtin_tools(tools, TSURF_CHAT))
-   {
-      cJSON_Delete(tools);
-      return NULL;
-   }
-   emit_mcp_tools(tools, TSURF_CHAT);
-   append_remote_tools(tools, 1);
-   return tools;
-}
-
-/* Build tools array for Responses API (flat format: type, name, description, parameters) */
-cJSON *build_tools_array_responses(void)
-{
-   cJSON *tools = cJSON_CreateArray();
-   if (!tools || emit_builtin_tools(tools, TSURF_RESP))
-   {
-      cJSON_Delete(tools);
-      return NULL;
-   }
-   emit_mcp_tools(tools, TSURF_RESP);
-   append_remote_tools(tools, 0);
-   return tools;
-}
-
-/* Lazy-built schema cache. The cJSON tree is allocated once on the first
- * lookup and intentionally leaked at process exit — small fixed cost,
- * avoids lifetime coordination with every dispatch call site. Mutex guards
- * the first-build race; subsequent reads are lock-free. */
-static cJSON *g_schema_cache_tools = NULL;
+/* The immutable canonical schema cache owns borrowed lookup pointers until exit. */
+static aimee_request_t g_schema_cache;
+static int g_schema_cache_ready;
 static pthread_mutex_t g_schema_cache_mu = PTHREAD_MUTEX_INITIALIZER;
-
-cJSON *agent_tool_get_schema_cached(const char *tool_name)
-{
-   if (!tool_name || !tool_name[0])
-      return NULL;
-
-   if (!g_schema_cache_tools)
-   {
-      pthread_mutex_lock(&g_schema_cache_mu);
-      if (!g_schema_cache_tools)
-         g_schema_cache_tools = build_tools_array();
-      pthread_mutex_unlock(&g_schema_cache_mu);
-   }
-   if (!g_schema_cache_tools)
-      return NULL;
-
-   cJSON *tool = NULL;
-   cJSON_ArrayForEach(tool, g_schema_cache_tools)
-   {
-      cJSON *fn = cJSON_GetObjectItemCaseSensitive(tool, "function");
-      if (!fn)
-         continue;
-      cJSON *name = cJSON_GetObjectItemCaseSensitive(fn, "name");
-      if (!cJSON_IsString(name) || strcmp(name->valuestring, tool_name) != 0)
-         continue;
-      return cJSON_GetObjectItemCaseSensitive(fn, "parameters");
-   }
-   return NULL;
-}
-
-/* List the built-in tool names, for callers that must hand the inventory to
- * someone who cannot look tools up themselves -- the rescue parser runs in the
- * delegates module and is not allowed to ask the tools module directly.
- *
- * The names point into the cache, which lives for the process, so the caller
- * borrows rather than owns them. Returns how many were written. */
-int agent_tool_known_names(const char **out, int max)
-{
-   int count = 0;
-   if (!out || max <= 0)
-      return 0;
-
-   if (!g_schema_cache_tools)
-   {
-      pthread_mutex_lock(&g_schema_cache_mu);
-      if (!g_schema_cache_tools)
-         g_schema_cache_tools = build_tools_array();
-      pthread_mutex_unlock(&g_schema_cache_mu);
-   }
-   if (!g_schema_cache_tools)
-      return 0;
-
-   cJSON *tool = NULL;
-   cJSON_ArrayForEach(tool, g_schema_cache_tools)
-   {
-      cJSON *fn = cJSON_GetObjectItemCaseSensitive(tool, "function");
-      if (!fn)
-         continue;
-      cJSON *name = cJSON_GetObjectItemCaseSensitive(fn, "name");
-      if (!cJSON_IsString(name) || !name->valuestring[0])
-         continue;
-      if (count >= max)
-         break;
-      out[count++] = name->valuestring;
-   }
-   return count;
-}
 
 static const char *agent_tools_schema_provider_for_agent(const agent_t *agent)
 {
@@ -2141,76 +1720,224 @@ static const char *agent_tools_schema_provider_for_agent(const agent_t *agent)
    return agent->provider;
 }
 
-void agent_tools_sanitize_for_provider(cJSON *tools, const char *provider_name)
+/* Registry-owned definitions stay canonical until an explicit provider render. */
+static int catalog_contains(const aimee_request_t *catalog, const char *name)
 {
-   if (!tools || !cJSON_IsArray(tools) || !provider_name || !provider_name[0])
-      return;
-   /* Quick gate: only the small/local providers actually need rewrites.
-    * Avoids the per-tool deep-copy + delete cycle in the hot path. */
-   if (strcmp(provider_name, "llama_native") != 0 && strcmp(provider_name, "llama-eval") != 0 &&
-       strcmp(provider_name, "ollama") != 0)
-      return;
-
-   cJSON *tool = NULL;
-   cJSON_ArrayForEach(tool, tools)
-   {
-      cJSON *fn = cJSON_GetObjectItemCaseSensitive(tool, "function");
-      if (!fn)
-         continue;
-      cJSON *params = cJSON_GetObjectItemCaseSensitive(fn, "parameters");
-      if (!params)
-         continue;
-      cJSON *clean = tool_schema_sanitize(provider_name, params);
-      if (!clean)
-         continue;
-      /* Replace in place; tool_schema_sanitize returned a fresh tree, so
-       * the swap is safe. */
-      cJSON_ReplaceItemInObjectCaseSensitive(fn, "parameters", clean);
-   }
+   for (int i = 0; i < catalog->n_tools; ++i)
+      if (!strcmp(catalog->tools[i].name, name))
+         return 1;
+   return 0;
 }
 
-void agent_tools_sanitize_for_agent(cJSON *tools, const agent_t *agent)
+static int catalog_append(aimee_request_t *catalog, const char *name, const char *description,
+                          cJSON *schema)
 {
-   agent_tools_sanitize_for_provider(tools, agent_tools_schema_provider_for_agent(agent));
+   aimee_tool_t tool = {.name = name ? strdup(name) : NULL,
+                        .description = strdup(description ? description : ""),
+                        .schema = schema};
+   if (!tool.name || !tool.description || !tool.schema || !aimee_ir_tool_valid(&tool) ||
+       catalog->n_tools >= AIMEE_IR_MAX_BLOCKS)
+      goto failed;
+   aimee_tool_t *next = realloc(catalog->tools, (size_t)(catalog->n_tools + 1) * sizeof *next);
+   if (!next)
+      goto failed;
+   catalog->tools = next;
+   catalog->tools[catalog->n_tools++] = tool;
+   return 0;
+failed:
+   aimee_tool_free(&tool);
+   return -1;
 }
 
-/* Build tools array in Anthropic format by converting from OpenAI format.
- * OpenAI: {"type":"function","function":{"name":"...","description":"...","parameters":{...}}}
- * Anthropic: {"name":"...","description":"...","input_schema":{...}} */
-cJSON *build_tools_array_anthropic(void)
+/* MCP tools/list is an explicit business-schema ingress, not a model wire. */
+static int catalog_advert(aimee_request_t *catalog, const char *name, const cJSON *advert)
 {
-   cJSON *openai_tools = build_tools_array();
-   cJSON *tools = cJSON_CreateArray();
-   if (!openai_tools || !tools)
-   {
-      cJSON_Delete(openai_tools);
-      cJSON_Delete(tools);
-      return NULL;
-   }
+   const char *description =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(advert, "description"));
+   const cJSON *source = cJSON_GetObjectItemCaseSensitive(advert, "inputSchema");
+   cJSON *schema =
+       source ? cJSON_Duplicate(source, 1) : cJSON_Parse("{\"type\":\"object\",\"properties\":{}}");
+   return catalog_append(catalog, name, description, schema);
+}
 
-   int n = cJSON_GetArraySize(openai_tools);
-   for (int i = 0; i < n; i++)
+int agent_tools_catalog(aimee_wire_t exposure, aimee_request_t *out)
+{
+   if (!out || (exposure != AIMEE_WIRE_OPENAI_CHAT && exposure != AIMEE_WIRE_RESPONSES &&
+                exposure != AIMEE_WIRE_ANTHROPIC))
+      return -1;
+   aimee_request_t catalog = {0};
+   unsigned surface = exposure == AIMEE_WIRE_RESPONSES ? TSURF_RESP : TSURF_CHAT;
+   for (size_t i = 0; i < sizeof g_builtin_tools / sizeof *g_builtin_tools; ++i)
    {
-      cJSON *oi = cJSON_GetArrayItem(openai_tools, i);
-      cJSON *fn = cJSON_GetObjectItem(oi, "function");
-      if (!fn)
+      const builtin_tool_def_t *definition = g_builtin_tools + i;
+      if (!(definition->surfaces & surface) ||
+          (agent_tools_is_git_write(definition->name) && !g_git_write_fn))
          continue;
-
-      cJSON *tool = cJSON_CreateObject();
-      cJSON *name = cJSON_GetObjectItem(fn, "name");
-      cJSON *desc = cJSON_GetObjectItem(fn, "description");
-      cJSON *params = cJSON_GetObjectItem(fn, "parameters");
-
-      if (name && cJSON_IsString(name))
-         cJSON_AddStringToObject(tool, "name", name->valuestring);
-      if (desc && cJSON_IsString(desc))
-         cJSON_AddStringToObject(tool, "description", desc->valuestring);
-      if (params)
-         cJSON_AddItemToObject(tool, "input_schema", cJSON_Duplicate(params, 1));
-
-      cJSON_AddItemToArray(tools, tool);
+      aimee_tool_t tool = {0};
+      if (builtin_ir_definition(definition, &tool))
+         goto failed;
+      cJSON *schema = tool.schema;
+      tool.schema = NULL;
+      int rc = catalog_append(&catalog, tool.name, tool.description, schema);
+      aimee_tool_free(&tool);
+      if (rc)
+         goto failed;
    }
+   if (g_mcp_call_fn && g_mcp_advert_fn)
+      for (int i = 0; i < g_mcp_tool_count; ++i)
+      {
+         cJSON *advert = g_mcp_advert_fn(g_mcp_tools[i]);
+         if (!cJSON_IsString(cJSON_GetObjectItemCaseSensitive(advert, "description")) ||
+             !cJSON_GetObjectItemCaseSensitive(advert, "inputSchema"))
+         {
+            cJSON_Delete(advert);
+            continue; /* An unavailable MCP advert never invents an empty native capability. */
+         }
+         int rc = catalog_advert(&catalog, g_mcp_tools[i], advert);
+         cJSON_Delete(advert);
+         if (rc)
+            goto failed;
+      }
+   computer_use_policy_t policy;
+   computer_use_policy_from_config(&policy);
+   cJSON *local = mcp_client_registry_build_namespaced_tools(1000);
+   char *wire = kb_client_tool_registry_snapshot_json();
+   cJSON *federated = wire ? cJSON_Parse(wire) : NULL;
+   free(wire);
+   const cJSON *sources[] = {local, cJSON_GetObjectItemCaseSensitive(federated, "mcp_tools")};
+   int rc = 0;
+   for (int source = 0; source < 2 && !rc; ++source)
+   {
+      if (!cJSON_IsArray(sources[source]))
+         continue;
+      const cJSON *advert;
+      cJSON_ArrayForEach(advert, sources[source])
+      {
+         const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(advert, "name"));
+         if (!name || !name[0] || (computer_use_is_tool_name(name) && !policy.enabled) ||
+             (source && catalog_contains(&catalog, name)))
+            continue;
+         if (catalog_advert(&catalog, name, advert))
+         {
+            rc = -1;
+            break;
+         }
+      }
+   }
+   cJSON_Delete(local);
+   cJSON_Delete(federated);
+   if (rc || aimee_ir_request_admit(&catalog))
+      goto failed;
+   aimee_request_free(out);
+   *out = catalog;
+   return 0;
+failed:
+   aimee_request_free(&catalog);
+   return -1;
+}
 
-   cJSON_Delete(openai_tools);
-   return tools;
+int agent_tools_execution_definition(const char *name, aimee_tool_t *out)
+{
+   if (!out || !name || !name[0])
+      return -1;
+   memset(out, 0, sizeof *out);
+   for (size_t i = 0; i < sizeof g_builtin_tools / sizeof *g_builtin_tools; ++i)
+      if (!strcmp(name, g_builtin_tools[i].name))
+         return agent_tools_is_git_write(name) && !g_git_write_fn
+                    ? -1
+                    : builtin_ir_definition(g_builtin_tools + i, out);
+   if (agent_tools_is_mcp_derived(name) && g_mcp_call_fn && g_mcp_advert_fn)
+   {
+      cJSON *advert = g_mcp_advert_fn(name);
+      aimee_request_t one = {0};
+      int valid = cJSON_IsString(cJSON_GetObjectItemCaseSensitive(advert, "description")) &&
+                  cJSON_GetObjectItemCaseSensitive(advert, "inputSchema") &&
+                  !catalog_advert(&one, name, advert);
+      cJSON_Delete(advert);
+      if (valid)
+      {
+         *out = one.tools[0];
+         free(one.tools);
+      }
+      return valid ? 0 : -1;
+   }
+   if (!strchr(name, ':'))
+      return -1;
+   aimee_request_t catalog = {0}, copy = {0};
+   if (agent_tools_catalog(AIMEE_WIRE_OPENAI_CHAT, &catalog))
+      return -1;
+   const aimee_tool_t *tool = aimee_ir_find_function(&catalog, NULL, name);
+   aimee_request_t one = {.tools = (aimee_tool_t *)tool, .n_tools = tool ? 1 : 0};
+   int valid = tool && !aimee_ir_request_clone(&one, &copy);
+   if (valid)
+   {
+      *out = copy.tools[0];
+      free(copy.tools);
+   }
+   aimee_request_free(&catalog);
+   return valid ? 0 : -1;
+}
+
+int agent_tools_catalog_respond(aimee_request_t *catalog)
+{
+   if (!catalog || aimee_ir_request_admit(catalog))
+      return -1;
+   if (catalog_contains(catalog, "respond"))
+      return 0;
+   cJSON *schema = cJSON_Parse(
+       "{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\",\"description\":"
+       "\"The message to return to the user\"}},\"required\":[\"message\"]}");
+   return catalog_append(
+              catalog, "respond",
+              "Respond to the user with a message. Use this when chatting, asking a clarifying "
+              "question, or reporting the final result, whenever no other tool action is needed.",
+              schema)
+              ? -1
+              : 1;
+}
+
+int agent_tools_catalog_sanitize(aimee_request_t *catalog, const char *provider)
+{
+   if (!catalog || aimee_ir_request_admit(catalog))
+      return -1;
+   if (!provider || (strcmp(provider, "llama_native") && strcmp(provider, "llama-eval") &&
+                     strcmp(provider, "ollama")))
+      return 0;
+   for (int i = 0; i < catalog->n_tools; ++i)
+   {
+      cJSON *schema = tool_schema_sanitize(provider, catalog->tools[i].schema);
+      if (!schema)
+         return -1;
+      cJSON_Delete(catalog->tools[i].schema);
+      catalog->tools[i].schema = schema;
+   }
+   return aimee_ir_request_admit(catalog);
+}
+int agent_tools_catalog_sanitize_for_agent(aimee_request_t *catalog, const agent_t *agent)
+{
+   return agent_tools_catalog_sanitize(catalog, agent_tools_schema_provider_for_agent(agent));
+}
+
+static const aimee_request_t *schema_cache(void)
+{
+   pthread_mutex_lock(&g_schema_cache_mu);
+   if (!g_schema_cache_ready && !agent_tools_catalog(AIMEE_WIRE_OPENAI_CHAT, &g_schema_cache))
+      g_schema_cache_ready = 1;
+   const aimee_request_t *catalog = g_schema_cache_ready ? &g_schema_cache : NULL;
+   pthread_mutex_unlock(&g_schema_cache_mu);
+   return catalog;
+}
+cJSON *agent_tool_get_schema_cached(const char *name)
+{
+   const aimee_request_t *catalog = name && name[0] ? schema_cache() : NULL;
+   const aimee_tool_t *tool = catalog ? aimee_ir_find_function(catalog, NULL, name) : NULL;
+   return tool ? tool->schema : NULL;
+}
+int agent_tool_known_names(const char **out, int max)
+{
+   const aimee_request_t *catalog = out && max > 0 ? schema_cache() : NULL;
+   int count = catalog && catalog->n_tools < max ? catalog->n_tools : catalog ? max : 0;
+   for (int i = 0; i < count; ++i)
+      out[i] = catalog->tools[i].name;
+   return count;
 }

@@ -1194,29 +1194,22 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    aimee_wire_t wire = is_anthropic_provider(selected) ? AIMEE_WIRE_ANTHROPIC
                        : is_chatgpt_provider(selected) ? AIMEE_WIRE_RESPONSES
                                                        : AIMEE_WIRE_OPENAI_CHAT;
-   cJSON *tools = cfg->no_tools                  ? cJSON_CreateArray()
-                  : wire == AIMEE_WIRE_ANTHROPIC ? build_tools_array_anthropic()
-                  : wire == AIMEE_WIRE_RESPONSES ? build_tools_array_responses()
-                                                 : build_tools_array();
-   if (tools)
-   {
-      if (wire == AIMEE_WIRE_ANTHROPIC)
-         agent_tools_filter_anthropic_for_role(tools, cfg->role);
-      else
-         agent_tools_filter_for_role(tools, cfg->role);
-   }
+   aimee_request_t tools = {0};
+   int catalog_ready = cfg->no_tools || !agent_tools_catalog(wire, &tools);
+   if (catalog_ready && agent_tools_catalog_filter(&tools, cfg->role))
+      catalog_ready = 0;
    char *system =
        agent_build_exec_context_checked(selected, cfg->network, cfg->role, cfg->system_prompt,
                                         !agent_tools_knowledge_write_allowed(), error, 512);
    const aimee_request_t *seed = cfg->canonical_request;
-   int prepared = empty && tools && system && (!seed || !aimee_ir_request_admit(seed)) &&
-                  !agent_prepare_request_ir(selected, empty, tools, system,
+   int prepared = empty && catalog_ready && system && (!seed || !aimee_ir_request_admit(seed)) &&
+                  !agent_prepare_request_ir(selected, empty, &tools, system,
                                             seed && seed->has_max_tokens ? seed->max_tokens : 0,
                                             seed && seed->has_temperature ? seed->temperature : -1,
                                             wire, cfg->role != NULL, &execution->profile);
    free(system);
    cJSON_Delete(empty);
-   cJSON_Delete(tools);
+   aimee_request_free(&tools);
    if (prepared && cfg->reasoning_effort &&
        aimee_ir_effort_parse(cfg->reasoning_effort, &execution->profile.reasoning_effort))
       prepared = 0;

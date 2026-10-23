@@ -5,6 +5,7 @@ struct aimee_response;
 #include "agent_types.h"
 #include "cJSON.h"
 #include <stdint.h>
+#include <aimee/ir/aimee_ir.h>
 #include <aimee/tools/module_api.h>
 
 /* Tool execution (Unix only) */
@@ -106,40 +107,27 @@ int agent_tools_execution_definition(const char *name, struct aimee_tool *out);
  * Container/detached providers do not inherit host transport capabilities. */
 char *const *agent_tools_bind_bash_environment(char *const environment[]);
 
-/* Tool definition builders */
-struct cJSON *build_tools_array(void);
-struct cJSON *build_tools_array_responses(void);
-struct cJSON *build_tools_array_anthropic(void);
-struct cJSON *delegate_respond_spec(void);
-int agent_tools_append_delegate_respond_tool(struct cJSON *tools);
+/* Complete registry-owned canonical catalog. Exposure preserves the selected
+ * provider's established inventory; only explicit egress renders native JSON. */
+int agent_tools_catalog(aimee_wire_t exposure, aimee_request_t *out);
+int agent_tools_catalog_filter(aimee_request_t *catalog, const char *role);
+int agent_tools_catalog_respond(aimee_request_t *catalog);
+int agent_tools_catalog_sanitize(aimee_request_t *catalog, const char *provider);
+int agent_tools_catalog_sanitize_for_agent(aimee_request_t *catalog, const agent_t *agent);
 int agent_ir_strip_delegate_respond(struct aimee_response *response);
 int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name);
-void agent_tools_filter_for_role(struct cJSON *tools, const char *role);
-/* Anthropic compatibility ingress; the OpenAI-family helper above accepts Chat
- * and Responses catalogs. Both decide on translation-admitted IR identities. */
-void agent_tools_filter_anthropic_for_role(struct cJSON *tools, const char *role);
 
-/* Look up a tool's parameter schema (the `function.parameters` object) by
+/* Look up a tool's canonical parameter schema by
  * tool name. Returns a borrowed pointer into a process-lifetime cache; the
  * caller MUST NOT cJSON_Delete it. Returns NULL if the tool is not in the
  * registry. The cache is built lazily on the first call from
- * build_tools_array() and is safe to call concurrently — first caller
+ * the canonical registry owner and is safe to call concurrently — first caller
  * wins; subsequent callers reuse the same pointer. */
 struct cJSON *agent_tool_get_schema_cached(const char *tool_name);
 
 /* Write up to `max` built-in tool names into `out`, returning how many.
  * The names are borrowed from the process-lifetime schema cache. */
 int agent_tool_known_names(const char **out, int max);
-
-/* Walk an OpenAI-format tools array (each element {type:"function",
- * function:{name, description, parameters}}) and rewrite each tool's
- * `function.parameters` schema in place via tool_schema_sanitize for
- * the given provider. No-op for providers that pass schemas through
- * unchanged (openai, openrouter, codex, gemini). Active for
- * llama_native, llama-eval, and ollama. The array is modified in place; ownership
- * unchanged. */
-void agent_tools_sanitize_for_provider(struct cJSON *tools, const char *provider_name);
-void agent_tools_sanitize_for_agent(struct cJSON *tools, const agent_t *agent);
 
 char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int timeout_ms);
 /* Same dispatch and owned text result, plus the tool owner's authoritative
@@ -225,7 +213,7 @@ void agent_tools_set_mcp_provider(agent_mcp_call_fn call, agent_mcp_advert_fn ad
 agent_mcp_call_fn agent_tools_mcp_call_provider(void);
 
 /* Declare an MCP tool as part of aimee's native surface. Idempotent. Must be
- * called before the first build_tools_array() so the schema cache sees it. */
+ * called before the first the canonical registry owner so the schema cache sees it. */
 void agent_tools_register_mcp_tool(const char *name);
 
 /* 1 if `name` was registered above and so dispatches through the MCP provider. */

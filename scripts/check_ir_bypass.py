@@ -16,6 +16,10 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "build_tools_array", "build_tools_array_responses", "build_tools_array_anthropic",
+    "agent_tools_filter_for_role", "agent_tools_filter_anthropic_for_role",
+    "agent_tools_append_delegate_respond_tool", "delegate_respond_spec",
+    "agent_tools_sanitize_for_provider", "agent_tools_sanitize_for_agent",
     "agent_build_request_openai", "agent_build_request_responses", "agent_build_request_anthropic",
     "agent_anthropic_set_system", "model_sampling_apply_openai", "model_sampling_apply_anthropic",
     "agent_request_shape_openai_messages",
@@ -79,6 +83,8 @@ RULES = {
     "retired-api": re.compile(r"\b(?:" + "|".join(RETIRED) + r")\b"),
     "driver-bypass": re.compile(r"->\s*(?:parse_response|build_request)\s*\("),
     "unclassified-tool-dispatch": re.compile(r"\bdispatch_tool_call(?:_ctx)?\s*\("),
+    "native-tool-reparse": re.compile(r"\b(?:openai_ir_parse_tool|anthropic_ir_parse_tool)\s*\("),
+    "dead-tool-builder-abi": re.compile(r"(?:->|\.)\s*build_tools\b|\(\s*\*\s*build_tools\s*\)"),
     "native-profile-rebuild": re.compile(r"\bagent_build_request_(?:openai|anthropic|responses)\s*\("),
     "post-render-profile": re.compile(r"\b(?:model_sampling_apply_(?:openai|anthropic)|agent_anthropic_set_system|agent_request_shape_openai_messages)\s*\("),
     "canonical-dispatch-cache": re.compile(r"\bdispatch_tool_call_ctx_status\s*\("),
@@ -120,7 +126,7 @@ CLASSIFIED_DISPATCH_FILES = {
     "src/server/server_compute_async.c", "src/server/script_tool_execution.c",
 }
 CANONICAL_PROFILE_FUNCTIONS = {
-    "agent_build_request_ir", "agent_openai_profile_ir", "agent_responses_profile_ir",
+    "agent_prepare_request_ir", "agent_build_request_ir", "agent_openai_profile_ir", "agent_responses_profile_ir",
     "agent_anthropic_profile_ir",
 }
 
@@ -196,6 +202,10 @@ def findings(root: Path) -> list[dict]:
                     pattern = re.compile(r"\bapproach_store_retry_context\s*\(")
             if rule == "unqualified-learning-prompt" and relative in {"src/db1_client/delegation.c", "src/db1_client/delegate_learning.h"}:
                 continue
+            if rule == "dead-tool-builder-abi" and relative != "src/modules/delegates/include/aimee/delegates/delegate_driver.h" and not relative.startswith("src/modules/delegates/"):
+                continue
+            if rule == "native-tool-reparse" and relative not in {"src/server/agent_bridge.c", "src/server/agent_tools.c", "src/posix/agent_runtime.c", "src/server/server_native_execution.c"}:
+                continue
             if rule == "post-render-profile" and relative != "src/server/agent_request_build.c":
                 continue
             if rule == "canonical-dispatch-cache" and relative not in {"src/posix/agent_runtime.c", "src/server/server_compute_async.c", "src/server/script_rpc.c", "src/server/script_tool_execution.c"}:
@@ -211,6 +221,9 @@ def findings(root: Path) -> list[dict]:
             for match in pattern.finditer(source):
                 if rule == "native-history-field" and not canonical and not any(
                         start <= match.start() < end for start, end in history_spans):
+                    continue
+                if rule == "native-tool-reparse" and relative == "src/server/agent_bridge.c" and not any(
+                        start <= match.start() < end for start, end in profile_spans):
                     continue
                 if rule == "native-profile-rebuild" and not any(
                         start <= match.start() < end for start, end in profile_spans):

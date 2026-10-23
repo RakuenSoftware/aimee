@@ -31,6 +31,25 @@ class IRBypassTests(unittest.TestCase):
     def test_production_tree(self):
         checker.check(checker.ROOT)
 
+    def test_internal_tool_catalog_stays_canonical(self):
+        for symbol in ("build_tools_array", "build_tools_array_responses", "build_tools_array_anthropic",
+                       "agent_tools_filter_for_role", "agent_tools_filter_anthropic_for_role",
+                       "agent_tools_append_delegate_respond_tool", "delegate_respond_spec",
+                       "agent_tools_sanitize_for_provider", "agent_tools_sanitize_for_agent"):
+            with self.subTest(symbol=symbol):
+                path=self.source("src/server/new_catalog.c",symbol+"(catalog);")
+                with self.assertRaisesRegex(ValueError,"retired-api"): checker.check(self.root)
+                path.unlink()
+        for symbol in ("openai_ir_parse_tool", "anthropic_ir_parse_tool"):
+            path=self.source("src/server/agent_bridge.c","int agent_prepare_request_ir(void) { return "+symbol+"(tool); }")
+            with self.assertRaisesRegex(ValueError,"native-tool-reparse"): checker.check(self.root)
+            path.unlink()
+        path=self.source("src/modules/delegates/driver.c","driver.build_tools = renamed_builder;")
+        with self.assertRaisesRegex(ValueError,"dead-tool-builder-abi"): checker.check(self.root)
+        path.unlink()
+        self.source("src/modules/translation/aimee_frontend_openai.c","openai_ir_parse_tool(native,tool);")
+        checker.check(self.root) # explicit external ingress remains supported
+
     def test_secondary_flat_cli_transport_cannot_be_reintroduced(self):
         for text in (
             "cli_event_t event;", "event.type = CLI_EVENT_TEXT_DELTA;",

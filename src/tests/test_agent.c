@@ -1,3 +1,4 @@
+#include "support/typed_catalog_fixture.h"
 #include "modules/tools/tool_catalog_data.h"
 #include "support/delegate_role_seam_stub.h"
 #include <aimee/ir/session_event.h>
@@ -715,8 +716,8 @@ static void test_tool_surface_single_source(void)
 
    status = agent_tools_builtin_catalog(&independent, &independent_count);
    assert(status == 0 && independent_count == count);
-   cJSON *chat = build_tools_array();
-   cJSON *resp = build_tools_array_responses();
+   cJSON *chat = fixture_chat_tools();
+   cJSON *resp = fixture_responses_tools();
    assert(tools_has(chat, "request_input", 1) && tools_has(resp, "request_input", 0));
    cJSON *question = tools_find(chat, "request_input", 1);
    cJSON *parameters = cJSON_GetObjectItemCaseSensitive(question, "parameters");
@@ -796,9 +797,9 @@ static void test_knowledge_write_gates_the_tool_policy(void)
    assert(agent_tools_tool_allowed_for_role("validate", "bash") == 1);
    assert(agent_tools_tool_allowed_for_role("validate", "write_file") == 0);
    assert(agent_tools_tool_allowed_for_role("search", "bash") == 0);
-   cJSON *tools = build_tools_array();
+   cJSON *tools = fixture_chat_tools();
    assert(tools_array_has_name(tools, "read_file") && tools_array_has_name(tools, "find_symbol"));
-   agent_tools_filter_for_role(tools, "review");
+   fixture_filter_tools(tools, "review");
    /* review uses review_indexed: the branch-index nav tools plus the read-only
     * worktree tools survive the filter. The read tools are reachability-gated
     * (slice 7); the default provider here is SHARED (reachable), so they are
@@ -815,12 +816,12 @@ static void test_knowledge_write_gates_the_tool_policy(void)
    /* diagnose stays on the current_code toolset (no index tools). */
    assert(agent_tools_tool_allowed_for_role("diagnose", "find_symbol") == 0);
    cJSON_Delete(tools);
-   tools = build_tools_array_anthropic();
-   agent_tools_filter_anthropic_for_role(tools, "diagnose");
+   tools = fixture_anthropic_tools();
+   fixture_filter_tools(tools, "diagnose");
    assert(tools_array_has_name(tools, "read_file") && !tools_array_has_name(tools, "find_symbol"));
    cJSON_Delete(tools);
-   tools = build_tools_array();
-   agent_tools_filter_for_role(tools, "validate");
+   tools = fixture_chat_tools();
+   fixture_filter_tools(tools, "validate");
    assert(tools_array_has_name(tools, "bash") && tools_array_has_name(tools, "read_file"));
    assert(tools_array_has_name(tools, "search_memory") &&
           !tools_array_has_name(tools, "write_file"));
@@ -893,31 +894,24 @@ static void test_permissions_clamp_the_toolset(void)
    agent_tools_denied_set(denied, 3);
 
    /* Offered: the tool is gone from the array a `code` delegate is handed. */
-   cJSON *tools = build_tools_array();
+   cJSON *tools = fixture_chat_tools();
    assert(tools_array_has_name(tools, "write_file"));
-   agent_tools_filter_for_role(tools, "code");
+   fixture_filter_tools(tools, "code");
    assert(!tools_array_has_name(tools, "write_file"));
    assert(!tools_array_has_name(tools, "edit_file"));
    /* And what the permission does NOT withhold survives the same filter. */
    assert(tools_array_has_name(tools, "read_file"));
    cJSON_Delete(tools);
-   for (int surface = 0; surface < 3; surface++)
-   {
-      tools = surface == 2 ? build_tools_array_anthropic()
-              : surface    ? build_tools_array_responses()
-                           : build_tools_array();
-      cJSON *definition = tools_find(tools, "read_file", surface == 0);
-      assert(definition);
-      cJSON_ReplaceItemInObjectCaseSensitive(
-          definition, surface == 2 ? "input_schema" : "parameters", cJSON_CreateArray());
-      if (surface == 2)
-         agent_tools_filter_anthropic_for_role(tools, "code");
-      else
-         agent_tools_filter_for_role(tools, "code");
-      assert(!tools_has(tools, "read_file", surface == 0));
-      assert(cJSON_GetArraySize(tools) > 0);
-      cJSON_Delete(tools);
-   }
+   aimee_request_t invalid = {0};
+   assert(!agent_tools_catalog(AIMEE_WIRE_OPENAI_CHAT, &invalid));
+   aimee_tool_t *read = (aimee_tool_t *)aimee_ir_find_function(&invalid, NULL, "read_file");
+   assert(read);
+   cJSON_Delete(read->schema);
+   read->schema = cJSON_CreateArray();
+   int original_count = invalid.n_tools;
+   assert(agent_tools_catalog_filter(&invalid, "code") == -1);
+   assert(invalid.n_tools == original_count); /* malformed authority is not repaired by filtering */
+   aimee_request_free(&invalid);
 
    /* Allowed: and the same answer at the gate that runs it. */
    assert(agent_tools_tool_allowed_for_role("code", "write_file") == 0);
@@ -4359,8 +4353,8 @@ static void test_owned_tool_and_source_handoff(void)
    assert(!agent_tools_tool_denied("changed_after_capture"));
    /* Both admission and advertisement must ignore another turn's global env. */
    assert(agent_tools_tool_allowed_for_role(NULL, "write_file"));
-   cJSON *tools = build_tools_array();
-   agent_tools_filter_for_role(tools, NULL);
+   cJSON *tools = fixture_chat_tools();
+   fixture_filter_tools(tools, NULL);
    assert(tools_array_has_name(tools, "write_file"));
    cJSON_Delete(tools);
    agent_tools_scope_restore(&previous);

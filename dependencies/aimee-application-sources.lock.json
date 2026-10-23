@@ -70,7 +70,7 @@
         "server",
         "kb"
       ],
-      "source_sha256": "beced098177dc69312c939738db9aa505f6d7445fba98472782dd2301a098e3a"
+      "source_sha256": "f3221d9001ebebe7d0580c69b0fafe97901a4fb5544a81987dead50ace5eb95c"
     },
     {
       "id": "gateway",
@@ -152,7 +152,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "9ecfb3ed6e48ad9315da037745949a86d981f854b9bf3c2c7ffe73863dfa19c6",
+      "source_sha256": "d6249dc90240a0cb5d8cbfea0167f4f85f7cc70ce62e202de463faabd2615132",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 10,
@@ -191,7 +191,7 @@
       "placements": [
         "server"
       ],
-      "source_sha256": "d8596299c04f0684ac48ab7aa935a4153917548808bfaca8da59bef856bf12a9",
+      "source_sha256": "3acd2673a8ef42197b871e573823ffe10a449b489e729cac403c45261ebea6d8",
       "runtime": "go",
       "principal_class": 1,
       "principal_ref": 11,

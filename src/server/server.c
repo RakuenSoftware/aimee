@@ -2176,7 +2176,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* WFE lifecycle is Go-only. This process exposes agent/roundtable resources
     * to the Go control plane but never registers a C workflow executor. */
    /* Give aimee's own agents the MCP tools marked native in mcp_tool_table. Must
-    * precede any toolset_registry_init() / build_tools_array(), which snapshot the
+    * precede any toolset_registry_init() / agent_tools_catalog(), which snapshot the
     * registrations. aimee's agents and an external MCP client now reach the SAME
     * handler, so the two surfaces cannot drift apart: the drift is what left review
     * panelists unable to ask "is this still called?" while Claude Code could. */

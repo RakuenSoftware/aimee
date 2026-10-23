@@ -886,12 +886,26 @@ native_provider_http:
       return -1;
    }
 
-   /* Build tools JSON (reused each turn, format depends on provider) */
-   cJSON *tools = chatgpt     ? build_tools_array_responses()
-                  : anthropic ? build_tools_array_anthropic()
-                              : build_tools_array(); /* OpenAI format */
-   if (!tools)
+   aimee_wire_t wire = chatgpt     ? AIMEE_WIRE_RESPONSES
+                       : anthropic ? AIMEE_WIRE_ANTHROPIC
+                                   : AIMEE_WIRE_OPENAI_CHAT;
+   aimee_request_t tools = {0};
+   int inject_respond_tool = agent_should_inject_respond_tool(agent, role);
+   int catalog_ready = !agent_tools_catalog(wire, &tools) &&
+                       !agent_tools_catalog_filter(&tools, role) &&
+                       (!inject_respond_tool || agent_tools_catalog_respond(&tools) >= 0);
+   if (catalog_ready)
    {
+      agent_tools_set_dispatch_role(role);
+      if (!chatgpt && !anthropic && agent_tools_catalog_sanitize_for_agent(&tools, agent))
+      {
+         agent_tools_set_dispatch_role(NULL);
+         catalog_ready = 0;
+      }
+   }
+   if (!catalog_ready)
+   {
+      aimee_request_free(&tools);
       free(assembled_sys);
       free(task_instructions);
       if (has_ephemeral_ssh)
@@ -901,31 +915,12 @@ native_provider_http:
       snprintf(out->error, sizeof out->error, "tool catalog could not be admitted as IR");
       return -1;
    }
-   if (anthropic)
-      agent_tools_filter_anthropic_for_role(tools, role);
-   else
-      agent_tools_filter_for_role(tools, role);
-   int inject_respond_tool = agent_should_inject_respond_tool(agent, role);
-   if (inject_respond_tool)
-      agent_tools_append_delegate_respond_tool(tools);
-   agent_tools_set_dispatch_role(role);
-   /* Provider-specific schema sanitization. Only fires for local llama.cpp-style
-    * providers (including Qwen served behind an OpenAI-compatible endpoint)
-    * and ollama (others pass through). Operates on the OpenAI-format
-    * builder output — chatgpt's Responses API and the anthropic-specific
-    * builder already shape the schema for their providers. */
-   if (!chatgpt && !anthropic)
-      agent_tools_sanitize_for_agent(tools, agent);
 
-   /* Legacy transcripts cross an explicit entry adapter once. Every message
-    * admitted after this point is canonical {role,blocks}, including host text. */
-   aimee_wire_t wire = chatgpt     ? AIMEE_WIRE_RESPONSES
-                       : anthropic ? AIMEE_WIRE_ANTHROPIC
-                                   : AIMEE_WIRE_OPENAI_CHAT;
+   /* Stored conversation JSON is canonical; legacy storage imports at this entry. */
    cJSON *messages = aimee_frontend_history_import(initial_messages, wire);
    if (!messages)
    {
-      cJSON_Delete(tools);
+      aimee_request_free(&tools);
       agent_tools_set_dispatch_role(NULL);
       free(assembled_sys);
       free(task_instructions);
@@ -943,7 +938,7 @@ native_provider_http:
    {
       cJSON_Delete(user_msg);
       cJSON_Delete(messages);
-      cJSON_Delete(tools);
+      aimee_request_free(&tools);
       agent_tools_set_dispatch_role(NULL);
       free(assembled_sys);
       free(task_instructions);
@@ -1165,7 +1160,7 @@ native_provider_http:
          agent_session_append_final_instruction(messages);
          final_instruction_added = 1;
       }
-      cJSON *active_tools = final_text_only_turn ? NULL : tools;
+      const aimee_request_t *active_tools = final_text_only_turn ? NULL : &tools;
       /* Evidence-gated review can require one real repository lookup. Force
        * provider tool selection only until the first successful tool call;
        * leaving it required would prevent the final text turn forever. */
@@ -1285,19 +1280,10 @@ native_provider_http:
       cJSON *eff_messages = reduce_active ? reduced_messages : messages;
 
       /* Build request (use fb_agent which may have fallback model after turn 0) */
-      cJSON *req;
-      if (chatgpt)
-         req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
-                                      AIMEE_WIRE_RESPONSES, role != NULL, &dispatch_catalog);
-      else if (anthropic)
-      {
+      if (anthropic)
          track_anthropic_payload_rewrite(driver, &fb_agent, eff_messages, sys);
-         req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
-                                      AIMEE_WIRE_ANTHROPIC, role != NULL, &dispatch_catalog);
-      }
-      else
-         req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok, temperature,
-                                      AIMEE_WIRE_OPENAI_CHAT, role != NULL, &dispatch_catalog);
+      cJSON *req = agent_build_request_ir(&fb_agent, eff_messages, active_tools, sys, tok,
+                                          temperature, wire, role != NULL, &dispatch_catalog);
 
       char *body = cJSON_PrintUnformatted(req);
       cJSON_Delete(req);
@@ -1408,22 +1394,10 @@ native_provider_http:
          snprintf(out->model, MAX_MODEL_LEN, "%s", fb_agent.model);
          snprintf(out->served_model, MAX_MODEL_LEN, "%s", fb_agent.model);
 
-         cJSON *fb_req;
-         if (chatgpt)
-            fb_req =
-                agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok, temperature,
-                                       AIMEE_WIRE_RESPONSES, role != NULL, &dispatch_catalog);
-         else if (anthropic)
-         {
+         if (anthropic)
             track_anthropic_payload_rewrite(driver, &fb_agent, messages, sys);
-            fb_req =
-                agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok, temperature,
-                                       AIMEE_WIRE_ANTHROPIC, role != NULL, &dispatch_catalog);
-         }
-         else
-            fb_req =
-                agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok, temperature,
-                                       AIMEE_WIRE_OPENAI_CHAT, role != NULL, &dispatch_catalog);
+         cJSON *fb_req = agent_build_request_ir(&fb_agent, messages, active_tools, sys, tok,
+                                                temperature, wire, role != NULL, &dispatch_catalog);
          char *fb_body = cJSON_PrintUnformatted(fb_req);
          cJSON_Delete(fb_req);
          if (fb_body)
@@ -2417,7 +2391,7 @@ ir_capture_failed:
    /* Cleanup */
    aimee_request_free(&dispatch_catalog);
    agent_tools_set_dispatch_role(NULL);
-   cJSON_Delete(tools);
+   aimee_request_free(&tools);
    cJSON_Delete(messages);
    free(assembled_sys);
    free(task_instructions);
