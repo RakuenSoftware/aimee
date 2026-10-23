@@ -33,8 +33,9 @@ provider/model pages, and CLI operations consume the same `providers` owner.
 ## Providers and readiness
 
 A configured connection is not proof of reachable inference. `inspect.go` and
-catalog discovery exercise the selected endpoint through egress, while CLI
-providers use the isolated probe worker. Validate the credential scheme and
+catalog discovery exercise the selected endpoint through egress. Native CLI
+models retain configuration and SDK metadata inspection; inference is tested
+through a conversation using the canonical native execution owner. Validate the credential scheme and
 model availability before selecting a connection for use. Owner unavailability
 is surfaced to management callers rather than replaced with a second writer.
 
@@ -48,7 +49,16 @@ for Codex probes, where inference supplies the availability result.
 
 Probe failures expose `execution_error` and the legacy `execution_message`
 alias. The GUI accepts both. Discovery failures remain separate from inference
-success, and `--no-run` never sends an inference request.
+success, and `--no-run` never sends an inference request. HTTP inference probes
+admit an owned canonical request and response, retain complete native response
+bytes as an inert raw sidecar, and require completed text before declaring health.
+Partial, refused, tool-pending, unknown, and malformed results cannot grant health.
+
+Native probes return `execution_tested: false` without `execution_ok` or
+`model_available`, with “Test this native model in a conversation.” The GUI
+shows this neutrally as not tested. Requested unsupported inference exits the CLI
+with code 2; `--no-run` metadata inspection exits 0. This is capability
+unavailability, not evidence that the model failed. No custom CLI command is run.
 
 ## Configuration and activation
 
@@ -111,8 +121,7 @@ metadata but excludes credential-bearing management payloads from raw capture.
 HTTP discovery and probes go through the egress module. Credentials are sealed
 for a named account, caller, destination origin, and authentication scheme, with
 expiry and authenticated encryption. The management process has no ambient
-network access. CLI probes run in an isolated Go worker with a fixed diagnostic
-prompt, temporary working directory, output bound, and process-group timeout.
+network access. Management probes do not launch native CLI inference workers.
 Existing native inference execution, per-turn authentication, and interactive
 OAuth login workers remain separate resource/execution boundaries; this change
 does not rewrite those runtime families.
@@ -130,7 +139,8 @@ reuse. `docs/validation/providers-gui.md` records browser acceptance journeys;
 Go tests cover connection isolation, concurrent writes, malformed rosters,
 legacy adoption, stale snapshot rejection, unknown-field retention, secret
 migration, deletion/reuse recovery, concurrency recovery, pricing, metadata,
-authenticated discovery, pagination, and bounded CLI diagnostics. Native tests
+authenticated discovery, pagination, strict canonical HTTP diagnostics, and
+native probe no-execution guarantees. Native tests
 use the real Go manager through a pipe fixture and check ABI compatibility.
 The fixture's public test Vault is only for native unit tests and is never used
 by a production module.

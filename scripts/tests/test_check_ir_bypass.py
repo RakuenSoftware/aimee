@@ -31,6 +31,21 @@ class IRBypassTests(unittest.TestCase):
     def test_production_tree(self):
         checker.check(checker.ROOT)
 
+    def test_unmanaged_native_probe_cannot_return(self):
+        for symbol in ("RunProbeWorker", "newProbeWorker", "runConfiguredProbe", "splitProbeCommand", "validProbeOutput"):
+            with self.subTest(symbol=symbol):
+                path = self.source("server-go/modules/providers/renamed_probe.go", "package providers\nfunc bad() { " + symbol + "() }")
+                with self.assertRaisesRegex(ValueError, "retired-api"):
+                    checker.check(self.root)
+                path.unlink()
+
+    def test_renamed_unmanaged_probe_cannot_execute(self):
+        for invocation in ('exec.Command("model")', 'exec.CommandContext(ctx, "model")'):
+            path = self.source("server-go/modules/providers/renamed_probe.go", "package providers\nfunc diagnostic() { " + invocation + " }")
+            with self.assertRaisesRegex(ValueError, "provider-probe-exec"):
+                checker.check(self.root)
+            path.unlink()
+
     def test_internal_tool_catalog_stays_canonical(self):
         for symbol in ("build_tools_array", "build_tools_array_responses", "build_tools_array_anthropic",
                        "agent_tools_filter_for_role", "agent_tools_filter_anthropic_for_role",

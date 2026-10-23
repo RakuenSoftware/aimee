@@ -1,8 +1,6 @@
 package providers
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -152,28 +150,7 @@ func (m *Manager) inspect(ctx context.Context, req Request) (object, error) {
 	}
 	if model != nil && str(model, "backend") != "" && str(model, "backend") != "http" {
 		backend := str(model, "backend")
-		_, opts := arguments(req.Arguments)
-		result := object{"status": "ok", "name": str(model, "name"), "backend": backend, "provider": str(model, "provider"), "models_status": -1, "models_probe_skipped": true, "slots_probe_skipped": true, "slots_source": "config", "slots": number(model, "max_parallel"), "context_window": number(model, "context_window"), "execution_tested": false}
-		if opts["no-run"] == "true" {
-			return result, nil
-		}
-		result["execution_tested"], result["execution_ok"] = true, false
-		if backend != "tmux-cli" && backend != "provider-cli" {
-			result["execution_error"] = "unsupported model backend"
-			return result, nil
-		}
-		if m.worker == nil {
-			result["execution_error"] = "CLI diagnostic worker unavailable"
-			return result, nil
-		}
-		reply, err := m.worker.probe(ctx, str(model, "name"))
-		if err != nil {
-			result["execution_error"] = "CLI diagnostic worker lost; restart the providers module"
-		} else {
-			for k, v := range reply {
-				result[k] = v
-			}
-		}
+		result := object{"status": "ok", "name": str(model, "name"), "backend": backend, "provider": str(model, "provider"), "models_status": -1, "models_probe_skipped": true, "slots_probe_skipped": true, "slots_source": "config", "slots": number(model, "max_parallel"), "context_window": number(model, "context_window"), "execution_tested": false, "execution_message": "Test this native model in a conversation."}
 		return result, nil
 	}
 	if req.Operation == "provider.connection_models" {
@@ -235,38 +212,40 @@ func (m *Manager) inspect(ctx context.Context, req Request) (object, error) {
 	}
 	result["execution_tested"] = true
 	result["execution_ok"] = false
-	payload := object{"model": str(model, "model"), "messages": []object{{"role": "user", "content": "Reply with exactly: ok"}}, "max_tokens": 256}
-	suffix := "/chat/completions"
-	// The bundled reasoning model can spend a tiny probe budget entirely on
-	// hidden reasoning. Request a short final answer from this known runtime.
-	if target, err := url.Parse(str(provider, "endpoint")); err == nil && target.Scheme == "https" && target.Host == "aimee-llm:8761" {
-		payload["chat_template_kwargs"] = object{"enable_thinking": false}
-	}
+	wire, suffix := "openai_chat", "/chat/completions"
 	if str(provider, "provider") == "anthropic" {
-		suffix = "/messages"
+		wire, suffix = "anthropic", "/messages"
 	}
 	if str(provider, "provider") == "chatgpt" {
-		suffix = "/responses"
-		// Same wire contract as responses_backend_build: Codex requires SSE,
-		// store=false and instructions, and rejects max_tokens/max_output_tokens.
-		payload = object{"model": str(model, "model"), "store": false, "stream": true,
-			"instructions": "You are performing a bounded availability probe.",
-			"input":        []object{{"type": "message", "role": "user", "content": []object{{"type": "input_text", "text": "Reply with exactly: ok"}}}}}
+		wire, suffix = "responses", "/responses"
 	}
-	body, _ := json.Marshal(payload)
+	request := probeRequest(str(model, "model"), wire)
+	localThinking := false
+	if target, err := url.Parse(str(provider, "endpoint")); err == nil && target.Scheme == "https" && target.Host == "aimee-llm:8761" {
+		localThinking = true
+	}
+	body, renderErr := probeWire(request, localThinking)
+	if renderErr != nil {
+		result["execution_error"] = "invalid canonical probe request"
+		return result, nil
+	}
 	started := time.Now()
 	execution, runErr := m.request(ctx, provider, "POST", suffix, body)
 	result["latency_ms"] = time.Since(started).Milliseconds()
+	// The diagnostic body has an IR owner even when transport status denies health.
+	response, decodeErr := probeHTTPResponse(execution.Body, wire)
 	if runErr != nil {
 		result["execution_error"] = runErr.Error()
 	} else if execution.Status < 200 || execution.Status >= 300 {
 		result["execution_error"] = fmt.Sprintf("provider returned HTTP %d", execution.Status)
-	} else if err := probeResponse(execution.Body, suffix == "/responses"); err != nil {
-		result["execution_error"] = err.Error()
 	} else {
-		result["execution_ok"] = true
-		if skipModels {
-			result["model_available"] = true
+		if decodeErr != nil || !response.CompleteText() {
+			result["execution_error"] = "provider returned no complete canonical diagnostic answer"
+		} else {
+			result["execution_ok"] = true
+			if skipModels {
+				result["model_available"] = true
+			}
 		}
 	}
 	return result, nil
@@ -452,77 +431,3 @@ func endpointHost(endpoint string) string {
 // Require both completed inference and final text, including output items
 // delivered before an empty response.completed envelope. A truncated stream or
 // a delta followed by failure is not a successful probe.
-func probeResponse(body []byte, responses bool) error {
-	var reply object
-	if responses {
-		finalText := false
-		scanner := bufio.NewScanner(bytes.NewReader(body))
-		scanner.Buffer(make([]byte, 4096), 1<<20)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if !strings.HasPrefix(line, "data:") {
-				continue
-			}
-			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-			if data == "[DONE]" {
-				continue
-			}
-			var event object
-			if json.Unmarshal([]byte(data), &event) != nil {
-				return errors.New("provider returned invalid Responses event")
-			}
-			switch str(event, "type") {
-			case "error", "response.failed", "response.incomplete":
-				return errors.New("provider did not complete the response")
-			case "response.output_item.done":
-				item, _ := event["item"].(map[string]any)
-				finalText = finalText || probeOutputText(item)
-			case "response.output_text.done":
-				finalText = finalText || strings.TrimSpace(str(event, "text")) != ""
-			case "response.content_part.done":
-				part, _ := event["part"].(map[string]any)
-				finalText = finalText || str(part, "type") == "output_text" && strings.TrimSpace(str(part, "text")) != ""
-			case "response.completed":
-				reply, _ = event["response"].(map[string]any)
-			}
-		}
-		if scanner.Err() != nil || reply == nil || str(reply, "status") != "completed" {
-			return errors.New("provider returned no completed response")
-		}
-		if finalText {
-			return nil
-		}
-		for _, item := range rows(reply, "output") {
-			if probeOutputText(item) {
-				return nil
-			}
-		}
-	} else {
-		if json.Unmarshal(body, &reply) != nil {
-			return errors.New("provider returned invalid JSON")
-		}
-		for _, choice := range rows(reply, "choices") {
-			if msg, ok := choice["message"].(map[string]any); ok && strings.TrimSpace(str(msg, "content")) != "" {
-				return nil
-			}
-		}
-		for _, part := range rows(reply, "content") {
-			if str(part, "type") == "text" && strings.TrimSpace(str(part, "text")) != "" {
-				return nil
-			}
-		}
-	}
-	return errors.New("provider returned no final text")
-}
-
-func probeOutputText(item object) bool {
-	if str(item, "type") != "message" || str(item, "role") != "assistant" {
-		return false
-	}
-	for _, part := range rows(item, "content") {
-		if str(part, "type") == "output_text" && strings.TrimSpace(str(part, "text")) != "" {
-			return true
-		}
-	}
-	return false
-}

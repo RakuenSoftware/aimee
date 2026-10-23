@@ -2026,9 +2026,22 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
    {
       exit_rc = 1;
    }
-   else if (strcmp(route->method, "model.probe") == 0 && cli_agent_probe_response_is_failure(resp))
+   else if (strcmp(route->method, "model.probe") == 0)
    {
-      exit_rc = 1;
+      int no_run = 0;
+      for (int i = 0; i < fwd_argc; i++)
+      {
+         if (strcmp(fwd_argv[i], "--no-run") == 0)
+            no_run = 1;
+         else if (strncmp(fwd_argv[i], "--no-run=", 9) == 0)
+            no_run = strcmp(fwd_argv[i] + 9, "true") == 0;
+      }
+      const char *backend = json_str(resp, "backend");
+      if (!no_run && backend[0] && strcmp(backend, "http") != 0 &&
+          cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(resp, "execution_tested")))
+         exit_rc = 2; /* Unsupported diagnostic, not evidence of model failure. */
+      else if (cli_agent_probe_response_is_failure(resp))
+         exit_rc = 1;
    }
    else if ((strcmp(route->method, "index.investigate") == 0 ||
              strcmp(route->method, "index.hybrid") == 0) &&

@@ -95,9 +95,9 @@ static void test_index_investigate_requires_useful_evidence(void)
 
 /* Capture the exact post-transport production path, including ownership,
  * stream selection, JSON shaping, and process return code. */
-static int finish_response_capture(const char *method, const char *json, int http_status,
-                                   int json_output, char *out, size_t out_cap, char *err,
-                                   size_t err_cap)
+static int finish_response_capture_args(const char *method, const char *json, int http_status,
+                                        int argc, char **argv, int json_output, char *out,
+                                        size_t out_cap, char *err, size_t err_cap)
 {
    cJSON *resp = cJSON_Parse(json);
    assert(resp != NULL);
@@ -113,7 +113,7 @@ static int finish_response_capture(const char *method, const char *json, int htt
    assert(dup2(ofd, STDOUT_FILENO) >= 0);
    assert(dup2(efd, STDERR_FILENO) >= 0);
 
-   int rc = cli_v1_finish_response(&route, resp, http_status, json_output, 0, NULL);
+   int rc = cli_v1_finish_response(&route, resp, http_status, json_output, argc, argv);
 
    fflush(stdout);
    fflush(stderr);
@@ -131,6 +131,48 @@ static int finish_response_capture(const char *method, const char *json, int htt
    fclose(out_file);
    fclose(err_file);
    return rc;
+}
+
+static int finish_response_capture(const char *method, const char *json, int http_status,
+                                   int json_output, char *out, size_t out_cap, char *err,
+                                   size_t err_cap)
+{
+   return finish_response_capture_args(method, json, http_status, 0, NULL, json_output, out,
+                                       out_cap, err, err_cap);
+}
+
+static void test_native_probe_unavailable_is_not_model_failure(void)
+{
+   const char *body = "{\"name\":\"native\",\"backend\":\"provider-cli\","
+                      "\"models_probe_skipped\":true,\"execution_tested\":false,"
+                      "\"execution_message\":\"Test this native model in a conversation.\"}";
+   char out[4096], err[1024];
+   assert(finish_response_capture("model.probe", body, 200, 0, out, sizeof(out), err,
+                                  sizeof(err)) == 2);
+   assert(strstr(out, "execution: not tested Test this native model in a conversation."));
+   assert(!strstr(out, "execution: failed") && !strstr(out, "execution: ok"));
+   char *args[] = {"native", "--no-run"};
+   assert(finish_response_capture_args("model.probe", body, 200, 2, args, 0, out, sizeof(out), err,
+                                       sizeof(err)) == 0);
+   char *equal_true[] = {"native", "--no-run=true"};
+   assert(finish_response_capture_args("model.probe", body, 200, 2, equal_true, 0, out, sizeof(out),
+                                       err, sizeof(err)) == 0);
+   char *equal_false[] = {"native", "--no-run=false"};
+   assert(finish_response_capture_args("model.probe", body, 200, 2, equal_false, 0, out,
+                                       sizeof(out), err, sizeof(err)) == 2);
+   char *last_false[] = {"native", "--no-run", "--no-run=false"};
+   assert(finish_response_capture_args("model.probe", body, 200, 3, last_false, 0, out, sizeof(out),
+                                       err, sizeof(err)) == 2);
+   char *last_true[] = {"native", "--no-run=false", "--no-run"};
+   assert(finish_response_capture_args("model.probe", body, 200, 3, last_true, 0, out, sizeof(out),
+                                       err, sizeof(err)) == 0);
+   assert(finish_response_capture("model.probe",
+                                  "{\"execution_tested\":true,\"execution_ok\":false}", 200, 1, out,
+                                  sizeof(out), err, sizeof(err)) == 1);
+   assert(finish_response_capture("model.probe",
+                                  "{\"execution_tested\":true,\"execution_ok\":true}", 200, 1, out,
+                                  sizeof(out), err, sizeof(err)) == 0);
+   printf("  PASS: native unsupported inference is distinct from model failure\n");
 }
 
 static void test_json_roundtable_failure_preserves_user_visible_envelope(void)
@@ -2417,6 +2459,7 @@ int main(void)
    test_memory_delete_and_supersede_routes();
    test_server_status_route_lookup();
    test_agent_probe_failure_controls_exit_status();
+   test_native_probe_unavailable_is_not_model_failure();
    test_roundtable_review_without_an_artifact_is_a_failure();
    test_a_failed_panel_prints_its_reasons_beside_the_artifact();
    test_kb_docs_push_route_and_marshal();

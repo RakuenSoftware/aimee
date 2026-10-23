@@ -4,6 +4,7 @@
   "dependencies": [
     "config",
     "egress",
+    "ir",
     "module-runtime",
     "vault"
   ],
@@ -28,30 +29,30 @@
     "server-go/modules/providers/metadata_download.go",
     "server-go/modules/providers/metadata_seed.go",
     "server-go/modules/providers/normalize.go",
-    "server-go/modules/providers/probe_worker_linux.go",
-    "server-go/modules/providers/probe_worker_other.go",
     "server-go/modules/providers/process.go",
     "server-go/modules/providers/profiles.go",
     "server-go/modules/providers/recovery.go",
     "server-go/modules/providers/rules.go",
     "server-go/modules/providers/store.go",
-    "server-go/modules/providers/testdata/nativefixture/main.go",
     "server-go/modules/providers/vaultresource/client.go",
     "server-go/modules/providers/model_services.go",
     "server-go/modules/providers/model_services_linux.go",
     "server-go/modules/providers/model_services_other.go",
     "server-go/modules/providers/model_services_tls.go",
-    "server-go/modules/providers/competence.go"
+    "server-go/modules/providers/competence.go",
+    "server-go/modules/providers/probe_ir.go",
+    "server-go/modules/providers/testdata/nativefixture/main.go"
   ],
   "go_tests": [
     "server-go/modules/providers/compatibility_test.go",
     "server-go/modules/providers/concurrency_test.go",
     "server-go/modules/providers/inspect_test.go",
     "server-go/modules/providers/management_test.go",
-    "server-go/modules/providers/probe_worker_linux_test.go",
     "server-go/modules/providers/rules_test.go",
     "server-go/modules/providers/model_services_test.go",
-    "server-go/modules/providers/competence_test.go"
+    "server-go/modules/providers/competence_test.go",
+    "server-go/modules/providers/probe_ir_boundary_test.go",
+    "server-go/modules/providers/probe_unavailable_test.go"
   ],
   "tests": [],
   "docs": [

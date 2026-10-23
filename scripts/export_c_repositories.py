@@ -627,7 +627,7 @@ def go_module_main(module_id: str, principal_ref: int,
     extra_imports = ""
     watchdog = ""
     if module_id == "providers":
-        watchdog = "\tif handled, code := handler.ModelServicesBootstrap(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunBootstrapLookup(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunProbeWorker(os.Args); handled { os.Exit(code) }\n"
+        watchdog = "\tif handled, code := handler.ModelServicesBootstrap(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunBootstrapLookup(os.Args); handled { os.Exit(code) }\n"
     cleanup = "\tdefer handler.Close()\n" if module_id == "postgres" else ""
     setup = ""
     process_setup = ""
@@ -762,7 +762,7 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
 # the serving module. Add entries here in lockstep with the caller's process
 # contract and runtime-bundle coverage.
 GO_SHARED_CONTRACTS = {
-    "server-go/ir": {"aimee", "memory", "economizer", "delegates", "governance", "roundtable"},
+    "server-go/ir": {"aimee", "memory", "economizer", "delegates", "governance", "roundtable", "providers"},
     "server-go/memory": {"memory"},
     "server-go/internal/retrievalmetrics": {"memory", "benchmarks"},
     "server-go/modules/module-runtime/identity": {"server", "kb", "memory"},

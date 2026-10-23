@@ -23,3 +23,16 @@ it('names the real model editor from its visible title and closes without saving
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
 });
+
+it('shows native inference unavailability neutrally instead of failed or healthy', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(
+    url === '/api/models' ? { models: [{ name: 'native', model: 'claude', provider: 'anthropic', enabled: true }] } :
+    url === '/api/models/probe' ? { name: 'native', execution_tested: false, execution_message: 'Test this native model in a conversation.' } : {},
+  ))));
+  render(<Models />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Probe', exact: true }));
+  expect(await screen.findByText('Test this native model in a conversation.')).toBeTruthy();
+  expect(screen.getByText('not tested', { exact: true })).toBeTruthy();
+  expect(screen.queryByText('available', { exact: true })).toBeNull();
+  expect(screen.queryByText('unavailable', { exact: true })).toBeNull();
+});

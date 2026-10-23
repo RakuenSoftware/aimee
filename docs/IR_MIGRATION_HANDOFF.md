@@ -38,11 +38,34 @@ build and import helpers are retired; their wire goldens now exercise the actual
 canonical completion transport. Together the cleanup removes 2,080 net production
 lines before the provider health-probe cutover.
 
-Provider health probes are the remaining semantic consumer being normalized:
-fixed tool-free requests and diagnostic completions must have canonical owners,
-with full native bytes retained as inert metadata and final-text admission shared
-with other consumers. Availability badges and CLI exit status must not treat
-truncated or refused output as healthy. This adapter work is isolated and pending.
+Provider HTTP health probes now own admitted canonical fixed requests and full
+canonical diagnostic responses. Their native JSON/SSE bytes remain inert raw
+metadata, and shared final-text admission rejects truncation, refusal, tools,
+unknown terminals and malformed known usage. The unmanaged native CLI probe
+worker and its pre-network-guard callbacks are retired: without a source-bound
+native diagnostic owner, probing reports not tested and directs users to a
+conversation. Configuration metadata and `--no-run` remain available; actual
+native execution still uses the managed factory. The UI shows a neutral result;
+CLI requested unsupported inference exits 2, failed HTTP inference 1, metadata 0.
+Focused provider normal/race, standalone export, CLI normal/sanitizers and UI
+regressions pass. The integrated bypass gate passes 31 tests.
+
+Measured from `03d881e0e`, this continuation removes **2,065 net production lines**
+(excluding tests, documentation, generated locks and build tooling). It retires
+parallel implementations rather than compressing source. The combined C baseline
+`f74a037ae` passes all 693 normal invocations, 693 ASan/UBSan/leak invocations,
+76 lint gates and both CMake native runtime/factory tests. The small later probe
+CLI/printer delta has focused normal and sanitizer coverage. Final combined Go,
+frontend, SDK, image and live browser acceptance remain pending; these results
+must not be relabeled as final-source deployment acceptance.
+
+The prior `.252` VM8167 was stopped and destroyed at 21:38 UTC before the new
+question/service/hybrid cases sent any model request. The exact controller-exit
+trigger is unconfirmed; no reaper-expiry claim is made. Local exports retain the
+173-case integration, 70 real-PostgreSQL checks, both normal upgrades and the real
+native resume with original UUID/full cache prefix preserved. The new task-owned
+lease controller retains its VM on ordinary errors and requires explicit cleanup.
+Replacement VM8168 is clean and ready for the final source image and new install.
 
 
 The user's completion criteria now include a significant reduction in production

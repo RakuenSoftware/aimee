@@ -56,6 +56,7 @@ interface ModelStats {
 interface ProbeResult {
   name: string;
   execution_ok?: boolean;
+  execution_tested?: boolean;
   model_available?: boolean;
   latency_ms?: number;
   execution_message?: string;
@@ -65,7 +66,7 @@ interface ProbeResult {
 }
 
 type ProbeState = {
-  status: "idle" | "probing" | "ok" | "down";
+  status: "idle" | "probing" | "ok" | "down" | "not-tested";
   latency_ms?: number;
   msg?: string;
 };
@@ -152,13 +153,12 @@ export default function Models() {
         setProbes((p) => ({ ...p, [name]: { status: "down", msg: res.error } }));
         return;
       }
-      // A live "Respond with ok." run is the strongest availability signal;
-      // fall back to /models reachability when the run was skipped.
-      const up = res.execution_ok ?? res.model_available ?? false;
+      // Catalog/configuration metadata is not evidence of model execution.
+      const tested = res.execution_tested !== false && typeof res.execution_ok === "boolean";
       setProbes((p) => ({
         ...p,
         [name]: {
-          status: up ? "ok" : "down",
+          status: !tested ? "not-tested" : res.execution_ok ? "ok" : "down",
           latency_ms: res.latency_ms,
           msg: res.execution_error || res.execution_message || res.model_probe,
         },
@@ -271,7 +271,7 @@ function ModelCard({
         ? { c: "var(--sg-danger)", t: "unavailable" }
         : pstate === "probing"
           ? { c: "var(--sg-warning)", t: "probing…" }
-          : { c: "var(--sg-text-pale)", t: "unknown" };
+          : { c: "var(--sg-text-pale)", t: pstate === "not-tested" ? "not tested" : "unknown" };
 
   const successPct =
     stats && stats.total_calls > 0
@@ -330,9 +330,9 @@ function ModelCard({
               {probe.latency_ms} ms
             </div>
           )}
-          {probe?.msg && pstate === "down" && (
+          {probe?.msg && (pstate === "down" || pstate === "not-tested") && (
             <div
-              style={{ fontSize: 11, color: "var(--sg-danger)", marginTop: 2, wordBreak: "break-word" }}
+              style={{ fontSize: 11, color: pstate === "down" ? "var(--sg-danger)" : "var(--sg-text-faint)", marginTop: 2, wordBreak: "break-word" }}
               title={probe.msg}
             >
               {probe.msg.slice(0, 80)}

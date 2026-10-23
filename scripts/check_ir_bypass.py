@@ -24,6 +24,7 @@ RETIRED = (
     "agent_build_request_openai", "agent_build_request_responses", "agent_build_request_anthropic",
     "agent_anthropic_set_system", "model_sampling_apply_openai", "model_sampling_apply_anthropic",
     "agent_request_shape_openai_messages",
+    "RunProbeWorker", "newProbeWorker", "runConfiguredProbe", "splitProbeCommand", "validProbeOutput",
     "externalTextObservation", "CLIText", "RunWatchdog",
     "shadow_mirror_dispatch",
     "kb_curator_sidecar_run", "kb_curator_shell_quote", "kb_curator_describe_wait_status",
@@ -81,6 +82,7 @@ RULES = {
     "legacy-session-search": re.compile(r"\bdb1_primary_session_(?:alloc_search|alloc_recent|get_latest)\b|\b(?:FROM|JOIN)\s+primary_sessions\b", re.IGNORECASE),
     "unscoped-approach-prompt": re.compile(r"\bapproach_store_(?:retry_context|recall|render)\s*\("),
     "unqualified-learning-prompt": re.compile(r"\bdb1_delegate_learning_inject_prompt\s*\("),
+    "provider-probe-exec": re.compile(r"\bexec\.(?:Command|CommandContext)\s*\("),
     "retired-api": re.compile(r"\b(?:" + "|".join(RETIRED) + r")\b"),
     "driver-bypass": re.compile(r"->\s*(?:parse_response|build_request)\s*\("),
     "unclassified-tool-dispatch": re.compile(r"\bdispatch_tool_call(?:_ctx)?\s*\("),
@@ -180,6 +182,8 @@ def findings(root: Path) -> list[dict]:
         history_spans = (profile_function_spans(source, {"message_history_repair"})
                          if relative == "src/server/agent_bridge.c" else [])
         for rule, pattern in RULES.items():
+            if rule == "provider-probe-exec" and Path(relative).parent.as_posix() != "server-go/modules/providers":
+                continue
             if rule == "delegate-model-bypass" and Path(relative).parent.as_posix() != "server-go/modules/delegates":
                 continue
             if rule == "model-command-bypass" and relative not in CANONICAL_MODEL_FILES:

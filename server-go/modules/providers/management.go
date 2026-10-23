@@ -26,7 +26,6 @@ type Manager struct {
 	egress    egress.Executor
 	config    Config
 	metadata  *Metadata
-	worker    *probeWorker
 }
 
 func NewManager(store *Store, resources Resources) *Manager {

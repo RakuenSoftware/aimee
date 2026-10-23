@@ -51,6 +51,23 @@ class CProcessBuildTests(unittest.TestCase):
             self.assertEqual(usage.returncode, 2)
             self.assertIn("DAEMON_MODULE_BUS_SOCKET", usage.stderr)
 
+    @unittest.skipUnless(shutil.which("go"), "go is not installed")
+    def test_providers_export_builds_with_owned_probe_ir(self) -> None:
+        contract = exporter.process_contracts.validate()["providers"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            exporter.export_module(root, "providers", "required", contract,
+                                   exporter.source_timestamp(), exporter.CORE_VERSION_FILE.read_text().strip())
+            module = root / "aimee-module-providers"
+            self.assertTrue((module / "server-go/ir/request.go").is_file())
+            self.assertTrue((module / "server-go/ir/response.go").is_file())
+            self.assertTrue((module / "server-go/modules/providers/probe_ir.go").is_file())
+            self.assertNotIn("RunProbeWorker", (module / "runtime/main.go").read_text())
+            self.assertFalse((module / "server-go/modules/providers/probe_worker_linux.go").exists())
+            build = subprocess.run(["go", "build", "-o", str(module / "providers"), "./runtime"],
+                                   cwd=module, capture_output=True, text=True, timeout=180)
+            self.assertEqual(build.returncode, 0, build.stderr)
+
     def test_shared_database_and_domain_contracts_follow_consumers(self) -> None:
         for module in ("aimee", "memory", "postgres"):
             with self.subTest(module=module):
