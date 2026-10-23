@@ -1,16 +1,31 @@
 # Native browser recall probe
 
 This live probe checks factual recall across Claude A1, resumed Claude A2, HTTP
-model B, and a return to the original Claude session. It keeps two independently
-generated 80-bit values and the full native tool profile. A2 must recall A1's
-label. B must recall the label and add the marker supplied in B's user message.
-Returning A must recall both values without either appearing in its new prompt.
+model B, and a return to the original Claude session. Both selectable scenarios
+keep two independently generated user-provided values and the full native tool
+profile. A2 must recall A1's first value. B must recall it and add the second value
+supplied in B's user message. Returning A must recall both values without either
+appearing in its new prompt.
+
+`scenario_mode: "legacy-label-marker"` is the default and retains the reproducible
+814 probe: two independently generated 80-bit label/marker values. Its first three
+prompts remain exact. `scenario_mode: "user-reference-uuid"` is a proposed test
+realism/provenance variant: two independent `crypto.randomUUID()` UUIDv4 values,
+with 122 random bits each, named project reference ID and release reference ID.
+The IDs are fixed before A1; no mode changes or value resampling occur after a
+refusal. The UUID scenario keeps the same four-turn information flow, full-value
+answer requirement, model/tool profile, and native identity/cache gates. It is
+not a release-planning task or a substitute task with easier factual values.
 
 The final question asks for the values supplied by the user. An earlier probe
 incorrectly said the assistant introduced the marker, although B's user message
 supplied it. Its recorded `reasoning_extraction` refusal remains a failed result.
-The first three prompts are unchanged; the correction does not change models,
-tools, history projection, native identity, or provider refusal handling.
+The corrected user-provenance 814 label/marker probe also produced a retained
+`reasoning_extraction` refusal on native return. Neither failed result is waived,
+retried, or reclassified by adding the UUID scenario. No product bug or provider
+refusal cause is established here. The UUID variant is unqualified until a
+separately authorized live run supplies its own evidence; it does not change
+SDKs, models, tools, history projection, native identity, or refusal handling.
 
 The answer oracle checks only actual canonical assistant text from the new turn.
 It requires the exact values once each, rejects guesses and truncated or extra
@@ -47,6 +62,11 @@ all 86 installed products, all 19 server modules and all three healthy services.
 `chromium_executable` optionally selects the installed browser. TLS verification
 remains enabled; a fixture with a private certificate supplies its exact UI
 certificate SPKI in the certificate receipt.
+
+The optional `scenario_mode` selects one of the two modes above. Unknown modes
+fail before browser launch. Missing mode retains the legacy default; there is no
+automatic fallback between modes. Reports and phase-start artifacts identify the
+selected mode, and UUID-mode reports name both reference IDs explicitly.
 
 Set `prepare_authorized` to prepare a fresh empty session. The runner waits for
 the fixture owner's session receipt and exact `execution_gate` before sending.
