@@ -17,14 +17,33 @@ static cJSON *agent_job_to_json(const db1_agent_job_t *job, int include_prompt, 
 
    cJSON_AddNumberToObject(obj, "id", job->id);
    cJSON_AddNumberToObject(obj, "job_id", job->id);
+   cJSON_AddStringToObject(obj, "job_status", job->status);
+   int observation = include_result ? server_delegate_job_observation(obj, job->id, 1) : 1;
+   if (include_result && observation == -2)
+   {
+      cJSON_Delete(obj);
+      obj = cJSON_CreateObject();
+      cJSON_AddNumberToObject(obj, "id", job->id);
+      cJSON_AddNumberToObject(obj, "job_id", job->id);
+      cJSON_AddStringToObject(obj, "status", "forbidden");
+      cJSON_AddStringToObject(obj, "job_status", "forbidden");
+      cJSON_AddStringToObject(obj, "canonical_state", "forbidden");
+      return obj;
+   }
    cJSON_AddStringToObject(obj, "role", job->role);
    cJSON_AddStringToObject(obj, "status", job->status);
    cJSON_AddStringToObject(obj, "agent_name", job->agent_name);
    cJSON_AddNumberToObject(obj, "cursor_turn", job->cursor_turn);
    if (include_prompt && job->prompt[0])
       cJSON_AddStringToObject(obj, "prompt", job->prompt);
-   if (include_result && job->result[0])
-      cJSON_AddStringToObject(obj, "result", job->result);
+   if (include_result && observation >= 0 && job->result[0])
+   {
+      if (!strcmp(job->status, "failed") || !strcmp(job->status, "cancelled") ||
+          !strcmp(job->status, "partial"))
+         cJSON_AddStringToObject(obj, "diagnostic", job->result);
+      else if (observation == 1)
+         cJSON_AddStringToObject(obj, "legacy_result", job->result);
+   }
    if (job->lease_owner[0])
       cJSON_AddStringToObject(obj, "lease_owner", job->lease_owner);
    if (job->heartbeat_at[0])
@@ -145,7 +164,11 @@ int handle_jobs_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    else
    {
       cJSON_AddStringToObject(resp, "job_status", job.status);
-      cJSON_AddItemToObject(resp, "job", agent_job_to_json(&job, 1, 1));
+      cJSON *projected = agent_job_to_json(&job, 1, 1);
+      cJSON_AddItemToObject(resp, "job", projected);
+      const cJSON *projected_status = cJSON_GetObjectItemCaseSensitive(projected, "job_status");
+      if (cJSON_IsString(projected_status))
+         cJSON_ReplaceItemInObject(resp, "job_status", cJSON_Duplicate(projected_status, 1));
       db1_agent_job_free(&job);
    }
 
@@ -171,8 +194,23 @@ int handle_jobs_logs(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    else
    {
       cJSON_AddStringToObject(resp, "job_status", job.status);
-      cJSON_AddItemToObject(resp, "job", agent_job_to_json(&job, 1, 1));
-      cJSON_AddStringToObject(resp, "log", job.result);
+      cJSON *projected = agent_job_to_json(&job, 1, 1);
+      cJSON_AddItemToObject(resp, "job", projected);
+      const cJSON *projected_status = cJSON_GetObjectItemCaseSensitive(projected, "job_status");
+      if (cJSON_IsString(projected_status))
+         cJSON_ReplaceItemInObject(resp, "job_status", cJSON_Duplicate(projected_status, 1));
+      const char *fields[] = {"result", "diagnostic", "legacy_result"};
+      const char *kinds[] = {"canonical_text", "diagnostic", "legacy_archive"};
+      for (size_t i = 0; i < sizeof fields / sizeof *fields; i++)
+      {
+         const cJSON *display = cJSON_GetObjectItemCaseSensitive(projected, fields[i]);
+         if (cJSON_IsString(display))
+         {
+            cJSON_AddStringToObject(resp, "log", display->valuestring);
+            cJSON_AddStringToObject(resp, "log_kind", kinds[i]);
+            break;
+         }
+      }
       db1_agent_job_free(&job);
    }
 

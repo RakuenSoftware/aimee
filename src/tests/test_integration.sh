@@ -2282,6 +2282,32 @@ fi  # MIRROR_SHA256
 # suite covers that in isolation) but "the routes a client actually calls still
 # behave when their state lives in another process".
 
+# Source authority must describe a real server-owned workspace, not a dummy
+# relative label. Register through the same public owner used by deployment.
+WF_WORKSPACE="$HOME/workflow-control-workspace"
+git init -b main "$WF_WORKSPACE" >/dev/null
+git -C "$WF_WORKSPACE" config user.name "Aimee Integration"
+git -C "$WF_WORKSPACE" config user.email "aimee-integration@example.invalid"
+printf 'workflow control fixture\n' >"$WF_WORKSPACE/README.md"
+git -C "$WF_WORKSPACE" add README.md
+git -C "$WF_WORKSPACE" commit -m fixture >/dev/null
+WF_REGISTER=$(python3 - "$WF_WORKSPACE" <<'PYWORKSPACE'
+import json, sys
+print(json.dumps(dict(method="workspace.add", root=sys.argv[1], provider="shared", scan=False)))
+PYWORKSPACE
+)
+RESP=$(http_rpc "$WF_REGISTER") || true
+check_output "workflow control workspace registered" '"status":"ok"' echo "$RESP"
+workflow_submit() {
+    local body
+    body=$(python3 - "$WF_WORKSPACE" "$1" <<'PYSUBMIT'
+import json, sys
+print(json.dumps(dict(proposal_md=sys.argv[2], workflow="build", repo=sys.argv[1])))
+PYSUBMIT
+)
+    http_call POST /v1/dev/submit "$body"
+}
+
 WF_STEP=""
 if [ "$WORKFLOW_MODULE_INSTALLED" -ne 1 ]; then
     WF_STEP="install (go toolchain, build, or generated grants)"
@@ -2320,13 +2346,13 @@ check_output "submit without a proposal is refused" '400' \
 check_output "submit without a repo is refused too" '400' \
     echo "$(http_status POST /v1/dev/submit '{"proposal_md":"# no repo"}')"
 
-WF_SUB1=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ one\n\ndo the first thing","workflow":"build","repo":"integ/repo"}')
+WF_SUB1=$(workflow_submit $'# integ one\n\ndo the first thing')
 check_output "a submit is admitted" '200' echo "${WF_SUB1%% *}"
 check_output "and it names the run it started" '"work_item_id"' echo "$WF_SUB1"
 WI1=$(echo "$WF_SUB1" | sed -n 's/.*"work_item_id"[^"]*"\([^"]*\)".*/\1/p')
 check "the submit returned an id" test -n "$WI1"
 
-WF_SUB2=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ two\n\ndo the second thing","workflow":"build","repo":"integ/repo"}')
+WF_SUB2=$(workflow_submit $'# integ two\n\ndo the second thing')
 check_output "a second submit is admitted" '200' echo "${WF_SUB2%% *}"
 WI2=$(echo "$WF_SUB2" | sed -n 's/.*"work_item_id"[^"]*"\([^"]*\)".*/\1/p')
 check "the two runs are distinct" test -n "$WI2" -a "$WI1" != "$WI2"
@@ -2347,7 +2373,7 @@ check_output "while the second says its own thing" 'do the second thing' \
 # "the third one" fails for the wrong reason the day the default moves.
 WF_CAP_CODE="" ; WF_CAP_BODY=""
 for i in 1 2 3 4 5 6 7 8; do
-    WF_C=$(http_call POST /v1/dev/submit "{\"proposal_md\":\"# cap probe $i\",\"workflow\":\"build\",\"repo\":\"integ/repo\"}")
+    WF_C=$(workflow_submit "# cap probe $i")
     WF_CAP_CODE="${WF_C%% *}"
     WF_CAP_BODY="$WF_C"
     [ "$WF_CAP_CODE" != "200" ] && break
@@ -2391,7 +2417,7 @@ check_output "resuming a park the operator cannot clear is refused" '409' \
 # consequence that matters, since a cap that never released would wedge intake.
 check_output "the run can be stopped" '200' \
     echo "$(http_status POST /v1/workflow/items/$WI1/stop '{}')"
-WF_SUB4=$(http_call POST /v1/dev/submit '{"proposal_md":"# integ four\n\nafter a slot freed","workflow":"build","repo":"integ/repo"}')
+WF_SUB4=$(workflow_submit $'# integ four\n\nafter a slot freed')
 check_output "stopping a run frees the admission slot it held" '200' echo "${WF_SUB4%% *}"
 
 check_output "a run can be deleted" '200' echo "$(http_status DELETE /v1/workflow/items/$WI2)"

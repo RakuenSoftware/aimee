@@ -418,6 +418,11 @@ def main():
         partial = api("/v1/runs", dict(model="ir-live-run", input="IR_RUN_TRUNCATED"))
         partial = await_run(partial["id"])
         assert partial["status"] == "incomplete" and partial["incomplete_details"]["reason"] == "max_output_tokens", partial
+        assert "RUN_PARTIAL" in json.dumps(partial) and "error" not in partial, partial
+        assert partial["usage"]["input_tokens"] == 10 and partial["usage"]["output_tokens"] == 2, partial
+        partial_source = partial["canonical_session_id"]
+        partial_history = api("/v1/trajectory/export", dict(session_id=partial_source, compress=False))["trajectory"]
+        assert "RUN_PARTIAL" in json.dumps(partial_history) and "IR_RUN_TRUNCATED" in json.dumps(partial_history), partial_history
         cancelled = api("/v1/runs", dict(model="ir-live-run", input="IR_RUN_CANCEL"))
         try:
             assert run_started.wait(10), "run did not reach the real provider"

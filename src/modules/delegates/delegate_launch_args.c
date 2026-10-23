@@ -218,8 +218,7 @@ int delegate_review_evidence_judge(const char *role, const char *response, unsig
       message[0] = '\0';
    if (!g_review_evidence)
    {
-      LOG_ERROR("delegates",
-                "no review-evidence provider registered; accepting the review unchecked");
+      LOG_ERROR("delegates", "no review-evidence provider registered");
       return -1;
    }
    return g_review_evidence(role, response, flags, verdict, message, message_cap);

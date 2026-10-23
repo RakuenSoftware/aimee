@@ -619,10 +619,38 @@ def main():
                 time.sleep(0.05)
             assert not errors, errors
             if sandbox_ready:
-                assert child["job_status"] == "done" and "CHILD_MIRROR_OK" in child["result"], child
+                assert child["job_status"] == "done", child
+                output = child["output"]
+                assert output["role"] == "assistant", output
+                text = "".join(block["text"] for block in output["blocks"] if block["type"] == "text")
+                assert "CHILD_MIRROR_OK" in text, output
+                # full_result exposes the actual canonical owner record, not a
+                # response reconstructed from the compatibility job.result.
+                history = child["history"]
+                assert isinstance(history, list) and output in history, child
+                source = child["canonical_source"]
+                assert isinstance(source, dict), child
+                events = child["events"]
+                assert isinstance(events, list) and events, child
+                owner, terminal = source["child"], source["terminal_source"]
+                assert source["execution_status"] == "completed", source
+                assert source["parent_source"]["session_id"] == sid and source["parent_source"]["actor"] == actor, source
+                assert owner["role"] == child["role"] and owner["agent"] == child["agent_name"], source
+                assert terminal["session_id"] == owner["session_id"] and terminal["turn_id"] == owner["turn_id"], source
+                assert terminal["actor"] == actor and int(source["last_sequence"]) >= int(terminal["sequence"]), source
+                completed = [event for event in events if event["event_id"] == terminal["event_id"]]
+                assert len(completed) == 1, events
+                assert completed[0]["turn_id"] == owner["turn_id"] and completed[0]["actor"] == actor, completed
+                assert completed[0]["sequence"] == terminal["sequence"], completed
+                assert completed[0]["payload"]["kind"] == "execution" and completed[0]["payload"]["payload"]["status"] == "completed", completed
                 assert len(child_requests) == child_before + 2, child_requests[child_before:]
             else:
-                assert child["job_status"] == "failed" and "could not be given a sandboxed container" in child["result"], child
+                # Host sandbox admission failed before a child provider call.
+                # This is an operator diagnostic, not a model refusal/output.
+                reason = child.get("diagnostic")
+                assert child["job_status"] == "failed", child
+                assert isinstance(reason, str) and "could not be given a sandboxed container" in reason, child
+                assert child["api_call_count"] == 0 and child["cursor_turn"] == 0, child
                 assert len(child_requests) == child_before, child_requests[child_before:]
             saved = api("/v1/trajectory/export", dict(session_id=sid, compress=False))["trajectory"]
             assert active[3] in json.dumps(saved) and active[3] + "_status" in json.dumps(saved) and "job_id" in json.dumps(saved), saved

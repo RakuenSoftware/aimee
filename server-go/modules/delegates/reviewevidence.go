@@ -75,18 +75,19 @@ type ReviewEvidenceVerdict struct {
 	Error string
 }
 
+// reviewEvidenceRolePolicy belongs to this module and does not inspect a report.
+func reviewEvidenceRolePolicy(role string) ReviewEvidenceVerdict {
+	return ReviewEvidenceVerdict{Guarded: guardedRoles[role], CheckSnippets: snippetCheckedRoles[role]}
+}
+
 // JudgeReviewEvidence reads a delegate's report for signs it did not look.
 func JudgeReviewEvidence(f ReviewEvidenceFacts) ReviewEvidenceVerdict {
-	if f.Response == "" || !guardedRoles[f.Role] {
+	if f.Response == "" || f.TargetProvided {
 		return ReviewEvidenceVerdict{}
 	}
-	if f.TargetProvided {
+	v := reviewEvidenceRolePolicy(f.Role)
+	if !v.Guarded {
 		return ReviewEvidenceVerdict{}
-	}
-
-	v := ReviewEvidenceVerdict{
-		Guarded:       true,
-		CheckSnippets: snippetCheckedRoles[f.Role],
 	}
 
 	if f.WorktreeDirty && claimsMissingParentDiff(f.Response) {

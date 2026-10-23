@@ -1488,6 +1488,41 @@ static cJSON *run_object(const run_job_t *job, const char *status, const aimee_r
    }
    return object;
 }
+/* Public presentation is distinct from reusable business-answer authority. */
+static int run_project_terminal_response(int rc, const agent_result_t *result,
+                                         aimee_response_t *response)
+{
+   if (!result || !response)
+      return -1;
+   const aimee_response_t *source = &result->canonical_response;
+   int incomplete = rc == -1 && !result->success &&
+                    !strcmp(result->stop_reason, aimee_stop_reason_name(AIMEE_STOP_MAX_TOKENS)) &&
+                    !aimee_ir_response_valid(source) &&
+                    source->stop_reason == AIMEE_STOP_MAX_TOKENS && !source->error_message &&
+                    !source->refusal;
+   if (!incomplete && (rc || !result->success || aimee_ir_response_complete_valid(source)))
+      return -1;
+   for (int i = 0; incomplete && i < source->n_content; i++)
+      if (source->content[i].type == AIMEE_BLK_TOOL_USE ||
+          source->content[i].type == AIMEE_BLK_TOOL_RESULT)
+         return -1;
+   aimee_response_t view = {0};
+   if (aimee_ir_response_clone(source, &view))
+      return -1;
+   if (incomplete)
+   {
+      /* The original observation stays unchanged. Public usage covers the
+       * whole host run, including preceding tool turns; this does not turn an
+       * incomplete observation into a successful business answer. */
+      view.usage_in = result->prompt_tokens;
+      view.usage_out = result->completion_tokens;
+      view.usage_cache_read = result->cache_read_tokens;
+      view.usage_cache_write = result->cache_write_tokens;
+   }
+   aimee_response_free(response);
+   *response = view;
+   return 0;
+}
 static char *run_status_json(const run_job_t *job, const char *status, const char *error)
 {
    cJSON *object = run_object(job, status, NULL, error);
@@ -1645,7 +1680,7 @@ static void *run_job_worker(void *context)
       run_finish_status(job, OPENAI_RUN_CANCELLED, NULL);
       goto done;
    }
-   if (rc || !result.success)
+   if (run_project_terminal_response(rc, &result, &response))
    {
       run_finish_status(job, OPENAI_RUN_FAILED, result.error[0] ? result.error : "run failed");
       goto done;

@@ -125,6 +125,12 @@ extern "C"
     * db1_agent_job_free. On miss, out is zero-initialized (free is still safe). */
    int db1_agent_job_get(int job_id, db1_agent_job_t *out);
 
+   /* Private actor-owned canonical child observation; never reads job.result.
+    * 0: found (caller owns *json_out), 1: no binding/child,
+    * -2: owner/canonical-source refused, -1: transport/framing failure. */
+   int db1_agent_job_canonical_observation(int job_id, const char *authenticated_actor,
+                                           char **json_out);
+
    /* Resolve an unguessable participant capability to its durable delegate job.
     * Exact-token lookup keeps agent identity behind the delegation boundary. */
    int db1_agent_job_get_by_participant(const char *participant_token, db1_agent_job_t *out);

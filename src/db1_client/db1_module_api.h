@@ -227,6 +227,7 @@
 #define AIMEE_DB1_OP_AGENT_LOG_ENTRY_LIST                    42u
 #define AIMEE_DB1_OP_DELEGATE_LEARNING_RECORD                43u
 #define AIMEE_DB1_OP_DELEGATE_LEARNING_INJECT_PROMPT         44u
+#define AIMEE_DB1_OP_AGENT_JOB_CANONICAL_OBSERVATION          45u
 
 /* Family 6: server and webchat session rows: who is talking, when they last
  * spoke, and what the conversation was called. */

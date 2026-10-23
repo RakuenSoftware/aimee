@@ -29407,6 +29407,51 @@
         ],
         "max_bytes": 32768
       }
+    },
+    {
+      "family": "delegation",
+      "id": 45,
+      "name": "agent_job_canonical_observation",
+      "c_name": "db1_agent_job_canonical_observation",
+      "c_params": [
+        "job_id",
+        "authenticated_actor",
+        "json_out"
+      ],
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "required",
+      "idempotency": "safe",
+      "host_only": true,
+      "results": [
+        "ok",
+        "missing",
+        "invalid",
+        "failed"
+      ],
+      "request": {
+        "fields": [
+          {
+            "name": "job_id",
+            "type": "int",
+            "required": true
+          },
+          {
+            "name": "authenticated_actor",
+            "type": "text",
+            "required": true
+          }
+        ]
+      },
+      "reply": {
+        "fields": [
+          {
+            "name": "canonical_observation",
+            "type": "text"
+          }
+        ],
+        "max_bytes": 8388620
+      }
     }
   ]
 }

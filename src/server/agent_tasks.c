@@ -467,21 +467,16 @@ int agent_job_resume(agent_config_t *cfg, int job_id, agent_result_t *out)
    rc = agent_run(cfg, job.role, NULL, job.prompt, AGENT_DEFAULT_MAX_TOKENS, out);
    agent_set_durable_job(0);
    int cursor_turn = out->turns > job.cursor_turn ? out->turns : job.cursor_turn;
-   char *authored = rc || aimee_ir_response_complete_text_valid(&out->canonical_response)
-                        ? NULL
-                        : aimee_ir_response_text_alloc(&out->canonical_response);
+   if (!rc)
+      agent_reject_degenerate_plain_response(out, out->agent_name);
+   if (!rc && !out->success)
+      rc = -1;
+   char *authored = rc ? NULL : aimee_ir_response_text_alloc(&out->canonical_response);
    if (!rc && !authored)
    {
       rc = -1;
       out->success = 0;
-      snprintf(out->error, sizeof out->error, "agent job did not return complete canonical text");
-   }
-   if (rc == 0 && liveness_reject_degenerate_response(
-                      &authored, out->error, sizeof(out->error),
-                      "agent job returned raw tool-call markup or another degenerate response"))
-   {
-      rc = -1;
-      out->success = 0;
+      snprintf(out->error, sizeof out->error, "cannot project canonical agent job output");
    }
 
    db1_agent_job_update(job_id, (rc == 0) ? "done" : "failed", cursor_turn,

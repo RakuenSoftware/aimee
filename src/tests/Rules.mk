@@ -391,6 +391,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-ir-request-codec \
                $(TESTPREFIX)/unit-test-agent-request-controls \
                $(TESTPREFIX)/unit-test-delegate-result-envelope \
+               $(TESTPREFIX)/unit-test-openai-run-terminal \
+               $(TESTPREFIX)/unit-test-delegate-status-ir \
                $(TESTPREFIX)/unit-test-harness-ir \
                $(TESTPREFIX)/unit-test-claude-headless \
                $(TESTPREFIX)/unit-test-server-chat-ir \
@@ -815,7 +817,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-tool-schema-sanitizer \
                $(TESTPREFIX)/unit-test-toolset \
                $(TESTPREFIX)/unit-test-db1-git-ownership-client \
-               $(TESTPREFIX)/unit-test-db1-conversation-client \
+               $(TESTPREFIX)/unit-test-db1-conversation-client $(TESTPREFIX)/unit-test-db1-agent-job-observation \
                $(TESTPREFIX)/unit-test-db1-source-deadlines \
                $(TESTPREFIX)/unit-test-server-http \
                $(TESTPREFIX)/unit-test-server-native-primitive \
@@ -7365,5 +7367,14 @@ $(TESTPREFIX)/unit-test-agent-request-controls: $(OBJDIR)/tests/test_agent_reque
  $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
-$(TESTPREFIX)/unit-test-delegate-result-envelope: $(OBJDIR)/tests/test_delegate_result_envelope.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o
+$(TESTPREFIX)/unit-test-delegate-result-envelope: $(OBJDIR)/tests/test_delegate_result_envelope.o $(OBJDIR)/server/liveness.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-openai-run-terminal: $(OBJDIR)/tests/test_openai_run_terminal.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/modules/translation/aimee_frontend_responses.o $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o
+	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-delegate-status-ir: $(OBJDIR)/tests/test_delegate_status_ir.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/json_fluent.o
+	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-db1-agent-job-observation: $(OBJDIR)/tests/test_db1_agent_job_observation.o $(OBJDIR)/db1_client/delegation.o $(OBJDIR)/db1_client/transport.o $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)

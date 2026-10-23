@@ -926,11 +926,39 @@ void delegate_apply_review_evidence_guard(const char *role, const char *repo_roo
 {
    if (!rc || *rc != 0 || !result)
       return;
-   if (!result->success || agent_result_project_complete_text(result) != 0)
+   if (!result->success || aimee_ir_response_complete_valid(&result->canonical_response) != 0)
    {
       *rc = -1;
       snprintf(result->error, sizeof result->error, "%s",
-               "delegate has no complete canonical text outcome");
+               "delegate has no complete canonical outcome");
+      return;
+   }
+   char *display = aimee_ir_response_text_alloc(&result->canonical_response);
+   if (!display)
+   {
+      *rc = -1;
+      snprintf(result->error, sizeof result->error, "%s", "delegate display projection failed");
+      return;
+   }
+   agent_result_replace_display_text(result, display);
+   unsigned policy = 0;
+   char policy_error[512] = "";
+   if (delegate_review_evidence_judge(role, "", AIMEE_DELEGATES_REVIEW_POLICY_ONLY, &policy,
+                                      policy_error, sizeof policy_error) != 0 ||
+       (policy & ~(AIMEE_DELEGATES_REVIEW_GUARDED | AIMEE_DELEGATES_REVIEW_CHECK_SNIPPETS)))
+   {
+      *rc = -1;
+      snprintf(result->error, sizeof result->error, "%s",
+               "delegate review role policy unavailable");
+      return;
+   }
+   if (!(policy & AIMEE_DELEGATES_REVIEW_GUARDED))
+      return;
+   if (agent_result_project_complete_text(result) != 0)
+   {
+      *rc = -1;
+      snprintf(result->error, sizeof result->error, "%s",
+               "delegate review requires complete canonical text");
       return;
    }
    if (!repo_root || !repo_root[0])

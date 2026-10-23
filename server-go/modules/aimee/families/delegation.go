@@ -57,6 +57,7 @@ const (
 	opAgentLogEntryList                  uint32 = 42
 	opDelegateLearningRecord             uint32 = 43
 	opDelegateLearningInjectPrompt       uint32 = 44
+	opAgentJobCanonicalObservation       uint32 = 45
 )
 
 const (
@@ -1129,6 +1130,7 @@ var Delegation = store.Family{
 		opDelegateReservationForgetIfMatches: {Name: "delegate_reservation_forget_if_matches", Args: 2, Tx: true, Run: delegateReservationForgetIfMatches},
 		opDelegationCheckpointSave:           {Name: "delegation_checkpoint_save", Args: 6, Tx: true, Run: delegationCheckpointSave},
 		opDelegationCheckpointLoad:           {Name: "delegation_checkpoint_load", Cells: 3, Args: 1, Run: delegationCheckpointLoad},
+		opAgentJobCanonicalObservation:       {Name: "agent_job_canonical_observation", Args: 2, Cells: 1, Tx: true, HostOnly: true, Timeout: store.CanonicalHistoryTimeout, Run: agentJobCanonicalObservation},
 		opAgentJobCreate:                     {Name: "agent_job_create", Args: 4, Tx: true, Run: agentJobCreate},
 		opAgentJobUpdate:                     {Name: "agent_job_update", Args: 4, Tx: true, Run: agentJobUpdate},
 		opAgentJobComplete:                   {Name: "agent_job_complete", Args: 6, Tx: true, Run: agentJobComplete},

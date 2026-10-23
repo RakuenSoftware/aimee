@@ -123,6 +123,7 @@ var schemaHistory = []struct {
 	{49, "schema_native_cache_reservations.sql"},
 	{50, "schema_legacy_primary_text.sql"},
 	{51, "schema_workflow_execution_scope.sql"},
+	{52, "schema_agent_job_observation.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

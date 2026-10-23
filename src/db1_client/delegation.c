@@ -926,3 +926,74 @@ char *db1_delegate_learning_inject_prompt(const char *role, const char *system_p
 }
 
 /* clang-format on */
+
+/* Read-only dynamic reply, sharing the existing bounded DB1 frame contract.
+ * Retry only when transport reports a larger complete reply; no write repeats. */
+int db1_agent_job_canonical_observation(int job_id, const char *authenticated_actor,
+                                        char **json_out)
+{
+   if (!json_out)
+      return -1;
+   *json_out = NULL;
+   if (job_id <= 0 || !authenticated_actor || !authenticated_actor[0] ||
+       !obs_bus_module_available(AIMEE_DB1_EVENT_DELEGATION))
+      return -1;
+   char job[32];
+   snprintf(job, sizeof job, "%d", job_id);
+   const char *fields[] = {job, authenticated_actor};
+   size_t request_len = 0;
+   if (db1_request_frame_size(fields, 2, &request_len))
+      return -1;
+   uint8_t *request = malloc(request_len), *response = malloc(4096);
+   if (!request || !response)
+   {
+      free(request);
+      free(response);
+      return -1;
+   }
+   db1_request_encode(request, AIMEE_DB1_OP_AGENT_JOB_CANONICAL_OBSERVATION, fields, 2);
+   uint32_t capacity = 4096, length = 0;
+   uint64_t deadline = aimee_module_call_deadline_ns(30000);
+   aimee_module_call_result_t call;
+   for (;;)
+   {
+      call = obs_bus_module_call(AIMEE_DB1_EVENT_DELEGATION, AIMEE_DB1_STAGE_DELEGATION, 0,
+                                 deadline, request, (uint32_t)request_len, response, capacity,
+                                 &length, NULL, NULL);
+      if (call != AIMEE_MODULE_CALL_RESPONSE_TOO_LARGE || length <= capacity ||
+          length > AIMEE_MODULE_MESSAGE_MAX_BODY)
+         break;
+      uint8_t *grown = realloc(response, length);
+      if (!grown)
+         break;
+      response = grown;
+      capacity = length;
+   }
+   free(request);
+   int result = -1;
+   if (call == AIMEE_MODULE_CALL_OK && length >= 8 && length <= capacity)
+   {
+      uint32_t status = aimee_db1_get_u32(response), cells = aimee_db1_get_u32(response + 4);
+      if (status == AIMEE_DB1_STATUS_MISSING && cells == 0 && length == 8)
+         result = 1;
+      else if (status == AIMEE_DB1_STATUS_INVALID && cells == 0 && length == 8)
+         result = -2;
+      else if (status == AIMEE_DB1_STATUS_OK && cells == 1 && length >= 12)
+      {
+         uint32_t size = aimee_db1_get_u32(response + 8);
+         if (size > 0 && size == length - 12 && size <= 8u * 1024u * 1024u &&
+             !memchr(response + 12, 0, size))
+         {
+            *json_out = malloc((size_t)size + 1);
+            if (*json_out)
+            {
+               memcpy(*json_out, response + 12, size);
+               (*json_out)[size] = 0;
+               result = 0;
+            }
+         }
+      }
+   }
+   free(response);
+   return result;
+}

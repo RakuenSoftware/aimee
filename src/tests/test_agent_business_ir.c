@@ -7,6 +7,7 @@
 #include "agent_tasks.h"
 #include "agent_config.h"
 #include "db1_client/execution_plans.h"
+#include "db1_client/agent_jobs.h"
 #include "cmd_describe_platform.h"
 #include "platform_path.h"
 #include <sys/stat.h>
@@ -55,6 +56,8 @@ static void produce(agent_result_t *out)
    aimee_block_t blocks[] = {
        {.type = AIMEE_BLK_THINKING, .text = "CANONICAL_OK {\"completion\":100}"},
        {.type = AIMEE_BLK_TEXT, .text = (char *)text}};
+   aimee_block_t image = {
+       .type = AIMEE_BLK_IMAGE, .media_type = "image/png", .media_ref = "fixture-image"};
    aimee_response_t view = {
        .role = "assistant", .stop_reason = AIMEE_STOP_END_TURN, .content = blocks, .n_content = 2};
    if (mode == 1 || (mode == 7 && calls == 2))
@@ -66,6 +69,11 @@ static void produce(agent_result_t *out)
       view.n_content = 1;
    if (mode == 3)
       view.stop_reason = AIMEE_STOP_MAX_TOKENS;
+   if (mode == 9)
+   {
+      view.content = &image;
+      view.n_content = 1;
+   }
    aimee_response_t owned = {0};
    assert(!aimee_ir_response_clone(&view, &owned));
    assert(!agent_result_adopt_response(out, &owned));
@@ -329,6 +337,62 @@ static void test_liveness_uses_canonical_observation(void)
    agent_result_clear_response(&out);
 }
 
+static char resumed_status[32];
+int db1_agent_job_get(int id, db1_agent_job_t *job)
+{
+   assert(id == 7);
+   memset(job, 0, sizeof *job);
+   job->id = id;
+   strcpy(job->role, "analysis");
+   strcpy(job->status, "pending");
+   job->prompt = strdup("Resume this original task.");
+   job->result = strdup("DISPLAY_POISON");
+   job->cursor_turn = 2;
+   return 0;
+}
+void db1_agent_job_free(db1_agent_job_t *job)
+{
+   free(job->prompt);
+   free(job->result);
+}
+int db1_agent_job_heartbeat_is_stale(const char *stamp, int minutes)
+{
+   (void)stamp;
+   (void)minutes;
+   return 1;
+}
+int db1_agent_job_take_lease(int id, const char *owner)
+{
+   assert(id == 7 && owner && owner[0]);
+   return 0;
+}
+void db1_agent_job_update(int id, const char *status, int cursor, const char *result)
+{
+   assert(id == 7 && cursor == 2);
+   assert(!result || !strstr(result, "DISPLAY_POISON"));
+   snprintf(resumed_status, sizeof resumed_status, "%s", status);
+}
+static void test_resumed_job_retains_general_completion(void)
+{
+   agent_config_t config = {0};
+   agent_result_t out = {0};
+   reset(9);
+   assert(agent_job_resume(&config, 7, &out) == 0 && out.success);
+   assert(!strcmp(resumed_status, "done"));
+   assert(out.canonical_response.n_content == 1);
+   assert(out.canonical_response.content[0].type == AIMEE_BLK_IMAGE);
+   assert(!agent_get_durable_job_id());
+   assert(!agent_result_take_text(&out));
+   for (int m = 1; m <= 4; m++)
+   {
+      reset(m);
+      assert(agent_job_resume(&config, 7, &out) != 0 && !out.success);
+      assert(!strcmp(resumed_status, "failed"));
+      assert(!agent_get_durable_job_id());
+      agent_result_clear_response(&out);
+   }
+}
+
 int main(void)
 {
    assert(snprintf(test_home, sizeof test_home, "%s/aimee-business-ir-XXXXXX", platform_tmpdir()) <
@@ -340,6 +404,7 @@ int main(void)
    test_vote_canonical_quorum();
    test_description_writes();
    test_liveness_uses_canonical_observation();
+   test_resumed_job_retains_general_completion();
    test_plan_steps();
    test_critic_refusal();
    test_loop();

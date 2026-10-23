@@ -105,3 +105,40 @@ func TestReviewEvidenceStageHonoursCancellation(t *testing.T) {
 		t.Errorf("want Cancelled, got %v", status)
 	}
 }
+
+func TestReviewEvidencePolicyOnly(t *testing.T) {
+	for _, tc := range []struct {
+		role string
+		want uint32
+	}{
+		{"review", reviewVerdictGuarded | reviewVerdictCheckSnippets},
+		{"diagnose", reviewVerdictGuarded}, {"code", 0}, {"unknown", 0},
+	} {
+		response, status := handleReviewEvidence(bus.ModuleInvocation{}, reviewRequest(tc.role, "", reviewFlagPolicyOnly))
+		if status != bus.ModuleStatusOK {
+			t.Fatalf("%s: %v", tc.role, status)
+		}
+		verdict, message := decodeReviewVerdict(t, response)
+		if verdict != tc.want || message != "" {
+			t.Fatalf("%s: %x %q", tc.role, verdict, message)
+		}
+	}
+	for _, request := range [][]byte{
+		reviewRequest("review", "report", reviewFlagPolicyOnly),
+		reviewRequest("review", "", reviewFlagPolicyOnly|reviewFlagTargetProvided),
+		reviewRequest("review", "", reviewFlagPolicyOnly|reviewFlagWorktreeDirty),
+	} {
+		if _, status := handleReviewEvidence(bus.ModuleInvocation{}, request); status != bus.ModuleStatusInvalidRequest {
+			t.Fatalf("ambiguous policy request admitted: %v", status)
+		}
+	}
+	// Empty-report semantics of ordinary evidence judging do not change.
+	response, status := handleReviewEvidence(bus.ModuleInvocation{}, reviewRequest("review", "", 0))
+	if status != bus.ModuleStatusOK {
+		t.Fatal(status)
+	}
+	verdict, message := decodeReviewVerdict(t, response)
+	if verdict != 0 || message != "" {
+		t.Fatalf("ordinary empty report: %x %q", verdict, message)
+	}
+}

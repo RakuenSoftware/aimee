@@ -22,8 +22,9 @@ const (
 
 	reviewFlagTargetProvided uint32 = 1 << 0
 	reviewFlagWorktreeDirty  uint32 = 1 << 1
+	reviewFlagPolicyOnly     uint32 = 1 << 2
 
-	reviewFlagsKnown = reviewFlagTargetProvided | reviewFlagWorktreeDirty
+	reviewFlagsKnown = reviewFlagTargetProvided | reviewFlagWorktreeDirty | reviewFlagPolicyOnly
 
 	reviewVerdictGuarded       uint32 = 1 << 0
 	reviewVerdictCheckSnippets uint32 = 1 << 1
@@ -58,12 +59,19 @@ func handleReviewEvidence(invocation bus.ModuleInvocation, request []byte) ([]by
 		return nil, bus.ModuleStatusCancelled
 	}
 
-	v := JudgeReviewEvidence(ReviewEvidenceFacts{
-		Role:           role,
-		Response:       response,
-		TargetProvided: flags&reviewFlagTargetProvided != 0,
-		WorktreeDirty:  flags&reviewFlagWorktreeDirty != 0,
-	})
+	var v ReviewEvidenceVerdict
+	if flags&reviewFlagPolicyOnly != 0 {
+		if flags != reviewFlagPolicyOnly || response != "" {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		v = reviewEvidenceRolePolicy(role)
+	} else {
+		v = JudgeReviewEvidence(ReviewEvidenceFacts{
+			Role: role, Response: response,
+			TargetProvided: flags&reviewFlagTargetProvided != 0,
+			WorktreeDirty:  flags&reviewFlagWorktreeDirty != 0,
+		})
+	}
 
 	var verdict uint32
 	if v.Guarded {

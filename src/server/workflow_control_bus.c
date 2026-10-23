@@ -112,8 +112,23 @@ int workflow_control_request(const char *method, const char *path, const char *q
       terminated[body_len] = '\0';
       cJSON *request = cJSON_ParseWithOpts(terminated, NULL, 1);
       free(terminated);
-      const cJSON *workspace = cJSON_GetObjectItemCaseSensitive(
-          request, !strcmp(path, "/v1/dev/submit") ? "repo" : "workspace");
+      int submission = !strcmp(path, "/v1/dev/submit");
+      const cJSON *workspace =
+          cJSON_GetObjectItemCaseSensitive(request, submission ? "repo" : "workspace");
+      const cJSON *proposal =
+          cJSON_GetObjectItemCaseSensitive(request, submission ? "proposal_md" : "proposal");
+      /* Preserve the existing required transport shape before issuing authority.
+       * Workflow/domain validation still belongs to the Go control owner. */
+      if (!cJSON_IsObject(request) || !cJSON_IsString(workspace) || !workspace->valuestring[0] ||
+          !cJSON_IsString(proposal) || !proposal->valuestring[0] ||
+          (submission &&
+           strspn(proposal->valuestring, " \t\r\n\f\v") == strlen(proposal->valuestring)))
+      {
+         cJSON_Delete(request);
+         return control_error(resp, resp_cap, 400,
+                              submission ? "proposal_md and repo are required"
+                                         : "workspace and proposal are required");
+      }
       char error[256];
       int minted = cJSON_IsString(workspace) && workspace->valuestring[0] &&
                    !server_native_delegate_source_mint_for_workspace(
@@ -160,11 +175,17 @@ int workflow_control_request(const char *method, const char *path, const char *q
       return control_error(resp, resp_cap, 502, "workflow control returned an unparseable result");
    const cJSON *status = cJSON_GetObjectItemCaseSensitive(parsed, "status");
    const cJSON *reply = cJSON_GetObjectItemCaseSensitive(parsed, "body");
-   if (!cJSON_IsNumber(status) || !cJSON_IsString(reply))
+   if (!cJSON_IsNumber(status) || status->valuedouble < 100 || status->valuedouble > 599 ||
+       status->valuedouble != status->valueint || !cJSON_IsString(reply))
    {
       cJSON_Delete(parsed);
       return control_error(resp, resp_cap, 502, "workflow control returned an invalid result");
    }
+   /* A valid non-success reply proves the control owner rejected admission.
+    * Unknown transport/deadline outcomes above retain the source: work may have
+    * been admitted even when its response could not reach this caller. */
+   if (execution_scope[0] && (status->valueint < 200 || status->valueint >= 300))
+      (void)server_native_delegate_source_revoke(execution_scope);
    size_t reply_len = strlen(reply->valuestring);
    if (reply_len >= (size_t)resp_cap)
    {

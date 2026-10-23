@@ -67,8 +67,287 @@ static void require_status(cJSON *out, const char *status, const char *text)
    assert(!cJSON_HasObjectItem(out, "cost_usd"));
    cJSON_Delete(out);
 }
+
+/* Exercise both real terminal consumers against one captured durable write. */
+static char recorded_status[32], recorded_result[4096];
+static int recorded_cursor, recorded_has_cost, coord_done, coord_failed, coord_notified;
+static double recorded_cost;
+static void record_result(const char *status, const char *result)
+{
+   snprintf(recorded_status, sizeof recorded_status, "%s", status);
+   snprintf(recorded_result, sizeof recorded_result, "%s", result ? result : "");
+}
+int db1_agent_job_complete(int id, const char *status, int cursor, const char *result, int has_cost,
+                           double cost)
+{
+   assert(id == 7);
+   record_result(status, result);
+   recorded_cursor = cursor;
+   recorded_has_cost = has_cost;
+   recorded_cost = cost;
+   return 0;
+}
+int db1_agent_job_get(int id, db1_agent_job_t *job)
+{
+   assert(id == 7);
+   memset(job, 0, sizeof *job);
+   job->cursor_turn = 17;
+   return 0;
+}
+void db1_agent_job_free(db1_agent_job_t *job)
+{
+   (void)job;
+}
+int db1_coord_job_complete_task_owned(int id, const char *owner, const char *result)
+{
+   assert(id == 8 && !strcmp(owner, "claim-owner"));
+   coord_done++;
+   record_result("done", result);
+   return 0;
+}
+int db1_coord_job_fail_task_owned(int id, const char *owner, const char *error)
+{
+   assert(id == 8 && !strcmp(owner, "claim-owner"));
+   coord_failed++;
+   record_result("failed", error);
+   return 0;
+}
+int db1_coord_job_release_task_bounded_owned(int id, const char *owner, int maximum)
+{
+   assert(id == 8 && !strcmp(owner, "claim-owner") && maximum == 3);
+   return 0;
+}
+int config_concurrency_preempt_requeue_max(void)
+{
+   return 3;
+}
+void server_coord_dispatcher_notify(void)
+{
+   coord_notified++;
+}
+void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
+{
+   (void)level;
+   (void)module;
+   (void)fmt;
+}
+static cJSON *terminal_envelope(const aimee_response_t *ir, const char *status, const char *message)
+{
+   cJSON *out = cJSON_CreateObject();
+   assert(out);
+   cJSON_AddStringToObject(out, "status", status);
+   cJSON_AddStringToObject(out, "response", "POISONED flat answer");
+   if (message)
+      cJSON_AddStringToObject(out, "message", message);
+   if (ir)
+   {
+      cJSON *value = aimee_ir_response_json(ir);
+      assert(value);
+      cJSON_AddItemToObject(out, "ir", value);
+   }
+   cJSON_AddNumberToObject(out, "turns", 2);
+   cJSON_AddNumberToObject(out, "tool_calls", 1);
+   cJSON_AddBoolToObject(out, "cost_known", 1);
+   cJSON_AddNumberToObject(out, "cost_usd", 0.25);
+   return out;
+}
+static void require_consumers(cJSON *out, const char *background, int done, const char *contains)
+{
+   char *before = cJSON_PrintUnformatted(out);
+   assert(before);
+   compute_ctx_t ctx = {.background_job_id = 7, .coord_task_id = 8};
+   snprintf(ctx.coord_claim_owner, sizeof ctx.coord_claim_owner, "claim-owner");
+   coord_done = coord_failed = coord_notified = 0;
+   compute_update_background_job(&ctx, out);
+   assert(!strcmp(recorded_status, background));
+   assert(!strstr(recorded_result, "POISONED"));
+   if (contains)
+      assert(strstr(recorded_result, contains));
+   assert(recorded_cursor == cJSON_GetObjectItemCaseSensitive(out, "turns")->valueint &&
+          recorded_has_cost && recorded_cost == 0.25);
+   compute_update_coord_task(&ctx, out);
+   assert(coord_done == done && coord_failed == !done && coord_notified == 1);
+   assert(!strstr(recorded_result, "POISONED"));
+   if (contains)
+      assert(strstr(recorded_result, contains));
+   char *after = cJSON_PrintUnformatted(out);
+   assert(after && !strcmp(before, after));
+   free(before);
+   free(after);
+   cJSON_Delete(out);
+}
+static void test_terminal_consumers(void)
+{
+   /* Baseline RED: a flat status=ok/response can grant durable completion. */
+   require_consumers(terminal_envelope(NULL, "ok", NULL), "failed", 0, "canonical");
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "Canonical durable answer"};
+   aimee_response_t ir = {.role = "assistant",
+                          .content = &block,
+                          .n_content = 1,
+                          .stop_reason = AIMEE_STOP_END_TURN,
+                          .raw_stop_reason = "end_turn"};
+   require_consumers(terminal_envelope(&ir, "ok", NULL), "done", 1, block.text);
+   cJSON *poison = terminal_envelope(&ir, "ok", NULL);
+   cJSON_ReplaceItemInObjectCaseSensitive(poison, "response",
+                                          cJSON_CreateString("<tool_call>{bad}</tool_call>"));
+   require_consumers(poison, "done", 1, block.text);
+   cJSON *malformed = terminal_envelope(&ir, "ok", NULL);
+   cJSON_ReplaceItemInObjectCaseSensitive(cJSON_GetObjectItemCaseSensitive(malformed, "ir"),
+                                          "schema", cJSON_CreateString("unknown"));
+   require_consumers(malformed, "failed", 0, "canonical");
+   require_consumers(terminal_envelope(&ir, "error", "SDK execution failed"), "failed", 0,
+                     "SDK execution failed");
+   require_consumers(terminal_envelope(NULL, "error", "source lineage refused"), "failed", 0,
+                     "source lineage refused");
+   cJSON *empty = terminal_envelope(NULL, "error", "native launch refused");
+   cJSON_ReplaceItemInObjectCaseSensitive(empty, "response", cJSON_CreateString(""));
+   require_consumers(empty, "failed", 0, "native launch refused");
+   ir.stop_reason = AIMEE_STOP_MAX_TOKENS;
+   ir.raw_stop_reason = "max_tokens";
+   require_consumers(terminal_envelope(&ir, "error", "budget exhausted"), "partial", 0,
+                     "Canonical durable answer");
+   require_consumers(terminal_envelope(&ir, "ok", NULL), "failed", 0, "canonical");
+   ir.error_message = "MAX with canonical error";
+   require_consumers(terminal_envelope(&ir, "error", "not partial"), "failed", 0, "not partial");
+   ir.error_message = NULL;
+   ir.stop_reason = AIMEE_STOP_CONTENT_FILTER;
+   ir.raw_stop_reason = "refusal";
+   aimee_refusal_details_t refusal = {.category = "provider-category", .explanation = "diagnostic"};
+   ir.refusal = &refusal;
+   require_consumers(terminal_envelope(&ir, "error", "provider refused"), "failed", 0,
+                     "provider refused");
+   ir.refusal = NULL;
+   ir.stop_reason = AIMEE_STOP_ERROR;
+   ir.raw_stop_reason = "error";
+   ir.error_message = "canonical API failure";
+   require_consumers(terminal_envelope(&ir, "ok", NULL), "failed", 0, "canonical API failure");
+   ir.error_message = NULL;
+   ir.stop_reason = AIMEE_STOP_MAX_TOKENS;
+   ir.raw_stop_reason = "max_tokens";
+   block = (aimee_block_t){.type = AIMEE_BLK_TOOL_USE,
+                           .tool_id = "pending",
+                           .tool_name = "read_file",
+                           .tool_input = cJSON_CreateObject()};
+   require_consumers(terminal_envelope(&ir, "error", "tool pending"), "failed", 0, "tool pending");
+   ir.stop_reason = AIMEE_STOP_END_TURN;
+   ir.raw_stop_reason = "end_turn";
+   require_consumers(terminal_envelope(&ir, "ok", NULL), "failed", 0, "canonical");
+   cJSON_Delete(block.tool_input);
+   ir.stop_reason = AIMEE_STOP_MAX_TOKENS;
+   ir.raw_stop_reason = "max_tokens";
+   block = (aimee_block_t){.type = AIMEE_BLK_THINKING, .text = "not authored answer"};
+   require_consumers(terminal_envelope(&ir, "error", "reasoning only"), "failed", 0,
+                     "reasoning only");
+   block = (aimee_block_t){.type = AIMEE_BLK_IMAGE,
+                           .media_type = "image/png",
+                           .media_ref = "https://example.invalid/image"};
+   ir.stop_reason = AIMEE_STOP_END_TURN;
+   ir.raw_stop_reason = "end_turn";
+   require_consumers(terminal_envelope(&ir, "ok", NULL), "done", 1, "");
+   block = (aimee_block_t){.type = AIMEE_BLK_TEXT,
+                           .text = "<tool_call>{\"name\":\"read_file\"}</tool_call>"};
+   require_consumers(terminal_envelope(&ir, "ok", NULL), "failed", 0, "degenerate");
+   block.text = "I'll inspect the repository.\n```sh\nrg TODO .\n```";
+   cJSON *plan = terminal_envelope(&ir, "ok", NULL);
+   cJSON_ReplaceItemInObjectCaseSensitive(plan, "turns", cJSON_CreateNumber(0));
+   cJSON_ReplaceItemInObjectCaseSensitive(plan, "tool_calls", cJSON_CreateNumber(0));
+   require_consumers(plan, "failed", 0, "unexecuted");
+   require_consumers(terminal_envelope(NULL, "cancelled", "operator cancelled"), "cancelled", 0,
+                     "operator cancelled");
+   cJSON *cursor = terminal_envelope(NULL, "error", "before model");
+   cJSON_DeleteItemFromObjectCaseSensitive(cursor, "turns");
+   compute_ctx_t ctx = {.background_job_id = 7};
+   compute_update_background_job(&ctx, cursor);
+   assert(recorded_cursor == 17);
+   cJSON_Delete(cursor);
+   cJSON *unknown_cost = terminal_envelope(NULL, "error", "before model");
+   cJSON_ReplaceItemInObjectCaseSensitive(unknown_cost, "cost_known", cJSON_CreateBool(0));
+   compute_update_background_job(&ctx, unknown_cost);
+   assert(!recorded_has_cost && recorded_cost == 0);
+   cJSON_Delete(unknown_cost);
+   cJSON *preempt = terminal_envelope(NULL, "preempted", NULL);
+   ctx.coord_task_id = 8;
+   snprintf(ctx.coord_claim_owner, sizeof ctx.coord_claim_owner, "claim-owner");
+   coord_done = coord_failed = coord_notified = 0;
+   compute_update_coord_task(&ctx, preempt);
+   assert(!coord_done && !coord_failed && coord_notified == 1);
+   cJSON_Delete(preempt);
+}
+/* The real worker uses this projection before drift/handoff checks. */
+static void worker_projection(const aimee_response_t *ir, int success, int handoff, int admitted,
+                              const char *display)
+{
+   agent_result_t result = {.success = success, .response = strdup("POISONED display")};
+   assert(result.response);
+   result.canonical_response = *ir;
+   cJSON *snapshot = aimee_ir_response_json(ir);
+   assert(snapshot);
+   char *before = cJSON_PrintUnformatted(snapshot);
+   cJSON_Delete(snapshot);
+   int rc = delegate_project_completed_result(&result, handoff);
+   assert((rc == 0) == admitted);
+   assert(!strcmp(result.response, admitted ? display : "POISONED display"));
+   assert(result.success == success);
+   snapshot = aimee_ir_response_json(&result.canonical_response);
+   char *after = cJSON_PrintUnformatted(snapshot);
+   assert(before && after && !strcmp(before, after));
+   cJSON_Delete(snapshot);
+   free(before);
+   free(after);
+   free(result.response);
+}
+static void test_worker_projection(void)
+{
+   aimee_block_t blocks[] = {{.type = AIMEE_BLK_IMAGE,
+                              .media_type = "image/png",
+                              .media_ref = "https://example.invalid/generated.png"},
+                             {.type = AIMEE_BLK_TEXT, .text = "canonical authored answer"},
+                             {.type = AIMEE_BLK_THINKING, .text = "inert reasoning"}};
+   aimee_response_t ir = {.role = "assistant",
+                          .content = blocks,
+                          .n_content = 1,
+                          .stop_reason = AIMEE_STOP_END_TURN,
+                          .raw_stop_reason = "end_turn"};
+   worker_projection(&ir, 1, 0, 1, "");
+   worker_projection(&ir, 1, 1, 0, NULL);
+   ir.n_content = 3;
+   worker_projection(&ir, 1, 0, 1, blocks[1].text);
+   worker_projection(&ir, 1, 1, 0, NULL);
+   ir.content = blocks + 1;
+   ir.n_content = 2;
+   worker_projection(&ir, 1, 0, 1, blocks[1].text);
+   worker_projection(&ir, 1, 1, 1, blocks[1].text);
+   worker_projection(&ir, 0, 0, 0, NULL);
+   ir.stop_reason = AIMEE_STOP_MAX_TOKENS;
+   ir.raw_stop_reason = "max_tokens";
+   worker_projection(&ir, 1, 0, 0, NULL);
+   ir.stop_reason = AIMEE_STOP_CONTENT_FILTER;
+   ir.raw_stop_reason = "refusal";
+   aimee_refusal_details_t refusal = {.category = "future_category", .explanation = "retained"};
+   ir.refusal = &refusal;
+   worker_projection(&ir, 1, 0, 0, NULL);
+   ir.refusal = NULL;
+   ir.stop_reason = AIMEE_STOP_ERROR;
+   ir.raw_stop_reason = "error";
+   ir.error_message = "host/provider failure";
+   worker_projection(&ir, 1, 0, 0, NULL);
+   ir.error_message = NULL;
+   aimee_block_t tool = {.type = AIMEE_BLK_TOOL_USE,
+                         .tool_id = "pending",
+                         .tool_name = "read_file",
+                         .tool_input = cJSON_CreateObject()};
+   assert(tool.tool_input);
+   ir.content = &tool;
+   ir.n_content = 1;
+   ir.stop_reason = AIMEE_STOP_TOOL_USE;
+   ir.raw_stop_reason = "tool_use";
+   worker_projection(&ir, 1, 0, 0, NULL);
+   cJSON_Delete(tool.tool_input);
+}
 int main(void)
 {
+   test_terminal_consumers();
+   test_worker_projection();
    aimee_block_t blocks[] = {
        {.type = AIMEE_BLK_TEXT, .text = "canonical visible answer"},
        {.type = AIMEE_BLK_THINKING, .text = "private thinking is not display"},

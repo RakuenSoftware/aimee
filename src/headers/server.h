@@ -614,6 +614,9 @@ int handle_delegate_cancel_unassigned(server_ctx_t *ctx, server_conn_t *conn, cJ
  * each against the live code index; returns a JSON report. Files nothing. */
 int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_launch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Read-only projection from the authenticated canonical child-log owner.
+ * 0 observed, 1 no binding, -1 unavailable, -2 owner/source refused. */
+int server_delegate_job_observation(cJSON *out, int job_id, int full);
 int handle_delegate_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Credential vault (WP-C.1): resolve the attested principal from the conn. */
 int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

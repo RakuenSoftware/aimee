@@ -16,6 +16,8 @@ static const char *handle = "0123456789abcdef0123456789abcdef0123456789abcdef012
 static char workspace[512], purpose[32];
 static cJSON *sent;
 static int mint_calls, revoked, bus_calls, deny;
+static int reply_status = 200;
+static aimee_module_call_result_t call_result = AIMEE_MODULE_CALL_OK;
 static int submissions, submit_result, notifications;
 static char fixture_home[512];
 
@@ -59,9 +61,16 @@ cJSON *aimee_module_json_call_raw(uint32_t kind, uint32_t stage, const char *bod
    cJSON_Delete(sent);
    sent = cJSON_Parse(body);
    assert(sent);
-   *result = AIMEE_MODULE_CALL_OK;
-   return cJSON_Parse(kind == AIMEE_WORKFLOWS_EVENT_CONTROL ? "{\"status\":200,\"body\":\"{}\"}"
-                                                            : "{\"approved\":false}");
+   *result = call_result;
+   if (call_result != AIMEE_MODULE_CALL_OK)
+      return NULL;
+   if (kind != AIMEE_WORKFLOWS_EVENT_CONTROL)
+      return cJSON_Parse("{\"approved\":false}");
+   cJSON *reply = cJSON_CreateObject();
+   assert(reply);
+   cJSON_AddNumberToObject(reply, "status", reply_status);
+   cJSON_AddStringToObject(reply, "body", "{}");
+   return reply;
 }
 const char *run_cmd_get_cwd(void)
 {
@@ -188,7 +197,8 @@ int main(void)
    assert(mkdtemp(temporary));
    snprintf(fixture_home, sizeof fixture_home, "%s", temporary);
    char response[256];
-   const char *body = "{\"repo\":\"/owned/project\",\"execution_scope\":\"forged\"}";
+   const char *body = "{\"proposal_md\":\"real "
+                      "proposal\",\"repo\":\"/owned/project\",\"execution_scope\":\"forged\"}";
    assert(workflow_control_request("POST", "/v1/dev/submit", "", body, (int)strlen(body), "actor",
                                    0, response, sizeof response) == 200);
    assert(mint_calls == 1 && bus_calls == 1 && revoked == 0);
@@ -200,12 +210,13 @@ int main(void)
    assert(workflow_control_request("GET", "/v1/workflow/items", "", NULL, 0, "actor", 0, response,
                                    sizeof response) == 200);
    assert(mint_calls == 1 && !cJSON_HasObjectItem(sent, "execution_scope"));
-   body = "{\"workspace\":\"/owned/trigger\"}";
+   body = "{\"workspace\":\"/owned/trigger\",\"proposal\":\"candidate\"}";
    assert(workflow_control_request("POST", "/v1/trigger/fire", "", body, (int)strlen(body), "actor",
                                    0, response, sizeof response) == 200);
    assert(!strcmp(workspace, "/owned/trigger"));
    deny = 1;
    int before = bus_calls;
+   body = "{\"proposal_md\":\"real proposal\",\"repo\":\"/owned/project\"}";
    assert(workflow_control_request("POST", "/v1/dev/submit", "", body, (int)strlen(body), "actor",
                                    0, response, sizeof response) == 403);
    assert(bus_calls == before);
@@ -238,6 +249,7 @@ int main(void)
    assert(!chdir(process_cwd) && !unlink(review_alias) && !rmdir(review_root));
    cJSON_Delete(review);
    cJSON_Delete(sent);
+   sent = NULL;
    /* Legacy C intake must bind the resolver's approved repository, not the
     * caller's unvalidated alias, and admission failure retires its capability. */
    char workflows[600], proposals[640], file[700];
@@ -259,6 +271,31 @@ int main(void)
    assert(dev_submit_run("another proposal", "build", "caller-alias", "actor", NULL, error,
                          sizeof error) == 403);
    assert(submissions == 2 && notifications == 1);
+   deny = 0;
+   static const char *bad[] = {"{}", "{\"repo\":\"/owned/project\"}", "{\"proposal_md\":\"text\"}",
+                               "{\"proposal_md\":42,\"repo\":\"/owned/project\"}",
+                               "{\"proposal_md\":\"   \",\"repo\":\"/owned/project\"}"};
+   int issued_before = mint_calls, dispatched_before = bus_calls;
+   for (size_t i = 0; i < sizeof bad / sizeof *bad; i++)
+      assert(workflow_control_request("POST", "/v1/dev/submit", "", bad[i], (int)strlen(bad[i]),
+                                      "actor", 0, response, sizeof response) == 400);
+   assert(mint_calls == issued_before && bus_calls == dispatched_before);
+   const char *valid = "{\"proposal_md\":\"work\",\"repo\":\"/owned/project\"}";
+   int retired_before = revoked;
+   reply_status = 400;
+   assert(workflow_control_request("POST", "/v1/dev/submit", "", valid, (int)strlen(valid), "actor",
+                                   0, response, sizeof response) == 400);
+   assert(revoked == retired_before + 1 && mint_calls == issued_before + 1);
+   retired_before = revoked;
+   reply_status = 200;
+   call_result = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
+   assert(workflow_control_request("POST", "/v1/dev/submit", "", valid, (int)strlen(valid), "actor",
+                                   0, response, sizeof response) == 502);
+   /* Unknown dispatch outcome: work may have been admitted, so retain authority. */
+   assert(revoked == retired_before && mint_calls == issued_before + 2);
+   call_result = AIMEE_MODULE_CALL_OK;
+   cJSON_Delete(sent);
+   sent = NULL;
    snprintf(file, sizeof file, "%s/issuer-fixture.md", proposals);
    assert(!unlink(file) && !rmdir(proposals) && !rmdir(workflows) && !rmdir(fixture_home));
    puts("native source issuers: ok");

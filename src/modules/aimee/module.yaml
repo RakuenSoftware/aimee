@@ -30,6 +30,7 @@
     "server-go/modules/aimee/families/conversation_window.go",
     "server-go/modules/aimee/families/conversation_wm.go",
     "server-go/modules/aimee/families/delegation.go",
+    "server-go/modules/aimee/families/delegation_observation.go",
     "server-go/modules/aimee/families/economizer_state.go",
     "server-go/modules/aimee/families/ensemble.go",
     "server-go/modules/aimee/families/ensemble_state.go",
