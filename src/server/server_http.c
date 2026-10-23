@@ -1971,10 +1971,7 @@ static void handle_conn_impl(int fd, int is_tcp, int is_management)
       shadow_mirror_begin_request(path, inbound_is_shadow);
    }
 
-   /* Native streaming chat over HTTP — hands off to the async chat worker, which
-    * streams newline-delimited aimee events. The outer route-allowed gate (TCP)
-    * already enforces CAP_CHAT via server_http_route_caps; re-check here so the
-    * UDS path is explicit too. */
+   /* Recheck chat capability for UDS as well as the outer TCP route gate. */
    if (strcmp(method, "POST") == 0 && strcmp(path, "/v1/chat/stream") == 0)
    {
       uint32_t need = server_capability_for_method("chat.send_stream");
@@ -1992,14 +1989,8 @@ static void handle_conn_impl(int fd, int is_tcp, int is_management)
       return;
    }
 
-   /* Auditable-correctness P1: for OpenAI-family ingress endpoints, mint the
-    * per-turn retrieval-event id up-front — before any response header is
-    * written — when evidence emission is on. The same id is then (a) surfaced
-    * to the client via the X-Aimee-Retrieval-Event response header and (b)
-    * reused by ingress_preinject_build for the emitted retrieval_event. Gated
-    * on the endpoint + flag so flag-off / non-ingress requests are byte-
-    * identical on the wire (config is read only for these three paths, which
-    * already pay a legacy_config_read inside the ingress builder). */
+   /* Mint the shared retrieval-event ID before writing response headers.
+    * Only supported OpenAI endpoints consult the evidence-emission flag. */
    if (strcmp(method, "POST") == 0 &&
        (strcmp(path, "/v1/chat/completions") == 0 || strcmp(path, "/v1/completions") == 0 ||
         strcmp(path, "/v1/responses") == 0))
