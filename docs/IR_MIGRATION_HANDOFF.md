@@ -187,6 +187,26 @@ failed/partial/refused IR remains diagnostic. Its focused normal/race regression
 pass. The failed integration receipt is retained; a new configured run must
 exercise the repaired actual CLI-to-evaluator contract.
 
+The next qualification source also repairs two follow-up control defects.
+Native primary chat now enforces the tighter positive bound from the registered
+model's `max_turns` and any request-local native limit; an unset TLS override no
+longer discards a configured finite cap. Actual adapter configuration, factory
+forwarding and runtime-budget regressions pass normally and under sanitizers.
+The onboarding metadata writer explicitly restores its dedicated directory to
+0755, so a restrictive process umask or earlier 0700 directory cannot hide the
+readable administrator marker from the C server. The real marker regression
+passes normally and under race with umask 077. Credential file modes are unchanged.
+
+The first `09567b99b` local native run passes all 692 invocations, but its wrapper
+correctly fails source equality after the parallel lint generator changes only
+stale generated documentation. Lint passes 75/76; docs generation now removes
+the retired socket variable (303 runtime environment variables), and its check
+passes after regeneration. The race run separately exposes the metadata-directory
+permission defect above and an AF_UNIX temporary-path limit in the harness. New
+qualification uses independent source worktrees and exclusive ten-character
+temporary roots. These failed wrapper/race/lint receipts remain retained; they
+are not relabeled final acceptance.
+
 These repairs still require their combined image, fresh native workflow and
 server-trigger execution, configured integration and final browser
 model-switch/control/replay acceptance. Keep outstanding checks separate from the

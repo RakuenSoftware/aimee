@@ -1074,7 +1074,6 @@ ENV_DESC = {
     "AIMEE_VAULT_TPM2_NV_INDEX": ("Server runtime", "TPM 2 NV index used for anti-rollback state."),
     "AIMEE_VAULT_TPM2_TCTI": ("Server runtime", "TPM 2 TCTI selector."),
     "AIMEE_WFE_ENGINE": ("Workflow engine", "Workflow runtime selector; current server images require `go`."),
-    "AIMEE_WFE_HTTP_SOCKET": ("Workflow engine", "Retired and ignored. Workflow control is admitted by the C host and served only over the authenticated module bus."),
     "AIMEE_WFE_WORKTREE_GC_GRACE_SECS": ("Workflow engine", "Grace period before an unowned workflow worktree can be collected."),
     "AIMEE_WITNESS_CADENCE_TEST_S": ("Diagnostics & misc", "Test-only override that shortens witness checkpoint and verification cadence."),
     "AIMEE_WITNESS_HARNESS_ROLE": ("Diagnostics & misc", "Restricted PostgreSQL role used by the witness live harness."),

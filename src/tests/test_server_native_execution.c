@@ -53,6 +53,7 @@ static void *terminal_resource;
 static int mode, retained, opened, joined, child_closed, began, completed, aborted, closed;
 static int terminal_committed, sdk_calls, restored, ready_calls, rejected_terminal;
 static int refuse_runtime;
+static int expected_turn_limit;
 static char parent_role[64], private_home[4096], host_workspace[4096], observed_sdk_identity[65];
 static int child_executable, child_directory;
 static const char *active_sdk = "codex";
@@ -549,7 +550,7 @@ const char *server_native_runtime_binding(const server_native_runtime_t *r)
 }
 int server_native_runtime_set_turn_limit(server_native_runtime_t *r, int limit)
 {
-   assert(r == &runtime && limit == 0);
+   assert(r == &runtime && limit == expected_turn_limit);
    return 0;
 }
 int server_native_runtime_turn_limit_reached(const server_native_runtime_t *r)
@@ -1245,6 +1246,20 @@ int main(int argc, char **argv)
       finish(1);
       assert(completed == 1 && !aborted);
    }
+   /* The actual factory must forward the adapter's admitted cap unchanged to
+    * the runtime owner, including zero's existing unlimited/default meaning. */
+   const int turn_limits[] = {0, 1, 3};
+   for (size_t i = 0; i < sizeof turn_limits / sizeof turn_limits[0]; i++)
+   {
+      reset(0);
+      cfg.native_turn_limit = expected_turn_limit = turn_limits[i];
+      agent_result_t limited = {0};
+      assert(!provider_cli_adapter_host_execute(&cfg, &limited));
+      assert(limited.success && opened == 1);
+      finish(1);
+      agent_result_clear_response(&limited);
+   }
+   cfg.native_turn_limit = expected_turn_limit = 0;
    /* The source-bound no-tools selection must reach the actual native profile
     * and runtime tool owner, not just hide tools in a display/Go request. */
    reset(0);

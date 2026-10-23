@@ -388,6 +388,11 @@ func TestSetupAccountIsCompleteForOperatorConfiguredLogin(t *testing.T) {
 func TestReplacementMarkerIsReadableByTheServerProcess(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "webchat", "bootstrap-replaced")
+	// An earlier restrictive umask can leave this shared metadata directory
+	// private even though each marker's file mode is readable.
+	if err := os.Mkdir(filepath.Dir(marker), 0o700); err != nil {
+		t.Fatal(err)
+	}
 
 	rollback, err := writeReplacementMarker(marker, "virant")
 	if err != nil {

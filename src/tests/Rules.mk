@@ -1079,7 +1079,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-coord-dispatcher-startup \
                 $(TESTPREFIX)/unit-test-delegate-startup
 
 TEST_TARGETS += $(TESTPREFIX)/unit-test-native-source-issuers \
-                $(TESTPREFIX)/unit-test-native-delegate-source $(TESTPREFIX)/unit-test-native-service-runtime-source
+                $(TESTPREFIX)/unit-test-native-delegate-source $(TESTPREFIX)/unit-test-native-service-runtime-source $(TESTPREFIX)/unit-test-native-provider-turn-limit
 
 UNIT_TEST_SHARD_COUNT ?= 1
 UNIT_TEST_SHARD_INDEX ?= 0
@@ -7400,3 +7400,6 @@ $(TESTPREFIX)/unit-test-native-service-runtime-source: $(OBJDIR)/tests/test_nati
     $(OBJDIR)/platform_random.o $(filter %/platform_random.o,$(PLATFORM_BASIC_OBJS)) $(CORE_CONNECTION_LIB) \
     $(OBJDIR)/server/server_native_delegate_source.o $(OBJDIR)/tests/source-runtime-real-credentials.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto
+
+$(TESTPREFIX)/unit-test-native-provider-turn-limit: $(OBJDIR)/tests/test_native_provider_turn_limit.o $(OBJDIR)/tests/support/native_provider_turn_limit_stubs.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lcrypto -lm

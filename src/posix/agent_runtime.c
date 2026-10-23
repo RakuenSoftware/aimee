@@ -464,6 +464,11 @@ static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
                                           const char *user_prompt, const aimee_request_t *seed,
                                           aimee_response_t *canonical, agent_result_t *out)
 {
+   int turn_limit = agent_native_request_turn_limit();
+   if (turn_limit <= 0)
+      turn_limit = 0;
+   if (agent->max_turns > 0 && (!turn_limit || agent->max_turns < turn_limit))
+      turn_limit = agent->max_turns;
    provider_cli_cfg_t cfg = {.agent = agent,
                              .network = network,
                              .role = role,
@@ -472,7 +477,7 @@ static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
                              .user_prompt = user_prompt,
                              .canonical_request = seed,
                              .canonical_response = canonical,
-                             .native_turn_limit = agent_native_request_turn_limit(),
+                             .native_turn_limit = turn_limit,
                              .no_tools = agent_native_request_tools_disabled()};
    int host = provider_cli_adapter_host_execute(&cfg, out);
    if (host != 1)
