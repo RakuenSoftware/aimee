@@ -1554,6 +1554,66 @@ static void test_native_buffered_refusal(const agent_t *selected, const request_
    captured_rows = NULL;
 }
 
+static void test_native_turn_limit(const agent_t *selected, const request_context_t *owner)
+{
+   owner_tools(1);
+   aimee_tool_t function = {.name = "read_file"};
+   aimee_tool_t space = {
+       .kind = AIMEE_TOOL_NAMESPACE, .name = "aimee", .children = &function, .n_children = 1};
+   aimee_block_t system = {.type = AIMEE_BLK_TEXT, .text = "host-owned system"};
+   aimee_request_t profile = {.model = "selected-model",
+                              .frontend = AIMEE_WIRE_ANTHROPIC,
+                              .tools = &space,
+                              .n_tools = 1,
+                              .system = &system,
+                              .n_system = 1,
+                              .prompt_cache_key = "",
+                              .mutated = 1};
+   server_session_capture_t *capture =
+       server_session_capture_open("private-child", "native-turn", "webuser:alice", "session-a");
+   assert(capture && !server_session_capture_bind(capture));
+   server_native_runtime_t *runtime =
+       server_native_runtime_open_request(selected, owner, "session-a", &profile);
+   assert(runtime && !server_native_runtime_set_turn_limit(runtime, 1));
+   assert(server_native_runtime_set_turn_limit(runtime, -1));
+   assert(server_session_capture_bind(NULL) == capture);
+   atomic_store(&expected_capture, capture);
+   captured_rows = cJSON_CreateArray();
+   atomic_store(&owned_profile_probe, 1);
+   atomic_store(&snapshot_generation, 1);
+
+   aimee_session_event_t started = {.kind = AIMEE_SESSION_EXECUTION, .execution_status = "running"};
+   assert(!server_session_capture_append(capture, &started, NULL, NULL));
+   char response[1024];
+   int before = atomic_load(&calls);
+   request(runtime, "/v1/messages", server_native_runtime_token(runtime), response);
+   assert(strstr(response, "200 OK") && atomic_load(&calls) == before + 1);
+   assert(!server_native_runtime_turn_limit_reached(runtime));
+   assert(server_native_runtime_set_turn_limit(runtime, 2));
+   int rows = cJSON_GetArraySize(captured_rows);
+   request(runtime, "/v1/messages", server_native_runtime_token(runtime), response);
+   assert(strstr(response, "502") && atomic_load(&calls) == before + 1);
+   assert(server_native_runtime_turn_limit_reached(runtime) &&
+          server_session_capture_failed(capture));
+   assert(cJSON_GetArraySize(captured_rows) == rows);
+
+   server_native_runtime_quiesce(runtime);
+   aimee_response_t original = {0};
+   assert(!server_native_runtime_result(runtime, &original));
+   assert(server_native_runtime_model_turns(runtime) == 2);
+   assert(original.stop_reason == AIMEE_STOP_ERROR && original.error_message &&
+          !strcmp(original.error_message, "native model generation turn cap reached"));
+   aimee_response_free(&original);
+   server_native_runtime_close(runtime);
+   server_session_capture_close(capture);
+   atomic_store(&expected_capture, NULL);
+   atomic_store(&owned_profile_probe, 0);
+   atomic_store(&snapshot_generation, 0);
+
+   cJSON_Delete(captured_rows);
+   captured_rows = NULL;
+}
+
 static void test_native_original_catalog(const agent_t *selected, const request_context_t *owner)
 {
    for (int variant = 0; variant < 20; variant++)
@@ -2606,6 +2666,7 @@ int main(void)
    test_retained_capture(&selected, &a);
    test_native_preframe_error(&selected, &a);
    test_native_buffered_refusal(&selected, &a);
+   test_native_turn_limit(&selected, &a);
    test_native_original_catalog(&selected, &a);
    test_native_supervised_execution(&selected, &a);
    test_native_large_mcp_catalog(&selected, &a);

@@ -156,8 +156,8 @@ const (
 
 	wfeCreateRootSQL = `INSERT INTO lifecycle_work_item
 	        (work_item_id, repo, proposal_path, workflow_name, workflow_version,
-	         current_stage, mode, submitter, parent_id, source_path, work_item_max_cost_usd)
-	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+	         current_stage, mode, submitter, parent_id, source_path, work_item_max_cost_usd, execution_scope)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 
 	// Parent eligibility spelled as INSERT..SELECT FROM the parent rather than
 	// a check followed by an insert: a concurrent StopTree either includes this
@@ -165,10 +165,11 @@ const (
 	// window in which a child is created under a parent that has just stopped.
 	wfeCreateChildSQL = `INSERT INTO lifecycle_work_item
 	        (work_item_id, repo, proposal_path, workflow_name, workflow_version,
-	         current_stage, mode, submitter, parent_id, source_path, work_item_max_cost_usd)
-	    SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+	         current_stage, mode, submitter, parent_id, source_path, work_item_max_cost_usd, execution_scope)
+	    SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, parent.execution_scope
 	      FROM lifecycle_work_item parent
-	     WHERE parent.work_item_id = $12 AND parent.state = 'active'`
+	     WHERE parent.work_item_id = $13 AND parent.state = 'active'
+ AND ($12 = '' OR $12 = parent.execution_scope)`
 
 	wfeEventSQL = `INSERT INTO lifecycle_event
 	        (work_item_id, stage, kind, actor, detail, content_hash, cost_usd)
@@ -916,6 +917,10 @@ func wfeCreateWorkItem(ctx context.Context, db store.DB, f []string) (uint32, []
 	mode, submitter, parentID, sourcePath := f[6], f[7], f[8], f[9]
 	maxCost, okCost := store.Atof(f[10])
 	rootCap, okCap := store.Atoi(f[11])
+	scope := f[12]
+	if !validExecutionScope(scope) {
+		return store.StatusInvalid, nil, nil
+	}
 	if workItemID == "" || proposalPath == "" || workflowName == "" || startStage == "" ||
 		!okCost || !costIsSane(maxCost) || !okCap {
 		return store.StatusInvalid, nil, nil
@@ -944,7 +949,7 @@ func wfeCreateWorkItem(ctx context.Context, db store.DB, f []string) (uint32, []
 	}
 
 	args := []any{workItemID, repo, proposalPath, workflowName, workflowVersion,
-		startStage, mode, submitter, parentID, sourcePath, maxCost}
+		startStage, mode, submitter, parentID, sourcePath, maxCost, scope}
 	sql := wfeCreateRootSQL
 	if parentID != "" {
 		sql = wfeCreateChildSQL
@@ -984,7 +989,7 @@ var Lifecycle = store.Family{
 	TransactionLockSQL: "SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(current_schema()), pg_catalog.hashtext('aimee:lifecycle'))",
 	Ops: map[uint32]store.Op{
 		opWorkItemCreate:                 {Name: "work_item_create", Args: 7, Tx: true, Run: workItemCreate},
-		opWorkItemGet:                    {Name: "work_item_get", Cells: 22, Args: 1, Run: workItemGet},
+		opWorkItemGet:                    {Name: "work_item_get", Cells: len(workItemCols), Args: 1, Run: workItemGet},
 		opWorkItemIDByProposal:           {Name: "work_item_id_by_proposal", Args: 2, Run: workItemIDByProposal},
 		opWorkItemIDByPRRef:              {Name: "work_item_id_by_pr_ref", Args: 1, Run: workItemIDByPRRef},
 		opWorkItemSetStage:               {Name: "work_item_set_stage", Args: 3, Tx: true, Run: workItemSetStage},
@@ -996,7 +1001,7 @@ var Lifecycle = store.Family{
 		opWorkItemChildCounts:            {Name: "work_item_child_counts", Cells: 3, Args: 1, Run: workItemChildCounts},
 		opWorkItemCountActiveBySubmitter: {Name: "work_item_count_active_by_submitter", Args: 1, Run: workItemCountActive},
 		opWorkItemCountRecentBySubmitter: {Name: "work_item_count_recent_by_submitter", Args: 2, Run: workItemCountRecent},
-		opWorkItemSubmitCapped:           {Name: "work_item_submit_capped", Args: 10, RunDB: workItemSubmitCapped},
+		opWorkItemSubmitCapped:           {Name: "work_item_submit_capped", Args: 11, RunDB: workItemSubmitCapped},
 		opWorkItemSetTerminal:            {Name: "work_item_set_terminal", Args: 2, Tx: true, Run: workItemSetTerminal},
 		opWorkItemGateApply:              {Name: "work_item_gate_apply", Args: 5, Tx: true, Run: workItemGateApply},
 		opWorkItemSetPause:               {Name: "work_item_set_pause", Args: 3, Tx: true, Run: workItemSetPause},
@@ -1052,7 +1057,22 @@ var Lifecycle = store.Family{
 		opWFERecoverLostReplay:      {Name: "wfe_recover_lost_replay", Args: 3, RunDB: wfeRecoverLostReplay},
 		opWFERecordRequestedChanges: {Name: "wfe_record_requested_changes", Cells: 4, Args: 9, RunDB: wfeRecordRequestedChanges},
 		opWFEClaimFrozenCreates:     {Name: "wfe_claim_frozen_creates", Cells: 3, Args: frozenFields, RunDB: wfeClaimFrozenCreates},
-		opWFECreateWorkItem:         {Name: "wfe_create_work_item", Args: 12, RunDB: wfeCreateWorkItem},
+		opWFECreateWorkItem:         {Name: "wfe_create_work_item", Args: 13, RunDB: wfeCreateWorkItem},
 		opWFELatestStageRetryDetail: {Name: "wfe_latest_stage_retry_detail", Args: 2, Run: wfeLatestStageRetryDetail},
 	},
+}
+
+func validExecutionScope(scope string) bool {
+	if scope == "" {
+		return true
+	}
+	if len(scope) != 64 {
+		return false
+	}
+	for _, c := range scope {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }

@@ -495,6 +495,13 @@ size_t aimee_ir_last_user_text(const aimee_request_t *r, char *buf, size_t n);
 int aimee_ir_tool_paths_valid(const aimee_request_t *request, const struct cJSON *paths);
 int aimee_ir_remove_tool_paths(aimee_request_t *request, const struct cJSON *paths);
 
+/* Pure response validation: 0 valid, -1 malformed; never changes source IR. */
+/* A completed authored answer may contain IMAGE/DOCUMENT and inert THINKING
+ * or opaque sidecars on admitted blocks. No pending tools/errors/refusal. */
+int aimee_ir_response_complete_valid(const aimee_response_t *response);
+/* Business-answer projection requires a successful complete text turn. */
+int aimee_ir_response_complete_text_valid(const aimee_response_t *response);
+int aimee_ir_response_valid(const aimee_response_t *response);
 /* Admit a completed API model response, rejecting forged results/roles, duplicate
  * tool IDs, malformed blocks and invalid function arguments. Classifies provenance. */
 int aimee_ir_response_admit(aimee_response_t *response);

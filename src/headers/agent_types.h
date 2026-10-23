@@ -622,14 +622,30 @@ static inline int agent_result_from_host_text(agent_result_t *result, const char
    return rc;
 }
 
-/* Text-only output boundary: relinquish typed storage only on extraction. */
+/* An explicit domain projection can retain the full owned model observation.
+ * Never accept the compatibility display as input to a business decision. */
+static inline int agent_result_project_complete_text(agent_result_t *result)
+{
+   if (!result || !result->success ||
+       aimee_ir_response_complete_text_valid(&result->canonical_response))
+      return -1;
+   char *text = aimee_ir_response_text_alloc(&result->canonical_response);
+   if (!text)
+      return -1;
+   agent_result_replace_display_text(result, text);
+   return 0;
+}
+
+/* Explicit business-text output boundary. Display annotations have no authority. */
 static inline char *agent_result_take_text(agent_result_t *result)
 {
    if (!result)
       return NULL;
-   char *text = result->response;
-   result->response = NULL;
-   aimee_response_free(&result->canonical_response);
+   char *text =
+       !result->success || aimee_ir_response_complete_text_valid(&result->canonical_response)
+           ? NULL
+           : aimee_ir_response_text_alloc(&result->canonical_response);
+   agent_result_clear_response(result);
    return text;
 }
 

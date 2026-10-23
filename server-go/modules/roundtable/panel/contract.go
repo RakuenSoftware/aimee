@@ -46,6 +46,7 @@ func Hash(content []byte) string {
 }
 
 type ReviewRequest struct {
+	ExecutionScope  string `json:"execution_scope,omitempty"`
 	Artifact        string `json:"artifact"`
 	OriginalRequest string `json:"original_request"`
 	ArtifactStage   string `json:"artifact_stage"`

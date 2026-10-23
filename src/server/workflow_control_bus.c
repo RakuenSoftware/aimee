@@ -16,6 +16,7 @@
  * body and the two identity headers -- because that is contract, not transport.
  */
 #include "workflow_control_bus.h"
+#include "server_native_delegate_source.h"
 
 #include "cJSON.h"
 
@@ -44,7 +45,7 @@ static int control_error(char *resp, int cap, int status, const char *message)
 
 static char *build_control_body(const char *method, const char *path, const char *query,
                                 const char *body, int body_len, const char *principal,
-                                int workflow_operator)
+                                int workflow_operator, const char *execution_scope)
 {
    cJSON *payload = cJSON_CreateObject();
    if (!payload)
@@ -78,6 +79,9 @@ static char *build_control_body(const char *method, const char *path, const char
    cJSON_AddStringToObject(payload, "principal", principal ? principal : "");
    cJSON_AddBoolToObject(payload, "workflow_operator", workflow_operator ? 1 : 0);
 
+   if (execution_scope && execution_scope[0])
+      cJSON_AddStringToObject(payload, "execution_scope", execution_scope);
+
    char *wire = cJSON_PrintUnformatted(payload);
    cJSON_Delete(payload);
    return wire;
@@ -95,14 +99,43 @@ int workflow_control_request(const char *method, const char *path, const char *q
    if (!body)
       body_len = 0;
 
-   char *wire =
-       build_control_body(method, path, query, body, body_len, principal, workflow_operator);
+   /* Only the authenticated outer host can issue this field. A field inside
+    * the public JSON body is business input and is never execution authority. */
+   char execution_scope[SERVER_NATIVE_DELEGATE_SCOPE_LEN] = "";
+   if (!strcmp(method, "POST") &&
+       (!strcmp(path, "/v1/dev/submit") || !strcmp(path, "/v1/trigger/fire")))
+   {
+      char *terminated = body_len > 0 ? malloc((size_t)body_len + 1) : NULL;
+      if (!terminated)
+         return control_error(resp, resp_cap, 400, "workflow workspace is required");
+      memcpy(terminated, body, (size_t)body_len);
+      terminated[body_len] = '\0';
+      cJSON *request = cJSON_ParseWithOpts(terminated, NULL, 1);
+      free(terminated);
+      const cJSON *workspace = cJSON_GetObjectItemCaseSensitive(
+          request, !strcmp(path, "/v1/dev/submit") ? "repo" : "workspace");
+      char error[256];
+      int minted = cJSON_IsString(workspace) && workspace->valuestring[0] &&
+                   !server_native_delegate_source_mint_for_workspace(
+                       "workflow", workspace->valuestring, execution_scope, error, sizeof error);
+      cJSON_Delete(request);
+      if (!minted)
+         return control_error(resp, resp_cap, 403, "workflow source custody unavailable");
+   }
+   char *wire = build_control_body(method, path, query, body, body_len, principal,
+                                   workflow_operator, execution_scope);
    if (!wire)
+   {
+      if (execution_scope[0])
+         (void)server_native_delegate_source_revoke(execution_scope);
       return control_error(resp, resp_cap, 500, "out of memory building workflow request");
+   }
    size_t wire_len = strlen(wire);
    if (wire_len > WORKFLOW_CONTROL_MAX_BODY)
    {
       free(wire);
+      if (execution_scope[0])
+         (void)server_native_delegate_source_revoke(execution_scope);
       return control_error(resp, resp_cap, 413, "workflow request exceeds the module body limit");
    }
 

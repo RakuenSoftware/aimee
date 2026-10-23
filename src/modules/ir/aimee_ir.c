@@ -690,10 +690,9 @@ static int clone_blocks(aimee_block_t **out, int *count, const aimee_block_t *so
    }
    return 0;
 }
-static int response_valid(const aimee_response_t *response);
 int aimee_ir_response_clone(const aimee_response_t *source, aimee_response_t *out)
 {
-   if (!out || response_valid(source))
+   if (!out || aimee_ir_response_valid(source))
       return -1;
    aimee_response_t copy = *source;
    copy.id = copy.model = copy.role = copy.error_message = copy.raw_stop_reason = NULL;
@@ -1387,7 +1386,7 @@ void aimee_ir_run_transforms(aimee_request_t *ir, const aimee_ir_transform_t *st
    }
 }
 
-static int response_valid(const aimee_response_t *response)
+int aimee_ir_response_valid(const aimee_response_t *response)
 {
    if (!response || response->n_content < 0 || response->n_content > AIMEE_IR_MAX_BLOCKS ||
        (response->n_content && !response->content))
@@ -1416,9 +1415,45 @@ static int response_valid(const aimee_response_t *response)
    }
    return 0;
 }
+/* General completion is not a business TEXT projection. Retain complete
+ * multimodal answers and their inert companion metadata without authorizing
+ * unfinished effects or promoting private reasoning into an answer. */
+int aimee_ir_response_complete_valid(const aimee_response_t *response)
+{
+   if (aimee_ir_response_valid(response) || response->error_message || response->refusal ||
+       (response->stop_reason != AIMEE_STOP_END_TURN &&
+        response->stop_reason != AIMEE_STOP_STOP_SEQUENCE))
+      return -1;
+   int authored = 0;
+   for (int i = 0; i < response->n_content; i++)
+   {
+      const aimee_block_t *block = &response->content[i];
+      if (block->type == AIMEE_BLK_TOOL_USE || block->type == AIMEE_BLK_TOOL_RESULT)
+         return -1;
+      authored |= (block->type == AIMEE_BLK_TEXT && block->text && block->text[0]) ||
+                  block->type == AIMEE_BLK_IMAGE || block->type == AIMEE_BLK_DOCUMENT;
+   }
+   return authored ? 0 : -1;
+}
+int aimee_ir_response_complete_text_valid(const aimee_response_t *response)
+{
+   if (aimee_ir_response_valid(response) || response->error_message || response->refusal ||
+       (response->stop_reason != AIMEE_STOP_END_TURN &&
+        response->stop_reason != AIMEE_STOP_STOP_SEQUENCE))
+      return -1;
+   int authored = 0;
+   for (int i = 0; i < response->n_content; i++)
+   {
+      const aimee_block_t *block = &response->content[i];
+      if (block->type != AIMEE_BLK_TEXT && block->type != AIMEE_BLK_THINKING)
+         return -1;
+      authored |= block->type == AIMEE_BLK_TEXT && block->text && block->text[0];
+   }
+   return authored ? 0 : -1;
+}
 int aimee_ir_response_admit(aimee_response_t *response)
 {
-   if (response_valid(response))
+   if (aimee_ir_response_valid(response))
       return -1;
    aimee_message_t message = {.role = response->role ? response->role : "assistant",
                               .blocks = response->content,

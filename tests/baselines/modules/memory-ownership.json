@@ -1865,7 +1865,8 @@
       "symbols": [
         "kb_module_memory_data"
       ],
-      "sha256": "4f3c8634fa78f7d7c52475e1fad5037d6ca812d42d0a21e5e871622947f74298"
+      "sha256": "af3e0146f7bc5c2e6f348ef6a830fe9ab7799b3f2d7b24a100510791cd0ba60e",
+      "boundary_review": "2026-10-23: Reviewed canonical curator cutover: Go retains fact claim/lease/source validation/commit/retry ownership and the existing kb_module_memory_data bus contract. Host only constructs an admitted owned model request, receives full canonical response, and projects complete authored TEXT (never refusal/error/partial/tool-pending/reasoning-as-answer) before the unchanged memory-facts-complete business operation. Typed fixture retains lease/commit/source assertions; normal and ASan/UBSan/leak memory-facts connection tests pass. No disposition, symbol, authority or inventory exemption changed."
     },
     "src/kb/kb_module_stage_adapters.c": {
       "disposition": "host-transport",
@@ -2116,8 +2117,8 @@
         "kb_client_memory_scope_context_clear",
         "kb_client_memory_scope_context_set"
       ],
-      "sha256": "59d5e7fda1e245dd64599c525a8d8dfd85891f2e9e67a7c5cc21291bed6135a2",
-      "boundary_review": "2026-10-20 PR #3052: reviewed retirement of agent_store_feedback, which fabricated a KB succeeded/fixes relationship from process success. No replacement correctness claim is emitted. Canonical terminal observations remain independently ungraded. The four remaining Go memory context/recall APIs and their arguments are unchanged. Other source changes retain owned canonical output and restrict optional result caching to exact admitted requests and authenticated owners, excluding session capture and opaque credentials. This is boundary analysis, not independent reviewer approval. 2026-10-20 PR #3052: Reviewed transport of actual selected agent/provider/model to the canonical child-log owner for protected delegate experience binding. Reversing only this call-signature change reproduces the previously pinned source exactly. Existing memory context/recall inputs and Go admission policy are unchanged. This records source-boundary analysis, not independent production-promotion approval."
+      "sha256": "4a941670af78d9de21efb21c0aae444b23e975e7350a24710cd3b07dbc00d4b2",
+      "boundary_review": "2026-10-20 PR #3052: reviewed retirement of agent_store_feedback, which fabricated a KB succeeded/fixes relationship from process success. No replacement correctness claim is emitted. Canonical terminal observations remain independently ungraded. The four remaining Go memory context/recall APIs and their arguments are unchanged. Other source changes retain owned canonical output and restrict optional result caching to exact admitted requests and authenticated owners, excluding session capture and opaque credentials. This is boundary analysis, not independent reviewer approval. 2026-10-20 PR #3052: Reviewed transport of actual selected agent/provider/model to the canonical child-log owner for protected delegate experience binding. Reversing only this call-signature change reproduces the previously pinned source exactly. Existing memory context/recall inputs and Go admission policy are unchanged. This records source-boundary analysis, not independent production-promotion approval. 2026-10-23 full internal IR cutover: simple model results retain admitted canonical metadata but grant success only to complete authored text; partial/refused/tool-pending/unknown results cannot become business answers. Existing memory context/recall calls, arguments, scopes and Go ownership are unchanged. Covered by actual agent-context-refusal terminal fixtures, normal and sanitizer lanes. This records source-boundary analysis, not production-promotion approval. 2026-10-23 full internal IR host bridge review: the native role wrapper admits the full canonical request, selected native registration and explicit tool policy; it scopes existing per-thread tool-disable/turn limits and restores both after the owned execution. No memory context/recall symbol, call arguments, actor/scope binding, or Go memory policy changes. The final wrapper is clang-formatted only. The exact existing memory symbol inventory and host-context disposition are retained; this is independent source-boundary review, not a production-promotion claim."
     },
     "src/server/ingress_preinject.c": {
       "disposition": "host-context",
@@ -2432,7 +2433,8 @@
       "symbols": [
         "kb_module_memory_data"
       ],
-      "sha256": "45d755121fe560505d3fdeb8fb8f315ef7f0acf06201d68fd5b95aad0e162129"
+      "sha256": "3cfbd4297c29a1f4df1958305a2b172accc7d37d13d3cc64ebf80e33f7877f7b",
+      "boundary_review": "2026-10-23: Reviewed canonical curator cutover: Go retains fact claim/lease/source validation/commit/retry ownership and the existing kb_module_memory_data bus contract. Host only constructs an admitted owned model request, receives full canonical response, and projects complete authored TEXT (never refusal/error/partial/tool-pending/reasoning-as-answer) before the unchanged memory-facts-complete business operation. Typed fixture retains lease/commit/source assertions; normal and ASan/UBSan/leak memory-facts connection tests pass. No disposition, symbol, authority or inventory exemption changed."
     },
     "src/tests/test_mcp_client_registry.c": {
       "disposition": "host-fixture",

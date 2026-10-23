@@ -1187,7 +1187,8 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    aimee_wire_t wire = is_anthropic_provider(selected) ? AIMEE_WIRE_ANTHROPIC
                        : is_chatgpt_provider(selected) ? AIMEE_WIRE_RESPONSES
                                                        : AIMEE_WIRE_OPENAI_CHAT;
-   cJSON *tools = wire == AIMEE_WIRE_ANTHROPIC   ? build_tools_array_anthropic()
+   cJSON *tools = cfg->no_tools                  ? cJSON_CreateArray()
+                  : wire == AIMEE_WIRE_ANTHROPIC ? build_tools_array_anthropic()
                   : wire == AIMEE_WIRE_RESPONSES ? build_tools_array_responses()
                                                  : build_tools_array();
    if (tools)
@@ -1225,6 +1226,8 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
       goto refused;
    stage = "native tool registry";
    if (native_registry_open(execution, owner))
+      goto refused;
+   if (server_native_runtime_set_turn_limit(execution->runtime, cfg->native_turn_limit))
       goto refused;
    stage = "native cache custody";
    if (native_custody_open(execution, error))
@@ -1327,8 +1330,7 @@ static int native_execution_result(native_execution_t *execution, agent_result_t
                    server_session_capture_session(execution->capture), execution->actor,
                    server_session_capture_turn(execution->capture), 1, history) &&
                !server_native_runtime_result(execution->runtime, &original) &&
-               original.stop_reason != AIMEE_STOP_TOOL_USE &&
-               original.stop_reason != AIMEE_STOP_ERROR && !original.error_message;
+               !aimee_ir_response_complete_valid(&original);
    cJSON_Delete(history);
    char *text = valid ? aimee_ir_response_text_alloc(&original) : NULL;
    if (!text || native_terminal_transfer(execution))
@@ -1352,6 +1354,40 @@ static int native_execution_result(native_execution_t *execution, agent_result_t
    if (canonical && aimee_ir_response_clone(&out->canonical_response, canonical))
       return -1;
    return 0;
+}
+/* A failed execution may still have a durably observed provider response.
+ * Preserve that original IR as diagnostics without transferring a successful
+ * cache or trusting the SDK's normalized stdout/display. */
+static void native_execution_diagnostic(native_execution_t *execution, agent_result_t *out,
+                                        aimee_response_t *canonical)
+{
+   agent_result_clear_response(out);
+   out->success = 0;
+   if (!execution->runtime)
+      return;
+   if (execution->containment && server_native_containment_quiesce(execution->containment, 1000))
+   {
+      server_native_runtime_deactivate_hold_port(execution->runtime);
+      return;
+   }
+   server_native_runtime_quiesce(execution->runtime);
+   aimee_response_t original = {0};
+   if (server_native_runtime_result(execution->runtime, &original))
+      return;
+   if (canonical && canonical != &out->canonical_response &&
+       aimee_ir_response_clone(&original, canonical))
+   {
+      aimee_response_free(&original);
+      return;
+   }
+   out->canonical_response = original;
+   out->response = aimee_ir_response_text_alloc(&original);
+   out->prompt_tokens = original.usage_in > INT_MAX ? INT_MAX : (int)original.usage_in;
+   out->completion_tokens = original.usage_out > INT_MAX ? INT_MAX : (int)original.usage_out;
+   out->cache_read_tokens =
+       original.usage_cache_read > INT_MAX ? INT_MAX : (int)original.usage_cache_read;
+   out->cache_write_tokens =
+       original.usage_cache_write > INT_MAX ? INT_MAX : (int)original.usage_cache_write;
 }
 static int native_claude_init(const cJSON *frame, void *context)
 {
@@ -1481,15 +1517,38 @@ int provider_cli_adapter_host_execute(const provider_cli_cfg_t *cfg, agent_resul
    int rc = !strcmp(execution->selected.cli_kind, "claude")
                 ? native_claude_execute(execution, &owned, out)
                 : codex_provider_cli_adapter.execute(&owned, out);
+   if (server_native_runtime_turn_limit_reached(execution->runtime))
+   {
+      server_native_runtime_quiesce(execution->runtime);
+      aimee_response_t capped = {0};
+      if (!server_native_runtime_result(execution->runtime, &capped))
+      {
+         if (cfg->canonical_response)
+         {
+            aimee_response_free(cfg->canonical_response);
+            *cfg->canonical_response = capped;
+            capped = (aimee_response_t){0};
+         }
+         aimee_response_free(&capped);
+      }
+      snprintf(out->error, sizeof out->error, "native model generation turn cap reached");
+      snprintf(out->stop_reason, sizeof out->stop_reason, "turn_cap");
+      out->turns = server_native_runtime_model_turns(execution->runtime);
+      out->success = 0;
+      rc = AGENT_RC_CONTEXT_REFUSED;
+   }
    if (!rc && out->success)
       rc = native_execution_result(execution, out, cfg->canonical_response);
+   if (rc || !out->success)
+      native_execution_diagnostic(execution, out, cfg->canonical_response);
    native_execution_close(execution);
    if (!rc && out->success)
       return 0;
 refused:
    out->success = 0;
    aimee_ir_session_fail_capture();
-   snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
+   if (strcmp(out->stop_reason, "turn_cap"))
+      snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
    if (!out->error[0])
       snprintf(out->error, sizeof out->error, "canonical native execution was refused");
    return AGENT_RC_CAPTURE_FAILED;

@@ -161,7 +161,7 @@ func TestSeatFailureCategoriesNameTheTransportCause(t *testing.T) {
 			t.Fatalf("seatFailureCategory(%v) = %q, want %q", tc.err, got, tc.want)
 		}
 	}
-	result := seatResult("", "", 0, false, delegate.ErrDelegateReplayUnavailable)
+	result := seatResult("", nil, 0, false, delegate.ErrDelegateReplayUnavailable)
 	if !result.ReplayLost {
 		t.Fatal("a lost replay was not marked, so the caller would park instead of recovering")
 	}
@@ -171,7 +171,7 @@ func TestSeatFailureCategoriesNameTheTransportCause(t *testing.T) {
 }
 
 func TestSeatFailureDetailIsRedacted(t *testing.T) {
-	result := seatResult("", "", 0, false,
+	result := seatResult("", nil, 0, false,
 		errorString("launch failed: authorization: bearer sk-live-secret-value"))
 	if strings.Contains(result.FailureDetail, "sk-live-secret-value") {
 		t.Fatalf("credential survived into a durable seat failure: %q", result.FailureDetail)

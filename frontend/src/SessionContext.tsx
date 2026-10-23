@@ -16,8 +16,10 @@ import {
 /* A "session" is the app-level unit of work: one chat conversation bound to one
  * git project (plus the provider session ids that carry that conversation). The
  * authenticated server account is authoritative; localStorage is only a fast
- * cache and a one-time migration source for pre-server transcripts. */
+ * metadata cache. Flat legacy messages remain read-only archives; canonical IR
+ * owns the active conversation and model history. */
 export interface Session extends SessionRecord {
+  /** Legacy archive only; never active transcript or model history. */
   messages: SessionMessage[];
 }
 
@@ -30,7 +32,7 @@ interface SessionCtx {
   selectSession: (id: string) => void;
   renameSession: (id: string, name: string) => void;
   /* Merge a partial update into one session (project binding, sids, attach id). */
-  patchSession: (id: string, patch: Partial<Session>) => void;
+  patchSession: (id: string, patch: Partial<Omit<Session, 'messages'>>) => void;
 }
 
 const SESSIONS_KEY = 'aimee_sessions';
@@ -129,12 +131,12 @@ async function persistSession(session: Session, legacyProviderAliasID = ''): Pro
         title: session.name,
         cwd: session.projectRoot,
         legacy_provider_alias_id: legacyProviderAliasID || undefined,
-        // The backend imports this only when its transcript is still empty.
+        // Only session metadata crosses this boundary; legacy transcript text
+        // remains a read-only archive and never becomes canonical model history.
         // Provider ids are opaque resume credentials and are never imported
         // directly from browser storage. During the one-time legacy upgrade the
         // optional alias only asks the backend to transfer a binding already
         // present in this authenticated user's server-owned legacy row.
-        messages: session.messages,
       }),
     });
     return response.ok;
@@ -379,18 +381,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const selectSession = useCallback((id: string) => setActiveId(id), []);
 
-  const patchSession = useCallback((id: string, patch: Partial<Session>) => {
+  const patchSession = useCallback((id: string, patch: Partial<Omit<Session, 'messages'>>) => {
+    // JS callers cannot turn a metadata update into a second transcript writer.
+    const { messages: ignoredMessages, ...metadata } = patch as Partial<Session>;
+    void ignoredMessages;
+    if (Object.keys(metadata).length === 0) return;
     const session = sessionsRef.current.find(candidate => candidate.id === id);
     if (!session) return;
-    const next = { ...session, ...patch };
+    const next = { ...session, ...metadata,
+      messages: metadata.aimeeSid && metadata.aimeeSid !== session.aimeeSid ? [] : session.messages };
     updateSessions(sessionsRef.current.map(candidate => candidate.id === id ? next : candidate));
     if (next.aimeeSid !== session.aimeeSid) {
       const pending = writesRef.current.get(session.aimeeSid) ?? Promise.resolve(true);
       void pending.then(() => forgetSession(session.aimeeSid));
     }
-    // Streaming transcripts already persist through the chat backend. Mirror
-    // them in the account cache without sending a metadata write every tick.
-    if (Object.keys(patch).some(key => key !== 'messages')) persistTracked(next);
+    persistTracked(next);
   }, [persistTracked, updateSessions]);
 
   const renameSession = useCallback((id: string, name: string) => {

@@ -340,6 +340,44 @@ func ValidBlock(encoded []byte) bool {
 	if !Decode(encoded, &b) || !irBlockKind(b.Type) || (b.MessageGroup != nil && (*b.MessageGroup < 1 || *b.MessageGroup > 4096)) {
 		return false
 	}
+	var fields map[string]json.RawMessage
+	if !Decode(encoded, &fields) {
+		return false
+	}
+	allowed := map[string]bool{"type": true, "cache_control": true, "cache_ttl": true, "message_group": true, "context": true}
+	specific := map[string][]string{"text": {"text"}, "thinking": {"text", "signature", "thinking_binding", "redacted_content", "thinking_id", "encrypted_content"}, "tool_use": {"tool_id", "name", "namespace", "input"}, "tool_result": {"tool_id", "content", "is_error"}, "image": {"media_type", "media_ref"}, "document": {"media_type", "media_ref"}}
+	for _, key := range specific[b.Type] {
+		allowed[key] = true
+	}
+	for key := range fields {
+		if !allowed[key] {
+			return false
+		}
+	}
+	for _, key := range []string{"type", "text", "signature", "thinking_binding", "redacted_content", "thinking_id", "encrypted_content", "cache_control", "cache_ttl", "tool_id", "name", "namespace", "media_type", "media_ref"} {
+		if value := fields[key]; value != nil {
+			var text string
+			if !Decode(value, &text) {
+				return false
+			}
+		}
+	}
+	if raw := fields["context"]; raw != nil && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return false
+	}
+	if raw := fields["message_group"]; raw != nil {
+		var group int
+		if !Decode(raw, &group) {
+			return false
+		}
+	}
+	if raw := fields["is_error"]; raw != nil {
+		var value bool
+		if !Decode(raw, &value) {
+			return false
+		}
+	}
+
 	if b.ThinkingBinding != nil {
 		value := *b.ThinkingBinding
 		if b.Type != "thinking" || len(value) != 198 || value[:4] != "ap1:" || (value[68] != ':' || value[133] != ':') {

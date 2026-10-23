@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/delegate"
 )
 
 // The workflow control stage carried over the event bus.
@@ -45,6 +46,7 @@ const (
 // carries exactly what the proxy carried -- no more, so moving the transport
 // cannot quietly widen what the control plane accepts.
 type ControlRequest struct {
+	ExecutionScope   string `json:"execution_scope,omitempty"`
 	Method           string `json:"method"`
 	Path             string `json:"path"`
 	Query            string `json:"query"`
@@ -148,7 +150,7 @@ func NewControlHandler(mux http.Handler) bus.ModuleHandler {
 		// The proxy rejected CR/LF because it built a request head by hand.
 		// Nothing is concatenated now, but the same inputs stay rejected: a path
 		// or principal carrying CR/LF never named a real route.
-		if decoded.Path == "" || containsControlChars(decoded.Path, decoded.Query, decoded.Principal) {
+		if decoded.Path == "" || containsControlChars(decoded.Path, decoded.Query, decoded.Principal) || (decoded.ExecutionScope != "" && !delegate.ValidExecutionScope(decoded.ExecutionScope)) {
 			return controlError(http.StatusBadRequest, "invalid workflow control request")
 		}
 		if invocation.Cancelled() {
@@ -164,6 +166,7 @@ func NewControlHandler(mux http.Handler) bus.ModuleHandler {
 		if err != nil {
 			return controlError(http.StatusBadRequest, "invalid workflow control target")
 		}
+		httpRequest = httpRequest.WithContext(delegate.WithExecutionScope(httpRequest.Context(), decoded.ExecutionScope))
 		httpRequest.Header.Set("Content-Type", "application/json")
 		// The private socket's ownership and mode used to be the authentication
 		// boundary; the bus attach is that boundary now. The identity headers stay

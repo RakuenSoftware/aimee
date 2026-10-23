@@ -231,14 +231,19 @@ static int skill_server_trial_run(void *opaque, const char *system_prompt, const
    agent_result_t result = {0};
    memset(&result, 0, sizeof(result));
    if (agent_generate(&runner->config, runner->agent_name, system_prompt, prompt, max_tokens, 0.0,
-                      &result) != 0)
+                      &result) != 0 ||
+       aimee_ir_response_complete_text_valid(&result.canonical_response))
    {
       snprintf(errbuf, errbuf_len, "%s", result.error[0] ? result.error : "model trial failed");
       agent_result_clear_response(&result);
       return -1;
    }
    *response_out = agent_result_take_text(&result);
-   result.response = NULL;
+   if (!*response_out)
+   {
+      snprintf(errbuf, errbuf_len, "failed to project canonical model response");
+      return -1;
+   }
    memset(usage_out, 0, sizeof(*usage_out));
    usage_out->prompt_tokens = result.prompt_tokens;
    usage_out->completion_tokens = result.completion_tokens;

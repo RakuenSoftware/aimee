@@ -47,6 +47,14 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
 int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
               const char *user_prompt, int max_tokens, agent_result_t *out);
 
+/* Source-bound native delegate entry. Keeps selected role and explicit host
+ * no-tools policy; the admitted request is never flattened into a CLI prompt. */
+int agent_run_native_request_for_role(agent_config_t *config, const agent_t *selected,
+                                      const char *role, int tools, const aimee_request_t *request,
+                                      aimee_response_t *response, agent_result_t *out);
+int agent_native_request_tools_disabled(void);
+int agent_native_request_turn_limit(void);
+
 /* Per-thread override of agent_run/agent_run_ex tool-mode inference. agent_run_ex
  * normally derives use_tools from the routed agent's config (tools_enabled +
  * exec-role); a delegate that decided tools-OFF (CLI --no-tools -> force_tools=0)

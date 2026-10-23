@@ -243,7 +243,7 @@ func (a *recordingAgents) seat(request SeatRequest) string {
 }
 
 func (a *recordingAgents) One(_ context.Context, run Run, request SeatRequest) SeatResult {
-	return SeatResult{Response: withTestIdentity(a.seat(request), run, request)}
+	return testCanonicalSeat(SeatResult{Response: withTestIdentity(a.seat(request), run, request)})
 }
 
 func (a *recordingAgents) Group(ctx context.Context, run Run, requests []SeatRequest) []SeatResult {
@@ -264,7 +264,7 @@ func (a firstPanelSeatUnavailableAgents) One(_ context.Context, run Run, request
 	if response == "" {
 		response = `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`
 	}
-	return SeatResult{Response: withTestIdentity(response, run, request), Participant: "opaque-seat-token"}
+	return testCanonicalSeat(SeatResult{Response: withTestIdentity(response, run, request), Participant: "opaque-seat-token"})
 }
 
 func (a firstPanelSeatUnavailableAgents) Group(ctx context.Context, run Run, requests []SeatRequest) []SeatResult {
@@ -290,13 +290,13 @@ func (a *repairingReviewAgents) Group(_ context.Context, run Run, requests []Sea
 	a.requests = append(a.requests, append([]SeatRequest(nil), requests...))
 	if len(a.requests) == 1 {
 		a.invalid = `"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request\nwithout drift"},"verdict":"approve","findings":[]}`
-		return []SeatResult{{Participant: "opaque-seat-token", Response: a.invalid, CostUSD: 1.25}}
+		return []SeatResult{testCanonicalSeat(SeatResult{Participant: "opaque-seat-token", Response: a.invalid, CostUSD: 1.25})}
 	}
-	return []SeatResult{{
+	return []SeatResult{testCanonicalSeat(SeatResult{
 		Participant: "opaque-seat-token",
 		Response:    withTestIdentity(`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, run, requests[0]),
 		CostUSD:     0.25,
-	}}
+	})}
 }
 
 // scriptedReviewAgents hands out one prepared response per seat in order.
@@ -310,7 +310,7 @@ func (a *scriptedReviewAgents) One(_ context.Context, run Run, request SeatReque
 	response := a.responses[0]
 	a.responses = a.responses[1:]
 	a.mu.Unlock()
-	return SeatResult{Response: withTestIdentity(response, run, request), Participant: "opaque-seat-token"}
+	return testCanonicalSeat(SeatResult{Response: withTestIdentity(response, run, request), Participant: "opaque-seat-token"})
 }
 
 func (a *scriptedReviewAgents) Group(ctx context.Context, run Run, requests []SeatRequest) []SeatResult {

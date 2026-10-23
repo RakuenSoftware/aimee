@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 
 	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
@@ -19,15 +20,16 @@ type panelDelegates struct{ runner *NativeRunner }
 
 func (p panelDelegates) request(run roundtablecfg.Run, seat roundtablecfg.SeatRequest) DelegateRequest {
 	return DelegateRequest{
-		Role:        seat.Role,
-		Persona:     seat.Persona,
-		Delegate:    seat.Selector,
-		Participant: seat.Participant,
-		Prompt:      seat.Prompt,
-		Workdir:     run.Workdir,
-		Tools:       seat.Tools,
-		MaxTurnsCap: seat.MaxTurnsCap,
-		DurableSlot: seat.DurableSlot,
+		ExecutionScope: run.ExecutionScope,
+		Role:           seat.Role,
+		Persona:        seat.Persona,
+		Delegate:       seat.Selector,
+		Participant:    seat.Participant,
+		Prompt:         seat.Prompt,
+		Workdir:        run.Workdir,
+		Tools:          seat.Tools,
+		MaxTurnsCap:    seat.MaxTurnsCap,
+		DurableSlot:    seat.DurableSlot,
 		// The seat prompt already carries the complete artifact, so unrelated
 		// worktree-diff evidence would only compete with it for attention.
 		ProvidedTarget:   true,
@@ -43,8 +45,16 @@ func (p panelDelegates) request(run roundtablecfg.Run, seat roundtablecfg.SeatRe
 
 // result classifies and redacts here rather than in the panel, so the panel
 // never grows a second copy of this taxonomy to keep in step with these errors.
-func panelSeatResult(participant, response string, cost float64, costUnknown bool, err error) roundtablecfg.SeatResult {
-	out := roundtablecfg.SeatResult{Participant: participant, Response: response,
+func panelSeatResult(participant string, output *canonical.Response, cost float64, costUnknown bool, err error) roundtablecfg.SeatResult {
+	response := ""
+	if err == nil {
+		if output == nil {
+			err = errors.New("delegate has no canonical response")
+		} else {
+			response, err = output.SemanticText()
+		}
+	}
+	out := roundtablecfg.SeatResult{Participant: participant, Response: response, Output: output,
 		CostUSD: cost, CostUnknown: costUnknown, Err: err}
 	if err == nil {
 		return out
@@ -76,12 +86,12 @@ func (p panelDelegates) Group(ctx context.Context, run roundtablecfg.Run, seats 
 		// without the generic group contract simply cannot host one.
 		unavailable := errors.New("delegate service does not support grouped delegation")
 		for i := range out {
-			out[i] = panelSeatResult("", "", 0, false, unavailable)
+			out[i] = panelSeatResult("", nil, 0, false, unavailable)
 		}
 		return out
 	}
 	for i, call := range group.DelegateGroup(ctx, requests) {
-		out[i] = panelSeatResult(call.Participant, call.Response, call.CostUSD, call.CostUnknown, call.Err)
+		out[i] = panelSeatResult(call.Participant, call.Output, call.CostUSD, call.CostUnknown, call.Err)
 	}
 	return out
 }
@@ -90,5 +100,5 @@ func (p panelDelegates) One(ctx context.Context, run roundtablecfg.Run, seat rou
 	request := p.request(run, seat)
 	request.MaxCostUSD = run.CostLimitUSD
 	result, err := p.runner.agents.Delegate(ctx, request)
-	return panelSeatResult(result.Participant, result.Response, result.CostUSD, result.CostUnknown, err)
+	return panelSeatResult(result.Participant, result.Output, result.CostUSD, result.CostUnknown, err)
 }

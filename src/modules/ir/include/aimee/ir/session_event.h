@@ -74,6 +74,9 @@ struct cJSON *aimee_ir_response_json(const aimee_response_t *response);
 int aimee_ir_response_parse(const struct cJSON *json, aimee_response_t *out);
 /* Canonical request/catalog snapshot: no native replay bytes or raw sidecars. */
 struct cJSON *aimee_ir_request_json(const aimee_request_t *request);
+/* Strict owned inverse. Replaces initialized out only after complete admission;
+ * native raw sidecars are deliberately not part of canonical request snapshots. */
+int aimee_ir_request_parse(const struct cJSON *json, aimee_request_t *out);
 /* Bounded identity/query projection for request policy, never a model prompt. */
 struct cJSON *aimee_ir_policy_view_json(const aimee_request_t *request);
 /* Decode canonical persisted content, never a provider protocol. On failure out

@@ -14,6 +14,7 @@
 #include "presence.h"
 #include "compute_pool.h"
 #include "agent.h"
+#include <aimee/ir/session_event.h>
 #include "agent_coord.h"
 #include "cmd_agent_delegate_impl.h"
 #include "config.h"
@@ -595,6 +596,12 @@ static cJSON *delegate_build_result_response(
 {
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "delegation_id", deleg_id);
+   cJSON *canonical = aimee_ir_response_json(&result->canonical_response);
+   if (canonical)
+      cJSON_AddItemToObject(resp, "ir", canonical);
+   if (rc == 0 && (!result->success ||
+                   aimee_ir_response_complete_text_valid(&result->canonical_response) != 0))
+      rc = -1;
    if (rc == 0)
    {
       cJSON_AddStringToObject(resp, "status", "ok");
@@ -1734,6 +1741,13 @@ static void delegate_worker_run(void *arg)
       workspace_turn_unbind_active();
    (void)db1_delegation_spawn_complete(deleg_id);
 
+   if (rc == 0 && (!result.success || agent_result_project_complete_text(&result) != 0))
+   {
+      rc = -1;
+      snprintf(result.error, sizeof result.error, "%s",
+               "delegate has no complete canonical text outcome");
+   }
+
    /* Post-run named-file drift check: verify named existing paths appear in response. */
    if (named_path_count > 0 && rc == 0 && result.response && result.response[0])
    {
@@ -1792,7 +1806,8 @@ static void delegate_worker_run(void *arg)
                                                          &repaired)
                     : agent_run(&acfg, role, system_prompt, repair_prompt, max_tokens, &repaired);
             free(repair_prompt);
-            if (repair_rc == 0 && repaired.response)
+            if (repair_rc == 0 && repaired.success &&
+                agent_result_project_complete_text(&repaired) == 0)
             {
                agent_result_move_response(&result, &repaired);
                result.turns += repaired.turns;
@@ -2381,13 +2396,24 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
       return server_send_error(conn, "ensemble run failed (no enabled agents in agents.json?)",
                                NULL);
 
+   cJSON *canonical =
+       result.canonical_response ? aimee_ir_response_json(result.canonical_response) : NULL;
+   if (!result.success || !canonical ||
+       aimee_ir_response_complete_text_valid(result.canonical_response) != 0)
+   {
+      cJSON_Delete(canonical);
+      delegate_ensemble_result_free(&result);
+      return server_send_error(conn, "ensemble returned no complete canonical outcome", NULL);
+   }
    cJSON *resp = jo_ok();
+   cJSON_AddItemToObject(resp, "ir", canonical);
    cJSON_AddStringToObject(resp, "response", result.response);
    cJSON_AddBoolToObject(resp, "degraded", result.degraded ? 1 : 0);
    cJSON_AddBoolToObject(resp, "cost_capped", result.cost_capped ? 1 : 0);
    cJSON_AddNumberToObject(resp, "participants_total", result.participants_total);
    cJSON_AddNumberToObject(resp, "participants_failed", result.participants_failed);
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
+   delegate_ensemble_result_free(&result);
    return server_send_ok(conn, resp);
 }
 

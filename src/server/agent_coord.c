@@ -441,12 +441,16 @@ int agent_coordinate(agent_config_t *cfg, const char *task, agent_result_t *out)
 
    agent_result_t planner_result = {0};
    int rc = agent_run(cfg, "execute", NULL, planner_prompt, 0, &planner_result);
-   if (rc != 0 || !planner_result.response)
+   if (rc != 0 || agent_result_project_complete_text(&planner_result))
    {
-      snprintf(out->error, sizeof(out->error), "planner failed: %s", planner_result.error);
+      snprintf(out->error, sizeof(out->error), "planner failed: %s",
+               planner_result.error[0] ? planner_result.error
+                                       : "incomplete canonical model response");
       agent_result_clear_response(&planner_result);
       return -1;
    }
+
+   const char *planner_text = planner_result.response; /* admitted canonical TEXT projection */
 
    /* Phase 2: Critic reviews the plan */
    char critic_prompt[8192];
@@ -454,28 +458,25 @@ int agent_coordinate(agent_config_t *cfg, const char *task, agent_result_t *out)
             "Review this plan for a task. Flag any risks, missing steps, or unsafe commands. "
             "If the plan is good, respond with APPROVED. If not, respond with REJECTED followed "
             "by your concerns.\n\nTask: %s\n\nPlan:\n%s",
-            task, planner_result.response);
+            task, planner_text);
 
    agent_result_t critic_result = {0};
    rc = agent_run(cfg, "execute", NULL, critic_prompt, 0, &critic_result);
 
-   int approved = 1;
-   if (rc == 0 && critic_result.response)
-   {
-      if (strstr(critic_result.response, "REJECTED") != NULL)
-         approved = 0;
-   }
+   char *critic_text = rc ? NULL : agent_result_take_text(&critic_result);
+   int approved = critic_text && strstr(critic_text, "REJECTED") == NULL;
+   free(critic_text);
    agent_result_clear_response(&critic_result);
 
    if (!approved)
    {
-      snprintf(out->error, sizeof(out->error), "plan rejected by critic");
+      snprintf(out->error, sizeof(out->error), "plan rejected or not completed by critic");
       agent_result_move_response(out, &planner_result);
       return -1;
    }
 
    /* Phase 3: Worker executes the plan */
-   cJSON *plan_json = cJSON_Parse(planner_result.response);
+   cJSON *plan_json = aimee_ir_json_parse_frame(planner_text, strlen(planner_text));
    agent_result_clear_response(&planner_result);
 
    if (!plan_json || !cJSON_IsArray(plan_json))
@@ -552,8 +553,8 @@ int agent_vote(agent_config_t *cfg, const char *role, const char *prompt, int n_
    if (n_voters > AGENT_MAX_COORD_AGENTS)
       n_voters = AGENT_MAX_COORD_AGENTS;
 
-   agent_task_t tasks[AGENT_MAX_COORD_AGENTS];
-   agent_result_t results[AGENT_MAX_COORD_AGENTS];
+   agent_task_t tasks[AGENT_MAX_COORD_AGENTS] = {0};
+   agent_result_t results[AGENT_MAX_COORD_AGENTS] = {0};
 
    for (int i = 0; i < n_voters; i++)
    {
@@ -564,7 +565,15 @@ int agent_vote(agent_config_t *cfg, const char *role, const char *prompt, int n_
       tasks[i].temperature = 0.3 + (0.1 * i); /* slight variation */
    }
 
-   int successes = agent_run_parallel(cfg, tasks, n_voters, results, 0 /* no deadline */);
+   (void)agent_run_parallel(cfg, tasks, n_voters, results, 0 /* no deadline */);
+   int successes = 0;
+   for (int i = 0; i < n_voters; i++)
+   {
+      if (results[i].success && !agent_result_project_complete_text(&results[i]))
+         successes++;
+      else
+         results[i].success = 0;
+   }
    if (successes == 0)
    {
       snprintf(out->error, sizeof(out->error), "all voters failed");

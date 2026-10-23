@@ -26,7 +26,6 @@ static void test_cpu_default(void)
    assert(p.backend == CURATOR_BACKEND_CPU);
    assert(p.docs_enabled == 1);
    assert(p.code_enabled == 1);
-   assert(strstr(p.extract_command, "curator-extract") != NULL);
    assert(strstr(p.model, "gemma") != NULL);
    printf("  cpu_default: ok\n");
 }
@@ -123,11 +122,13 @@ static void test_apply_config(void)
     * struct, so the assertions read back through the accessors. The suite runs
     * with HOME/TMPDIR pointed at a throwaway dir, so this writes to a scratch
     * config, not the developer's. */
+   /* Applying a profile must not install or overwrite a retired shell adapter. */
+   assert(config_set_kb_curator_extract_command("legacy-command") == 0);
    curator_profile_t p = curator_profile_select(0, NULL);
    assert(curator_profile_apply(&p) == 0);
    assert(config_kb_curator_extract_docs_enabled() == 1);
    assert(config_kb_curator_extract_code_enabled() == 1);
-   assert(strstr(config_kb_curator_extract_command(), "curator-extract") != NULL);
+   assert(strcmp(config_kb_curator_extract_command(), "legacy-command") == 0);
 
    /* Disabled profile turns off extraction. */
    curator_profile_t dis;

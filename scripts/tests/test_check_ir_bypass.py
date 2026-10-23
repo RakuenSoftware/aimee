@@ -31,6 +31,20 @@ class IRBypassTests(unittest.TestCase):
     def test_production_tree(self):
         checker.check(checker.ROOT)
 
+    def test_model_consumers_cannot_trust_shell_output(self):
+        # Deterministic solver/index adapters remain explicit non-model protocols.
+        self.source("src/kb/kb_planner.c", "platform_exec_pipe(cmd, request, n, &out, &len);")
+        checker.check(self.root)
+        for relative in checker.CANONICAL_MODEL_FILES:
+            for call in ("platform_exec_pipe(cmd, request, n, &out, &len)",
+                         "kb_curator_sidecar_run(cmd, request, cap, err, len)",
+                         'popen(cmd, "r")'):
+                with self.subTest(relative=relative, call=call):
+                    path = self.source(relative, call + ";")
+                    with self.assertRaisesRegex(ValueError, "model-command-bypass"):
+                        checker.check(self.root)
+                    path.unlink()
+
     def test_session_search_cannot_restore_unscoped_legacy_transcript_reads(self):
         self.source("src/db1_client/sessions.c", "db1_primary_session_alloc_search(query, rows, 4);")
         checker.check(self.root)  # Existing administrative compatibility is separate.

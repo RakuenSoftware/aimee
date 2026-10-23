@@ -30,6 +30,32 @@ static int fixture_metadata(const char *name, aimee_tool_metadata_t *out)
    return 0;
 }
 
+static int terminal_intents, terminal_denials;
+static int capture_terminal_denial(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   if (event->kind != AIMEE_SESSION_MESSAGE)
+      return 0;
+   for (int i = 0; i < event->message->n_blocks; i++)
+   {
+      const aimee_block_t *block = &event->message->blocks[i];
+      if (block->type == AIMEE_BLK_TOOL_USE)
+      {
+         assert(!strcmp(block->tool_id, "terminal-denied-call"));
+         terminal_intents++;
+      }
+      if (block->type == AIMEE_BLK_TOOL_RESULT)
+      {
+         assert(!strcmp(block->tool_id, "terminal-denied-call") && block->tool_is_error);
+         char *text = cJSON_PrintUnformatted(block->tool_result);
+         assert(text && strstr(text, "not dispatched"));
+         free(text);
+         terminal_denials++;
+      }
+   }
+   return 0;
+}
+
 static int wide_parallel, wide_uses, wide_results;
 static int identity_case, identity_results;
 static char identity_path[4096];
@@ -100,6 +126,8 @@ static int recalls;
 static int refuse_after;
 static int provider_calls;
 static int final_response;
+static const char *simple_finish;
+static int simple_tools;
 static int bootstrap_case, bootstrap_evidence_seen;
 static int malformed_projection;
 static int transport_refuse;
@@ -132,6 +160,33 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
    (void)model;
    (void)session_id;
    provider_calls++;
+   if (simple_finish)
+   {
+      char response[512];
+      snprintf(response, sizeof response,
+               "{\"model\":\"terminal-fixture\",\"choices\":[{\"finish_reason\":\"%s\","
+               "\"message\":{\"role\":\"assistant\",\"content\":\"Partial plausible verdict.\"}}],"
+               "\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}",
+               simple_finish);
+      cJSON *root = cJSON_Parse(response);
+      assert(root);
+      if (simple_tools)
+      {
+         cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItem(root, "choices"), 0);
+         cJSON *message = cJSON_GetObjectItem(choice, "message");
+         cJSON *calls = cJSON_AddArrayToObject(message, "tool_calls");
+         cJSON *call = cJSON_CreateObject();
+         cJSON_AddItemToArray(calls, call);
+         cJSON_AddStringToObject(call, "id", "terminal-denied-call");
+         cJSON_AddStringToObject(call, "type", "function");
+         cJSON *function = cJSON_AddObjectToObject(call, "function");
+         cJSON_AddStringToObject(function, "name", "read_file");
+         cJSON_AddStringToObject(function, "arguments", "{\"path\":\"must-not-run\"}");
+      }
+      *response_buf = cJSON_PrintUnformatted(root);
+      cJSON_Delete(root);
+      return 200;
+   }
    if (bootstrap_case)
    {
       char *request = strndup(body, body_len);
@@ -569,6 +624,47 @@ int main(void)
       agent_result_clear_response(&result);
       request_context_clear();
    }
+   /* The real non-tool provider path must not grant success to partial text. */
+   const char *incomplete_stops[] = {"content_filter", "length", "tool_calls", "unknown"};
+   transport_refuse = 0;
+   agent.fallback_model[0] = 0;
+   for (size_t i = 0; i < sizeof incomplete_stops / sizeof *incomplete_stops; i++)
+   {
+      simple_finish = incomplete_stops[i];
+      provider_calls = 0;
+      rc = agent_execute(&agent, NULL, "original prompt", 128, 0, &result);
+      assert(rc != 0 && !result.success && provider_calls == 1);
+      assert(result.canonical_response.n_content == 1);
+      assert(result.canonical_response.usage_in == 7);
+      assert(result.canonical_response.usage_out == 3);
+      assert(!agent_result_take_text(&result));
+   }
+   /* Even actual native tool-use blocks accompanying a refused, truncated or
+    * contradictory terminal state cannot reach tool execution or a retry. */
+   const char *denied_tool_stops[] = {"content_filter", "length", "unknown", "stop"};
+   simple_tools = 1;
+   for (size_t i = 0; i < sizeof denied_tool_stops / sizeof *denied_tool_stops; i++)
+   {
+      simple_finish = denied_tool_stops[i];
+      provider_calls = terminal_intents = terminal_denials = 0;
+      aimee_ir_session_set_sink(capture_terminal_denial, NULL);
+      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
+                                             0, &result);
+      aimee_ir_session_set_sink(NULL, NULL);
+      assert(terminal_intents == 1 && terminal_denials == 1);
+      assert(rc != 0 && !result.success && provider_calls == 1 && result.tool_calls == 0);
+      assert(aimee_ir_response_tool_count(&result.canonical_response) == 1);
+      assert(result.canonical_response.usage_in == 7 && result.canonical_response.usage_out == 3);
+      assert(!agent_result_take_text(&result));
+   }
+   simple_tools = 0;
+   simple_finish = "stop";
+   rc = agent_execute(&agent, NULL, "original prompt", 128, 0, &result);
+   assert(rc == 0 && result.success);
+   char *answer = agent_result_take_text(&result);
+   assert(answer && !strcmp(answer, "Partial plausible verdict."));
+   free(answer);
+   simple_finish = NULL;
    /* A durable capture loss is local and terminal, including after dispatch.
     * The attempted tool must still be counted when publishing its result fails. */
    for (int mode = 1; mode <= 2; mode++)

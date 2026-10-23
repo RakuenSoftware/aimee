@@ -51,6 +51,13 @@ GO_PROCESSES = {
 }
 # Executables that host a process other than the module runtime's multicall binary.
 HOSTED_BY = {"wfe": "/usr/local/bin/aimee-wfe"}
+# Exact internal service ownership, not permission to host arbitrary process
+# stages in core. The C host uses a distinct trusted class0/ref0 serving slot.
+HOST_STAGE_OWNERS = {("delegates", 23): (6679, "server-core")}
+
+def process_stages(contract):
+    return [stage for stage in contract["stages"] if "hosted_by" not in stage]
+
 
 STAGE_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 PROTOCOL_KIND_FLAG = 0x80000000
@@ -75,9 +82,9 @@ def validate() -> dict[str, dict[str, object]]:
         raise ContractError("canonical inventory is not a string array")
     contract = load(CONTRACTS)
     if set(contract) != {"schema_version", "principal_class", "components", "clients"}:
-        raise ContractError("top-level keys differ from v4")
-    if contract["schema_version"] != 4 or contract["principal_class"] != 1:
-        raise ContractError("schema_version must equal 4 and principal_class must equal 1")
+        raise ContractError("top-level keys differ from v5")
+    if contract["schema_version"] != 5 or contract["principal_class"] != 1:
+        raise ContractError("schema_version must equal 5 and principal_class must equal 1")
     components = contract["components"]
     if not isinstance(components, list) or len(components) != len(ordered):
         raise ContractError("component count differs from canonical inventory")
@@ -148,7 +155,7 @@ def validate() -> dict[str, dict[str, object]]:
         else:
             keys = set(raw) - {"hosted_by", "durability_declarations"}
             if keys != {"id", "execution", "runtime", "principal_ref", "placements", "stages"}:
-                raise ContractError(f"{component_id}: process keys differ from v4")
+                raise ContractError(f"{component_id}: process keys differ from v5")
             # Most processes are multicall binaries the module runtime spawns and
             # pins by path. A process that is an already-supervised program instead
             # says so, because its grant must pin THAT executable and the runtime
@@ -187,6 +194,13 @@ def validate() -> dict[str, dict[str, object]]:
                 expected_stage_keys = base_stage_keys | (
                     {"emitter", "sample_rate"} if durability == "sampled" else
                     {"emitter"} if durability == "ledger" else set())
+                host_owner = HOST_STAGE_OWNERS.get((component_id, stage.get("id"))) if isinstance(stage, dict) else None
+                if host_owner:
+                    expected_stage_keys |= {"hosted_by"}
+                    if stage.get("event_kind") != host_owner[0] or stage.get("hosted_by") != host_owner[1] or placements != ["server"]:
+                        raise ContractError(f"{component_id}: invalid declared core stage owner")
+                elif isinstance(stage, dict) and "hosted_by" in stage:
+                    raise ContractError(f"{component_id}: stage has no declared core owner")
                 if not isinstance(stage, dict) or set(stage) != expected_stage_keys:
                     raise ContractError(f"{component_id}: invalid stage shape")
                 name, stage_id, kind = stage["name"], stage["id"], stage["event_kind"]
@@ -314,6 +328,9 @@ def validate_clients(clients: object, served_kinds: set[int], module_refs: set[i
         if ref in seen_refs or ref in module_refs:
             raise ContractError(f"{identifier}: principal_ref {ref} collides")
         seen_refs.add(ref)
+        if ref == 76 or identifier == "delegates-host":
+            if client != {"id":"delegates-host","principal_ref":76,"executable":"/usr/local/libexec/aimee-modules/aimee-module-delegates","placements":["server"],"request":[6679]}:
+                raise ContractError("delegates-host must be request-only principal76 for native host kind6679")
         executable = client["executable"]
         if not isinstance(executable, str) or not executable.startswith("/"):
             raise ContractError(f"{identifier}: executable must be an absolute path")

@@ -118,25 +118,29 @@ describe('chat transcript ownership', () => {
     expect(screen.getAllByTestId('assistant').map(node => node.textContent)).toEqual(['Partial answer complete']);
   });
 
-  it('keeps the active conversation when the session list is reordered', async () => {
+  it('keeps the selected legacy archive separate when the session list is reordered', async () => {
     const one = session('one', 'First conversation');
     const two = session('two', 'Second conversation');
     context.sessions = [one, two]; context.active = one;
     const view = render(<Chat />);
     await tick();
-    expect(screen.getByTestId('user').textContent).toBe('First conversation');
+    expect(screen.getByText('First conversation')).toBeTruthy();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('First conversation');
     context.sessions = [two, one];
     view.rerender(<Chat />);
     await tick();
-    expect(screen.getByTestId('user').textContent).toBe('First conversation');
+    expect(screen.getByText('First conversation')).toBeTruthy();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('First conversation');
     context.active = two;
     view.rerender(<Chat />);
     await tick();
-    expect(screen.getByTestId('user').textContent).toBe('Second conversation');
+    expect(screen.getByText('Second conversation')).toBeTruthy();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('Second conversation');
     context.active = one;
     view.rerender(<Chat />);
     await tick();
-    expect(screen.getByTestId('user').textContent).toBe('First conversation');
+    expect(screen.getByText('First conversation')).toBeTruthy();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('First conversation');
   });
 
   it('keeps canonical admission out of the separate text-only account cache', async () => {
@@ -153,7 +157,7 @@ describe('chat transcript ownership', () => {
     await tick(500);
   });
 
-  it('hydrates newer server history without changing the active session', async () => {
+  it('retains newer legacy archive records without hydrating the canonical conversation', async () => {
     context.active = session('one', 'First message');
     context.sessions = [context.active];
     const view = render(<Chat />);
@@ -164,7 +168,9 @@ describe('chat transcript ownership', () => {
     context.sessions = [context.active];
     view.rerender(<Chat />);
     await tick();
-    expect(screen.getByTestId('assistant').textContent).toBe('Reply from another device');
+    expect(screen.getByText('Reply from another device')).toBeTruthy();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('Reply from another device');
+    expect(screen.queryByTestId('assistant')).toBeNull();
   });
 
   it('sends to the originating project when the user switches sessions while attachment is pending', async () => {

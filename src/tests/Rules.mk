@@ -96,6 +96,7 @@ TEST_RUN_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/n
 # link the bus as loose objects, so keep its two new implementation objects in
 # one fixture rather than duplicating them in every target below.
 OBS_BUS_LINK_OBJS = $(OBJDIR)/modules/audit/obs_bus.o \
+                    $(OBJDIR)/core/event_bus/module_runtime.o \
                     $(OBJDIR)/core/event_bus/bus_runtime.o \
                     $(OBJDIR)/core/event_bus/bus_endpoint.o \
                     $(OBJDIR)/core/event_bus/module_client.o \
@@ -387,6 +388,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-wfe-advance \
                $(TESTPREFIX)/unit-test-aimee-ir \
                $(TESTPREFIX)/unit-test-ir-session-event \
+               $(TESTPREFIX)/unit-test-ir-request-codec \
+               $(TESTPREFIX)/unit-test-agent-request-controls \
                $(TESTPREFIX)/unit-test-harness-ir \
                $(TESTPREFIX)/unit-test-claude-headless \
                $(TESTPREFIX)/unit-test-server-chat-ir \
@@ -444,6 +447,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-bus-endpoint \
                $(TESTPREFIX)/unit-test-bus-runtime \
                $(TESTPREFIX)/unit-test-module-runtime \
+               $(TESTPREFIX)/unit-test-module-embedded-runtime \
+               $(TESTPREFIX)/unit-test-server-native-delegate \
                $(TESTPREFIX)/unit-test-module-json-call \
                $(TESTPREFIX)/unit-test-economizer-module-client \
                $(TESTPREFIX)/unit-test-delegate-egress-adapter \
@@ -646,6 +651,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-cmd-run \
                $(TESTPREFIX)/unit-test-conversation \
                $(TESTPREFIX)/unit-test-agent-loop \
+               $(TESTPREFIX)/unit-test-agent-business-ir \
                $(TESTPREFIX)/unit-test-agent-max-turns \
                $(TESTPREFIX)/unit-test-provider-settable \
                $(TESTPREFIX)/unit-test-json-fluent \
@@ -1067,6 +1073,9 @@ $(TESTPREFIX)/unit-test-communication: $(OBJDIR)/tests/test_communication.o \
 TEST_TARGETS += $(TESTPREFIX)/unit-test-coord-dispatcher-startup \
                 $(TESTPREFIX)/unit-test-runtime-state-lookup \
                 $(TESTPREFIX)/unit-test-delegate-startup
+
+TEST_TARGETS += $(TESTPREFIX)/unit-test-native-source-issuers \
+                $(TESTPREFIX)/unit-test-native-delegate-source
 
 UNIT_TEST_SHARD_COUNT ?= 1
 UNIT_TEST_SHARD_INDEX ?= 0
@@ -1505,7 +1514,7 @@ $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_queue.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_extract.o \
                                        $(OBJDIR)/kb_store/kb_store_tenant.o $(OBJDIR)/kb/kb_identity.o \
-                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS) \
@@ -3183,6 +3192,7 @@ unit-test-bus-runtime: $(TESTPREFIX)/unit-test-bus-runtime
 # root is granted per-object rather than in the base flags.
 $(OBJDIR)/tests/test_module_runtime.o: C_FLAGS += -Icore/event_bus/include \
                                                   -Imodules/execution-policy/include
+$(OBJDIR)/tests/test_bus_module_embedded_runtime.o: C_FLAGS += -Icore/event_bus/include
 $(TESTPREFIX)/unit-test-module-runtime: $(OBJDIR)/tests/test_module_runtime.o \
                                         $(OBJDIR)/core/event_bus/module_client.o \
                                         $(OBJDIR)/core/event_bus/module_runtime.o \
@@ -4663,7 +4673,10 @@ $(TESTPREFIX)/unit-test-curator-code-unit: \
                                        $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o \
                                        $(OBJDIR)/kb_store/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
-                                       $(TEST_CORE_OBJS)
+                                       $(TEST_CORE_OBJS) \
+                                       $(OBJDIR)/tests/support/mock_agent_http.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o \
+                                       $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-curator-resolve-entities: \
@@ -4775,7 +4788,7 @@ $(TESTPREFIX)/unit-test-curator-judge: $(OBJDIR)/text.o $(OBJDIR)/tests/support/
                                              $(OBJDIR)/tests/test_curator_judge.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_judge.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
-                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS) \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
@@ -4789,7 +4802,7 @@ $(TESTPREFIX)/unit-test-kb-surprising-judge: $(OBJDIR)/text.o $(OBJDIR)/tests/su
                                              $(OBJDIR)/tests/test_kb_surprising_judge.o \
                                        $(OBJDIR)/kb/kb_surprising_judge.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
-                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS) \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
@@ -4802,7 +4815,7 @@ $(TESTPREFIX)/unit-test-curator-synthesize: \
                                        $(OBJDIR)/tests/test_curator_synthesize.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_synthesize.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
-                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS) \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
@@ -4822,7 +4835,7 @@ $(TESTPREFIX)/unit-test-curator-synthesize: \
 $(TESTPREFIX)/unit-test-kb-reflection: \
                                        $(OBJDIR)/tests/test_kb_reflection.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
-                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS) \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
@@ -5925,6 +5938,12 @@ $(TESTPREFIX)/unit-test-agent-max-turns: $(OBJDIR)/tests/test_agent_max_turns.o 
                                          $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
+$(TESTPREFIX)/unit-test-agent-business-ir: $(OBJDIR)/tests/test_agent_business_ir.o \
+                                     $(OBJDIR)/cmd_describe.o $(OBJDIR)/server/agent_runtime_liveness.o $(OBJDIR)/server/liveness.o $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/server/agent_coord.o $(OBJDIR)/server/agent_loop.o \
+                                     $(OBJDIR)/modules/delegates/delegate_role.o $(OBJDIR)/dstr.o $(PROVIDER_IR_OBJS) \
+                                     $(OBJDIR)/cJSON.o $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
 $(TESTPREFIX)/unit-test-agent-loop: $(OBJDIR)/tests/test_agent_loop.o \
                                      $(OBJDIR)/server/agent_loop.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o \
                                      $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/log.o \
@@ -5951,7 +5970,7 @@ $(TESTPREFIX)/unit-test-kb-curator-provider: $(OBJDIR)/tests/support/curator_con
 
 $(TESTPREFIX)/unit-test-kb-curator-llm: $(OBJDIR)/tests/support/curator_config_stub.o \
                                        $(OBJDIR)/tests/test_kb_curator_llm.o \
-                                  $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
+                                  $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                   $(OBJDIR)/kb_curator_provider.o $(OBJDIR)/provider_client.o $(PROVIDER_IR_OBJS) \
                                   $(OBJDIR)/text.o \
                                   $(OBJDIR)/cJSON.o $(OBJDIR)/tests/support/mock_agent_http.o
@@ -6614,8 +6633,7 @@ $(TESTPREFIX)/unit-test-learning-synth: $(OBJDIR)/tests/test_learning_synth.o \
                      $(OBJDIR)/kb_store/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \
                      $(OBJDIR)/kb_store/kb_store_init.o $(OBJDIR)/kb_store/kb_store_hardening.o $(OBJDIR)/kb_store/db_schema.o \
-                     $(OBJDIR)/posix/platform_process.o \
-                     $(OBJDIR)/linux/platform_process.o \
+                     $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o $(PROVIDER_IR_OBJS) \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lzstd
 
@@ -7009,7 +7027,7 @@ $(TESTPREFIX)/compaction-retention-probe: $(OBJDIR)/tests/retention_probe.o \
 compaction-retention-probe: $(TESTPREFIX)/compaction-retention-probe
 
 # Bounded model-neutral completion intervention over the response seam.
-$(TESTPREFIX)/unit-test-response-completion-stage: $(OBJDIR)/tests/test_response_completion_stage.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cJSON.o
+$(TESTPREFIX)/unit-test-response-completion-stage: $(OBJDIR)/modules/ir/response_codec.o $(OBJDIR)/tests/test_response_completion_stage.o $(OBJDIR)/modules/governance/gw_stage_completion.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Real Go provider owner behind the native test transport.
@@ -7048,7 +7066,7 @@ $(TESTPREFIX)/unit-test-server-memory-domain: $(OBJDIR)/tests/test_server_memory
 $(TESTPREFIX)/unit-test-cmd-memory-data: $(OBJDIR)/tests/test_cmd_memory_data.o $(OBJDIR)/cmd_data.o $(OBJDIR)/json_fluent.o $(OBJDIR)/dstr.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
-$(TESTPREFIX)/unit-test-kb-memory-facts-connection: $(OBJDIR)/tests/test_kb_memory_facts_connection.o $(OBJDIR)/kb/kb_memory_facts.o $(OBJDIR)/vendor/cJSON.o
+$(TESTPREFIX)/unit-test-kb-memory-facts-connection: $(OBJDIR)/tests/test_kb_memory_facts_connection.o $(OBJDIR)/kb/kb_memory_facts.o $(OBJDIR)/vendor/cJSON.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm_contract.o $(PROVIDER_IR_OBJS)
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-server-facts-transport: $(OBJDIR)/tests/test_server_facts_transport.o $(OBJDIR)/kb/kb_service_memory.o $(OBJDIR)/server/server_facts.o $(OBJDIR)/server/server_error_kind.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
@@ -7076,7 +7094,7 @@ $(TESTPREFIX)/unit-test-workflow-transport: $(OBJDIR)/tests/test_workflow_transp
 $(TESTPREFIX)/unit-test-trace-transport: $(OBJDIR)/tests/test_trace_transport.o $(OBJDIR)/trace_analysis.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
 
-$(TESTPREFIX)/unit-test-benchmark-context-transport: $(OBJDIR)/tests/test_benchmark_context_transport.o $(OBJDIR)/modules/benchmarks/agent_eval.o $(OBJDIR)/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
+$(TESTPREFIX)/unit-test-benchmark-context-transport: $(OBJDIR)/tests/test_benchmark_context_transport.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/benchmarks/agent_eval.o $(OBJDIR)/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o $(OBJDIR)/tests/support/module_runtime_fixture.o | $(OBJDIR)/aimee-memory-fixture
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm -lpthread
 
 $(TESTPREFIX)/unit-test-assertion-transport: $(OBJDIR)/tests/test_assertion_transport.o $(OBJDIR)/kb/kb_store_adapters/kb_service_backend_context.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
@@ -7303,3 +7321,45 @@ $(TESTPREFIX)/unit-test-runtime-state-lookup: $(OBJDIR)/tests/test_runtime_state
 
 $(TESTPREFIX)/unit-test-delegate-startup: $(OBJDIR)/tests/test_delegate_startup.o
 	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+$(TESTPREFIX)/unit-test-ir-request-codec: $(OBJDIR)/tests/test_ir_request_codec.o \
+    $(OBJDIR)/modules/ir/request_codec.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-module-embedded-runtime: $(OBJDIR)/tests/test_bus_module_embedded_runtime.o \
+                                        $(OBJDIR)/core/event_bus/module_client.o \
+                                        $(OBJDIR)/core/event_bus/module_runtime.o \
+                                        $(OBJDIR)/core/event_bus/module_protocol.o \
+                                        $(OBJDIR)/core/event_bus/bus_runtime.o \
+                                        $(OBJDIR)/core/event_bus/bus_endpoint.o \
+                                        $(OBJDIR)/core/event_bus/bus_client.o \
+                                        $(OBJDIR)/core/event_bus/bus_attach.o \
+                                        $(OBJDIR)/core/event_bus/bus_host.o \
+                                        $(OBJDIR)/core/event_bus/bus_route.o \
+                                        $(OBJDIR)/core/event_bus/bus_region.o \
+                                        $(OBJDIR)/core/event_bus/bus_region_host.o \
+                                        $(OBJDIR)/core/event_bus/bus_ring.o \
+                                        $(OBJDIR)/core/event_bus/bus_arena.o \
+                                        $(OBJDIR)/core/event_bus/bus_wire.o \
+                                        $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lcrypto
+
+$(TESTPREFIX)/unit-test-server-native-delegate: $(OBJDIR)/tests/test_server_native_delegate.o \
+ $(OBJDIR)/server/server_native_delegate.o $(OBJDIR)/modules/ir/request_codec.o \
+ $(OBJDIR)/modules/ir/response_codec.o $(OBJDIR)/modules/ir/session_event.o \
+ $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/core/event_bus/module_runtime.o \
+ $(OBJDIR)/core/event_bus/module_protocol.o $(OBJDIR)/core/event_bus/bus_client.o \
+ $(OBJDIR)/core/event_bus/bus_wire.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-native-source-issuers: $(OBJDIR)/tests/test_native_source_issuers.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-native-delegate-source: $(OBJDIR)/tests/test_native_delegate_source.o $(OBJDIR)/server/server_native_delegate_source.o $(OBJDIR)/server/request_context.o $(OBJDIR)/modules/vault/agent_credentials.o $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o $(PROVIDER_IR_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
+
+$(TESTPREFIX)/unit-test-agent-request-controls: $(OBJDIR)/tests/test_agent_request_controls.o \
+ $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
+ $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/aimee_sha256.o \
+ $(OBJDIR)/modules/translation/wire_codec.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto

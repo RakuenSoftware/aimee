@@ -12,7 +12,7 @@
 /* Internal helper: run a single tool command via the agent and capture the result.
  * Replaces the removed agent_run_tool_command() from an earlier refactor. */
 static int agent_run_tool_command(const agent_t *agent, const char *type, const char *cmd,
-                                  int timeout_ms, agent_result_t *out)
+                                  int timeout_ms, agent_result_t *out, const char **authored)
 {
    (void)timeout_ms; /* passed through agent config */
    char sys[128];
@@ -20,7 +20,18 @@ static int agent_run_tool_command(const agent_t *agent, const char *type, const 
    /* Composite plan/step helper: a sub-turn of an outer plan execution, so it uses
     * the PRIMITIVE agent_execute (not agent_dispatch_one) — re-acquiring the same
     * agent's max_parallel slot here would self-throttle the plan. */
-   return agent_execute(agent, sys, cmd, 2048, 0.2, out);
+   *authored = NULL;
+   int rc = agent_execute(agent, sys, cmd, 2048, 0.2, out);
+   if (!rc && agent_result_project_complete_text(out))
+   {
+      snprintf(out->error, sizeof out->error,
+               "command model did not return complete canonical text");
+      out->success = 0;
+      return -1;
+   }
+   if (!rc)
+      *authored = out->response; /* borrowed projection; canonical owner remains out */
+   return rc;
 }
 
 static void plan_record_evidence(int plan_id, int step_id, const char *kind, const char *content,
@@ -97,10 +108,11 @@ int agent_plan_rollback_step(plan_t *plan, int step_idx, int timeout_ms)
 
    agent_result_t rr = {0};
    memset(&rr, 0, sizeof(rr));
-   int rc = agent_run_tool_command(NULL, "rollback", s->rollback, timeout_ms, &rr);
+   const char *authored = NULL;
+   int rc = agent_run_tool_command(NULL, "rollback", s->rollback, timeout_ms, &rr, &authored);
 
    (void)db1_plan_step_set_status_output(s->id, (rc == 0) ? "rolled_back" : "failed",
-                                         rr.response ? rr.response : rr.error);
+                                         authored ? authored : rr.error);
 
    agent_result_clear_response(&rr);
    s->status = (rc == 0) ? 4 : 3;
@@ -125,31 +137,32 @@ int agent_plan_execute(plan_t *plan, const agent_t *agent, int timeout_ms)
 
       agent_result_t rr = {0};
       memset(&rr, 0, sizeof(rr));
-      int rc = agent_run_tool_command(agent, "execute", s->action, timeout_ms, &rr);
+      const char *authored = NULL;
+      int rc = agent_run_tool_command(agent, "execute", s->action, timeout_ms, &rr, &authored);
 
       int success = (rc == 0);
       if (success && s->success_predicate[0])
       {
-         const char *hay = rr.response ? rr.response : "";
+         const char *hay = authored ? authored : "";
          if (strstr(hay, s->success_predicate) == NULL)
             success = 0;
       }
 
       {
          char evidence[4608];
-         snprintf(evidence, sizeof(evidence), "%s", rr.response ? rr.response : rr.error);
+         snprintf(evidence, sizeof(evidence), "%s", authored ? authored : rr.error);
          plan_record_evidence(plan->id, s->id,
                               s->success_predicate[0] ? "success_predicate" : "step_output",
                               evidence, success, s->success_predicate[0] ? "strong" : "weak");
       }
 
       (void)db1_plan_step_set_status_output(s->id, success ? "done" : "failed",
-                                            rr.response ? rr.response : rr.error);
+                                            authored ? authored : rr.error);
 
       s->status = success ? 2 : 3;
-      if (rr.response)
+      if (authored)
       {
-         snprintf(s->output, sizeof(s->output), "%s", rr.response);
+         snprintf(s->output, sizeof(s->output), "%s", authored);
       }
       else if (rr.error[0])
       {
@@ -307,14 +320,15 @@ int agent_execute_with_plan(const agent_t *agent, const agent_network_t *network
     * agent_execute, not the slot-acquiring agent_dispatch_one (nested acquisition
     * of the same agent's slot would self-throttle the plan). */
    int rc = agent_execute(agent, system_prompt, plan_prompt, max_tokens, temperature, &plan_res);
-   if (rc != 0 || !plan_res.response)
+   if (rc != 0 || agent_result_project_complete_text(&plan_res))
    {
-      snprintf(out->error, sizeof(out->error), "plan generation failed: %s", plan_res.error);
+      snprintf(out->error, sizeof(out->error), "plan generation failed: %s",
+               plan_res.error[0] ? plan_res.error : "incomplete canonical model response");
       agent_result_clear_response(&plan_res);
       return -1;
    }
 
-   cJSON *json = cJSON_Parse(plan_res.response);
+   cJSON *json = aimee_ir_json_parse_frame(plan_res.response, strlen(plan_res.response));
    if (!json || !cJSON_IsArray(json))
    {
       cJSON_Delete(json);
@@ -453,8 +467,17 @@ int agent_job_resume(agent_config_t *cfg, int job_id, agent_result_t *out)
    rc = agent_run(cfg, job.role, NULL, job.prompt, AGENT_DEFAULT_MAX_TOKENS, out);
    agent_set_durable_job(0);
    int cursor_turn = out->turns > job.cursor_turn ? out->turns : job.cursor_turn;
+   char *authored = rc || aimee_ir_response_complete_text_valid(&out->canonical_response)
+                        ? NULL
+                        : aimee_ir_response_text_alloc(&out->canonical_response);
+   if (!rc && !authored)
+   {
+      rc = -1;
+      out->success = 0;
+      snprintf(out->error, sizeof out->error, "agent job did not return complete canonical text");
+   }
    if (rc == 0 && liveness_reject_degenerate_response(
-                      &out->response, out->error, sizeof(out->error),
+                      &authored, out->error, sizeof(out->error),
                       "agent job returned raw tool-call markup or another degenerate response"))
    {
       rc = -1;
@@ -462,7 +485,9 @@ int agent_job_resume(agent_config_t *cfg, int job_id, agent_result_t *out)
    }
 
    db1_agent_job_update(job_id, (rc == 0) ? "done" : "failed", cursor_turn,
-                        out->response ? out->response : out->error);
+                        authored ? authored : out->error);
+
+   free(authored);
 
 out:
    db1_agent_job_free(&job);

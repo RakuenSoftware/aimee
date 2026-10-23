@@ -43,8 +43,8 @@ func (c *groupRoutingCaller) Call(_ context.Context, _, stage uint32, _ uint64,
 		return nil, err
 	}
 	c.invokedModels = append(c.invokedModels, invocation.Model)
-	return json.Marshal(InvocationResult{Version: WireVersion, Status: "done",
-		Agent: invocation.Model, Response: "ok"})
+	return json.Marshal(testCanonicalInvocation(InvocationResult{Version: WireVersion, Status: "done",
+		Agent: invocation.Model, Response: "ok"}))
 }
 
 func (c *recordingCaller) Call(_ context.Context, kind, stage uint32, _ uint64,
@@ -63,7 +63,7 @@ func (c *recordingCaller) Call(_ context.Context, kind, stage uint32, _ uint64,
 }
 
 func TestBusWireOmitsCallerLifecycleState(t *testing.T) {
-	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "done", Response: "ok"}}
+	caller := &recordingCaller{result: testCanonicalInvocation(InvocationResult{Version: WireVersion, Status: "done", Response: "ok"})}
 	client := &BusClient{caller: caller, deadline: time.Second}
 	_, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "security",
 		Delegate: "codex", Prompt: "review this", Workdir: "/repo", Tools: true,
@@ -82,7 +82,7 @@ func TestBusWireOmitsCallerLifecycleState(t *testing.T) {
 			t.Fatalf("caller state %q crossed the delegate wire", forbidden)
 		}
 	}
-	for _, required := range []string{"role", "persona", "model", "prompt", "workdir", "tools",
+	for _, required := range []string{"role", "persona", "model", "ir", "workdir", "tools",
 		"execution_timeout_ms"} {
 		if _, exists := fields[required]; !exists {
 			t.Fatalf("delegate field %q missing", required)
@@ -117,7 +117,7 @@ func TestCostLimitFailsBeforeDispatch(t *testing.T) {
 }
 
 func TestDelegateResultPreservesCallerLocalParticipant(t *testing.T) {
-	caller := &recordingCaller{result: InvocationResult{Version: WireVersion, Status: "done", Response: "ok"}}
+	caller := &recordingCaller{result: testCanonicalInvocation(InvocationResult{Version: WireVersion, Status: "done", Response: "ok"})}
 	client := &BusClient{caller: caller, deadline: time.Second}
 	result, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "security",
 		Prompt: "review this", Participant: "seat-security"})

@@ -329,7 +329,7 @@ int describe_one(const char *project_name, const char *project_path)
 
    free(prompt);
 
-   if (rc != 0 || !result.response || !result.response[0])
+   if (rc != 0 || agent_result_project_complete_text(&result))
    {
       fprintf(stderr, "describe: failed for %s: %s\n", project_name,
               result.error[0] ? result.error : "no response");
@@ -487,7 +487,7 @@ int style_one(const char *project_name, const char *project_path)
 
    free(prompt);
 
-   if (rc != 0 || !result.response || !result.response[0])
+   if (rc != 0 || agent_result_project_complete_text(&result))
    {
       fprintf(stderr, "style: failed for %s: %s\n", project_name,
               result.error[0] ? result.error : "no response");

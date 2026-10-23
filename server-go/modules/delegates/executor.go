@@ -1,7 +1,6 @@
 package delegates
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -23,6 +22,8 @@ import (
 )
 
 const maxExecutorOutput = 16 << 20
+
+var errNoConfiguredAgents = errors.New("agent registry has no agents")
 
 const (
 	watchdogArgument = "__aimee_delegate_watchdog"
@@ -104,6 +105,7 @@ func (r agentRegistry) roster() []agentEntry {
 // agent and runs its argv directly; there is no shell, HTTP agent service, job
 // row, status poller, or C agent loop in this path.
 type RegistryExecutor struct {
+	host     delegatecontract.StageCaller
 	path     string
 	mu       sync.Mutex
 	registry agentRegistry
@@ -128,7 +130,7 @@ func NewRegistryExecutor(home string) (*RegistryExecutor, error) {
 		models = filepath.Join(home, "agents.json")
 	}
 	r := &RegistryExecutor{path: models, limits: make(map[string]*agentLimiter)}
-	if _, err := r.load(); err != nil {
+	if _, err := r.load(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errNoConfiguredAgents) {
 		return nil, err
 	}
 	return r, nil
@@ -153,7 +155,7 @@ func (r *RegistryExecutor) load() (agentRegistry, error) {
 		return agentRegistry{}, fmt.Errorf("decode agent registry: %w", err)
 	}
 	if len(registry.roster()) == 0 {
-		return agentRegistry{}, errors.New("agent registry has no agents")
+		return agentRegistry{}, errNoConfiguredAgents
 	}
 	for _, agent := range registry.roster() {
 		if agent.MaxParallel != nil && *agent.MaxParallel < 0 {
@@ -457,35 +459,11 @@ func executorArgv(agent agentEntry, request delegatecontract.Invocation) ([]stri
 	}
 	kind := strings.ToLower(strings.TrimSpace(agent.CLIKind))
 	switch kind {
-	case "codex":
-		if !request.Tools {
-			return nil, errors.New("codex CLI cannot guarantee a tools-disabled invocation")
-		}
-		argv = append(argv, "exec", "--ephemeral", "--json", "--skip-git-repo-check", "--color", "never")
-		if RoleIsWrite(request.Role) {
-			argv = append(argv, "--sandbox", "workspace-write")
-		} else {
-			argv = append(argv, "--sandbox", "read-only")
-		}
-		if agent.Model != "" {
-			argv = append(argv, "--model", agent.Model)
-		}
-		argv = append(argv, "-")
-	case "claude", "claude-code":
-		argv = append(argv, "-p", "--output-format", "stream-json", "--verbose")
-		if agent.Model != "" {
-			argv = append(argv, "--model", agent.Model)
-		}
-		if !request.Tools {
-			// Claude documents an empty --tools value as the explicit mechanism
-			// for disabling every built-in tool; preserve the empty argv element.
-			argv = append(argv, "--tools", "")
-		} else if !RoleIsWrite(request.Role) {
-			argv = append(argv, "--allowedTools", "Read", "Glob", "Grep")
-		}
-	case "", "generic":
-		// A generic adapter consumes the prompt on stdin and writes its final
-		// response on stdout. This keeps custom CLIs argv-only and testable.
+	case "claude", "claude-code", "codex":
+		return nil, errors.New("native SDK launch requires the canonical host execution owner")
+	case "generic":
+		// Explicit operator-declared external text transport. Tools=true permits
+		// external work; it never attests host-governed model tool execution.
 		if !RoleIsWrite(request.Role) {
 			return nil, errors.New("generic delegate CLIs cannot prove read-only role isolation")
 		}
@@ -495,6 +473,7 @@ func executorArgv(agent agentEntry, request delegatecontract.Invocation) ([]stri
 		if request.MaxTurns > 0 {
 			return nil, errors.New("generic delegate CLIs cannot enforce a maximum turn count")
 		}
+
 	default:
 		return nil, fmt.Errorf("unsupported delegate cli_kind %q", agent.CLIKind)
 	}
@@ -505,6 +484,7 @@ type limitedBuffer struct {
 	mu        sync.Mutex
 	buffer    bytes.Buffer
 	remaining int
+	overflow  bool
 }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
@@ -512,15 +492,19 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 	defer b.mu.Unlock()
 	n := len(p)
 	if b.remaining <= 0 {
+		b.overflow = b.overflow || n > 0
 		return n, nil
 	}
 	if len(p) > b.remaining {
+		b.overflow = true
 		p = p[:b.remaining]
 	}
 	_, _ = b.buffer.Write(p)
 	b.remaining -= len(p)
 	return n, nil
 }
+
+func (b *limitedBuffer) Overflow() bool { b.mu.Lock(); defer b.mu.Unlock(); return b.overflow }
 
 func (b *limitedBuffer) String() string {
 	b.mu.Lock()
@@ -539,91 +523,6 @@ func (b *limitedBuffer) BytesCopy() []byte {
 // completed non-reasoning/non-final items for tool work; counting each such
 // item as another turn is conservative when tools run in parallel, so it may
 // stop early but can never permit more model continuations than the cap.
-type turnMonitor struct {
-	mu       sync.Mutex
-	kind     string
-	max      int
-	turns    int
-	pending  []byte
-	exceeded bool
-	trigger  string
-	cancel   context.CancelFunc
-	output   io.Writer
-}
-
-func newTurnMonitor(kind string, max int, cancel context.CancelFunc, output io.Writer) *turnMonitor {
-	turns := 0
-	if strings.EqualFold(strings.TrimSpace(kind), "codex") && max > 0 {
-		turns = 1
-	}
-	return &turnMonitor{kind: strings.ToLower(strings.TrimSpace(kind)), max: max,
-		turns: turns, cancel: cancel, output: output}
-}
-
-func (m *turnMonitor) Write(p []byte) (int, error) {
-	n, err := m.output.Write(p)
-	m.mu.Lock()
-	m.pending = append(m.pending, p...)
-	for {
-		end := bytes.IndexByte(m.pending, '\n')
-		if end < 0 {
-			break
-		}
-		line := append([]byte(nil), m.pending[:end]...)
-		m.pending = m.pending[end+1:]
-		m.observe(line)
-	}
-	m.mu.Unlock()
-	return n, err
-}
-
-func (m *turnMonitor) observe(line []byte) {
-	if m.max <= 0 || m.exceeded {
-		return
-	}
-	var item map[string]any
-	if json.Unmarshal(line, &item) != nil {
-		return
-	}
-	switch m.kind {
-	case "claude", "claude-code":
-		if item["type"] == "assistant" {
-			m.turns++
-		}
-	case "codex":
-		if item["type"] == "item.completed" {
-			nested, _ := item["item"].(map[string]any)
-			typeName, _ := nested["type"].(string)
-			if typeName != "agent_message" && typeName != "reasoning" {
-				m.turns++
-			}
-		}
-	}
-	if m.turns > m.max {
-		m.exceeded = true
-		m.trigger = string(line)
-		m.cancel()
-	}
-}
-
-func (m *turnMonitor) Exceeded() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.exceeded
-}
-
-func (m *turnMonitor) Turns() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.turns
-}
-
-func (m *turnMonitor) Detail() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.trigger
-}
-
 func boundedTerminationDetail(detail string) string {
 	detail = strings.ToValidUTF8(delegatecontract.SafeDiagnostic(strings.TrimSpace(detail)), "�")
 	if len(detail) <= delegatecontract.TerminationDetailMax {
@@ -636,49 +535,8 @@ func boundedTerminationDetail(detail string) string {
 	return detail[:end]
 }
 
-func terminationDiagnostic(kind string, request delegatecontract.Invocation, elapsed time.Duration,
-	monitor *turnMonitor, detail string) *delegatecontract.TerminationDiagnostic {
-	diagnostic := &delegatecontract.TerminationDiagnostic{
-		Kind: kind, ExecutionTimeoutMS: request.ExecutionTimeoutMS,
-		ElapsedMS: elapsed.Milliseconds(), Detail: boundedTerminationDetail(detail),
-	}
-	if kind == delegatecontract.TerminationTurnCap {
-		diagnostic.MaxTurns = request.MaxTurns
-		diagnostic.ObservedTurns = monitor.Turns()
-	}
-	return diagnostic
-}
-
-func finalOutput(kind string, output []byte) string {
-	kind = strings.ToLower(strings.TrimSpace(kind))
-	if kind == "" || kind == "generic" {
-		return strings.TrimSpace(string(output))
-	}
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	scanner.Buffer(make([]byte, 4096), maxExecutorOutput)
-	var final string
-	for scanner.Scan() {
-		var item map[string]any
-		if json.Unmarshal(scanner.Bytes(), &item) != nil {
-			continue
-		}
-		if kind == "claude" || kind == "claude-code" {
-			if item["type"] == "result" {
-				if value, ok := item["result"].(string); ok {
-					final = value
-				}
-			}
-			continue
-		}
-		if kind == "codex" && item["type"] == "item.completed" {
-			if nested, ok := item["item"].(map[string]any); ok && nested["type"] == "agent_message" {
-				if value, ok := nested["text"].(string); ok {
-					final = value
-				}
-			}
-		}
-	}
-	return strings.TrimSpace(final)
+func terminationDiagnostic(kind string, request delegatecontract.Invocation, elapsed time.Duration, detail string) *delegatecontract.TerminationDiagnostic {
+	return &delegatecontract.TerminationDiagnostic{Kind: kind, ExecutionTimeoutMS: request.ExecutionTimeoutMS, ElapsedMS: elapsed.Milliseconds(), Detail: boundedTerminationDetail(detail)}
 }
 
 // RunWatchdog handles the private re-exec mode used by executorCommand. Every
@@ -822,15 +680,22 @@ func (r *RegistryExecutor) Execute(ctx context.Context, request delegatecontract
 			return result
 		}
 	}
+	kind := strings.ToLower(strings.TrimSpace(agent.CLIKind))
+	switch kind {
+	case "claude", "claude-code", "codex":
+		return r.executeHost(ctx, request, agent)
+	}
 	argv, err := executorArgv(agent, request)
 	if err != nil {
 		result.Error = err.Error()
 		return result
 	}
-	prompt := request.Prompt
-	if persona := strings.TrimSpace(request.Persona); persona != "" {
-		prompt = "You are acting as " + persona + ".\n\n" + prompt
+	prompt, err := delegatecontract.CLIText(request.Input)
+	if err != nil {
+		result.Error = err.Error()
+		return result
 	}
+
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 	cmd, closeCommand, err := executorCommand(runCtx, argv)
@@ -844,49 +709,51 @@ func (r *RegistryExecutor) Execute(ctx context.Context, request delegatecontract
 	}
 	cmd.Stdin = strings.NewReader(prompt)
 	output := &limitedBuffer{remaining: maxExecutorOutput}
-	monitor := newTurnMonitor(agent.CLIKind, request.MaxTurns, runCancel, output)
-	cmd.Stdout, cmd.Stderr = output, output
-	if request.MaxTurns > 0 {
-		cmd.Stdout = monitor
-	}
+	diagnostics := &limitedBuffer{remaining: maxExecutorOutput}
+	cmd.Stdout, cmd.Stderr = output, diagnostics
 	started := time.Now()
 	if err := cmd.Run(); err != nil {
 		elapsed := time.Since(started)
-		if monitor.Exceeded() {
-			result.Error = fmt.Sprintf("%s (configured=%d observed=%d)",
-				delegatecontract.ErrDelegateTurnCap, request.MaxTurns, monitor.Turns())
-			result.Termination = terminationDiagnostic(delegatecontract.TerminationTurnCap,
-				request, elapsed, monitor, monitor.Detail())
-			return result
-		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			result.Error = delegatecontract.ErrDelegateExecutionDeadline.Error()
 			if detail := boundedTerminationDetail(output.String()); detail != "" {
 				result.Error += ": " + detail
 			}
 			result.Termination = terminationDiagnostic(delegatecontract.TerminationExecutionDeadline,
-				request, elapsed, monitor, output.String())
+				request, elapsed, output.String())
 			return result
 		}
 		if errors.Is(ctx.Err(), context.Canceled) {
 			result.Error = context.Canceled.Error()
 			result.Termination = terminationDiagnostic(delegatecontract.TerminationCancelled,
-				request, elapsed, monitor, output.String())
+				request, elapsed, output.String())
 			return result
 		}
-		detail := strings.TrimSpace(output.String())
+		detail := strings.TrimSpace(diagnostics.String())
+		if detail == "" {
+			detail = strings.TrimSpace(output.String())
+		}
 		if detail == "" {
 			detail = err.Error()
 		}
 		result.Error = delegatecontract.SafeDiagnostic(detail)
 		return result
 	}
-	response := finalOutput(agent.CLIKind, output.BytesCopy())
-	if response == "" {
-		result.Error = "delegate CLI returned no final response"
+	if output.Overflow() {
+		result.Error = "external text adapter exceeded the complete-output limit"
 		return result
 	}
-	result.Status, result.Response = "done", response
+	response, history, parseErr := externalTextObservation(output.BytesCopy())
+	result.Output, result.History = response, history
+	if parseErr != nil {
+		result.Error = parseErr.Error()
+		return result
+	}
+	result.Status = "done"
+	if err := delegatecontract.AdmitResult(&result); err != nil {
+		result.Status, result.Error = "failed", err.Error()
+		result.Response = ""
+	}
 	return result
 }
 

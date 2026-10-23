@@ -61,6 +61,52 @@ static void shuffle_indices(int *indices, int count)
    }
 }
 
+/* Admission precedes every business-text use, including scorer and peer
+ * history construction. Keep canonical diagnostics; withdraw unsafe display. */
+static int ensemble_project_result(agent_result_t *result)
+{
+   if (result->success && agent_result_project_complete_text(result) == 0)
+      return 0;
+   result->success = 0;
+   agent_result_replace_display_text(result, NULL);
+   return -1;
+}
+
+void delegate_ensemble_result_free(delegate_ensemble_result_t *result)
+{
+   if (!result || !result->canonical_response)
+      return;
+   aimee_response_free(result->canonical_response);
+   free(result->canonical_response);
+   result->canonical_response = NULL;
+}
+
+static int ensemble_adopt_output(delegate_ensemble_result_t *out, const agent_result_t *source)
+{
+   if (!out || !source || !source->success ||
+       aimee_ir_response_complete_text_valid(&source->canonical_response))
+      return -1;
+   aimee_response_t *owned = calloc(1, sizeof *owned);
+   if (!owned || aimee_ir_response_clone(&source->canonical_response, owned))
+   {
+      free(owned);
+      return -1;
+   }
+   char *text = aimee_ir_response_text_alloc(owned);
+   if (!text)
+   {
+      aimee_response_free(owned);
+      free(owned);
+      return -1;
+   }
+   delegate_ensemble_result_free(out);
+   out->canonical_response = owned;
+   snprintf(out->response, sizeof out->response, "%s", text);
+   free(text);
+   out->success = 1;
+   return 0;
+}
+
 static int count_successful(const agent_result_t *results, int count)
 {
    /* A usable participant result is exactly a non-empty response. Review mode
@@ -321,6 +367,8 @@ static int delegate_run_inline(agent_config_t *acfg, const char *agent_name, con
            ? agent_run_named(acfg, agent_name, role, system_prompt, user_prompt, max_tokens,
                              temperature, out)
            : agent_run_ex(acfg, role, system_prompt, user_prompt, max_tokens, temperature, out);
+   if (rc == 0 && ensemble_project_result(out) != 0)
+      rc = -1;
    ensemble_fold_cost(acfg, out, agent_name);
    if (leased && ag)
       delegate_credentials_release(NULL, ag->name, leased_cred);
@@ -857,7 +905,7 @@ static int run_quality_scorer(agent_config_t *acfg, const char *task, const char
    memset(&score_result, 0, sizeof(score_result));
    int score = artifact ? (int)strlen(artifact) : 0;
    if (agent_run_with_tools_write_enforce(acfg, "reason", NULL, full, 512, 0, &score_result) == 0 &&
-       score_result.response && score_result.response[0])
+       ensemble_project_result(&score_result) == 0)
    {
       if (cost_usd)
          *cost_usd += result_token_cost(acfg, &score_result, "reason");
@@ -888,7 +936,7 @@ static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, cons
    memset(&res, 0, sizeof(res));
    int completion = 0;
    if (agent_run_with_tools_write_enforce(acfg, "reason", NULL, full, 512, 0, &res) == 0 &&
-       res.response && res.response[0])
+       ensemble_project_result(&res) == 0)
    {
       if (cost_usd)
          *cost_usd += result_token_cost(acfg, &res, "reason");
@@ -931,7 +979,7 @@ static int summarize_forward(agent_config_t *acfg, const ensemble_panel_t *panel
    memset(&res, 0, sizeof(res));
    int rc = run_aggregator(acfg, panel, full, 0, &res);
    free(full);
-   if (rc != 0 || !res.response || !res.response[0])
+   if (rc != 0 || ensemble_project_result(&res) != 0)
    {
       agent_result_clear_response(&res);
       return -1;
@@ -1065,7 +1113,7 @@ static void answer_roundtable_questions(agent_config_t *acfg, const char *task,
    agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
    if (agent_run_with_tools_write_enforce(acfg, "reason", NULL, prompt, 1024, 0, &res) == 0 &&
-       res.response && res.response[0])
+       ensemble_project_result(&res) == 0)
    {
       parse_question_answers(res.response, opts, out);
       out->cost_usd += result_token_cost(acfg, &res, "reason");
@@ -1097,7 +1145,7 @@ static int repair_review_json(agent_config_t *acfg, const ensemble_panel_t *pane
    int rc = agent_run_named(acfg, panel->reference_models[participant], "review", NULL, prompt, 512,
                             0.2, &res);
    free(prompt);
-   if (rc != 0 || !res.response || !res.response[0])
+   if (rc != 0 || ensemble_project_result(&res) != 0)
    {
       agent_result_clear_response(&res);
       return -1;
@@ -1227,7 +1275,10 @@ static int run_round_parallel(agent_config_t *acfg, const ensemble_panel_t *pane
    agent_run_parallel(acfg, tasks, ref_count, results, deadline_ms);
    /* Account each participant's run onto the originating session, like a delegate. */
    for (int i = 0; i < ref_count; i++)
+   {
+      (void)ensemble_project_result(&results[i]);
       ensemble_fold_cost(acfg, &results[i], panel->reference_models[i]);
+   }
 
    /* Did the reviewers actually LOOK? A review panel was tool-less for its whole
     * life, and giving it tools is worth nothing if the panelists never call one —
@@ -1303,6 +1354,7 @@ static int run_round_sequential(agent_config_t *acfg, const ensemble_panel_t *pa
          agent_run_named(acfg, panel->reference_models[i], "draft", persona, prompt, 0,
                          0.3 + (0.05 * i), &results[i]);
       free(persona);
+      (void)ensemble_project_result(&results[i]);
       if (results[i].response && results[i].response[0])
       {
          char label[256];
@@ -1768,7 +1820,10 @@ int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, c
    agent_run_parallel(acfg, tasks, ref_count, results, 0 /* MoA aggregate: no deadline */);
    /* Account each participant's run onto the originating session, like a delegate. */
    for (int i = 0; i < ref_count; i++)
+   {
+      (void)ensemble_project_result(&results[i]);
       ensemble_fold_cost(acfg, &results[i], panel->reference_models[i]);
+   }
 
    /* Partial-failure metadata: how many of the fanned-out participants returned
     * no usable response. Set before any early return so degraded/cost-capped
@@ -1788,8 +1843,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, c
       int best = best_candidate(results, ref_count);
       if (best >= 0 && results[best].response)
       {
-         snprintf(out->response, sizeof(out->response), "%s", results[best].response);
-         out->success = 1;
+         (void)ensemble_adopt_output(out, &results[best]);
       }
       for (int i = 0; i < ref_count; i++)
          agent_result_clear_response(&results[i]);
@@ -1807,8 +1861,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, c
       int best = best_candidate(results, ref_count);
       if (best >= 0 && results[best].response)
       {
-         snprintf(out->response, sizeof(out->response), "%s", results[best].response);
-         out->success = 1;
+         (void)ensemble_adopt_output(out, &results[best]);
       }
       for (int i = 0; i < ref_count; i++)
          agent_result_clear_response(&results[i]);
@@ -1848,9 +1901,8 @@ int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, c
 
    if (agg_rc == 0 && agg_result.response && agg_result.response[0])
    {
-      snprintf(out->response, sizeof(out->response), "%s", agg_result.response);
+      (void)ensemble_adopt_output(out, &agg_result);
       out->cost_usd += result_token_cost(acfg, &agg_result, panel->aggregator);
-      out->success = 1;
    }
    else
    {
@@ -2405,7 +2457,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
          memset(&apply_result, 0, sizeof(apply_result));
          if (agent_run_with_tools_write_enforce(acfg, "draft", NULL, full, 4096, 0,
                                                 &apply_result) == 0 &&
-             apply_result.response && apply_result.response[0])
+             ensemble_project_result(&apply_result) == 0)
          {
             free(best_artifact);
             best_artifact = xstrdup0(apply_result.response);
@@ -2441,19 +2493,4 @@ fail:
    free(best_artifact);
    memset(out, 0, sizeof(*out));
    return -1;
-}
-
-void delegate_roundtable_result_free(roundtable_result_t *r)
-{
-   if (!r)
-      return;
-   free(r->artifact);
-   r->artifact = NULL;
-}
-
-double delegate_ensemble_cost_usd(const delegate_ensemble_result_t *r)
-{
-   if (!r)
-      return 0.0;
-   return r->cost_usd;
 }

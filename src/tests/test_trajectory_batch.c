@@ -99,6 +99,9 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
       model.blocks = opaque;
       model.n_blocks = 2;
    }
+   aimee_response_t response = {
+       .role = "assistant", .content = &answer, .n_content = 1, .stop_reason = AIMEE_STOP_END_TURN};
+   assert(!aimee_ir_response_clone(&response, &out->canonical_response));
    cJSON *history = cJSON_CreateArray();
    assert(history && cJSON_AddItemToArray(history, aimee_ir_message_json(&user)) &&
           cJSON_AddItemToArray(history, aimee_ir_message_json(&model)));
@@ -108,6 +111,7 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
    free(wire);
    cJSON_Delete(history);
    cJSON_Delete(opaque[1].tool_input);
+   agent_result_replace_display_text(out, strdup("display must not determine task grading"));
    out->turns = 1;
    return 0;
 }
@@ -158,6 +162,9 @@ static void test_batch_writes_one_trajectory_per_task(void)
    cJSON *written = cJSON_GetObjectItem(root, "written");
    assert(cJSON_IsArray(written));
    assert(cJSON_GetArraySize(written) == 2);
+   for (int i = 0; i < 2; i++)
+      assert(cJSON_IsTrue(
+          cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(written, i), "success")));
    cJSON *counts = cJSON_GetObjectItem(root, "toolsets");
    assert(cJSON_GetObjectItem(counts, "readonly")->valueint == 1);
    assert(cJSON_GetObjectItem(counts, "current_code")->valueint == 1);

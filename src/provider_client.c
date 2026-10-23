@@ -12,7 +12,6 @@
 #include "cJSON.h"
 #include <aimee/translation/aimee_frontend.h>
 #include <aimee/translation/aimee_backend.h>
-#include <limits.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -93,25 +92,6 @@ struct cJSON *provider_client_build_openai(const provider_def_t *def, struct cJS
 
 /* --- response parsing --- */
 
-static char *provider_reasoning_text(const aimee_response_t *response)
-{
-   size_t length = 0;
-   int found = 0;
-   for (int i = 0; i < response->n_content; i++)
-      if (response->content[i].type == AIMEE_BLK_THINKING && response->content[i].text)
-      {
-         length += strlen(response->content[i].text);
-         found = 1;
-      }
-   if (!found)
-      return NULL;
-   char *text = calloc(length + 1, 1);
-   if (text)
-      for (int i = 0; i < response->n_content; i++)
-         if (response->content[i].type == AIMEE_BLK_THINKING && response->content[i].text)
-            strcat(text, response->content[i].text);
-   return text;
-}
 int provider_client_parse_openai(const char *body, provider_completion_t *out)
 {
    if (!out)
@@ -135,30 +115,17 @@ int provider_client_parse_openai(const char *body, provider_completion_t *out)
                 ? openai_backend_parse(root, &out->ir, error, sizeof error)
                 : -1;
    cJSON_Delete(root);
-   if (rc || aimee_ir_response_admit(&out->ir) || out->ir.error_message)
+   if (rc || aimee_ir_response_admit(&out->ir) || out->ir.error_message ||
+       out->ir.stop_reason == AIMEE_STOP_CONTENT_FILTER || out->ir.stop_reason == AIMEE_STOP_ERROR)
       return -1;
-   int textual = 0;
+   /* Admission keeps the complete response. The application must choose a
+    * permitted terminal state before projecting authored TEXT into its domain. */
+   int authored_text = 0;
    for (int i = 0; i < out->ir.n_content; i++)
-      textual |= out->ir.content[i].type == AIMEE_BLK_TEXT ||
-                 out->ir.content[i].type == AIMEE_BLK_THINKING;
-   if (!textual)
+      authored_text |= out->ir.content[i].type == AIMEE_BLK_TEXT && out->ir.content[i].text &&
+                       out->ir.content[i].text[0];
+   if (!authored_text)
       return -1;
-   out->content = aimee_ir_response_text_alloc(&out->ir);
-   out->reasoning = provider_reasoning_text(&out->ir);
-   /* Curator JSON recovery may inspect a reasoning-only local-model reply.
-    * This application view does not reclassify the canonical THINKING block. */
-   if ((!out->content || !out->content[0]) && out->reasoning && out->reasoning[0])
-   {
-      free(out->content);
-      out->content = strdup(out->reasoning);
-   }
-   if (!out->content)
-      return -1;
-   out->prompt_tokens = out->ir.usage_in > INT_MAX ? INT_MAX : (int)out->ir.usage_in;
-   out->completion_tokens = out->ir.usage_out > INT_MAX ? INT_MAX : (int)out->ir.usage_out;
-   snprintf(out->model, sizeof out->model, "%s", out->ir.model ? out->ir.model : "");
-   snprintf(out->finish_reason, sizeof out->finish_reason, "%s",
-            out->ir.raw_stop_reason ? out->ir.raw_stop_reason : "");
    return 0;
 }
 
@@ -330,8 +297,4 @@ void provider_completion_free(provider_completion_t *out)
    if (!out)
       return;
    aimee_response_free(&out->ir);
-   free(out->content);
-   out->content = NULL;
-   free(out->reasoning);
-   out->reasoning = NULL;
 }

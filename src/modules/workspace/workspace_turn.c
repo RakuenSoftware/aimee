@@ -72,6 +72,7 @@ struct workspace_turn_scope
    ws_detached_provider_t detached;
    int bound;
    int mirror_fd, created_fd;
+   int owned_source;
    char created_cwd[MAX_PATH_LEN];
    char epoch[65];
    char cwd[MAX_PATH_LEN], drift[256];
@@ -442,6 +443,7 @@ int workspace_turn_resolve_detached_mirror_cwd(const char *cwd, char *out, size_
 }
 
 static int active_mirror_lease(const char *real);
+static int owned_source_replaced(void);
 
 static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, int *bound,
                             int *mirror_fd, char resolved[MAX_PATH_LEN], char drift[256],
@@ -451,6 +453,8 @@ static int bind_active_into(const char *cwd, ws_detached_provider_t *detached, i
    *mirror_fd = -1;
    resolved[0] = '\0';
    drift[0] = '\0';
+   if (owned_source_replaced())
+      return -1;
    if (!cwd || !cwd[0])
       return 0;
    /* Nested foreground hooks/tools and background workers retain the same
@@ -613,6 +617,64 @@ static int mirror_lease_matches(const char *real, const char *path, int fd)
           !strcmp(real, bound) && !fstat(fd, &held) && !stat(bound, &current) &&
           S_ISDIR(held.st_mode) && held.st_dev == current.st_dev && held.st_ino == current.st_ino;
 }
+static int owned_source_replaced(void)
+{
+   for (const workspace_turn_scope_t *scope = t_nested_scope; scope; scope = scope->previous)
+      if (scope->owned_source && !mirror_lease_matches(scope->cwd, scope->cwd, scope->mirror_fd))
+         return 1;
+   return 0;
+}
+int workspace_turn_scope_begin_owned_source(const char *cwd, int held_fd,
+                                            workspace_turn_scope_t **out)
+{
+   if (!out)
+      return -1;
+   *out = NULL;
+   char actual[MAX_PATH_LEN];
+   const workspace_provider_t *active = workspace_provider_active();
+   if (!cwd || !cwd[0] || held_fd < 0 || !realpath(cwd, actual) || !strcmp(actual, "/") ||
+       strcmp(cwd, actual) || active != workspace_provider_shared() || t_turn_bound ||
+       t_turn_container_state || t_turn_mirror_fd >= 0 || t_callback_mirror ||
+       owned_source_replaced())
+      return -1;
+   for (const workspace_turn_scope_t *scope = t_nested_scope; scope; scope = scope->previous)
+      if ((scope->bound && !scope->owned_source) ||
+          scope->previous_provider != workspace_provider_shared())
+         return -1;
+   for (int i = 0; i < config_workspace_count(); i++)
+   {
+      char root[MAX_PATH_LEN], resolved[MAX_PATH_LEN], provider[32];
+      snprintf(root, sizeof root, "%s", config_workspaces(i));
+      snprintf(provider, sizeof provider, "%s", config_workspace_providers(i));
+      if ((cwd_in_workspace(actual, root) ||
+           (realpath(root, resolved) && cwd_in_workspace(actual, resolved))) &&
+          provider[0] && strcmp(provider, "shared"))
+         return -1;
+   }
+   int duplicate = fcntl(held_fd, F_DUPFD_CLOEXEC, 3);
+   if (duplicate < 0)
+      return -1;
+   if (!mirror_lease_matches(actual, actual, duplicate))
+   {
+      close(duplicate);
+      return -1;
+   }
+   workspace_turn_scope_t *scope = calloc(1, sizeof *scope);
+   if (!scope)
+   {
+      close(duplicate);
+      return -1;
+   }
+   scope->created_fd = -1;
+   scope->mirror_fd = duplicate;
+   scope->owned_source = scope->bound = 1;
+   snprintf(scope->cwd, sizeof scope->cwd, "%s", actual);
+   scope->previous_provider = active;
+   scope->previous = t_nested_scope;
+   t_nested_scope = scope;
+   *out = scope;
+   return 1;
+}
 static int active_mirror_lease(const char *real)
 {
    if (t_callback_mirror &&
@@ -693,6 +755,8 @@ int workspace_turn_mirror_capture(const char *cwd, workspace_turn_mirror_lease_t
    if (!out)
       return -1;
    *out = NULL;
+   if (owned_source_replaced())
+      return -1;
    char actual[MAX_PATH_LEN];
    if (!cwd || !cwd[0] || !realpath(cwd, actual))
       return 0;
@@ -758,6 +822,8 @@ int workspace_turn_workspace_authorized(const char *workspace, char *out, size_t
                 strerror(errno));
       return 0;
    }
+   if (owned_source_replaced())
+      return 0; /* A held service source cannot downgrade to a configured pathname. */
    if (active_mirror_lease(real) >= 0)
    {
       snprintf(out, out_cap, "%s", real);
@@ -1046,7 +1112,7 @@ int workspace_turn_resource_identity(const char *cwd, int *directory_fd, char di
       *directory_fd = -1;
    if (digest)
       digest[0] = 0;
-   if (!cwd || !cwd[0] || !directory_fd || !digest)
+   if (!cwd || !cwd[0] || !directory_fd || !digest || owned_source_replaced())
       return -1;
    const workspace_provider_t *provider = workspace_provider_active();
    if (!provider)
@@ -1075,7 +1141,9 @@ int workspace_turn_resource_identity(const char *cwd, int *directory_fd, char di
       char actual[MAX_PATH_LEN];
       int mirror = -1;
       if (realpath(cwd, actual))
+      {
          mirror = active_mirror_lease(actual);
+      }
       if (mirror >= 0)
          fd = fcntl(mirror, F_DUPFD_CLOEXEC, 3);
       else if (project_owner && (fd = project_owner(cwd)) >= 0)

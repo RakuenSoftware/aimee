@@ -155,13 +155,14 @@ int roadmap_reassess_run(const char *roadmap_id, agent_config_t *cfg, char **out
 
    free(prompt);
 
-   if (rc != 0 || !result.response)
+   char *authored = rc ? NULL : agent_result_take_text(&result);
+   if (!authored)
    {
       agent_result_clear_response(&result);
       return -1;
    }
 
-   *out_verdict = agent_result_take_text(&result);
+   *out_verdict = authored;
    int complete = roadmap_reassess_is_complete(*out_verdict);
    return complete ? 0 : 1;
 }

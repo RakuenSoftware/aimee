@@ -39,7 +39,7 @@ func sharedLifecycleClient(t *testing.T, store db.Store) *contract.Client {
 }
 
 func sharedCreateWork(client *contract.Client, id, parent string, cap int) (int, error) {
-	return client.WfeCreateWorkItem(context.Background(), id, "repo", id, "build", "v1", "impl", "autonomous", "test", parent, "", 1, cap)
+	return client.WfeCreateWorkItem(context.Background(), id, "repo", id, "build", "v1", "impl", "autonomous", "test", parent, "", 1, cap, "")
 }
 
 func TestSharedDatabaseWorkflowAdmissionAcrossProviders(t *testing.T) {

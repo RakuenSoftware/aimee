@@ -315,8 +315,14 @@ void capture_round_review_items(const agent_result_t *results, int ref_count,
    {
       char seat[MAX_AGENT_NAME + MAX_MODEL_LEN + 2];
       review_seat_label(&results[i], seat, sizeof(seat));
-      capture_review_items_from_text(results[i].response, seat,
-                                     results[i].successful_tool_calls > 0, out);
+      if (!results[i].success ||
+          aimee_ir_response_complete_text_valid(&results[i].canonical_response) != 0)
+         continue;
+      char *text = aimee_ir_response_text_alloc(&results[i].canonical_response);
+      if (!text)
+         continue;
+      capture_review_items_from_text(text, seat, results[i].successful_tool_calls > 0, out);
+      free(text);
    }
    if (!out->original_request_alignment[0])
    {
@@ -325,4 +331,19 @@ void capture_round_review_items(const agent_result_t *results, int ref_count,
                sizeof out->original_request_alignment_summary,
                "No panelist returned the required original-request alignment assessment.");
    }
+}
+
+void delegate_roundtable_result_free(roundtable_result_t *r)
+{
+   if (!r)
+      return;
+   free(r->artifact);
+   r->artifact = NULL;
+}
+
+double delegate_ensemble_cost_usd(const delegate_ensemble_result_t *r)
+{
+   if (!r)
+      return 0.0;
+   return r->cost_usd;
 }

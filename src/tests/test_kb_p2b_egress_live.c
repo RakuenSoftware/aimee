@@ -106,19 +106,15 @@ struct cJSON *kb_curator_presets_json(void)
    return NULL;
 }
 
-char *kb_curator_llm_run(kb_curator_stage_t stage, const char *system_prompt,
-                         const char *request_json, struct cJSON *json_schema,
-                         const char *fallback_command, int out_cap, char *errbuf, size_t errlen)
+int kb_curator_llm_run(kb_curator_stage_t stage, const aimee_request_t *request,
+                       aimee_response_t *out, char *errbuf, size_t errlen)
 {
    (void)stage;
-   (void)system_prompt;
-   (void)request_json;
-   (void)json_schema;
-   (void)fallback_command;
-   (void)out_cap;
+   (void)request;
+   (void)out;
    if (errbuf && errlen)
-      errbuf[0] = '\0';
-   return NULL;
+      snprintf(errbuf, errlen, "no model in egress fixture");
+   return -1;
 }
 
 static int64_t scalar(const char *sql)

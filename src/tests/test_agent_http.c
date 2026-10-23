@@ -987,6 +987,27 @@ static void test_canonical_delegate_policy_before_native_egress(void)
       cJSON_Delete(native);
       cJSON_Delete(tools);
    }
+   /* An oversized catalog must be rejected before governance can remove all
+    * its entries and accidentally turn an unadmitted request into valid egress. */
+   for (size_t w = 0; w < sizeof wires / sizeof *wires; w++)
+   {
+      cJSON *examples = cJSON_Parse(tool_wires[w]);
+      cJSON *task = cJSON_GetArrayItem(examples, 1);
+      cJSON *oversized = cJSON_CreateArray();
+      assert(examples && task && oversized);
+      for (int i = 0; i <= AIMEE_IR_MAX_BLOCKS; i++)
+         assert(cJSON_AddItemToArray(oversized, cJSON_Duplicate(task, 1)));
+      agent_t agent = {0};
+      snprintf(agent.model, sizeof agent.model, "selected");
+      aimee_request_t owned = {0};
+      assert(agent_prepare_request_ir(&agent, messages, oversized, "host", 128, 0, wires[w], 1,
+                                      &owned) < 0);
+      assert(!owned.model && !owned.n_tools && !owned.messages);
+      assert(cJSON_GetArraySize(oversized) == AIMEE_IR_MAX_BLOCKS + 1);
+      aimee_request_free(&owned);
+      cJSON_Delete(oversized);
+      cJSON_Delete(examples);
+   }
    gateway_policy_set_delegates_available_provider(NULL);
    cJSON_Delete(messages);
    puts("canonical delegate policy before all native outputs/fallback models OK");

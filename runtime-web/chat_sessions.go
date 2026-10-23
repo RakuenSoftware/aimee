@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -271,6 +270,18 @@ func (s *server) upsertChatSessionWithLegacyRuntime(username, targetID, aliasID,
 	if changed == 0 {
 		return false, nil
 	}
+	// Retain only the already stored legacy archive when its old alias row is
+	// retired. This copies no browser text and never enters canonical history.
+	var archived int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM chat_session_messages WHERE session_id = ?`, targetID).Scan(&archived); err != nil {
+		return false, err
+	}
+	if archived == 0 {
+		if _, err := tx.Exec(`INSERT INTO chat_session_messages (session_id, username, role, text)
+			SELECT ?, username, role, text FROM chat_session_messages WHERE session_id = ? ORDER BY id`, targetID, aliasID); err != nil {
+			return false, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
@@ -292,63 +303,8 @@ func (s *server) appendChatMessage(username, id, role, text string) error {
 	return err
 }
 
-const (
-	chatSessionSeedMaxMessages = 2000
-	chatSessionSeedMaxBytes    = 8 * 1024 * 1024
-)
-
-// seedChatMessages imports a legacy browser-only transcript once. Existing
-// server history always wins, which prevents a stale browser from overwriting a
-// conversation that another browser has advanced.
-func (s *server) seedChatMessages(username, id string, messages []chatMessage) error {
-	if s == nil || s.db == nil || username == "" || id == "" || len(messages) == 0 {
-		return nil
-	}
-	if len(messages) > chatSessionSeedMaxMessages {
-		return fmt.Errorf("too many messages")
-	}
-	total := 0
-	for _, msg := range messages {
-		if msg.Role != "user" && msg.Role != "assistant" && msg.Role != "narration" {
-			return fmt.Errorf("invalid message role")
-		}
-		total += len(msg.Text)
-		if total > chatSessionSeedMaxBytes {
-			return fmt.Errorf("transcript too large")
-		}
-	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var count int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM chat_session_messages
-		WHERE session_id = ?`, id).Scan(&count); err != nil {
-		return err
-	}
-	if count != 0 {
-		return tx.Commit()
-	}
-	stmt, err := tx.Prepare(`INSERT INTO chat_session_messages
-		(session_id, username, role, text)
-		SELECT ?, ?, ?, ? WHERE EXISTS
-		(SELECT 1 FROM chat_sessions WHERE id = ?)`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-	for _, msg := range messages {
-		if msg.Text == "" {
-			continue
-		}
-		if _, err := stmt.Exec(id, username, msg.Role, msg.Text, id); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
+// Legacy flat records are read-only archives, never active model history.
+const chatSessionArchiveMaxMessages = 2000
 
 func (s *server) loadChatSessionDetails(username string, cs *chatSession) error {
 	if s == nil || s.db == nil || cs == nil {
@@ -360,7 +316,7 @@ func (s *server) loadChatSessionDetails(username string, cs *chatSession) error 
 	rows, err := s.db.Query(`SELECT role, text FROM (
 		SELECT id, role, text FROM chat_session_messages
 		 WHERE session_id = ? ORDER BY id DESC LIMIT ?
-	) ORDER BY id`, cs.ID, chatSessionSeedMaxMessages)
+	) ORDER BY id`, cs.ID, chatSessionArchiveMaxMessages)
 	if err != nil {
 		return err
 	}
@@ -518,6 +474,10 @@ func (s *server) handleChatSessionUpsert(w http.ResponseWriter, r *http.Request)
 		writeJSONError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
+	if req.Messages != nil {
+		writeJSONError(w, http.StatusUnprocessableEntity, "flat transcript writes are unsupported; use canonical conversation history")
+		return
+	}
 	owned, exists, err := s.chatSessionOwned(username, id)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "failed to verify session")
@@ -556,12 +516,6 @@ func (s *server) handleChatSessionUpsert(w http.ResponseWriter, r *http.Request)
 	if err != nil || !owned {
 		writeJSONError(w, http.StatusConflict, "session id is unavailable")
 		return
-	}
-	if req.Messages != nil {
-		if err := s.seedChatMessages(username, id, *req.Messages); err != nil {
-			writeJSONError(w, http.StatusBadRequest, err.Error())
-			return
-		}
 	}
 
 	cs, err := s.getChatSession(username, id)

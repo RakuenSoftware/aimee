@@ -77,10 +77,10 @@ static void *classify_thread(void *arg)
          double ms =
              (double)(t1.tv_sec - t0.tv_sec) * 1000.0 + (double)(t1.tv_nsec - t0.tv_nsec) / 1.0e6;
 
+         char *authored = rc ? NULL : agent_result_take_text(&res);
          char cbuf[WFE_ROUTER_ID_LEN] = "";
          const char *cid =
-             (rc == 0 && res.response &&
-              wfe_router_parse_classification(res.response, &cat, cbuf, sizeof cbuf) == 0)
+             (authored && wfe_router_parse_classification(authored, &cat, cbuf, sizeof cbuf) == 0)
                  ? cbuf
                  : NULL; /* rc!=0 / no id -> DEFER falls back to the read-only default */
          wfe_route_decision_t d;
@@ -90,6 +90,7 @@ static void *classify_thread(void *arg)
                                      sizeof payload);
          db1_interaction_event_record(a->session_id, ie_event_type_name(IE_GUARDRAIL_DECISION),
                                       "router-s1", payload, "classifier");
+         free(authored);
          agent_result_clear_response(&res);
       }
    }

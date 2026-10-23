@@ -14,7 +14,8 @@
     "src/modules/ir/aimee_ir_session.c",
     "src/modules/ir/aimee_ir_module_plan.c",
     "src/modules/ir/session_event.c",
-    "src/modules/ir/response_codec.c"
+    "src/modules/ir/response_codec.c",
+    "src/modules/ir/request_codec.c"
   ],
   "public_headers": [
     "src/modules/ir/include/aimee/ir/aimee_ir.h",
@@ -28,7 +29,8 @@
     "src/tests/test_aimee_ir_metrics.c",
     "src/tests/test_panel_ir_contract.c",
     "src/tests/test_ir_module_plan.c",
-    "src/tests/test_ir_session_event.c"
+    "src/tests/test_ir_session_event.c",
+    "src/tests/test_ir_request_codec.c"
   ],
   "docs": [
     "docs/modules/ir.md"

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/delegate"
@@ -97,6 +98,7 @@ func (r *PanelReviewer) Review(ctx context.Context, request panel.ReviewRequest)
 	}
 
 	run := panel.Run{
+		ExecutionScope:   request.ExecutionScope,
 		ID:               id,
 		Stage:            request.Stage,
 		ExecutionVersion: request.ExecutionVersion,
@@ -134,15 +136,16 @@ type seatBus struct{ client *delegate.BusClient }
 
 func (s seatBus) request(run panel.Run, seat panel.SeatRequest) delegate.DelegateRequest {
 	return delegate.DelegateRequest{
-		Role:        seat.Role,
-		Persona:     seat.Persona,
-		Delegate:    seat.Selector,
-		Participant: seat.Participant,
-		Prompt:      seat.Prompt,
-		Workdir:     run.Workdir,
-		Tools:       seat.Tools,
-		MaxTurnsCap: seat.MaxTurnsCap,
-		DurableSlot: seat.DurableSlot,
+		ExecutionScope: run.ExecutionScope,
+		Role:           seat.Role,
+		Persona:        seat.Persona,
+		Delegate:       seat.Selector,
+		Participant:    seat.Participant,
+		Prompt:         seat.Prompt,
+		Workdir:        run.Workdir,
+		Tools:          seat.Tools,
+		MaxTurnsCap:    seat.MaxTurnsCap,
+		DurableSlot:    seat.DurableSlot,
 		// The seat prompt already carries the complete artifact, so unrelated
 		// worktree-diff evidence would only compete with it for attention.
 		ProvidedTarget:   true,
@@ -156,8 +159,16 @@ func (s seatBus) request(run panel.Run, seat panel.SeatRequest) delegate.Delegat
 	}
 }
 
-func seatResult(participant, response string, cost float64, costUnknown bool, err error) panel.SeatResult {
-	out := panel.SeatResult{Participant: participant, Response: response,
+func seatResult(participant string, output *canonical.Response, cost float64, costUnknown bool, err error) panel.SeatResult {
+	response := ""
+	if err == nil {
+		if output == nil {
+			err = errors.New("delegate has no canonical response")
+		} else {
+			response, err = output.SemanticText()
+		}
+	}
+	out := panel.SeatResult{Participant: participant, Response: response, Output: output,
 		CostUSD: cost, CostUnknown: costUnknown, Err: err}
 	if err == nil {
 		return out
@@ -208,7 +219,7 @@ func (s seatBus) Group(ctx context.Context, run panel.Run, seats []panel.SeatReq
 		}
 	}
 	for i, call := range s.client.DelegateGroup(ctx, requests) {
-		out[i] = seatResult(call.Participant, call.Response, call.CostUSD, call.CostUnknown, call.Err)
+		out[i] = seatResult(call.Participant, call.Output, call.CostUSD, call.CostUnknown, call.Err)
 	}
 	return out
 }
@@ -217,5 +228,5 @@ func (s seatBus) One(ctx context.Context, run panel.Run, seat panel.SeatRequest)
 	request := s.request(run, seat)
 	request.MaxCostUSD = run.CostLimitUSD
 	result, err := s.client.Delegate(ctx, request)
-	return seatResult(result.Participant, result.Response, result.CostUSD, result.CostUnknown, err)
+	return seatResult(result.Participant, result.Output, result.CostUSD, result.CostUnknown, err)
 }

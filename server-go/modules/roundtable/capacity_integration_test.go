@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -58,6 +59,15 @@ func (b *moduleStageBridge) Call(ctx context.Context, _ uint32, stage uint32, _ 
 	return reply, nil
 }
 
+// The actual SDK runs only inside the C host owner. This slow owner transport
+// exercises real Go admission/cancellation without a parallel SDK process.
+type slowHostOwner struct{}
+
+func (slowHostOwner) Call(ctx context.Context, _ uint32, _ uint32, _ uint64, _ time.Duration, _ []byte) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 func TestTenOverlappingPanelsCrossGoProducerAdmissionWithoutUnreachable(t *testing.T) {
 	const campaigns = 10
 	home := t.TempDir()
@@ -73,7 +83,7 @@ func TestTenOverlappingPanelsCrossGoProducerAdmissionWithoutUnreachable(t *testi
 	if err := os.WriteFile(filepath.Join(home, "models.json"), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	executor, err := delegatemodule.NewRegistryExecutor(home)
+	executor, err := delegatemodule.NewRegistryExecutorWithHost(home, slowHostOwner{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +105,7 @@ func TestTenOverlappingPanelsCrossGoProducerAdmissionWithoutUnreachable(t *testi
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			run := panel.Run{ID: "live-capacity-" + string(rune('a'+i)),
+			run := panel.Run{ExecutionScope: strings.Repeat("a", 64), ID: "live-capacity-" + string(rune('a'+i)),
 				OriginalRequest: "review the implementation under overlapping delegate load",
 				Reviewed:        panel.Artifact{Stage: "frozen_diff", Content: content, Hash: panel.Hash([]byte(content))}}
 			result, err := panel.Convene(t.Context(), delegates, run, reviewPanel, "")

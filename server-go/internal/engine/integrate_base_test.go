@@ -244,20 +244,20 @@ func TestIntegrateFeatureBaseConflictAbortsCleanly(t *testing.T) {
 type partialNoCommitAgents struct{}
 
 func (partialNoCommitAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
-	return DelegateResult{
+	return testCanonicalDelegate(DelegateResult{
 		Response: "named file 'docs/runbooks/x.md' was not created by delegate; the task remains unimplemented",
 		Partial:  true,
-	}, nil
+	}), nil
 }
 
 type documentedNoopAgents struct{}
 
 func (documentedNoopAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
-	return DelegateResult{
+	return testCanonicalDelegate(DelegateResult{
 		Response: "Partial result; delegate ended with error: delegate code: no owned files changed; " +
 			"result treated as incomplete\n\nNo changes made. Documentation is already complete.",
 		Partial: true,
-	}, nil
+	}), nil
 }
 
 func (documentedNoopAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
@@ -267,11 +267,11 @@ func (documentedNoopAgents) DelegateGroup(_ context.Context, requests []Delegate
 type implementationSatisfiedNoopAgents struct{}
 
 func (implementationSatisfiedNoopAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
-	return DelegateResult{
+	return testCanonicalDelegate(DelegateResult{
 		Response: "Partial result; delegate ended with error: delegate code: no owned files changed; " +
 			"result treated as incomplete\n\nTask already complete on the current branch. No changes made.",
 		Partial: true,
-	}, nil
+	}), nil
 }
 
 func (implementationSatisfiedNoopAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
@@ -281,7 +281,7 @@ func (implementationSatisfiedNoopAgents) DelegateGroup(_ context.Context, reques
 func (a partialNoCommitAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
 	out := make([]DelegateGroupResult, len(requests))
 	for i := range requests {
-		out[i] = DelegateGroupResult{Response: "partial"}
+		out[i] = testCanonicalGroup(DelegateGroupResult{Response: "partial"})
 	}
 	return out
 }

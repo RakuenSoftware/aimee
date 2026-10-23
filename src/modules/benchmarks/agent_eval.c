@@ -239,19 +239,16 @@ int agent_eval_ablation_preset(const char *preset, agent_ablation_flags_t *out)
 
 static int eval_check_success(const eval_task_t *task, const agent_result_t *result)
 {
-   if (!result->success || !result->response)
+   if (!result->success || aimee_ir_response_complete_text_valid(&result->canonical_response))
       return 0;
-
-   if (task->success_check_type[0] == '\0')
-      return result->success; /* no check defined, use agent success */
-
-   if (strcmp(task->success_check_type, "contains") == 0)
-      return strstr(result->response, task->success_check_value) != NULL;
-
-   if (strcmp(task->success_check_type, "exit_code") == 0)
-      return result->success; /* agent already checks exit codes */
-
-   return result->success;
+   char *authored = aimee_ir_response_text_alloc(&result->canonical_response);
+   if (!authored)
+      return 0;
+   int success = 1;
+   if (!strcmp(task->success_check_type, "contains"))
+      success = strstr(authored, task->success_check_value) != NULL;
+   free(authored);
+   return success;
 }
 
 static int eval_tool_failures(const agent_result_t *result, int passed)

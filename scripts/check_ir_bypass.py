@@ -16,6 +16,9 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "kb_curator_sidecar_run", "kb_curator_shell_quote", "kb_curator_describe_wait_status",
+    "kb_curator_append_sidecar_error", "kb_curator_pick_sidecar_command",
+    "kb_curator_resolve_sidecar_command",
     "gw_stage_router", "ingress_preinject_query_from_messages",
     "ingress_preinject_last_assistant_from_messages",
     "messages_compact_consecutive",
@@ -52,6 +55,7 @@ RETIRED = (
     "anthropic_stream_get_usage", "anthropic_stream_free", "emit_message_as_sse",
 )
 RULES = {
+    "model-command-bypass": re.compile(r"\b(?:platform_exec_pipe|kb_curator_sidecar_run|popen)\s*\("),
     "legacy-transcript-write": re.compile(r"\bdb1_primary_session_save\s*\("),
     "legacy-session-search": re.compile(r"\bdb1_primary_session_(?:alloc_search|alloc_recent|get_latest)\b|\b(?:FROM|JOIN)\s+primary_sessions\b", re.IGNORECASE),
     "unscoped-approach-prompt": re.compile(r"\bapproach_store_(?:retry_context|recall|render)\s*\("),
@@ -79,6 +83,17 @@ CANONICAL_FILES = {
     "src/server/primary_session_adapter.c", "src/server/server_native_cache.c",
     "src/server/server_native_execution.c", "src/server/session_search_tool.c",
     "server-go/modules/aimee/families/session_ir_search.go",
+}
+# Business JSON is allowed after canonical terminal admission. These model
+# consumers cannot obtain model results from arbitrary command stdout.
+CANONICAL_MODEL_FILES = {
+    "src/kb/kb_memory_facts.c", "src/kb/kb_reflection.c",
+    "src/kb/kb_surprising_judge.c", "src/kb/kb_learning_synth.c",
+    "src/modules/kb-synthesis/kb_curator_llm.c",
+    "src/modules/kb-synthesis/kb_curator_extract.c",
+    "src/modules/kb-synthesis/kb_curator_extract_code.c",
+    "src/modules/kb-synthesis/kb_curator_judge.c",
+    "src/modules/kb-synthesis/kb_curator_synthesize.c",
 }
 CANONICAL_HOOK_FILES = {"src/cmd_hooks.c", "src/server/server_hooks.c"}
 CANONICAL_TREES = ("server-go/modules/economizer/", "server-go/modules/memory/")
@@ -142,6 +157,8 @@ def findings(root: Path) -> list[dict]:
         history_spans = (profile_function_spans(source, {"message_history_repair"})
                          if relative == "src/server/agent_bridge.c" else [])
         for rule, pattern in RULES.items():
+            if rule == "model-command-bypass" and relative not in CANONICAL_MODEL_FILES:
+                continue
             if rule == "legacy-transcript-write" and relative not in {
                     "src/server/server_auth.c", "src/posix/server_compute.c",
                     "src/windows/server_compute.c"}:

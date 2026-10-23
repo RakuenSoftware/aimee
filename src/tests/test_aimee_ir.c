@@ -332,8 +332,63 @@ static void test_refusal_builder_and_admission(void)
    aimee_ir_response_builder_free(&builder);
 }
 
+static void test_general_complete_media(void)
+{
+   cJSON *raw = cJSON_Parse("{\"opaque_media\":9007199254740993}");
+   aimee_block_t blocks[] = {
+       {.type = AIMEE_BLK_TEXT, .text = "authored"},
+       {.type = AIMEE_BLK_THINKING, .text = "private", .thinking_encrypted_content = "opaque"},
+       {.type = AIMEE_BLK_IMAGE,
+        .media_type = "image/png",
+        .media_ref = "data:image/png;base64,eA==",
+        .raw = raw},
+       {.type = AIMEE_BLK_DOCUMENT,
+        .media_type = "application/pdf",
+        .media_ref = "https://owned.invalid/document"}};
+   aimee_response_t response = {
+       .role = "assistant", .stop_reason = AIMEE_STOP_END_TURN, .content = blocks, .n_content = 4};
+   aimee_response_t before = response;
+   assert(!aimee_ir_response_complete_valid(&response));
+   assert(aimee_ir_response_complete_text_valid(&response));
+   assert(!memcmp(&before, &response, sizeof response));
+   response.content = &blocks[2];
+   response.n_content = 1;
+   assert(!aimee_ir_response_complete_valid(&response) &&
+          aimee_ir_response_complete_text_valid(&response));
+   response.content = &blocks[3];
+   assert(!aimee_ir_response_complete_valid(&response));
+   response.content = &blocks[1];
+   assert(aimee_ir_response_complete_valid(&response));
+   response.content = blocks;
+   response.n_content = 1;
+   assert(!aimee_ir_response_complete_valid(&response));
+   for (int stop = AIMEE_STOP_UNKNOWN; stop <= AIMEE_STOP_ERROR; stop++)
+   {
+      response.stop_reason = stop;
+      assert((aimee_ir_response_complete_valid(&response) == 0) ==
+             (stop == AIMEE_STOP_END_TURN || stop == AIMEE_STOP_STOP_SEQUENCE));
+   }
+   response.stop_reason = AIMEE_STOP_END_TURN;
+   response.error_message = "diagnostic";
+   assert(aimee_ir_response_complete_valid(&response));
+   response.error_message = NULL;
+   blocks[0].type = AIMEE_BLK_TOOL_USE;
+   blocks[0].tool_id = "call";
+   blocks[0].tool_name = "tool";
+   assert(aimee_ir_response_complete_valid(&response));
+   blocks[0].type = AIMEE_BLK_TOOL_RESULT;
+   assert(aimee_ir_response_complete_valid(&response));
+   blocks[0].type = AIMEE_BLK_TEXT;
+   blocks[0].text = "";
+   assert(aimee_ir_response_complete_valid(&response));
+   response.n_content = 0;
+   assert(aimee_ir_response_complete_valid(&response));
+   cJSON_Delete(raw);
+}
+
 int main(void)
 {
+   test_general_complete_media();
    test_owned_refusal_clone();
    test_refusal_details_validation();
    test_refusal_builder_and_admission();

@@ -60,6 +60,8 @@ struct server_native_runtime
    aimee_response_t last_response;
    long usage[5]; /* Successful committed model completions in this execution. */
    int last_complete;
+   int model_turn_limit, admitted_model_turns;
+   atomic_int model_turn_limit_reached;
    int owns_request, bound_registry, n_bindings;
    atomic_int launch_attested;
    char launch_digest[65];
@@ -1299,6 +1301,24 @@ static int native_perform(const char *method, const char *path, const char *head
       free(input);
       return -1;
    }
+   if (request_locked)
+   {
+      /* The capture lease serializes the one authoritative model branch.
+       * Count exactly once per admitted generation before policy/transport. */
+      if (runtime->model_turn_limit > 0 &&
+          runtime->admitted_model_turns >= runtime->model_turn_limit)
+      {
+         atomic_store(&runtime->model_turn_limit_reached, 1);
+         server_session_capture_fail(runtime->capture);
+         server_session_capture_model_leave(runtime->capture, model_lease);
+         agent_source_authority_snapshot_destroy(&previous_source);
+         agent_source_authority_snapshot_destroy(&bound_source);
+         free(input);
+         return -1;
+      }
+      if (runtime->admitted_model_turns < INT_MAX)
+         runtime->admitted_model_turns++;
+   }
    native_request_owner_t request_owner = {.runtime = runtime, .require_complete = request_locked};
    agent_tools_scope_snapshot_t previous_tools;
    agent_tools_scope_bookmark(&previous_tools);
@@ -1660,6 +1680,7 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
       free(runtime);
       return NULL;
    }
+   atomic_init(&runtime->model_turn_limit_reached, 0);
    runtime->producer = pthread_self();
    runtime->selected = *selected;
    runtime->owner = *owner;
@@ -1917,6 +1938,25 @@ server_native_runtime_open_bound_request(const agent_t *selected, const request_
    return native_runtime_open(selected, owner, session, profile, bindings, count, 1);
 }
 
+int server_native_runtime_set_turn_limit(server_native_runtime_t *runtime, int limit)
+{
+   if (!runtime || limit < 0 || limit > 10000 || !runtime->owns_request ||
+       !pthread_equal(runtime->producer, pthread_self()) ||
+       atomic_load(&runtime->launch_attested) || runtime->admitted_model_turns)
+      return -1;
+   runtime->model_turn_limit = limit;
+   return 0;
+}
+int server_native_runtime_turn_limit_reached(const server_native_runtime_t *runtime)
+{
+   return runtime && atomic_load(&runtime->model_turn_limit_reached);
+}
+int server_native_runtime_model_turns(const server_native_runtime_t *runtime)
+{
+   if (!runtime || runtime->listener || !pthread_equal(runtime->producer, pthread_self()))
+      return -1;
+   return runtime->admitted_model_turns + server_native_runtime_turn_limit_reached(runtime);
+}
 int server_native_runtime_attest_launch(server_native_runtime_t *runtime, const char *digest)
 {
    if (!runtime || !runtime->bound_registry || !runtime->owns_request ||
@@ -2194,9 +2234,11 @@ void server_native_runtime_quiesce(server_native_runtime_t *runtime)
 }
 int server_native_runtime_result(const server_native_runtime_t *runtime, aimee_response_t *out)
 {
-   if (!runtime || runtime->listener || !runtime->owns_request || !runtime->last_complete ||
+   if (!runtime || runtime->listener || !runtime->owns_request ||
+       (!runtime->last_complete && !server_native_runtime_turn_limit_reached(runtime)) ||
        !pthread_equal(runtime->producer, pthread_self()) ||
-       server_session_capture_failed(runtime->capture))
+       (server_session_capture_failed(runtime->capture) &&
+        !server_native_runtime_turn_limit_reached(runtime)))
       return -1;
    aimee_response_t result = runtime->last_response;
    result.usage_in = runtime->usage[0];
@@ -2204,6 +2246,12 @@ int server_native_runtime_result(const server_native_runtime_t *runtime, aimee_r
    result.usage_cache_read = runtime->usage[2];
    result.usage_cache_write = runtime->usage[3];
    result.usage_reasoning = runtime->usage[4];
+   if (server_native_runtime_turn_limit_reached(runtime))
+   {
+      if (!result.refusal)
+         result.stop_reason = AIMEE_STOP_ERROR;
+      result.error_message = "native model generation turn cap reached";
+   }
    return aimee_ir_response_clone(&result, out);
 }
 void server_native_runtime_close(server_native_runtime_t *runtime)

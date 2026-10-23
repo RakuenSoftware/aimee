@@ -924,8 +924,16 @@ static int delegate_repo_has_uncommitted_changes(const char *repo_root)
 void delegate_apply_review_evidence_guard(const char *role, const char *repo_root, int *rc,
                                           agent_result_t *result, int target_provided)
 {
-   if (!rc || *rc != 0 || !result || !result->response || !result->response[0] || !repo_root ||
-       !repo_root[0])
+   if (!rc || *rc != 0 || !result)
+      return;
+   if (!result->success || agent_result_project_complete_text(result) != 0)
+   {
+      *rc = -1;
+      snprintf(result->error, sizeof result->error, "%s",
+               "delegate has no complete canonical text outcome");
+      return;
+   }
+   if (!repo_root || !repo_root[0])
       return;
 
    /* Which roles are guarded, which of them have their citations checked against

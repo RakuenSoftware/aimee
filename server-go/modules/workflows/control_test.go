@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"encoding/json"
+	"github.com/JBailes/aimee/server-go/delegate"
 	"net/http"
 	"strings"
 	"testing"
@@ -216,5 +217,26 @@ func TestHandlerRoutesBothStages(t *testing.T) {
 
 	if _, status := handler(bus.ModuleInvocation{StageID: 99}, nil); status != bus.ModuleStatusInvalidRequest {
 		t.Fatalf("unknown stage must be rejected, got %v", status)
+	}
+}
+
+func TestExecutionScopeComesOnlyFromTrustedOuterControl(t *testing.T) {
+	scope := strings.Repeat("a", 64)
+	mux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := delegate.ExecutionScopeFromContext(r.Context()); got != scope {
+			t.Fatalf("lost host-issued scope: %q", got)
+		}
+		if r.Header.Get("X-Aimee-Execution-Scope") != "" {
+			t.Fatal("authorization handle exposed as HTTP header")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	response := controlCall(t, mux, ControlRequest{Method: "POST", Path: "/v1/dev/submit", ExecutionScope: scope, Body: `{"execution_scope":"forged"}`})
+	if response.Status != http.StatusNoContent {
+		t.Fatalf("outer context status%d", response.Status)
+	}
+	denied := controlCall(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("invalid scope reached mux") }), ControlRequest{Method: "GET", Path: "/v1/health", ExecutionScope: strings.Repeat("A", 64)})
+	if denied.Status != http.StatusBadRequest {
+		t.Fatalf("invalid scope status%d", denied.Status)
 	}
 }

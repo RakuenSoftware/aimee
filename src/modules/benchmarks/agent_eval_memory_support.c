@@ -296,18 +296,25 @@ int mem_eval_write_hard_negative(FILE *fp, const char *suite, const eval_task_t 
 {
    if (!fp || !task || !result)
       return -1;
+   if (aimee_ir_response_complete_text_valid(&result->canonical_response))
+      return -1;
+   char *authored = aimee_ir_response_text_alloc(&result->canonical_response);
+   if (!authored)
+      return -1;
    cJSON *args = cJSON_CreateObject(), *reply = NULL;
    if (!args || !cJSON_AddStringToObject(args, "operation", "benchmark-hard-negative") ||
        !cJSON_AddStringToObject(args, "suite", suite ? suite : "") ||
        !cJSON_AddStringToObject(args, "task", task->name) ||
        !cJSON_AddStringToObject(args, "query", task->prompt) ||
        !cJSON_AddStringToObject(args, "expected", task->success_check_value) ||
-       !cJSON_AddStringToObject(args, "got", result->response ? result->response : "") ||
+       !cJSON_AddStringToObject(args, "got", authored) ||
        !cJSON_AddStringToObject(args, "error", result->error))
    {
+      free(authored);
       cJSON_Delete(args);
       return -1;
    }
+   free(authored);
    int rc = mem_eval_dispatch_diagnostic(args, &reply);
    cJSON_Delete(args);
    const cJSON *line = cJSON_GetObjectItemCaseSensitive(reply, "line");

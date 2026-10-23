@@ -99,7 +99,7 @@ char *aux_call(const char *task_name, const char *prompt, int max_tokens)
    agent_result_t res = {0};
    memset(&res, 0, sizeof(res));
    int rc = agent_dispatch_one(&local, NULL, NULL, NULL, prompt, tok, 0.0, 0 /* use_tools */, &res);
-   if (rc != 0 || !res.response || !res.response[0])
+   if (rc != 0 || aimee_ir_response_complete_text_valid(&res.canonical_response))
    {
       LOG_WARN("aux", "aux_call task '%s': %s", task_name,
                res.error[0] ? res.error : "empty response");

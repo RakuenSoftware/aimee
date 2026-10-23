@@ -82,6 +82,8 @@ extern "C"
       int (*tool_call)(const aimee_block_t *call, aimee_block_t *result, void *context);
       void *tool_context;
       int control_channel;   /* bidirectional structured input for browser-owned controls */
+      int native_turn_limit; /* host-admitted model generation budget; zero preserves default */
+      int no_tools;          /* explicit host-owned native catalog restriction */
       int primary;           /* server-owned primary uses its authorized autonomous mode */
       const char *resume_id; /* structured primary conversation, optional */
       const char *home;      /* parent-materialized runtime credential HOME */

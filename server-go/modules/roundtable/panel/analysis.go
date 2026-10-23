@@ -73,16 +73,17 @@ func RunAnalysis(ctx context.Context, delegates Delegates, run Run, seats []Seat
 	outcomes := make([]seatOutcome, len(seats))
 	repairIndexes := make([]int, 0, len(seats))
 	for i, call := range delegated {
-		parsed, err := parsePanelResponse(call.Response, call.Err)
+		text, admissionErr := call.semanticText()
+		parsed, err := parsePanelResponse(text, admissionErr)
 		seat := seats[i]
 		seat.Participant = call.Participant
-		outcomes[i] = seatOutcome{seat: seat, result: parsed, raw: call.Response, cost: call.CostUSD,
+		outcomes[i] = seatOutcome{seat: seat, result: parsed, raw: text, cost: call.CostUSD,
 			costUnknown: call.CostUnknown, err: err, category: call.FailureCategory,
 			detail: call.FailureDetail, replayLost: call.ReplayLost}
 		// A verdict that contradicts its own findings carries no more reviewable
 		// signal than unparseable text, so it earns the same one repair attempt.
 		// Without this it was charged against the artifact having never been retried.
-		if call.Err == nil && strings.TrimSpace(call.Participant) != "" && (err != nil || panelVerdictError(parsed) != nil) {
+		if admissionErr == nil && strings.TrimSpace(call.Participant) != "" && (err != nil || panelVerdictError(parsed) != nil) {
 			repairIndexes = append(repairIndexes, i)
 		}
 	}
@@ -117,7 +118,8 @@ func RunAnalysis(ctx context.Context, delegates Delegates, run Run, seats []Seat
 		}
 		for i, call := range delegates.Group(ctx, run, repairs) {
 			outcomeIndex := repairIndexes[i]
-			parsed, err := parsePanelResponse(call.Response, call.Err)
+			text, admissionErr := call.semanticText()
+			parsed, err := parsePanelResponse(text, admissionErr)
 			outcomes[outcomeIndex].cost += call.CostUSD
 			outcomes[outcomeIndex].costUnknown = outcomes[outcomeIndex].costUnknown || call.CostUnknown
 			outcomes[outcomeIndex].result = parsed

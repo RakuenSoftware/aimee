@@ -447,6 +447,17 @@ static const char *default_exec_instructions =
     "- If you encounter an error, try to diagnose and fix it.\n"
     "- Do not ask for confirmation. Execute the task directly.\n";
 
+/* Standalone adapter fixtures have no server-owned catalog override. The
+ * server links the strong source-bound implementation. */
+__attribute__((weak)) int agent_native_request_turn_limit(void)
+{
+   return 0;
+}
+__attribute__((weak)) int agent_native_request_tools_disabled(void)
+{
+   return 0;
+}
+
 static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
                                           const agent_t *agent, const agent_network_t *network,
                                           const char *role, const char *system_prompt,
@@ -460,7 +471,9 @@ static int agent_execute_provider_session(const provider_cli_adapter_t *adapter,
                              .system_prompt = system_prompt,
                              .user_prompt = user_prompt,
                              .canonical_request = seed,
-                             .canonical_response = canonical};
+                             .canonical_response = canonical,
+                             .native_turn_limit = agent_native_request_turn_limit(),
+                             .no_tools = agent_native_request_tools_disabled()};
    int host = provider_cli_adapter_host_execute(&cfg, out);
    if (host != 1)
       return host;
@@ -1553,17 +1566,67 @@ native_provider_http:
             snprintf(out->stop_reason, sizeof out->stop_reason, "capture_failed");
          break;
       }
-      if (response.error_message)
+      int call_count = aimee_ir_response_tool_count(&response);
+      /* Accumulate tokens */
+      const long counts[5] = {response.usage_in, response.usage_out, response.usage_cache_write,
+                              response.usage_cache_read, response.usage_reasoning};
+      const long usage_limit = LONG_MAX > 9007199254740991LL ? 9007199254740991LL : LONG_MAX;
+      int usage_overflow = 0;
+      for (int i = 0; i < 5; i++)
+         if (counts[i] < 0 || counts[i] > usage_limit - canonical_usage[i])
+            usage_overflow = 1;
+      if (usage_overflow)
       {
-         snprintf(out->error, sizeof out->error, "%s", response.error_message);
+         delegate_response_release(&response, response_text, tool_arguments, call_count);
+         delegate_capture_stop(out, &capture_failed);
+         snprintf(out->error, sizeof out->error, "aggregate usage exceeds canonical output range");
+         break;
+      }
+      for (int i = 0; i < 5; i++)
+         canonical_usage[i] += counts[i];
+      /* Compatibility counters have an int boundary. The typed response and
+       * canonical per-call observations retain the complete exact counts. */
+      out->prompt_tokens = canonical_usage[0] > INT_MAX ? INT_MAX : (int)canonical_usage[0];
+      out->completion_tokens = canonical_usage[1] > INT_MAX ? INT_MAX : (int)canonical_usage[1];
+      out->cache_write_tokens = canonical_usage[2] > INT_MAX ? INT_MAX : (int)canonical_usage[2];
+      out->cache_read_tokens = canonical_usage[3] > INT_MAX ? INT_MAX : (int)canonical_usage[3];
+
+      /* A declined/incomplete observation is diagnostic IR, never authority to
+       * execute tools, synthesize a final answer or trigger an evidence retry. */
+      if (response.error_message || response.refusal ||
+          (response.stop_reason != AIMEE_STOP_END_TURN &&
+           response.stop_reason != AIMEE_STOP_STOP_SEQUENCE &&
+           response.stop_reason != AIMEE_STOP_TOOL_USE) ||
+          (aimee_ir_response_has_tool_use(&response) &&
+           response.stop_reason != AIMEE_STOP_TOOL_USE))
+      {
+         snprintf(out->error, sizeof out->error,
+                  "model returned a declined or incomplete canonical observation");
          snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
                   aimee_stop_reason_name(response.stop_reason));
-         aimee_response_free(&response);
+         out->success = 0;
+         /* Close the already captured intents with host-authored denials. A
+          * later replay must not mistake them for pending tool execution. */
+         for (int i = 0; i < call_count; i++)
+         {
+            const aimee_block_t *tool = aimee_ir_response_tool(&response, i);
+            if (aimee_ir_session_emit_tool_result(tool->tool_id,
+                                                  "Tool was not dispatched because the model "
+                                                  "response was declined or incomplete.",
+                                                  1))
+            {
+               delegate_capture_stop(out, &capture_failed);
+               snprintf(out->error, sizeof out->error,
+                        "cannot persist declined tool intent closure");
+               break;
+            }
+         }
+         if (agent_result_adopt_response(out, &response))
+            aimee_response_free(&response);
          break;
       }
       snprintf(out->stop_reason, sizeof out->stop_reason, "%s",
                aimee_stop_reason_name(response.stop_reason));
-      int call_count = aimee_ir_response_tool_count(&response);
       /* Universal-gateway P4 (response side): ask the event-bus governance module
        * about a denied tool_use the model emitted anyway. Shape-agnostic — the
        * returned decision is applied to the typed IR blocks. This stays
@@ -1639,30 +1702,6 @@ native_provider_http:
          }
          consecutive_errors++;
       }
-
-      /* Accumulate tokens */
-      const long counts[5] = {response.usage_in, response.usage_out, response.usage_cache_write,
-                              response.usage_cache_read, response.usage_reasoning};
-      const long usage_limit = LONG_MAX > 9007199254740991LL ? 9007199254740991LL : LONG_MAX;
-      int usage_overflow = 0;
-      for (int i = 0; i < 5; i++)
-         if (counts[i] < 0 || counts[i] > usage_limit - canonical_usage[i])
-            usage_overflow = 1;
-      if (usage_overflow)
-      {
-         delegate_response_release(&response, response_text, tool_arguments, call_count);
-         delegate_capture_stop(out, &capture_failed);
-         snprintf(out->error, sizeof out->error, "aggregate usage exceeds canonical output range");
-         break;
-      }
-      for (int i = 0; i < 5; i++)
-         canonical_usage[i] += counts[i];
-      /* Compatibility counters have an int boundary. The typed response and
-       * canonical per-call observations retain the complete exact counts. */
-      out->prompt_tokens = canonical_usage[0] > INT_MAX ? INT_MAX : (int)canonical_usage[0];
-      out->completion_tokens = canonical_usage[1] > INT_MAX ? INT_MAX : (int)canonical_usage[1];
-      out->cache_write_tokens = canonical_usage[2] > INT_MAX ? INT_MAX : (int)canonical_usage[2];
-      out->cache_read_tokens = canonical_usage[3] > INT_MAX ? INT_MAX : (int)canonical_usage[3];
 
       /* XML tool-call rescue: models without native function-calling embed
        * <tool_call>...</tool_call> blocks in their text. The entry adapter owns
@@ -1795,6 +1834,17 @@ native_provider_http:
 
       if (!(call_count > 0))
       {
+         if (response.stop_reason != AIMEE_STOP_END_TURN &&
+             response.stop_reason != AIMEE_STOP_STOP_SEQUENCE)
+         {
+            snprintf(out->error, sizeof out->error,
+                     "canonical response has no successful final observation");
+            out->success = 0;
+            if (agent_result_adopt_response(out, &response))
+               aimee_response_free(&response);
+            delegate_response_release(&response, response_text, tool_arguments, call_count);
+            break;
+         }
          /* Final text response */
          if (response_text)
          {

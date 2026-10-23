@@ -125,12 +125,18 @@ static int load_batch_tasks(const char *path, eval_task_t *tasks, int max_tasks)
 
 static int task_passed(const eval_task_t *task, const agent_result_t *result, int rc)
 {
-   if (rc != 0 || !result || !result->success)
+   if (rc != 0 || !result || !result->success ||
+       aimee_ir_response_complete_text_valid(&result->canonical_response))
       return 0;
    if (!task->success_check_type[0])
       return 1;
    if (strcmp(task->success_check_type, "contains") == 0)
-      return result->response && strstr(result->response, task->success_check_value) != NULL;
+   {
+      char *text = aimee_ir_response_text_alloc(&result->canonical_response);
+      int passed = text && strstr(text, task->success_check_value) != NULL;
+      free(text);
+      return passed;
+   }
    return result->success;
 }
 

@@ -26,6 +26,9 @@ void ensemble_panel_from_config(ensemble_panel_t *out);
 int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, const char *prompt,
                           delegate_ensemble_result_t *out);
 
+/* Releases owned canonical output, retaining scalar/display diagnostics. */
+void delegate_ensemble_result_free(delegate_ensemble_result_t *result);
+
 double delegate_ensemble_cost_usd(const delegate_ensemble_result_t *r);
 
 /* Estimate the USD cost of a single delegate/model call. Routes through the

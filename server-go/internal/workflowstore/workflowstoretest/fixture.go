@@ -589,6 +589,13 @@ func Exec(t testing.TB, path, query string, args ...any) {
 	}
 }
 
+// TryExec exposes expected database constraint failures in fixture-only tests.
+func TryExec(t testing.TB, path, query string, args ...any) error {
+	t.Helper()
+	_, err := fixtureStore(t, path).Exec(context.Background(), rebind(query), args...)
+	return err
+}
+
 // QueryInt reads one integer directly from the store, for assertions about
 // columns no operation exposes. Same caveat as Exec.
 func QueryInt(t testing.TB, path, query string, args ...any) int {

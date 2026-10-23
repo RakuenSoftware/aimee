@@ -87,9 +87,14 @@ typedef struct
    char original_request_alignment_sources[256];
 } aimee_panel_result_t;
 
+struct aimee_response;
+
 typedef struct
 {
-   char response[8192];
+   char response[8192]; /* bounded display projection, never execution authority */
+   /* Owned full selected/aggregated canonical source; caller releases through
+    * delegate_ensemble_result_free after every successful run. */
+   struct aimee_response *canonical_response;
    int success;
    double cost_usd;
    int degraded;

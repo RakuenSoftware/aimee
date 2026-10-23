@@ -10,6 +10,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void assert_text(const provider_completion_t *out, const char *expected)
+{
+   char *text = aimee_ir_response_text_alloc(&out->ir);
+   assert(text && strcmp(text, expected) == 0);
+   free(text);
+}
+
 static cJSON *two_messages(void)
 {
    cJSON *msgs = cJSON_CreateArray();
@@ -104,10 +111,10 @@ static void test_parse_success(void)
    provider_completion_t out;
    int rc = provider_client_parse_openai(body, &out);
    assert(rc == 0);
-   assert(out.content && strcmp(out.content, "{\"entities\":[]}") == 0);
-   assert(out.prompt_tokens == 42 && out.completion_tokens == 7);
-   assert(strcmp(out.model, "granite-3b-instruct") == 0);
-   assert(strcmp(out.finish_reason, "stop") == 0);
+   assert_text(&out, "{\"entities\":[]}");
+   assert(out.ir.usage_in == 42 && out.ir.usage_out == 7);
+   assert(strcmp(out.ir.model, "granite-3b-instruct") == 0);
+   assert(strcmp(out.ir.raw_stop_reason, "stop") == 0);
    provider_completion_free(&out);
    provider_completion_free(&out); /* idempotent */
    printf("provider_client: parse success ok\n");
@@ -154,8 +161,9 @@ static void test_owned_response_blocks(void)
    char *body = cJSON_PrintUnformatted(root);
    provider_completion_t out;
    assert(body && !provider_client_parse_openai(body, &out));
-   assert(out.ir.n_content == 22 && !strcmp(out.content, "beforeafter") &&
-          !strcmp(out.reasoning, "why"));
+   assert(out.ir.n_content == 22);
+   assert_text(&out, "beforeafter");
+   assert(!strcmp(out.ir.content[0].text, "why"));
    assert(out.ir.content[0].type == AIMEE_BLK_THINKING);
    assert(out.ir.content[1].type == AIMEE_BLK_TEXT && out.ir.content[2].type == AIMEE_BLK_IMAGE);
    assert(out.ir.content[3].type == AIMEE_BLK_TEXT && out.ir.content[4].type == AIMEE_BLK_DOCUMENT);
@@ -197,19 +205,28 @@ static void test_parse_failures(void)
    assert(provider_client_parse_openai(NULL, &out) == -1);
    provider_completion_free(&out);
    /* out zeroed even on failure */
-   assert(out.content == NULL && out.prompt_tokens == 0);
+   assert(out.ir.content == NULL && out.ir.usage_in == 0);
    printf("provider_client: parse failures ok\n");
 }
 
-/* The reasoning_content shape matrix.
- *
- * These are the JSON shapes real providers actually emit, and the precedence
- * between them is the whole point: reasoning_content is PRIVATE reasoning, never
- * the answer. The one exception is content:null — the answer is absent and the
- * reasoning is all there is, which is why the old code returned rc=-1
- * "unparseable provider response" and threw a usable reply away. Each case below
- * pins one shape so that recovery cannot quietly widen into "reasoning is the
- * answer whenever content looks empty". */
+/* Canonical THINKING is diagnostic state, never a substitute authored answer.
+ * A reasoning-only response remains available in out.ir but is not a usable
+ * textual completion for a curator or other application consumer. */
+static void test_refused_text_is_not_answer(void)
+{
+   provider_completion_t out = {0};
+   const char *body = "{\"choices\":[{\"finish_reason\":\"content_filter\","
+                      "\"message\":{\"role\":\"assistant\","
+                      "\"content\":\"{\\\"synthesis\\\":\\\"partial unapproved data\\\"}\"}}],"
+                      "\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}";
+   assert(provider_client_parse_openai(body, &out) < 0);
+   assert(out.ir.stop_reason == AIMEE_STOP_CONTENT_FILTER);
+   assert(out.ir.usage_in == 7 && out.ir.usage_out == 3);
+   assert(out.ir.n_content == 1 && out.ir.content[0].type == AIMEE_BLK_TEXT);
+   assert(strstr(out.ir.content[0].text, "partial unapproved data"));
+   provider_completion_free(&out);
+}
+
 static void test_parse_reasoning_shapes(void)
 {
    provider_completion_t out;
@@ -219,27 +236,29 @@ static void test_parse_reasoning_shapes(void)
               "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":\"the answer\","
               "\"reasoning_content\":\"weighing it up\"}}]}",
               &out) == 0);
-   assert(out.content && strcmp(out.content, "the answer") == 0);
-   assert(out.reasoning && strcmp(out.reasoning, "weighing it up") == 0);
+   assert_text(&out, "the answer");
+   assert(out.ir.content[0].type == AIMEE_BLK_THINKING &&
+          !strcmp(out.ir.content[0].text, "weighing it up"));
    assert(out.ir.n_content == 2 && out.ir.content[0].type == AIMEE_BLK_THINKING &&
           out.ir.content[1].type == AIMEE_BLK_TEXT);
    provider_completion_free(&out);
 
-   /* (2) content:null with reasoning — the shape that used to fail outright.
-    * The reasoning IS the reply here; recovering it is the fix. */
+   /* (2) A reasoning-only response cannot become application answer data. */
    assert(provider_client_parse_openai(
               "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":null,"
               "\"reasoning_content\":\"recovered body\"}}]}",
-              &out) == 0);
-   assert(out.content && strcmp(out.content, "recovered body") == 0);
+              &out) == -1);
+   assert_text(&out, "");
+   assert(!strcmp(out.ir.content[0].text, "recovered body"));
    assert(out.ir.n_content == 1 && out.ir.content[0].type == AIMEE_BLK_THINKING);
    provider_completion_free(&out);
 
    /* (3) content absent entirely (not an explicit null) behaves the same. */
    assert(provider_client_parse_openai("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{"
                                        "\"reasoning_content\":\"only reasoning\"}}]}",
-                                       &out) == 0);
-   assert(out.content && strcmp(out.content, "only reasoning") == 0);
+                                       &out) == -1);
+   assert_text(&out, "");
+   assert(out.ir.n_content == 1 && out.ir.content[0].type == AIMEE_BLK_THINKING);
    provider_completion_free(&out);
 
    /* (4) reasoning present but NOT a string: no coercion, no silent fallback.
@@ -264,7 +283,7 @@ static void test_parse_reasoning_shapes(void)
    assert(provider_client_parse_openai("{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{"
                                        "\"content\":\"<think>hmm</think>real answer\"}}]}",
                                        &out) == 0);
-   assert(out.content && strcmp(out.content, "real answer") == 0);
+   assert_text(&out, "real answer");
    provider_completion_free(&out);
 
    printf("provider_client: reasoning shapes ok\n");
@@ -369,8 +388,8 @@ static void test_complete_success(void)
    /* URL assembled with exactly one slash; auth carries the bearer. */
    assert(strcmp(g_seen_url, "http://h:8080/v1/chat/completions") == 0);
    assert(strcmp(g_seen_auth, "Authorization: Bearer secret") == 0);
-   assert(out.content && strcmp(out.content, "hi") == 0);
-   assert(out.prompt_tokens == 3 && out.completion_tokens == 1);
+   assert_text(&out, "hi");
+   assert(out.ir.usage_in == 3 && out.ir.usage_out == 1);
    assert(out.http_status == 200);
    provider_completion_free(&out);
    cJSON_Delete(msgs);
@@ -412,7 +431,7 @@ static void test_complete_retry_then_ok(void)
    int rc = provider_client_complete(&def, msgs, NULL, &out, NULL, 0);
    assert(rc == 0);
    assert(g_post_calls == 2); /* retried once after the 503 */
-   assert(out.content && strcmp(out.content, "ok") == 0);
+   assert_text(&out, "ok");
    provider_completion_free(&out);
    cJSON_Delete(msgs);
    mock_agent_http_reset();
@@ -435,7 +454,7 @@ static void test_complete_non_retryable(void)
    assert(rc == -1);
    assert(g_post_calls == 1); /* 401 is not retried */
    assert(out.http_status == 401);
-   assert(out.content == NULL);
+   assert(out.ir.content == NULL);
    assert(err[0] != '\0');
    provider_completion_free(&out);
    cJSON_Delete(msgs);
@@ -485,6 +504,7 @@ int main(void)
    test_owned_response_blocks();
    test_parse_failures();
    test_parse_reasoning_shapes();
+   test_refused_text_is_not_answer();
    test_complete_arg_guards();
    test_complete_success();
    test_complete_trailing_slash();

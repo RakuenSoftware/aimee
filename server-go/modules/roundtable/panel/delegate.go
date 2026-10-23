@@ -1,11 +1,16 @@
 package panel
 
-import "context"
+import (
+	"context"
+	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
+)
 
 // Run is the identity and budget a review executes under. The panel needs these
 // to key durable delegate slots, bound spend and reach the worktree; it needs
 // nothing else about the workflow item that may own the review.
 type Run struct {
+	ExecutionScope string
 	// ID is the review identity. It is echoed by every seat and checked, so a
 	// report about a different run is detectable.
 	ID string
@@ -71,7 +76,8 @@ type SeatRequest struct {
 // SeatResult is what a seat returned, or why it did not.
 type SeatResult struct {
 	Participant string
-	Response    string
+	Response    string // display projection only
+	Output      *canonical.Response
 	CostUSD     float64
 	// CostUnknown means no measurement was recorded, so CostUSD is a lower bound
 	// rather than actual spend. It must never be committed as a measured zero.
@@ -102,4 +108,14 @@ type SeatResult struct {
 type Delegates interface {
 	Group(ctx context.Context, run Run, requests []SeatRequest) []SeatResult
 	One(ctx context.Context, run Run, request SeatRequest) SeatResult
+}
+
+func (s SeatResult) semanticText() (string, error) {
+	if s.Err != nil {
+		return "", s.Err
+	}
+	if s.Output == nil {
+		return "", fmt.Errorf("seat has no canonical response")
+	}
+	return s.Output.SemanticText()
 }

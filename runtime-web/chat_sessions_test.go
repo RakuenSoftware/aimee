@@ -179,26 +179,6 @@ func TestChatSessionRestoresTranscriptAndProviderID(t *testing.T) {
 	}
 }
 
-func TestSeedChatMessagesDoesNotOverwriteServerHistory(t *testing.T) {
-	s := newSessionTestServer(t)
-	_ = s.touchChatSession("alice", "sess-1", "", "server turn")
-	if err := s.seedChatMessages("alice", "sess-1", []chatMessage{
-		{Role: "user", Text: "legacy user"},
-		{Role: "assistant", Text: "legacy answer"},
-	}); err != nil {
-		t.Fatalf("initial seed: %v", err)
-	}
-	if err := s.seedChatMessages("alice", "sess-1", []chatMessage{
-		{Role: "user", Text: "stale overwrite"},
-	}); err != nil {
-		t.Fatalf("repeat seed: %v", err)
-	}
-	cs, _ := s.getChatSession("alice", "sess-1")
-	if cs == nil || len(cs.Messages) != 2 || cs.Messages[0].Text != "legacy user" {
-		t.Fatalf("server transcript overwritten: %+v", cs)
-	}
-}
-
 func TestHandleChatSessionsListReturnsEnvironmentSessions(t *testing.T) {
 	s := newSessionTestServer(t)
 	_ = s.touchChatSession("alice", "sess-1", "/a", "hello there")
@@ -262,12 +242,11 @@ func TestHandleChatSessionUpsertAndGet(t *testing.T) {
 	}
 }
 
-func TestHandleChatSessionUpsertSeedsCrossBrowserStateWithoutTrustingProviderID(t *testing.T) {
+func TestHandleChatSessionUpsertPersistsMetadataWithoutTrustingProviderID(t *testing.T) {
 	s := newSessionTestServer(t)
 	rr := httptest.NewRecorder()
 	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/session", strings.NewReader(
-		`{"id":"stable-id","title":"My chat","provider_session_id":"provider-id",`+
-			`"messages":[{"role":"user","text":"question"},{"role":"assistant","text":"answer"}]}`)), "alice")
+		`{"id":"stable-id","title":"My chat","provider_session_id":"provider-id"}`)), "alice")
 	s.handleChatSession(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d (%s)", rr.Code, rr.Body.String())
@@ -276,7 +255,7 @@ func TestHandleChatSessionUpsertSeedsCrossBrowserStateWithoutTrustingProviderID(
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.ID != "stable-id" || got.ProviderSessionID != "" || len(got.Messages) != 2 {
+	if got.ID != "stable-id" || got.ProviderSessionID != "" || len(got.Messages) != 0 {
 		t.Fatalf("restorable session = %+v", got)
 	}
 }
@@ -285,11 +264,11 @@ func TestHandleChatSessionUpsertTransfersServerTrustedLegacyAlias(t *testing.T) 
 	s := newSessionTestServer(t)
 	_ = s.touchChatSession("alice", "legacy-provider-id", "", "old chat")
 	_ = s.setChatSessionRuntime("alice", "legacy-provider-id", "legacy-provider-id")
+	_ = s.appendChatMessage("alice", "legacy-provider-id", "user", "old chat")
 
 	rr := httptest.NewRecorder()
 	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/session", strings.NewReader(
-		`{"id":"web-stable-id","legacy_provider_alias_id":"legacy-provider-id",`+
-			`"messages":[{"role":"user","text":"old chat"}]}`)), "alice")
+		`{"id":"web-stable-id","legacy_provider_alias_id":"legacy-provider-id"}`)), "alice")
 	s.handleChatSession(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d (%s)", rr.Code, rr.Body.String())
@@ -427,5 +406,21 @@ func TestCurrentUserDefaultsEmpty(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), ctxUsername, "zoe"))
 	if u := currentUser(req); u != "zoe" {
 		t.Fatalf("currentUser = %q, want zoe", u)
+	}
+}
+
+func TestChatSessionUpsertRefusesFlatHistoryWithoutChangingStoredArchive(t *testing.T) {
+	s := newSessionTestServer(t)
+	_ = s.touchChatSession("alice", "archive", "", "original")
+	_ = s.appendChatMessage("alice", "archive", "assistant", "retained legacy archive")
+	rr := httptest.NewRecorder()
+	req := asUser(httptest.NewRequest(http.MethodPost, "/api/chat/session", strings.NewReader(`{"id":"archive","title":"replacement","messages":[{"role":"assistant","text":"browser supplied live history"}]}`)), "alice")
+	s.handleChatSession(rr, req)
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d, want 422", rr.Code)
+	}
+	got, err := s.getChatSession("alice", "archive")
+	if err != nil || got == nil || got.Title != "original" || len(got.Messages) != 1 || got.Messages[0].Text != "retained legacy archive" {
+		t.Fatalf("archive changed: %+v, %v", got, err)
 	}
 }

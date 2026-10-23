@@ -33,7 +33,7 @@ func (a *discussionTestAgents) One(_ context.Context, _ Run, request SeatRequest
 	a.requests = append(a.requests, request)
 	a.mu.Unlock()
 	response, err := a.respond(request)
-	return SeatResult{Response: response, Err: err}
+	return testCanonicalSeat(SeatResult{Response: response, Err: err})
 }
 
 // Seats run concurrently in production, so the double does too: a data race
@@ -56,7 +56,7 @@ func (a *discussionTestAgents) Group(ctx context.Context, run Run, requests []Se
 				result.Response = withTestIdentity(result.Response, run, requests[i])
 				result.Participant = fmt.Sprintf("test-participant:%d", i)
 			}
-			out[i] = result
+			out[i] = testCanonicalSeat(result)
 		}(i)
 	}
 	wg.Wait()

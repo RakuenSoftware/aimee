@@ -54,6 +54,14 @@ server_native_runtime_open_bound_request(const agent_t *selected, const request_
  * grant effects: source47 independently validates the registered pending claim. */
 int server_native_runtime_set_native_owner(server_native_runtime_t *runtime,
                                            const struct cJSON *reservation);
+/* Creator-only before launch. Bounds admitted model-generation requests;
+ * count_tokens, MCP and tool routes do not spend turns. Every admitted attempt
+ * spends one turn, including a failed provider request; no retry credit. */
+int server_native_runtime_set_turn_limit(server_native_runtime_t *runtime, int limit);
+int server_native_runtime_turn_limit_reached(const server_native_runtime_t *runtime);
+/* Creator reads after callback quiescence: admitted generations plus the first
+ * attempted generation refused by the cap. This is diagnostic, not retry credit. */
+int server_native_runtime_model_turns(const server_native_runtime_t *runtime);
 int server_native_runtime_attest_launch(server_native_runtime_t *runtime, const char *digest);
 /* Host-only original-call admission. Revalidates the committed source prefix
  * and claims once for this turn; it does not execute or authorize any effect.

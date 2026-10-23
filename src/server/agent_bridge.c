@@ -552,8 +552,8 @@ static int agent_anthropic_profile_ir(const agent_t *agent, const cJSON *tools,
  * economizer must not own provider cache configuration. */
 int agent_request_with_tools_supported(const aimee_request_t *request)
 {
-   if (!request || request->n_messages < 1 || request->n_messages > AIMEE_IR_MAX_BLOCKS ||
-       !request->messages)
+   if (aimee_ir_request_admit(request) || request->n_messages < 1 ||
+       request->n_messages > AIMEE_IR_MAX_BLOCKS || !request->messages)
       return 0;
    int content = 0;
    for (int i = 0; i < request->n_messages; i++)
@@ -569,8 +569,22 @@ int agent_request_with_tools_supported(const aimee_request_t *request)
             content = 1;
       }
    }
+   if (request->n_system)
+   {
+      const aimee_block_t *system = &request->system[0];
+      /* This execution capability composes one TEXT policy through its host
+       * role/persona owner. Opaque native block data and modeled wire controls
+       * cannot silently disappear when rebuilding that host profile. Context
+       * provenance and authored grouping remain valid host-only metadata. */
+      if (system->cache_control || system->cache_ttl || system->raw || system->media_type ||
+          system->media_ref || system->thinking_signature || system->thinking_binding ||
+          system->thinking_id || system->thinking_encrypted_content || system->thinking_redacted ||
+          system->tool_id || system->tool_name || system->tool_namespace || system->tool_input ||
+          system->tool_result || system->tool_is_error)
+         return 0;
+   }
    return content &&
-          !(request->n_tools ||
+          !(request->cache_policy != AIMEE_CACHE_DEFAULT || request->n_tools ||
             (request->tool_choice != AIMEE_TOOL_CHOICE_UNSET &&
              request->tool_choice != AIMEE_TOOL_CHOICE_AUTO) ||
             request->n_system > 1 ||
@@ -579,7 +593,9 @@ int agent_request_with_tools_supported(const aimee_request_t *request)
             request->prompt_cache_retention || request->prompt_cache_options || request->n_stop ||
             request->has_top_p || request->has_top_k || request->has_parallel_tool_calls ||
             request->reasoning_summary || request->reasoning_effort ||
-            request->output_format.kind > AIMEE_OUTPUT_TEXT);
+            request->output_format.kind > AIMEE_OUTPUT_TEXT || request->output_format.name ||
+            request->output_format.description || request->output_format.schema ||
+            request->output_format.strict != AIMEE_STRICT_UNSET);
 }
 
 int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
@@ -617,6 +633,10 @@ int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON 
          goto fail;
    }
    if (wire == AIMEE_WIRE_OPENAI_CHAT && agent_shape_ir_user(agent, &ir))
+      goto fail;
+   /* Policy may remove catalog entries; it must not sanitize an unadmitted
+    * host request into admissible transport by hiding an invalid input. */
+   if (aimee_ir_request_admit(&ir))
       goto fail;
    aimee_ir_classify_context(&ir);
    int policy_changes = gateway_delegate_run_request_pipeline(&ir, is_delegate);

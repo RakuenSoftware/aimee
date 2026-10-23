@@ -643,6 +643,11 @@ def go_module_main(module_id: str, principal_ref: int,
 \t\tos.Exit(1)
 \t}
 """
+    if module_id == "delegates":
+        handler = "moduleHandler"
+        process_setup = """\tmoduleHandler, err := handler.NewProcessHandler(ctx, os.Args[1])
+\tif err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+"""
     if module_id == "aimee":
         extra_imports = '\t"github.com/JBailes/aimee/server-go/modules/aimee/process"\n'
         handler = "moduleHandler.Handle"
@@ -760,7 +765,7 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
 # the serving module. Add entries here in lockstep with the caller's process
 # contract and runtime-bundle coverage.
 GO_SHARED_CONTRACTS = {
-    "server-go/ir": {"aimee", "memory", "economizer", "delegates", "governance"},
+    "server-go/ir": {"aimee", "memory", "economizer", "delegates", "governance", "roundtable"},
     "server-go/memory": {"memory"},
     "server-go/internal/retrievalmetrics": {"memory", "benchmarks"},
     "server-go/modules/module-runtime/identity": {"server", "kb", "memory"},
@@ -769,7 +774,7 @@ GO_SHARED_CONTRACTS = {
     "server-go/modules/egress": {"providers", "memory", "git", "roundtable"},
     "server-go/modules/audit": {"memory"},
     "server-go/modules/execution-policy": {"aimee", "tools"},
-    "server-go/delegate": {"delegates", "roundtable"},
+    "server-go/delegate": {"delegates", "roundtable", "workflows"},
     "server-go/aimee": {"aimee", "economizer"},
     "server-go/db": {"aimee", "memory", "postgres"},
 }
@@ -852,7 +857,7 @@ def external_module_pin(
         pin["runtime"] = contract["runtime"]
         pin["principal_class"] = PRINCIPAL_CLASS
         pin["principal_ref"] = contract["principal_ref"]
-        pin["serve"] = [stage["event_kind"] for stage in contract["stages"]]
+        pin["serve"] = [stage["event_kind"] for stage in process_contracts.process_stages(contract)]
     return pin
 
 
@@ -925,7 +930,7 @@ def export_module(
     runtime = contract.get("runtime")
     if execution == "process":
         principal_ref = contract["principal_ref"]
-        stages = contract["stages"]
+        stages = process_contracts.process_stages(contract)
         assert isinstance(principal_ref, int) and isinstance(stages, list)
         serve = ",".join(str(stage["event_kind"]) for stage in stages)
         write_text(
@@ -1165,7 +1170,7 @@ This is the independent `{module_id}` source-ownership repository.
         pin["runtime"] = contract["runtime"]
         pin["principal_class"] = PRINCIPAL_CLASS
         pin["principal_ref"] = contract["principal_ref"]
-        pin["serve"] = [stage["event_kind"] for stage in contract["stages"]]
+        pin["serve"] = [stage["event_kind"] for stage in process_contracts.process_stages(contract)]
     return pin
 
 
@@ -1189,7 +1194,7 @@ def export_runtime_bundle(output_root: Path) -> int:
         module_repository_files(module_id, descriptor)
         enabled = module_id in required or descriptor.get("enabled_by_default") is True
         principal_ref = contract["principal_ref"]
-        stages = contract["stages"]
+        stages = process_contracts.process_stages(contract)
         assert isinstance(principal_ref, int) and isinstance(stages, list)
         binary = f"aimee-module-{module_id}"
         # The grant pins the exact executable that may attach as this principal.
@@ -1253,6 +1258,10 @@ serve={serve}
             if enabled and hosted_by is None:
                 placement_rows[placement].append(f"{module_id}\t{executable}")
         count += 1
+    host_services = [{"owner": module_id, "stage": stage["id"], "event_kind": stage["event_kind"], "hosted_by": stage["hosted_by"], "principal_class": 0, "principal_ref": 0, "placements": contract["placements"]}
+                     for module_id, contract in contracts.items() if contract["execution"] == "process"
+                     for stage in contract["stages"] if "hosted_by" in stage]
+    write_text(output_root / "host-services.json", json.dumps({"schema_version": 1, "services": host_services}, indent=2)+"\n")
     # Bus clients request stages but serve none, so they get a grant and no
     # manifest row: nothing supervises them, they are already running.
     contract_doc = load_json(process_contracts.CONTRACTS)

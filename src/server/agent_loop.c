@@ -234,8 +234,15 @@ int agent_loop_run(agent_config_t *cfg, const char *role, const char *system_pro
       int rc = agent_run(cfg, role, system_prompt, iter_prompt, max_tokens, out);
       free(iter_prompt);
 
-      if (rc != 0)
+      if (rc != 0 || agent_result_project_complete_text(out))
       {
+         if (!rc)
+         {
+            rc = -1;
+            out->success = 0;
+            snprintf(out->error, sizeof out->error,
+                     "delegate did not return complete canonical text");
+         }
          LOG_WARN("agent_loop", "iteration %d failed: %s", iter, out->error);
          /* Hard failure — propagate */
          final_rc = rc;
@@ -265,8 +272,7 @@ int agent_loop_run(agent_config_t *cfg, const char *role, const char *system_pro
       /* Parse completion from response */
       char gaps[512] = "";
       int completion = -1;
-      if (out->response)
-         completion = agent_loop_parse_completion(out->response, gaps, sizeof(gaps));
+      completion = agent_loop_parse_completion(out->response, gaps, sizeof(gaps));
 
       if (completion < 0)
       {

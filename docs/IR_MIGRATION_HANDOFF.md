@@ -15,6 +15,57 @@ implementation or local/live validation. Earlier follow-up-PR instructions below
 are historical. Do not investigate or change `.100`; validation uses the owned
 `.252` environment.
 
+### Full internal conversion in progress: 23 October 2026
+
+The active goal is **full internal canonical IR conversion**, including model
+requests, results, streams, histories, native execution, delegates, workflows,
+curation and learning synthesis. Browser acceptance alone does not complete it.
+The earlier recall probe reproduces a refusal in the stock Claude SDK as well;
+that diagnostic is separate from the remaining internal conversion work.
+
+Three implementation lanes are active on the same branch: canonical-only browser
+history, typed delegate/workflow execution, and typed curator/learning consumers.
+The integrated browser changes remove flat transcript hydration, normal writes
+and active rendering fallback; existing flat records are read-only archives.
+The provider result now owns only canonical IR and transport status. Refused/error
+results and reasoning-only output cannot acquire answer or tool authority. Request
+admission precedes delegate policy transformations. Code-unit extraction is also
+using the canonical provider contract instead of direct shell output.
+
+Opaque shell model commands are retired as internal model-result transports.
+Configure `kb.curator.provider` or the existing `SYNTHESIS_ENDPOINT` instead.
+No endpoint is selected automatically; an unconfigured installation fails closed,
+and retrieval remains available. Deterministic parser, solver and embedding
+sidecars retain their own explicit domain protocols. Shipping defaults and the
+hardware profile picker no longer install shell model commands.
+
+Go delegate, workflow and roundtable requests now carry complete owned canonical
+requests and responses. Native execution crosses the authenticated local bus into
+the existing C factory; direct SDK execution and stdout interpretation are retired.
+Immutable workflow execution scopes restore the actual source actor, credentials
+and workspace custody. Registered background triggers use an honest server source,
+not invented human authority. Scope handles are Vault-encrypted and host-MAC-bound;
+capture retains structural receipts without recording these private transports.
+
+General completion preserves image/document answers and opaque companion metadata.
+Business text projection separately requires a completed text answer. Refused,
+truncated and unfinished tool turns cannot create artifacts, execute recovered
+actions, or become successful cache entries. Effective native model limits and
+observed attempts are retained, including the first refused over-limit attempt.
+
+Combined local qualification currently passes the full application build, all 76
+lint gates, strict checks against the actual built bus archives, all three full Go
+race suites, 483 frontend tests, type checking and both frontend builds. The focused
+canonical request, source capability, source issuer, native factory, native worker
+and request-control tests also pass. Full native suite, sanitizer, configured
+integration and new `.252` runtime validation are still in progress. Earlier test
+results below do not qualify the current combined runtime.
+
+These edits remain **unqualified as a combined runtime** until all lanes are
+integrated, reviewed, tested and deployed for validation on the owned `.252` VM.
+The qualification below applies only to the named earlier commits; it is not a
+claim that the new full-conversion work is complete.
+
 ### Latest runtime qualification: 23 October 2026
 
 Runtime candidate `252ee7707` is committed and pushed on the same branch. Its

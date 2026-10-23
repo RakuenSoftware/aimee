@@ -209,8 +209,7 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
     * Tier-B provider (§2) or the legacy sidecar command. */
    provider_def_owned_t synth_provider;
    int have_provider = kb_curator_provider_for_stage(KB_CURATOR_STAGE_SYNTHESIZE, &synth_provider);
-   if (!config_kb_curator_synthesize_enabled() ||
-       (!config_kb_curator_synthesize_command()[0] && !have_provider))
+   if (!config_kb_curator_synthesize_enabled() || !have_provider)
       return 0;
 
    char ent_id[64] = "", scope_kind[64] = "", scope_id[128] = "";
@@ -252,9 +251,18 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
    kb_store_lease_release_idle();
 
    char serr[256];
-   char *response = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE, CURATOR_SYNTH_SYSTEM_PROMPT,
-                                       request, NULL, config_kb_curator_synthesize_command(),
-                                       CURATOR_SYNTH_OUTBUF, serr, sizeof(serr));
+   aimee_request_t model_request = {0};
+   aimee_response_t model_response = {0};
+   int model_rc =
+       kb_curator_llm_request_init(&model_request, CURATOR_SYNTH_SYSTEM_PROMPT, request, NULL);
+   if (!model_rc)
+      model_rc = kb_curator_llm_run(KB_CURATOR_STAGE_SYNTHESIZE, &model_request, &model_response,
+                                    serr, sizeof(serr));
+   else
+      snprintf(serr, sizeof(serr), "invalid canonical curator request");
+   char *response = model_rc ? NULL : kb_curator_llm_text(&model_response, serr, sizeof(serr));
+   aimee_request_free(&model_request);
+   aimee_response_free(&model_response);
    free(request);
    if (!response)
    {

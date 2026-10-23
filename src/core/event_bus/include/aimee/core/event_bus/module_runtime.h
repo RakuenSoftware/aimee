@@ -9,6 +9,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdatomic.h>
+#include <aimee/core/event_bus/bus_client.h>
 
 #include <aimee/core/event_bus/module_protocol.h>
 
@@ -24,6 +26,9 @@ typedef struct
    uint64_t deadline_ns;
    uint64_t trace_id;
    const void *runtime_state;
+   /* Copied from host-stamped bus frame identity, never body JSON. */
+   uint32_t source_principal_ref;
+   uint32_t source_handle;
 } aimee_module_invocation_t;
 
 /* A handler writes at most response_capacity bytes and sets response_len. It
@@ -48,6 +53,16 @@ typedef struct
 /* True after a bus cancel for this correlation or once its absolute monotonic
  * deadline expires. Module code never owns clocks or transport cancellation. */
 int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation);
+
+/* Borrowed cancellation flag, valid only during this joined handler call. */
+const atomic_int *aimee_module_invocation_cancel_flag(const aimee_module_invocation_t *invocation);
+
+/* Embedded host service. Borrows one exclusively owned attached client and an
+ * immutable stage table. Installs NO signals and does not detach the client.
+ * stop() ends admission, cancels and joins every worker before returning. */
+typedef int (*aimee_module_service_stop_fn)(void *context);
+int aimee_module_service_run(bus_client_t *client, const aimee_module_process_config_t *config,
+                             aimee_module_service_stop_fn stop, void *stop_context);
 
 /* Run until SIGINT/SIGTERM, host epoch change, or an attach error. */
 int aimee_module_process_run(const aimee_module_process_config_t *config);

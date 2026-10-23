@@ -233,6 +233,7 @@
     "server-go/modules/aimee/families/schema_learning_projection_outbox.sql",
     "server-go/modules/aimee/families/schema_native_cache_recovery.sql",
     "server-go/modules/aimee/families/schema_native_cache_reservations.sql",
-    "server-go/modules/aimee/families/schema_legacy_primary_text.sql"
+    "server-go/modules/aimee/families/schema_legacy_primary_text.sql",
+    "server-go/modules/aimee/families/schema_workflow_execution_scope.sql"
   ]
 }

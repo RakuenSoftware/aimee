@@ -858,12 +858,12 @@ static void *drain_thread_main(void *arg)
 
       /* Candidate-generation synthesis drain — the heavy LLM pass, on the
        * scheduler, never on the capture hot path. Off by default. */
-      if (config_learning_synthesize_enabled() && config_learning_synthesize_command()[0])
+      if (config_learning_synthesize_enabled())
       {
          const char *embed_cmd = config_embedder_command_current(NULL);
-         /* Bound LLM calls per poll — each op is one sidecar/LLM round-trip. */
-         int n = kb_learning_synth_drain(SYNTH_DRAIN_BATCH, config_learning_synthesize_command(),
-                                         embed_cmd, config_learning_synthesize_k(),
+         /* Bound canonical provider calls per poll. */
+         int n = kb_learning_synth_drain(SYNTH_DRAIN_BATCH, NULL, embed_cmd,
+                                         config_learning_synthesize_k(),
                                          config_learning_synthesize_max_tokens());
          if (n > 0)
             aimee_log(LOG_DEBUG, "kb.learning.synth", "drained %d synthesis op(s)", n);

@@ -194,8 +194,36 @@ static void test_provider_refusal_cannot_trigger_completion(void)
    }
 }
 
+static void test_incomplete_terminal_is_not_action_authority(void)
+{
+   const aimee_stop_reason_t stops[] = {AIMEE_STOP_MAX_TOKENS, AIMEE_STOP_ERROR, AIMEE_STOP_UNKNOWN,
+                                        AIMEE_STOP_TOOL_USE};
+   for (size_t i = 0; i < sizeof stops / sizeof *stops; i++)
+   {
+      aimee_request_t policy = request(edit_history, "Bash", empty_schema);
+      aimee_response_t out = response("Related findings were not changed.");
+      out.stop_reason = stops[i];
+      out.raw_stop_reason = strdup("original-provider-stop");
+      out.usage_in = 17;
+      out.usage_out = 9;
+      cJSON *before = aimee_ir_response_json(&out);
+      assert(before);
+      assert(gw_ir_response_completion_armed(&policy));
+      assert(!gw_ir_response_run_completion(&out, &policy));
+      cJSON *after = aimee_ir_response_json(&out);
+      assert(after && cJSON_Compare(before, after, 1));
+      assert(out.n_content == 2 && !aimee_ir_response_has_tool_use(&out) &&
+             out.stop_reason == stops[i]);
+      cJSON_Delete(before);
+      cJSON_Delete(after);
+      aimee_response_free(&out);
+      aimee_request_free(&policy);
+   }
+}
+
 int main(void)
 {
+   test_incomplete_terminal_is_not_action_authority();
    test_provider_refusal_cannot_trigger_completion();
    test_intervention_retains_reasoning_and_bounds_retry();
    test_no_unrelated_or_evidence_intervention();

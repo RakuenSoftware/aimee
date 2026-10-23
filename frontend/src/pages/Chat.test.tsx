@@ -686,3 +686,55 @@ describe('canonical browser chat', () => {
     expect(screen.getByRole('alert')).toBeTruthy();
   });
 });
+
+describe('canonical-only active history', () => {
+  it('never renders a flat server transcript as an empty canonical conversation', async () => {
+    render(<Chat />);
+    await tick();
+    const source = sources.filter(item => !item.closed).at(-1)!;
+    await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('History one');
+    expect(context.patchSession.mock.calls.filter(([, patch]) => Object.hasOwn(patch, 'messages'))).toEqual([]);
+  });
+
+  it('keeps flat history out of the active transcript after replay refusal and remount', async () => {
+    const view = render(<Chat />);
+    await tick();
+    const source = sources.filter(item => !item.closed).at(-1)!;
+    await act(async () => { source.listeners.get('error')?.({ data: '' }); });
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('History one');
+    view.unmount();
+    render(<Chat />);
+    await tick();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('History one');
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+  });
+});
+
+describe('flat history is an archive, never authority', () => {
+  it('sends only the new user input after canonical empty replay, without cached transcript data', async () => {
+    await start();
+    const request = fetchMock.mock.calls.find(([url]) => url === '/api/chat/send')!;
+    expect(JSON.parse(String(request[1]?.body))).toEqual({ message: 'Please investigate', aimee_session_id: 'web-one', attach_id: 'attach-1', cwd: '' });
+    expect(context.patchSession.mock.calls.some(([, patch]) => Object.hasOwn(patch, 'messages'))).toBe(false);
+    await close();
+  });
+
+  it('refuses legacy thread-switch text instead of replacing canonical history', async () => {
+    localStorage.setItem('aimee_chat_tabs', JSON.stringify([{ title: 'one', aimeeSid: 'web-one', messages: [], threads: [{ id: 1, label: 'Root', msg_count: 0, parent_id: -1, branch_msg_index: 0 }, { id: 2, label: 'Alternative', msg_count: 1, parent_id: 1, branch_msg_index: 0 }] }]));
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/chat/threads') return new Response(JSON.stringify({ capabilities: { branching: true }, threads: [{ id: 1, label: 'Root', msg_count: 0, parent_id: -1, branch_msg_index: 0 }, { id: 2, label: 'Alternative', msg_count: 1, parent_id: 1, branch_msg_index: 0 }] }));
+      if (url === '/api/chat/branch') return new Response(JSON.stringify({ ok: true }));
+      if (url === '/api/chat/switch-thread') return new Response(JSON.stringify({ ok: true, messages: [{ role: 'assistant', text: 'Foreign legacy branch answer' }] }));
+      return original(url, init);
+    });
+    render(<Chat />);
+    await tick();
+    fireEvent.click(screen.getByRole('button', { name: /Alternative/ }));
+    await tick();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('Foreign legacy branch answer');
+    expect(screen.getByText('Legacy thread transcripts cannot replace canonical conversation history.')).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+  });
+});

@@ -30,6 +30,13 @@ int workspace_turn_scope_begin(const char *cwd, workspace_turn_scope_t **out);
  * detached registrations use their recorded source/head under an owned local
  * scope; failed reconstruction refuses without exposing the foreign cwd. */
 int workspace_turn_scope_begin_background(const char *cwd, workspace_turn_scope_t **out);
+/* Host-only local source custody after independent configuration and signed
+ * scope validation. The already-approved descriptor is duplicated, never
+ * replaced by path authorization. Canonical cwd must name that exact non-root
+ * directory. Nonlocal providers/namespaces refuse; caller retains its fd.
+ * Returns 1 with an owned nested scope, or -1 without changing active state. */
+int workspace_turn_scope_begin_owned_source(const char *cwd, int held_fd,
+                                            workspace_turn_scope_t **out);
 /* Host creation result only: call immediately after the worktree owner creates
  * this turn's dedicated child. Retains that exact directory under the held
  * reconstruction, never a prefix grant or a model-supplied mount path. */

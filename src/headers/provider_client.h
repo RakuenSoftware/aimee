@@ -86,22 +86,9 @@ extern "C"
 
    typedef struct
    {
-      /* Owned canonical response. Text fields below are application projections. */
+      /* The canonical response is the sole model-result authority. */
       aimee_response_t ir;
-      char *content;                  /* malloc'd completion text; NULL if none. Caller frees. */
-      char *reasoning;                /* malloc'd reasoning/chain-of-thought, when the provider
-                                       * returned any: either as `reasoning_content` (llama.cpp
-                                       * --jinja, DeepSeek/Qwen APIs) or as a <think> preamble on
-                                       * an inlining endpoint. Kept SEPARATE from content rather
-                                       * than discarded — dropping it silently is what left the
-                                       * curator unable to say why an extraction went wrong, and
-                                       * the canonical IR models it as AIMEE_BLK_THINKING. NULL
-                                       * when the provider sent none. Caller frees. */
-      int prompt_tokens;              /* from usage; 0 when absent. */
-      int completion_tokens;          /* from usage; 0 when absent. */
-      char model[PROVIDER_MODEL_LEN]; /* provider-reported model id; "" when absent. */
-      char finish_reason[32];         /* OpenAI finish_reason; "" when absent. */
-      int http_status;                /* last HTTP status (or <0 on a network error). */
+      int http_status; /* last HTTP status (or <0 on a network error). */
    } provider_completion_t;
 
 #define PROVIDER_CLIENT_DEFAULT_TIMEOUT_MS 120000
@@ -118,9 +105,9 @@ extern "C"
 
    /* Parse an OpenAI chat-completions response `body` into `out` (zeroed first).
     * Returns 0 for an admitted textual completion, -1 otherwise. The owned IR
-    * retains reasoning/media/tool blocks; free the result after success or failure. Usage,
-    * model and finish_reason are filled when present. `http_status` is left 0
-    * here — provider_client_complete sets it after the transport call. */
+    * retains reasoning/media/tool blocks; free the result after success or failure. All model
+    * metadata remains in IR. `http_status` is left 0 here — provider_client_complete sets it after
+    * the transport call. */
    int provider_client_parse_openai(const char *body, provider_completion_t *out);
 
    /* Canonical entry for internal callers. The request is borrowed; provider

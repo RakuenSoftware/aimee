@@ -2,9 +2,9 @@ import { parseJSON, stringifyJSON } from '../ir/json';
 import './chat.css';
 import { mergeChannelMessages, type ChannelMessage } from './chat/channelMessages';
 import { useSessionPreference } from './chat/useSessionPreference';
-import { useEffect, useRef, useState, useCallback, memo } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { AutoGrowTextarea, Button, Drawer, Tabs, TypingIndicator, tokens } from '@rakuensoftware/smoothgui';
-import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
+import { BootstrapBanner } from './chat/ChatPrimitives';
 import { renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
 import { useSessions } from '../SessionContext';
@@ -124,10 +124,9 @@ const ACTIVE_TAB_KEY = 'aimee_active_chat_tab';
 const CHANNEL_KEY = 'aimee_active_channel';
 const PROJECT_ROOT_KEY = 'aimee_chat_project_root';
 const RULES_BANNER_DISMISSED_KEY = 'aimee_rules_banner_dismissed';
-const STREAM_PERSIST_DEBOUNCE_MS = 1000;
 // How many of a tab's most-recent messages the transcript renders by default.
-// Full history is kept in memory (and persisted), but only this window is mounted
-// to the DOM / reconciled per stream flush, so render cost is bounded by the
+// Full canonical history remains in its durable projection; only this window is mounted
+// to the DOM, so render cost is bounded by the
 // window, not the whole conversation. Scrolling/"show earlier" reveals the rest.
 const TRANSCRIPT_WINDOW = 150;
 const TRANSCRIPT_WINDOW_STEP = 150;
@@ -255,20 +254,6 @@ function saveRulesBannerDismissed(dismissed: boolean, root = ''): void {
   } catch { /* ignore */ }
 }
 
-function streamToTabMessages(msgs: StreamMsg[]): TabMessage[] {
-  return msgs
-    .filter(m => m.type === 'user' || m.type === 'assistant' || m.type === 'narration')
-    // Never persist an empty assistant/narration bubble (it reloads as an empty
-    // box); user turns always carry text.
-    .filter(m => m.type === 'user' || m.text.trim() !== '')
-    .map(m => ({ role: m.type as 'user' | 'assistant' | 'narration', text: m.text }));
-}
-
-function sameTabMessages(a: TabMessage[], b: TabMessage[]): boolean {
-  if (a.length !== b.length) return false;
-  return a.every((msg, i) => msg.role === b[i].role && msg.text === b[i].text);
-}
-
 function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === 'AbortError';
 }
@@ -278,33 +263,6 @@ function isAbortError(err: unknown): boolean {
 interface BootstrapStatus {
   has_rules: boolean;
   stacks?: BootstrapStack[];
-}
-
-/* ---- Message item (rendered from saved tab or streaming) ---- */
-
-interface StreamMsg {
-  id: number;
-  type: 'user' | 'assistant' | 'thinking' | 'tool' | 'narration' | 'diff' | 'checkpoint';
-  text: string;       // user/assistant text
-  thinkText?: string; // for thinking
-  toolName?: string;
-  toolArgs?: string;
-  toolResult?: string;
-  diffPath?: string;
-  diffContent?: string;
-  snapshotId?: number; // for checkpoint
-}
-
-interface ActiveStreamRefs {
-  assistantId: number | null;
-  thinkId: number | null;
-  toolId: number | null;
-  /* aimeeSid of the tab that owns this stream. Captured at send time so SSE
-   * events (notably the provider `session` id) are applied to the originating
-   * tab — never to whatever tab happens to be active when the event arrives.
-   * Without this, switching tabs mid-stream cross-writes provider metadata onto
-   * the wrong tab and corrupts the browser's restored-session cache. */
-  originSid: string;
 }
 
 interface QueuedChatSend {
@@ -327,9 +285,6 @@ interface SidWork {
   iterCur: number;  // current agent iteration (0 = none)
   iterMax: number;
 }
-
-let msgIdCounter = 0;
-function nextId() { return ++msgIdCounter; }
 
 /* ---- Thread Bar (conversation branching) ---- */
 
@@ -1225,76 +1180,6 @@ function ChannelView({ channelName, messages, agents, onSend }: ChannelViewProps
   );
 }
 
-/* Render one transcript block. `streaming` only matters for an assistant bubble
- * (it then renders raw growing text and skips the markdown parse); every other
- * block type ignores it. */
-function renderBlock(m: StreamMsg, activeSid: string, streaming: boolean) {
-  switch (m.type) {
-    case 'user':
-      return <Message key={m.id} role="user" text={m.text} />;
-    case 'assistant':
-      return <Message key={m.id} role="assistant" text={m.text} streaming={streaming} />;
-    case 'thinking':
-      return <ThinkingBlock key={m.id} text={m.thinkText ?? ''} />;
-    case 'tool':
-      return <ToolBlock key={m.id} name={m.toolName ?? ''} args={m.toolArgs ?? ''} result={m.toolResult} />;
-    case 'narration':
-      return <TurnSummaryCard key={m.id} text={m.text} />;
-    case 'diff':
-      return <DiffBlock key={m.id} path={m.diffPath} diff={m.diffContent ?? ''} />;
-    case 'checkpoint':
-      return <RewindMarker key={m.id} snapshotId={m.snapshotId!} sid={activeSid} />;
-    default:
-      return null;
-  }
-}
-
-/* The committed (settled) part of the transcript — everything except the live,
- * still-streaming tail block. Memoized with a REFERENCE-ONLY comparator: a
- * stream flush rebuilds the `messages` array but keeps every settled message's
- * object identity (applyDeltas replaces only the one growing message), so this
- * subtree bails in an O(n) pointer scan instead of re-mapping and reconciling
- * the whole conversation as React elements. Without it, each of the ~10 flushes/s
- * costs O(conversation length) of React work, so a long session steadily pegs a
- * core — the "gets worse the longer I chat" symptom. It re-renders only when a
- * block is committed (count changes) or a settled block actually mutates (e.g. a
- * tool_result lands), both of which change an element reference. */
-const CommittedTranscript = memo(function CommittedTranscript({ messages, count, activeSid }: {
-  messages: StreamMsg[]; count: number; activeSid: string;
-}) {
-  const blocks = [];
-  for (let i = 0; i < count; i++) blocks.push(renderBlock(messages[i], activeSid, false));
-  return <>{blocks}</>;
-}, (prev, next) => {
-  if (prev.count !== next.count || prev.activeSid !== next.activeSid) return false;
-  for (let i = 0; i < next.count; i++) {
-    if (prev.messages[i] !== next.messages[i]) return false;
-  }
-  return true;
-});
-
-/* Renders the transcript. Extracted + memoized so re-renders of the big Chat
- * component that are NOT a message change (textarea typing, the remote-turn
- * preview, the workflow poll, working toggles) skip it entirely. During a turn
- * only the live tail block is re-rendered per flush; the committed history is
- * gated behind CommittedTranscript's reference comparator. */
-const Transcript = memo(function Transcript({ messages, working, activeSid }: {
-  messages: StreamMsg[]; working: boolean; activeSid: string;
-}) {
-  const n = messages.length;
-  // While a turn is in flight the last block is the live tail (an assistant
-  // bubble streams its raw text; it settles — and renders markdown once — when
-  // another block follows it or the turn ends). Everything before it is settled.
-  const liveTail = working && n > 0;
-  const committedCount = liveTail ? n - 1 : n;
-  return (
-    <>
-      <CommittedTranscript messages={messages} count={committedCount} activeSid={activeSid} />
-      {liveTail && renderBlock(messages[n - 1], activeSid, true)}
-    </>
-  );
-});
-
 /* ---- Main Chat component ---- */
 
 export default function Chat() {
@@ -1304,7 +1189,7 @@ export default function Chat() {
   const activeSessionId = activeSession?.id ?? '';
   const matchedIdx = tabs.findIndex(tab => tab.sessionId === activeSessionId);
   const activeIdx = matchedIdx >= 0 ? matchedIdx : 0;
-  const [streamMsgs, setStreamMsgs] = useState<StreamMsg[]>([]);
+  const [rulesStatus, setRulesStatus] = useState('');
   const irSessions = useRef<Record<string, SessionState>>({});
   const irPending = useRef<Record<string, Map<string, Envelope>>>({});
   const irFlush = useRef<number | null>(null);
@@ -1377,8 +1262,7 @@ export default function Chat() {
         const existing = byId.get(s.id) ?? byAimeeId.get(s.aimeeSid);
         if (existing) {
           const messages = existing.aimeeSid === s.aimeeSid
-            ? irSessions.current[s.aimeeSid]?.messages.length ? existing.messages
-              : reconcileSessionMessages(existing.messages, s.messages) : s.messages;
+            ? reconcileSessionMessages(existing.messages, s.messages) : s.messages;
           if (existing.sessionId === s.id && existing.title === s.name &&
               existing.aimeeSid === s.aimeeSid && messages === existing.messages &&
               (!s.claudeSid || existing.sid === s.claudeSid)) return existing;
@@ -1455,15 +1339,13 @@ export default function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const workflowUpdatedAtRef = useRef<string | null>(null);
-  const skipNextStreamPersistRef = useRef(false);
-  const streamPersistTimerRef = useRef<number | null>(null);
   // Controller → originSid, so a finishing send can decrement work for the tab it
   // belonged to (not whatever tab is active when it lands).
   const activeSendAbortRefs = useRef<Map<AbortController, string>>(new Map());
   /* Per-tab send queues + drainers, keyed by aimeeSid. Each session drains
    * independently and concurrently, so a turn on one tab never blocks another
-   * tab's turn (the server already multiplexes sessions: per-session pools,
-   * presence locks and tmux panes). Sends stay serial WITHIN a session — a
+   * tab's turn (the server already multiplexes sessions: per-session pools and
+   * presence locks). Sends stay serial WITHIN a session — a
    * single conversation pane can only run one turn at a time. */
   const sendQueuesRef = useRef<Map<string, QueuedChatSend[]>>(new Map());
   const sendDrainingRef = useRef<Set<string>>(new Set());
@@ -1479,29 +1361,6 @@ export default function Chat() {
   }
   const tabsRef = useRef<TabData[]>(tabs);
   const activeIdxRef = useRef(activeIdx);
-  // turn_ids already committed to history from the presence ring this session.
-  // The ring replays turn_started→deltas→turn_done from cursor 0 on EVERY new
-  // subscription (reconnect / tab switch back), so dedup is required to avoid
-  // re-appending the same observed turn. Survives effect re-runs (component ref).
-  /* Stream-token batching: text/thinking deltas arrive far faster than the
-   * screen refreshes. Rather than a setStreamMsgs (→ full re-render) per token,
-   * we accumulate deltas here and flush them in a single state update per
-   * 100 ms timer tick. Message
-   * *creation* stays synchronous so ids/order are assigned immediately; only the
-   * append of further text into an existing bubble is batched. */
-  const pendingAppendsRef = useRef<Array<{ owner: string; id: number; field: 'text' | 'thinkText'; delta: string }>>([]);
-  const flushTimerRef = useRef<number | null>(null);
-  /* Live mirror of `streamMsgs` for synchronous reads (effects/switch logic). */
-  const streamMsgsRef = useRef<StreamMsg[]>(streamMsgs);
-  /* Off-screen live transcript for every NON-active tab keyed by its aimeeSid.
-   * A stream is routed to its OWNING tab's buffer (by streamRefs.originSid), so a
-   * turn that is in flight while the user is on another tab accumulates here
-   * instead of bleeding into — and being saved onto — the active tab. `streamMsgs`
-   * stays strictly the active tab's view; the switch effect swaps buffers in/out. */
-  const bgStreamsRef = useRef<Map<string, StreamMsg[]>>(new Map());
-  /* aimeeSid that `streamMsgs` currently represents (the tab whose buffer is
-   * on-screen). '' until the first load so the initial committed history loads. */
-  const renderedSidRef = useRef<string>('');
   const queueActive = working;
   const activePersonaSid = tabs[activeIdx]?.aimeeSid ?? '';
   const activeSessionMatched = !!activeSession && tabs[activeIdx]?.sessionId === activeSession.id && activePersonaSid === activeSession.aimeeSid;
@@ -1611,28 +1470,11 @@ export default function Chat() {
   }, []);
 
   // How many trailing messages the transcript currently renders. Full history
-  // stays in streamMsgs (and persisted); we just don't mount/reconcile all of it.
+  // stays in the canonical session projection; only the visible window is mounted.
   // "Show earlier" grows the window; switching conversations resets it so a fresh
   // tab opens windowed, not expanded from a previous one.
   const [visibleCount, setVisibleCount] = useState(TRANSCRIPT_WINDOW);
   useEffect(() => { setVisibleCount(TRANSCRIPT_WINDOW); }, [activePersonaSid]);
-  const hiddenLegacyCount = Math.max(0, streamMsgs.length - visibleCount);
-  const windowedMsgs = hiddenLegacyCount > 0 ? streamMsgs.slice(hiddenLegacyCount) : streamMsgs;
-
-  useEffect(() => { scrollToBottom(); }, [streamMsgs, working, scrollToBottom]);
-  useEffect(() => { streamMsgsRef.current = streamMsgs; }, [streamMsgs]);
-  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
-  /* Drop off-screen stream buffers for tabs that have been closed, so they don't
-   * accumulate across open/close cycles. */
-  useEffect(() => {
-    const live = new Set(tabs.map(t => t.aimeeSid));
-    for (const sid of bgStreamsRef.current.keys()) {
-      if (!live.has(sid)) bgStreamsRef.current.delete(sid);
-    }
-  }, [tabs]);
-  // Cancel any pending stream-flush timer on unmount.
-  useEffect(() => () => { if (flushTimerRef.current !== null) window.clearTimeout(flushTimerRef.current); }, []);
-
   /* Detach every attached presence surface when the page unloads, so a closed
    * browser doesn't leak attachments until the session is closed. keepalive
    * lets the POSTs survive the unload; best-effort. */
@@ -1728,8 +1570,7 @@ export default function Chat() {
   // Execution activity is a canonical projection, not separately copied UI state.
   // Keeping a second state/effect pair can lag a replayed running turn.
   const remoteTurnActive = !!irReady[activeAimeeSid] && !!canonicalState?.activeTurns.length;
-  const hiddenCount = canonicalState?.messages.length
-    ? Math.max(0, canonicalState.messages.length - visibleCount) : hiddenLegacyCount;
+  const hiddenCount = Math.max(0, (canonicalState?.messages.length ?? 0) - visibleCount);
   const submittedControls = useRef(new Set<string>());
   const [pendingReplies, setPendingReplies] = useState<Record<string, ReadonlySet<string>>>({});
   const replyControl = useCallback(async (requestId: string, reply: ControlReply, sessionId = activeAimeeSid) => {
@@ -1811,8 +1652,6 @@ export default function Chat() {
 
   useEffect(() => {
     return () => {
-      saveOwnerStream(renderedSidRef.current);
-      for (const owner of bgStreamsRef.current.keys()) saveOwnerStream(owner);
       saveTabs(tabsRef.current);
       flushPendingTabs();
       abortActiveSends();
@@ -2062,119 +1901,6 @@ export default function Chat() {
     }
   }
 
-  /* Swap the on-screen transcript when the active tab changes. The leaving tab's
-   * live buffer (possibly mid-stream) is stashed off-screen so its stream keeps
-   * accumulating against its OWN history instead of the newly-active tab; the
-   * entering tab is restored from its stashed buffer if one exists (in-flight or
-   * recently streamed, keeping rich tool/thinking blocks), else loaded fresh from
-   * committed history. */
-  useEffect(() => {
-    const newSid = tabs[activeIdx]?.aimeeSid ?? '';
-    const oldSid = renderedSidRef.current;
-    if (oldSid === newSid) return;
-    if (oldSid) {
-      bgStreamsRef.current.set(oldSid, streamMsgsRef.current);
-      saveTabMessages(oldSid, streamMsgsRef.current);
-    }
-    renderedSidRef.current = newSid;
-    skipNextStreamPersistRef.current = true;
-    const buffered = bgStreamsRef.current.get(newSid);
-    if (buffered) {
-      // Take ownership: the buffer is now on-screen (in streamMsgs), so drop the
-      // off-screen copy to avoid a stale duplicate on the next switch-out stash.
-      bgStreamsRef.current.delete(newSid);
-      streamMsgsRef.current = buffered;
-      setStreamMsgs(buffered);
-      return;
-    }
-    const tab = tabs[activeIdx];
-    const msgs: StreamMsg[] = tab
-      ? tab.messages.map(m => ({ id: nextId(), type: m.role, text: m.text }))
-      : [];
-    streamMsgsRef.current = msgs;
-    setStreamMsgs(msgs);
-  }, [activePersonaSid]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // A server refresh can hydrate the currently selected session without
-  // changing its tab index (the normal fresh-browser case). Load that account-
-  // scoped transcript directly; later local stream updates do not retrigger this
-  // effect because SessionContext's server snapshot is unchanged.
-  useEffect(() => {
-    // Wait until the selected session has a matching tab before hydrating it.
-    if (tabs[activeIdx]?.sessionId !== activeSessionId) return;
-    const serverMessages = activeSession?.messages;
-    if (!serverMessages) return;
-    const tab = tabsRef.current.find(candidate => candidate.sessionId === activeSessionId);
-    if (!tab || tab.aimeeSid !== renderedSidRef.current || irSessions.current[tab.aimeeSid]?.messages.length) return;
-    // A live reply owns its message ids. Replacing it with a snapshot would
-    // orphan the stream's ids, causing later deltas to lose their target.
-    for (const owner of activeSendAbortRefs.current.values()) {
-      if (owner === tab.aimeeSid) return;
-    }
-    const live = streamToTabMessages(streamMsgsRef.current);
-    if (reconcileSessionMessages(live, serverMessages) === live) return;
-    const hydrated = serverMessages.map(message => ({
-      id: nextId(), type: message.role, text: message.text,
-    }));
-    streamMsgsRef.current = hydrated;
-    renderedSidRef.current = tab.aimeeSid;
-    setStreamMsgs(hydrated);
-  }, [activeSessionId, activeSession?.messages, tabs[activeIdx]?.sessionId]);
-
-  /* Commit by stable id: a refresh may reorder tabs while a timer is pending. */
-  const saveTabMessages = useCallback((owner: string, msgs: StreamMsg[]) => {
-    const tab = tabsRef.current.find(candidate => candidate.aimeeSid === owner);
-    if (!tab) return;
-    const saved = reconcileSessionMessages(tab.messages, streamToTabMessages(msgs));
-    if (sameTabMessages(tab.messages, saved)) return;
-    const next = tabsRef.current.map(candidate => candidate === tab ? { ...tab, messages: saved } : candidate);
-    tabsRef.current = next;
-    setTabs(next);
-    if (tab.sessionId) patchSession(tab.sessionId, { messages: saved });
-  }, [patchSession]);
-
-  /* Route updates to the buffer actually on screen, including the interval
-   * between selecting a session and swapping its transcript. Keep refs current
-   * synchronously so final commits cannot save an older React render. */
-  const applyToOwnerStream = useCallback((owner: string, updater: (prev: StreamMsg[]) => StreamMsg[]) => {
-    if (owner === renderedSidRef.current) {
-      const next = updater(streamMsgsRef.current);
-      streamMsgsRef.current = next;
-      setStreamMsgs(next);
-    } else {
-      bgStreamsRef.current.set(owner, updater(bgStreamsRef.current.get(owner) ?? []));
-    }
-  }, []);
-
-  const saveOwnerStream = useCallback((owner: string) => {
-    flushStreamAppends();
-    saveTabMessages(owner, owner === renderedSidRef.current
-      ? streamMsgsRef.current : bgStreamsRef.current.get(owner) ?? []);
-  }, [saveTabMessages]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (skipNextStreamPersistRef.current) {
-      skipNextStreamPersistRef.current = false;
-      return;
-    }
-
-    const owner = renderedSidRef.current;
-    if (streamPersistTimerRef.current !== null) {
-      window.clearTimeout(streamPersistTimerRef.current);
-    }
-    streamPersistTimerRef.current = window.setTimeout(() => {
-      streamPersistTimerRef.current = null;
-      saveTabMessages(owner, streamMsgs);
-    }, STREAM_PERSIST_DEBOUNCE_MS);
-
-    return () => {
-      if (streamPersistTimerRef.current !== null) {
-        window.clearTimeout(streamPersistTimerRef.current);
-        streamPersistTimerRef.current = null;
-      }
-    };
-  }, [streamMsgs, activePersonaSid, saveTabMessages]);
-
   const workflowChannel = ((tabs[activeIdx]?.workflowChannel ?? '').trim()
     || (tabs[activeIdx]?.title ?? '').trim()
     || 'general');
@@ -2269,12 +1995,10 @@ export default function Chat() {
   }
 
 
-  /* Clear the current conversation: drop the visible transcript and mint a fresh
-   * provider session (empty claude session id + new aimee session id) so the next
-   * turn starts clean — no resume of a stale/gone session. */
+  /* Explicitly clear this conversation by minting a new canonical session.
+   * Provider cache adoption remains owned by the server, never the browser. */
   function clearChat() {
     const nextAimeeSid = newAimeeSessionId();
-    setStreamMsgs([]);
     setTabs(prev => {
       const next = [...prev];
       if (next[activeIdx]) {
@@ -2283,7 +2007,7 @@ export default function Chat() {
       return next;
     });
     if (activeSession) patchSession(activeSession.id, {
-      claudeSid: '', aimeeSid: nextAimeeSid, attachId: '', messages: [],
+      claudeSid: '', aimeeSid: nextAimeeSid, attachId: '',
     });
   }
 
@@ -2328,27 +2052,10 @@ export default function Chat() {
         body: JSON.stringify({ thread_id: threadId }),
       });
       const d = await r.json() as { ok?: boolean; messages?: TabMessage[] };
-      if (d.ok && d.messages) {
-        const msgs: StreamMsg[] = d.messages.map(m => ({
-          id: nextId(),
-          type: m.role as 'user' | 'assistant',
-          text: m.text,
-        }));
-        setStreamMsgs(msgs);
-        setTabs(prev => {
-          const next = [...prev];
-          if (next[activeIdx]) {
-            next[activeIdx] = {
-              ...next[activeIdx],
-              messages: d.messages!.map(m => ({ role: m.role, text: m.text })),
-              activeThreadId: threadId,
-            };
-          }
-          return next;
-        });
-        await refreshThreads();
-      }
-    } catch { /* ignore */ }
+      if (d.ok && d.messages) throw new Error('Legacy thread transcripts cannot replace canonical conversation history.');
+      if (!r.ok || !d.ok) throw new Error('Conversation branch could not be loaded.');
+      await refreshThreads();
+    } catch (error) { setThreadError(error instanceof Error ? error.message : 'Conversation branch could not be loaded.'); }
   }
 
   async function refreshThreads() {
@@ -2381,21 +2088,12 @@ export default function Chat() {
       if (r.ok && (d.ok || d.status === 'ok')) {
         saveRulesBannerDismissed(false, projectRoot);
         setBanner(null);
-        setStreamMsgs(prev => [
-          ...prev,
-          { id: nextId(), type: 'assistant', text: d.created ? 'Created .aimee-rules.' : '.aimee-rules already exists.' },
-        ]);
+        setRulesStatus(d.created ? 'Created .aimee-rules.' : '.aimee-rules already exists.');
         return;
       }
-      setStreamMsgs(prev => [
-        ...prev,
-        { id: nextId(), type: 'assistant', text: 'Failed to create .aimee-rules.' },
-      ]);
+      setRulesStatus('Failed to create .aimee-rules.');
     } catch {
-      setStreamMsgs(prev => [
-        ...prev,
-        { id: nextId(), type: 'assistant', text: 'Failed to create .aimee-rules.' },
-      ]);
+      setRulesStatus('Failed to create .aimee-rules.');
     }
   }
 
@@ -2477,9 +2175,8 @@ export default function Chat() {
     /* Auto-title from first message */
     const idx = activeIdxRef.current;
     const activeSidForTitle = tabsRef.current[idx]?.aimeeSid ?? '';
-    const hasExistingMessages = (tabsRef.current[idx]?.messages.length ?? 0) > 0 ||
-      (irSessions.current[activeSidForTitle]?.messages.length ?? 0) > 0 ||
-      streamMsgs.length > 0 || activeSendAbortRefs.current.size > 0 ||
+    const hasExistingMessages = (irSessions.current[activeSidForTitle]?.messages.length ?? 0) > 0 ||
+      activeSendAbortRefs.current.size > 0 ||
       (sendQueuesRef.current.get(activeSidForTitle)?.length ?? 0) > 0;
     if (!hasExistingMessages) {
       const title = text.substring(0, 30) + (text.length > 30 ? '…' : '');
@@ -2493,11 +2190,9 @@ export default function Chat() {
       if (sessionId) patchSession(sessionId, { name: title });
     }
 
-    const userMsgId = nextId();
     // Sending is an explicit intent to follow the conversation: re-stick to the
     // bottom even if the user had scrolled up to read back.
     atBottomRef.current = true;
-    void userMsgId; // canonical admission owns the user message
 
     const originSid = tabsRef.current[idx]?.aimeeSid ?? '';
     pushToSendQueue(originSid, { text, version: sendQueueVersionRef.current, originSid,
@@ -2547,7 +2242,6 @@ export default function Chat() {
     // drained. This keeps the stream, the busy indicator and out-of-band SSE events
     // (the provider `session` id in particular) on the originating tab.
     const aimeeSid = item.originSid;
-    const streamRefs: ActiveStreamRefs = { assistantId: null, thinkId: null, toolId: null, originSid: aimeeSid };
     const controller = new AbortController();
     activeSendAbortRefs.current.set(controller, aimeeSid);
     recomputeWorkCounts();
@@ -2608,7 +2302,7 @@ export default function Chat() {
             try {
               const data = parseJSON(line.slice(6)) as Record<string, unknown>;
               if (evtType === 'ir') {
-                ingestIR(streamRefs.originSid, data);
+                ingestIR(aimeeSid, data);
                 evtType = null;
                 continue;
               }
@@ -2646,66 +2340,9 @@ export default function Chat() {
       fetch('/api/lsp/diagnostics/summary').then(r => r.json()).then((d: { errors: number; warnings: number; active_servers: number }) => {
         setLspDiag(d.active_servers > 0 ? d : null);
       }).catch(() => {});
-      if (!controller.signal.aborted) saveOwnerStream(streamRefs.originSid);
-      flushStreamAppends();
       activeSendAbortRefs.current.delete(controller);
       recomputeWorkCounts(); // clears this sid's busy/iteration once it has no work left
-      streamRefs.assistantId = null;
-      streamRefs.thinkId = null;
-      streamRefs.toolId = null;
       textareaRef.current?.focus();
-    }
-  }
-
-  /* Apply all buffered stream deltas in one state update, coalesced per message.
-   * Safe to call manually (e.g. at turn end) or as the throttled timer callback. */
-  function flushStreamAppends() {
-    if (flushTimerRef.current !== null) {
-      window.clearTimeout(flushTimerRef.current);
-      flushTimerRef.current = null;
-    }
-    const ups = pendingAppendsRef.current;
-    if (ups.length === 0) return;
-    pendingAppendsRef.current = [];
-    // Partition deltas by owning tab, then coalesce per message, so a stream's
-    // text lands in ITS tab's buffer even if the user switched tabs since the
-    // delta was queued (the flush timer fires asynchronously).
-    const byOwner = new Map<string, Map<number, { text: string; think: string }>>();
-    for (const u of ups) {
-      let byId = byOwner.get(u.owner);
-      if (!byId) { byId = new Map(); byOwner.set(u.owner, byId); }
-      const e = byId.get(u.id) ?? { text: '', think: '' };
-      if (u.field === 'text') e.text += u.delta;
-      else e.think += u.delta;
-      byId.set(u.id, e);
-    }
-    // Only the messages that received a delta change — in practice the 1–2 tail
-    // blocks of the turn (the streaming assistant bubble, maybe a thinking
-    // block). The whole conversation lives in `msgs` (windowing is render-only),
-    // so map()-ing a closure + Map.get over the FULL history every flush is
-    // O(history) of wasted work — and it runs for EVERY streaming tab ~10×/s, so
-    // it scales with running-tab count × session length, pegging a core. Instead
-    // copy the array once (cheap pointer copy) and rewrite only the matching
-    // indices, scanning from the tail and stopping once every delta is placed.
-    const applyDeltas = (msgs: StreamMsg[], byId: Map<number, { text: string; think: string }>): StreamMsg[] => {
-      if (byId.size === 0) return msgs;
-      let next: StreamMsg[] | null = null;
-      let remaining = byId.size;
-      for (let i = msgs.length - 1; i >= 0 && remaining > 0; i--) {
-        const e = byId.get(msgs[i].id);
-        if (!e) continue;
-        if (!next) next = msgs.slice();
-        const m = msgs[i];
-        const nm = { ...m };
-        if (e.text) nm.text = m.text + e.text;
-        if (e.think) nm.thinkText = (m.thinkText ?? '') + e.think;
-        next[i] = nm;
-        remaining--;
-      }
-      return next ?? msgs;
-    };
-    for (const [owner, byId] of byOwner) {
-      applyToOwnerStream(owner, prev => applyDeltas(prev, byId));
     }
   }
 
@@ -2807,6 +2444,15 @@ export default function Chat() {
         />
       )}
 
+      {rulesStatus && <p role="status">{rulesStatus}</p>}
+      {activeSessionMatched && !!tabs[activeIdx]?.messages.length && <details aria-label="Legacy transcript archive">
+        <summary>Legacy transcript archive (not model history)</summary>
+        <p>This read-only archive is separate from the canonical conversation and is not sent to models.</p>
+        {tabs[activeIdx].messages.map((message, index) => <div key={index}>
+          <strong>{message.role}</strong><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{message.text}</pre>
+        </div>)}
+      </details>}
+
       {/* Messages */}
       <div
         className="chat-messages" role="log" aria-label="Conversation" aria-live="off"
@@ -2826,9 +2472,9 @@ export default function Chat() {
             Show earlier messages ({hiddenCount})
           </Button>
         )}
-        {canonicalState && (canonicalState.messages.length > 0 || Object.keys(canonicalState.children ?? {}).length > 0 || Object.keys(canonicalState.controls).length > 0) ? <>
-          <IRTranscript state={canonicalState} onReply={replyControl} controlsReady={!!irReady[activeAimeeSid]} messageLimit={visibleCount} pendingReplies={pendingReplies[activeAimeeSid]} pendingRepliesBySession={pendingReplies} /></> :
-          <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />}
+        <IRTranscript state={canonicalState ?? emptySession(activeAimeeSid)} onReply={replyControl}
+          controlsReady={!!irReady[activeAimeeSid]} messageLimit={visibleCount}
+          pendingReplies={pendingReplies[activeAimeeSid]} pendingRepliesBySession={pendingReplies} />
         {(sendErrors[activeAimeeSid] || irTransportErrors[activeAimeeSid]) ? <div role="alert">
           {sendErrors[activeAimeeSid] || irTransportErrors[activeAimeeSid]}{' '}
           <button type="button" onClick={() => {
@@ -3078,7 +2724,7 @@ export default function Chat() {
           onToggle={() => { setContextOpen(o => !o); setPluginsOpen(false); setRulesOpen(false); }}
           sessionUsage={sessionUsage}
           sessionId={tabs[activeIdx]?.aimeeSid ?? ''}
-          msgCount={streamMsgs.filter(m => m.type === 'user').length}
+          msgCount={canonicalState?.messages.filter(m => m.role === 'user').length ?? 0}
           metrics={allTimeMetrics}
         />
 

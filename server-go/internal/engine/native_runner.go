@@ -257,6 +257,7 @@ func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request D
 	if err := applyDelegateDeadlineCap(ctx, &request); err != nil {
 		return DelegateResult{}, err
 	}
+	request.ExecutionScope = step.WorkItem.ExecutionScope
 	request.WorkItemID = step.WorkItem.ID
 	request.Stage = step.Node.ID
 	request.ExecutionVersion = step.WorkItem.UpdatedAt
@@ -268,6 +269,9 @@ func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request D
 	}
 	started := time.Now()
 	result, err := r.agents.Delegate(ctx, request)
+	if err == nil {
+		_, err = result.SemanticText()
+	}
 	return result, decorateDelegateLimitError(err, stageWallRemaining, request, time.Since(started))
 }
 
@@ -287,6 +291,7 @@ func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requ
 			}
 			return out
 		}
+		requests[i].ExecutionScope = step.WorkItem.ExecutionScope
 		requests[i].WorkItemID = step.WorkItem.ID
 		requests[i].Stage = step.Node.ID
 		requests[i].ExecutionVersion = step.WorkItem.UpdatedAt
@@ -570,7 +575,7 @@ func (r *NativeRunner) custom(ctx context.Context, req StepRequest, block wfe.Bl
 		}
 		return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch, ContentHash: head, CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
 	}
-	return StepResult{Status: StepAdvanced, ArtifactType: block.Produces, Artifact: result.Response, CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
+	return StepResult{Status: StepAdvanced, ArtifactType: block.Produces, Artifact: delegateText(result), CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
 }
 
 func (r *NativeRunner) author(ctx context.Context, req StepRequest, kind string) (StepResult, error) {
@@ -594,10 +599,10 @@ func (r *NativeRunner) author(ctx context.Context, req StepRequest, kind string)
 	if err != nil {
 		return StepResult{}, err
 	}
-	if strings.TrimSpace(result.Response) == "" {
+	if strings.TrimSpace(delegateText(result)) == "" {
 		return StepResult{Status: StepChanges, Detail: "planner returned an empty artifact", CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
 	}
-	return StepResult{Status: StepAdvanced, ArtifactType: kind, Artifact: result.Response, CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
+	return StepResult{Status: StepAdvanced, ArtifactType: kind, Artifact: delegateText(result), CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
 }
 
 func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind string) (StepResult, error) {
@@ -660,7 +665,7 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 		}
 		cost += result.CostUSD
 		costUnknown = costUnknown || result.CostUnknown
-		content, validationErr = extractJSONObject(result.Response)
+		content, validationErr = extractJSONObject(delegateText(result))
 		if validationErr == nil {
 			validationErr = validateStructured(kind, content)
 		}
@@ -673,7 +678,7 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 		// the artifact. The changed prompt is part of DelegateRequest and therefore
 		// receives a distinct durable job key. Do not byte-truncate the artifact:
 		// silent byte limits were the original non-convergence failure mode.
-		prompt += "\n\nYOUR PREVIOUS RESPONSE WAS INVALID (" + validationErr.Error() + "). Repair it and return one complete JSON object only. Do not truncate or omit any field.\n\nCOMPLETE INVALID RESPONSE:\n" + result.Response
+		prompt += "\n\nYOUR PREVIOUS RESPONSE WAS INVALID (" + validationErr.Error() + "). Repair it and return one complete JSON object only. Do not truncate or omit any field.\n\nCOMPLETE INVALID RESPONSE:\n" + delegateText(result)
 	}
 	if validationErr != nil {
 		return StepResult{Status: StepChanges, Detail: "structured response remained invalid after corrective synthesis: " + validationErr.Error(), CostUSD: cost, CostUnknown: costUnknown}, nil
@@ -926,8 +931,8 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		// A document no-op is the requested outcome when the accepted diff is
 		// already documented. Freeze the exact unchanged HEAD so doc_freeze and
 		// doc_gate still review it; blocking review feedback overrides that exemption.
-		satisfiedNoop := (docs && delegatePartialIsNoChange(result.Response)) ||
-			(!docs && implementationPartialIsSatisfiedNoChange(result.Response))
+		satisfiedNoop := (docs && delegatePartialIsNoChange(delegateText(result))) ||
+			(!docs && implementationPartialIsSatisfiedNoChange(delegateText(result)))
 		blockingReviewUnchanged := false
 		if headErr == nil && head == baseHead && feedbackHasBlockingFinding(req.Feedback) &&
 			req.Feedback.ArtifactHash != "" {
@@ -940,7 +945,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		if headErr == nil && head == baseHead &&
 			(blockingReviewUnchanged || (!satisfiedNoop &&
 				!branchHasWorkOverBase(ctx, workdir, req.WorkItem.ParentID))) {
-			detail := strings.TrimSpace(result.Response)
+			detail := strings.TrimSpace(delegateText(result))
 			if detail == "" {
 				detail = "delegate returned a partial result and produced no commit"
 			}
@@ -1003,7 +1008,7 @@ func (r *NativeRunner) review(ctx context.Context, req StepRequest) (StepResult,
 	if err != nil {
 		return StepResult{}, err
 	}
-	doc, err := extractJSONObject(result.Response)
+	doc, err := extractJSONObject(delegateText(result))
 	if err != nil {
 		return malformedReview(reviewed.Hash, persona, err, result.CostUSD), nil
 	}
@@ -1472,6 +1477,7 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	// store, and resolving a second time in the control plane is how the two
 	// sides previously ended up with different notions of the same panel.
 	result, err := r.reviews.Review(ctx, roundtablecfg.ReviewRequest{
+		ExecutionScope:   req.WorkItem.ExecutionScope,
 		Artifact:         string(reviewed.Content),
 		OriginalRequest:  req.Proposal,
 		ArtifactStage:    reviewed.Type,
@@ -1635,7 +1641,7 @@ func (r *NativeRunner) foreach(ctx context.Context, req StepRequest) (StepResult
 		// row and wedged the parent in slices. The content hash stays appended
 		// for operator diagnosis. Same-generation retries still deduplicate on
 		// the id above, before this insert is reached.
-		if err := r.db.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: id, Repo: req.WorkItem.Repo, ProposalPath: "packet:" + id + ":" + wfe.Hash(packet), WorkflowName: childName, WorkflowVersion: definition.Version, StartStage: start, Mode: "autonomous", ParentID: req.WorkItem.ID}); err != nil {
+		if err := r.db.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: id, Repo: req.WorkItem.Repo, ProposalPath: "packet:" + id + ":" + wfe.Hash(packet), WorkflowName: childName, WorkflowVersion: definition.Version, StartStage: start, Mode: "autonomous", ParentID: req.WorkItem.ID, ExecutionScope: req.WorkItem.ExecutionScope}); err != nil {
 			r.rollbackChildren(ctx, created)
 			return StepResult{}, err
 		}
@@ -2144,4 +2150,11 @@ func validateStructured(kind string, doc []byte) error {
 		}
 	}
 	return nil
+}
+
+// delegateText projects only admitted successful canonical content. The caller
+// has already propagated admission failure; there is no display-string fallback.
+func delegateText(result DelegateResult) string {
+	text, _ := result.SemanticText()
+	return text
 }

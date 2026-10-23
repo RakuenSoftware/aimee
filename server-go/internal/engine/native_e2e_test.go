@@ -44,16 +44,16 @@ type e2eAgents struct {
 func (a *e2eAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
 	switch request.Role {
 	case "review":
-		return DelegateResult{Response: fmt.Sprintf(`{"run_id":%q,"artifact_hash":%q,"artifact_stage":%q,"original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`,
-			request.WorkItemID, request.ArtifactHash, request.ArtifactStage)}, nil
+		return testCanonicalDelegate(DelegateResult{Response: fmt.Sprintf(`{"run_id":%q,"artifact_hash":%q,"artifact_stage":%q,"original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`,
+			request.WorkItemID, request.ArtifactHash, request.ArtifactStage)}), nil
 	case "draft":
 		if strings.Contains(request.Prompt, "PACKET PLAN") || strings.Contains(request.Prompt, "Decompose the complete approved plan") {
-			return DelegateResult{Response: `{"schema_version":1,"packets":[{"packet_id":"p1","summary":"implement feature","target_blocks":["implement"],"dependencies":[],"acceptance_criteria":["feature exists"]}]}`}, nil
+			return testCanonicalDelegate(DelegateResult{Response: `{"schema_version":1,"packets":[{"packet_id":"p1","summary":"implement feature","target_blocks":["implement"],"dependencies":[],"acceptance_criteria":["feature exists"]}]}`}), nil
 		}
 		if strings.Contains(request.Prompt, "Scope the engineering task") {
-			return DelegateResult{Response: `{"schema_version":1,"status":"unconfirmed","summary":"implement feature","rationale":"proposal","acceptance_criteria":["feature exists"]}`}, nil
+			return testCanonicalDelegate(DelegateResult{Response: `{"schema_version":1,"status":"unconfirmed","summary":"implement feature","rationale":"proposal","acceptance_criteria":["feature exists"]}`}), nil
 		}
-		return DelegateResult{Response: "1. Implement feature.\n2. Verify it.\n"}, nil
+		return testCanonicalDelegate(DelegateResult{Response: "1. Implement feature.\n2. Verify it.\n"}), nil
 	case "code":
 		a.mu.Lock()
 		a.codeRuns++
@@ -70,7 +70,7 @@ func (a *e2eAgents) Delegate(_ context.Context, request DelegateRequest) (Delega
 		if err := os.WriteFile(path, []byte(fmt.Sprintf("run %d\n", n)), 0o600); err != nil {
 			return DelegateResult{}, err
 		}
-		return DelegateResult{Response: "done"}, nil
+		return testCanonicalDelegate(DelegateResult{Response: "done"}), nil
 	default:
 		return DelegateResult{}, fmt.Errorf("unexpected role %s", request.Role)
 	}

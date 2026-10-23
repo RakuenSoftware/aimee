@@ -23,7 +23,7 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		{"learning", 8, []uint32{6145, 6146, 6147}},
 		{"routing", 9, []uint32{6401, 6402}},
 		{"providers", 33, []uint32{12545, 12546, 12547}},
-		{"delegates", 10, []uint32{6657, 6658, 6659, 6660, 6661, 6662, 6663, 6664, 6665, 6666, 6667, 6668, 6669, 6670, 6671, 6672, 6673, 6674, 6675, 6676, 6677, 6678}},
+		{"delegates", 10, []uint32{6657, 6658, 6659, 6660, 6661, 6662, 6663, 6664, 6665, 6666, 6667, 6668, 6669, 6670, 6671, 6672, 6673, 6674, 6675, 6676, 6677, 6678, 6680}},
 		{"tools", 11, []uint32{6913, 6914}},
 		{"workspace", 12, []uint32{7169, 7170, 7171}},
 		{"git", 13, []uint32{7425, 7426, 7427, 7428, 7429, 7430}},
@@ -108,6 +108,7 @@ func TestAdvertisedStagesMatchTheContractFile(t *testing.T) {
 			Stages    []struct {
 				EventKind uint32 `json:"event_kind"`
 				Name      string `json:"name"`
+				HostedBy  string `json:"hosted_by"`
 			} `json:"stages"`
 		} `json:"components"`
 	}
@@ -166,6 +167,16 @@ func TestAdvertisedStagesMatchTheContractFile(t *testing.T) {
 			advertised[s.EventKind] = true
 		}
 		for _, s := range declared.Stages {
+			if s.HostedBy != "" {
+				if declared.ID != "delegates" || s.EventKind != 6679 || s.HostedBy != "server-core" {
+					t.Fatal("unknown core stage ownership")
+				}
+				if advertised[s.EventKind] {
+					t.Fatal("Go process claimed core native execution stage")
+				}
+				continue
+			}
+
 			// roundtable-review is registered ONLY when this process can convene a
 			// panel (roundtableReviewer() succeeds), which it cannot under test.
 			// That conditionality is deliberate and documented above; every other

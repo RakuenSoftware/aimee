@@ -12,6 +12,7 @@ function SessionProbe() {
     <button onClick={() => addSession('New chat')}>Add</button>
     <button onClick={() => active && patchSession(active.id, { projectRoot: '/work/new-project', projectName: 'new-project' })}>Project</button>
     <button onClick={() => active && closeSession(active.id)}>Close</button>
+    <button onClick={() => active && patchSession(active.id, { messages: [{ role: 'assistant', text: 'Injected flat history' }] } as never)}>Flat write</button>
   </>;
 }
 
@@ -177,5 +178,28 @@ describe('SessionProvider refresh races', () => {
     await act(async () => { saves[1](json({})); });
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1);
     expect(screen.getByTestId('sessions').textContent).toBe('Alice chat');
+  });
+});
+
+describe('metadata writes cannot upload flat transcript authority', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+  it('preserves the local legacy archive but omits it from ordinary session saves', async () => {
+    localStorage.clear(); trustedCache();
+    const requests: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/auth/me') return json({ username: 'alice' });
+      if (init?.method === 'POST') { requests.push(JSON.parse(String(init.body))); return json({}); }
+      return json([remote]);
+    }));
+    render(<SessionProvider><SessionProbe /></SessionProvider>);
+    await screen.findByText('Alice chat');
+    fireEvent.click(screen.getByRole('button', { name: 'Project' }));
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    for (const request of requests) expect(request).not.toHaveProperty('messages');
+    expect(screen.getByTestId('active').textContent).toContain('private message');
+    const writes = requests.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Flat write' }));
+    expect(screen.getByTestId('active').textContent).not.toContain('Injected flat history');
+    expect(requests).toHaveLength(writes);
   });
 });

@@ -346,6 +346,7 @@ int agent_dispatch_one(const agent_t *agent, const agent_network_t *network, con
 
 /* Per-thread tool-mode override for agent_run_ex; see agent_run_force_no_tools. */
 static __thread int tl_force_no_tools = 0;
+static __thread int tl_native_turn_limit = 0;
 static __thread int tl_require_initial_tool_call = 0;
 void agent_run_force_no_tools(int on)
 {
@@ -873,7 +874,10 @@ static void parse_response(const char *body, const agent_t *agent,
    {
       agent_result_clear_response(out);
       out->response = text;
-      out->success = 1;
+      out->success = !aimee_ir_response_complete_text_valid(&response);
+      if (!out->success)
+         snprintf(out->error, sizeof out->error,
+                  "model did not return a complete canonical text answer");
    }
    else
       free(text);
@@ -1987,4 +1991,38 @@ int agent_run_request_with_tools(agent_config_t *config, const agent_t *selected
    return agent_run_with_tools_internal(
        config, "execute", NULL, query[0] ? query : "Continue the admitted conversation.",
        request->has_max_tokens ? request->max_tokens : 0, 1, out, selected, request, response);
+}
+
+/* Only the attested native bridge chooses this scope. Native execution still
+ * uses the normal selected-agent admission, capture, policy and tool owners. */
+int agent_native_request_turn_limit(void)
+{
+   return tl_native_turn_limit;
+}
+int agent_native_request_tools_disabled(void)
+{
+   return tl_force_no_tools;
+}
+int agent_run_native_request_for_role(agent_config_t *config, const agent_t *selected,
+                                      const char *role, int tools, const aimee_request_t *request,
+                                      aimee_response_t *response, agent_result_t *out)
+{
+   if (!config || !selected || !selected->enabled || !role || !role[0] ||
+       (tools != 0 && tools != 1) || !request || !response || !out ||
+       strcmp(selected->backend, "provider-cli") ||
+       (strcmp(selected->cli_kind, "claude") && strcmp(selected->cli_kind, "codex")) ||
+       aimee_ir_request_admit(request))
+      return -1;
+   char query[4096];
+   aimee_ir_last_user_text(request, query, sizeof query);
+   int previous = tl_force_no_tools, previous_limit = tl_native_turn_limit;
+   tl_force_no_tools = !tools;
+   tl_native_turn_limit = selected->max_turns > 0 ? selected->max_turns : 0;
+   int rc = agent_run_with_tools_internal(
+       config, role, request->n_system ? request->system[0].text : NULL,
+       query[0] ? query : "Continue the admitted conversation.",
+       request->has_max_tokens ? request->max_tokens : 0, 1, out, selected, request, response);
+   tl_force_no_tools = previous;
+   tl_native_turn_limit = previous_limit;
+   return rc;
 }

@@ -39,12 +39,26 @@ typedef struct
    uint32_t event_kind;
    uint64_t correlation_id;
    aimee_module_message_t message;
+   uint32_t source_principal_ref;
+   uint32_t source_handle;
    uint8_t *body;
    uint32_t body_len;
    uint32_t body_capacity;
 } module_assembly_t;
 
 static volatile sig_atomic_t process_running = 1;
+
+typedef struct
+{
+   bus_client_t *client;
+   const aimee_module_process_config_t *config;
+   aimee_module_service_stop_fn stop;
+   void *stop_context;
+} module_loop_t;
+static int loop_running(const module_loop_t *loop)
+{
+   return !loop->stop || !loop->stop(loop->stop_context);
+}
 
 static uint64_t monotonic_now_ns(void)
 {
@@ -76,6 +90,14 @@ int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocatio
    return now != 0 && aimee_module_deadline_expired(invocation->deadline_ns, now);
 }
 
+const atomic_int *aimee_module_invocation_cancel_flag(const aimee_module_invocation_t *invocation)
+{
+   if (!invocation || !invocation->runtime_state)
+      return NULL;
+   const module_work_t *work = invocation->runtime_state;
+   return &work->cancelled;
+}
+
 static uint32_t stage_for_kind(const aimee_module_process_config_t *config, uint32_t kind)
 {
    for (size_t i = 0; i < config->stage_count; ++i)
@@ -103,9 +125,11 @@ static void *run_handler(void *argument)
    }
    else if (work->status != AIMEE_MODULE_STATUS_OK)
       work->response_len = 0;
-   if (atomic_load_explicit(&work->cancelled, memory_order_acquire))
+   int cancelled = atomic_load_explicit(&work->cancelled, memory_order_acquire);
+   if (cancelled)
    {
-      work->status = AIMEE_MODULE_STATUS_CANCELLED;
+      work->status =
+          cancelled == 2 ? AIMEE_MODULE_STATUS_DEADLINE_EXCEEDED : AIMEE_MODULE_STATUS_CANCELLED;
       work->response_len = 0;
    }
    else
@@ -121,10 +145,11 @@ static void *run_handler(void *argument)
    return NULL;
 }
 
-static void reply_result(bus_client_t *client, uint32_t kind, uint64_t correlation,
+static void reply_result(module_loop_t *loop, uint32_t kind, uint64_t correlation,
                          uint32_t stage_id, uint64_t trace_id, aimee_module_status_t status,
                          const uint8_t *body, uint32_t body_len)
 {
+   bus_client_t *client = loop->client;
    if (body_len > AIMEE_MODULE_MESSAGE_MAX_BODY || (body_len > 0 && !body) ||
        status != AIMEE_MODULE_STATUS_OK)
    {
@@ -164,7 +189,8 @@ static void reply_result(bus_client_t *client, uint32_t kind, uint64_t correlati
              bus_client_reply_fragment(client, kind, correlation, payload, (uint32_t)total, more);
          if (sent == BUS_CLIENT_OK)
             break;
-         if (sent != BUS_CLIENT_WOULD_BLOCK || !process_running || bus_client_epoch_changed(client))
+         if (sent != BUS_CLIENT_WOULD_BLOCK || !loop_running(loop) ||
+             bus_client_epoch_changed(client))
          {
             free(payload);
             return;
@@ -249,15 +275,28 @@ static int append_assembly(module_assembly_t *assembly, const uint8_t *body, uin
    return 0;
 }
 
-static void reap_work(bus_client_t *client, module_work_t *work)
+static void reap_work(module_loop_t *loop, module_work_t *work)
 {
    for (size_t i = 0; i < MODULE_MAX_INFLIGHT; ++i)
    {
       module_work_t *item = &work[i];
-      if (!item->in_use || !atomic_load_explicit(&item->done, memory_order_acquire))
+      if (!item->in_use)
          continue;
+      if (!atomic_load_explicit(&item->done, memory_order_acquire))
+      {
+         uint64_t now = monotonic_now_ns();
+         if (now && aimee_module_deadline_expired(item->invocation.deadline_ns, now))
+         {
+            int active = 0;
+            /* SDK/other joined owners borrow this flag rather than the AMOD
+             * clock. Preserve the first explicit-cancel/deadline cause. */
+            atomic_compare_exchange_strong_explicit(&item->cancelled, &active, 2,
+                                                    memory_order_release, memory_order_relaxed);
+         }
+         continue;
+      }
       (void)pthread_join(item->thread, NULL);
-      reply_result(client, item->event_kind, item->correlation_id, item->invocation.stage_id,
+      reply_result(loop, item->event_kind, item->correlation_id, item->invocation.stage_id,
                    item->invocation.trace_id, item->status, item->response_body,
                    item->response_len);
       free(item->request_body);
@@ -266,7 +305,7 @@ static void reap_work(bus_client_t *client, module_work_t *work)
    }
 }
 
-static void stop_work(module_work_t *work)
+static void stop_work(module_loop_t *loop, module_work_t *work)
 {
    for (size_t i = 0; i < MODULE_MAX_INFLIGHT; ++i)
       if (work[i].in_use)
@@ -276,30 +315,42 @@ static void stop_work(module_work_t *work)
       if (!work[i].in_use)
          continue;
       (void)pthread_join(work[i].thread, NULL);
+      reply_result(loop, work[i].event_kind, work[i].correlation_id, work[i].invocation.stage_id,
+                   work[i].invocation.trace_id, AIMEE_MODULE_STATUS_CANCELLED, NULL, 0);
       free(work[i].request_body);
       free(work[i].response_body);
    }
 }
 
-static void start_request(bus_client_t *client, const aimee_module_process_config_t *config,
-                          module_work_t *work, module_assembly_t *assemblies,
+static void start_request(module_loop_t *loop, module_work_t *work, module_assembly_t *assemblies,
                           const bus_event_t *event, uint64_t now)
 {
+   const aimee_module_process_config_t *config = loop->config;
    uint32_t expected_stage = stage_for_kind(config, event->frame.event_kind);
    aimee_module_message_t request;
    aimee_module_message_result_t decoded =
        aimee_module_message_decode(event->payload, event->payload_len, &request);
    module_assembly_t *assembly = find_assembly(assemblies, event->frame.correlation_id);
+   if (!loop_running(loop))
+   {
+      discard_assembly(assembly);
+      reply_result(loop, event->frame.event_kind, event->frame.correlation_id, expected_stage,
+                   decoded == AIMEE_MODULE_MESSAGE_OK ? request.trace_id : 0,
+                   AIMEE_MODULE_STATUS_CANCELLED, NULL, 0);
+      return;
+   }
    if (expected_stage == 0 || decoded != AIMEE_MODULE_MESSAGE_OK ||
        request.operation != AIMEE_MODULE_OP_INVOKE || request.stage_id != expected_stage ||
        find_work(work, event->frame.correlation_id) != NULL ||
-       (assembly && (assembly->event_kind != event->frame.event_kind ||
+       (assembly && (assembly->source_principal_ref != event->frame.principal_ref ||
+                     assembly->source_handle != event->frame.src_handle ||
+                     assembly->event_kind != event->frame.event_kind ||
                      assembly->message.stage_id != request.stage_id ||
                      assembly->message.deadline_ns != request.deadline_ns ||
                      assembly->message.trace_id != request.trace_id)))
    {
       discard_assembly(assembly);
-      reply_result(client, event->frame.event_kind, event->frame.correlation_id, expected_stage, 0,
+      reply_result(loop, event->frame.event_kind, event->frame.correlation_id, expected_stage, 0,
                    AIMEE_MODULE_STATUS_INVALID_REQUEST, NULL, 0);
       return;
    }
@@ -309,7 +360,7 @@ static void start_request(bus_client_t *client, const aimee_module_process_confi
       assembly = free_assembly_slot(assemblies);
       if (!assembly)
       {
-         reply_result(client, event->frame.event_kind, event->frame.correlation_id, expected_stage,
+         reply_result(loop, event->frame.event_kind, event->frame.correlation_id, expected_stage,
                       request.trace_id, AIMEE_MODULE_STATUS_INTERNAL, NULL, 0);
          return;
       }
@@ -318,13 +369,15 @@ static void start_request(bus_client_t *client, const aimee_module_process_confi
       assembly->event_kind = event->frame.event_kind;
       assembly->correlation_id = event->frame.correlation_id;
       assembly->message = request;
+      assembly->source_principal_ref = event->frame.principal_ref;
+      assembly->source_handle = event->frame.src_handle;
    }
    if (append_assembly(assembly, event->payload + AIMEE_MODULE_MESSAGE_HEADER_LEN,
                        request.body_len) != 0)
    {
       uint64_t trace_id = request.trace_id;
       discard_assembly(assembly);
-      reply_result(client, event->frame.event_kind, event->frame.correlation_id, expected_stage,
+      reply_result(loop, event->frame.event_kind, event->frame.correlation_id, expected_stage,
                    trace_id, AIMEE_MODULE_STATUS_INTERNAL, NULL, 0);
       return;
    }
@@ -340,14 +393,14 @@ static void start_request(bus_client_t *client, const aimee_module_process_confi
    if (now != 0 && aimee_module_deadline_expired(request.deadline_ns, now))
    {
       free(request_body);
-      reply_result(client, event->frame.event_kind, event->frame.correlation_id, expected_stage,
+      reply_result(loop, event->frame.event_kind, event->frame.correlation_id, expected_stage,
                    request.trace_id, AIMEE_MODULE_STATUS_DEADLINE_EXCEEDED, NULL, 0);
       return;
    }
    if (!config->handler)
    {
       free(request_body);
-      reply_result(client, event->frame.event_kind, event->frame.correlation_id, expected_stage,
+      reply_result(loop, event->frame.event_kind, event->frame.correlation_id, expected_stage,
                    request.trace_id, AIMEE_MODULE_STATUS_CAPABILITY_ABSENT, NULL, 0);
       return;
    }
@@ -356,7 +409,7 @@ static void start_request(bus_client_t *client, const aimee_module_process_confi
    if (!item)
    {
       free(request_body);
-      reply_result(client, event->frame.event_kind, event->frame.correlation_id, expected_stage,
+      reply_result(loop, event->frame.event_kind, event->frame.correlation_id, expected_stage,
                    request.trace_id, AIMEE_MODULE_STATUS_INTERNAL, NULL, 0);
       return;
    }
@@ -374,6 +427,8 @@ static void start_request(bus_client_t *client, const aimee_module_process_confi
    item->invocation.deadline_ns = request.deadline_ns;
    item->invocation.trace_id = request.trace_id;
    item->invocation.runtime_state = item;
+   item->invocation.source_principal_ref = event->frame.principal_ref;
+   item->invocation.source_handle = event->frame.src_handle;
    item->handler = config->handler;
    item->user_data = config->user_data;
    item->request_len = request_len;
@@ -386,7 +441,7 @@ allocation_failed:
    free(item->request_body);
    free(item->response_body);
    memset(item, 0, sizeof(*item));
-   reply_result(client, event->frame.event_kind, event->frame.correlation_id, expected_stage,
+   reply_result(loop, event->frame.event_kind, event->frame.correlation_id, expected_stage,
                 request.trace_id, AIMEE_MODULE_STATUS_INTERNAL, NULL, 0);
 }
 
@@ -400,6 +455,61 @@ static int config_valid(const aimee_module_process_config_t *config)
       if (config->stages[i].event_kind == 0 || config->stages[i].stage_id == 0)
          return 0;
    return 1;
+}
+
+static int process_stopped(void *context)
+{
+   (void)context;
+   return !process_running;
+}
+
+int aimee_module_service_run(bus_client_t *client, const aimee_module_process_config_t *config,
+                             aimee_module_service_stop_fn stop, void *stop_context)
+{
+   if (!client || !config || !config->stages || !config->stage_count || !stop)
+      return 2;
+   for (size_t i = 0; i < config->stage_count; i++)
+      if (!config->stages[i].event_kind || !config->stages[i].stage_id)
+         return 2;
+   module_loop_t loop = {
+       .client = client, .config = config, .stop = stop, .stop_context = stop_context};
+   module_work_t work[MODULE_MAX_INFLIGHT];
+   memset(work, 0, sizeof work);
+   module_assembly_t assemblies[MODULE_MAX_INFLIGHT];
+   memset(assemblies, 0, sizeof assemblies);
+   while (loop_running(&loop) && !bus_client_epoch_changed(client))
+   {
+      uint64_t now = monotonic_now_ns();
+      if (now != 0)
+         bus_client_heartbeat(client, now);
+      reap_work(&loop, work);
+
+      bus_event_t event;
+      bus_client_result_t result = bus_client_poll(client, &event);
+      if (result == BUS_CLIENT_EPOCH)
+         break;
+      if (result == BUS_CLIENT_OK && (event.frame.hdr_flags & BUS_F_CANCEL))
+      {
+         module_work_t *item = find_work(work, event.frame.correlation_id);
+         if (item)
+         {
+            int active = 0;
+            atomic_compare_exchange_strong_explicit(&item->cancelled, &active, 1,
+                                                    memory_order_release, memory_order_relaxed);
+         }
+         discard_assembly(find_assembly(assemblies, event.frame.correlation_id));
+      }
+      else if (result == BUS_CLIENT_OK && (event.frame.hdr_flags & BUS_F_REQUEST))
+      {
+         start_request(&loop, work, assemblies, &event, now);
+      }
+      const struct timespec idle = {.tv_sec = 0, .tv_nsec = 1000000};
+      nanosleep(&idle, NULL);
+   }
+   stop_work(&loop, work);
+   for (size_t i = 0; i < MODULE_MAX_INFLIGHT; ++i)
+      discard_assembly(&assemblies[i]);
+   return 0;
 }
 
 int aimee_module_process_run(const aimee_module_process_config_t *config)
@@ -426,38 +536,7 @@ int aimee_module_process_run(const aimee_module_process_config_t *config)
    }
    bus_endpoint_close(&socket_fd);
 
-   module_work_t work[MODULE_MAX_INFLIGHT];
-   memset(work, 0, sizeof work);
-   module_assembly_t assemblies[MODULE_MAX_INFLIGHT];
-   memset(assemblies, 0, sizeof assemblies);
-   while (process_running && !bus_client_epoch_changed(&client))
-   {
-      uint64_t now = monotonic_now_ns();
-      if (now != 0)
-         bus_client_heartbeat(&client, now);
-      reap_work(&client, work);
-
-      bus_event_t event;
-      bus_client_result_t result = bus_client_poll(&client, &event);
-      if (result == BUS_CLIENT_EPOCH)
-         break;
-      if (result == BUS_CLIENT_OK && (event.frame.hdr_flags & BUS_F_CANCEL))
-      {
-         module_work_t *item = find_work(work, event.frame.correlation_id);
-         if (item)
-            atomic_store_explicit(&item->cancelled, 1, memory_order_release);
-         discard_assembly(find_assembly(assemblies, event.frame.correlation_id));
-      }
-      else if (result == BUS_CLIENT_OK && (event.frame.hdr_flags & BUS_F_REQUEST))
-      {
-         start_request(&client, config, work, assemblies, &event, now);
-      }
-      const struct timespec idle = {.tv_sec = 0, .tv_nsec = 1000000};
-      nanosleep(&idle, NULL);
-   }
-   stop_work(work);
-   for (size_t i = 0; i < MODULE_MAX_INFLIGHT; ++i)
-      discard_assembly(&assemblies[i]);
+   int result = aimee_module_service_run(&client, config, process_stopped, NULL);
    bus_client_detach(&client);
-   return 0;
+   return result;
 }

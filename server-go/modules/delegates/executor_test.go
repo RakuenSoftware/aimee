@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,17 +87,22 @@ func (e *planningExecutor) PlanGroup(_ context.Context,
 
 func (blockingExecutor) Execute(ctx context.Context, _ delegatecontract.Invocation) delegatecontract.InvocationResult {
 	<-ctx.Done()
-	return delegatecontract.InvocationResult{Version: 2, Status: "failed", Error: ctx.Err().Error()}
+	return delegatecontract.InvocationResult{Version: delegatecontract.WireVersion, Status: "failed", Error: ctx.Err().Error()}
 }
 
 func (e *fixedExecutor) Execute(_ context.Context, request delegatecontract.Invocation) delegatecontract.InvocationResult {
 	e.request = request
-	return e.result
+	result := e.result
+	if result.Status == "done" {
+		result.Output = canonical.TextResponse(result.Response)
+		result.History = []canonical.Message{{Role: "assistant", Blocks: []canonical.Block{result.Output.Blocks[0].Block}}}
+	}
+	return result
 }
 
 func TestExecutionStageCanonicalizesRoleAndReturnsTerminalStatus(t *testing.T) {
-	executor := &fixedExecutor{result: delegatecontract.InvocationResult{Version: 2, Status: "done", Response: "complete"}}
-	request, _ := json.Marshal(delegatecontract.Invocation{Version: 2, Role: "implement", Persona: "engineer", Prompt: "do it"})
+	executor := &fixedExecutor{result: delegatecontract.InvocationResult{Version: delegatecontract.WireVersion, Status: "done", Response: "complete"}}
+	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion, Role: "implement", Persona: "engineer", Input: delegatecontract.TaskRequest("fixture", "do it")})
 	reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request)
 	if status != bus.ModuleStatusOK {
 		t.Fatalf("status = %d", status)
@@ -111,8 +117,8 @@ func TestExecutionStageCanonicalizesRoleAndReturnsTerminalStatus(t *testing.T) {
 }
 
 func TestExecutionStageAppliesProducerDeadline(t *testing.T) {
-	request, _ := json.Marshal(delegatecontract.Invocation{Version: 2, Role: "review",
-		Persona: "reviewer", Prompt: "inspect", ExecutionTimeoutMS: 20})
+	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion, Role: "review",
+		Persona: "reviewer", Input: delegatecontract.TaskRequest("fixture", "inspect"), ExecutionTimeoutMS: 20})
 	started := time.Now()
 	reply, status := NewHandler(blockingExecutor{})(bus.ModuleInvocation{StageID: StageInvoke}, request)
 	if status != bus.ModuleStatusOK || time.Since(started) > time.Second {
@@ -133,7 +139,7 @@ func TestExecutionStageRejectsMalformedTermination(t *testing.T) {
 		},
 	}}
 	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion,
-		Role: "review", Persona: "reviewer", Prompt: "inspect"})
+		Role: "review", Persona: "reviewer", Input: delegatecontract.TaskRequest("fixture", "inspect")})
 	if reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request); status != bus.ModuleStatusInternal || reply != nil {
 		t.Fatalf("malformed termination crossed the wire: status=%d reply=%s", status, reply)
 	}
@@ -147,7 +153,7 @@ func TestExecutionStageRejectsTerminationWithMismatchedExecutionCap(t *testing.T
 		},
 	}}
 	request, _ := json.Marshal(delegatecontract.Invocation{Version: delegatecontract.WireVersion,
-		Role: "review", Persona: "reviewer", Prompt: "inspect", ExecutionTimeoutMS: 1000})
+		Role: "review", Persona: "reviewer", Input: delegatecontract.TaskRequest("fixture", "inspect"), ExecutionTimeoutMS: 1000})
 	if reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request); status != bus.ModuleStatusInternal || reply != nil {
 		t.Fatalf("termination with a mismatched execution cap crossed the wire: status=%d reply=%s", status, reply)
 	}
@@ -199,7 +205,7 @@ func TestGroupPlanStageKeepsNonCapacityFailureAsTransportError(t *testing.T) {
 func TestRegistryExecutorRunsArgvWithoutShell(t *testing.T) {
 	home := t.TempDir()
 	script := filepath.Join(home, "delegate-helper")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nread prompt\nprintf 'answer:%s' \"$prompt\"\n"), 0o700); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'answer:'\ncat\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	registry := map[string]any{"default_agent": "helper", "agents": []map[string]any{{
@@ -218,8 +224,8 @@ func TestRegistryExecutorRunsArgvWithoutShell(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(workdir, ".git"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	result := executor.Execute(t.Context(), delegatecontract.Invocation{Version: 2, Role: "code",
-		Persona: "security", Prompt: "inspect", Workdir: workdir, Tools: true})
+	result := executor.Execute(t.Context(), delegatecontract.Invocation{Version: delegatecontract.WireVersion, Role: "code",
+		Persona: "security", Input: delegatecontract.TaskRequest("security", "inspect"), Workdir: workdir, Tools: true})
 	if result.Status != "done" || !strings.Contains(result.Response, "You are acting as security.") {
 		t.Fatalf("result = %+v", result)
 	}
@@ -252,8 +258,8 @@ func TestRegistryExecutorEnforcesMaxParallelWithoutPoisoningAgentHealth(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := delegatecontract.Invocation{Version: 2, Role: "code", Persona: "engineer",
-		Prompt: "work", Workdir: workdir, Tools: true}
+	request := delegatecontract.Invocation{Version: delegatecontract.WireVersion, Role: "code", Persona: "engineer",
+		Input: delegatecontract.TaskRequest("fixture", "work"), Workdir: workdir, Tools: true}
 	results := make(chan delegatecontract.InvocationResult, 2)
 	for range 2 {
 		go func() { results <- executor.Execute(t.Context(), request) }()
@@ -325,8 +331,8 @@ func TestRegistryExecutorTypesCallerDeadlineAsExecutionDeadline(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
-	result := executor.Execute(ctx, delegatecontract.Invocation{Version: 2, Role: "code",
-		Persona: "engineer", Prompt: "work", Workdir: workdir, Tools: true})
+	result := executor.Execute(ctx, delegatecontract.Invocation{Version: delegatecontract.WireVersion, Role: "code",
+		Persona: "engineer", Input: delegatecontract.TaskRequest("fixture", "work"), Workdir: workdir, Tools: true})
 	if result.Status != "failed" || !delegatecontract.IsExecutionDeadline(errors.New(result.Error)) ||
 		delegatecontract.IsCapacityDeadline(errors.New(result.Error)) {
 		t.Fatalf("caller deadline was not typed as an execution deadline: %+v", result)
@@ -529,33 +535,11 @@ func TestRegistryRejectsNegativeMaxParallel(t *testing.T) {
 	}
 }
 
-func TestExecutorArgvFailsClosedWhenToolsCannotBeDisabled(t *testing.T) {
-	_, err := executorArgv(agentEntry{CLIKind: "codex", CLICmd: "codex"},
-		delegatecontract.Invocation{Role: "review", Tools: false})
-	if err == nil || !strings.Contains(err.Error(), "tools-disabled") {
-		t.Fatalf("codex tools-disabled error = %v", err)
-	}
-	argv, err := executorArgv(agentEntry{CLIKind: "claude", CLICmd: "claude"},
-		delegatecontract.Invocation{Role: "review", Tools: false})
-	tools := slices.Index(argv, "--tools")
-	if err != nil || tools < 0 || tools+1 >= len(argv) || argv[tools+1] != "" {
-		t.Fatalf("claude tools-disabled argv = %q, %v", argv, err)
-	}
-}
-
-func TestTurnMonitorCancelsAtTheConfiguredCap(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	var output bytes.Buffer
-	monitor := newTurnMonitor("claude", 1, cancel, &output)
-	_, _ = monitor.Write([]byte("{\"type\":\"assistant\"}\n{\"type\":\"assistant\"}\n"))
-	if !monitor.Exceeded() || ctx.Err() == nil {
-		t.Fatal("Claude turn cap did not cancel execution")
-	}
-	ctx, cancel = context.WithCancel(t.Context())
-	monitor = newTurnMonitor("codex", 1, cancel, &output)
-	_, _ = monitor.Write([]byte("{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\"}}\n"))
-	if !monitor.Exceeded() || ctx.Err() == nil {
-		t.Fatal("Codex turn cap did not cancel execution")
+func TestNativeSDKArgvCannotBypassCanonicalHost(t *testing.T) {
+	for _, kind := range []string{"claude", "claude-code", "codex"} {
+		if _, err := executorArgv(agentEntry{CLIKind: kind, CLICmd: kind}, delegatecontract.Invocation{Role: "review", Tools: true}); err == nil {
+			t.Fatal("direct native SDK argv admitted")
+		}
 	}
 }
 
@@ -578,7 +562,16 @@ func turnCapExecutorFixture(t *testing.T, kind string) (*RegistryExecutor, strin
 	if err := os.WriteFile(filepath.Join(home, "models.json"), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	executor, err := NewRegistryExecutor(home)
+	executor, err := NewRegistryExecutorWithHost(home, hostCallFunc(func(_ context.Context, _ uint32, _ uint32, _ uint64, _ time.Duration, body []byte) ([]byte, error) {
+		var request delegatecontract.Invocation
+		if err := json.Unmarshal(body, &request); err != nil {
+			return nil, err
+		}
+		if request.MaxTurns != 1 || request.ExecutionTimeoutMS != 5000 {
+			t.Fatal("native execution limit lost before host")
+		}
+		return json.Marshal(delegatecontract.InvocationResult{Version: delegatecontract.WireVersion, Agent: request.Model, Status: "failed", Error: delegatecontract.ErrDelegateTurnCap.Error(), Termination: &delegatecontract.TerminationDiagnostic{Kind: delegatecontract.TerminationTurnCap, MaxTurns: request.MaxTurns, ObservedTurns: 2, ExecutionTimeoutMS: request.ExecutionTimeoutMS, ElapsedMS: 1, Detail: "[REDACTED]"}})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,27 +623,29 @@ func assertFixtureProcessesGone(t *testing.T, pidFile string) {
 	}
 }
 
-func TestRegistryExecutorTurnCap(t *testing.T) {
+func TestRegistryExecutorPreservesHostTurnCap(t *testing.T) {
 	for _, kind := range []string{"claude", "codex"} {
 		t.Run(kind, func(t *testing.T) {
 			executor, pidFile := turnCapExecutorFixture(t, kind)
 			result := executor.Execute(t.Context(), delegatecontract.Invocation{
-				Version: delegatecontract.WireVersion, Role: "review", Persona: "qa",
-				Prompt: "exceed the cap", Tools: true, MaxTurns: 1, ExecutionTimeoutMS: 5000,
+				Operation: "fixture-operation", ExecutionScope: strings.Repeat("a", 64), Version: delegatecontract.WireVersion, Role: "review", Persona: "qa",
+				Input: delegatecontract.TaskRequest("fixture", "exceed the cap"), Tools: true, MaxTurns: 1, ExecutionTimeoutMS: 5000,
 			})
 			assertTurnCapResult(t, result)
-			assertFixtureProcessesGone(t, pidFile)
+			if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+				t.Fatal("native SDK bypassed host owner")
+			}
 		})
 	}
 }
 
-func TestExecutionStageTurnCapWire(t *testing.T) {
+func TestExecutionStagePreservesHostTurnCapWire(t *testing.T) {
 	for _, kind := range []string{"claude", "codex"} {
 		t.Run(kind, func(t *testing.T) {
 			executor, pidFile := turnCapExecutorFixture(t, kind)
 			request, _ := json.Marshal(delegatecontract.Invocation{
-				Version: delegatecontract.WireVersion, Role: "review", Persona: "qa",
-				Prompt: "cross the wire", Tools: true, MaxTurns: 1, ExecutionTimeoutMS: 5000,
+				Operation: "fixture-operation", ExecutionScope: strings.Repeat("a", 64), Version: delegatecontract.WireVersion, Role: "review", Persona: "qa",
+				Input: delegatecontract.TaskRequest("fixture", "cross the wire"), Tools: true, MaxTurns: 1, ExecutionTimeoutMS: 5000,
 			})
 			reply, status := NewHandler(executor)(bus.ModuleInvocation{StageID: StageInvoke}, request)
 			if status != bus.ModuleStatusOK {
@@ -661,7 +656,9 @@ func TestExecutionStageTurnCapWire(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertTurnCapResult(t, result)
-			assertFixtureProcessesGone(t, pidFile)
+			if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+				t.Fatal("native SDK bypassed host owner")
+			}
 		})
 	}
 }
@@ -729,7 +726,7 @@ func TestExecutorCancellationTerminatesDelegateProcessGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := delegatecontract.Invocation{Version: delegatecontract.WireVersion,
-		Role: "code", Persona: "engineer", Prompt: "work", Workdir: workdir, Tools: true}
+		Role: "code", Persona: "engineer", Input: delegatecontract.TaskRequest("fixture", "work"), Workdir: workdir, Tools: true}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan delegatecontract.InvocationResult, 1)
 	go func() {
@@ -794,7 +791,7 @@ func TestRegistryExecutorExecutionDeadlineDiagnostic(t *testing.T) {
 	defer cancel()
 	result := executor.Execute(ctx, delegatecontract.Invocation{
 		Version: delegatecontract.WireVersion, Role: "code", Persona: "engineer",
-		Prompt: "wait", Workdir: workdir, Tools: true, ExecutionTimeoutMS: 75,
+		Input: delegatecontract.TaskRequest("fixture", "wait"), Workdir: workdir, Tools: true, ExecutionTimeoutMS: 75,
 	})
 	if result.Status != "failed" || result.Termination == nil ||
 		result.Termination.Kind != delegatecontract.TerminationExecutionDeadline ||

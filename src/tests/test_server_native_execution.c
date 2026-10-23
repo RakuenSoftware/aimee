@@ -381,15 +381,15 @@ int agent_tools_knowledge_write_allowed(void)
 }
 cJSON *build_tools_array_responses(void)
 {
-   return cJSON_CreateArray();
+   return cJSON_Parse("[{\"name\":\"read_file\"}]");
 }
 cJSON *build_tools_array(void)
 {
-   return cJSON_CreateArray();
+   return cJSON_Parse("[{\"name\":\"read_file\"}]");
 }
 cJSON *build_tools_array_anthropic(void)
 {
-   return cJSON_CreateArray();
+   return cJSON_Parse("[{\"name\":\"read_file\"}]");
 }
 
 void agent_tools_filter_for_role(cJSON *tools, const char *role)
@@ -413,6 +413,7 @@ char *agent_build_exec_context_checked(const agent_t *agent, const agent_network
    assert(!strcmp(agent->model, "selected-model") && skip);
    return strdup("host environment");
 }
+static int expected_no_tools;
 int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON *tools,
                              const char *system, int max_tokens, double temperature,
                              aimee_wire_t wire, int delegate, aimee_request_t *out)
@@ -420,6 +421,7 @@ int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON 
    assert(max_tokens == 0 && temperature == -1);
    (void)delegate;
    assert(cJSON_GetArraySize(messages) == 0 && cJSON_IsArray(tools));
+   assert(cJSON_GetArraySize(tools) == (expected_no_tools ? 0 : 1));
    assert(!strcmp(system, "host environment") && wire == expected_wire);
    if (expected_provider)
       assert(!strcmp(agent->provider, expected_provider));
@@ -428,6 +430,8 @@ int agent_prepare_request_ir(const agent_t *agent, const cJSON *messages, cJSON 
    if (expected_auth)
       assert(!strcmp(agent->auth_type, expected_auth));
    out->model = strdup(agent->model);
+   if (expected_no_tools)
+      return 0;
    out->tools = calloc(1, sizeof *out->tools);
    assert(out->tools);
    out->n_tools = 1;
@@ -492,6 +496,12 @@ server_native_runtime_t *server_native_runtime_open_bound_request(
    if (expected_auth)
       assert(!strcmp(selected->auth_type, expected_auth));
    assert(!durable_reservation); /* Session recovery precedes current profile. */
+   if (expected_no_tools)
+   {
+      assert(!profile->n_tools && !count && !bindings);
+      opened++;
+      return &runtime;
+   }
    assert(profile->n_tools == 1 && profile->tools[0].kind == AIMEE_TOOL_FUNCTION);
    const char *logical = !strcmp(active_sdk, "claude") ? "mcp__aimee__read_file" : "read_file";
    assert(!strcmp(profile->tools[0].name, logical));
@@ -517,6 +527,21 @@ const char *server_native_runtime_binding(const server_native_runtime_t *r)
 {
    assert(r == &runtime);
    return digest;
+}
+int server_native_runtime_set_turn_limit(server_native_runtime_t *r, int limit)
+{
+   assert(r == &runtime && limit == 0);
+   return 0;
+}
+int server_native_runtime_turn_limit_reached(const server_native_runtime_t *r)
+{
+   assert(r == &runtime);
+   return 0;
+}
+int server_native_runtime_model_turns(const server_native_runtime_t *r)
+{
+   assert(r == &runtime);
+   return 0;
 }
 int server_native_runtime_attest_launch(server_native_runtime_t *r, const char *proof)
 {
@@ -566,7 +591,7 @@ int server_native_runtime_result(const server_native_runtime_t *r, aimee_respons
    if (mode == 3)
       return -1;
    out->role = strdup("assistant");
-   out->n_content = mode == 11 ? 2 : 1;
+   out->n_content = mode == 19 ? 4 : mode == 11 ? 2 : 1;
    out->content = calloc((size_t)out->n_content, sizeof *out->content);
    out->content[0].type = AIMEE_BLK_TEXT;
    out->content[0].text = strdup("ORIGINAL canonical output");
@@ -575,11 +600,48 @@ int server_native_runtime_result(const server_native_runtime_t *r, aimee_respons
                                         .text = strdup("original reasoning"),
                                         .thinking_id = strdup("original-reasoning-id"),
                                         .thinking_encrypted_content = strdup("opaque-original")};
+   if (mode == 19)
+   {
+      out->content[1] = (aimee_block_t){.type = AIMEE_BLK_IMAGE,
+                                        .media_type = strdup("image/png"),
+                                        .media_ref = strdup("data:image/png;base64,cGl4ZWw=")};
+      out->content[1].raw = cJSON_Parse("{\"native_media\":{\"id\":9007199254740993}}");
+      out->content[2] = (aimee_block_t){.type = AIMEE_BLK_DOCUMENT,
+                                        .media_type = strdup("application/pdf"),
+                                        .media_ref = strdup("https://owned.invalid/document.pdf")};
+      out->content[3] =
+          (aimee_block_t){.type = AIMEE_BLK_THINKING,
+                          .text = strdup("retained thought"),
+                          .thinking_encrypted_content = strdup("opaque-encrypted-thought")};
+   }
+   if (mode == 20)
+   {
+      free(out->content[0].text);
+      out->content[0] = (aimee_block_t){.type = AIMEE_BLK_IMAGE,
+                                        .media_type = strdup("image/png"),
+                                        .media_ref = strdup("data:image/png;base64,cGl4ZWw=")};
+   }
    out->usage_in = 73;
    out->usage_out = 29;
    out->usage_cache_read = 11;
    out->usage_cache_write = 7;
-   out->stop_reason = mode == 4 ? AIMEE_STOP_TOOL_USE : AIMEE_STOP_END_TURN;
+   out->stop_reason = mode == 4                  ? AIMEE_STOP_TOOL_USE
+                      : mode == 12 || mode == 15 ? AIMEE_STOP_CONTENT_FILTER
+                      : mode == 13               ? AIMEE_STOP_MAX_TOKENS
+                      : mode == 14               ? AIMEE_STOP_UNKNOWN
+                      : mode == 16               ? AIMEE_STOP_ERROR
+                                                 : AIMEE_STOP_END_TURN;
+   if (mode == 12 || mode == 15)
+   {
+      out->raw_stop_reason = strdup("refusal");
+      out->refusal = calloc(1, sizeof *out->refusal);
+      out->refusal->category = strdup("future_provider_category");
+      out->refusal->explanation = strdup("retained provider detail");
+   }
+   if (mode == 16)
+      out->error_message = strdup("retained upstream diagnostic");
+   if (mode == 17)
+      out->content[0].type = AIMEE_BLK_THINKING;
    return 0;
 }
 int server_native_runtime_execute_tool(const aimee_block_t *call, aimee_block_t *result, void *ctx)
@@ -685,7 +747,7 @@ static int sdk_execute(const provider_cli_cfg_t *cfg, agent_result_t *out)
    assert(!cfg->bind_session("native-result", cfg->bind_context));
    out->response = strdup("SDK REWRITE MUST NOT BECOME CANONICAL");
    out->success = !rc;
-   return rc;
+   return mode == 15 || mode == 16 || mode == 18 ? -1 : rc;
 }
 const provider_cli_adapter_t codex_provider_cli_adapter = {.cli_kind = "codex",
                                                            .execute = sdk_execute};
@@ -1083,6 +1145,84 @@ int main(int argc, char **argv)
       }
       agent_result_clear_response(&out);
    }
+   /* Provider declines/partials and failed SDK framing retain original IR,
+    * never the SDK display, and cannot publish a successful native cache. */
+   for (int diagnostic = 12; diagnostic <= 18; diagnostic++)
+   {
+      reset(diagnostic);
+      aimee_response_t original = {0};
+      cfg.canonical_response = &original;
+      agent_result_t failed = {0};
+      assert(provider_cli_adapter_host_execute(&cfg, &failed) < 0);
+      assert(!failed.success && !terminal && !completed && aborted == 1 && closed == 1);
+      assert(original.n_content == 1 && original.usage_in == 73 && original.usage_out == 29);
+      assert(failed.canonical_response.n_content == 1);
+      assert(!failed.response || !strstr(failed.response, "SDK REWRITE"));
+      if (diagnostic == 12 || diagnostic == 15)
+      {
+         assert(original.stop_reason == AIMEE_STOP_CONTENT_FILTER && original.refusal &&
+                !strcmp(original.refusal->category, "future_provider_category") &&
+                !strcmp(original.refusal->explanation, "retained provider detail") &&
+                !strcmp(original.raw_stop_reason, "refusal"));
+      }
+      if (diagnostic == 13)
+         assert(original.stop_reason == AIMEE_STOP_MAX_TOKENS);
+      if (diagnostic == 14)
+         assert(original.stop_reason == AIMEE_STOP_UNKNOWN);
+      if (diagnostic == 16)
+         assert(original.stop_reason == AIMEE_STOP_ERROR && original.error_message &&
+                !strcmp(original.error_message, "retained upstream diagnostic"));
+      if (diagnostic == 17)
+         assert(original.content[0].type == AIMEE_BLK_THINKING);
+      if (diagnostic == 18)
+         assert(original.stop_reason == AIMEE_STOP_END_TURN && !failed.success);
+      aimee_response_free(&original);
+      agent_result_clear_response(&failed);
+      cfg.canonical_response = NULL;
+   }
+   /* General native/primary completion preserves all admitted visible media,
+    * even with no text. Business TEXT-only projection is a different boundary. */
+   for (int media = 19; media <= 20; media++)
+   {
+      reset(media);
+      aimee_response_t original = {0};
+      cfg.canonical_response = &original;
+      agent_result_t rendered = {0};
+      assert(!provider_cli_adapter_host_execute(&cfg, &rendered));
+      assert(rendered.success && terminal && !completed && !aborted);
+      assert(original.n_content == (media == 19 ? 4 : 1) && original.usage_in == 73);
+      if (media == 19)
+      {
+         assert(original.content[1].type == AIMEE_BLK_IMAGE &&
+                original.content[2].type == AIMEE_BLK_DOCUMENT);
+         assert(original.content[1].raw && !strcmp(original.content[3].thinking_encrypted_content,
+                                                   "opaque-encrypted-thought"));
+         char *raw = cJSON_PrintUnformatted(original.content[1].raw);
+         assert(raw && strstr(raw, "9007199254740993"));
+         cJSON_free(raw);
+      }
+      else
+         assert(original.content[0].type == AIMEE_BLK_IMAGE && rendered.response &&
+                !rendered.response[0]);
+      assert(aimee_ir_response_complete_text_valid(&original)); /* not a business artifact */
+      aimee_response_free(&original);
+      agent_result_clear_response(&rendered);
+      cfg.canonical_response = NULL;
+      finish(1);
+      assert(completed == 1 && !aborted);
+   }
+   /* The source-bound no-tools selection must reach the actual native profile
+    * and runtime tool owner, not just hide tools in a display/Go request. */
+   reset(0);
+   expected_no_tools = 1;
+   cfg.no_tools = 1;
+   agent_result_t tool_less = {0};
+   assert(!provider_cli_adapter_host_execute(&cfg, &tool_less));
+   assert(tool_less.success && opened == 1);
+   finish(1);
+   agent_result_clear_response(&tool_less);
+   cfg.no_tools = 0;
+   expected_no_tools = 0;
    /* DB40 acknowledgement can precede the marker at a crash: recover by
     * authenticated directory lookup, never by adopting a marker into DB40. */
    reset(0);

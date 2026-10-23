@@ -214,14 +214,16 @@ char *roadmap_milestone_validate(const char *roadmap_id, const char *milestone_i
 
    free(prompt);
 
-   if (rc != 0 || !result.response)
+   char *authored = rc ? NULL : agent_result_take_text(&result);
+   if (!authored)
    {
       agent_result_clear_response(&result);
       return NULL;
    }
 
-   const char *verdict = roadmap_milestone_parse_verdict(result.response);
+   const char *verdict = roadmap_milestone_parse_verdict(authored);
    char *ret = strdup(verdict);
+   free(authored);
    agent_result_clear_response(&result);
    return ret;
 }

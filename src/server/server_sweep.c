@@ -445,17 +445,19 @@ int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       int prc = agent_run_named(&acfg, proposer, "review", NULL, prompt, 0, 0.2, &r);
       free(prompt);
       areas_run++;
-      if (prc != 0 || !r.response || !r.response[0])
+      char *authored = prc ? NULL : agent_result_take_text(&r);
+      if (!authored)
          aimee_log(LOG_WARN, "sweep", "proposer produced no candidates for area %d (rc=%d)", a,
                    prc);
-      if (r.response && r.response[0])
+      if (authored)
       {
          sweep_candidate_t cand[SWEEP_MAX_CAND];
-         int nc = sweep_parse_candidates(r.response, cand, SWEEP_MAX_CAND);
+         int nc = sweep_parse_candidates(authored, cand, SWEEP_MAX_CAND);
          for (int i = 0; i < nc && i < caps.max_items_per_area; i++)
             score_candidate(cands, &cand[i], &scfg, settled, settled_n, &strong, &worth, &rejected,
                             &excluded, &fc);
       }
+      free(authored);
       agent_result_clear_response(&r);
    }
 

@@ -224,7 +224,10 @@ static int cron_run_llm_prompt(const char *prompt, char **out, char *err, size_t
    }
    *out = agent_result_take_text(&result);
    if (!*out)
-      *out = strdup("");
+   {
+      snprintf(err, err_len, "cron model did not return a complete canonical text answer");
+      return -1;
+   }
    return 0;
 }
 

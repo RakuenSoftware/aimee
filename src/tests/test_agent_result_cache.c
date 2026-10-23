@@ -103,6 +103,31 @@ int main(void)
    stored = strdup("legacy flat response");
    assert(!agent_result_cache_read("summarize", key, &reused));
    assert(!reused.canonical_response.content);
+   /* A stored partial/refused observation cannot become a successful hit,
+    * including data written by an older runtime. Success flags are not proof. */
+   const aimee_stop_reason_t excluded[] = {AIMEE_STOP_CONTENT_FILTER, AIMEE_STOP_ERROR,
+                                           AIMEE_STOP_MAX_TOKENS, AIMEE_STOP_TOOL_USE,
+                                           AIMEE_STOP_UNKNOWN};
+   reused = (agent_result_t){0};
+   for (size_t i = 0; i < sizeof excluded / sizeof *excluded; i++)
+   {
+      original.canonical_response.stop_reason = excluded[i];
+      int before_writes = writes;
+      agent_result_cache_write("summarize", key, &original);
+      assert(writes == before_writes);
+      cJSON *snapshot = aimee_ir_response_json(&original.canonical_response);
+      assert(snapshot);
+      free(stored);
+      stored = cJSON_PrintUnformatted(snapshot);
+      cJSON_Delete(snapshot);
+      assert(stored && !agent_result_cache_read("summarize", key, &reused));
+      assert(!reused.success && !reused.response && !reused.canonical_response.content);
+   }
+   original.canonical_response.stop_reason = AIMEE_STOP_END_TURN;
+   original.canonical_response.content[0].type = AIMEE_BLK_THINKING;
+   int before_writes = writes;
+   agent_result_cache_write("summarize", key, &original);
+   assert(writes == before_writes);
    agent_result_clear_response(&original);
    free(stored);
    puts("agent-result-cache: canonical reuse and ownership gates passed");

@@ -173,10 +173,11 @@ func runDiscussionCycle(ctx context.Context, delegates Delegates, run Run, repor
 	delegated := delegates.Group(ctx, run, requests)
 	outcomes := make([]outcome, len(delegated))
 	for i, call := range delegated {
-		parsed, err := discussionResponse{}, call.Err
+		text, err := call.semanticText()
+		parsed := discussionResponse{}
 		if err == nil {
 			var doc []byte
-			doc, err = extractJSONObject(call.Response)
+			doc, err = extractJSONObject(text)
 			if err == nil {
 				err = json.Unmarshal(doc, &parsed)
 			}

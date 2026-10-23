@@ -59,13 +59,13 @@ func RunChairman(ctx context.Context, delegates Delegates, run Run, panel Panel,
 		Prompt: prompt, Tools: true, MaxTurnsCap: delegateMaxTurnsCap,
 		DurableSlot: chairmanDurableSlot(run), ArtifactStage: artifactStage, ArtifactHash: reviewed.Hash}
 	result := delegates.One(ctx, run, request)
-	err := result.Err
+	text, err := result.semanticText()
 	cost += result.CostUSD
 	costUnknown = costUnknown || result.CostUnknown
 	if err != nil {
 		return feedback, analysis.Approvals, cost, costUnknown, "chairman failed: " + err.Error(), false
 	}
-	final, parseErr := parsePanelResponse(result.Response, nil)
+	final, parseErr := parsePanelResponse(text, nil)
 	if parseErr == nil {
 		parseErr = panelVerdictError(final)
 	}
@@ -75,22 +75,22 @@ func RunChairman(ctx context.Context, delegates Delegates, run Run, panel Panel,
 	// top. Give it the same one attempt, on the same participant.
 	if parseErr != nil {
 		repair := request
-		repair.Prompt = panelResponseRepairPrompt(run.ID, reviewed.Hash, artifactStage, result.Response)
+		repair.Prompt = panelResponseRepairPrompt(run.ID, reviewed.Hash, artifactStage, text)
 		repair.DurableSlot = chairmanDurableSlot(run) + ":repair:1"
 		repaired := delegates.One(ctx, run, repair)
-		repairErr := repaired.Err
+		repairedText, repairErr := repaired.semanticText()
 		cost += repaired.CostUSD
 		costUnknown = costUnknown || repaired.CostUnknown
 		if repairErr != nil {
 			return feedback, analysis.Approvals, cost, costUnknown, "chairman failed: " + repairErr.Error(), false
 		}
-		final, parseErr = parsePanelResponse(repaired.Response, nil)
+		final, parseErr = parsePanelResponse(repairedText, nil)
 		if parseErr == nil {
 			parseErr = panelVerdictError(final)
 		}
 		if parseErr != nil {
 			return feedback, analysis.Approvals, cost, costUnknown,
-				"chairman returned no structured verdict after repair: " + parseErr.Error() + chairmanResponseNote(repaired.Response), false
+				"chairman returned no structured verdict after repair: " + parseErr.Error() + chairmanResponseNote(repairedText), false
 		}
 	}
 	if final.RunID != run.ID || final.ArtifactHash != reviewed.Hash {

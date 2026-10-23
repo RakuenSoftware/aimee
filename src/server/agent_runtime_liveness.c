@@ -8,16 +8,20 @@
 
 void agent_reject_degenerate_plain_response(agent_result_t *out, const char *agent_name)
 {
-   if (!out || !out->success || !out->response)
+   if (!out || !out->success)
       return;
 
+   if (agent_result_project_complete_text(out))
+   {
+      out->success = 0;
+      snprintf(out->error, sizeof out->error, "agent did not return complete canonical text");
+      return;
+   }
    int unexecuted_tool_plan = out->tool_calls == 0 && out->turns == 0 &&
                               liveness_is_unexecuted_tool_plan_response(out->response);
    if (!liveness_is_degenerate_response(out->response) && !unexecuted_tool_plan)
       return;
 
-   agent_result_clear_response(out);
-   out->response = NULL;
    out->success = 0;
    out->abstained = 1;
    snprintf(out->abstain_reason, sizeof(out->abstain_reason), "degenerate response");
