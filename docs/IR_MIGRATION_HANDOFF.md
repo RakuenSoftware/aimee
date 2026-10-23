@@ -207,12 +207,50 @@ qualification uses independent source worktrees and exclusive ten-character
 temporary roots. These failed wrapper/race/lint receipts remain retained; they
 are not relabeled final acceptance.
 
-These repairs still require their combined image, fresh native workflow and
-server-trigger execution, configured integration and final browser
-model-switch/control/replay acceptance. Keep outstanding checks separate from the
-stock-SDK recall refusal. No current-branch GitHub CI or production promotion is
-claimed. Keep one eventual PR, automatic reviews and strict attribution; do not
-investigate or change `.100`.
+Runtime source `936438a42` now passes 693 native fixture invocations normally
+and 693 with ASan/UBSan/leak checking (690 distinct binaries), plus all 76 lint
+gates. The sanitizer parent was safely paused before any fixture invocation and
+resumed after the normal suite, avoiding confirmed shared test paths; elapsed
+sanitizer time includes that recorded pause. All three Go race suites pass. The
+server-Go success includes a test-only repair to two observability negative
+fixtures: explicit 0644 chmod/stat prevents umask 077 from accidentally creating
+safe 0600 files. Production file-permission guards are unchanged. The original
+936 two-fixture failure remains retained. This test-only follow-up does not
+relabel or require rebuilding the qualified production image.
+
+The canonical 936 image matches all 87 products and 19 server modules. Its
+normal upgrade preserves all 89 existing canonical events, native records,
+complete SDK/cache bytes, UUID, workspace/device/inodes, Vault, models and
+configuration. Public TLS leaf reissue keeps the same private-key SPKI, with both
+actual public certificates retained. Fresh empty installation and normal setup
+pass. Actual installed CLI implicit-cwd investigation passes in two distinct
+normally registered repositories, without explicit project/scope fields or
+model calls: Hello-World returns its correct empty project result and Spoon-Knife
+returns three results only from its own project. The original no-active-project
+failure is absent. Local index availability is measured, not inferred from KB
+mode; no KB instance is configured.
+
+One actual fresh browser workflow now crosses authenticated C scope minting,
+Go storage/scheduling, the native host, C factory and real Claude SDK. Its private
+scope is persisted as 64 valid characters; public ownership keeps the bare PAM
+name. One SDK process completes with canonical TEXT and THINKING, child 12 events
+and parent two matching child-execution events, zero tools, then the real human
+gate (`active` plus `pause_reason=human_gate`). One normal owner stop succeeds.
+The original browser harness expected a different parked-state label; its
+failure remains retained. A later finisher stopped the task successfully but
+failed a background-presence assertion; that blocked attach was a single fresh
+UI presence registration after login, not a workflow/model retry. A separate
+15-second source-bound forensic observation confirms the distinct UI SID and no
+repeat. Neither automation failure is relabeled green. Independent final seals
+prove the actual native behavior, stopped state, full canonical history/cache and
+quiescence.
+
+Honest server-triggered native execution, ordinary model switching/replay,
+question/permission replies, native tool effects and current configured
+integration/deployment acceptance remain outstanding. Keep these checks separate
+from the stock-SDK recall refusal. No current-branch GitHub CI or production
+promotion is claimed. Keep one eventual PR, automatic reviews and strict
+attribution; do not investigate or change `.100`.
 
 ### Earlier runtime qualification: 23 October 2026
 

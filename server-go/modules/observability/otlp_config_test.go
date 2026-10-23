@@ -81,6 +81,14 @@ func TestOTLPRejectsPermissiveClientKey(t *testing.T) {
 	if err := os.WriteFile(key, []byte("private key is validated by exporter"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Mkdir/WriteFile modes are filtered by the caller's umask. Establish
+	// the permissive negative fixture explicitly, including under umask 077.
+	if err := os.Chmod(key, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(key); err != nil || info.Mode().Perm() != 0o644 {
+		t.Fatalf("negative fixture is not actually permissive: %v %v", info, err)
+	}
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://collector.example")
 	t.Setenv("OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE", certificate)
 	t.Setenv("OTEL_EXPORTER_OTLP_CLIENT_KEY", key)
