@@ -30,16 +30,56 @@ class NativeCatalogObservations:
         self.records = []
         self.lock = threading.Lock()
 
-    def observe(self, kind, wire, scope, tools):
-        with self.lock:
-            return self._observe(kind, wire, scope, tools)
+    @staticmethod
+    def history_phase(wire, request):
+        # Mirror the actual frontend role mapping, never prompt text or call count.
+        items = request.get("input" if wire == "chatgpt" else "messages", [])
+        if isinstance(items, str):
+            return "opening", dict(scalar=True, items=[])
+        assert isinstance(items, list), "invalid observed wire history"
+        shape = []
+        assistant = False
+        for item in items:
+            assert isinstance(item, dict), "invalid observed history item"
+            role, kind = item.get("role"), item.get("type")
+            shape.append(dict(role=role, type=kind))
+            assistant |= role == "assistant" or (wire == "chatgpt" and kind in
+                ("function_call", "reasoning"))
+        return ("established" if assistant else "opening"), dict(scalar=False, items=shape)
 
-    def _observe(self, kind, wire, scope, tools):
+    @staticmethod
+    def opening_tools(tools):
+        # Expected projection from the existing memory gateway_plan.go native-shell
+        # policy. MCP groups keep their callable surface; definitions/order remain exact.
+        aliases = {"exec_command", "local_shell", "shell", "bash", "run_command",
+                   "container.exec", "shell_command", "run_shell_command", "Bash", "Shell"}
+        def shell(tool, namespace=""):
+            if namespace.startswith("mcp__"):
+                return False
+            definition = tool.get("function", tool)
+            return (tool.get("type") == "local_shell" or
+                    (namespace == "container" and definition.get("name") == "exec") or
+                    definition.get("name") in aliases)
+        projected = []
+        for tool in tools:
+            if tool.get("type") == "namespace":
+                children = [child for child in tool.get("tools", []) if not shell(child, tool.get("name", ""))]
+                if children:
+                    projected.append({**tool, "tools": children})
+            elif not shell(tool):
+                projected.append(tool)
+        return projected
+
+    def observe(self, kind, wire, scope, tools, request):
+        with self.lock:
+            return self._observe(kind, wire, scope, tools, request)
+
+    def _observe(self, kind, wire, scope, tools, request):
         assert isinstance(tools, list), "native request has no tool array"
+        phase, history_shape = self.history_phase(wire, request)
         encoded = json.dumps(tools, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-        key = (kind, wire, scope)
+        key = (kind, wire, scope, phase)
         previous = self.references.setdefault(key, encoded)
-        assert previous == encoded, ("native catalog changed across auth/resume", key)
         names = []
         for tool in tools:
             assert isinstance(tool, dict)
@@ -50,6 +90,7 @@ class NativeCatalogObservations:
             else:
                 names.append(dict(namespace=None, name=definition.get("name")))
         record = dict(ordinal=len(self.records) + 1, kind=kind, wire=wire, scope=scope,
+                      history_phase=phase, history_shape=history_shape,
                       declarations=len(tools), names=names,
                       sha256=hashlib.sha256(encoded.encode()).hexdigest(), tools=json.loads(encoded))
         self.records.append(record)
@@ -58,6 +99,15 @@ class NativeCatalogObservations:
             target = self.directory / ("catalog-%04d.json" % record["ordinal"])
             target.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
             target.chmod(0o600)
+        # Preserve actual offending declarations/history shape before strict failure.
+        assert previous == encoded, ("native catalog changed within policy phase", key)
+        if phase == "opening":
+            assert self.opening_tools(tools) == tools, ("opening catalog exposes native shell", key)
+        opening = self.references.get((kind, wire, scope, "opening"))
+        established = self.references.get((kind, wire, scope, "established"))
+        if opening is not None and established is not None:
+            assert json.loads(opening) == self.opening_tools(json.loads(established)), (
+                "catalog differs beyond opening native-shell policy", key)
         return record
 
     def finish(self):
@@ -223,7 +273,7 @@ def main():
                 if request.get("model") == "native-delegate-child":
                     assert delegation_released.wait(60), "parent native owner did not finish"
                     child_requests.append(request)
-                    catalogs.observe("http-child", "openai", "diagnose", request.get("tools"))
+                    catalogs.observe("http-child", "openai", "diagnose", request.get("tools"), request)
                     assert self.headers.get("Authorization") == "Bearer native-child-fixture-only"
                     names = {tool.get("name", tool.get("function", {}).get("name")) for tool in request.get("tools", [])}
                     assert "delegate" not in names and "delegate_status" not in names, names
@@ -269,7 +319,7 @@ def main():
                         assert request["max_tokens"] == 128 and request["temperature"] == 0.25, request
                 auth, token = authorizations[marker]
                 assert all(secret not in encoded for secret in forbidden_credentials)
-                catalogs.observe(kind, wire, "run" if async_case else "primary", request.get("tools"))
+                catalogs.observe(kind, wire, "run" if async_case else "primary", request.get("tools"), request)
                 if wire == "anthropic" and auth == "api_key":
                     assert self.headers.get("x-api-key") == token
                 else:

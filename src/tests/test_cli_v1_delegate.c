@@ -1037,18 +1037,18 @@ static void test_agent_probe_failure_controls_exit_status(void)
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddBoolToObject(resp, "model_available", 0);
    cJSON_AddBoolToObject(resp, "execution_ok", 0);
-   assert(cli_agent_probe_response_is_failure(resp) == 1);
+   assert(cli_agent_probe_response_exit_code(resp, 0, NULL) == 1);
    cJSON_ReplaceItemInObject(resp, "execution_ok", cJSON_CreateTrue());
    /* A successful execution wins over a hosted provider's unavailable /models. */
-   assert(cli_agent_probe_response_is_failure(resp) == 0);
+   assert(cli_agent_probe_response_exit_code(resp, 0, NULL) == 0);
    cJSON_DeleteItemFromObject(resp, "execution_ok");
-   assert(cli_agent_probe_response_is_failure(resp) == 1); /* --no-run model probe */
+   assert(cli_agent_probe_response_exit_code(resp, 0, NULL) == 1); /* --no-run model probe */
    cJSON_ReplaceItemInObject(resp, "model_available", cJSON_CreateTrue());
-   assert(cli_agent_probe_response_is_failure(resp) == 0);
+   assert(cli_agent_probe_response_exit_code(resp, 0, NULL) == 0);
    cJSON_Delete(resp);
 
    resp = cJSON_CreateObject();
-   assert(cli_agent_probe_response_is_failure(resp) == 0); /* old server compatibility */
+   assert(cli_agent_probe_response_exit_code(resp, 0, NULL) == 0); /* old server compatibility */
    cJSON_Delete(resp);
    printf("  PASS: test_agent_probe_failure_controls_exit_status\n");
 }

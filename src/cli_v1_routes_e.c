@@ -24,8 +24,20 @@
 #include <unistd.h>
 #endif /* !_WIN32 (preamble guard) */
 
-int cli_agent_probe_response_is_failure(cJSON *resp)
+int cli_agent_probe_response_exit_code(cJSON *resp, int argc, char **argv)
 {
+   int no_run = 0;
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--no-run") == 0)
+         no_run = 1;
+      else if (strncmp(argv[i], "--no-run=", 9) == 0)
+         no_run = strcmp(argv[i] + 9, "true") == 0;
+   }
+   const char *backend = json_str(resp, "backend");
+   if (!no_run && backend[0] && strcmp(backend, "http") != 0 &&
+       cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(resp, "execution_tested")))
+      return 2; /* Unsupported diagnostic, not evidence of model failure. */
    cJSON *execution_ok = cJSON_GetObjectItemCaseSensitive(resp, "execution_ok");
    if (execution_ok)
       return !cJSON_IsTrue(execution_ok);

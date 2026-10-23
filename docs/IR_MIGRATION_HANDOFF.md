@@ -52,9 +52,11 @@ regressions pass. Independent review also closes explicit streamed refusal
 overwrite, duplicate closed-text aliases and nested response-identity conflicts;
 old-source failures and final focused normal/race results are retained. The integrated bypass gate passes 31 tests.
 
-Measured from `03d881e0e`, this continuation removes **1950 net production lines**
-(excluding tests, documentation, generated locks and build tooling). It retires
-parallel implementations rather than compressing source. The combined C baseline
+Measured from `03d881e0e`, this continuation removes **1,951 net production lines**
+(900 added / 2,851 deleted, excluding tests, documentation, generated locks and
+build tooling). It retires parallel implementations rather than compressing source.
+The final CLI probe exit policy now lives in its existing response owner, keeping
+the forwarding file below the 2,500-line lint limit without exemptions. The combined C baseline
 `f74a037ae` passes all 693 normal invocations, 693 ASan/UBSan/leak invocations,
 76 lint gates and both CMake native runtime/factory tests. The small later probe
 CLI/printer delta has focused normal and sanitizer coverage. Final combined Go,
@@ -67,7 +69,16 @@ trigger is unconfirmed; no reaper-expiry claim is made. Local exports retain the
 173-case integration, 70 real-PostgreSQL checks, both normal upgrades and the real
 native resume with original UUID/full cache prefix preserved. The new task-owned
 lease controller retains its VM on ordinary errors and requires explicit cleanup.
-Replacement VM8168 is clean and ready for the final source image and new install.
+Replacement VM8168 has built source `655272011`: all 87 source-derived products
+and 19 modules match; no application or model has been started there. Its final
+Go normal/race suites, 24 exporter checks, 494 frontend tests, type checking and
+both frontend builds pass. Full lint found a 2,502-line CLI forwarding file; the
+response-owner extraction passes focused CLI normal/sanitizer tests and the line
+gate. The actual SDK matrix has not passed: its observer incorrectly demanded
+identical opening and established catalogs, despite the existing canonical memory
+policy removing native shell tools until assistant history exists. The observed
+51-to-52 declaration difference is solely `bash`; a phase-aware strict observer
+and a fresh source-qualified matrix remain required. These are not live acceptance.
 
 
 The user's completion criteria now include a significant reduction in production
