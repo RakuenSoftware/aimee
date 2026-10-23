@@ -625,10 +625,7 @@ def go_module_main(module_id: str, principal_ref: int,
     if module_id in {"economizer", "egress"}:
         handler = "handler.NewHandler()"
     extra_imports = ""
-    watchdog = """\tif handled, code := handler.RunWatchdog(os.Args); handled {
-\t\tos.Exit(code)
-\t}
-""" if module_id == "delegates" else ""
+    watchdog = ""
     if module_id == "providers":
         watchdog = "\tif handled, code := handler.ModelServicesBootstrap(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunBootstrapLookup(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunProbeWorker(os.Args); handled { os.Exit(code) }\n"
     cleanup = "\tdefer handler.Close()\n" if module_id == "postgres" else ""
@@ -771,7 +768,7 @@ GO_SHARED_CONTRACTS = {
     "server-go/modules/module-runtime/identity": {"server", "kb", "memory"},
     "server-go/modules/module-runtime/supervisor": {"server", "kb"},
     "server-go/config": {"config", "providers", "memory"},
-    "server-go/modules/egress": {"providers", "memory", "git", "roundtable"},
+    "server-go/modules/egress": {"providers", "memory", "git", "roundtable", "delegates"},
     "server-go/modules/audit": {"memory"},
     "server-go/modules/execution-policy": {"aimee", "tools"},
     "server-go/delegate": {"delegates", "roundtable", "workflows"},

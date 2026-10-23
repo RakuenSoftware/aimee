@@ -69,7 +69,6 @@
   "go_sources": [
     "server-go/modules/delegates/delegates.go",
     "server-go/modules/delegates/executor.go",
-    "server-go/modules/delegates/external_text.go",
     "server-go/modules/delegates/host_executor.go",
     "server-go/modules/delegates/capabilities.go",
     "server-go/modules/delegates/chain.go",
@@ -124,6 +123,7 @@
     "server-go/modules/delegates/delegates_test.go",
     "server-go/modules/delegates/executor_test.go",
     "server-go/modules/delegates/executor_ir_test.go",
+    "server-go/modules/delegates/generic_retirement_test.go",
     "server-go/modules/delegates/executor_roster_test.go",
     "server-go/modules/delegates/capabilities_test.go",
     "server-go/modules/delegates/chain_test.go",

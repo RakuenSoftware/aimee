@@ -29,6 +29,25 @@ registry, including a write-role/tools-enabled/unbounded command that must never
 create its marker, and canonical-host capacity, deadline, cancellation and
 turn-cap handling.
 
+The generic retirement passes the full server-Go normal suite and all three Go
+race suites. The bypass gate and 24 mutation tests reject both retired symbols
+and newly named direct command/synthetic-text model paths. Standalone packaging
+also removes the generated watchdog entry point, declares the delegates' actual
+egress dependency, removes the deleted text adapter and includes its new tests.
+The Aimee descriptor now includes its existing job-observation SQL migration and
+live regression. All 23 exporter tests pass with zero skips using the installed
+Go/CMake toolchains, including actual standalone builds. Earlier packaging
+failures remain retained.
+
+Standard Compose native execution does not configure the optional cgroup
+boundary; no whole-tree native crash-recovery proof is claimed for that profile.
+The held live permission case therefore uses a real HTTP operator-interruption
+receipt, then switches the same owned session to native execution for one
+relative-path write and one browser Allow. It must prove absolute resource
+binding, one dispatch and one effect. This tests native permission delivery,
+not native kernel custody. Actual live execution remains pending final image and
+integration qualification; no synthetic receipt or scope repair is authorized.
+
 
 The active goal is **full internal canonical IR conversion**, including model
 requests, results, streams, histories, native execution, delegates, workflows,

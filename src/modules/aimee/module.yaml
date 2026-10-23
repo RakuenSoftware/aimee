@@ -116,6 +116,7 @@
     "server-go/modules/aimee/families/conversation_clarify_test.go",
     "server-go/modules/aimee/families/conversation_user_memory_test.go",
     "server-go/modules/aimee/families/delegation_test.go",
+    "server-go/modules/aimee/families/delegation_observation_live_test.go",
     "server-go/modules/aimee/families/economizer_frames_test.go",
     "server-go/modules/aimee/families/economizer_state_test.go",
     "server-go/modules/aimee/families/ensemble_state_test.go",
@@ -185,6 +186,7 @@
     "docs/modules/aimee.md"
   ],
   "go_assets": [
+    "server-go/modules/aimee/families/schema_agent_job_observation.sql",
     "server-go/modules/aimee/families/schema_agent_work.sql",
     "server-go/modules/aimee/families/schema_cell_limits.sql",
     "server-go/modules/aimee/families/schema_checkpoints.sql",

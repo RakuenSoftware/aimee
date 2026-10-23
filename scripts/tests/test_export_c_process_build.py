@@ -24,6 +24,33 @@ SPEC.loader.exec_module(exporter)
 
 
 class CProcessBuildTests(unittest.TestCase):
+    def test_delegate_entrypoint_has_no_retired_command_watchdog(self) -> None:
+        main = exporter.go_module_main("delegates", 18, [])
+        self.assertNotIn("RunWatchdog", main)
+        self.assertIn("handler.NewProcessHandler(ctx, os.Args[1])", main)
+
+    @unittest.skipUnless(shutil.which("go"), "go is not installed")
+    def test_delegates_export_builds_canonical_host_only_entrypoint(self) -> None:
+        self.assertIn("server-go/modules/egress/egress.go", exporter.go_process_shared_sources("delegates"))
+        contract = exporter.process_contracts.validate()["delegates"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            exporter.export_module(root, "delegates", "required", contract,
+                                   exporter.source_timestamp(),
+                                   exporter.CORE_VERSION_FILE.read_text().strip())
+            module = root / "aimee-module-delegates"
+            main = (module / "runtime/main.go").read_text()
+            self.assertNotIn("RunWatchdog", main)
+            self.assertFalse((module / "server-go/modules/delegates/external_text.go").exists())
+            self.assertTrue((module / "server-go/modules/delegates/generic_retirement_test.go").exists())
+            binary = module / "delegates"
+            build = subprocess.run(["go", "build", "-o", str(binary), "./runtime"],
+                                   cwd=module, capture_output=True, text=True, timeout=180)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            usage = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+            self.assertEqual(usage.returncode, 2)
+            self.assertIn("DAEMON_MODULE_BUS_SOCKET", usage.stderr)
+
     def test_shared_database_and_domain_contracts_follow_consumers(self) -> None:
         for module in ("aimee", "memory", "postgres"):
             with self.subTest(module=module):
