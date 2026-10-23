@@ -33,6 +33,9 @@ BUS_TRANSPORT_HEADERS = {"aimee/audit/obs_bus.h", "aimee/postgres/client.h"}
 # Harness translation also consumes the canonical session envelope: this is the
 # same shared IR data contract, not a call into another module's domain service.
 IR_SHARED_TYPE = {
+    # The tools header exchanges owned canonical catalogs only. These are data
+    # declarations; tool policy and peer service calls keep their bus owners.
+    ("src/modules/tools/include/aimee/tools/agent_tools.h", "aimee/ir/aimee_ir.h"),
     # Curator execution exchanges owned canonical request/response data. Provider
     # resolution and model transport remain at their existing execution boundary.
     ("src/modules/kb-synthesis/kb_curator_llm.h", "aimee/ir/aimee_ir.h"),
