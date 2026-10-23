@@ -33,6 +33,13 @@ cJSON *aimee_module_command_call_context(uint32_t event, uint32_t stage, const c
    (void)context;
    abort();
 }
+int server_learning_project_from_cwd(const char *cwd, char *out, size_t capacity)
+{
+   (void)cwd;
+   (void)out;
+   (void)capacity;
+   abort(); /* This fixture owns no learning source and must never request one. */
+}
 int server_native_history_load(const char *session, const char *actor, const char *turn,
                                int running, cJSON **messages, cJSON **receipts)
 {

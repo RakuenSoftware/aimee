@@ -264,11 +264,12 @@ def main():
         def qa_request(prompt):
             def block(text, origin, authority):
                 return dict(type="text", text=text, context=dict(origin=origin, authority=authority,
-                    trust=2, sensitivity=1, model_visible=True))
+                    trust=2, sensitivity=1, model_visible=True,
+                    revision_domain="", revision_scope="", revision_epoch="0"))
             return dict(ir=dict(version=1, source_wire="unspecified", cache_policy="native",
                 system=[block("Use only the supplied evidence.", 3, 2)],
                 messages=[dict(role="user", content_scalar=True, blocks=[block(prompt, 5, 1)])],
-                tools=[], stop_sequences=[], tool_choice=dict(mode="none"),
+                tools=[], stop_sequences=[], tool_choice=dict(mode="none"), stream=False,
                 max_tokens=256, temperature=0.3))
 
         cli = str(Path(__file__).resolve().parents[2] / "aimee")

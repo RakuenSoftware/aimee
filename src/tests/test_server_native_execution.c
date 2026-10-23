@@ -51,6 +51,7 @@ static server_session_terminal_action_fn terminal;
 static void *terminal_resource;
 static int mode, retained, opened, joined, child_closed, began, completed, aborted, closed;
 static int terminal_committed, sdk_calls, restored, ready_calls, rejected_terminal;
+static int refuse_runtime;
 static char parent_role[64], private_home[4096], host_workspace[4096], observed_sdk_identity[65];
 static int child_executable, child_directory;
 static const char *active_sdk = "codex";
@@ -496,6 +497,8 @@ server_native_runtime_t *server_native_runtime_open_bound_request(
    if (expected_auth)
       assert(!strcmp(selected->auth_type, expected_auth));
    assert(!durable_reservation); /* Session recovery precedes current profile. */
+   if (refuse_runtime)
+      return NULL;
    if (expected_no_tools)
    {
       assert(!profile->n_tools && !count && !bindings);
@@ -1107,6 +1110,20 @@ int main(int argc, char **argv)
    snprintf(selected.model, sizeof selected.model, "selected-model");
    provider_cli_cfg_t cfg = {.agent = &selected, .role = "worker", .user_prompt = "current task"};
 #if defined(__linux__)
+   /* Runtime preparation also resolves credential/source lineage. A refusal
+    * must not misdiagnose that boundary as a tool-catalog defect or model reply. */
+   reset(0);
+   refuse_runtime = 1;
+   agent_result_t preparation_refused = {0};
+   assert(provider_cli_adapter_host_execute(&cfg, &preparation_refused) < 0);
+   assert(!preparation_refused.success && !preparation_refused.canonical_response.content &&
+          !preparation_refused.canonical_response.n_content);
+   assert(!strcmp(preparation_refused.error,
+                  "native SDK launch refused during native runtime preparation"));
+   assert(!sdk_calls && !opened && !began && !reserved && !private_home[0] && !retained);
+   assert(restored == 1);
+   agent_result_clear_response(&preparation_refused);
+   refuse_runtime = 0;
    for (int scenario = 0; scenario <= 10; scenario++)
    {
       reset(scenario);

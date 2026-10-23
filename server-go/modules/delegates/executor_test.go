@@ -802,3 +802,124 @@ func TestRegistryExecutorExecutionDeadlineDiagnostic(t *testing.T) {
 	}
 	assertFixtureProcessesGone(t, pidFile)
 }
+
+// A fresh normal server starts before any model is registered through setup.
+// The long-lived executor must discover that later authoritative registration.
+func TestRegistryExecutorFirstBootFindsNormalModelRegistration(t *testing.T) {
+	home := t.TempDir()
+	calls := 0
+	executor, err := NewRegistryExecutorWithHost(home, hostCallFunc(func(_ context.Context, _, _ uint32, _ uint64, _ time.Duration, body []byte) ([]byte, error) {
+		calls++
+		var request delegatecontract.Invocation
+		if err := json.Unmarshal(body, &request); err != nil {
+			t.Fatal(err)
+		}
+		if request.ExecutionScope != strings.Repeat("a", 64) {
+			t.Fatal("source scope lost", request.ExecutionScope)
+		}
+		return json.Marshal(hostResult("actual owner answer"))
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := []byte(`{"models":[{"name":"native","cli_kind":"claude","cli_cmd":"claude","roles":["review"]}]}`)
+	if err := os.WriteFile(filepath.Join(home, "models.json"), registry, 0600); err != nil {
+		t.Fatal(err)
+	}
+	result := executor.Execute(t.Context(), nativeInvocation())
+	if result.Status != "done" || calls != 1 || result.Response != "actual owner answer" {
+		t.Fatal("normal first-boot registration unavailable", result, calls)
+	}
+	request := nativeInvocation()
+	request.ExecutionScope = ""
+	result = executor.Execute(t.Context(), request)
+	if result.Status != "failed" || calls != 1 {
+		t.Fatal("registry discovery bypassed source scope", result, calls)
+	}
+}
+func TestRegistryExecutorCanonicalReplacesLegacyAtSameTimestamp(t *testing.T) {
+	home := t.TempDir()
+	legacy := filepath.Join(home, "agents.json")
+	if err := os.WriteFile(legacy, []byte(`{"agents":[{"name":"legacy","cli_kind":"generic"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	executor, err := NewRegistryExecutor(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := filepath.Join(home, "models.json")
+	if err := os.WriteFile(canonical, []byte(`{"models":[{"name":"native","cli_kind":"claude"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(canonical, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := executor.load()
+	if err != nil || registry.roster()[0].Name != "native" {
+		t.Fatal("cached legacy displaced canonical authority", registry, err)
+	}
+	// Atomic owner writes can retain both timestamp and size; inode identity changes.
+	replacement := canonical + ".new"
+	if err := os.WriteFile(replacement, []byte(`{"models":[{"name":"second","cli_kind":"claude"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(replacement, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, canonical); err != nil {
+		t.Fatal(err)
+	}
+	registry, err = executor.load()
+	if err != nil || registry.roster()[0].Name != "second" {
+		t.Fatal("atomic replacement lost", registry, err)
+	}
+	info, err = os.Stat(canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(canonical, []byte(strings.Repeat("!", int(info.Size()))), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chtimes(canonical, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = executor.load(); err == nil {
+		t.Fatal("malformed same-inode/mtime/size canonical owner served cached authority")
+	}
+}
+func TestRegistryExecutorCanonicalErrorsNeverUseLegacy(t *testing.T) {
+	for _, kind := range []string{"malformed", "directory", "dangling"} {
+		t.Run(kind, func(t *testing.T) {
+			home := t.TempDir()
+			if err := os.WriteFile(filepath.Join(home, "agents.json"), []byte(`{"agents":[{"name":"legacy","cli_kind":"generic"}]}`), 0600); err != nil {
+				t.Fatal(err)
+			}
+			executor, err := NewRegistryExecutor(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(home, "models.json")
+			switch kind {
+			case "malformed":
+				err = os.WriteFile(path, []byte(`{"models":`), 0600)
+			case "directory":
+				err = os.Mkdir(path, 0700)
+			case "dangling":
+				err = os.Symlink(filepath.Join(home, "absent"), path)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = executor.load(); err == nil {
+				t.Fatal("canonical failure fell back to legacy authority", kind)
+			}
+			if _, err = NewRegistryExecutor(home); err == nil {
+				t.Fatal("unusable canonical entry treated as unconfigured first boot", kind)
+			}
+		})
+	}
+}

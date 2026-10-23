@@ -9,7 +9,7 @@
 set -euo pipefail
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-test_dir=$(mktemp -d -p /tmp aimee-webchat-vault.XXXXXX)
+test_dir=$(mktemp -d "${TMPDIR:-/tmp}/aimee-webchat-vault.XXXXXX")
 trap 'find "$test_dir" -depth -delete 2>/dev/null || true' EXIT
 
 export AIMEE_HOME="$test_dir/home"

@@ -89,13 +89,52 @@ old SAN claim is made. A later external change to the operator's local Claude
 credential file is recorded separately; the task did not restore it or claim
 unchanged operator-source bytes. Original application Vault bytes remain exact.
 
-The subsequent administrator and evaluator repairs have focused native, sanitizer
-and Go race coverage, but final combined native/sanitizer/static checks, the new
-canonical image, actual native workflow/server-trigger execution and final browser
-acceptance are still required. Keep those outstanding checks separate from the
-stock-SDK recall refusal. No current-branch GitHub CI or production promotion is
-claimed. Keep one eventual PR, automatic reviews and strict attribution; do not
-investigate or change `.100`.
+The administrator and evaluator repairs are committed as `a9cdd64b1`. Its image
+matches all 87 source-derived products and 19 modules. The normal upgrade keeps
+all prior 86 events and full cache/native/authority state exact. Subsequent C
+qualification passes 691 registered invocations normally and under
+ASan/UBSan/leak checking, with the same 33 conditional prerequisite notices
+retained. The isolated fixture version is pinned to its original build metadata;
+its application C/Go bytes match `a9cdd64b1`. The only approved test delta adds an
+aborting learning-transport seam. Seven updated production C units pass the strict
+Cppcheck ratchet and explicit Clang analysis; all 76 lint gates and three Go race
+suites pass. The evaluator's 26 real-PostgreSQL tests pass normally and under race,
+without skips.
+
+Actual fresh `a9cdd64b1` setup proves the administrator repair, but the first
+workflow pauses before model execution: the long-lived Go executor selected
+`agents.json` at startup before setup created `models.json`, then never reconsidered
+that path. It is stopped normally with no SDK, native cache or canonical model
+output. The repair resolves the canonical registry on every load, permits legacy
+fallback only when the canonical entry is absent, and binds cached parsing to the
+selected path, actual file identity and bytes. First-boot-after-configuration and
+stale-cache regressions reproduce the old failure; normal and race tests pass.
+The full three-module Go race suites pass after this repair.
+
+The old-install ordinary browser A1 also stops before SDK launch, for a distinct
+reason: its preserved credential expired at 13:36 UTC; the normal refresh endpoint
+returns HTTP 429 at 15:03 UTC. The actual constructor stage is
+`claude_source_lineage`. This is auth-refresh status, not model HTTP status or a
+tool-catalog defect. Its three legitimate failed events are retained, so the next
+upgrade baseline is 89 events. The old SDK/cache bytes remain exact. The outer
+launch diagnostic now correctly names runtime preparation. The old turn is not
+retried or repaired by rewriting its credentials. The separate fresh enrollment
+is valid until 21:31 UTC and remains the fresh-install acceptance source.
+
+The first `a9cdd64b1` configured integration ends 168/171: the new hand-written
+Python fixture omitted required canonical context revision fields and `stream`,
+and the new fixture UID could not open a prior UID's global verifier lock. The
+repaired Python body passes the actual production C codec unchanged; the next
+fixture uses its own nonce-scoped verifier lock. No decoder, ownership rule or
+test was weakened. All eight SDK profiles and the refusal oracle passed that
+failed run; its receipt is retained as failed, not relabeled green.
+
+The combined registry/diagnostic repair still requires its new canonical image,
+fresh-install native workflow/server-trigger execution, current configured
+integration and final browser model-switch/control/replay acceptance. Keep these
+outstanding checks separate from the stock-SDK recall refusal. No current-branch
+GitHub CI or production promotion is claimed. Keep one eventual PR, automatic
+reviews and strict attribution; do not investigate or change `.100`.
 
 ### Earlier runtime qualification: 23 October 2026
 

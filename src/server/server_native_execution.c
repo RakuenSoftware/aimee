@@ -1224,7 +1224,7 @@ static native_execution_t *native_execution_open(const provider_cli_cfg_t *cfg, 
    stage = "owned SDK identity";
    if (server_native_sdk_profile_prepare(&execution->profile, sdk, execution->executable_fd))
       goto refused;
-   stage = "native tool registry";
+   stage = "native runtime preparation";
    if (native_registry_open(execution, owner))
       goto refused;
    if (server_native_runtime_set_turn_limit(execution->runtime, cfg->native_turn_limit))

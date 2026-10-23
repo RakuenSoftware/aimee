@@ -3,6 +3,7 @@ package delegates
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -101,12 +102,15 @@ func (r agentRegistry) roster() []agentEntry {
 	return r.Models
 }
 
-// RegistryExecutor is the Go-owned delegate producer. It selects a configured
-// agent and runs its argv directly; there is no shell, HTTP agent service, job
-// row, status poller, or C agent loop in this path.
+// RegistryExecutor selects the current configured registration. Native providers
+// execute through the canonical, source-scoped C host owner; only explicitly
+// configured generic text transports execute argv locally without a shell.
 type RegistryExecutor struct {
 	host     delegatecontract.StageCaller
+	home     string
 	path     string
+	fileInfo os.FileInfo
+	digest   [sha256.Size]byte
 	mu       sync.Mutex
 	registry agentRegistry
 	stamp    int64
@@ -125,11 +129,7 @@ func NewRegistryExecutor(home string) (*RegistryExecutor, error) {
 	if home == "" {
 		return nil, errors.New("AIMEE_HOME is required for delegate execution")
 	}
-	models := filepath.Join(home, "models.json")
-	if _, err := os.Stat(models); errors.Is(err, os.ErrNotExist) {
-		models = filepath.Join(home, "agents.json")
-	}
-	r := &RegistryExecutor{path: models, limits: make(map[string]*agentLimiter)}
+	r := &RegistryExecutor{home: home, limits: make(map[string]*agentLimiter)}
 	if _, err := r.load(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errNoConfiguredAgents) {
 		return nil, err
 	}
@@ -139,16 +139,39 @@ func NewRegistryExecutor(home string) (*RegistryExecutor, error) {
 func (r *RegistryExecutor) load() (agentRegistry, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	info, err := os.Stat(r.path)
+	// Setup may create models.json after this long-lived executor starts. Resolve
+	// the authoritative owner on every load; only an absent canonical entry may
+	// select the legacy file. A broken symlink is an error, not legacy authority.
+	path := filepath.Join(r.home, "models.json")
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if _, entryErr := os.Lstat(path); !errors.Is(entryErr, os.ErrNotExist) {
+			// The canonical entry exists but is unusable; do not let constructor
+			// treat its target ENOENT as an unconfigured first boot.
+			return agentRegistry{}, fmt.Errorf("open canonical agent registry entry: %v", err)
+		}
+		path = filepath.Join(r.home, "agents.json")
+		file, err = os.Open(path)
+	}
+	if err != nil {
+		return agentRegistry{}, fmt.Errorf("open agent registry: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
 	if err != nil {
 		return agentRegistry{}, fmt.Errorf("stat agent registry: %w", err)
 	}
-	if r.stamp == info.ModTime().UnixNano() && len(r.registry.roster()) > 0 {
-		return r.registry, nil
-	}
-	body, err := os.ReadFile(r.path)
+	body, err := io.ReadAll(file)
 	if err != nil {
 		return agentRegistry{}, fmt.Errorf("read agent registry: %w", err)
+	}
+	// Bind the cache to the selected owner and actual file bytes. Atomic owner
+	// writes and in-place rewrites can preserve timestamps and file sizes.
+	digest := sha256.Sum256(body)
+	if r.path == path && r.fileInfo != nil && os.SameFile(r.fileInfo, info) &&
+		r.stamp == info.ModTime().UnixNano() && r.fileInfo.Size() == info.Size() &&
+		r.digest == digest && len(r.registry.roster()) > 0 {
+		return r.registry, nil
 	}
 	var registry agentRegistry
 	if err := json.Unmarshal(body, &registry); err != nil {
@@ -162,7 +185,7 @@ func (r *RegistryExecutor) load() (agentRegistry, error) {
 			return agentRegistry{}, fmt.Errorf("agent %q has negative max_parallel", agent.Name)
 		}
 	}
-	r.registry, r.stamp = registry, info.ModTime().UnixNano()
+	r.registry, r.path, r.fileInfo, r.stamp, r.digest = registry, path, info, info.ModTime().UnixNano(), digest
 	return registry, nil
 }
 
