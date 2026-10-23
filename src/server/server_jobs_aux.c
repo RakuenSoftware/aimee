@@ -34,7 +34,7 @@ static cJSON *agent_job_to_json(const db1_agent_job_t *job, int include_prompt, 
    cJSON_AddStringToObject(obj, "status", job->status);
    cJSON_AddStringToObject(obj, "agent_name", job->agent_name);
    cJSON_AddNumberToObject(obj, "cursor_turn", job->cursor_turn);
-   if (include_prompt && job->prompt[0])
+   if (include_prompt && (!include_result || observation >= 0) && job->prompt[0])
       cJSON_AddStringToObject(obj, "prompt", job->prompt);
    if (include_result && observation >= 0 && job->result[0])
    {

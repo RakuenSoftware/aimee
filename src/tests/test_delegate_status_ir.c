@@ -261,6 +261,7 @@ static void test_jobs_aux(void)
       assert(db1_agent_job_get(7, &job) == 0);
       view = agent_job_to_json(&job, 1, 1);
       assert(!field(view, "result") && !field(view, "diagnostic") && !field(view, "legacy_result"));
+      assert(!field(view, "prompt"));
       if (rc == -2)
       {
          assert(!field(view, "prompt") && !field(view, "role") && !field(view, "agent_name"));
@@ -271,6 +272,7 @@ static void test_jobs_aux(void)
       assert(handle_jobs_logs(NULL, NULL, req) == 0);
       assert(!field(captured, "log"));
       assert(!field(field(captured, "job"), "result"));
+      assert(!field(field(captured, "job"), "prompt"));
       if (rc == -2)
       {
          assert(!strcmp(string(captured, "job_status"), "forbidden"));
