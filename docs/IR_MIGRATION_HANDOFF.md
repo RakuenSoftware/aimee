@@ -17,6 +17,16 @@ are historical. Do not investigate or change `.100`; validation uses the owned
 
 ### Full internal conversion in progress: 23 October 2026
 
+Remaining structural cutover: the HTTP loop and native factory still construct
+provider-shaped tool catalogs, filter them and parse them back into typed IR.
+The execution-definition plugin fallback and schema caches also rebuild that
+catalog. These are internal round trips, not external translation boundaries.
+The follow-up replaces them with one admitted canonical catalog owner and removes
+unused driver tool-builder callbacks. Completion requires preserving tool order,
+surface masks, full SDK catalogs, roles, plugin precedence and schema policy.
+This work is in an isolated checkout; it is not implemented in this commit.
+
+
 The user's completion criteria now include a significant reduction in production
 code. The first retirement pass deletes 1,439 production lines with no replacement
 production code: obsolete CLI event/callback transports and duplicate raw request,
