@@ -11,19 +11,44 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
+	canonical "github.com/JBailes/aimee/server-go/ir"
 	"github.com/JBailes/aimee/server-go/modules/memory"
 	"github.com/JBailes/aimee/server-go/modules/postgres"
 )
 
+// Output owns the canonical observation; strings are explicit QA domain projections.
 type modelReply struct {
-	Response         string `json:"response"`
-	PromptTokens     int    `json:"prompt_tokens"`
-	CompletionTokens int    `json:"completion_tokens"`
+	Output           *canonical.Response
+	Response         string
+	PromptTokens     int
+	CompletionTokens int
 }
+
+func projectModelReply(reply modelReply) (modelReply, error) {
+	if reply.Output == nil {
+		return reply, errors.New("evaluation model omitted canonical response")
+	}
+	text, err := reply.Output.SemanticText()
+	if err != nil {
+		return reply, fmt.Errorf("evaluation requires complete canonical text: %w", err)
+	}
+	input, err := strconv.Atoi(reply.Output.Usage.Input)
+	if err != nil {
+		return reply, errors.New("evaluation input usage exceeds supported integer range")
+	}
+	output, err := strconv.Atoi(reply.Output.Usage.Output)
+	if err != nil {
+		return reply, errors.New("evaluation output usage exceeds supported integer range")
+	}
+	reply.Response, reply.PromptTokens, reply.CompletionTokens = text, input, output
+	return reply, nil
+}
+
 type evaluationModel func(context.Context, string, string, int) (modelReply, error)
 
 type limitedModelOutput struct{ buffer bytes.Buffer }
@@ -38,9 +63,8 @@ func (b *limitedModelOutput) Write(p []byte) (int, error) {
 	return b.buffer.Write(p)
 }
 
-// The existing plain-completion runner owns provider configuration/execution.
-// JSON stdin preserves full prompts without shell interpolation or argv limits.
-// The agentic run path would consume live hints and record feedback; never use it.
+// The registered tool-free canonical owner never enters agentic hint,
+// worktree, tool or feedback paths. Stdin avoids shell and argv interpolation.
 func agentModel(executable string) evaluationModel {
 	return func(ctx context.Context, system, prompt string, tokens int) (modelReply, error) {
 		var reply modelReply
@@ -56,25 +80,53 @@ func agentModel(executable string) evaluationModel {
 		if system == judgeSystem {
 			temperature = 0
 		}
-		request, err := json.Marshal(map[string]any{"system": system, "prompt": prompt, "max_tokens": tokens, "temperature": temperature})
+		policy := canonical.Context{Origin: 3, Authority: 2, Trust: 2, Sensitivity: 1, ModelVisible: true}
+		evidence := canonical.Context{Origin: 5, Authority: 1, Trust: 2, Sensitivity: 1, ModelVisible: true}
+		input := canonical.Request{Version: 1, SourceWire: "unspecified", CachePolicy: "native",
+			System:   []canonical.Block{{Type: "text", Text: &system, Context: &policy}},
+			Messages: []canonical.Message{{Role: "user", ContentScalar: true, Blocks: []canonical.Block{{Type: "text", Text: &prompt, Context: &evidence}}}},
+			Tools:    []canonical.Tool{}, Stops: []string{}, ToolChoice: canonical.ToolChoice{Mode: "none"},
+			MaxTokens: &tokens, Temperature: &temperature}
+		if !input.Valid() {
+			return reply, errors.New("evaluation request is not admitted canonical IR")
+		}
+		request, err := json.Marshal(map[string]any{"ir": &input})
 		if err != nil {
 			return reply, err
 		}
 		if len(request) > 1<<20 {
 			return reply, errors.New("evaluation model request exceeds 1 MiB")
 		}
-		cmd := exec.CommandContext(ctx, executable, "--json", "agent", "generate")
+		cmd := exec.CommandContext(ctx, executable, "--json", "model", "generate")
 		cmd.Stdin = bytes.NewReader(request)
 		cmd.WaitDelay = time.Second
 		var output, diagnostic limitedModelOutput
 		cmd.Stdout, cmd.Stderr = &output, &diagnostic
-		if err := cmd.Run(); err != nil {
-			return reply, fmt.Errorf("evaluation agent failed: %w", err)
+		runErr := cmd.Run()
+		var envelope map[string]json.RawMessage
+		if !canonical.Decode(output.Bytes(), &envelope) {
+			if runErr != nil {
+				return reply, fmt.Errorf("evaluation agent failed: %w", runErr)
+			}
+			return reply, errors.New("evaluation owner returned invalid JSON")
 		}
-		if err := json.Unmarshal(output.Bytes(), &reply); err != nil {
-			return reply, fmt.Errorf("evaluation agent response: %w", err)
+		if raw := envelope["ir"]; raw != nil {
+			reply.Output, err = canonical.DecodeResponse(raw)
+			if err != nil {
+				return reply, fmt.Errorf("evaluation owner canonical response: %w", err)
+			}
 		}
-		return reply, nil
+		if runErr != nil {
+			return reply, fmt.Errorf("evaluation agent failed: %w", runErr)
+		}
+		var status string
+		if !canonical.Decode(envelope["status"], &status) || status != "ok" {
+			return reply, errors.New("evaluation owner did not complete successfully")
+		}
+		if hostError := envelope["error"]; hostError != nil && !bytes.Equal(bytes.TrimSpace(hostError), []byte("null")) {
+			return reply, errors.New("evaluation owner returned contradictory host error")
+		}
+		return projectModelReply(reply)
 	}
 }
 
@@ -100,6 +152,10 @@ func judgeScore(s string) (int, error) {
 }
 func checkedModel(ctx context.Context, model evaluationModel, system, prompt string, tokens int) (modelReply, error) {
 	reply, err := model(ctx, system, prompt, tokens)
+	if err != nil {
+		return reply, err
+	}
+	reply, err = projectModelReply(reply)
 	if err != nil {
 		return reply, err
 	}

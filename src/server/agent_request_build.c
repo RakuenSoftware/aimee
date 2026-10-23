@@ -27,6 +27,26 @@ int is_anthropic_provider(const agent_t *agent)
    return strcmp(agent->provider, "anthropic") == 0;
 }
 
+cJSON *agent_build_plain_request_ir(const agent_t *agent, const aimee_request_t *request)
+{
+   aimee_request_t owned = {0};
+   if (!agent || !request || aimee_ir_request_admit(request) || request->n_tools ||
+       request->stream || request->model ||
+       (request->has_max_tokens &&
+        agent_request_max_tokens(agent, request->max_tokens) != request->max_tokens) ||
+       aimee_ir_request_clone(request, &owned))
+      return NULL;
+   owned.model = strdup(agent->model);
+   owned.mutated = 1;
+   cJSON *body = NULL;
+   if (owned.model)
+      body = is_chatgpt_provider(agent)     ? responses_backend_build(&owned)
+             : is_anthropic_provider(agent) ? anthropic_backend_build(&owned)
+                                            : openai_backend_build(&owned);
+   aimee_request_free(&owned);
+   return body;
+}
+
 /* Build the provider request for a plain (system, user) agent turn. Constructs the
  * typed IR and dispatches to the matching backend (anthropic / responses / openai),
  * with host prompt/cache/sampling preparation completed before rendering.

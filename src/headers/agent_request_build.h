@@ -5,6 +5,7 @@
 
 #include "aimee.h" /* size macros for agent_types.h */
 #include "agent_types.h"
+#include <aimee/ir/aimee_ir.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -22,6 +23,8 @@ extern "C"
     * hand-builders were deleted. */
    struct cJSON *agent_build_request(const agent_t *agent, const char *system_prompt,
                                      const char *user_prompt, int max_tokens, double temperature);
+   /* Already admitted tool-free input retains its blocks and provenance. */
+   struct cJSON *agent_build_plain_request_ir(const agent_t *agent, const aimee_request_t *request);
 
 #ifdef __cplusplus
 }

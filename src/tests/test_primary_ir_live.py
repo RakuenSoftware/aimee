@@ -92,6 +92,17 @@ def main():
                     assert "canonical delegate fixture" in json.dumps(results), results
                     assert "CLIENT_CWD_MUST_NOT_BE_READ" not in json.dumps(results), results
                     payload["choices"][0]["message"]["content"] = "MIRROR_DELEGATE_OK"
+            if request.get("model") == "ir-model-a":
+                encoded = json.dumps(request)
+                if "IR_QA_PARTIAL" in encoded:
+                    payload["choices"][0]["finish_reason"] = "length"
+                if "IR_QA_REFUSED" in encoded:
+                    payload["choices"][0]["finish_reason"] = "content_filter"
+                if "IR_QA_TOOL" in encoded:
+                    payload["choices"][0]["finish_reason"] = "tool_calls"
+                    payload["choices"][0]["message"]["tool_calls"] = [dict(
+                        id="qa-unexecuted", type="function", function=dict(name="write_file",
+                            arguments=json.dumps(dict(path=str(home / "qa-must-not-exist"), content="forbidden"))))]
             data = json.dumps(payload).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -247,6 +258,45 @@ def main():
         assert recovery.returncode == 0, recovery.stdout + recovery.stderr
         print("standalone learning: canonical replay recovered a lost projection without duplicate outcomes")
         print(f"canonical primary: A/B/A/B, {len(observed)} native calls, {sequence} durable events, live/replay and resumed-cursor parity passed")
+
+        # The shipped evaluator must reach the actual registered CLI/RPC, not a
+        # fake executable that happens to print the retired flat result shape.
+        def qa_request(prompt):
+            def block(text, origin, authority):
+                return dict(type="text", text=text, context=dict(origin=origin, authority=authority,
+                    trust=2, sensitivity=1, model_visible=True))
+            return dict(ir=dict(version=1, source_wire="unspecified", cache_policy="native",
+                system=[block("Use only the supplied evidence.", 3, 2)],
+                messages=[dict(role="user", content_scalar=True, blocks=[block(prompt, 5, 1)])],
+                tools=[], stop_sequences=[], tool_choice=dict(mode="none"),
+                max_tokens=256, temperature=0.3))
+
+        cli = str(Path(__file__).resolve().parents[2] / "aimee")
+        for marker, stop in [("IR_QA_ANSWER", 1), ("IR_QA_PARTIAL", 2),
+                             ("IR_QA_REFUSED", 5), ("IR_QA_TOOL", 3)]:
+            before = len(observed)
+            completed = subprocess.run([cli, "--json", "model", "generate"],
+                input=json.dumps(qa_request(marker)), text=True, capture_output=True, timeout=30)
+            result = json.loads(completed.stdout)
+            assert len(observed) == before + 1, (marker, completed.returncode, result)
+            assert result["ir"]["schema"] == "aimee.response.v1", result
+            assert result["ir"]["stop_reason"] == stop, result
+            assert result["ir"]["usage"]["input"] == "10" and result["ir"]["usage"]["output"] == "2", result
+            assert "response" not in result and "result" not in result, result
+            assert (completed.returncode == 0) == (marker == "IR_QA_ANSWER"), result
+            assert result["status"] == ("ok" if marker == "IR_QA_ANSWER" else "error"), result
+            sent = observed[-1]
+            assert sent["model"] == "ir-model-a" and sent["max_tokens"] == 256 and sent["temperature"] == 0.3, sent
+            assert not sent.get("tools") and "IR_TURN_0" not in json.dumps(sent), sent
+            assert marker in json.dumps(sent) and not (home / "qa-must-not-exist").exists(), result
+        before = len(observed)
+        invalid = qa_request("IR_QA_INVALID")
+        invalid["ir"]["top_p"] = 0.5
+        refused = subprocess.run([cli, "--json", "model", "generate"],
+            input=json.dumps(invalid), text=True, capture_output=True, timeout=30)
+        assert refused.returncode != 0 and len(observed) == before, refused.stdout
+        assert "ir" not in json.loads(refused.stdout), refused.stdout
+        print("canonical evaluation: registered real CLI -> admitted tool-free owner -> actual HTTP fixture -> full canonical success/refusal/MAX/tool observations; no history/hints/effects")
 
         # Repeated cache-eligible prompts still produce private canonical
         # executions. A flat role-cache hit must not bypass the durable owner.

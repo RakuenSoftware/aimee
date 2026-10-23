@@ -2309,8 +2309,75 @@ static void test_git_explicit_repo_alias(void)
    cJSON_Delete(req);
 }
 
+/* Framed generation preserves the complete caller IR JSON, not flattened
+ * shell arguments. A seekable fixture also exercises the full one-MiB bound
+ * without deadlocking a pipe before the marshaller starts reading it. */
+static cJSON *model_generate_stdin(const void *bytes, size_t length, int argc, char **argv)
+{
+   FILE *file = tmpfile();
+   assert(file);
+   assert(fwrite(bytes, 1, length, file) == length);
+   assert(!fflush(file) && !fseek(file, 0, SEEK_SET));
+   int original = dup(STDIN_FILENO);
+   assert(original >= 0 && dup2(fileno(file), STDIN_FILENO) >= 0);
+   clearerr(stdin);
+   cJSON *result = marshal_model_generate(argc, argv);
+   assert(!fseek(stdin, 0, SEEK_END)); /* discard an oversized read's buffered tail */
+   assert(dup2(original, STDIN_FILENO) >= 0);
+   clearerr(stdin);
+   close(original);
+   fclose(file);
+   return result;
+}
+static void test_model_generate_canonical_frame(void)
+{
+   cli_v1_route_t route;
+   char *lookup[] = {"generate"};
+   assert(cli_v1_lookup("model", 1, lookup, &route));
+   assert(!strcmp(route.method, "model.generate") && route.skip_subcmd == 1);
+   assert(!route.server_method && route.timeout_ms == 300000);
+   const char input[] = "{\"ir\":{\"version\":1,\"system\":[{\"text\":\"caller\\npolicy\"}],"
+                        "\"messages\":[{\"role\":\"user\",\"content_scalar\":true,\"blocks\":[{"
+                        "\"text\":\"evidence 雪\"}]}],\"max_tokens\":256,\"temperature\":0.3}}";
+   cJSON *expected = cJSON_Parse(input);
+   cJSON *actual = model_generate_stdin(input, sizeof input - 1, 0, NULL);
+   assert(expected && actual);
+   assert(cJSON_Compare(cJSON_GetObjectItem(actual, "ir"), cJSON_GetObjectItem(expected, "ir"), 1));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(actual, "method")), "model.generate"));
+   assert(cJSON_GetObjectItem(actual, "protocol_version")->valueint == 1);
+   assert(cJSON_GetArraySize(actual) == 3);
+   cJSON_Delete(expected);
+   cJSON_Delete(actual);
+   const char *bad[] = {"",
+                        " ",
+                        "[]",
+                        "{\"ir\":{}} trailing",
+                        "{\"ir\":{}}{}",
+                        "{\"ir\":\"flat\"}",
+                        "{\"ir\":{},\"actor\":\"forged\"}",
+                        "{\"ir\":{},\"ir\":{}}"};
+   for (size_t n = 0; n < sizeof bad / sizeof *bad; n++)
+      assert(!model_generate_stdin(bad[n], strlen(bad[n]), 0, NULL));
+   char *args[] = {"--model", "untrusted-override"};
+   assert(!model_generate_stdin(input, sizeof input - 1, 2, args));
+   const char embedded[] = {'{', '"', 'i', 'r', '"', ':', '{', '}', '}', 0, ' '};
+   assert(!model_generate_stdin(embedded, sizeof embedded, 0, NULL));
+   const size_t limit = 1024u * 1024u;
+   char *boundary = malloc(limit + 1);
+   assert(boundary);
+   memset(boundary, ' ', limit + 1);
+   memcpy(boundary, "{\"ir\":{}}", 9);
+   actual = model_generate_stdin(boundary, limit, 0, NULL);
+   assert(actual);
+   cJSON_Delete(actual);
+   assert(!model_generate_stdin(boundary, limit + 1, 0, NULL));
+   free(boundary);
+   puts("  PASS: model.generate exact framed IR, route and input bounds");
+}
+
 int main(void)
 {
+   test_model_generate_canonical_frame();
    test_git_explicit_repo_alias();
    test_cli_v1_body_cap_matches_server();
    printf("test_cli_v1_delegate\n");

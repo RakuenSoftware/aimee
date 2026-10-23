@@ -37,6 +37,7 @@ int git_verify_response_is_failure(cJSON *resp);
 double json_double(cJSON *obj, const char *key, double def);
 int json_int(cJSON *obj, const char *key, int def);
 const char *json_str(cJSON *obj, const char *key);
+cJSON *marshal_model_generate(int argc, char **argv);
 cJSON *marshal_audit_fidelity(int argc, char **argv);
 cJSON *marshal_audit_provenance(int argc, char **argv);
 cJSON *marshal_audit_trace(int argc, char **argv);

@@ -20,6 +20,7 @@
 #include "model_registry.h"
 #include "agent_config.h"
 #include "cJSON.h"
+#include <aimee/ir/session_event.h>
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 int model_max_output(const char *provider, const char *model_id)
@@ -280,9 +281,64 @@ static void test_typed_sampling_in_plain_requests(void)
    puts("typed plain sampling retains recommendations, wire scope and hard constraints OK");
 }
 
+static void test_owned_plain_request_preserves_input(void)
+{
+   aimee_block_t policy = {.type = AIMEE_BLK_TEXT,
+                           .text = "Answer using the evidence only.",
+                           .context = {.origin = AIMEE_CTX_ORIGIN_USER,
+                                       .authority = AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                                       .trust = AIMEE_CTX_TRUST_UNVERIFIED,
+                                       .model_visible = 1}};
+   aimee_block_t evidence = {.type = AIMEE_BLK_TEXT,
+                             .text = "Retrieved source: Orion.",
+                             .context = {.origin = AIMEE_CTX_ORIGIN_RETRIEVAL,
+                                         .authority = AIMEE_CTX_AUTH_EVIDENCE,
+                                         .trust = AIMEE_CTX_TRUST_UNVERIFIED,
+                                         .model_visible = 1}};
+   aimee_message_t message = {.role = "user", .blocks = &evidence, .n_blocks = 1};
+   aimee_request_t input = {.system = &policy,
+                            .n_system = 1,
+                            .messages = &message,
+                            .n_messages = 1,
+                            .tool_choice = AIMEE_TOOL_CHOICE_NONE,
+                            .max_tokens = 256,
+                            .has_max_tokens = 1,
+                            .temperature = 0.3,
+                            .has_temperature = 1};
+   cJSON *snapshot = aimee_ir_request_json(&input);
+   assert(snapshot);
+   const char *providers[] = {"openai", "anthropic"};
+   for (size_t i = 0; i < sizeof providers / sizeof *providers; i++)
+   {
+      agent_t agent = mk_agent(providers[i], "configured-model");
+      cJSON *body = agent_build_plain_request_ir(&agent, &input);
+      assert(body);
+      assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(body, "model")), "configured-model"));
+      assert(cJSON_GetObjectItem(body, "max_tokens")->valueint == 256);
+      assert(cJSON_GetObjectItem(body, "temperature")->valuedouble == 0.3);
+      char *encoded = cJSON_PrintUnformatted(body);
+      assert(encoded && strstr(encoded, evidence.text) && strstr(encoded, policy.text));
+      assert(!cJSON_GetObjectItem(body, "tools"));
+      cJSON *after = aimee_ir_request_json(&input);
+      assert(after && cJSON_Compare(snapshot, after, 1));
+      cJSON_Delete(after);
+      cJSON_Delete(body);
+      free(encoded);
+   }
+   agent_t agent = mk_agent("openai", "configured-model");
+   input.stream = 1;
+   assert(!agent_build_plain_request_ir(&agent, &input));
+   input.stream = 0;
+   input.model = "unrelated-pinned-model";
+   assert(!agent_build_plain_request_ir(&agent, &input));
+   cJSON_Delete(snapshot);
+   puts("owned plain input preserves evidence provenance, exact controls and configured target OK");
+}
+
 int main(void)
 {
    init_config_home();
+   test_owned_plain_request_preserves_input();
    printf("agent_request_build golden:\n");
 
    /* Anthropic Messages wire: system + user as typed text blocks, max_tokens, then

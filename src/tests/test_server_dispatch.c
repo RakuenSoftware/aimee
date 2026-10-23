@@ -1546,6 +1546,10 @@ int handle_agent_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "model.stats");
 }
+int handle_agent_generate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "model.generate");
+}
 int handle_agent_draft(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "model.draft");

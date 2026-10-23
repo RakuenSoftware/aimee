@@ -393,6 +393,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-delegate-result-envelope \
                $(TESTPREFIX)/unit-test-openai-run-terminal \
                $(TESTPREFIX)/unit-test-delegate-status-ir \
+               $(TESTPREFIX)/unit-test-agent-generate-ir \
                $(TESTPREFIX)/unit-test-harness-ir \
                $(TESTPREFIX)/unit-test-claude-headless \
                $(TESTPREFIX)/unit-test-server-chat-ir \
@@ -5839,6 +5840,7 @@ $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent-context-refusal: $(OBJDIR)/tests/test_agent_context_refusal.o \
+                                $(OBJDIR)/server/agent_admission.o \
                                 $(OBJDIR)/modules/module-runtime/pre_llm_hook.o \
                                 $(OBJDIR)/server/agent_runtime_liveness.o \
                                 $(OBJDIR)/modules/translation/aimee_backend_responses.o \
@@ -7378,3 +7380,6 @@ $(TESTPREFIX)/unit-test-delegate-status-ir: $(OBJDIR)/tests/test_delegate_status
 
 $(TESTPREFIX)/unit-test-db1-agent-job-observation: $(OBJDIR)/tests/test_db1_agent_job_observation.o $(OBJDIR)/db1_client/delegation.o $(OBJDIR)/db1_client/transport.o $(OBJDIR)/module_json_call.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-agent-generate-ir: $(OBJDIR)/tests/test_agent_generate_ir.o $(OBJDIR)/server/server_error_kind.o $(IR_CONTRACT_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/json_fluent.o
+	$(TESTLINK_MIN) $(LEAN_GC_FLAGS) -o $@ $^ $(L_MINIMAL) -lcrypto

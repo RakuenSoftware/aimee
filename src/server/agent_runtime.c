@@ -208,6 +208,10 @@ static _Thread_local const char *result_cache_role;
  * Slot safety: there is no non-local exit between acquire and release — the
  * executors (agent_execute / agent_execute_with_tools_for_role) return normally
  * (C has no exceptions), so the release always runs and a slot is never leaked. */
+static int agent_execute_plain_request(const agent_t *agent, const char *system_prompt,
+                                       const char *user_prompt, int max_tokens, double temperature,
+                                       agent_result_t *out, const aimee_request_t *request);
+
 static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t *net,
                                        const char *role, const char *system_prompt,
                                        const char *user_prompt, int max_tokens, double temperature,
@@ -280,8 +284,23 @@ static int agent_dispatch_one_internal(const agent_t *ag, const agent_network_t 
       rc = AGENT_RC_CAPTURE_FAILED;
       snprintf(out->error, sizeof out->error, "cannot admit canonical session capture");
    }
-   else if (request)
+   else if (request && use_tools)
       rc = agent_execute_request_with_tools(ag, net, role, request, response, out);
+   else if (request)
+   {
+      aimee_session_event_t event = {
+          .kind = AIMEE_SESSION_MESSAGE, .message_id = "user", .message = &request->messages[0]};
+      if (aimee_ir_session_emit(&event))
+         rc = AGENT_RC_CAPTURE_FAILED;
+      else
+      {
+         const char *previous_cache_role = result_cache_role;
+         result_cache_role = NULL;
+         rc = agent_execute_plain_request(ag, system_prompt, user_prompt, max_tokens, temperature,
+                                          out, request);
+         result_cache_role = previous_cache_role;
+      }
+   }
    else
    {
       const char *previous_cache_role = result_cache_role;
@@ -523,6 +542,48 @@ int agent_generate(agent_config_t *cfg, const char *agent_name, const char *syst
     * return before the executor sets it (idempotent when it was already set). */
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", local.name);
    return rc;
+}
+
+/* Evaluation has a canonical, tool-free owner. It deliberately does not enter
+ * routing, hints, credential-pool retries, tool loops or feedback recording. */
+int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request, agent_result_t *out)
+{
+   memset(out, 0, sizeof *out);
+   if (!cfg || !request || aimee_ir_request_admit(request) || request->n_tools || request->stream ||
+       request->model || request->tool_choice != AIMEE_TOOL_CHOICE_NONE ||
+       request->n_messages != 1 || request->messages[0].n_blocks != 1 ||
+       request->messages[0].blocks[0].type != AIMEE_BLK_TEXT ||
+       !request->messages[0].blocks[0].text || !request->messages[0].blocks[0].text[0])
+      return AGENT_RC_CONTEXT_REFUSED;
+   agent_t *pick = cfg->default_agent[0] ? agent_find(cfg, cfg->default_agent) : NULL;
+   if (pick && (!pick->enabled || agent_uses_provider_cli(pick)))
+      pick = NULL;
+   for (int i = 0; !pick && i < cfg->agent_count; i++)
+      if (cfg->agents[i].enabled && !agent_uses_provider_cli(&cfg->agents[i]))
+         pick = &cfg->agents[i];
+   if (!pick)
+   {
+      snprintf(out->error, sizeof out->error, "no non-CLI delegate available for generation");
+      return -1;
+   }
+   agent_t local = *pick;
+   agent_apply_runtime_config(&local);
+   local.write_capable = 0;
+   if (request->has_max_tokens &&
+       agent_request_max_tokens(&local, request->max_tokens) != request->max_tokens)
+   {
+      snprintf(out->error, sizeof out->error, "selected model cannot honor generation token cap");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   if (is_chatgpt_provider(&local) && (request->has_max_tokens || request->has_temperature))
+   {
+      snprintf(out->error, sizeof out->error, "selected model cannot honor generation controls");
+      return AGENT_RC_CONTEXT_REFUSED;
+   }
+   return agent_dispatch_one_internal(
+       &local, &cfg->network, NULL, NULL, request->messages[0].blocks[0].text,
+       request->has_max_tokens ? request->max_tokens : 0,
+       request->has_temperature ? request->temperature : 0.3, 0, out, request, NULL);
 }
 
 /* Run one fan-out task on a specifically named configured agent (resolved like
@@ -886,8 +947,9 @@ static void parse_response(const char *body, const agent_t *agent,
 
 /* --- Simple (non-tool) execution --- */
 
-int agent_execute(const agent_t *agent, const char *system_prompt, const char *user_prompt,
-                  int max_tokens, double temperature, agent_result_t *out)
+static int agent_execute_plain_request(const agent_t *agent, const char *system_prompt,
+                                       const char *user_prompt, int max_tokens, double temperature,
+                                       agent_result_t *out, const aimee_request_t *request)
 {
    memset(out, 0, sizeof(*out));
    /* A refused route arrives here as NULL, and the three reads below would fault
@@ -939,13 +1001,15 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       return -1;
    }
    /* Run PRE_LLM_CALL hooks — appends ephemeral context to user msg, never system_prompt. */
-   char *augmented_prompt = plugin_chook_apply_pre_llm(user_prompt);
+   char *augmented_prompt = request ? NULL : plugin_chook_apply_pre_llm(user_prompt);
    const char *effective_user = augmented_prompt ? augmented_prompt : user_prompt;
    /* Build request body — derive the output cap from the model when unpinned. */
    int tok = agent_request_max_tokens(agent, max_tokens);
-   if (is_anthropic_provider(agent))
+   if (!request && is_anthropic_provider(agent))
       track_simple_anthropic_payload_rewrite(driver, agent, system_prompt, effective_user);
-   cJSON *req = agent_build_request(agent, system_prompt, effective_user, tok, temperature);
+   cJSON *req = request
+                    ? agent_build_plain_request_ir(agent, request)
+                    : agent_build_request(agent, system_prompt, effective_user, tok, temperature);
    char *body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
    if (!body)
@@ -1017,10 +1081,11 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       snprintf(out->model, MAX_MODEL_LEN, "%s", fb_agent.model);
       snprintf(out->served_model, MAX_MODEL_LEN, "%s", fb_agent.model);
 
-      if (is_anthropic_provider(&fb_agent))
+      if (!request && is_anthropic_provider(&fb_agent))
          track_simple_anthropic_payload_rewrite(driver, &fb_agent, system_prompt, effective_user);
       cJSON *fb_req =
-          agent_build_request(&fb_agent, system_prompt, effective_user, tok, temperature);
+          request ? agent_build_plain_request_ir(&fb_agent, request)
+                  : agent_build_request(&fb_agent, system_prompt, effective_user, tok, temperature);
       char *fb_body = cJSON_PrintUnformatted(fb_req);
       cJSON_Delete(fb_req);
       if (fb_body)
@@ -2019,4 +2084,11 @@ int agent_run_native_request_for_role(agent_config_t *config, const agent_t *sel
    tl_force_no_tools = previous;
    tl_native_turn_limit = previous_limit;
    return rc;
+}
+
+int agent_execute(const agent_t *agent, const char *system_prompt, const char *user_prompt,
+                  int max_tokens, double temperature, agent_result_t *out)
+{
+   return agent_execute_plain_request(agent, system_prompt, user_prompt, max_tokens, temperature,
+                                      out, NULL);
 }

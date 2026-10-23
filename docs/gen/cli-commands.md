@@ -631,6 +631,7 @@ Model roster management.
 Subcommands:
 
 ```
+  generate         Tool-free canonical text completion (JSON request on stdin)
   list             List configured models
   add              Add or update a model
   setup            Run a provider's attended OAuth setup

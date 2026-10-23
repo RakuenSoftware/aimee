@@ -21,6 +21,30 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The canonical tool-free fixture installs its own log sink. Reaching a live
+ * history/learning transport would violate the no-context/no-feedback contract. */
+cJSON *aimee_module_command_call_context(uint32_t event, uint32_t stage, const char *verb,
+                                         const cJSON *args, const cJSON *context)
+{
+   (void)event;
+   (void)stage;
+   (void)verb;
+   (void)args;
+   (void)context;
+   abort();
+}
+int server_native_history_load(const char *session, const char *actor, const char *turn,
+                               int running, cJSON **messages, cJSON **receipts)
+{
+   (void)session;
+   (void)actor;
+   (void)turn;
+   (void)running;
+   (void)messages;
+   (void)receipts;
+   abort();
+}
+
 static int metadata_available = 1;
 static int fixture_metadata(const char *name, aimee_tool_metadata_t *out)
 {
@@ -132,6 +156,7 @@ static int bootstrap_case, bootstrap_evidence_seen;
 static int malformed_projection;
 static int transport_refuse;
 static int expect_hook_prompt, hook_calls;
+static int owned_generation_case, owned_generation_inputs;
 static int fallback_hook_context(const char *user, char *out, size_t capacity, void *context)
 {
    (void)context;
@@ -160,6 +185,19 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
    (void)model;
    (void)session_id;
    provider_calls++;
+   if (owned_generation_case)
+   {
+      cJSON *sent = cJSON_ParseWithLengthOpts(body, body_len, NULL, 0);
+      assert(sent);
+      assert(cJSON_GetObjectItem(sent, "max_tokens")->valueint == 256);
+      assert(cJSON_GetObjectItem(sent, "temperature")->valuedouble == 0.3);
+      assert(!cJSON_GetObjectItem(sent, "tools"));
+      char *encoded = cJSON_PrintUnformatted(sent);
+      assert(encoded && strstr(encoded, "original prompt") &&
+             !strstr(encoded, "single-hook-context"));
+      free(encoded);
+      cJSON_Delete(sent);
+   }
    if (simple_finish)
    {
       char response[512];
@@ -469,6 +507,69 @@ static int fixture_classifier(const char *name, int *classification)
    return 0;
 }
 
+static int capture_owned_generation(const aimee_session_event_t *event, void *context)
+{
+   (void)context;
+   if (event->kind == AIMEE_SESSION_MESSAGE && !strcmp(event->message->role, "user"))
+   {
+      assert(event->message->n_blocks == 1);
+      const aimee_block_t *block = &event->message->blocks[0];
+      assert(block->context.origin == AIMEE_CTX_ORIGIN_RETRIEVAL);
+      assert(block->context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+      assert(block->context.trust == AIMEE_CTX_TRUST_UNVERIFIED);
+      assert(!strcmp(block->text, "original prompt"));
+      owned_generation_inputs++;
+   }
+   return 0;
+}
+
+static void test_owned_plain_generation(const agent_t *agent)
+{
+   agent_config_t *cfg = calloc(1, sizeof *cfg);
+   assert(cfg);
+   cfg->agent_count = 1;
+   cfg->agents[0] = *agent;
+   cfg->agents[0].enabled = 1;
+   cfg->agents[0].max_parallel = 1;
+   snprintf(cfg->default_agent, sizeof cfg->default_agent, "%s", agent->name);
+   aimee_block_t policy = {.type = AIMEE_BLK_TEXT,
+                           .text = "Use only the evidence.",
+                           .context = {.origin = AIMEE_CTX_ORIGIN_USER,
+                                       .authority = AIMEE_CTX_AUTH_TASK_INSTRUCTION,
+                                       .trust = AIMEE_CTX_TRUST_UNVERIFIED,
+                                       .model_visible = 1}};
+   aimee_block_t evidence = {.type = AIMEE_BLK_TEXT,
+                             .text = "original prompt",
+                             .context = {.origin = AIMEE_CTX_ORIGIN_RETRIEVAL,
+                                         .authority = AIMEE_CTX_AUTH_EVIDENCE,
+                                         .trust = AIMEE_CTX_TRUST_UNVERIFIED,
+                                         .model_visible = 1}};
+   aimee_message_t message = {.role = "user", .blocks = &evidence, .n_blocks = 1};
+   aimee_request_t input = {.system = &policy,
+                            .n_system = 1,
+                            .messages = &message,
+                            .n_messages = 1,
+                            .tool_choice = AIMEE_TOOL_CHOICE_NONE,
+                            .max_tokens = 256,
+                            .has_max_tokens = 1,
+                            .temperature = 0.3,
+                            .has_temperature = 1};
+   agent_result_t result = {0};
+   owned_generation_case = 1;
+   owned_generation_inputs = provider_calls = recalls = hook_calls = 0;
+   assert(plugin_chook_register_pre_llm(fallback_hook_context, NULL) >= 0);
+   aimee_ir_session_set_sink(capture_owned_generation, NULL);
+   int rc = agent_generate_request(cfg, &input, &result);
+   aimee_ir_session_set_sink(NULL, NULL);
+   plugin_chook_reset();
+   owned_generation_case = 0;
+   assert(rc == 0 && result.success &&
+          !aimee_ir_response_complete_text_valid(&result.canonical_response));
+   assert(provider_calls == 1 && recalls == 0 && hook_calls == 0 && owned_generation_inputs == 1);
+   agent_result_clear_response(&result);
+   free(cfg);
+}
+
 int main(void)
 {
    delegate_role_seam_install();
@@ -711,6 +812,7 @@ int main(void)
    char *answer = agent_result_take_text(&result);
    assert(answer && !strcmp(answer, "Partial plausible verdict."));
    free(answer);
+   test_owned_plain_generation(&agent);
    simple_finish = NULL;
    /* A durable capture loss is local and terminal, including after dispatch.
     * The attempted tool must still be counted when publishing its result fails. */

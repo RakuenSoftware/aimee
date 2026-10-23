@@ -365,6 +365,14 @@ func TestSetupAccountIsCompleteForOperatorConfiguredLogin(t *testing.T) {
 	if status["complete"] != true || status["required"] != false || status["username"] != "operator" {
 		t.Fatalf("status = %#v", status)
 	}
+	if !s.isAdmin(withUser(httptest.NewRequest(http.MethodGet, "/", nil), "operator")) {
+		t.Fatal("explicit seed owner was not admitted as appliance administrator")
+	}
+	for _, other := range []string{"admin", "another-managed-user", ""} {
+		if s.isAdmin(withUser(httptest.NewRequest(http.MethodGet, "/", nil), other)) {
+			t.Fatalf("explicit seed marker granted administrator to %q", other)
+		}
+	}
 }
 
 // The roundtable admin gate lives in the C server, which runs as `aimee`, while

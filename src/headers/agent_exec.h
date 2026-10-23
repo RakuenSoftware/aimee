@@ -109,6 +109,8 @@ void agent_run_require_initial_tool_call(int on);
 int agent_generate(agent_config_t *cfg, const char *agent_name, const char *system_prompt,
                    const char *user_prompt, int max_tokens, double temperature,
                    agent_result_t *out);
+int agent_generate_request(agent_config_t *cfg, const aimee_request_t *request,
+                           agent_result_t *out);
 
 /* Like agent_run but forces tool execution regardless of agent config */
 int agent_run_with_tools(agent_config_t *cfg, const char *role, const char *system_prompt,

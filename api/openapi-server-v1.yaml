@@ -2764,6 +2764,17 @@ paths:
       summary: One-shot tool-free text generation (proposal drafting) via a non-CLI delegate
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: "{text, agent}", content: { application/json: { schema: { type: object } } } } }
+  /model/generate:
+    post:
+      summary: One-shot tool-free canonical text completion for evaluation
+      description: >
+        Accepts {ir} with an aimee.request.v1 request containing one caller system
+        text block and one user text block, explicit max_tokens and temperature,
+        no tools, and tool_choice none. Caller instructions and retrieved evidence
+        must retain unverified provenance. Other controls are refused. Selects the
+        configured default HTTP delegate without hints, tool execution or feedback.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [ir], properties: { ir: { type: object } } } } } }
+      responses: { "200": { description: "{status, ir}; ir is a complete aimee.response.v1 text answer", content: { application/json: { schema: { type: object } } } } }
   /model/setup:
     post:
       summary: Set up an agent (async)

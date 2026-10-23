@@ -157,6 +157,7 @@
      "                   --backend X --task-id Y [--image I] [--host H]\n"
      "                   [--no-hibernate] \"<cmd>\"\n"},
     {"model", "Model roster management", AIMEE_CMD_TIER_ADVANCED, 0,
+     "  generate         Tool-free canonical text completion (JSON request on stdin)\n"
      "  list             List configured models\n"
      "  add              Add or update a model\n"
      "  setup            Run a provider's attended OAuth setup\n"

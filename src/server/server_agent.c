@@ -26,6 +26,96 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include "platform_path.h"
+#include "agent_exec.h"
+#include <aimee/ir/session_event.h>
+
+/* This completion boundary accepts caller instructions and retrieved evidence,
+ * never an assertion of host policy or verified provenance from a JSON body. */
+static int generation_text(const aimee_block_t *block)
+{
+   return block->type == AIMEE_BLK_TEXT && block->text && block->text[0] &&
+          block->context.model_visible &&
+          (block->context.origin == AIMEE_CTX_ORIGIN_USER ||
+           block->context.origin == AIMEE_CTX_ORIGIN_RETRIEVAL) &&
+          block->context.authority <= AIMEE_CTX_AUTH_TASK_INSTRUCTION &&
+          block->context.trust <= AIMEE_CTX_TRUST_UNVERIFIED &&
+          !block->context.revision_domain[0] && !block->context.revision_scope[0] &&
+          !block->context.revision_epoch;
+}
+
+int handle_agent_generate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const cJSON *field;
+   if (!cJSON_IsObject(req))
+      return server_send_error(conn, "generation requires one canonical request envelope", NULL);
+   cJSON_ArrayForEach(
+       field,
+       req) if (!field->string || cJSON_GetObjectItemCaseSensitive(req, field->string) != field ||
+                (strcmp(field->string, "ir") && strcmp(field->string, "method") &&
+                 strcmp(field->string, "protocol_version") && strcmp(field->string, "request_id") &&
+                 strcmp(field->string,
+                        "id"))) return server_send_error(conn,
+                                                         "unsupported generation envelope field",
+                                                         NULL);
+   aimee_request_t input = {0};
+   if (aimee_ir_request_parse(cJSON_GetObjectItemCaseSensitive(req, "ir"), &input))
+      return server_send_error(conn, "generation requires an admitted canonical request", NULL);
+   int supported =
+       !input.model && input.frontend == AIMEE_WIRE_UNKNOWN && input.n_system == 1 &&
+       generation_text(&input.system[0]) && input.n_messages == 1 && input.messages[0].role &&
+       !strcmp(input.messages[0].role, "user") && input.messages[0].n_blocks == 1 &&
+       generation_text(&input.messages[0].blocks[0]) && !input.n_tools &&
+       input.tool_choice == AIMEE_TOOL_CHOICE_NONE && !input.tool_choice_name &&
+       !input.has_parallel_tool_calls && !input.stream && !input.n_stop && input.has_max_tokens &&
+       input.max_tokens > 0 && input.has_temperature && !input.has_top_p && !input.has_top_k &&
+       !input.metadata && !input.service_tier && !input.prompt_cache_key &&
+       !input.prompt_cache_retention && !input.prompt_cache_options && !input.thinking &&
+       !input.reasoning_summary && !input.reasoning_effort && !input.output_format.kind &&
+       input.cache_policy == AIMEE_CACHE_DEFAULT && !input.raw && !input.raw_bytes;
+   if (!supported)
+   {
+      aimee_request_free(&input);
+      return server_send_error(conn, "generation supports tool-free canonical text requests", NULL);
+   }
+   agent_config_t cfg;
+   if (agent_load_config(&cfg))
+   {
+      aimee_request_free(&input);
+      return server_send_error(conn, "no delegates configured", NULL);
+   }
+   agent_result_t result = {0};
+   int rc = agent_generate_request(&cfg, &input, &result);
+   aimee_request_free(&input);
+   if (rc || !result.success || aimee_ir_response_complete_text_valid(&result.canonical_response))
+   {
+      const aimee_response_t *observed = &result.canonical_response;
+      cJSON *failure = server_error_kind_json(
+          SERVER_ERR_UNAVAILABLE, "generation did not return a complete canonical text answer",
+          NULL);
+      if (failure && !aimee_ir_response_valid(observed) &&
+          (observed->n_content || observed->stop_reason != AIMEE_STOP_UNKNOWN ||
+           observed->error_message))
+      {
+         cJSON *canonical = aimee_ir_response_json(observed);
+         if (canonical && !cJSON_AddItemToObject(failure, "ir", canonical))
+            cJSON_Delete(canonical);
+      }
+      agent_result_clear_response(&result);
+      return server_send_ok(conn, failure);
+   }
+   cJSON *response = jo_ok();
+   cJSON *canonical = aimee_ir_response_json(&result.canonical_response);
+   if (!response || !canonical || !cJSON_AddItemToObject(response, "ir", canonical))
+   {
+      cJSON_Delete(canonical);
+      cJSON_Delete(response);
+      agent_result_clear_response(&result);
+      return server_send_error(conn, "generation response could not be encoded", NULL);
+   }
+   agent_result_clear_response(&result);
+   return server_send_ok(conn, response);
+}
 
 /* Authentication is attested by the existing HTTP/UDS boundary; all provider
  * and model decisions are made by the Go module. */

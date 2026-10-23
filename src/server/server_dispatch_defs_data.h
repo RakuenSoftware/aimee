@@ -51,6 +51,7 @@
     {"model.probe", handle_agent_probe},
     {"model.stats", handle_agent_stats},
     {"model.draft", handle_agent_draft},
+    {"model.generate", handle_agent_generate},
     {"model.setup", handle_agent_setup},
     {"model.setup_poll", handle_agent_setup_poll},
     {"model.cli_oauth_start", handle_agent_cli_oauth_start},

@@ -1391,6 +1391,7 @@ static const struct
    marshal_argv_fn fn;
 } MARSHAL_ARGV[] = {
     {"model.episodes", marshal_agent_episodes},
+    {"model.generate", marshal_model_generate},
     {"api.enable", marshal_api_enable},
     {"aux.test", marshal_aux_test},
     {"cert.issue", marshal_cert_issue},

@@ -178,6 +178,7 @@ const method_policy_t method_registry[] = {
     {"model.episodes", CAP_DELEGATE, "agent episode history"},
     {"eval.*", CAP_DELEGATE, "eval harness"},
     {"chat.send_stream", CAP_CHAT, "chat stream"},
+    {"model.generate", CAP_CHAT, "tool-free canonical completion"},
     {"chat.graceful_cancel", CAP_CHAT, "cancel an in-flight chat turn (owner-authz)"},
     {"chat.interrupt", CAP_CHAT, "stop an in-flight turn and queue a steer (owner-authz)"},
     /* Tool definitions are read-only session metadata. Keeping this behind

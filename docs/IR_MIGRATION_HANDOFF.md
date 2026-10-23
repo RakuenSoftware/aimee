@@ -23,50 +23,81 @@ curation and learning synthesis. Browser acceptance alone does not complete it.
 The earlier recall probe reproduces a refusal in the stock Claude SDK as well;
 that diagnostic is separate from the remaining internal conversion work.
 
-Three implementation lanes are active on the same branch: canonical-only browser
-history, typed delegate/workflow execution, and typed curator/learning consumers.
-The integrated browser changes remove flat transcript hydration, normal writes
-and active rendering fallback; existing flat records are read-only archives.
-The provider result now owns only canonical IR and transport status. Refused/error
-results and reasoning-only output cannot acquire answer or tool authority. Request
-admission precedes delegate policy transformations. Code-unit extraction is also
-using the canonical provider contract instead of direct shell output.
+The browser, delegate/workflow and curator/learning cutovers are integrated on
+this branch. Parallel agents are qualifying the final runtime. Active browser
+history comes only from the durable canonical session log; flat records are inert
+archives. Provider results own canonical IR and transport status. Refused, partial,
+reasoning-only and unfinished tool turns cannot acquire business success or tool
+authority. Asynchronous terminal classification and child status/logs use the
+owner-checked canonical observation, including the actual current child turn;
+legacy stored results cannot substitute for that observation.
+
+Go delegates, workflows and panels exchange complete owned canonical requests and
+responses. Native calls cross the authenticated local bus into the C factory;
+direct SDK execution and stdout interpretation are retired. Immutable execution
+scopes bind source, actor, credentials, role, model and workspace custody.
+Registered triggers mint an honest server source only for an admitted candidate,
+after deduplication. General completion preserves media and opaque companions;
+application text projection separately requires a completed text answer.
 
 Opaque shell model commands are retired as internal model-result transports.
-Configure `kb.curator.provider` or the existing `SYNTHESIS_ENDPOINT` instead.
-No endpoint is selected automatically; an unconfigured installation fails closed,
-and retrieval remains available. Deterministic parser, solver and embedding
-sidecars retain their own explicit domain protocols. Shipping defaults and the
-hardware profile picker no longer install shell model commands.
+Curator and synthesis consumers use their configured canonical provider; no
+endpoint or KB instance is selected automatically. Deterministic parsing, solving,
+embedding and external cognifier domain protocols remain explicit boundaries.
+KB-free canonical task observation, configured-test grading and scoped reuse do
+not require a remote KB or an invented grade.
 
-Go delegate, workflow and roundtable requests now carry complete owned canonical
-requests and responses. Native execution crosses the authenticated local bus into
-the existing C factory; direct SDK execution and stdout interpretation are retired.
-Immutable workflow execution scopes restore the actual source actor, credentials
-and workspace custody. Registered background triggers use an honest server source,
-not invented human authority. Scope handles are Vault-encrypted and host-MAC-bound;
-capture retains structural receipts without recording these private transports.
+Fresh acceptance found an additional real setup defect: an explicitly supplied
+PAM login was provisioned without recording the initial appliance administrator.
+Setup reported complete with an empty username while workflow saving returned
+403. Startup now records the usable named supplied account through the existing
+non-secret `explicit:<username>` identity contract, preserving existing generated,
+replacement and first-seed ownership. Actual Go/C policy readers and shell
+negative regressions pass. Neither failed workflow preflight submitted a task or
+called a model. Their evidence and stopped fresh-install volumes are retained;
+a new empty installation of the final image must qualify the repair.
 
-General completion preserves image/document answers and opaque companion metadata.
-Business text projection separately requires a completed text answer. Refused,
-truncated and unfinished tool turns cannot create artifacts, execute recovered
-actions, or become successful cache entries. Effective native model limits and
-observed attempts are retained, including the first refused over-limit attempt.
+The shipped memory evaluator also called an unregistered `agent generate`
+command, hidden by a fake executable fixture, and consumed only a flat response.
+It now uses the registered `model generate` CLI/RPC with bounded canonical JSON
+stdin. Its tool-free owner retains caller instructions and retrieved evidence as
+unverified context, preserves explicit controls and rejects unsupported controls.
+It uses the configured HTTP completion path without hints, hooks, tools, role
+cache or feedback. The evaluator admits full canonical responses and derives
+answer/judge text and usage only after complete-text admission. Observed failed
+IR remains diagnostic; host errors, missing IR and poisoned display fields cannot
+become answers. Normal/race real-PostgreSQL evaluator qualification passes all
+26 tests without skips. The actual CLI-to-daemon fixture is part of ordinary
+configured integration, alongside success/refusal/MAX/tool negative cases.
 
-Combined local qualification currently passes the full application build, all 76
-lint gates, strict checks against the actual built bus archives, all three full Go
-race suites, 483 frontend tests, type checking and both frontend builds. The focused
-canonical request, source capability, source issuer, native factory, native worker
-and request-control tests also pass. Full native suite, sanitizer, configured
-integration and new `.252` runtime validation are still in progress. Earlier test
-results below do not qualify the current combined runtime.
+Source `876a35522` passes 690 native invocations and 690 ASan/UBSan/leak
+invocations, all 76 lint gates, all three Go race suites, 483 frontend tests,
+type checking and both frontend builds. Configured local integration passes
+170/170 with eight actual SDK profiles; unavailable Docker checks were explicitly
+skipped there. Independent guest qualification then passes 171/171 with all eight
+SDK profiles, actual Docker grading, KB-free learning, recovery and scoped reuse;
+its earlier workflow-dependency skip and PostgreSQL readiness failure remain
+retained, not counted as full acceptance. The source-derived Docker image matches
+all 87 products and 19 server modules. The sole extra product relative to the
+older 86-product baseline is the declared private delegates-host grant.
 
-These edits remain **unqualified as a combined runtime** until all lanes are
-integrated, reviewed, tested and deployed for validation on the owned `.252` VM.
-The qualification below applies only to the named earlier commits; it is not a
-claim that the new full-conversion work is complete.
+The normal `876a35522` upgrade preserves all 86 existing canonical events,
+native records, full cache/SDK bytes, UUID, device identity, workspace/inodes,
+Vault ciphertext, models and configuration. Public TLS certificate reissue retains
+the same SPKI; the old public PEM bytes were not exported, so no byte-equality or
+old SAN claim is made. A later external change to the operator's local Claude
+credential file is recorded separately; the task did not restore it or claim
+unchanged operator-source bytes. Original application Vault bytes remain exact.
 
-### Latest runtime qualification: 23 October 2026
+The subsequent administrator and evaluator repairs have focused native, sanitizer
+and Go race coverage, but final combined native/sanitizer/static checks, the new
+canonical image, actual native workflow/server-trigger execution and final browser
+acceptance are still required. Keep those outstanding checks separate from the
+stock-SDK recall refusal. No current-branch GitHub CI or production promotion is
+claimed. Keep one eventual PR, automatic reviews and strict attribution; do not
+investigate or change `.100`.
+
+### Earlier runtime qualification: 23 October 2026
 
 Runtime candidate `252ee7707` is committed and pushed on the same branch. Its
 canonical Docker and HOST builds and normal upgrades pass. Docker matches all

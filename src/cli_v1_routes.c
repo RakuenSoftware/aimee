@@ -1639,6 +1639,40 @@ static char *marshal_read_stdin_limited(size_t limit)
    return buf;
 }
 
+/* A dedicated framed JSON boundary; never place prompts in shell arguments. */
+cJSON *marshal_model_generate(int argc, char **argv)
+{
+   (void)argv;
+   if (argc)
+      return NULL;
+   const size_t limit = 1024u * 1024u;
+   char *body = malloc(limit + 2);
+   if (!body)
+      return NULL;
+   size_t count = fread(body, 1, limit + 1, stdin);
+   if (!count || count > limit || ferror(stdin) || memchr(body, 0, count))
+   {
+      free(body);
+      return NULL;
+   }
+   body[count] = 0;
+   cJSON *request = cJSON_ParseWithLengthOpts(body, count + 1, NULL, 1);
+   free(body);
+   if (!cJSON_IsObject(request) || cJSON_GetArraySize(request) != 1 ||
+       !cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(request, "ir")))
+   {
+      cJSON_Delete(request);
+      return NULL;
+   }
+   if (!cJSON_AddStringToObject(request, "method", "model.generate") ||
+       !cJSON_AddNumberToObject(request, "protocol_version", V1_PROTOCOL_VERSION))
+   {
+      cJSON_Delete(request);
+      return NULL;
+   }
+   return request;
+}
+
 static char *marshal_read_prompt_file(const char *path)
 {
    return marshal_read_file_limited(path, 2u * 1024u * 1024u);

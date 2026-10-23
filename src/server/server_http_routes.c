@@ -1750,6 +1750,7 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/model/probe", NULL, RM_EXACT, "model.probe", 0, rh_dispatch_op},
     {"GET", "/v1/model/stats", NULL, RM_EXACT, "model.stats", 0, rh_dispatch_op},
     {"POST", "/v1/model/draft", NULL, RM_EXACT, "model.draft", 0, rh_dispatch_op},
+    {"POST", "/v1/model/generate", NULL, RM_EXACT, "model.generate", 0, rh_dispatch_op},
     {"POST", "/v1/model/setup", NULL, RM_EXACT, "model.setup", 0, rh_dispatch_op},
     {"POST", "/v1/model/setup_poll", NULL, RM_EXACT, "model.setup_poll", 0, rh_dispatch_op},
     {"POST", "/v1/model/cli_oauth_start", NULL, RM_EXACT, "model.cli_oauth_start", 0,
