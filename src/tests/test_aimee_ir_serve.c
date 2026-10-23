@@ -106,67 +106,44 @@ int main(void)
    test_native_stage_replay();
    printf("ir-serve: ");
    test_import_history();
-   cJSON *req = cJSON_Parse(REQ);
-   assert(req);
-
-   /* Responses (codex) backend: model overridden, max_tokens override applied */
-   char *rbody = aimee_ir_build_provider_body(req, "chatgpt", "gpt-5.5-codex", 200, 1);
-   assert(rbody);
-   cJSON *rj = cJSON_Parse(rbody);
-   assert(rj);
-   assert(strcmp(cJSON_GetObjectItem(rj, "model")->valuestring, "gpt-5.5-codex") ==
-          0); /* agent's */
-   /* codex requirements (verified live): store=false, stream=true, no max_output_tokens */
-   assert(cJSON_IsFalse(cJSON_GetObjectItem(rj, "store")));
-   assert(cJSON_IsTrue(cJSON_GetObjectItem(rj, "stream")));
-   assert(cJSON_GetObjectItem(rj, "max_output_tokens") == NULL);
-   assert(cJSON_GetObjectItem(rj, "instructions")); /* system -> instructions */
-   assert(cJSON_GetArraySize(cJSON_GetObjectItem(rj, "input")) >= 1);
-   assert(cJSON_GetObjectItem(rj, "tools"));
-   cJSON_Delete(rj);
-   free(rbody);
-
-   /* OpenAI backend: model overridden, no max_tokens override -> IR's 100 kept */
-   char *obody = aimee_ir_build_provider_body(req, "openai", "some-openai-model", 0, 1);
-   assert(obody);
-   cJSON *oj = cJSON_Parse(obody);
-   assert(oj);
-   assert(strcmp(cJSON_GetObjectItem(oj, "model")->valuestring, "some-openai-model") == 0);
-   assert((int)cJSON_GetObjectItem(oj, "max_tokens")->valuedouble == 100); /* from IR */
-   /* messages: a leading system message + the user message */
-   cJSON *msgs = cJSON_GetObjectItem(oj, "messages");
-   assert(cJSON_GetArraySize(msgs) == 2);
-   assert(strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(msgs, 0), "role")->valuestring, "system") ==
-          0);
-   assert(cJSON_GetObjectItem(oj, "tools"));
-   cJSON_Delete(oj);
-   free(obody);
-
-   /* want_stream is the CALLER's decision, not the client's. The request fixture has
-    * stream:true, but a buffered-replay caller must be able to ask the upstream for a
-    * whole JSON reply — inheriting the client's flag is what made that path request
-    * SSE and then parse it as JSON ("unparseable reply"). */
-   {
-      char *nb = aimee_ir_build_provider_body(req, "openai", "m", 0, 0);
-      assert(nb);
-      cJSON *nj = cJSON_Parse(nb);
-      assert(nj);
-      assert(cJSON_GetObjectItem(nj, "stream") == NULL); /* not merely false: absent */
-      cJSON_Delete(nj);
-      free(nb);
-
-      char *sb = aimee_ir_build_provider_body(req, "openai", "m", 0, 1);
-      assert(sb);
-      cJSON *sj = cJSON_Parse(sb);
-      assert(sj);
-      assert(cJSON_IsTrue(cJSON_GetObjectItem(sj, "stream")));
-      cJSON_Delete(sj);
-      free(sb);
-   }
-
-   /* Invalid entry refuses; there is no legacy execution fallback. */
-   assert(aimee_ir_build_provider_body(NULL, "openai", "m", 0, 1) == NULL);
-   cJSON_Delete(req);
+   /* Provider codecs consume the already-owned request. The retired provider
+    * body shim is not a production path and must not be what this test proves. */
+   for (int provider = 0; provider < 2; provider++)
+      for (int stream = 0; stream < 2; stream++)
+      {
+         aimee_request_t ir = {0};
+         char error[128];
+         assert(!aimee_frontend_parse_wire(REQ, strlen(REQ), AIMEE_WIRE_ANTHROPIC, &ir, error,
+                                           sizeof error));
+         free(ir.model);
+         ir.model = strdup("served-model");
+         ir.max_tokens = 200;
+         ir.has_max_tokens = 1;
+         ir.stream = stream;
+         char *wire = aimee_backend_render_wire(&ir, provider ? AIMEE_WIRE_RESPONSES
+                                                              : AIMEE_WIRE_OPENAI_CHAT);
+         cJSON *body = wire ? cJSON_Parse(wire) : NULL;
+         assert(body &&
+                !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(body, "model")), "served-model"));
+         if (provider)
+            assert(cJSON_IsTrue(cJSON_GetObjectItem(body, "stream"))); /* Responses requires SSE. */
+         else
+            assert(stream ? cJSON_IsTrue(cJSON_GetObjectItem(body, "stream"))
+                          : !cJSON_GetObjectItem(body, "stream"));
+         assert(cJSON_IsArray(cJSON_GetObjectItem(body, provider ? "input" : "messages")));
+         assert(cJSON_IsArray(cJSON_GetObjectItem(body, "tools")));
+         if (provider)
+         {
+            assert(cJSON_IsFalse(cJSON_GetObjectItem(body, "store")));
+            assert(!cJSON_GetObjectItem(body, "max_output_tokens"));
+            assert(cJSON_GetObjectItem(body, "instructions"));
+         }
+         else
+            assert(cJSON_GetObjectItem(body, "max_tokens")->valueint == 200);
+         cJSON_Delete(body);
+         free(wire);
+         aimee_request_free(&ir);
+      }
 
    /* Native Responses enters canonical ownership once and stays there through host stages. */
    const char *body = "{\"model\":\"native-model\",\"stream\":true,\"instructions\":\"be helpful\","
@@ -230,30 +207,37 @@ int main(void)
    cJSON_Delete(policy_wire);
    aimee_request_free(&policy_request);
 
-   /* LEGACY FLAT PATH: an already-established conversation must be terminal in
+   /* The active typed owner must remember an established conversation in
     * the durable delivery state. Otherwise a later compacted request, whose
     * assistant history has disappeared, looks like a fresh session and receives
     * a persona midway through it after a restart. */
    {
-      ir_seam_test_session("legacy-established");
+      ir_seam_test_session("typed-established");
       ir_seam_test_persona("PERSONA-BODY <aimee-persona name=x>");
-
-      char *established = aimee_ir_prepend_active_persona_text("follow-up", 1);
-      assert(established && !strstr(established, "aimee-persona"));
-      free(established);
-
-      char *compacted = aimee_ir_prepend_active_persona_text("compacted follow-up", 0);
-      assert(compacted && !strstr(compacted, "aimee-persona"));
-      free(compacted);
-
-      /* A genuinely fresh session does receive it, exactly once. */
-      ir_seam_test_session("legacy-fresh");
-      char *first = aimee_ir_prepend_active_persona_text("hello", 0);
-      assert(first && strstr(first, "aimee-persona"));
-      free(first);
-      char *second = aimee_ir_prepend_active_persona_text("hello again", 0);
-      assert(second && !strstr(second, "aimee-persona"));
-      free(second);
+      const char *established =
+          "{\"model\":\"m\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":"
+          "\"previous\"},{\"role\":\"assistant\",\"content\":\"prior "
+          "answer\"},{\"role\":\"user\",\"content\":\"follow-up\"}]}";
+      const char *opening = "{\"model\":\"m\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\","
+                            "\"content\":\"hello\"}]}";
+      for (int phase = 0; phase < 4; phase++)
+      {
+         if (phase == 2)
+            ir_seam_test_session("typed-fresh");
+         const char *input = phase == 0 ? established : opening;
+         aimee_request_t request = {0};
+         char error[128];
+         assert(!aimee_frontend_parse_wire(input, strlen(input), AIMEE_WIRE_ANTHROPIC, &request,
+                                           error, sizeof error));
+         aimee_ir_apply_gateway_request_stages(&request);
+         char *wire = aimee_backend_render_wire(&request, AIMEE_WIRE_ANTHROPIC);
+         assert(wire);
+         assert((strstr(wire, "PERSONA-BODY") != NULL) == (phase == 2));
+         free(wire);
+         aimee_request_free(&request);
+      }
+      ir_seam_test_session(NULL);
+      ir_seam_test_persona(NULL);
    }
 
    printf("ok\n");

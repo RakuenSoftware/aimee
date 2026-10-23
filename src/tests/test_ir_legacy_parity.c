@@ -1,22 +1,11 @@
-/* test_ir_legacy_parity.c -- does the IR send the provider the SAME bytes the legacy
- * translator would?
- *
- * This is the evidence that retires the legacy translators. The owner's gate was
- * "validate that IR is a full replacement", and the roundtable's objection was that
- * the fallback is load-bearing with no measurement. Neither is answered by "it worked
- * on my box": the question is whether the IR is byte-faithful across the request
- * shapes real clients send, and — where it is NOT byte-identical — whether the
- * difference is semantically safe.
- *
- * Scope note: this pins the FRONTEND parse + BACKEND build, which is what the
- * fallback protects (aimee_ir_build_provider_body returning NULL is the ONLY way the
- * ingress reaches the legacy body). */
+/* Request corpus through the active canonical frontend/backend codecs. */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "aimee_ir_serve.h"
+#include <aimee/translation/aimee_frontend.h>
+#include <aimee/translation/aimee_backend.h>
 #include "cJSON.h"
 
 /* The shapes a real Anthropic client actually sends. */
@@ -59,7 +48,7 @@ static const char *CORPUS[] = {
 
 int main(void)
 {
-   printf("ir-legacy-parity:\n");
+   printf("canonical codec corpus:\n");
 
    int n = 0;
    for (int i = 0; CORPUS[i]; i++)
@@ -67,16 +56,16 @@ int main(void)
       cJSON *req = cJSON_Parse(CORPUS[i]);
       assert(req && "corpus entry must be valid JSON");
 
-      /* THE GATE: the ingress only falls back to legacy when this returns NULL. If it
-       * never returns NULL for a well-formed request, the fallback is unreachable in
-       * practice and the translators are safe to delete. */
-      char *ir = aimee_ir_build_provider_body(req, "openai", "served-model", 0, 0);
-      if (!ir)
-      {
-         printf("  FAIL: IR returned NULL (would fall back to legacy) for shape %d\n", i);
-         assert(0 && "IR must build every well-formed client shape");
-      }
-
+      aimee_request_t request = {0};
+      char error[128];
+      assert(!aimee_frontend_parse_wire(CORPUS[i], strlen(CORPUS[i]), AIMEE_WIRE_ANTHROPIC,
+                                        &request, error, sizeof error));
+      assert(!aimee_ir_request_admit(&request));
+      free(request.model);
+      request.model = strdup("served-model");
+      request.stream = 0;
+      char *ir = aimee_backend_render_wire(&request, AIMEE_WIRE_OPENAI_CHAT);
+      assert(ir);
       cJSON *j = cJSON_Parse(ir);
       assert(j && "IR body must be valid JSON");
       /* the agent's served model wins over the client's */
@@ -88,30 +77,27 @@ int main(void)
        * NULL-check but corrupt the conversation. */
       cJSON *msgs = cJSON_GetObjectItem(j, "messages");
       assert(cJSON_IsArray(msgs) && cJSON_GetArraySize(msgs) >= 1);
-      /* temperature must ALWAYS be emitted: legacy injects it at build time
-       * (defaulting an absent value to 1.0), so the IR must too or the provider
-       * bodies diverge -- the shadow caught exactly this. The client value wins when
-       * present (one corpus shape sends 0.2); the rest get the 1.0 default. So the
-       * invariant is "present and numeric", and specifically 1.0 unless the shape
-       * set its own. */
+      /* Absence remains absence. A retired migration shim used to invent a
+       * temperature default here; actual parsed controls remain the authority. */
       cJSON *temp = cJSON_GetObjectItem(j, "temperature");
-      assert(temp && cJSON_IsNumber(temp));
       cJSON *sent = cJSON_GetObjectItem(req, "temperature");
-      assert(temp->valuedouble == (cJSON_IsNumber(sent) ? sent->valuedouble : 1.0));
+      assert(cJSON_IsNumber(temp) == cJSON_IsNumber(sent));
+      if (cJSON_IsNumber(sent))
+         assert(temp->valuedouble == sent->valuedouble);
+      aimee_request_free(&request);
 
       cJSON_Delete(j);
       free(ir);
       cJSON_Delete(req);
       n++;
    }
-   printf("  PASS: IR built all %d client shapes without falling back\n", n);
+   printf("  PASS: IR rendered all %d client shapes\n", n);
 
-   /* The ONLY documented fallback trigger: a null/non-object request. The ingress
-    * already rejects that with a 400 before the builder is reached, so in production
-    * this is unreachable -- pinned here so that claim stays true. */
-   assert(aimee_ir_build_provider_body(NULL, "openai", "m", 0, 0) == NULL);
-   printf("  PASS: the only fallback trigger is a null request (400'd upstream)\n");
-
-   printf("ir-legacy-parity: ok\n");
+   aimee_request_t invalid = {0};
+   char error[128];
+   assert(aimee_frontend_parse_wire("null", 4, AIMEE_WIRE_ANTHROPIC, &invalid, error,
+                                    sizeof error) < 0);
+   aimee_request_free(&invalid);
+   printf("canonical codec corpus: ok\n");
    return 0;
 }

@@ -60,6 +60,19 @@ class IRBypassTests(unittest.TestCase):
                         checker.check(self.root)
                     path.unlink()
 
+    def test_migration_fallback_and_flat_persona_shims_stay_retired(self):
+        for symbol in (
+            "aimee_ir_path_enabled", "aimee_ir_stream_relay_enabled",
+            "aimee_ir_build_provider_body", "aimee_ir_shadow_compare_bodies",
+            "aimee_ir_shadow_enabled", "aimee_ir_prepend_active_persona_text",
+            "aimee_ir_prepend_persona_text",
+        ):
+            with self.subTest(symbol=symbol):
+                path = self.source("src/server/retired_migration.c", "void caller(void) { " + symbol + "(); }")
+                with self.assertRaisesRegex(ValueError, "retired-api"):
+                    checker.check(self.root)
+                path.unlink()
+
     def test_generic_model_stdout_adapters_stay_retired(self):
         for call in ("externalTextObservation(stdout)", "delegate.CLIText(request.Input)", "RunWatchdog(args)"):
             with self.subTest(call=call):

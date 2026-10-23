@@ -2,11 +2,6 @@
 #include "aimee_ir_shadow.h"
 #include "modules/governance/gw_stage_governance.h"
 
-__attribute__((weak)) int aimee_ir_shadow_enabled(void)
-{
-   return 0;
-}
-
 /* The minimal agent-runtime link does not carry the separately supervised
  * governance stage. Keep its test seam disabled and inert; production links
  * the strong event-bus implementation. */

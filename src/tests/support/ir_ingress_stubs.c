@@ -162,20 +162,6 @@ __attribute__((weak)) void aimee_ir_shadow_observe_request(const void *req, int 
    (void)frontend;
 }
 
-__attribute__((weak)) int aimee_ir_path_enabled(void)
-{
-   return 0;
-}
-
-/* Slice 5-wire: the incremental IR-delta relay. The flag stub returns 0 (legacy
- * relay), so the delta helpers below are never CALLED by the ingress tests -- they
- * exist only to resolve the link. Real definitions (aimee_ir_serve/aimee_ir_stream)
- * win when linked. */
-__attribute__((weak)) int aimee_ir_stream_relay_enabled(void)
-{
-   return 0;
-}
-
 __attribute__((weak)) void openai_stream_state_init(void *st)
 {
    (void)st;
@@ -200,18 +186,6 @@ __attribute__((weak)) int anthropic_delta_emit(const void *d, void *st, const ch
    (void)emit;
    (void)ctx;
    return 0;
-}
-
-__attribute__((weak)) char *aimee_ir_build_provider_body(const void *req, const char *driver_name,
-                                                         const char *agent_model,
-                                                         int max_tokens_override, int want_stream)
-{
-   (void)req;
-   (void)driver_name;
-   (void)agent_model;
-   (void)max_tokens_override;
-   (void)want_stream;
-   return NULL;
 }
 
 /* IR observability counters. The ingress increments these on the legacy-fallback and

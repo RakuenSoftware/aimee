@@ -23,46 +23,6 @@ static int shadow_enabled(void)
    return v && v[0] && v[0] != '0';
 }
 
-int aimee_ir_shadow_enabled(void)
-{
-   return shadow_enabled();
-}
-
-void aimee_ir_shadow_compare_bodies(const char *ir_body, const char *legacy_body,
-                                    aimee_wire_t frontend)
-{
-   if (!shadow_enabled())
-      return;
-   /* Compare the two provider bodies SEMANTICALLY (parsed JSON), not byte-for-byte.
-    * The IR and legacy legitimately serialize the same request with keys in a
-    * different order ({"model","max_tokens","messages"} vs
-    * {"model","messages","max_tokens"}); a strcmp flags that as a mismatch even
-    * though the provider sees identical requests. cJSON_Compare ignores key order
-    * but still catches a genuine divergence -- a missing/extra field or a different
-    * value (e.g. legacy injecting a temperature default the IR omitted). A NULL on
-    * either side is a divergence, not a skip: "the IR could not build it" is exactly
-    * the case that forces a legacy fallback in production. */
-   cJSON *ir_json = ir_body ? cJSON_Parse(ir_body) : NULL;
-   cJSON *legacy_json = legacy_body ? cJSON_Parse(legacy_body) : NULL;
-   int equal = ir_json && legacy_json && cJSON_Compare(ir_json, legacy_json, 1);
-   cJSON_Delete(ir_json);
-   cJSON_Delete(legacy_json);
-   if (equal)
-   {
-      aimee_ir_metric_inc(AIMEE_IR_M_BODY_MATCH, frontend);
-      return;
-   }
-   aimee_ir_metric_inc(AIMEE_IR_M_BODY_MISMATCH, frontend);
-   if (g_logged < SHADOW_LOG_CAP)
-   {
-      g_logged++;
-      /* Compare only shape/length metadata; request content stays private. */
-      fprintf(stderr,
-              "aimee_ir_shadow: provider-body mismatch (wire=%d) ir_len=%zu legacy_len=%zu\n",
-              (int)frontend, ir_body ? strlen(ir_body) : 0, legacy_body ? strlen(legacy_body) : 0);
-   }
-}
-
 void aimee_ir_shadow_observe_request(const cJSON *req, aimee_wire_t frontend)
 {
    if (!shadow_enabled() || !req)

@@ -25,6 +25,14 @@ provider/cache tests now exercise the active canonical adapters. The CLI pass
 passes six normal and six ASan/UBSan/leak targets; the request-builder pass passes
 five of each. The integrated bypass gate passes 26 tests. Broad combined-source
 qualification remains pending; these focused results are not final acceptance.
+A second pass retires seven unused migration toggles, body-comparison/build
+shims and flat persona helpers: another net 202 production lines removed. Its
+six focused targets pass normally and under ASan/UBSan/leak checking. Moving the
+persona regression to the actual typed stages exposed a real bug: delivery-state
+tracking stopped at the first user message before seeing a later assistant. A
+restarted established session could receive its persona again after compaction.
+The typed owner now checks all assistant roles first; an old-code failing regression
+covers established history, compaction, and a fresh session's one-time delivery.
 The full branch still has a net production-code increase, measured separately
 from tests and documentation. Further confirmed dead migration APIs are being
 retired, while active diagnostics, archives and native replay remain supported.

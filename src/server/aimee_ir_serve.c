@@ -24,18 +24,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-int aimee_ir_path_enabled(void)
-{
-   /* Retained ABI for callers; canonical admission has no legacy escape hatch. */
-   return 1;
-}
-
-int aimee_ir_stream_relay_enabled(void)
-{
-   /* Kept for existing callers; ingress has no legacy stream execution path. */
-   return 1;
-}
-
 /* Resolve the memory module toggle: config-store modules.memory (canonical) -> env
  * default parsed by the Go owner. Cached legacy_config_read applies operator
  * toggles without restarting. Resolved at the seam
@@ -101,35 +89,6 @@ static char *ir_resolve_persona_instructions(void)
    return persona_compose_primary_instructions(name, NULL);
 }
 
-char *aimee_ir_prepend_active_persona_text(const char *text, int conversation_established)
-{
-   const char *sid = server_http_identity_session_hdr();
-   int claim = session_persona_delivery_claim(sid);
-   if (claim == 0)
-      return strdup(text ? text : "");
-   if (claim < 0)
-   {
-      fprintf(stderr, "aimee: persona delivery state unavailable; retaining retry eligibility\n");
-      return NULL;
-   }
-   /* A migrated/restarted named session starts with delivery_state=0 even when
-    * its transcript is already established. Commit that observation before a
-    * later compacted request drops the assistant history; otherwise the legacy
-    * flat path would misclassify the compacted turn as a new conversation and
-    * inject a persona midway through it. */
-   if (conversation_established)
-   {
-      char *out = strdup(text ? text : "");
-      session_persona_delivery_finish(sid, out != NULL);
-      return out;
-   }
-   char *instructions = ir_resolve_persona_instructions();
-   char *out = aimee_ir_prepend_persona_text(text, instructions);
-   session_persona_delivery_finish(sid, instructions && instructions[0] && out);
-   free(instructions);
-   return out;
-}
-
 /* A transform returning zero can still mean the persona was already present, or
  * that a restarted server first observed an established conversation.  Both are
  * terminal.  Only a genuine first request that could not be mutated (for example
@@ -139,10 +98,11 @@ static int ir_persona_delivery_already_satisfied(const aimee_request_t *ir)
    if (!ir)
       return 0;
    for (int i = 0; i < ir->n_messages; i++)
+      if (ir->messages[i].role && strcmp(ir->messages[i].role, "assistant") == 0)
+         return 1;
+   for (int i = 0; i < ir->n_messages; i++)
    {
       const aimee_message_t *message = &ir->messages[i];
-      if (message->role && strcmp(message->role, "assistant") == 0)
-         return 1;
       if (!message->role || strcmp(message->role, "user") != 0)
          continue;
       for (int j = 0; j < message->n_blocks; j++)
@@ -256,59 +216,4 @@ void aimee_ir_apply_native_request_stages(aimee_request_t *request)
 {
    if (config_present() && config_ingress_preinject_anthropic_enabled())
       aimee_ir_apply_request_stages(request, ir_memory_enabled());
-}
-
-char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
-                                   const char *agent_model, int max_tokens_override,
-                                   int want_stream)
-{
-   aimee_request_t ir;
-   char err[128];
-   if (anthropic_frontend_parse(req, &ir, err, sizeof err) != 0)
-   {
-      aimee_ir_metric_inc(AIMEE_IR_M_PARSE_FAIL, AIMEE_WIRE_ANTHROPIC);
-      return NULL;
-   }
-   /* the served model + cap come from the configured agent, not the client */
-   if (agent_model && agent_model[0])
-   {
-      free(ir.model);
-      ir.model = strdup(agent_model);
-   }
-   if (max_tokens_override > 0)
-   {
-      ir.max_tokens = max_tokens_override;
-      ir.has_max_tokens = 1;
-   }
-   /* Match the legacy ingress, which defaults an absent temperature to 1.0 and
-    * always emits it (build_provider_body is fed jo_num(req, "temperature", 1.0)).
-    * Applied at BUILD time, like legacy -- not in the frontend parse, so the IR
-    * request itself stays protocol-neutral (an Anthropic-parsed and OpenAI-parsed
-    * copy of the same request remain equal). Without it the IR omits temperature
-    * when the client sends none, diverging from the legacy provider body. */
-   if (!ir.has_temperature)
-   {
-      ir.temperature = 1.0;
-      ir.has_temperature = 1;
-   }
-   /* The upstream stream flag is the CALLER's decision, not the client's: a caller
-    * that streams to the client may still want the upstream reply buffered so it can
-    * police + replay it. Inheriting ir.stream from the request is what made the
-    * buffered-replay path ask for SSE and then parse it as JSON. */
-   ir.stream = want_stream ? 1 : 0;
-
-   aimee_ir_apply_request_stages(&ir, ir_memory_enabled());
-
-   int is_responses = driver_name && strcmp(driver_name, "chatgpt") == 0;
-   char *s =
-       aimee_backend_render_wire(&ir, is_responses ? AIMEE_WIRE_RESPONSES : AIMEE_WIRE_OPENAI_CHAT);
-   aimee_request_free(&ir);
-   if (!s)
-   {
-      aimee_ir_metric_inc(AIMEE_IR_M_BACKEND_BUILD_FAIL, AIMEE_WIRE_ANTHROPIC);
-      return NULL;
-   }
-   if (s)
-      aimee_ir_metric_inc(AIMEE_IR_M_IR_PATH, AIMEE_WIRE_ANTHROPIC);
-   return s;
 }

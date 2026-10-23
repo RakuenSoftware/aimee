@@ -599,8 +599,6 @@ void aimee_ir_apply_request_stages(aimee_request_t *ir, int memory_enabled);
  * Returns 1 when placed, 0 otherwise. */
 int aimee_ir_prepend_persona_instructions(aimee_request_t *request, const char *instructions);
 
-char *aimee_ir_prepend_persona_text(const char *text, const char *instructions);
-
 int aimee_ir_stage_session_assist(aimee_request_t *request, void *unused);
 
 typedef struct
