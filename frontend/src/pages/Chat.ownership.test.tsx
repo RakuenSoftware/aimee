@@ -9,8 +9,8 @@ const context = vi.hoisted(() => ({ sessions: [] as Session[], active: null as S
 vi.mock('../SessionContext', () => ({ useSessions: () => context }));
 vi.mock('./chat/ChatPrimitives', () => ({
   Message: ({ role, text }: { role: string; text: string }) => <div data-testid={role}>{text}</div>,
-  BootstrapBanner: () => null, DiffBlock: () => null, RewindMarker: () => null,
-  ThinkingBlock: () => null, ToolBlock: () => null, TurnSummaryCard: () => null,
+  BootstrapBanner: () => null,
+  ThinkingBlock: () => null, ToolBlock: () => null,
 }));
 
 function session(id: string, text = ''): Session {

@@ -307,21 +307,21 @@ describe('canonical browser chat', () => {
     render(<StrictMode><Chat /></StrictMode>);
     await act(async () => {});
     expect(screen.queryByRole('button', { name: 'Branch', exact: true })).toBeNull();
-    expect(fetchMock.mock.calls.some(([url]) => url === '/api/chat/branch')).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => ['/api/chat/threads', '/api/chat/branch', '/api/chat/switch-thread'].includes(url))).toBe(false);
   });
 
-  it('shows a refused branch action if an advertised capability becomes unavailable', async () => {
+  it('does not revive raw thread mutations from a legacy capability response', async () => {
     const ordinaryFetch = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
       if (url === '/api/chat/threads') return Promise.resolve(new Response(JSON.stringify({ capabilities: { branching: true } })));
-      if (url === '/api/chat/branch') return Promise.resolve(new Response(JSON.stringify({ error: 'Conversation branching is unavailable' }), { status: 501 }));
+      if (url === '/api/chat/branch' || url === '/api/chat/switch-thread') return Promise.resolve(new Response(JSON.stringify({ ok: true, messages: [{ role: 'assistant', text: 'Foreign thread transcript' }] })));
       return ordinaryFetch(url, init);
     });
     render(<StrictMode><Chat /></StrictMode>);
     await act(async () => {});
-    fireEvent.click(screen.getByRole('button', { name: 'Branch', exact: true }));
-    await act(async () => {});
-    expect(screen.getByRole('alert').textContent).toBe('Conversation branching is unavailable');
+    expect(screen.queryByRole('button', { name: /Branch/ })).toBeNull();
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('Foreign thread transcript');
+    expect(fetchMock.mock.calls.some(([url]) => ['/api/chat/threads', '/api/chat/branch', '/api/chat/switch-thread'].includes(url))).toBe(false);
   });
 
   it('labels an unavailable model lookup instead of displaying the default as a known pin', async () => {
@@ -893,21 +893,26 @@ describe('flat history is an archive, never authority', () => {
     await close();
   });
 
-  it('refuses legacy thread-switch text instead of replacing canonical history', async () => {
-    localStorage.setItem('aimee_chat_tabs', JSON.stringify([{ title: 'one', aimeeSid: 'web-one', messages: [], threads: [{ id: 1, label: 'Root', msg_count: 0, parent_id: -1, branch_msg_index: 0 }, { id: 2, label: 'Alternative', msg_count: 1, parent_id: 1, branch_msg_index: 0 }] }]));
+  it('preserves archived thread metadata and messages without exposing thread mutations', async () => {
+    const threads = [{ id: 1, label: 'Root', msg_count: 0, parent_id: -1, branch_msg_index: 0, active: false }, { id: 2, label: 'Alternative', msg_count: 1, parent_id: 1, branch_msg_index: 0, active: true }];
+    const messages = [{ role: 'user', text: 'History one' }, { role: 'assistant', text: 'Archived original answer' }];
+    localStorage.setItem('aimee_chat_tabs', JSON.stringify([{ sessionId: 'one', title: 'one', aimeeSid: 'web-one', messages, threads, activeThreadId: 2 }]));
     const original = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url === '/api/chat/threads') return new Response(JSON.stringify({ capabilities: { branching: true }, threads: [{ id: 1, label: 'Root', msg_count: 0, parent_id: -1, branch_msg_index: 0 }, { id: 2, label: 'Alternative', msg_count: 1, parent_id: 1, branch_msg_index: 0 }] }));
-      if (url === '/api/chat/branch') return new Response(JSON.stringify({ ok: true }));
+      if (url === '/api/chat/threads') return new Response(JSON.stringify({ capabilities: { branching: true }, threads, active_id: 2 }));
       if (url === '/api/chat/switch-thread') return new Response(JSON.stringify({ ok: true, messages: [{ role: 'assistant', text: 'Foreign legacy branch answer' }] }));
       return original(url, init);
     });
     render(<Chat />);
     await tick();
-    fireEvent.click(screen.getByRole('button', { name: /Alternative/ }));
-    await tick();
+    expect(screen.queryByRole('button', { name: /Alternative|Branch/ })).toBeNull();
+    expect(screen.getByLabelText('Legacy transcript archive').textContent).toContain('Archived original answer');
+    expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('Archived original answer');
     expect(screen.getByRole('log', { name: 'Conversation' }).textContent).not.toContain('Foreign legacy branch answer');
-    expect(screen.getByText('Legacy thread transcripts cannot replace canonical conversation history.')).toBeTruthy();
-    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/chat/send')).toHaveLength(0);
+    const cached = JSON.parse(localStorage.getItem('aimee_chat_tabs')!)[0];
+    expect(cached.threads).toEqual(threads);
+    expect(cached.activeThreadId).toBe(2);
+    expect(cached.messages).toEqual(messages);
+    expect(fetchMock.mock.calls.some(([url]) => ['/api/chat/threads', '/api/chat/branch', '/api/chat/switch-thread', '/api/chat/send'].includes(url))).toBe(false);
   });
 });

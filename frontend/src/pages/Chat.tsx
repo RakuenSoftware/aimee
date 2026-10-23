@@ -288,79 +288,6 @@ interface SidWork {
   iterMax: number;
 }
 
-/* ---- Thread Bar (conversation branching) ---- */
-
-interface ThreadBarProps {
-  threads: ThreadInfo[];
-  activeThreadId: number;
-  onSwitch: (id: number) => void;
-  onBranch: () => void;
-}
-
-function ThreadBar({ threads, activeThreadId, onSwitch, onBranch }: ThreadBarProps) {
-  if (threads.length <= 1) {
-    return (
-      <div style={{
-        display: 'flex', alignItems: 'center', padding: '4px 16px',
-        background: tokens.surfaceAlt, borderBottom: `1px solid ${tokens.borderLight}`,
-        fontSize: '12px', color: tokens.textPale, gap: '8px',
-      }}>
-        <Button
-          variant="default"
-          size="sm"
-          onClick={onBranch}
-          onMouseOver={e => (e.currentTarget.style.borderColor = tokens.primary)}
-          onMouseOut={e => (e.currentTarget.style.borderColor = tokens.borderMedium)}
-          title="Branch conversation to explore an alternative approach"
-        >
-          Branch
-        </Button>
-        <span>No branches — branch to explore alternatives</span>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', padding: '4px 16px',
-      background: tokens.surfaceAlt, borderBottom: `1px solid ${tokens.borderLight}`,
-      fontSize: '12px', gap: '6px', overflowX: 'auto',
-    }}>
-      <span style={{ color: tokens.textPale, whiteSpace: 'nowrap', marginRight: '4px' }}>Threads:</span>
-      {threads.map(t => (
-        <button
-          key={t.id}
-          onClick={() => onSwitch(t.id)}
-          style={{
-            padding: '2px 10px', fontSize: '11px',
-            color: t.id === activeThreadId ? tokens.primary : tokens.textSecondary,
-            background: t.id === activeThreadId ? tokens.surface : 'transparent',
-            border: t.id === activeThreadId
-              ? `1px solid ${tokens.primary}`
-              : `1px solid ${tokens.borderMedium}`,
-            borderRadius: '4px', cursor: 'pointer', whiteSpace: 'nowrap',
-          }}
-          title={`${t.label} (${t.msg_count} msgs, branched from ${t.parent_id} at msg ${t.branch_msg_index})`}
-        >
-          {t.label || (t.parent_id < 0 ? 'root' : `thread-${t.id}`)}
-          <span style={{ color: tokens.textPale, marginLeft: '4px' }}>({t.msg_count})</span>
-        </button>
-      ))}
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onBranch}
-        onMouseOver={e => (e.currentTarget.style.borderColor = tokens.primary)}
-        onMouseOut={e => (e.currentTarget.style.borderColor = tokens.borderMedium)}
-        title="Branch from current point"
-        style={{ border: `1px dashed ${tokens.borderMedium}` }}
-      >
-        + Branch
-      </Button>
-    </div>
-  );
-}
-
 /* ---- Collaborative Rules Panel ---- */
 
 interface CollabRule {
@@ -1340,8 +1267,6 @@ export default function Chat() {
   const [pluginsLoading, setPluginsLoading] = useState(false);
   const [pluginsError, setPluginsError] = useState<string | null>(null);
   const [agents, setAgents] = useState<ModelInfo[]>([]);
-  const [branchingSupported, setBranchingSupported] = useState(false);
-  const [threadError, setThreadError] = useState('');
 
   /* Channel state */
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
@@ -1789,16 +1714,6 @@ export default function Chat() {
     if (pluginsOpen) void refreshPlugins();
   }, [pluginsOpen, refreshPlugins]);
 
-  // Unsupported controls stay hidden until the backend advertises their capability.
-  useEffect(() => {
-    let disposed = false;
-    void fetch('/api/chat/threads').then(response => response.ok ? response.json() : {})
-      .then((body: { capabilities?: { branching?: boolean } }) => {
-        if (!disposed) setBranchingSupported(body.capabilities?.branching === true);
-      }).catch(() => {});
-    return () => { disposed = true; };
-  }, []);
-
   /* Fetch channel list on mount */
   useEffect(() => {
     fetch('/api/channels')
@@ -2059,56 +1974,6 @@ export default function Chat() {
         body: JSON.stringify({ reason: `Paused from webchat channel ${workflowChannel}` }),
       });
       await refreshWorkflow();
-    } catch { /* ignore */ }
-  }
-
-  /* Thread operations */
-  async function branchThread() {
-    setThreadError('');
-    try {
-      const label = `branch-${(tabs[activeIdx]?.threads?.length ?? 0) + 1}`;
-      const r = await fetch('/api/chat/branch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-        body: JSON.stringify({ label }),
-      });
-      const d = await r.json() as { ok?: boolean; thread_id?: number; error?: string };
-      if (!r.ok || !d.ok) throw new Error(d.error || 'Could not branch conversation');
-      if (d.ok) {
-        await refreshThreads();
-      }
-    } catch (error) { setThreadError(error instanceof Error ? error.message : 'Could not branch conversation'); }
-  }
-
-  async function switchThread(threadId: number) {
-    try {
-      const r = await fetch('/api/chat/switch-thread', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-        body: JSON.stringify({ thread_id: threadId }),
-      });
-      const d = await r.json() as { ok?: boolean; messages?: TabMessage[] };
-      if (d.ok && d.messages) throw new Error('Legacy thread transcripts cannot replace canonical conversation history.');
-      if (!r.ok || !d.ok) throw new Error('Conversation branch could not be loaded.');
-      await refreshThreads();
-    } catch (error) { setThreadError(error instanceof Error ? error.message : 'Conversation branch could not be loaded.'); }
-  }
-
-  async function refreshThreads() {
-    try {
-      const r = await fetch('/api/chat/threads');
-      const d = await r.json() as { threads: ThreadInfo[]; active_id: number };
-      setTabs(prev => {
-        const next = [...prev];
-        if (next[activeIdx]) {
-          next[activeIdx] = {
-            ...next[activeIdx],
-            threads: d.threads,
-            activeThreadId: d.active_id,
-          };
-        }
-        return next;
-      });
     } catch { /* ignore */ }
   }
 
@@ -2430,15 +2295,6 @@ export default function Chat() {
           Clear
         </Button>
       </div>
-
-      {/* Thread bar (conversation branching) */}
-      {branchingSupported && <ThreadBar
-        threads={tabs[activeIdx]?.threads ?? []}
-        activeThreadId={tabs[activeIdx]?.activeThreadId ?? 0}
-        onSwitch={switchThread}
-        onBranch={branchThread}
-      />}
-      {threadError && <p role="alert">{threadError}</p>}
 
       {/* Main content area: channel sidebar + chat + optional rules panel */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>

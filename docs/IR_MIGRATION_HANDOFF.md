@@ -52,11 +52,17 @@ regressions pass. Independent review also closes explicit streamed refusal
 overwrite, duplicate closed-text aliases and nested response-identity conflicts;
 old-source failures and final focused normal/race results are retained. The integrated bypass gate passes 31 tests.
 
-Measured from `03d881e0e`, this continuation removes **1,951 net production lines**
-(900 added / 2,851 deleted, excluding tests, documentation, generated locks and
+Measured from `03d881e0e`, this continuation removes **2,146 net production lines**
+(902 added / 3,048 deleted, excluding tests, documentation, generated locks and
 build tooling). It retires parallel implementations rather than compressing source.
 The final CLI probe exit policy now lives in its existing response owner, keeping
-the forwarding file below the 2,500-line lint limit without exemptions. The combined C baseline
+the forwarding file below the 2,500-line lint limit without exemptions.
+A further 195-line frontend retirement removes the unsupported legacy thread
+controls/capability fetch and three unused flat-history render/rewind components.
+Archived messages and thread metadata remain intact; active IR rendering and
+replies are unchanged. All 494 frontend tests, type checking, both builds and the
+31-test bypass suite pass; new old-source failing cases cover fake capability
+responses and archive preservation. The combined C baseline
 `f74a037ae` passes all 693 normal invocations, 693 ASan/UBSan/leak invocations,
 76 lint gates and both CMake native runtime/factory tests. The small later probe
 CLI/printer delta has focused normal and sanitizer coverage. Final combined Go,
@@ -69,16 +75,41 @@ trigger is unconfirmed; no reaper-expiry claim is made. Local exports retain the
 173-case integration, 70 real-PostgreSQL checks, both normal upgrades and the real
 native resume with original UUID/full cache prefix preserved. The new task-owned
 lease controller retains its VM on ordinary errors and requires explicit cleanup.
-Replacement VM8168 has built source `655272011`: all 87 source-derived products
-and 19 modules match; no application or model has been started there. Its final
-Go normal/race suites, 24 exporter checks, 494 frontend tests, type checking and
-both frontend builds pass. Full lint found a 2,502-line CLI forwarding file; the
-response-owner extraction passes focused CLI normal/sanitizer tests and the line
-gate. The actual SDK matrix has not passed: its observer incorrectly demanded
-identical opening and established catalogs, despite the existing canonical memory
-policy removing native shell tools until assistant history exists. The observed
-51-to-52 declaration difference is solely `bash`; a phase-aware strict observer
-and a fresh source-qualified matrix remain required. These are not live acceptance.
+Replacement VM8168 has built source `601aff47e`: all 87 source-derived products
+and 19 modules match. Its actual eight-profile SDK qualification passes with
+47 full catalog snapshots across 18 observed history-phase groups, typed refusal
+and all four source fences; source entries and all eight products remain exact.
+Opening/established catalog differences are limited to the existing native-shell
+policy. The independent source/product/catalog recomputation also passes. All
+76 lint gates pass on that exact source; Go/exporter and frontend sources remain
+identical to their qualified baseline except for the separately tested CLI delta.
+
+A genuinely empty installation of `601aff47e` passes normal PAM/admin/setup,
+normal supported credential enrollment, and actual installed `index investigate`
+in two distinct repositories using implicit cwd and no explicit project/ambient
+scope. No KB instance is configured. Initial startup stopped before launching the
+app because pinned PostgreSQL/embedder dependencies were absent; exact-digest
+pulls and same-project startup preserve the generated environment/PAM material.
+The initial failed attempt remains evidence; no bootstrap or credential reset ran.
+
+The actual browser question case passes: one Send, one request_input and one
+answer; pending controls survive reload, and completed controls stay closed after
+reload. The 13 canonical records, exact tool/control IDs, completed/checkpoint,
+one SDK invocation/two generations, full SDK cache and zero workspace effects
+are independently verified. All 22 observed SSE responses are HTTP 200 with zero
+EventSource errors; intentional navigation/close aborts remain recorded. This
+does not establish the cause of the older failed question case.
+
+The first real registered service trigger correctly refuses the test fixture's
+unsupported monetary ceiling before any SDK launch: `delegate CLI execution
+cannot enforce a monetary cost limit`. Its real work item, private source scope,
+normal owner Stop/removal, unchanged question history/cache and sealed source
+records remain negative evidence. The production refusal stays intact. A distinct
+supported positive service case must use admitted turn/deadline bounds (and output
+bounds where already supported) without claiming dollar-limit enforcement. That case, hybrid permission/fault
+recovery, final candidate upgrade/native replay and responsive idle/editor checks
+remain unfinished. No final live or CI completion is claimed.
+
 
 
 The user's completion criteria now include a significant reduction in production
