@@ -1329,7 +1329,8 @@ static void test_legacy_tmux_executes_structured_headless(void)
          "case \" $* \" in *' --output-format stream-json '*) ;; *) exit 91;; esac\n"
          "cat >/dev/null\n"
          "printf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"id\":\"legacy-frame\","
-         "\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"structured legacy "
+         "\"role\":\"assistant\",\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\","
+         "\"text\":\"structured legacy "
          "runtime\"}]}}'\n"
          "printf '%s\\n' '{\"type\":\"result\",\"is_error\":false,\"result\":\"structured legacy "
          "runtime\"}'\n",

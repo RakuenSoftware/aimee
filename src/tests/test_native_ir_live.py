@@ -22,6 +22,58 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 
+class NativeCatalogObservations:
+    """Full observed declarations, separate from transport/user/auth data."""
+    def __init__(self, directory=None):
+        self.directory = Path(directory) if directory else None
+        self.references = {}
+        self.records = []
+        self.lock = threading.Lock()
+
+    def observe(self, kind, wire, scope, tools):
+        with self.lock:
+            return self._observe(kind, wire, scope, tools)
+
+    def _observe(self, kind, wire, scope, tools):
+        assert isinstance(tools, list), "native request has no tool array"
+        encoded = json.dumps(tools, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        key = (kind, wire, scope)
+        previous = self.references.setdefault(key, encoded)
+        assert previous == encoded, ("native catalog changed across auth/resume", key)
+        names = []
+        for tool in tools:
+            assert isinstance(tool, dict)
+            definition = tool.get("function", tool)
+            if tool.get("type") == "namespace":
+                for child in tool.get("tools", []):
+                    names.append(dict(namespace=tool.get("name"), name=child.get("name")))
+            else:
+                names.append(dict(namespace=None, name=definition.get("name")))
+        record = dict(ordinal=len(self.records) + 1, kind=kind, wire=wire, scope=scope,
+                      declarations=len(tools), names=names,
+                      sha256=hashlib.sha256(encoded.encode()).hexdigest(), tools=json.loads(encoded))
+        self.records.append(record)
+        if self.directory:
+            self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            target = self.directory / ("catalog-%04d.json" % record["ordinal"])
+            target.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+            target.chmod(0o600)
+        return record
+
+    def finish(self):
+        if self.directory:
+            self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            target = self.directory / "summary.json"
+            target.write_text(json.dumps(dict(records=[{k:v for k,v in r.items() if k != "tools"}
+                              for r in self.records], baseline_full_wire_available=False,
+                              evidence="observed catalogs plus exact source-owned profile fixtures; not baseline wire equivalence"),
+                              indent=2) + "\n")
+            target.chmod(0o600)
+        for key, encoded in self.references.items():
+            print("native integration: observed catalog", *key, "declarations", len(json.loads(encoded)),
+                  "sha256", hashlib.sha256(encoded.encode()).hexdigest(), flush=True)
+
+
 class Local(http.client.HTTPConnection):
     def connect(self):
         self.sock = socket.socket(socket.AF_UNIX)
@@ -157,6 +209,8 @@ def main():
     observed = []
     errors = []
     count = 0
+    artifact = os.environ.get("AIMEE_TEST_NATIVE_ARTIFACT_DIR")
+    catalogs = NativeCatalogObservations(Path(artifact) / "native-catalogs" if artifact else None)
 
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -169,6 +223,7 @@ def main():
                 if request.get("model") == "native-delegate-child":
                     assert delegation_released.wait(60), "parent native owner did not finish"
                     child_requests.append(request)
+                    catalogs.observe("http-child", "openai", "diagnose", request.get("tools"))
                     assert self.headers.get("Authorization") == "Bearer native-child-fixture-only"
                     names = {tool.get("name", tool.get("function", {}).get("name")) for tool in request.get("tools", [])}
                     assert "delegate" not in names and "delegate_status" not in names, names
@@ -214,6 +269,7 @@ def main():
                         assert request["max_tokens"] == 128 and request["temperature"] == 0.25, request
                 auth, token = authorizations[marker]
                 assert all(secret not in encoded for secret in forbidden_credentials)
+                catalogs.observe(kind, wire, "run" if async_case else "primary", request.get("tools"))
                 if wire == "anthropic" and auth == "api_key":
                     assert self.headers.get("x-api-key") == token
                 else:
@@ -730,6 +786,7 @@ def main():
             models_path.unlink(missing_ok=True)
         else:
             models_path.write_bytes(previous)
+        catalogs.finish()
         delegation_released.set()
         server.shutdown()
         server.server_close()

@@ -61,7 +61,6 @@ IR_SHARED_TYPE = {
 }
 # A peer service called directly in process. Each one must become bus traffic.
 PENDING_BUS_MIGRATION = {
-    ("src/modules/delegates/delegate_openai.c", "aimee/tools/agent_tools.h"),
     ("src/modules/delegates/delegate_run_phases.c", "aimee/workspace/workspace.h"),
     ("src/modules/guardrails/guardrails_action_audit.c", "aimee/audit/audit_action.h"),
     ("src/modules/guardrails/guardrails_action_audit.c", "aimee/audit/audit_worm.h"),

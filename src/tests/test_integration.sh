@@ -17,6 +17,17 @@ set -e
 # Explicit local diagnostic profile; the default CI qualification is unchanged.
 NATIVE_RECOVERY_ONLY="${AIMEE_TEST_NATIVE_RECOVERY_ONLY:-0}"
 case "$NATIVE_RECOVERY_ONLY" in 0|1) ;; *) echo "invalid native recovery mode"; exit 2 ;; esac
+NATIVE_MATRIX_ONLY="${AIMEE_TEST_NATIVE_MATRIX_ONLY:-0}"
+case "$NATIVE_MATRIX_ONLY" in 0|1) ;; *) echo "invalid native matrix mode"; exit 2 ;; esac
+if [ "$NATIVE_MATRIX_ONLY" = 1 ]; then
+    if [ "$NATIVE_RECOVERY_ONLY" != 0 ] ||
+       [ ! -x "${AIMEE_TEST_NATIVE_CODEX:-}" ] || [ ! -x "${AIMEE_TEST_NATIVE_CLAUDE:-}" ] ||
+       [ -z "${AIMEE_STORE_URL:-}" ] || [ -z "${AIMEE_STORE_MIGRATION_URL:-}" ]; then
+        echo "focused native SDK matrix requires both explicit SDK executables and real store/runtime migration configuration; recovery-only is separate"
+        exit 2
+    fi
+    echo "FOCUSED native SDK matrix: all eight profiles, refusal and source fences; general integration and Docker grading are not run"
+fi
 if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
     if [ "${AIMEE_TEST_NATIVE_REQUIRE_CONTAINMENT:-0}" != 1 ] ||
        [ -z "${AIMEE_NATIVE_CONTAINMENT_ROOT:-}" ] ||
@@ -1090,12 +1101,12 @@ trap cleanup EXIT
 # 1. No server reachable
 # ============================================================
 
-if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
+if [ "$NATIVE_RECOVERY_ONLY" = 1 ] || [ "$NATIVE_MATRIX_ONLY" = 1 ]; then
     # The general profile enables this owner after its intentional outage
     # checks. Focused native execution starts the same real owner immediately.
     MEMORY_MODULE_ENABLED=1
     start_server && SERVER_STARTED=1 || SERVER_STARTED=0
-    check "focused recovery owned server started" test "$SERVER_STARTED" = 1
+    check "focused native owned server started" test "$SERVER_STARTED" = 1
     if [ "$SERVER_STARTED" != 1 ]; then exit 1; fi
     MEMORY_READY=0
     for attempt in $(seq 1 100); do
@@ -1103,7 +1114,7 @@ if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
         case "$RESP" in *'"kind":"invalid_argument"'*) MEMORY_READY=1; break ;; esac
         sleep 0.1
     done
-    check "focused recovery real memory owner ready" test "$MEMORY_READY" = 1
+    check "focused native real memory owner ready" test "$MEMORY_READY" = 1
     if [ "$MEMORY_READY" != 1 ]; then exit 1; fi
 else
 # This used to be "auto-start", and asserted that a command failed *because
@@ -2454,7 +2465,7 @@ PYREQ
 )
 RESP=$(http_rpc "$PRIMARY_WORKSPACE_REQ") || true
 check_output "canonical delegate server workspace registered" '"status":"ok"' echo "$RESP"
-if [ "$NATIVE_RECOVERY_ONLY" = 0 ]; then
+if [ "$NATIVE_RECOVERY_ONLY" = 0 ] && [ "$NATIVE_MATRIX_ONLY" = 0 ]; then
 PRIMARY_IR_LOG="$HOME/primary-ir-live.log"
 if AIMEE_IR_DELEGATE_WORKSPACE="$PRIMARY_IR_WORKSPACE" python3 "$REPO_ROOT/src/tests/test_primary_ir_live.py" >"$PRIMARY_IR_LOG" 2>&1; then
     PASS=$((PASS + 1))
@@ -2615,7 +2626,7 @@ run_execution_grade_fixture() {
     fi
     return "$status"
 }
-if [ "$NATIVE_RECOVERY_ONLY" = 0 ]; then
+if [ "$NATIVE_RECOVERY_ONLY" = 0 ] && [ "$NATIVE_MATRIX_ONLY" = 0 ]; then
 EXECUTION_GRADE_LOG="$HOME/execution-grade-live.log"
 if run_execution_grade_fixture; then
     GRADE_SKIPS=$(grep -c '^SKIP:' "$EXECUTION_GRADE_LOG" || true)
@@ -2692,7 +2703,10 @@ fi
 REACHED_SUMMARY=1
 TOTAL=$((PASS + FAIL)) || true
 echo ""
-if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
+if [ "$NATIVE_MATRIX_ONLY" = 1 ]; then
+    echo "focused native SDK matrix qualification: $PASS/$TOTAL setup/eight-profile/shutdown checks passed"
+    echo "General integration and Docker grading were not run in this invocation."
+elif [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
     echo "focused native recovery qualification: $PASS/$TOTAL setup/recovery/shutdown checks passed"
     echo "General integration and eight-profile SDK qualification were not run in this invocation."
 else
@@ -2705,7 +2719,9 @@ if [ "$FAIL" -gt 0 ]; then
     echo "FAILED ($FAIL failures)"
     exit 1
 fi
-if [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
+if [ "$NATIVE_MATRIX_ONLY" = 1 ]; then
+    echo "Focused eight-profile native SDK qualification passed."
+elif [ "$NATIVE_RECOVERY_ONLY" = 1 ]; then
     echo "Focused native crash/interruption recovery qualification passed."
 else
     echo "All integration tests passed."

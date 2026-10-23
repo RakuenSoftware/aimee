@@ -10,6 +10,68 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class NativeIntegrationReadiness(unittest.TestCase):
+    def test_native_catalog_observations_keep_full_declarations_and_scope(self):
+        import importlib.util
+        import json
+        spec = importlib.util.spec_from_file_location("native_live_catalog", ROOT / "src/tests/test_native_ir_live.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as directory:
+            observations = module.NativeCatalogObservations(directory)
+            tools = [{"type":"function", "name":"read_file", "description":"complete declaration",
+                      "parameters":{"type":"object", "properties":{"path":{"type":"string"}}, "required":["path"]}}]
+            first = observations.observe("claude", "anthropic", "primary", tools)
+            self.assertEqual(first["tools"], tools)
+            self.assertEqual(observations.observe("claude", "anthropic", "primary", tools)["sha256"], first["sha256"])
+            for changed in ([], tools + tools, [{**tools[0], "parameters":{"type":"object"}}]):
+                with self.subTest(changed=changed), self.assertRaises(AssertionError):
+                    observations.observe("claude", "anthropic", "primary", changed)
+            ordered = tools + [{**tools[0], "name":"write_file"}]
+            observations.observe("codex", "chatgpt", "primary", ordered)
+            with self.assertRaises(AssertionError):
+                observations.observe("codex", "chatgpt", "primary", list(reversed(ordered)))
+            observations.observe("http-child", "openai", "diagnose", [])
+            saved = json.loads((Path(directory) / "catalog-0001.json").read_text())
+            self.assertEqual(saved["names"], [{"namespace":None,"name":"read_file"}])
+            self.assertEqual(saved["tools"], tools)
+            self.assertNotIn("headers", saved)
+
+    def mode_prefix(self, **overrides):
+        source = (ROOT / "src/tests/test_integration.sh").read_text()
+        prefix = source[:source.index("# Resolve paths relative to repo root")]
+        env = {"PATH": "/usr/bin:/bin", **overrides}
+        return subprocess.run(["bash", "-c", prefix + "\necho MODE_PREFIX_COMPLETE\n"],
+                              env=env, capture_output=True, text=True, timeout=3)
+
+    def test_default_mode_does_not_select_a_focused_slice(self):
+        result = self.mode_prefix()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "MODE_PREFIX_COMPLETE\n")
+        source = (ROOT / "src/tests/test_integration.sh").read_text()
+        # Existing default general branches still run, and the original eight
+        # profile condition remains independent of the general-only branches.
+        self.assertIn('if [ "$NATIVE_RECOVERY_ONLY" = 0 ] && [ "$NATIVE_MATRIX_ONLY" = 0 ]; then', source)
+        self.assertIn('if [ "$NATIVE_RECOVERY_ONLY" = 0 ] && [ -n "${AIMEE_TEST_NATIVE_CODEX:-}" ]', source)
+
+    def test_matrix_mode_refuses_missing_runtime_or_sdk_before_setup(self):
+        for overrides in ({"AIMEE_TEST_NATIVE_MATRIX_ONLY": "invalid"},
+                          {"AIMEE_TEST_NATIVE_MATRIX_ONLY": "1"},
+                          {"AIMEE_TEST_NATIVE_MATRIX_ONLY": "1", "AIMEE_TEST_NATIVE_RECOVERY_ONLY": "1"}):
+            with self.subTest(overrides=overrides):
+                result = self.mode_prefix(**overrides)
+                self.assertEqual(result.returncode, 2)
+                self.assertNotIn("MODE_PREFIX_COMPLETE", result.stdout)
+
+    def test_matrix_mode_labels_coverage_without_claiming_general_integration(self):
+        result = self.mode_prefix(AIMEE_TEST_NATIVE_MATRIX_ONLY="1",
+                                 AIMEE_TEST_NATIVE_CODEX="/usr/bin/true",
+                                 AIMEE_TEST_NATIVE_CLAUDE="/usr/bin/true",
+                                 AIMEE_STORE_URL="fixture-runtime", AIMEE_STORE_MIGRATION_URL="fixture-migrator")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("all eight profiles, refusal and source fences", result.stdout)
+        self.assertIn("general integration and Docker grading are not run", result.stdout)
+        self.assertTrue(result.stdout.endswith("MODE_PREFIX_COMPLETE\n"))
+
     def run_startup(self, memory_enabled):
         source = (ROOT / "src/tests/test_integration.sh").read_text()
         start = source.index("start_server() {\n")
