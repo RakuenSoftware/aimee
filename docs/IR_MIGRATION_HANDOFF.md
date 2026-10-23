@@ -270,22 +270,42 @@ behavior proofs remain separate.
 
 Registered service-trigger configuration is blocked before any candidate/model:
 the pinned external config owner turns nested JSON numbers into YAML strings,
-rejecting numeric max_spend_usd. The owner repair is being developed against the
-exact pinned revision, retaining temporal-learning defaults; no budget omission,
-string workaround, module-cache patch, extra PR or default-branch mutation is
-used. Source/authority/cache seals confirm no service model ran.
+rejecting numeric max_spend_usd. The owner repair is now committed on the scoped
+dependency branch at `01e83ef1aee91c7b5848ecb58ead5e930fde99b8`, with the exact
+previous pin as its parent, retaining temporal-learning defaults. Its normal and
+race tests and actual application consumer tests pass; the old handler reproduces
+the numeric failures. The application now pins the immutable pseudo-version and
+verified module checksum. No budget omission, string workaround, module-cache
+patch, extra PR or default-branch mutation is used. Source/authority/cache seals
+confirm no service model ran. A new qualified image and actual service-trigger
+execution remain required.
 
 Standalone real-PG workflow control passes 32/32 and lifecycle passes 23/23.
-Coexistence exposes a test-oracle connection defect: libpq treats PGDATABASE's
+Coexistence exposed a test-oracle connection defect: libpq treats PGDATABASE's
 value as a literal database name, rather than expanding a whole URI. The test-only
 repair supplies URI components through the private child environment, verifies
 matching runtime/migration endpoints, retains schema/read-only checks, and rejects
 unknown options. Seven pure cases and an actual read of 1,010 columns/121 tables
-pass; a fresh committed-harness coexistence run remains required. Earlier fixture
-startup/path errors and oracle failure remain retained.
+pass. The fresh committed `1ad2ec549` harness then passes coexistence 15/15 with
+zero notes against the same qualified 936 runtime products. Earlier fixture
+startup/path errors and oracle failure remain retained. All nonce-scoped fixture
+databases, roles, container, volume and cgroups are cleaned; application resources
+are preserved.
+
+The next actual native question exposes a separate browser failure. One model
+request emits the real canonical question at sequence 6, but the history
+EventSource fails and the UI hides its controls. No human reply is submitted;
+the request cancels and completes with 13 canonical events. Those records, the
+prior 44 events and full SDK/cache/authority bytes remain preserved. This is a
+failed question acceptance case. Current public and owner SSE reads return all
+13 events and valid replay completion; the original failing HTTP status was not
+retained, so a backend cause is not established. A reproducible frontend gap
+allows new model sends after a history failure despite hidden controls. Its
+repair must preserve the draft and block dispatch until explicit reconnect
+finishes validated canonical replay, without automatic resend or stale controls.
 
 Honest server-triggered native execution, question/permission replies, native
-tool effects and final coexistence deployment acceptance remain outstanding.
+tool effects and final browser acceptance remain outstanding.
 Keep these checks separate
 from the stock-SDK recall refusal. No current-branch GitHub CI or production
 promotion is claimed. Keep one eventual PR, automatic reviews and strict
