@@ -29,6 +29,7 @@ int cli_agent_probe_response_exit_code(cJSON *resp, int argc, char **argv);
 int cli_index_investigate_response_is_failure(cJSON *resp);
 char *cli_index_worktree_root(const char *method, const cJSON *req);
 int cli_index_apply_worktree_project(cJSON *req, const char *root, const cJSON *response);
+int cli_ws_output_quiet_bind(int quiet);
 int cli_ws_project_identity(const char *remote, const char *bearer, const char *abs_root, char *out,
                             size_t out_len);
 void __attribute__((unused)) cli_v1_sleep_ms(int ms);
@@ -89,6 +90,7 @@ cJSON *marshal_kb_status(int argc, char **argv);
 cJSON *marshal_kb_update(int argc, char **argv);
 cJSON *marshal_mcp_recheck(int argc, char **argv);
 cJSON *marshal_tool_call(int argc, char **argv);
+cJSON *marshal_agent_args(const char *method, int argc, char **argv);
 cJSON *marshal_workspace_add(int argc, char **argv);
 cJSON *marshal_workspace_prepare(int argc, char **argv);
 cJSON *marshal_memory_benchmark(int argc, char **argv);

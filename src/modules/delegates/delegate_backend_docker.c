@@ -526,7 +526,8 @@ static int docker_is_ordinary_delegate(const char *id)
                          "container",
                          "--format",
                          "{\"mounts\":{{json .Mounts}},\"entrypoint\":{{json "
-                         ".Config.Entrypoint}},\"labels\":{{json .Config.Labels}}}",
+                         "(index .Config \"Entrypoint\")}},\"labels\":{{json "
+                         "(index .Config \"Labels\")}}}",
                          id,
                          NULL};
    char *out = NULL;

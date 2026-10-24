@@ -2,6 +2,7 @@
  * the remote code index before session isolation enters a hidden worktree. */
 #include "cli_client.h"
 #include "cli_v1_routes_internal.h"
+#include <aimee/workspace/identity.h>
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -23,7 +24,7 @@ int cli_index_ensure_remote(const char *root)
       return 1;
    }
    char identity[128];
-   if (cli_ws_project_identity(NULL, NULL, abs, identity, sizeof identity))
+   if (workspace_repo_identity(abs, identity, sizeof identity, NULL, 0))
    {
       free(abs);
       return 1;
@@ -78,7 +79,9 @@ int cli_index_ensure_remote(const char *root)
     * /v1/index/ingest. It records the canonical root/project rather than the
     * hidden per-session worktree the MCP proxy enters later. */
    char *scan_argv[] = {abs};
+   int previous = cli_ws_output_quiet_bind(1);
    int rc = cli_index_scan_remote(1, scan_argv);
+   (void)cli_ws_output_quiet_bind(previous);
    free(abs);
    return rc;
 }

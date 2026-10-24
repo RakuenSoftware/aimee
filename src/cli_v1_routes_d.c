@@ -1178,6 +1178,13 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
 #if defined(AIMEE_POSIX)
 static int g_cli_ws_json_output;
 
+int cli_ws_output_quiet_bind(int quiet)
+{
+   int previous = g_cli_ws_json_output;
+   g_cli_ws_json_output = quiet != 0;
+   return previous;
+}
+
 /* Keep the thin-client push path aligned with the local/canonical scanners.
  * Hidden-root projects are deliberately excluded from index reads and startup
  * cleanup so temporary .aimee/.claude worktrees cannot pollute the shared code
@@ -1466,7 +1473,7 @@ static int cli_ws_ingest_tree(const char *remote, const char *bearer, const char
 
 int cli_workspace_add_remote(const char *path, int prepare, int json_output)
 {
-   g_cli_ws_json_output = json_output;
+   (void)cli_ws_output_quiet_bind(json_output);
    if (!path || !path[0])
    {
       fprintf(stderr, "usage: aimee workspace %s <path>\n", prepare ? "prepare" : "add");
@@ -2319,10 +2326,9 @@ int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int jso
          {
             cJSON_Delete(projects);
             projects = NULL;
-            int previous_json = g_cli_ws_json_output;
-            g_cli_ws_json_output = effective_json_output;
+            int previous_json = cli_ws_output_quiet_bind(effective_json_output);
             int ingest_rc = cli_ws_ingest_tree(remote, bearer, worktree_root);
-            g_cli_ws_json_output = previous_json;
+            (void)cli_ws_output_quiet_bind(previous_json);
             if (ingest_rc == 0)
             {
                projects =

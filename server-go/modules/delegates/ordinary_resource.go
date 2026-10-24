@@ -15,7 +15,7 @@ func ResolveOrdinaryImage(ctx context.Context, run CommandRunner, docker, image 
 	if run == nil || !baseImageValid(image) {
 		return "", nil, errors.New("ordinary image reference/transport unavailable")
 	}
-	output, err := run(ctx, docker, "image", "inspect", "--format", `{"id":{{json .Id}},"entrypoint":{{json .Config.Entrypoint}},"healthcheck":{{json .Config.Healthcheck}}}`, image)
+	output, err := run(ctx, docker, "image", "inspect", "--format", `{"id":{{json .Id}},"entrypoint":{{json (index .Config "Entrypoint")}},"healthcheck":{{json (index .Config "Healthcheck")}}}`, image)
 	var observed struct {
 		ID          string
 		Entrypoint  []string

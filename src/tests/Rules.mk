@@ -1584,7 +1584,7 @@ $(TESTPREFIX)/unit-test-cli-mcp-serve: $(OBJDIR)/tests/test_cli_mcp_serve.o $(OB
 # Includes cli_index_bootstrap.c directly so transport/index calls can be
 # controlled without linking the full thin-client closure.
 $(TESTPREFIX)/unit-test-cli-index-bootstrap: $(OBJDIR)/tests/test_cli_index_bootstrap.o \
-                     $(OBJDIR)/cJSON.o
+                     $(WORKSPACE_IDENTITY_OBJS) $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-server-mcp-roundtable: \
