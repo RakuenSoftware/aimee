@@ -16,6 +16,8 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "builtin_chat_send_ex", "builtin_chat_stream_t", "builtin_chat_stream_control_t",
+    "chat_stream_on_open", "chat_stream_finish", "g_acp_tool_seq",
     "db1_primary_session_save", "db1_primary_session_load", "db1_primary_session_delete",
     "db1_primary_session_alloc_recent", "db1_primary_session_alloc_search",
     "db1_webchat_claude_session_get", "db1_webchat_claude_session_owned_by_other",

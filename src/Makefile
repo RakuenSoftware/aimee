@@ -540,7 +540,7 @@ CORE_SRCS += $(IR_CONTRACT_SRCS)
 
 # --- Pure client (aimee) ---
 CLI_SRCS = cli_kb_smoke.c cli_argspec.c cli_v1_routes.c cli_v1_routes_d.c cli_native_bridge.c cli_v1_routes_e.c cli_v1_routes_f.c cli_v1_routes_c.c cli_v1_routes_b.c cli_index_bootstrap.c cli_main.c cli_agent_setup.c cli_session_start.c hook_session_token.c session_degraded_notice.c cmd_self_update.c self_update_util.c harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c cli_attention_guard.c client_session_worktree.c session_worktree_key.c cli_code_audit.c cli_css.c cli_chat_stream.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c client_config.c modules/delegates/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c modules/protocols/acp/acp_server.c modules/workspace/cli_workspace_serve.c modules/workspace/workspace_client_diff.c cli_agent_keys.c cmd_workflow.c
-CLI_SRCS += http_content_encoding.c $(HOOK_IR_SRCS) $(IR_BASE_SRCS)
+CLI_SRCS += http_content_encoding.c $(HOOK_IR_SRCS) $(IR_BASE_SRCS) modules/ir/session_event.c
 CLI_SRCS += cli_proxy.c cli_proxy_cmd.c
 CLI_OBJS = $(CLI_SRCS:%.c=$(OBJDIR)/%.o)
 CLIENT_PLATFORM_OBJS = $(filter %/platform_ipc.o %/platform_net.o %/platform_path.o %/platform_process.o %/platform_random.o %/history.o %/cli_client.o %/cli_main.o,$(PLATFORM_OBJS))
@@ -933,7 +933,7 @@ endif
 
 # --- Gateway ---
 
-GATEWAY_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c cli_native_bridge.c cli_v1_routes_e.c cli_v1_routes_f.c gateway/gateway_main.c gateway/gateway_ctx.c gateway/platform_registry.c \
+GATEWAY_SRCS = cli_chat_stream.c modules/ir/aimee_ir.c modules/ir/session_event.c cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_d.c cli_native_bridge.c cli_v1_routes_e.c cli_v1_routes_f.c gateway/gateway_main.c gateway/gateway_ctx.c gateway/platform_registry.c \
                gateway/delivery_router.c gateway/session_key.c \
                gateway/platform_telegram.c gateway/platform_ntfy.c gateway/platform_webhook.c \
                gateway/stt.c gateway/tts.c gateway/pairing.c gateway/gateway_pairing.c gateway/mirror.c \

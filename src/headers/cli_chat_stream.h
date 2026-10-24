@@ -1,17 +1,12 @@
-/* cli_chat_stream.h: headless /v1 chat streaming for non-interactive callers.
- *
- * Was cli_tui.h. The interactive terminal UIs it was named for — the OpenCode
- * frontend, the native fallback loop and `aimee chat` — are gone; nothing here
- * touches a terminal. acp-serve is the only caller. */
+/* Canonical first-party chat subscriber; callback tool IDs are opaque and stable. */
 #ifndef DEC_CLI_CHAT_STREAM_H
-#define DEC_CLI_CHAT_STREAM_H 1
-
-/* Run `message` through aimee-server, streaming incremental output: text_cb(delta, ud)
- * fires per text chunk and tool_cb(phase, tool_name, ud) per tool event; either may be
- * NULL. Returns the full reply (heap, caller frees) or NULL on error. Writes nothing to
- * stdout, so callers owning a protocol stream stay clean. */
-char *cli_chat_stream(const char *sock, const char *session_id, const char *message,
-                      void (*text_cb)(const char *delta, void *ud),
-                      void (*tool_cb)(const char *phase, const char *tool_name, void *ud),
-                      void *ud);
-#endif /* DEC_CLI_CHAT_STREAM_H */
+#define DEC_CLI_CHAT_STREAM_H
+struct cJSON;
+typedef void (*cli_chat_tool_fn)(const char *phase, const char *id, const char *name,
+                                 void *context);
+char *cli_chat_request_stream(const char *endpoint, const char *bearer, const struct cJSON *request,
+                              int timeout_ms, void (*text)(const char *, void *),
+                              cli_chat_tool_fn tool, void *context);
+char *cli_chat_stream(const char *sock, const char *session, const char *message,
+                      void (*text)(const char *, void *), cli_chat_tool_fn tool, void *context);
+#endif

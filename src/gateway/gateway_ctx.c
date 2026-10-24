@@ -16,6 +16,7 @@
 #include "aimee.h"
 #include "aimee_home.h"
 #include "cli_client.h"
+#include "cli_chat_stream.h"
 #include <cJSON.h>
 #include <unistd.h>
 
@@ -104,38 +105,6 @@ static void session_forget_locked(gateway_ctx_t *ctx, const char *key)
    }
 }
 
-/* ---- streaming accumulator ---- */
-
-typedef struct
-{
-   char *buf;
-   size_t len;
-   size_t cap;
-} stream_buf_t;
-
-static int stream_text_cb(cJSON *event, void *userdata)
-{
-   stream_buf_t *sb = (stream_buf_t *)userdata;
-   cJSON *jtext = cJSON_GetObjectItemCaseSensitive(event, "text");
-   if (!cJSON_IsString(jtext))
-      return 0;
-   const char *chunk = jtext->valuestring;
-   size_t chunk_len = strlen(chunk);
-   if (sb->len + chunk_len + 1 > sb->cap)
-   {
-      size_t new_cap = (sb->cap + chunk_len + 1) * 2;
-      char *newbuf = realloc(sb->buf, new_cap);
-      if (!newbuf)
-         return 0;
-      sb->buf = newbuf;
-      sb->cap = new_cap;
-   }
-   memcpy(sb->buf + sb->len, chunk, chunk_len);
-   sb->len += chunk_len;
-   sb->buf[sb->len] = '\0';
-   return 0;
-}
-
 /* Co-located /v1 HTTP endpoint ("unix:<home>/aimee-http.sock"). The gateway runs
  * alongside aimee-server and reaches it over the local /v1 surface now that the
  * NDJSON RPC socket is gone. Returns 0 on success. */
@@ -175,39 +144,17 @@ static int rpc_launch_run(char *sid_out, size_t sid_cap)
 
 static char *rpc_chat_send_stream(const char *aimee_sid, const char *message)
 {
-   stream_buf_t sb;
-   memset(&sb, 0, sizeof(sb));
-   sb.buf = malloc(512);
-   if (!sb.buf)
-      return NULL;
-   sb.buf[0] = '\0';
-   sb.cap = 512;
    char endpoint[4200];
-   if (gw_v1_endpoint(endpoint, sizeof(endpoint)) != 0)
-   {
-      free(sb.buf);
+   if (gw_v1_endpoint(endpoint, sizeof(endpoint)))
       return NULL;
-   }
    cJSON *req = cJSON_CreateObject();
    /* No "method" — the POST /v1/chat/stream route maps to chat.send_stream. */
    cJSON_AddStringToObject(req, "message", message);
    cJSON_AddStringToObject(req, "aimee_session_id", aimee_sid);
    cJSON_AddStringToObject(req, "cwd", "/");
-   char *body = cJSON_PrintUnformatted(req);
+   char *reply = cli_chat_request_stream(endpoint, NULL, req, 120000, NULL, NULL, NULL);
    cJSON_Delete(req);
-   int status = 0;
-   cJSON *resp =
-       body ? cli_http_request_stream_ndjson(endpoint, "POST", "/v1/chat/stream", body, NULL,
-                                             120000, &status, stream_text_cb, &sb, NULL, NULL)
-            : NULL;
-   free(body);
-   cJSON_Delete(resp);
-   if (sb.len == 0)
-   {
-      free(sb.buf);
-      return NULL;
-   }
-   return sb.buf;
+   return reply;
 }
 
 gateway_ctx_t *gateway_ctx_new(void)

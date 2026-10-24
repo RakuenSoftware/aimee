@@ -499,6 +499,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-openai-runs-store \
                $(TESTPREFIX)/unit-test-cli-argspec \
                $(TESTPREFIX)/unit-test-cli-http-transport \
+               $(TESTPREFIX)/unit-test-cli-chat-ir \
+               $(TESTPREFIX)/unit-test-cli-acp-projection \
                $(TESTPREFIX)/unit-test-diff \
                $(TESTPREFIX)/unit-test-anchor-snapshot \
                $(TESTPREFIX)/unit-test-edit-anchored \
@@ -3931,7 +3933,7 @@ $(TESTPREFIX)/unit-test-gateway: $(OBJDIR)/tests/test_gateway.o \
                                  $(OBJDIR)/gateway/platform_telegram.o \
                                  $(OBJDIR)/gateway/platform_ntfy.o \
                                  $(OBJDIR)/gateway/platform_webhook.o \
-                                 $(OBJDIR)/gateway/gateway_ctx.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
+                                 $(OBJDIR)/gateway/gateway_ctx.o $(OBJDIR)/cli_chat_stream.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
                                  $(OBJDIR)/gateway/gateway_pairing.o \
                                  $(OBJDIR)/aimee_home.o \
                                  $(OBJDIR)/gateway/session_key.o \
@@ -3955,7 +3957,7 @@ $(TESTPREFIX)/unit-test-gateway-telegram: $(OBJDIR)/tests/test_gateway_telegram.
                                           $(OBJDIR)/gateway/platform_registry.o \
                                           $(OBJDIR)/gateway/platform_ntfy.o \
                                           $(OBJDIR)/gateway/platform_webhook.o \
-                                          $(OBJDIR)/gateway/gateway_ctx.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
+                                          $(OBJDIR)/gateway/gateway_ctx.o $(OBJDIR)/cli_chat_stream.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
                                           $(OBJDIR)/gateway/gateway_pairing.o \
                                           $(OBJDIR)/aimee_home.o \
                                           $(OBJDIR)/gateway/delivery_router.o \
@@ -3982,7 +3984,7 @@ $(TESTPREFIX)/unit-test-gateway-ntfy-webhook: $(OBJDIR)/tests/test_gateway_ntfy_
                                               $(OBJDIR)/gateway/platform_webhook.o \
                                               $(OBJDIR)/gateway/platform_telegram.o \
                                               $(OBJDIR)/gateway/platform_registry.o \
-                                              $(OBJDIR)/gateway/gateway_ctx.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
+                                              $(OBJDIR)/gateway/gateway_ctx.o $(OBJDIR)/cli_chat_stream.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o \
                                               $(OBJDIR)/gateway/gateway_pairing.o \
                                               $(OBJDIR)/aimee_home.o \
                                               $(OBJDIR)/gateway/delivery_router.o \
@@ -4072,7 +4074,7 @@ $(TESTPREFIX)/unit-test-cli-argspec: $(OBJDIR)/tests/test_cli_argspec.o \
                                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-cli-http-transport: $(OBJDIR)/tests/test_cli_http_transport.o \
+$(TESTPREFIX)/unit-test-cli-http-transport: $(OBJDIR)/tests/test_cli_http_transport.o $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o \
                                             $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/cli_native_bridge.o $(OBJDIR)/code_collect.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
                                             $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -7424,4 +7426,13 @@ $(TESTPREFIX)/unit-test-canonical-cancel-compute: $(OBJDIR)/tests/test_canonical
     $(OBJDIR)/tests/support/learning_outcome_stub.o $(OBJDIR)/tests/support/log_stub.o \
     $(OBJDIR)/aimee_sha256.o $(OBJDIR)/interaction_event_names.o \
     $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-cli-chat-ir: $(OBJDIR)/tests/test_cli_chat_ir.o $(OBJDIR)/posix/cli_client.o $(CORE_CONNECTION_LIB) \
+    $(OBJDIR)/modules/ir/session_event.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/aimee_sha256.o \
+    $(OBJDIR)/modules/protocols/acp/acp_server.o $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-cli-acp-projection: $(OBJDIR)/tests/test_cli_acp_projection.o \
+    $(OBJDIR)/modules/protocols/acp/acp_server.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto

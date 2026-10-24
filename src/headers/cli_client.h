@@ -31,6 +31,8 @@ cJSON *cli_request(cli_conn_t *conn, cJSON *request, int timeout_ms);
 
 /* Callback for streaming events. Called for each intermediate JSON message
  * that has an "event" field. Return 0 to continue, non-zero to abort. */
+/* NDJSON callbacks borrow each admitted frame. NULL reports malformed framing;
+ * nonzero stops POSIX delivery. A buffered platform may already have read EOF. */
 typedef int (*cli_stream_cb)(cJSON *event, void *userdata);
 
 /* Check if server is available (GET /v1/health over the local HTTP UDS).
@@ -125,17 +127,12 @@ cJSON *cli_http_request_stream(const char *endpoint, const char *method, const c
                                const char *body_json, const char *bearer, int timeout_ms,
                                int *http_status, cli_stream_cb cb, void *userdata);
 
-/* NDJSON streaming variant: the response body is the native aimee event stream
- * (one JSON object per line; intermediate events carry "event", the final
- * message carries "status"). cb() is invoked per intermediate event (nonzero
- * aborts); the final "status" object is returned (caller frees). on_open(fd,ud),
- * when non-NULL, is called with the live socket fd right after connect (and with
- * -1 just before close) so an external thread can abort the turn by closing it.
- * Used to consume POST /v1/chat/stream. Returns NULL on transport failure. */
-cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, const char *path,
-                                      const char *body_json, const char *bearer, int timeout_ms,
-                                      int *http_status, cli_stream_cb cb, void *userdata,
-                                      void (*on_open)(int fd, void *ud), void *on_open_ud);
+/* Canonical NDJSON delivery: 0 for EOF/subscriber stop, -1 on transport/framing
+ * failure. Only a validated subscriber terminal authorizes successful output.
+ * Every frame reaches the required callback; no flat final object bypasses it. */
+int cli_http_request_stream_ndjson(const char *endpoint, const char *method, const char *path,
+                                   const char *body_json, const char *bearer, int timeout_ms,
+                                   int *http_status, cli_stream_cb cb, void *userdata);
 
 /* Close connection. */
 void cli_close(cli_conn_t *conn);

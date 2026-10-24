@@ -27,6 +27,7 @@
 #include "hook_session_token.h"
 #include <aimee/delegates/delegate_plan.h>
 #include "cli_chat_stream.h"
+#include <stdint.h>
 #include "platform.h"
 #include "platform_path.h" /* platform_getppid */
 #include "platform_process.h"
@@ -1725,50 +1726,45 @@ static int client_session_brief(int argc, char **argv)
    return 0;
 }
 
-/* Per-delta callback: emit one ACP session/update notification to stdout as the
- * turn streams. `ud` carries the session id. */
-static void acp_stream_delta(const char *delta, void *ud)
+typedef struct
 {
-   if (!delta || !delta[0])
+   const char *session;
+   int failed;
+} acp_stream_context_t;
+static void acp_stream_output(acp_stream_context_t *context, const char *text, const char *phase,
+                              const char *id, const char *name)
+{
+   if (context->failed)
       return;
-   char out[8192];
-   if (acp_build_update_notification((const char *)ud, delta, out, sizeof(out)) == 1 && out[0])
+   const char *fields[] = {context->session, text, id, name};
+   size_t cap = 512;
+   for (size_t i = 0; i < sizeof fields / sizeof *fields; i++)
    {
-      fputs(out, stdout);
-      fputc('\n', stdout);
-      fflush(stdout);
+      size_t n = fields[i] ? strlen(fields[i]) : 0;
+      if (n > (SIZE_MAX - cap) / 6)
+      {
+         context->failed = 1;
+         return;
+      }
+      cap += 6 * n;
    }
+   char *out = malloc(cap);
+   int rc = out ? (text ? acp_build_update_notification(context->session, text, out, cap)
+                        : acp_build_tool_update(context->session, id, phase, name, out, cap))
+                : -1;
+   if (rc != 1 || !out[0] || fputs(out, stdout) == EOF || fputc('\n', stdout) == EOF ||
+       fflush(stdout))
+      context->failed = 1;
+   free(out);
 }
-
-/* Per-tool callback: emit a standard ACP session/update tool_call notification
- * as each tool starts/completes during the turn. `ud` carries the session id.
- *
- * The toolCallId must be unique within the session — a client keys the
- * tool_call_update off it to find the tool_call it updates. It used to be the tool
- * name, so an agent that read three files emitted three calls under one id and the
- * client had no way to tell them apart. Number them instead.
- *
- * A plain counter is enough: this runs on the one thread draining the server's
- * event stream, and the server emits each tool's started before its completed, so
- * "the current value" always names the call in flight. It lives as long as the
- * process, which for `aimee acp` is exactly one ACP session — the scope the id
- * must be unique over. */
-static unsigned g_acp_tool_seq;
-
-static void acp_stream_tool(const char *phase, const char *name, void *ud)
+static void acp_stream_delta(const char *delta, void *context)
 {
-   char out[1024];
-   char call_id[128];
-   if (!phase || strcmp(phase, "completed") != 0)
-      g_acp_tool_seq++;
-   snprintf(call_id, sizeof(call_id), "%s-%u", name ? name : "tool", g_acp_tool_seq);
-   if (acp_build_tool_update((const char *)ud, call_id, phase, name, out, sizeof(out)) == 1 &&
-       out[0])
-   {
-      fputs(out, stdout);
-      fputc('\n', stdout);
-      fflush(stdout);
-   }
+   if (delta && delta[0])
+      acp_stream_output(context, delta, NULL, NULL, NULL);
+}
+static void acp_stream_tool(const char *phase, const char *id, const char *name, void *context)
+{
+   acp_stream_output(context, NULL, phase, id, name);
 }
 
 /* ACP prompt/submit dispatch: run the turn through aimee-server's chat path,
@@ -1799,8 +1795,15 @@ static char *acp_dispatch_prompt(const char *content, const char *session_id)
       snprintf(fallback, sizeof(fallback), "acp-ppid-%d", platform_getppid());
       log_sid = fallback;
    }
-   return cli_chat_stream(sock, log_sid, content, acp_stream_delta, acp_stream_tool,
-                          (void *)session_id);
+   acp_stream_context_t context = {.session = session_id};
+   char *reply =
+       cli_chat_stream(sock, log_sid, content, acp_stream_delta, acp_stream_tool, &context);
+   if (context.failed)
+   {
+      free(reply);
+      return NULL;
+   }
+   return reply;
 }
 
 /* `aimee claude-proxy enable|disable [server_url] [token]` — opt-in routing of
@@ -2178,7 +2181,7 @@ int main(int argc, char **argv)
 
    /* ACP stdio server: lets ACP editors (Zed, Aider) use aimee as a backend.
     * Tag every chat turn this loop dispatches as "acp" so the session is logged
-    * under its real surface (builtin_chat_send_ex forwards AIMEE_CLIENT_TYPE into
+    * under its real surface (cli_chat_stream forwards AIMEE_CLIENT_TYPE into
     * the chat request; the server records it on the server_sessions row). */
    if (strcmp(cmd, "acp-serve") == 0)
    {

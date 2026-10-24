@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #endif
 #include "cli_client.h"
+#include <aimee/ir/session_event.h>
 #include "json_wire.h"
 #include "aimee_home.h"
 #include "aimee_version.h"
@@ -709,26 +710,16 @@ cJSON *cli_http_request_stream(const char *endpoint, const char *method, const c
    return last;
 }
 
-/* NDJSON streaming counterpart to cli_http_request_stream(): for endpoints whose
- * response body is the native aimee event stream — one JSON object per line,
- * intermediate events carry an "event" field and the final message carries a
- * "status" field (exactly like the legacy NDJSON socket via cli_request_stream).
- * Used to consume POST /v1/chat/stream. cb(event,userdata) is invoked for each
- * intermediate event (return nonzero to abort); the final "status" object is the
- * return value (caller cJSON_Delete()s it). on_open(fd,on_open_ud), when
- * non-NULL, is called once with the live socket fd right after connect so an
- * external thread can force-close it to interrupt the turn (TUI abort); it is
- * called again with -1 just before the fd is closed. Returns NULL on
- * connect/transport failure; *http_status is set from the status line. */
-cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, const char *path,
-                                      const char *body_json, const char *bearer, int timeout_ms,
-                                      int *http_status, cli_stream_cb cb, void *userdata,
-                                      void (*on_open)(int fd, void *ud), void *on_open_ud)
+/* A terminal-aware subscriber owns completion; malformed framing is reported
+ * through a NULL callback rather than silently discarded. */
+int cli_http_request_stream_ndjson(const char *endpoint, const char *method, const char *path,
+                                   const char *body_json, const char *bearer, int timeout_ms,
+                                   int *http_status, cli_stream_cb cb, void *userdata)
 {
    if (http_status)
       *http_status = 0;
-   if (!endpoint || !method || !path)
-      return NULL;
+   if (!endpoint || !method || !path || !cb)
+      return -1;
    /* poll(2) semantics: timeout_ms == -1 waits indefinitely (a chat turn has no
     * idle bound), so only a 0 timeout falls back to the default. Connect always
     * uses a finite bound. */
@@ -739,28 +730,22 @@ cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, 
    char host[AIMEE_COMM_HOST_MAX + AIMEE_COMM_PORT_MAX + 5];
    int fd = cli_http_connect(endpoint, host, sizeof(host), NULL, 0, connect_timeout_ms);
    if (fd < 0)
-      return NULL;
-   if (on_open)
-      on_open(fd, on_open_ud);
+      return -1;
 
    size_t blen = body_json ? strlen(body_json) : 0;
    size_t reqcap = blen + strlen(path) + strlen(host) + (bearer ? strlen(bearer) : 0) + 256;
    char *req = malloc(reqcap);
    if (!req)
    {
-      if (on_open)
-         on_open(-1, on_open_ud);
       close(fd);
-      return NULL;
+      return -1;
    }
    int reqlen = cli_http_build_request(method, path, host, bearer, body_json, req, reqcap);
    if (reqlen < 0)
    {
       free(req);
-      if (on_open)
-         on_open(-1, on_open_ud);
       close(fd);
-      return NULL;
+      return -1;
    }
    size_t total = 0;
    while (total < (size_t)reqlen)
@@ -771,10 +756,8 @@ cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, 
          if (errno == EINTR)
             continue;
          free(req);
-         if (on_open)
-            on_open(-1, on_open_ud);
          close(fd);
-         return NULL;
+         return -1;
       }
       total += (size_t)n;
    }
@@ -784,14 +767,12 @@ cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, 
    char *buf = malloc(cap);
    if (!buf)
    {
-      if (on_open)
-         on_open(-1, on_open_ud);
       close(fd);
-      return NULL;
+      return -1;
    }
    int headers_done = 0;
    size_t scan = 0; /* offset of the next unparsed body byte */
-   cJSON *final = NULL;
+   int result = -1;
    for (;;)
    {
       /* Parse any complete newline-delimited objects already buffered (body
@@ -802,35 +783,19 @@ cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, 
          if (!nl)
             break;
          *nl = '\0';
-         cJSON *msg = cJSON_Parse(buf + scan);
+         cJSON *msg = aimee_ir_json_parse_frame(buf + scan, (size_t)(nl - (buf + scan)));
          scan = (size_t)(nl - buf) + 1;
          if (!msg)
-            continue; /* skip unparseable lines */
-         if (cJSON_GetObjectItem(msg, "status"))
          {
-            final = msg;
-            free(buf);
-            close(fd);
-            if (on_open)
-               on_open(-1, on_open_ud);
-            return final;
+            (void)cb(NULL, userdata);
+            goto stream_done;
          }
-         if (cb)
+         int rc = cb(msg, userdata);
+         cJSON_Delete(msg);
+         if (rc)
          {
-            int rc = cb(msg, userdata);
-            cJSON_Delete(msg);
-            if (rc != 0)
-            {
-               free(buf);
-               close(fd);
-               if (on_open)
-                  on_open(-1, on_open_ud);
-               return NULL; /* callback requested abort */
-            }
-         }
-         else
-         {
-            cJSON_Delete(msg);
+            result = rc > 0 ? 0 : -1;
+            goto stream_done;
          }
       }
 
@@ -873,7 +838,12 @@ cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, 
          break;
       }
       if (n == 0)
-         break; /* EOF */
+      {
+         result = headers_done && !len ? 0 : -1;
+         if (len)
+            (void)cb(NULL, userdata);
+         break;
+      }
       len += (size_t)n;
       buf[len] = '\0';
 
@@ -893,11 +863,10 @@ cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, 
       }
    }
 
+stream_done:
    free(buf);
    close(fd);
-   if (on_open)
-      on_open(-1, on_open_ud);
-   return NULL;
+   return result;
 }
 
 cJSON *cli_request(cli_conn_t *conn, cJSON *request, int timeout_ms)

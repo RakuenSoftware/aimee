@@ -4,6 +4,7 @@
  * ("unix:" / absolute-path) transport is unsupported here — those callers fail
  * gracefully; the cross-platform remote path goes through aimee_client_request. */
 #include "cli_client.h"
+#include <aimee/ir/session_event.h>
 #include "json_wire.h"
 #include "aimee_client.h"
 #include "aimee_home.h"
@@ -588,20 +589,15 @@ cJSON *cli_http_request(const char *endpoint, const char *method, const char *pa
    return parsed;
 }
 
-cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, const char *path,
-                                      const char *body_json, const char *bearer, int timeout_ms,
-                                      int *http_status, cli_stream_cb cb, void *userdata,
-                                      void (*on_open)(int fd, void *ud), void *on_open_ud)
+int cli_http_request_stream_ndjson(const char *endpoint, const char *method, const char *path,
+                                   const char *body_json, const char *bearer, int timeout_ms,
+                                   int *http_status, cli_stream_cb cb, void *userdata)
 {
-   /* The streaming body is read in one pass after the response completes; the
-    * synchronous Winsock read above already buffers it. Windows interactive
-    * chat is remote-only, so on_open (the TUI abort fd hook) is unused here. */
-   (void)on_open;
-   (void)on_open_ud;
+   /* Winsock currently buffers the body before invoking subscriber callbacks. */
    if (http_status)
       *http_status = 0;
-   if (!endpoint || !method || !path)
-      return NULL;
+   if (!endpoint || !method || !path || !cb)
+      return -1;
    /* The caller passes the chat idle-timeout sentinel (-1 = "block until the
     * server streams / closes"). cli_win_http_connect maps any non-positive value
     * to the tiny 5s default SO_RCVTIMEO, which truncates a chat turn the moment
@@ -612,7 +608,7 @@ cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, 
    size_t len = 0;
    char *resp = cli_win_http_exec(endpoint, method, path, body_json, bearer, timeout_ms, &len);
    if (!resp)
-      return NULL;
+      return -1;
    if (http_status && strncmp(resp, "HTTP/", 5) == 0)
    {
       const char *sp = strchr(resp, ' ');
@@ -620,7 +616,7 @@ cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, 
          *http_status = atoi(sp + 1);
    }
    char *bodyp = strstr(resp, "\r\n\r\n");
-   cJSON *final = NULL;
+   int result = bodyp ? 0 : -1;
    if (bodyp)
    {
       char *line = bodyp + 4;
@@ -634,28 +630,23 @@ cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, 
             line[ll - 1] = '\0';
          if (line[0])
          {
-            cJSON *msg = cJSON_Parse(line);
-            if (msg)
+            cJSON *msg = nl ? aimee_ir_json_parse_frame(line, strlen(line)) : NULL;
+            int valid = msg != NULL;
+            int rc = cb(msg, userdata);
+            cJSON_Delete(msg);
+            if (!valid || rc < 0)
             {
-               if (cJSON_GetObjectItem(msg, "status"))
-               {
-                  if (final)
-                     cJSON_Delete(final);
-                  final = msg;
-               }
-               else
-               {
-                  if (cb)
-                     (void)cb(msg, userdata);
-                  cJSON_Delete(msg);
-               }
+               result = -1;
+               break;
             }
+            /* A positive terminal stops live POSIX delivery. Here the body is
+             * buffered already; validate every remaining frame as well. */
          }
          line = nl ? nl + 1 : NULL;
       }
    }
    free(resp);
-   return final;
+   return result;
 }
 
 /* cli_v1_dispatch_local now lives in the shared cli_v1_routes.inc — it resolves the

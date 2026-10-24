@@ -28,6 +28,14 @@ class IRBypassTests(unittest.TestCase):
         path.write_text(text)
         return path
 
+    def test_retired_first_party_chat_projection(self):
+        for name in ["builtin_chat_send_ex", "builtin_chat_stream_t", "builtin_chat_stream_control_t",
+                     "chat_stream_on_open", "chat_stream_finish", "g_acp_tool_seq"]:
+            target = self.source("src/retired_chat.c", f"void {name}(void);\n")
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "retired-api"):
+                checker.check(self.root)
+            target.unlink()
+
     def test_production_tree(self):
         checker.check(checker.ROOT)
 
