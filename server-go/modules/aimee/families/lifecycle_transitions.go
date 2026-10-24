@@ -49,7 +49,7 @@ var operatorResumable = map[string]bool{
 	"fanout_limit": true, "workflow_definition_invalid": true,
 	"workflow_block_unavailable": true, "delegate_failed": true,
 	"replay_unrecoverable": true, "base_integration_conflict": true,
-	"request_unimplementable": true,
+	"request_unimplementable": true, "cost_limit_unsupported": true,
 	// External conversation runners recheck the bound run and required input on
 	// retry. Releasing these waits never skips a gate or advances a stage.
 	"conversation_input": true, "binding_pending": true,

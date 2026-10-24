@@ -6,6 +6,8 @@
 #include "server_native_delegate_source.h"
 #include "agent_exec.h"
 #include "db1_client/server_sessions.h"
+__typeof__(agent_get_request_session) composition_mock_agent_get_request_session;
+#define agent_get_request_session composition_mock_agent_get_request_session
 __typeof__(agent_get_request_cancel) composition_mock_agent_get_request_cancel;
 #define agent_get_request_cancel composition_mock_agent_get_request_cancel
 __typeof__(agent_get_request_vault_principal) composition_mock_agent_get_request_vault_principal;
@@ -44,6 +46,7 @@ __typeof__(server_native_delegate_source_runtime_consume)
 #undef main
 #undef identity
 #undef request
+#undef agent_get_request_session
 #undef agent_get_request_cancel
 #undef agent_get_request_vault_principal
 #undef agent_request_cancel_scope_bind
@@ -114,11 +117,13 @@ static int composition_source_admit(server_native_delegate_source_scope_t *scope
 }
 static void ctor(const agent_t *model, const aimee_request_t *profile, int admitted)
 {
+   assert(!server_native_runtime_forward_service_admitted());
    constructor_owner_queries = 0;
    probing_constructor = 1;
    assert(!server_native_runtime_open_bound_request(model, request_context_get(),
                                                     agent_get_request_session(), profile, NULL, 0));
    probing_constructor = 0;
+   assert(!server_native_runtime_forward_service_admitted());
    assert(constructor_owner_queries == admitted);
 }
 static void readmit(void)

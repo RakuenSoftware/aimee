@@ -9,6 +9,11 @@
 typedef struct server_native_runtime server_native_runtime_t;
 struct cJSON;
 
+/* Read-only private callback proof, active only while a constructor-admitted
+ * service runtime forwards its own request. No setter or wire capability exists;
+ * it never changes the owner's honest NONE transport or grants operator access. */
+int server_native_runtime_forward_service_admitted(void);
+
 /* Own one native child's local transport. The source session must already belong
  * to the attested request owner. No operator/global CLI credential is borrowed.
  * Model forwarding requires stable selected Vault source lineage (Codex OAuth

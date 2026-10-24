@@ -63,7 +63,7 @@ struct server_native_runtime
    int last_complete;
    int model_turn_limit, admitted_model_turns;
    atomic_int model_turn_limit_reached;
-   int owns_request, bound_registry, n_bindings;
+   int owns_request, bound_registry, n_bindings, service_source;
    atomic_int launch_attested;
    char launch_digest[65];
    server_native_tool_binding_t *bindings;
@@ -79,6 +79,35 @@ struct server_native_runtime
    int job_id, api_key_source, claude_source;
    char session[128], token[65], url[64], binding[65], lineage[65];
 };
+
+/* Only native_perform activates this callback-local proof. The service bit is
+ * retained from the private constructor's consumed source capability; neither
+ * request JSON nor an actor/transport label can set it. Nested callbacks restore
+ * the prior proof before any context/resource leases are released. */
+static _Thread_local const server_native_runtime_t *forward_runtime;
+
+int server_native_runtime_forward_service_admitted(void)
+{
+   const server_native_runtime_t *runtime = forward_runtime;
+   const request_context_t *owner = request_context_get();
+   const char *cwd = run_cmd_get_cwd();
+   return runtime && runtime->service_source && runtime->owns_request && runtime->capture &&
+          (!runtime->bound_registry || atomic_load(&runtime->launch_attested)) &&
+          runtime->request_profile.model &&
+          !strcmp(runtime->request_profile.model, runtime->selected.model) &&
+          !aimee_ir_request_admit(&runtime->request_profile) && owner &&
+          owner->vault_transport == ATTEST_NONE && !owner->trusted && owner->model_execution == 1 &&
+          !owner->operator_script_origin && owner->capabilities == runtime->owner.capabilities &&
+          !strcmp(owner->principal, runtime->owner.principal) &&
+          !strcmp(owner->vault_principal, runtime->owner.vault_principal) &&
+          !strcmp(owner->session_key, runtime->session) &&
+          !strcmp(agent_get_request_session(), runtime->session) &&
+          !strcmp(agent_get_request_vault_principal(), runtime->owner.vault_principal) &&
+          server_session_capture_current() == runtime->capture &&
+          server_session_capture_accepting(runtime->capture) &&
+          !aimee_ir_session_capture_failed() && workspace_provider_active() == runtime->workspace &&
+          !strcmp(cwd ? cwd : "", runtime->cwd);
+}
 
 static const server_native_tool_binding_t *
 native_tool_binding(const server_native_runtime_t *runtime, const char *space, const char *name,
@@ -1471,6 +1500,8 @@ static int native_perform(const char *method, const char *path, const char *head
       aimee_ir_session_set_sink(server_session_capture_sink, runtime->capture);
    failure_stage = "dispatch";
    native_mcp_stage(&diagnostic, "dispatch", NATIVE_MCP_STAGE_BEGIN);
+   const server_native_runtime_t *previous_forward = forward_runtime;
+   forward_runtime = runtime;
    if (work)
       rc = work->cli   ? native_cli_dispatch(runtime, work, io)
            : work->rpc ? native_mcp_dispatch(runtime, work, io, &diagnostic)
@@ -1480,6 +1511,7 @@ static int native_perform(const char *method, const char *path, const char *head
       io->response_started(io->context);
       rc = server_http_native_forward(io->downstream_fd, method, path, input, (int)length);
    }
+   forward_runtime = previous_forward;
    native_mcp_stage(&diagnostic, "dispatch", rc ? NATIVE_MCP_STAGE_FAILED : NATIVE_MCP_STAGE_OK);
    if (aimee_ir_session_capture_failed())
       server_session_capture_fail(runtime->capture);
@@ -1688,6 +1720,7 @@ native_runtime_open(const agent_t *selected, const request_context_t *owner, con
    runtime->producer = pthread_self();
    runtime->selected = *selected;
    runtime->owner = *owner;
+   runtime->service_source = service_source;
    runtime->owner.model_execution = 1;
    runtime->owner.operator_script_origin = 0;
    /* A model/tool capability never carries independent operator authority:

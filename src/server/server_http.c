@@ -10,6 +10,7 @@
 #include "command_registry.h"
 #include <aimee/core/connection/auth.h>
 #include "server_http.h"
+#include "server_native_runtime.h"
 #include "delegate_egress_adapter.h" /* fd handoff to the Go sole-egress module */
 #include "kb_identity_token.h"
 #include "server_write_tier.h"
@@ -1193,9 +1194,14 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
                                int body_len)
 {
    const request_context_t *owner = request_context_get();
-   if (!owner || owner->vault_transport == ATTEST_NONE || !owner->vault_principal[0] ||
-       server_http_identity_transport() != owner->vault_transport ||
-       strcmp(server_http_identity_principal(), owner->vault_principal) ||
+   int service_scope = owner && owner->vault_transport == ATTEST_NONE &&
+                       server_native_runtime_forward_service_admitted() &&
+                       server_http_identity_transport() == ATTEST_NONE &&
+                       !server_http_identity_principal()[0];
+   if (!owner || !owner->vault_principal[0] ||
+       (!service_scope && (owner->vault_transport == ATTEST_NONE ||
+                           server_http_identity_transport() != owner->vault_transport ||
+                           strcmp(server_http_identity_principal(), owner->vault_principal))) ||
        server_http_identity_browser_operator() || !method || !path || strncmp(path, "/v1/", 4) ||
        strchr(path, '?') || strchr(path, '#') || body_len < 0 ||
        !server_http_route_allowed_caps(0, owner->capabilities, method, path, 0))

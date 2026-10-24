@@ -30,18 +30,32 @@
 #include <string.h>
 #include <unistd.h>
 
-/* The standalone runtime suite has no source issuer. NONE never acquires a
- * capability here; the source/runtime composition fixture links the real owner. */
+static _Atomic int service_forward_probe;
+static const aimee_request_t *fixture_service_ticket;
+static _Thread_local struct
+{
+   int valid;
+   request_context_t owner;
+   agent_request_creds_t credentials;
+   server_session_capture_t *capture;
+   const workspace_provider_t *workspace;
+   char cwd[MAX_PATH_LEN];
+} service_saved_callback;
+/* Controlled source-owner dependency for downstream runtime scope tests. Only
+ * an exact-profile one-shot fixture ticket can admit NONE here. The separate
+ * source/runtime composition fixture links the real HMAC owner and tests forged
+ * actors/profiles and consumption; this stub is not a claim of real minting. */
 int server_native_delegate_source_runtime_consume(const agent_t *selected,
                                                   const request_context_t *owner,
                                                   const aimee_request_t *profile,
                                                   const char *session)
 {
-   (void)selected;
-   (void)owner;
-   (void)profile;
-   (void)session;
-   return 0;
+   int valid = fixture_service_ticket && fixture_service_ticket == profile && selected && owner &&
+               owner->vault_transport == ATTEST_NONE && !owner->trusted && owner->model_execution &&
+               !strcmp(owner->principal, "server") && !strcmp(owner->vault_principal, "server") &&
+               session && !strcmp(session, "service-session");
+   fixture_service_ticket = NULL; /* Controlled source-owner dependency, always one-shot. */
+   return valid;
 }
 
 static _Thread_local char tool_role[64], tool_cwd[MAX_PATH_LEN], tool_session[128];
@@ -231,6 +245,7 @@ static atomic_int calls, cancelled, wait_for_cancel, source_changed, session_rem
 
 static void restored_probe(void)
 {
+   assert(!server_native_runtime_forward_service_admitted());
    assert(!current_mirror);
    assert(!current_model && !request_context_get());
    aimee_frontend_state_scope_t guard = aimee_frontend_bind_state_guard(NULL, NULL);
@@ -250,6 +265,26 @@ static void restored_probe(void)
    assert(!agent_source_authority_tls_capture_checked(&previous));
    assert(!previous.active && !previous.authority && !previous.root[0] && !previous.paths);
    agent_source_authority_snapshot_destroy(&previous);
+   if (service_saved_callback.valid)
+   {
+      /* Reinstall every getter-visible binding after callback cleanup. A stale
+       * private runtime TLS pointer must still not authorize another forward. */
+      request_context_snapshot_t prior;
+      request_context_snapshot(&prior);
+      agent_request_creds_t credentials = current_credentials;
+      request_context_set(&service_saved_callback.owner);
+      current_credentials = service_saved_callback.credentials;
+      workspace = service_saved_callback.workspace;
+      run_cmd_set_cwd(service_saved_callback.cwd);
+      assert(!server_session_capture_bind(service_saved_callback.capture));
+      assert(!server_native_runtime_forward_service_admitted());
+      assert(server_session_capture_bind(NULL) == service_saved_callback.capture);
+      run_cmd_set_cwd(NULL);
+      workspace = NULL;
+      current_credentials = credentials;
+      request_context_restore(&prior);
+      service_saved_callback.valid = 0;
+   }
 }
 
 void agent_request_creds_snapshot(agent_request_creds_t *out)
@@ -259,6 +294,10 @@ void agent_request_creds_snapshot(agent_request_creds_t *out)
 void agent_request_creds_restore(const agent_request_creds_t *value)
 {
    current_credentials = *value;
+}
+const char *agent_get_request_session(void)
+{
+   return current_credentials.session_id;
 }
 void agent_set_request_session(const char *session)
 {
@@ -303,8 +342,7 @@ int agent_request_cancelled(void)
 
 const char *agent_get_request_vault_principal(void)
 {
-   const request_context_t *owner = request_context_get();
-   return owner ? owner->vault_principal : "";
+   return current_credentials.vault_principal;
 }
 char *safe_strdup(const char *text)
 {
@@ -551,7 +589,9 @@ int db1_server_session_get(const char *session, db1_server_session_t *out)
             atomic_load(&source_recreated) ? "2026-10-20T00:01:00Z" : "2026-10-20T00:00:00Z");
    if (atomic_load(&session_removed))
       return -1;
-   if (!strcmp(session, "session-a"))
+   if (atomic_load(&service_forward_probe) && !strcmp(session, "service-session"))
+      strcpy(out->principal, "server");
+   else if (!strcmp(session, "session-a"))
       strcpy(out->principal, "webuser:alice");
    else if (!strcmp(session, "session-b"))
       strcpy(out->principal, "webuser:bob");
@@ -606,12 +646,76 @@ int server_http_native_forward(int fd, const char *method, const char *path, con
                                int length)
 {
    (void)method;
-   probe_replay_scope(path);
+   if (!atomic_load(&service_forward_probe))
+      probe_replay_scope(path);
    assert(protocol_captured);
    assert(length == (int)strlen(body));
    if (strncmp(path, "/v1/mcp/", 8))
       assert(length == 2 && !strcmp(body, "{}"));
    const request_context_t *owner = request_context_get();
+   if (atomic_load(&service_forward_probe) && owner && owner->vault_transport == ATTEST_NONE)
+   {
+      assert(server_native_runtime_forward_service_admitted());
+      service_saved_callback.valid = 1;
+      service_saved_callback.owner = *owner;
+      service_saved_callback.credentials = current_credentials;
+      service_saved_callback.capture = server_session_capture_current();
+      service_saved_callback.workspace = workspace;
+      snprintf(service_saved_callback.cwd, sizeof service_saved_callback.cwd, "%s",
+               run_cmd_get_cwd());
+      assert(!owner->trusted && owner->model_execution == 1 && !owner->operator_script_origin);
+      request_context_snapshot_t saved;
+      request_context_snapshot(&saved);
+      for (int field = 0; field < 8; field++)
+      {
+         request_context_t changed = *owner;
+         if (field == 0)
+            strcpy(changed.principal, "foreign");
+         if (field == 1)
+            strcpy(changed.vault_principal, "foreign");
+         if (field == 2)
+            strcpy(changed.session_key, "foreign");
+         if (field == 3)
+            changed.capabilities ^= CAP_MEMORY_READ;
+         if (field == 4)
+            changed.vault_transport = ATTEST_TCP_BEARER;
+         if (field == 5)
+            changed.trusted = 1;
+         if (field == 6)
+            changed.model_execution = 0;
+         if (field == 7)
+            changed.operator_script_origin = 1;
+         request_context_set(&changed);
+         assert(!server_native_runtime_forward_service_admitted());
+         request_context_restore(&saved);
+         assert(server_native_runtime_forward_service_admitted());
+         owner = request_context_get();
+      }
+      agent_request_creds_t credentials = current_credentials;
+      strcpy(current_credentials.session_id, "foreign");
+      assert(!server_native_runtime_forward_service_admitted());
+      current_credentials = credentials;
+      strcpy(current_credentials.vault_principal, "foreign");
+      assert(!server_native_runtime_forward_service_admitted());
+      current_credentials = credentials;
+      char previous_cwd[MAX_PATH_LEN];
+      snprintf(previous_cwd, sizeof previous_cwd, "%s", run_cmd_get_cwd());
+      run_cmd_set_cwd("/foreign");
+      assert(!server_native_runtime_forward_service_admitted());
+      run_cmd_set_cwd(previous_cwd);
+      const workspace_provider_t *previous_workspace = workspace;
+      workspace = NULL;
+      assert(!server_native_runtime_forward_service_admitted());
+      workspace = previous_workspace;
+      server_session_capture_t *previous_capture = server_session_capture_bind(NULL);
+      assert(!server_native_runtime_forward_service_admitted());
+      assert(!server_session_capture_bind(previous_capture));
+      assert(server_native_runtime_forward_service_admitted());
+      atomic_fetch_add(&calls, 1);
+      const char response[] = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+      return aimee_core_socket_write_all(fd, response, sizeof response - 1);
+   }
+   assert(!server_native_runtime_forward_service_admitted());
    assert(owner && owner->vault_transport == ATTEST_WEBCHAT_TRUSTED);
    assert(!strcmp(identity, owner->vault_principal));
    assert(!strcmp(owner->method, method) && !strcmp(owner->path, path));
@@ -1139,7 +1243,8 @@ int db1_session_ir_running_history_load(const char *session, const char *actor, 
 {
    server_session_capture_t *owner = server_session_capture_current();
    assert(owner && !strcmp(session, server_session_capture_session(owner)));
-   assert(!strcmp(actor, "webuser:alice") && !strcmp(turn, "native-turn"));
+   assert(!strcmp(actor, atomic_load(&service_forward_probe) ? "server" : "webuser:alice") &&
+          !strcmp(turn, "native-turn"));
    *out = NULL;
    if (atomic_load(&snapshot_fault) == 1)
       return -1;
@@ -2541,6 +2646,56 @@ static void test_private_source_revocation(const agent_t *selected, const reques
 
 #include "support/native_sdk_identity_fixture.h"
 
+static void test_private_service_forward_callback(const agent_t *selected)
+{
+   assert(!server_native_runtime_forward_service_admitted());
+   owner_tools(0);
+   run_cmd_set_cwd("/work/service");
+   request_context_t owner = {
+       .vault_transport = ATTEST_NONE, .model_execution = 1, .capabilities = CAP_CHAT};
+   strcpy(owner.principal, "server");
+   strcpy(owner.vault_principal, "server");
+   strcpy(owner.session_key, "service-session");
+   aimee_request_t profile = {
+       .model = "selected-model", .frontend = AIMEE_WIRE_RESPONSES, .mutated = 1};
+   atomic_store(&service_forward_probe, 1);
+   server_session_capture_t *capture =
+       server_session_capture_open("service-session", "native-turn", "server", "service-session");
+   assert(capture && !server_session_capture_bind(capture));
+   assert(!server_native_runtime_open_bound_request(selected, &owner, "service-session", &profile,
+                                                    NULL, 0));
+   aimee_request_t foreign = profile;
+   foreign.model = "foreign-profile-model";
+   fixture_service_ticket = &foreign;
+   assert(!server_native_runtime_open_bound_request(selected, &owner, "service-session", &foreign,
+                                                    NULL, 0));
+   assert(!server_native_runtime_forward_service_admitted());
+   fixture_service_ticket = &profile;
+   server_native_runtime_t *runtime = server_native_runtime_open_bound_request(
+       selected, &owner, "service-session", &profile, NULL, 0);
+   assert(runtime && server_session_capture_bind(NULL) == capture);
+   assert(!fixture_service_ticket && !server_native_runtime_forward_service_admitted());
+   atomic_store(&expected_capture, capture);
+   char launch[65];
+   memset(launch, 'a', 64);
+   launch[64] = 0;
+   assert(!server_native_runtime_attest_launch(runtime, launch));
+   char response[1024];
+   int before = atomic_load(&calls);
+   request(runtime, "/v1/responses", server_native_runtime_token(runtime), response);
+   assert(strstr(response, "200 OK") && atomic_load(&calls) == before + 1);
+   assert(!server_native_runtime_forward_service_admitted());
+   request(runtime, "/v1/responses", "forged-token", response);
+   assert(strstr(response, "401") && atomic_load(&calls) == before + 1);
+   assert(!server_native_runtime_forward_service_admitted());
+   server_native_runtime_close(runtime);
+   assert(!server_native_runtime_forward_service_admitted());
+   server_session_capture_close(capture);
+   atomic_store(&expected_capture, NULL);
+   atomic_store(&service_forward_probe, 0);
+   owner_tools(0);
+}
+
 int main(void)
 {
    agent_t selected = {.enabled = 1};
@@ -2548,6 +2703,7 @@ int main(void)
    strcpy(selected.registration, "selected-account");
    strcpy(selected.model, "selected-model");
    strcpy(selected.auth_type, "codex-oauth");
+   test_private_service_forward_callback(&selected);
    request_context_t a = {.vault_transport = ATTEST_WEBCHAT_TRUSTED,
                           .capabilities = CAP_CHAT | CAP_TOOL_EXECUTE};
    strcpy(a.vault_principal, "webuser:alice");

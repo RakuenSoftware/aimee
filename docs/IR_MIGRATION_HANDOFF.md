@@ -15,7 +15,7 @@ implementation or local/live validation. Earlier follow-up-PR instructions below
 are historical. Do not investigate or change `.100`; validation uses the owned
 `.252` environment.
 
-### Full internal conversion in progress: 23 October 2026
+### Full internal conversion in progress: 24 October 2026
 
 The internal tool-catalog cutover now uses one admitted canonical owner for
 HTTP/native execution, role filtering, respond, schema normalization and current
@@ -52,8 +52,8 @@ regressions pass. Independent review also closes explicit streamed refusal
 overwrite, duplicate closed-text aliases and nested response-identity conflicts;
 old-source failures and final focused normal/race results are retained. The integrated bypass gate passes 31 tests.
 
-Measured from `03d881e0e`, this continuation removes **2,146 net production lines**
-(902 added / 3,048 deleted, excluding tests, documentation, generated locks and
+Measured from `03d881e0e`, this continuation removes **2,096 net production lines**
+(960 added / 3,056 deleted, excluding tests, documentation, generated locks and
 build tooling). It retires parallel implementations rather than compressing source.
 The final CLI probe exit policy now lives in its existing response owner, keeping
 the forwarding file below the 2,500-line lint limit without exemptions.
@@ -109,6 +109,47 @@ supported positive service case must use admitted turn/deadline bounds (and outp
 bounds where already supported) without claiming dollar-limit enforcement. That case, hybrid permission/fault
 recovery, final candidate upgrade/native replay and responsive idle/editor checks
 remain unfinished. No final live or CI completion is claimed.
+
+Subsequent `ce789ccf3` qualification passes all 76 lint gates, the frontend
+retirement checks and all 87 image products/19 modules. A normal same-volume
+`601aff47e` to `ce789ccf3` upgrade preserves all prior Q13 history, native records,
+full SDK cache and protected authority. Public TLS leaf renewal retains its SPKI;
+the prior full PEM was not exported, so no full prior-PEM equality claim is made.
+The actual original-UUID resume then passes: one Send, no tools/replies, original
+4159-byte cache prefix preserved and appended to 6471 bytes, unchanged cache/cwd
+inodes and 7 new canonical records (current Q20). Independent checks accept it.
+
+The distinct supported service case uses a new normal alias with one admitted
+generation, effective native timeout at most 180 seconds, output cap 512, tools
+false and no monetary claim. It exposes a real local scope defect: its actual SDK
+receives HTTP 403 `native request scope unavailable` before any observed upstream
+inference. The constructor has consumed the private host capability, but the
+HTTP forwarder still rejects honest server/NONE sources. Its failed child/parent
+records and opaque SDK error cache are retained; normal owner Stop/removal leave
+Q20 and its full 6471-byte cache untouched.
+
+The fix retains the consumed capability only in the owned runtime and activates
+read-only callback-local proof around its dispatch. Forwarding requires matching
+canonical profile/model/launch, live capture, actor/session/capabilities,
+credentials, cwd and workspace. No wire field can activate it; honest NONE and
+trusted=0 remain unchanged. Three focused fixtures pass normally and with
+ASan/UBSan/leak checks. The old HTTP guard reproduces the actual 403 regression;
+cryptographic constructor admission, callback activation and HTTP policy are
+separately qualified layers, not claimed as one mocked end-to-end proof. Actual
+service success on the corrected image remains required.
+
+The earlier monetary negative also exposes a real retry defect: its permanent
+refusal was labeled transient `runner_unavailable`. It now parks as
+`cost_limit_unsupported`, with explicit operator resume and the refusal intact.
+Actual PostgreSQL regressions reproduce repeated old scheduler retries and prove
+one new park, zero model dispatch/spend, and operator-only retries. The four
+changed Go packages pass 902 tests/subtests in each normal and race run; 49
+unrelated optional family checks remain explicit skips. Required engine/store
+checks use actual PostgreSQL with zero skips. A separate existing fake-plane E2E
+fixture now supplies its required explicitly synthetic source issuer; this is
+not evidence of C MAC attestation. Final combined qualification, corrected-image
+service execution, permission/fault recovery, responsive idle/editor and one
+final PR/fresh CI remain unfinished.
 
 
 

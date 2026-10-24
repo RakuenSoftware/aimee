@@ -47,6 +47,14 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 
+/* HTTP policy seam only. Private mint/constructor and callback activation are
+ * tested in separate fixtures with explicit seams; this cannot mint a grant. */
+static int fixture_native_service_admitted;
+int server_native_runtime_forward_service_admitted(void)
+{
+   return fixture_native_service_admitted;
+}
+
 static int history_open_effects;
 static int native_source_mint_calls, native_source_revoke_calls;
 
@@ -1218,6 +1226,74 @@ static void test_native_http_handoff_preserves_owner_and_caps(void)
    server_http_set_chat_handler(NULL);
 }
 
+static int service_forward_calls;
+static int native_service_probe(const char *body, char *response, int capacity)
+{
+   assert(!strcmp(body, "{}"));
+   const request_context_t *owner = request_context_get();
+   assert(owner && owner->vault_transport == ATTEST_NONE && !owner->trusted &&
+          owner->model_execution == 1 && !owner->operator_script_origin);
+   assert(!strcmp(owner->principal, "server") && !strcmp(owner->vault_principal, "server"));
+   assert(server_http_identity_transport() == ATTEST_NONE && !server_http_identity_principal()[0] &&
+          !server_http_identity_browser_operator());
+   service_forward_calls++;
+   snprintf(response, (size_t)capacity, "{\"private_service_forward\":true}");
+   return 200;
+}
+static void test_private_service_native_http_forward(void)
+{
+   request_context_t owner = {
+       .vault_transport = ATTEST_NONE, .model_execution = 1, .capabilities = CAP_CHAT};
+   strcpy(owner.principal, "server");
+   strcpy(owner.vault_principal, "server");
+   strcpy(owner.session_key, "private-service-session");
+   server_http_set_chat_handler(native_service_probe);
+   service_forward_calls = 0;
+   for (int mode = 0; mode < 8; mode++)
+   {
+      request_context_t current = owner;
+      fixture_native_service_admitted = mode != 0 && mode != 7;
+      if (mode == 3)
+         current.vault_transport = ATTEST_TCP_BEARER;
+      if (mode == 4)
+         current.capabilities = CAP_MEMORY_READ;
+      request_context_set(mode == 6 ? NULL : &current);
+      server_http_identity_clear();
+      if (mode == 2)
+      {
+         request_context_t foreign = owner;
+         foreign.vault_transport = ATTEST_WEBCHAT_TRUSTED;
+         strcpy(foreign.vault_principal, "webuser:foreign");
+         server_http_identity_bind_request_owner(&foreign);
+      }
+      int pair[2];
+      assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
+      const char *body = mode == 5 ? "{} trailing" : "{}";
+      int rc = server_http_native_forward(pair[0], "POST", "/v1/chat/completions", body,
+                                          (int)strlen(body));
+      shutdown(pair[0], SHUT_WR);
+      char response[2048];
+      ssize_t n = read(pair[1], response, sizeof response - 1);
+      assert(n > 0);
+      response[n] = 0;
+      assert((rc == 0) == (mode == 1));
+      assert(strstr(response, mode == 1 ? "200" : mode == 5 ? "400" : "403"));
+      assert(service_forward_calls == (mode >= 1));
+      if (mode == 1)
+      {
+         assert(strstr(response, "private_service_forward"));
+         assert(request_context_get()->vault_transport == ATTEST_NONE &&
+                !request_context_get()->trusted);
+      }
+      close(pair[0]);
+      close(pair[1]);
+      request_context_clear();
+      server_http_identity_clear();
+   }
+   fixture_native_service_admitted = 0;
+   server_http_set_chat_handler(NULL);
+}
+
 static void test_history_open_precedes_sse_headers(void)
 {
    for (int mode = 1; mode <= 4; mode++)
@@ -1279,6 +1355,7 @@ int main(void)
 
    test_json_number_serialization_is_exact();
    test_native_http_handoff_preserves_owner_and_caps();
+   test_private_service_native_http_forward();
    test_role_template_show_reports_what_the_role_came_to();
    printf("server_http: ");
 
