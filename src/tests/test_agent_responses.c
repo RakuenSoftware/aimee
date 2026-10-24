@@ -85,7 +85,7 @@ void test_responses_object_folds_in_streamed_function_call(void)
        "data: {\"item\":{\"type\":\"reasoning\",\"summary\":\"thinking\"}}\r\n\r\n"
        "event: response.output_item.done\r\n"
        "data: {\"item\":{\"type\":\"function_call\",\"call_id\":\"call_42\","
-       "\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"/tmp/x\\\"}\"}}\r\n\r\n"
+       "\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"/fixture/x\\\"}\"}}\r\n\r\n"
        "event: response.completed\r\n"
        "data: {\"response\":{\"output\":[],\"usage\":{\"input_tokens\":5,\"output_tokens\":7}}}"
        "\r\n\r\n";
@@ -95,7 +95,7 @@ void test_responses_object_folds_in_streamed_function_call(void)
    assert(aimee_ir_response_tool_count(&parsed) == 1);
    const aimee_block_t *tool = aimee_ir_response_tool(&parsed, 0);
    assert(!strcmp(tool->tool_name, "read_file") && !strcmp(tool->tool_id, "call_42"));
-   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(tool->tool_input, "path")), "/tmp/x"));
+   assert(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(tool->tool_input, "path")), "/fixture/x"));
    assert(parsed.n_content == 2 && parsed.content[0].type == AIMEE_BLK_THINKING);
    assert(!strcmp(parsed.content[0].text, "thinking"));
    assert(parsed.usage_in == 5 && parsed.usage_out == 7);
