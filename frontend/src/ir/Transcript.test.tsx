@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 import IRTranscript from './Transcript';
 import { nativeOwner } from './interruption.fixture';
+import { operatorCancelError } from './interruption';
 import { emptySession, reduceSession, type Envelope } from './session';
 it.each([false, true])('presents rejected steering as a safe quoted diagnostic without changing canonical state (shortened=%s)', shortened => {
   const preview = '<img src=x onerror="alert(1)">\nKeep this as submitted text';
@@ -544,4 +545,37 @@ it('displays the authenticated canonical provider-rejection category without cla
   expect(screen.getByRole('alert').textContent).toBe(reason);
   expect(screen.getByText('Response details').closest('details')?.open).toBe(false);
   expect(JSON.stringify(state)).toBe(retained);
+});
+
+it('keeps a historical cancellation beside its own turn before a later successful answer', () => {
+  const record = (sequence: string, turn: string, event: Envelope['event']): Envelope => ({
+    version: 1, session_id: 's', sequence, turn_id: turn, event_id: `position-${sequence}`, actor: 'alice', event });
+  const message = (id: string, role: 'user' | 'assistant', text: string): Envelope['event'] => ({
+    kind: 'message', message_id: id, payload: { role, blocks: [{ type: 'text', text }] } });
+  const records = [
+    record('1', 'old', { kind: 'execution', payload: { status: 'running' } }),
+    record('2', 'old', message('old-user', 'user', 'Earlier request')),
+    record('3', 'old', message('old-answer', 'assistant', 'Earlier partial response')),
+    record('4', 'old', { kind: 'execution', payload: { status: 'cancelled', error: operatorCancelError } }),
+    record('5', 'new', { kind: 'execution', payload: { status: 'running' } }),
+    record('6', 'new', message('new-user', 'user', 'Later request')),
+    record('7', 'new', message('new-answer', 'assistant', 'Later successful answer')),
+    record('8', 'new', { kind: 'execution', payload: { status: 'completed' } }),
+  ];
+  const state = records.reduce(reduceSession, emptySession('s'));
+  const view = render(<IRTranscript state={state} />);
+  const warning = screen.getByRole('alert');
+  expect(warning.textContent).toBe(operatorCancelError);
+  expect(screen.getByText('Earlier partial response').compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(warning.compareDocumentPosition(screen.getByText('Later request')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(state.errors).toEqual([operatorCancelError]);
+  expect(state.errorOrigins?.[0].turn).toBe('old');
+  expect(state.executions).toEqual({ old: 'cancelled', new: 'completed' });
+  view.rerender(<IRTranscript state={state} messageLimit={2} />);
+  expect(screen.getByText('Earlier turn')).toBeTruthy();
+  expect(screen.getByRole('alert').textContent).toBe(operatorCancelError);
+  view.rerender(<IRTranscript state={{ ...state, errorOrigins: undefined }} />);
+  expect(screen.queryByText('Earlier turn')).toBeNull();
+  expect(screen.getByText('Later successful answer').compareDocumentPosition(screen.getByRole('alert')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(state.errors).toEqual([operatorCancelError]);
 });

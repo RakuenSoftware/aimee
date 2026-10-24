@@ -916,3 +916,17 @@ describe('flat history is an archive, never authority', () => {
     expect(fetchMock.mock.calls.some(([url]) => ['/api/chat/threads', '/api/chat/branch', '/api/chat/switch-thread', '/api/chat/send'].includes(url))).toBe(false);
   });
 });
+
+it('keeps the idle placeholder short and retains the keyboard hint without sending Shift+Enter', async () => {
+  render(<StrictMode><Chat /></StrictMode>);
+  await act(async () => {});
+  const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+  await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
+  const input = screen.getByPlaceholderText(/^Type a message/);
+  expect(input.getAttribute('placeholder')).toBe('Type a message…');
+  expect(input.getAttribute('title')).toBe('Shift+Enter for newline');
+  fireEvent.change(input, { target: { value: 'Unsent draft' } });
+  fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+  expect(input).toHaveProperty('value', 'Unsent draft');
+  expect(fetchMock.mock.calls.some(([url]) => url === '/api/chat/send')).toBe(false);
+});

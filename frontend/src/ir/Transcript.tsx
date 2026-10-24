@@ -166,6 +166,26 @@ export default function IRTranscript({ state, onReply, ancestors = [], controlsR
       BigInt(state.errorOrigins![prior].sequence) < BigInt(origin.sequence));
     if (details.length) { secondary.set(index, details); details.forEach(prior => folded.add(prior)); }
   });
+  const lastMessageByTurn = new Map(messages.map(message => [message.turn, message.id]));
+  const errorsByTurn = new Map<string, number[]>();
+  const unanchoredErrors: number[] = [];
+  state.errors.forEach((_, index) => {
+    if (folded.has(index)) return;
+    const turn = state.errorOrigins?.[index]?.turn;
+    if (turn && lastMessageByTurn.has(turn)) {
+      const indices = errorsByTurn.get(turn) ?? [];
+      indices.push(index);
+      errorsByTurn.set(turn, indices);
+    } else unanchoredErrors.push(index);
+  });
+  const renderDiagnostic = (index: number, earlier = false) => <div key={`error:${index}`}>
+    {earlier && <p className="text-xs text-muted-foreground">Earlier turn</p>}
+    <div role="alert"><ExecutionError error={state.errors[index]} /></div>
+    {secondary.has(index) && <details className="ir-response-details">
+      <summary>Response details</summary>
+      {secondary.get(index)!.map(prior => <p key={prior}><ExecutionError error={state.errors[prior]} /></p>)}
+    </details>}
+  </div>;
   return <>
     {(state.importReports ?? []).map(observation => <section key={observation.id}>
       <ImportReportView observation={observation} />
@@ -208,7 +228,8 @@ export default function IRTranscript({ state, onReply, ancestors = [], controlsR
       <p>The provider declined to complete this response.</p>
       {m.refusal?.category !== null && m.refusal?.category !== undefined && <p style={{ overflowWrap: 'anywhere' }}>Category: <span>{m.refusal.category}</span></p>}
       {m.refusal?.explanation !== null && m.refusal?.explanation !== undefined && <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{m.refusal.explanation}</p>}
-    </details>] : [])])}
+    </details>] : []), ...(lastMessageByTurn.get(m.turn) === m.id
+      ? (errorsByTurn.get(m.turn) ?? []).map(index => renderDiagnostic(index)) : [])])}
     {pendingControls.map(([id, control]) => <ControlCard key={`${state.session}:${id}`} id={id} control={control} onReply={onReply} replyPending={pendingReplies?.has(id)} />)}
     {resolvedControls.length > 0 && <details className="ir-resolved-controls">
       <summary>Resolved requests ({resolvedControls.length})</summary>
@@ -231,12 +252,9 @@ export default function IRTranscript({ state, onReply, ancestors = [], controlsR
         {state.projections.map(report => <p key={report.id}><ProjectionNotice report={report} /></p>)}
       </details>
     </div>}
-    {state.errors.map((error, i) => folded.has(i) ? null : <div key={`error:${i}`}>
-      <div role="alert"><ExecutionError error={error} /></div>
-      {secondary.has(i) && <details className="ir-response-details">
-        <summary>Response details</summary>
-        {secondary.get(i)!.map(index => <p key={index}><ExecutionError error={state.errors[index]} /></p>)}
-      </details>}
-    </div>)}
+    {unanchoredErrors.map(index => {
+      const turn = state.errorOrigins?.[index]?.turn;
+      return renderDiagnostic(index, !!turn && messageTurns.has(turn));
+    })}
   </>;
 }

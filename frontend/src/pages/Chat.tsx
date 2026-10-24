@@ -2588,7 +2588,8 @@ export default function Chat() {
           maxHeight={200}
           placeholder={(working || remoteTurnActive)
             ? 'Steer the running turn…'
-            : 'Type a message… (Shift+Enter for newline)'}
+            : 'Type a message…'}
+          title="Shift+Enter for newline"
           style={{ flex: 1, minHeight: '44px' }}
           onFocus={e => (e.target.style.borderColor = tokens.primary)}
           onBlur={e => (e.target.style.borderColor = tokens.borderMedium)}
