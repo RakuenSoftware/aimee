@@ -1236,8 +1236,9 @@ int main(int argc, char **argv)
       assert(!config_set_provider(inline_selection ? "acp:inline" : "configured-acp"));
       char marker[1024];
       snprintf(marker, sizeof marker, "%s/started-%d", workspace, inline_selection);
-      assert(snprintf(command, sizeof command, "--acp-route-child %d %s %s \"quoted argument\"",
-                      child_mode, workspace, marker) < (int)sizeof command);
+      assert(snprintf(command, sizeof command,
+                      "--acp-route-child %d %s started-%d \"quoted argument\"", child_mode,
+                      workspace, inline_selection) < (int)sizeof command);
       acp_route_policy_reset(workspace, "alice", "session-one");
       acp_route_policy_fault(
           child_mode == 32
