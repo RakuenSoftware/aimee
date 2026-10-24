@@ -1840,10 +1840,10 @@
       ],
       "sha256": "2401f1b5a81547c6a444efd58f21b6156bf52aec5c2595f213799c9b8c3f3e14",
       "evidence": [
-        "server-go/modules/memory/external_store_test.go",
-        "server-go/modules/memory/backendstore/store_test.go"
+        "server-go/modules/memory/personal_versions_test.go",
+        "src/tests/test_module_json_call.c"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go.",
+      "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
       "boundary_review": "PR #3050: exposes only the tools adapter registration entry point for isolated real-owner qualification. Memory declarations and ownership are unchanged. This records boundary analysis, not independent production-promotion approval."
     },
     "src/headers/rel_types.h": {
@@ -1880,10 +1880,10 @@
       ],
       "sha256": "ba7f0a60514c63d5058b6e31fd7583b4ba7d06ad175682562f9a7b1b740c1c5a",
       "evidence": [
-        "server-go/modules/memory/external_store_test.go",
-        "server-go/modules/memory/backendstore/store_test.go"
+        "server-go/modules/memory/personal_versions_test.go",
+        "src/tests/test_module_json_call.c"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go."
+      "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
     },
     "src/kb/kb_module_stage_adapters.h": {
       "disposition": "host-transport",
@@ -1894,10 +1894,10 @@
       ],
       "sha256": "bc6456e7e9efadd539a478745d86fdefc551fa3df3a6500457d831484986ffca",
       "evidence": [
-        "server-go/modules/memory/external_store_test.go",
-        "server-go/modules/memory/backendstore/store_test.go"
+        "server-go/modules/memory/personal_versions_test.go",
+        "src/tests/test_module_json_call.c"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
+      "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
     },
     "src/kb/kb_service.c": {
       "disposition": "protocol-catalog",
@@ -2150,10 +2150,10 @@
       ],
       "sha256": "2e78687c674ee2725269c3f0e47fb22f5fff19b2a1f66c0132ffc4fab2d5a814",
       "evidence": [
-        "server-go/modules/memory/external_store_test.go",
-        "server-go/modules/memory/backendstore/store_test.go"
+        "server-go/modules/memory/personal_versions_test.go",
+        "src/tests/test_module_json_call.c"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Backend routing now reads the frozen startup config; memory ownership remains in Go. Oct 18: removed only the response-composition input copy after sharing its API type; memory adapters are unchanged.",
+      "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active.",
       "boundary_review": "PR #3050: added only the typed tools metadata transport/registration next to the existing tools classifier. Memory adapter symbols, framing, policy and Go ownership are unchanged. This is not independent production-promotion approval.",
       "boundary_change": " Tools-only adapter registration is extracted with its production initialization order preserved. Tool classification consumes the existing full-name metadata wire; legacy wire serving remains intact. Memory stage registrations, scoped request forwarding and eligibility remain unchanged and Go-owned. This is boundary analysis, not independent reviewer approval."
     },
@@ -2468,40 +2468,6 @@
       ],
       "sha256": "d5701cf5caf3b4f058d0d3a3ec06078ebbc5d28bfc314698640e00c17a380986"
     },
-    "src/tests/test_memory_advanced.c": {
-      "disposition": "legacy-fixture",
-      "symbols": [
-        "add_provenance",
-        "memory_directive_counts",
-        "memory_directive_create",
-        "memory_directive_get",
-        "memory_directive_list",
-        "memory_directive_mark_surfaced",
-        "memory_directive_match",
-        "memory_directive_metrics",
-        "memory_directive_resolve",
-        "memory_directive_suppress",
-        "memory_directive_sweep_expired",
-        "memory_insert",
-        "memory_lifecycle_counts",
-        "memory_lifecycle_sweep_expired",
-        "memory_list_conflicts",
-        "memory_maintenance_run",
-        "memory_mark_pending",
-        "memory_prospective_complete",
-        "memory_prospective_create",
-        "memory_prospective_get",
-        "memory_prospective_list",
-        "memory_prospective_mark_triggered",
-        "memory_prospective_match",
-        "memory_prospective_sweep_expired",
-        "memory_query_health",
-        "memory_record_conflict",
-        "memory_resolve_conflict",
-        "memory_transition_lifecycle"
-      ],
-      "sha256": "3b2bc0c6de11985aa452d30112429f830c237b8a3c908ca3617f6e923749044d"
-    },
     "src/tests/test_memory_checkpoint_transport.c": {
       "disposition": "host-fixture",
       "symbols": [
@@ -2602,18 +2568,6 @@
       ],
       "sha256": "ce1ca897443c2155a6e0edfa74c8f6fb558795d90dc3aa85047be5d0d97e329a"
     },
-    "src/tests/test_workspace_memory.c": {
-      "disposition": "legacy-fixture",
-      "symbols": [
-        "memory_assemble_context_ws",
-        "memory_insert",
-        "memory_insert_ex",
-        "memory_link_create",
-        "memory_tag_global",
-        "memory_tag_project"
-      ],
-      "sha256": "59ad08a618e76d2bc5bde969d0b563fb17bb04228779c7782fce4f7a7eff1a48"
-    },
     "src/wiki_render.c": {
       "disposition": "host-context",
       "symbols": [
@@ -2629,10 +2583,10 @@
       ],
       "sha256": "2b2d9f18cd6579ac80ca71fcdee280b8d657f2952d70c65d6bd9cecf4c7a87ff",
       "evidence": [
-        "server-go/modules/memory/external_store_test.go",
-        "server-go/modules/memory/backendstore/store_test.go"
+        "server-go/modules/memory/personal_versions_test.go",
+        "src/tests/test_module_json_call.c"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go. Oct 18: extracted only shared HTTP query/response helpers; owner erasure/reset forwarding functions are byte-identical."
+      "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
     },
     "src/modules/vault/vault_env_bootstrap.c": {
       "disposition": "credential-custody",
@@ -2655,10 +2609,10 @@
       ],
       "sha256": "322ff96444b6de86ec616f5df7291724474441a7559d8695298bf2114f59b9b0",
       "evidence": [
-        "server-go/modules/memory/external_store_test.go",
-        "server-go/modules/memory/backendstore/store_test.go"
+        "server-go/modules/memory/personal_versions_test.go",
+        "src/tests/test_module_json_call.c"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
+      "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
     },
     "src/tests/test_kb_http_routes.c": {
       "disposition": "host-fixture",
@@ -2668,10 +2622,10 @@
       ],
       "sha256": "7a81904c468d0d805eeb70718826128cf21067a6c85bcc9ab40c5bfe445db2be",
       "evidence": [
-        "server-go/modules/memory/external_store_test.go",
-        "server-go/modules/memory/backendstore/store_test.go"
+        "server-go/modules/memory/personal_versions_test.go",
+        "src/tests/test_module_json_call.c"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
+      "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
     },
     "src/tests/test_server_erasure_protocol.c": {
       "disposition": "host-fixture",
@@ -2681,10 +2635,10 @@
       ],
       "sha256": "f3961c603e77311d2a5b50f19e3aa668ee769f5e7d1cda6c07c66186c495ddb4",
       "evidence": [
-        "server-go/modules/memory/external_store_test.go",
-        "server-go/modules/memory/backendstore/store_test.go"
+        "server-go/modules/memory/personal_versions_test.go",
+        "src/tests/test_module_json_call.c"
       ],
-      "reason": " Added authenticated owner erasure forwarding only; canonical external-backend state and retained erasure intents remain in Go."
+      "reason": "Authenticated owner lifecycle forwarding only. The current native storage owner retains canonical erasure authority; retired compatibility catalogs are exported with private offline tooling. Shared host protocol remains active."
     },
     "src/config_client.c": {
       "disposition": "credential-custody",
@@ -2712,7 +2666,8 @@
       "symbols": [
         "AIMEE_MEMORY_BACKEND_TOKEN"
       ],
-      "sha256": "a500002e711b8285158f0e1b8723fe3b1db2c24098ab6885b16b9e6e105243b8"
+      "sha256": "0f505bd95236578fcf00f271f85abf49978400b013331a3afc07f638cab875b5",
+      "boundary_review": "Retired in-process provider setup; current native and alias acceptance, explicit retired/partial/credential-write refusal. Fixture remains host configuration transport; no datastore implementation added. Actual C Werror fixture and Chromium setup tests passed."
     }
   },
   "generated_files": {
@@ -2761,5 +2716,15 @@
       }
     }
   },
-  "namespace_review": "Current KB domain names and paths replace the retired database ordinal; original files and symbols remain immutable, and the checker covers both spellings. Native memory ownership does not change."
+  "namespace_review": "Current KB domain names and paths replace the retired database ordinal; original files and symbols remain immutable, and the checker covers both spellings. Native memory ownership does not change.",
+  "retired_external_fixtures": {
+    "src/tests/test_memory_advanced.c": {
+      "sha256": "3b2bc0c6de11985aa452d30112429f830c237b8a3c908ca3617f6e923749044d",
+      "reason": "Explicitly unbuilt fixture calling retired C APIs; removal and current regression owners documented in docs/validation/memory-c-retirement-2026-10-24.md"
+    },
+    "src/tests/test_workspace_memory.c": {
+      "sha256": "59ad08a618e76d2bc5bde969d0b563fb17bb04228779c7782fce4f7a7eff1a48",
+      "reason": "Explicitly unbuilt fixture calling retired C APIs; removal and current regression owners documented in docs/validation/memory-c-retirement-2026-10-24.md"
+    }
+  }
 }

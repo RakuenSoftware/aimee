@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -217,7 +216,7 @@ func (p policy) decide(invocation bus.ModuleInvocation, request Request) Decisio
 		if address.IP == nil {
 			continue
 		}
-		if request.Purpose != "embedding" && request.Purpose != "embedding-health" && request.Purpose != "provider" && request.Purpose != "memory-backend" &&
+		if request.Purpose != "embedding" && request.Purpose != "embedding-health" && request.Purpose != "provider" &&
 			!(request.Purpose == "mcp_sse" && p.allowPrivateMCP) &&
 			!publicIP(address.IP) {
 			return deny("target resolved to a non-public address")
@@ -239,9 +238,8 @@ func callerPurposeAllowed(ref uint32, request Request, target *url.URL) bool {
 	case ProvidersClientRef:
 		return request.Purpose == "provider" && (request.Method == "GET" || request.Method == "POST")
 	case MemoryClientRef:
-		return (request.Purpose == "memory-backend" && memoryBackendOriginAllowed(target) && memoryBackendTargetAllowed(request.Method, target.EscapedPath())) ||
-			(request.Purpose == "embedding" && request.Method == "POST" &&
-				(strings.HasSuffix(target.EscapedPath(), "/embed") || strings.HasSuffix(target.EscapedPath(), "/embed_batch"))) ||
+		return (request.Purpose == "embedding" && request.Method == "POST" &&
+			(strings.HasSuffix(target.EscapedPath(), "/embed") || strings.HasSuffix(target.EscapedPath(), "/embed_batch"))) ||
 			(request.Purpose == "embedding-health" && request.Method == "GET" &&
 				strings.HasSuffix(target.EscapedPath(), "/health"))
 	case GitClientRef:
@@ -359,47 +357,4 @@ func publicIP(ip net.IP) bool {
 	}
 	return !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsUnspecified() &&
 		!ip.IsLinkLocalMulticast() && !ip.IsLinkLocalUnicast() && !ip.IsMulticast()
-}
-
-// Memory adapters reuse governed egress with provider-specific route admission.
-func memoryBackendTargetAllowed(method, path string) bool {
-	if strings.TrimSpace(os.Getenv("AIMEE_MEMORY_BACKEND")) == "hillock" {
-		return (method == "POST" && path == "/v1/rank") || (method == "GET" && path == "/v1/health")
-	}
-	switch path {
-	case "/api/v1/add", "/api/v1/cognify", "/api/v1/aimee/index-chunks", "/api/v1/search":
-		return method == "POST"
-	case "/api/v1/datasets":
-		return method == "GET"
-	}
-	if method != "DELETE" || !strings.HasPrefix(path, "/api/v1/datasets/") {
-		return false
-	}
-	id := strings.TrimPrefix(path, "/api/v1/datasets/")
-	if len(id) != 36 {
-		return false
-	}
-	for i, c := range id {
-		if i == 8 || i == 13 || i == 18 || i == 23 {
-			if c != '-' {
-				return false
-			}
-		} else if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-			return false
-		}
-	}
-	return true
-}
-
-func memoryBackendOriginAllowed(target *url.URL) bool {
-	endpoint := os.Getenv("AIMEE_MEMORY_BACKEND_URL")
-	if endpoint == "" {
-		if strings.TrimSpace(os.Getenv("AIMEE_MEMORY_BACKEND")) == "hillock" {
-			endpoint = os.Getenv("AIMEE_HILLOCK_URL")
-		} else {
-			endpoint = os.Getenv("AIMEE_COGNEE_URL")
-		}
-	}
-	allowed, err := url.Parse(endpoint)
-	return err == nil && allowed.Host != "" && allowed.User == nil && (allowed.Path == "" || allowed.Path == "/") && allowed.RawQuery == "" && allowed.Fragment == "" && target.RawQuery == "" && target.Fragment == "" && target.Scheme == allowed.Scheme && strings.EqualFold(target.Host, allowed.Host)
 }

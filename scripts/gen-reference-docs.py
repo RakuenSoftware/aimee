@@ -1087,13 +1087,10 @@ ENV_DESC = {
 
 # Deployment wiring and provider settings consumed only by Go owners.
 ENV_DESC.update({
-    "AIMEE_MEMORY_BACKEND_DIR": ("Memory", "Optional durable compatibility catalog root for Cognee/Hillock. Defaults to `$AIMEE_HOME/memory-backends`; each engine and placement has a separate private catalog."),
-    "AIMEE_MEMORY_BACKEND": ("Memory", "Select the generic memory engine: `native` (default), `aimee-native`, `cognee`, or `hillock`. Unknown selections fail startup. See the memory module contract."),
-    "AIMEE_HILLOCK_URL": ("Memory", "Hillock HDC sidecar base URL; fallback when `AIMEE_MEMORY_BACKEND_URL` is unset and Hillock is selected."),
-    "AIMEE_COGNEE_URL": ("Memory", "Cognee API base URL; fallback when `AIMEE_MEMORY_BACKEND_URL` is unset."),
-    "AIMEE_MEMORY_BACKEND_URL": ("Memory", "Selected alternative memory API base URL. Requests use the existing egress owner."),
-    "AIMEE_MEMORY_BACKEND_AUTH": ("Memory", "Alternative memory authentication mode: `bearer` by default, `api-key` for Cognee service keys, or explicit `none` for an isolated development endpoint."),
-    "AIMEE_MEMORY_BACKEND_TOKEN": ("Memory", "First-boot credential transport for the alternative memory service; sealed into Vault and removed from the environment before runtime."),
+    "AIMEE_MEMORY_BACKEND": ("Memory", "Current in-process owner accepts `native` (default) or `aimee-native`. Retired/unknown engines fail startup. Independent memory modules use process composition."),
+    "AIMEE_MEMORY_BACKEND_URL": ("Memory", "Retained legacy setting; the current native owner ignores this endpoint. Retired provider selections fail startup."),
+    "AIMEE_MEMORY_BACKEND_AUTH": ("Memory", "Retained legacy startup setting; native accepts `bearer` or `none` and performs no provider authentication."),
+    "AIMEE_MEMORY_BACKEND_TOKEN": ("Memory", "Legacy bootstrap secret name. Existing Vault entries are retained for operator-controlled migration; the retired memory-backend egress route cannot resolve them."),
     "AIMEE_EGRESS_CREDENTIAL_HELPER": ("TLS & networking", "Privileged credential helper executable used by the egress owner. Startup validates its path and custody; credentials remain in Vault."),
     "AIMEE_POSTGRES_STORAGE": ("Database & vectors", "PostgreSQL storage mode: `plain` by default or opt-in `luks`. See Storage tiers for custody and recovery requirements."),
     "AIMEE_POSTGRES_STORAGE_SOCKET": ("Database & vectors", "Local control socket for the PostgreSQL storage service."),

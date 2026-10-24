@@ -1112,24 +1112,11 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 	// This is an internal lifecycle contract for the trusted connection host,
 	// not a model/user command. Existing owner routes admit subject erasure.
 	if request.Operation == "erase-backend" {
-		external, ok := options.data.(*externalDataStore)
 		if invocation.PrincipalRef != 0 || request.BackendSubject == "" {
 			return nil, bus.ModuleStatusCapabilityAbsent
 		}
-		if !ok {
-			return []byte(`{"records":[],"deleted":true}`), bus.ModuleStatusOK
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(dataTimeout))
-		defer cancel()
-		if invocation.Cancelled() {
-			return nil, bus.ModuleStatusCancelled
-		}
-		if _, err := external.catalog.EraseSubjectRequest(ctx, request.BackendSubject, request.BackendSessions, request.BackendErasureID); err != nil {
-			return nil, bus.ModuleStatusInternal
-		}
-		if err := resetDerivedBackend(ctx, external); err != nil {
-			return nil, bus.ModuleStatusInternal
-		}
+		// Canonical native erasure remains owned by its storage owner. There is no
+		// longer an independently served legacy catalog to erase here.
 		return []byte(`{"records":[],"deleted":true}`), bus.ModuleStatusOK
 	}
 	if request.Operation == "reset-derived" {
@@ -1176,8 +1163,7 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 	if request.IngressPreview && (!request.PublicView || (request.Operation != "diagnose" && request.Operation != "explain")) {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	_, externalVersionStore := options.data.(*externalDataStore)
-	if request.AtVersion != nil && ((!externalVersionStore && options.placement != PlacementServer) || request.Operation != "get" || !request.AtVersion.ValidFor(request.ID) || request.ReadPolicy != nil || request.AsOf != "") {
+	if request.AtVersion != nil && (options.placement != PlacementServer || request.Operation != "get" || !request.AtVersion.ValidFor(request.ID) || request.ReadPolicy != nil || request.AsOf != "") {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
 	versionedMutation := (options.placement == PlacementKB && (versionedCorrectionOperation(request.Operation) || request.Operation == "delete-as" || request.Operation == "reject" || request.Operation == "restore")) || (options.placement == PlacementServer && (request.Operation == "supersede" || request.Operation == "delete"))
@@ -1426,41 +1412,6 @@ func handleDataAttempt(options handlerOptions, invocation bus.ModuleInvocation, 
 		return encoded, bus.ModuleStatusOK
 	}
 
-	if external, ok := options.data.(*externalDataStore); ok {
-		if request.AsOf != "" {
-			return nil, bus.ModuleStatusCapabilityAbsent
-		}
-		if (request.Operation == "personal-source-revalidate" || request.Operation == "source-revalidate" || request.Operation == "compose-recall") && invocation.PrincipalRef != 0 {
-			return nil, bus.ModuleStatusCapabilityAbsent
-		}
-		response, resultStatus := external.execute(ctx, request, scope, options, explicitScope)
-		publishMutationAudit(external.auditAction, request, response, resultStatus)
-		if request.PublicView && resultStatus == bus.ModuleStatusOK {
-			response.PublicRecords = []publicMemoryRecord{}
-			for _, r := range response.Records {
-				category := ""
-				if r.Authorship != nil {
-					category = r.Authorship.Category
-				}
-				var metadata struct {
-					UseCases      string `json:"use_cases"`
-					SourceSession string `json:"source_session"`
-				}
-				// Metadata is opaque optional JSON. Other imported shapes retain
-				// their payload without claiming this compatibility view.
-				_ = json.Unmarshal(r.Metadata, &metadata)
-				response.PublicRecords = append(response.PublicRecords, publicMemoryRecord{ID: r.ID, Tier: r.Tier, Kind: r.Kind, Key: r.Key, Content: r.Content, Confidence: r.Confidence, Version: r.Version, ProvenanceCategory: category, UseCases: metadata.UseCases, SourceSession: metadata.SourceSession, Metadata: r.Metadata})
-			}
-		}
-		if readResult != nil {
-			response.Read = readResult
-		}
-		raw, encodeErr := json.Marshal(response)
-		if encodeErr != nil || len(raw) > maxDataBody {
-			return nil, bus.ModuleStatusInternal
-		}
-		return raw, resultStatus
-	}
 	ctx = withRetrievalCapabilities(ctx, options.placement, request)
 	response := DataResponse{Read: readResult}
 	rollbackOnly := false

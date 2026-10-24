@@ -1,0 +1,19 @@
+{
+  "probe_build": "passed; CGO_ENABLED=0 Go1.26.10; production SDK+MCP SSE imports",
+  "offline_provider_tests": {
+    "passed": 3,
+    "failed": 0
+  },
+  "installed_docker_gate": "not run: Docker executable unavailable",
+  "checks": [
+    "Python compilation passed",
+    "gofmt applied",
+    "diff whitespace check passed"
+  ],
+  "files": {
+    "tests/e2e/egress-vault-e2e.py": "d2f7717dfedb82bd741fa46376e5df4057b0bc1eb21693c7265400ecb469ded6",
+    "tests/e2e/fixtures/egress-vault-probe/README.md": "1c5675cce3c528f131d16715b5b4a713d22022bf7e991048a49e0621b4e5fabc",
+    "tests/e2e/fixtures/egress-vault-probe/main.go": "617f278f5a464b6696e8f17ca8ad0734717b645a027374599d1614119af275eb",
+    "tests/e2e/fixtures/egress-vault-probe/test_provider.py": "4ff8a8a6dd0b4d0d25a53930f95d6ad26bb6200a25503df25b3c69b6df99d894"
+  }
+}

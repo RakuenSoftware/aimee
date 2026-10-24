@@ -64,16 +64,12 @@ UNBUILT_SOURCES = {
     "test_kb_mgmt_token_authority_daemon_stop.c",
     "test_learning_metrics.c",
     "test_learning_regret.c",
-    "test_memory_advanced.c",
-    "test_memory_embed_http_auth.c",
-    "test_memory_recall_pivot.c",
     "test_memory_retrieval_eval.c",
     "test_panel_ir_contract.c",
     "test_plugin_grant_provisioning.c",
     "test_pgvec_neardup.c",
     "test_self_update.c",
     "test_session_briefing.c",
-    "test_workspace_memory.c",
 }
 
 # Targets the ordinary suite cannot run, and the reason. A -pg target needs a

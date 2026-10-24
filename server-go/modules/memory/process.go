@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -117,22 +116,6 @@ func NewProcessHandler(ctx context.Context, socket, placementName string) (bus.M
 		closeConnection()
 		return nil, fmt.Errorf("memory: backend configuration: %w", err)
 	}
-	backendName := strings.TrimSpace(os.Getenv("AIMEE_MEMORY_BACKEND"))
-	if backendName != "" && backendName != "native" && backendName != "aimee-native" {
-		executor := processEgress(ctx, socket)
-		data, err := configuredExternalStore(executor, placement)
-		if err != nil {
-			closeConnection()
-			return nil, err
-		}
-		if err = resetDerivedBackend(ctx, data); err != nil {
-			closeConnection()
-			return nil, err
-		}
-		data.auditAction = resources.MemoryAuditAction
-		log.Printf("memory module: placement=%s storage=backend-owned backend=%s", placement, backendName)
-		return NewHandler(executor, WithDataStore(placement, data), func(options *handlerOptions) { options.dataContext = ctx }), nil
-	}
 	data, err := NewPostgresDataStore(resources, placement)
 	if err != nil {
 		closeConnection()
@@ -172,7 +155,7 @@ func NewProcessHandler(ctx context.Context, socket, placementName string) (bus.M
 	}
 	StartPersonalIndex(ctx, data, executor, os.Getenv("EMBEDDER_URL"))
 	StartSharedIndex(ctx, data, executor)
-	backendName = "aimee-native"
+	backendName := "aimee-native"
 	if factory != nil {
 		backendName = os.Getenv("AIMEE_MEMORY_BACKEND")
 	}

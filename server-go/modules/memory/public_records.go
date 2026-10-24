@@ -167,17 +167,6 @@ func handleRecordCommand(options handlerOptions, invocation bus.ModuleInvocation
 			}
 		}
 	case "get":
-		if _, external := options.data.(*externalDataStore); external {
-			var ok bool
-			id, idOK := args.decimalID("id")
-			if !idOK {
-				return invalid("memory.get requires a positive integer id")
-			}
-			request.AtVersion, ok = commandRecordVersion(args, "at_version", id)
-			if !ok {
-				return invalid("at_version requires an exact record version")
-			}
-		}
 		if raw, exists := args["include_version"]; exists {
 			if string(raw) == "null" || json.Unmarshal(raw, &request.IncludeVersion) != nil {
 				return invalid("include_version must be boolean")

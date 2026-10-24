@@ -117,8 +117,7 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 	if _, exists := args["include_version"]; exists && verb != "get" && !(verb == "runtime" && options.placement == PlacementServer) {
 		return commandResult(commandError("unsupported_mode", "include_version is supported only for exact-ID get"))
 	}
-	_, externalVersionStore := options.data.(*externalDataStore)
-	if _, exists := args["at_version"]; exists && ((!externalVersionStore && options.placement != PlacementServer) || (verb != "get" && verb != "runtime")) {
+	if _, exists := args["at_version"]; exists && (options.placement != PlacementServer || (verb != "get" && verb != "runtime")) {
 		return commandResult(commandError("unsupported_mode", "at_version requires an exact-ID versioned get"))
 	}
 	if invocation.Cancelled() {
@@ -148,13 +147,6 @@ func handleCommand(options handlerOptions, invocation bus.ModuleInvocation, fram
 			response["serving_id"] = ""
 		}
 		return commandResult(response)
-	}
-	if _, external := options.data.(*externalDataStore); external {
-		for _, route := range backendCommandRoutes {
-			if route.verb == verb {
-				return route.handler(options, invocation, verb, args)
-			}
-		}
 	}
 	for _, route := range sharedCommandRoutes {
 		if route.verb == verb {

@@ -101,6 +101,21 @@ class MemoryCBoundaryTest(unittest.TestCase):
         with self.assertRaises(BoundaryError):
             validate(root)
 
+    def test_rejects_retired_unimplemented_memory_headers(self) -> None:
+        for relative in (
+            "src/memory_context_internal.h",
+            "src/modules/kb/c/memory_health.h",
+            "src/modules/kb/c/memory_promotion.h",
+            "src/modules/kb/c/memory_lifecycle.h",
+        ):
+            with self.subTest(relative=relative):
+                root = self.fixture()
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("/* retired API */\n", encoding="utf-8")
+                with self.assertRaisesRegex(BoundaryError, "retired-platform-memory-policy"):
+                    validate(root)
+
     def test_rejects_retired_gate_or_extraction_file(self) -> None:
         for name in ("memory_fact_gate.c", "memory_extract_patterns.c",
                      "memory_extract_patterns.h", "memory_assemble_util.h",

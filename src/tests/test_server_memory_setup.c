@@ -1,4 +1,4 @@
-/* First-start writes exercise the shipping config RPC, including admin and Vault boundaries. */
+/* First-start writes reject retired engines and partial/credential config changes. */
 #include "aimee.h"
 #include "cJSON.h"
 #include "config.h"
@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static int administrator, writes, seals, refuse_seal;
+static int administrator, writes, seals;
 static cJSON *response, *saved;
 int route_roundtable_mutation_authorized(const char *principal)
 {
@@ -86,7 +86,8 @@ int config_secret_store(const char *name, const char *value)
    assert(!strcmp(name, "AIMEE_MEMORY_BACKEND_TOKEN"));
    assert(!strcmp(value, "fixture-secret"));
    seals++;
-   return refuse_seal ? -1 : 0;
+   assert(0);
+   return -1;
 }
 
 static int set(const char *key, const char *value)
@@ -95,8 +96,6 @@ static int set(const char *key, const char *value)
    cJSON_AddStringToObject(request, "key", key);
    cJSON_AddItemToObject(request, "value", cJSON_Parse(value));
    int result = handle_config_set(NULL, NULL, request);
-   if (!strcmp(key, "memory_backend_token") && administrator)
-      assert(cJSON_GetObjectItemCaseSensitive(request, "value")->valuestring[0] == 0);
    cJSON_Delete(request);
    return result;
 }
@@ -108,8 +107,8 @@ int main(void)
    assert(set("memory_backend_token", "\"fixture-secret\"") == -1 && seals == 0);
    administrator = 1;
    const char *valid[] = {
-       hillock, "{\"engine\":\"native\",\"endpoint\":\"\",\"auth\":\"bearer\"}",
-       "{\"engine\":\"cognee\",\"endpoint\":\"https://cognee.example/\",\"auth\":\"api-key\"}"};
+       "{\"engine\":\"native\",\"endpoint\":\"\",\"auth\":\"bearer\"}",
+       "{\"engine\":\"aimee-native\",\"endpoint\":\"\",\"auth\":\"none\"}"};
    for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); i++)
    {
       assert(set("memory.backend", valid[i]) == 0);
@@ -117,6 +116,10 @@ int main(void)
       assert(!strcmp(cJSON_GetObjectItemCaseSensitive(response, "reload")->valuestring, "restart"));
    }
    const char *invalid[] = {
+       hillock,
+       "{\"engine\":\"cognee\",\"endpoint\":\"https://cognee.example\",\"auth\":\"api-key\"}",
+       "{\"engine\":\"native\",\"endpoint\":\"https://host\",\"auth\":\"bearer\"}",
+       "{\"engine\":\"native\",\"endpoint\":\"\",\"auth\":\"api-key\"}",
        "{\"engine\":\"hillock\",\"endpoint\":\"http://host:invalid\",\"auth\":\"bearer\"}",
        "{\"engine\":\"hillock\",\"endpoint\":\"http://host:65536\",\"auth\":\"bearer\"}",
        "{\"engine\":\"unknown\",\"endpoint\":\"\",\"auth\":\"bearer\"}",
@@ -127,16 +130,12 @@ int main(void)
        "{\"engine\":\"native\",\"endpoint\":\"\",\"auth\":\"bearer\",\"token\":\"secret\"}",
        "{\"engine\":false,\"endpoint\":\"\",\"auth\":\"bearer\"}"};
    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
-      assert(set("memory.backend", invalid[i]) == -1 && writes == 3);
-   assert(set("memory.backend.engine", "\"hillock\"") == -1 && writes == 3);
+      assert(set("memory.backend", invalid[i]) == -1 && writes == 2);
+   assert(set("memory.backend.engine", "\"hillock\"") == -1 && writes == 2);
    assert(set("memory.backend_token", "\"fixture-secret\"") == -1 && seals == 0);
    assert(set("memory_backend.token", "\"fixture-secret\"") == -1 && seals == 0);
-   assert(set("memory_backend_endpoint", "\"http://host\"") == -1 && writes == 3);
-   assert(set("memory_backend_token", "\"fixture-secret\"") == 0 && seals == 1);
-   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "value")));
-   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(response, "secret")));
-   refuse_seal = 1;
-   assert(set("memory_backend_token", "\"fixture-secret\"") == -1 && writes == 3);
+   assert(set("memory_backend_endpoint", "\"http://host\"") == -1 && writes == 2);
+   assert(set("memory_backend_token", "\"fixture-secret\"") == -1 && seals == 0);
    cJSON_Delete(response);
    cJSON_Delete(saved);
    puts("server_memory_setup: OK");

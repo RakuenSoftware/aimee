@@ -5,7 +5,6 @@ import (
 	"errors"
 	"github.com/JBailes/aimee/server-go/bus"
 	contract "github.com/JBailes/aimee/server-go/memory"
-	"github.com/JBailes/aimee/server-go/modules/module-runtime/identity"
 	"testing"
 	"time"
 )
@@ -120,59 +119,16 @@ func TestMemoryStoreContractCanonicalScopes(t *testing.T) {
 }
 
 func TestMemoryBackendConfiguration(t *testing.T) {
-	t.Setenv("AIMEE_MEMORY_BACKEND", "native")
-	if factory, err := configuredMemoryBackend(nil); err != nil || factory != nil {
-		t.Fatal("native default changed", err)
+	for _, name := range []string{"", "native", "aimee-native"} {
+		t.Setenv("AIMEE_MEMORY_BACKEND", name)
+		if factory, err := configuredMemoryBackend(nil); err != nil || factory != nil {
+			t.Fatalf("native selection %q: %v", name, err)
+		}
 	}
-	t.Setenv("AIMEE_MEMORY_BACKEND", "unregistered")
-	if _, err := configuredMemoryBackend(nil); err == nil {
-		t.Fatal("unknown provider silently accepted")
-	}
-	home := t.TempDir()
-	if _, err := identity.Ensure(home, "server"); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AIMEE_HOME", home)
-	t.Setenv("AIMEE_MEMORY_BACKEND", "cognee")
-	t.Setenv("AIMEE_MEMORY_BACKEND_URL", "https://cognee.example")
-	t.Setenv("AIMEE_MEMORY_BACKEND_AUTH", "bearer")
-	factory, err := configuredMemoryBackend(nil)
-	if err != nil || factory == nil {
-		t.Fatal(err)
-	}
-	provider, err := factory(NativeStore{Data: &recordingDataStore{}})
-	if err != nil || provider.Capabilities().Name != "cognee" {
-		t.Fatal(provider, err)
-	}
-	// Exact reads still use the injected generic source; no network or native
-	// SQL is required by the Cognee implementation for a canonical read.
-	scope := Scope{Type: ScopeProject, Value: "contract"}
-	record, err := provider.Get(context.Background(), scope, 42)
-	if err != nil || record.ID != 42 || record.Scope != scope {
-		t.Fatal(record, err)
-	}
-	t.Setenv("AIMEE_MEMORY_BACKEND", "hillock")
-	factory, err = configuredMemoryBackend(nil)
-	if err != nil || factory == nil {
-		t.Fatal(err)
-	}
-	provider, err = factory(NativeStore{Data: &recordingDataStore{}})
-	if err != nil || provider.Capabilities().Name != "hillock" {
-		t.Fatal(provider, err)
-	}
-	record, err = provider.Get(context.Background(), scope, 42)
-	if err != nil || record.ID != 42 {
-		t.Fatal(record, err)
-	}
-	t.Setenv("AIMEE_MEMORY_BACKEND", "cognee")
-
-	t.Setenv("AIMEE_MEMORY_BACKEND_URL", "https://cognee.example/admin")
-	if _, err := configuredMemoryBackend(nil); err == nil {
-		t.Fatal("invalid origin accepted")
-	}
-	t.Setenv("AIMEE_MEMORY_BACKEND_URL", "https://cognee.example")
-	t.Setenv("AIMEE_MEMORY_BACKEND_AUTH", "unknown")
-	if _, err := configuredMemoryBackend(nil); err == nil {
-		t.Fatal("unknown auth accepted")
+	for _, name := range []string{"cognee", "hillock", "unregistered", "aims-db"} {
+		t.Setenv("AIMEE_MEMORY_BACKEND", name)
+		if _, err := configuredMemoryBackend(nil); err == nil {
+			t.Fatalf("%q silently accepted without its independent module", name)
+		}
 	}
 }

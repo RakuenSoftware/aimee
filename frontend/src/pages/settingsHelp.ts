@@ -136,10 +136,10 @@ export const SECTION_HELP: Record<string, string> = {
 // One line per config key. Plain language, states the default.
 export const FIELD_HELP: Record<string, string> = {
   'memory.backend': 'Personal memory backend and service configuration. Takes effect after restart.',
-  memory_backend_engine: 'Aimee native memory, Cognee or Hillock. Requires restart.',
-  memory_backend_endpoint: 'HTTP(S) origin of the selected external memory service.',
-  memory_backend_auth: 'Bearer, Cognee API key, or explicit isolated development authentication.',
-  memory_backend_token: 'Service credential kept only in the Vault.',
+  memory_backend_engine: 'Supported memory backend: native. Retired external selections require data migration before switching. Requires restart.',
+  memory_backend_endpoint: 'Retained origin of a retired external memory backend; migrate its data before switching.',
+  memory_backend_auth: 'Retained authentication mode for a retired external memory backend.',
+  memory_backend_token: 'Retained retired-backend credential kept only in the Vault.',
   // Workflow trigger admission (live)
   "trigger.max_concurrent":
     "Maximum active runs admitted across all configured triggers. When the cap is reached, new proposals stay pending and are reconsidered on a later scheduler pass. Default 2. 0 or less means uncapped.",

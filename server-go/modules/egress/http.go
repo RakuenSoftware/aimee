@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -190,25 +189,6 @@ func (p policy) handleHTTP(invocation bus.ModuleInvocation, body []byte) ([]byte
 				return encoded, bus.ModuleStatusOK
 			}
 		}
-	} else if request.Purpose == "memory-backend" {
-		if invocation.PrincipalRef != MemoryClientRef || request.Credential != nil || request.CredentialScope != "" || request.CredentialResource != "" {
-			return nil, bus.ModuleStatusInvalidRequest
-		}
-		if request.CredentialPresent {
-			if request.CredentialHandle != "memory-backend" || p.backendCredentials == nil {
-				return nil, bus.ModuleStatusInvalidRequest
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), invocation.Remaining(5*time.Second))
-			var err error
-			bearer, err = p.backendCredentials.Resolve(ctx, MemoryClientRef, "memory-backend")
-			cancel()
-			if err != nil {
-				encoded, _ := encodeHTTPResponse(HTTPResponse{Error: "memory backend credential unavailable"})
-				return encoded, bus.ModuleStatusOK
-			}
-		} else if request.CredentialHandle != "" {
-			return nil, bus.ModuleStatusInvalidRequest
-		}
 	} else if request.CredentialPresent || request.Credential != nil || request.CredentialHandle != "" ||
 		request.CredentialScope != "" || request.CredentialResource != "" {
 		return nil, bus.ModuleStatusInvalidRequest
@@ -274,7 +254,7 @@ func (p policy) executeHTTP(invocation bus.ModuleInvocation, request HTTPRequest
 		httpRequest.Header.Set(name, value)
 	}
 	if len(bearer) > 0 {
-		if (request.Purpose == "provider" && request.CredentialScope == "x-api-key") || (request.Purpose == "memory-backend" && os.Getenv("AIMEE_MEMORY_BACKEND_AUTH") == "api-key") {
+		if request.Purpose == "provider" && request.CredentialScope == "x-api-key" {
 			httpRequest.Header.Set("x-api-key", string(bearer))
 		} else {
 			httpRequest.Header.Set("Authorization", "Bearer "+string(bearer))

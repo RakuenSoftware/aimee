@@ -1,0 +1,90 @@
+{
+  "aimee-memory-extraction-frontend-typecheck-20261024.log.gz": {
+    "bytes": 20,
+    "sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+    "uncompressed": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "aims-extraction-go-r3-20261024.log.gz": {
+    "bytes": 126,
+    "sha256": "c2f79c3ae5ca8cc62ec9b12f3a40de440ec8e3e78c82c032581f5e31a13f4414",
+    "uncompressed": {
+      "bytes": 244,
+      "sha256": "9dfd5accec3ca2afaa579ccdeadd54dce47e884b3fdf72c4ac76843504507a53"
+    }
+  },
+  "aims-extraction-memory-ownership-tests-20261024.log.gz": {
+    "bytes": 266,
+    "sha256": "d69fa8882c9c908cbe06c8242f0e20cc817dc17766b52154477fac94a4f9d788",
+    "uncompressed": {
+      "bytes": 858,
+      "sha256": "68bbf02f507a73c222684a7b6f2b1356a96526e3cd14f0915898c8d3909634c6"
+    }
+  },
+  "aimee-memory-extraction-frontend-20261024.log.gz": {
+    "bytes": 203,
+    "sha256": "7d50c67071c7d0aa0e52689f4036d6bf6ea286cb88b45bf1b0d4bb81369ea220",
+    "uncompressed": {
+      "bytes": 247,
+      "sha256": "cda9a1e1e5b8cb72986a150ef7132ad3a06e2164365425312a6153d2ed375b34"
+    }
+  },
+  "aims-extraction-runtime-bundle-check-20261024.log.gz": {
+    "bytes": 68,
+    "sha256": "b2bc66e2d1c9bba25ba23826dcc8bd7b0efd13cd67c99a3bc574ee360339ee62",
+    "uncompressed": {
+      "bytes": 48,
+      "sha256": "81297050c27d65064977cc795e3ad127a23ba35b85d59a378ad3ec113ad46183"
+    }
+  },
+  "aims-extraction-go-boundary-delta-20261024.json": {
+    "bytes": 1234,
+    "sha256": "378bd3e77da8668148fa502a3154d94bf3feefabddaab2633a45b6af1a314e1c"
+  },
+  "aims-extraction-module-docs-20261024.log.gz": {
+    "bytes": 264,
+    "sha256": "094e0bea410fcbfab6a333f89c355acd3defe55f4abda56bb8ade7579e291807",
+    "uncompressed": {
+      "bytes": 505,
+      "sha256": "7df130d31301d8eb0d75c4119e1fc8e506d4d2565d5602db7bfe318029ba887b"
+    }
+  },
+  "aims-egress-vault-mcp-qualification-20261024.json": {
+    "bytes": 828,
+    "sha256": "31330f2d0dc05175c19ef85734b3b475ad5aa6f5db8dd3ebdcf103de31f1f3f0"
+  },
+  "aims-extraction-source-lock-tests-20261024.log.gz": {
+    "bytes": 302,
+    "sha256": "f6a53ea2ff35af0f00bb5b9b75e350eca10f9243f24d7eb4465958b997a0a9b9",
+    "uncompressed": {
+      "bytes": 1002,
+      "sha256": "45faac921780304872f28280807bc105ce636e489dfb4273f35851cde3899c4b"
+    }
+  },
+  "aimee-memory-extraction-frontend-build-20261024.log.gz": {
+    "bytes": 237,
+    "sha256": "4b440959d4154d4944f59ad18ab317a43a63d25f3716f66156db07bc06ccb194",
+    "uncompressed": {
+      "bytes": 327,
+      "sha256": "8bbaed7e5ce251188908040461a55420408f638bb6dd44e8f2138539487181f2"
+    }
+  },
+  "aims-extraction-core-contract-tests-20261024.log.gz": {
+    "bytes": 55,
+    "sha256": "ae05ba1e6448e06c1be55176fb149e4d4bdb35288aa8f11188ebc6bf951c3117",
+    "uncompressed": {
+      "bytes": 126,
+      "sha256": "a3c0aecaeefe27489a98fe4187bf9cb1b8d19b62f3c3a3051a62f1b24676d2ae"
+    }
+  },
+  "aimee-memory-extraction-setup-browser-20261024.log.gz": {
+    "bytes": 298,
+    "sha256": "3debf7bbc700f290d31e90eb1fe12e06c4bb7041af91856b4ebe81cdb9d0eb21",
+    "uncompressed": {
+      "bytes": 1263,
+      "sha256": "7487c094604648dd6ab94daab13ca090adb1fb38de15e90ba6ac103d8f99ca20"
+    }
+  }
+}

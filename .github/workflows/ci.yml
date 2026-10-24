@@ -379,55 +379,20 @@ jobs:
         with:
           go-version-file: server-go/go.mod
           cache-dependency-path: server-go/go.sum
-      - name: Contract, native bridge, external adapters and egress race tests
+      - name: Memory wire contract and host egress race tests
         working-directory: server-go
-        # ./modules/memory is not listed: postgres-knowledge-replay runs that whole
-        # package with -race AND a real database, which this lane does not have,
-        # so running it here again only repeated the database-free subset.
-        run: go test -race ./memory ./modules/memory/backendstore ./modules/memory/cognee ./modules/memory/hillock ./modules/egress
+        # Full owner+real-PG qualification remains in postgres-knowledge-replay.
+        run: go test -race ./memory ./modules/egress
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.13"
-      - name: Portable transfer build and syntax
-        run: |
-          (cd server-go && go build -o "$RUNNER_TEMP/aimee-memory-transfer" ./modules/memory/cmd/aimee-memory-transfer)
-          (cd server-go && go run ../scripts/validation/memory/qualify-external.go -sizes 100,1000 -output "$RUNNER_TEMP/catalog-scale.json")
-          python3 -m py_compile scripts/validation/memory/*.py scripts/validation/memory/lxc/*.py integrations/cognee/service.py integrations/discord/*.py
+      - name: Memory maintenance and Discord syntax
+        run: python3 -m py_compile scripts/validation/memory/*.py integrations/discord/*.py
       - name: Backend-neutral Discord episode, source and delivery tests
         run: |
           python3 -m venv "$RUNNER_TEMP/discord-venv"
           "$RUNNER_TEMP/discord-venv/bin/pip" install -r integrations/discord/requirements.txt
           (cd integrations/discord && "$RUNNER_TEMP/discord-venv/bin/python" -m unittest discover)
-      - name: Install pinned real Cognee API
-        run: |
-          python3 -m venv "$RUNNER_TEMP/cognee-venv"
-          "$RUNNER_TEMP/cognee-venv/bin/pip" install 'cognee[api]==1.6.2'
-      - name: Real Cognee storage, retrieval and erasure contract (required, no skip)
-        run: |
-          python3 scripts/validation/memory/run-cognee-contract.py \
-            --python "$RUNNER_TEMP/cognee-venv/bin/python" \
-            --artifacts "$RUNNER_TEMP/cognee-contract"
-      - name: Real pinned Hillock HDC contract (required, no skip)
-        run: |
-          python3 -m venv "$RUNNER_TEMP/hillock-venv"
-          "$RUNNER_TEMP/hillock-venv/bin/pip" install -r integrations/hillock/requirements.txt
-          "$RUNNER_TEMP/hillock-venv/bin/python" scripts/validation/memory/run-hillock-contract.py \
-            --artifacts "$RUNNER_TEMP/hillock-contract"
-      - name: Retain external memory diagnostics
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: external-memory-contract
-          path: |
-            ${{ runner.temp }}/cognee-contract/contract.log
-            ${{ runner.temp }}/cognee-contract/server.log
-            ${{ runner.temp }}/cognee-contract/summary.json
-            ${{ runner.temp }}/hillock-contract/contract.log
-            ${{ runner.temp }}/hillock-contract/server.log
-            ${{ runner.temp }}/hillock-contract/summary.json
-            ${{ runner.temp }}/catalog-scale.json
-          if-no-files-found: warn
-          retention-days: 7
 
   go-unit-tests:
     needs: change-scope

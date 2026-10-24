@@ -249,9 +249,14 @@ func TestMemoryBackendSetupPersistsAcrossConfigOwnerRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 		settings, err := memorycontract.ResolveBackendSettings(snapshot, func(string) string { return "" })
-		if err != nil || settings.Engine != engine || settings.Endpoint != endpoint {
-			t.Fatal(settings, err)
+		if engine == "native" {
+			if err != nil || settings.Engine != engine || settings.Endpoint != endpoint {
+				t.Fatal(settings, err)
+			}
+		} else if err == nil {
+			t.Fatal("retired persisted backend silently accepted", engine)
 		}
+
 		if _, leaked := snapshot["memory_backend_token"]; leaked {
 			t.Fatal("credential in public configuration")
 		}
