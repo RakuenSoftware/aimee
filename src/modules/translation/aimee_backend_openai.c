@@ -8,6 +8,7 @@
 #include <aimee/translation/aimee_frontend.h>
 
 #include "cJSON.h"
+#include "usage_observation.h"
 #include "util.h" /* text_split_reasoning_prefix, strip_llm_private_scaffold */
 
 #include <stdio.h>
@@ -636,6 +637,21 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
       return -1;
    }
    out->raw = cJSON_Duplicate(resp, 1);
+   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
+   const cJSON *cached = cJSON_GetObjectItemCaseSensitive(usage, "prompt_tokens_details");
+   const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(usage, "completion_tokens_details");
+   if (aimee_ir_read_usage(usage, "prompt_tokens", &out->usage_in) ||
+       aimee_ir_read_usage(usage, "completion_tokens", &out->usage_out) ||
+       aimee_ir_read_usage(cached, "cached_tokens", &out->usage_cache_read) ||
+       aimee_ir_read_usage(reasoning, "reasoning_tokens", &out->usage_reasoning))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid provider usage counter");
+      aimee_response_free(out);
+      return -1;
+   }
+   wire_response_usage(out, usage, "prompt_tokens", "completion_tokens");
+
    const cJSON *failure = cJSON_GetObjectItemCaseSensitive(resp, "error");
    if (failure && !cJSON_IsNull(failure))
    {
@@ -724,20 +740,6 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
                return -1;
             }
          }
-   }
-
-   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
-   const cJSON *cached = cJSON_GetObjectItemCaseSensitive(usage, "prompt_tokens_details");
-   const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(usage, "completion_tokens_details");
-   if (aimee_ir_read_usage(usage, "prompt_tokens", &out->usage_in) ||
-       aimee_ir_read_usage(usage, "completion_tokens", &out->usage_out) ||
-       aimee_ir_read_usage(cached, "cached_tokens", &out->usage_cache_read) ||
-       aimee_ir_read_usage(reasoning, "reasoning_tokens", &out->usage_reasoning))
-   {
-      if (err && errn)
-         snprintf(err, errn, "invalid provider usage counter");
-      aimee_response_free(out);
-      return -1;
    }
 
    return 0;

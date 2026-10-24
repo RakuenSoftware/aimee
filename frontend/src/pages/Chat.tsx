@@ -1556,7 +1556,7 @@ export default function Chat() {
     }
   }, [activeAimeeSid]);
 
-  const usage = canonicalState?.messages.slice().reverse().find(m => m.usage)?.usage;
+  const usage = canonicalState?.messages.slice().reverse().find(m => m.role === 'assistant')?.usage;
   const lastUsage = usage ? { in: usage.input, out: usage.output, cost: 0 } : null;
   useEffect(() => {
     scrollToBottom();

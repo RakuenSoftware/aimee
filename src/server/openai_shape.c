@@ -505,7 +505,7 @@ int openai_format_text_chunk(const char *id, const char *model, long created,
 
 int openai_format_text_completion(const char *id, const char *model, const char *content,
                                   long created, int prompt_tokens, int completion_tokens,
-                                  char *resp, int cap)
+                                  int usage_unobserved, char *resp, int cap)
 {
    if (!resp || cap <= 0)
       return -1;
@@ -539,16 +539,19 @@ int openai_format_text_completion(const char *id, const char *model, const char 
    cJSON_AddStringToObject(choice, "text", content ? content : "");
    cJSON_AddStringToObject(choice, "finish_reason", "stop");
 
-   cJSON *usage = cJSON_CreateObject();
-   if (!usage)
+   if (!usage_unobserved)
    {
-      cJSON_Delete(root);
-      return -1;
+      cJSON *usage = cJSON_CreateObject();
+      if (!usage)
+      {
+         cJSON_Delete(root);
+         return -1;
+      }
+      cJSON_AddItemToObject(root, "usage", usage);
+      cJSON_AddNumberToObject(usage, "prompt_tokens", (double)prompt_tokens);
+      cJSON_AddNumberToObject(usage, "completion_tokens", (double)completion_tokens);
+      cJSON_AddNumberToObject(usage, "total_tokens", (double)(prompt_tokens + completion_tokens));
    }
-   cJSON_AddItemToObject(root, "usage", usage);
-   cJSON_AddNumberToObject(usage, "prompt_tokens", (double)prompt_tokens);
-   cJSON_AddNumberToObject(usage, "completion_tokens", (double)completion_tokens);
-   cJSON_AddNumberToObject(usage, "total_tokens", (double)(prompt_tokens + completion_tokens));
 
    char *s = cJSON_PrintUnformatted(root);
    cJSON_Delete(root);

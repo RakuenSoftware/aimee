@@ -945,7 +945,7 @@ native_provider_http:
    int total_calls = 0;
    int successful_tool_calls = 0;
    long canonical_usage[5] = {0};
-   int api_call_count = 0; /* cumulative provider API calls; published via heartbeat */
+   int api_call_count = 0; /* Saturating transport attempts, not model generations; heartbeat. */
    int final_instruction_added = 0;
    int final_tool_retry_count = 0;
    int degenerate_retry_count = 0;
@@ -1353,10 +1353,16 @@ native_provider_http:
          wire_fence_destroy(wire_snapshot);
          break;
       }
-      int http_status = wire_fence_post(url, auth_header, wire_body.data, wire_body.len,
-                                        &response_body, per_call, extra_headers, ra, rb, rm,
-                                        agent->provider, fb_agent.model, session_id, wire_route);
-      api_call_count++;
+      wire_fence_observation_t observation = {0};
+      int http_status = wire_fence_post_observed(
+          url, auth_header, wire_body.data, wire_body.len, &response_body, per_call, extra_headers,
+          ra, rb, rm, agent->provider, fb_agent.model, session_id, wire_route, &observation);
+      api_call_count = observation.transport_attempts > INT_MAX - api_call_count
+                           ? INT_MAX
+                           : api_call_count + observation.transport_attempts;
+      out->usage_unobserved |=
+          observation.transport_attempts > 1 ||
+          (observation.transport_attempts && (http_status != 200 || !response_body));
       {
          int dj = agent_get_durable_job_id();
          if (dj > 0)
@@ -1420,11 +1426,17 @@ native_provider_http:
                wire_fence_destroy(fb_snapshot);
                break;
             }
-            http_status =
-                wire_fence_post(url, auth_header, fb_wire_body.data, fb_wire_body.len,
-                                &response_body, per_call, extra_headers, ra, rb, rm,
-                                fb_agent.provider, fb_agent.model, session_id, wire_route);
-            api_call_count++;
+            observation = (wire_fence_observation_t){0};
+            http_status = wire_fence_post_observed(
+                url, auth_header, fb_wire_body.data, fb_wire_body.len, &response_body, per_call,
+                extra_headers, ra, rb, rm, fb_agent.provider, fb_agent.model, session_id,
+                wire_route, &observation);
+            api_call_count = observation.transport_attempts > INT_MAX - api_call_count
+                                 ? INT_MAX
+                                 : api_call_count + observation.transport_attempts;
+            out->usage_unobserved |=
+                observation.transport_attempts > 1 ||
+                (observation.transport_attempts && (http_status != 200 || !response_body));
             {
                int dj = agent_get_durable_job_id();
                if (dj > 0)
@@ -1526,6 +1538,7 @@ native_provider_http:
       free(response_body);
       if (decode_rc != 0)
       {
+         out->usage_unobserved |= observation.transport_attempts != 0;
          capture_failed = decode_rc == AGENT_IR_CAPTURE_FAILED || aimee_ir_session_capture_failed();
          snprintf(out->error, sizeof(out->error), "%s",
                   decode_rc == AGENT_IR_CAPTURE_FAILED
@@ -1536,7 +1549,8 @@ native_provider_http:
          break;
       }
       int call_count = aimee_ir_response_tool_count(&response);
-      /* Accumulate tokens */
+      out->usage_unobserved |= response.usage_unobserved;
+      /* Accumulate observed tokens without claiming an unknown total is complete. */
       const long counts[5] = {response.usage_in, response.usage_out, response.usage_cache_write,
                               response.usage_cache_read, response.usage_reasoning};
       const long usage_limit = LONG_MAX > 9007199254740991LL ? 9007199254740991LL : LONG_MAX;
@@ -2369,11 +2383,12 @@ ir_capture_failed:
 
    if (out->success && canonical_out)
    {
-      canonical_out->usage_in = canonical_usage[0];
-      canonical_out->usage_out = canonical_usage[1];
-      canonical_out->usage_cache_write = canonical_usage[2];
-      canonical_out->usage_cache_read = canonical_usage[3];
-      canonical_out->usage_reasoning = canonical_usage[4];
+      canonical_out->usage_unobserved = out->usage_unobserved;
+      canonical_out->usage_in = out->usage_unobserved ? 0 : canonical_usage[0];
+      canonical_out->usage_out = out->usage_unobserved ? 0 : canonical_usage[1];
+      canonical_out->usage_cache_write = out->usage_unobserved ? 0 : canonical_usage[2];
+      canonical_out->usage_cache_read = out->usage_unobserved ? 0 : canonical_usage[3];
+      canonical_out->usage_reasoning = out->usage_unobserved ? 0 : canonical_usage[4];
    }
    if (out->success && updated_messages)
       *updated_messages = cJSON_Duplicate(messages, 1);

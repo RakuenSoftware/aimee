@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <limits.h>
 #include <stdio.h>
 #include "http_retry.h"
 #include "agent_exec.h"
@@ -230,6 +231,7 @@ typedef struct
    const char *provider, *model;
    char attempt[33];
    void *send_guard_state;
+   int transport_attempts;
 } wire_attempt_t;
 
 extern int ingress_preinject_acquire_send_guard(void **) __attribute__((weak));
@@ -300,6 +302,8 @@ refused:
 static void wire_attempt_after(void *opaque, int status, const char *response, size_t length)
 {
    wire_attempt_t *attempt = opaque;
+   if (status != HTTP_RETRY_ADMISSION_REFUSED && attempt->transport_attempts < INT_MAX)
+      attempt->transport_attempts++;
    if (attempt->attempt[0] &&
        (!ingress_preinject_observe_attempt ||
         ingress_preinject_observe_attempt(attempt->attempt, status, response, length) != 0))
@@ -308,10 +312,11 @@ static void wire_attempt_after(void *opaque, int status, const char *response, s
           stderr);
 }
 
-int wire_fence_post(const char *url, const char *auth_header, const void *body, size_t body_len,
-                    char **response_buf, int timeout_ms, const char *extra_headers,
-                    int max_attempts, int base_ms, int max_ms, const char *provider,
-                    const char *model, const char *session_id, wire_fence_route_t route)
+int wire_fence_post_observed(const char *url, const char *auth_header, const void *body,
+                             size_t body_len, char **response_buf, int timeout_ms,
+                             const char *extra_headers, int max_attempts, int base_ms, int max_ms,
+                             const char *provider, const char *model, const char *session_id,
+                             wire_fence_route_t route, wire_fence_observation_t *observation)
 {
    wire_attempt_t attempt = {.route = route, .provider = provider, .model = model};
    agent_http_send_guard_t guard = {.context = &attempt,
@@ -322,9 +327,22 @@ int wire_fence_post(const char *url, const char *auth_header, const void *body, 
                                      .before = wire_attempt_before,
                                      .after = wire_attempt_after,
                                      .send_guard = wire_send_guard_required() ? &guard : NULL};
-   return http_retry_post_observed_bytes(url, auth_header, body, body_len, response_buf, timeout_ms,
-                                         extra_headers, max_attempts, base_ms, max_ms, provider,
-                                         model, session_id, NULL, &observer);
+   int status = http_retry_post_observed_bytes(
+       url, auth_header, body, body_len, response_buf, timeout_ms, extra_headers, max_attempts,
+       base_ms, max_ms, provider, model, session_id, NULL, &observer);
+   if (observation)
+      observation->transport_attempts = attempt.transport_attempts;
+   return status;
+}
+
+int wire_fence_post(const char *url, const char *auth_header, const void *body, size_t body_len,
+                    char **response_buf, int timeout_ms, const char *extra_headers,
+                    int max_attempts, int base_ms, int max_ms, const char *provider,
+                    const char *model, const char *session_id, wire_fence_route_t route)
+{
+   return wire_fence_post_observed(url, auth_header, body, body_len, response_buf, timeout_ms,
+                                   extra_headers, max_attempts, base_ms, max_ms, provider, model,
+                                   session_id, route, NULL);
 }
 
 extern int ingress_preinject_observe_commitment(const char *, int, const char *, size_t,

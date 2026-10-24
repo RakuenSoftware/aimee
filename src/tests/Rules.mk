@@ -403,6 +403,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-ir-crossproto-egress \
                $(TESTPREFIX)/unit-test-aimee-ir-rescue \
                $(TESTPREFIX)/unit-test-agent-result-cache \
+               $(TESTPREFIX)/unit-test-agent-usage-audit \
                $(TESTPREFIX)/unit-test-agent-ir-parse \
                $(TESTPREFIX)/unit-test-responses-parity \
                $(TESTPREFIX)/unit-test-ir-shadow-response \
@@ -650,6 +651,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-model-provider \
                $(TESTPREFIX)/unit-test-delegate-driver \
                $(TESTPREFIX)/unit-test-agent-http \
+               $(TESTPREFIX)/unit-test-provider-attempt-usage \
                $(TESTPREFIX)/unit-test-agent-context-refusal \
                $(TESTPREFIX)/unit-test-middleware \
                $(TESTPREFIX)/unit-test-verify-hook \
@@ -5845,8 +5847,7 @@ $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
                                 $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-agent-context-refusal: $(OBJDIR)/tests/test_agent_context_refusal.o \
-                                $(OBJDIR)/server/agent_admission.o \
+AGENT_CONTEXT_REFUSAL_TEST_COMMON = $(OBJDIR)/server/agent_admission.o \
                                 $(OBJDIR)/modules/module-runtime/pre_llm_hook.o \
                                 $(OBJDIR)/server/agent_runtime_liveness.o \
                                 $(OBJDIR)/modules/translation/aimee_backend_responses.o \
@@ -5874,6 +5875,8 @@ $(TESTPREFIX)/unit-test-agent-context-refusal: $(OBJDIR)/tests/test_agent_contex
                                 $(OBJDIR)/tests/support/delegate_role_seam_stub.o \
      $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
     $(OBJDIR)/modules/translation/aimee_frontend_responses.o
+
+$(TESTPREFIX)/unit-test-agent-context-refusal: $(OBJDIR)/tests/test_agent_context_refusal.o $(AGENT_CONTEXT_REFUSAL_TEST_COMMON)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Links the real dispatch TU against the shared test object sets — no stubs needed
@@ -7531,3 +7534,9 @@ $(TESTPREFIX)/unit-test-acp-service-source: $(OBJDIR)/tests/test_acp_service_sou
  $(OBJDIR)/aimee_sha256.o $(OBJDIR)/cJSON.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/session_id.o \
  $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-agent-usage-audit: $(OBJDIR)/tests/test_agent_usage_audit.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/token_tracker.o $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-provider-attempt-usage: $(OBJDIR)/tests/test_provider_attempt_usage.o $(AGENT_CONTEXT_REFUSAL_TEST_COMMON) $(OBJDIR)/server/http_retry.o $(OBJDIR)/posix/agent_bridge.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

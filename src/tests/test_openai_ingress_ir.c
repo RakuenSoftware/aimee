@@ -42,6 +42,101 @@ char *gw_ir_request_completion_system_prompt(const aimee_request_t *request, con
    (void)base;
    return NULL;
 }
+static int avoided_audits;
+static double avoided_cost;
+const request_context_t *request_context_get(void)
+{
+   return NULL;
+}
+const char *session_id(void)
+{
+   return "cache-usage-test";
+}
+int db1_token_audit_insert(const db1_token_audit_row_t *row)
+{
+   avoided_audits++;
+   avoided_cost = row->estimated_cost_usd;
+   return 0;
+}
+
+static int actual_audits;
+static char actual_usage_kind[24];
+int agent_ingress_accounting_enabled(void)
+{
+   return 1;
+}
+void agent_ingress_record_cost(const char *name, const char *served, const char *requested,
+                               const char *stop, int input, int output, int cache_write,
+                               int cache_read, const char *source, const char *kind)
+{
+   assert(!strcmp(name, "usage-agent") && !strcmp(source, "openai-ingress"));
+   assert(!input && !output && !cache_write && !cache_read);
+   snprintf(actual_usage_kind, sizeof actual_usage_kind, "%s", kind ? kind : "realized");
+   actual_audits++;
+}
+static void test_actual_ingress_usage_accounting(void)
+{
+   agent_t agent = {0};
+   strcpy(agent.name, "usage-agent");
+   for (int unknown = 0; unknown <= 1; unknown++)
+   {
+      aimee_response_t response = {.usage_unobserved = unknown};
+      actual_audits = 0;
+      openai_account_response(&agent, "fixture", &response);
+      assert(actual_audits == 1);
+      assert(!strcmp(actual_usage_kind, unknown ? "unobserved" : "realized"));
+   }
+}
+
+static void test_cached_unknown_usage(void)
+{
+   for (int unknown = 0; unknown <= 1; unknown++)
+   {
+      aimee_response_t response = {.role = strdup("assistant"),
+                                   .stop_reason = AIMEE_STOP_END_TURN,
+                                   .usage_unobserved = unknown,
+                                   .n_content = 1};
+      response.content = calloc(1, sizeof *response.content);
+      response.content[0] =
+          (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = strdup("cached answer")};
+      openai_ir_cache_t cache = {.created = 123};
+      snprintf(cache.client_id, sizeof cache.client_id, "chatcmpl-usage");
+      char *encoded = openai_ir_cache_encode(&response, &cache);
+      aimee_response_t restored = {0};
+      assert(encoded && !openai_ir_cache_decode(encoded, &restored, &cache));
+      assert(restored.usage_unobserved == unknown);
+      assert(!restored.usage_in && !restored.usage_out);
+      assert(!strcmp(restored.content[0].text, "cached answer"));
+      aimee_response_free(&restored);
+      /* Old cache rows cannot establish whether numeric zero was observed. */
+      cJSON *wire = cJSON_Parse(encoded);
+      assert(wire);
+      cJSON_DeleteItemFromObjectCaseSensitive(wire, "usage_unobserved");
+      char *ambiguous = cJSON_PrintUnformatted(wire);
+      assert(ambiguous && openai_ir_cache_decode(ambiguous, &restored, &cache) < 0);
+      assert(!restored.content);
+      free(ambiguous);
+      cJSON *invalid[] = {cJSON_CreateNull(), cJSON_CreateNumber(0), cJSON_CreateString("false")};
+      for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+      {
+         cJSON_DeleteItemFromObjectCaseSensitive(wire, "usage_unobserved");
+         assert(cJSON_AddItemToObject(wire, "usage_unobserved", invalid[i]));
+         ambiguous = cJSON_PrintUnformatted(wire);
+         assert(ambiguous && openai_ir_cache_decode(ambiguous, &restored, &cache) < 0);
+         assert(!restored.content);
+         free(ambiguous);
+      }
+      cJSON_Delete(wire);
+      free(encoded);
+      aimee_response_free(&response);
+   }
+   avoided_audits = 0;
+   record_avoided_turn("unknown", NAN);
+   assert(!avoided_audits);
+   record_avoided_turn("observed-zero", 0.0);
+   assert(avoided_audits == 1 && avoided_cost == 0.0);
+}
+
 static void test_actual_admission_preparation_mirror(void)
 {
    shadow_mirror_reset();
@@ -531,6 +626,8 @@ static void test_cache_configuration_at_actual_ingress(void)
 
 int main(void)
 {
+   test_actual_ingress_usage_accounting();
+   test_cached_unknown_usage();
    test_actual_admission_preparation_mirror();
    test_cache_configuration_at_actual_ingress();
    test_restored_history_rechecks_native_provenance();

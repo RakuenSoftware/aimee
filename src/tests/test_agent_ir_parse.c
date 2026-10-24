@@ -135,6 +135,15 @@ int main(void)
       assert(aimee_ir_response_parse(snapshot, &restored) < 0 && restored.content == unchanged);
       cJSON_Delete(snapshot);
       aimee_response_free(&restored);
+      agent_result_t unknown = {0}, carried = {0};
+      unknown.canonical_response.usage_unobserved = 1;
+      agent_result_clear_response(&unknown);
+      assert(unknown.usage_unobserved); /* Releasing content cannot make spend known. */
+      assert(!agent_result_from_host_text(&unknown, "next observed answer"));
+      agent_result_move_response(&carried, &unknown);
+      assert(carried.usage_unobserved);
+      agent_result_clear_response(&carried);
+      agent_result_clear_response(&unknown);
       agent_result_t original = {0}, selected = {0};
       original.turns = 7;
       assert(agent_result_adopt_response(&original, &response) == 0);

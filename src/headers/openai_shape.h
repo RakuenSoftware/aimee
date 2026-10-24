@@ -195,9 +195,10 @@ extern "C"
     *  "choices":[{"text":content,"index":0,"finish_reason":"stop"}],
     *  "usage":{"prompt_tokens":pt,"completion_tokens":ct,"total_tokens":pt+ct}}
     * Returns bytes written, or -1. */
+   /* Omit optional usage when its totals were not observed. */
    int openai_format_text_completion(const char *id, const char *model, const char *content,
                                      long created, int prompt_tokens, int completion_tokens,
-                                     char *resp, int cap);
+                                     int usage_unobserved, char *resp, int cap);
 
    /* Build an OpenAI error envelope {"error":{"message":msg,"type":type}} into
     * resp[cap]. Returns bytes written, or -1. */

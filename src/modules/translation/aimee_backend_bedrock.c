@@ -7,6 +7,7 @@
 #include <aimee/translation/aimee_backend.h>
 
 #include "cJSON.h"
+#include "usage_observation.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -638,6 +639,7 @@ int bedrock_converse_parse(const cJSON *resp, aimee_response_t *out, char *err, 
       aimee_response_free(out);
       return -1;
    }
+   wire_response_usage(out, usage, "inputTokens", "outputTokens");
    if (!out->raw || !out->role || !out->raw_stop_reason)
       goto allocation_failure;
    for (int i = 0; i < out->n_content; i++)

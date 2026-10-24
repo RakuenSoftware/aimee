@@ -76,8 +76,31 @@ static void unrepresentable_refusal(void)
    cJSON_Delete(responses);
 }
 
+static void test_unobserved_usage_projection(void)
+{
+   aimee_response_t response = {
+       .role = "assistant", .stop_reason = AIMEE_STOP_END_TURN, .usage_unobserved = 1};
+   cJSON *chat = openai_frontend_render(&response);
+   cJSON *responses = responses_frontend_render(&response);
+   assert(chat && responses);
+   assert(!cJSON_GetObjectItem(chat, "usage"));
+   assert(cJSON_IsNull(cJSON_GetObjectItem(responses, "usage")));
+   /* Anthropic requires numeric usage; it cannot truthfully render this state. */
+   assert(!anthropic_frontend_render(&response));
+   cJSON_Delete(chat);
+   cJSON_Delete(responses);
+   response.usage_unobserved = 0;
+   chat = openai_frontend_render(&response);
+   assert(cJSON_GetObjectItem(cJSON_GetObjectItem(chat, "usage"), "total_tokens")->valueint == 0);
+   cJSON_Delete(chat);
+   chat = anthropic_frontend_render(&response);
+   assert(chat);
+   cJSON_Delete(chat);
+}
+
 int main(void)
 {
+   test_unobserved_usage_projection();
    unrepresentable_refusal();
    printf("aimee-frontend: ");
    char err[128];

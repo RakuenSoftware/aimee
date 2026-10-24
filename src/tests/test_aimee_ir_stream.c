@@ -50,8 +50,78 @@ static void feed_emit(const char *chunk_json, openai_stream_state_t *ost,
    cJSON_Delete(chunk);
 }
 
+static void test_unobserved_stream_usage(void)
+{
+   for (int observed = 0; observed < 2; observed++)
+   {
+      openai_stream_state_t state;
+      openai_stream_state_init(&state);
+      aimee_delta_t deltas[8];
+      cJSON *chunk =
+          cJSON_Parse(observed ? "{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],"
+                                 "\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0}}"
+                               : "{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}");
+      int count = openai_chunk_to_deltas(chunk, &state, deltas, 8);
+      assert(count >= 0);
+      int found = 0;
+      for (int i = 0; i < count; i++)
+         if (deltas[i].type == AIMEE_DELTA_TURN_STOP)
+         {
+            assert(deltas[i].usage_unobserved == !observed);
+            found = 1;
+         }
+      if (!found)
+      {
+         assert(openai_stream_finish(&state, deltas, 8) == 1);
+         assert(deltas[0].usage_unobserved == !observed);
+      }
+      cJSON_Delete(chunk);
+   }
+   const char *partial[] = {"null", "{}", "{\"prompt_tokens\":7}", "{\"completion_tokens\":3}"};
+   for (size_t i = 0; i < sizeof partial / sizeof *partial; i++)
+   {
+      openai_stream_state_t state;
+      openai_stream_state_init(&state);
+      cJSON *chunk = cJSON_Parse("{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}");
+      assert(cJSON_AddItemToObject(chunk, "usage", cJSON_Parse(partial[i])));
+      aimee_delta_t deltas[8];
+      assert(openai_chunk_to_deltas(chunk, &state, deltas, 8) >= 0);
+      assert(openai_stream_finish(&state, deltas, 8) == 1);
+      assert(deltas[0].usage_unobserved && !deltas[0].usage_in && !deltas[0].usage_out);
+      cJSON_Delete(chunk);
+   }
+   {
+      openai_stream_state_t state;
+      openai_stream_state_init(&state);
+      cJSON *bad = cJSON_Parse("{\"usage\":\"not counters\",\"choices\":[]}");
+      aimee_delta_t deltas[8];
+      assert(openai_chunk_to_deltas(bad, &state, deltas, 8) < 0);
+      cJSON_Delete(bad);
+   }
+   anthropic_backend_stream_state_t state;
+   anthropic_backend_stream_state_init(&state);
+   const char *events[] = {"message_start", "message_delta", "message_stop"};
+   const char *frames[] = {"{\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":7}}}",
+                           "{\"delta\":{\"stop_reason\":\"end_turn\"}}", "{}"};
+   aimee_delta_t delta[2];
+   for (int i = 0; i < 3; i++)
+   {
+      cJSON *frame = cJSON_Parse(frames[i]);
+      int count = anthropic_stream_to_deltas(events[i], frame, &state, delta, 2);
+      assert(count >= 0);
+      if (i == 2)
+         assert(count == 1 && delta[0].usage_unobserved && !delta[0].usage_in &&
+                !delta[0].usage_out);
+      cJSON_Delete(frame);
+   }
+   anthropic_stream_state_t client = {0};
+   assert(!anthropic_delta_render(delta, &client, "id", "model"));
+   assert(anthropic_delta_emit(delta, &client, "id", "model", NULL, NULL) < 0);
+}
+
 int main(void)
 {
+   test_unobserved_stream_usage();
    printf("ir-stream: ");
    openai_stream_state_t ost;
    openai_stream_state_init(&ost);
@@ -281,7 +351,8 @@ int main(void)
       aimee_delta_t d[4];
       cJSON *p;
       int n;
-      A_FEED("message_start", "{\"message\":{\"role\":\"assistant\"}}");
+      A_FEED("message_start",
+             "{\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":0}}}");
       assert(n == 1);
       A_DONE();
       const char *reason = refused ? "refusal" : "future_stop";
@@ -315,7 +386,8 @@ int main(void)
       aimee_delta_t d[4];
       cJSON *p;
       int n;
-      A_FEED("message_start", "{\"message\":{\"role\":\"assistant\"}}");
+      A_FEED("message_start",
+             "{\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":0}}}");
       assert(n == 1);
       A_DONE();
       const char *details[] = {"{\"type\":\"refusal\",\"category\":null,\"explanation\":null}",

@@ -66,6 +66,7 @@
 #include <pthread.h>
 #include <openssl/crypto.h>
 #include <limits.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -79,8 +80,13 @@
  * provider call was skipped, so the avoided estimated cost is logged separately
  * and never added to spend totals (see db1_token_audit_spend_breakdown). Tokens
  * are zero because no real call happened. */
+static void openai_account_response(const agent_t *agent, const char *model,
+                                    const aimee_response_t *response);
+
 static void record_avoided_turn(const char *model, double avoided_cost)
 {
+   if (!isfinite(avoided_cost))
+      return;
    /* Carry the request-context attribution (#3) so an avoided row is attributed
     * to the same principal/request as a realized one. The avoided cost is a
     * special value (the prior realized cost replayed), so this writes directly
@@ -261,20 +267,16 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       snprintf(error, sizeof error, "text completion cannot represent a tool call");
       goto failure;
    }
-   if (!cache.avoided && agent_ingress_accounting_enabled())
-      agent_ingress_record_cost(
-          agent.name, agent.model, model,
-          response.raw_stop_reason ? response.raw_stop_reason
-                                   : aimee_stop_reason_name(response.stop_reason),
-          (int)response.usage_in, (int)response.usage_out, (int)response.usage_cache_write,
-          (int)response.usage_cache_read, "openai-ingress", NULL);
+   if (!cache.avoided)
+      openai_account_response(&agent, model, &response);
    char *text = chat ? NULL : aimee_ir_response_text_alloc(&response);
-   int length = chat   ? aimee_openai_buffered_response(&response, cache.client_id, model,
-                                                        cache.created, 0, resp, cap)
-                : text ? openai_format_text_completion(cache.client_id, model, text, cache.created,
-                                                       (int)response.usage_in,
-                                                       (int)response.usage_out, resp, cap)
-                       : -1;
+   int length = chat ? aimee_openai_buffered_response(&response, cache.client_id, model,
+                                                      cache.created, 0, resp, cap)
+                : text
+                    ? openai_format_text_completion(cache.client_id, model, text, cache.created,
+                                                    (int)response.usage_in, (int)response.usage_out,
+                                                    response.usage_unobserved, resp, cap)
+                    : -1;
    free(text);
    status = length >= 0 ? 200 : 500;
    if (status != 200)
@@ -684,16 +686,17 @@ static int responses_admit_request(const char *body, aimee_request_t *request, c
    shadow_mirror_capture_request(request);
    return 0;
 }
-static void responses_account(const agent_t *agent, const char *model,
-                              const aimee_response_t *response)
+static void openai_account_response(const agent_t *agent, const char *model,
+                                    const aimee_response_t *response)
 {
    if (agent_ingress_accounting_enabled())
-      agent_ingress_record_cost(
-          agent->name, agent->model, model,
-          response->raw_stop_reason ? response->raw_stop_reason
+      agent_ingress_record_cost(agent->name, agent->model, model,
+                                response->raw_stop_reason
+                                    ? response->raw_stop_reason
                                     : aimee_stop_reason_name(response->stop_reason),
-          (int)response->usage_in, (int)response->usage_out, (int)response->usage_cache_write,
-          (int)response->usage_cache_read, "openai-ingress", NULL);
+                                (int)response->usage_in, (int)response->usage_out,
+                                (int)response->usage_cache_write, (int)response->usage_cache_read,
+                                "openai-ingress", response->usage_unobserved ? "unobserved" : NULL);
 }
 static int responses_handler(const char *body, char *buffer, int capacity)
 {
@@ -727,7 +730,7 @@ static int responses_handler(const char *body, char *buffer, int capacity)
       free(model);
       goto failed;
    }
-   responses_account(&agent, model, &response);
+   openai_account_response(&agent, model, &response);
    char id[64];
    if (responses_mint_id((long)time(NULL), id, sizeof id) ||
        responses_store_history(id, &request, &response))
@@ -820,13 +823,7 @@ static int completion_stream_ir(int chat, const char *body, server_http_sse_emit
       snprintf(error, sizeof error, "text completion cannot represent a tool call");
       goto failure;
    }
-   if (agent_ingress_accounting_enabled())
-      agent_ingress_record_cost(
-          agent.name, agent.model, model,
-          response.raw_stop_reason ? response.raw_stop_reason
-                                   : aimee_stop_reason_name(response.stop_reason),
-          (int)response.usage_in, (int)response.usage_out, (int)response.usage_cache_write,
-          (int)response.usage_cache_read, "openai-ingress", NULL);
+   openai_account_response(&agent, model, &response);
    if (chat)
    {
       emit_chunk(emit, ctx, id, model, created, 1, NULL, 0);
@@ -1100,6 +1097,7 @@ static char *openai_ir_cache_encode(const aimee_response_t *response,
             cJSON_AddNumberToObject(root, "created", cache->created) &&
             cJSON_AddStringToObject(root, "stop_reason",
                                     aimee_stop_reason_name(response->stop_reason)) &&
+            cJSON_AddBoolToObject(root, "usage_unobserved", response->usage_unobserved) &&
             cJSON_AddNumberToObject(root, "usage_in", response->usage_in) &&
             cJSON_AddNumberToObject(root, "usage_out", response->usage_out) &&
             cJSON_AddNumberToObject(root, "usage_cache_read", response->usage_cache_read) &&
@@ -1152,6 +1150,10 @@ static int openai_ir_cache_decode(const char *encoded, aimee_response_t *respons
       if (field && (!cJSON_IsString(field) || !(*destinations[i] = strdup(field->valuestring))))
          goto invalid;
    }
+   const cJSON *unobserved = cJSON_GetObjectItemCaseSensitive(root, "usage_unobserved");
+   if (!cJSON_IsBool(unobserved))
+      goto invalid;
+   response->usage_unobserved = cJSON_IsTrue(unobserved);
    if (aimee_refusal_details_parse(cJSON_GetObjectItemCaseSensitive(root, "refusal"),
                                    &response->refusal) ||
        aimee_ir_read_usage(root, "usage_in", &response->usage_in) ||
@@ -1250,7 +1252,7 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
                return -1;
             }
             cache->avoided = 1;
-            if (agent_ingress_accounting_enabled())
+            if (!out->usage_unobserved && agent_ingress_accounting_enabled())
                record_avoided_turn(agent->model, avoided);
             return 0;
          }
@@ -1325,9 +1327,12 @@ static int agent_execute_prepared_ir_request(const agent_t *agent, aimee_request
                                 .output_tokens = out->usage_out,
                                 .cache_write_tokens = out->usage_cache_write,
                                 .cache_read_tokens = out->usage_cache_read};
-         response_dedup_put(cache->key, encoded,
-                            token_estimate_cost(out->model ? out->model : agent->model, &usage),
-                            (long)time(NULL), cache->ttl);
+         response_dedup_put(
+             cache->key, encoded,
+             out->usage_unobserved
+                 ? NAN
+                 : token_estimate_cost(out->model ? out->model : agent->model, &usage),
+             (long)time(NULL), cache->ttl);
          free(encoded);
       }
    }
@@ -1403,7 +1408,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
        agent_execute_prepared_ir_request(&agent, &request, &response, error, sizeof error, 0, NULL,
                                          &stream))
       goto failed;
-   responses_account(&agent, model, &response);
+   openai_account_response(&agent, model, &response);
    if (responses_store_history(id, &request, &response))
    {
       snprintf(error, sizeof error, "durable Responses history could not be committed");

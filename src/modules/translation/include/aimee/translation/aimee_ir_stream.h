@@ -24,6 +24,7 @@ typedef struct
    int tool_block[AIMEE_STREAM_MAX_TOOLS]; /* openai tool_calls[i].index -> block id (-1 = none) */
    int stopped;                            /* TURN_STOP emitted */
    int pending_stop, usage_seen;
+   int usage_fields; /* observed input/output totals, independently of zero */
    aimee_stop_reason_t pending_stop_reason;
    long usage_in, usage_out, usage_cache_read, usage_cache_write, usage_reasoning;
 } openai_stream_state_t;
@@ -119,6 +120,7 @@ typedef struct
    int failed;
    int started;                             /* message_start seen */
    int terminal_emitted;                    /* TURN_STOP emitted */
+   int usage_fields;                        /* input at start/delta and final output at delta */
    aimee_stop_reason_t pending_stop_reason; /* from message_delta */
    long pending_usage_in;                   /* from message_start */
    long pending_usage_out;                  /* from message_delta */

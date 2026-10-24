@@ -9,6 +9,7 @@
 #include <aimee/translation/aimee_frontend.h>
 
 #include "cJSON.h"
+#include "usage_observation.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -338,6 +339,21 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
       return -1;
    }
    out->raw = cJSON_Duplicate(resp, 1);
+   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
+   const cJSON *cached = cJSON_GetObjectItemCaseSensitive(usage, "input_tokens_details");
+   const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(usage, "output_tokens_details");
+   if (aimee_ir_read_usage(usage, "input_tokens", &out->usage_in) ||
+       aimee_ir_read_usage(usage, "output_tokens", &out->usage_out) ||
+       aimee_ir_read_usage(cached, "cached_tokens", &out->usage_cache_read) ||
+       aimee_ir_read_usage(reasoning, "reasoning_tokens", &out->usage_reasoning))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid provider usage counter");
+      aimee_response_free(out);
+      return -1;
+   }
+   wire_response_usage(out, usage, "input_tokens", "output_tokens");
+
    const cJSON *failure = cJSON_GetObjectItemCaseSensitive(resp, "error");
    if (failure && !cJSON_IsNull(failure))
    {
@@ -466,20 +482,6 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
       out->stop_reason = saw_refusal ? AIMEE_STOP_CONTENT_FILTER
                          : saw_tool  ? AIMEE_STOP_TOOL_USE
                                      : AIMEE_STOP_END_TURN;
-
-   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
-   const cJSON *cached = cJSON_GetObjectItemCaseSensitive(usage, "input_tokens_details");
-   const cJSON *reasoning = cJSON_GetObjectItemCaseSensitive(usage, "output_tokens_details");
-   if (aimee_ir_read_usage(usage, "input_tokens", &out->usage_in) ||
-       aimee_ir_read_usage(usage, "output_tokens", &out->usage_out) ||
-       aimee_ir_read_usage(cached, "cached_tokens", &out->usage_cache_read) ||
-       aimee_ir_read_usage(reasoning, "reasoning_tokens", &out->usage_reasoning))
-   {
-      if (err && errn)
-         snprintf(err, errn, "invalid provider usage counter");
-      aimee_response_free(out);
-      return -1;
-   }
 
    return 0;
 

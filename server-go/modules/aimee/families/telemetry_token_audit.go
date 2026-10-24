@@ -45,13 +45,17 @@ const (
 
 	tokenAuditCostForDelegationSQL = `SELECT COALESCE(SUM(estimated_cost_usd), 0)
 	                                    FROM token_audit
-	                                   WHERE delegation_id = $1 AND ` + realizedFilter
+	                                   WHERE delegation_id = $1 AND ` + realizedFilter + `
+	                                  HAVING COUNT(*) > 0 AND NOT EXISTS (SELECT 1 FROM token_audit
+	                                           WHERE delegation_id = $1 AND usage_kind = 'unobserved')`
 
-	// The "_ex" form counts every kind, not only realized spend: it answers
-	// "what did this delegation cost including what was estimated or avoided",
-	// which is a different question from what is billable.
+	// An accounting total requires at least one row and no explicitly missing usage.
+	// This total includes estimated and avoided costs; missing usage cannot become
+	// free spend when other attempts have known usage.
 	tokenAuditCostForDelegationExSQL = `SELECT COALESCE(SUM(estimated_cost_usd), 0)
-	                                      FROM token_audit WHERE delegation_id = $1`
+	                                      FROM token_audit WHERE delegation_id = $1
+	                                     HAVING COUNT(*) > 0
+	                                        AND COUNT(*) FILTER (WHERE usage_kind = 'unobserved') = 0`
 
 	// The supervisor/worker split, as ONE row of twelve.
 	//

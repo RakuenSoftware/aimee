@@ -204,8 +204,69 @@ static void test_refusal_details_codec(void)
    cJSON_Delete(input);
 }
 
+static void test_unobserved_usage(void)
+{
+   struct usage_case
+   {
+      const char *response, *input, *output;
+      int (*parse)(const cJSON *, aimee_response_t *, char *, size_t);
+   } cases[] = {{"{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"answer\"},"
+                 "\"finish_reason\":\"stop\"}]}",
+                 "prompt_tokens", "completion_tokens", openai_backend_parse},
+                {"{\"status\":\"completed\",\"output\":[]}", "input_tokens", "output_tokens",
+                 responses_backend_parse},
+                {"{\"role\":\"assistant\",\"content\":[],\"stop_reason\":\"end_turn\"}",
+                 "input_tokens", "output_tokens", anthropic_backend_parse}};
+   for (size_t i = 0; i < sizeof cases / sizeof *cases; i++)
+      for (int variant = 0; variant < 6; variant++)
+      {
+         cJSON *wire = cJSON_Parse(cases[i].response);
+         assert(wire);
+         if (variant == 1)
+            cJSON_AddNullToObject(wire, "usage");
+         else if (variant >= 2)
+         {
+            cJSON *usage = cJSON_AddObjectToObject(wire, "usage");
+            if (variant >= 3)
+               cJSON_AddNumberToObject(usage, cases[i].input, variant == 3 ? 7 : 0);
+            if (variant >= 4)
+               cJSON_AddNumberToObject(usage, cases[i].output, variant == 5 ? 9 : 0);
+         }
+         aimee_response_t response = {0};
+         char error[128];
+         assert(!cases[i].parse(wire, &response, error, sizeof error));
+         assert(response.usage_unobserved == (variant < 4));
+         assert(response.usage_in == 0 && response.usage_out == (variant == 5 ? 9 : 0));
+         /* Partial observations remain in the opaque provider sidecar. */
+         if (variant == 3)
+            assert(cJSON_GetObjectItem(cJSON_GetObjectItem(response.raw, "usage"), cases[i].input)
+                       ->valueint == 7);
+         aimee_response_free(&response);
+         cJSON_Delete(wire);
+      }
+   for (size_t i = 0; i < sizeof cases / sizeof *cases; i++)
+      for (int known = 0; known < 2; known++)
+      {
+         cJSON *wire = cJSON_Parse("{\"error\":{\"message\":\"upstream failure\"}}");
+         if (known)
+         {
+            cJSON *usage = cJSON_AddObjectToObject(wire, "usage");
+            cJSON_AddNumberToObject(usage, cases[i].input, 0);
+            cJSON_AddNumberToObject(usage, cases[i].output, 0);
+         }
+         aimee_response_t response = {0};
+         char error[128];
+         assert(!cases[i].parse(wire, &response, error, sizeof error));
+         assert(response.stop_reason == AIMEE_STOP_ERROR && response.error_message);
+         assert(response.usage_unobserved == !known);
+         aimee_response_free(&response);
+         cJSON_Delete(wire);
+      }
+}
+
 int main(void)
 {
+   test_unobserved_usage();
    test_refusal_details_codec();
    test_refusal_details_shapes();
    printf("aimee-backend: ");

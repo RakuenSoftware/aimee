@@ -522,8 +522,10 @@ static void test_streaming_anthropic_policy_off_uses_ir(void)
    g_prevent = 0;
    g_stream_payload =
        "event: message_start\ndata: "
-       "{\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"role\":\"assistant\"}}\n\n"
-       "event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+       "{\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"usage\":{"
+       "\"input_tokens\":0}}}\n\n"
+       "event: message_delta\ndata: "
+       "{\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\n"
        "event: message_stop\ndata: {}\n\n";
 
    memset(&cap, 0, sizeof(cap));
@@ -786,8 +788,10 @@ static void test_native_completion_followup_reaches_provider_system(void)
    reset_capture();
    g_driver = &driver;
    g_stream_payload =
-       "event: message_start\ndata: {\"message\":{\"id\":\"m1\",\"role\":\"assistant\"}}\n\n"
-       "event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+       "event: message_start\ndata: "
+       "{\"message\":{\"id\":\"m1\",\"role\":\"assistant\",\"usage\":{\"input_tokens\":0}}}\n\n"
+       "event: message_delta\ndata: "
+       "{\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\n"
        "event: message_stop\ndata: {}\n\n";
    memset(&cap, 0, sizeof(cap));
    messages_stream("{\"model\":\"ignored\",\"max_tokens\":16,\"stream\":true,"
@@ -830,7 +834,9 @@ static void test_signed_stream_snapshot_before_completion(void)
       reject_signed_snapshot = reject;
       g_driver = &driver;
       g_stream_payload =
-          "event: message_start\ndata: {\"message\":{\"id\":\"signed\",\"role\":\"assistant\"}}\n\n"
+          "event: message_start\ndata: "
+          "{\"message\":{\"id\":\"signed\",\"role\":\"assistant\",\"usage\":{\"input_tokens\":0}}}"
+          "\n\n"
           "event: content_block_start\ndata: "
           "{\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n"
           "event: content_block_delta\ndata: "
@@ -839,7 +845,8 @@ static void test_signed_stream_snapshot_before_completion(void)
           "{\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"opaque-signature\"}"
           "}\n\n"
           "event: content_block_stop\ndata: {\"index\":0}\n\n"
-          "event: message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+          "event: message_delta\ndata: "
+          "{\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\n"
           "event: message_stop\ndata: {}\n\n";
       aimee_ir_session_set_sink(signed_capture, NULL);
       replay_cap_t cap = {0};
@@ -879,9 +886,9 @@ static void test_signed_stream_snapshot_before_completion(void)
 
 static void test_strict_provider_stream_frames(void)
 {
-   static const char native_nul[] =
-       "event: message_start\ndata: "
-       "{\"message\":{\"id\":\"before\\u0000after\",\"role\":\"assistant\"}}\n\n";
+   static const char native_nul[] = "event: message_start\ndata: "
+                                    "{\"message\":{\"id\":\"before\\u0000after\",\"role\":"
+                                    "\"assistant\",\"usage\":{\"input_tokens\":0}}}\n\n";
    static const char native_raw_nul[] =
        "event: message_start\ndata: "
        "{\"message\":{\"id\":\"prefix\",\"role\":\"assistant\"}}\0{}\n\n";

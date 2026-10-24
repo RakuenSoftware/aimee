@@ -469,6 +469,15 @@ cJSON *responses_frontend_render(const aimee_response_t *r)
          return NULL;
       }
    }
+   if (r->usage_unobserved)
+   {
+      if (!cJSON_AddNullToObject(out, "usage"))
+      {
+         cJSON_Delete(out);
+         return NULL;
+      }
+      return out;
+   }
    cJSON *usage = cJSON_AddObjectToObject(out, "usage");
    cJSON_AddNumberToObject(usage, "input_tokens", (double)r->usage_in);
    cJSON_AddNumberToObject(usage, "output_tokens", (double)r->usage_out);

@@ -286,6 +286,8 @@ static int messages_emit_json(server_http_sse_event_emit emit, void *context, co
 static int messages_emit_response(const aimee_response_t *response, const char *id,
                                   const char *model, server_http_sse_event_emit emit, void *context)
 {
+   if (response->usage_unobserved)
+      return -1; /* Anthropic requires numeric usage; absence is not measured zero. */
    if (response->refusal &&
        (response->stop_reason != AIMEE_STOP_CONTENT_FILTER || response->error_message ||
         !aimee_refusal_details_valid(response->refusal)))
@@ -792,7 +794,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
       agent_ingress_record_cost(ag->name, ag->model, model, messages_stop_reason(&parsed),
                                 (int)parsed.usage_in, (int)parsed.usage_out,
                                 (int)parsed.usage_cache_write, (int)parsed.usage_cache_read,
-                                "anthropic-ingress", NULL);
+                                "anthropic-ingress", parsed.usage_unobserved ? "unobserved" : NULL);
 
    mint_msg_id(msg_id, sizeof(msg_id));
    out = messages_render_response(&parsed, msg_id, model);
@@ -826,6 +828,7 @@ typedef struct
    const char *msg_id;
    const char *model;
    long ir_usage_out; /* tapped from the TURN_STOP delta for the cost row */
+   int ir_usage_unobserved;
    int ir_failed;
 } prov_stream_ctx_t;
 
@@ -882,8 +885,13 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
                   return -1;
                }
                c->ir_usage_out = terminal.usage_out;
-               anthropic_delta_emit(&terminal, &c->ir_ast, c->msg_id, c->model, c->emit,
-                                    c->emit_ctx);
+               c->ir_usage_unobserved = terminal.usage_unobserved;
+               if (anthropic_delta_emit(&terminal, &c->ir_ast, c->msg_id, c->model, c->emit,
+                                        c->emit_ctx) < 0)
+               {
+                  c->ir_failed = 1;
+                  return -1;
+               }
             }
             return 0;
          }
@@ -921,9 +929,17 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
                   return -1;
                }
                if (deltas[i].type == AIMEE_DELTA_TURN_STOP)
+               {
                   c->ir_usage_out = deltas[i].usage_out;
-               anthropic_delta_emit(&deltas[i], &c->ir_ast, c->msg_id, c->model, c->emit,
-                                    c->emit_ctx);
+                  c->ir_usage_unobserved = deltas[i].usage_unobserved;
+               }
+               if (anthropic_delta_emit(&deltas[i], &c->ir_ast, c->msg_id, c->model, c->emit,
+                                        c->emit_ctx) < 0)
+               {
+                  c->ir_failed = 1;
+                  cJSON_Delete(chunk);
+                  return -1;
+               }
             }
             cJSON_Delete(chunk);
          }
@@ -1017,8 +1033,12 @@ static int native_ir_flush(native_ir_stream_ctx_t *c)
    {
       if (delta.kind == AIMEE_BLK_THINKING && (delta.text_delta || delta.redacted_content))
          c->saw_reasoning = 1;
-      c->emitted +=
+      int emitted =
           anthropic_delta_emit(&delta, &c->frontend, c->message_id, c->model, c->emit, c->emit_ctx);
+      if (emitted < 0)
+         c->failed = 1;
+      else
+         c->emitted += emitted;
       if (delta.type == AIMEE_DELTA_ERROR)
          c->failed = 1;
    }
@@ -1126,11 +1146,11 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
       aimee_delta_t error = {.type = AIMEE_DELTA_ERROR, .error_message = reason};
       anthropic_delta_emit(&error, &state, msg_id, model, emit, ctx);
    }
-   else if (agent_ingress_accounting_enabled())
-      agent_ingress_record_cost(ag->name, ag->model, model, messages_stop_reason(&response),
-                                (int)response.usage_in, (int)response.usage_out,
-                                (int)response.usage_cache_write, (int)response.usage_cache_read,
-                                "anthropic-ingress", NULL);
+   if (status == 200 && response.role && agent_ingress_accounting_enabled())
+      agent_ingress_record_cost(
+          ag->name, ag->model, model, messages_stop_reason(&response), (int)response.usage_in,
+          (int)response.usage_out, (int)response.usage_cache_write, (int)response.usage_cache_read,
+          "anthropic-ingress", response.usage_unobserved ? "unobserved" : NULL);
    aimee_response_free(&response);
    free(frame);
 }
@@ -1172,13 +1192,14 @@ static int messages_stream_native_ir(const char *url, const char *auth, const vo
       }
       status = -1;
    }
-   if ((stream.backend.pending_usage_in || stream.backend.pending_usage_out) &&
-       agent_ingress_accounting_enabled())
+   if (status != HTTP_RETRY_ADMISSION_REFUSED && agent_ingress_accounting_enabled())
       agent_ingress_record_cost(
           ag->name, ag->model, model, NULL, (int)stream.backend.pending_usage_in,
           (int)stream.backend.pending_usage_out, (int)stream.backend.pending_cache_write,
           (int)stream.backend.pending_cache_read, "anthropic-ingress",
-          status == 200 ? "realized" : "partial");
+          !stream.backend.terminal_emitted || stream.assembled.response.usage_unobserved
+              ? "unobserved"
+              : (status == 200 ? "realized" : "partial"));
    if (stream.saw_reasoning)
       aimee_ir_metric_inc(status == 200 ? AIMEE_IR_M_REASONING_OBSERVED
                                         : AIMEE_IR_M_REASONING_INCOMPLETE,
@@ -1199,7 +1220,7 @@ static int messages_stream_native_ir(const char *url, const char *auth, const vo
  * provider rejected from a stream that merely ended. */
 static int messages_stream_ir_relay(const char *url, const char *auth, const void *prov_body,
                                     size_t prov_body_len, const char *extra, agent_t *ag,
-                                    const char *model, const char *msg_id, int input_est,
+                                    const char *model, const char *msg_id,
                                     server_http_sse_event_emit emit, void *ctx)
 {
    prov_stream_ctx_t pc;
@@ -1207,6 +1228,7 @@ static int messages_stream_ir_relay(const char *url, const char *auth, const voi
    memset(&pc, 0, sizeof pc);
    sse_parser_init(&pc.parser);
    openai_stream_state_init(&pc.ir_ost);
+   pc.ir_usage_unobserved = 1;
    pc.emit = emit;
    pc.emit_ctx = ctx;
    pc.msg_id = msg_id;
@@ -1234,7 +1256,9 @@ static int messages_stream_ir_relay(const char *url, const char *auth, const voi
             ir_status = -1;
          }
          pc.ir_usage_out = terminal.usage_out;
-         anthropic_delta_emit(&terminal, &pc.ir_ast, msg_id, model, emit, ctx);
+         pc.ir_usage_unobserved = terminal.usage_unobserved;
+         if (anthropic_delta_emit(&terminal, &pc.ir_ast, msg_id, model, emit, ctx) < 0)
+            ir_status = -1;
       }
       else if (n < 0)
       {
@@ -1245,12 +1269,11 @@ static int messages_stream_ir_relay(const char *url, const char *auth, const voi
          ir_status = -1;
       }
    }
-   if ((input_est > 0 || pc.ir_usage_out > 0) && agent_ingress_accounting_enabled())
-      agent_ingress_record_cost(ag->name, ag->model, model, NULL,
-                                pc.ir_ost.usage_seen ? (int)pc.ir_ost.usage_in : input_est,
-                                (int)pc.ir_usage_out, (int)pc.ir_ost.usage_cache_read,
-                                (int)pc.ir_ost.usage_cache_write, "anthropic-ingress",
-                                ir_status == 200 ? "realized" : "partial");
+   if (agent_ingress_accounting_enabled())
+      agent_ingress_record_cost(
+          ag->name, ag->model, model, NULL, (int)pc.ir_ost.usage_in, (int)pc.ir_usage_out,
+          (int)pc.ir_ost.usage_cache_read, (int)pc.ir_ost.usage_cache_write, "anthropic-ingress",
+          pc.ir_usage_unobserved ? "unobserved" : (ir_status == 200 ? "realized" : "partial"));
    return ir_status;
 }
 
@@ -1270,7 +1293,6 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    char extra[2048];
    char msg_id[48];
    const delegate_driver_t *driver;
-   int input_est;
    int responses_wire = 0;
    wire_fence_t *wire_snapshot = NULL;
    gw_mutate_ctx_t gwmc;
@@ -1403,19 +1425,8 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       goto cleanup;
    }
 
-   input_est = messages_estimate_tokens(&policy);
-   if (input_est < 0)
-   {
-      anthropic_stream_state_t state = {0};
-      aimee_delta_t error = {.type = AIMEE_DELTA_ERROR,
-                             .error_message = "cannot estimate canonical request"};
-      anthropic_delta_emit(&error, &state, msg_id, model, emit, ctx);
-      stream_status = 500;
-      goto cleanup;
-   }
-
    stream_status = messages_stream_ir_relay(url, auth, wire_prov_body, wire_prov_body_len, extra,
-                                            ag, model, msg_id, input_est, emit, ctx);
+                                            ag, model, msg_id, emit, ctx);
 cleanup:
    /* THE STREAMING HALF OF THE SAFETY NET. Bytes are already with the client, so
     * nothing can be restored or resent -- the breaker is all that is left, and

@@ -944,6 +944,8 @@ cJSON *openai_frontend_render(const aimee_response_t *r)
 
    cJSON_AddStringToObject(choice, "finish_reason", openai_finish(r));
 
+   if (r->usage_unobserved)
+      return out; /* Optional usage is absent; no measured zero was observed. */
    cJSON *usage = cJSON_AddObjectToObject(out, "usage");
    cJSON_AddNumberToObject(usage, "prompt_tokens", (double)r->usage_in);
    cJSON_AddNumberToObject(usage, "completion_tokens", (double)r->usage_out);

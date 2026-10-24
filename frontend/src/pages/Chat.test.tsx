@@ -930,3 +930,30 @@ it('keeps the idle placeholder short and retains the keyboard hint without sendi
   expect(input).toHaveProperty('value', 'Unsent draft');
   expect(fetchMock.mock.calls.some(([url]) => url === '/api/chat/send')).toBe(false);
 });
+
+it('does not reuse a previous model usage observation for a later unknown turn', async () => {
+  render(<StrictMode><Chat /></StrictMode>);
+  await act(async () => {});
+  const source = sources.filter(candidate => !candidate.closed).at(-1)!;
+  await act(async () => { source.listeners.get('replay_complete')?.({ data: JSON.stringify({ session_id: 'web-one', cursor: '0' }) }); });
+  const finish = async (turn: string, usage?: { usage_in: number; usage_out: number }) => {
+    const send = (event: SessionEvent) => source.emit({ ...envelope(event), turn_id: turn });
+    await act(async () => {
+      send({ kind: 'execution', payload: { status: 'running' } });
+      send({ kind: 'delta', message_id: turn, role: 'assistant', payload: { type: 'TURN_START' } });
+      send({ kind: 'delta', message_id: turn, role: 'assistant', payload: { type: 'BLOCK_START', block_id: 0, kind: 'text' } });
+      send({ kind: 'delta', message_id: turn, role: 'assistant', payload: { type: 'BLOCK_DELTA', block_id: 0, kind: 'text', text_delta: `Answer ${turn}` } });
+      send({ kind: 'delta', message_id: turn, role: 'assistant', payload: { type: 'BLOCK_STOP', block_id: 0, kind: 'text' } });
+      send({ kind: 'delta', message_id: turn, role: 'assistant', payload: { type: 'TURN_STOP', stop_reason: 'end_turn', ...usage } });
+      send({ kind: 'execution', payload: { status: 'completed' } });
+    });
+    await tick();
+  };
+  await finish('known', { usage_in: 6, usage_out: 4 });
+  expect(screen.getByText('6 in / 4 out')).toBeTruthy();
+  await finish('unknown');
+  expect(screen.queryByText('6 in / 4 out')).toBeNull();
+  await finish('observed-zero', { usage_in: 0, usage_out: 0 });
+  expect(screen.getByText('0 in / 0 out')).toBeTruthy();
+  expect(fetchMock.mock.calls.some(([url]) => url === '/api/chat/send')).toBe(false);
+});

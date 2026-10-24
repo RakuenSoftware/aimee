@@ -107,6 +107,7 @@ static void result_add_prior_metrics(agent_result_t *result, const agent_result_
 {
    if (!result || !prior)
       return;
+   result->usage_unobserved |= prior->usage_unobserved | prior->canonical_response.usage_unobserved;
    result->turns += prior->turns;
    result->tool_calls += prior->tool_calls;
    result->prompt_tokens += prior->prompt_tokens;

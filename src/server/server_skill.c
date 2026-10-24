@@ -267,7 +267,7 @@ static int skill_server_trial_run(void *opaque, const char *system_prompt, const
    int priced = 0;
    usage_out->cost_usd =
        token_estimate_cost_ex(result.model[0] ? result.model : served, &token_usage, &priced);
-   usage_out->cost_unknown = !priced;
+   usage_out->cost_unknown = !priced || agent_result_usage_is_unobserved(&result);
    return 0;
 }
 

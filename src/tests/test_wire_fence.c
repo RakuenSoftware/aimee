@@ -418,6 +418,7 @@ int http_retry_post_observed_bytes(const char *url, const char *auth, const void
       if (observer->before(observer->context, body, length) != 0)
          return HTTP_RETRY_ADMISSION_REFUSED;
       retry_transport_calls++;
+      observer->after(observer->context, 200, NULL, 0);
    }
    return 200;
 }
@@ -435,8 +436,11 @@ static void test_retry_reserves_every_actual_provider_attempt(void)
          retry_calls = retry_transport_calls = 0;
          retry_refuse = refuse;
          char *response = NULL;
-         int rc = wire_fence_post("fixture", "", "abc", 3, &response, 1000, "", 2, 0, 0, "fixture",
-                                  "fixture-model", "session", WIRE_FENCE_OPENAI_CHAT);
+         wire_fence_observation_t observation = {.transport_attempts = 99};
+         int rc = wire_fence_post_observed("fixture", "", "abc", 3, &response, 1000, "", 2, 0, 0,
+                                           "fixture", "fixture-model", "session",
+                                           WIRE_FENCE_OPENAI_CHAT, &observation);
+         assert(observation.transport_attempts == (refuse ? refuse - 1 : 2));
          assert(rc == (refuse ? HTTP_RETRY_ADMISSION_REFUSED : 200));
          assert(retry_calls == (refuse ? refuse : 2));
          assert(retry_transport_calls == (refuse ? refuse - 1 : 2));

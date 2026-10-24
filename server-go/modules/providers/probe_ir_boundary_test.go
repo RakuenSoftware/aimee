@@ -222,3 +222,38 @@ func TestResponsesNestedCreatedIdentityMustMatchTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestProbeUnobservedUsageIsNotObservedZero(t *testing.T) {
+	for _, wire := range []string{"openai_chat", "anthropic", "responses"} {
+		for variant := 0; variant < 6; variant++ {
+			input, output := "input_tokens", "output_tokens"
+			body := `{"role":"assistant","content":[{"type":"text","text":"probe"}],"stop_reason":"end_turn"}`
+			if wire == "openai_chat" {
+				input, output = "prompt_tokens", "completion_tokens"
+				body = `{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"probe"}}]}`
+			} else if wire == "responses" {
+				body = `{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"probe"}]}]}`
+			}
+			usages := []string{"", "null", "{}", `{"` + input + `":7}`, `{"` + input + `":0,"` + output + `":0}`, `{"` + input + `":0,"` + output + `":9}`}
+			if variant > 0 {
+				body = strings.TrimSuffix(body, "}") + `,"usage":` + usages[variant] + `}`
+			}
+			if wire == "responses" {
+				body = `data: {"type":"response.completed","response":` + body + "}\n\n"
+			}
+			response, err := probeHTTPResponse([]byte(body), wire)
+			if err != nil || !response.CompleteText() {
+				t.Fatalf("%s variant%d: %v", wire, variant, err)
+			}
+			if response.Usage.Unobserved != (variant < 4) {
+				t.Fatalf("%s variant%d: usage knowledge %t", wire, variant, response.Usage.Unobserved)
+			}
+			if variant < 4 && (response.Usage.Input != "" || response.Usage.Output != "") {
+				t.Fatal("unknown usage contains invented numeric totals")
+			}
+			if variant == 4 && (response.Usage.Input != "0" || response.Usage.Output != "0") {
+				t.Fatal("explicitly observed zero was lost")
+			}
+		}
+	}
+}

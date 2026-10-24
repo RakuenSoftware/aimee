@@ -52,11 +52,24 @@ int main(void)
 
    /* --- text_completion envelope --- */
    {
-      int len = openai_format_text_completion("cmpl-2", "aimee", "hi there", 123, 1, 1, resp,
+      int len = openai_format_text_completion("cmpl-2", "aimee", "hi there", 123, 1, 1, 0, resp,
                                               sizeof(resp));
       assert(len > 0);
       assert(strstr(resp, "\"object\":\"text_completion\""));
       assert(strstr(resp, "\"text\":\"hi there\""));
+      assert(openai_format_text_completion("cmpl-unknown", "aimee", "answer", 123, 0, 0, 1, resp,
+                                           sizeof(resp)) > 0);
+      cJSON *unknown = cJSON_Parse(resp);
+      assert(unknown && !cJSON_GetObjectItemCaseSensitive(unknown, "usage"));
+      cJSON_Delete(unknown);
+      assert(openai_format_text_completion("cmpl-zero", "aimee", "answer", 123, 0, 0, 0, resp,
+                                           sizeof(resp)) > 0);
+      cJSON *zero = cJSON_Parse(resp);
+      const cJSON *usage = cJSON_GetObjectItemCaseSensitive(zero, "usage");
+      assert(cJSON_IsObject(usage));
+      assert(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(usage, "prompt_tokens")));
+      assert(cJSON_GetObjectItemCaseSensitive(usage, "prompt_tokens")->valuedouble == 0);
+      cJSON_Delete(zero);
    }
 
    /* --- error envelope --- */

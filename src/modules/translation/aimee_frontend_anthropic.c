@@ -419,6 +419,9 @@ cJSON *anthropic_frontend_render(const aimee_response_t *r)
       }
       return failure;
    }
+   /* This wire requires numeric totals; unknown usage cannot become zero. */
+   if (r->usage_unobserved)
+      return NULL;
    cJSON *out = cJSON_CreateObject();
    cJSON_AddStringToObject(out, "id", r->id ? r->id : "");
    cJSON_AddStringToObject(out, "type", "message");

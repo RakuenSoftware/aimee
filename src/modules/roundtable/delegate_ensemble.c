@@ -24,6 +24,7 @@
 #include "token_tracker.h"
 
 #include <openssl/crypto.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -130,92 +131,6 @@ static void record_adopted_round(roundtable_result_t *out, int round, int failed
       out->degraded = 1;
 }
 
-/* Balance-match a JSON object starting at text[start]=='{'. Scans forward
- * tracking brace depth, correctly skipping braces that appear INSIDE JSON string
- * literals (respecting \-escapes), and returns the index just past the matching
- * '}', or -1 if unbalanced. This is what lets us extract the real object out of a
- * prose review that also contains `{...}` code snippets. */
-static long json_object_extent(const char *text, long start)
-{
-   int depth = 0;
-   int in_str = 0;
-   for (long i = start; text[i]; i++)
-   {
-      char c = text[i];
-      if (in_str)
-      {
-         if (c == '\\' && text[i + 1])
-            i++; /* skip the escaped char */
-         else if (c == '"')
-            in_str = 0;
-         continue;
-      }
-      if (c == '"')
-         in_str = 1;
-      else if (c == '{')
-         depth++;
-      else if (c == '}')
-      {
-         depth--;
-         if (depth == 0)
-            return i + 1;
-      }
-   }
-   return -1;
-}
-
-/* Parse JSON from a model response, tolerating a markdown code fence
- * (```json ... ```) or surrounding prose. Panelists given a persona system prompt
- * — especially on a large task, where the "raw JSON only" instruction is far up
- * the context — frequently return their `{"items":[...]}` wrapped in prose that
- * ALSO contains `{...}` code snippets. A naive first-'{'-to-last-'}' slice then
- * spans unrelated braces and fails to parse, collapsing the review to zero items.
- * Strategy: strict parse first (bare JSON); else scan every '{', balance-match a
- * candidate object (string-aware), parse it, and prefer the first that carries an
- * "items" array (the review contract), falling back to the first that parses at
- * all. Returns NULL if nothing parses; caller owns the result. */
-cJSON *parse_model_json_lenient(const char *text)
-{
-   if (!text || !text[0])
-      return NULL;
-   cJSON *root = cJSON_Parse(text);
-   if (root)
-      return root;
-
-   cJSON *first_valid = NULL;
-   for (long i = 0; text[i]; i++)
-   {
-      if (text[i] != '{')
-         continue;
-      long end = json_object_extent(text, i);
-      if (end < 0)
-         break; /* no balanced object from here on */
-      size_t len = (size_t)(end - i);
-      char *buf = (char *)malloc(len + 1);
-      if (!buf)
-         break;
-      memcpy(buf, text + i, len);
-      buf[len] = '\0';
-      cJSON *cand = cJSON_Parse(buf);
-      free(buf);
-      if (cand)
-      {
-         if (cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(cand, "items")))
-         {
-            cJSON_Delete(first_valid);
-            return cand; /* the review contract object — best match */
-         }
-         if (!first_valid)
-            first_valid = cand; /* remember, keep scanning for an items object */
-         else
-            cJSON_Delete(cand);
-         /* skip past this object to avoid rescanning its inner braces */
-         i = end - 1;
-      }
-   }
-   return first_valid;
-}
-
 static int best_candidate(const agent_result_t *results, int count)
 {
    int best = -1;
@@ -290,6 +205,9 @@ static double result_token_cost(const agent_config_t *acfg, const agent_result_t
 {
    if (!result)
       return 0.0;
+   /* NaN stays unknown through every sum and renders as JSON null. */
+   if (agent_result_usage_is_unobserved(result))
+      return NAN;
    /* Prefer the model actually served (recorded on the result, and updated
     * across fallback-model swaps) over re-deriving it from the configured agent
     * by name — so observed cost reflects what really ran. */
@@ -298,6 +216,11 @@ static double result_token_cost(const agent_config_t *acfg, const agent_result_t
                                         result->completion_tokens);
    const char *agent = result->agent_name[0] ? result->agent_name : fallback_agent;
    return agent_token_cost(acfg, agent, result->prompt_tokens, result->completion_tokens);
+}
+
+static int cost_limit_reached(const ensemble_panel_t *panel, double cost)
+{
+   return panel->max_cost_usd > 0.0 && (!isfinite(cost) || cost > panel->max_cost_usd);
 }
 
 static double estimate_cost(const agent_config_t *acfg, const agent_result_t *results,
@@ -668,6 +591,9 @@ static int run_aggregator(agent_config_t *acfg, const ensemble_panel_t *panel,
             out->response && out->response[0])
       return 0;
 
+   if (panel->max_cost_usd > 0.0 && agent_result_usage_is_unobserved(out))
+      return -1;
+
    /* Fallback: try one alternate panelist. Synthesis/repair is bounded overhead,
     * never authority to retry across an arbitrarily large configured roster. */
    int fallbacks_tried = 0;
@@ -686,11 +612,16 @@ static int run_aggregator(agent_config_t *acfg, const ensemble_panel_t *panel,
          continue;
       if (fallbacks_tried++ >= 1)
          break;
+      int usage_unobserved = agent_result_usage_is_unobserved(out);
       agent_result_clear_response(out);
       memset(out, 0, sizeof(*out));
       if (delegate_run_inline(&agg_cfg, cand, "review", NULL, synthesis_prompt, 0, 0.3, out) == 0 &&
           out->response && out->response[0])
+      {
+         out->usage_unobserved |= usage_unobserved;
          return 0;
+      }
+      out->usage_unobserved |= usage_unobserved;
    }
    return -1;
 }
@@ -907,13 +838,13 @@ static int run_quality_scorer(agent_config_t *acfg, const char *task, const char
    if (agent_run_with_tools_write_enforce(acfg, "reason", NULL, full, 512, 0, &score_result) == 0 &&
        ensemble_project_result(&score_result) == 0)
    {
-      if (cost_usd)
-         *cost_usd += result_token_cost(acfg, &score_result, "reason");
       char *end = NULL;
       long parsed = strtol(score_result.response, &end, 10);
       if (end && end != score_result.response && parsed >= 0 && parsed <= 100)
          score = (int)parsed;
    }
+   if (cost_usd)
+      *cost_usd += result_token_cost(acfg, &score_result, "reason");
    agent_result_clear_response(&score_result);
    free(full);
    return score;
@@ -938,8 +869,6 @@ static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, cons
    if (agent_run_with_tools_write_enforce(acfg, "reason", NULL, full, 512, 0, &res) == 0 &&
        ensemble_project_result(&res) == 0)
    {
-      if (cost_usd)
-         *cost_usd += result_token_cost(acfg, &res, "reason");
       cJSON *j = parse_model_json_lenient(res.response);
       cJSON *c = j ? cJSON_GetObjectItemCaseSensitive(j, "completion") : NULL;
       if (cJSON_IsNumber(c))
@@ -948,6 +877,8 @@ static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, cons
          completion = atoi(res.response);
       cJSON_Delete(j);
    }
+   if (cost_usd)
+      *cost_usd += result_token_cost(acfg, &res, "reason");
    agent_result_clear_response(&res);
    free(full);
    return completion >= 90;
@@ -979,13 +910,13 @@ static int summarize_forward(agent_config_t *acfg, const ensemble_panel_t *panel
    memset(&res, 0, sizeof(res));
    int rc = run_aggregator(acfg, panel, full, 0, &res);
    free(full);
+   if (cost_usd)
+      *cost_usd += result_token_cost(acfg, &res, panel->aggregator);
    if (rc != 0 || ensemble_project_result(&res) != 0)
    {
       agent_result_clear_response(&res);
       return -1;
    }
-   if (cost_usd)
-      *cost_usd += result_token_cost(acfg, &res, panel->aggregator);
    free(*peer_notes);
    *peer_notes = xstrdup0(res.response);
    if (strlen(*artifact) > 20000)
@@ -1116,10 +1047,10 @@ static void answer_roundtable_questions(agent_config_t *acfg, const char *task,
        ensemble_project_result(&res) == 0)
    {
       parse_question_answers(res.response, opts, out);
-      out->cost_usd += result_token_cost(acfg, &res, "reason");
    }
    else
       mark_question_gaps(opts, out);
+   out->cost_usd += result_token_cost(acfg, &res, "reason");
    agent_result_clear_response(&res);
    free(prompt);
 }
@@ -1145,13 +1076,13 @@ static int repair_review_json(agent_config_t *acfg, const ensemble_panel_t *pane
    int rc = agent_run_named(acfg, panel->reference_models[participant], "review", NULL, prompt, 512,
                             0.2, &res);
    free(prompt);
+   if (cost_usd)
+      *cost_usd += result_token_cost(acfg, &res, panel->reference_models[participant]);
    if (rc != 0 || ensemble_project_result(&res) != 0)
    {
       agent_result_clear_response(&res);
       return -1;
    }
-   if (cost_usd)
-      *cost_usd += result_token_cost(acfg, &res, panel->reference_models[participant]);
    agent_result_move_response(fixed, &res);
    return 0;
 }
@@ -1367,6 +1298,8 @@ static int run_round_sequential(agent_config_t *acfg, const ensemble_panel_t *pa
          }
       }
       free(prompt);
+      if (panel->max_cost_usd > 0.0 && agent_result_usage_is_unobserved(&results[i]))
+         break;
    }
    return 0;
 }
@@ -1835,7 +1768,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, c
    out->cost_usd = cost;
 
    /* Check cost cap before doing more work */
-   if (panel->max_cost_usd > 0.0 && cost > panel->max_cost_usd)
+   if (cost_limit_reached(panel, cost))
    {
       aimee_log(LOG_INFO, "delegate_ensemble", "cost cap exceeded: $%.4f > $%.4f", cost,
                 panel->max_cost_usd);
@@ -1898,11 +1831,11 @@ int delegate_ensemble_run(agent_config_t *acfg, const ensemble_panel_t *panel, c
    agent_result_t agg_result = {0};
    int agg_rc = run_aggregator(acfg, panel, synthesis_buf, 0, &agg_result);
    free(synthesis_buf);
+   out->cost_usd += result_token_cost(acfg, &agg_result, panel->aggregator);
 
    if (agg_rc == 0 && agg_result.response && agg_result.response[0])
    {
       (void)ensemble_adopt_output(out, &agg_result);
-      out->cost_usd += result_token_cost(acfg, &agg_result, panel->aggregator);
    }
    else
    {
@@ -2049,6 +1982,11 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
 
    for (int round = 1; round <= local.max_rounds; round++)
    {
+      if (cost_limit_reached(panel, out->cost_usd))
+      {
+         out->cost_capped = 1;
+         break;
+      }
       if (local.cancel_requested && local.cancel_requested(local.cancel_ctx))
       {
          out->cancelled = 1;
@@ -2090,6 +2028,12 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
          }
       }
 
+      if (cost_limit_reached(panel, out->cost_usd))
+      {
+         out->cost_capped = 1;
+         break;
+      }
+
       agent_result_t results[ENSEMBLE_MAX_REFS];
       memset(results, 0, sizeof(results));
       /* Remaining roundtable budget bounds this round's parallel panel so a hung
@@ -2119,6 +2063,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
             agent_result_clear_response(&results[i]);
          goto fail;
       }
+      out->cost_usd += estimate_cost(acfg, results, panel->reference_models, ref_count);
+      out->rounds_run = round;
       int required_count =
           local.required_participants > 0 ? local.required_participants : ref_count;
       if (local.cancel_requested && local.cancel_requested(local.cancel_ctx))
@@ -2147,7 +2093,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
                   out->cancelled = 1;
                   break;
                }
-               if (repair_review_json(acfg, panel, i, results[i].response, &fixed,
+               if (!cost_limit_reached(panel, out->cost_usd) &&
+                   repair_review_json(acfg, panel, i, results[i].response, &fixed,
                                       &out->cost_usd) == 0 &&
                    parse_review_issue_keys(fixed.response, cur_review_keys, &cur_review_key_count,
                                            64) == 0)
@@ -2209,10 +2156,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
                 local.max_rounds, ref_count - round_failed, ref_count,
                 required_count - round_required_failed, required_count);
 
-      double round_cost = estimate_cost(acfg, results, panel->reference_models, ref_count);
-      out->cost_usd += round_cost;
-      out->rounds_run = round;
-      if (panel->max_cost_usd > 0.0 && out->cost_usd > panel->max_cost_usd)
+      if (cost_limit_reached(panel, out->cost_usd))
       {
          out->cost_capped = 1;
          int best = best_candidate(results, ref_count);
@@ -2302,6 +2246,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
                   int chair_changed = 0;
                   chair_adj = roundtable_chair_apply(out, chair_res.response, &chair_changed);
                }
+               out->cost_usd += result_token_cost(acfg, &chair_res, panel->aggregator);
                agent_result_clear_response(&chair_res);
                free(chair_prompt);
             }
@@ -2349,13 +2294,13 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
       long agg_deadline_abs = local.deadline_ms > 0 ? start_ms + local.deadline_ms : 0;
       int agg_rc = run_aggregator(acfg, panel, synthesis_prompt, agg_deadline_abs, &agg_result);
       free(synthesis_prompt);
+      out->cost_usd += result_token_cost(acfg, &agg_result, panel->aggregator);
       if (agg_rc != 0 || !agg_result.response || !agg_result.response[0])
       {
          out->degraded = 1;
          agent_result_clear_response(&agg_result);
          continue;
       }
-      out->cost_usd += result_token_cost(acfg, &agg_result, panel->aggregator);
 
       char *prev_artifact_for_judge = xstrdup0(artifact);
       int ratio = change_ratio_0_100(artifact, agg_result.response);
@@ -2383,6 +2328,18 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
          free(prev_artifact_for_judge);
          break;
       }
+      if (cost_limit_reached(panel, out->cost_usd))
+      {
+         out->cost_capped = 1;
+         if (!best_artifact)
+         {
+            best_artifact = xstrdup0(agg_result.response);
+            record_adopted_round(out, round, round_failed, round_required_failed);
+         }
+         agent_result_clear_response(&agg_result);
+         free(prev_artifact_for_judge);
+         break;
+      }
       /* The quality scorer exists only to compare candidates across rounds and
        * pick the best. A single-round run has exactly one candidate, so skip the
        * extra (large, sequential, external-LLM) scorer call and adopt this
@@ -2400,7 +2357,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
       }
       agent_result_clear_response(&agg_result);
 
-      if (panel->max_cost_usd > 0.0 && out->cost_usd > panel->max_cost_usd)
+      if (cost_limit_reached(panel, out->cost_usd))
       {
          out->cost_capped = 1;
          free(prev_artifact_for_judge);
@@ -2444,7 +2401,10 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
       free(prev_artifact_for_judge);
    }
 
-   if (local.mode == ROUNDTABLE_REVIEW && local.apply_review && best_artifact && best_artifact[0])
+   if (cost_limit_reached(panel, out->cost_usd))
+      out->cost_capped = 1;
+   if (local.mode == ROUNDTABLE_REVIEW && local.apply_review && !out->cost_capped &&
+       best_artifact && best_artifact[0])
    {
       char *apply_prompt =
           xasprintf3("Apply this consolidated review to produce the final draft.\n\nTASK:\n",
@@ -2461,8 +2421,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
          {
             free(best_artifact);
             best_artifact = xstrdup0(apply_result.response);
-            out->cost_usd += result_token_cost(acfg, &apply_result, "draft");
          }
+         out->cost_usd += result_token_cost(acfg, &apply_result, "draft");
          agent_result_clear_response(&apply_result);
          free(full);
       }
@@ -2478,7 +2438,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const ensemble_panel_t *panel,
        * (respect the stop) or already hit the cost cap (do not spend past the
        * budget), but still report the questions as gaps so the
        * answered_questions/coverage_gaps contract stays populated. */
-      if (out->cancelled || out->cost_capped)
+      if (out->cancelled || out->cost_capped || cost_limit_reached(panel, out->cost_usd))
          mark_question_gaps(&local, out);
       else
          answer_roundtable_questions(acfg, task, &local, out);

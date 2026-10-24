@@ -537,7 +537,8 @@ typedef struct
     * response is a cached text/display projection, never conversation history. */
    aimee_response_t canonical_response;
    char *response;
-   int cache_hit; /* No new provider work, health success or outcome evidence. */
+   int cache_hit;        /* No new provider work, health success or outcome evidence. */
+   int usage_unobserved; /* Any actual provider attempt lacked complete usage. */
    int prompt_tokens;
    int completion_tokens;
    int cache_write_tokens; /* Anthropic: cache_creation_input_tokens */
@@ -554,11 +555,18 @@ typedef struct
    char abstain_reason[512];
 } agent_result_t;
 
+/* A direct factory output may still own the canonical observation. */
+static inline int agent_result_usage_is_unobserved(const agent_result_t *result)
+{
+   return result && (result->usage_unobserved || result->canonical_response.usage_unobserved);
+}
+
 /* Metadata stays available for accounting after content is released. */
 static inline void agent_result_clear_response(agent_result_t *result)
 {
    if (!result)
       return;
+   result->usage_unobserved |= result->canonical_response.usage_unobserved;
    free(result->response);
    result->response = NULL;
    aimee_response_free(&result->canonical_response);
@@ -573,6 +581,7 @@ static inline int agent_result_adopt_response(agent_result_t *result, aimee_resp
    if (!text)
       return -1;
    agent_result_clear_response(result);
+   result->usage_unobserved |= owned->usage_unobserved;
    result->canonical_response = *owned;
    *owned = (aimee_response_t){0};
    result->response = text;
@@ -585,6 +594,8 @@ static inline void agent_result_move_response(agent_result_t *destination, agent
    if (!destination || !source || destination == source)
       return;
    agent_result_clear_response(destination);
+   destination->usage_unobserved |=
+       source->usage_unobserved | source->canonical_response.usage_unobserved;
    destination->canonical_response = source->canonical_response;
    destination->response = source->response;
    memcpy(destination->agent_name, source->agent_name, sizeof destination->agent_name);

@@ -83,7 +83,7 @@ func probeMap(v any) object { m, _ := v.(map[string]any); return m }
 func probeResponseBase(raw []byte) *canonical.Response {
 	role := "assistant"
 	sidecar, _ := json.Marshal(object{"native_body_base64": base64.StdEncoding.EncodeToString(raw)})
-	return &canonical.Response{Schema: "aimee.response.v1", Role: &role, Blocks: []canonical.ResponseBlock{}, Usage: canonical.ZeroUsage(), Raw: sidecar}
+	return &canonical.Response{Schema: "aimee.response.v1", Role: &role, Blocks: []canonical.ResponseBlock{}, Usage: canonical.ResponseUsage{Unobserved: true}, Raw: sidecar}
 }
 func probeStop(r *canonical.Response, raw string, wire string) {
 	r.RawStopReason = &raw
@@ -166,6 +166,8 @@ func probeParts(r *canonical.Response, value any) error {
 	return nil
 }
 func probeUsage(r *canonical.Response, u object) error {
+	usage := canonical.ZeroUsage()
+	r.Usage = canonical.ResponseUsage{Unobserved: true}
 	for _, key := range []string{"prompt_tokens_details", "input_tokens_details", "completion_tokens_details", "output_tokens_details"} {
 		if value := u[key]; value != nil && probeMap(value) == nil {
 			return errProbe
@@ -175,14 +177,14 @@ func probeUsage(r *canonical.Response, u object) error {
 		value any
 		out   *string
 	}{
-		{u["input_tokens"], &r.Usage.Input}, {u["prompt_tokens"], &r.Usage.Input},
-		{u["output_tokens"], &r.Usage.Output}, {u["completion_tokens"], &r.Usage.Output},
-		{u["cache_read_input_tokens"], &r.Usage.CacheRead}, {u["cached_input_tokens"], &r.Usage.CacheRead},
-		{probeMap(u["prompt_tokens_details"])["cached_tokens"], &r.Usage.CacheRead},
-		{probeMap(u["input_tokens_details"])["cached_tokens"], &r.Usage.CacheRead},
-		{u["cache_creation_input_tokens"], &r.Usage.CacheWrite},
-		{probeMap(u["completion_tokens_details"])["reasoning_tokens"], &r.Usage.Reasoning},
-		{probeMap(u["output_tokens_details"])["reasoning_tokens"], &r.Usage.Reasoning},
+		{u["input_tokens"], &usage.Input}, {u["prompt_tokens"], &usage.Input},
+		{u["output_tokens"], &usage.Output}, {u["completion_tokens"], &usage.Output},
+		{u["cache_read_input_tokens"], &usage.CacheRead}, {u["cached_input_tokens"], &usage.CacheRead},
+		{probeMap(u["prompt_tokens_details"])["cached_tokens"], &usage.CacheRead},
+		{probeMap(u["input_tokens_details"])["cached_tokens"], &usage.CacheRead},
+		{u["cache_creation_input_tokens"], &usage.CacheWrite},
+		{probeMap(u["completion_tokens_details"])["reasoning_tokens"], &usage.Reasoning},
+		{probeMap(u["output_tokens_details"])["reasoning_tokens"], &usage.Reasoning},
 	}
 	for _, field := range fields {
 		if field.value == nil {
@@ -197,6 +199,10 @@ func probeUsage(r *canonical.Response, u object) error {
 			return errProbe
 		}
 		*field.out = string(n)
+	}
+	if (u["input_tokens"] != nil || u["prompt_tokens"] != nil) &&
+		(u["output_tokens"] != nil || u["completion_tokens"] != nil) {
+		r.Usage = usage
 	}
 	return nil
 }

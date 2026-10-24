@@ -5,6 +5,7 @@
 #include "cJSON.h"
 #include "model_registry.h"
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +17,8 @@
  * g_parallel_mode == 4 sleep below, which must be comfortably longer. */
 #define ROUNDTABLE_DEADLINE_TEST_MS 200
 
+static int
+    g_usage_mode; /* 1=panel unknown, 2=synthesis unknown, 3=observed zero, 4=scorer unknown */
 static int g_parallel_mode = 0; /* 0=all, 1=only-first, 9=last-fails, 10=first-fails,
                                  * 11=first seat fails only on the first fan-out */
 static int g_aggregator_mode = 0;
@@ -96,6 +99,16 @@ static void fixture_observation(agent_result_t *out)
    if (!out->response)
       return;
    assert(agent_result_from_host_text(out, out->response) == 0);
+   int unknown =
+       (g_usage_mode == 1 && out->prompt_tokens < 200) ||
+       (g_usage_mode == 2 && out->prompt_tokens == 200 && strcmp(out->agent_name, "reason")) ||
+       (g_usage_mode == 4 && !strcmp(out->agent_name, "reason")) ||
+       (g_usage_mode == 5 && out->prompt_tokens == 200 && g_aggregator_calls == 2 &&
+        strcmp(out->agent_name, "reason"));
+   if (unknown || g_usage_mode == 3)
+      out->prompt_tokens = out->completion_tokens = 0;
+   out->canonical_response.usage_unobserved = unknown && g_usage_mode != 2;
+   out->usage_unobserved = unknown && g_usage_mode == 2;
    out->canonical_response.usage_in = out->prompt_tokens;
    out->canonical_response.usage_out = out->completion_tokens;
    if (g_parallel_mode == 12)
@@ -554,6 +567,7 @@ static agent_config_t make_priced_acfg(void)
 
 static void reset_modes(void)
 {
+   g_usage_mode = 0;
    g_parallel_mode = 0;
    g_aggregator_mode = 0;
    g_reason_mode = 0;
@@ -2058,8 +2072,107 @@ static void test_review_items_require_canonical_success(void)
    agent_result_clear_response(&source);
 }
 
+static void assert_cost_json_null(double cost)
+{
+   /* This is the actual legacy compute handler's cost field writer. */
+   cJSON *report = cJSON_CreateObject();
+   cJSON_AddNumberToObject(report, "cost_usd", cost);
+   char *wire = cJSON_PrintUnformatted(report);
+   cJSON *parsed = cJSON_Parse(wire);
+   assert(parsed && cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(parsed, "cost_usd")));
+   free(wire);
+   cJSON_Delete(report);
+   cJSON_Delete(parsed);
+}
+
+static void test_unknown_usage_cost_and_spend(void)
+{
+   agent_config_t acfg = make_acfg();
+   for (int bounded = 0; bounded <= 1; bounded++)
+   {
+      reset_modes();
+      g_usage_mode = 1;
+      ensemble_panel_t panel = make_cfg(1, 2, bounded ? 10.0 : 0.0);
+      delegate_ensemble_result_t result = {0};
+      assert(!delegate_ensemble_run(&acfg, &panel, "unknown panel usage", &result));
+      assert(result.success && isnan(delegate_ensemble_cost_usd(&result)));
+      assert_cost_json_null(result.cost_usd);
+      assert(result.cost_capped == bounded);
+      assert(g_aggregator_calls == (bounded ? 0 : 1));
+      assert(result.canonical_response && result.response[0]);
+      delegate_ensemble_result_free(&result);
+   }
+   for (int usage = 1; usage <= 4; usage++)
+   {
+      reset_modes();
+      g_usage_mode = usage;
+      g_cost_fold_calls = 0;
+      ensemble_panel_t panel = make_cfg(1, 2, 10.0);
+      roundtable_opts_t opts = {
+          .mode = ROUNDTABLE_DRAFT, .max_rounds = 3, .parent_session_id = "usage-parent"};
+      roundtable_result_t result = {0};
+      assert(!delegate_roundtable_run(&acfg, &panel, "usage budget", &opts, &result));
+      assert(result.artifact && result.artifact[0]);
+      if (usage == 3)
+      {
+         assert(result.cost_usd == 0.0 && !result.cost_capped);
+         assert(g_scorer_calls > 0 && g_cost_fold_calls == 0);
+      }
+      else
+      {
+         assert(isnan(result.cost_usd) && result.cost_capped && result.rounds_run == 1);
+         assert_cost_json_null(result.cost_usd);
+         assert(g_scorer_calls == (usage == 4 ? 1 : 0));
+         assert(g_aggregator_calls == (usage == 1 ? 0 : 1));
+         assert(g_cost_fold_calls == (usage == 1 ? 0 : usage == 2 ? 3 : 4));
+      }
+      delegate_roundtable_result_free(&result);
+   }
+   reset_modes();
+   g_usage_mode = 5;
+   g_aggregator_mode = g_reason_mode = 1;
+   ensemble_panel_t graded_panel = make_cfg(1, 2, 10.0);
+   roundtable_opts_t graded_opts = {.mode = ROUNDTABLE_DRAFT, .max_rounds = 3};
+   roundtable_result_t graded = {0};
+   assert(!delegate_roundtable_run(&acfg, &graded_panel, "retain best before unknown synthesis",
+                                   &graded_opts, &graded));
+   assert(graded.cost_capped && isnan(graded.cost_usd) && graded.rounds_run == 2);
+   assert(graded.best_round == 1 && strstr(graded.artifact, "synthesized answer 1"));
+   assert(g_scorer_calls == 1);
+   delegate_roundtable_result_free(&graded);
+   reset_modes();
+   g_usage_mode = 1;
+   ensemble_panel_t panel = make_cfg(1, 2, 10.0);
+   roundtable_opts_t opts = {
+       .mode = ROUNDTABLE_DRAFT, .max_rounds = 3, .turns = ROUNDTABLE_SEQUENTIAL};
+   roundtable_result_t result = {0};
+   assert(!delegate_roundtable_run(&acfg, &panel, "unknown sequential usage", &opts, &result));
+   assert(result.cost_capped && isnan(result.cost_usd) && g_named_calls == 1);
+   delegate_roundtable_result_free(&result);
+   for (int malformed = 0; malformed <= 1; malformed++)
+   {
+      reset_modes();
+      g_usage_mode = 1;
+      g_parallel_mode = malformed ? 3 : 6;
+      const char *questions[] = {"does auth hold?"};
+      opts = (roundtable_opts_t){.mode = ROUNDTABLE_REVIEW,
+                                 .max_rounds = 1,
+                                 .apply_review = 1,
+                                 .questions = questions,
+                                 .question_count = 1};
+      panel.chair_synthesis = 1;
+      assert(!delegate_roundtable_run(&acfg, &panel, "unknown review usage", &opts, &result));
+      assert(result.cost_capped && isnan(result.cost_usd));
+      assert(!g_named_calls && !g_aggregator_calls && !g_scorer_calls);
+      assert(result.answered_question_count == 1 && !result.answered_questions[0].answered);
+      delegate_roundtable_result_free(&result);
+   }
+   reset_modes();
+}
+
 int main(void)
 {
+   test_unknown_usage_cost_and_spend();
    test_refused_native_participants_cannot_synthesize_success();
    test_review_items_require_canonical_success();
    printf("delegate_ensemble tests\n");

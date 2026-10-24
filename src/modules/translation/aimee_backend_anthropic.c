@@ -5,6 +5,7 @@
 #include <aimee/translation/aimee_frontend.h>
 
 #include "cJSON.h"
+#include "usage_observation.h"
 #include "anthropic_refusal.h"
 #include "aimee_sha256.h"
 #include <stdint.h>
@@ -1087,6 +1088,19 @@ int anthropic_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
       return -1;
    }
    out->raw = cJSON_Duplicate(resp, 1);
+   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
+   if (aimee_ir_read_usage(usage, "input_tokens", &out->usage_in) ||
+       aimee_ir_read_usage(usage, "output_tokens", &out->usage_out) ||
+       aimee_ir_read_usage(usage, "cache_read_input_tokens", &out->usage_cache_read) ||
+       aimee_ir_read_usage(usage, "cache_creation_input_tokens", &out->usage_cache_write))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid provider usage counter");
+      aimee_response_free(out);
+      return -1;
+   }
+   wire_response_usage(out, usage, "input_tokens", "output_tokens");
+
    if (failure && !cJSON_IsNull(failure))
    {
       const char *message =
@@ -1151,18 +1165,6 @@ int anthropic_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
          }
          out->n_content = n;
       }
-   }
-
-   const cJSON *usage = cJSON_GetObjectItemCaseSensitive(resp, "usage");
-   if (aimee_ir_read_usage(usage, "input_tokens", &out->usage_in) ||
-       aimee_ir_read_usage(usage, "output_tokens", &out->usage_out) ||
-       aimee_ir_read_usage(usage, "cache_read_input_tokens", &out->usage_cache_read) ||
-       aimee_ir_read_usage(usage, "cache_creation_input_tokens", &out->usage_cache_write))
-   {
-      if (err && errn)
-         snprintf(err, errn, "invalid provider usage counter");
-      aimee_response_free(out);
-      return -1;
    }
 
    return 0;

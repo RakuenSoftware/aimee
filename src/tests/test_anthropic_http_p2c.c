@@ -505,7 +505,8 @@ static void test_messages_buffered_responses_wire_parses_sse(void)
    g_driver = &driver;
    /* Raw SSE — invalid JSON on purpose, so the old cJSON_Parse path yields empty. */
    g_response_body = "event: response.completed\ndata: "
-                     "{\"type\":\"response.completed\",\"response\":{\"status\":\"completed\","
+                     "{\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":0,"
+                     "\"output_tokens\":0},\"status\":\"completed\","
                      "\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{"
                      "\"type\":\"output_text\",\"text\":\"PONG\"}]}]}}\n\n";
 

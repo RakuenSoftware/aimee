@@ -157,6 +157,7 @@ static int recalls;
 static int refuse_after;
 static int provider_calls;
 static int final_response;
+static int usage_mixed;
 static const char *simple_finish;
 static int simple_tools, simple_media;
 static int bootstrap_case, bootstrap_evidence_seen;
@@ -294,6 +295,14 @@ int http_retry_post_context_bytes(const char *url, const char *auth_header, cons
              cJSON_Parse("{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{"
                          "\"type\":\"output_text\",\"text\":\"Identity fixture completed.\"}]}");
          assert(message && cJSON_AddItemToArray(output, message));
+      }
+      if (usage_mixed == 3 || (usage_mixed == 1 && provider_calls == 2) ||
+          (usage_mixed == 2 && provider_calls == 1))
+      {
+         cJSON *usage = cJSON_AddObjectToObject(reply, "usage");
+         assert(usage);
+         assert(cJSON_AddNumberToObject(usage, "input_tokens", usage_mixed == 3 ? 0 : 7));
+         assert(cJSON_AddNumberToObject(usage, "output_tokens", usage_mixed == 3 ? 0 : 3));
       }
       *response_buf = cJSON_PrintUnformatted(reply);
       cJSON_Delete(reply);
@@ -873,6 +882,24 @@ int main(void)
       agent_result_clear_response(&result);
       aimee_ir_session_set_sink(NULL, NULL);
    }
+   identity_case = 2;
+   for (usage_mixed = 1; usage_mixed <= 3; usage_mixed++)
+   {
+      recalls = provider_calls = identity_results = 0;
+      aimee_ir_session_set_sink(capture_identity_result, NULL);
+      rc = agent_execute_with_tools_for_role(&agent, &network, NULL, "original prompt", "task", 128,
+                                             0, &result);
+      assert(rc == 0 && result.success && provider_calls == 2 && identity_results == 1);
+      assert(!aimee_ir_response_admit(&result.canonical_response));
+      assert(agent_result_usage_is_unobserved(&result) == (usage_mixed != 3));
+      assert(result.canonical_response.usage_unobserved == (usage_mixed != 3));
+      assert(result.canonical_response.usage_in == 0 && result.canonical_response.usage_out == 0);
+      assert(result.prompt_tokens == (usage_mixed == 3 ? 0 : 7));
+      assert(result.completion_tokens == (usage_mixed == 3 ? 0 : 3));
+      agent_result_clear_response(&result);
+      aimee_ir_session_set_sink(NULL, NULL);
+   }
+   usage_mixed = 0;
    identity_case = 2;
    metadata_available = 0;
    recalls = provider_calls = identity_results = 0;

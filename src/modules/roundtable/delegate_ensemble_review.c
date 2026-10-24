@@ -19,6 +19,92 @@
 #include <time.h>
 #include <ctype.h>
 
+/* Balance-match a JSON object starting at text[start]=='{'. Scans forward
+ * tracking brace depth, correctly skipping braces that appear INSIDE JSON string
+ * literals (respecting \-escapes), and returns the index just past the matching
+ * '}', or -1 if unbalanced. This is what lets us extract the real object out of a
+ * prose review that also contains `{...}` code snippets. */
+static long json_object_extent(const char *text, long start)
+{
+   int depth = 0;
+   int in_str = 0;
+   for (long i = start; text[i]; i++)
+   {
+      char c = text[i];
+      if (in_str)
+      {
+         if (c == '\\' && text[i + 1])
+            i++; /* skip the escaped char */
+         else if (c == '"')
+            in_str = 0;
+         continue;
+      }
+      if (c == '"')
+         in_str = 1;
+      else if (c == '{')
+         depth++;
+      else if (c == '}')
+      {
+         depth--;
+         if (depth == 0)
+            return i + 1;
+      }
+   }
+   return -1;
+}
+
+/* Parse JSON from a model response, tolerating a markdown code fence
+ * (```json ... ```) or surrounding prose. Panelists given a persona system prompt
+ * — especially on a large task, where the "raw JSON only" instruction is far up
+ * the context — frequently return their `{"items":[...]}` wrapped in prose that
+ * ALSO contains `{...}` code snippets. A naive first-'{'-to-last-'}' slice then
+ * spans unrelated braces and fails to parse, collapsing the review to zero items.
+ * Strategy: strict parse first (bare JSON); else scan every '{', balance-match a
+ * candidate object (string-aware), parse it, and prefer the first that carries an
+ * "items" array (the review contract), falling back to the first that parses at
+ * all. Returns NULL if nothing parses; caller owns the result. */
+cJSON *parse_model_json_lenient(const char *text)
+{
+   if (!text || !text[0])
+      return NULL;
+   cJSON *root = cJSON_Parse(text);
+   if (root)
+      return root;
+
+   cJSON *first_valid = NULL;
+   for (long i = 0; text[i]; i++)
+   {
+      if (text[i] != '{')
+         continue;
+      long end = json_object_extent(text, i);
+      if (end < 0)
+         break; /* no balanced object from here on */
+      size_t len = (size_t)(end - i);
+      char *buf = (char *)malloc(len + 1);
+      if (!buf)
+         break;
+      memcpy(buf, text + i, len);
+      buf[len] = '\0';
+      cJSON *cand = cJSON_Parse(buf);
+      free(buf);
+      if (cand)
+      {
+         if (cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(cand, "items")))
+         {
+            cJSON_Delete(first_valid);
+            return cand; /* the review contract object — best match */
+         }
+         if (!first_valid)
+            first_valid = cand; /* remember, keep scanning for an items object */
+         else
+            cJSON_Delete(cand);
+         /* skip past this object to avoid rescanning its inner braces */
+         i = end - 1;
+      }
+   }
+   return first_valid;
+}
+
 static void normalized_identity_key(const char *category, const char *location, const char *summary,
                                     char *out, size_t out_n)
 {

@@ -31,10 +31,11 @@ Latest compiled and deployed test runtime:
 `36ea38743b25ec9d856c7d21e4c1a75860046e5b`.
 The one test-only descendant `7925b40c00f865eae3e2ff2aef3f7aaa1a69bf10`
 fixes diagnostic-file ownership and does not change production code.
-Current branch head `eb4e3803b` additionally retires 1,001 production lines of
+Production retirement commit `eb4e3803b` additionally retires 1,001 production lines of
 disconnected planners, model loops and resume APIs. Five focused normal and five
-sanitizer targets plus Make/CMake shipping links pass; full combined checks are
-running. Retained active function bodies and plan data layouts are unchanged.
+sanitizer targets plus Make/CMake shipping links pass; the full 698-invocation normal and 698-invocation sanitizer runs and all 76 lint
+gates pass on that source. New consumer and container deltas still need combined
+qualification. Retained active function bodies and plan data layouts are unchanged.
 This production delta is not yet deployed or claimed live-qualified.
 
 The current image is
@@ -57,6 +58,53 @@ Retain this VM for manual review. The task-owned retention controller lives on
 host `.252`, not the local machine. Do not destroy/reset its volumes, credentials,
 failed turns or caches. Private credentials belong in their existing files and
 must not be printed.
+
+## Active gaps found by the latest live and consumer audit
+
+The migration is still unfinished. The full normal delegate worker always binds a
+verified container; the restored ACP constructor currently requires a local FD.
+Its inline-selection/primary-worker fixtures did not qualify that complete path.
+The fix must use the existing Docker/workspace owners, immutable container
+identity, a private scoped Unix endpoint, actual supervised stdio and bounded raw
+filesystem IO. Never bypass the container, loan the global UID socket or borrow a
+host executable as the agent. The C and Go owners are implementing that path.
+
+Unknown usage was also lost by several remaining consumers. Provider decoders,
+stream completion, wire output, result moves/retries/aggregation, token audit,
+roundtable spending and result-cache metadata are being corrected together.
+Missing or mixed unknown usage cannot become known/free zero; explicitly
+observed zero stays valid. Failed HTTP, decoding, retry and fallback attempts
+retain uncertainty rather than claiming complete totals. Provider discovery
+probes preserve the same distinction. Optional wire usage is omitted or null
+according to its external contract; mandatory numeric usage refuses unknown. Ambiguous old result-cache entries must miss rather
+than guess usage knowledge; native opaque caches remain untouched. Focused normal,
+sanitizer, old-code failure and real-PostgreSQL evidence is retained separately;
+final combined qualification is still required.
+
+The frontend correction is committed at `c7338b33d`: historical errors render
+beside their own turn and the mobile placeholder no longer clips. Its 503 tests,
+typecheck and both builds pass. Actual fb0 replay proved the earlier cancellation
+was sequence6 while the later successful terminal was sequence27. The corrected
+SPA is not deployed yet. The integrated usage-bar follow-up also clears a prior
+turn’s count when the latest assistant has unknown usage. Its actual main-tree
+504 frontend tests, typecheck and both builds pass; this is local qualification,
+not a deployed browser claim.
+
+The current live history contains 128 rows. One fresh bounded native Send failed
+before SDK launch at `claude_source_lineage`, during native runtime preparation.
+No second Send, SDK process, provider response, retry or credential rotation occurred.
+The old125 prefix, five native sessions, complete caches, authority and grants
+remain exact. Preserve this failure; it is not a successful recall or provider
+inference test. The normal OAuth refresh at that stage returned HTTP429; SDK0 and no successful
+rotation were independently sealed. Preserve the diagnostic category and fixed
+HTTP status without printing credentials. A distinct later bounded model test
+may qualify recall after the final build; do not retry or rewrite this turn.
+
+Two earlier installed CLI structural jobs stopped before ACP: missing persona,
+then an ordinary UID trying to borrow a PAM-owned GUI project. The guards are
+correct. No third job or new workspace registration occurred after the container
+gap was identified. Future validation must use a normal CLI-owned registered
+source and the complete container path.
 
 ## Implemented ownership
 
@@ -131,17 +179,19 @@ minify source or remove supported behavior to change the count.
 
 ## Active work before completion
 
-- Complete actual installed CLI ACP/MCP/nested-read and browser validation on fb0,
-  plus a meaningful bounded native model/history/recall journey. Preserve the
+- Complete and qualify the full container-backed ACP owner, then build the final
+  combined candidate. Run actual installed CLI ACP/MCP/nested-read and browser
+  validation on that candidate, plus a meaningful bounded native
+  model/history/recall journey. Preserve the
   original history/cache/authority prefix and seal actual additional records.
-- Complete combined qualification of the integrated dormant C model-loop,
-  planner and resume retirement. Preserve active plan data/storage, job state, prompt
-  helpers, voting and directive policy. Review dormant native constructor modes
+- Complete combined qualification of the usage-consumer corrections with the
+  already qualified dormant C model-loop, planner and resume retirement. Preserve
+  active plan data/storage, job state, prompt helpers, voting and directive policy. Review dormant native constructor modes
   separately; absence of callers does not justify dropping supported coverage.
-- Fix the confirmed transcript layout defect: errors are currently appended after
-  all messages despite carrying their owning turn. Place old diagnostics with
-  their own turn, preserve folding and legacy unknown-origin errors, and qualify
-  later-success rendering and mobile input readability.
+- Deploy the qualified transcript and usage-bar corrections; verify old errors
+  beside their own turn, later-success rendering, mobile input readability and
+  unknown latest usage in the actual browser. Preserve diagnostic history,
+  folding and legacy errors without a known owning turn.
 - The installed CLI structural probes so far are two retained prelaunch negatives:
   missing persona, then attempting to use a PAM-owned project as an ordinary UID.
   Both left IR125/SDK0. Use a normally registered CLI-owned shared source; do not
@@ -170,3 +220,21 @@ refusals precisely rather than claiming all-services/all-platform success.
 - `/var/tmp/aimee-fb0-open-acceptance-audit.json`
 - `/var/tmp/aimee-final-03-integration-held/final-proof-index.json`
 - `/var/tmp/aimee-ir-production-reduction-fb0d0f826.json`
+
+Latest combined local usage evidence:
+
+- `/var/tmp/aimee-combined-usage-go/proof.json`: providers and telemetry families,
+  760 tests pass per normal/race lane; 52 optional tests skipped per lane.
+- `/var/tmp/aimee-ui-usage-proof/main-combined/proof.json`: 504 frontend tests,
+  typecheck and both production builds.
+- Translation, usage audit, roundtable/cache, manual wire output and transport
+  have retained old-source failures plus focused normal/sanitizer receipts.
+  Combined C qualification passes 22 normal and 22 sanitizer/leak targets.
+  The subsequent module-include correction and unchanged review-parser owner
+  relocation pass nine normal and nine sanitizer targets; all 76 lint gates pass.
+  These checks do not qualify a final live image.
+- `/var/tmp/aimee-combined-usage-main-proof/final-index.json`: 22 normal and
+  22 sanitizer targets on the integrated usage composition.
+- `/var/tmp/aimee-combined-usage-lint-followup/proof.json`: nine normal and nine
+  sanitizer targets after the two lint corrections.
+- `/var/tmp/aimee-combined-usage-final-gates/lint/proof.json`: all 76 lint gates.

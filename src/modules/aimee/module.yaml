@@ -160,6 +160,7 @@
     "server-go/modules/aimee/session_directory_test.go",
     "server-go/modules/aimee/unavailable_test.go",
     "server-go/modules/aimee/families/telemetry_procedure_events_live_test.go",
+    "server-go/modules/aimee/families/telemetry_usage_cost_live_test.go",
     "server-go/modules/aimee/families/session_harness_checkpoint_test.go",
     "server-go/modules/aimee/families/telemetry_execution_grades_live_test.go",
     "server-go/modules/aimee/families/telemetry_execution_recall_live_test.go",

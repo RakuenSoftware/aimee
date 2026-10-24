@@ -49,6 +49,8 @@ static int g_proof_gated = 0;
 static int g_mutation_mode, g_post_count, g_reject_first, g_policy_calls, g_router_calls;
 static char *g_first_body;
 static int g_receipt_refuse, g_receipt_calls;
+static int g_audit_calls;
+static char g_audit_kind[24];
 int ingress_preinject_revalidate_sources(void)
 {
    return 0;
@@ -84,6 +86,8 @@ static void reset_capture(void)
    g_response_status = 200;
    g_proof_gated = 0;
    g_requested_agent[0] = '\0';
+   g_audit_calls = 0;
+   g_audit_kind[0] = 0;
 }
 
 int agent_load_config(agent_config_t *cfg)
@@ -287,7 +291,8 @@ void agent_ingress_record_cost(const char *agent_name, const char *agent_model,
    (void)cache_write_tokens;
    (void)cache_read_tokens;
    (void)source;
-   (void)kind;
+   snprintf(g_audit_kind, sizeof g_audit_kind, "%s", kind ? kind : "realized");
+   g_audit_calls++;
 }
 /* Enable accounting in this unit so the tap/record path is exercised. */
 int agent_ingress_accounting_enabled(void)
@@ -434,6 +439,92 @@ static void cap_emit(void *ctx, const char *event, const char *data_json)
    cap->count++;
 }
 
+static void test_unknown_usage_has_no_anthropic_success_projection(void)
+{
+   aimee_response_t response = {0};
+   assert(!aimee_ir_response_from_text(&response, "Canonical answer", "fixture"));
+   response.usage_unobserved = 1;
+   emit_capture_t cap = {0};
+   assert(messages_emit_response(&response, "unknown", "fixture", cap_emit, &cap) < 0);
+   assert(cap.count == 0); /* No numeric-zero start or terminal can escape. */
+   response.usage_unobserved = 0;
+   assert(!messages_emit_response(&response, "zero", "fixture", cap_emit, &cap));
+   assert(cap.count > 0 && !strcmp(cap.events[cap.count - 1], "message_stop"));
+   aimee_response_free(&response);
+   const delegate_driver_t openai = {.name = "openai"};
+   const char *request = "{\"model\":\"ignored\",\"max_tokens\":64,\"messages\":[{\"role\":"
+                         "\"user\",\"content\":\"hi\"}]}";
+   for (int known = 0; known <= 1; known++)
+   {
+      reset_capture();
+      g_driver = &openai;
+      g_response_body =
+          known ? "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\","
+                  "\"content\":\"ok\"}}],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0}}"
+                : "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\","
+                  "\"content\":\"ok\"}}]}";
+      char output[4096];
+      int status = messages_buffered(request, output, sizeof output);
+      assert((status == 200) == known);
+      assert(g_audit_calls == 1 && !strcmp(g_audit_kind, known ? "realized" : "unobserved"));
+      memset(&cap, 0, sizeof cap);
+      g_audit_calls = 0;
+      agent_t agent = {0};
+      messages_stream_buffered_replay("fixture", "", "{}", 2, "", &agent, &openai, "model",
+                                      "buffered-usage", 0, NULL, cap_emit, &cap);
+      assert(g_audit_calls == 1 && !strcmp(g_audit_kind, known ? "realized" : "unobserved"));
+      assert(cap.count > 0 && !strcmp(cap.events[cap.count - 1], known ? "message_stop" : "error"));
+      memset(&cap, 0, sizeof cap);
+      g_audit_calls = 0;
+      g_stream_payload = known ? "data: "
+                                 "{\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":"
+                                 "\"stop\"}]}\n\ndata: "
+                                 "{\"choices\":[],\"usage\":{\"prompt_tokens\":0,\"completion_"
+                                 "tokens\":0}}\n\ndata: [DONE]\n\n"
+                               : "data: "
+                                 "{\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":"
+                                 "\"stop\"}]}\n\ndata: [DONE]\n\n";
+      assert(!messages_stream(request, cap_emit, &cap));
+      assert(g_audit_calls == 1 && !strcmp(g_audit_kind, known ? "realized" : "unobserved"));
+      int stopped = 0, errors = 0;
+      for (int i = 0; i < cap.count; i++)
+      {
+         stopped += !strcmp(cap.events[i], "message_stop");
+         errors += !strcmp(cap.events[i], "error");
+      }
+      assert(stopped == known && (known || errors));
+   }
+   const delegate_driver_t anthropic = {.name = "anthropic"};
+   for (int known = 0; known <= 1; known++)
+   {
+      reset_capture();
+      g_driver = &anthropic;
+      memset(&cap, 0, sizeof cap);
+      g_stream_payload =
+          known ? "event: message_start\ndata: "
+                  "{\"message\":{\"id\":\"usage-zero\",\"role\":\"assistant\",\"usage\":{\"input_"
+                  "tokens\":0}}}\n\nevent: message_delta\ndata: "
+                  "{\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}"
+                  "\n\nevent: message_stop\ndata: {}\n\n"
+                : "event: message_start\ndata: "
+                  "{\"message\":{\"id\":\"usage-unknown\",\"role\":\"assistant\"}}\n\nevent: "
+                  "message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\nevent: "
+                  "message_stop\ndata: {}\n\n";
+      assert(!messages_stream(request, cap_emit, &cap));
+      assert(g_audit_calls == 1 && !strcmp(g_audit_kind, known ? "realized" : "unobserved"));
+      int stopped = 0, errors = 0;
+      for (int i = 0; i < cap.count; i++)
+      {
+         stopped += !strcmp(cap.events[i], "message_stop");
+         errors += !strcmp(cap.events[i], "error");
+      }
+      assert(stopped == known && (known || errors));
+   }
+   reset_capture();
+   g_driver = NULL;
+   PASS("unknown usage cannot become Anthropic success or realized zero cost");
+}
+
 static void test_explicit_unknown_model_is_rejected(void)
 {
    const char *request =
@@ -459,9 +550,11 @@ static void test_explicit_unknown_model_is_rejected(void)
 
 static const char *native_empty_stream =
     "event: message_start\ndata: "
-    "{\"type\":\"message_start\",\"message\":{\"id\":\"native-id\",\"role\":\"assistant\"}}\n\n"
+    "{\"type\":\"message_start\",\"message\":{\"id\":\"native-id\",\"role\":\"assistant\","
+    "\"usage\":{\"input_tokens\":0}}}\n\n"
     "event: message_delta\ndata: "
-    "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+    "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_"
+    "tokens\":0}}\n\n"
     "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
 
 static const char *native_stream_request =
@@ -590,7 +683,8 @@ static void test_native_ir_refuses_incomplete_and_invalid_streams(void)
    const char *bad[] = {
        "event: message_stop\ndata: {}\n\n",
        "event: content_block_start\ndata: {\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n",
-       "event: message_start\ndata: {\"message\":{\"role\":\"assistant\"}}\n\n",
+       "event: message_start\ndata: "
+       "{\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":0}}}\n\n",
        "event: message_start\ndata: "
        "{\"message\":{\"role\":\"assistant\",\"usage\":{\"input_tokens\":1e300}}}\n\n",
        "event: message_start\ndata: {\"message\":{\"role\":\"assistant\"}}\n\nevent: "
@@ -598,7 +692,8 @@ static void test_native_ir_refuses_incomplete_and_invalid_streams(void)
        "{\"index\":0,\"content_block\":{\"type\":\"future-content\"}}\n\n",
        "event: message_start\ndata: {\"message\":{\"role\":\"assistant\"}}\n\nevent: "
        "content_block_start\ndata: {\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\nevent: "
-       "message_delta\ndata: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+       "message_delta\ndata: "
+       "{\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\n",
        "event: message_start\ndata: {\"message\":{\"role\":\"assistant\"}} trailing\n\n",
    };
    agent_t agent = {0};
@@ -1054,20 +1149,23 @@ static void test_messages_stream_anthropic_reasoning_metrics(void)
    reset_capture();
    memset(&cap, 0, sizeof(cap));
    g_driver = &anthropic;
-   g_stream_payload = "event: message_start\n"
-                      "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}\n\n"
-                      "event: content_block_start\n"
-                      "data: {\"type\":\"content_block_start\",\"index\":0,"
-                      "\"content_block\":{\"type\":\"text\"}}\n\n"
-                      "event: content_block_delta\n"
-                      "data: {\"type\":\"content_block_delta\",\"index\":0,"
-                      "\"delta\":{\"type\":\"text_delta\",\"text\":\"plain answer\"}}\n\n"
-                      "event: content_block_stop\n"
-                      "data: {\"index\":0}\n\n"
-                      "event: message_delta\n"
-                      "data: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
-                      "event: message_stop\n"
-                      "data: {\"type\":\"message_stop\"}\n\n";
+   g_stream_payload =
+       "event: message_start\n"
+       "data: "
+       "{\"type\":\"message_start\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input_"
+       "tokens\":0}}}\n\n"
+       "event: content_block_start\n"
+       "data: {\"type\":\"content_block_start\",\"index\":0,"
+       "\"content_block\":{\"type\":\"text\"}}\n\n"
+       "event: content_block_delta\n"
+       "data: {\"type\":\"content_block_delta\",\"index\":0,"
+       "\"delta\":{\"type\":\"text_delta\",\"text\":\"plain answer\"}}\n\n"
+       "event: content_block_stop\n"
+       "data: {\"index\":0}\n\n"
+       "event: message_delta\n"
+       "data: {\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\n"
+       "event: message_stop\n"
+       "data: {\"type\":\"message_stop\"}\n\n";
    assert(messages_stream(REQ, cap_emit, &cap) == 0);
    assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_OBSERVED) == 0);
    assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 0);
@@ -1076,20 +1174,23 @@ static void test_messages_stream_anthropic_reasoning_metrics(void)
    aimee_ir_metrics_reset();
    reset_capture();
    memset(&cap, 0, sizeof(cap));
-   g_stream_payload = "event: message_start\n"
-                      "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}\n\n"
-                      "event: content_block_start\n"
-                      "data: {\"type\":\"content_block_start\",\"index\":0,"
-                      "\"content_block\":{\"type\":\"thinking\"}}\n\n"
-                      "event: content_block_delta\n"
-                      "data: {\"type\":\"content_block_delta\",\"index\":0,"
-                      "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"weighing it up\"}}\n\n"
-                      "event: content_block_stop\n"
-                      "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
-                      "event: message_delta\n"
-                      "data: {\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
-                      "event: message_stop\n"
-                      "data: {\"type\":\"message_stop\"}\n\n";
+   g_stream_payload =
+       "event: message_start\n"
+       "data: "
+       "{\"type\":\"message_start\",\"message\":{\"role\":\"assistant\",\"usage\":{\"input_"
+       "tokens\":0}}}\n\n"
+       "event: content_block_start\n"
+       "data: {\"type\":\"content_block_start\",\"index\":0,"
+       "\"content_block\":{\"type\":\"thinking\"}}\n\n"
+       "event: content_block_delta\n"
+       "data: {\"type\":\"content_block_delta\",\"index\":0,"
+       "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"weighing it up\"}}\n\n"
+       "event: content_block_stop\n"
+       "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+       "event: message_delta\n"
+       "data: {\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\n"
+       "event: message_stop\n"
+       "data: {\"type\":\"message_stop\"}\n\n";
    assert(messages_stream(REQ, cap_emit, &cap) == 0);
    assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_OBSERVED) == 1);
    assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 0);
@@ -1101,7 +1202,9 @@ static void test_messages_stream_anthropic_reasoning_metrics(void)
    reset_capture();
    memset(&cap, 0, sizeof(cap));
    g_stream_payload = "event: message_start\n"
-                      "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}\n\n"
+                      "data: "
+                      "{\"type\":\"message_start\",\"message\":{\"role\":\"assistant\",\"usage\":{"
+                      "\"input_tokens\":0}}}\n\n"
                       "event: content_block_start\n"
                       "data: {\"type\":\"content_block_start\",\"index\":0,"
                       "\"content_block\":{\"type\":\"thinking\"}}\n\n"
@@ -1471,7 +1574,7 @@ static void test_durable_receipt_refusal_blocks_buffered_and_streamed(void)
                memset(&cap, 0, sizeof(cap));
                agent_t agent = {0};
                int relayed = messages_stream_ir_relay("fixture", "", "{}", 2, "", &agent, "model",
-                                                      "message", 0, cap_emit, &cap);
+                                                      "message", cap_emit, &cap);
                assert(relayed == HTTP_RETRY_ADMISSION_REFUSED);
                assert_terminal_receipt_error(&cap);
             }
@@ -1684,6 +1787,7 @@ int main(void)
    test_native_count_admits_before_dispatch();
    test_count_uses_owned_model_and_history();
    test_native_alias_uses_provider_model();
+   test_unknown_usage_has_no_anthropic_success_projection();
    test_explicit_unknown_model_is_rejected();
    test_messages_stream_anthropic_reasoning_metrics();
    test_native_ir_fragmentation_and_persistence();
