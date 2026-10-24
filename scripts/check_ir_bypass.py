@@ -16,6 +16,10 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "db1_primary_session_save", "db1_primary_session_load", "db1_primary_session_delete",
+    "db1_primary_session_alloc_recent", "db1_primary_session_alloc_search",
+    "db1_webchat_claude_session_get", "db1_webchat_claude_session_owned_by_other",
+    "db1_webchat_claude_session_bind",
     "agent_responses_sse_response_object", "agent_tools_builtin_catalog",
     "provider_cli_adapter_execute", "agent_execute_cli_codex", "agent_execute_cli_codex_at_cwd",
     "provider_client_complete", "provider_client_build_openai", "provider_import_request",

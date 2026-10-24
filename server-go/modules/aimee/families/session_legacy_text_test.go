@@ -36,7 +36,7 @@ func TestLegacyPrimaryTextChecksCompleteOrderedUTF8Source(t *testing.T) {
 			}
 		})
 	}
-	if !Sessions.Ops[11].Tx || !Sessions.Ops[15].Tx {
+	if !Sessions.Ops[15].Tx {
 		t.Fatal("source reads require owner transaction")
 	}
 }

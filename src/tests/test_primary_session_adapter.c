@@ -169,13 +169,6 @@ void db1_primary_session_row_clear(db1_primary_session_row_t *row)
 {
    free(row->messages_json);
 }
-char *db1_primary_session_load(const char *id, const char *agent, const char *provider)
-{
-   (void)id;
-   (void)agent;
-   (void)provider;
-   return NULL;
-}
 const context_engine_t *context_engine_get_active(void)
 {
    return NULL;

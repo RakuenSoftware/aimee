@@ -38,13 +38,12 @@ aimee_module_call_result_t obs_bus_module_call(uint32_t kind, uint32_t stage, ui
    struct timespec now;
    assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
    uint64_t ns = (uint64_t)now.tv_sec * 1000000000u + (uint64_t)now.tv_nsec;
-   uint64_t expected_ms = (canonical || op == AIMEE_DB1_OP_PRIMARY_SESSION_LOAD ||
-                           op == AIMEE_DB1_OP_PRIMARY_SESSION_GET_LATEST)
+   uint64_t expected_ms = (canonical || op == AIMEE_DB1_OP_PRIMARY_SESSION_GET_LATEST)
                               ? 30000u
                               : 2000u;
    assert(deadline > ns && deadline - ns <= expected_ms * 1000000u);
    assert(deadline - ns > (expected_ms - 1000u) * 1000000u);
-   int load = op == AIMEE_DB1_OP_PRIMARY_SESSION_LOAD || canonical;
+   int load = canonical;
    const char *reply_text = import ? "imported" : transcript;
    if (running)
    {
@@ -91,10 +90,7 @@ int main(void)
    transcript = malloc(size + 1);
    memset(transcript, 'x', size);
    transcript[size] = 0;
-   char *loaded = db1_primary_session_load("session", "codex", "chatgpt");
-   assert(loaded && !strcmp(loaded, transcript) && calls == 2);
-   free(loaded);
-   loaded = NULL;
+   char *loaded = NULL;
    int snapshot = db1_session_ir_running_history_load("session", "owner", "active", &loaded);
    assert(!snapshot && loaded && !strcmp(loaded, transcript));
    free(loaded);
@@ -111,13 +107,6 @@ int main(void)
    assert(db1_primary_session_get_latest("session", &row) == 0);
    assert(!strcmp(row.messages_json, transcript) && !strcmp(row.provider, "chatgpt"));
    db1_primary_session_row_clear(&row);
-   db1_primary_session_row_t *rows = NULL;
-   assert(db1_primary_session_alloc_recent(&rows, 256) == 1);
-   assert(!strcmp(rows[0].messages_json, transcript));
-   db1_primary_session_rows_free(rows, 1);
-   assert(db1_primary_session_alloc_search("find", &rows, 256) == 1);
-   assert(!strcmp(rows[0].messages_json, transcript));
-   db1_primary_session_rows_free(rows, 1);
    malformed = 1;
    assert(db1_primary_session_get_latest("session", &row) == -1 && !row.messages_json);
    loaded = NULL;
@@ -137,7 +126,7 @@ int main(void)
    assert(db1_primary_session_get_latest("session", &row) == -1);
    snapshot = db1_session_ir_running_history_load("session", "owner", "active", &loaded);
    assert(snapshot == -1 && !loaded);
-   puts("primary history transport: large load/latest/list/search, running snapshots, bounds and "
+   puts("primary history transport: large latest-source import, running snapshots, bounds and "
         "missing/error passed");
    return 0;
 }

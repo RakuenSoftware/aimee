@@ -28,7 +28,6 @@
 #include "primary_sessions.h"
 #include "db1_client/server_sessions.h"
 #include "session_paths.h"
-#include "webchat_claude_sessions.h"
 #include "webchat_live.h"
 
 #include "db1_module_api.h"
@@ -61,7 +60,6 @@ static uint64_t sessions_call_timeout_ms(uint32_t op)
 {
    switch (op)
    {
-   case AIMEE_DB1_OP_PRIMARY_SESSION_LOAD:
    case AIMEE_DB1_OP_PRIMARY_SESSION_GET_LATEST:
    case AIMEE_DB1_OP_SESSION_IR_HISTORY_LOAD:
    case AIMEE_DB1_OP_SESSION_IR_RUNNING_HISTORY_LOAD:
@@ -518,95 +516,6 @@ static int primary_row_take(db1_primary_session_row_t *row, char **cells)
    return 0;
 }
 
-int db1_primary_session_save(const char *session_id, const char *agent_name, const char *provider, const char *messages_json)
-{
-   if (!session_id || !session_id[0])
-      return -1;
-   const char *fields[] = {session_id, agent_name ? agent_name : "", provider ? provider : "", messages_json ? messages_json : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_PRIMARY_SESSION_SAVE, fields, 4, NULL, NULL, 0, NULL));
-}
-
-char *db1_primary_session_load(const char *session_id, const char *agent_name, const char *provider)
-{
-   if (!session_id || !session_id[0])
-      return NULL;
-   const char *fields[] = {session_id, agent_name ? agent_name : "", provider ? provider : ""};
-   char **cells = NULL;
-   uint32_t count = 0;
-   int status = primary_read(AIMEE_DB1_OP_PRIMARY_SESSION_LOAD, fields, 3, &cells, &count);
-   char *value = NULL;
-   if (status == AIMEE_DB1_STATUS_OK && count == 1 && cells[0][0])
-   {
-      value = cells[0];
-      cells[0] = NULL;
-   }
-   primary_cells_free(cells, count);
-   return value;
-}
-
-int db1_primary_session_delete(const char *session_id, const char *agent_name, const char *provider)
-{
-   if (!session_id || !session_id[0])
-      return -1;
-   const char *fields[] = {session_id, agent_name ? agent_name : "", provider ? provider : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_PRIMARY_SESSION_DELETE, fields, 3, NULL, NULL, 0, NULL));
-}
-
-static int primary_rows_read(uint32_t op, const char *const *fields, uint32_t argc,
-                              db1_primary_session_row_t **out, int max)
-{
-   *out = NULL;
-   char **cells = NULL;
-   uint32_t count = 0;
-   int status = primary_read(op, fields, argc, &cells, &count);
-   if (status != AIMEE_DB1_STATUS_OK || count % 6 || count / 6 > (uint32_t)max)
-   {
-      primary_cells_free(cells, count);
-      return -1;
-   }
-   uint32_t n = count / 6;
-   db1_primary_session_row_t *rows = calloc(n ? n : 1, sizeof(*rows));
-   if (!rows)
-   {
-      primary_cells_free(cells, count);
-      return -1;
-   }
-   for (uint32_t i = 0; i < n; i++)
-      if (primary_row_take(&rows[i], cells + i * 6) != 0)
-      {
-         db1_primary_session_rows_free(rows, (int)n);
-         primary_cells_free(cells, count);
-         return -1;
-      }
-   primary_cells_free(cells, count);
-   *out = rows;
-   return (int)n;
-}
-
-int db1_primary_session_alloc_recent(db1_primary_session_row_t **out, int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   if (max > 256)
-      max = 256;
-   char bound[32];
-   snprintf(bound, sizeof bound, "%d", max);
-   const char *fields[] = {bound};
-   return primary_rows_read(AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_RECENT, fields, 1, out, max);
-}
-
-int db1_primary_session_alloc_search(const char *query, db1_primary_session_row_t **out, int max)
-{
-   if (!out || max <= 0)
-      return -1;
-   if (max > 256)
-      max = 256;
-   char bound[32];
-   snprintf(bound, sizeof bound, "%d", max);
-   const char *fields[] = {query ? query : "", bound};
-   return primary_rows_read(AIMEE_DB1_OP_PRIMARY_SESSION_ALLOC_SEARCH, fields, 2, out, max);
-}
-
 int db1_primary_session_get_latest(const char *session_id, db1_primary_session_row_t *out)
 {
    if (!session_id || !session_id[0] || !out)
@@ -665,42 +574,6 @@ int db1_session_stale_reads(const char *parent_session_id, const char *child_ses
    }
    int wire_rows = (int)(wire_filled / 1u);
    return wire_rows;
-}
-
-int db1_webchat_claude_session_get(const char *principal, const char *aimee_session_id, char *out, size_t out_n)
-{
-   if (!principal || !principal[0] || !aimee_session_id || !aimee_session_id[0] || !out || out_n == 0)
-      return -1;
-   const char *fields[] = {principal, aimee_session_id};
-   char slot_rc[32];
-   char *const values[] = {out, slot_rc};
-   const size_t caps[] = {out_n, sizeof slot_rc};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_GET, fields, 2, values, caps, 2, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtol(slot_rc, NULL, 10);
-}
-
-int db1_webchat_claude_session_owned_by_other(const char *principal, const char *aimee_session_id, const char *claude_session_id)
-{
-   if (!principal || !principal[0] || !aimee_session_id || !aimee_session_id[0])
-      return -1;
-   const char *fields[] = {principal, aimee_session_id, claude_session_id ? claude_session_id : ""};
-   char slot0[32];
-   char *const values[] = {slot0};
-   const size_t caps[] = {sizeof slot0};
-   int wire_status = db1_call(&family, AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_OWNED_BY_OTHER, fields, 3, values, caps, 1, NULL);
-   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
-      return -1;
-   return (int)strtoll(slot0, NULL, 10);
-}
-
-int db1_webchat_claude_session_bind(const char *principal, const char *aimee_session_id, const char *claude_session_id)
-{
-   if (!principal || !principal[0] || !aimee_session_id || !aimee_session_id[0])
-      return -1;
-   const char *fields[] = {principal, aimee_session_id, claude_session_id ? claude_session_id : ""};
-   return write_result(db1_call(&family, AIMEE_DB1_OP_WEBCHAT_CLAUDE_SESSION_BIND, fields, 3, NULL, NULL, 0, NULL));
 }
 
 int db1_webchat_live_set(const char *session_id, const char *turn_id, const char *text, const char *status)

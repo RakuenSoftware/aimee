@@ -151,8 +151,8 @@ class IRBypassTests(unittest.TestCase):
                     path.unlink()
 
     def test_session_search_cannot_restore_unscoped_legacy_transcript_reads(self):
-        self.source("src/db1_client/sessions.c", "db1_primary_session_alloc_search(query, rows, 4);")
-        checker.check(self.root)  # Existing administrative compatibility is separate.
+        self.source("src/db1_client/sessions.c", "db1_primary_session_get_latest(id, row);")
+        checker.check(self.root)  # The retained one-time import owns this source read.
         for relative, text in [
             ("src/server/session_search_tool.c", "db1_primary_session_alloc_search(query, rows, 4);"),
             ("src/server/session_search_tool.c", "db1_primary_session_get_latest(id, row);"),
@@ -181,7 +181,10 @@ class IRBypassTests(unittest.TestCase):
             checker.check(self.root)
 
     def test_hook_archive_cannot_restore_legacy_transcript_write(self):
-        self.source("src/db1_client/sessions.c", "int db1_primary_session_save(void);")
+        path = self.source("src/db1_client/sessions.c", "int db1_primary_session_save(void);")
+        with self.assertRaisesRegex(ValueError, "retired-api"):
+            checker.check(self.root)
+        path.unlink()
         self.source("src/server/server_auth.c", "db1_session_ir_history_save(session, digest, scope, actor, json);")
         checker.check(self.root)
         self.source("src/server/server_auth.c", "db1_primary_session_save(session, client, provider, json);")
