@@ -708,7 +708,6 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/middleware.c
     ${AIMEE_SRC_DIR}/server/agent_pipeline.c
     ${AIMEE_SRC_DIR}/server/process_mgr.c
-    ${AIMEE_SRC_DIR}/server/agent_loop.c
     ${AIMEE_SRC_DIR}/server/liveness.c
     ${AIMEE_SRC_DIR}/server/cli_session.c
     ${AIMEE_SRC_DIR}/server/cli_session_pty.c

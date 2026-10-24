@@ -28,6 +28,16 @@ class IRBypassTests(unittest.TestCase):
         path.write_text(text)
         return path
 
+    def test_dormant_parallel_c_execution_cannot_return(self):
+        for name in ('agent_coordinate', 'agent_execute_with_plan', 'agent_job_resume', 'agent_plan_execute', 'agent_plan_rollback_step', 'agent_plan_verify', 'plan_assign_waves', 'agent_loop_init', 'agent_loop_free', 'agent_loop_run', 'agent_loop_parse_completion', 'agent_loop_t'):
+            for relative in ("src/server/reintroduced_runner.c", "src/headers/reintroduced_runner.h"):
+                path = self.source(relative, f"int {name}(void);\n")
+                with self.subTest(name=name, relative=relative), self.assertRaisesRegex(ValueError, "retired-api"):
+                    checker.check(self.root)
+                path.unlink()
+        self.source("src/headers/active_plan.h", "plan_t retained; plan_step_t step; void agent_set_durable_job(int); int agent_get_durable_job_id(void); int agent_loop_total_timeout_ms(int,int);")
+        checker.check(self.root)
+
     def test_retired_first_party_chat_projection(self):
         for name in ["builtin_chat_send_ex", "builtin_chat_stream_t", "builtin_chat_stream_control_t",
                      "chat_stream_on_open", "chat_stream_finish", "g_acp_tool_seq"]:

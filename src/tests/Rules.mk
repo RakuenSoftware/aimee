@@ -657,7 +657,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-server-native-cache $(TESTPREFIX)/unit-t
                $(TESTPREFIX)/unit-test-proxy-bootstrap \
                $(TESTPREFIX)/unit-test-cmd-run \
                $(TESTPREFIX)/unit-test-conversation \
-               $(TESTPREFIX)/unit-test-agent-loop \
                $(TESTPREFIX)/unit-test-agent-business-ir \
                $(TESTPREFIX)/unit-test-agent-max-turns \
                $(TESTPREFIX)/unit-test-provider-settable \
@@ -5950,20 +5949,10 @@ $(TESTPREFIX)/unit-test-agent-max-turns: $(OBJDIR)/tests/test_agent_max_turns.o 
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-agent-business-ir: $(OBJDIR)/tests/test_agent_business_ir.o \
-                                     $(OBJDIR)/cmd_describe.o $(OBJDIR)/server/agent_runtime_liveness.o $(OBJDIR)/server/liveness.o $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/server/agent_coord.o $(OBJDIR)/server/agent_loop.o \
+                                     $(OBJDIR)/cmd_describe.o $(OBJDIR)/server/agent_runtime_liveness.o $(OBJDIR)/server/liveness.o $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/server/agent_coord.o \
                                      $(OBJDIR)/modules/delegates/delegate_role.o $(OBJDIR)/dstr.o $(PROVIDER_IR_OBJS) \
                                      $(OBJDIR)/cJSON.o $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
-
-$(TESTPREFIX)/unit-test-agent-loop: $(OBJDIR)/tests/test_agent_loop.o \
-                                     $(OBJDIR)/server/agent_loop.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o \
-                                     $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/log.o \
-                                     $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS)
-	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
-
-
-
-
 
 # DB1 server-owned per-model price table (ingress-cost-accounting §2).
 

@@ -351,58 +351,6 @@ static inline size_t agent_tool_output_cap_clamp(int configured)
  * model-visible tool-result truncation site. */
 size_t agent_tool_output_cap(void);
 
-/* Self-correcting delegate loop
- *
- * Wraps agent_run in a quality-checking loop. After each iteration the agent
- * is asked to self-assess task completion (0-100). Execution continues until
- * the completion score meets the threshold, the optional verify command passes,
- * or the iteration cap is reached.
- *
- * This is separate from --retry (transient failure retry). The loop addresses
- * quality: "task not fully done", whereas retry addresses reliability: "API
- * error, try again". */
-
-#define AGENT_LOOP_MAX_ITER_DEFAULT  5    /* maximum iterations before giving up */
-#define AGENT_LOOP_THRESHOLD_DEFAULT 95   /* stop when completion >= this */
-#define AGENT_LOOP_CONTEXT_MAX       8192 /* max bytes of accumulated context */
-
-typedef struct
-{
-   int max_iterations;       /* cap on total iterations */
-   int completion_threshold; /* 0-100: stop when self-assessed >= this */
-   char verify_cmd[1024];    /* optional shell command; failure → continue loop */
-   /* runtime (zeroed on init) */
-   int current_iteration;
-   int last_completion;       /* last parsed completion score */
-   char *accumulated_context; /* heap: summary of prior iterations (NULL if none) */
-} agent_loop_t;
-
-/* Initialise loop with explicit parameters. Sets runtime fields to zero. */
-void agent_loop_init(agent_loop_t *loop, int max_iter, int threshold, const char *verify_cmd);
-
-/* Free heap resources. Safe to call on a zero-initialised struct. */
-void agent_loop_free(agent_loop_t *loop);
-
-/* Parse a completion score and optional gaps from a delegate response.
- * Scans for the last occurrence of {"completion": N, "gaps": [...]} in text.
- * Returns the completion score (0-100) on success, or -1 if not found.
- * If gaps_out is non-NULL and gaps_len > 0, fills it with the "gaps" array
- * as a comma-separated string. */
-int agent_loop_parse_completion(const char *response, char *gaps_out, size_t gaps_len);
-
-/* Run a self-correcting agent loop.
- * Executes agent_run repeatedly, augmenting the prompt with self-assessment
- * instructions and feeding prior-iteration context into each continuation.
- * Stops when:
- *   (a) self-assessed completion >= loop->completion_threshold AND
- *       verify_cmd passes (or is empty), OR
- *   (b) loop->max_iterations is exhausted.
- * out->response is set to the final iteration's response (caller must free).
- * Returns 0 when the task is considered complete, -1 on hard failure. */
-int agent_loop_run(agent_config_t *cfg, const char *role, const char *system_prompt,
-                   const char *original_prompt, int max_tokens, agent_loop_t *loop,
-                   agent_result_t *out);
-
 /* Provider health */
 typedef enum
 {

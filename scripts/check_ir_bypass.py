@@ -16,6 +16,10 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = Path("tests/baselines/ir-bypass-exceptions.json")
 RETIRED = (
+    "agent_coordinate", "agent_execute_with_plan", "agent_job_resume",
+    "agent_plan_execute", "agent_plan_rollback_step", "agent_plan_verify", "plan_assign_waves",
+    "agent_loop_init", "agent_loop_free", "agent_loop_run", "agent_loop_parse_completion",
+    "agent_loop_t",
     "provider_cli_spawn_argv", "acp_turn_consume", "acp_turn_state_t", "acp_tools",
     "host_model_capture",
     "cli_claude_allowed_tools", "cli_claude_allowed_tools_count", "claude_build_argv",

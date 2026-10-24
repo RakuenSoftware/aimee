@@ -51,7 +51,6 @@ int delegate_token_budget_for_agent(const char *model, int agent_context_window)
  * agent is picked downstream, so the prompt has to fit the smallest of them. */
 int delegate_token_budget_for_agents(const agent_config_t *cfg);
 
-int agent_coordinate(agent_config_t *cfg, const char *task, agent_result_t *out);
 int agent_vote(agent_config_t *cfg, const char *role, const char *prompt, int n_voters,
                agent_result_t *out);
 /* Check whether a tool call would violate any active hard directive in KB_STORE.
