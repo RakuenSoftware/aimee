@@ -32,6 +32,10 @@ func privateLeaseFixture(t *testing.T) *leaseFixture {
 	if err := os.WriteFile(helper, content, 0555); err != nil {
 		t.Fatal(err)
 	}
+	// WriteFile applies the process umask; the measured fixture requires exact mode.
+	if err := os.Chmod(helper, 0555); err != nil {
+		t.Fatal(err)
+	}
 	hash := sha256.Sum256(content)
 	path := filepath.Join(filepath.Dir(socket), "lease.jsonl")
 	parent, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)

@@ -32,6 +32,10 @@ func TestMeasuredHelperMustRemainTheSamePrivateFile(t *testing.T) {
 		if err := os.WriteFile(path, content, 0555); err != nil {
 			t.Fatal(err)
 		}
+		// WriteFile applies the process umask; the measured fixture requires exact mode.
+		if err := os.Chmod(path, 0555); err != nil {
+			t.Fatal(err)
+		}
 	}
 	write()
 	for _, defect := range []string{"", "digest", "mode", "hardlink", "symlink", "source"} {

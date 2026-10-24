@@ -120,6 +120,10 @@ func TestPrivateAcquireReceiptBindsActualIDAndOwnerSocket(t *testing.T) {
 	if err := os.WriteFile(helper, content, 0555); err != nil {
 		t.Fatal(err)
 	}
+	// WriteFile applies the process umask; the measured fixture requires exact mode.
+	if err := os.Chmod(helper, 0555); err != nil {
+		t.Fatal(err)
+	}
 	measured := sha256.Sum256(content)
 	digest := hex.EncodeToString(measured[:])
 	endpoint := fmt.Sprintf("unix:///proc/%d/fd/99", os.Getppid())
